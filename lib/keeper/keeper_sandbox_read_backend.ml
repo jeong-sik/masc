@@ -240,7 +240,7 @@ let resolve_read_dispatch ~turn_sandbox_factory ~(meta : keeper_meta) ~cwd =
            mount has to state its own answer rather than inherit Docker's. *)
         | Micro_vm ->
           Error
-            "microvm_read_refuses_docker_substitution: an Apple Container keeper's tree is not reachable through a Docker container"
+            "microvm_read_refuses_docker_substitution: a microVM keeper's tree is not reachable through a Docker container"
         | Remote_ssh -> Ok Remote_dispatch))
 ;;
 

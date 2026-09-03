@@ -251,9 +251,13 @@ let joined_opt parts =
   | [] -> None
   | rows -> Some (String.concat " · " rows)
 
+(* The profile, not the runtime under it: this wire carries which sandbox a
+   Keeper declared and not which microVM CLI serves it. Naming Apple here
+   labelled every msb and nerdctl Keeper with a runtime it does not use. The
+   runtime appears in the logs section, which does carry it. *)
 let profile_label = function
   | Some Docker -> "Docker"
-  | Some Micro_vm -> "Apple Container VM"
+  | Some Micro_vm -> "microVM guest"
   | Some Remote_ssh -> "Remote SSH"
   | None -> "not reported"
 
@@ -425,7 +429,15 @@ let view_lines ~width reading =
 (* The server answers the runtime's own spelling, so every runtime it can
    name has to be a value here. A strict decoder is the point -- an unknown
    string blanks the whole panel rather than guessing -- which is why a new
-   microVM runtime is a change on both sides of this wire. *)
+   microVM runtime is a change on both sides of this wire.
+
+   This type is parallel to the server's closed sum rather than the same
+   type: this library links no server code, so the compiler cannot ask. What
+   asks is
+   [test_the_reader_accepts_every_runtime_the_server_can_name] in
+   test/test_tui_keeper_sandbox.ml, which iterates
+   [Keeper_microvm_backend.valid_strings] and fails when one has no arm
+   below. Adding a runtime there without adding it here fails the suite. *)
 type log_backend =
   | Docker_log_backend
   | Apple_container_log_backend

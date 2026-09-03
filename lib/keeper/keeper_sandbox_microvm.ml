@@ -70,7 +70,25 @@ let unsupported_docker_flags = [ "--security-opt"; "--pids-limit" ]
     20,027. *)
 let work_volume_guest_root = "/masc-work"
 
-(** What [container] is told about the network.
+(** What each runtime is told about the network.
+
+    A closed network is an isolation property, so it is spelled per runtime
+    rather than in one grammar handed to all three. [container] and
+    [nerdctl] take Docker's [--network none] / [--dns]. [msb] takes neither:
+    [msb run --network none] answers "unexpected argument '--network' found"
+    and [--dns] the same (0.6.16, 2026-09-04). Its own spellings are
+    [--no-net] ("Disable all network access by default... without rules, the
+    guest has no network reachability"), [--net <PROFILE>], and
+    [--dns-nameserver <ADDR>].
+
+    [Network_inherit] is a refusal for [msb]: leaving the flags off would
+    hand the guest whatever msb's unstated default network is, and that is
+    the difference between a keeper that reaches GitHub and one that reaches
+    the host. What msb's default is has not been measured, so it is not
+    assumed. [--no-net] answers [Network_none] and that is the only mode this
+    module can say in msb's grammar today.
+
+    Below is what was measured for Apple's runtime.
 
     [Network_none] closes it with [--network none].
 
@@ -93,13 +111,28 @@ let work_volume_guest_root = "/masc-work"
     host not found". [inherit] therefore means container's NAT, not the
     host's namespace, and the two differ in what the guest can reach on
     localhost. *)
-let network_args ~dns (mode : Keeper_types_profile_sandbox.network_mode) =
-  match mode with
-  | Keeper_types_profile_sandbox.Network_none -> [ "--network"; "none" ]
-  | Keeper_types_profile_sandbox.Network_inherit ->
-    (match dns with
-     | Some server when String.trim server <> "" -> [ "--dns"; String.trim server ]
-     | Some _ | None -> [])
+let network_args_for backend ~dns (mode : Keeper_types_profile_sandbox.network_mode) =
+  match (backend : Backend.t) with
+  | Backend.Apple_container | Backend.Nerdctl_kata ->
+    Ok
+      (match mode with
+       | Keeper_types_profile_sandbox.Network_none -> [ "--network"; "none" ]
+       | Keeper_types_profile_sandbox.Network_inherit ->
+         (match dns with
+          | Some server when String.trim server <> "" -> [ "--dns"; String.trim server ]
+          | Some _ | None -> []))
+  | Backend.Microsandbox ->
+    (match mode with
+     | Keeper_types_profile_sandbox.Network_none -> Ok [ "--no-net" ]
+     | Keeper_types_profile_sandbox.Network_inherit ->
+       Error
+         "microvm_network_mode_unexpressible: msb 0.6.16 rejects --network \
+          and --dns and spells its own policy --no-net / --net <PROFILE> / \
+          --dns-nameserver. --no-net answers network_mode = \"none\", but \
+          what msb's network is with no flag at all has not been measured, \
+          so network_mode = \"inherit\" is not handed to it as an omission. \
+          Next: set network_mode = \"none\" on this Keeper, or measure msb's \
+          default network and name the profile that matches inherit.")
 ;;
 
 (** Whether [image] is in container's own store.
@@ -138,23 +171,38 @@ type image_probe_outcome =
   | Image_cli_unavailable
   | Image_probe_failed of image_probe_failure
 
-(** The two shapes an image listing arrives in.
+(** The shapes a machine-readable image answer arrives in.
 
-    [container image list --format json] and [msb image list --format json]
-    both answer a JSON array (measured against msb 0.6.16 on 2026-09-04).
-    [nerdctl] has no literal [--format json]: its listing is [nerdctl images]
-    with a Go template, which prints one object per line. Reading
-    a line stream with the array check would call a healthy listing malformed
-    and turn "image is missing" into "the probe could not say", so the shape
-    is chosen by the runtime rather than assumed. *)
-type image_listing_shape =
-  | Listing_json_array
-  | Listing_json_lines
+    Measured 2026-09-04, container 1.3.1 and msb 0.6.16:
+
+    {v
+      container image list --format json     [ {...}, ... ]   array
+      container image inspect <ref>          [ {...} ]        array
+      msb image list --format json           [ {...}, ... ]   array
+      msb image inspect --format json <ref>  { ... }          object
+      nerdctl images --format '{{json .}}'   one object/line  lines
+    v}
+
+    An object read with the array check would call a healthy answer malformed
+    and turn "image is present" into "the probe could not say" -- which is
+    what an earlier version of this module did to every [msb] keeper. The
+    shape is chosen by the runtime and the question, never assumed. *)
+type json_shape =
+  | Json_array
+  | Json_object
+  | Json_lines
 
 let json_array_error raw =
   match Yojson.Safe.from_string raw with
   | `List _ -> None
   | _ -> Some "expected a JSON array"
+  | exception Yojson.Json_error detail -> Some ("invalid JSON: " ^ detail)
+;;
+
+let json_object_error raw =
+  match Yojson.Safe.from_string raw with
+  | `Assoc _ -> None
+  | _ -> Some "expected a JSON object"
   | exception Yojson.Json_error detail -> Some ("invalid JSON: " ^ detail)
 ;;
 
@@ -174,10 +222,11 @@ let json_lines_error raw =
        None
 ;;
 
-let listing_shape_error shape raw =
+let json_shape_error shape raw =
   match shape with
-  | Listing_json_array -> json_array_error raw
-  | Listing_json_lines -> json_lines_error raw
+  | Json_array -> json_array_error raw
+  | Json_object -> json_object_error raw
+  | Json_lines -> json_lines_error raw
 ;;
 
 let probe_failure ~phase ~status ~stdout ~stderr ~reason =
@@ -185,13 +234,14 @@ let probe_failure ~phase ~status ~stdout ~stderr ~reason =
 ;;
 
 let classify_image_probe
+      ~inspect_shape
       ~listing_shape
       ~inspect:(inspect_status, inspect_stdout, inspect_stderr)
       ~listing
   =
   match inspect_status with
   | Unix.WEXITED 0 ->
-    (match json_array_error inspect_stdout with
+    (match json_shape_error inspect_shape inspect_stdout with
      | None -> Image_present
      | Some reason ->
        probe_failure
@@ -204,7 +254,7 @@ let classify_image_probe
   | Unix.WEXITED 1 ->
     (match listing with
      | Some (Unix.WEXITED 0 as status, stdout, stderr) ->
-       (match listing_shape_error listing_shape stdout with
+       (match json_shape_error listing_shape stdout with
         | None -> Image_missing
         | Some reason ->
           probe_failure ~phase:Image_list ~status ~stdout ~stderr ~reason)
@@ -284,9 +334,12 @@ let image_present_result_for backend ~image = function
          (Backend.cli_name backend))
 ;;
 
-(* [nerdctl] has no [image list]; its listing is [images], and no literal
-   [--format json] -- the Go template is how it is asked for machine output.
-   [msb image list --format json] answers an array, measured 0.6.16. *)
+(* [nerdctl] has no [image list]; its listing is [images]. Its command
+   reference documents both [--format=json] and the Go template; the template
+   is the spelling used here because it is the one whose per-line output this
+   module's [Json_lines] reader is written against. [container image list
+   --format json] and [msb image list --format json] both answer an array,
+   measured 0.6.16 and 1.3.1 on 2026-09-04. *)
 let image_listing_argv_for backend =
   match (backend : Backend.t) with
   | Backend.Apple_container | Backend.Microsandbox ->
@@ -297,13 +350,38 @@ let image_listing_argv_for backend =
 
 let image_listing_shape_for backend =
   match (backend : Backend.t) with
-  | Backend.Apple_container | Backend.Microsandbox -> Listing_json_array
-  | Backend.Nerdctl_kata -> Listing_json_lines
+  | Backend.Apple_container | Backend.Microsandbox -> Json_array
+  | Backend.Nerdctl_kata -> Json_lines
+;;
+
+(* [container image inspect] answers JSON with no flag; [msb image inspect]
+   answers a human table unless [--format json] is asked for, and then answers
+   a bare object rather than an array. [nerdctl image inspect] documents
+   [--mode=(dockercompat|native)] with no stated default, so the mode is named
+   rather than assumed -- dockercompat, which is Docker's array-of-one shape
+   this module already reads. *)
+let image_inspect_argv_for backend ~image =
+  match (backend : Backend.t) with
+  | Backend.Apple_container -> command_argv_for backend @ [ "image"; "inspect"; image ]
+  | Backend.Microsandbox ->
+    command_argv_for backend @ [ "image"; "inspect"; "--format"; "json"; image ]
+  | Backend.Nerdctl_kata ->
+    command_argv_for backend
+    @ [ "image"; "inspect"; "--mode"; "dockercompat"; image ]
+;;
+
+let image_inspect_shape_for backend =
+  match (backend : Backend.t) with
+  | Backend.Apple_container | Backend.Nerdctl_kata -> Json_array
+  | Backend.Microsandbox -> Json_object
 ;;
 
 let image_probe_for backend ~image ~timeout_sec =
-  let inspect_argv = command_argv_for backend @ [ "image"; "inspect"; image ] in
-  let inspect = Process_eio.run_argv_with_status_split ~timeout_sec inspect_argv in
+  let inspect =
+    Process_eio.run_argv_with_status_split
+      ~timeout_sec
+      (image_inspect_argv_for backend ~image)
+  in
   let listing =
     match inspect with
     | Unix.WEXITED 1, _, _ ->
@@ -314,6 +392,7 @@ let image_probe_for backend ~image ~timeout_sec =
     | _ -> None
   in
   classify_image_probe
+    ~inspect_shape:(image_inspect_shape_for backend)
     ~listing_shape:(image_listing_shape_for backend)
     ~inspect
     ~listing
@@ -442,6 +521,12 @@ let turn_start_argv_for
        @ [ image; "tail"; "-f"; "/dev/null" ])
 ;;
 
+(* [--user uid:gid] is a value [container exec] and [nerdctl exec] document
+   and [msb exec] does not -- see {!shim_exec_prefix_for} for the whole
+   reading. Every msb caller of this builder is behind an earlier refusal
+   today ({!ensure_work_volume_for}), so the numeric form never reaches msb.
+   Lifting that refusal without settling the identity would make this the
+   place a keeper's tree gets written under the wrong uid. *)
 let exec_argv_for backend ~container_name ~uid ~gid ~container_cwd ~stdin ~command_argv =
   command_argv_for backend
   @ [ "exec" ]
@@ -456,13 +541,20 @@ let exec_argv_for backend ~container_name ~uid ~gid ~container_cwd ~stdin ~comma
 
     It differs from {!exec_argv_for} in one thing the shim cannot do without:
     the guest has to be told where its config is, and that travels as an
-    environment entry on the exec. [container exec] and [nerdctl exec] both
-    document [--env]; [msb exec] documents [--user], [--workdir], [--stream]
-    and [--tty] and nothing that sets environment, so this refuses rather
-    than sending a flag read from no help output. Baking the value in at boot
-    with [msb run -e] is the change that would settle it, and it moves the
-    config path out of the per-call argv, so it is a decision rather than a
-    spelling. *)
+    environment entry on the exec. All three CLIs document that entry --
+    [msb exec] has [-e, --env <ENV>] the same as the other two.
+
+    What [msb] does not document is the identity the shim runs under.
+    [container exec --user] documents [name|uid[:gid]] and nerdctl takes
+    Docker's, so the mapped [uid:gid] this lane runs the keeper's commands as
+    is a value those CLIs accept. [msb exec -u, --user <USER>] documents
+    "Run the command as the specified guest user" and no numeric form
+    (0.6.16, 2026-09-04). Sending [501:20] there would be a value read from
+    no help output, and if msb resolved it as a user name the shim would run
+    as somebody else on a tree owned by that uid -- a silent wrong-identity
+    write, not a failed call. So this refuses. Settling it means either msb
+    documenting the numeric form or the lane naming a guest user, which is a
+    decision about identity rather than a spelling. *)
 let shim_exec_prefix_for backend ~container_name ~uid ~gid ~remote_root ~shim_config_path =
   match (backend : Backend.t) with
   | Backend.Apple_container | Backend.Nerdctl_kata ->
@@ -481,11 +573,13 @@ let shim_exec_prefix_for backend ~container_name ~uid ~gid ~remote_root ~shim_co
        @ Backend.command_separator backend)
   | Backend.Microsandbox ->
     Error
-      "microvm_shim_exec_unsupported: msb 0.6.16 exec documents --user, \
-       --workdir, --stream and --tty and no flag that sets environment, so \
-       the guest's shim cannot be told where its config is on a per-call \
-       exec. Next: name the config at boot with `msb run -e` (RFC-0405 \
-       follow-up) rather than sending a flag msb's help does not carry."
+      "microvm_shim_exec_unsupported: msb 0.6.16 exec takes the environment \
+       entry the shim needs (-e/--env), but its --user documents a guest \
+       user name and no uid:gid form, so the identity this lane runs a \
+       keeper's commands under cannot be named. Sent anyway, msb would \
+       either reject it or resolve it as somebody else's name and write to \
+       the keeper's tree as that user. Next: name a guest user for the lane, \
+       or use a runtime whose --user takes uid:gid (RFC-0405 follow-up)."
 ;;
 
 (* The two runtimes spell removal differently -- [container delete --force]
@@ -691,23 +785,37 @@ let ensure_apple_work_volume ~volume_name ~size ~timeout_sec =
 (** The work volume, for whichever runtime this keeper declared.
 
     Only Apple's grammar is established here, so the other two refuse instead
-    of guessing at one. For [msb] the create is known ([--kind disk --size],
-    measured 0.6.16, [-s] rejected) but the inspect and list this settles
-    existence with are not, and [container volume create] taught the lane why
-    that matters: a create over an existing volume lands on a keeper's
-    working tree. For [nerdctl] there is nothing to establish -- its
-    [volume create] documents [--label] and no size flag, so the sized
-    per-keeper volume RFC-0400 asks for has no nerdctl spelling. *)
+    of guessing at one.
+
+    For [msb] the create is known ([volume create --kind disk --size],
+    measured 0.6.16, [-s] rejected), and so is half of the existence check:
+    [msb volume list --format json] is documented and answers an array
+    (measured, [[]] on a host with no volumes). The other half is not.
+    [msb volume inspect] carries no [--format], so it answers a human table,
+    and this probe is written as inspect-then-listing the way Apple's is:
+    a create over a volume that already holds a keeper's working tree is the
+    failure the check exists for, and human prose is not a protocol to settle
+    it on. Establishing the row shape of the listing -- which needs an msb
+    volume to observe, and this host has none -- is what would let the pair
+    be rewritten as a listing-only check.
+
+    For [nerdctl] there is nothing to establish -- its [volume create]
+    documents [--label] and no size flag (nerdctl command reference), so the
+    sized per-keeper volume RFC-0400 asks for has no nerdctl spelling. *)
 let ensure_work_volume_for backend ~volume_name ~size ~timeout_sec =
   match (backend : Backend.t) with
   | Backend.Apple_container -> ensure_apple_work_volume ~volume_name ~size ~timeout_sec
   | Backend.Microsandbox ->
     Error
       "microvm_work_volume_unsupported: msb 0.6.16 creates a sized volume \
-       with `volume create --kind disk --size` (-s is rejected), but the \
-       inspect and list grammar this provisioning settles existence with was \
-       not read from msb's own help, and creating over a volume that already \
-       holds a keeper's working tree is the failure that check exists for."
+       with `volume create --kind disk --size` (-s is rejected), and `msb \
+       volume list --format json` is machine-readable, but `msb volume \
+       inspect` carries no --format and answers a human table, so the \
+       inspect half of the existence check this provisioning runs has no \
+       machine form. Creating over a volume that already holds a keeper's \
+       working tree is the failure that check exists for. Next: settle \
+       existence from the listing alone, which needs the row shape of `msb \
+       volume list --format json` observed against a real volume."
   | Backend.Nerdctl_kata ->
     Error
       "microvm_work_volume_unsupported: nerdctl volume create documents \
@@ -834,12 +942,21 @@ let inspect_argv_for backend ~container_name =
   | Backend.Apple_container -> command_argv_for backend @ [ "inspect"; container_name ]
   | Backend.Microsandbox ->
     command_argv_for backend @ [ "inspect"; container_name; "--format"; "json" ]
-  (* [nerdctl inspect] defaults to --mode dockercompat, so the Go template
-     Docker already answers works here unchanged. Asking for the one field
-     rather than the whole document keeps the parse to a literal. *)
+  (* [nerdctl inspect] documents [--mode=(dockercompat|native)] and states no
+     default, so the mode is named. [{{json .State.Running}}] resolves only
+     in dockercompat; inherited from an unstated default it would be a
+     template that stops resolving the day the default moves, which prints an
+     empty line and reads as "not running". Asking for the one field rather
+     than the whole document keeps the parse to a literal. *)
   | Backend.Nerdctl_kata ->
     command_argv_for backend
-    @ [ "inspect"; "--format"; "{{json .State.Running}}"; container_name ]
+    @ [ "inspect"
+      ; "--mode"
+      ; "dockercompat"
+      ; "--format"
+      ; "{{json .State.Running}}"
+      ; container_name
+      ]
 ;;
 
 (* [container logs] takes [-n]; [msb logs] rejects [-n] and takes [--tail]
@@ -989,14 +1106,25 @@ let live_containers_of_json ~base_path ~keeper_name = function
 (** How a runtime answers "which guests are here", and whether that answer
     carries the labels the scoping above reads.
 
+    What the sweep needs from a row is not just "which guests" but "whose":
+    the base path hash, the keeper name, and the owner pid it decides
+    abandonment on. Filtering is not enough -- the pid has to be read back.
+
     Apple's [container list -a --format json] answers a JSON array whose
-    entries nest [configuration.labels], which is where the base path hash,
-    the keeper name and the owner pid live. [msb list --format json] answers
-    rows carrying only created_at, image, name and status, and no labels at
-    all -- measured 0.6.16, 2026-09-04 -- so a guest cannot be scoped to this
-    base path from a listing; msb keeps labels in [inspect] under
-    [active_config.labels]. [nerdctl] has no [list] subcommand at all (it is
-    [ps]) and no literal [--format json].
+    entries nest [configuration.labels], which is where all three live.
+
+    [msb list] documents [--label <LABEL>] (repeatable, AND-matched), so a
+    guest can be scoped server-side; what its [--format json] rows carry is
+    only created_at, image, name and status, with no label values at all
+    (measured 0.6.16, 2026-09-04). The owner pid the sweep needs is therefore
+    not in the answer, and msb keeps labels in [inspect] under
+    [active_config.labels] -- one call per guest rather than one listing.
+
+    [nerdctl] has no [list] subcommand (it is [ps]), and its command
+    reference does document [--format=json]. What the reference does not
+    document for those rows is a [.Labels] field, so the nested labels object
+    this scoping reads has no established nerdctl shape; nerdctl is not
+    installed on this host, so it could not be measured either.
 
     Naming the gap rather than running the Apple argv is the point: read as
     "no guests", an unscopable listing is exactly the answer that leaves a
@@ -1012,14 +1140,17 @@ let container_listing_for backend =
       (command_argv_for backend @ [ "list"; "-a"; "--format"; "json" ])
   | Backend.Microsandbox ->
     Listing_not_established
-      "msb list --format json reports {created_at, image, name, status} and \
-       carries no labels, so a guest cannot be scoped to this base path and \
-       keeper; msb keeps labels in `inspect` under active_config.labels"
+      "msb list can be scoped server-side with --label, but its --format \
+       json rows report only {created_at, image, name, status} and echo no \
+       label values, so the owner pid this sweep decides abandonment on \
+       cannot be read back from the listing; msb keeps labels in `inspect` \
+       under active_config.labels, one call per guest"
   | Backend.Nerdctl_kata ->
     Listing_not_established
-      "nerdctl has no `list` subcommand (it is `ps`) and no literal --format \
-       json, so the labelled JSON array this scoping reads has no nerdctl \
-       spelling read from that CLI's own reference"
+      "nerdctl has no `list` subcommand (it is `ps`), and while its reference \
+       documents `--format=json` it documents no .Labels field on those rows, \
+       so the nested labels object this scoping reads has no established \
+       nerdctl shape"
 ;;
 
 let list_live_containers_for backend ~base_path ~keeper_name ~timeout_sec =

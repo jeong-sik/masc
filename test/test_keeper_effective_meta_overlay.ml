@@ -155,8 +155,12 @@ let seed_runtime_meta config name =
       | Ok () -> meta
   | Error err -> Alcotest.failf "write_meta failed: %s" err)
 
-let write_keeper_toml ?microvm_backend ~keepers_dir ~name ~sandbox_profile
-      ~instructions =
+(* [microvm_backend] is a required parameter rather than an optional one: an
+   optional with no positional after it cannot be erased, and every call site
+   that omitted it would become a partial application the compiler accepts and
+   the test never runs. *)
+let write_keeper_toml_with_backend ~keepers_dir ~name ~sandbox_profile
+      ~microvm_backend ~instructions =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     (Printf.sprintf
@@ -169,6 +173,10 @@ sandbox_profile = "%s"
         | None -> ""
         | Some backend -> Printf.sprintf "microvm_backend = %S\n" backend)
        instructions)
+
+let write_keeper_toml ~keepers_dir ~name ~sandbox_profile ~instructions =
+  write_keeper_toml_with_backend ~keepers_dir ~name ~sandbox_profile
+    ~microvm_backend:None ~instructions
 
 let write_keeper_agent ~keepers_dir ~name instructions =
   write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"docker" ~instructions
@@ -317,8 +325,8 @@ let test_sandbox_log_target_uses_effective_meta () =
   (* The runtime is declared, so the assertion below is host-independent and
      says what #32837 changed: the log backend is the Keeper's own runtime,
      not Apple's for every microvm Keeper. *)
-  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"microvm"
-    ~microvm_backend:"microsandbox"
+  write_keeper_toml_with_backend ~keepers_dir ~name ~sandbox_profile:"microvm"
+    ~microvm_backend:(Some "microsandbox")
     ~instructions:"Read the effective log backend.";
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -332,17 +340,21 @@ let test_sandbox_log_target_uses_effective_meta () =
     Alcotest.fail "durable meta placeholder selected Docker for a microvm Keeper"
   | Ok (Sandbox_control.No_local_stream reason, _) ->
     Alcotest.failf "microvm Keeper reported no local stream: %s" reason
-  | Ok
-      ( Sandbox_control.Local_backend
-          (Sandbox_control.Micro_vm_logs Masc.Keeper_microvm_backend.Apple_container)
-      , _ ) ->
-    Alcotest.fail
-      "a Keeper declaring microsandbox read its logs through Apple's runtime"
+  (* The TOML declares microsandbox, so only microsandbox passes. Accepting
+     any non-Apple runtime would pass on a resolver that returned the wrong
+     one, which is the same class of defect as returning Apple's. *)
   | Ok
       ( Sandbox_control.Local_backend
           (Sandbox_control.Micro_vm_logs
-             ( Masc.Keeper_microvm_backend.Microsandbox
-             | Masc.Keeper_microvm_backend.Nerdctl_kata ))
+             (( Masc.Keeper_microvm_backend.Apple_container
+              | Masc.Keeper_microvm_backend.Nerdctl_kata ) as resolved))
+      , _ ) ->
+    Alcotest.failf
+      "a Keeper declaring microsandbox read its logs through %s"
+      (Masc.Keeper_microvm_backend.to_string resolved)
+  | Ok
+      ( Sandbox_control.Local_backend
+          (Sandbox_control.Micro_vm_logs Masc.Keeper_microvm_backend.Microsandbox)
       , effective_name ) ->
     Alcotest.(check string) "effective keeper name" name effective_name
 

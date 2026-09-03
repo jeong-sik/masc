@@ -637,7 +637,14 @@ let why_no_container (meta : keeper_meta) ~preflight containers =
   else
     match meta.sandbox_profile with
     | Micro_vm ->
-      Some "no visible Apple Container VM; a microvm guest is created on this Keeper's first sandboxed tool execution"
+      (* Named from the Keeper's own meta. The Apple-only wording sent an msb
+         operator to look for a guest under a runtime the Keeper never uses. *)
+      Some
+        (Printf.sprintf
+           "no visible %s microVM guest; a guest is created on this Keeper's first sandboxed tool execution"
+           (match meta.microvm_backend with
+            | Some backend -> Keeper_microvm_backend.to_string backend
+            | None -> "declared"))
     | Remote_ssh ->
       Some "remote_ssh executes on its configured endpoint and does not own a local container"
     | Docker -> (

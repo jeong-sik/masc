@@ -32,6 +32,13 @@ microvm_backend = "apple_container"   # | "microsandbox" | "nerdctl_kata"
 | `microsandbox` | `microvm_constraint_unexpressible` | `msb 0.6.16` 에 `--cap-drop` 과 `--read-only` 가 없다. 프로필이 약속한 격리를 못 주면서 뜨느니 안 뜬다 |
 | `nerdctl_kata` | `microvm_work_volume_unsupported` | `nerdctl volume create` 에 크기 플래그가 없어서 keeper 작업 볼륨(RFC-0400)을 만들 방법이 없다 |
 
+이 표는 **이미지가 그 런타임 저장소에 있을 때** 나오는 답이다. 부팅은
+이미지 확인 → 작업 볼륨 → 부팅 argv 순서로 가기 때문에, 이미지가 없으면 위
+문구 대신 `microvm_image_missing` 이 먼저 나온다. `msb` 는 `msb image list
+--format json`, `nerdctl` 은 `nerdctl images` 로 각자 저장소를 확인한다.
+런타임마다 이미지 저장소가 따로라서, Docker 로 빌드해 둔 이미지는 셋 중
+어디에도 보이지 않는다.
+
 전에는 셋 다 뜨는 것처럼 보였는데, 그건 셋 다 Apple `container` 로 떴기 때문이다.
 그래서 `microsandbox` 라고 적은 keeper 의 게스트를 `msb stop` 으로 내리려 하면
 `sandbox not found` 가 났고, 실제로 떠 있는 게스트는 아무도 못 치웠다.

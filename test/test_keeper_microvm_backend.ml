@@ -5,6 +5,7 @@
 
 module Backend = Masc.Keeper_microvm_backend
 module Microvm = Masc.Keeper_sandbox_microvm
+module Profile = Keeper_types_profile_sandbox
 
 let check = Alcotest.check
 let fail = Alcotest.fail
@@ -100,36 +101,61 @@ let test_kata_removal_and_inspect_are_dockers_grammar () =
     "nerdctl rm --force"
     [ "nerdctl"; "rm"; "--force"; "g" ]
     (Microvm.delete_force_argv_for Backend.Nerdctl_kata ~container_name:"g");
-  (* dockercompat is nerdctl inspect's default mode, so the template masc
-     already sends Docker is reused rather than a second document parsed. *)
+  (* nerdctl's reference documents --mode and no default for it, so the mode
+     is on the argv. The template masc already sends Docker resolves only in
+     dockercompat; taken from an unstated default it would print an empty
+     line the day that default moved, and an empty line reads as "not
+     running" -- which takes a live guest down. *)
   check
     (Alcotest.list Alcotest.string)
-    "nerdctl inspect uses Docker's template"
-    [ "nerdctl"; "inspect"; "--format"; "{{json .State.Running}}"; "g" ]
+    "nerdctl inspect names the mode Docker's template resolves in"
+    [ "nerdctl"; "inspect"; "--mode"; "dockercompat"; "--format"
+    ; "{{json .State.Running}}"; "g" ]
     (Microvm.inspect_argv_for Backend.Nerdctl_kata ~container_name:"g")
 ;;
 
 (* ── the boot, and the guarantees it asks for by name ──────────────── *)
 
-let boot ?(constraints = Backend.all_guest_constraints) backend =
-  Microvm.turn_start_argv_for
-    backend
-    ~container_name:"g"
-    ~label_args:[ "--label"; "masc.mcp.kind=keeper-vm" ]
-    ~uid:501
-    ~gid:20
-    ~memory:"2g"
-    ~cpus:None
-    ~network_args:[ "--network"; "none" ]
-    ~mount_args:[ "-v"; "h:c:ro" ]
-    ~image:"img"
-    ~constraints
+(* The network tokens come from the runtime's own builder rather than being
+   typed in. A closed network is an isolation property that is not a
+   [guest_constraint], so a fixture spelling Apple's [--network none] for all
+   three would make every assertion below blind to the one axis whose flags
+   actually differ between them. *)
+type boot_refusal =
+  | Network_refused of string
+  | Constraints_refused of Microvm.constraint_refusal list
+
+let boot ?(network = Profile.Network_none) ?(constraints = Backend.all_guest_constraints)
+      backend
+  : (string list, boot_refusal) result
+  =
+  match Microvm.network_args_for backend ~dns:(Some "1.1.1.1") network with
+  | Error detail -> Error (Network_refused detail)
+  | Ok network_args ->
+    (match
+       Microvm.turn_start_argv_for
+         backend
+         ~container_name:"g"
+         ~label_args:[ "--label"; "masc.mcp.kind=keeper-vm" ]
+         ~uid:501
+         ~gid:20
+         ~memory:"2g"
+         ~cpus:None
+         ~network_args
+         ~mount_args:[ "-v"; "h:c:ro" ]
+         ~image:"img"
+         ~constraints
+     with
+     | Ok argv -> Ok argv
+     | Error refusals -> Error (Constraints_refused refusals))
 ;;
 
 let booted label backend =
   match boot backend with
   | Ok argv -> argv
-  | Error refusals -> fail (label ^ ": " ^ Microvm.constraint_refusals_message backend refusals)
+  | Error (Network_refused detail) -> fail (label ^ ": " ^ detail)
+  | Error (Constraints_refused refusals) ->
+    fail (label ^ ": " ^ Microvm.constraint_refusals_message backend refusals)
 ;;
 
 (* The whole boot argv, spelled out. Before #32837 this call took no backend
@@ -173,7 +199,9 @@ let test_boot_argv_is_each_runtimes_own () =
     Alcotest.failf
       "msb booted without the isolation it cannot spell: %s"
       (String.concat " " argv)
-  | Error refusals ->
+  | Error (Network_refused detail) ->
+    fail ("msb refused a closed network it can spell with --no-net: " ^ detail)
+  | Error (Constraints_refused refusals) ->
     check
       (Alcotest.list Alcotest.string)
       "msb names both guarantees it has no flag for"
@@ -192,7 +220,7 @@ let test_an_isolation_guarantee_is_never_silently_dropped () =
   List.iter
     (fun backend ->
       match boot backend with
-      | Error _ -> ()
+      | Error (Network_refused _) | Error (Constraints_refused _) -> ()
       | Ok argv ->
         List.iter
           (fun guest_constraint ->
@@ -226,7 +254,8 @@ let test_an_isolation_guarantee_is_never_silently_dropped () =
    observable states. *)
 let test_a_lifecycle_drop_is_recorded_on_the_guest () =
   match boot ~constraints:[ Backend.Remove_on_exit ] Backend.Microsandbox with
-  | Error _ -> fail "a lifecycle-only guarantee refused the boot"
+  | Error (Network_refused detail) -> fail ("the network refused the boot: " ^ detail)
+  | Error (Constraints_refused _) -> fail "a lifecycle-only guarantee refused the boot"
   | Ok argv ->
     check
       Alcotest.bool
@@ -315,10 +344,12 @@ let shim_prefix backend =
     ~shim_config_path:"/opt/masc-exec-shim/masc-exec-shim.conf"
 ;;
 
-(* The shim has to be told where its config is, and that travels as an env
-   entry on the exec. msb documents no flag that sets one, so this refuses
-   rather than sending a spelling read from no help output. *)
-let test_the_shim_prefix_refuses_where_the_env_cannot_be_set () =
+(* The prefix carries two things the shim cannot run without: where its
+   config is, and which identity it runs as. All three CLIs document the env
+   entry; msb's --user documents a guest user name and no uid:gid form, so
+   the identity is the half that cannot be said and the prefix refuses rather
+   than sending a value read from no help output. *)
+let test_the_shim_prefix_refuses_where_the_identity_cannot_be_named () =
   check
     (Alcotest.list Alcotest.string)
     "container carries the config env"
@@ -338,11 +369,97 @@ let test_the_shim_prefix_refuses_where_the_env_cannot_be_set () =
      | Ok argv -> argv
      | Error detail -> fail detail);
   match shim_prefix Backend.Microsandbox with
-  | Error _ -> ()
+  | Error detail ->
+    (* The refusal has to name the identity, not the environment: msb has
+       -e/--env, and a reason that says otherwise sends the next reader to
+       read a help page that contradicts it. *)
+    check
+      Alcotest.bool
+      "the refusal names the identity it cannot express"
+      true
+      (Astring.String.is_infix ~affix:"--user" detail)
   | Ok argv ->
     Alcotest.failf
-      "msb was handed an exec env flag its help does not carry: %s"
+      "msb was handed a --user value its help does not carry: %s"
       (String.concat " " argv)
+;;
+
+(* A closed network is an isolation property that is not a
+   [guest_constraint], so nothing in the guarantee table asks a runtime about
+   it. This is where it is asked. msb rejects Docker's [--network] and
+   [--dns] at argument parsing ("unexpected argument '--network' found",
+   0.6.16) and spells its own [--no-net] / [--net] / [--dns-nameserver]; sent
+   Apple's tokens it would fail every boot, and left with no tokens at all it
+   would run open while the profile reported "none". *)
+let test_the_network_policy_is_spelled_per_runtime () =
+  let ok label backend network =
+    match Microvm.network_args_for backend ~dns:(Some "1.1.1.1") network with
+    | Ok args -> args
+    | Error detail -> fail (label ^ ": " ^ detail)
+  in
+  check
+    (Alcotest.list Alcotest.string)
+    "container closes with Docker's spelling"
+    [ "--network"; "none" ]
+    (ok "container" Backend.Apple_container Profile.Network_none);
+  check
+    (Alcotest.list Alcotest.string)
+    "nerdctl takes Docker's grammar too"
+    [ "--network"; "none" ]
+    (ok "nerdctl" Backend.Nerdctl_kata Profile.Network_none);
+  check
+    (Alcotest.list Alcotest.string)
+    "msb closes with its own"
+    [ "--no-net" ]
+    (ok "msb" Backend.Microsandbox Profile.Network_none);
+  check
+    (Alcotest.list Alcotest.string)
+    "container's inherit carries the nameserver"
+    [ "--dns"; "1.1.1.1" ]
+    (ok "container" Backend.Apple_container Profile.Network_inherit);
+  (* An unmeasured default is not an open network by omission. *)
+  match
+    Microvm.network_args_for
+      Backend.Microsandbox
+      ~dns:(Some "1.1.1.1")
+      Profile.Network_inherit
+  with
+  | Ok args ->
+    Alcotest.failf
+      "msb was handed an inherit network this build has not measured: %s"
+      (String.concat " " args)
+  | Error detail ->
+    check
+      Alcotest.bool
+      "the refusal names the mode it cannot express"
+      true
+      (Astring.String.is_infix ~affix:"inherit" detail)
+;;
+
+(* No runtime may emit a token another runtime's CLI rejects. Apple's and
+   nerdctl's [--network] is exactly such a token for msb, so the closed mode
+   is checked to be spelled differently rather than merely non-empty. *)
+let test_no_runtime_borrows_anothers_network_spelling () =
+  let closed backend =
+    match Microvm.network_args_for backend ~dns:None Profile.Network_none with
+    | Ok args -> args
+    | Error detail ->
+      fail (Backend.to_string backend ^ " cannot close its network: " ^ detail)
+  in
+  List.iter
+    (fun backend ->
+      let args = closed backend in
+      check
+        Alcotest.bool
+        (Backend.to_string backend ^ " emits some closing token")
+        true
+        (args <> []))
+    Backend.all;
+  check
+    Alcotest.bool
+    "msb does not receive Docker's --network"
+    false
+    (List.exists (String.equal "--network") (closed Backend.Microsandbox))
 ;;
 
 (* ── the surfaces that reap, and the ones that cannot ──────────────── *)
@@ -394,10 +511,10 @@ let test_the_log_tail_flag_is_per_runtime () =
     (Microvm.logs_tail_argv_for Backend.Nerdctl_kata ~tail:50 ~container_id:"vm-1")
 ;;
 
-(* nerdctl has no [image list] and no literal [--format json], so the listing
-   that proves its store was readable is a line stream. Read with the array
-   check, a healthy listing would look malformed and "the image is missing"
-   would become "the probe could not say". *)
+(* nerdctl has no [image list]; its listing is [images] with a Go template
+   that prints one object per line. Read with the array check, a healthy
+   listing would look malformed and "the image is missing" would become "the
+   probe could not say". *)
 let test_the_image_listing_argv_and_shape_agree () =
   check
     (Alcotest.list Alcotest.string)
@@ -416,12 +533,47 @@ let test_the_image_listing_argv_and_shape_agree () =
     (Microvm.image_listing_argv_for Backend.Nerdctl_kata);
   let shape_is_lines backend =
     match Microvm.image_listing_shape_for backend with
-    | Microvm.Listing_json_lines -> true
-    | Microvm.Listing_json_array -> false
+    | Microvm.Json_lines -> true
+    | Microvm.Json_array | Microvm.Json_object -> false
   in
   check Alcotest.bool "container is an array" false (shape_is_lines Backend.Apple_container);
   check Alcotest.bool "msb is an array" false (shape_is_lines Backend.Microsandbox);
   check Alcotest.bool "nerdctl is lines" true (shape_is_lines Backend.Nerdctl_kata)
+;;
+
+(* The single-image inspect is a separate question from the listing, and the
+   three runtimes disagree on both the flag and the shape. msb answers a
+   human table with no flag and a bare object with one; nerdctl documents
+   [--mode] with no default, so the mode is named rather than inherited. *)
+let test_the_image_inspect_argv_and_shape_agree () =
+  let image = "masc-keeper-sandbox:local" in
+  check
+    (Alcotest.list Alcotest.string)
+    "container inspects with no flag"
+    [ "container"; "image"; "inspect"; image ]
+    (Microvm.image_inspect_argv_for Backend.Apple_container ~image);
+  check
+    (Alcotest.list Alcotest.string)
+    "msb has to be asked for the machine form"
+    [ "msb"; "image"; "inspect"; "--format"; "json"; image ]
+    (Microvm.image_inspect_argv_for Backend.Microsandbox ~image);
+  check
+    (Alcotest.list Alcotest.string)
+    "nerdctl names the mode rather than assuming a default"
+    [ "nerdctl"; "image"; "inspect"; "--mode"; "dockercompat"; image ]
+    (Microvm.image_inspect_argv_for Backend.Nerdctl_kata ~image);
+  let shape_label backend =
+    match Microvm.image_inspect_shape_for backend with
+    | Microvm.Json_array -> "array"
+    | Microvm.Json_object -> "object"
+    | Microvm.Json_lines -> "lines"
+  in
+  check Alcotest.string "container answers an array" "array"
+    (shape_label Backend.Apple_container);
+  check Alcotest.string "msb answers an object" "object"
+    (shape_label Backend.Microsandbox);
+  check Alcotest.string "nerdctl answers Docker's array" "array"
+    (shape_label Backend.Nerdctl_kata)
 ;;
 
 (* Neither of the other two can be handed Apple's volume grammar, and a
@@ -627,6 +779,8 @@ let () =
             test_the_log_tail_flag_is_per_runtime
         ; Alcotest.test_case "the image listing argv and shape agree" `Quick
             test_the_image_listing_argv_and_shape_agree
+        ; Alcotest.test_case "the image inspect argv and shape agree" `Quick
+            test_the_image_inspect_argv_and_shape_agree
         ] )
     ; ( "guarantees"
       , [ Alcotest.test_case "an isolation guarantee is never silently dropped"
@@ -635,8 +789,13 @@ let () =
             test_a_lifecycle_drop_is_recorded_on_the_guest
         ; Alcotest.test_case "every runtime answers every guarantee" `Quick
             test_every_runtime_answers_every_guarantee
-        ; Alcotest.test_case "the shim prefix refuses where env cannot be set"
-            `Quick test_the_shim_prefix_refuses_where_the_env_cannot_be_set
+        ; Alcotest.test_case
+            "the shim prefix refuses where the identity cannot be named"
+            `Quick test_the_shim_prefix_refuses_where_the_identity_cannot_be_named
+        ; Alcotest.test_case "the network policy is spelled per runtime" `Quick
+            test_the_network_policy_is_spelled_per_runtime
+        ; Alcotest.test_case "no runtime borrows another's network spelling"
+            `Quick test_no_runtime_borrows_anothers_network_spelling
         ] )
     ; ( "reaping"
       , [ Alcotest.test_case "only a labelled listing is offered" `Quick

@@ -25,9 +25,10 @@ type t =
           Kata pod is a microVM with its own kernel and a [kata-agent] that
           takes OCI Exec over vsock, so a guest can be booted detached and
           driven across turns the way the other two are. The CLI is Docker's
-          grammar, and [nerdctl inspect] defaults to [--mode dockercompat],
-          so this backend reuses the Docker state format rather than needing
-          a parse of its own. *)
+          grammar, and [nerdctl inspect --mode dockercompat] answers the
+          Docker state format, so this backend reuses that parse rather than
+          needing one of its own. The mode is named on every call: the
+          reference documents the flag and states no default. *)
 
 val to_string : t -> string
 val of_string : string -> t option

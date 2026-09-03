@@ -20,12 +20,24 @@ val unsupported_docker_flags : string list
     unknown option rather than ignoring it, so this list is what a reader
     must weigh when choosing the profile, not a runtime fallback. *)
 
-val network_args :
-  dns:string option -> Keeper_types_profile_sandbox.network_mode -> string list
-(** [Network_inherit] uses container's NAT, which routes outside. It needs a
-    nameserver passed in: the guest's resolver points at the gateway and the
-    gateway refuses DNS from inside, so without one the guest routes fine and
-    resolves nothing. *)
+val network_args_for :
+  Keeper_microvm_backend.t ->
+  dns:string option ->
+  Keeper_types_profile_sandbox.network_mode ->
+  (string list, string) result
+(** How one runtime is told to close or open the guest's network.
+
+    A closed network is an isolation property, so the spelling is per runtime
+    rather than one grammar sent to all three. [container] and [nerdctl] take
+    Docker's [--network none] and [--dns]; [Network_inherit] there is
+    container's NAT, which routes outside and needs a nameserver passed in
+    (the guest's resolver points at the gateway and the gateway refuses DNS
+    from inside, so without one the guest routes fine and resolves nothing).
+
+    [msb] rejects both Docker spellings and has its own: [Network_none] is
+    [--no-net]. [Network_inherit] is [Error] rather than an empty argv --
+    msb's network with no flag has not been measured, and an omission would
+    be a guess at how open the guest is. *)
 
 val image_present_for :
   Keeper_microvm_backend.t -> image:string -> timeout_sec:float -> (unit, string) result
@@ -52,34 +64,51 @@ type image_probe_outcome =
   | Image_cli_unavailable
   | Image_probe_failed of image_probe_failure
 
-type image_listing_shape =
-  | Listing_json_array
-      (** [container image list --format json] and [msb image list --format
-          json]: one array of image records. *)
-  | Listing_json_lines
-      (** [nerdctl images] with a Go template: one JSON object per line,
-          because nerdctl has no literal [--format json]. *)
+type json_shape =
+  | Json_array
+      (** One array of records: [container image list --format json],
+          [container image inspect], [msb image list --format json],
+          [nerdctl image inspect --mode dockercompat]. *)
+  | Json_object
+      (** One bare object: [msb image inspect --format json], which answers a
+          record rather than the array of one Docker's grammar returns. *)
+  | Json_lines
+      (** One JSON object per line: [nerdctl images] with a Go template. *)
 
-val image_listing_shape_for : Keeper_microvm_backend.t -> image_listing_shape
-(** Which of the two shapes this runtime's image listing arrives in. Reading
-    a line stream with the array check would call a healthy listing malformed
-    and turn "the image is missing" into "the probe could not say". *)
+val image_listing_shape_for : Keeper_microvm_backend.t -> json_shape
+(** Which shape this runtime's image listing arrives in. Reading a line
+    stream with the array check would call a healthy listing malformed and
+    turn "the image is missing" into "the probe could not say". *)
 
 val image_listing_argv_for : Keeper_microvm_backend.t -> string list
 (** The listing that proves this runtime's image store was readable.
     [image list --format json] for [container] and [msb]; [images] with a Go
     template for [nerdctl], which has no [image list] subcommand. *)
 
+val image_inspect_shape_for : Keeper_microvm_backend.t -> json_shape
+(** Which shape this runtime answers a single-image inspect in. [msb] answers
+    an object where the other two answer an array of one; reading its answer
+    with the array check reports [Image_probe_failed] for an image that is
+    present, which is the inverse of what the probe is for. *)
+
+val image_inspect_argv_for : Keeper_microvm_backend.t -> image:string -> string list
+(** The single-image inspect, in the machine form each CLI documents.
+    [container image inspect] answers JSON with no flag; [msb image inspect]
+    answers a human table unless given [--format json]; [nerdctl image
+    inspect] documents [--mode=(dockercompat|native)] and no default, so the
+    mode is named. *)
+
 val classify_image_probe :
-  listing_shape:image_listing_shape ->
+  inspect_shape:json_shape ->
+  listing_shape:json_shape ->
   inspect:Unix.process_status * string * string ->
   listing:(Unix.process_status * string * string) option ->
   image_probe_outcome
 (** Classify an image inspect without reading human error prose. Successful
-    inspect output must be a JSON array. Exit 1 is [Image_missing] only when
-    a subsequent image listing also succeeds in [listing_shape], proving that
-    the runtime and its image store were readable. Every unavailable or
-    malformed observation fails closed. *)
+    inspect output must parse in [inspect_shape]. Exit 1 is [Image_missing]
+    only when a subsequent image listing also succeeds in [listing_shape],
+    proving that the runtime and its image store were readable. Every
+    unavailable or malformed observation fails closed. *)
 
 val image_probe_for :
   Keeper_microvm_backend.t -> image:string -> timeout_sec:float -> image_probe_outcome
@@ -154,11 +183,17 @@ val shim_exec_prefix_for :
 (** The prefix the remote lane delivers a framed request through, ending at
     the guest name so the caller appends the shim path.
 
-    [Error] for [msb]: the shim has to be told where its config is, that
-    travels as an environment entry on the exec, and [msb exec] documents no
-    flag that sets one. Naming it at boot with [msb run -e] is the change
-    that would settle it, which moves the path out of the per-call argv and
-    is therefore a decision rather than a spelling. *)
+    The prefix carries the config location and the identity the shim runs
+    under. All three CLIs document the environment entry the first needs
+    ([msb exec] has [-e, --env]).
+
+    [Error] for [msb]: [container exec --user] documents [name|uid[:gid]] and
+    nerdctl takes Docker's, but [msb exec --user] documents a guest user name
+    and no numeric form (0.6.16), so the mapped [uid:gid] a keeper's commands
+    run as cannot be named. Sending it would either be rejected or resolved
+    as somebody else's user name, writing to the keeper's tree as that user.
+    Naming a guest user for the lane is the change that would settle it,
+    which is a decision about identity rather than a spelling. *)
 
 val stop_argv_for :
   Keeper_microvm_backend.t -> container_name:string -> string list

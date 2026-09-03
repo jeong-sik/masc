@@ -873,6 +873,14 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
           | Error err ->
             Error ("microvm_start_failed: github_identity_invalid: " ^ err)
           | Ok (github_identity, github_identity_is_new) ->
+         (* The network policy is spelled by the runtime, and one of the three
+            cannot say every mode. Resolved before the argv so a boot refuses
+            rather than handing msb Docker's flags, which it rejects at
+            argument parsing with no statement of what the guest's network
+            would have been. *)
+         (match Keeper_sandbox_microvm.network_args_for backend ~dns t.network_mode with
+          | Error detail -> Error ("microvm_start_failed: " ^ detail)
+          | Ok network_args ->
          let argv_result =
            Keeper_sandbox_microvm.turn_start_argv_for
              backend
@@ -897,8 +905,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                (match Env_config_sandbox.Runtime.microvm_cpus () with
                 | "" -> None
                 | count -> Some count)
-             ~network_args:
-               (Keeper_sandbox_microvm.network_args ~dns t.network_mode)
+             ~network_args
              (* Config and the GitHub identity. Config has no cleanup, so it
                 travels as-is. The identity does: the Docker lane runs that
                 cleanup under [Eio_guard] at turn end, which would delete the
@@ -1028,7 +1035,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                Error
                  (Printf.sprintf
                     "microvm_start_failed: %s"
-                    (Keeper_sandbox_runtime.docker_failure_output_for_log out))))))))
+                    (Keeper_sandbox_runtime.docker_failure_output_for_log out)))))))))
 ;;
 
 let start_microvm_container ?timeout_sec t =

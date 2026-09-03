@@ -25,6 +25,14 @@ let probe_mount_args =
   @ M.work_volume_mount_args ~volume_name:"masc-keeper-work-probe"
   @ M.shim_mount_args ~host_dir:"/base/.masc/microvm/shim"
 
+(* Apple's runtime can spell both modes, so a refusal here is a defect in the
+   fixture rather than a case the boot argv tests are about. *)
+let apple_network_args ~dns network =
+  match M.network_args_for Backend.Apple_container ~dns network with
+  | Ok args -> args
+  | Error detail ->
+    Alcotest.failf "Apple's runtime refused a network mode it can spell: %s" detail
+
 let argv ?(network = Profile.Network_none) () =
   apple_boot_argv
   @@ M.turn_start_argv_for
@@ -35,7 +43,7 @@ let argv ?(network = Profile.Network_none) () =
     ~gid:20
     ~memory:"2g"
     ~cpus:None
-    ~network_args:(M.network_args ~dns:(Some "1.1.1.1") network)
+    ~network_args:(apple_network_args ~dns:(Some "1.1.1.1") network)
     ~mount_args:probe_mount_args
     ~image:"masc-keeper-sandbox:local"
     ~constraints:Backend.all_guest_constraints
@@ -110,7 +118,7 @@ let test_closed_network_is_spelled_on_the_command () =
   Alcotest.(check (list string))
     "none closes the network"
     [ "--network"; "none" ]
-    (M.network_args ~dns:(Some "1.1.1.1") Profile.Network_none);
+    (apple_network_args ~dns:(Some "1.1.1.1") Profile.Network_none);
   (* inherit uses container's NAT, which routes outside. What it needs is a
      nameserver: the guest's resolver points at the gateway and the gateway
      refuses DNS from inside, so an inherit guest with no --dns routes fine
@@ -119,11 +127,11 @@ let test_closed_network_is_spelled_on_the_command () =
   Alcotest.(check (list string))
     "inherit carries the nameserver"
     [ "--dns"; "1.1.1.1" ]
-    (M.network_args ~dns:(Some "1.1.1.1") Profile.Network_inherit);
+    (apple_network_args ~dns:(Some "1.1.1.1") Profile.Network_inherit);
   Alcotest.(check (list string))
     "an empty nameserver passes no --dns"
     []
-    (M.network_args ~dns:(Some "") Profile.Network_inherit);
+    (apple_network_args ~dns:(Some "") Profile.Network_inherit);
   Alcotest.(check bool)
     "the closed network reaches the boot argv"
     true
@@ -138,7 +146,8 @@ let inspect_result status stdout stderr = status, stdout, stderr
 let test_image_probe_uses_structured_evidence () =
   let present =
     M.classify_image_probe
-      ~listing_shape:M.Listing_json_array
+      ~inspect_shape:M.Json_array
+      ~listing_shape:M.Json_array
       ~inspect:(inspect_result (Unix.WEXITED 0) {|[{"configuration":{}}]|} "")
       ~listing:None
   in
@@ -147,7 +156,8 @@ let test_image_probe_uses_structured_evidence () =
    | _ -> Alcotest.fail "valid inspect JSON must establish image presence");
   let missing =
     M.classify_image_probe
-      ~listing_shape:M.Listing_json_array
+      ~inspect_shape:M.Json_array
+      ~listing_shape:M.Json_array
       ~inspect:(inspect_result (Unix.WEXITED 1) "any human prose" "any stderr")
       ~listing:(Some (inspect_result (Unix.WEXITED 0) "[]" ""))
   in
@@ -156,7 +166,8 @@ let test_image_probe_uses_structured_evidence () =
    | _ -> Alcotest.fail "a healthy structured listing must distinguish a missing image");
   let service_dead =
     M.classify_image_probe
-      ~listing_shape:M.Listing_json_array
+      ~inspect_shape:M.Json_array
+      ~listing_shape:M.Json_array
       ~inspect:(inspect_result (Unix.WEXITED 1) "same exit code" "")
       ~listing:(Some (inspect_result (Unix.WEXITED 1) "" "service unavailable"))
   in
@@ -165,7 +176,8 @@ let test_image_probe_uses_structured_evidence () =
    | _ -> Alcotest.fail "an unreadable image store must stay probe-failed");
   let malformed =
     M.classify_image_probe
-      ~listing_shape:M.Listing_json_array
+      ~inspect_shape:M.Json_array
+      ~listing_shape:M.Json_array
       ~inspect:(inspect_result (Unix.WEXITED 0) "not json" "")
       ~listing:None
   in
@@ -174,7 +186,8 @@ let test_image_probe_uses_structured_evidence () =
    | _ -> Alcotest.fail "successful status with malformed JSON must fail closed");
   let malformed_listing =
     M.classify_image_probe
-      ~listing_shape:M.Listing_json_array
+      ~inspect_shape:M.Json_array
+      ~listing_shape:M.Json_array
       ~inspect:(inspect_result (Unix.WEXITED 1) "" "")
       ~listing:(Some (inspect_result (Unix.WEXITED 0) "not json" ""))
   in
@@ -183,13 +196,55 @@ let test_image_probe_uses_structured_evidence () =
    | _ -> Alcotest.fail "malformed listing JSON must not establish image absence");
   let cli_missing =
     M.classify_image_probe
-      ~listing_shape:M.Listing_json_array
+      ~inspect_shape:M.Json_array
+      ~listing_shape:M.Json_array
       ~inspect:(inspect_result (Unix.WEXITED 127) "" "not found")
       ~listing:None
   in
   match cli_missing with
   | M.Image_cli_unavailable -> ()
   | _ -> Alcotest.fail "exit 127 must preserve the CLI-unavailable class"
+
+(* [msb image inspect --format json] answers a bare object where the other
+   two answer an array of one (measured 0.6.16, 2026-09-04). Read with the
+   array check, an image that is present classified as "the probe could not
+   say" -- the inverse of what the probe exists for, and it took every msb
+   keeper down before boot. *)
+let test_the_inspect_shape_follows_the_runtime () =
+  let msb_inspect_stdout = {|{"architecture":"arm64","reference":"x:local"}|} in
+  Alcotest.(check bool)
+    "msb answers an object"
+    true
+    (match M.image_inspect_shape_for Backend.Microsandbox with
+     | M.Json_object -> true
+     | M.Json_array | M.Json_lines -> false);
+  (match
+     M.classify_image_probe
+       ~inspect_shape:
+         (M.image_inspect_shape_for Backend.Microsandbox)
+       ~listing_shape:
+         (M.image_listing_shape_for Backend.Microsandbox)
+       ~inspect:(inspect_result (Unix.WEXITED 0) msb_inspect_stdout "")
+       ~listing:None
+   with
+   | M.Image_present -> ()
+   | M.Image_missing | M.Image_cli_unavailable | M.Image_probe_failed _ ->
+     Alcotest.fail "an msb image that is present must classify as present");
+  (* And the object is not accepted where an array is the runtime's answer,
+     so the shape is a real discriminator rather than a widened check. *)
+  match
+    M.classify_image_probe
+      ~inspect_shape:
+        (M.image_inspect_shape_for Backend.Apple_container)
+      ~listing_shape:
+        (M.image_listing_shape_for Backend.Apple_container)
+      ~inspect:(inspect_result (Unix.WEXITED 0) msb_inspect_stdout "")
+      ~listing:None
+  with
+  | M.Image_probe_failed { phase = M.Image_inspect; _ } -> ()
+  | M.Image_present | M.Image_missing | M.Image_cli_unavailable
+  | M.Image_probe_failed _ ->
+    Alcotest.fail "Apple's runtime must not accept msb's inspect shape"
 
 (* ── Refusal wiring ─────────────────────────────────────────────
    The profile parses, the argv builder exists, and nothing starts the
@@ -461,7 +516,7 @@ let test_turn_start_argv_shape () =
       ~gid:20
       ~memory:"2g"
       ~cpus:None
-      ~network_args:(M.network_args ~dns:None Profile.Network_none)
+      ~network_args:(apple_network_args ~dns:None Profile.Network_none)
       ~mount_args:[ "-v"; "/base/.masc/config:/home/keeper/.masc/config:ro" ]
       ~image:"masc-keeper-sandbox:local"
       ~constraints:Backend.all_guest_constraints
@@ -908,23 +963,33 @@ let test_leaves_foreign_base_guest_untouched () =
     []
     (ids (M.sweep_candidates_of_json ~base_path:sweep_base_path ~is_pid_alive listing))
 
+(* The sweep asks every runtime, so an absent CLI has to be asked about by its
+   own executable name and contribute no row. A runtime whose listing grammar
+   is not established contributes no row either, even with its CLI present --
+   which is why an empty result means "nothing was swept", not "nothing was
+   found". *)
 let test_sweep_skips_listing_when_cli_is_unavailable () =
   let spawn_count = ref 0 in
   let run_argv ~timeout_sec:_ _argv =
     incr spawn_count;
     Unix.WEXITED 0, "[]"
   in
+  let asked = ref [] in
   let unavailable =
     M.sweep_abandoned_guests
       ~base_path:sweep_base_path
       ~command_available:(fun command ->
-        Alcotest.(check string) "microvm executable" "container" command;
+        asked := command :: !asked;
         false)
       ~timeout_sec:1.0
       ~is_pid_alive
       ~run_argv
   in
-  Alcotest.(check bool) "unavailable result" true (Option.is_none unavailable);
+  Alcotest.(check (list string))
+    "every runtime is asked for its own executable"
+    (List.map Backend.cli_name Backend.all)
+    (List.rev !asked);
+  Alcotest.(check int) "unavailable row count" 0 (List.length unavailable);
   Alcotest.(check int) "unavailable spawn count" 0 !spawn_count;
   let available =
     M.sweep_abandoned_guests
@@ -934,12 +999,22 @@ let test_sweep_skips_listing_when_cli_is_unavailable () =
       ~is_pid_alive
       ~run_argv
   in
+  (* Only Apple's runtime has an established labelled listing today, so it is
+     the only row and the only spawn. *)
   Alcotest.(check int) "available listing count" 1 !spawn_count;
   match available with
-  | None -> Alcotest.fail "available CLI did not run the sweep"
-  | Some outcome ->
+  | [] -> Alcotest.fail "available CLI did not run the sweep"
+  | [ (backend, outcome) ] ->
+    Alcotest.(check string)
+      "the row names the runtime it swept"
+      "apple_container"
+      (Backend.to_string backend);
     Alcotest.(check (list string)) "available removed" [] outcome.M.removed;
     Alcotest.(check int) "available failures" 0 (List.length outcome.M.failed)
+  | rows ->
+    Alcotest.failf
+      "expected one swept runtime, got %d"
+      (List.length rows)
 
 let live_entry ~base_path ~keeper_name ~id =
   let label key value = key, `String value in
@@ -1284,6 +1359,8 @@ let () =
             test_closed_network_is_spelled_on_the_command
         ; Alcotest.test_case "image probe uses structured evidence" `Quick
             test_image_probe_uses_structured_evidence
+        ; Alcotest.test_case "the inspect shape follows the runtime" `Quick
+            test_the_inspect_shape_follows_the_runtime
         ; Alcotest.test_case "live structured image probe" `Slow
             test_live_structured_image_probe
         ; Alcotest.test_case "sweeps only guests whose owner is gone" `Quick

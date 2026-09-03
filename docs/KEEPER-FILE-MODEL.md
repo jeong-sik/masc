@@ -44,7 +44,6 @@ Current `[keeper]` fields:
 - `sandbox_profile`
 - `sandbox_image`
 - `network_mode`
-- `active_goal_ids`
 - `max_context_override`
 - `telemetry_feedback_enabled`
 - `telemetry_feedback_window_hours`

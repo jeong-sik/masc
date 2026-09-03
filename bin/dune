@@ -493,7 +493,7 @@
  (name masc_tui_paste_spill)
  (wrapped false)
  (modules masc_tui_paste_spill)
- (libraries masc_tui_message_layout))
+ (libraries masc_tui_message_layout masc.keeper_paste_naming))
 
 (library
  (name masc_tui_graphics)

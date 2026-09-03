@@ -98,7 +98,7 @@ type review_result =
 (* LLM verification prompt                                          *)
 (* ================================================================ *)
 
-(* Review prose lives in [config/prompts/verification.*.md]. This module picks
+(* Review prose lives in [config/prompts/verification.md] and its slots. This module picks
    the template and supplies the data it renders — a tool-name list, a root
    listing, a numbered item list — and holds no review instructions of its own.
    Two things go wrong when the prose sits here instead: a code change that

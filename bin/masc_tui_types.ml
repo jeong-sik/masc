@@ -4637,6 +4637,7 @@ let palette_entries (state : state) =
   [ "settings", Palette_config Config_params ]
   @ [ "go Task Review", Palette_goto Verification ]
   @ [ "go Lanes", Palette_goto Lanes ]
+  @ [ "go Clients", Palette_goto Clients ]
   @ [ "go Schedules", Palette_goto Schedules ]
   @ [ "go Fusion", Palette_goto Fusion ]
   @ [ "go Code", Palette_goto Code ]

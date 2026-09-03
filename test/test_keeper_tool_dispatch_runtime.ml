@@ -7128,8 +7128,40 @@ let composable_output_probes =
     }
   ; probe "masc_board_stats" (`Assoc [])
   ; probe "masc_board_list" (`Assoc [])
-  ; probe "masc_goal_list" (`Assoc [])
-  ; probe "masc_run_list" (`Assoc [])
+  ; { tool_name = "masc_goal_list"
+    ; prepare =
+        (fun ~config ~meta:_ ->
+           (* An empty list validates the envelope and nothing else. The goal
+              item's own fields -- id, title, priority, phase, timestamps --
+              live inside [goals], so a probe that leaves it empty never puts
+              them in front of the schema. Same shape of blind spot that let
+              the keeper_tasks_list cursor drift through (masc #33000). *)
+           ignore
+             (Goal_store.upsert_goal
+                config
+                ~title:"composable output probe goal"
+                ~metric:"probes covered"
+                ~target_value:"1"
+                ~priority:2
+                ());
+           `Assoc [])
+    }
+  ; { tool_name = "masc_run_list"
+    ; prepare =
+        (fun ~config ~meta:_ ->
+           (* Same reason as the goal probe: the run item's task_id, plan and
+              timestamps are only reachable through a non-empty [runs]. *)
+           let stamp = "2026-01-01T00:00:00Z" in
+           Masc.Run_eio.write_run
+             config
+             { Masc.Run_eio.task_id = "composable-output-probe-run"
+             ; agent_name = None
+             ; plan = "probe plan"
+             ; created_at = stamp
+             ; updated_at = stamp
+             };
+           `Assoc [])
+    }
   ; { tool_name = "masc_get_metrics"
     ; prepare =
         (fun ~config:_ ~meta -> `Assoc [ "agent_name", `String meta.Masc.Keeper_meta_contract.name ])
@@ -7285,10 +7317,17 @@ let test_composable_outputs_satisfy_declared_schema () =
               else (
                 match result.KTE.data with
                 | Some data ->
+                  (* Alcotest's [fail] raises its own exception, not
+                     [Failure], so catching [Failure] alone let a schema
+                     rejection escape and abort the loop again -- the very
+                     thing this collector exists to stop. Catch every
+                     exception a probe can raise and keep its message. *)
                   (try
                      validate_probe_output ~tool_name ~data;
                      None
-                   with Failure detail -> Some detail)
+                   with
+                   | Failure detail -> Some detail
+                   | exn -> Some (Printexc.to_string exn))
                 | None ->
                   Some
                     (Printf.sprintf

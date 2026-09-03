@@ -1,0 +1,14 @@
+name = "report_review_verdict"
+description = "Report your review verdict. You MUST call this tool with your assessment. verdict must be exactly APPROVE or REJECT."
+
+[[params]]
+name = "verdict"
+type = "string"
+required = true
+enum = ["APPROVE", "REJECT"]
+description = "APPROVE or REJECT."
+
+[[params]]
+name = "reason"
+type = "string"
+description = "Why this verdict. Required for REJECT."

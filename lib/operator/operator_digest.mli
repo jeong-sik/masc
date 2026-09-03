@@ -1,4 +1,4 @@
-type operator_severity = Sev_critical | Sev_bad | Sev_warn
+type operator_severity = Sev_critical | Sev_bad | Sev_warn | Sev_info
 
 val operator_severity_to_string : operator_severity -> string
 val operator_severity_of_string_opt : string -> operator_severity option
@@ -25,6 +25,13 @@ type recommended_action = {
 }
 
 val severity_rank : operator_severity -> int
+
+val health_from_attention_items : attention_item list -> string
+(** Workspace health read off the severities present: "bad" when any row is
+    [Sev_critical] or [Sev_bad], "warn" when any is [Sev_warn], "ok"
+    otherwise. An [Sev_info] row -- a Keeper holding messages it has not
+    answered yet -- leaves health at "ok": it is the runtime working, and an
+    amber reading on it spends the operator's attention on nothing. *)
 val compare_attention : attention_item -> attention_item -> int
 val compare_recommendation : recommended_action -> recommended_action -> int
 

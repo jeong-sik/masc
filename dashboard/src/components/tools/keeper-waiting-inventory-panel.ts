@@ -11,7 +11,6 @@ import {
   LaneAgeAxis,
   LaneWaitingRow,
   ageMinutes,
-  boundedCount,
   DAY_MINUTES,
   waitingRowsOldestFirst,
 } from '../keeper-workspace/keeper-lane-strip'
@@ -126,10 +125,6 @@ function LaneRows({ rows, dev }: { rows: DashboardKeeperWaitingRow[]; dev: boole
 function KeeperRow({ keeper, dev }: { keeper: DashboardKeeperWaitingKeeper; dev: boolean }) {
   const rows = keeper.waiting_on ?? []
   const waitingCount = keeper.waiting_count ?? 0
-  const countTruncated = keeper.waiting_count_truncated === true
-  const truncatedSources = Object.entries(keeper.truncated_sources ?? {})
-    .filter(([, truncated]) => truncated)
-    .map(([source]) => enumLabel(source))
   return html`
     <div class="border-t border-[var(--color-border-subtle)] py-3 first:border-t-0" data-keeper-lane=${keeper.keeper_name}>
       <div class="mb-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
@@ -137,16 +132,9 @@ function KeeperRow({ keeper, dev }: { keeper: DashboardKeeperWaitingKeeper; dev:
           <span class="min-w-0 truncate font-mono text-sm text-[var(--color-fg-primary)]">${keeper.keeper_name}</span>
           <${StatusChip} tone=${stateTone(keeper.state)} uppercase=${false}>${enumLabel(keeper.state)}<//>
         </div>
-        <span class="text-2xs text-[var(--color-fg-muted)]">${boundedCount(waitingCount, countTruncated)} rows</span>
+        <span class="text-2xs text-[var(--color-fg-muted)]">${waitingCount} rows</span>
       </div>
       <${SourceCounts} counts=${keeper.sources} />
-      ${countTruncated
-        ? html`
-            <div class="mt-2 text-2xs text-[var(--color-status-warn)]">
-              truncated ${truncatedSources.length > 0 ? truncatedSources.join(', ') : 'waiting rows'}
-            </div>
-          `
-        : null}
       <div class="mt-2">
         <${LaneRows} rows=${rows} dev=${dev} />
       </div>
@@ -175,7 +163,6 @@ export function KeeperWaitingInventoryPanel({
     inventory.global_pending_confirm_count_known === false
       ? 'unknown'
       : inventory.global_pending_confirm_count ?? 0
-  const truncatedKeeperCount = inventory.external_attention_truncated_keeper_count ?? 0
   return html`
     <div class="grid gap-3">
       <div class="flex flex-wrap gap-1.5">
@@ -184,9 +171,6 @@ export function KeeperWaitingInventoryPanel({
         <${CountPill} label="rows" value=${inventory.row_count} />
         <${CountPill} label="global" value=${inventory.global_row_count ?? 0} />
         <${CountPill} label="unmapped confirms" value=${pendingConfirmCount} />
-        ${inventory.row_count_truncated
-          ? html`<${CountPill} label="truncated keepers" value=${truncatedKeeperCount} />`
-          : null}
         <button
           type="button"
           class=${`ml-auto rounded-[var(--r-0)] border px-1.5 py-0.5 text-3xs font-normal ${dev ? 'border-[var(--color-accent)] text-[var(--color-accent-fg)]' : 'border-[var(--color-border-default)] text-[var(--color-fg-muted)]'}`}
@@ -235,10 +219,6 @@ function laneSummary(keeper: DashboardKeeperWaitingKeeper): string {
 function LaneEvidenceCard({ keeper, dev }: { keeper: DashboardKeeperWaitingKeeper; dev: boolean }) {
   const rows = keeper.waiting_on ?? []
   const waitingCount = keeper.waiting_count ?? 0
-  const countTruncated = keeper.waiting_count_truncated === true
-  const truncatedSources = Object.entries(keeper.truncated_sources ?? {})
-    .filter(([, truncated]) => truncated)
-    .map(([source]) => enumLabel(source))
   return html`
     <article
       class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
@@ -258,7 +238,7 @@ function LaneEvidenceCard({ keeper, dev }: { keeper: DashboardKeeperWaitingKeepe
           </div>
         </div>
         <div class="text-right text-2xs text-[var(--color-fg-muted)]">
-          <div><span class="font-mono text-[var(--color-fg-primary)]">${boundedCount(waitingCount, countTruncated)}</span> lane rows</div>
+          <div><span class="font-mono text-[var(--color-fg-primary)]">${waitingCount}</span> lane rows</div>
           ${Object.keys(keeper.source_next_actions ?? {}).length > 0
             ? html`<div class="font-mono">source별 next action</div>`
             : html`<div class="font-mono text-[var(--color-status-warn)]">source actions unavailable</div>`}
@@ -267,13 +247,6 @@ function LaneEvidenceCard({ keeper, dev }: { keeper: DashboardKeeperWaitingKeepe
       <div class="mt-2">
         <${SourceCounts} counts=${keeper.sources} />
       </div>
-      ${countTruncated
-        ? html`
-            <div class="mt-2 text-2xs text-[var(--color-status-warn)]">
-              truncated ${truncatedSources.length > 0 ? truncatedSources.join(', ') : 'waiting rows'}
-            </div>
-          `
-        : null}
       <div class="mt-2">
         ${rows.length > 0
           ? html`<${LaneRows} rows=${rows} dev=${dev} />`
@@ -321,13 +294,6 @@ export function KeeperLaneInventoryPanel({
       ${lanes.length > 0
         ? html`<div class="grid gap-2 lg:grid-cols-2">${lanes.map(keeper => html`<${LaneEvidenceCard} key=${keeper.keeper_name} keeper=${keeper} dev=${dev} />`)}</div>`
         : html`<div class="text-xs text-[var(--color-fg-muted)]">no keeper lane rows in projection</div>`}
-      ${inventory.row_count_truncated
-        ? html`
-            <div class="text-2xs text-[var(--color-status-warn)]">
-              lane projection truncated at ${inventory.external_attention_row_limit ?? 'unknown'} rows
-            </div>
-          `
-        : null}
       ${globalRows.length > 0
         ? html`
             <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">

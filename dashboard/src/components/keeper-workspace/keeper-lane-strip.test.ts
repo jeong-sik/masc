@@ -125,58 +125,6 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
   }
 }
 
-/** Mirrors the live shape that produced the "레인 64" report: the server capped
- *  external attention at `external_attention_row_limit` and said so, so every
- *  count folded over the surviving rows is a lower bound. The cap and the
- *  external-attention row count are the observed values (sangsu, 2026-07-21,
- *  265 pending in the store, 64 served); the uncapped chat rows are added so
- *  the fixture covers a mixed entry where only one source is bounded. */
-function truncatedInventoryFixture(): DashboardKeeperWaitingInventory {
-  const externalRows: DashboardKeeperWaitingRow[] = Array.from({ length: 64 }, (_, i) => ({
-    keeper_name: 'sangsu',
-    source: 'external_attention',
-    waiting_on: 'external_attention',
-    what: 'external_attention 멘션',
-    wake_producer: 'keeper_process_external_attention',
-    since_iso: '2026-06-12T03:20:00Z',
-    next_action: 'keeper_process_external_attention',
-    detail: { event_id: `evt-${i}` },
-  }))
-  const chatRows: DashboardKeeperWaitingRow[] = Array.from({ length: 5 }, (_, i) => ({
-    keeper_name: 'sangsu',
-    source: 'chat_operation_queued',
-    waiting_on: 'owner_fifo',
-    what: '운영자 채팅 1건 대기',
-    wake_producer: 'keeper_owner_actor',
-    since_iso: '2026-07-21T07:30:00Z',
-    next_action: 'keeper_owner_start_fifo_head',
-    detail: { operation_id: `kmsg-operation-${i}` },
-  }))
-  return {
-    schema: 'masc.dashboard.keeper_waiting_inventory.v3',
-    source: 'server_keeper_waiting_inventory',
-    generated_at: '2026-07-21T07:38:06Z',
-    supported_states: ['idle', 'busy', 'waiting', 'deferred'],
-    keeper_count_known: true,
-    keeper_count: 1,
-    waiting_keeper_count: 1,
-    row_count: 69,
-    row_count_truncated: true,
-    external_attention_row_limit: 64,
-    keepers: [
-      {
-        keeper_name: 'sangsu',
-        state: 'waiting',
-        waiting_count: 69,
-        waiting_count_truncated: true,
-        truncated_sources: { external_attention: true },
-        sources: { external_attention: 64, chat_operation_queued: 5 },
-        waiting_on: [...externalRows, ...chatRows],
-      },
-    ],
-  }
-}
-
 describe('KeeperLaneStrip', () => {
   let host: HTMLDivElement | null = null
 
@@ -232,22 +180,22 @@ describe('KeeperLaneStrip', () => {
     inventory.keepers[0]!.waiting_on = [
       {
         keeper_name: 'sangsu',
-        source: 'external_attention',
+        source: 'event_queue_pending',
         waiting_on: 'discord-old',
         what: 'discord-old 멘션',
-        wake_producer: 'external_attention_store',
+        wake_producer: 'connector_attention_hook',
         since_iso: '2026-08-06T03:59:42Z',
-        next_action: 'keeper_process_external_attention',
+        next_action: 'keeper_drain_event_queue',
         detail: { event_id: 'evt-old' },
       },
       {
         keeper_name: 'sangsu',
-        source: 'external_attention',
+        source: 'event_queue_pending',
         waiting_on: 'discord-new',
         what: 'discord-new 멘션',
-        wake_producer: 'external_attention_store',
+        wake_producer: 'connector_attention_hook',
         since_iso: '2026-08-08T10:12:03Z',
-        next_action: 'keeper_process_external_attention',
+        next_action: 'keeper_drain_event_queue',
         detail: { event_id: 'evt-new' },
       },
       {
@@ -338,7 +286,7 @@ describe('KeeperLaneStrip', () => {
   it('groups the server source counts into the stage pipeline', () => {
     const inventory = inventoryFixture()
     inventory.keepers[0]!.sources = {
-      external_attention: 2,
+      event_queue_pending: 2,
       schedule_waiting: 1,
       chat_operation_queued: 1,
       chat_operation_running: 1,
@@ -354,7 +302,7 @@ describe('KeeperLaneStrip', () => {
     `)
     const stages = Array.from(el.querySelectorAll('[data-testid="keeper-lane-pipeline"] [data-stage]'))
     expect(stages.map(stage => `${stage.getAttribute('data-stage')}:${stage.getAttribute('data-active')}`)).toEqual([
-      'external:true',
+      'external:false',
       'schedule:true',
       'queue:true',
       'operator:false',
@@ -411,56 +359,7 @@ describe('KeeperLaneStrip', () => {
     expect(disclosure!.querySelector('[data-testid="keeper-lane-waiting-time"] time')).not.toBeNull()
   })
 
-  it('marks a server-capped count as a lower bound instead of a total', () => {
-    const el = mount(html`
-      <${KeeperLaneStrip}
-        keeper=${keeperFixture()}
-        inventory=${truncatedInventoryFixture()}
-        ready=${true}
-        loading=${false}
-        error=${null}
-      />
-    `)
-    const text = el.textContent ?? ''
-    expect(text).toContain('≥69')
-    // the bare integer would assert a total the server never computed
-    expect(text).not.toMatch(/작업 대기열\s*69(?!\d)/)
-    expect(el.querySelectorAll('[data-testid="keeper-lane-waiting-row"]').length).toBe(69)
-  })
-
-  it('attributes the truncation to the capped source and the server limit', () => {
-    const el = mount(html`
-      <${KeeperLaneStrip}
-        keeper=${keeperFixture()}
-        inventory=${truncatedInventoryFixture()}
-        ready=${true}
-        loading=${false}
-        error=${null}
-      />
-    `)
-    const note = el.querySelector('[data-testid="keeper-lane-truncation"]')?.textContent ?? ''
-    expect(note).toContain('외부 알림')
-    expect(note).toContain('64')
-    expect(note).toContain('실제 대기 건수는 더 많습니다')
-  })
-
-  it('bounds only the sources the server reported as capped', () => {
-    const el = mount(html`
-      <${KeeperLaneStrip}
-        keeper=${keeperFixture()}
-        inventory=${truncatedInventoryFixture()}
-        ready=${true}
-        loading=${false}
-        error=${null}
-      />
-    `)
-    const pipeline = el.querySelector('[data-testid="keeper-lane-pipeline"]')!
-    expect(pipeline.querySelector('[title="external_attention"]')?.textContent).toBe('외부 알림≥64')
-    // chat_operation_queued was not capped, so it is an exact count
-    expect(pipeline.querySelector('[title="chat_operation_queued"]')?.textContent).toBe('채팅 대기5')
-  })
-
-  it('renders an exact count and no truncation note when nothing was capped', () => {
+  it('renders an exact count', () => {
     const el = mount(html`
       <${KeeperLaneStrip}
         keeper=${keeperFixture()}
@@ -471,7 +370,6 @@ describe('KeeperLaneStrip', () => {
       />
     `)
     expect(el.textContent ?? '').not.toContain('≥')
-    expect(el.querySelector('[data-testid="keeper-lane-truncation"]')).toBeNull()
   })
 
   it('renders no transport/freshness caption row', () => {

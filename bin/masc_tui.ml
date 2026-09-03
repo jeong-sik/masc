@@ -14255,7 +14255,15 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_detail ->
                 state.detail_scroll <-
                   max 0 (state.detail_scroll + (direction * page))
-            | Lanes ->
+             | Clients ->
+                 let cursor, scroll =
+                   move_row_cursor state ~delta:(direction * page)
+                     ~cursor:state.clients_surface_cursor
+                     ~scroll:state.clients_surface_scroll
+                 in
+                 state.clients_surface_cursor <- cursor;
+                 state.clients_surface_scroll <- scroll
+             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
                      state.lane_run_detail_scroll <-
@@ -14362,7 +14370,9 @@ and is loaded on demand through keeper_skill.
                  | None -> ())
             | Planning | Verification ->
                 launch_verification_load state ~mailbox:async_messages
-            | Lanes ->
+             | Clients ->
+                 launch_clients_load state ~mailbox:async_messages
+             | Lanes ->
                 launch_lanes_load state ~mailbox:async_messages;
                 (match state.lanes_mode with
                  | Lanes_run_list lane_id ->
@@ -14570,7 +14580,11 @@ and is loaded on demand through keeper_skill.
                   (* Off-ring child: the way out of the list is the ring
                      parent, loaded, same as Connectors and Code. *)
                   goto_surface state ~mailbox:async_messages Config
-            | Lanes ->
+             | Clients ->
+                 (* Off-ring child: the way out is the ring parent, loaded,
+                    the same exit Resources takes to Config. *)
+                 goto_surface state ~mailbox:async_messages Runtime
+             | Lanes ->
                 state.lanes_action_error <- None;
                 (match state.lanes_mode with
                  | Lanes_run_detail (lane_id, _) ->
@@ -14768,7 +14782,7 @@ and is loaded on demand through keeper_skill.
                 state.system_logs_detail_scroll <- 0
             | Keepers Keeper_runtime_pick | Keepers Keeper_message
             | Keepers Keeper_list | Acting | Approvals
-            | Memory | Repositories | Connectors | Config | Tools -> ())
+             | Memory | Repositories | Connectors | Config | Tools | Clients -> ()
        | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
             | Code ->
@@ -14985,6 +14999,14 @@ and is loaded on demand through keeper_skill.
                    in
                    state.verification_cursor <- cursor;
                    state.verification_scroll <- scroll)
+            | Clients ->
+                let cursor, scroll =
+                  move_row_cursor state ~delta:1
+                    ~cursor:state.clients_surface_cursor
+                    ~scroll:state.clients_surface_scroll
+                in
+                state.clients_surface_cursor <- cursor;
+                state.clients_surface_scroll <- scroll
             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
@@ -15321,6 +15343,14 @@ and is loaded on demand through keeper_skill.
                    in
                    state.verification_cursor <- cursor;
                    state.verification_scroll <- scroll)
+            | Clients ->
+                let cursor, scroll =
+                  move_row_cursor state ~delta:(-1)
+                    ~cursor:state.clients_surface_cursor
+                    ~scroll:state.clients_surface_scroll
+                in
+                state.clients_surface_cursor <- cursor;
+                state.clients_surface_scroll <- scroll
             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
@@ -15806,7 +15836,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Acting
-            | Connectors | Config | Resources | Tools -> ())
+             | Connectors | Config | Resources | Tools | Clients -> ())
        (* Changes reads one keeper's file writes and already binds to the
           roster cursor on entry, so it opens from a keeper surface rather
           than from the Tab ring. Both of them list [f] in their footer and
@@ -15948,7 +15978,7 @@ and is loaded on demand through keeper_skill.
                  | None -> ())
             | Overview | Acting | Keepers (Keeper_logs | Keeper_calls | Keeper_message)
             | Lanes | Board | Approvals | Planning | Schedules
-            | Memory | Verification | Harness | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
+            | Memory | Verification | Harness | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | Clients
             | System_logs -> ())
        | Some "d" when state.view = Changes ->
            (* The same file, read from the tree instead of from the log. Two
@@ -16185,7 +16215,16 @@ and is loaded on demand through keeper_skill.
                     ~content_height:(keeper_log_content_height state);
                 state.view <- Keepers Keeper_logs
             | None -> ())
-       | Some "m" | Some "M" | Some "c" | Some "C" ->
+| Some "c" | Some "C"
+         when state.view = Runtime
+              && Option.is_none state.runtime_detail_target ->
+            (* The third Runtime reading: not what the lanes call, not what
+               the workspace could call, but who is attached to it — the
+               clients roster, off the ring under Runtime the way Lanes is.
+               This arm sits above the chat arm because that one takes [c]
+               unguarded on every surface that names a Keeper. *)
+            goto_surface state ~mailbox:async_messages Clients
+| Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat from every row that names a Keeper. Standalone Lanes carry
               no Keeper identity; Keeper chat is owned by the Keepers surface.
               [c] is an alias for [m] because the footer names the action rather
@@ -16263,14 +16302,6 @@ and is loaded on demand through keeper_skill.
                 state.runtime_mode <- Masc_tui_types.Runtime_lanes;
                 state.runtime_surface_scroll <- 0;
                 goto_surface state ~mailbox:async_messages Lanes)
-       | Some "c" | Some "C"
-         when state.view = Runtime
-              && Option.is_none state.runtime_detail_target ->
-           (* The third Runtime reading: not what the lanes call, not what
-              the workspace could call, but who is attached to it — the
-              clients roster, off the ring under Runtime the way Lanes is.
-              [c] for clients; Esc and Left return here. *)
-           goto_surface state ~mailbox:async_messages Clients
        | Some "p" | Some "P" when state.view = Clients ->
            goto_surface state ~mailbox:async_messages Runtime
        | Some "p" | Some "P"
@@ -16408,7 +16439,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Approvals | Schedules | Verification | Harness
-            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+             | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs | Clients -> ()
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,
               "wake up" on a keeper row. The surface decides which one is
@@ -16431,7 +16462,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Approvals | Planning | Schedules | Verification | Harness
-            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs
+             | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs | Clients
             -> ())
        | Some "E"
          when state.view = Config && state.config_pane = Config_params ->
@@ -16530,7 +16561,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Board | Planning | Verification | Harness
-            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Resources | System_logs -> ())
+             | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Resources | System_logs | Clients -> ()
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_prompts ->
            if state.prompts_show_runtime_assets
@@ -16591,7 +16622,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Memory | Lanes
             | Board | Planning | Schedules | Harness
-            | Fusion | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Fusion | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs | Clients -> ()
       | _ -> ());
 
       (* Surface navigation asks only for datasets the destination adds. The
@@ -16726,7 +16757,8 @@ and is loaded on demand through keeper_skill.
                 explicit refresh for its child badge, but does not poll a
                 hidden 200-row queue on every cadence tick. *)
              launch_verification_load state ~mailbox:async_messages
-         | Lanes -> launch_lanes_load state ~mailbox:async_messages
+             | Lanes -> launch_lanes_load state ~mailbox:async_messages
+             | Clients -> launch_clients_load state ~mailbox:async_messages
          | Harness -> launch_harness_load state ~mailbox:async_messages
          | Fusion ->
              launch_fusion_runs_load state ~mailbox:async_messages;

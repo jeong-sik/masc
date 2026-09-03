@@ -3516,11 +3516,11 @@ let clients_snapshot_json rows =
     ; "clients", `List rows
     ]
 
-let test_decode_clients_reads_both_status_spellings_and_ignores_profile () =
+let test_decode_clients_reads_the_status_enum_and_ignores_profile () =
   let json =
     clients_snapshot_json
       [ clients_row_json ~name:"codex-mcp-client" ~agent_type:"codex"
-          ~status:"Active" ~keeper:None ~task:None
+          ~status:"active" ~keeper:None ~task:None
       ; clients_row_json ~name:"analyst-agent" ~agent_type:"keeper"
           ~status:"busy" ~keeper:(Some "analyst") ~task:(Some "task-845")
       ]
@@ -3537,10 +3537,10 @@ let test_decode_clients_reads_both_status_spellings_and_ignores_profile () =
              "a bound row carries its task" (Some "task-845")
              bound.Tui_decode.cr_current_task;
            Alcotest.(check string)
-             "the emitter's capital spelling decodes" "active"
+             "the wire spelling decodes" "active"
              (Tui_decode.client_status_to_string mcp.Tui_decode.cr_status);
            Alcotest.(check string)
-             "the lowercase spelling decodes too" "busy"
+             "busy decodes" "busy"
              (Tui_decode.client_status_to_string bound.Tui_decode.cr_status)
        | _ -> Alcotest.fail "expected both rows")
 
@@ -3552,6 +3552,16 @@ let test_decode_clients_rejects_unknown_status_and_schema () =
               ~status:"hibernating" ~keeper:None ~task:None ])
    with
    | Ok _ -> Alcotest.fail "an unknown status decoded"
+   | Error detail ->
+       Alcotest.(check bool) "error names the status" true
+         (String.starts_with ~prefix:"clients: unknown status" detail));
+  (match
+     Tui_decode.decode_clients_snapshot
+       (clients_snapshot_json
+          [ clients_row_json ~name:"x" ~agent_type:"codex"
+              ~status:"Active" ~keeper:None ~task:None ])
+   with
+   | Ok _ -> Alcotest.fail "the capital spelling decoded"
    | Error detail ->
        Alcotest.(check bool) "error names the status" true
          (String.starts_with ~prefix:"clients: unknown status" detail));
@@ -7120,7 +7130,7 @@ let () =
     ( "decode_clients",
       [
         Alcotest.test_case "reads both status spellings, ignores the profile" `Quick
-          test_decode_clients_reads_both_status_spellings_and_ignores_profile;
+          test_decode_clients_reads_the_status_enum_and_ignores_profile;
         Alcotest.test_case "rejects an unknown status and a wrong schema" `Quick
           test_decode_clients_rejects_unknown_status_and_schema;
       ] );

@@ -5198,13 +5198,35 @@ let decode_file_mount_paths items =
     (fun item -> required_string_field item "container_path")
     items
 
+type client_status =
+  | Client_active
+  | Client_busy
+  | Client_listening
+  | Client_inactive
+
+type client_row = {
+  cr_name : string;
+  cr_agent_type : string;
+  cr_status : client_status;
+  cr_current_task : string option;
+  cr_keeper_name : string option;
+  cr_session_bound_at : string;
+  cr_last_seen : string;
+  cr_capabilities : string list;
+}
+
+type clients_snapshot = {
+  cls_observed_at : string;
+  cls_clients : client_row list;
+}
+
 (* The clients roster's status is the agent_status ADT on the wire. The
-   emitter spells constructors with a capital lead; every other reader of
-   the same enum lowercases first, so accepting both spellings of the four
-   closed values is reading one enum, not guessing at a string. Anything
-   else rejects the row rather than drawing a wrong dot. *)
+   emitter ([string_of_agent_status], which [dashboard_agent_json] uses)
+   spells the four closed values lowercase and nothing else, so this reads
+   exactly those four words: a spelling the producer never sends is a
+   different enum and rejects the row rather than drawing a wrong dot. *)
 let client_status_of_string value =
-  match String.lowercase_ascii value with
+  match value with
   | "active" -> Ok Client_active
   | "busy" -> Ok Client_busy
   | "listening" -> Ok Client_listening

@@ -6099,7 +6099,7 @@ let render_clients (state : state) =
     box_line_styled buf cols ~style:(Theme.recede ())
       (Printf.sprintf "[%d attached, scroll %d]" shown scroll);
   box_bottom buf cols;
-  Buffer.contents buf
+  finish_surface state ~surface_key:"clients" ~rows:terminal_rows ~cols buf
 ;;
 
 let render_lanes (state : state) =

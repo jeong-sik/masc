@@ -833,22 +833,31 @@ let materialise_spilled_paste state text =
         (Masc_tui_paste_spill.substituted spill
            ~replacement:spill.Masc_tui_paste_spill.text text)
 
-(* Where a keeper can read a file this process writes.
+(* Where this process stages a spilled paste for the keeper.
 
-   [Keeper_sandbox_config.host_root_abs_of_agent] is the same answer the
-   server gives: it reads the keeper's own TOML for the sandbox profile and
-   returns the backend-scoped root -- [.masc/playground/<name>/] for a local
-   keeper and [.masc/playground/docker/<name>/] for a Docker one. Working the
-   path out here instead would be this process copying a layout the server
-   owns, and the two roots differ by a directory that is easy to get right
-   once and wrong afterwards.
+   [Keeper_sandbox_config] is the same answer the server gives: it reads the
+   keeper's own TOML for the sandbox profile and returns the backend-scoped
+   root -- [.masc/playground/docker/<name>/] for a Docker keeper and
+   [.masc/playground/<name>/] for the endpoint-owned profiles (microvm,
+   remote_ssh). Working the path out here instead would be this process
+   copying a layout the server owns, and the two roots differ by a directory
+   that is easy to get right once and wrong afterwards.
+
+   "Staging" is the honest word. For Docker the root is bind-mounted into
+   the container, so the staged file is already where the keeper reads it.
+   For an endpoint-owned tree the root is only the host bookkeeping bundle
+   and the keeper cannot see it; [Keeper_paste_delivery] carries the file to
+   the endpoint's workspace root at the next turn setup, the first moment a
+   turn-owned endpoint exists. Writing here at paste time is still right:
+   the paste is durable from the moment the operator sends it, and no
+   endpoint has to be up for this process to receive it.
 
    [None] when the root cannot be named or does not exist. A keeper that has
    never run has no playground, and creating one from outside would be this
    process deciding something about the keeper's own space. *)
-let keeper_readable_dir ~base_path ~keeper_name =
+let keeper_staging_dir ~base_path ~keeper_name =
   match
-    Keeper_sandbox_config.host_root_abs_of_agent ~base_path
+    Keeper_sandbox_config.sandbox_profile_of_agent ~base_path
       ~agent_name:keeper_name
   with
   (* [sandbox_profile_of_agent] raises on a keeper TOML it cannot read, and
@@ -856,9 +865,13 @@ let keeper_readable_dir ~base_path ~keeper_name =
      calls. Neither is a reason to lose the paste -- the caller falls back to
      sending the text. *)
   | exception _ -> None
-  | dir -> (
+  | profile -> (
+      let dir =
+        Filename.concat base_path
+          (Keeper_sandbox_config.host_root_rel_of_profile profile keeper_name)
+      in
       match Sys.file_exists dir && Sys.is_directory dir with
-      | true -> Some dir
+      | true -> Some (dir, profile)
       | false -> None
       | exception Sys_error _ -> None)
 
@@ -874,13 +887,21 @@ let write_file path contents =
       | () -> Ok ()
       | exception Sys_error detail -> Error detail)
 
-(* Hand a spilled paste to the keeper as a file it can read, and put a line
-   naming that file where the placeholder stands.
+(* Stage a spilled paste as a file the keeper will be able to read, and put
+   a line naming that file where the placeholder stands.
 
    Measured before it was built: a keeper reads paths relative to its own
    sandbox root and refuses anything outside it, so [/tmp] comes back as
    [path_outside_sandbox] and a workspace-relative path is simply not found.
-   The file goes into the root and the message names it bare.
+   The file goes into the root the server names for this keeper and the
+   message names it bare.
+
+   For Docker that root is the bind-mounted workspace itself, so the file is
+   already where the keeper reads it. For the endpoint-owned profiles it is
+   the host bookkeeping bundle -- staging, not the destination -- and
+   [Keeper_paste_delivery] writes it through the remote lane at the next
+   turn setup. The keeper-facing line ("It is in your working directory")
+   becomes true before that turn's first Read.
 
    Every failure falls back to sending the text itself. A paste that reached
    the keeper as a large message is worse than one it can read off disk; a
@@ -903,7 +924,7 @@ let place_spilled_paste state ~base_path ~keeper_name text =
              nothing to hand the keeper. *)
           text
       | Some pointed -> (
-          match keeper_readable_dir ~base_path ~keeper_name with
+          match keeper_staging_dir ~base_path ~keeper_name with
           | None ->
               add_event state "system"
                 (Printf.sprintf
@@ -911,7 +932,7 @@ let place_spilled_paste state ~base_path ~keeper_name text =
                     the message instead"
                    (Keeper_chat.terminal_safe_text keeper_name));
               inline ()
-          | Some dir -> (
+          | Some (dir, profile) -> (
               let path =
                 Filename.concat dir spill.Masc_tui_paste_spill.file_name
               in
@@ -924,11 +945,25 @@ let place_spilled_paste state ~base_path ~keeper_name text =
                        (Keeper_chat.terminal_safe_text keeper_name) detail);
                   inline ()
               | Ok () ->
-                  add_event state "system"
-                    (Printf.sprintf "Wrote %s (%d bytes) into %s's workspace"
-                       spill.Masc_tui_paste_spill.file_name
-                       spill.Masc_tui_paste_spill.bytes
-                       (Keeper_chat.terminal_safe_text keeper_name));
+                  (match profile with
+                   | Keeper_sandbox_config.Docker ->
+                       (* The staged directory is the bind-mounted workspace
+                          itself: written is delivered. *)
+                       add_event state "system"
+                         (Printf.sprintf
+                            "Wrote %s (%d bytes) into %s's workspace"
+                            spill.Masc_tui_paste_spill.file_name
+                            spill.Masc_tui_paste_spill.bytes
+                            (Keeper_chat.terminal_safe_text keeper_name))
+                   | Keeper_sandbox_config.Micro_vm
+                   | Keeper_sandbox_config.Remote_ssh ->
+                       add_event state "system"
+                         (Printf.sprintf
+                            "Staged %s (%d bytes) for %s; it lands in the \
+                             workspace when the next turn starts"
+                            spill.Masc_tui_paste_spill.file_name
+                            spill.Masc_tui_paste_spill.bytes
+                            (Keeper_chat.terminal_safe_text keeper_name)));
                   pointed)))
 
 let reset_message_file_changes state keeper_name =

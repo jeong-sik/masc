@@ -110,7 +110,51 @@ bash /tmp/masc-install.sh --version "$TAG"
 릴리스에는 서버 바이너리와 터미널 UI, 배포 점검 도구가 들어갑니다. 설치 스크립트가
 `masc-tui`를 `masc` 옆에 놓고, 실행 명령까지 화면에 찍어 줍니다.
 
+### 처음 설정
+
+바이너리를 놓은 뒤 설치 스크립트가 일회성 설정 마법사를 실행합니다(`--no-wizard`
+로 건너뜀). 아무것도 쓰기 전에 이 호스트에서 감지한 것을 먼저 보여주고, 실제로
+쓰는 파일은 `.masc/config/.env.local`(provider 키 하나)과 `runtime.toml`의
+`[runtime].default` 둘뿐입니다.
+
+두 축을 보여줍니다. **모델 소스**는 턴이 토큰을 받는 곳입니다.
+
+- 클라우드 provider(Anthropic, OpenAI, GLM, DeepSeek …)는 API 키 환경 변수로
+  제안됩니다. `--provider <id>`로 묻지 않고 고르고, `--api-key`나
+  `--api-key-stdin`으로 키를 줍니다.
+- 로컬 서버(Ollama, llama-server, MLX)는 healthcheck 경로로 curl해
+  `reachable`(도달) / `not running`(안 뜸)으로 표시합니다. 안 떠 있는 서버가
+  고르기 전에 보입니다.
+- subscription CLI(Claude Code, Codex, Antigravity)는 그 CLI 자신의 로그인으로
+  연결돼 키가 필요 없습니다. 명령이 `PATH`에 있으면 `installed`(설치됨), 자체
+  로그인 검사를 통과하면 `signed in`(로그인됨)으로 표시합니다.
+
+**실행 샌드박스**는 Keeper의 도구가 도는 곳입니다. 마법사는 호스트가 제공 가능한
+백엔드를 **감지·표시만** 합니다 — `docker`(데몬 도달), macOS의 Apple `container`
+CLI로 `microvm`, `remote_ssh`(runtime.toml에 endpoint 선언). 고르지는 않습니다.
+샌드박스는 `.masc/config/keepers/<name>.toml`에서 Keeper마다, 또는 자기 선택을
+지닌 `--team <preset>`으로 정합니다(`--sandbox docker|microvm|remote_ssh`로 그
+팀의 샌드박스를 지정할 수 있습니다).
+
+subscription 로그인 확인은 독립 명령이기도 합니다. `masc runtime-probe
+<runtime_id>`는 CLI가 로그인돼 있으면 `0`, 아니면 `1`로 끝나며, 자격증명 파일을
+읽지 않고 서버의 로그인 probe를 재사용합니다.
+
 ## MCP 클라이언트 설정
+
+한 번에 끝내는 길은 `masc mcp-config`입니다. bearer를 발급하고 클라이언트용
+완성 config 블록을 찍어 주므로, URL·토큰·헤더를 손으로 맞추지 않고 한 블록만
+붙여 넣으면 됩니다.
+
+```bash
+masc mcp-config --base-path /path/to/project --client codex
+masc mcp-config --base-path /path/to/project --client claude-desktop
+masc mcp-config --base-path /path/to/project --client env   # 셸 export
+```
+
+long-lived worker 토큰을 발급하며(`--expiring`으로 세션 한정), 고른 클라이언트에
+맞게 endpoint·토큰·헤더를 담습니다. 아래 수동 블록은 이 명령이 다루지 않는
+클라이언트를 직접 배선할 때 쓰는 같은 형식입니다.
 
 공개된 MCP 경로는 HTTP입니다. 먼저 `quickstart.sh`가 만든 worker bearer를
 불러옵니다.

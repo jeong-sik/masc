@@ -1146,7 +1146,8 @@ let test_shim_travels_read_only_with_its_config () =
    Write, so the probe runs as that uid and names the owner on failure. *)
 let test_keeper_work_root_write_probe_runs_as_the_keeper () =
   let argv =
-    M.keeper_work_root_write_probe_argv
+    M.keeper_work_root_write_probe_argv_for
+      Backend.Apple_container
       ~container_name:"masc-keeper-vm-x" ~uid:502 ~gid:20 ~keeper_name:"lane-smith"
   in
   Alcotest.(check bool) "runs as the keeper's uid, not root" true
@@ -1167,7 +1168,9 @@ let test_keeper_work_root_write_probe_runs_as_the_keeper () =
 
 let test_keeper_work_root_is_created_as_root_with_a_mode () =
   let argv =
-    M.keeper_work_root_mkdir_argv ~container_name:"masc-keeper-vm-x" ~keeper_name:"lane-smith"
+    M.keeper_work_root_mkdir_argv_for
+      Backend.Apple_container
+      ~container_name:"masc-keeper-vm-x" ~keeper_name:"lane-smith"
   in
   Alcotest.(check bool) "runs as root" true (adjacent ~flag:"--user" ~value:"0:0" argv);
   Alcotest.(check bool) "explicit mode" true (adjacent ~flag:"-m" ~value:"0777" argv);

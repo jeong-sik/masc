@@ -12114,61 +12114,79 @@ and is loaded on demand through keeper_skill.
       let compact_viewport =
         Frame_presenter.last_frame_is_compact frame_presenter
       in
+      (* The field a typed character would land in, read once for the paste
+         below. A paste is the characters the operator would have typed, so
+         it goes where they would have gone; the exhaustive match is what
+         keeps a field added to [text_input_target] from silently dropping
+         pasted text the way the palette, row search and the preset name
+         each did. *)
+      let text_target = text_input_target state ~compact_viewport in
       (match input with
-       (* A pasted setting value belongs to the inline field, not the global
-          chat composer.  The first paste replaces the selected current value;
-          later pastes append, matching typed input. *)
-       | Some (Pasted paste)
-         when Option.is_some state.runtime_param_edit
-              && not compact_viewport ->
+       (* A paste into a one-line field is the text, on one line: no dropped
+          file to classify and no spill to disk, both of which are the
+          composer's and mean nothing in a field a single row high. A copied
+          secret carries the newline that ended it, and a field is not a
+          place for one. *)
+       | Some (Pasted paste) when Option.is_some text_target ->
            let text =
              Masc_tui_types.identity_field_paste paste.Masc_tui_paste.text
            in
-           Option.iter
-             (fun edit ->
-               state.runtime_param_edit <-
-                 Some (Masc_tui_types.runtime_param_edit_append edit text);
-               state.runtime_params_notice <- None)
-             state.runtime_param_edit
-       (* A paste while the Identity tab is taking text belongs to the field
-          taking it. A client secret is exactly the thing an operator pastes,
-          and the default path puts it in a chat draft -- a credential in a
-          message nobody meant to write. *)
-       | Some (Pasted paste)
-         when state.view = Keepers Keeper_detail
-              && state.detail_tab = Detail_identity
-              && (Option.is_some state.identity_app_form
-                  || Option.is_some state.identity_filter)
-              && not compact_viewport ->
-           (* One line: a copied secret carries the newline that ended it,
-              and a field is not a place for one. *)
-           let text =
-             Masc_tui_types.identity_field_paste paste.Masc_tui_paste.text
-           in
-           (match state.identity_app_form with
-            | Some form ->
-              state.identity_app_form <-
-                Some
-                  (match form.Masc_tui_types.iaf_field with
-                   | Masc_tui_types.App_client_id ->
-                     { form with
-                       Masc_tui_types.iaf_client_id =
-                         form.Masc_tui_types.iaf_client_id ^ text
-                     }
-                   | Masc_tui_types.App_client_secret ->
-                     { form with
-                       Masc_tui_types.iaf_client_secret =
-                         form.Masc_tui_types.iaf_client_secret ^ text
-                     }
-                   | Masc_tui_types.App_scopes ->
-                     { form with
-                       Masc_tui_types.iaf_scopes =
-                         form.Masc_tui_types.iaf_scopes ^ text
-                     })
-            | None ->
-              state.identity_filter <-
-                Some (Option.value state.identity_filter ~default:"" ^ text);
-              state.identity_cursor <- 0)
+           (match text_target with
+            | None -> ()
+            | Some Text_preset_name ->
+                state.preset_save_draft <-
+                  Some
+                    (Option.value state.preset_save_draft ~default:"" ^ text)
+            (* The first paste replaces the selected current value; later
+               pastes append, matching typed input. *)
+            | Some Text_runtime_param ->
+                Option.iter
+                  (fun edit ->
+                    state.runtime_param_edit <-
+                      Some (Masc_tui_types.runtime_param_edit_append edit text);
+                    state.runtime_params_notice <- None)
+                  state.runtime_param_edit
+            | Some Text_palette ->
+                state.palette_query <- state.palette_query ^ text;
+                state.palette_cursor <- 0
+            (* Typing in row search moves the cursor to the first match as
+               each character lands, so a paste has to jump the same way or
+               the query on screen and the row under it disagree. *)
+            | Some Text_row_search ->
+                let longer =
+                  Option.value state.search ~default:"" ^ text
+                in
+                state.search <- Some longer;
+                search_jump state ~query:longer ~after:(-1)
+            (* A client secret is exactly the thing an operator pastes, and
+               the composer path would put it in a chat draft -- a credential
+               in a message nobody meant to write. *)
+            | Some Text_identity_app_form ->
+                Option.iter
+                  (fun form ->
+                    state.identity_app_form <-
+                      Some
+                        (match form.Masc_tui_types.iaf_field with
+                         | Masc_tui_types.App_client_id ->
+                           { form with
+                             Masc_tui_types.iaf_client_id =
+                               form.Masc_tui_types.iaf_client_id ^ text
+                           }
+                         | Masc_tui_types.App_client_secret ->
+                           { form with
+                             Masc_tui_types.iaf_client_secret =
+                               form.Masc_tui_types.iaf_client_secret ^ text
+                           }
+                         | Masc_tui_types.App_scopes ->
+                           { form with
+                             Masc_tui_types.iaf_scopes =
+                               form.Masc_tui_types.iaf_scopes ^ text
+                           }))
+                  state.identity_app_form
+            | Some Text_identity_filter ->
+                state.identity_filter <-
+                  Some (Option.value state.identity_filter ~default:"" ^ text);
+                state.identity_cursor <- 0)
        (* Both sides of this arm are wanted: the guard decides whether a paste
           is handled at all, and the rewrite decides what text it carries. *)
        | Some (Pasted paste)
@@ -12304,9 +12322,8 @@ and is loaded on demand through keeper_skill.
           draft is open, so a name with an s or an r in it does not fire the
           save and restore keys under it. *)
        | Some k
-         when state.view = Config
-              && state.config_pane = Config_presets
-              && Option.is_some state.preset_save_draft ->
+         when text_input_target state ~compact_viewport
+              = Some Text_preset_name ->
            (match state.preset_save_draft with
             | None -> ()
             | Some draft ->
@@ -12334,7 +12351,9 @@ and is loaded on demand through keeper_skill.
                | s when String.length s = 1 && Char.code s.[0] >= 32 ->
                  state.preset_save_draft <- Some (draft ^ s)
                | _ -> ()))
-       | Some k when Option.is_some state.runtime_param_edit ->
+       | Some k
+         when text_input_target state ~compact_viewport
+              = Some Text_runtime_param ->
            (match state.runtime_param_edit with
             | None -> ()
             | Some edit ->
@@ -12787,7 +12806,8 @@ and is loaded on demand through keeper_skill.
        (* The palette is the same kind of modal, but typed: printable keys
           build the query, arrows move the cursor, Enter runs the highlighted
           jump through the exact goto/chat paths the bound keys use. *)
-       | Some k when state.palette_open ->
+       | Some k
+         when text_input_target state ~compact_viewport = Some Text_palette ->
            let close () =
              state.palette_open <- false;
              state.palette_query <- "";
@@ -12934,7 +12954,9 @@ and is loaded on demand through keeper_skill.
        (* Row search: typing moves the surface's row cursor live to the
           first match from the top; Enter keeps the query for n/N, Esc keeps
           nothing. The list itself never narrows -- see [search] in types. *)
-       | Some k when Option.is_some state.search ->
+       | Some k
+         when text_input_target state ~compact_viewport
+              = Some Text_row_search ->
            let query = Option.value state.search ~default:"" in
            (match k with
             | "esc" -> state.search <- None
@@ -12959,10 +12981,8 @@ and is loaded on demand through keeper_skill.
           send on the last, esc to abandon -- and abandoning clears the
           secret rather than leaving it in the process. *)
        | Some k
-         when state.view = Keepers Keeper_detail
-              && state.detail_tab = Detail_identity
-              && Option.is_some state.identity_app_form
-              && not compact_viewport -> (
+         when text_input_target state ~compact_viewport
+              = Some Text_identity_app_form -> (
            match state.identity_app_form with
            | None -> ()
            | Some form -> (
@@ -13135,10 +13155,8 @@ and is loaded on demand through keeper_skill.
           or backspace on an empty query. The arrows are named keys rather
           than characters and keep moving the cursor through what is left. *)
        | Some k
-         when state.view = Keepers Keeper_detail
-              && state.detail_tab = Detail_identity
-              && Option.is_some state.identity_filter
-              && not compact_viewport -> (
+         when text_input_target state ~compact_viewport
+              = Some Text_identity_filter -> (
            let query = Option.value state.identity_filter ~default:"" in
            let narrow text =
              state.identity_filter <- Some text;

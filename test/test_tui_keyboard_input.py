@@ -4129,6 +4129,55 @@ PASTE_START = b"\x1b[200~"
 PASTE_END = b"\x1b[201~"
 
 
+def paste_into_a_field_interaction() -> Interaction:
+    """A paste goes into the field that is taking characters.
+
+    Seven fields take typed characters; paste used to name four, and row
+    search and the command palette were not among them. Their text went to
+    the chat draft behind the surface -- invisible there, and on a surface
+    with no keeper selected, nowhere at all. The operator saw paste work on
+    one screen and do nothing on the next."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        wait_for_output(
+            process, master_fd, output, BRACKETED_PASTE_ON, start=0, timeout=5.0
+        )
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+
+        # Row search draws its query in the footer, so the pasted characters
+        # are asserted where they landed rather than through what they did.
+        send_and_wait(process, master_fd, output, b"/", b"MASC Keepers")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            PASTE_START + b"alph" + PASTE_END,
+            b"/alph",
+        )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+
+        # The palette runs what it was given. Its first entry with an empty
+        # query is "settings", so landing on Lanes is only possible if the
+        # pasted characters reached the query: a dropped paste sends the
+        # operator to Config instead.
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b":" + PASTE_START + b"go lanes" + PASTE_END + b"\r",
+            b"MASC Lanes",
+        )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def bracketed_paste_interaction(requests: HttpRequests) -> Interaction:
     """A multi-line paste is one draft, not one message per line.
 
@@ -11210,6 +11259,11 @@ def run_keyboard_regression(executable: str) -> None:
             )
         },
         http_requests=paste_requests,
+    )
+    run_terminal_scenario(
+        executable,
+        description="A paste goes into the field taking characters",
+        interact=paste_into_a_field_interaction(),
     )
     word_requests: HttpRequests = []
     run_terminal_scenario(

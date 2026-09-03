@@ -154,13 +154,8 @@ val record_crashed_cycle_failure :
 val handle_cycle_exception :
   base_path:string -> meta:keeper_meta -> exn -> keepalive_turn_outcome
 
-type connector_attention_outcome =
-  | Attention_resolved
-  | Attention_ignored
-
 type batch_disposition =
-  | Batch_ack_completed of
-      { connector_attention_outcome : connector_attention_outcome }
+  | Batch_ack_completed
   | Batch_ack_attention_only
   | Batch_no_action
 
@@ -182,23 +177,6 @@ val batch_disposition_of_cycle_outcome :
     until its continuation receipt is recorded. Every failed, cancelled,
     input-required, or skipped outcome leaves the whole batch pending.
     Provider/runtime failure is not authority to discard input. *)
-
-type connector_attention_settlement =
-  | Settle_resolved
-  | Settle_ignored
-  | Settle_pending_in_queue
-
-val connector_attention_settlement_of_disposition :
-  batch_disposition -> connector_attention_settlement
-(** The terminal external-attention event a disposition owes the rows behind its
-    Connector_attention stimuli. The queue entry and the attention row are two
-    separate writes, and the wake is edge-triggered
-    (RFC-connector-ambient-attention-wake): once a disposition terminalizes the
-    entry, only a *new* ambient message in that conversation ever arms another
-    stimulus. So every disposition that terminalizes must name a terminal event
-    here — [Settle_pending_in_queue] is correct only while the entry stays
-    queued for a later turn to settle. Pure, and split from the append so the
-    mapping is checkable without running a turn. *)
 
 (** Pure: post-turn status event derived from the registry
     turn-failure counter. [turn_fail_count > 0] maps to [Turn_failed];

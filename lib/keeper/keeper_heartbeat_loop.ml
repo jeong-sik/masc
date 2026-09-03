@@ -190,26 +190,6 @@ let failure_route_rate_limited_backoff_hint
 
 exception Event_queue_cycle_failed of string
 
-let connector_attention_event_ids_of_stimuli stimuli =
-  List.filter_map
-    (fun (stimulus : Keeper_event_queue.stimulus) ->
-      match stimulus.payload with
-      | Keeper_event_queue.Connector_attention { event_id } -> Some event_id
-      | Keeper_event_queue.Board_signal _
-      | Keeper_event_queue.Board_attention _
-      | Keeper_event_queue.Fusion_completed _
-      | Keeper_event_queue.Schedule_due _
-      | Keeper_event_queue.Bootstrap
-      | Keeper_event_queue.Hitl_resolved _
-      | Keeper_event_queue.Ask_answered _
-      | Keeper_event_queue.Completion_authority_rejected _
-      | Keeper_event_queue.Task_cancelled _
-      | Keeper_event_queue.Workspace_message _
-      | Keeper_event_queue.Delegate_completed _
-      | Keeper_event_queue.Composition_completed _ ->
-        None)
-    stimuli
-;;
 
 (* Which stimuli own a turn-entry reaction. Both halves of the turn read this
    one predicate: a finish row for a stimulus that never wrote a start row would
@@ -266,51 +246,7 @@ let record_replay_owned_turn_started_reactions ~ctx ~keeper_name stimuli =
     stimuli
 ;;
 
-let mark_connector_attention_ignored_after_turn ~base_path ~keeper_name event_ids =
-  match event_ids with
-  | [] -> ()
-  | _ :: _ ->
-    (match
-       Keeper_external_attention.mark_ignored
-         ~base_path
-         ~keeper_name
-         ~event_ids
-         ~reason:"connector_attention_turn_completed_without_direct_reply"
-         ()
-     with
-     | Ok () -> ()
-     | Error err ->
-       Log.Keeper.warn
-         "connector attention mark_ignored after turn failed keeper=%s events=[%s]: %s"
-         keeper_name
-         (String.concat "," event_ids)
-         err)
-;;
 
-let mark_connector_attention_resolved_after_delivery ~base_path ~keeper_name event_ids =
-  match event_ids with
-  | [] -> ()
-  | _ :: _ ->
-    (match
-       Keeper_external_attention.mark_resolved
-         ~base_path
-         ~keeper_name
-         ~event_ids
-         ~reason:"connector_attention_reply_delivered"
-         ()
-     with
-     | Ok () -> ()
-     | Error err ->
-       Log.Keeper.warn
-         "connector attention mark_resolved after delivery failed keeper=%s events=[%s]: %s"
-         keeper_name
-         (String.concat "," event_ids)
-         err)
-;;
-
-type connector_attention_outcome =
-  | Attention_resolved
-  | Attention_ignored
 
 (* T6 audit: record a swallowed cycle exception as a turn failure.
 
@@ -373,8 +309,7 @@ let handle_cycle_exception ~base_path ~(meta : keeper_meta) exn =
    arbitrary batch of unrelated Board, Schedule, Task, or
    completion-authority facts. *)
 type batch_disposition =
-  | Batch_ack_completed of
-      { connector_attention_outcome : connector_attention_outcome }
+  | Batch_ack_completed
   | Batch_ack_attention_only
   | Batch_no_action
 
@@ -387,16 +322,13 @@ let batch_disposition_of_cycle_outcome
     (match completion.continuation_route with
      | Keeper_unified_turn.Continuation_route_addressed ->
        Batch_ack_completed
-         { connector_attention_outcome = Attention_resolved }
      | Keeper_unified_turn.Continuation_memory_write_completed ->
        (* The receipt proves a completed non-surface terminal effect.  The
           external-attention ledger's Ignored reason is narrowly "turn
           completed without direct reply"; it does not claim model intent. *)
        Batch_ack_completed
-         { connector_attention_outcome = Attention_ignored }
      | Keeper_unified_turn.Continuation_memory_retract_completed ->
        Batch_ack_completed
-         { connector_attention_outcome = Attention_ignored }
      | Keeper_unified_turn.Continuation_route_mismatch
      | Keeper_unified_turn.Continuation_no_terminal_effect_receipt
      | Keeper_unified_turn.Continuation_route_not_applicable ->
@@ -451,23 +383,8 @@ let batch_disposition_of_cycle_outcome
     Batch_no_action
 ;;
 
-type connector_attention_settlement =
-  | Settle_resolved
-  | Settle_ignored
-  | Settle_pending_in_queue
-
-let connector_attention_settlement_of_disposition = function
-  | Batch_ack_completed { connector_attention_outcome = Attention_resolved } ->
-    Settle_resolved
-  | Batch_ack_completed { connector_attention_outcome = Attention_ignored } ->
-    Settle_ignored
-  (* The entry stays pending, so the turn that finally drains it owns the
-     terminal event. Settling here would retire a row that is still live. *)
-  | Batch_ack_attention_only | Batch_no_action -> Settle_pending_in_queue
-;;
-
 let batch_disposition_records_continuation = function
-  | Batch_ack_completed _ | Batch_ack_attention_only -> true
+  | Batch_ack_completed | Batch_ack_attention_only -> true
   | Batch_no_action -> false
 ;;
 
@@ -1026,24 +943,7 @@ let run_keepalive_unified_turn
       (match !consumed_selections with
        | [] -> ()
        | (_ :: _) as selections ->
-           let settle_connector_attention settlement =
-             let event_ids =
-               connector_attention_event_ids_of_stimuli !consumed_stimuli
-             in
-             match settlement with
-             | Settle_resolved ->
-               mark_connector_attention_resolved_after_delivery
-                 ~base_path:ctx.config.base_path
-                 ~keeper_name:meta_after_triage.name
-                 event_ids
-             | Settle_ignored ->
-               mark_connector_attention_ignored_after_turn
-                 ~base_path:ctx.config.base_path
-                 ~keeper_name:meta_after_triage.name
-                 event_ids
-             | Settle_pending_in_queue -> ()
-           in
-           let remove_completed_selections ~should_ack ~settlement =
+           let remove_completed_selections ~should_ack =
              let should_ack selection =
                should_ack selection
                &&
@@ -1063,25 +963,17 @@ let run_keepalive_unified_turn
                  true
                  selections_to_ack
              in
-             stimuli_acked := all_acked && List.is_empty retained_selections;
-             (* A failed queue ack leaves the entry live, so the row it carries
-                is still someone's to settle. *)
-             if all_acked && List.is_empty retained_selections
-             then settle_connector_attention settlement
-           in
-           let settlement =
-             connector_attention_settlement_of_disposition disposition
+             stimuli_acked := all_acked && List.is_empty retained_selections
            in
            match disposition with
-           | Batch_ack_completed _ ->
-             remove_completed_selections ~should_ack:(fun _ -> true) ~settlement
+           | Batch_ack_completed ->
+             remove_completed_selections ~should_ack:(fun _ -> true)
            | Batch_ack_attention_only ->
              remove_completed_selections
                ~should_ack:(fun selection ->
                  match selection.Keeper_event_queue_state.source.payload with
                  | Keeper_event_queue.Connector_attention _ -> false
                  | _ -> true)
-               ~settlement
            | Batch_no_action -> ());
       { meta = meta_after_cycle
       ; cycle_status =

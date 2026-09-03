@@ -2060,6 +2060,7 @@
 
 (include stanzas/test_channel_gate_discord_state_in_process.inc)
 (include stanzas/test_discord_directory_failure.inc)
+(include stanzas/test_bootstrap_retention_warning.inc)
 
 (include stanzas/test_gate_surface.inc)
 

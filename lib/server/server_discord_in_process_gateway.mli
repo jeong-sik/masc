@@ -96,3 +96,16 @@ val start :
 (** Fork the gateway fiber. Returns immediately. Warnings and the
     eventual gateway crash (if any) are emitted via [Log.Server].
     Cancellation propagates through [~sw]. *)
+
+type directory_rest_failure =
+  | Directory_authentication_failed
+  | Directory_permission_denied
+  | Directory_channel_gone
+  | Directory_operation_failed
+
+val classify_directory_rest_failure :
+  Discord_rest_client.error -> directory_rest_failure
+(** Exposed for tests. [Directory_channel_gone] is the permanent verdict:
+    Discord answers 10003 (Unknown Channel) for a deleted channel for as
+    long as it is gone, so the refresh loop remembers the channel per
+    process and stops re-asking every pass; a restart re-checks. *)

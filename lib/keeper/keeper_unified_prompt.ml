@@ -92,11 +92,6 @@ let format_own_recent_actions_turn (turn : Keeper_own_recent_actions.turn) : str
 ;;
 
 
-(** Format active goals into a prompt section. *)
-let format_goals (goal_ids : string list) : string =
-  String.concat "\n"
-    (List.map (fun gid -> Printf.sprintf "- %s" gid) goal_ids)
-
 (* What the prompt knows about one active goal. [phase] is [None] only when the
    id does not resolve in the store (a dangling assignment — kept visible, per
    [active_goal_summaries]). RFC-0387 stage 2 carries the phase so a [Verifying]
@@ -108,8 +103,9 @@ type goal_summary =
   ; summary_phase : Goal_phase.t option
   }
 
-(** Format active goals with their titles (RFC-0315). Falls back to
-    [format_goals] at the call site when the caller did not resolve titles.
+(** Format active goals with their titles (RFC-0315). The only rendering of
+    the Active Goals layer: a caller that resolves no summaries renders no
+    layer, rather than falling back to a list this layer does not scope.
     A [Verifying] goal is annotated: completion is requested and the proof is
     being judged out-of-band, so the keeper keeps working the linked tasks
     instead of re-requesting completion. *)
@@ -1326,9 +1322,14 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
       let count, body =
         match active_goal_summaries with
         | Some summaries -> List.length summaries, format_goal_summaries summaries
-        | None ->
-          ( List.length observation.active_goals
-          , format_goals observation.active_goals )
+        (* No goals, not every goal. The caller resolves the goals linked to
+           this turn's task ({!active_goal_summaries_for_task}); a Keeper
+           holding no task has none, and that is the answer. Reading
+           [observation.active_goals] here answered with the workspace's whole
+           open-goal list instead -- the same list #32665 took out of the
+           system prompt, back in the turn context for anyone who omits the
+           argument. *)
+        | None -> 0, ""
       in
       if count = 0
       then None

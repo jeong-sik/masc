@@ -14,14 +14,6 @@
 // a guessed "idle". The order is an observation order only: independent
 // source queues retain their own processing authority, so no row is labelled
 // as the next one to run.
-//
-// Counts are the one place the "raw values stay visible" rule cuts the other
-// way. `waiting_count` and `sources` are both folds over a list the server
-// already capped (`server_keeper_waiting_inventory.ml` takes 64
-// external-attention rows, then measures what survived), so rendering either
-// as a bare integer states a total the server never computed. When the server
-// sets `waiting_count_truncated` the same numbers are lower bounds and must
-// render as such.
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
@@ -64,7 +56,6 @@ const LANE_SOURCE_LABELS: Record<DashboardKeeperWaitingSource, string> = {
   chat_operation_queued: '채팅 대기',
   chat_operation_running: '채팅 처리 중',
   hitl_pending: '승인 대기',
-  external_attention: '외부 알림',
   fusion_running: 'Fusion 실행 중',
   schedule_waiting: '예약 실행',
   owner_shutdown: '종료 정리',
@@ -77,7 +68,6 @@ const LANE_SOURCE_GRAPH_COLORS: Record<DashboardKeeperWaitingSource, string> = {
   chat_operation_queued: 'var(--color-accent)',
   chat_operation_running: 'var(--status-warn)',
   hitl_pending: 'var(--status-warn)',
-  external_attention: 'var(--color-accent)',
   fusion_running: 'var(--status-ok)',
   schedule_waiting: 'var(--status-warn)',
   owner_shutdown: 'var(--color-fg-muted)',
@@ -104,7 +94,6 @@ const LANE_SOURCE_STAGE: Record<DashboardKeeperWaitingSource, LaneStage> = {
   chat_operation_queued: 'queue',
   chat_operation_running: 'keeper',
   hitl_pending: 'operator',
-  external_attention: 'external',
   fusion_running: 'keeper',
   schedule_waiting: 'schedule',
   owner_shutdown: 'keeper',
@@ -142,20 +131,6 @@ function LaneGap({ children }: { children: VNode | string }): VNode {
       <span>${children}</span>
     </div>
   `
-}
-
-/** A count the server folded over a possibly-capped row list. `truncated`
- *  carries the server's own `waiting_count_truncated` / `truncated_sources`
- *  verdict, so a capped count never renders as an exact total. */
-export function boundedCount(value: number, truncated: boolean): string {
-  return truncated ? `≥${value}` : `${value}`
-}
-
-/** Sources the server reported as capped, for the attribution line. */
-function truncatedSourceLabels(entry: DashboardKeeperWaitingKeeper): string[] {
-  return Object.entries(entry.truncated_sources ?? {})
-    .filter(([, isTruncated]) => isTruncated)
-    .map(([source]) => laneSourceLabel(source))
 }
 
 function rowSince(row: DashboardKeeperWaitingRow): number | null {
@@ -199,14 +174,13 @@ interface StageItem {
 }
 
 /** Per-stage source counts, each marked with the server's own per-source
- *  truncation verdict. Sorted by count so the source driving the stage reads
+ *  Sorted by count so the source driving the stage reads
  *  first. A key outside the closed source vocabulary is kept visible under
  *  `unknown` rather than filed into a stage it was never assigned. */
 function stageBreakdown(entry: DashboardKeeperWaitingKeeper): {
   byStage: Record<LaneStage, StageItem[]>
   unknown: StageItem[]
 } {
-  const truncated = entry.truncated_sources ?? {}
   const byStage: Record<LaneStage, StageItem[]> = {
     external: [],
     schedule: [],
@@ -222,7 +196,7 @@ function stageBreakdown(entry: DashboardKeeperWaitingKeeper): {
       const item: StageItem = {
         source: key,
         label: laneSourceLabel(key),
-        count: boundedCount(count, truncated[key] === true),
+        count: String(count),
         color: source === null ? null : LANE_SOURCE_GRAPH_COLORS[source],
       }
       if (source === null) unknown.push(item)
@@ -396,15 +370,12 @@ export function KeeperLaneStrip({
   const ages = rows.map(row => ageMinutes(row, nowMs))
   const axisMax = Math.max(DAY_MINUTES, ...ages.filter((age): age is number => age != null))
   const waitingCount = entry?.waiting_count ?? 0
-  const countTruncated = entry?.waiting_count_truncated === true
-  const truncatedSources = entry ? truncatedSourceLabels(entry) : []
-  const rowLimit = inventory?.external_attention_row_limit
   return html`
     <div class="ctx-sec" data-testid="keeper-lane-section">
       <h4 style=${{ display: 'flex', alignItems: 'center', gap: '7px' }}>
         작업 대기열
         ${waitingCount > 0
-          ? html`<${CountBadge}>${boundedCount(waitingCount, countTruncated)}<//>`
+          ? html`<${CountBadge}>${waitingCount}<//>`
           : null}
         <button
           type="button"
@@ -446,11 +417,6 @@ export function KeeperLaneStrip({
                       </div>
                     </div>
                   `
-                : null}
-              ${countTruncated
-                ? html`<div class="text-2xs text-[var(--color-fg-muted)]" data-testid="keeper-lane-truncation">
-                    서버 상한${rowLimit != null ? ` ${rowLimit}` : ''}에서 잘림${truncatedSources.length > 0 ? ` — ${truncatedSources.join(', ')}` : ''}. 실제 대기 건수는 더 많습니다.
-                  </div>`
                 : null}
             </div>
           `

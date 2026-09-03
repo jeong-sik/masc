@@ -261,7 +261,6 @@ const LANE_SOURCE_DEFS: Record<string, LaneSourceDef> = {
   chat_operation_queued: { label: '채팅 대기', tone: 'volt', stage: 'queue' },
   chat_operation_running: { label: '채팅 처리 중', tone: 'warn', stage: 'keeper' },
   hitl_pending: { label: '승인 대기', tone: 'warn', stage: 'operator' },
-  external_attention: { label: '외부 알림', tone: 'volt', stage: 'external' },
   fusion_running: { label: 'Fusion 실행 중', tone: 'ok', stage: 'keeper' },
   schedule_waiting: { label: '예약 실행', tone: 'warn', stage: 'schedule' },
   owner_shutdown: { label: '종료 정리', tone: 'dim', stage: 'keeper' },
@@ -289,11 +288,6 @@ export function laneStatePresent(state: string): { label: string; tone: 'ok' | '
   return LANE_STATE_PRESENT[state] ?? { label: enumLabel(state), tone: 'dim' }
 }
 
-/** A count the server folded over a possibly-capped row list renders as a
- *  lower bound when the server itself says it truncated (design bounded()). */
-export function boundedCount(value: number, truncated: boolean): string {
-  return truncated ? `≥${value}` : `${value}`
-}
 
 export interface LaneStageItem {
   readonly source: string
@@ -302,14 +296,13 @@ export interface LaneStageItem {
   readonly tone: LaneSourceTone
 }
 
-/** Per-stage source counts for the pipeline strip, preserving the server's
- *  own per-source truncation verdicts. Unknown sources stay visible in
- *  `unknown` rather than being filed into a stage they were never assigned. */
+/** Per-stage source counts for the pipeline strip. Unknown sources stay
+ *  visible in `unknown` rather than being filed into a stage they were never
+ *  assigned. */
 export function laneStageBreakdown(entry: DashboardKeeperWaitingKeeper): {
   byStage: Record<LaneStage, LaneStageItem[]>
   unknown: LaneStageItem[]
 } {
-  const truncated = entry.truncated_sources ?? {}
   const byStage: Record<LaneStage, LaneStageItem[]> = {
     external: [], schedule: [], queue: [], operator: [], keeper: [],
   }
@@ -321,7 +314,7 @@ export function laneStageBreakdown(entry: DashboardKeeperWaitingKeeper): {
       const item: LaneStageItem = {
         source,
         label: laneSourceLabel(source),
-        count: boundedCount(count, truncated[source] === true),
+        count: String(count),
         tone: laneSourceTone(source),
       }
       if (def) byStage[def.stage].push(item)

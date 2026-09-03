@@ -29,6 +29,7 @@ let entry style body : Layout.entry =
   ; request_label = ""
   ; body
   ; markdown_source = Layout.Markdown_streaming
+  ; turn_rail = Layout.Rail_none
   }
 ;;
 

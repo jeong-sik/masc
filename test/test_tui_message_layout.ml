@@ -16,6 +16,7 @@ let entry ?(timestamp = "12:34:56") ?timeline_bucket
   ; request_label
   ; body
   ; markdown_source
+  ; turn_rail = Layout.Rail_none
   }
 
 let test_keeps_latest_reply () =
@@ -612,6 +613,7 @@ let transcript count =
             index;
         role_label_mark_cells = 0;
         markdown_source = Layout.Markdown_streaming;
+        turn_rail = Layout.Rail_none;
       })
 
 let test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity () =
@@ -1463,11 +1465,17 @@ let first_gutter ~origin entries =
   | row :: _ -> row.Layout.gutter
   | [] -> failwith "no rows"
 
+(* Every folded margin opens with the turn rail's column, blank on a row with
+   no turn to hang from. It is charged to every row whether or not a rail is
+   drawn: a column that came and went with the rail would re-wrap the bodies
+   under it. These pin the bytes after it. *)
+let no_rail = String.make Layout.turn_rail_cells ' '
+
 let test_inline_margin_carries_clock_and_speaker () =
   let entries = [ entry Layout.User "you" "tui-..aaaaaaaa" "hello" ] in
-  check string "clock cut to the minute, speaker kept" "12:34 you"
+  check string "clock cut to the minute, speaker kept" (no_rail ^ "12:34 you")
     (first_gutter ~origin:Layout.Origin_inline entries);
-  check string "bare keeps the speaker only" "you"
+  check string "bare keeps the speaker only" (no_rail ^ "you")
     (first_gutter ~origin:Layout.Origin_bare entries)
 
 let inline_rows ~terminal_cols source =
@@ -1507,13 +1515,15 @@ let test_a_narrow_inline_margin_keeps_the_source () =
       check bool
         (Printf.sprintf "%d terminal cells keep sources distinct" terminal_cols)
         true (not (String.equal one.Layout.gutter two.Layout.gutter));
+      (* A shortened source keeps no mark, so the label boundary is the rail's
+         own column and nothing more. *)
       check int
         (Printf.sprintf "%d terminal cells omit the truncated mark" terminal_cols)
-        0 one.Layout.gutter_label_at;
+        one.Layout.gutter_rail_cells one.Layout.gutter_label_at;
       check int
         (Printf.sprintf "%d terminal cells omit the other truncated mark"
            terminal_cols)
-        0 two.Layout.gutter_label_at;
+        two.Layout.gutter_rail_cells two.Layout.gutter_label_at;
       check bool
         (Printf.sprintf "%d terminal cells remove the mark bytes" terminal_cols)
         false
@@ -1552,14 +1562,15 @@ let test_normal_inline_margin_bytes_stay_stable () =
   with
   | [ first; second ] ->
       check string "normal first gutter bytes"
-        ("12:34 " ^ Layout.speaker_mark Layout.Keeper ^ " …per.one")
+        (no_rail ^ "12:34 " ^ Layout.speaker_mark Layout.Keeper ^ " …per.one")
         first.Layout.gutter;
       check string "normal continuation bytes"
-        ("12:35 " ^ Layout.speaker_mark Layout.Keeper ^ String.make 9 ' ')
+        (no_rail ^ "12:35 " ^ Layout.speaker_mark Layout.Keeper
+        ^ String.make 9 ' ')
         second.Layout.gutter;
-      check int "normal gutter keeps clock plus mark boundary" 8
-        first.Layout.gutter_label_at;
-      check int "continuation has no source boundary" 0
+      check int "normal gutter keeps clock plus mark boundary"
+        (Layout.turn_rail_cells + 8) first.Layout.gutter_label_at;
+      check int "continuation has no source boundary" Layout.turn_rail_cells
         second.Layout.gutter_label_at;
       check int "continuation keeps the first gutter width"
         (Layout.display_width first.Layout.gutter)
@@ -1571,7 +1582,7 @@ let test_normal_inline_margin_bytes_stay_stable () =
    one that would otherwise lose bytes silently. *)
 let test_a_timestamp_of_another_shape_survives () =
   let entries = [ entry ~timestamp:"just now" Layout.User "you" "r" "hello" ] in
-  check string "unshortened" "just now you"
+  check string "unshortened" (no_rail ^ "just now you")
     (first_gutter ~origin:Layout.Origin_inline entries)
 
 let test_wrapped_rows_indent_under_the_first () =
@@ -1766,15 +1777,22 @@ let test_a_continuation_survives_the_renderer_cut () =
   | [ _; second ] ->
       let gutter = second.Layout.gutter in
       let at = second.Layout.gutter_label_at in
-      (* Asserted rather than assumed: this row is the whole reason a zero cut
-         happens here, and a continuation that started reporting a boundary
-         would leave the checks below passing on a row that was never it. *)
-      check int "a continuation asks to be cut at zero" 0 at;
-      check string "the renderer redraws the margin it was given" gutter
-        (Layout.take_cells gutter at ^ Layout.drop_cells gutter at);
+      (* Asserted rather than assumed: this row is the whole reason the cut
+         lands where it does, and a continuation that started reporting a
+         speaker boundary would leave the checks below passing on a row that
+         was never it. Past the rail there is nothing left to separate: a
+         continuation draws no name. *)
+      check int "a continuation is cut at the rail and no further"
+        second.Layout.gutter_rail_cells at;
+      let rail = Layout.take_cells gutter second.Layout.gutter_rail_cells in
+      let rest = Layout.drop_cells gutter second.Layout.gutter_rail_cells in
+      let redrawn =
+        rail ^ Layout.take_cells rest (at - second.Layout.gutter_rail_cells)
+        ^ Layout.drop_cells rest (at - second.Layout.gutter_rail_cells)
+      in
+      check string "the renderer redraws the margin it was given" gutter redrawn;
       check string "the clock reads once" "22:32"
-        (Layout.take_cells gutter at ^ Layout.drop_cells gutter at
-        |> fun redrawn -> Layout.take_cells redrawn 5)
+        (Layout.take_cells (Layout.drop_cells redrawn Layout.turn_rail_cells) 5)
   | _ -> failwith "expected two rows"
 ;;
 

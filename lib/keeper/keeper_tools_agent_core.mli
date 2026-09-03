@@ -89,6 +89,12 @@ type tool_bundle =
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> terminal_effect_state
   ; gate_replay_delivery : gate_replay_delivery option
+  ; turn_sandbox_factory : Keeper_sandbox_factory.t option
+        (** The factory the bundle's tools resolve through, handed back so
+            turn setup can reach the same endpoint the turn's own calls will
+            — paste delivery is the consumer: a microvm guest may only be
+            started by the turn that owns its lifecycle
+            ([microvm_remote_requires_turn_sandbox_factory]). *)
   }
 
 (** Per-keeper tool usage view from [Keeper_registry]. *)

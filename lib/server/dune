@@ -170,7 +170,6 @@
   masc.config
   masc.ide
   masc.dashboard_utils
-  masc.masc_dashboard_api_types
   masc.tool_schemas
   masc.masc_tool_blob_store
   masc.activity_graph

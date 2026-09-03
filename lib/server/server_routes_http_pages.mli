@@ -1,6 +1,5 @@
 (** Server_routes_http_pages — static HTML / asset
-    handlers + GraphQL playground / iql + Bonsai
-    dashboard index + JSON keeper-summary endpoint.
+    handlers + GraphQL playground / iql.
 
     Reached three different ways depending on the
     consumer:
@@ -11,20 +10,13 @@
       server_runtime_bootstrap, bin/main_eio).
     - [open Server_routes_http_pages] in
       {!Server_routes_http_routes_frontend} — reaches
-      the 9 handlers below unqualified.
+      the 6 handlers below unqualified.
     - [module Pages = Server_routes_http_pages] aliases
-      in 4 sister routing modules + the test — only
-      [test/test_keeper_registry] uses
-      [Pages.keepers_summary_from_registry] in practice;
+      in 4 sister routing modules + the test —
       production sister aliases are unused leftovers
       (cycle 223 unused-alias pattern).
 
-    External surface (23 entries):
-    - {b Bonsai dashboard handlers}
-      ({!serve_bonsai_index},
-      {!serve_bonsai_static},
-      {!bonsai_api_keepers_summary},
-      {!keepers_summary_from_registry}).
+    External surface (19 entries):
     - {b Legacy dashboard handlers}
       ({!serve_dashboard_index},
       {!serve_dashboard_static}).
@@ -48,12 +40,10 @@
     - {b Misc} ({!serve_favicon}).
 
     Internal helpers stay private at this boundary
-    (~17 internal lets — [graphiql_asset_path] /
-    [graphiql_asset_root], [bonsai_asset_root] /
-    [bonsai_index_html], [assets_root] /
-    [playground_asset_root], [bonsai_keeper_status_of_phase],
-    [handle_get_graphql], [graphql_headers]
-    helper). *)
+    (~9 internal lets — [graphiql_asset_path] /
+    [graphiql_asset_root], [assets_root] /
+    [playground_asset_root], [handle_get_graphql],
+    [graphql_headers] helper). *)
 
 (** {1 GraphQL Playground / iql assets} *)
 
@@ -123,23 +113,6 @@ val dashboard_index_cache_control : string
 
 val favicon_svg : string
 (** Inline SVG bytes for the [/favicon.svg] response. *)
-
-(** {1 Bonsai dashboard handlers} *)
-
-val serve_bonsai_index :
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Serves the Bonsai dashboard's index HTML (inline
-    boot script + asset hashes). *)
-
-val serve_bonsai_static :
-  string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Serves a Bonsai dashboard static asset by name. *)
-
-val bonsai_api_keepers_summary :
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Bonsai dashboard's JSON [GET /api/bonsai/keepers]
-    endpoint.  Consumes the registry through
-    {!keepers_summary_from_registry}. *)
 
 (** {1 Legacy dashboard handlers} *)
 

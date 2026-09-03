@@ -115,7 +115,6 @@ check_forbidden_active "V4b-retired-state-protocol-zero-pin" \
   "lib/" \
   "bin/" \
   "dashboard/src/" \
-  "dashboard_bonsai/src/" \
   "sidecars/" \
   "viewer/src/" \
   "config/prompts/" \
@@ -136,7 +135,6 @@ check_forbidden_active "V7b-retired-authorization-hierarchy" \
   "test/" \
   "config/" \
   "dashboard/src/" \
-  "dashboard_bonsai/src/" \
   "sidecars/" \
   "viewer/src/"
 

@@ -610,6 +610,164 @@ let test_keeper_name_width_never_shrinks_as_the_terminal_grows () =
     previous := name
   done
 
+(* Memory fleet columns.
+
+   The header row and the data row are built from one description of the
+   columns. These check that the pair actually lands on the same offsets, and
+   that no reading can move a cell -- the two things the screen lost while the
+   header and the row each carried their own widths in a format string. *)
+
+(* One cell per column, so a mark's position is the cell's position. *)
+let memory_probe =
+  { Schedule.mrow_state = "S"
+  ; mrow_name = "N"
+  ; mrow_revision = "R"
+  ; mrow_facts = "F"
+  ; mrow_size = "Z"
+  ; mrow_source = "U"
+  ; mrow_delta = "D"
+  }
+
+(* Every reading past its budget, including the two that used to push the row:
+   a keeper name over eighteen cells and an ordinary reading over fourteen. *)
+let memory_overflowing =
+  { Schedule.mrow_state = "read-error-and-then-some"
+  ; mrow_name = "kidsnote-pr-jira-checker-and-a-longer-tail"
+  ; mrow_revision = "1234567890"
+  ; mrow_facts = "9876543"
+  ; mrow_size = "1234567.8 MB"
+  ; mrow_source = "r32 i8 1.5 KB with more than the cell holds"
+  ; mrow_delta = "+1000 -1000"
+  }
+
+let index_of haystack needle =
+  let haystack_length = String.length haystack in
+  let needle_length = String.length needle in
+  let rec walk index =
+    if index + needle_length > haystack_length then None
+    else if String.sub haystack index needle_length = needle then Some index
+    else walk (index + 1)
+  in
+  walk 0
+
+let offset_of needle text =
+  match index_of text needle with
+  | Some index -> index
+  | None -> failf "%S is not in %S" needle text
+
+(* Offsets are asked in display cells, not bytes: the delta column is headed
+   with a two-byte glyph that occupies one cell. *)
+let cells_before text byte_offset =
+  Masc_tui_message_layout.display_width (String.sub text 0 byte_offset)
+
+let check_left_cell label mark ~header ~row ~inner_width =
+  check int
+    (Printf.sprintf "inner %d: %s starts where its cell starts" inner_width label)
+    (cells_before header (offset_of label header))
+    (cells_before row (offset_of mark row))
+
+let check_right_cell label mark ~header ~row ~inner_width =
+  let ends text needle =
+    cells_before text (offset_of needle text)
+    + Masc_tui_message_layout.display_width needle
+  in
+  check int
+    (Printf.sprintf "inner %d: %s ends where its cell ends" inner_width label)
+    (ends header label) (ends row mark)
+
+let memory_minimum_row_width =
+  Schedule.memory_columns_used_width
+    (Schedule.allocate_memory_columns ~inner_width:0)
+
+(* The row must never be wider than the box that holds it. *)
+let test_memory_columns_never_exceed_their_width () =
+  for inner_width = 0 to 400 do
+    let columns = Schedule.allocate_memory_columns ~inner_width in
+    let used = Schedule.memory_columns_used_width columns in
+    check bool
+      (Printf.sprintf "inner %d fits (used %d)" inner_width used)
+      true
+      (used <= max inner_width memory_minimum_row_width)
+  done
+
+(* The defect this pair replaces: a header naming a column the row drew
+   somewhere else. Every visible column is checked at every width. *)
+let test_memory_header_and_row_share_their_offsets () =
+  for inner_width = memory_minimum_row_width to 240 do
+    let columns = Schedule.allocate_memory_columns ~inner_width in
+    let header = Schedule.memory_header_row columns in
+    let row = Schedule.memory_row columns memory_probe in
+    check_left_cell "STATE" "S" ~header ~row ~inner_width;
+    check_left_cell "KEEPER" "N" ~header ~row ~inner_width;
+    if columns.Schedule.mcol_show_revision then
+      check_right_cell "REV" "R" ~header ~row ~inner_width;
+    check_right_cell "FACTS" "F" ~header ~row ~inner_width;
+    check_right_cell "SIZE" "Z" ~header ~row ~inner_width;
+    if columns.Schedule.mcol_show_source then
+      check_left_cell "SOURCE" "U" ~header ~row ~inner_width;
+    check_right_cell "\xce\x94" "D" ~header ~row ~inner_width
+  done
+
+(* A reading wider than its cell is folded, never allowed to push the cells
+   after it. Both rows are laid out on the same allocation, so both are exactly
+   as wide as the header. *)
+let test_memory_row_width_does_not_depend_on_its_readings () =
+  for inner_width = memory_minimum_row_width to 240 do
+    let columns = Schedule.allocate_memory_columns ~inner_width in
+    let width text = Masc_tui_message_layout.display_width text in
+    let header = width (Schedule.memory_header_row columns) in
+    check int
+      (Printf.sprintf "inner %d: a short row matches the header" inner_width)
+      header
+      (width (Schedule.memory_row columns memory_probe));
+    check int
+      (Printf.sprintf "inner %d: an overflowing row matches the header" inner_width)
+      header
+      (width (Schedule.memory_row columns memory_overflowing))
+  done
+
+(* An empty reading still holds its cell, or the columns after it move on the
+   rows that read normally -- which is every row on a healthy fleet. *)
+let test_memory_empty_readings_still_hold_their_cells () =
+  let columns = Schedule.allocate_memory_columns ~inner_width:200 in
+  let blank =
+    { Schedule.mrow_state = ""
+    ; mrow_name = ""
+    ; mrow_revision = ""
+    ; mrow_facts = ""
+    ; mrow_size = ""
+    ; mrow_source = ""
+    ; mrow_delta = ""
+    }
+  in
+  check int "a blank row is as wide as the header"
+    (Masc_tui_message_layout.display_width (Schedule.memory_header_row columns))
+    (Masc_tui_message_layout.display_width (Schedule.memory_row columns blank))
+
+(* Columns drop from the right, and the keeper's identity never drops. *)
+let test_memory_columns_drop_from_the_right () =
+  let narrow = Schedule.allocate_memory_columns ~inner_width:50 in
+  check bool "no source when narrow" false narrow.Schedule.mcol_show_source;
+  check bool "no revision when narrow" false narrow.Schedule.mcol_show_revision;
+  check bool "the name still has cells" true (narrow.Schedule.mcol_name > 0);
+  let medium = Schedule.allocate_memory_columns ~inner_width:70 in
+  check bool "revision returns first" true medium.Schedule.mcol_show_revision;
+  check bool "source is still out" false medium.Schedule.mcol_show_source;
+  let wide = Schedule.allocate_memory_columns ~inner_width:120 in
+  check bool "source returns when wide" true wide.Schedule.mcol_show_source
+
+(* A width that added a column while narrowing the name would make the same
+   keeper unreadable on the larger terminal. *)
+let test_memory_name_width_never_shrinks_as_the_terminal_grows () =
+  let previous = ref 0 in
+  for inner_width = memory_minimum_row_width to 400 do
+    let name = (Schedule.allocate_memory_columns ~inner_width).Schedule.mcol_name in
+    check bool
+      (Printf.sprintf "inner %d keeps the name at least as wide" inner_width)
+      true (name >= !previous);
+    previous := name
+  done
+
 (* The strip named five stops while the Planning walk had three: Schedules and
    Fusion had become tabs of the selected Keeper and nothing took their names
    off this row. A reader pressing 4 or 5 arrived nowhere. *)
@@ -743,6 +901,18 @@ let () =
             test_keeper_name_width_never_shrinks_as_the_terminal_grows
         ; test_case "keeper columns grow identifiers first" `Quick
             test_keeper_columns_grow_identifiers_first
+        ; test_case "memory columns never exceed their width" `Quick
+            test_memory_columns_never_exceed_their_width
+        ; test_case "memory header and row share their offsets" `Quick
+            test_memory_header_and_row_share_their_offsets
+        ; test_case "memory row width ignores its readings" `Quick
+            test_memory_row_width_does_not_depend_on_its_readings
+        ; test_case "memory empty readings still hold their cells" `Quick
+            test_memory_empty_readings_still_hold_their_cells
+        ; test_case "memory columns drop from the right" `Quick
+            test_memory_columns_drop_from_the_right
+        ; test_case "memory name width never shrinks" `Quick
+            test_memory_name_width_never_shrinks_as_the_terminal_grows
         ; test_case "planning strip names only its own stops" `Quick
             test_planning_strip_names_only_its_own_stops
         ; test_case "planning window rides the active stop" `Quick

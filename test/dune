@@ -3899,7 +3899,10 @@
 (test
  (name test_tui_render_schedule)
  (modules test_tui_render_schedule)
- (libraries alcotest masc_tui_render_schedule))
+ ; masc_tui_message_layout so a column offset is asked in display cells rather
+ ; than bytes: the delta column is headed with a two-byte glyph one cell wide,
+ ; and a byte offset would report the header and its own cell as misaligned.
+ (libraries alcotest masc_tui_message_layout masc_tui_render_schedule))
 
 (test
  (name test_tui_terminal_write_repair)

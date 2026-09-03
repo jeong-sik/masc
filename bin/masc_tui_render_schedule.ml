@@ -388,6 +388,150 @@ let allocate_keeper_columns ~inner_width =
     ; kcol_task = base.kcol_task + slack
     }
 
+module Message_layout = Masc_tui_message_layout
+
+(* Memory fleet columns.
+
+   The Keepers table's rule, applied to a screen that had none: every cell
+   declares a width, slack goes to the name, and the columns answering a
+   second question drop first.
+
+   What differs is the values. A keeper's memory reading is three numbers in
+   three units -- which revision, how many facts, how many bytes -- and the
+   screen printed all three into one cell joined by slashes. No header can
+   name a cell like that, and a reading wider than the cell pushed every cell
+   after it: "r6476/139/94.4 KB" is seventeen cells in a fourteen-cell budget,
+   so most rows sat three cells right of their own header. Each number gets a
+   cell here.
+
+   [memory_cells] is the one place the order, the widths and the alignment are
+   written down. The header row and the data row are both built from it, so
+   the two cannot drift -- a column added to one is added to the other, at the
+   same width, in the same place. *)
+
+let memory_state_width = 10
+let memory_minimum_name_width = 16
+let memory_maximum_name_width = 26
+let memory_revision_width = 6
+let memory_facts_width = 5
+let memory_size_width = 9
+let memory_source_width = 20
+let memory_delta_width = 6
+let memory_cell_gap = 2
+
+(* The source-bound reading answers "is anything pinned to a file", and the
+   revision answers "how far has the snapshot moved". Neither is the question
+   the screen exists for -- which keeper remembers how much -- so they are the
+   two that leave, in that order. *)
+let memory_source_minimum_inner_width = 84
+let memory_revision_minimum_inner_width = 62
+
+type memory_columns = {
+  mcol_show_revision : bool;
+  mcol_show_source : bool;
+  mcol_name : int;
+}
+
+type memory_row_values = {
+  mrow_state : string;
+  mrow_name : string;
+  mrow_revision : string;
+  mrow_facts : string;
+  mrow_size : string;
+  mrow_source : string;
+  mrow_delta : string;
+}
+
+type memory_cell_align =
+  | Memory_cell_left
+  | Memory_cell_right
+
+(* The header carries no values, and the row carries no labels; one shape
+   holds both so neither can be built without the other's widths. *)
+let memory_no_values =
+  { mrow_state = ""
+  ; mrow_name = ""
+  ; mrow_revision = ""
+  ; mrow_facts = ""
+  ; mrow_size = ""
+  ; mrow_source = ""
+  ; mrow_delta = ""
+  }
+
+let memory_cells columns values =
+  let revision =
+    if columns.mcol_show_revision then
+      [ (memory_revision_width, Memory_cell_right, "REV", values.mrow_revision) ]
+    else []
+  in
+  let source =
+    if columns.mcol_show_source then
+      [ (memory_source_width, Memory_cell_left, "SOURCE", values.mrow_source) ]
+    else []
+  in
+  [ (memory_state_width, Memory_cell_left, "STATE", values.mrow_state)
+  ; (columns.mcol_name, Memory_cell_left, "KEEPER", values.mrow_name)
+  ]
+  @ revision
+  @ [ (memory_facts_width, Memory_cell_right, "FACTS", values.mrow_facts)
+    ; (memory_size_width, Memory_cell_right, "SIZE", values.mrow_size)
+    ]
+  @ source
+  @ [ (memory_delta_width, Memory_cell_right, "\xce\x94", values.mrow_delta) ]
+
+let memory_columns_used_width columns =
+  let cells = memory_cells columns memory_no_values in
+  List.fold_left (fun total (width, _, _, _) -> total + width) 0 cells
+  + (memory_cell_gap * max 0 (List.length cells - 1))
+
+let allocate_memory_columns ~inner_width =
+  let inner_width = max 0 inner_width in
+  let show_source = inner_width >= memory_source_minimum_inner_width in
+  let show_revision = inner_width >= memory_revision_minimum_inner_width in
+  let base =
+    { mcol_show_revision = show_revision
+    ; mcol_show_source = show_source
+    ; mcol_name = memory_minimum_name_width
+    }
+  in
+  let slack = inner_width - memory_columns_used_width base in
+  if slack <= 0 then base
+  else
+    (* Unlike the roster there is no cell here that grows without bound: every
+       column has a reading whose widest form is known, so surplus width stays
+       margin rather than padding one cell out to the frame. *)
+    let growth =
+      min (memory_maximum_name_width - memory_minimum_name_width) slack
+    in
+    { base with mcol_name = base.mcol_name + growth }
+
+(* Identifiers fold in the middle: two keepers sharing a prefix are told apart
+   by the tail, and a name cut at the head reads as a different keeper. The
+   numbers fold the same way rather than losing a digit off one end, because a
+   truncated number is a wrong number and a folded one is visibly incomplete. *)
+let memory_pad ~align width text =
+  let fitted = Message_layout.fit_middle width text in
+  let gap = max 0 (width - Message_layout.display_width fitted) in
+  match align with
+  | Memory_cell_left -> fitted ^ String.make gap ' '
+  | Memory_cell_right -> String.make gap ' ' ^ fitted
+
+let memory_render_cells cells ~pick =
+  String.concat
+    (String.make memory_cell_gap ' ')
+    (List.map
+       (fun (width, align, header, value) ->
+         memory_pad ~align width (pick (header, value)))
+       cells)
+
+let memory_header_row columns =
+  memory_render_cells
+    (memory_cells columns memory_no_values)
+    ~pick:(fun (header, _) -> header)
+
+let memory_row columns values =
+  memory_render_cells (memory_cells columns values) ~pick:(fun (_, value) -> value)
+
 module Terminal_size_cache = struct
   type refresh =
     | Changed of (int * int)

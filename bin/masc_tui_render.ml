@@ -10212,46 +10212,93 @@ let memory_context_lines (k : Masc.Tui_decode.memory_keeper_health) =
   current_line :: facts_line :: source_line :: librarian_line :: vision_line
   :: (read_error_lines @ alert_lines)
 
-let memory_state_label (k : Masc.Tui_decode.memory_keeper_health) =
+type memory_state =
+  | Memory_ordinary
+  | Memory_warning
+  | Memory_degraded
+  | Memory_no_current
+  | Memory_source_only
+  | Memory_starving
+  | Memory_read_error
+
+let memory_state (k : Masc.Tui_decode.memory_keeper_health) =
   let open Masc.Tui_decode in
   if Option.is_some k.mkh_read_error || Option.is_some k.mkh_source_read_error
-  then "read-error"
+  then Memory_read_error
   else if
     (not k.mkh_snapshot_present)
     && k.mkh_librarian_failures > 0
     && not k.mkh_source_snapshot_present
-  then "STARVING"
+  then Memory_starving
   else if (not k.mkh_snapshot_present) && k.mkh_source_snapshot_present
-  then "source-only"
+  then Memory_source_only
   else if not k.mkh_snapshot_present
-  then "no-current"
+  then Memory_no_current
   else if k.mkh_librarian_failures > 0
-  then "degraded"
+  then Memory_degraded
   else if List.exists (fun alert -> String.equal alert.ma_severity "warn") k.mkh_alerts
-  then "warning"
-  else "ok"
+  then Memory_warning
+  else Memory_ordinary
 
-let memory_row_line (k : Masc.Tui_decode.memory_keeper_health) =
+let memory_state_label = function
+  | Memory_ordinary -> "ok"
+  | Memory_warning -> "warning"
+  | Memory_degraded -> "degraded"
+  | Memory_no_current -> "no-current"
+  | Memory_source_only -> "source-only"
+  | Memory_starving -> "STARVING"
+  | Memory_read_error -> "read-error"
+
+(* The table's variant: a keeper reading normally says nothing in this cell.
+   Thirteen rows spelling "ok" spent a column of the frame without telling an
+   operator anything the absence of a word does not already say, and the one
+   row that deviates is then the only row in the column carrying text. The
+   detail pane below keeps {!memory_state_label}, where the word is identity
+   rather than repetition. *)
+let memory_state_cell = function
+  | Memory_ordinary -> ""
+  | state -> memory_state_label state
+
+(* Which revision, how many facts, how many bytes: three readings in three
+   units. They shared one cell joined by slashes, which no header could name
+   and which pushed the rest of the row right as soon as the joined reading
+   outgrew the cell -- "r6476/139/94.4 KB" is seventeen cells against fourteen.
+   Each gets a cell, and every cell is fitted to the same allocation the header
+   is drawn from. *)
+let memory_row_line columns (k : Masc.Tui_decode.memory_keeper_health) =
   let open Masc.Tui_decode in
-  let ordinary =
-    if k.mkh_snapshot_present
-    then
-      Printf.sprintf "r%d/%d/%s" k.mkh_revision k.mkh_facts
-        (Masc_tui_context_inspector.format_bytes k.mkh_snapshot_bytes)
-    else "-"
-  in
+  let em_dash = "\xe2\x80\x94" in
+  let ordinary_reading value = if k.mkh_snapshot_present then value () else em_dash in
   let source =
-    if Option.is_some k.mkh_source_read_error
-    then "read-error"
-    else if k.mkh_source_snapshot_present
-    then
-      Printf.sprintf "r%d/%d/i%d/%s" k.mkh_source_revision k.mkh_source_facts
+    if Option.is_some k.mkh_source_read_error then "read error"
+    else if k.mkh_source_snapshot_present then
+      Printf.sprintf "r%d i%d %s" k.mkh_source_revision
         k.mkh_source_invalidations
         (Masc_tui_context_inspector.format_bytes k.mkh_source_snapshot_bytes)
-    else "-"
+    else em_dash
   in
-  Printf.sprintf "  %-18s %-14s %-18s %+5d/-%-4d  %s" k.mkh_keeper_id ordinary
-    source k.mkh_added k.mkh_removed (memory_state_label k)
+  (* A keeper that gained and lost facts in the same read shows both; one that
+     did neither shows nothing, because a column of "+0/-0" is the "ok" column
+     again in another hand. *)
+  let delta =
+    match k.mkh_added, k.mkh_removed with
+    | 0, 0 -> ""
+    | added, 0 -> Printf.sprintf "+%d" added
+    | 0, removed -> Printf.sprintf "-%d" removed
+    | added, removed -> Printf.sprintf "+%d -%d" added removed
+  in
+  "  "
+  ^ Render_schedule.memory_row columns
+      { Render_schedule.mrow_state = memory_state_cell (memory_state k)
+      ; mrow_name = k.mkh_keeper_id
+      ; mrow_revision = ordinary_reading (fun () -> string_of_int k.mkh_revision)
+      ; mrow_facts = ordinary_reading (fun () -> string_of_int k.mkh_facts)
+      ; mrow_size =
+          ordinary_reading (fun () ->
+              Masc_tui_context_inspector.format_bytes k.mkh_snapshot_bytes)
+      ; mrow_source = source
+      ; mrow_delta = delta
+      }
 
 (* A starving keeper is an error the server graded; a keeper with a config
    but no snapshot yet is quiet, not bad. A source-bound snapshot changes the
@@ -10308,13 +10355,18 @@ let render_memory (state : state) =
           s.mhs_total_support_invalidations s.mhs_total_source_facts timestamp
           (connection_badge state)
   in
+  (* Two cells of gutter carry the cursor band; the columns divide what is
+     left. Allocated once here rather than per row, so every row and the header
+     above them are laid out on one reading of the frame. *)
+  let columns =
+    Render_schedule.allocate_memory_columns
+      ~inner_width:(max 1 (framed_inner_width cols - 2))
+  in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"memory"
     ~title ~hints:(Masc_tui_keys.footer_hints state.view)
     ~body:(fun ~budget c ->
       c.push_styled ~style:(Theme.recede ())
-        (Printf.sprintf
-           "  %-18s %-14s %-18s %11s  %s"
-           "Keeper" "Ordinary" "Source-bound" "+/-" "State");
+        ("  " ^ Render_schedule.memory_header_row columns);
       c.push_divider ();
       (match state.memory_health_error with
        | None -> ()
@@ -10360,11 +10412,11 @@ let render_memory (state : state) =
                  graded-warn keeper keeps its health color on every other
                  row. *)
               if idx = state.memory_health_cursor then
-                c.push_selected (memory_row_line k)
+                c.push_selected (memory_row_line columns k)
               else
                 match memory_row_style k with
-                | Some style -> c.push_styled ~style (memory_row_line k)
-                | None -> c.push (memory_row_line k)
+                | Some style -> c.push_styled ~style (memory_row_line columns k)
+                | None -> c.push (memory_row_line columns k)
         done;
         if overflowing then
           c.push_styled ~style:(Theme.recede ())

@@ -1363,16 +1363,21 @@ let agent_metrics_output_required =
   ]
 ;;
 
-(* Producer: Tool_agent.handle_get_metrics. The two resolution fields are
-   appended by metrics_json_with_resolution only when the requested name
-   resolved to a different metric id. *)
+(* Producer: Tool_agent.handle_get_metrics, which serializes the metrics
+   record and nothing else.
+
+   This declared two more properties, [requested_agent_name] and
+   [resolved_agent_name], and the comment credited them to
+   [metrics_json_with_resolution]. That function does not exist, no code
+   emits either field, and nothing in docs, the dashboard or an RFC reads
+   them. [resolve_metrics_for_agent] trims the requested name and returns it
+   unchanged, so a "resolved differs from requested" case cannot arise
+   either. Declared and never produced is quiet under a strict schema --
+   optional properties pass validation by being absent -- which is how it
+   outlived the producer (masc #33007). *)
 let get_metrics_output_schema =
   object_output_schema
-    ~properties:
-      (agent_metrics_output_properties
-       @ [ "requested_agent_name", `Assoc [ "type", `String "string" ]
-         ; "resolved_agent_name", `Assoc [ "type", `String "string" ]
-         ])
+    ~properties:agent_metrics_output_properties
     ~required:agent_metrics_output_required
 ;;
 

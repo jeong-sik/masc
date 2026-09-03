@@ -9,11 +9,10 @@
     every one of them was a MASC result — twelve from a Jira search, six from
     {!Keeper_artifact_read} itself.
 
-    That last group is why this constant is separate from
-    {!Common.max_tool_output_bytes}. One value used to decide both when a
-    result becomes a blob and how much of a blob a read returns, so a read of
-    an externalized result came back at exactly the size the harness spills.
-    Reading an artifact produced another unreadable artifact.
+    That last group is why the value moved. A 64KB constant used to decide
+    both when a result becomes a blob and how much of a blob a read returns,
+    so a read of an externalized result came back at exactly the size the
+    harness spills. Reading an artifact produced another unreadable artifact.
 
     These tests pin the ordering that has to hold for that not to recur, and
     the measurement the number is chosen from. They do not reach a harness:
@@ -44,8 +43,8 @@ let test_ceiling_is_under_the_observed_spill_bracket () =
 ;;
 
 (* A read of a stored artifact must not itself be large enough to store. When
-   both bounds were [max_tool_output_bytes] this was an equality, and the
-   page a read returned was exactly a spill. *)
+   both bounds were the old 64KB constant this was an equality, and the page
+   a read returned was exactly a spill. *)
 let test_a_page_of_a_blob_is_not_itself_spillable () =
   check
     bool
@@ -57,18 +56,6 @@ let test_a_page_of_a_blob_is_not_itself_spillable () =
     "and the default read does too"
     true
     (Artifact_read.default_max_bytes <= Common.max_tool_result_wire_bytes)
-;;
-
-(* The two constants answer different questions and must not collapse back
-   into one. [max_tool_output_bytes] still bounds surfaces that never reach a
-   model turn — the status tail, the subprocess capture note — and moving
-   them would change unrelated behaviour. *)
-let test_the_two_ceilings_stay_distinct () =
-  check
-    bool
-    "the wire ceiling is the smaller of the two"
-    true
-    (Common.max_tool_result_wire_bytes < Common.max_tool_output_bytes)
 ;;
 
 let () =
@@ -83,10 +70,6 @@ let () =
             "a page of a blob is not itself spillable"
             `Quick
             test_a_page_of_a_blob_is_not_itself_spillable
-        ; test_case
-            "the two ceilings stay distinct"
-            `Quick
-            test_the_two_ceilings_stay_distinct
         ] )
     ]
 ;;

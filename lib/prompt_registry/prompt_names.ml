@@ -373,4 +373,4 @@ let keeper_gate_replay_resolution_exact_input =
 
 (* HITL context-summary canonical output contract — the schema is data the
    caller supplies; the contract sentence lives in the template. *)
-let keeper_hitl_summary_output_contract = "keeper.hitl_summary.output_contract"
+let judge_effect_output_contract = "judge.effect.output_contract"

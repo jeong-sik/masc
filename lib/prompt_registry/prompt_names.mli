@@ -218,4 +218,4 @@ val keeper_gate_replay_resolution_exact_input : string
     caller supplies; the contract sentence lives in the template. Variable:
     [schema_json]. *)
 
-val keeper_hitl_summary_output_contract : string
+val judge_effect_output_contract : string

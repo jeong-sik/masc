@@ -8,7 +8,7 @@ open Keeper_agent_result
 open Keeper_agent_error
 open Keeper_agent_prompt_metrics
 
-(* [config/prompts/judge.effect.md] hands the judge this bundle as its
+(* config/prompts/judge.md, slot effect hands the judge this bundle as its
    entire visible evidence, and [keeper_gate_causal_context.mli] declares that
    evidence to be turn-local. The capture did not match. Measured on live
    pending approvals 2026-07-28: [history_messages] was 1,278,158 B of a

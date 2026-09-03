@@ -280,7 +280,7 @@ let canonical_output_contract () =
   let schema_json = Yojson.Safe.to_string Schema.hitl_context_summary_schema in
   match
     Prompt_registry.render_prompt_template
-      Prompt_names.keeper_hitl_summary_output_contract
+      Prompt_names.judge_effect_output_contract
       [ "schema_json", schema_json ]
   with
   | Ok text -> String.trim text
@@ -288,7 +288,7 @@ let canonical_output_contract () =
     Log.Keeper.error
       "hitl summary output-contract prompt %s did not render, falling back to the bare \
        schema: %s"
-      Prompt_names.keeper_hitl_summary_output_contract
+      Prompt_names.judge_effect_output_contract
       detail;
     schema_json
 ;;

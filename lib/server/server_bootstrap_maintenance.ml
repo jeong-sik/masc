@@ -414,7 +414,7 @@ let recover_projected_durable_demand_owner
                " — paused beyond a day of recovery passes; only an operator \
                 resume clears this (POST /api/v1/keepers_bulk/directive, \
                 action=resume)"
-             else ""))
+             else "")))
 ;;
 
 (* Recovery passes that retained a non-executable owner, per keeper+reason.

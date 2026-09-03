@@ -33,7 +33,13 @@
     [Keeper_tool_execute_runtime.execute_gate_input]; the network shape is
     the [network_read] gate request ([capability] at the top level). The
     sandbox labels inside the execute envelope are display/audit data and
-    are never read here. *)
+    are never read here.
+
+    An execute request may carry its command as [argv] or as a one-line
+    [script]. A script line with no shell primitive character anywhere and
+    a non-empty token list splits into exactly the argv the shell would
+    produce, so the same closed table judges it (RFC-0404); quotes, pipes,
+    substitution, or a second line return [false] and keep the judge. *)
 val observation_only_request
   :  operation:string
   -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile option
@@ -41,6 +47,14 @@ val observation_only_request
   -> bool
 
 val observation_network_capabilities : string list
+
+val script_argv_equivalent : string -> string list option
+(** [Some argv] exactly when the script line is provably that argv: single
+    line, no shell primitive character anywhere, at least one non-empty
+    token. The split is the identity — a shell handed this line produces
+    the same argv — so the observation table may judge the result with the
+    authority it has over real arrays. Anything else is [None] and the
+    request keeps its judgment (RFC-0404). *)
 
 (** Exposed for tests: the argv classifier alone. *)
 val classify_argv : string list -> bool

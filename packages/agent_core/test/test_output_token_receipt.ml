@@ -258,7 +258,7 @@ let check_openai_chat_compatible_artifact ~label ~requested ~payload ~receipt =
     receipt
 ;;
 
-let test_glm_and_dashscope_chat_envelopes () =
+let test_glm_chat_envelope () =
   let glm_config =
     PC.make
       ~kind:Glm
@@ -278,29 +278,7 @@ let test_glm_and_dashscope_chat_envelopes () =
     ~label:"GLM max_tokens"
     ~requested:70
     ~payload:glm_payload
-    ~receipt:(Glm.request_output_token_receipt glm_artifact);
-  let dashscope_config =
-    PC.make
-      ~kind:DashScope
-      ~model_id:"receipt-dashscope-chat"
-      ~base_url:""
-      ~max_tokens:60
-      ~model_capabilities_override:(declared_capabilities 100)
-      ()
-  in
-  let dashscope_artifact =
-    Openai.build_request_artifact ~config:dashscope_config ~messages:[] ()
-  in
-  let dashscope_payload = Openai.request_payload dashscope_artifact in
-  Alcotest.(check string)
-    "DashScope legacy payload projection"
-    dashscope_payload
-    (Openai.build_request ~config:dashscope_config ~messages:[] ());
-  check_openai_chat_compatible_artifact
-    ~label:"DashScope max_tokens"
-    ~requested:60
-    ~payload:dashscope_payload
-    ~receipt:(Openai.request_output_token_receipt dashscope_artifact)
+    ~receipt:(Glm.request_output_token_receipt glm_artifact)
 ;;
 
 let test_glm_provider_default_clamp () =
@@ -498,9 +476,9 @@ let () =
         ; Alcotest.test_case "Gemini clamp" `Quick test_gemini_clamp
         ; Alcotest.test_case "Ollama exact" `Quick test_ollama_exact
         ; Alcotest.test_case
-            "GLM and DashScope Chat envelopes"
+            "GLM Chat envelope"
             `Quick
-            test_glm_and_dashscope_chat_envelopes
+            test_glm_chat_envelope
         ; Alcotest.test_case
             "GLM provider-default clamp"
             `Quick

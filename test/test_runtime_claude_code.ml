@@ -37,6 +37,26 @@ let result_with_usage =
   {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-usage-1","result":"MASC_CLAUDE_OK","api_error_status":null,"usage":{"input_tokens":123456,"output_tokens":789,"cache_read_input_tokens":42}}|}
 ;;
 
+(* Three assistant frames of one turn. The first two share a message id,
+   the shape parallel tool calls produce, so their usage must count once. *)
+let assistant_with_usage_a =
+  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-usage-a1","message":{"id":"msg-usage-a","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"first"}],"usage":{"input_tokens":100,"output_tokens":10}}}|}
+;;
+
+let assistant_with_usage_a_sibling =
+  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-usage-a2","message":{"id":"msg-usage-a","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"first again"}],"usage":{"input_tokens":100,"output_tokens":10}}}|}
+;;
+
+let assistant_with_usage_b =
+  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-usage-b1","message":{"id":"msg-usage-b","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"second"}],"usage":{"input_tokens":200,"output_tokens":20,"cache_read_input_tokens":5}}}|}
+;;
+
+(* A frame the CLI emits without a message id cannot be matched to a
+   sibling, so it counts on its own. *)
+let assistant_with_usage_no_id =
+  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-usage-c1","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"third"}],"usage":{"input_tokens":1,"output_tokens":1}}}|}
+;;
+
 let result_with_partial_usage =
   {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-usage-2","result":"MASC_CLAUDE_OK","api_error_status":null,"usage":{"output_tokens":789}}|}
 ;;
@@ -877,9 +897,53 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
       match run_fixture ~dynamic_tools:[ tool ] path with
       | Error
           (Runtime_claude_code.Stopped_by_host
-            (Repeated_tool_call { tool_name; repeated_count })) ->
+            { stop = Repeated_tool_call { tool_name; repeated_count }; _ }) ->
         check string "tool" "masc_probe" tool_name;
         check int "repeat count" 3 repeated_count
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "dynamic tool abort did not stop the Claude turn")
+;;
+
+(* kidsnote, 2026-09-02: every host-stopped turn recorded output_tokens = 0
+   because the stop was built with usage = None. The result frame never
+   arrives after a host stop, so the sum of the assistant frames seen so far
+   is the turn's measurement, deduplicated by message id. *)
+let test_host_stop_carries_the_assistant_usage_sum () =
+  let tool : Runtime_claude_code.dynamic_tool =
+    { name = "masc_probe"
+    ; description = "Abort a repeated provider loop"
+    ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call =
+        (fun ~call_id:_ _ ->
+          { success = false
+          ; content = "same deterministic failure"
+          ; abort_turn =
+              Some
+                (Repeated_tool_call
+                   { tool_name = "masc_probe"; repeated_count = 3 })
+          })
+    }
+  in
+  with_fixture
+    [ Emit assistant_with_usage_a
+    ; Emit assistant_with_usage_a_sibling
+    ; Emit assistant_with_usage_b
+    ; Emit assistant_with_usage_no_id
+    ; Emit_and_read mcp_initialize
+    ; Emit mcp_initialized_notification
+    ; Emit_and_read mcp_list
+    ; Emit_and_read mcp_call
+    ]
+    (fun path ->
+      match run_fixture ~dynamic_tools:[ tool ] path with
+      | Error (Runtime_claude_code.Stopped_by_host { usage = Some usage; _ }) ->
+        check int "input tokens summed, sibling counted once, id-less counted" 301
+          usage.input_tokens;
+        check int "output tokens summed" 31 usage.output_tokens;
+        check int "cache read carried" 5 usage.cache_read_input_tokens;
+        check int "absent cache creation is 0" 0 usage.cache_creation_input_tokens
+      | Error (Runtime_claude_code.Stopped_by_host { usage = None; _ }) ->
+        fail "host stop dropped the assistant usage"
       | Error error -> fail (Runtime_claude_code.error_to_string error)
       | Ok _ -> fail "dynamic tool abort did not stop the Claude turn")
 ;;
@@ -1716,6 +1780,8 @@ let () =
             "dynamic tool abort stops provider loop"
             `Quick
             test_dynamic_tool_abort_stops_the_provider_loop
+        ; test_case "host stop carries the assistant usage sum" `Quick
+            test_host_stop_carries_the_assistant_usage_sum
         ; test_case
             "shared bridge owns exact dispatch"
             `Quick

@@ -5785,22 +5785,7 @@ let execute_gate_command envelope =
   | `Assoc _ as args -> (
     match stage_command args with
     | Some command -> Some command
-    | None -> (
-      match script_command args with
-      | Some command -> Some command
-      | None -> (
-      (* A staged call carries no top-level argv; the tool takes one shape or
-         the other, never both. Stages read the way they run. *)
-      match member "pipeline" args with
-      | `List (_ :: _ as stages) ->
-        List.fold_right
-          (fun stage acc ->
-            match stage_command stage, acc with
-            | Some command, Some rest -> Some (command :: rest)
-            | _, _ -> None)
-          stages (Some [])
-        |> Option.map (String.concat " | ")
-      | _ -> None)))
+    | None -> script_command args)
   | _ -> None
 
 (* Where the command would run. The same envelope carries it, and it decides

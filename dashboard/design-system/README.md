@@ -6,7 +6,7 @@
 
 ## SSOT documents
 
-- **[`SPEC.md`](SPEC.md)** — canonical design system specification covering both `dashboard/`(Preact) and `dashboard_bonsai/`(Bonsai/OCaml). Token taxonomy (Raw/Semantic/Role), canonical vocabulary, theme matrix, ARIA pattern catalog, governance.
+- **[`SPEC.md`](SPEC.md)** — canonical design system specification covering `dashboard/`(Preact). Token taxonomy (Raw/Semantic/Role), canonical vocabulary, theme matrix, ARIA pattern catalog, governance.
 - **[`patterns/a11y/`](patterns/a11y/)** — ARIA pattern catalog: `region` · `list` · `tablist` · `radiogroup` · `log` · `dialog`. Each file has JSX + Bonsai examples, keyboard contracts, screen reader expectations.
 
 새 token / 컴포넌트 패턴 / 테마 추가는 SPEC.md 갱신이 선행되어야 합니다.
@@ -49,7 +49,7 @@ MASC is **bilingual Korean/English** under the hood — titles, goals and some c
 
 ## Sources used
 
-- **`tokens/source.ts`** — single source of truth for all design tokens (raw + semantic + themes). Codegen via `pnpm tokens:build` emits 7 artifacts (preview / Tailwind v4 / Preact TS / Bonsai OCaml / DTCG JSON / Bonsai CSS). See `tokens/build.ts`.
+- **`tokens/source.ts`** — single source of truth for all design tokens (raw + semantic + themes). Codegen via `pnpm tokens:build` emits 4 artifacts (preview / Tailwind v4 / Preact TS / DTCG JSON). See `tokens/build.ts`.
 - **`source_styles/`** — generated `tokens.generated.css` (preview surface) plus reference copies of zone-specific stylesheets:
   - `primitives.css` — chip, pill, bar, spark, kv-row, btn variants, elevation helpers, status surfaces, animations
   - `layout.css` — the 3-col × 7-row cockpit grid
@@ -193,7 +193,7 @@ touching component CSS.
 
 **Raw tier** — palette anchors. Defined in `tokens/source.ts` (the SSOT)
 and emitted to every surface via `pnpm tokens:build` (preview, Tailwind,
-Preact, Bonsai). Treat as private-ish: prefer the semantic alias unless
+Preact). Treat as private-ish: prefer the semantic alias unless
 you genuinely need a literal palette pick.
 
 **Semantic tier** — meaning over hex. The full alias matrix:
@@ -303,7 +303,5 @@ in their consuming surfaces:
 
 - `dashboard/src/styles/tokens.generated.css` (Tailwind v4 `@theme`)
 - `dashboard/src/styles/tokens.generated.ts`  (Preact typed)
-- `dashboard_bonsai/static/colors_and_type.generated.css` (Bonsai naming)
-- `dashboard_bonsai/src/tokens.ml` + `tokens.mli` (OCaml polyvar)
 
 No `slides/` directory — no slide template was provided.

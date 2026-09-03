@@ -23,7 +23,6 @@ accepting no request-time thinking parameter.
 | `Thinking_object_adaptive` | `No_preserve_thinking_control` + `reasoning_output_format="split_reasoning_fields"` / `reasoning_replay="preserve_always"` when documented | MiniMax-style top-level `thinking` object with `type:"adaptive"` / `type:"disabled"` plus `reasoning_split=true` for side-channel output, no effort/depth field | Replay policy is explicit catalog data; MiniMax-M3 requires complete assistant replay |
 | `Thinking_object_only` | `Thinking_object_keep_all` | Top-level `thinking` object without effort plus `thinking.keep="all"` when requested | Preserve historical `reasoning_content` when `preserve_thinking=true` |
 | `Chat_template_kwargs` | `Chat_template_kwargs_preserve_thinking` | Self-hosted chat-template kwargs such as Qwen `enable_thinking` / `preserve_thinking` | Preserve historical reasoning only when requested |
-| `Enable_thinking` | `Top_level_preserve_thinking` | DashScope-style top-level `enable_thinking` plus separate `preserve_thinking` | Preserve historical reasoning only when requested |
 | `No_thinking_control` | `Always_preserved_thinking` | Latest Kimi-style models whose thinking is provider-controlled and whose historical `reasoning_content` must remain in messages | Always replay historical reasoning; emit no thinking request field; omit fixed sampling knobs such as `temperature` / `top_p` |
 | `Chat_template_token` | `No_preserve_thinking_control` | Template token injection such as Gemma `<\|think\|>` | No mandatory replay; parse visible thought channel from generated text |
 | `Ollama_think` | `No_preserve_thinking_control` | Ollama native `/api/chat` top-level `think` bool/level, with thoughts in `message.thinking` | No mandatory replay; parse Ollama thinking side channel |
@@ -60,7 +59,7 @@ accepting no request-time thinking parameter.
   `thinkingLevel`, while Gemini 2.5 uses `thinkingBudget`; optional thought
   summaries are marked on response parts. Source:
   <https://ai.google.dev/gemini-api/docs/thinking>, checked 2026-06-14.
-- DashScope/Qwen official docs: OpenAI-compatible Qwen thinking uses
+- Qwen official docs: OpenAI-compatible Qwen thinking uses
   `enable_thinking`, optional `thinking_budget`, side-channel
   `reasoning_content`, and `preserve_thinking` for carrying historical
   assistant reasoning forward. Source:

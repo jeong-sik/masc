@@ -131,7 +131,7 @@ let test_prefill_complete () =
   let ev =
     Telemetry_event.Prefill_complete
       { provider = "ollama"
-      ; model = "dashscope"
+      ; model = "qwen"
       ; prompt_eval_tokens = 1024
       ; prompt_eval_ms = 55.5
       ; cache_hit = true

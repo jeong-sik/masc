@@ -349,6 +349,17 @@ let recovery_failure_of_client_error = function
   | Runtime_claude_code.Stopped_by_host _ -> Session_store.Protocol_failed
 ;;
 
+(* The CLI frame carries Anthropic exclusive counts; the shared constructor
+   produces the canonical inclusive api_usage. One mapping for the result
+   frame's total and for the sum a host stop carries. *)
+let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
+  Agent_core.Llm_provider.Backend_anthropic.usage_of_wire_counts
+    ~input_tokens:usage.input_tokens
+    ~output_tokens:usage.output_tokens
+    ~cache_creation_input_tokens:usage.cache_creation_input_tokens
+    ~cache_read_input_tokens:usage.cache_read_input_tokens
+;;
+
 module For_testing = struct
   let observe_stream_native_action ~turn_count ~observe event =
     match
@@ -768,7 +779,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
       (List.length dynamic_tools)
       (Runtime_claude_code.dynamic_tool_bytes dynamic_tools);
     let started_at = Time_compat.now () in
-    let settle_host_stop stop =
+    let settle_host_stop ~usage stop =
       match (!session_state).Session_store.phase with
       | Turn_inflight { session_id; turn_id; _ } ->
         let turn_id =
@@ -823,6 +834,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
             ~turns_used:turn_count
             ~latency_ms:
               (Some (Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)))
+            ~usage:(Option.map api_usage_of_turn_usage usage)
             stop
         in
         let* () =
@@ -908,11 +920,11 @@ let run_without_lifecycle ~runtime_id ~keeper_name
              ~images
         in
         (match client_result with
-         | Error (Runtime_claude_code.Stopped_by_host stop) ->
+         | Error (Runtime_claude_code.Stopped_by_host { stop; usage }) ->
            recovery_failure := Session_store.Host_hook_failed;
            (match !terminal_error with
             | Some detail -> Error (internal_error detail)
-            | None -> settle_host_stop stop)
+            | None -> settle_host_stop ~usage stop)
          | Error error ->
            context_overflow_retry_safe :=
              (match error with
@@ -964,19 +976,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
              ; model = turn.model
              ; stop_reason = EndTurn
              ; content = [ Text turn.text ]
-             ; usage =
-                 (* The CLI frame carries Anthropic exclusive counts; the
-                    shared constructor produces the canonical inclusive
-                    api_usage. *)
-                 Option.map
-                   (fun (usage : Runtime_claude_code.turn_usage) ->
-                      Agent_core.Llm_provider.Backend_anthropic.usage_of_wire_counts
-                        ~input_tokens:usage.input_tokens
-                        ~output_tokens:usage.output_tokens
-                        ~cache_creation_input_tokens:
-                          usage.cache_creation_input_tokens
-                        ~cache_read_input_tokens:usage.cache_read_input_tokens)
-                   turn.usage
+             ; usage = Option.map api_usage_of_turn_usage turn.usage
              ; telemetry =
                  Some
                    { Agent_core.Types.default_inference_telemetry with

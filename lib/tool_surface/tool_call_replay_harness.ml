@@ -7,7 +7,6 @@ type response_format =
   | Openai_chat_completions
   | Anthropic_messages
   | Gemini_generate_content
-  | Dashscope_output_choices
 
 type snapshot = {
   id : string;
@@ -29,7 +28,6 @@ let response_format_of_string = function
   | "openai_chat_completions" -> Ok Openai_chat_completions
   | "anthropic_messages" -> Ok Anthropic_messages
   | "gemini_generate_content" -> Ok Gemini_generate_content
-  | "dashscope_output_choices" -> Ok Dashscope_output_choices
   | value -> errorf "response_format: unsupported value %S" value
 
 let assoc label = function
@@ -166,28 +164,6 @@ let extract_openai_tool_calls response =
         "response.choices[0].message.tool_calls"
         tool_call_items
 
-let extract_dashscope_tool_calls response =
-  let* fields = assoc "response" response in
-  let* output = json_field fields "output" in
-  let* output_fields = assoc "response.output" output in
-  let* choices = list_field output_fields "choices" in
-  match choices with
-  | [] -> errorf "response.output.choices: must not be empty"
-  | first :: _ ->
-      let* choice_fields = assoc "response.output.choices[0]" first in
-      let* message = json_field choice_fields "message" in
-      let* message_fields = assoc "response.output.choices[0].message" message in
-      let* tool_call_items =
-        match List.assoc_opt "tool_calls" message_fields with
-        | Some (`List items) -> Ok items
-        | Some `Null | None -> Ok []
-        | Some _ ->
-            errorf "response.output.choices[0].message.tool_calls: expected array"
-      in
-      function_tool_calls_of_json_list
-        "response.output.choices[0].message.tool_calls"
-        tool_call_items
-
 let extract_anthropic_tool_calls response =
   let* fields = assoc "response" response in
   let* content = list_field fields "content" in
@@ -243,7 +219,6 @@ let extract_tool_calls response_format response =
   | Openai_chat_completions -> extract_openai_tool_calls response
   | Anthropic_messages -> extract_anthropic_tool_calls response
   | Gemini_generate_content -> extract_gemini_tool_calls response
-  | Dashscope_output_choices -> extract_dashscope_tool_calls response
 
 let validate_snapshot (snapshot : snapshot) =
   let errors = ref [] in

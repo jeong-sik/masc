@@ -140,6 +140,12 @@ let all_surface_golden_names =
   ; "keeper_webmcp_call"
   ; "keeper_webmcp_list"
   ; "masc_agent_fitness"
+    (* +3 for the ask family: the answer→wake chain existed end to end, but
+       without descriptors the agent-core lane never saw the tools, so no
+       Keeper running in-process could ask the operator anything. *)
+  ; "masc_ask"
+  ; "masc_ask_status"
+  ; "masc_ask_withdraw"
   ; "masc_board_cleanup"
   ; "masc_board_comment"
   ; "masc_board_comment_vote"

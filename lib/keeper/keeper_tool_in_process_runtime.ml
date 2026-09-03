@@ -1471,6 +1471,37 @@ let handle_surface_post_with_outcome
            (Keeper_surface_post.error_json
               (Channel_gate_binding_store.binding_store_error_to_string detail))
        | Ok bound_slack_channels ->
+       (* A channel reference may arrive as the bound channel's name instead
+          of its id. Resolve it here, before target resolution and before
+          the gate input is built, so the approved effect and its replay
+          both pin the resolved id. Names come from the connector_names
+          projection; a keeper's bound channel is in it once its first
+          inbound event has arrived. Unresolvable references pass through
+          unchanged and resolve_target answers with its binding error. *)
+       let channel_id =
+         match channel_id with
+         | Some requested
+           when String.equal surface Keeper_surface_post.slack_label
+                || String.equal surface Keeper_surface_post.discord_label ->
+           let bound =
+             if String.equal surface Keeper_surface_post.slack_label
+             then bound_slack_channels
+             else bound_discord_channels
+           in
+           let names =
+             Connector_names.entries
+               ~base_dir:config.Workspace.base_path
+               ~connector:surface
+               ~scope:Connector_names.Channel
+           in
+           (match
+              Keeper_surface_post.resolve_bound_channel_reference
+                ~names ~bound requested
+            with
+           | Some id -> Some id
+           | None -> Some requested)
+         | other -> other
+       in
        match
          Keeper_surface_post.resolve_target ~surface ~channel_id
            ?continuation_channel

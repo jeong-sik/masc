@@ -34,12 +34,6 @@ let valid_fixture_cases =
       expected_tool = "gh_issue_list";
     };
     {
-      file_name = "dashscope_tool_call.jsonl";
-      expected_id = "dashscope-tool-call-001";
-      expected_provider = "dashscope";
-      expected_tool = "Grep";
-    };
-    {
       file_name = "gemini_tool_call.jsonl";
       expected_id = "gemini-tool-call-001";
       expected_provider = "gemini";

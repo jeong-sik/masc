@@ -2,18 +2,14 @@ import { describe, it, expect } from 'vitest'
 import { source, type TokenBase, type Tier, type Kind } from './source'
 
 // source.ts is the design-system token SSOT consumed by build.ts (codegen
-// driver) to emit the 7 @generated artifacts. The codegen does no
-// validation — a malformed name, unknown tier/kind, or a bonsai invariant
-// pointing at a non-existent token would emit silently and surface only as
-// broken CSS at runtime. These tests guard the data integrity build.ts
-// relies on.
+// driver) to emit the @generated artifacts. The codegen does no
+// validation — a malformed name or unknown tier/kind would emit silently
+// and surface only as broken CSS at runtime. These tests guard the data
+// integrity build.ts relies on.
 
 const RAW: readonly TokenBase[] = source.raw
 const SEMANTIC: readonly TokenBase[] = source.semantic
 const ALL: readonly TokenBase[] = [...RAW, ...SEMANTIC]
-
-const rawNames = new Set(RAW.map((t) => t.name))
-const roleNames = new Set(SEMANTIC.filter((t) => t.tier === 'role').map((t) => t.name))
 
 const VALID_TIERS: ReadonlySet<Tier> = new Set<Tier>(['raw', 'semantic', 'role'])
 const VALID_KINDS: ReadonlySet<Kind> = new Set<Kind>([
@@ -47,16 +43,6 @@ describe('design-system token SSOT (source.ts) integrity', () => {
       .filter(([name, c]) => c > 1 && !KNOWN_ROLE_OVER_RAW.has(name))
       .map(([name]) => name)
     expect(unexpectedDupes).toEqual([])
-  })
-
-  it('bonsai invariant raw names all resolve to raw tokens', () => {
-    const missing = source.bonsai.invariantRawNames.filter((n) => !rawNames.has(n))
-    expect(missing).toEqual([])
-  })
-
-  it('bonsai invariant role names all resolve to role-tier tokens', () => {
-    const missing = source.bonsai.invariantRoleNames.filter((n) => !roleNames.has(n))
-    expect(missing).toEqual([])
   })
 
   it('defines the mobile operator hit target as a semantic spacing role', () => {

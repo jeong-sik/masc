@@ -2056,6 +2056,11 @@ type state = {
      [h] on the help sheet for the session). Off leaves "?:help" as the one
      remaining hint -- the door back for the reader who knows the keys. *)
   mutable hints_visible: bool;
+  (* Whether a line typed while an earlier one still waits joins that line
+     instead of queueing behind it ([tui].coalesce_queued_input at boot). A
+     queued line has not been sent, so joining two changes what one turn
+     receives rather than what a turn in flight sees. *)
+  mutable coalesce_queued_input: bool;
   mutable answering_open: bool;
   mutable answering_scroll: int;
   (* Cursor over the overlay's actionable rows (running / just finished);
@@ -2972,6 +2977,7 @@ let create_state
   agenda_open = false;
   agenda_scroll = 0;
   hints_visible = true;
+  coalesce_queued_input = true;
   answering_open = false;
   answering_scroll = 0;
   answering_cursor = 0;

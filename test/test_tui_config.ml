@@ -135,11 +135,35 @@ let hints_cases =
       (fun () -> check_hints "none" None (hints_of "[tui]\ntheme = \"x\"\n"))
   ]
 
+
+(* Whether a queued line absorbs the next one, [tui].coalesce_queued_input.
+   Absence must read as "yes" so a reader who never touched the key gets the
+   joining behaviour, and an explicit false must survive as false. *)
+let coalesce_of s = Config.coalesce_queued_input_of_doc (doc_of s)
+
+let check_coalesce label expected actual =
+  Alcotest.(check (option bool)) label expected actual
+
+let coalesce_cases =
+  [ Alcotest.test_case "reads [tui] coalesce_queued_input" `Quick (fun () ->
+        check_coalesce "false" (Some false)
+          (coalesce_of "[tui]\ncoalesce_queued_input = false\n"))
+  ; Alcotest.test_case "true stays true" `Quick (fun () ->
+        check_coalesce "true" (Some true)
+          (coalesce_of "[tui]\ncoalesce_queued_input = true\n"))
+  ; Alcotest.test_case "absent key -> None (caller joins by default)" `Quick
+      (fun () -> check_coalesce "none" None (coalesce_of "[tui]\ntheme = \"x\"\n"))
+  ; Alcotest.test_case "wrong type -> None, not a crash" `Quick (fun () ->
+        check_coalesce "string" None
+          (coalesce_of "[tui]\ncoalesce_queued_input = \"yes\"\n"))
+  ]
+
 let () =
   Alcotest.run "tui_config"
     [ ("theme_of_doc", cases)
     ; ("table_frame_of_doc", frame_cases)
     ; ( "lift_colours", lift_cases )
     ; ("hints_visible_of_doc", hints_cases)
+    ; ("coalesce_queued_input", coalesce_cases)
     ; ("theme_io", io_cases)
     ]

@@ -60,8 +60,8 @@ let test_aggregating_on_token_usage () =
 let test_aggregating_on_tool_calls () =
   let agg = Agg.create () in
   let hooks = Agg.to_hooks agg in
-  hooks.on_tool_calls ~provider:"ollama" ~model_id:"dashscope-3:8b" ~count:2;
-  hooks.on_tool_calls ~provider:"ollama" ~model_id:"dashscope-3:8b" ~count:3;
+  hooks.on_tool_calls ~provider:"ollama" ~model_id:"qwen3:8b" ~count:2;
+  hooks.on_tool_calls ~provider:"ollama" ~model_id:"qwen3:8b" ~count:3;
   let snap = Agg.snapshot agg in
   let entry = List.hd snap in
   check int "tool_call_total" 5 entry.M.tool_call_total

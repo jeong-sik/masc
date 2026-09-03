@@ -448,6 +448,9 @@ let default_owned_target ~ownership_root ~path =
   let entries ~root =
     match Sys.readdir root with
     | e -> Array.to_list e
+    (* An unreadable directory is an empty one for this walk; a cancelled
+       fiber is not, and a wildcard here answered [[]] for both. *)
+    | exception (Eio.Cancel.Cancelled _ as error) -> raise error
     | exception _ -> []
   in
   let subdirs_of ~root ~skip =

@@ -15,7 +15,6 @@ type t =
   | Ollama
   | Gemini
   | Glm
-  | DashScope
 
 let to_string = function
   | Anthropic -> "anthropic"
@@ -24,17 +23,15 @@ let to_string = function
   | Ollama -> "ollama"
   | Gemini -> "gemini"
   | Glm -> "glm"
-  | DashScope -> "dashscope"
 ;;
 
-let all : t list = [ Anthropic; Kimi; OpenAI_compat; Ollama; Gemini; Glm; DashScope ]
+let all : t list = [ Anthropic; Kimi; OpenAI_compat; Ollama; Gemini; Glm ]
 
 let default_api_key_env = function
   | Anthropic -> Some "ANTHROPIC_API_KEY"
   | Kimi -> Some "KIMI_API_KEY"
   | Gemini -> Some "GEMINI_API_KEY"
   | Glm -> Some "ZAI_API_KEY"
-  | DashScope -> Some "DASHSCOPE_API_KEY"
   | OpenAI_compat | Ollama ->
     (* Named providers sharing these wire kinds declare their own exact
        credential environment in the provider catalog. *)

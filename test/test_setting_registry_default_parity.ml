@@ -22,7 +22,7 @@
     cheaper than the census that found these two. *)
 
 open Alcotest
-module Registry = Masc.Keeper_runtime_setting_registry
+module Registry = Keeper_runtime_setting_registry
 
 let find env_name =
   match
@@ -46,23 +46,23 @@ let check_display env_name ~owner =
 let test_keepalive_defaults_match_their_owner () =
   check_display
     "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"
-    ~owner:(string_of_int Masc.Env_config_keeper.KeeperKeepalive.interval_sec);
+    ~owner:(string_of_int Env_config_keeper.KeeperKeepalive.interval_sec);
   check_display
     "MASC_KEEPER_SLEEP_CHUNK_SEC"
     ~owner:
-      (Printf.sprintf "%.1f" Masc.Env_config_keeper.KeeperKeepalive.sleep_chunk_sec);
+      (Printf.sprintf "%.1f" Env_config_keeper.KeeperKeepalive.sleep_chunk_sec);
   check_display
     "MASC_KEEPER_RATE_LIMIT_BACKOFF_CAP_SEC"
     ~owner:
       (Printf.sprintf
          "%.1f"
-         Masc.Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec)
+         Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec)
 ;;
 
 let test_snapshot_default_matches_its_owner () =
   check_display
     "MASC_KEEPER_SNAPSHOT_SEC"
-    ~owner:(string_of_int Masc.Env_config_keeper.KeeperRuntime.snapshot_sec)
+    ~owner:(string_of_int Env_config_keeper.KeeperRuntime.snapshot_sec)
 ;;
 
 (* The one that actually drifted. It is a thunk rather than a value, so it
@@ -74,7 +74,7 @@ let test_web_search_cache_ttl_matches_its_owner () =
     ~owner:
       (Printf.sprintf
          "%.1f"
-         (Masc.Env_config_runtime.Tools.web_search_cache_ttl_sec ()))
+         (Env_config_runtime.Tools.web_search_cache_ttl_sec ()))
 ;;
 
 let () =

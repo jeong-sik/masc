@@ -847,11 +847,55 @@
  (modules masc_tui_interrupt_signal)
  (libraries yojson))
 
+; masc_tui_ansi is a library, not an executable module, because every surface
+; that draws anything needs Ansi/Theme/Terminal_text. While it lived here, a
+; surface could only be extracted from masc_tui_render.ml by staying inside
+; this same stanza -- which is why the file split out in #3808 grew back to
+; 16.5k lines. A library makes per-surface modules possible at all.
+(library
+ (name masc_tui_render_tools)
+ (wrapped false)
+ (modules masc_tui_render_tools)
+ (libraries
+  masc
+  masc_types
+  masc_tui_ansi
+  masc_tui_context_inspector
+  masc_keeper_registry
+  masc_tui_json
+  masc_skill_reference
+  masc_skill_snapshot
+  masc_tui_theme
+  masc_tui_tool_tree
+  masc_tui_types
+  yojson))
+
+(library
+ (name masc_tui_json)
+ (wrapped false)
+ (modules masc_tui_json)
+ (libraries yojson))
+
+(library
+ (name masc_tui_ansi)
+ (wrapped false)
+ (modules masc_tui_ansi)
+ (libraries
+  masc
+  masc_types
+  terminal_size
+  unix
+  masc_tui_frame
+  masc_tui_message_layout
+  masc_tui_observation_layout
+  masc_tui_render_schedule
+  masc_tui_terminal_palette
+  masc_tui_theme))
+
 (executable
  (name masc_tui)
  (modules
   masc_tui
-  masc_tui_ansi
   masc_tui_render
   masc_tui_loader
   masc_tui_http)
@@ -859,6 +903,7 @@
  (package masc)
  (libraries
   masc_tui_agenda
+  masc_tui_ansi
   masc_tui_answering
   masc_tui_ask_projection
   masc_tui_frame
@@ -892,8 +937,8 @@
   masc_tui_interrupt_signal
   masc.runtime
   masc.keeper_registry
-  masc.skill_reference
-  masc.skill_snapshot
+  masc_skill_reference
+  masc_skill_snapshot
   ;; masc_tui_render names Fusion_types directly to label a run's topology.
   ;; Tui_decode carries the type through fur_topology, but dune does not open a
   ;; transitive library's module names, so masc_tui lists masc.fusion_core.
@@ -954,6 +999,8 @@
   masc_tui_planning_detail
   masc_tui_task_selection
   masc_tui_render_schedule
+  masc_tui_json
+  masc_tui_render_tools
   masc_tui_context_bars
   masc_tui_tool_tree
   masc_tui_tool_detail

@@ -2213,6 +2213,12 @@ let parse_line ~file_path (line : string) : chat_message option =
       Option.is_some audio
       || Option.exists (fun values -> values <> []) attachments
       || Option.exists (fun values -> values <> []) blocks
+      (* A Gate lifecycle row's payload is its typed phase. The store used to
+         compose a sentence beside it, so the row also had text and passed
+         here by accident; with the sentence gone the row is all typed field,
+         and dropping it would delete the durable record of an external
+         effect on read. *)
+      || Option.is_some approval_lifecycle
     in
     if not delivery_execution_identity_valid then None
     else if role_label = "" || (content = "" && not has_structured_payload) then (
@@ -2482,32 +2488,6 @@ let approval_lifecycle_equal left right =
   && artifact_equal left.artifact_ref right.artifact_ref
 ;;
 
-let approval_lifecycle_content lifecycle =
-  let tool =
-    match lifecycle.tool_name with
-    | None -> "Gate operation"
-    | Some tool_name -> tool_name
-  in
-  match lifecycle.phase with
-  | Approval_requested ->
-    Printf.sprintf
-      "승인 요청됨 · %s\n이 호출만 기다리고, 나머지 작업은 이어서 진행합니다."
-      tool
-  | Approval_resolved_approved ->
-    Printf.sprintf
-      "승인됨 · %s\n외부 효과는 아직 적용 확인 전입니다."
-      tool
-  | Approval_resolved_rejected -> Printf.sprintf "승인 거절됨 · %s" tool
-  | Approval_replay_applied -> Printf.sprintf "승인 작업 적용 완료 · %s" tool
-  | Approval_replay_applied_with_warning ->
-    Printf.sprintf "승인 작업 적용 완료(경고 있음) · %s" tool
-  | Approval_replay_failed -> Printf.sprintf "승인 작업 적용 실패 · %s" tool
-  | Approval_replay_indeterminate ->
-    Printf.sprintf "승인 작업 적용 여부 불명 · %s" tool
-  | Approval_continuation_recorded ->
-    Printf.sprintf "승인 후 후속 작업 이어가기 기록됨 · %s" tool
-;;
-
 type approval_lifecycle_append =
   | Approval_lifecycle_exact of append_once_result
   | Approval_lifecycle_conflict of approval_lifecycle
@@ -2528,7 +2508,6 @@ let append_approval_lifecycle_at_slot_once
       ~keeper_name
       ~lifecycle
       ~transcript_slot
-      ~corrected
   =
   let open Keeper_chat_delivery_identity in
   match Request_id.of_string lifecycle.approval_id with
@@ -2543,22 +2522,17 @@ let append_approval_lifecycle_at_slot_once
        let path = chat_path ~base_dir ~keeper_name in
        let ts = Time_compat.now () in
        let row_id = mint_message_id ~ts in
-       let content = approval_lifecycle_content lifecycle in
-       let content =
-         if corrected
-         then
-           String.concat
-             "\n"
-             [ "승인 작업 결과 정정"
-             ; content
-             ; "이전 표시보다 durable replay journal 결과가 우선합니다."
-             ]
-         else content
-       in
+       (* The row's fact is [approval_lifecycle], and [transcript_slot] says
+          which step it is -- a correction is [Approval_replay_correction], not
+          a sentence saying so. The store used to compose a Korean retelling of
+          both into [content], which made a machine-written row read as
+          something a Keeper said and put display wording in the persistence
+          layer. Every reader now takes the typed fields and words them itself
+          (masc #33016). *)
        let line =
          encode_line
            ~role:Role.System
-           ~content
+           ~content:""
            ~ts
            ~message_id:row_id
            ~approval_lifecycle:lifecycle
@@ -2610,7 +2584,6 @@ let append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
       ~keeper_name
       ~lifecycle
       ~transcript_slot
-      ~corrected:false
   with
   | Error _ as error -> error
   | Ok (Approval_lifecycle_exact result) -> Ok result
@@ -2664,7 +2637,6 @@ let reconcile_approval_replay_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
            ~keeper_name
            ~lifecycle
            ~transcript_slot:Approval_replay
-           ~corrected:false
        with
        | Error _ as error -> error
        | Ok (Approval_lifecycle_exact result) -> Ok result
@@ -2675,7 +2647,6 @@ let reconcile_approval_replay_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
               ~keeper_name
               ~lifecycle
               ~transcript_slot:Approval_replay_correction
-              ~corrected:true
           with
           | Error _ as error -> error
           | Ok

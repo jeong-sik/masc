@@ -9,7 +9,15 @@
     at turn setup — the first moment a turn-owned endpoint exists — every
     staged paste (the [Keeper_paste_naming] shape) is written to the
     endpoint's workspace root through the remote lane and removed from
-    staging once it is there.
+    staging once the endpoint reads it back with the same byte count.
+
+    The read-back is what makes "delivered" honest: a remote write that
+    exits 0 proves the payload ran, not that the bytes are readable at the
+    translated path (2026-09-04, #33010: a delivery logged success on a
+    guest serving a stale tree; the keeper never saw the file). A write
+    that reports success but whose read-back disagrees — absent file,
+    wrong tree, truncated — is retained as {!Readback_mismatch}, not
+    delivered.
 
     Shared-mount (Docker) keepers never reach this module: the directory the
     TUI wrote is the bind-mounted workspace itself.
@@ -27,6 +35,10 @@ type retain_reason =
   | Endpoint_unavailable of string
   | Staging_read_failed of string
   | Remote_write_failed of string
+      (** The write itself answered non-[Completed]. *)
+  | Readback_mismatch of string
+      (** The write answered [Completed], but reading the file back through
+          the same endpoint failed or found a different byte count. *)
 
 type retained_paste =
   { file_name : string
@@ -50,12 +62,20 @@ val staged_file_names : staging_dir:string -> string list
     error. *)
 
 val deliver_staged_pastes :
-  write:(file_name:string -> content:string -> (unit, string) result) ->
+  write:(file_name:string -> content:string -> (unit, retain_reason) result) ->
   staging_dir:string ->
   outcome list
 (** Write every staged paste through [write] and remove the staged copy of
-    each one that lands. [write] is the delivery transport; the production
-    wiring supplies {!write_through_endpoint}, tests supply a recorder. *)
+    each one that lands verified. [write] is the delivery transport and names
+    its own failure as a {!retain_reason}; the production wiring supplies
+    {!write_through_endpoint}, tests supply a recorder. *)
+
+val readback_script : string
+(** The payload the verification runs on the endpoint: a byte count of the
+    file at the translated path ([wc -c < "$1"]). Exposed so tests can pin
+    the argv shape and recognise the request in a stub endpoint. *)
+
+val readback_argv : remote_path:string -> string list
 
 val write_through_endpoint :
   endpoint:Keeper_sandbox_remote.t ->
@@ -63,12 +83,16 @@ val write_through_endpoint :
   meta:Keeper_meta_contract.keeper_meta ->
   file_name:string ->
   content:string ->
-  (unit, string) result
+  (unit, retain_reason) result
 (** The production transport:
     {!Keeper_tool_filesystem_remote_write.handle_with_endpoint} with the
     Write tool's own args shape, so the same jail, translation, and lease
-    rules apply as a keeper-issued Write. Exposed so tests can drive the
-    real path projection against a stub endpoint. *)
+    rules apply as a keeper-issued Write — then a read-back of the file
+    through the same endpoint ({!readback_argv}), because a write that
+    reports success is not proof the bytes are readable at the translated
+    path. Only a matching byte count is [Ok]; a failed or disagreeing
+    read-back is [Readback_mismatch]. Exposed so tests can drive the real
+    path projection against a stub endpoint. *)
 
 val inlined_correction : retained_paste list -> string option
 (** The turn-message correction for pastes that stayed staged: names the

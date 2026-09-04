@@ -738,16 +738,23 @@ let run_named
     | Some _ -> Ok []
     | None -> resolve_runtime_candidates remaining_candidate_ids
   in
+  (* RFC-0265 media handling applies to deferred lanes too, but only the degrade
+     floor — never a reroute. A deferred lane commits to a single budgeted
+     assignment, so [remaining_runtimes] is already [[]] above and
+     [decide_modality_reroute] cannot pick a [Reroute] target from an empty
+     candidate list: the decision here is only [No_reroute_needed] (the deferred
+     candidate accepts the turn's modality) or [No_capable_runtime] (it does not,
+     so the unsupported media is stripped and the turn runs text-only). The
+     earlier [Some _ -> No_reroute_needed] short-circuit skipped the degrade as
+     well, letting an image-bearing turn dispatch to a text-only deferred
+     candidate and hit the hard multimodal gate instead of degrading (#33034). *)
   let reroute_decision =
-    match deferred_runtime_lane with
-    | Some _ -> Runtime_agent.No_reroute_needed
-    | None ->
-      lane_modality_reroute_decision
-        ~checkpoint_messages
-        ~initial_messages
-        ~goal_blocks:current_goal_blocks
-        ~first_candidate
-        ~remaining_runtimes
+    lane_modality_reroute_decision
+      ~checkpoint_messages
+      ~initial_messages
+      ~goal_blocks:current_goal_blocks
+      ~first_candidate
+      ~remaining_runtimes
   in
   let first_runtime_id, first_runtime =
     first_runtime_after_modality_reroute ~keeper_name ~assignment_id:runtime_id

@@ -17,9 +17,9 @@
   is now a quiet vertical rail (#33060).
 - **An image a text-only Keeper cannot read is read for it.** A deferred runtime
   lane degrades an image turn to text instead of crashing on a text-only model
-  (#33037, RFC-0414 #33054), and the cloud vision models are wired as the
-  `media_failover` read fleet so `analyze_image`'s eager read lands on a fast one
-  (#33074).
+  (#33037, RFC-0414 #33054), and the cloud vision runtime gemma4-31b is wired as the
+  `media_failover` read fleet so `analyze_image`'s eager read lands on a fast one,
+  with an image-sized request-body ceiling in its binding (#33074).
 - **Chat is one canonical event log.** A per-turn chat event journal records the
   stream once and projects it (RFC-0412 stage 1, #33053, #33002), with a
   retention sweep and a repeating-SSE decode fix (#33056).
@@ -54,6 +54,12 @@
   paged shape and every probe runs (#33006), goal and run probes carry an item
   and the collector keeps every failure (#33011), and the output schema rejects
   the metrics alias fields that were removed (#33030).
+
+- **Also folded into this tag.** A Keeper answering a Discord mention no longer
+  sends the surface name as a channel id: `keeper_surface_post`'s `channel_id`
+  says omit it to reply where the message came from (#33093). The STATUS badge
+  stops drawing two lanes as one (#33094), and the TUI renderer gains an
+  interface it did not have (#33091).
 
 ## [0.30.0] - 2026-09-04
 

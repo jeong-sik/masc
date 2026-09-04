@@ -1103,7 +1103,7 @@ let own_typed_messages (state : state) =
             | Message_user (Sent_by_operator _) -> true
             | Message_user (Sent_by_other _) -> false
             | Message_keeper | Message_autonomous | Message_status
-            | Message_error | Message_tool | Message_skill _
+            | Message_local | Message_error | Message_tool | Message_skill _
             | Message_thinking | Message_memory ->
                 false)
            && String.equal entry.me_keeper_name target
@@ -4855,7 +4855,10 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
         (not (String.equal entry.me_keeper_name keeper_name))
         ||
         match entry.me_role with
-        | Message_status -> true
+        (* Neither is in the transcript a refresh brings back -- the gate rows
+           because the refresh does not carry them, this one because it never
+           went to the server at all -- so both are kept. *)
+        | Message_status | Message_local -> true
         | Message_error ->
             String.equal entry.me_request_id ""
             || not
@@ -4889,8 +4892,8 @@ let locally_submitted_at state keeper_name request_id =
          to here rather than matching that one. *)
       | Message_user (Sent_by_operator _ | Sent_by_other _)
       | Message_keeper | Message_autonomous
-      | Message_status | Message_error | Message_tool | Message_skill _
-      | Message_thinking
+      | Message_status | Message_local | Message_error | Message_tool
+      | Message_skill _ | Message_thinking
       | Message_memory -> None)
     (state.msg_history @ state.msg_loaded)
 ;;
@@ -5478,9 +5481,9 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                        match entry.me_role with
                        | Message_user (Sent_by_operator _) -> true
                        | Message_user (Sent_by_other _) | Message_keeper
-                       | Message_autonomous | Message_status | Message_error
-                       | Message_tool | Message_skill _ | Message_thinking
-                       | Message_memory -> false
+                       | Message_autonomous | Message_status | Message_local
+                       | Message_error | Message_tool | Message_skill _
+                       | Message_thinking | Message_memory -> false
                      then { entry with me_text = safe_text }
                      else entry)
                    state.msg_history;
@@ -5789,7 +5792,7 @@ let paste_clipboard_image state =
        in
        if needs_separator then Buffer.add_char state.msg_input ' ';
        Buffer.add_string state.msg_input (Printf.sprintf "[Image #%d] " index);
-       notice ~role:Message_status
+       notice ~role:Message_local
          (Printf.sprintf
             "pasted [Image #%d] (%s, %d bytes) \xe2\x80\x94 %d staged for the next message"
             index
@@ -6135,7 +6138,7 @@ let open_named_image state =
   | Masc_tui_image_preview.Staged attachment ->
       open_staged_image state ~notice attachment
   | Masc_tui_image_preview.No_image ->
-      notice ~role:Message_status
+      notice ~role:Message_local
         (Printf.sprintf
            "Ctrl-O: this conversation names no %s to look at, and no image is staged for the next message"
            Masc_tui_image_ref.extension)
@@ -6178,19 +6181,19 @@ let seek_in_chat state ~target ~restart =
       | Some (scroll, anchor) ->
           state.msg_find_at <- Some anchor;
           set_msg_scroll state scroll;
-          notice ~role:Message_status
+          notice ~role:Message_local
             (Printf.sprintf "/find %s \xe2\x80\x94 %d row(s) back (/find repeats)"
                state.msg_find scroll)
       | None ->
           if restart then
-            notice ~role:Message_status
+            notice ~role:Message_local
               (Printf.sprintf "/find %s \xe2\x80\x94 nothing in this conversation"
                  state.msg_find)
           else
             (* The walk is over, not empty. Said apart from the case above
                because starting again is what fixes this one and not that
                one. *)
-            notice ~role:Message_status
+            notice ~role:Message_local
               (Printf.sprintf
                  "/find %s \xe2\x80\x94 no older match; /find %s starts again"
                  state.msg_find state.msg_find))
@@ -6231,7 +6234,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       | Ok attachment ->
           state.msg_attachments <- state.msg_attachments @ [ attachment ];
           note_attachment_staged state;
-          notice ~role:Message_status
+          notice ~role:Message_local
             (Printf.sprintf
                "attached %s (%s, %d bytes) — %d staged for the next message"
                attachment.Masc_tui_keeper_chat_projection.name
@@ -6240,7 +6243,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
                (List.length state.msg_attachments)))
   | Masc_tui_command.Help ->
       Buffer.clear state.msg_input;
-      notice ~role:Message_status
+      notice ~role:Message_local
         (String.concat "\n" Masc_tui_command.help_lines)
   | Masc_tui_command.Open_settings ->
       Buffer.clear state.msg_input;
@@ -6280,11 +6283,11 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
               (Keeper_chat_transcript.request_id live)
           with
           | Some request -> launch_keeper_interrupt state ~mailbox request
-          | None -> notice ~role:Message_status "no turn of this pane's to interrupt")
+          | None -> notice ~role:Message_local "no turn of this pane's to interrupt")
       | Some _ ->
-          notice ~role:Message_status
+          notice ~role:Message_local
             "an interrupt is already outstanding for this turn"
-      | None -> notice ~role:Message_status "no turn is streaming in this pane")
+      | None -> notice ~role:Message_local "no turn is streaming in this pane")
   | Masc_tui_command.Steer_missing_message ->
       notice ~role:Message_error "/steer needs replacement text on the same line"
   | Masc_tui_command.Steer_turn message ->
@@ -6297,7 +6300,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
          | `Folded -> Reasoning_folded
          | `Full -> Reasoning_full
          | `Cycle -> next_reasoning_visibility state.msg_reasoning_visibility);
-      notice ~role:Message_status
+      notice ~role:Message_local
         ("reasoning "
          ^ reasoning_visibility_to_string state.msg_reasoning_visibility)
   | Masc_tui_command.Set_tools mode ->
@@ -6312,13 +6315,13 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            launch_keeper_chat_tool_details_load ~force:true state ~mailbox
              ~keeper_name
        | Tools_compact, _ | Tools_full, None -> ());
-      notice ~role:Message_status
+      notice ~role:Message_local
         ("tool calls " ^ tool_visibility_to_string state.msg_tool_visibility)
   | Masc_tui_command.Cycle_memory ->
       Buffer.clear state.msg_input;
       state.msg_memory_visibility <-
         next_memory_visibility state.msg_memory_visibility;
-      notice ~role:Message_status
+      notice ~role:Message_local
         ("Librarian/Memory timeline: "
          ^ memory_visibility_to_string state.msg_memory_visibility
          ^ " (Ctrl-N or /memory to cycle)")
@@ -6360,7 +6363,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       notice ~role:Message_error "/preset restore needs a name on the same line"
   | Masc_tui_command.Preset_restore name ->
       Buffer.clear state.msg_input;
-      notice ~role:Message_status
+      notice ~role:Message_local
         (Printf.sprintf "restoring preset %s — the live state is autosaved first" name);
       launch_preset_call state ~mailbox
         ~call:(fun ~host ~port -> Masc_tui_loader.restore_preset ~host ~port ~name)
@@ -9159,7 +9162,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Presets_listed (sink, result) ->
       (match sink, result with
        | Preset_to_chat target, Ok snapshot ->
-           chat_notice state ~keeper_name:target ~role:Message_status
+           chat_notice state ~keeper_name:target ~role:Message_local
              (String.concat "\n" (Masc_tui_preset_text.listing_lines snapshot))
        | Preset_to_chat target, Error detail ->
            chat_notice state ~keeper_name:target ~role:Message_error detail
@@ -9174,7 +9177,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Preset_saved (sink, result) ->
       (match sink, result with
        | Preset_to_chat target, Ok manifest ->
-           chat_notice state ~keeper_name:target ~role:Message_status
+           chat_notice state ~keeper_name:target ~role:Message_local
              (Masc_tui_preset_text.saved_line manifest)
        | Preset_to_chat target, Error detail ->
            chat_notice state ~keeper_name:target ~role:Message_error detail
@@ -9189,7 +9192,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match sink, result with
        | Preset_to_chat target, Ok report ->
            let role =
-             if Masc_tui_preset_text.restore_is_clean report then Message_status
+             if Masc_tui_preset_text.restore_is_clean report then Message_local
              else Message_error
            in
            chat_notice state ~keeper_name:target ~role

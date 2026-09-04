@@ -9,11 +9,34 @@ type style =
   | Inbound
   | Keeper
   | Status
+  | Local
   | Journal
   | Error
   | Tool
   | Skill of skill_tone
   | Thinking
+
+(* Every style there is, beside the type rather than in the test that walks it.
+   The distinctness check reads this list, and a list kept a thousand lines
+   away in a test file is one a new variant slips past -- [Local] did, and the
+   check passed without ever looking at its mark. Adjacency is the whole
+   mechanism here; nothing in the language forces a variant to be listed. *)
+let all_styles =
+  [ User
+  ; Inbound
+  ; Keeper
+  ; Status
+  ; Local
+  ; Journal
+  ; Error
+  ; Tool
+  ; Thinking
+  ; Skill Skill_live
+  ; Skill Skill_used
+  ; Skill Skill_attention
+  ; Skill Skill_failure
+  ]
+;;
 
 type turn_rail =
   | Rail_opens
@@ -680,6 +703,9 @@ let speaker_mark : style -> string = function
   | Inbound -> "\xe2\x97\x80"   (* someone else sent this here *)
   | Keeper -> "\xe2\x97\x8f"    (* a keeper speaks *)
   | Status -> "?"
+  (* The same mark the composer prompt draws, because that is where this row
+     came from: the pane answering what was typed at it. *)
+  | Local -> "\xe2\x80\xba"
   | Journal -> "\xe2\x97\x88"   (* the parallel Memory journal lane *)
   | Error -> "\xe2\x9c\x97"
   | Tool -> "\xe2\x96\xa0"
@@ -1037,7 +1063,7 @@ let continued_mark : style -> string = function
 
    Reasoning is the Keeper's own, not a quotation, however folded it is. *)
 let shade_of_style : style -> shade = function
-  | Tool | Skill _ | Status | Journal -> Shade_quoted
+  | Tool | Skill _ | Status | Local | Journal -> Shade_quoted
   | User | Inbound | Keeper | Error | Thinking -> Shade_none
 
 let origin_gutter ~origin ~previous ~inner_width entry =

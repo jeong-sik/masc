@@ -2521,6 +2521,76 @@ let test_complete_stream_preserves_repeated_incremental_text () =
   | Exit -> ()
 ;;
 
+(* The repeat guard from #32997 lives in the stream state machine. This is the
+   wiring that makes it stop the socket: the accumulator failing has to end the
+   read, not just discard what the read keeps delivering.
+
+   The provider repeats one paragraph three times and then goes quiet for
+   [quiet_s] before sending more. A client that stops at the third occurrence
+   answers in well under that. One that keeps reading waits for a frame it has
+   already decided to throw away — which is what the deleted
+   [Eio.Time.Timeout when stream_failed acc -> Ok ()] arm used to paper over.
+
+   Timing rather than frame counting: TCP buffering means "the server wrote it"
+   does not tell us whether the client read it, while the wall clock does. *)
+let test_complete_stream_stops_reading_a_repeating_generation () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    (* Whole lines of 40 bytes or more are what the guard counts. *)
+    let paragraph = "the premise this rests on has not changed since" in
+    let repeated = anthropic_sse_frame_delta (paragraph ^ "\\n") in
+    let quiet_s = 2.0 in
+    let url =
+      start_raw_sse_server
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        [ 0.0, anthropic_sse_frame_message_start
+        ; 0.0, anthropic_sse_frame_content_block_start
+        ; 0.0, repeated
+        ; 0.0, repeated
+        ; 0.0, repeated
+        ; quiet_s, anthropic_sse_frame_delta "a frame the client must never wait for"
+        ; 0.0, anthropic_sse_frame_stop
+        ]
+    in
+    let started = Eio.Time.now env#clock in
+    let result =
+      Complete.complete_stream
+        ~sw
+        ~net:env#net
+        ~config:(make_config url)
+        ~messages
+        ~on_event:(fun _ -> ())
+        ()
+    in
+    let elapsed = Eio.Time.now env#clock -. started in
+    (match result with
+     | Error
+         (Http_client.ProviderFailure
+            { kind =
+                Http_client.Provider_wire_error
+                  { kind = Http_client.Repeating_generation; _ }
+            ; _
+            }) -> ()
+     | Error _ ->
+       fail "a repeating generation must be reported as one, not as a timeout"
+     | Ok _ -> fail "three identical paragraphs must not finalize as an answer");
+    if elapsed >= quiet_s
+    then
+      failf
+        "the stream spent %.2fs on a provider it had stopped reading (it went \
+         quiet for %.2fs)"
+        elapsed
+        quiet_s;
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
 let test_complete_stream_replaces_invalid_content_with_typed_failure () =
   Eio_main.run
   @@ fun env ->
@@ -3835,6 +3905,10 @@ let () =
             "built-in stream preserves repeated incremental text"
             `Quick
             test_complete_stream_preserves_repeated_incremental_text
+        ; test_case
+            "built-in stream stops reading a repeating generation"
+            `Quick
+            test_complete_stream_stops_reading_a_repeating_generation
         ; test_case
             "built-in stream replaces invalid content with typed failure"
             `Quick

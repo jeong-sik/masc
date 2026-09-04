@@ -278,6 +278,7 @@ let stream_protocol_error_kind_of_string = function
   | "sse_unsupported_part" -> Some Sse_unsupported_part
   | "sse_unsupported_response" -> Some Sse_unsupported_response
   | "sse_stream_incomplete" -> Some Sse_stream_incomplete
+  | "sse_stream_repeating" -> Some Sse_stream_repeating
   | _ -> None
 
 let stream_protocol_error_summary error =

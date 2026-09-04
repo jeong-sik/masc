@@ -72,11 +72,11 @@ type delta =
 type t =
   { pending : Buffer.t
   ; mutable pending_seq : int option
-        (* The [id:] of the frame being read, held until its [data:] line or
-           the frame's end. It lives on [t], not in one [feed], because a
-           chunk may end between the two lines. Cleared at the frame end so a
-           later frame without an id (acceptance, the settle-time run_error)
-           cannot inherit it. *)
+        (* The [id:] of the frame being read, held until the frame's end;
+           every [data:] line of the frame is tagged with it. It lives on [t],
+           not in one [feed], because a chunk may end between the two lines.
+           Cleared at the frame end so a later frame without an id
+           (acceptance, the settle-time run_error) cannot inherit it. *)
   }
 
 let create () = { pending = Buffer.create 4096; pending_seq = None }

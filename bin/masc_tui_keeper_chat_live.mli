@@ -144,5 +144,9 @@ val feed : t -> string -> (int option * delta) list
     frame without one (the acceptance event and the settle-time run_error
     never went through the bus). The id is held across a chunk boundary and
     dropped at the frame's end, so an id-less frame cannot inherit the seq of
-    the frame before it. Bytes of a line that is still incomplete are held
-    until the rest arrives. *)
+    the frame before it. The server writes [id:] before [data:] in every
+    frame ([Sse_wire.add_optional_headers]); an id after its data would tag
+    nothing. Bytes of a line that is still incomplete are held until the rest
+    arrives -- so a decoder must not be carried across a reconnect: a stream
+    cut after an [id:] line would leave the seq and the partial bytes armed
+    for the next stream's first frame. *)

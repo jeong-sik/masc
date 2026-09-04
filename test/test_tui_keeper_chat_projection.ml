@@ -124,6 +124,8 @@ let test_id_lines_do_not_change_the_strict_decode () =
     (Chat.classify_sse_line "" = Chat.Sse_frame_end);
   check bool "a non-integer id is ignored" true
     (Chat.classify_sse_line "id: abc" = Chat.Sse_ignored);
+  check bool "a whitespace-only line is ignored, not a frame end" true
+    (Chat.classify_sse_line "   " = Chat.Sse_ignored);
   check bool "same outcome with and without id lines" true
     (Chat.decode_response ~request plain = Chat.decode_response ~request with_ids);
   match Chat.decode_response ~request with_ids with

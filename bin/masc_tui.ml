@@ -16905,7 +16905,7 @@ and is loaded on demand through keeper_skill.
                     (Printf.sprintf "opening PR #%d via gh..." number);
                   ignore
                     (Unix.system
-                       (Printf.sprintf "gh pr view %d --web 2>/dev/null &"))
+                       (Printf.sprintf "gh pr view %d --web 2>/dev/null &" number))
               | None ->
                   add_event state "git" "opening branch PR via gh...";
                   ignore (Unix.system "gh pr view --web 2>/dev/null &"))

@@ -169,8 +169,11 @@ it agrees with sox to six decimal places on a finished file.
 `Ctrl-Y` in a focused composer row starts a capture, and pressing it again
 stops one, keeping what was said up to that point -- the usual reason to stop
 is that the sentence is finished and the trailing-silence wait is two seconds
-away. A stop before any speech aborts and yields nothing. The transcript is
-appended to the draft, not sent. A meter runs in the prompt while it records, because a
+away. `Esc` abandons the recording instead, which is the only place in the
+capture path where the operator says what they want rather than the levels
+inferring it. Either key before any speech aborts and yields nothing, so
+reaching for the wrong one costs nothing. The transcript is appended to the
+draft, not sent. A meter runs in the prompt while it records, because a
 dead input device and a quiet room both end as an empty draft and nothing else
 separates them.
 

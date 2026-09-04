@@ -170,10 +170,16 @@ let create ?on_publish () =
 (* [publish] is the single choke point every turn event passes through — route
    lifecycle, bridge-translated deltas, and terminal paths all call it. The
    hook runs BEFORE the bus add so the canonical journal records what the turn
-   produced even when a full bus suspends the add. [publish] performs only
-   blocking Unix I/O inside the hook (which suspends the whole domain briefly
-   but never interleaves fibers in it), so seq assignment → hook → bus add is
-   effectively atomic and journal order == seq order == bus order. *)
+   produced even when a full bus suspends the add. The ordering guarantee rests
+   on one invariant: every [publish] for a given bus runs in the single
+   publisher fiber (the process_single_turn / consume_worker_events call tree
+   in server_routes_http_keeper_stream.ml), so seq assignment → hook → bus add
+   executes sequentially within that fiber and journal order == seq order ==
+   bus order with no extra lock. The journal hook's blocking Unix I/O is
+   offloaded via Fs_compat.run_blocking_private_file_transaction
+   (Eio_unix.run_in_systhread when called from an Eio fiber), which suspends
+   only the calling fiber — that keeps sibling fibers responsive but is not
+   what makes the ordering safe. *)
 let publish t event =
   (match t.on_publish with
    | None -> ()

@@ -6,6 +6,7 @@ module L = Masc.Keeper_chat_event_log
 module Blocks = Masc.Keeper_chat_blocks
 module Surface = Masc.Keeper_surface_post
 module Outcome = Masc.Keeper_turn_outcome
+module Projection = Server_keeper_chat_agui_projection
 
 let occurrence : E.tool_stream_occurrence =
   { stream_scope = 7; provider_message_id = Some "pm-1"; block_index = 2 }
@@ -431,6 +432,192 @@ let test_bus_journal_integration_records_all_events () =
          8
          (List.length adapter_blocks))
 
+(* A well-formed turn exercising every constructor that produces SSE output
+   plus the five adapter-only blocks (which must be journaled but project to
+   [None]). [Event_error] is omitted: it is the alternative terminal, already
+   covered by the codec round-trip. *)
+let golden_events : E.keeper_chat_event list =
+  [ E.Run_started { run_id = "run-golden"; thread_id = "keeper:golden" }
+  ; E.Agent_core_stream_connected
+  ; E.Agent_core_stream_message_start
+      { provider_message_id = "pm-1"; model = "kimi-for-coding"; usage = Some usage_full }
+  ; E.Agent_core_stream_ping
+  ; E.Text_message_start { message_id = "msg-1"; role = E.Assistant }
+  ; E.Agent_core_content_block_start
+      { index = 0
+      ; content_type = "thinking"
+      ; tool_call_id = None
+      ; tool_call_name = None
+      }
+  ; E.Agent_core_thinking_delta { index = 0; delta = "let me think" }
+  ; E.Agent_core_thinking_signature_delta { index = 0; signature_bytes = 128 }
+  ; E.Agent_core_content_block_stop { index = 0 }
+  ; E.Text_delta "Hello"
+  ; E.Text_delta ", world"
+  ; E.Agent_core_content_block_start
+      { index = 1
+      ; content_type = "tool_use"
+      ; tool_call_id = Some "tc-1"
+      ; tool_call_name = Some "read_file"
+      }
+  ; E.Tool_call_start
+      { occurrence; tool_call_id = Some "tc-1"; tool_call_name = "read_file" }
+  ; E.Tool_call_args { occurrence; tool_call_id = Some "tc-1"; delta = "{\"path\":" }
+  ; E.Tool_call_args_snapshot
+      { occurrence; tool_call_id = Some "tc-1"; snapshot = "{\"path\":\"/tmp/x\"}" }
+  ; E.Tool_call_end { occurrence; tool_call_id = Some "tc-1" }
+  ; E.Agent_core_content_block_stop { index = 1 }
+  ; E.Tool_approval_requested
+      { tool_call_id = "tc-1"
+      ; tool_call_name = "read_file"
+      ; args = "{\"path\":\"/tmp/x\"}"
+      ; question = "allow read?"
+      ; because = "policy: fs read"
+      }
+  ; E.Tool_approval_settled { tool_call_id = "tc-1"; outcome = "approved" }
+  ; E.Tool_result_ready
+      { occurrence
+      ; tool_call_id = Some "tc-1"
+      ; execution_id = Ids.Execution_id.of_string "exec-golden-1"
+      }
+  ; E.Agent_core_media_delta
+      { index = 2
+      ; media_type = "image/png"
+      ; source_type = Agent_core.Types.Url
+      ; media_ref = "/api/v1/media/tok-golden"
+      }
+  ; E.Agent_core_stream_protocol_error protocol_error_full
+  ; E.Agent_core_runtime_attempt_started
+  ; E.Agent_core_stream_message_delta
+      { stop_reason = Some Agent_core.Types.EndTurn
+      ; usage = Some delta_usage_partial
+      }
+  ; E.Agent_core_stream_message_stop
+  ; E.Text_message_end
+  ; E.Link_block
+      { url = "https://example.com"
+      ; title = "Example"
+      ; description = Some "desc"
+      ; image = Some "https://example.com/i.png"
+      }
+  ; E.Image_block { url = "https://example.com/i.png"; caption = Some "cap" }
+  ; E.Status_block { kind = Blocks.Awaiting_gate_approval }
+  ; E.Audio_block
+      { token = "aud-1"
+      ; mime = "audio/ogg"
+      ; message_text = "voice"
+      ; duration_sec = Some 1.5
+      }
+  ; E.Tool_context_block
+      { tool_call_id = "tc-1"
+      ; name = "read_file"
+      ; args_summary = "path /tmp/x"
+      ; result_summary = Some "42 bytes"
+      }
+  ; E.Continuation_checkpoint { message = "checkpoint"; request_id = Some "req-golden" }
+  ; E.External_effect_completed
+      { target =
+          Surface.Delivered_to_slack { channel_id = "C123"; thread_ts = Some "1700.5" }
+      }
+  ; E.Reply_details
+      { reply = "Hello, world"
+      ; turn_outcome = Outcome.Visible_reply
+      ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-golden" ~absolute_turn:1
+      }
+  ; E.Run_finished { run_id = "run-golden" }
+  ]
+
+(* The exact fold the live Dashboard adapter performs
+   (server_routes_http_keeper_stream.ml:2646-2668): project with a per-event
+   injected timestamp, serialize projected events with Ag_ui.event_to_sse —
+   the same serializer keeper_stream_send_event uses at :1017-1018 — and skip
+   None projections. *)
+let projected_sse_bytes timed_events =
+  let _, rev_bytes =
+    List.fold_left
+      (fun (projection, acc) (ts, event) ->
+         let projection, projected =
+           Projection.project
+             ~timestamp:ts
+             ~redact_text:Fun.id
+             ~redact_json:Fun.id
+             projection
+             event
+         in
+         ( projection
+         , match projected with
+           | Some ag_event -> Ag_ui.event_to_sse ag_event :: acc
+           | None -> acc ))
+      (Projection.initial, [])
+      timed_events
+  in
+  String.concat "" (List.rev rev_bytes)
+
+let test_golden_replay_matches_live_stream_bytes () =
+  let base_dir = temp_base_path "keeper-chat-event-log-golden" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       (* Exact binary fractions: float -> JSON -> float is byte-exact for
+          these values, and the per-line ts assert below catches drift. *)
+       let timestamps =
+         List.mapi (fun i _ -> 1_762_300_000.0 +. (float_of_int i *. 0.25)) golden_events
+       in
+       (* Live path: fold the in-memory events with scripted injected time. *)
+       let live_bytes = projected_sse_bytes (List.combine timestamps golden_events) in
+       (* Journal the whole turn through the real bus with a scripted clock. *)
+       let clock = scripted_clock timestamps in
+       let journal =
+         L.open_journal ~now:clock ~base_dir ~keeper_name:"golden" ~operation_id:"op-golden" ()
+       in
+       let bus =
+         Masc.Keeper_chat_events.create ~on_publish:(L.append journal) ()
+       in
+       List.iter (Masc.Keeper_chat_events.publish bus) golden_events;
+       (* Replay: decode the journal, re-fold from [initial] with the
+          journaled ts. *)
+       let journaled = L.read_journal journal in
+       Alcotest.(check int)
+         "journal holds the whole turn"
+         (List.length golden_events)
+         (List.length journaled);
+       List.iter2
+         (fun scripted_ts (entry : L.journaled_event) ->
+            Alcotest.(check (float 0.0))
+              "ts survives the journal"
+              scripted_ts
+              entry.ts)
+         timestamps
+         journaled;
+       let replay_bytes =
+         projected_sse_bytes
+           (List.map (fun (entry : L.journaled_event) -> entry.ts, entry.event) journaled)
+       in
+       Alcotest.(check string)
+         "replay reproduces the live SSE byte stream"
+         live_bytes
+         replay_bytes;
+       (* The five adapter-only block events are invisible in the byte
+          comparison (they project to None); pin their journal presence
+          separately so the byte-equality green can never mask a journal
+          gap. *)
+       let adapter_blocks =
+         List.filter
+           (fun (entry : L.journaled_event) ->
+              match entry.event with
+              | E.Link_block _
+              | E.Image_block _
+              | E.Status_block _
+              | E.Audio_block _
+              | E.Tool_context_block _ -> true
+              | _ -> false)
+           journaled
+       in
+       Alcotest.(check int)
+         "five adapter-only block events journaled"
+         5
+         (List.length adapter_blocks))
+
 let () =
   Alcotest.run
     "keeper_chat_event_log"
@@ -483,5 +670,11 @@ let () =
             "bus journal records every published event"
             `Quick
             test_bus_journal_integration_records_all_events
+        ] )
+    ; ( "golden"
+      , [ Alcotest.test_case
+            "journal replay reproduces the live SSE byte stream"
+            `Quick
+            test_golden_replay_matches_live_stream_bytes
         ] )
     ]

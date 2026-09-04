@@ -131,9 +131,29 @@ let network_mode_rejection profile mode =
        not support network_mode = \"none\" (only \"inherit\" is \
        accepted in Phase 1; per-VM egress policy arrives with the \
        microVM backend)"
+  (* Phase 1 refuses the whole knob on this profile, and per-VM egress policy
+     is the knob the refusal above names as arriving with the microVM
+     backend. *)
+  | Remote_ssh, Network_policy ->
+    Some
+      "remote_ssh_no_network_mode: sandbox_profile \"remote_ssh\" does \
+       not support network_mode = \"policy\" (only \"inherit\" is \
+       accepted in Phase 1; per-VM egress policy is a microVM backend \
+       mode)"
   | Remote_ssh, Network_inherit -> None
   | Docker, (Network_none | Network_inherit) -> None
-  | Micro_vm, (Network_none | Network_inherit) -> None
+  (* RFC-0415. The runtime already refuses this, in
+     [Keeper_sandbox_control] and [docker_network_args]; refusing it here is
+     what stops a create from writing a keeper TOML that its own runtime then
+     turns down, which is the pair of homes this function exists to close. *)
+  | Docker, Network_policy ->
+    Some
+      "docker_no_policy_network_mode: sandbox_profile \"docker\" does not \
+       support network_mode = \"policy\" because the Docker egress boundary \
+       is unmeasured (RFC-0415). Use \"none\" or \"inherit\" here, or move \
+       this keeper to sandbox_profile = \"microvm\""
+  (* The backend the mode was built for. *)
+  | Micro_vm, (Network_none | Network_inherit | Network_policy) -> None
 ;;
 
 (* The observation-only gate fast path ({!Keeper_gate_readonly}) keys on this

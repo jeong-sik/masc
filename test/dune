@@ -1353,6 +1353,14 @@
  (modules test_masc_test_runtime)
  (libraries alcotest fs_compat masc_test_runtime unix))
 
+; task-1310: this test rewrites PATH and TMPDIR and inspects what a stub sox
+; left in TMPDIR; run it with --sandbox none (dune's action sandbox remaps
+; TMPDIR into a private overlay that vanishes with the action).
+(test
+ (name test_voice_noise_reduction_cleanup)
+ (modules test_voice_noise_reduction_cleanup)
+ (libraries alcotest masc_test_deps unix))
+
 ; Group 3: Eio-native tests (single-module, standard deps)
 ; Merged from ~100 individual (test ...) stanzas.
 

@@ -39,10 +39,10 @@ all three read and write the same state.
 | **MCP** | Your own agent joins the workspace: claim a task, post to the board, record evidence | Any MCP client over `http://127.0.0.1:8935/mcp` |
 | **Dashboard** | The same state in a browser, for when a terminal is not at hand | Served at `/dashboard/` by the same process |
 
-![MASC terminal UI](docs/screenshots/tui/2026-08-26/surfaces/01-overview.png)
+![MASC terminal UI](docs/screenshots/tui/2026-09-04/surfaces/01-overview.png)
 
 Keeper names and the base path in this frame were replaced with stand-ins of
-the same width; the [surface inventory](docs/screenshots/tui/2026-08-26/surfaces/README.md)
+the same width; the [surface inventory](docs/screenshots/tui/2026-09-04/surfaces/README.md)
 holds four more and the capture metadata. The [Terminal UI](#terminal-ui)
 section below lists every surface and the keys that reach it.
 
@@ -415,6 +415,16 @@ Keeper may add `microvm_backend = "apple_container" | "microsandbox" |
 Keeper must add `remote_endpoint = "<name>"` naming a table under
 `[exec.ssh.endpoints]` in `runtime.toml`.
 
+`network_mode` accepts `none`, `inherit`, or `policy`. `policy` is the mode
+between the other two: the guest reaches an allowlist proxy this server owns
+and nothing else, so a Keeper that needs one host stops being given every
+host. What it may reach is declared under `[egress.keepers.<name>]` in
+`runtime.toml` and parsed when that file is read, so a rule the matcher and a
+resolver could read differently fails the load rather than sitting in a live
+allowlist. The lane is carried today only by the `apple_container` microVM
+backend; every other backend refuses it and names what has to be measured
+first. See the [egress runbook](docs/operations/egress-policy-runbook.md).
+
 ### Keeper event-driven lifecycle
 
 When a Keeper runs in the background, it follows an event-driven reactive loop:
@@ -467,10 +477,10 @@ terminal UI reads; reach for it when a browser is handier than a terminal, or
 for the screens that only exist there (the IDE shell, the Lab diagnostics).
 Navigation is defined in `dashboard/src/config/navigation.ts`.
 
-![MASC dashboard overview](docs/screenshots/dashboard/2026-08-26/01-overview.png)
+![MASC dashboard overview](docs/screenshots/dashboard/2026-09-04/01-overview.png)
 
 This image was captured from a live local runtime with operational identifiers
-redacted. The [dashboard inventory](docs/screenshots/dashboard/2026-08-26/README.md)
+redacted. The [dashboard inventory](docs/screenshots/dashboard/2026-09-04/README.md)
 contains 24 screens and the exact capture metadata.
 
 Primary sidebar screens:
@@ -510,7 +520,7 @@ Route examples required by the current dashboard contract:
 `dashboard#connectors?section=connector-status`, and
 `dashboard#workspace?section=verification`. `journey` is a hidden diagnostic.
 
-See the [24-screen inventory](docs/screenshots/dashboard/2026-08-26/README.md)
+See the [24-screen inventory](docs/screenshots/dashboard/2026-09-04/README.md)
 for the captured primary, Monitor, Work, and Lab views.
 
 ## Repository layout
@@ -542,6 +552,7 @@ masc/
 | [`docs/ENV-CONTRACT.md`](docs/ENV-CONTRACT.md) | Environment variables the runtime reads |
 | [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | Local bearer and dashboard write access |
 | [`docs/operations/ssh-endpoints-runbook.md`](docs/operations/ssh-endpoints-runbook.md) | Provisioning a `remote_ssh` endpoint with `masc-exec-ssh-bootstrap`, migrating a Keeper onto it, and every preflight failure code |
+| [`docs/operations/egress-policy-runbook.md`](docs/operations/egress-policy-runbook.md) | Declaring what a Keeper in `network_mode = "policy"` may reach, which backends carry the lane, and reading the egress events |
 | [`docs/AGENT-CORE-BOUNDARY.md`](docs/AGENT-CORE-BOUNDARY.md) | Responsibility split between MASC and embedded Agent Core |
 | [`docs/spec/SPEC-INDEX.md`](docs/spec/SPEC-INDEX.md) | Specification index; inventory counts inside it are historical unless marked current |
 | [`docs/RELEASE-EVIDENCE.md`](docs/RELEASE-EVIDENCE.md) | Release evidence format; verify its version header before reuse |

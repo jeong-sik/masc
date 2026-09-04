@@ -120,7 +120,7 @@ let test_a_pause_that_outlasts_the_window_ends_the_capture () =
   let paused = Bridge.Speaking { floor = room; quiet_since = Some 5.0 } in
   match finishes ~now:7.0 ~level:(at (-40.0)) paused with
   | Bridge.Ended_after_speech -> ()
-  | Bridge.Ended_without_speech | Bridge.Ended_by_operator ->
+  | Bridge.Ended_without_speech _ | Bridge.Ended_by_operator _ ->
     fail "a capture that heard speech must end as having heard it"
 ;;
 
@@ -131,7 +131,7 @@ let test_a_pause_that_outlasts_the_window_ends_the_capture () =
 let test_a_deadline_during_speech_still_counts_as_speech () =
   match Bridge.end_at_deadline speaking with
   | Bridge.Ended_after_speech -> ()
-  | Bridge.Ended_without_speech | Bridge.Ended_by_operator ->
+  | Bridge.Ended_without_speech _ | Bridge.Ended_by_operator _ ->
     fail "speech already heard must survive the deadline"
 ;;
 
@@ -139,10 +139,120 @@ let test_a_deadline_before_any_speech_carries_no_transcript () =
   List.iter
     (fun phase ->
        match Bridge.end_at_deadline phase with
-       | Bridge.Ended_without_speech -> ()
-       | Bridge.Ended_after_speech | Bridge.Ended_by_operator ->
+       | Bridge.Ended_without_speech _ -> ()
+       | Bridge.Ended_after_speech | Bridge.Ended_by_operator _ ->
          failf "%s must not be transcribed" (phase_name phase))
     [ listening; Bridge.Calibrating { until = 1.0; floor = None } ]
+;;
+
+(* The key says "stop", not "cancel", and the reason to reach for it is
+   usually that the sentence is finished and the trailing-silence wait is two
+   seconds away. Discarding then costs the whole sentence again; transcribing
+   something unwanted costs one deletion in a draft that has not been sent. *)
+let test_a_stop_mid_sentence_keeps_what_was_said () =
+  match Bridge.end_at_operator_stop Bridge.Keep_what_was_heard speaking with
+  | Bridge.Ended_after_speech -> ()
+  | Bridge.Ended_without_speech _ | Bridge.Ended_by_operator _ ->
+    fail "a stop after speech must keep it"
+;;
+
+let test_a_stop_during_a_pause_keeps_what_was_said () =
+  let paused = Bridge.Speaking { floor = room; quiet_since = Some 5.0 } in
+  match Bridge.end_at_operator_stop Bridge.Keep_what_was_heard paused with
+  | Bridge.Ended_after_speech -> ()
+  | Bridge.Ended_without_speech _ | Bridge.Ended_by_operator _ ->
+    fail "a pause inside a sentence is still a sentence"
+;;
+
+(* Before any speech it is an abort, and the transcriber must not see it:
+   whisper answers a room with a fluent sentence. *)
+let test_a_stop_before_any_speech_carries_no_transcript () =
+  List.iter
+    (fun phase ->
+       match Bridge.end_at_operator_stop Bridge.Keep_what_was_heard phase with
+       | Bridge.Ended_by_operator _ -> ()
+       | Bridge.Ended_after_speech | Bridge.Ended_without_speech _ ->
+         failf "%s must not be transcribed" (phase_name phase))
+    [ listening; Bridge.Calibrating { until = 1.0; floor = None } ]
+;;
+
+(* Esc, and the only place in the capture path where the operator says what
+   they want instead of the levels inferring it. A recording that picked up
+   something they did not mean to send has to be abandonable, and no amount of
+   speech in it makes that less true. *)
+let test_a_discard_throws_away_even_a_full_sentence () =
+  List.iter
+    (fun phase ->
+       match Bridge.end_at_operator_stop Bridge.Discard phase with
+       | Bridge.Ended_by_operator _ -> ()
+       | Bridge.Ended_after_speech | Bridge.Ended_without_speech _ ->
+         failf "a discard must abandon %s" (phase_name phase))
+    [ speaking
+    ; Bridge.Speaking { floor = room; quiet_since = Some 5.0 }
+    ; listening
+    ; Bridge.Calibrating { until = 1.0; floor = None }
+    ]
+;;
+
+(* The two requests are only allowed to differ where there is speech. Before
+   any, both abandon, so an operator who reaches for the wrong key loses
+   nothing. *)
+let test_stop_and_discard_differ_only_once_there_is_speech () =
+  List.iter
+    (fun phase ->
+       check
+         bool
+         (phase_name phase)
+         true
+         (Bridge.end_at_operator_stop Bridge.Keep_what_was_heard phase
+          = Bridge.end_at_operator_stop Bridge.Discard phase))
+    [ listening; Bridge.Calibrating { until = 1.0; floor = None } ]
+;;
+
+(* Why a recording ended does not decide what happens to it -- what was heard
+   does. The two endings agree wherever that question has the same answer. *)
+let test_a_stop_and_a_deadline_agree_on_whether_there_is_speech () =
+  let carries = function
+    | Bridge.Ended_after_speech -> true
+    | Bridge.Ended_without_speech _ | Bridge.Ended_by_operator _ -> false
+  in
+  List.iter
+    (fun phase ->
+       check
+         bool
+         (phase_name phase)
+         (carries (Bridge.end_at_deadline phase))
+         (carries (Bridge.end_at_operator_stop Bridge.Keep_what_was_heard phase)))
+    [ speaking
+    ; Bridge.Speaking { floor = room; quiet_since = Some 5.0 }
+    ; listening
+    ; Bridge.Calibrating { until = 1.0; floor = None }
+    ]
+;;
+
+(* The room is carried out of the capture so the operator can be told what it
+   was. Without it "nothing was heard" is the same sentence whether the
+   microphone is dead, the room is loud, or the transcriber failed. *)
+let test_an_ending_without_speech_carries_the_room_it_measured () =
+  match Bridge.end_at_deadline listening with
+  | Bridge.Ended_without_speech (Some floor) ->
+    check (float 0.5) "the room it was listening against" (-40.0)
+      (Bridge.db_of_amplitude floor)
+  | Bridge.Ended_without_speech None -> fail "the room was measured, so it must be reported"
+  | Bridge.Ended_after_speech | Bridge.Ended_by_operator _ ->
+    fail "listening with no speech must end without speech"
+;;
+
+(* Calibration can end before a single reading arrives -- a microphone that
+   delivers nothing keeps the capture there until the deadline. There is no
+   room to report then, and reporting one would be inventing it. *)
+let test_an_ending_during_calibration_reports_no_room_when_none_was_read () =
+  match Bridge.end_at_deadline (Bridge.Calibrating { until = 1.0; floor = None }) with
+  | Bridge.Ended_without_speech None -> ()
+  | Bridge.Ended_without_speech (Some floor) ->
+    failf "no reading arrived, yet %f was reported" floor
+  | Bridge.Ended_after_speech | Bridge.Ended_by_operator _ ->
+    fail "calibration with no speech must end without speech"
 ;;
 
 let () =
@@ -187,6 +297,42 @@ let () =
             "a pause that outlasts the window ends the capture"
             `Quick
             test_a_pause_that_outlasts_the_window_ends_the_capture
+        ] )
+    ; ( "the operator stops it"
+      , [ test_case
+            "a stop mid-sentence keeps what was said"
+            `Quick
+            test_a_stop_mid_sentence_keeps_what_was_said
+        ; test_case
+            "a stop during a pause keeps what was said"
+            `Quick
+            test_a_stop_during_a_pause_keeps_what_was_said
+        ; test_case
+            "a stop before any speech carries no transcript"
+            `Quick
+            test_a_stop_before_any_speech_carries_no_transcript
+        ; test_case
+            "a discard throws away even a full sentence"
+            `Quick
+            test_a_discard_throws_away_even_a_full_sentence
+        ; test_case
+            "stop and discard differ only once there is speech"
+            `Quick
+            test_stop_and_discard_differ_only_once_there_is_speech
+        ; test_case
+            "a stop and a deadline agree on whether there is speech"
+            `Quick
+            test_a_stop_and_a_deadline_agree_on_whether_there_is_speech
+        ] )
+    ; ( "what the ending reports"
+      , [ test_case
+            "an ending without speech carries the room it measured"
+            `Quick
+            test_an_ending_without_speech_carries_the_room_it_measured
+        ; test_case
+            "an ending during calibration reports no room when none was read"
+            `Quick
+            test_an_ending_during_calibration_reports_no_room_when_none_was_read
         ] )
     ; ( "running out of time"
       , [ test_case

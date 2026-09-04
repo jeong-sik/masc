@@ -175,6 +175,9 @@ let test_chat_hint_widths_keep_one_row_and_whole_items () =
         (Masc_tui_message_layout.scroll_hint ~scrolled_back:0
            ~older_exist:true)
       ~switch_hint:"" ~escape_hint:"Esc:list"
+      (* The quiet leave shares the row only while the draft is empty, so that
+         is the shape whose width has to fit. *)
+      ~leave_hint:"  Q:leave"
   in
   let render hints max_cells =
     Masc_tui_footer.line ~status ~dim:"\x1b[2m" ~reset:"\x1b[0m"
@@ -213,6 +216,7 @@ let test_chat_hint_widths_keep_one_row_and_whole_items () =
         (Masc_tui_message_layout.scroll_hint ~scrolled_back:999
            ~older_exist:true)
       ~switch_hint:"  Ctrl-G:next Keeper" ~escape_hint:"Esc:interrupt turn"
+      ~leave_hint:"  Q:leave"
   in
   let active = render active_hints 240 in
   check_at_most_cells "worst-case active footer fits 240 cells" 240 active;

@@ -9,11 +9,34 @@ type style =
   | Inbound
   | Keeper
   | Status
+  | Local
   | Journal
   | Error
   | Tool
   | Skill of skill_tone
   | Thinking
+
+(* Every style there is, beside the type rather than in the test that walks it.
+   The distinctness check reads this list, and a list kept a thousand lines
+   away in a test file is one a new variant slips past -- [Local] did, and the
+   check passed without ever looking at its mark. Adjacency is the whole
+   mechanism here; nothing in the language forces a variant to be listed. *)
+let all_styles =
+  [ User
+  ; Inbound
+  ; Keeper
+  ; Status
+  ; Local
+  ; Journal
+  ; Error
+  ; Tool
+  ; Thinking
+  ; Skill Skill_live
+  ; Skill Skill_used
+  ; Skill Skill_attention
+  ; Skill Skill_failure
+  ]
+;;
 
 type turn_rail =
   | Rail_opens
@@ -680,6 +703,9 @@ let speaker_mark : style -> string = function
   | Inbound -> "\xe2\x97\x80"   (* someone else sent this here *)
   | Keeper -> "\xe2\x97\x8f"    (* a keeper speaks *)
   | Status -> "?"
+  (* The same mark the composer prompt draws, because that is where this row
+     came from: the pane answering what was typed at it. *)
+  | Local -> "\xe2\x80\xba"
   | Journal -> "\xe2\x97\x88"   (* the parallel Memory journal lane *)
   | Error -> "\xe2\x9c\x97"
   | Tool -> "\xe2\x96\xa0"
@@ -772,17 +798,32 @@ let split_aligned_role_label ~style label =
   , String.sub after_mark 0 boundary
   , String.sub after_mark boundary (String.length after_mark - boundary) )
 
+(* #32984: the width gate below is derived from a chat row's fixed chrome,
+   not chosen. Before its body, a row pays the frame's border and padding
+   (4 cells -- [Masc_tui_frame.inner_width] is [cols - 4], pinned in the
+   layout tests), the body indent (2, in {!rows_of_entry}), the turn rail
+   ({!turn_rail_cells}), and the speaker/tool label column at its floor
+   ({!chat_role_label_column}). What remains is the body, and a body reads
+   when it keeps twenty cells: three or four English words per row, so a
+   tool summary wraps at word boundaries. Under the gate this replaced --
+   thirteen columns on a text-only contract -- a 22-column terminal left
+   four body cells and "returned" drew as "retu/rned".
+
+   The derivation assumes the default [Origin_bare] row. [Origin_inline]'s
+   clock spends six further body cells; it is a user toggle, so that spend
+   is visible and self-inflicted rather than gated. *)
+let chat_readable_body_cells = 20
+
+let chat_min_terminal_cols =
+  4 + 2 + turn_rail_cells + chat_role_label_column + chat_readable_body_cells
+
 let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
-  (* At thirteen columns the frame leaves nine content cells: two for the
-     body indent, four for the body itself, and three for a shortened source
-     such as […aa]. Eleven columns left one source cell, which could draw only
-     the omission marker and therefore admitted a chat pane with no identity. *)
   (* The fixed chrome costs eight rows. The title and operational identity use
      separate rows so a provider id cannot cut the title or context reading.
      Three history rows are the minimum that
      can show an oversized entry's identity/opening, an omission marker, and
      its latest output instead of silently dropping one of those facts. *)
-  terminal_cols >= 13
+  terminal_cols >= chat_min_terminal_cols
   && message_history_height ~terminal_rows ~status_rows >= 3
 
 let take_last count values =
@@ -1037,7 +1078,7 @@ let continued_mark : style -> string = function
 
    Reasoning is the Keeper's own, not a quotation, however folded it is. *)
 let shade_of_style : style -> shade = function
-  | Tool | Skill _ | Status | Journal -> Shade_quoted
+  | Tool | Skill _ | Status | Local | Journal -> Shade_quoted
   | User | Inbound | Keeper | Error | Thinking -> Shade_none
 
 let origin_gutter ~origin ~previous ~inner_width entry =

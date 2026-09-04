@@ -37,6 +37,17 @@ end
 type network_mode =
   | Network_none [@tla.symbol "Network_none"]
   | Network_inherit [@tla.symbol "Network_inherit"]
+  | Network_policy [@tla.symbol "Network_policy"]
+      (** Outbound traffic reaches a proxy the MASC server owns and nothing
+          else, and the proxy judges each destination against the keeper's
+          allowlist (RFC-0415).
+
+          The enforcement point is the backend's own network boundary, not an
+          environment variable: [HTTPS_PROXY] is advice, and a subprocess
+          carrying its own socket ignores advice. Measured 2026-09-04 on
+          Apple [container] 1.3.1, a guest on an [--internal] network cannot
+          reach 1.1.1.1:443 or a public address by raw TCP, and can reach a
+          listener on the host gateway. *)
 [@@deriving tla]
 
 let sandbox_profile_to_config = function
@@ -73,17 +84,19 @@ let valid_sandbox_profile_strings = Keeper_sandbox_config.valid_sandbox_profile_
 let network_mode_to_string = function
   | Network_none -> "none"
   | Network_inherit -> "inherit"
+  | Network_policy -> "policy"
 ;;
 
 let network_mode_of_string raw =
   match String.trim (String.lowercase_ascii raw) with
   | "none" -> Some Network_none
   | "inherit" -> Some Network_inherit
+  | "policy" -> Some Network_policy
   | _ -> None
 ;;
 
 (* Issue #8467: Variant SSOT for [network_mode]. *)
-let all_network_modes = [ Network_none; Network_inherit ]
+let all_network_modes = [ Network_none; Network_inherit; Network_policy ]
 let valid_network_mode_strings = List.map network_mode_to_string all_network_modes
 
 let default_network_mode_for_profile = function
@@ -92,6 +105,53 @@ let default_network_mode_for_profile = function
      separate decision the keeper TOML states outright. *)
   | Micro_vm -> Network_none
   | Remote_ssh -> Network_inherit
+;;
+
+(* Which profile and network mode may be held together, and the refusal for
+   the pair that may not. One function because the rule had two homes and only
+   one of them ran before a write: the keeper TOML loader refused
+   [remote_ssh] with [network_mode = "none"], while the keeper_up resolver
+   never compared the two at all. A create could therefore write a keeper TOML
+   that the next load of the same file rejected, and the only way out was to
+   hand-edit that file.
+
+   Every pair is written out rather than closed with a wildcard: a new profile
+   or a new mode fails to compile here until someone decides its answer. *)
+let network_mode_rejection profile mode =
+  match profile, mode with
+  (* Phase 1 SSH lane, Docker-parity hardening table in
+     docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md section
+     4.2: [remote_ssh] is transport-only, so the container network knobs are
+     not reproduced and the guest cannot be cut off from the network. Refusing
+     is what says so; accepting the knob would ignore it silently. Per-VM
+     egress policy arrives with the Phase 2 microVM backend. *)
+  | Remote_ssh, Network_none ->
+    Some
+      "remote_ssh_no_network_mode: sandbox_profile \"remote_ssh\" does \
+       not support network_mode = \"none\" (only \"inherit\" is \
+       accepted in Phase 1; per-VM egress policy arrives with the \
+       microVM backend)"
+  | Remote_ssh, Network_inherit -> None
+  (* Same reason as [none], and it does not soften with RFC-0415: an
+     endpoint's network is its own host's policy, so masc has no boundary
+     there to point at a proxy. *)
+  | Remote_ssh, Network_policy ->
+    Some
+      "remote_ssh_no_network_mode: sandbox_profile \"remote_ssh\" does not \
+       support network_mode = \"policy\" (an endpoint's network is its host's \
+       policy, not something masc sets; only \"inherit\" is accepted)"
+  | Docker, (Network_none | Network_inherit) -> None
+  (* Refused at create as well as at boot. Docker can express an internal
+     network, so the shape is plausible and the boundary is unmeasured
+     (RFC-0415); saying so while the keeper TOML is being written beats
+     saying it when the keeper first tries to start. *)
+  | Docker, Network_policy ->
+    Some
+      "docker_no_network_policy: sandbox_profile \"docker\" does not support \
+       network_mode = \"policy\" because the Docker egress boundary is \
+       unmeasured (RFC-0415). Use \"microvm\" for a policy lane, or \"none\" / \
+       \"inherit\" here."
+  | Micro_vm, (Network_none | Network_inherit | Network_policy) -> None
 ;;
 
 (* The observation-only gate fast path ({!Keeper_gate_readonly}) keys on this

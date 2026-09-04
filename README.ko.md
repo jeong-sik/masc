@@ -37,11 +37,11 @@ MASC(Multi-Agent Shared Context)는 여러 코딩 에이전트가 같이 쓰는 
 | **대시보드** | 브라우저에서 전체를 보고 운영자로서 조작할 때 | 서버가 같은 프로세스에서 `/dashboard/` 로 띄웁니다 |
 | **TUI** | 터미널에서 Keeper를 지켜보고 지시할 때. 코드와 diff도 여기서 봅니다 | `masc-tui`. 설치하면 `masc` 옆에 같이 깔립니다 |
 
-![MASC 터미널 UI](docs/screenshots/tui/2026-08-26/surfaces/01-overview.png)
+![MASC 터미널 UI](docs/screenshots/tui/2026-09-04/surfaces/01-overview.png)
 
 로컬에서 실행 중인 MASC의 터미널 UI입니다. Keeper 이름과 경로는 같은 글자 수의
 가짜 값으로 바꿨습니다. 다섯 장과 캡처 조건은
-[화면 목록](docs/screenshots/tui/2026-08-26/surfaces/README.md)에 있습니다.
+[화면 목록](docs/screenshots/tui/2026-09-04/surfaces/README.md)에 있습니다.
 
 ## 처음 실행하기
 
@@ -395,7 +395,7 @@ curl -fsS 'http://127.0.0.1:8935/health?full=1' \
 서버가 `/dashboard/`로 대시보드를 띄웁니다. 화면 구성은
 `dashboard/src/config/navigation.ts`에 정의돼 있습니다.
 
-![MASC 대시보드 개요](docs/screenshots/dashboard/2026-08-26/01-overview.png)
+![MASC 대시보드 개요](docs/screenshots/dashboard/2026-09-04/01-overview.png)
 
 로컬에서 실행 중인 MASC의 대시보드입니다. 운영 정보는 알아볼 수 없도록 바꿨습니다.
 
@@ -438,7 +438,7 @@ curl -fsS 'http://127.0.0.1:8935/health?full=1' \
 화면입니다.
 
 주 메뉴, Monitor, Work, Lab 화면을 캡처한
-[24개 화면 목록](docs/screenshots/dashboard/2026-08-26/README.md)도 있습니다.
+[24개 화면 목록](docs/screenshots/dashboard/2026-09-04/README.md)도 있습니다.
 
 ## 저장소 구조
 

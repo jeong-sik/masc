@@ -232,6 +232,8 @@
   test_keeper_chat_store
   test_keeper_chat_blocks
   test_keeper_chat_event_log
+  test_keeper_chat_journal_audit
+  test_keeper_chat_replay
   test_keeper_chat_media_store
   test_keeper_external_attention
   test_keeper_waiting_inventory
@@ -579,6 +581,8 @@
   test_keeper_chat_store
   test_keeper_chat_blocks
   test_keeper_chat_event_log
+  test_keeper_chat_journal_audit
+  test_keeper_chat_replay
   test_keeper_chat_media_store
   test_keeper_external_attention
   test_keeper_waiting_inventory
@@ -3142,6 +3146,26 @@
  (libraries alcotest masc_tui_gate_text))
 
 (test
+ (name test_egress_host)
+ (modules test_egress_host)
+ (libraries alcotest masc.egress_host))
+
+(test
+ (name test_egress_proxy_decision)
+ (modules test_egress_proxy_decision)
+ (libraries alcotest masc.egress_host masc.egress_proxy_decision masc.string_util))
+
+(test
+ (name test_egress_allowlist_toml)
+ (modules test_egress_allowlist_toml)
+ (libraries alcotest masc.runtime masc.egress_host masc.string_util))
+
+(test
+ (name test_egress_proxy_net)
+ (modules test_egress_proxy_net)
+ (libraries alcotest eio eio_main masc.egress_host masc.egress_proxy_net))
+
+(test
  (name test_tui_gate_fold)
  (modules test_tui_gate_fold)
  (libraries alcotest masc_tui_types masc_tui_gate_text))
@@ -3415,6 +3439,16 @@
  (name test_tui_editor)
  (modules test_tui_editor)
  (libraries alcotest unix masc_tui_editor))
+
+(test
+ (name test_masc_cli_keeper_create)
+ (modules test_masc_cli_keeper_create)
+ (libraries
+  alcotest
+  masc
+  masc_cli_keeper_create
+  masc_keeper_types_profile_sandbox
+  yojson))
 
 (test
  (name test_tui_keeper_selection)

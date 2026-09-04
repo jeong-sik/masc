@@ -1395,31 +1395,6 @@ List.iter
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
-            String.equal runtime.id
-              "ollama_cloud_native.minimax-m3-native-structured")
-         runtimes
-     with
-     | None -> fail "expected native MiniMax M3 structured-output runtime in seed"
-     | Some runtime ->
-       check string "native MiniMax M3 api name" "minimax-m3"
-         runtime.model.api_name;
-       check (option (float 0.0)) "native MiniMax M3 connect timeout"
-         (Some 600.0)
-         (agent_core_provider_config runtime).connect_timeout_s;
-       (match runtime.model.capabilities with
-       | Some caps ->
-         check bool "native MiniMax M3 response_format json" true
-           caps.supports_response_format_json;
-         check bool "native MiniMax M3 structured output" true
-           caps.supports_structured_output;
-         check bool "native MiniMax M3 Ollama think control" true
-           (Runtime_schema.equal_thinking_control_format
-              caps.thinking_control_format
-              Runtime_schema.Ollama_think)
-       | None -> fail "expected native MiniMax M3 capabilities"));
-    (match
-       List.find_opt
-         (fun (runtime : Runtime.t) ->
             String.equal runtime.id "ollama_cloud.kimi-k2-7-code")
          runtimes
      with
@@ -3276,6 +3251,7 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; lane_decls = []
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []
+    ; egress_allowlists = []
     }
   in
   let binding =

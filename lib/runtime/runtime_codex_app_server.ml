@@ -173,15 +173,29 @@ type error =
       ; turn_accepted : bool
       }
 
-(* The app-server names its sandbox profile with a leading colon; the CLI
-   surface (-s read-only|workspace-write) proves both modes exist. A wrong
-   profile string fails thread/start with a typed protocol error — loud, not
-   silent. [Native_none] never reaches here: neither Codex nor its caller
-   can disable the built-in tools, so the keeper layer rejects it first and
-   this function refuses it as config. *)
+(* These are named permissions profile ids, which the app-server keeps in a
+   different value space from sandbox modes. [ThreadStartParams] carries both
+   and admits only one: [permissions] is "Named profile id for this thread.
+   Cannot be combined with `sandbox`." The field list below writes
+   [permissions], so a [SandboxMode] value here names nothing.
+
+   The ids are read off the app-server rather than guessed. codex-cli 0.153.2,
+   [permissionProfile/list] over stdio (initialize, initialized, list — no
+   thread and no prompt) answers with exactly three:
+     ":read-only", ":workspace", ":danger-full-access".
+   The CLI's -s read-only|workspace-write|danger-full-access is [SandboxMode],
+   the [sandbox] field's vocabulary; "workspace-write" is absent from the
+   profile list and from the binary's own profile table. [Native_full] takes
+   ":workspace", which the vendor describes as allowing "writes inside the
+   active workspace roots and system temp directories"
+   (https://learn.chatgpt.com/docs/permissions).
+
+   [Native_none] never reaches here: neither Codex nor its caller can disable
+   the built-in tools, so the keeper layer rejects it first and this function
+   refuses it as config. *)
 let permissions_profile_of_posture = function
   | Runtime_native_tools.Native_read -> Ok ":read-only"
-  | Runtime_native_tools.Native_full -> Ok ":workspace-write"
+  | Runtime_native_tools.Native_full -> Ok ":workspace"
   | Runtime_native_tools.Native_none ->
     Error
       (Invalid_config

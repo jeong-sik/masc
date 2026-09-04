@@ -20,6 +20,31 @@ val unsupported_docker_flags : string list
     unknown option rather than ignoring it, so this list is what a reader
     must weigh when choosing the profile, not a runtime fallback. *)
 
+val policy_network_name : string
+(** The host-only network a [Network_policy] guest is attached to. It carries
+    no allowlist of its own: it removes every route except the host gateway,
+    and the keeper's allowlist is judged by the proxy behind that gateway. *)
+
+val policy_network_create_argv_for : Keeper_microvm_backend.t -> (string list, string) result
+(** Create the host-only network the policy lane attaches to. Only the
+    backend that carries the lane answers; the others refuse, so a backend
+    that gained a policy arm without gaining this fails here rather than
+    booting a guest onto a network nobody created. *)
+
+val policy_network_list_argv_for : Keeper_microvm_backend.t -> (string list, string) result
+(** List networks, to see whether {!policy_network_name} already exists. *)
+
+val policy_network_present : listing:string -> (bool, string) result
+(** Whether [container network list --format json] carries
+    {!policy_network_name}. Compared as a decoded [id], so nothing depends on
+    how the CLI spaces a column, and a network whose name contains this one's
+    cannot answer for it.
+
+    Unparseable output is an error rather than "absent": reading a failed
+    decode as absence would drive a create against a network that may already
+    exist, and the guest would then be refused with a message about creation
+    rather than about the listing that could not be read. *)
+
 val network_args_for :
   Keeper_microvm_backend.t ->
   dns:string option ->

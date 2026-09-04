@@ -26,7 +26,7 @@ lib/dashboard_tool_source_freshness.ml:40
 lib/dashboard/dashboard_verification.ml:47
 lib/eval_calibration.ml:31
 lib/eval_calibration.ml:40
-lib/eval_calibration.ml:53
+lib/eval_calibration.ml::verdict_of_string
 lib/gate/channel_gate_discord_state.ml:282
 lib/gate/channel_gate_metrics.ml:36
 lib/keeper/keeper_tool_board_runtime.ml::string_arg

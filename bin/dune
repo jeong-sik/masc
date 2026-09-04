@@ -9,6 +9,9 @@
  (libraries
   masc
   masc.auth
+  masc.http_client
+  masc_cli_keeper_create
+  masc_tui_editor
   masc.crypto_rng
   masc.dashboard
   masc.operator
@@ -44,6 +47,7 @@
   fmt
   yojson
   str
+  uri
   cohttp
   cohttp-eio
   masc.prompt_registry
@@ -806,6 +810,18 @@
  (wrapped false)
  (modules masc_tui_editor)
  (libraries unix))
+
+;; The declaration [masc keeper-create] sends and the answer it reads, both
+;; pure, so the flag surface is a test rather than a running server.
+(library
+ (name masc_cli_keeper_create)
+ (wrapped false)
+ (modules masc_cli_keeper_create)
+ (libraries
+  masc
+  masc_core
+  masc_keeper_types_profile_sandbox
+  yojson))
 
 (library
  (name masc_tui_keeper_config)

@@ -20,12 +20,12 @@ val create_response_json :
   Yojson.Safe.t
 (** The envelope a successful create hands back.
 
-    It names the isolation the keeper landed on. [network_mode] is not a
-    [keeper_up] argument — it is dashboard-owned — so a keeper created through
-    this tool always takes its sandbox profile's default, and both [docker]
-    and [microvm] default to [none]. This envelope is the only point at which
-    the creating operator learns that, so the two fields are part of the
-    contract rather than decoration. *)
+    It names the isolation the keeper landed on. [network_mode] is a
+    [keeper_up] argument; when the caller omits it the keeper takes its
+    sandbox profile's default, and both [docker] and [microvm] default to
+    [none]. This envelope is where the creating operator learns which of the
+    two happened, so the two fields are part of the contract rather than
+    decoration. *)
 
 (** Create a new keeper from parsed args: build initial meta,
     write checkpoint, start keepalive, return the [keeper_up]

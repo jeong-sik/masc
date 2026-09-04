@@ -9,6 +9,8 @@ let describe = function
   | Command.Task_missing_title -> "task-missing-title"
   | Command.Help -> "help"
   | Command.Open_settings -> "open-settings"
+  | Command.Open_diff -> "open-diff"
+  | Command.Open_changes -> "open-changes"
   | Command.Switch_keeper name -> "keeper:" ^ name
   | Command.Switch_keeper_missing_name -> "keeper-missing-name"
   | Command.Interrupt_turn -> "interrupt"
@@ -70,6 +72,8 @@ let test_pane_commands_parse_by_word () =
   check (list string) "pane commands"
     [ "help"
     ; "open-settings"
+    ; "open-diff"
+    ; "open-changes"
     ; "keeper:orbiter"
     ; "keeper-missing-name"
     ; "interrupt"
@@ -95,6 +99,8 @@ let test_pane_commands_parse_by_word () =
        (fun text -> describe (Command.parse text))
        [ "/help"
        ; "/settings"
+       ; "/diff"
+       ; "/changes"
        ; "/keeper orbiter"
        ; "/keeper   "
        ; "/interrupt"
@@ -589,6 +595,61 @@ let test_autocomplete_sub_arguments () =
   check (option string) "empty keeper list yields none" None
     (Command.autocomplete ~keeper_names:[] "/keeper s")
 
+let test_autocomplete_prev_direction () =
+  check (option string) "prev on /t wraps to last candidate"
+    (Some "/tools ") (Command.autocomplete ~direction:Command.Prev "/t");
+  check (option string) "prev on /tools cycles to thinking"
+    (Some "/thinking ") (Command.autocomplete ~direction:Command.Prev "/tools");
+  check (option string) "prev on /thinking cycles to task"
+    (Some "/task ") (Command.autocomplete ~direction:Command.Prev "/thinking");
+  check (option string) "prev on /thinking  wraps to full"
+    (Some "/thinking full") (Command.autocomplete ~direction:Command.Prev "/thinking ");
+  check (option string) "prev on /thinking full cycles to folded"
+    (Some "/thinking folded") (Command.autocomplete ~direction:Command.Prev "/thinking full");
+  check (option string) "prev on /thinking folded cycles to hidden"
+    (Some "/thinking hidden") (Command.autocomplete ~direction:Command.Prev "/thinking folded");
+  let keeper_names = [ "sol-xhigh"; "roger" ] in
+  check (option string) "prev on keeper wraps to last keeper"
+    (Some "/keeper roger") (Command.autocomplete ~direction:Command.Prev ~keeper_names "/keeper ")
+
+let test_is_slash_navigable () =
+  check bool "empty string is not navigable" false
+    (Command.is_slash_navigable "");
+  check bool "plain text is not navigable" false
+    (Command.is_slash_navigable "hello world");
+  check bool "bare slash is navigable" true
+    (Command.is_slash_navigable "/");
+  check bool "/t prefix is navigable" true
+    (Command.is_slash_navigable "/t");
+  check bool "/task with empty space is navigable (cycles siblings)" true
+    (Command.is_slash_navigable "/task ");
+  check bool "/task with free text is not navigable" false
+    (Command.is_slash_navigable "/task Buy milk at store");
+  check bool "/thinking with space is navigable" true
+    (Command.is_slash_navigable "/thinking ");
+  check bool "/thinking h is navigable" true
+    (Command.is_slash_navigable "/thinking h");
+  check bool "/thinking hidden[space] is not navigable (arg complete)" false
+    (Command.is_slash_navigable "/thinking hidden ");
+  check bool "/unknown is not navigable" false
+    (Command.is_slash_navigable "/xyz")
+
+let test_autocomplete_sequential_cycling () =
+  let step0 = "/t" in
+  let step1 = Command.autocomplete step0 in
+  check (option string) "step 1: /t -> /task " (Some "/task ") step1;
+  let step2 = Command.autocomplete (Option.get step1) in
+  check (option string) "step 2: /task  -> /thinking " (Some "/thinking ") step2;
+  let step3 = Command.autocomplete (Option.get step2) in
+  check (option string) "step 3: /thinking  -> /thinking hidden" (Some "/thinking hidden") step3;
+  let step4 = Command.autocomplete (Option.get step3) in
+  check (option string) "step 4: /thinking hidden -> /thinking folded" (Some "/thinking folded") step4;
+  let step5 = Command.autocomplete (Option.get step4) in
+  check (option string) "step 5: /thinking folded -> /thinking full" (Some "/thinking full") step5;
+  let step6 = Command.autocomplete (Option.get step5) in
+  check (option string) "step 6: /thinking full wraps -> /thinking hidden" (Some "/thinking hidden") step6
+
+
 (* The cancel contract: exit-class on masc_transition, so the one typed
    reason must arrive as both [reason] and the required non-empty
    [handoff_context.summary]. A builder that dropped the summary would pass
@@ -691,6 +752,12 @@ let () =
             test_autocomplete_trailing_space_subargument_not_mutated
         ; test_case "autocomplete sub arguments" `Quick
             test_autocomplete_sub_arguments
+        ; test_case "autocomplete prev direction" `Quick
+            test_autocomplete_prev_direction
+        ; test_case "is slash navigable predicate" `Quick
+            test_is_slash_navigable
+        ; test_case "autocomplete sequential cycling" `Quick
+            test_autocomplete_sequential_cycling
         ] )
     ; ( "tools/call"
       , [ test_case "cancel arguments carry the reason as summary" `Quick

@@ -504,12 +504,20 @@ let test_input_cursor_uses_visible_terminal_cells () =
     (supported 13 80 3);
   check bool "status frame keeps three history rows" true
     (supported 14 80 3);
-  check bool "twelve columns cannot preserve a source suffix" false
-    (supported 30 12 0);
-  check bool "thirteen columns preserve a source suffix" true
-    (supported 30 13 0);
-  check int "the minimum terminal leaves nine framed content cells" 9
-    (Frame.inner_width ~cols:13)
+  (* #32984: the width gate derives from a row's fixed chrome -- frame
+     border and padding, body indent, turn rail, the label column floor --
+     plus a readable body floor, and [Layout.chat_min_terminal_cols] carries
+     the result. The thirteen-column contract this replaced was text-only
+     (two indent, four body, three for a shortened source); label-bearing
+     rows shredded mid-word there. *)
+  check bool "one column under the chat minimum is gated out" false
+    (supported 30 (Layout.chat_min_terminal_cols - 1) 0);
+  check bool "the chat minimum is admitted" true
+    (supported 30 Layout.chat_min_terminal_cols 0);
+  (* Frame inner width minus indent (2), rail (2), and the label column
+     floor (10) is the body the gate guarantees. *)
+  check int "the minimum terminal leaves a twenty-cell framed body" 20
+    (Frame.inner_width ~cols:Layout.chat_min_terminal_cols - 2 - 2 - 10)
 
 let test_chat_history_height_uses_the_shared_chrome () =
   check int "46-row pane exposes 38 transcript rows" 38
@@ -1707,13 +1715,30 @@ let test_a_continuation_does_not_borrow_the_reasoning_glyph () =
 
 (* Every speaker draws a different mark. A shared glyph is how the pane came to
    say two things with one shape. *)
+(* Reads [Layout.all_styles] rather than a list of its own. The list here
+   named eight styles and had done since before Skill had four tones, so the
+   check passed over every mark it did not mention -- [Local] arrived and was
+   never compared against anything.
+
+   Skill is one speaker in four states, and [Skill_failure] deliberately draws
+   the error mark: a skill that failed is a failure, and the state marks are
+   pinned separately by the test below. So the tones collapse to one entry
+   here, and what is checked is that no two *speakers* look alike. *)
 let test_every_speaker_mark_is_distinct () =
-  let marks =
-    List.map Layout.speaker_mark
-      [ Layout.User; Layout.Inbound; Layout.Keeper; Layout.Status
-      ; Layout.Journal; Layout.Error; Layout.Tool; Layout.Thinking
-      ]
+  let speakers =
+    List.filter
+      (function
+        | Layout.Skill Layout.Skill_live -> true
+        | Layout.Skill
+            (Layout.Skill_used | Layout.Skill_attention | Layout.Skill_failure) ->
+            false
+        | Layout.User | Layout.Inbound | Layout.Keeper | Layout.Status
+        | Layout.Local | Layout.Journal | Layout.Error | Layout.Tool
+        | Layout.Thinking ->
+            true)
+      Layout.all_styles
   in
+  let marks = List.map Layout.speaker_mark speakers in
   check int "no two speakers share a mark" (List.length marks)
     (List.length (List.sort_uniq String.compare marks))
 

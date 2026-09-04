@@ -91,6 +91,11 @@ type keeper_chat_stream_request = {
   channel_workspace_id : string;
   attachments : Keeper_chat_store.attachment list;
   direct_message : Keeper_invocation_contract.direct_message;
+  since_seq : int option;
+      (** A reconnecting client re-POSTs the same [request_id] with the last
+          journal seq it received; the handler replays the journaled suffix
+          before the live sink attaches (RFC-0412 §3.2). [-1] asks for the
+          whole turn. Absent on a first submit. *)
 }
 (** Parsed payload of a keeper chat-stream HTTP request.
     [message] is the text fallback used by the existing direct keeper
@@ -325,6 +330,19 @@ type operation_wire_stream = Wire_started | Wire_terminal_sent
 
 module For_testing : sig
   val parse_request : string -> (keeper_chat_stream_request, string) result
+
+  (** Reconnect dedup: [false] only for a seq the replay already wrote. *)
+  val live_event_is_new : replayed:(int, unit) Hashtbl.t -> int option -> bool
+
+  (** The frames a reconnect replays for [since_seq], or [] when the journal
+      is missing, unreadable, corrupt, or holds an event the projection
+      refuses; never raises (except cancellation). *)
+  val journal_replay_frames :
+    base_path:string ->
+    keeper_name:string ->
+    operation_id:string ->
+    since_seq:int ->
+    (int * Ag_ui.event) list
   val has_connector_context : keeper_chat_stream_request -> bool
   val has_external_speaker : keeper_chat_stream_request -> bool
   val message_for_request : keeper_chat_stream_request -> string
@@ -387,7 +405,10 @@ module For_testing : sig
     execution:Keeper_owner.operation_execution ->
     unit
   val register_operation_live_sink :
-    operation_id:string -> (Ag_ui.event -> unit) -> unit -> unit
+    operation_id:string ->
+    (seq:int option -> Ag_ui.event -> unit) ->
+    unit ->
+    unit
 end
 
 val handle_keeper_ask_answer :

@@ -143,10 +143,30 @@ type level_phase =
   | Listening of { floor : float }
   | Speaking of { floor : float; quiet_since : float option }
 
+(** Why a recording ended. What happens to it turns on whether speech was
+    heard, not on which of these it was: a capture stopped mid-sentence, and
+    one that ran out of time mid-sentence, both carry a sentence.
+    [Ended_by_operator] therefore means a stop that came before anything was
+    said. *)
+(** What the operator asked for when they ended a recording early. One variant
+    rather than two flags: a stop and a discard cannot both be requested, and a
+    pair of booleans would let them be. *)
+type stop_request =
+  | Keep_what_was_heard
+  | Discard
+
 type capture_end =
   | Ended_after_speech
-  | Ended_without_speech
-  | Ended_by_operator
+  | Ended_without_speech of float option
+  | Ended_by_operator of float option
+      (** Both carry the room level the capture settled on, as a linear RMS
+          amplitude, or [None] when the recorder never produced a sample to
+          measure.
+
+          It is carried because an empty draft is the same sight whether the
+          microphone heard nothing, the room sat above the threshold, or the
+          transcriber failed. The two levels separate those: "room -38.2 dB,
+          speech had to clear -32.2 dB" is a thing to act on. *)
 
 type level_step =
   | Continue of level_phase
@@ -172,13 +192,24 @@ val end_at_deadline : level_phase -> capture_end
     cut off mid-sentence still carries speech; one that never rose above the
     room is a recording of a room, and must not be transcribed. *)
 
+val end_at_operator_stop : stop_request -> level_phase -> capture_end
+(** The same question asked of a stop.
+
+    [Keep_what_was_heard] mid-sentence is "send what I said", which is usually
+    why the key is pressed -- the alternative is waiting out
+    {!Voice_config.trailing_silence_seconds}. Before any speech it is an abort.
+
+    [Discard] is an abort whatever was heard. It is the only place in the
+    capture path where the operator says what they want rather than the levels
+    inferring it. *)
+
 val record_and_transcribe :
   agent_id:string ->
   ?timeout_sec:float ->
   ?language_code:string ->
   ?noise_floor:float ->
   ?on_level:(float -> unit) ->
-  ?should_stop:(unit -> bool) ->
+  ?should_stop:(unit -> stop_request option) ->
   unit ->
   (Yojson.Safe.t, string) result
 (** Record from the microphone (with beep tones) and transcribe via STT.
@@ -194,8 +225,12 @@ val record_and_transcribe :
     [Float.neg_infinity] while there is no audio to measure and once more when
     the capture ends.
 
-    [should_stop] is polled at the same rate; returning [true] ends the
-    recording and yields no transcript.
+    [should_stop] is polled at the same rate. [Keep_what_was_heard] ends the
+    recording and still transcribes what was said -- the usual reason to stop
+    a capture is that the speaker has finished and does not want to wait out
+    {!Voice_config.trailing_silence_seconds}. [Discard] throws the recording
+    away. Either one before any speech yields no transcript, which is what
+    keeps a room away from a transcriber that answers silence with a sentence.
 
     [noise_floor] reuses an RMS level already measured, skipping calibration.
     Omitted, the room is read from the capture's own opening.

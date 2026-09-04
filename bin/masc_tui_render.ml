@@ -36,6 +36,8 @@ module Planning_detail = Masc_tui_planning_detail
 module Link = Masc_tui_link
 module Status = Masc.Keeper_status_runtime
 module Render_tools = Masc_tui_render_tools
+module Span = Masc_tui_span
+module Diff = Masc_tui_diff
 
 let json_assoc_member_opt = Masc_tui_json.member_opt
 
@@ -502,8 +504,8 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
              (Printf.sprintf "[%s]  %s  %s" timestamp
                 (String.trim role_label) request_label)
        | Message_layout.User | Message_layout.Inbound | Message_layout.Keeper
-       | Message_layout.Status | Message_layout.Journal | Message_layout.Error
-       | Message_layout.Skill _ ->
+       | Message_layout.Status | Message_layout.Local | Message_layout.Journal
+       | Message_layout.Error | Message_layout.Skill _ ->
            (* [role_label] arrives in a fixed fourteen-to-eighteen cell column
               so the request column stays put down the pane. The label sits
               beside its mark and the remaining padding follows the badge;
@@ -7701,7 +7703,8 @@ let turn_rail_of ~(edge : Masc_tui_types.turn_edge)
         ->
           Message_layout.Rail_does
       | Message_layout.User | Message_layout.Inbound | Message_layout.Keeper
-      | Message_layout.Status | Message_layout.Journal | Message_layout.Error ->
+      | Message_layout.Status | Message_layout.Local | Message_layout.Journal
+      | Message_layout.Error ->
           Message_layout.Rail_says)
 
 let compute_keeper_message_layout_entries (state : state) ~keeper_name
@@ -7720,6 +7723,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
     | Message_keeper -> Keeper_chat.terminal_safe_text message.me_keeper_name
     | Message_autonomous -> Keeper_chat.terminal_safe_text message.me_keeper_name
     | Message_status -> "STATUS"
+    | Message_local -> "LOCAL"
     | Message_error -> "ERROR"
     | Message_tool -> "TOOLS"
     | Message_skill _ -> "SKILL"
@@ -7775,7 +7779,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                     (Keeper_chat_transcript.project_tool_block
                        (tool_projection_mode state) block))
           | Message_user _ | Message_keeper | Message_autonomous
-          | Message_status | Message_memory | Message_error
+          | Message_status | Message_local | Message_memory | Message_error
           | Message_skill _ | Message_thinking ->
               None
         in
@@ -7785,6 +7789,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
           | Message_user (Sent_by_other _) -> Message_layout.Inbound
           | Message_keeper | Message_autonomous -> Message_layout.Keeper
           | Message_status -> Message_layout.Status
+          | Message_local -> Message_layout.Local
           | Message_memory -> Message_layout.Journal
           | Message_error -> Message_layout.Error
           | Message_tool -> (
@@ -7844,7 +7849,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                   | None -> message.me_text))
           | Message_thinking | Message_user _ | Message_keeper
           | Message_autonomous
-          | Message_status | Message_error ->
+          | Message_status | Message_local | Message_error ->
               message.me_text
         in
         (* What the links in this message point at, on rows of their own
@@ -7863,8 +7868,8 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
           match message.me_role with
           | Message_tool | Message_skill _ -> body
           | Message_thinking | Message_user _ | Message_keeper
-          | Message_autonomous | Message_status | Message_error
-          | Message_memory -> (
+          | Message_autonomous | Message_status | Message_local
+          | Message_error | Message_memory -> (
               let seen = Hashtbl.create 4 in
               let labels =
                 Message_layout.bare_urls body
@@ -9145,6 +9150,21 @@ let render_keeper_message (state : state) =
            | Masc_tui_esc_interrupt.Leave -> return_hint ())
       | None -> return_hint ()
     in
+    (* Named beside the empty-draft Q arm in the dispatch, and reading the
+       same condition it does, chat focus included: the hint exists exactly
+       when the key would leave, and is absent exactly when Q is a letter
+       someone is typing, the roster holds focus, or something is mid-flight
+       for Esc to settle (a capture, a half-edited queued line). The compact
+       footer omits it for width, not because the key went away -- the help
+       sheet still names it. *)
+    let leave_hint =
+      if state.keeper_message_focus = Right_pane
+         && Buffer.length state.msg_input = 0
+         && Option.is_none state.msg_recall_replaces
+         && Option.is_none state.voice_capture
+      then "  Q:leave"
+      else ""
+    in
     let switch_hint =
       match next_keeper_message_target state with
       | Masc_tui_keeper_selection.No_alternative -> ""
@@ -9201,7 +9221,13 @@ let render_keeper_message (state : state) =
               db
               Ansi.reset
         in
-        Printf.sprintf "%s  %s^Y again to stop%s" bar Ansi.dim Ansi.reset
+        (* Both endings, because they are not the same and the difference is
+           what the operator loses. ^Y keeps the sentence; Esc abandons it. *)
+        Printf.sprintf
+          "%s  %s^Y send · Esc discard%s"
+          bar
+          Ansi.dim
+          Ansi.reset
       (* Between utterances in continuous mode: on, but nothing recording. A
          mode that is idle looks exactly like one that is off without this. *)
       | None when state.voice_continuous <> None ->
@@ -9211,7 +9237,7 @@ let render_keeper_message (state : state) =
           Ansi.reset
       | None ->
       if state.keeper_message_focus = Left_pane then
-        "j/k or Up/Down:move  Enter:open  Right/l/Esc:chat"
+        "Up/Down:move  Enter:open  Right/Esc:chat"
       else if chat_cols < 120 then
         let compact_enter_hint =
           match disposition with
@@ -9230,7 +9256,7 @@ let render_keeper_message (state : state) =
           ~scroll_hint:compact_scroll_hint ~escape_hint
       else
         Masc_tui_footer.chat_hints ~enter_hint ~scroll_hint ~switch_hint
-          ~escape_hint
+          ~escape_hint ~leave_hint
     in
     Buffer.add_string chat_buf
       (footer_line state ~max_cells:chat_cols ~hints:footer_hints);
@@ -10065,11 +10091,11 @@ let render_harness_list (state : state) =
                     (String.sub verdict (at + 1)
                        (String.length verdict - at - 1)) )
           in
-          let line =
-            "  "
-            ^ Render_schedule.harness_row
-                ~verdict_style:(semantic_status_color verdict) ~reason_width
-                { Render_schedule.hrow_time =
+            let line =
+              "  "
+              ^ Render_schedule.harness_row
+                  ~verdict_style:(semantic_status_color ruling) ~reason_width
+                  { Render_schedule.hrow_time =
                     Terminal_text.clock_timestamp
                       (Masc_domain.iso8601_of_unix_seconds v.hv_at)
                 ; hrow_task = Terminal_text.single_line v.hv_task_id
@@ -10189,11 +10215,11 @@ let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
         @ wrapped "Why the requested evaluator did not run" reason
   in
   let ruling, reason =
-    let whole = Terminal_text.single_line verdict.hv_verdict in
+    let whole = verdict.hv_verdict in
     match String.index_opt whole ':' with
-    | None -> whole, ""
+    | None -> Terminal_text.single_line whole, ""
     | Some at ->
-        ( String.sub whole 0 at
+        ( Terminal_text.single_line (String.sub whole 0 at)
         , String.trim
             (String.sub whole (at + 1) (String.length whole - at - 1)) )
   in
@@ -10205,14 +10231,14 @@ let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
   @ [ field "Agent" verdict.hv_agent
     ; Ansi.dim, ""
     ; Ansi.bold, "  DECISION"
-    ; field ~style:(semantic_status_color verdict.hv_verdict) "Verdict" ruling
+    ; field ~style:(semantic_status_color ruling) "Verdict" ruling
     ; field "Gate" verdict.hv_gate
     ; field "Evaluator" verdict.hv_evaluator
     ; field "Recorded"
         (Masc_domain.iso8601_of_unix_seconds verdict.hv_at)
     ]
-  (* The reason a task was rejected is the sentence the operator came here to
-     read, and it runs long. [field] is one [single_line], so it was cut at
+  (* The reason a task was rejected or approved is the sentence the operator came
+     here to read, and it runs long. [field] is one [single_line], so it was cut at
      the pane's width and the rest existed nowhere on the surface. The title
      above already wraps for the same reason. *)
   @ (if reason = "" then [] else wrapped "Reason" reason)
@@ -10995,70 +11021,344 @@ let repository_change_status (row : Masc.Tui_decode.repository_change) =
     | false, true -> "worktree"
     | false, false -> "unknown"
 
-let render_repository_changes (state : state) =
-  let terminal_rows, cols = get_terminal_size () in
-  let changes =
-    match state.repository_changes with
-    | Some snapshot -> snapshot.Masc.Tui_decode.rcs_changes
-    | None -> []
+let box_line_span buf cols span =
+  let inner = framed_inner_width cols in
+  Buffer.add_string buf
+    (Printf.sprintf "  %s  \n" (Span.render (Span.pad_to inner Span.plain (Span.truncate inner span))))
+
+type change_context = {
+  ctx_keeper : string option;
+  ctx_task_id : string option;
+  ctx_task_title : string option;
+  ctx_goal_id : string option;
+  ctx_goal_title : string option;
+  ctx_turn : int option;
+}
+
+let file_change_matches_path (path : string) (fc : Masc.Tui_decode.file_change) =
+  match fc.Masc.Tui_decode.fc_location with
+  | Masc.Tui_decode.Fc_in_repo { relative_path; _ } -> String.equal relative_path path
+  | Masc.Tui_decode.Fc_in_bundle { bundle_path } -> String.equal bundle_path path
+  | Masc.Tui_decode.Fc_at_absolute_path { path = p } ->
+      String.equal p path || String.equal (Filename.basename p) (Filename.basename path)
+
+let resolve_change_context (state : state) ~(path_opt : string option) : change_context =
+  let matched_change =
+    match path_opt, state.msg_file_changes with
+    | Some path, Some snapshot ->
+        List.find_opt
+          (file_change_matches_path path)
+          snapshot.Masc.Tui_decode.fcs_changes
+    | _ -> None
   in
-  let scope_name =
-    match state.repository_changes_scope, state.repositories with
-    | Some Tui_decode.Repository_change_project, _ -> "Project workspace"
-    | Some (Tui_decode.Repository_change_repository id), Some snapshot ->
+  let keeper =
+    match matched_change with
+    | Some fc -> Some fc.Masc.Tui_decode.fc_keeper
+    | None -> state.msg_target_keeper_name
+  in
+  let keeper_record =
+    match keeper with
+    | Some name ->
+        List.find_opt
+          (fun (k : Masc.Tui_decode.keeper) -> String.equal k.Masc.Tui_decode.k_name name)
+          state.keepers
+    | None -> None
+  in
+  let task_id =
+    match matched_change with
+    | Some fc when Option.is_some fc.Masc.Tui_decode.fc_task_id -> fc.Masc.Tui_decode.fc_task_id
+    | _ ->
+        (match keeper_record with
+         | Some k -> k.Masc.Tui_decode.k_current_task_id
+         | None -> None)
+  in
+  let turn =
+    match matched_change with
+    | Some fc -> fc.Masc.Tui_decode.fc_turn
+    | None -> None
+  in
+  let task =
+    match task_id with
+    | Some tid ->
+        List.find_opt
+          (fun (t : Masc.Tui_decode.task) -> String.equal t.Masc.Tui_decode.id tid)
+          state.tasks
+    | None -> None
+  in
+  let task_title = Option.map (fun (t : Masc.Tui_decode.task) -> t.Masc.Tui_decode.title) task in
+  let goal_id =
+    match task with
+    | Some t -> List.nth_opt t.Masc.Tui_decode.goal_ids 0
+    | None -> None
+  in
+  let goal_title =
+    match goal_id, state.planning with
+    | Some gid, Some snapshot ->
         (match
            List.find_opt
-             (fun (repo : Masc.Tui_decode.repository) ->
-               String.equal repo.rp_id id)
-             snapshot.rs_repositories
+             (fun (g : planning_goal) -> String.equal g.pg_id gid)
+             snapshot.pl_goals
          with
-         | Some repo -> repo.rp_name
-         | None -> id)
-    | Some (Tui_decode.Repository_change_repository id), None -> id
-    | None, _ -> "Git workspace"
+         | Some g -> Some g.pg_title
+         | None -> None)
+    | _ -> None
   in
-  let title =
-    Printf.sprintf " MASC Git Changes — %s (%d)  %s"
-      (Terminal_text.single_line scope_name) (List.length changes)
+  { ctx_keeper = keeper
+  ; ctx_task_id = task_id
+  ; ctx_task_title = task_title
+  ; ctx_goal_id = goal_id
+  ; ctx_goal_title = goal_title
+  ; ctx_turn = turn
+  }
+
+let tree_diff_row_span ~width (row : Masc.Tui_decode.git_diff_row) =
+  let background, marker =
+    match row.Masc.Tui_decode.gdr_kind with
+    | Masc.Tui_decode.Gd_removed -> (Span.bg Theme.Syntax.diff_removed_bg, "-")
+    | Masc.Tui_decode.Gd_added -> (Span.bg Theme.Syntax.diff_added_bg, "+")
+    | Masc.Tui_decode.Gd_context -> (Span.plain, " ")
+  in
+  let gutter =
+    Printf.sprintf "%s %s %s "
+      (Diff.line_number_cell row.Masc.Tui_decode.gdr_old_line)
+      (Diff.line_number_cell row.Masc.Tui_decode.gdr_new_line)
+      marker
+  in
+  let text_style =
+    match row.Masc.Tui_decode.gdr_kind with
+    | Masc.Tui_decode.Gd_context -> Span.combine background (Span.weight Ansi.dim)
+    | Masc.Tui_decode.Gd_added | Masc.Tui_decode.Gd_removed -> background
+  in
+  let composed =
+    Span.concat
+      [ Span.text (Span.combine background (Span.weight Ansi.dim)) gutter
+      ; Span.text text_style
+          (Terminal_text.single_line row.Masc.Tui_decode.gdr_text)
+      ]
+  in
+  Span.pad_to width background (Span.truncate width composed)
+
+let render_repository_changes_diff (state : state) ~path =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  let diff_rows =
+    match state.repository_changes_diff with
+    | Some (p, diff) when String.equal p path -> diff.Masc.Tui_decode.gd_rows
+    | _ -> []
+  in
+  let total = List.length diff_rows in
+  let header =
+    Printf.sprintf "%s %s  vs HEAD  %s"
+      (screen_title " MASC Git Diff")
+      (Terminal_text.single_line path)
       (connection_badge state)
   in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"repository-changes"
-    ~title ~hints:Masc_tui_keys.footer_hints_git_changes
-    ~body:(fun ~budget c ->
-      c.push_styled ~style:(Theme.recede ())
-        (Printf.sprintf "  %-18s %s" "State" "Path");
-      c.push_divider ();
-      (match state.repository_changes_error with
-       | None -> ()
-       | Some detail ->
-           c.push_styled ~style:(Theme.bad ())
-             ("  " ^ Keeper_chat.terminal_safe_text detail);
-           c.push_divider ());
-      let fixed =
-        2 + (if Option.is_some state.repository_changes_error then 2 else 0)
+  let change_ctx = resolve_change_context state ~path_opt:(Some path) in
+  let context_line_opt =
+    let items = [] in
+    let items =
+      match change_ctx.ctx_goal_id, change_ctx.ctx_goal_title with
+      | Some gid, Some title ->
+          Printf.sprintf "Goal: %s (%s)" gid (Message_layout.fit_middle 24 title) :: items
+      | Some gid, None -> ("Goal: " ^ gid) :: items
+      | None, _ -> items
+    in
+    let items =
+      match change_ctx.ctx_task_id, change_ctx.ctx_task_title with
+      | Some tid, Some title ->
+          Printf.sprintf "Task: %s (%s)" tid (Message_layout.fit_middle 26 title) :: items
+      | Some tid, None -> ("Task: " ^ tid) :: items
+      | None, _ -> items
+    in
+    let items =
+      match change_ctx.ctx_turn with
+      | Some turn -> Printf.sprintf "Turn #%d" turn :: items
+      | None -> items
+    in
+    let items =
+      match change_ctx.ctx_keeper with
+      | Some k -> ("Keeper: " ^ k) :: items
+      | None -> items
+    in
+    if items = [] then None
+    else Some ("  " ^ String.concat "  |  " (List.rev items))
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  (match context_line_opt with
+   | Some ctx_line ->
+       box_line buf cols ctx_line;
+       box_divider buf cols
+   | None -> ());
+  box_line_styled buf cols ~style:(Theme.recede ())
+    "  old   new     what the working tree holds, against its last commit";
+  box_divider buf cols;
+  (match state.repository_changes_diff_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:(Theme.bad ())
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows =
+    7
+    + (if Option.is_some context_line_opt then 2 else 0)
+    + if Option.is_some state.repository_changes_diff_error then 2 else 0
+  in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (total - content_height) in
+  let scroll = max 0 (min state.repository_changes_diff_scroll max_scroll) in
+  if total = 0 then begin
+    let empty =
+      match (state.repository_changes_diff, state.repository_changes_diff_error) with
+      | _, Some _ -> "  (the read failed; nothing here is a reading)"
+      | None, None -> "  (reading the tree)"
+      | Some (_, diff), None ->
+          if diff.Masc.Tui_decode.gd_has_changes then
+            "  (the tree reports a change and sent no lines)"
+          else "  (this file matches its last commit, or is untracked)"
+    in
+    box_line_styled buf cols ~style:(Theme.recede ()) empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      match List.nth_opt diff_rows (i + scroll) with
+      | None -> box_empty buf cols
+      | Some row ->
+          box_line_span buf cols (tree_diff_row_span ~width:(framed_inner_width cols) row)
+    done;
+  box_line_styled buf cols ~style:(Theme.recede ())
+    (if total > content_height then
+       Printf.sprintf "[%d lines, scroll %d]  esc back to files" total scroll
+     else "  esc back to files");
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols ~hints:Masc_tui_keys.footer_hints_git_diff);
+  finish_surface state
+    ~surface_key:"repository-changes-diff" ~rows:terminal_rows ~cols buf
+
+let render_repository_changes (state : state) =
+  match state.repository_changes_diff_path with
+  | Some path -> render_repository_changes_diff state ~path
+  | None ->
+      let terminal_rows, cols = get_terminal_size () in
+      let changes =
+        match state.repository_changes with
+        | Some snapshot -> snapshot.Masc.Tui_decode.rcs_changes
+        | None -> []
       in
-      let room = max 1 (budget - fixed) in
-      if changes = [] then
-        c.push_styled ~style:(Theme.recede ())
-          (match state.repository_changes, state.repository_changes_error with
-           | None, None -> "  (loading Git changes)"
-           | Some _, None -> "  (working tree clean)"
-           | _, Some _ -> "  (Git changes unavailable)")
-      else
-        for i = 0 to room - 1 do
-          let idx = state.repository_changes_scroll + i in
-          match List.nth_opt changes idx with
-          | None -> c.push_empty ()
-          | Some row ->
-              let line =
-                Printf.sprintf "  %-18s %s"
-                  (repository_change_status row)
-                  (Message_layout.fit_middle (max 8 (cols - 28))
-                     (Terminal_text.single_line row.rc_path))
-              in
-              if idx = state.repository_changes_cursor then c.push_selected line
-              else c.push line
-        done)
+      let scope_name =
+        match state.repository_changes_scope, state.repositories with
+        | Some Tui_decode.Repository_change_project, _ -> "Project workspace"
+        | Some (Tui_decode.Repository_change_repository id), Some snapshot ->
+            (match
+               List.find_opt
+                 (fun (repo : Masc.Tui_decode.repository) ->
+                   String.equal repo.rp_id id)
+                 snapshot.rs_repositories
+             with
+             | Some repo -> repo.rp_name
+             | None -> id)
+        | Some (Tui_decode.Repository_change_repository id), None -> id
+        | None, _ -> "Git workspace"
+      in
+      let title =
+        Printf.sprintf " MASC Git Changes — %s (%d)  %s"
+          (Terminal_text.single_line scope_name) (List.length changes)
+          (connection_badge state)
+      in
+      let change_ctx = resolve_change_context state ~path_opt:None in
+      let context_line_opt =
+        let items = [] in
+        let items =
+          match change_ctx.ctx_goal_id, change_ctx.ctx_goal_title with
+          | Some gid, Some title ->
+              Printf.sprintf "Goal: %s (%s)" gid (Message_layout.fit_middle 24 title) :: items
+          | Some gid, None -> ("Goal: " ^ gid) :: items
+          | None, _ -> items
+        in
+        let items =
+          match change_ctx.ctx_task_id, change_ctx.ctx_task_title with
+          | Some tid, Some title ->
+              Printf.sprintf "Task: %s (%s)" tid (Message_layout.fit_middle 26 title) :: items
+          | Some tid, None -> ("Task: " ^ tid) :: items
+          | None, _ -> items
+        in
+        let items =
+          match change_ctx.ctx_keeper with
+          | Some k -> ("Keeper: " ^ k) :: items
+          | None -> items
+        in
+        if items = [] then None
+        else Some ("  " ^ String.concat "  |  " (List.rev items))
+      in
+      surface_chrome state ~terminal_rows ~cols ~surface_key:"repository-changes"
+        ~title ~hints:Masc_tui_keys.footer_hints_git_changes
+        ~body:(fun ~budget c ->
+          (match context_line_opt with
+           | Some ctx_line ->
+               c.push ctx_line;
+               c.push_divider ()
+           | None -> ());
+          c.push_styled ~style:(Theme.recede ())
+            (Printf.sprintf "  %-18s %s" "State" "Path");
+          c.push_divider ();
+          (match state.repository_changes_error with
+           | None -> ()
+           | Some detail ->
+               c.push_styled ~style:(Theme.bad ())
+                 ("  " ^ Keeper_chat.terminal_safe_text detail);
+               c.push_divider ());
+          let fixed =
+            2
+            + (if Option.is_some context_line_opt then 2 else 0)
+            + if Option.is_some state.repository_changes_error then 2 else 0
+          in
+          let room = max 1 (budget - fixed) in
+          if changes = [] then
+            c.push_styled ~style:(Theme.recede ())
+              (match state.repository_changes, state.repository_changes_error with
+               | None, None -> "  (loading Git changes)"
+               | Some _, None -> "  (working tree clean)"
+               | _, Some _ -> "  (Git changes unavailable)")
+          else
+            for i = 0 to room - 1 do
+              let idx = state.repository_changes_scroll + i in
+              match List.nth_opt changes idx with
+              | None -> c.push_empty ()
+              | Some row ->
+                  let attr =
+                    match state.msg_file_changes with
+                    | Some snap ->
+                        (match
+                           List.find_opt
+                             (file_change_matches_path row.rc_path)
+                             snap.Masc.Tui_decode.fcs_changes
+                         with
+                         | Some fc ->
+                             let t =
+                               match fc.fc_task_id with
+                               | Some tid -> tid
+                               | None -> fc.fc_keeper
+                             in
+                             " [" ^ t ^ "]"
+                         | None -> "")
+                    | None -> ""
+                  in
+                  let line =
+                    Printf.sprintf "  %-18s %s%s"
+                      (repository_change_status row)
+                      (Message_layout.fit_middle (max 8 (cols - 28 - String.length attr))
+                         (Terminal_text.single_line row.rc_path))
+                      attr
+                  in
+                  if idx = state.repository_changes_cursor then c.push_selected line
+                  else c.push line
+            done)
 
 (* Full health of the row the cursor names: fields the fleet table
    abbreviates, plus every alert the server already graded. *)
@@ -11644,9 +11944,6 @@ let change_result_badge (change : Masc.Tui_decode.file_change) =
   if change.Masc.Tui_decode.fc_succeeded then Theme.ok (), "APPLIED"
   else Theme.bad (), "FAILED"
 
-module Span = Masc_tui_span
-module Diff = Masc_tui_diff
-
 (* A row of the diff, drawn as layers rather than as one styled string.
 
    Three styles overlap on every line: the row's background, the gutter's
@@ -11679,11 +11976,6 @@ let diff_row_span ~width (row : Diff.row) =
      different kinds of line. Truncated first, because padding does not
      shorten. *)
   Span.pad_to width background (Span.truncate width composed)
-
-let box_line_span buf cols span =
-  let inner = framed_inner_width cols in
-  Buffer.add_string buf
-    (Printf.sprintf "  %s  \n" (Span.render (Span.pad_to inner Span.plain (Span.truncate inner span))))
 
 (* The two halves of one change. A write has no removed half: its before is
    empty, so every line arrives as an addition, which is what a new file is. *)
@@ -11945,35 +12237,6 @@ let render_changes_list (state : state) =
     (footer_line state ~max_cells:cols ~hints:"j/k:move  right/Enter:diff  [/]:keeper  d:tree diff  v:code  o:editor  r:refresh  q:quit");
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
-(* One current-tree diff row. Same three layers as the tool-call reading, plus
-   git's per-row numbers. Producer-recorded Edit ranges describe the completed
-   tool execution instead; they are not this later tree observation. *)
-let tree_diff_row_span ~width (row : Masc.Tui_decode.git_diff_row) =
-  let background, marker =
-    match row.Masc.Tui_decode.gdr_kind with
-    | Masc.Tui_decode.Gd_removed -> (Span.bg Theme.Syntax.diff_removed_bg, "-")
-    | Masc.Tui_decode.Gd_added -> (Span.bg Theme.Syntax.diff_added_bg, "+")
-    | Masc.Tui_decode.Gd_context -> (Span.plain, " ")
-  in
-  let gutter =
-    Printf.sprintf "%s %s %s "
-      (Diff.line_number_cell row.Masc.Tui_decode.gdr_old_line)
-      (Diff.line_number_cell row.Masc.Tui_decode.gdr_new_line)
-      marker
-  in
-  let text_style =
-    match row.Masc.Tui_decode.gdr_kind with
-    | Masc.Tui_decode.Gd_context -> Span.combine background (Span.weight Ansi.dim)
-    | Masc.Tui_decode.Gd_added | Masc.Tui_decode.Gd_removed -> background
-  in
-  let composed =
-    Span.concat
-      [ Span.text (Span.combine background (Span.weight Ansi.dim)) gutter
-      ; Span.text text_style
-          (Terminal_text.single_line row.Masc.Tui_decode.gdr_text)
-      ]
-  in
-  Span.pad_to width background (Span.truncate width composed)
 
 (* What the tree holds for the file the cursor names. Separate from the
    tool-call reading by decision, not by accident: one says what the keeper
@@ -15091,11 +15354,17 @@ let render_surface (state : state) =
            | Some task -> render_task_detail state task
            | None -> render_overview state )
        | None -> render_overview state)
-  | Keepers Keeper_list -> render_keeper_list state
-  | Keepers Keeper_detail -> render_keeper_detail state
+  | Keepers Keeper_list ->
+      if state.repository_changes_open then render_repository_changes state
+      else render_keeper_list state
+  | Keepers Keeper_detail ->
+      if state.repository_changes_open then render_repository_changes state
+      else render_keeper_detail state
   | Keepers Keeper_logs -> render_keeper_logs state
   | Keepers Keeper_calls -> render_keeper_calls state
-  | Keepers Keeper_message -> render_keeper_message state
+  | Keepers Keeper_message ->
+      if state.repository_changes_open then render_repository_changes state
+      else render_keeper_message state
   | Keepers Keeper_runtime_pick -> render_runtime_pick state
   | Lanes -> render_lanes state
   | Clients -> render_clients state

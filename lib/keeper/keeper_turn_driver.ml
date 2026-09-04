@@ -521,21 +521,25 @@ let lane_modality_reroute_decision ~checkpoint_messages ~initial_messages
     ~initial_messages
     goal_blocks
 
+(* The WARN names the runtime being left and the runtime being taken. It used to
+   print [assignment_id] on the left, which for a keeper whose assignment is a
+   bare runtime id reads as a reroute from a runtime to itself — the "kimi -> kimi"
+   lines that made a working reroute look like a no-op. The assignment is still
+   reported, as the assignment. *)
 let first_runtime_after_modality_reroute ~keeper_name ~assignment_id
     ~first_candidate_id ~first_candidate = function
   | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ ->
     first_candidate_id, first_candidate
-  | Runtime_agent.Reroute { to_runtime_id; reason } ->
-    (match Runtime.get_runtime_by_id to_runtime_id with
-     | None -> first_candidate_id, first_candidate
-     | Some rerouted ->
-       Log.Keeper.warn
-         "%s: RFC-0265 modality reroute %s -> %s (%s)"
-         keeper_name
-         assignment_id
-         to_runtime_id
-         reason;
-       to_runtime_id, rerouted)
+  | Runtime_agent.Reroute { target; reason } ->
+    let to_runtime_id = target.Runtime.id in
+    Log.Keeper.warn
+      "%s: RFC-0265 modality reroute %s -> %s (assignment %s: %s)"
+      keeper_name
+      first_candidate_id
+      to_runtime_id
+      assignment_id
+      reason;
+    to_runtime_id, target
 
 type attempt_inference_policy =
   { attempt_enable_thinking : bool option
@@ -800,7 +804,7 @@ let run_named
      later vision-capable runtime still sees the original media. *)
   let goal_blocks, initial_messages, agent_core_checkpoint, replay_prefix_projection =
     match reroute_decision with
-    | Runtime_agent.No_capable_runtime _ ->
+    | Runtime_agent.No_capable_runtime { required } ->
       let caps = Runtime_agent.input_capabilities_of_runtime first_runtime in
       let stripped_goal, goal_dropped =
         Runtime_agent.strip_unsupported_modality_blocks caps current_goal_blocks
@@ -826,8 +830,35 @@ let run_named
       in
       (match Runtime_agent.media_degrade_note ~runtime_id:first_runtime_id dropped with
        | None ->
-         (* Nothing strippable (e.g. only ToolResult-nested media): keep the
-            inputs unchanged so the loud capability floor still applies. *)
+         (* [required] is non-empty — that is why the decision was
+            [No_capable_runtime] — yet nothing was strippable, so there is no
+            text-only turn to offer and the provider capability floor will reject
+            this turn. Say so here. Falling through in silence is what left the
+            operator with a bare provider capability error and no record that
+            RFC-0265 had run and given up. Reachable when the modalities are
+            each supported but the runtime does not accept them bundled: no single
+            media block is individually unsupported, so the strip removes nothing.
+            ToolResult-nested media used to land here too, before the strip
+            learned to descend. *)
+         Log.Keeper.warn
+           "%s: RFC-0265 media degrade unavailable on %s — required %s, nothing \
+            strippable; the capability floor rejects this turn"
+           keeper_name
+           first_runtime_id
+           (String.concat "," required);
+         emit_runtime_manifest
+           ~status:"degrade_unavailable"
+           ~decision:
+             (Keeper_runtime_manifest.with_payload_role
+                ~payload_role:Keeper_runtime_manifest.Operator_evidence
+                (`Assoc
+                  [ ("routing_action", `String "media_degrade_unavailable")
+                  ; ("routing_reason", `String "required_media_not_strippable")
+                  ; ("degraded_runtime_id", `String first_runtime_id)
+                  ; ( "required_modalities"
+                    , `String (String.concat "," required) )
+                  ]))
+           Keeper_runtime_manifest.Runtime_routed;
          goal_blocks, initial_messages, agent_core_checkpoint, Keeper_replay_prefix.unchanged
        | Some note ->
          Log.Keeper.warn

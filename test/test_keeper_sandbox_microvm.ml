@@ -1177,6 +1177,33 @@ let test_keeper_work_root_is_created_as_root_with_a_mode () =
   Alcotest.(check bool) "creates the keeper root" true (contains "/masc-work/lane-smith" argv)
 ;;
 
+(* Boot invariant (RFC-0052): the mkdir and the write probe above both pass
+   against a writable rootfs directory, so they cannot catch a guest whose
+   work volume is not mounted. Only /proc/mounts can. *)
+let test_work_volume_mounted_probe_reads_proc_mounts () =
+  let argv =
+    M.work_volume_mounted_probe_argv_for
+      Backend.Apple_container
+      ~container_name:"masc-keeper-vm-x"
+  in
+  Alcotest.(check bool) "execs into the guest" true
+    (adjacent ~flag:"exec" ~value:"--user" argv && contains "masc-keeper-vm-x" argv);
+  Alcotest.(check bool) "runs as root" true (adjacent ~flag:"--user" ~value:"0:0" argv);
+  (* The workdir is /, not the path under test: a probe that starts inside
+     the would-be mountpoint would fail to exec on a guest missing the
+     directory, reading as "not mounted" for the wrong reason. *)
+  Alcotest.(check bool) "runs at the guest root" true (adjacent ~flag:"-w" ~value:"/" argv);
+  match List.rev argv with
+  | "/proc/mounts" :: pattern :: "-q" :: "grep" :: _ ->
+    (* The mountpoint field with its surrounding spaces: an exact field match,
+       so a prefix like /masc-work-stale cannot pass for the volume. *)
+    Alcotest.(check string)
+      "the pattern is the work root as a /proc/mounts mountpoint field"
+      (Printf.sprintf " %s " M.work_volume_guest_root)
+      pattern
+  | _ -> Alcotest.fail "probe is not grep -q <pattern> /proc/mounts"
+;;
+
 (* The running guest as a remote endpoint: the argv the remote runner spawns
    is [container exec] into this guest, the shim it names is the mounted one,
    and the identity it injects is the snapshot the guest already mounts. *)
@@ -1414,6 +1441,8 @@ let () =
             test_shim_travels_read_only_with_its_config
         ; Alcotest.test_case "keeper work root is created as root with a mode" `Quick
             test_keeper_work_root_is_created_as_root_with_a_mode
+        ; Alcotest.test_case "work volume mounted probe reads /proc/mounts" `Quick
+            test_work_volume_mounted_probe_reads_proc_mounts
         ; Alcotest.test_case "keeper work root write probe runs as the keeper" `Quick
             test_keeper_work_root_write_probe_runs_as_the_keeper
         ; Alcotest.test_case "running guest is a remote endpoint" `Quick

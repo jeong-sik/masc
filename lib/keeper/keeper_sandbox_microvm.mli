@@ -312,6 +312,21 @@ val keeper_work_root_write_probe_argv_for
     stderr. A root that exists but belongs to another uid -- a tree imported
     from elsewhere -- fails here rather than on the keeper's first Write. *)
 
+val work_volume_mounted_probe_argv_for
+  :  Keeper_microvm_backend.t
+  -> container_name:string
+  -> string list
+(** Boot invariant (RFC-0052): exit 0 only when {!work_volume_guest_root} is a
+    mountpoint inside the guest, read from [/proc/mounts] as root.
+
+    Runs before the mkdir and the write probe above because neither can tell
+    a mounted volume from a writable directory on the guest rootfs: with the
+    mount absent both succeed, and the guest then serves an ephemeral tree
+    whose writes evaporate on the next boot while every log line names the
+    volume. [grep] over [/proc/mounts] rather than [mountpoint(1)], which the
+    sandbox image does not ship; the pattern carries the mountpoint field's
+    surrounding spaces so a prefix of the path cannot match. *)
+
 val keeper_vm_container_kind : string
 
 val inspect_argv_for

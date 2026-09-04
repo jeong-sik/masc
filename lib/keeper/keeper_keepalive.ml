@@ -436,6 +436,98 @@ let fork_board_attention_worker
         (Keeper_board_attention_worker.fatal_error_to_string fatal))
 ;;
 
+(* One egress proxy per keeper in the policy lane, forked beside the Board
+   attention worker and for the same reason: it belongs to the lane, so it
+   is forked from one place rather than from whichever launch path happened
+   to start the keeper.
+
+   The guest reaches this listener and nothing else, so the listener is that
+   keeper's whole reach and the port it bound is the keeper's identity to the
+   proxy -- no header or source address has to be trusted for that.
+
+   A keeper not in the policy lane gets no listener. A keeper in it whose
+   allowlist cannot be resolved gets none either, and the reason is logged:
+   the lane is closed without one, which is the safe direction, and a
+   listener serving an allowlist nobody could read would be worse. *)
+let fork_egress_proxy
+      ~(sw : Eio.Switch.t)
+      ~(ctx : _ context)
+      ~(keeper_name : string)
+      ~(network_mode : Keeper_types_profile_sandbox.network_mode)
+      ~(stop : unit Eio.Promise.t)
+  : unit
+  =
+  match network_mode with
+  | Keeper_types_profile_sandbox.Network_none | Keeper_types_profile_sandbox.Network_inherit
+    -> ()
+  | Keeper_types_profile_sandbox.Network_policy ->
+    (match
+       Keeper_egress_lane.resolve_allowlist
+         ~base_path:ctx.config.base_path
+         ~keeper_name
+     with
+     | Error detail ->
+       Log.Keeper.error
+         "egress proxy not started keeper=%s: %s (the lane stays closed)"
+         keeper_name
+         detail
+     | Ok _ when Option.is_none ctx.net ->
+       (* No network capability in this context means no listener can be
+          bound, and a policy guest with no proxy reaches nothing. Said
+          rather than passed over: the lane being closed is the safe
+          outcome, but it should not be a silent one. *)
+       Log.Keeper.error
+         "egress proxy not started keeper=%s: this lane has no network \
+          capability (the lane stays closed)"
+         keeper_name
+     | Ok rules ->
+       let net = Option.get ctx.net in
+       Eio.Fiber.fork ~sw (fun () ->
+         try
+           Eio.Switch.run (fun proxy_sw ->
+             let socket =
+               Eio.Net.listen
+                 net
+                 ~sw:proxy_sw
+                 ~reuse_addr:true
+                 ~backlog:16
+                 Keeper_egress_lane.listen_address
+             in
+             let port =
+               match Eio.Net.listening_addr socket with
+               | `Tcp (_, port) -> port
+               | `Unix _ -> 0
+             in
+             Log.Keeper.info
+               "egress proxy listening keeper=%s port=%d rules=%d"
+               keeper_name
+               port
+               (List.length rules);
+             Eio.Fiber.first
+               (fun () ->
+                  Egress_proxy_net.serve
+                    ~sw:proxy_sw
+                    ~net
+                    ~clock:ctx.clock
+                    ~keeper_name
+                    ~rules
+                    ~on_event:(fun event ->
+                      Log.Keeper.info
+                        "egress keeper=%s %s"
+                        event.Egress_proxy_net.keeper_name
+                        (Egress_proxy_net.outcome_to_string event.Egress_proxy_net.outcome))
+                    ~socket
+                    ~read_timeout_s:10.0)
+               (fun () -> Eio.Promise.await stop))
+         with
+         | Eio.Cancel.Cancelled _ -> ()
+         | exn ->
+           Log.Keeper.error
+             "egress proxy stopped keeper=%s: %s (the lane stays closed)"
+             keeper_name
+             (Printexc.to_string exn)))
+;;
+
 (* ── Lifecycle bootstrap / publish helpers ── *)
 
 let bootstrap_live_keeper_meta ?lifecycle_token ~(ctx : _ context) (m : keeper_meta)
@@ -1293,6 +1385,12 @@ let start_keepalive
           ~sw:lane_sw
           ~ctx
           ~keeper_name:live_meta.name
+          ~stop:board_stop;
+        fork_egress_proxy
+          ~sw:lane_sw
+          ~ctx
+          ~keeper_name:live_meta.name
+          ~network_mode:live_meta.network_mode
           ~stop:board_stop;
         Eio_guard.protect
           (fun () ->

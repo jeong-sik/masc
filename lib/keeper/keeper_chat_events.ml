@@ -161,10 +161,11 @@ type t =
   { stream : keeper_chat_event Eio.Stream.t
   ; on_publish : (seq:int -> keeper_chat_event -> unit) option
   ; mutable next_seq : int
+  ; read_seq : int ref
   }
 
 let create ?on_publish () =
-  { stream = Eio.Stream.create 512; on_publish; next_seq = 0 }
+  { stream = Eio.Stream.create 512; on_publish; next_seq = 0; read_seq = ref 0 }
 ;;
 
 (* [publish] is the single choke point every turn event passes through — route
@@ -197,6 +198,21 @@ let publish t event =
 ;;
 
 let subscribe t = Eio.Stream.take t.stream
+
+(* [subscribe_with_seq] returns the bus read cursor alongside the event. The
+   cursor is per-bus and advances on every [subscribe_with_seq] call, so it
+   matches the 0-based publish-order seq exactly when exactly one fiber drains
+   the bus through it (the single-consumer contract [subscribe] already
+   assumes). Mixing with [subscribe] or [take_nonblocking] forfeits seq
+   accuracy: events taken through those paths never advance [read_seq], so
+   later [subscribe_with_seq] results under-count by the number of skipped
+   events. *)
+let subscribe_with_seq t =
+  let event = Eio.Stream.take t.stream in
+  let seq = !(t.read_seq) in
+  t.read_seq := seq + 1;
+  (seq, event)
+;;
 
 let take_nonblocking t = Eio.Stream.take_nonblocking t.stream
 

@@ -388,6 +388,40 @@ let test_on_publish_hook_receives_monotonic_seq () =
    | E.Text_delta "a" -> ()
    | _ -> Alcotest.fail "first subscribed event mismatch")
 
+let test_subscribe_with_seq_returns_publish_order_seqs () =
+  let bus = Masc.Keeper_chat_events.create () in
+  Masc.Keeper_chat_events.publish
+    bus
+    (E.Run_started { run_id = "run-seq"; thread_id = "keeper:seq" });
+  Masc.Keeper_chat_events.publish bus E.Text_message_end;
+  let s0, e0 = Masc.Keeper_chat_events.subscribe_with_seq bus in
+  let s1, e1 = Masc.Keeper_chat_events.subscribe_with_seq bus in
+  Alcotest.(check int) "first seq" 0 s0;
+  Alcotest.(check int) "second seq" 1 s1;
+  (match e0 with
+   | E.Run_started { run_id = "run-seq"; _ } -> ()
+   | _ -> Alcotest.fail "first event mismatch");
+  (match e1 with
+   | E.Text_message_end -> ()
+   | _ -> Alcotest.fail "second event mismatch")
+
+let test_event_to_sse_frame_carries_journal_seq () =
+  let event =
+    Ag_ui.make_event
+      ~timestamp:13.0
+      ~thread_id:"keeper:fixture"
+      Ag_ui.Run_finished
+  in
+  let frame = Ag_ui.event_to_sse ~id:3 event in
+  Alcotest.(check bool)
+    "frame carries the journal seq as its SSE id"
+    true
+    (Astring.String.is_infix ~affix:"id: 3\n" frame);
+  Alcotest.(check bool)
+    "data line still present"
+    true
+    (Astring.String.is_infix ~affix:"data: " frame)
+
 let test_on_publish_hook_failure_does_not_break_publish () =
   let bus =
     Masc.Keeper_chat_events.create
@@ -700,6 +734,14 @@ let () =
             "hook receives monotonic seq"
             `Quick
             test_on_publish_hook_receives_monotonic_seq
+        ; Alcotest.test_case
+            "subscribe_with_seq returns publish-order seqs"
+            `Quick
+            test_subscribe_with_seq_returns_publish_order_seqs
+        ; Alcotest.test_case
+            "SSE frame carries the journal seq as id"
+            `Quick
+            test_event_to_sse_frame_carries_journal_seq
         ; Alcotest.test_case
             "hook failure does not break publish"
             `Quick

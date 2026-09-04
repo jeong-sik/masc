@@ -46,11 +46,13 @@ val chat_appended_with_audio :
 val operation_event_to_json :
   keeper_name:string ->
   operation_id:string ->
+  seq:int option ->
   event:Ag_ui.event ->
   Yojson.Safe.t
 
 val operation_event :
   keeper_name:string ->
   operation_id:string ->
+  seq:int option ->
   event:Ag_ui.event ->
   unit

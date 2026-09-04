@@ -745,9 +745,12 @@ let policy_network_present ~listing =
 let policy_network_inspect_argv_for backend =
   match (backend : Backend.t) with
   | Backend.Apple_container ->
-    Ok
-      (command_argv_for backend
-       @ [ "network"; "inspect"; policy_network_name; "--format"; "json" ])
+    (* No [--format json] here, unlike [network list]: [network inspect]
+       rejects the flag ("Unknown option '--format'") and already answers
+       JSON. Measured 2026-09-05 on container 1.3.1 -- the two subcommands
+       do not agree, and assuming they did made every policy boot fail at
+       reading the gateway. *)
+    Ok (command_argv_for backend @ [ "network"; "inspect"; policy_network_name ])
   | Backend.Microsandbox | Backend.Nerdctl_kata ->
     Error
       (Printf.sprintf

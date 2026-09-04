@@ -17,7 +17,7 @@ Completion 심사는 시스템 LLM 레인의 일이지만, Cancel 요청은 일�
 런타임이 게이트를 심사 개시 전에 물어보아 거절을 기록한다(§4.1), 운영자 증거
 카드는 자기가 답하는 질문을 스스로 이름 짓고(§4.2), 동일한 커밋 경로의 승인
 클릭 하나가 `Cancelled` 로 내린다(§4.2). 커밋 깔때기는 취소 청구의 승인에
-운영자 서명을 다시 요구해 기각을 값으로 돌려준다(§4.3). 거절은 재시도도
+운영자 서명을 다시 요구해 기각을 값으로 돌려준다(§4.4). 거절은 재시도도
 자동 확정도 아니다(§5).
 
 ## 1. 문제 — 실측
@@ -68,7 +68,7 @@ let system_review_allowed = function
   `Cancelled` 로 내린다. 권한 주체는 `Human_operator` — 시스템 레인은 사이에
   없다.
 
-### 4.3 커밋 깔때기의 이중 잠금
+### 4.4 커밋 깔때기의 이중 잠금
 
 - 심사 입구의 게이트(§4.1)만으로는 부족하다 — 판정 기록의 최종 수령인은
   커밋 깔때기이고, 거기서 권한을 **다시** 물어본다. `decide_verdict` 는
@@ -90,14 +90,14 @@ let system_review_allowed = function
 ## 6. 증명
 
 §6.2 = §4.2 원클릭 계약의 증명(증거 카드 intent + 승인 → Cancelled).
-§6.3 = §4.1 게이트 계약의 증명(순수 함수 단언). §6.4 = §4.3 깔때기 계약의
+§6.3 = §4.1 게이트 계약의 증명(순수 함수 단언). §6.4 = §4.4 깔때기 계약의
 증명(시스템 서명 기각 + 운영자 회귀). 이 문서의 테스트 인용 규약이다.
 
 | 무엇을 | 어디서 | 결과 |
 |---|---|---|
 | §4.1 게이트 계약 | `test_verification.ml` `test_cancel_intent_is_refused_by_system_review` | Complete=true, Cancel=false |
 | §4.2 원클릭 폐쇄 | `test_workspace.ml` `test_operator_one_click_cancels_a_cancel_claim` | 카드 intent=cancellation + approve 1클릭 → `Cancelled` 착지 |
-| §4.3 깔때기 이중 잠금 | `test_workspace_task_lifecycle.ml` `test_system_approval_of_cancel_claim_is_refused` · `test_operator_approval_still_cancels_a_cancel_claim` | 시스템 서명 × 취소 청구 = `Verdict_cancel_requires_operator`, 운영자 서명 = `Cancelled` (슈트 녹색) |
+| §4.4 깔때기 이중 잠금 | `test_workspace_task_lifecycle.ml` `test_system_approval_of_cancel_claim_is_refused` · `test_operator_approval_still_cancels_a_cancel_claim` | 시스템 서명 × 취소 청구 = `Verdict_cancel_requires_operator`, 운영자 서명 = `Cancelled` (슈트 녹색) |
 | 클린룸 전체 | `evidence/cleanroom_rebuild.log` (2026-09-04) | `rm -rf _build` 후 `-j1` 재건: test_verification 60검사·test_workspace 86검사, 직접 exe·별칭 양 경로 전부 녹색 |
 
 교훈 각주: 이 증명 chain 의 첫 판독에서 별칭 경로 EXIT=1 이 "테스트 실패"로

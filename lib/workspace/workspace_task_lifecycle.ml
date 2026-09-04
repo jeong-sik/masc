@@ -262,7 +262,7 @@ let decide_verdict
       (match verdict with
        (* One verdict, two terminals. The obligation records which question
           was asked, so an approval ends the Task the way the producer asked
-          rather than the way this branch used to assume. RFC-0415 §4.3: a
+          rather than the way this branch used to assume. RFC-0415 §4.4: a
           cancellation is a permission, not a judgment — the terminal
           [Cancelled] record of a cancel claim may carry only an operator's
           signature, so the system lane's approval of a cancel claim is

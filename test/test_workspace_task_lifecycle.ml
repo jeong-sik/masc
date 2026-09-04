@@ -257,7 +257,7 @@ let test_verdict_is_not_an_agent_action () =
     [ "approve"; "reject" ]
 ;;
 
-(* RFC-0415 §4.3: a cancel claim's terminal [Cancelled] record may carry only
+(* RFC-0415 §4.4: a cancel claim's terminal [Cancelled] record may carry only
    an operator's signature. The system lane's approval of a cancel claim is
    refused at the commit funnel itself, not merely at the review entrance. *)
 let awaiting_cancel =

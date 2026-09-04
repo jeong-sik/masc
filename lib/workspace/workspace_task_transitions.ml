@@ -254,7 +254,7 @@ let transition_task_outcome_r
               (Masc_domain.Task
                  (Masc_domain.Task_error.InvalidState
                     "a cancellation verdict requires an operator's signature \
-                     (RFC-0415 §4.3)"))
+                     (RFC-0415 §4.4)"))
           | Error
               (Workspace_task_lifecycle.Verification_id_mismatch
                  { expected; actual }) ->
@@ -853,7 +853,7 @@ let commit_verdict_r
                  (Masc_domain.Task
                     (Masc_domain.Task_error.InvalidState
                         "a cancellation verdict requires an operator's signature \
-                        (RFC-0415 §4.3)"))
+                        (RFC-0415 §4.4)"))
              | Error
                  (Workspace_task_lifecycle.Verification_id_mismatch
                     { expected; actual }) ->

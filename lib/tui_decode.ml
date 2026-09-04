@@ -5552,7 +5552,7 @@ let decode_fusion_judge_node json =
         let* fjno_output_tokens = required_int_field json "output_tokens" in
         (* [elapsed_s] is `Null` when the failure left no clock reading, and
            [timed_out] is derived server-side from the failure itself. *)
-        let fjno_elapsed_s = optional_float_field json "elapsed_s" in
+        let* fjno_elapsed_s = optional_float_field json "elapsed_s" in
         let* fjno_timed_out = required_bool_field json "timed_out" in
         Ok
           (Judge_node_failed

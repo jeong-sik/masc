@@ -3886,18 +3886,18 @@ let test_decode_fusion_judge_nodes () =
                  (match first_ok.Tui_decode.fjn_outcome with
                   | Tui_decode.Judge_node_synthesized s ->
                       Alcotest.(check string) "first lens keeps its resolution"
-                        "first-resolved-501" s.Tui_decode.fjno_resolved_answer;
+                        "first-resolved-501" s.fjno_resolved_answer;
                       Alcotest.(check int) "first lens keeps its usage" 200
-                        s.Tui_decode.fjno_output_tokens
+                        s.fjno_output_tokens
                   | Tui_decode.Judge_node_failed _ ->
                       Alcotest.fail "synthesized first decoded as failed");
                  (match first_failed.Tui_decode.fjn_outcome with
                   | Tui_decode.Judge_node_failed f ->
                       Alcotest.(check bool) "a timeout says so" true
-                        f.Tui_decode.fjno_timed_out;
+                        f.fjno_timed_out;
                       Alcotest.(check (Alcotest.option Alcotest.float))
                         "a failure with no clock reads as none" None
-                        f.Tui_decode.fjno_elapsed_s
+                        f.fjno_elapsed_s
                   | Tui_decode.Judge_node_synthesized _ ->
                       Alcotest.fail "failed first decoded as synthesized");
                  Alcotest.(check string) "the canonical judge is untouched"

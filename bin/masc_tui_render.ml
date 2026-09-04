@@ -36,6 +36,8 @@ module Planning_detail = Masc_tui_planning_detail
 module Link = Masc_tui_link
 module Status = Masc.Keeper_status_runtime
 module Render_tools = Masc_tui_render_tools
+module Span = Masc_tui_span
+module Diff = Masc_tui_diff
 
 let json_assoc_member_opt = Masc_tui_json.member_opt
 

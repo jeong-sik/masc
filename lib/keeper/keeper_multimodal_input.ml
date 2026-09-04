@@ -92,6 +92,31 @@ let parse_attachment ~index json =
       ; height = None
       }
 
+(* Two attachments sharing an id both parse, but a user_blocks reference
+   resolves through {!find_attachment}'s first match, so the second is
+   silently shadowed -- the same silent-drop class as an unreferenced
+   attachment ({!validate_attachment_references}). Reject the duplicate at
+   the parse boundary, naming the id. *)
+let reject_duplicate_attachment_ids (atts : Keeper_chat_store.attachment list) =
+  let rec collect seen dups = function
+    | [] -> List.rev dups
+    | (att : Keeper_chat_store.attachment) :: rest ->
+      if List.exists (String.equal att.id) dups
+      then collect (att.id :: seen) dups rest
+      else if List.exists (String.equal att.id) seen
+      then collect (att.id :: seen) (att.id :: dups) rest
+      else collect (att.id :: seen) dups rest
+  in
+  match collect [] [] atts with
+  | [] -> Ok ()
+  | first :: _ as dups ->
+    Error
+      (Printf.sprintf
+         "duplicate attachment id %s: every attachment id must be unique; a user_blocks reference to %S would reach only one of them"
+         (dups |> List.map (Printf.sprintf "%S") |> String.concat ", ")
+         first)
+;;
+
 let parse_attachments json =
   match Json_util.assoc_member_opt "attachments" json with
   | None | Some `Null -> Ok []
@@ -102,7 +127,9 @@ let parse_attachments json =
         let* attachment = parse_attachment ~index attachment in
         loop (index + 1) (attachment :: acc) rest
     in
-    loop 0 [] attachments
+    let* parsed = loop 0 [] attachments in
+    let* () = reject_duplicate_attachment_ids parsed in
+    Ok parsed
   | Some _ -> Error "attachments must be an array"
 
 let user_media_block_to_yojson kind (media : user_media_block) =

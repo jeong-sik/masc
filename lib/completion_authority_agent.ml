@@ -213,49 +213,54 @@ let required_string_list_field ~context name fields =
     Error (Printf.sprintf "%s has no %s" context name)
 ;;
 
-let completion_contract_of_request
+(* The producer's stated why, written into the request by the transition that
+   created the obligation. Absent, there is nothing to judge — a cancellation
+   is only its reason — so this is an error rather than an empty string that
+   would reach the judge as a case with no argument. *)
+let cancel_reason_of_output fields =
+  match List.assoc_opt "cancel_reason" fields with
+  | Some (`String reason) when String.trim reason <> "" -> Ok (String.trim reason)
+  | Some (`String _) ->
+    Error "verification request output cancel_reason is blank"
+  | Some other ->
+    Error
+      (Printf.sprintf
+         "verification request output cancel_reason must be a string, got %s"
+         (Json_util.excerpt other))
+  | None -> Error "verification request output has no cancel_reason"
+;;
+
+(* Which question to put, and the material it needs. The Task's intent picks
+   the branch; the request supplies the rest. A completion is weighed against
+   its contract and artifacts, a stop against its reason with the contract
+   alongside as context. *)
+let verdict_question_of_request
       ~(intent : Masc_domain.verification_intent)
       (request : Verification.verification_request)
   =
-  let completion_contract = request.criteria in
-  let completion_contract =
-    match completion_contract with
-    | [] -> None
-    | descriptions -> Some descriptions
-  in
   match request.output with
   | `Assoc fields ->
-    let* required_artifacts =
-      required_string_list_field
-        ~context:"verification request output"
-        "required_artifacts"
-        fields
-    in
-    (* A stop produces nothing, so the contract and the required artifacts are
-       withheld from the two prompt sections built out of them.
-
-       What that withholds is the instruction, not the text. The request is
-       serialized whole into [completion_notes], so its criteria and its
-       required_artifacts still reach the judge as context — which is right,
-       they say what the Task was for. What no longer reaches it is the
-       contract block's order to "REJECT if the notes do not evidence every
-       item", and the evidence block's per-artifact version of the same. A
-       stop's notes are one sentence saying why the work should not happen; it
-       evidences none of them, so with those blocks rendered every
-       cancellation of a contracted Task is refused for not finishing the work
-       it is asking not to finish.
-
-       This is a narrowing, not the answer. The prompt's own body still asks
-       whether the notes describe concrete work done and whether they read as
-       avoidance, and a refused stop returns the Task to its producer — so a
-       cancellation can still be rejected for being a cancellation. Giving it
-       its own prompt is issue #33052. *)
-    let completion_contract, required_artifacts =
-      match intent with
-      | Masc_domain.Complete_task -> completion_contract, required_artifacts
-      | Masc_domain.Cancel_task -> None, []
-    in
-    Ok (completion_contract, required_artifacts)
+    (match intent with
+     | Masc_domain.Complete_task ->
+       let* required_evidence =
+         required_string_list_field
+           ~context:"verification request output"
+           "required_artifacts"
+           fields
+       in
+       Ok
+         (Task.Anti_rationalization.Completion
+            { completion_contract =
+                (match request.criteria with
+                 | [] -> None
+                 | descriptions -> Some descriptions)
+            ; required_evidence
+            })
+     | Masc_domain.Cancel_task ->
+       let* reason = cancel_reason_of_output fields in
+       Ok
+         (Task.Anti_rationalization.Cancellation
+            { reason; contract_context = request.criteria }))
   | other ->
     Error
       (Printf.sprintf
@@ -267,8 +272,7 @@ type prepared_review =
   { request : Verification.verification_request
   ; evidence_access : Workspace_verification_store.submitted_evidence_access
   ; review_request : Task.Anti_rationalization.review_request
-  ; completion_contract : string list option
-  ; required_artifacts : string list
+  ; question : Task.Anti_rationalization.verdict_question
   }
 
 (* Artifact references the store looked for and did not find. The snapshot layer
@@ -374,9 +378,7 @@ let prepare_review
              header.worker)
       else
         let* evidence_refs = evidence_refs_of_output request.output in
-        let* completion_contract, required_artifacts =
-          completion_contract_of_request ~intent request
-        in
+        let* question = verdict_question_of_request ~intent request in
         (* An artifact reference the store could not read is carried here,
            not refused here.
 
@@ -427,8 +429,7 @@ let prepare_review
               ; task_id = task.id
               ; evidence_refs
               }
-          ; completion_contract
-          ; required_artifacts
+          ; question
           }
 ;;
 
@@ -685,8 +686,7 @@ let process_task_once
                 ~sw:(Some runtime.sw)
                 ~lookup
                 ~few_shot_block
-                ?completion_contract:prepared.completion_contract
-                ~required_evidence:prepared.required_artifacts
+                ~question:prepared.question
                 ~on_tool_result
                 prepared.review_request
             in

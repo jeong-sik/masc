@@ -9201,7 +9201,13 @@ let render_keeper_message (state : state) =
               db
               Ansi.reset
         in
-        Printf.sprintf "%s  %s^Y again to stop%s" bar Ansi.dim Ansi.reset
+        (* Both endings, because they are not the same and the difference is
+           what the operator loses. ^Y keeps the sentence; Esc abandons it. *)
+        Printf.sprintf
+          "%s  %s^Y send · Esc discard%s"
+          bar
+          Ansi.dim
+          Ansi.reset
       (* Between utterances in continuous mode: on, but nothing recording. A
          mode that is idle looks exactly like one that is off without this. *)
       | None when state.voice_continuous <> None ->

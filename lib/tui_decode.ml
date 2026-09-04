@@ -5742,11 +5742,10 @@ let decode_fusion_evidence ~run_id json =
   let* fe_judge = decode_fusion_judge judge_json in
   let* fe_judges =
     (* Additive RFC-0284 key: a post recorded before it carries no array,
-       and the empty answer keeps such evidence rendering exactly as it
-       already did. *)
-    match optional_list_field meta "judges" with
-    | None -> Ok []
-    | Some nodes -> decode_list "judges" decode_fusion_judge_node nodes
+       and the empty list optional_list_field answers for an absent key keeps
+       such evidence rendering exactly as it already did. *)
+    let* nodes = optional_list_field meta "judges" in
+    decode_list "judges" decode_fusion_judge_node nodes
   in
   let* tool_trace_json = required_object_field meta "tool_trace" in
   let* fe_tool_trace = decode_fusion_tool_trace tool_trace_json in

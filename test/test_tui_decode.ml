@@ -3895,7 +3895,7 @@ let test_decode_fusion_judge_nodes () =
                   | Tui_decode.Judge_node_failed f ->
                       Alcotest.(check bool) "a timeout says so" true
                         f.fjno_timed_out;
-                      Alcotest.(check (Alcotest.option Alcotest.float))
+                      Alcotest.(check (option (float 0.001)))
                         "a failure with no clock reads as none" None
                         f.fjno_elapsed_s
                   | Tui_decode.Judge_node_synthesized _ ->

@@ -3122,8 +3122,16 @@ let test_approval_replay_reconciliation_appends_one_typed_correction () =
          ] -> ()
        | _ -> Alcotest.fail "correction did not use its typed provenance slot");
       let correction = List.nth messages 1 in
-      Alcotest.(check bool) "correction is explicit to the operator" true
-        (String_util.contains_substring correction.content "승인 작업 결과 정정"))
+      (* What makes this row a correction is its slot and its phase, both
+         checked above. The store used to also compose a Korean sentence
+         saying so; a row that carries no prose is what keeps a reader from
+         depending on that wording again. *)
+      Alcotest.(check string) "the correction row composes no prose" ""
+        correction.content;
+      match correction.approval_lifecycle with
+      | Some { phase = K.Approval_replay_applied; _ } -> ()
+      | Some _ | None ->
+        Alcotest.fail "correction row does not carry the canonical phase")
 ;;
 
 let test_all_replay_terminal_phases_roundtrip () =

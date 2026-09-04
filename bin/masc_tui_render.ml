@@ -9148,6 +9148,19 @@ let render_keeper_message (state : state) =
            | Masc_tui_esc_interrupt.Leave -> return_hint ())
       | None -> return_hint ()
     in
+    (* Named beside the empty-draft Q arm in the dispatch, and reading the
+       same condition it does: the hint exists exactly when the key would
+       leave, and is absent exactly when Q is a letter someone is typing or
+       something is mid-flight for Esc to settle (a capture, a half-edited
+       queued line). The compact footer omits it for width, not because the
+       key went away -- the help sheet still names it. *)
+    let leave_hint =
+      if Buffer.length state.msg_input = 0
+         && Option.is_none state.msg_recall_replaces
+         && Option.is_none state.voice_capture
+      then "  Q:leave"
+      else ""
+    in
     let switch_hint =
       match next_keeper_message_target state with
       | Masc_tui_keeper_selection.No_alternative -> ""
@@ -9239,7 +9252,7 @@ let render_keeper_message (state : state) =
           ~scroll_hint:compact_scroll_hint ~escape_hint
       else
         Masc_tui_footer.chat_hints ~enter_hint ~scroll_hint ~switch_hint
-          ~escape_hint
+          ~escape_hint ~leave_hint
     in
     Buffer.add_string chat_buf
       (footer_line state ~max_cells:chat_cols ~hints:footer_hints);

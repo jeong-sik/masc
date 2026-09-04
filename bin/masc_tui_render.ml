@@ -11021,6 +11021,96 @@ let repository_change_status (row : Masc.Tui_decode.repository_change) =
     | false, true -> "worktree"
     | false, false -> "unknown"
 
+let box_line_span buf cols span =
+  let inner = framed_inner_width cols in
+  Buffer.add_string buf
+    (Printf.sprintf "  %s  \n" (Span.render (Span.pad_to inner Span.plain (Span.truncate inner span))))
+
+type change_context = {
+  ctx_keeper : string option;
+  ctx_task_id : string option;
+  ctx_task_title : string option;
+  ctx_goal_id : string option;
+  ctx_goal_title : string option;
+  ctx_turn : int option;
+}
+
+let file_change_matches_path (path : string) (fc : Masc.Tui_decode.file_change) =
+  match fc.Masc.Tui_decode.fc_location with
+  | Masc.Tui_decode.Fc_in_repo { relative_path; _ } -> String.equal relative_path path
+  | Masc.Tui_decode.Fc_in_bundle { bundle_path } -> String.equal bundle_path path
+  | Masc.Tui_decode.Fc_at_absolute_path { path = p } ->
+      String.equal p path || String.equal (Filename.basename p) (Filename.basename path)
+
+let resolve_change_context (state : state) ~(path_opt : string option) : change_context =
+  let matched_change =
+    match path_opt, state.msg_file_changes with
+    | Some path, Some snapshot ->
+        List.find_opt
+          (file_change_matches_path path)
+          snapshot.Masc.Tui_decode.fcs_changes
+    | _ -> None
+  in
+  let keeper =
+    match matched_change with
+    | Some fc -> Some fc.Masc.Tui_decode.fc_keeper
+    | None -> state.msg_target_keeper_name
+  in
+  let keeper_record =
+    match keeper with
+    | Some name ->
+        List.find_opt
+          (fun (k : Masc.Tui_decode.keeper) -> String.equal k.Masc.Tui_decode.k_name name)
+          state.keepers
+    | None -> None
+  in
+  let task_id =
+    match matched_change with
+    | Some fc when Option.is_some fc.Masc.Tui_decode.fc_task_id -> fc.Masc.Tui_decode.fc_task_id
+    | _ ->
+        (match keeper_record with
+         | Some k -> k.Masc.Tui_decode.k_current_task_id
+         | None -> None)
+  in
+  let turn =
+    match matched_change with
+    | Some fc -> fc.Masc.Tui_decode.fc_turn
+    | None -> None
+  in
+  let task =
+    match task_id with
+    | Some tid ->
+        List.find_opt
+          (fun (t : Masc.Tui_decode.task) -> String.equal t.Masc.Tui_decode.id tid)
+          state.tasks
+    | None -> None
+  in
+  let task_title = Option.map (fun (t : Masc.Tui_decode.task) -> t.Masc.Tui_decode.title) task in
+  let goal_id =
+    match task with
+    | Some t -> List.nth_opt t.Masc.Tui_decode.goal_ids 0
+    | None -> None
+  in
+  let goal_title =
+    match goal_id, state.planning with
+    | Some gid, Some snapshot ->
+        (match
+           List.find_opt
+             (fun (g : planning_goal) -> String.equal g.pg_id gid)
+             snapshot.pl_goals
+         with
+         | Some g -> Some g.pg_title
+         | None -> None)
+    | _ -> None
+  in
+  { ctx_keeper = keeper
+  ; ctx_task_id = task_id
+  ; ctx_task_title = task_title
+  ; ctx_goal_id = goal_id
+  ; ctx_goal_title = goal_title
+  ; ctx_turn = turn
+  }
+
 let tree_diff_row_span ~width (row : Masc.Tui_decode.git_diff_row) =
   let background, marker =
     match row.Masc.Tui_decode.gdr_kind with
@@ -11064,9 +11154,44 @@ let render_repository_changes_diff (state : state) ~path =
       (Terminal_text.single_line path)
       (connection_badge state)
   in
+  let change_ctx = resolve_change_context state ~path_opt:(Some path) in
+  let context_line_opt =
+    let items = [] in
+    let items =
+      match change_ctx.ctx_goal_id, change_ctx.ctx_goal_title with
+      | Some gid, Some title ->
+          Printf.sprintf "Goal: %s (%s)" gid (Message_layout.fit_middle 24 title) :: items
+      | Some gid, None -> ("Goal: " ^ gid) :: items
+      | None, _ -> items
+    in
+    let items =
+      match change_ctx.ctx_task_id, change_ctx.ctx_task_title with
+      | Some tid, Some title ->
+          Printf.sprintf "Task: %s (%s)" tid (Message_layout.fit_middle 26 title) :: items
+      | Some tid, None -> ("Task: " ^ tid) :: items
+      | None, _ -> items
+    in
+    let items =
+      match change_ctx.ctx_turn with
+      | Some turn -> Printf.sprintf "Turn #%d" turn :: items
+      | None -> items
+    in
+    let items =
+      match change_ctx.ctx_keeper with
+      | Some k -> ("Keeper: " ^ k) :: items
+      | None -> items
+    in
+    if items = [] then None
+    else Some ("  " ^ String.concat "  |  " (List.rev items))
+  in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
+  (match context_line_opt with
+   | Some ctx_line ->
+       box_line_styled buf cols ~style:(Theme.plain ()) ctx_line;
+       box_divider buf cols
+   | None -> ());
   box_line_styled buf cols ~style:(Theme.recede ())
     "  old   new     what the working tree holds, against its last commit";
   box_divider buf cols;
@@ -11077,7 +11202,9 @@ let render_repository_changes_diff (state : state) ~path =
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
   let chrome_rows =
-    7 + if Option.is_some state.repository_changes_diff_error then 2 else 0
+    7
+    + (if Option.is_some context_line_opt then 2 else 0)
+    + if Option.is_some state.repository_changes_diff_error then 2 else 0
   in
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (total - content_height) in
@@ -11124,63 +11251,114 @@ let render_repository_changes (state : state) =
         | Some snapshot -> snapshot.Masc.Tui_decode.rcs_changes
         | None -> []
       in
-  let scope_name =
-    match state.repository_changes_scope, state.repositories with
-    | Some Tui_decode.Repository_change_project, _ -> "Project workspace"
-    | Some (Tui_decode.Repository_change_repository id), Some snapshot ->
-        (match
-           List.find_opt
-             (fun (repo : Masc.Tui_decode.repository) ->
-               String.equal repo.rp_id id)
-             snapshot.rs_repositories
-         with
-         | Some repo -> repo.rp_name
-         | None -> id)
-    | Some (Tui_decode.Repository_change_repository id), None -> id
-    | None, _ -> "Git workspace"
-  in
-  let title =
-    Printf.sprintf " MASC Git Changes — %s (%d)  %s"
-      (Terminal_text.single_line scope_name) (List.length changes)
-      (connection_badge state)
-  in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"repository-changes"
-    ~title ~hints:Masc_tui_keys.footer_hints_git_changes
-    ~body:(fun ~budget c ->
-      c.push_styled ~style:(Theme.recede ())
-        (Printf.sprintf "  %-18s %s" "State" "Path");
-      c.push_divider ();
-      (match state.repository_changes_error with
-       | None -> ()
-       | Some detail ->
-           c.push_styled ~style:(Theme.bad ())
-             ("  " ^ Keeper_chat.terminal_safe_text detail);
-           c.push_divider ());
-      let fixed =
-        2 + (if Option.is_some state.repository_changes_error then 2 else 0)
+      let scope_name =
+        match state.repository_changes_scope, state.repositories with
+        | Some Tui_decode.Repository_change_project, _ -> "Project workspace"
+        | Some (Tui_decode.Repository_change_repository id), Some snapshot ->
+            (match
+               List.find_opt
+                 (fun (repo : Masc.Tui_decode.repository) ->
+                   String.equal repo.rp_id id)
+                 snapshot.rs_repositories
+             with
+             | Some repo -> repo.rp_name
+             | None -> id)
+        | Some (Tui_decode.Repository_change_repository id), None -> id
+        | None, _ -> "Git workspace"
       in
-      let room = max 1 (budget - fixed) in
-      if changes = [] then
-        c.push_styled ~style:(Theme.recede ())
-          (match state.repository_changes, state.repository_changes_error with
-           | None, None -> "  (loading Git changes)"
-           | Some _, None -> "  (working tree clean)"
-           | _, Some _ -> "  (Git changes unavailable)")
-      else
-        for i = 0 to room - 1 do
-          let idx = state.repository_changes_scroll + i in
-          match List.nth_opt changes idx with
-          | None -> c.push_empty ()
-          | Some row ->
-              let line =
-                Printf.sprintf "  %-18s %s"
-                  (repository_change_status row)
-                  (Message_layout.fit_middle (max 8 (cols - 28))
-                     (Terminal_text.single_line row.rc_path))
-              in
-              if idx = state.repository_changes_cursor then c.push_selected line
-              else c.push line
-        done)
+      let title =
+        Printf.sprintf " MASC Git Changes — %s (%d)  %s"
+          (Terminal_text.single_line scope_name) (List.length changes)
+          (connection_badge state)
+      in
+      let change_ctx = resolve_change_context state ~path_opt:None in
+      let context_line_opt =
+        let items = [] in
+        let items =
+          match change_ctx.ctx_goal_id, change_ctx.ctx_goal_title with
+          | Some gid, Some title ->
+              Printf.sprintf "Goal: %s (%s)" gid (Message_layout.fit_middle 24 title) :: items
+          | Some gid, None -> ("Goal: " ^ gid) :: items
+          | None, _ -> items
+        in
+        let items =
+          match change_ctx.ctx_task_id, change_ctx.ctx_task_title with
+          | Some tid, Some title ->
+              Printf.sprintf "Task: %s (%s)" tid (Message_layout.fit_middle 26 title) :: items
+          | Some tid, None -> ("Task: " ^ tid) :: items
+          | None, _ -> items
+        in
+        let items =
+          match change_ctx.ctx_keeper with
+          | Some k -> ("Keeper: " ^ k) :: items
+          | None -> items
+        in
+        if items = [] then None
+        else Some ("  " ^ String.concat "  |  " (List.rev items))
+      in
+      surface_chrome state ~terminal_rows ~cols ~surface_key:"repository-changes"
+        ~title ~hints:Masc_tui_keys.footer_hints_git_changes
+        ~body:(fun ~budget c ->
+          (match context_line_opt with
+           | Some ctx_line ->
+               c.push_styled ~style:(Theme.plain ()) ctx_line;
+               c.push_divider ()
+           | None -> ());
+          c.push_styled ~style:(Theme.recede ())
+            (Printf.sprintf "  %-18s %s" "State" "Path");
+          c.push_divider ();
+          (match state.repository_changes_error with
+           | None -> ()
+           | Some detail ->
+               c.push_styled ~style:(Theme.bad ())
+                 ("  " ^ Keeper_chat.terminal_safe_text detail);
+               c.push_divider ());
+          let fixed =
+            2
+            + (if Option.is_some context_line_opt then 2 else 0)
+            + if Option.is_some state.repository_changes_error then 2 else 0
+          in
+          let room = max 1 (budget - fixed) in
+          if changes = [] then
+            c.push_styled ~style:(Theme.recede ())
+              (match state.repository_changes, state.repository_changes_error with
+               | None, None -> "  (loading Git changes)"
+               | Some _, None -> "  (working tree clean)"
+               | _, Some _ -> "  (Git changes unavailable)")
+          else
+            for i = 0 to room - 1 do
+              let idx = state.repository_changes_scroll + i in
+              match List.nth_opt changes idx with
+              | None -> c.push_empty ()
+              | Some row ->
+                  let attr =
+                    match state.msg_file_changes with
+                    | Some snap ->
+                        (match
+                           List.find_opt
+                             (file_change_matches_path row.rc_path)
+                             snap.Masc.Tui_decode.fcs_changes
+                         with
+                         | Some fc ->
+                             let t =
+                               match fc.fc_task_id with
+                               | Some tid -> tid
+                               | None -> fc.fc_keeper
+                             in
+                             " [" ^ t ^ "]"
+                         | None -> "")
+                    | None -> ""
+                  in
+                  let line =
+                    Printf.sprintf "  %-18s %s%s"
+                      (repository_change_status row)
+                      (Message_layout.fit_middle (max 8 (cols - 28 - String.length attr))
+                         (Terminal_text.single_line row.rc_path))
+                      attr
+                  in
+                  if idx = state.repository_changes_cursor then c.push_selected line
+                  else c.push line
+            done)
 
 (* Full health of the row the cursor names: fields the fleet table
    abbreviates, plus every alert the server already graded. *)
@@ -11766,9 +11944,6 @@ let change_result_badge (change : Masc.Tui_decode.file_change) =
   if change.Masc.Tui_decode.fc_succeeded then Theme.ok (), "APPLIED"
   else Theme.bad (), "FAILED"
 
-module Span = Masc_tui_span
-module Diff = Masc_tui_diff
-
 (* A row of the diff, drawn as layers rather than as one styled string.
 
    Three styles overlap on every line: the row's background, the gutter's
@@ -11801,11 +11976,6 @@ let diff_row_span ~width (row : Diff.row) =
      different kinds of line. Truncated first, because padding does not
      shorten. *)
   Span.pad_to width background (Span.truncate width composed)
-
-let box_line_span buf cols span =
-  let inner = framed_inner_width cols in
-  Buffer.add_string buf
-    (Printf.sprintf "  %s  \n" (Span.render (Span.pad_to inner Span.plain (Span.truncate inner span))))
 
 (* The two halves of one change. A write has no removed half: its before is
    empty, so every line arrives as an addition, which is what a new file is. *)

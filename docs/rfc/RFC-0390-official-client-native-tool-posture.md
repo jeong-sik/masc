@@ -53,7 +53,7 @@ native = "read"   # "none" | "read" | "full"
 |---|---|---|---|---|
 | `none` | 읽기·효과 전부 masc 도구로만 | `--tools ""` (현행) | **선언 불가** — admission 에서 typed 거부 | **선언 불가** — admission 에서 typed 거부 |
 | `read` | 네이티브 읽기 허용, 효과는 masc 도구로만 | `--tools "Read,Glob,Grep"` | `:read-only` (현행) | `--mode plan` + `--sandbox` (현행) |
-| `full` | 네이티브 효과까지 허용 | `--tools "default"` | `workspace-write` | `--mode accept-edits` + `--sandbox` 유지 |
+| `full` | 네이티브 효과까지 허용 | `--tools "default"` | `:workspace` | `--mode accept-edits` + `--sandbox` 유지 |
 
 - 키가 없으면 **각 런타임의 현행 자세 유지** (Claude Code = `none`,
   Codex = `read`, Antigravity = `read`). 기본값을 하나로 통일하면
@@ -114,8 +114,14 @@ official client 세션 재개는 `tool_surface_sha256` 으로 표면 일치를
    `--tools` 인자 분기. `--setting-sources=` 는 유지 (스킬 복원은
    별도 논의 — 스킬은 도구가 아니라 프롬프트 표면이다).
 3. `runtime_codex_app_server` — `permissions` 프로파일 분기.
-   app-server 프로토콜의 `":workspace-write"` 문자열 형태는 구현에서
-   공식 문서로 확증한다 (CLI 는 `-s workspace-write` 로 존재 확인됨).
+   **확증 완료 (2026-09-04, masc#33065).** 이 자리에 적혀 있던
+   `":workspace-write"` 는 틀린 값이었다. `-s workspace-write` 는
+   `SandboxMode` 이고 `permissions` 가 받는 profile id 가 아니다 —
+   `ThreadStartParams` 가 두 필드를 따로 두고 `permissions` 를
+   "Named profile id for this thread. Cannot be combined with `sandbox`."
+   로 설명한다. codex-cli 0.153.2 의 `permissionProfile/list` 는 정확히
+   `:read-only`, `:workspace`, `:danger-full-access` 셋을 답한다.
+   따라서 `full` 은 `:workspace` 다.
 4. `keeper_antigravity_runtime` — `execution_mode` 분기.
 5. lane admission 에 approval mode × `full` 결합 검사.
 6. 세션 정체성에 자세 반영.

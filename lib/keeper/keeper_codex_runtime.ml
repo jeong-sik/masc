@@ -435,9 +435,11 @@ let recovery_failure_of_client_error = function
    configuration MASC already chose, not an instruction -- what the keeper does
    about it stays the keeper's.
 
-   Checked against codex-cli 0.149.1 on 2026-08-25. Its app-server schema
-   names [SandboxMode] as [read-only | workspace-write | danger-full-access],
-   and a read-only session refuses a built-in patch with the wording this note
+   Checked against codex-cli 0.149.1 on 2026-08-25, profile ids re-read from
+   0.153.2 on 2026-09-04. MASC reaches the read-only posture through the named
+   permissions profile [:read-only] ([thread/start]'s [permissions]), not
+   through [sandbox] and its [SandboxMode] vocabulary, which this client never
+   sends. Such a session refuses a built-in patch with the wording this note
    contradicts: "patch rejected: writing is blocked by read-only sandbox"
    (openai/codex#30712, #24806).
 

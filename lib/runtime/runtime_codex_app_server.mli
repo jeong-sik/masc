@@ -20,8 +20,12 @@ type config =
   ; developer_instructions : string option
   ; native : Runtime_native_tools.posture
     (** Built-in tool posture (RFC-0390): [Native_read] maps to the
-        [:read-only] sandbox profile, [Native_full] to [:workspace-write].
-        [Native_none] is unrepresentable on Codex and fails as config. *)
+        [:read-only] named permissions profile, [Native_full] to
+        [:workspace]. These are app-server profile ids sent as
+        [thread/start]'s [permissions], not values of the CLI's [SandboxMode]
+        vocabulary, which belongs to the [sandbox] field this client never
+        sends. [Native_none] is unrepresentable on Codex and fails as
+        config. *)
   ; admission_timeout_s : float
     (** Finite bound for post-spawn subscription/account checks, thread
         creation, history injection, and the complete [turn/start] write. *)

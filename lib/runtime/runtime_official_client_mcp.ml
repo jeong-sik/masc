@@ -270,6 +270,18 @@ let dispatch_message
       let id = Mcp_transport_protocol.request_id_to_yojson request_id in
       let* protocol_version = protocol_version message.params in
       let initialize_response =
+        (* [tools] carries no [listChanged]: this server answers and never
+           originates. MCP 2025-11-25 server/tools says a server declaring
+           [listChanged] SHOULD send [notifications/tools/list_changed], and
+           there is no channel here to send one on — [handle_message] returns
+           [response : Yojson.Safe.t option], the HTTP transport answers GET
+           with 405 rather than opening an SSE stream
+           ([runtime_official_client_mcp_http.ml] `GET branch), and the Claude
+           Code transport only ever carries a control_response back. The list
+           is fixed for the session besides: [tool_specs] closes over an
+           immutable list bound when the turn starts. Declaring the capability
+           would promise a notification nothing can deliver about a set that
+           does not change; the lane's real pin is elsewhere (RFC-0413 §3.3). *)
         Mcp_transport_protocol.make_response
           ~id
           (`Assoc

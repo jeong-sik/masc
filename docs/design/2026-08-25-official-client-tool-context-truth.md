@@ -20,8 +20,14 @@ Claude Code, Codex, Antigravity가 실제로 받은 native/MASC tool surface와 
 | Runtime | Keeper default | Runtime enforcement |
 |---|---:|---|
 | Claude Code | `native = "none"` | `--tools ""`; `read`는 `Read,Glob,Grep`; `full`은 `default` |
-| Codex app-server | `native = "read"` | `permissions=:read-only`; `full`은 `:workspace-write` |
+| Codex app-server | `native = "read"` | `permissions=:read-only`; `full`은 `:workspace` (아래 주) |
 | Antigravity | `native = "read"` | `--mode plan --sandbox`; `full`은 `accept-edits --sandbox` |
+
+> 주 (2026-09-04, masc#33065): 이 표는 원래 `full`을 `:workspace-write`로 적었고
+> 코드도 그 값을 보냈다. 그 값은 profile id가 아니라 `SandboxMode`라서 어느
+> 프로필도 가리키지 않는다. codex-cli 0.153.2의 `permissionProfile/list`가 답하는
+> id는 `:read-only`, `:workspace`, `:danger-full-access` 셋뿐이다. `full`을 쓰는
+> keeper가 없어 라이브에서 드러난 적은 없다.
 
 그러나 다음 projection은 실행 truth를 잃는다.
 

@@ -1594,6 +1594,38 @@ let test_setting_sources_render_in_argv () =
           (argv [ Runtime_native_tools.Settings_local ])))
 ;;
 
+(* Passing [--system-prompt] replaces the CLI's built-in prompt, so the flag's
+   absence is what selects that prompt. claude 2.1.260 reads any string as the
+   prompt — "" included — which is why an unset prompt has to drop the flag
+   rather than send an empty value. Its --help states the same coupling:
+   "Only applies with the default system prompt (ignored with
+   --system-prompt)". *)
+let test_system_prompt_flag_is_omitted_when_unset () =
+  let argv system_prompt =
+    let config =
+      { (Runtime_claude_code.default_config ~cwd:"/tmp") with system_prompt }
+    in
+    match
+      Runtime_claude_code.command
+        config
+        ~dynamic_tools:[]
+        ~reasoning_effort:None
+        ~session_mode:Runtime_claude_code.Start
+        ~session_id:"11111111-1111-4111-8111-111111111111"
+    with
+    | Ok argv -> argv
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+  in
+  check bool "an unset prompt sends no --system-prompt" false
+    (List.mem "--system-prompt" (argv None));
+  check (option string) "so the flag carries no value" None
+    (flag_value (argv None) "--system-prompt");
+  check bool "a declared prompt sends the flag" true
+    (List.mem "--system-prompt" (argv (Some "keeper instructions")));
+  check (option string) "with its text verbatim" (Some "keeper instructions")
+    (flag_value (argv (Some "keeper instructions")) "--system-prompt")
+;;
+
 let test_native_posture_selects_tools_flag () =
   let argv posture = native_argv ~native:posture ~dynamic_tools:[] in
   check (option string) "none disables the built-in set" (Some "")
@@ -1639,6 +1671,10 @@ let () =
             "setting sources render in argv"
             `Quick
             test_setting_sources_render_in_argv
+        ; test_case
+            "an unset system prompt omits the flag"
+            `Quick
+            test_system_prompt_flag_is_omitted_when_unset
         ; test_case
             "read pre-approves its read set"
             `Quick

@@ -35,7 +35,7 @@ val journaled_event_of_string : string -> (journaled_event, string) result
 (** {1 Journal} *)
 
 type journal
-(** An open per-operation journal: a resolved path plus the clock. *)
+(** An open per-operation journal: a resolved path. *)
 
 val journal_path :
   base_dir:string -> keeper_name:string -> operation_id:string -> string
@@ -46,19 +46,18 @@ val journal_path :
     client-derived, so it is sanitized too. *)
 
 val open_journal :
-  ?now:(unit -> float) ->
-  base_dir:string ->
-  keeper_name:string ->
-  operation_id:string ->
-  unit ->
-  journal
+  base_dir:string -> keeper_name:string -> operation_id:string -> unit -> journal
 (** Resolves the path and creates the parent directory. Fail-open: directory
-    creation failure is logged, not raised. [now] defaults to
-    [Time_compat.now] and is injectable for deterministic tests. *)
+    creation failure is logged, not raised. *)
 
-val append : journal -> seq:int -> Keeper_chat_events.keeper_chat_event -> unit
+val append :
+  journal -> seq:int -> ts:float -> Keeper_chat_events.keeper_chat_event -> unit
 (** Synchronously appends one envelope line (fsync + truncate-rollback via
-    [Fs_compat.append_private_jsonl_durable_locked_result]). Fail-open: every
+    [Fs_compat.append_private_jsonl_durable_locked_result]). [seq] and [ts]
+    are the bus stamps ({!Keeper_chat_events.published}): the journal never
+    reads a clock of its own, so the line and the live projection of the same
+    event agree. Installed as the bus hook it is exactly
+    [Keeper_chat_events.create ~on_publish:(append journal)]. Fail-open: every
     failure is logged via [Log.Keeper.error] and swallowed — including raw
     [Unix.Unix_error]s the transaction layer does not convert into its result
     type — so journaling never breaks the live turn. A non-finite float

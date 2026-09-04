@@ -202,13 +202,28 @@ type t
 (** Bounded per-turn event stream plus its optional journal hook (RFC-0412
     stage 1). *)
 
-(** [create ?on_publish ()] returns a new bounded event stream. Each turn
-    should create its own stream instance. [on_publish], when given, is
-    invoked synchronously with a 0-based per-stream sequence number BEFORE the
-    event enters the bus; hook exceptions are logged and swallowed (except
-    cancellation, which is re-raised) so a journal failure can never break the
-    live turn. *)
-val create : ?on_publish:(seq:int -> keeper_chat_event -> unit) -> unit -> t
+(** One event as the bus stamped it: the 0-based publish-order sequence number
+    and the publish-time clock reading. The journal line for this event (via
+    [on_publish]) and every live projection of it carry the same [seq] and
+    [ts], so a journal replay reproduces the live wire bytes. *)
+type published =
+  { seq : int
+  ; ts : float
+  ; event : keeper_chat_event
+  }
+
+(** [create ?now ?on_publish ()] returns a new bounded event stream. Each turn
+    should create its own stream instance. [now] is the clock read once per
+    [publish] (default [Time_compat.now]; injectable for deterministic tests).
+    [on_publish], when given, is invoked synchronously with that seq and ts
+    BEFORE the event enters the bus; hook exceptions are logged and swallowed
+    (except cancellation, which is re-raised) so a journal failure can never
+    break the live turn. *)
+val create :
+  ?now:(unit -> float) ->
+  ?on_publish:(seq:int -> ts:float -> keeper_chat_event -> unit) ->
+  unit ->
+  t
 
 (** [publish t event] runs the journal hook (if any) and adds [event] to the
     stream. With a journal hook installed, the hook performs brief blocking
@@ -221,14 +236,11 @@ val publish : t -> keeper_chat_event -> unit
 (** [subscribe t] blocks until an event is available, then returns it. *)
 val subscribe : t -> keeper_chat_event
 
-(** [subscribe_with_seq t] blocks until an event is available, then returns
-    it with its 0-based publish-order sequence number. Same single-consumer
-    contract as [subscribe] — the seq is the bus read cursor, valid because
-    exactly one fiber drains the bus. Mixing with [subscribe] or
-    [take_nonblocking] forfeits seq accuracy for the events those calls
-    skip: they never advance the cursor, so later [subscribe_with_seq]
-    results under-count by the number of skipped events. *)
-val subscribe_with_seq : t -> int * keeper_chat_event
+(** [subscribe_published t] blocks until an event is available, then returns
+    it with the seq and ts the bus stamped at publish time. The wire adapter
+    reads through this so the frame id is the journal seq and the projected
+    timestamp is the journaled ts. *)
+val subscribe_published : t -> published
 
 (** [take_nonblocking t] returns the next queued event, or [None] when the
     bus is empty. Drain/test support: it bypasses the blocking [subscribe]

@@ -2682,10 +2682,15 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                  let redact_text = Keeper_secret_redaction.redact_text redaction in
                  let redact_json = Keeper_secret_redaction.redact_json redaction in
                  let rec loop projection =
-                   let seq, event = Keeper_chat_events.subscribe_with_seq events in
+                   let { Keeper_chat_events.seq; ts; event } =
+                     Keeper_chat_events.subscribe_published events
+                   in
+                   (* The bus stamped [ts] once at publish; the journal line
+                      carries the same value, so a since_seq replay of this
+                      event reproduces this frame byte for byte. *)
                    let projection, projected =
                      Server_keeper_chat_agui_projection.project
-                       ~timestamp:(Time_compat.now ())
+                       ~timestamp:ts
                        ~redact_text
                        ~redact_json
                        projection

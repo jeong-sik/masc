@@ -559,10 +559,7 @@ let journaled_event_of_string line =
 
 (** {1 Journal} *)
 
-type journal =
-  { path : string
-  ; now : unit -> float
-  }
+type journal = { path : string }
 
 let sanitize_segment = Workspace_utils_backend_setup.sanitize_namespace_segment
 
@@ -580,7 +577,7 @@ let journal_path ~base_dir ~keeper_name ~operation_id =
 
 (* Fail-open at construction too: a directory we cannot create must not abort
    the turn; the per-event append below then logs each failure. *)
-let open_journal ?(now = Time_compat.now) ~base_dir ~keeper_name ~operation_id () =
+let open_journal ~base_dir ~keeper_name ~operation_id () =
   let path = journal_path ~base_dir ~keeper_name ~operation_id in
   (try Fs_compat.mkdir_p (Filename.dirname path) with
    | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
@@ -589,7 +586,7 @@ let open_journal ?(now = Time_compat.now) ~base_dir ~keeper_name ~operation_id (
        "keeper_chat_event_log: journal directory creation failed path=%s: %s"
        path
        (Printexc.to_string exn));
-  { path; now }
+  { path }
 ;;
 
 (* A non-finite float (NaN/inf) would serialize to a bare NaN/Infinity token —
@@ -614,21 +611,8 @@ let event_floats_are_finite = function
    raised into the live path. The umbrella is required: the Fs_compat result
    type covers only write/fsync/rollback failures, while mkdir, openfile,
    fchmod, fsync_parent_directory, and lockf raise raw [Unix.Unix_error]. *)
-let append journal ~seq event =
+let append journal ~seq ~ts event =
   try
-    (* The clock is injectable; a raising clock falls back to the real one
-       rather than breaking the turn. *)
-    let ts =
-      try journal.now () with
-      | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
-      | exn ->
-        Log.Keeper.error
-          "keeper_chat_event_log: journal clock raised path=%s seq=%d: %s; falling back to Time_compat.now"
-          journal.path
-          seq
-          (Printexc.to_string exn);
-        Time_compat.now ()
-    in
     if (not (float_is_finite ts)) || not (event_floats_are_finite event)
     then
       Log.Keeper.error
@@ -698,7 +682,7 @@ let read_journal journal =
 
 (* Read-only consumers (the consistency audit) must not mkdir as a side
    effect of reading, so they hold no [open_journal] handle. *)
-let read_journal_path path = read_journal { path; now = Time_compat.now }
+let read_journal_path path = read_journal { path }
 
 
 type read_failure =

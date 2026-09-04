@@ -243,6 +243,58 @@ let repeated_exact_tool_call ~threshold tool_calls =
     else None
 ;;
 
+(* Constitution exception (named bound + rationale): the same repetition count
+   as the two axes above, on the one key they cannot use.
+
+   [same_exact_tool_call] requires the output fingerprint to match, and that is
+   deliberate -- an unchanged output is the proof that the world did not move.
+   A tool whose result is a clock has no such proof available: every call
+   returns a different value while nothing advances, so no threshold on that
+   axis can ever fire. Live, one keeper called [keeper_time_now] 280 times in a
+   single turn out of 281 tool calls, writing the same sentence between them
+   with only the freshly read timestamp changed, and neither the tool axis nor
+   the text axis saw it (masc #33021).
+
+   So this axis drops the output and keeps adjacency instead. Adjacency is what
+   the output fingerprint was buying: consecutive identical calls with nothing
+   in between is the same "nothing happened" evidence, without asking the
+   result to stand still.
+
+   5 = the first call plus four consecutive repeats. Measured over three days
+   of live tool calls (2026-09-01..03), adjacent runs of an identical
+   (tool, input) pair separate cleanly at that point: runs of 3-4 are ordinary
+   work (keeper_tasks_list 101, keeper_spawn_read 40, masc_board_post_get 60,
+   Execute 33), while 35 of the 36 runs reaching 5 were one tool -- the clock --
+   under the two keepers that were looping. A yield here persists a checkpoint
+   and resumes, so the one non-clock run of that length cost a resume. *)
+let repeated_tool_call_input_yield_threshold = 5
+
+let same_tool_call_input
+      (left : Keeper_agent_result.tool_call_detail)
+      (right : Keeper_agent_result.tool_call_detail)
+  =
+  String.equal left.tool_name right.tool_name
+  && same_present_fingerprint left.input_fingerprint right.input_fingerprint
+;;
+
+(* Newest-first, so the head is the latest call and the streak runs back from
+   it. Unlike [repeated_exact_tool_call] the repeats must be adjacent: without
+   the output fingerprint, two identical inputs far apart in a dispatch are
+   ordinary re-reads, not a loop. *)
+let repeated_tool_call_input ~threshold tool_calls =
+  match tool_calls with
+  | [] -> None
+  | latest :: previous ->
+    let rec streak count = function
+      | call :: rest when same_tool_call_input latest call -> streak (count + 1) rest
+      | _ -> count
+    in
+    let repeated_count = streak 1 previous in
+    if threshold > 1 && repeated_count >= threshold
+    then Some (latest.tool_name, repeated_count)
+    else None
+;;
+
 let assistant_text_is_blank text =
   String.for_all
     (fun ch -> ch = ' ' || ch = '\t' || ch = '\n' || ch = '\r')
@@ -497,6 +549,7 @@ module For_testing = struct
   let prune_raw_traces_after_turn_record = prune_raw_traces_after_turn_record
   let runtime_yield_reason = runtime_yield_reason
   let repeated_exact_tool_call = repeated_exact_tool_call
+  let repeated_tool_call_input = repeated_tool_call_input
   let repeated_assistant_text = repeated_assistant_text
   let dispatch_after_provider_transcript_admission =
     dispatch_after_provider_transcript_admission
@@ -1094,6 +1147,24 @@ let run_turn
                                       { tool_name; repeated_count }))
                             | None ->
                               (match
+                                 repeated_tool_call_input
+                                   ~threshold:
+                                     repeated_tool_call_input_yield_threshold
+                                   s.acc.tool_calls
+                               with
+                               | Some (tool_name, repeated_count) ->
+                                 Log.Keeper.warn
+                                   ~keeper_name:meta.name
+                                   "yielding repeated tool input loop tool=%s \
+                                    count=%d"
+                                   tool_name
+                                   repeated_count;
+                                 Ok
+                                   (Runtime_agent.Yield
+                                      (Runtime_agent.Repeated_tool_call
+                                         { tool_name; repeated_count }))
+                               | None ->
+                              (match
                                  repeated_assistant_text
                                    ~threshold:
                                      repeated_assistant_text_yield_threshold
@@ -1108,7 +1179,7 @@ let run_turn
                                  Ok
                                    (Runtime_agent.Yield
                                       (Runtime_agent.Repeated_assistant_text
-                                         { repeated_count }))))
+                                         { repeated_count })))))
                      in
                      (match autonomous_yield_requested with
                       | None -> repeated_loop_decision ()

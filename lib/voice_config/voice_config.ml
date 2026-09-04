@@ -120,15 +120,6 @@ let require_string ~ctx ~field json =
   | Some value -> Ok value
   | None -> Error (Printf.sprintf "%s.%s is required" ctx field)
 
-let require_object ~ctx ~field json =
-  match Json_util.get_object json field with
-  | Some obj -> Ok obj
-  | None ->
-      let raw = Option.value ~default:`Null (Json_util.assoc_member_opt field json) in
-      Error
-        (Printf.sprintf "%s.%s must be object, got %s: %s" ctx field
-           (Json_util.kind_name raw) (Json_util.excerpt raw))
-
 let require_list ~ctx ~field json =
   match Json_util.get_array json field with
   | Some (`List items) -> Ok items
@@ -292,50 +283,96 @@ let parse_agent_voice_settings json =
         (Printf.sprintf "tts.agent_voice_settings must be an object, got %s: %s"
            (Json_util.kind_name other) (Json_util.excerpt other))
 
+let default_tts =
+  {
+    default_model = "";
+    default_voice = "";
+    default_voice_settings =
+      { stability = 0.5; similarity_boost = 0.75; style = 0.0 };
+    agent_voices = [];
+    agent_voice_settings = [];
+    endpoints = [];
+  }
+
 let parse_tts json =
-  let open Result in
-  let* tts_json = require_object ~ctx:"root" ~field:"tts" json in
-  let* default_model = require_string ~ctx:"tts" ~field:"default_model" tts_json in
-  let* default_voice = require_string ~ctx:"tts" ~field:"default_voice" tts_json in
-  let* default_voice_settings =
-    parse_voice_tuning ~ctx:"tts.default_voice_settings"
-      (Option.value ~default:`Null (Json_util.assoc_member_opt "default_voice_settings" tts_json))
-  in
-  let* agent_voices = parse_agent_voices tts_json in
-  let* agent_voice_settings =
-    parse_agent_voice_settings tts_json
-  in
-  let* endpoints_json = require_list ~ctx:"tts" ~field:"endpoints" tts_json in
-  let* endpoints = parse_endpoints ~ctx:"tts.endpoints" [] endpoints_json in
-  Ok
-    {
-      default_model;
-      default_voice;
-      default_voice_settings;
-      agent_voices;
-      agent_voice_settings;
-      endpoints;
-    }
+  match Json_util.assoc_member_opt "tts" json with
+  | None | Some `Null -> Ok default_tts
+  | Some (`Assoc _ as tts_json) ->
+      let open Result in
+      let* default_voice =
+        require_string ~ctx:"tts" ~field:"default_voice" tts_json
+      in
+      let default_model =
+        Option.value ~default:""
+          (Json_util.get_string_nonempty tts_json "default_model")
+      in
+      let* default_voice_settings =
+        parse_voice_tuning ~ctx:"tts.default_voice_settings"
+          (Option.value ~default:`Null
+             (Json_util.assoc_member_opt "default_voice_settings" tts_json))
+      in
+      let* agent_voices = parse_agent_voices tts_json in
+      let* agent_voice_settings =
+        parse_agent_voice_settings tts_json
+      in
+      let* endpoints_json = require_list ~ctx:"tts" ~field:"endpoints" tts_json in
+      let* endpoints = parse_endpoints ~ctx:"tts.endpoints" [] endpoints_json in
+      Ok
+        {
+          default_model;
+          default_voice;
+          default_voice_settings;
+          agent_voices;
+          agent_voice_settings;
+          endpoints;
+        }
+  | Some other ->
+      Error
+        (Printf.sprintf "root.tts must be object, got %s: %s"
+           (Json_util.kind_name other) (Json_util.excerpt other))
+
+let default_stt =
+  {
+    default_model = "";
+    endpoints = [];
+  }
 
 let parse_stt json =
-  let open Result in
-  let* stt_json = require_object ~ctx:"root" ~field:"stt" json in
-  let* default_model = require_string ~ctx:"stt" ~field:"default_model" stt_json in
-  let* endpoints_json = require_list ~ctx:"stt" ~field:"endpoints" stt_json in
-  let* endpoints = parse_endpoints ~ctx:"stt.endpoints" [] endpoints_json in
-  Ok { default_model; endpoints }
+  match Json_util.assoc_member_opt "stt" json with
+  | None | Some `Null -> Ok default_stt
+  | Some (`Assoc _ as stt_json) ->
+      let open Result in
+      let default_model =
+        Option.value ~default:""
+          (Json_util.get_string_nonempty stt_json "default_model")
+      in
+      let* endpoints_json = require_list ~ctx:"stt" ~field:"endpoints" stt_json in
+      let* endpoints = parse_endpoints ~ctx:"stt.endpoints" [] endpoints_json in
+      Ok { default_model; endpoints }
+  | Some other ->
+      Error
+        (Printf.sprintf "root.stt must be object, got %s: %s"
+           (Json_util.kind_name other) (Json_util.excerpt other))
+
+let default_session = { endpoints = [] }
 
 let parse_session json =
-  let open Result in
-  let* session_json = require_object ~ctx:"root" ~field:"session" json in
-  let* endpoints_json =
-    require_list ~ctx:"session" ~field:"endpoints" session_json
-  in
-  match endpoints_json with
-  | [] -> Ok { endpoints = [] }
-  | items ->
-    let* endpoints = parse_endpoints ~ctx:"session.endpoints" [] items in
-    Ok { endpoints }
+  match Json_util.assoc_member_opt "session" json with
+  | None | Some `Null -> Ok default_session
+  | Some (`Assoc _ as session_json) ->
+      let open Result in
+      let* endpoints_json =
+        require_list ~ctx:"session" ~field:"endpoints" session_json
+      in
+      (match endpoints_json with
+      | [] -> Ok { endpoints = [] }
+      | items ->
+        let* endpoints = parse_endpoints ~ctx:"session.endpoints" [] items in
+        Ok { endpoints })
+  | Some other ->
+      Error
+        (Printf.sprintf "root.session must be object, got %s: %s"
+           (Json_util.kind_name other) (Json_util.excerpt other))
 
 (* Defaults measured on one workstation 2026-09-04, which is exactly why they
    are configurable: a room read 4.48% peak here and speech clipped at 100%,

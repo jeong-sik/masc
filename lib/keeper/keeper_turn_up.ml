@@ -38,11 +38,15 @@ let declarative_manifest_revision (p : Keeper_turn_up_args.parsed_args) =
   | Declarative_manifest_present { sha256; _ } ->
     Keeper_turn_up_config_persistence.Sha256 sha256
 
+(* The code is [Keeper_turn_up_update]'s exported constant, not a second copy
+   of the spelling. It was a copy: the create branch here and the update
+   branch there wrote the same literal twice, and a reader that matches one
+   of them has no way to tell whether the other still agrees. *)
 let config_revision_conflict ~expected ~observed =
   tool_result_error_data
     ~class_:Tool_result.Workflow_rejection
     (`Assoc
-       [ "code", `String "keeper_config_revision_conflict"
+       [ "code", `String Keeper_turn_up_update.config_revision_conflict_code
        ; "expected", Keeper_turn_up_config_persistence.config_revision_to_yojson expected
        ; "observed", Keeper_turn_up_config_persistence.config_revision_to_yojson observed
        ])

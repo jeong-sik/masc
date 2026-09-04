@@ -347,8 +347,13 @@ let test_memory_category_cycle_returns_to_all () =
 
 let test_git_changes_footer_names_only_changed_file_actions () =
   check str "Git changes has one shared row footer"
-    "j/k:move  Right / d / Enter:diff  v:open in code  Left / Esc:back  r:refresh  Tab:next  q:quit"
+    "j/k:move  Right / d / Enter:diff  v:open in code  p:open PR  t/g:task / goal  Left / Esc:back  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_git_changes
+
+let test_git_diff_footer_names_scroll_code_and_files () =
+  check str "Git diff has diff navigation footer"
+    "j/k:scroll  v:open in code  p:open PR  t/g:task / goal  Left / Esc:back to files  r:refresh  Tab:next  q:quit"
+    Masc_tui_keys.footer_hints_git_diff
 
 let test_verification_footer_carries_the_verdict_keys () =
   (* Verification is a list/detail surface: Enter explains the request before
@@ -1339,6 +1344,8 @@ let () =
             test_memory_category_cycle_returns_to_all
         ; Alcotest.test_case "Git changes has changed-file actions only" `Quick
             test_git_changes_footer_names_only_changed_file_actions
+        ; Alcotest.test_case "Git diff has diff navigation and jump actions" `Quick
+            test_git_diff_footer_names_scroll_code_and_files
         ; Alcotest.test_case "Verification carries the verdict keys" `Quick
             test_verification_footer_carries_the_verdict_keys
         ; Alcotest.test_case "Fusion pins the shared list projection" `Quick

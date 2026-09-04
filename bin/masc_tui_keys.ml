@@ -618,6 +618,8 @@ let footer_hints_git_changes =
     ([ b Navigate "j/k" "move"
      ; b Act "Right / d / Enter" "diff"
      ; b Act "v" "open in code"
+     ; b Act "p" "open PR"
+     ; b Act "t/g" "task / goal"
      ; b Act "Left / Esc" "back"
      ]
      @ listing_meta)
@@ -626,6 +628,8 @@ let footer_hints_git_diff =
   hints_of_bindings
     ([ b Navigate "j/k" "scroll"
      ; b Act "v" "open in code"
+     ; b Act "p" "open PR"
+     ; b Act "t/g" "task / goal"
      ; b Act "Left / Esc" "back to files"
      ]
      @ listing_meta)

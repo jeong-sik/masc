@@ -1272,7 +1272,11 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          there, and staying scrolled back would hide the send. *)
       set_msg_scroll state 0;
       forget_recall state;
-      submit_message text
+      submit_message text;
+      (* The composer is empty after a submit, so a line held only because the
+         operator was mid-compose ([composing_for_keeper]) can dispatch now. When
+         the submit folded onto that held line, this is what sends the merge. *)
+      drain_queue ()
     end;
     true
   (* The same two keys the composer row binds, because this surface has its own
@@ -1337,6 +1341,9 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     in
     Buffer.clear state.msg_input;
     Buffer.add_string state.msg_input new_content;
+    (* Emptying the composer releases a line held only for this keeper's compose
+       ([composing_for_keeper]); send it now rather than waiting for a settle. *)
+    if Buffer.length state.msg_input = 0 then drain_queue ();
     true
   | "\x17" | "alt-backspace" ->
     (* Ctrl-W, or Alt+Backspace on a terminal that sends ESC DEL: the last
@@ -1348,6 +1355,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     in
     Buffer.clear state.msg_input;
     Buffer.add_string state.msg_input new_content;
+    if Buffer.length state.msg_input = 0 then drain_queue ();
     true
   | s ->
     let c = if String.length s = 1 then Some (Char.code s.[0]) else None in
@@ -1384,6 +1392,9 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
         drain_queue ()
       end;
       Buffer.clear state.msg_input;
+      (* Cleared composer: release any line held only for this keeper's compose
+         ([composing_for_keeper]). *)
+      drain_queue ();
       true
     end else if c = Some 5 then begin
       (* Ctrl-E: back to the newest row. Scrolling down one row at a time from
@@ -5502,6 +5513,19 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                    blocking.Keeper_chat.request_id waiting))))
 ;;
 
+(* The operator is mid-line for this keeper: the composer holds text and it is
+   aimed here. While that is true, a settle should not dispatch the keeper's
+   waiting line out from under the line being typed -- holding it lets the next
+   Enter fold the two together ([coalesce_queued_input]). Gated on that setting:
+   with coalescing off the operator wants every line its own turn, so the settle
+   dispatches promptly as before. *)
+let composing_for_keeper state keeper_name =
+  state.coalesce_queued_input
+  && Buffer.length state.msg_input > 0
+  && (match state.msg_target_keeper_name with
+      | Some target -> String.equal target keeper_name
+      | None -> false)
+
 let drain_queued_message state ~base_path ~mailbox =
   (* Send everything that can go now, oldest first, skipping lines whose own
      keeper still has a turn running. Sending sets that keeper's in-flight, so
@@ -5518,6 +5542,7 @@ let drain_queued_message state ~base_path ~mailbox =
     match
       Chat_queue.take_first_sendable state.msg_queued ~sendable:(fun keeper_name ->
         Option.is_none (inflight_for state keeper_name)
+        && not (composing_for_keeper state keeper_name)
         &&
         match state.msg_recall_replaces with
         | Some editing ->

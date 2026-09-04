@@ -3309,6 +3309,14 @@ let send_disposition state ~keeper_name : send_disposition =
       (Option.map
          (fun entry -> entry.sent_request)
          (inflight_for_keeper state keeper_name))
+    ~waiting:
+      (* The line a new one for this keeper would join (last waiting [Next], never
+         a steer). Present it as "the keeper is spoken for" so Enter queues onto
+         it instead of dispatching past a line the operator has not finished. *)
+      (Option.map
+         (fun (item : Masc_tui_keeper_chat_queue.item) ->
+           item.Masc_tui_keeper_chat_queue.request)
+         (Masc_tui_keeper_chat_queue.join_target state.msg_queued ~keeper_name))
 
 (** One keeper as the Keepers surface reads it: durable pause from the
     metadata row, live runtime from the roster. *)

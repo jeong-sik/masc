@@ -919,12 +919,13 @@ let chat_live_timeline_at ~request_id ~started_at ~request_messages
    sequence yet; an exact clock tie precedes unowned/Journal rows. Callers that
    already hold committed rows for this request insert after its latest causal
    frontier instead. *)
-let chat_live_insertion_index ~request_id ~timeline_at positioned_messages =
+let chat_block_insertion_index ~bounds ~request_id ~timeline_at
+    positioned_messages =
   let lower_bound =
     List.fold_left
       (fun (index, lower_bound) ((row : msg_entry), _) ->
         ( index + 1
-        , if String.equal row.me_request_id request_id
+        , if String.equal row.me_request_id request_id && bounds row
           then index + 1
           else lower_bound ))
       (0, 0) positioned_messages
@@ -950,6 +951,23 @@ let chat_live_insertion_index ~request_id ~timeline_at positioned_messages =
         else find (index + 1) rest
   in
   find 0 positioned_messages
+;;
+
+let chat_live_insertion_index ~request_id ~timeline_at positioned_messages =
+  chat_block_insertion_index ~bounds:(fun _ -> true) ~request_id ~timeline_at
+    positioned_messages
+;;
+
+(* A settled block holds the turn's progress, tools and words; the request's
+   output rows that stay committed -- a failure the strict decode wrote, a
+   local line -- came after all of that, so the block goes after the request's
+   last row of any earlier phase and before its output rows. Bounding on every
+   row put a failed turn's words under its own error and under whatever turns
+   ran in between. *)
+let chat_settled_insertion_index ~request_id ~timeline_at positioned_messages =
+  chat_block_insertion_index
+    ~bounds:(fun row -> row.me_turn_phase <> Turn_output)
+    ~request_id ~timeline_at positioned_messages
 ;;
 
 let msg_anchor entry =
@@ -2268,16 +2286,20 @@ let journal_fetch_targets ~cap ~held ~unavailable
 ;;
 
 (* A committed log stands for its turn once the stream told it how the turn
-   ended. A log that never heard the end -- the request went without a live
-   view (no Eio clock), or the stream was cut and nothing replayed it -- holds
-   part of the turn at most, and the committed rows keep saying the rest. *)
+   ended: a failure, or a finish with the recorded reply. A finish without one
+   is a cancelled turn (the server ends a cancelled stream with RUN_FINISHED
+   and no KEEPER_REPLY_DETAILS), whose ending the log cannot draw; and a log
+   that never heard the end -- the request went without a live view (no Eio
+   clock), or the stream was cut and nothing replayed it -- holds part of the
+   turn at most. In both the committed rows keep saying what the turn did. *)
 let turn_log_holds_the_turn turn_log =
   Masc_tui_keeper_chat_log.committed turn_log.tl_log
   &&
   match Masc_tui_keeper_chat_transcript.phase turn_log.tl_transcript with
-  | Masc_tui_keeper_chat_transcript.Stream_ended
-  | Masc_tui_keeper_chat_transcript.Stream_failed _ ->
-      true
+  | Masc_tui_keeper_chat_transcript.Stream_failed _ -> true
+  | Masc_tui_keeper_chat_transcript.Stream_ended ->
+      Option.is_some
+        (Masc_tui_keeper_chat_transcript.reply turn_log.tl_transcript)
   | Masc_tui_keeper_chat_transcript.Waiting
   | Masc_tui_keeper_chat_transcript.Working ->
       false
@@ -3349,6 +3371,10 @@ type state = {
      session. A request that never got an answer is not here: the next
      refresh asks again. *)
   mutable msg_journal_unavailable: string list;
+  (* The settled logs held when [msg_scroll_pin] was taken. Their rows were on
+     the screen the operator anchored, so they are not rows that arrived
+     since; a log held later is. *)
+  mutable msg_scroll_pin_settled: turn_log list;
   mutable detail_scroll: int;
   workspace: string;
   port: int;
@@ -3438,9 +3464,14 @@ let live_for_keeper state keeper_name =
   Option.map (fun entry -> entry.log) (inflight_for_keeper state keeper_name)
 ;;
 
-let settled_log_for_request state request_id =
+(* Scoped by keeper like every other reading of the settled logs: a request
+   id is minted per send, but the rule that one turn has one source is a
+   rule per keeper's conversation. *)
+let settled_log_for_request state ~keeper_name request_id =
   List.find_opt
-    (fun turn_log -> String.equal (turn_log_request_id turn_log) request_id)
+    (fun turn_log ->
+      String.equal (turn_log_keeper_name turn_log) keeper_name
+      && String.equal (turn_log_request_id turn_log) request_id)
     state.msg_settled_logs
 ;;
 
@@ -3458,8 +3489,9 @@ let settled_logs_for_keeper state keeper_name =
    journal on the next refresh. *)
 let hold_settled_log state turn_log =
   let request_id = turn_log_request_id turn_log in
+  let keeper_name = turn_log_keeper_name turn_log in
   let replaceable =
-    match settled_log_for_request state request_id with
+    match settled_log_for_request state ~keeper_name request_id with
     | Some existing -> not (turn_log_holds_the_turn existing)
     | None -> true
   in
@@ -3474,7 +3506,10 @@ let hold_settled_log state turn_log =
     state.msg_settled_logs <-
       insert
         (List.filter
-           (fun held -> not (String.equal (turn_log_request_id held) request_id))
+           (fun held ->
+             not
+               (String.equal (turn_log_keeper_name held) keeper_name
+               && String.equal (turn_log_request_id held) request_id))
            state.msg_settled_logs)
   end
 ;;
@@ -3492,33 +3527,125 @@ let reasoning_drawn = function
   | Reasoning_folded | Reasoning_full -> true
 ;;
 
-(* The rows a turn's log draws itself: the keeper's words, its tool blocks,
-   its skills, its reasoning. What a person said, what the server said about
-   the turn (gate rows), what the pane said, and a failure are drawn from the
-   committed rows whether or not a log holds the turn -- the log draws none of
-   them. *)
-let log_draws_role = function
-  | Message_keeper | Message_autonomous | Message_tool | Message_skill _
-  | Message_thinking ->
-      true
+(* A turn a settled log stands for, as the timeline needs to know it: which
+   request, and whether the log carries reasoning. The wire carries reasoning
+   only from runtimes that stream it; a runtime that does not leaves the
+   durable trace row -- "N reasoning steps, content withheld" -- as the only
+   record that the keeper thought at all, and that row stays. *)
+type held_turn =
+  { ht_request_id : string
+  ; ht_reasoning : bool
+  }
+
+let held_turn_of_log turn_log =
+  { ht_request_id = turn_log_request_id turn_log
+  ; ht_reasoning =
+      Masc_tui_keeper_chat_transcript.thinking_lines turn_log.tl_transcript <> []
+  }
+;;
+
+(* The rows a turn's log draws itself: the keeper's words, its tool blocks
+   (with the durable outcome and duration folded in by
+   [enrich_held_logs_from_rows]), its skills, and its reasoning when it has
+   any. What a person said, what the server said about the turn (gate rows),
+   what the pane said, and a failure are drawn from the committed rows whether
+   or not a log holds the turn -- the log draws none of them. *)
+let log_draws_row (held : held_turn) (row : msg_entry) =
+  String.equal row.me_request_id held.ht_request_id
+  &&
+  match row.me_role with
+  | Message_keeper | Message_autonomous | Message_tool | Message_skill _ -> true
+  | Message_thinking -> held.ht_reasoning
   | Message_user _ | Message_status | Message_local | Message_error
   | Message_memory ->
       false
 ;;
 
-(* The committed rows the pane still draws once these request ids are held
-   by settled logs: a turn has one source, and for a held turn that is the
-   log. *)
-let rows_the_logs_do_not_draw ~held_request_ids rows =
-  match held_request_ids with
+(* The committed rows the pane still draws once these turns are held by
+   settled logs: a turn has one source, and for a held turn that is the log.
+   The same list when nothing is held, so the memo above it can tell. *)
+let rows_the_logs_do_not_draw ~held rows =
+  match held with
   | [] -> rows
   | held ->
       List.filter
         (fun (row : msg_entry) ->
-          not
-            (log_draws_role row.me_role
-            && List.exists (String.equal row.me_request_id) held))
+          not (List.exists (fun turn -> log_draws_row turn row) held))
         rows
+;;
+
+(* What the durable transcript knows about a held turn's calls that the wire
+   did not carry -- outcome and duration -- folded into the log's transcript
+   by execution id, so the block a held turn is drawn from says what the
+   loaded row it replaces would have said. Run where loaded rows arrive and
+   where a journal log is held. *)
+let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
+  List.iter
+    (fun turn_log ->
+      let request_id = turn_log_request_id turn_log in
+      List.iter
+        (fun (row : msg_entry) ->
+          match row.me_tool_block with
+          | Some block when String.equal row.me_request_id request_id ->
+              List.iter
+                (fun (activity : Masc_tui_keeper_chat_transcript.tool_activity) ->
+                  match activity.execution_id with
+                  | Some execution_id ->
+                      ignore
+                        (Masc_tui_keeper_chat_transcript.note_tool_outcome
+                           turn_log.tl_transcript ~execution_id
+                           ~outcome:activity.outcome ~duration:activity.duration
+                          : bool)
+                  | None -> ())
+                block.Masc_tui_keeper_chat_transcript.activities
+          | Some _ | None -> ())
+        rows)
+    (List.filter turn_log_holds_the_turn (settled_logs_for_keeper state keeper_name))
+;;
+
+(* Settling a turn: its log is committed and, when it has anything to draw,
+   kept among the settled logs; the pane stops treating it as live. Nothing
+   is copied into session rows (RFC-0412 §3.3). Here rather than in the
+   executable so the decision is linkable by a test. *)
+let settle_turn_log state (entry : inflight) =
+  Masc_tui_keeper_chat_log.commit entry.log.tl_log;
+  if Masc_tui_keeper_chat_log.entries entry.log.tl_log <> [] then
+    hold_settled_log state entry.log;
+  match state.msg_live with
+  | Some visible
+    when String.equal (turn_log_request_id visible) (turn_log_request_id entry.log) ->
+      state.msg_live <- None
+  | Some _ | None -> ()
+;;
+
+(* The strict decode's row for a completed turn, or nothing when the settled
+   log stands for the turn and draws its reply itself
+   ([Masc_tui_keeper_chat_transcript.drawn]). *)
+let completed_turn_row state (request : Masc_tui_keeper_chat_projection.request)
+    (completed : Masc_tui_keeper_chat_projection.completed_turn) =
+  let log_holds_the_turn =
+    Option.exists turn_log_holds_the_turn
+      (settled_log_for_request state ~keeper_name:request.keeper_name
+         request.request_id)
+  in
+  if log_holds_the_turn then None
+  else
+    let role =
+      match completed.turn_outcome with
+      | Masc_tui_keeper_chat_projection.Visible_reply
+        when String.trim completed.reply <> "" ->
+          Message_keeper
+      | Masc_tui_keeper_chat_projection.Visible_reply
+      | Masc_tui_keeper_chat_projection.Continuation_checkpoint
+      | Masc_tui_keeper_chat_projection.Terminal_effect_settled
+      | Masc_tui_keeper_chat_projection.Awaiting_gate_approval
+      | Masc_tui_keeper_chat_projection.No_visible_reply ->
+          Message_status
+    in
+    Some
+      ( role
+      , Masc_tui_keeper_chat_transcript.turn_status_text ~reply:completed.reply
+          ~turn_ref:completed.turn_ref completed.turn_outcome )
 ;;
 
 let promoted_inflight_for_keeper state keeper_name =
@@ -4048,6 +4175,7 @@ let create_state
   msg_inflight = [];
   msg_settled_logs = [];
   msg_journal_unavailable = [];
+  msg_scroll_pin_settled = [];
   detail_scroll = 0;
   workspace;
   port;
@@ -4113,13 +4241,13 @@ let compute_chat_rows_for (state : state) keeper_name ~promoted_request_id
         String.equal entry.me_keeper_name keeper_name && not_promoted entry)
       state.msg_history
   in
-  let held_request_ids =
+  let held =
     settled_logs_for_keeper state keeper_name
     |> List.filter turn_log_holds_the_turn
-    |> List.map turn_log_request_id
+    |> List.map held_turn_of_log
   in
-  let loaded = rows_the_logs_do_not_draw ~held_request_ids loaded in
-  let session = rows_the_logs_do_not_draw ~held_request_ids session in
+  let loaded = rows_the_logs_do_not_draw ~held loaded in
+  let session = rows_the_logs_do_not_draw ~held session in
   chat_timeline ~loaded ~session ~queued_request_ids |> chat_timeline_rows
 
 (* One conversation's rows, computed once per change of its inputs.
@@ -4243,10 +4371,11 @@ let set_msg_scroll (state : state) rows =
   let rows = max 0 rows in
   if rows = 0 then begin
     state.msg_scroll <- 0;
-    state.msg_scroll_pin <- None
+    state.msg_scroll_pin <- None;
+    state.msg_scroll_pin_settled <- []
   end
   else begin
-    if state.msg_scroll = 0 then
+    if state.msg_scroll = 0 then begin
       state.msg_scroll_pin <-
         (match state.msg_target_keeper_name with
          | None -> None
@@ -4254,6 +4383,8 @@ let set_msg_scroll (state : state) rows =
            (match List.rev (chat_rows_for state keeper_name) with
             | newest :: _ -> Some (msg_anchor newest)
             | [] -> None));
+      state.msg_scroll_pin_settled <- state.msg_settled_logs
+    end;
     state.msg_scroll <- rows
   end
 

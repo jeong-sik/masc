@@ -94,6 +94,9 @@ type live_tool_call =
   ; ended : bool
   ; result_ready : bool
   ; failed : bool
+  ; duration : string option
+        (** Not on the wire: the durable transcript's [dur], folded in by
+            {!note_tool_outcome} once the loaded rows carry it. *)
   }
 
 (* [call_id] and [tool_name] are also fields of [tool_activity] above. OCaml
@@ -192,6 +195,9 @@ type t =
         (* Not a trail node: the server streams the reply text as deltas --
            chunked at the end when nothing streamed -- so the text is already
            in the trail. [drawn] reconciles the two. *)
+  ; mutable revision : int
+        (* Bumped by every mutation: the memo key for anything drawn from
+           this transcript. *)
   }
 
 let create ~keeper_name ~request_id ~started_at =
@@ -213,7 +219,11 @@ let create ~keeper_name ~request_id ~started_at =
   ; admission = None
   ; attempt = 0
   ; reply = None
+  ; revision = 0
   }
+
+let revision t = t.revision
+let bump t = t.revision <- t.revision + 1
 
 (* Consecutive deltas of one kind are one stretch; a delta of another kind in
    between closes it. Coalescing here rather than at draw time keeps the trail
@@ -241,7 +251,9 @@ let attempt t = t.attempt
 let reply t = t.reply
 let phase t = t.phase
 let interrupt t = t.interrupt
-let note_interrupt t interrupt = t.interrupt <- interrupt
+let note_interrupt t interrupt =
+  t.interrupt <- interrupt;
+  bump t
 let text t = safe_block (Buffer.contents t.text_buffer)
 let thinking t = safe_block (Buffer.contents t.thinking_buffer)
 
@@ -285,7 +297,7 @@ let activity_of_live_call (call : live_tool_call) =
        else if call.result_ready then Returned
        else if call.ended then Awaiting_result
        else Started)
-    ~duration:None ()
+    ~duration:call.duration ()
 
 let tool_calls t =
   List.rev t.reversed_tool_calls |> List.map activity_of_live_call
@@ -1062,7 +1074,11 @@ let apply_tool_result t ~(occurrence : Live.tool_occurrence) ~execution_id =
             "KEEPER_TOOL_RESULT_READY occurrence conflicted during update"))
 ;;
 
-let apply ~now t (delta : Live.delta) =
+let rec apply ~now t (delta : Live.delta) =
+  bump t;
+  apply_delta ~now t delta
+
+and apply_delta ~now t (delta : Live.delta) =
   match delta with
   | Live.Run_started -> (
       match t.phase with
@@ -1146,6 +1162,7 @@ let apply ~now t (delta : Live.delta) =
            ; ended = false
            ; result_ready = false
            ; failed = false
+           ; duration = None
            }
            :: t.reversed_tool_calls;
          t.reversed_trail <- Node_tool local_id :: t.reversed_trail)
@@ -1264,6 +1281,35 @@ let of_log ~now (log : Masc_tui_keeper_chat_log.t) =
   t
 ;;
 
+(* What the durable transcript knows about a call that the wire did not
+   carry: how it ended and how long it took. Matched by execution id, the
+   server-owned identity both records share. A fact the wire already had is
+   not taken back: the durable [Never_returned] and the unrecorded outcome
+   say less than the stream saw, and the stream's word stands. *)
+let note_tool_outcome t ~execution_id ~outcome ~duration =
+  match
+    List.find_opt
+      (fun (call : live_tool_call) ->
+        Option.equal String.equal call.execution_id (Some execution_id))
+      t.reversed_tool_calls
+  with
+  | None -> false
+  | Some call ->
+      let updated =
+        match outcome with
+        | Returned -> { call with result_ready = true; ended = true }
+        | Failed -> { call with failed = true; ended = true }
+        | Started | Awaiting_result | Never_returned | Outcome_unrecorded -> call
+      in
+      let updated =
+        match duration with
+        | Some _ -> { updated with duration }
+        | None -> updated
+      in
+      update_local_call t call.local_id (fun _ -> updated);
+      bump t;
+      true
+
 let turn_status_text ~reply ~turn_ref (outcome : Masc.Keeper_turn_outcome.t) =
   match outcome with
   | Masc.Keeper_turn_outcome.Visible_reply when String.trim reply <> "" -> reply
@@ -1317,37 +1363,39 @@ let drawn t =
       } ->
         false
   in
+  (* The recorded reply is the terminal message's text
+     ([Agent_core.Types.text_of_content result.response.content], normalized),
+     not the whole turn's: a turn that said "Let me check." before its tool
+     round and "Done." after records "Done.". So only the last stretch of the
+     current attempt is the one the reply can stand in for; the stretches
+     before it are the turn's earlier rounds and stay as they streamed. *)
+  let last_text =
+    List.fold_left
+      (fun (index, last) item ->
+        (index + 1, if current_text item then Some index else last))
+      (0, None) items
+    |> snd
+  in
   match t.reply with
   | None -> items
   | Some { reply_text; reply_outcome = Masc.Keeper_turn_outcome.Visible_reply; _ }
-    when String.trim reply_text <> "" ->
+    when String.trim reply_text <> "" -> (
       let canonical = safe_block reply_text in
-      if String.equal (String.trim (text t)) (String.trim canonical)
-      then items
-      else begin
-        (* The server stripped something from the visible reply that the
-           stream carried, or the stream never carried the reply: the recorded
-           text stands in for the current attempt's stretches, where the last
-           of them was, so it reads after the tool rounds that produced it. *)
-        let last_text =
-          List.fold_left
-            (fun (index, last) item ->
-              (index + 1, if current_text item then Some index else last))
-            (0, None) items
-          |> snd
-        in
-        let reply_item = { superseded = None; drawn = Drawn_reply canonical } in
-        match last_text with
-        | None -> items @ [ reply_item ]
-        | Some last ->
-            List.concat
-              (List.mapi
-                 (fun index item ->
-                   if current_text item
-                   then if index = last then [ reply_item ] else []
-                   else [ item ])
-                 items)
-      end
+      let reply_item = { superseded = None; drawn = Drawn_reply canonical } in
+      match last_text with
+      | None ->
+          (* Nothing streamed for the reply: the record is all there is. *)
+          items @ [ reply_item ]
+      | Some last -> (
+          match List.nth items last with
+          | { drawn = Drawn_text streamed; _ }
+            when String.equal (String.trim streamed) (String.trim canonical) ->
+              items
+          | _ ->
+              (* The server stripped something the stream carried, or the
+                 stream's last stretch was cut short: the recorded text stands
+                 where that stretch was. *)
+              List.mapi (fun index item -> if index = last then reply_item else item) items))
   | Some { reply_text; reply_outcome; reply_turn_ref } ->
       (* Nothing is chunked for a control outcome, and a visible reply with
          no text has nothing to chunk: the one row that says how the turn

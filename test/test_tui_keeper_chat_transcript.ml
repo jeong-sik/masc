@@ -421,27 +421,85 @@ let test_drawn_keeps_the_trail_when_the_reply_is_what_streamed () =
     (drawn t)
 ;;
 
-(* The server strips control tokens from the visible reply; the recorded text
-   stands in for the streamed stretches, after the tool round that produced
-   them, and the earlier attempt's stretches stay where they were. *)
+(* The recorded reply is the terminal message's text. The server strips
+   control tokens from it, so the last stretch can differ from what streamed;
+   the recorded text stands in for that stretch only. Earlier stretches are
+   the turn's earlier rounds and stay, and so does the superseded attempt. *)
 let test_drawn_replaces_the_streamed_text_with_a_differing_reply () =
   let t = fresh () in
   feed t
     [ Live.Run_started
     ; Live.Text "first try"
     ; Live.Runtime_attempt_started
-    ; Live.Text "<think>plan</think>"
+    ; Live.Text "Let me check."
     ; tool_started "c1" "read_file"
     ; tool_ended "c1"
-    ; Live.Text "Here it is."
+    ; Live.Text "Here it is.<|eot|>"
     ; reply_details ~reply:"Here it is." ()
     ];
-  check (list string) "the current attempt's stretches collapse to the recorded reply"
+  check (list string) "only the last stretch gives way to the recorded reply"
     [ "[superseded 0] text:first try"
+    ; "text:Let me check."
     ; "tools:" ^ String.concat "|" (Transcript.tool_rows t)
     ; "reply:Here it is."
     ]
     (drawn t)
+;;
+
+(* A turn that spoke before its tool round and again after records only the
+   second as its reply; the first is not taken back. *)
+let test_drawn_keeps_earlier_rounds_when_the_reply_is_the_last_stretch () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Text "Let me check."
+    ; tool_started "c1" "read_file"
+    ; tool_ended "c1"
+    ; Live.Text "Done."
+    ; reply_details ~reply:"Done." ()
+    ];
+  check (list string) "both rounds stay as they streamed"
+    [ "text:Let me check."
+    ; "tools:" ^ String.concat "|" (Transcript.tool_rows t)
+    ; "text:Done."
+    ]
+    (drawn t)
+;;
+
+(* The wire carries neither a call's duration nor whether it failed; the
+   durable transcript does. Folded in by execution id, the block says what
+   the loaded row it replaces would have said. A durable word that says less
+   than the stream saw changes nothing. *)
+let test_note_tool_outcome_folds_the_durable_facts_in () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; tool_started "c1" "read_file"
+    ; tool_ended "c1"
+    ; tool_result "c1" "exec-1"
+    ; tool_started "c2" "grep"
+    ; tool_ended "c2"
+    ; tool_result "c2" "exec-2"
+    ];
+  let outcomes () =
+    List.map
+      (fun (a : Transcript.tool_activity) -> (a.outcome, a.duration))
+      (Transcript.tool_calls t)
+  in
+  let before = Transcript.revision t in
+  check bool "an unknown execution id matches nothing" false
+    (Transcript.note_tool_outcome t ~execution_id:"exec-9" ~outcome:Transcript.Failed
+       ~duration:None);
+  check bool "the failed call is found" true
+    (Transcript.note_tool_outcome t ~execution_id:"exec-1" ~outcome:Transcript.Failed
+       ~duration:(Some "32ms"));
+  check bool "a durable word that says less leaves the stream's" true
+    (Transcript.note_tool_outcome t ~execution_id:"exec-2"
+       ~outcome:Transcript.Never_returned ~duration:(Some "5ms"));
+  check (list (pair tool_outcome (option string))) "outcome and duration per call"
+    [ (Transcript.Failed, Some "32ms"); (Transcript.Returned, Some "5ms") ]
+    (outcomes ());
+  check bool "the revision moved" true (Transcript.revision t > before)
 ;;
 
 let test_drawn_appends_the_reply_when_nothing_streamed () =
@@ -1516,6 +1574,10 @@ let () =
             test_drawn_keeps_the_trail_when_the_reply_is_what_streamed
         ; test_case "drawn replaces the streamed text with a differing reply" `Quick
             test_drawn_replaces_the_streamed_text_with_a_differing_reply
+        ; test_case "drawn keeps earlier rounds when the reply is the last stretch" `Quick
+            test_drawn_keeps_earlier_rounds_when_the_reply_is_the_last_stretch
+        ; test_case "note_tool_outcome folds the durable facts in" `Quick
+            test_note_tool_outcome_folds_the_durable_facts_in
         ; test_case "drawn appends the reply when nothing streamed" `Quick
             test_drawn_appends_the_reply_when_nothing_streamed
         ; test_case "drawn ends a blank visible reply with a status row" `Quick

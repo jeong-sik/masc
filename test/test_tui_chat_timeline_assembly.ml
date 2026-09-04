@@ -340,12 +340,19 @@ let test_a_held_turn_keeps_only_the_rows_the_log_does_not_draw () =
     ]
   in
   let texts rows = List.map (fun (r : Tui_types.msg_entry) -> r.me_text) rows in
+  let held ~reasoning =
+    [ { Tui_types.ht_request_id = "held"; ht_reasoning = reasoning } ]
+  in
   Alcotest.(check (list string))
-    "held: the keeper's words, tools, skills and reasoning leave"
+    "held with reasoning: the keeper's words, tools, skills and reasoning leave"
     [ "asked"; "gate approved"; "failed"; "/help"; "another turn"; "journal" ]
-    (texts (Tui_types.rows_the_logs_do_not_draw ~held_request_ids:[ "held" ] rows));
+    (texts (Tui_types.rows_the_logs_do_not_draw ~held:(held ~reasoning:true) rows));
+  Alcotest.(check (list string))
+    "held without reasoning: the trace row is the only record that it thought"
+    [ "asked"; "thought"; "gate approved"; "failed"; "/help"; "another turn"; "journal" ]
+    (texts (Tui_types.rows_the_logs_do_not_draw ~held:(held ~reasoning:false) rows));
   Alcotest.(check bool) "nothing held: the same list" true
-    (rows == Tui_types.rows_the_logs_do_not_draw ~held_request_ids:[] rows)
+    (rows == Tui_types.rows_the_logs_do_not_draw ~held:[] rows)
 ;;
 
 let test_an_empty_conversation_has_no_edges () =

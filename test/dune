@@ -3051,6 +3051,7 @@
   ast_grep
   astring
   masc
+  masc.masc_types
   masc_tui_interrupt_signal
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
@@ -3068,6 +3069,7 @@
  (modules test_tui_chat_rows_memo)
  (libraries
   alcotest
+  masc
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
   masc_tui_keeper_chat_projection

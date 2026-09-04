@@ -2170,17 +2170,7 @@ let settle_live_turn state (request : Keeper_chat.request) =
   match inflight_entry_by_request_id state request.Keeper_chat.request_id with
   | Some entry
     when Keeper_chat.same_request_identity entry.sent_request request ->
-      Keeper_chat_log.commit entry.log.tl_log;
-      if
-        Keeper_chat_log.entries entry.log.tl_log <> []
-        && not (List.memq entry.log state.msg_settled_logs)
-      then state.msg_settled_logs <- state.msg_settled_logs @ [ entry.log ];
-      (match state.msg_live with
-       | Some visible
-         when String.equal (turn_log_request_id visible)
-                request.Keeper_chat.request_id ->
-           state.msg_live <- None
-       | Some _ | None -> ())
+      settle_turn_log state entry
   | Some _ | None -> ()
 
 (* Ask the server to interrupt the turn this request opened.
@@ -6567,25 +6557,11 @@ let apply_keeper_chat_result state request result =
               ([Keeper_chat_transcript.drawn] reconciles the recorded reply by
               outcome). The row here is for a turn whose stream never told the
               pane how it ended, so the strict decode is the one source. *)
-           let log_holds_the_turn =
-             Option.exists turn_log_holds_the_turn
-               (settled_log_for_request state request.Keeper_chat.request_id)
-           in
-           if not log_holds_the_turn then begin
-             let role =
-               match completed.turn_outcome with
-               | Keeper_chat.Visible_reply
-                 when String.trim completed.reply <> "" ->
-                   Message_keeper
-               | Keeper_chat.Visible_reply
-               | Keeper_chat.Continuation_checkpoint
-               | Keeper_chat.Terminal_effect_settled
-               | Keeper_chat.Awaiting_gate_approval
-               | Keeper_chat.No_visible_reply -> Message_status
-             in
-             append_chat_history ~turn_phase:Turn_output state request role
-               (chat_status_text completed)
-           end;
+           (match completed_turn_row state request completed with
+            | Some (role, text) ->
+                append_chat_history ~turn_phase:Turn_output state request role
+                  text
+            | None -> ());
            add_event state "message"
              (Printf.sprintf "Keeper turn finished: %s" request.request_id)
        | Ok (Keeper_chat.Replayed_succeeded _) ->
@@ -10369,6 +10345,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                         row.operation_id)
                     rows);
              let fresh = msg_entries_of_history_rows state keeper_name rows in
+             (* The durable outcome and duration of a held turn's calls reach
+                its block through its log's transcript, not through the rows
+                the block replaces. *)
+             enrich_held_logs_from_rows state ~keeper_name fresh;
              let kept = merge_paged_history ~paged:prior_history ~fresh in
              let cursor = oldest_at kept in
              (* Where reading further back starts: the oldest row now held. A
@@ -10411,8 +10391,23 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           turn_log_add_journaled log lines;
           Keeper_chat_log.commit log.tl_log;
           (* A journal of a turn still running holds part of it. It is not
-             kept and not remembered, so the next refresh asks again. *)
-          if turn_log_holds_the_turn log then hold_settled_log state log
+             kept and not remembered, so the next refresh asks again. A
+             journal read whole that still cannot stand for the turn -- a
+             cancelled turn, finished without a recorded reply -- has nothing
+             more to say and is not asked for again either. *)
+          if turn_log_holds_the_turn log then begin
+            hold_settled_log state log;
+            (match state.msg_loaded_keeper with
+             | Some loaded_keeper when String.equal loaded_keeper keeper_name ->
+                 enrich_held_logs_from_rows state ~keeper_name state.msg_loaded
+             | Some _ | None -> ())
+          end
+          else (
+            match Keeper_chat_transcript.phase log.tl_transcript with
+            | Keeper_chat_transcript.Stream_ended
+            | Keeper_chat_transcript.Stream_failed _ ->
+                remember_journal_unavailable state operation_id
+            | Keeper_chat_transcript.Waiting | Keeper_chat_transcript.Working -> ())
       | Error (Keeper_chat_log.Unknown_operation | Keeper_chat_log.Journal_pruned) ->
           (* Nothing to reload, now or later this session: the v1 rows are
              the turn. *)

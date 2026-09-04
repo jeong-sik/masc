@@ -213,6 +213,21 @@ val apply : now:float -> t -> Masc_tui_keeper_chat_live.delta -> unit
 
 val note_interrupt : t -> interrupt -> unit
 
+val note_tool_outcome :
+  t -> execution_id:string -> outcome:tool_outcome -> duration:string option -> bool
+(** Folds in what the durable transcript recorded for one call -- its outcome
+    and its [dur] -- matched by execution id; returns whether a call matched.
+    The wire does not carry either yet (RFC-0412 stage 4 moves them there), so
+    a turn drawn from its log would otherwise show a failed call as returned
+    and no durations once the loaded rows are left out of the timeline. A
+    durable outcome that says less than the stream saw ([Never_returned],
+    unrecorded) changes nothing. *)
+
+val revision : t -> int
+(** Bumped by every mutation ({!apply}, {!note_interrupt},
+    {!note_tool_outcome}): the memo key for anything drawn from this
+    transcript. *)
+
 val phase : t -> phase
 val interrupt : t -> interrupt
 val text : t -> string
@@ -308,12 +323,13 @@ type drawn_item =
 val drawn : t -> drawn_item list
 (** The trail flattened -- a superseded block's rows in place, tagged with
     their attempt -- and reconciled with the recorded reply. Without a reply,
-    the trail as it is. With a [Visible_reply] whose text equals what the
-    current attempt streamed (trimmed), the trail as it is; when it differs,
-    the current attempt's text stretches are replaced by one [Drawn_reply]
-    where the last of them was (appended when nothing streamed). With a blank
-    [Visible_reply] or any control outcome, one [Drawn_status] is appended
-    and the streamed rows stay. *)
+    the trail as it is. The recorded reply is the terminal message's text, not
+    the whole turn's, so with a [Visible_reply] it is compared (trimmed) to
+    the current attempt's last text stretch only: equal, the trail as it is;
+    different, that one stretch is replaced by one [Drawn_reply] (appended
+    when nothing streamed); earlier stretches -- the turn's earlier rounds --
+    stay as they streamed. With a blank [Visible_reply] or any control
+    outcome, one [Drawn_status] is appended and the streamed rows stay. *)
 
 val of_log : now:float -> Masc_tui_keeper_chat_log.t -> t
 (** The transcript a log projects to: {!create} from the log's identity, then

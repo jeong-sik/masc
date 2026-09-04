@@ -134,6 +134,12 @@ let test_replaced_settled_logs_are_seen () =
   Tui_types.turn_log_add ~now:3.0 log ~seq:(Some 0)
     Masc_tui_keeper_chat_live.Run_started;
   Tui_types.turn_log_add ~now:3.0 log ~seq:(Some 1)
+    (Masc_tui_keeper_chat_live.Reply_details
+       { reply = "row at 3"
+       ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
+       ; turn_ref = "trace-1#1"
+       });
+  Tui_types.turn_log_add ~now:3.0 log ~seq:(Some 2)
     Masc_tui_keeper_chat_live.Run_finished;
   Masc_tui_keeper_chat_log.commit log.Tui_types.tl_log;
   state.Tui_types.msg_settled_logs <- [ log ];

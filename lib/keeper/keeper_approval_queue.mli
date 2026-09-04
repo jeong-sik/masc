@@ -221,6 +221,12 @@ val record_consumed_resolution_replay :
   outcome:resolution_replay_outcome ->
   (replay_recording, grant_error) result
 
+(** One line naming what a gated call asked for, taken from its persisted
+    input. [None] when the input names no argv and no provider surface: the
+    row then reads as it did before the field existed, rather than from a
+    guess. *)
+val call_summary_of_input : Yojson.Safe.t -> string option
+
 (** Idempotently project durable approval truth into the originating Keeper's
     visible chat. These receipts never authorize or replay an effect; they are
     the presentation acknowledgement required before the wake event may be
@@ -230,6 +236,7 @@ val ensure_resolution_chat_projection :
   keeper_name:string ->
   approval_id:string ->
   tool_name:string option ->
+  call_summary:string option ->
   decision:decision ->
   (unit, string) result
 
@@ -238,6 +245,7 @@ val ensure_replay_chat_projection :
   keeper_name:string ->
   approval_id:string ->
   tool_name:string option ->
+  call_summary:string option ->
   outcome:resolution_replay_outcome ->
   (unit, string) result
 

@@ -916,6 +916,7 @@ let test_window_keeps_tool_lines_of_retained_turns () =
         ; tool_name = Some "Execute"
         ; phase = K.Approval_resolved_approved
         ; artifact_ref = None
+        ; call_summary = None
         }
       in
       (match K.append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle with
@@ -2893,6 +2894,7 @@ let test_approval_lifecycle_rows_are_typed_idempotent_system_receipts () =
         ; tool_name = Some "Execute"
         ; phase = K.Approval_resolved_approved
         ; artifact_ref = None
+        ; call_summary = None
         }
       in
       (match K.append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle:resolved with
@@ -2928,6 +2930,7 @@ let test_approval_lifecycle_rows_are_typed_idempotent_system_receipts () =
         ; tool_name = Some "Execute"
         ; phase = K.Approval_replay_applied
         ; artifact_ref = Some artifact_ref
+        ; call_summary = None
         }
       in
       (match K.append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle:replay with
@@ -2938,6 +2941,7 @@ let test_approval_lifecycle_rows_are_typed_idempotent_system_receipts () =
         ; tool_name = Some "Execute"
         ; phase = K.Approval_continuation_recorded
         ; artifact_ref = None
+        ; call_summary = None
         }
       in
       (match
@@ -2993,6 +2997,7 @@ let test_approval_lifecycle_redacts_and_compares_artifact_preview () =
         ; tool_name = Some ("Execute " ^ secret)
         ; phase = K.Approval_replay_applied
         ; artifact_ref = Some artifact_ref
+        ; call_summary = Some ("git log -- " ^ secret)
         }
       in
       (match K.append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle with
@@ -3034,6 +3039,7 @@ let test_approval_replay_reconciliation_appends_one_typed_correction () =
         ; tool_name = Some "tool_execute"
         ; phase = K.Approval_replay_failed
         ; artifact_ref = Some (artifact_ref 'd' 955)
+        ; call_summary = None
         }
       in
       let canonical : K.approval_lifecycle =
@@ -3162,6 +3168,7 @@ let test_all_replay_terminal_phases_roundtrip () =
             ; tool_name = Some "Execute"
             ; phase
             ; artifact_ref = Some artifact_ref
+            ; call_summary = None
             }
           in
           match K.append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle with

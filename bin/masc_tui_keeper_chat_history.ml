@@ -69,6 +69,7 @@ type kind =
       { approval_id : string
       ; phase : string
       ; tool : string option
+      ; summary : string option
       }
   | Memory_activity of { summary : string option }
 
@@ -1197,6 +1198,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                     { approval_id
                     ; phase
                     ; tool = string_field lifecycle "tool_name"
+                    ; summary = string_field lifecycle "call_summary"
                     }
                 | Some _ | None -> Memory_activity { summary = None })
               | None -> Memory_activity { summary = None })

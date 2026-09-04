@@ -123,10 +123,13 @@ type kind =
       { approval_id : string
       ; phase : string
       ; tool : string option
+      ; summary : string option
       }
       (** One durable step of an external-effect approval, read off the row's
           typed [approval_lifecycle] rather than off prose the store composed.
-          The wording belongs to whoever draws it; the row carries the fact. *)
+          [summary] names what the gated call asked for, so a row answers
+          "what was deferred" without the pane going back to the request. The
+          wording belongs to whoever draws it; the row carries the fact. *)
   | Memory_activity of { summary : string option }
       (** A committed or failed Memory OS journal pass. [row.text] carries
           exact added/removed claims or typed failure detail; [summary] is the

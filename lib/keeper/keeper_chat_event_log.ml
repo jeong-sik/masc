@@ -1,10 +1,8 @@
-(** Versioned JSON codec for [Keeper_chat_events.keeper_chat_event]
-    (RFC-0412 §4.1).
+(** Versioned JSON codec and per-operation JSONL journal for
+    [Keeper_chat_events.keeper_chat_event] (RFC-0412 §4.1).
 
     Stage 1 is dual-write only: read paths are unchanged, and the journal is
-    fail-open — a journal failure must never break the live turn. This module
-    currently ships the codec only; the per-operation JSONL journal arrives
-    with the journal writer task. *)
+    fail-open — a journal failure must never break the live turn. *)
 
 open Keeper_chat_events
 
@@ -546,4 +544,153 @@ let journaled_event_of_json json =
         (keeper_chat_event_of_json (json |> member "event"))
   with
   | Type_error (message, _) -> Error ("journaled_event: " ^ message)
+;;
+
+(* String-level framing: the single place where JSONL line conversion and
+   [Yojson.Json_error] handling live. *)
+let journaled_event_to_string journaled =
+  Yojson.Safe.to_string (journaled_event_to_json journaled)
+;;
+
+let journaled_event_of_string line =
+  try journaled_event_of_json (Yojson.Safe.from_string line) with
+  | Yojson.Json_error message -> Error ("journaled_event: invalid JSON: " ^ message)
+;;
+
+(** {1 Journal} *)
+
+type journal =
+  { path : string
+  ; now : unit -> float
+  }
+
+let sanitize_segment = Workspace_utils_backend_setup.sanitize_namespace_segment
+
+let events_dir ~base_dir =
+  Filename.concat
+    (Common.masc_dir_from_base_path ~base_path:base_dir)
+    "keeper_chat_events"
+;;
+
+let journal_path ~base_dir ~keeper_name ~operation_id =
+  Filename.concat
+    (Filename.concat (events_dir ~base_dir) (sanitize_segment keeper_name))
+    (sanitize_segment operation_id ^ ".jsonl")
+;;
+
+(* Fail-open at construction too: a directory we cannot create must not abort
+   the turn; the per-event append below then logs each failure. *)
+let open_journal ?(now = Time_compat.now) ~base_dir ~keeper_name ~operation_id () =
+  let path = journal_path ~base_dir ~keeper_name ~operation_id in
+  (try Fs_compat.mkdir_p (Filename.dirname path) with
+   | exn ->
+     Log.Keeper.error
+       "keeper_chat_event_log: journal directory creation failed path=%s: %s"
+       path
+       (Printexc.to_string exn));
+  { path; now }
+;;
+
+(* A non-finite float (NaN/inf) would serialize to a bare NaN/Infinity token —
+   invalid JSON. Reject at the writer boundary: log and skip the line. *)
+let float_is_finite value =
+  match classify_float value with
+  | FP_nan | FP_infinite -> false
+  | FP_normal | FP_subnormal | FP_zero -> true
+;;
+
+let event_floats_are_finite = function
+  | Agent_core_stream_message_start
+      { usage = Some { Agent_core.Types.cost_usd = Some cost_usd; _ }; _ } ->
+    float_is_finite cost_usd
+  | Audio_block { duration_sec = Some duration_sec; _ } ->
+    float_is_finite duration_sec
+  | _ -> true
+;;
+
+(* Fail-open by contract: stage 1 dual-writes next to keeper_chat_store, which
+   remains the durable record of record. A journal failure is logged, never
+   raised into the live path. The umbrella is required: the Fs_compat result
+   type covers only write/fsync/rollback failures, while mkdir, openfile,
+   fchmod, fsync_parent_directory, and lockf raise raw [Unix.Unix_error]. *)
+let append journal ~seq event =
+  try
+    (* The clock is injectable; a raising clock falls back to the real one
+       rather than breaking the turn. *)
+    let ts =
+      try journal.now () with
+      | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+      | exn ->
+        Log.Keeper.error
+          "keeper_chat_event_log: journal clock raised path=%s seq=%d: %s; falling back to Time_compat.now"
+          journal.path
+          seq
+          (Printexc.to_string exn);
+        Time_compat.now ()
+    in
+    if (not (float_is_finite ts)) || not (event_floats_are_finite event)
+    then
+      Log.Keeper.error
+        "keeper_chat_event_log: refusing to journal non-finite float path=%s seq=%d"
+        journal.path
+        seq
+    else begin
+      let line = journaled_event_to_string { seq; ts; event } ^ "\n" in
+      match Fs_compat.append_private_jsonl_durable_locked_result journal.path line with
+      | Fs_compat.Private_file_succeeded () -> ()
+      | Fs_compat.Private_file_succeeded_with_cleanup_failure
+          { value = (); cleanup_failure } ->
+        Log.Keeper.error
+          "keeper_chat_event_log: append succeeded with descriptor settlement failure path=%s: %s"
+          journal.path
+          (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+      | Fs_compat.Private_file_failed error ->
+        Log.Keeper.error
+          "keeper_chat_event_log: journal append failed path=%s: %s"
+          journal.path
+          (Fs_compat.private_jsonl_append_error_to_string error)
+      | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+        Log.Keeper.error
+          "keeper_chat_event_log: journal append failed path=%s: %s; descriptor settlement failed: %s"
+          journal.path
+          (Fs_compat.private_jsonl_append_error_to_string error)
+          (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+    end
+  with
+  | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+  | exn ->
+    Log.Keeper.error
+      "keeper_chat_event_log: journal append raised path=%s seq=%d: %s"
+      journal.path
+      seq
+      (Printexc.to_string exn)
+;;
+
+(* Strict read: a corrupt line raises [Invalid_argument]. Stage 1 has no
+   consumer for this beyond tests; replay serving (stage 2) decides the
+   production corrupt-line policy then. *)
+let read_journal journal =
+  let ic = open_in_bin journal.path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+       let rec loop acc =
+         match input_line ic with
+         | exception End_of_file -> List.rev acc
+         | line ->
+           if String.equal (String.trim line) ""
+           then loop acc
+           else begin
+             match journaled_event_of_string line with
+             | Ok journaled -> loop (journaled :: acc)
+             | Error detail ->
+               raise
+                 (Invalid_argument
+                    (Printf.sprintf
+                       "keeper_chat_event_log: corrupt journal line path=%s: %s"
+                       journal.path
+                       detail))
+           end
+       in
+       loop [])
 ;;

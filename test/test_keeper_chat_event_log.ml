@@ -197,6 +197,143 @@ let test_codec_rejects_unknown_tag () =
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "unknown event tag must be rejected"
 
+(* --- temp-dir idiom (same as test_keeper_chat_store_append_result.ml) --- *)
+
+let temp_base_path prefix =
+  Filename.concat
+    (Filename.get_temp_dir_name ())
+    (Printf.sprintf "%s-%d-%d" prefix (Unix.getpid ()) (Random.bits ()))
+
+let rec remove_tree path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path
+    end
+    else Sys.remove path
+
+let scripted_clock timestamps =
+  let remaining = ref timestamps in
+  fun () ->
+    match !remaining with
+    | ts :: rest ->
+      remaining := rest;
+      ts
+    | [] -> failwith "scripted clock exhausted"
+
+let test_journal_round_trip () =
+  let base_dir = temp_base_path "keeper-chat-event-log" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let clock = scripted_clock [ 1_762_300_000.0; 1_762_300_000.25 ] in
+       let journal =
+         L.open_journal ~now:clock ~base_dir ~keeper_name:"golden-keeper" ~operation_id:"op-1" ()
+       in
+       L.append journal ~seq:0 (E.Text_delta "hello");
+       L.append journal ~seq:1 (E.Agent_core_thinking_delta { index = 0; delta = "hmm" });
+       let journaled = L.read_journal journal in
+       Alcotest.(check int) "two lines" 2 (List.length journaled);
+       List.iteri
+         (fun i (entry : L.journaled_event) ->
+            Alcotest.(check int) "seq" i entry.seq)
+         journaled;
+       Alcotest.(check (float 0.0))
+         "ts of first line"
+         1_762_300_000.0
+         (List.nth journaled 0).ts;
+       Alcotest.(check string)
+         "event payload round-trips through the journal"
+         (Yojson.Safe.to_string (L.keeper_chat_event_to_json (E.Text_delta "hello")))
+         (Yojson.Safe.to_string
+            (L.keeper_chat_event_to_json (List.nth journaled 0).event)))
+
+let test_journal_append_is_fail_open () =
+  let file_path = temp_base_path "keeper-chat-event-log-file" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove file_path with _ -> ())
+    (fun () ->
+       let oc = open_out file_path in
+       close_out oc;
+       (* base_dir nested under a regular file: directory creation and the
+          append both fail with ENOTDIR, and neither may raise. *)
+       let journal =
+         L.open_journal
+           ~base_dir:(Filename.concat file_path "under-a-file")
+           ~keeper_name:"k"
+           ~operation_id:"op"
+           ()
+       in
+       L.append journal ~seq:0 (E.Text_delta "dropped, logged, live path unaffected");
+       Alcotest.(check bool) "append did not raise" true true)
+
+let test_journal_skips_non_finite_floats () =
+  let base_dir = temp_base_path "keeper-chat-event-log-nan" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let clock =
+         scripted_clock
+           [ Float.nan; 1_762_300_000.0; 1_762_300_000.25; 1_762_300_000.5 ]
+       in
+       let journal =
+         L.open_journal ~now:clock ~base_dir ~keeper_name:"k" ~operation_id:"op" ()
+       in
+       (* NaN [ts]: skipped. *)
+       L.append journal ~seq:0 (E.Text_delta "nan ts");
+       (* NaN [cost_usd]: skipped. *)
+       L.append
+         journal
+         ~seq:1
+         (E.Agent_core_stream_message_start
+            { provider_message_id = "pm-1"
+            ; model = "m"
+            ; usage = Some { usage_full with Agent_core.Types.cost_usd = Some Float.nan }
+            });
+       (* Finite everywhere: journaled. *)
+       L.append journal ~seq:2 (E.Text_delta "fine");
+       (* NaN [duration_sec]: skipped. *)
+       L.append
+         journal
+         ~seq:3
+         (E.Audio_block
+            { token = "aud-1"
+            ; mime = "audio/ogg"
+            ; message_text = "x"
+            ; duration_sec = Some Float.nan
+            });
+       let journaled = L.read_journal journal in
+       Alcotest.(check int) "only the valid line was journaled" 1 (List.length journaled);
+       Alcotest.(check int) "seq of the surviving line" 2 (List.nth journaled 0).seq)
+
+let test_journal_path_sanitizes_segments () =
+  let path =
+    L.journal_path ~base_dir:"/tmp/base" ~keeper_name:"keeper/x" ~operation_id:"op/../../escape"
+  in
+  let stem = Filename.remove_extension (Filename.basename path) in
+  let keeper_segment = Filename.basename (Filename.dirname path) in
+  Alcotest.(check bool)
+    "operation segment is traversal-free"
+    true
+    (stem <> ".."
+     && (not (String.contains stem '/'))
+     && not (String.contains stem '.'));
+  Alcotest.(check bool)
+    "keeper segment is traversal-free"
+    true
+    (keeper_segment <> ".."
+     && (not (String.contains keeper_segment '/'))
+     && not (String.contains keeper_segment '.'));
+  Alcotest.(check string)
+    "journal root is <base>/.masc/keeper_chat_events"
+    (Filename.concat
+       (Masc.Common.masc_dir_from_base_path ~base_path:"/tmp/base")
+       "keeper_chat_events")
+    (Filename.dirname (Filename.dirname path))
+
 let () =
   Alcotest.run
     "keeper_chat_event_log"
@@ -214,5 +351,20 @@ let () =
             "codec rejects unknown tag"
             `Quick
             test_codec_rejects_unknown_tag
+        ] )
+    ; ( "journal"
+      , [ Alcotest.test_case "round trip" `Quick test_journal_round_trip
+        ; Alcotest.test_case
+            "append is fail-open"
+            `Quick
+            test_journal_append_is_fail_open
+        ; Alcotest.test_case
+            "skips non-finite floats"
+            `Quick
+            test_journal_skips_non_finite_floats
+        ; Alcotest.test_case
+            "path sanitizes both segments"
+            `Quick
+            test_journal_path_sanitizes_segments
         ] )
     ]

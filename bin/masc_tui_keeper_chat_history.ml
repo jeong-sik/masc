@@ -377,7 +377,12 @@ let text_with_attachments ~format_bytes ~text ~notes =
     let line index (n : attachment_note) =
       let dimensions =
         match (n.att_width, n.att_height) with
-        | Some width, Some height -> Printf.sprintf " \xc2\xb7 %dx%d" width height
+        (* The separator is the multiplication sign the comment above names
+           and the test pins, not an ASCII letter x. Both shipped in the same
+           commit as this line and disagreed with it, so this assertion had
+           never passed. *)
+        | Some width, Some height ->
+          Printf.sprintf " \xc2\xb7 %d\xc3\x97%d" width height
         | _ -> if n.att_mime = "" then "" else " \xc2\xb7 " ^ n.att_mime
       in
       Printf.sprintf "\xe2\x8e\x98 #%d %s%s%s" (index + 1) n.att_name

@@ -578,9 +578,11 @@ tools.attached_allow  ->  tools.deferred_allow
 전부 신고한다.** 올바른 선언이 구조적으로 경고를 낸다.
 
 그래서 거르는 것은 두 자리에서 하되, **`unnamed` 는 두 제공 집합의 합집합에 대해 한
-번만 낸다.** 지금 경고를 내보내는 자리도 `keeper_run_tools_setup.ml:432-444` 한
-곳이므로 자리를 옮기지 않는다. 이것이 §6.2 의 `unnamed = 0` 판정을 성립시키는
-조건이다.
+번만 낸다.** 지금 경고를 내보내는 자리는 `keeper_run_tools_setup.ml:432-445` 한 곳뿐이라
+(`rg attached_tool_allow_unnamed lib/` 가 이 한 줄만 낸다) 자리를 옮기지 않는다.
+붙임 쪽 `kept` 는 이미 두 곳에서 읽히므로(`:470` 의 `identity_surface`, `:630` 의
+`attached_names`) 거르는 결과 자체는 지금 모양 그대로 쓴다. 이것이 §6.2 의
+`unnamed = 0` 판정을 성립시키는 조건이다.
 
 #### 투영 검사에 빼는 이름을 알려야 한다
 

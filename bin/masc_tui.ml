@@ -10458,12 +10458,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         && Option.equal String.equal state.repository_changes_diff_path (Some path)
       then
         (match result with
-         | Ok diff when String.equal diff.Masc.Tui_decode.gd_path path ->
+         | Ok diff ->
              state.repository_changes_diff <- Some (path, diff);
              state.repository_changes_diff_error <- None
-         | Ok _ ->
-             state.repository_changes_diff_error <-
-               Some "Git diff response belongs to a different path"
          | Error detail -> state.repository_changes_diff_error <- Some detail)
   | Keeper_chat_file_changes_loaded (generation, keeper_name, result) ->
       let still_current =

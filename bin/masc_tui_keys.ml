@@ -100,10 +100,10 @@ let for_surface = function
   | Keepers Keeper_calls ->
       [ b Navigate "j/k" "scroll"; b Act "Left / Esc" "back" ] @ listing_meta
   | Keepers Keeper_message ->
-      [ b Navigate "h / Left" "roster"
-          ~help:"focus the visible Keeper roster (h when the draft is empty)"
+      [ b Navigate "Left" "roster" ~help:"focus the visible Keeper roster"
       ; b Navigate "Right / Esc" "chat" ~help:"return focus to the chat composer"
-      ; b Navigate "j/k" "roster move" ~help:"move while the roster has focus"
+      ; b Navigate "Up / Down" "roster move"
+          ~help:"move while the roster has focus"
       ; b Act "Enter" "send / open"
           ~help:"send from chat, or open the selected Keeper from the roster"
       ; b Act "Ctrl-J" "newline" ~help:"newline in the draft"

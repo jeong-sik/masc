@@ -1251,6 +1251,26 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
           true
       | None -> true)
   | _ ->
+  let apply_autocomplete direction =
+    let text = Buffer.contents state.msg_input in
+    let keeper_names =
+      List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers
+    in
+    match Masc_tui_command.autocomplete ~direction ~keeper_names text with
+    | Some completed ->
+        forget_recall state;
+        Buffer.clear state.msg_input;
+        Buffer.add_string state.msg_input completed;
+        true
+    | None -> true
+  in
+  let slash_navigable () =
+    let keeper_names =
+      List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers
+    in
+    Masc_tui_command.is_slash_navigable ~keeper_names
+      (Buffer.contents state.msg_input)
+  in
   match key with
   | "esc" when Option.is_some state.msg_recall_replaces ->
     state.msg_recall_replaces <- None;
@@ -1258,18 +1278,8 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     Buffer.clear state.msg_input;
     drain_queue ();
     true
-  | "\t" ->
-      let text = Buffer.contents state.msg_input in
-      let keeper_names =
-        List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers
-      in
-      (match Masc_tui_command.autocomplete ~keeper_names text with
-       | Some completed ->
-           forget_recall state;
-           Buffer.clear state.msg_input;
-           Buffer.add_string state.msg_input completed;
-           true
-       | None -> true)
+  | "\t" -> apply_autocomplete Masc_tui_command.Next
+  | "shift-tab" -> apply_autocomplete Masc_tui_command.Prev
   (* The footer and this arm read the same table (Masc_tui_esc_interrupt),
      so the hint the operator sees is the act the key performs: Esc is the
      first press of an interrupt, the accidental second press inside the
@@ -1314,6 +1324,8 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   | "down" when state.msg_scroll > 0 ->
     set_msg_scroll state (state.msg_scroll - 1);
     true
+  | "down" when slash_navigable () -> apply_autocomplete Masc_tui_command.Next
+  | "up" when slash_navigable () -> apply_autocomplete Masc_tui_command.Prev
   | "up" ->
     recall_older state;
     true

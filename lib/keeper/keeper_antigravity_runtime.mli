@@ -20,6 +20,8 @@ val run :
   tools:Agent_core.Tool.t list ->
   initial_messages:Agent_core.Types.message list ->
   model_input_projection:Agent_core.Agent.model_input_projection option ->
+  on_transmitted_model_input:
+    (Keeper_official_client_host.transmitted_model_input -> unit) ->
   hooks:Agent_core.Hooks.hooks option ->
   context_injector:Agent_core.Hooks.context_injector option ->
   context:Agent_core.Context.t option ->
@@ -36,6 +38,15 @@ val run :
   config:Runtime_execution.antigravity_cli ->
   unit ->
   attempt_outcome
+(** [on_transmitted_model_input] fires once per turn, after the admission
+    window has cut the history and before the prompt is rendered. Required
+    rather than optional: a lane that reports nothing is what wrote every
+    Antigravity turn's input attribution as zero (masc#32995).
+
+    It reports [Whole_input_transmitted] only when the conversation starts,
+    because only then does the rendered prompt carry the whole list. A resumed
+    conversation reports [Held_by_client_session]: the CLI re-sends just the
+    new turn, so what the model reads is not this process's to measure. *)
 
 module For_testing : sig
   val capacity_bounded_model_input_projection

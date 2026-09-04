@@ -779,6 +779,7 @@ let test_spawn_failure_is_pre_dispatch () =
                       config
                     | Some _ | None -> fail "Antigravity runtime fixture did not resolve"
                   in
+                  let reports = ref [] in
                   let attempt =
                     Keeper_antigravity_runtime.run
                       ~pre_tool_rejects:(ref [])
@@ -791,6 +792,8 @@ let test_spawn_failure_is_pre_dispatch () =
                       ~tools:[]
                       ~initial_messages:[]
                       ~model_input_projection:None
+                      ~on_transmitted_model_input:
+                        (fun report -> reports := report :: !reports)
                       ~hooks:None
                       ~context_injector:None
                       ~context:None
@@ -811,7 +814,15 @@ let test_spawn_failure_is_pre_dispatch () =
                     "spawn is proven pre-dispatch"
                     "no_effect_observed"
                     (Keeper_provider_attempt_effect.to_string
-                       attempt.effect_disposition))))))
+                       attempt.effect_disposition);
+                  (* A turn that never prepared reports nothing, so the record
+                     falls to [Dispatch_not_reached]. Reporting an empty list
+                     here instead would be written as a turn measured at zero
+                     bytes -- the reading masc#32995 exists to stop. *)
+                  check int
+                    "a turn that never prepared reports no input"
+                    0
+                    (List.length !reports))))))
 ;;
 
 let plain_user_message text : Agent_core.Types.message =

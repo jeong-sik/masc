@@ -267,7 +267,7 @@ let content_of_wire_message raw =
 let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
     ?event_capture ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
-    ~base_path ~cli_path ~goal () =
+    ?on_request_attribution ~base_path ~cli_path ~goal () =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
@@ -309,6 +309,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                            ?runtime_manifest_append
                            ?raw_trace
                            ?on_official_client_native_action
+                           ?on_request_attribution
                            ~sw
                            ~net:(Eio.Stdenv.net env)
                            ())
@@ -1127,6 +1128,23 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
 let test_keeper_settles_and_resumes () =
   let base_path = temp_workspace () in
   let prompt_marker = Filename.concat base_path "resume-prompt.json" in
+  (* What each turn reported about its own model input. The start/resume split
+     the rest of this test pins on the wire has to be the same split the
+     record carries, or the metrics row describes a request that was not
+     sent. *)
+  let reports = ref [] in
+  let on_request_attribution ~runtime_id:_ ~tools:_ ~transmitted =
+    reports := transmitted :: !reports
+  in
+  let reported_input () =
+    match !reports with
+    | [ latest ] -> latest
+    | other ->
+      fail
+        (Printf.sprintf
+           "expected exactly one input report for the turn, got %d"
+           (List.length other))
+  in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
@@ -1142,6 +1160,7 @@ let test_keeper_settles_and_resumes () =
                ~base_path
                ~cli_path
                ~goal:"FIRST_GOAL"
+               ~on_request_attribution
                ()
            with
            | Error error -> fail (Agent_core.Error.to_string error)
@@ -1151,6 +1170,17 @@ let test_keeper_settles_and_resumes () =
                "MASC_CLAUDE_FIRST"
                (keeper_response_text turn);
              check int "first turn" 1 turn.turns);
+       (* A start renders the whole prepared list into the prompt, so the
+          record may attribute it. *)
+       (match reported_input () with
+        | Keeper_official_client_host.Whole_input_transmitted messages ->
+          check bool
+            "a started conversation reports the history it rendered"
+            true
+            (List.length messages > 0)
+        | Keeper_official_client_host.Held_by_client_session ->
+          fail "a started conversation reported nothing to attribute");
+       reports := [];
        let first = load_state base_path in
        let session_id =
          match first.phase with
@@ -1169,6 +1199,7 @@ let test_keeper_settles_and_resumes () =
                ~base_path
                ~cli_path
                ~goal:"SECOND_GOAL"
+               ~on_request_attribution
                ()
            with
            | Error error -> fail (Agent_core.Error.to_string error)
@@ -1187,6 +1218,18 @@ let test_keeper_settles_and_resumes () =
          "resume sends only current goal"
          "SECOND_GOAL"
          (content_of_wire_message raw);
+       (* And the record says the same thing the wire does. Reporting the
+          prepared list here would attribute "ALREADY_IN_OFFICIAL_SESSION" and
+          the first turn's history to a request that carried neither
+          (masc#32995). *)
+       (match reported_input () with
+        | Keeper_official_client_host.Held_by_client_session -> ()
+        | Keeper_official_client_host.Whole_input_transmitted messages ->
+          fail
+            (Printf.sprintf
+               "a resumed conversation attributed %d messages the wire did not \
+                carry"
+               (List.length messages)));
        let second = load_state base_path in
        check int "durable cumulative turns" 2 second.turn_count;
        match second.phase with
@@ -1397,6 +1440,7 @@ let run_direct_attempt ?hooks ~base_path ~cli_path ~goal ~tools () =
                     ~tools
                     ~initial_messages:[]
                     ~model_input_projection:None
+                    ~on_transmitted_model_input:(fun _ -> ())
                     ~hooks
                     ~context_injector:None
                       (* Dynamic tools require the Keeper shared context

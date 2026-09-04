@@ -31,6 +31,7 @@ type network_mode =
   Keeper_types_profile_sandbox.network_mode =
     Network_none
   | Network_inherit
+  | Network_policy
 val to_tla_symbol : network_mode -> string
 val all_symbols : string list
 val all_states : network_mode list

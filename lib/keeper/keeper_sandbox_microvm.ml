@@ -111,19 +111,68 @@ let work_volume_guest_root = "/masc-work"
     host not found". [inherit] therefore means container's NAT, not the
     host's namespace, and the two differ in what the guest can reach on
     localhost. *)
+(* The host-only network every [Network_policy] guest is attached to. One
+   name for the fleet rather than one per keeper: the network carries no
+   allowlist -- it only removes every route except the host gateway -- and
+   the per-keeper judgement happens at the proxy on the other side of that
+   gateway. Creating it is the server's job; a guest is never attached to a
+   network that does not exist, because [container run] fails rather than
+   falling back to the default network. *)
+let policy_network_name = "masc-egress-policy"
+
 let network_args_for backend ~dns (mode : Keeper_types_profile_sandbox.network_mode) =
   match (backend : Backend.t) with
-  | Backend.Apple_container | Backend.Nerdctl_kata ->
+  | Backend.Apple_container ->
     Ok
       (match mode with
        | Keeper_types_profile_sandbox.Network_none -> [ "--network"; "none" ]
        | Keeper_types_profile_sandbox.Network_inherit ->
          (match dns with
           | Some server when String.trim server <> "" -> [ "--dns"; String.trim server ]
-          | Some _ | None -> []))
+          | Some _ | None -> [])
+       | Keeper_types_profile_sandbox.Network_policy ->
+         (* Two flags, and both are the policy rather than a default.
+
+            The host-only network is the enforcement point. Measured
+            2026-09-04 on container 1.3.1: a guest attached to an
+            [--internal] network could not reach 1.1.1.1:443 or a public
+            address by raw TCP, and could reach a listener on the host
+            gateway. So a subprocess carrying its own socket does not get
+            out, which is what [HTTPS_PROXY] alone cannot promise.
+
+            [--no-dns] leaves the guest with no resolver on purpose. The
+            proxy speaks CONNECT, so the guest hands it a name and the proxy
+            resolves it -- after the allowlist has judged that same name.
+            One resolver, downstream of the matcher, is what closes the gap
+            a null-byte bypass goes through: there is no second parser to
+            disagree with the first. *)
+         [ "--network"; policy_network_name; "--no-dns" ])
+  | Backend.Nerdctl_kata ->
+    (match mode with
+     | Keeper_types_profile_sandbox.Network_none -> Ok [ "--network"; "none" ]
+     | Keeper_types_profile_sandbox.Network_inherit ->
+       Ok
+         (match dns with
+          | Some server when String.trim server <> "" -> [ "--dns"; String.trim server ]
+          | Some _ | None -> [])
+     | Keeper_types_profile_sandbox.Network_policy ->
+       Error
+         "microvm_network_mode_unmeasured: nerdctl can create an internal \
+          network, so the shape is plausible, but whether a Kata guest on one \
+          can still reach a public address by raw TCP has not been measured \
+          (RFC-0415). A mode that is policy on one backend and advice on \
+          another is worse than one that refuses. Next: measure it, then \
+          replace this arm.")
   | Backend.Microsandbox ->
     (match mode with
      | Keeper_types_profile_sandbox.Network_none -> Ok [ "--no-net" ]
+     | Keeper_types_profile_sandbox.Network_policy ->
+       Error
+         "microvm_network_mode_unmeasured: msb spells its own network policy \
+          (--no-net / --net <PROFILE>), and which profile leaves only a host \
+          listener reachable has not been measured (RFC-0415). msb also does \
+          not boot under masc today -- its list output carries no labels -- \
+          so this arm has no live path to measure on yet."
      | Keeper_types_profile_sandbox.Network_inherit ->
        Error
          "microvm_network_mode_unexpressible: msb 0.6.16 rejects --network \

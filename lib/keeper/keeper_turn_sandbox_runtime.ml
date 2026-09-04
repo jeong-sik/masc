@@ -199,6 +199,11 @@ let keeper_docker_container_name (t : t) =
     match t.network_mode with
     | Network_none -> "none"
     | Network_inherit -> "inherit"
+    (* The suffix keeps a container from being reused across a network
+       change, so this mode needs its own even though a Docker keeper cannot
+       reach it today: a name that collides is how a policy guest would
+       silently adopt an inherit container. *)
+    | Network_policy -> "policy"
   in
   Printf.sprintf
     "masc-keeper-docker-%s-%s-%s"
@@ -1239,9 +1244,9 @@ let start_container ?timeout_sec (t : t) =
         with
         | Error _ as err -> err
         | Ok seccomp_args ->
-        let network_args, network_label =
-          Keeper_sandbox_runtime.docker_network_args t.network_mode
-        in
+        match Keeper_sandbox_runtime.docker_network_args t.network_mode with
+        | Error msg -> Error msg
+        | Ok (network_args, network_label) ->
         (match
            Keeper_sandbox_runtime.docker_user_identity_mount_args
              ~host_root:t.host_root

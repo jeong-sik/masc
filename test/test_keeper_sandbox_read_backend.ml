@@ -1150,19 +1150,38 @@ let test_sandbox_container_label_args_include_managed_ttl () =
   Alcotest.(check bool) "inherit network label" true
     (has_label "masc.mcp.network=inherit")
 
+let docker_network_args_exn mode =
+  match Keeper_sandbox_runtime.docker_network_args mode with
+  | Ok pair -> pair
+  | Error detail -> Alcotest.failf "expected docker network args, got %s" detail
+;;
+
 let test_docker_network_args_follow_masc_policy () =
   let args_none, label_none =
-    Keeper_sandbox_runtime.docker_network_args Keeper_types_profile_sandbox.Network_none
+    docker_network_args_exn Keeper_types_profile_sandbox.Network_none
   in
   Alcotest.(check (list string)) "network none passes docker flag"
     [ "--network"; "none" ] args_none;
   Alcotest.(check string) "network none label" "none" label_none;
   let args_inherit, label_inherit =
-    Keeper_sandbox_runtime.docker_network_args Keeper_types_profile_sandbox.Network_inherit
+    docker_network_args_exn Keeper_types_profile_sandbox.Network_inherit
   in
   Alcotest.(check (list string)) "network inherit uses host network (#10431)"
     [ "--network"; "host" ] args_inherit;
   Alcotest.(check string) "network inherit label" "inherit" label_inherit
+
+(* Docker's egress boundary is unmeasured, so the policy lane refuses there
+   rather than emitting args that might not close (RFC-0415). A silent
+   fallback to inherit is the failure this pins. *)
+let test_docker_refuses_the_policy_lane () =
+  match Keeper_sandbox_runtime.docker_network_args Keeper_types_profile_sandbox.Network_policy with
+  | Ok (args, label) ->
+    Alcotest.failf "docker accepted the policy lane: args=[%s] label=%s"
+      (String.concat " " args) label
+  | Error detail ->
+    Alcotest.(check bool) "the refusal names the mode and the profile" true
+      (String_util.contains_substring detail "policy"
+       && String_util.contains_substring detail "docker")
 
 let test_docker_nofile_args_follow_config () =
   with_env "MASC_KEEPER_SANDBOX_NOFILE_LIMIT" "not-a-number" @@ fun () ->
@@ -2238,6 +2257,8 @@ let run_tests ~clock () =
         [
           Alcotest.test_case "docker network args follow policy" `Quick
             test_docker_network_args_follow_masc_policy;
+          Alcotest.test_case "docker refuses the policy lane" `Quick
+            test_docker_refuses_the_policy_lane;
           Alcotest.test_case "docker nofile args follow config" `Quick
             test_docker_nofile_args_follow_config;
           Alcotest.test_case "docker MASC config binding pins paths" `Quick

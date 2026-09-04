@@ -20,6 +20,11 @@ val unsupported_docker_flags : string list
     unknown option rather than ignoring it, so this list is what a reader
     must weigh when choosing the profile, not a runtime fallback. *)
 
+val policy_network_name : string
+(** The host-only network a [Network_policy] guest is attached to. It carries
+    no allowlist of its own: it removes every route except the host gateway,
+    and the keeper's allowlist is judged by the proxy behind that gateway. *)
+
 val network_args_for :
   Keeper_microvm_backend.t ->
   dns:string option ->

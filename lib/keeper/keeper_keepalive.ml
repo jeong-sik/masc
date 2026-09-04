@@ -490,7 +490,7 @@ let fork_egress_proxy
                  net
                  ~sw:proxy_sw
                  ~reuse_addr:true
-                 ~backlog:16
+                 ~backlog:Keeper_egress_lane.listen_backlog
                  Keeper_egress_lane.listen_address
              in
              let port =
@@ -517,7 +517,7 @@ let fork_egress_proxy
                         event.Egress_proxy_net.keeper_name
                         (Egress_proxy_net.outcome_to_string event.Egress_proxy_net.outcome))
                     ~socket
-                    ~read_timeout_s:10.0)
+                    ~read_timeout_s:Keeper_egress_lane.request_line_read_timeout_s)
                (fun () -> Eio.Promise.await stop))
          with
          | Eio.Cancel.Cancelled _ -> ()

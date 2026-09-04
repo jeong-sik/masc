@@ -374,6 +374,12 @@ let run_argv_with_status ?timeout_sec argv =
    Idempotent by listing first: a create against an existing name is an
    error on this CLI, and swallowing that error would also swallow the real
    ones. *)
+(* Named because a bare 30. and 60. in a boot path is the kind of number a
+   later edit rounds without knowing which call it bounds. Listing is a local
+   read; creating brings up a vmnet interface. *)
+let policy_network_list_timeout_s = 30.0
+let policy_network_create_timeout_s = 60.0
+
 let ensure_policy_network backend (mode : Keeper_types_profile_sandbox.network_mode) =
   match mode with
   | Keeper_types_profile_sandbox.Network_none | Keeper_types_profile_sandbox.Network_inherit
@@ -382,21 +388,26 @@ let ensure_policy_network backend (mode : Keeper_types_profile_sandbox.network_m
     (match Keeper_sandbox_microvm.policy_network_list_argv_for backend with
      | Error _ as error -> error
      | Ok list_argv ->
-       (match run_argv_with_status ~timeout_sec:30.0 list_argv with
-        | Unix.WEXITED 0, listing
-          when Keeper_sandbox_microvm.policy_network_present ~listing -> Ok ()
-        | Unix.WEXITED 0, _ ->
-          (match Keeper_sandbox_microvm.policy_network_create_argv_for backend with
-           | Error _ as error -> error
-           | Ok create_argv ->
-             (match run_argv_with_status ~timeout_sec:60.0 create_argv with
-              | Unix.WEXITED 0, _ -> Ok ()
-              | _, output ->
-                Error
-                  (Printf.sprintf
-                     "microvm_policy_network_uncreatable: %s: %s"
-                     (String.concat " " create_argv)
-                     (String.trim output))))
+       let create_network () =
+         match Keeper_sandbox_microvm.policy_network_create_argv_for backend with
+         | Error _ as error -> error
+         | Ok create_argv ->
+           (match run_argv_with_status ~timeout_sec:policy_network_create_timeout_s create_argv with
+            | Unix.WEXITED 0, _ -> Ok ()
+            | _, output ->
+              Error
+                (Printf.sprintf
+                   "microvm_policy_network_uncreatable: %s: %s"
+                   (String.concat " " create_argv)
+                   (String.trim output)))
+       in
+       (match run_argv_with_status ~timeout_sec:policy_network_list_timeout_s list_argv with
+        | Unix.WEXITED 0, listing ->
+          (match Keeper_sandbox_microvm.policy_network_present ~listing with
+           | Ok true -> Ok ()
+           | Ok false -> create_network ()
+           | Error detail ->
+             Error ("microvm_policy_network_unreadable: " ^ detail))
         | _, listing ->
           Error
             (Printf.sprintf

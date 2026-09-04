@@ -9168,6 +9168,38 @@ let render_keeper_message (state : state) =
     let footer_hints =
       match slash_hint with
       | Some line -> line
+      (* A capture takes the hint line for as long as it runs. The chat surface
+         draws its own input row rather than the composer, so the meter that
+         row carries never reaches here — and this is the one screen an
+         operator speaks from. Nothing else distinguishes a microphone that is
+         hearing them from one that is not: both end as an empty draft.
+
+         It replaces the hints rather than crowding in beside them because the
+         keys they name are the ones a capture is not waiting for. *)
+      | None when state.voice_capture <> None ->
+        let bar =
+          match state.voice_level_db with
+          | None -> Printf.sprintf "%s듣는 중…%s" Ansi.dim Ansi.reset
+          | Some db ->
+            Printf.sprintf
+              "%s%s%s  %s%.0f dB%s"
+              (Masc_tui_theme.tone Masc_tui_theme.Accent)
+              (Masc_tui_footer.voice_bar
+                 ~width:Masc_tui_footer.voice_bar_width
+                 ~db:(Some db))
+              Ansi.reset
+              Ansi.dim
+              db
+              Ansi.reset
+        in
+        Printf.sprintf "%s  %s^Y again to stop%s" bar Ansi.dim Ansi.reset
+      (* Between utterances in continuous mode: on, but nothing recording. A
+         mode that is idle looks exactly like one that is off without this. *)
+      | None when state.voice_continuous <> None ->
+        Printf.sprintf
+          "%s대기 중 — 말하면 잡습니다 · ^A to stop%s"
+          Ansi.dim
+          Ansi.reset
       | None ->
       if state.keeper_message_focus = Left_pane then
         "j/k or Up/Down:move  Enter:open  Right/l/Esc:chat"

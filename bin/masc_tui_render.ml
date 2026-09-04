@@ -11189,7 +11189,7 @@ let render_repository_changes_diff (state : state) ~path =
   box_divider buf cols;
   (match context_line_opt with
    | Some ctx_line ->
-       box_line_styled buf cols ~style:(Theme.plain ()) ctx_line;
+       box_line buf cols ctx_line;
        box_divider buf cols
    | None -> ());
   box_line_styled buf cols ~style:(Theme.recede ())
@@ -11301,7 +11301,7 @@ let render_repository_changes (state : state) =
         ~body:(fun ~budget c ->
           (match context_line_opt with
            | Some ctx_line ->
-               c.push_styled ~style:(Theme.plain ()) ctx_line;
+               c.push ctx_line;
                c.push_divider ()
            | None -> ());
           c.push_styled ~style:(Theme.recede ())

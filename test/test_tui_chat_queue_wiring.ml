@@ -1237,6 +1237,39 @@ let test_queueing_puts_the_line_in_the_conversation () =
 
 (* Cancel removes the pending row. Edit keeps it and rewrites the exact queued
    request in place, which is what preserves STEER intent and submitted_at. *)
+(* Esc during a turn stops the turn. Two surfaces promise it -- the footer
+   draws "Esc:interrupt turn" while one is live
+   (masc_tui_render.ml escape_hint) and the help row says "back; during a turn,
+   interrupt it" (masc_tui_keys.ml) -- and the key handler did the opposite:
+   [handle_message_key] answered "esc" by leaving unconditionally and returning
+   [true], so the surface-level arm that did interrupt was never reached. The
+   composer takes every key while the chat is open, so the interrupt has to be
+   reachable from inside this binding, not beside it. *)
+let test_escape_reaches_the_interrupt () =
+  let interrupts =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"handle_message_key"
+      ~callee:"interrupt_turn"
+  in
+  if interrupts < 1 then
+    failf
+      "handle_message_key must be able to interrupt the turn; observed %d \
+       call(s) of interrupt_turn"
+      interrupts;
+  let launched =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"main"
+      ~callee:"launch_keeper_interrupt"
+  in
+  if launched < 1 then
+    failf
+      "the interrupt handed to handle_message_key must reach \
+       launch_keeper_interrupt; observed %d call(s)"
+      launched
+;;
+
 let test_cancel_and_edit_take_the_row_with_them () =
   let cancelled =
     Ast_grep.count_calls_in_value_binding
@@ -1424,6 +1457,8 @@ let () =
             test_skill_usage_time_does_not_invent_never
         ; test_case "chat shortcuts reach visibility state" `Quick
             test_chat_shortcuts_reach_visibility_state
+        ; test_case "Esc reaches the interrupt" `Quick
+            test_escape_reaches_the_interrupt
         ; test_case "the budget and the pane agree about queue rows" `Quick
             test_the_budget_and_the_pane_agree_about_queue_rows
         ; test_case "the budget and the pane agree about the scrollback row"

@@ -323,8 +323,10 @@ let build_goal_timeline node linked_keepers approvals goal_events =
              (* Exhaustive on [task_status], the same way [task_status_color]
                 above is.  Rendering the status to a string and re-matching it
                 put this decision past the compiler: a seventh constructor
-                broke that colour match at build time and fell through to "ok"
-                here, so the two answers for one value could drift apart. *)
+                would break that colour match at build time and fall through to
+                "ok" here, so the two answers for one value could drift apart.
+                No such constructor has been added; the six arms below are
+                today's whole type. *)
              ~severity:
                (match task.task_status with
                 | Masc_domain.Cancelled _ -> "bad"

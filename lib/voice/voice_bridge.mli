@@ -183,6 +183,17 @@ val end_at_deadline : level_phase -> capture_end
 (** What running out of time means, which depends on what was heard. A capture
     cut off mid-sentence still carries speech; one that never rose above the
     room is a recording of a room, and must not be transcribed. *)
+val with_noise_reduced_audio :
+  audio_file:string -> f:(string -> 'a) -> 'a
+(** Run [f] on a noise-reduced copy of [audio_file], removing the copy and
+    the profile when [f] returns — whatever it returns, and when it raises.
+    When sox cannot produce the copy, [f] runs on [audio_file] itself: the
+    caller transcribes what it already had rather than nothing.
+
+    Exposed because its scope-ownership is the regression contract: the
+    [noise_reduced_copy] it replaced handed the reduced file to its caller,
+    and nobody removed it — every noise-reduced capture left a
+    masc_nr_*.wav behind forever. *)
 
 val end_at_operator_stop : stop_request -> level_phase -> capture_end
 (** The same question asked of a stop.

@@ -1258,12 +1258,12 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     Buffer.clear state.msg_input;
     drain_queue ();
     true
-  (* The footer draws "Esc:interrupt turn" while a turn is live and the help
-     row says "back; during a turn, interrupt it". Both were promises this arm
-     did not keep: it left unconditionally and answered [true], so the
-     surface-level Esc handling that does interrupt was never reached. Leaving
-     is one keypress away again once the turn settles; a turn the operator
-     wants stopped is the more urgent of the two. *)
+  (* The footer and this arm read the same table (Masc_tui_esc_interrupt),
+     so the hint the operator sees is the act the key performs: Esc is the
+     first press of an interrupt, the accidental second press inside the
+     grace window, or a request to leave once the interrupt is stale,
+     declined, or errored. Leaving cancels nothing: the interrupt proceeds
+     server-side and the pane can be reopened. *)
   | "esc" -> if interrupt_turn () then true else (leave_keeper_message state; true)
   | "\r" ->
     let text = Buffer.contents state.msg_input in
@@ -10094,7 +10094,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            let noted =
              match result with
              | Ok (Masc_tui_interrupt_signal.Signalled { turn_id }) ->
-                 Keeper_chat_transcript.Signal_sent { turn_id }
+                 Keeper_chat_transcript.Signal_sent
+                   { turn_id; signalled_at_ns = Mtime_clock.elapsed_ns () }
              | Ok (Masc_tui_interrupt_signal.Not_signalled { reason; detail }) ->
                  Keeper_chat_transcript.Signal_declined
                    (match detail with
@@ -13924,29 +13925,36 @@ and is loaded on demand through keeper_skill.
                         keeper the pane is showing is the one Esc can stop:
                         another keeper's turn is not on screen, and stopping
                         it from here would be a keypress the reader cannot
-                        see the target of. A second press while the first is
-                        unanswered is not a second interrupt -- it reports
-                        [true] so it does not fall through to leaving, which
-                        is not what the reader asked for either. *)
+                        see the target of. What the press does is the pure
+                        table in Masc_tui_esc_interrupt: launch on a first
+                        press, swallow an accidental double press inside the
+                        grace window, and leave the view once the signal is
+                        stale, declined, or errored. Leaving cancels nothing
+                        -- the interrupt proceeds server-side, and a turn
+                        parked in an uncancellable section keeps streaming
+                        after its signal (masc #29229), so holding Esc until
+                        the stream settles could hold it forever. *)
                      match state.msg_live with
                      | Some live
                        when state.msg_target_keeper_name
-                            = Some (Keeper_chat_transcript.keeper_name live)
-                            && Keeper_chat_transcript.interrupt live
-                               = Keeper_chat_transcript.Not_requested ->
-                         (match
-                            inflight_by_request_id state
-                              (Keeper_chat_transcript.request_id live)
-                          with
-                          | Some request ->
-                              launch_keeper_interrupt state
-                                ~mailbox:async_messages request;
-                              true
-                          | None -> false)
-                     | Some live
-                       when state.msg_target_keeper_name
                             = Some (Keeper_chat_transcript.keeper_name live) ->
-                         true
+                         (match
+                            Masc_tui_esc_interrupt.action
+                              ~now_ns:(Mtime_clock.elapsed_ns ())
+                              (Keeper_chat_transcript.interrupt live)
+                          with
+                          | Masc_tui_esc_interrupt.Launch_interrupt ->
+                            (match
+                               inflight_by_request_id state
+                                 (Keeper_chat_transcript.request_id live)
+                             with
+                             | Some request ->
+                               launch_keeper_interrupt state
+                                 ~mailbox:async_messages request;
+                               true
+                             | None -> false)
+                          | Masc_tui_esc_interrupt.Swallow -> true
+                          | Masc_tui_esc_interrupt.Leave -> false)
                      | Some _ | None -> false)
                    ~submit_message:
                      (send_operator_text state ~base_path

@@ -9123,18 +9123,27 @@ let render_keeper_message (state : state) =
       Message_layout.scroll_hint ~scrolled_back:scroll
         ~older_exist:state.msg_older_exist
     in
+    let return_hint () =
+      match state.msg_return with
+      | Keeper_chat_return_list -> "Esc:list"
+      | Keeper_chat_return_detail -> "Esc:detail"
+      | Keeper_chat_return_lanes -> "Esc:Lanes"
+    in
+    (* The hint is the dispatch's own table, not a retelling of it: both read
+       Masc_tui_esc_interrupt.action, so the footer cannot advertise an
+       interrupt Esc will not spend itself on, nor say "interrupt sent" after
+       the grace window when Esc would leave. *)
     let escape_hint =
       match state.msg_live with
-      | Some live
-        when Keeper_chat_transcript.interrupt live
-             = Keeper_chat_transcript.Not_requested ->
-          "Esc:interrupt turn"
-      | Some _ -> "Esc:interrupt sent"
-      | None ->
-          (match state.msg_return with
-           | Keeper_chat_return_list -> "Esc:list"
-           | Keeper_chat_return_detail -> "Esc:detail"
-           | Keeper_chat_return_lanes -> "Esc:Lanes")
+      | Some live ->
+          (match
+             Masc_tui_esc_interrupt.action ~now_ns:(Mtime_clock.elapsed_ns ())
+               (Keeper_chat_transcript.interrupt live)
+           with
+           | Masc_tui_esc_interrupt.Launch_interrupt -> "Esc:interrupt turn"
+           | Masc_tui_esc_interrupt.Swallow -> "Esc:interrupt sent"
+           | Masc_tui_esc_interrupt.Leave -> return_hint ())
+      | None -> return_hint ()
     in
     let switch_hint =
       match next_keeper_message_target state with

@@ -20,10 +20,13 @@ type phase =
     [Signal_sent] is not "the turn stopped". The server reports whether it
     signalled the running fiber, and a turn parked in an uncancellable section
     keeps going after a signal lands — reading it as the outcome is what hid a
-    63-minute hang (masc #29229). The stream ending is the proof. *)
+    63-minute hang (masc #29229). The stream ending is the proof.
+    [signalled_at_ns] is a monotonic timestamp ([Mtime_clock.elapsed_ns]),
+    so a reader can tell a fresh signal from one the turn has long since
+    ignored without a wall-clock step re-opening the question. *)
 type interrupt =
   | Not_requested
-  | Signal_sent of { turn_id : int option }
+  | Signal_sent of { turn_id : int option; signalled_at_ns : int64 }
   | Signal_declined of string
       (** The server accepted the request and did not signal — no turn in
           flight, or the cancel itself failed. Carries its reason. *)

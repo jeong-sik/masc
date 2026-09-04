@@ -433,6 +433,12 @@
  (modules masc_tui_mode))
 
 (library
+ (name masc_tui_esc_interrupt)
+ (wrapped false)
+ (modules masc_tui_esc_interrupt)
+ (libraries masc_tui_keeper_chat_transcript))
+
+(library
  (name masc_tui_file_icon)
  (wrapped false)
  (modules masc_tui_file_icon))
@@ -995,6 +1001,7 @@
   masc_tui_terminal_title
   masc_tui_runtime_config_receipt
   masc_tui_interrupt_signal
+  masc_tui_esc_interrupt
   masc.runtime
   masc.keeper_registry
   masc_skill_reference

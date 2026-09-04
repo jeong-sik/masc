@@ -372,9 +372,11 @@ let test_interrupt_is_recorded_as_a_signal_not_an_outcome () =
   let t = fresh () in
   check bool "nothing requested yet" true
     (Transcript.interrupt t = Transcript.Not_requested);
-  Transcript.note_interrupt t (Transcript.Signal_sent { turn_id = Some 7 });
+  Transcript.note_interrupt t
+    (Transcript.Signal_sent { turn_id = Some 7; signalled_at = 100.0 });
   check bool "the signal is recorded" true
-    (Transcript.interrupt t = Transcript.Signal_sent { turn_id = Some 7 });
+    (Transcript.interrupt t
+     = Transcript.Signal_sent { turn_id = Some 7; signalled_at = 100.0 });
   (* The signal says nothing about whether the turn stopped, so the phase has
      to stay whatever the stream last said. *)
   check phase "signalling does not end the turn" Transcript.Waiting
@@ -724,7 +726,8 @@ let test_status_rows_grow_only_with_what_they_report () =
   check (list string) "a turn in flight reports how it is going and nothing else"
     [ "progress" ]
     (rows t |> List.map (fun (kind, _) -> kind_to_string kind));
-  Transcript.note_interrupt t (Transcript.Signal_sent { turn_id = None });
+  Transcript.note_interrupt t
+    (Transcript.Signal_sent { turn_id = None; signalled_at = 100.0 });
   check int "an interrupt adds one row" 2
     (List.length (rows t));
   Transcript.apply ~now:origin t (Live.Undecodable "invalid JSON: x");
@@ -805,7 +808,8 @@ let test_progress_row_counts_the_tool_calls () =
 
 let test_interrupt_row_does_not_claim_the_turn_stopped () =
   let t = fresh () in
-  Transcript.note_interrupt t (Transcript.Signal_sent { turn_id = Some 12 });
+  Transcript.note_interrupt t
+    (Transcript.Signal_sent { turn_id = Some 12; signalled_at = 100.0 });
   match
     rows t
     |> List.filter (fun (kind, _) -> kind = Transcript.Attention)

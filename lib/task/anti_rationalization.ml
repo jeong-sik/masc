@@ -133,6 +133,12 @@ type verdict_question =
   | Completion of
       { completion_contract : string list option
       ; required_evidence : string list
+      ; few_shot_block : string
+            (** Operator disagreements returned to the judge as examples. It
+                lives in this arm because only the completion prompt has a slot
+                for it: passed alongside the question it was accepted for a
+                cancellation and dropped without a word, and the ledger read
+                that produced it ran for nothing. *)
       }
   | Cancellation of
       { reason : string
@@ -235,17 +241,16 @@ let contract_context_section = function
 ;;
 
 let build_prompt
-      ?(few_shot_block = "")
       ~(question : verdict_question)
       ~(lookup : lookup_surface)
       (req : review_request) : (string, string) result =
   let ( let* ) = Result.bind in
-  let calibration_section =
-    if few_shot_block = "" then "" else "\n" ^ few_shot_block ^ "\n"
-  in
   let* lookup_section = lookup_section ~question lookup in
   match question with
-  | Completion { completion_contract; required_evidence } ->
+  | Completion { completion_contract; required_evidence; few_shot_block } ->
+    let calibration_section =
+      if few_shot_block = "" then "" else "\n" ^ few_shot_block ^ "\n"
+    in
     let* verification_contract_section = contract_section completion_contract in
     let* required_evidence_section = evidence_section ~required_evidence in
     let evidence_refs_json =
@@ -270,11 +275,11 @@ let build_prompt
        no artifacts, and the completion prompt reads their absence as a reason
        to refuse — which is how every cancellation of a contracted Task came to
        be refused for not finishing the work it asks not to finish (#33052). *)
-    (* No calibration block. Every recorded divergence is a completion
-       judgement — the row carries no intent, so the selector cannot tell them
-       apart — and feeding "the evaluator wrongly approved this completion"
-       into a stop's prompt teaches it the shape this branch exists to
-       unlearn. *)
+    (* No calibration block, and the arm carries no field for one. Every
+       recorded divergence is a completion judgement — the row carries no
+       intent, so the selector cannot tell them apart — and feeding "the
+       evaluator wrongly approved this completion" into a stop's prompt
+       teaches it the shape this branch exists to unlearn. *)
     let* contract_context_section = contract_context_section contract_context in
     Prompt_registry.render_prompt_template
       Prompt_names.verification_cancellation
@@ -593,7 +598,7 @@ let review
       ?generator_runtime
       ?on_verdict
       ?on_tool_result
-      ?(few_shot_block = "")
+
       ?(sw : Eio.Switch.t option = None)
       ~(question : verdict_question)
       ~(lookup : lookup_surface)
@@ -611,7 +616,7 @@ let review
       Log.Task.info "task_id=%s [task-completion-review] %s" req.task_id message)
     ~log_warn:(fun message ->
       Log.Task.warn "task_id=%s [task-completion-review] %s" req.task_id message)
-    ~render_prompt:(fun () -> build_prompt ~few_shot_block ~question ~lookup req)
+    ~render_prompt:(fun () -> build_prompt ~question ~lookup req)
     ~lookup
     ~base_path
     ()

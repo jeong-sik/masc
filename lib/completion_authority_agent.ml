@@ -255,6 +255,9 @@ let verdict_question_of_request
                  | [] -> None
                  | descriptions -> Some descriptions)
             ; required_evidence
+              (* Filled at the review site, where the ledger is read. This
+                 function maps an intent to a question and reads no store. *)
+            ; few_shot_block = ""
             })
      | Masc_domain.Cancel_task ->
        let* reason = cancel_reason_of_output fields in
@@ -671,22 +674,31 @@ let process_task_once
             in
             (* Human labels close the judge's own loop: where an operator
                disagreed with a past verdict, the divergence returns to the
-               judge as a few-shot example, false positives first. The prompt
-               slot has existed since the calibration design; this passes it.
-               With no labels recorded the block is empty and the prompt is
-               byte-identical to before. *)
-            let few_shot_block =
-              Eval_calibration.format_few_shot_block
-                (Eval_calibration.select_examples
-                   ~max_examples:judge_few_shot_examples)
+               judge as a few-shot example, false positives first.
+
+               Only a completion asks for them. Every row in the ledger is a
+               completion judgement, and the cancellation prompt has no slot to
+               put one in, so on a stop this read is answered by a file nobody
+               will look at. The block rides inside [Completion] for that
+               reason: the arm that has the slot is the arm that fills it. *)
+            let question =
+              match prepared.question with
+              | Task.Anti_rationalization.Completion completion ->
+                Task.Anti_rationalization.Completion
+                  { completion with
+                    few_shot_block =
+                      Eval_calibration.format_few_shot_block
+                        (Eval_calibration.select_examples
+                           ~max_examples:judge_few_shot_examples)
+                  }
+              | Task.Anti_rationalization.Cancellation _ as stop -> stop
             in
             let result =
               Task.Anti_rationalization.review
                 ~base_path:runtime.config.base_path
                 ~sw:(Some runtime.sw)
                 ~lookup
-                ~few_shot_block
-                ~question:prepared.question
+                ~question
                 ~on_tool_result
                 prepared.review_request
             in

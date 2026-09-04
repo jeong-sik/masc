@@ -56,7 +56,7 @@ let rendered_with_lookup () =
   in
   match
     AR.build_prompt
-      ~question:(AR.Completion { completion_contract = None; required_evidence = [] })
+      ~question:(AR.Completion { completion_contract = None; required_evidence = []; few_shot_block = "" })
       ~lookup
       request
   with
@@ -106,6 +106,7 @@ let test_every_section_template_renders () =
              (AR.Completion
                 { completion_contract = Some [ marker "contract_item" ]
                 ; required_evidence = [ marker "evidence_item" ]
+                ; few_shot_block = marker "few_shot_block"
                 })
            request
        with
@@ -116,7 +117,12 @@ let test_every_section_template_renders () =
          check bool (label ^ ": the contract section rendered") true
            (Astring.String.is_infix ~affix:(marker "contract_item") text);
          check bool (label ^ ": the required-evidence section rendered") true
-           (Astring.String.is_infix ~affix:(marker "evidence_item") text))
+           (Astring.String.is_infix ~affix:(marker "evidence_item") text);
+         (* The calibration slot. It rode as a separate argument and nothing
+            pinned that it landed; a template that stopped naming the variable
+            would have dropped it in silence. *)
+         check bool (label ^ ": the calibration block rendered") true
+           (Astring.String.is_infix ~affix:(marker "few_shot_block") text))
     cases
 ;;
 
@@ -227,6 +233,7 @@ let completion_prompt () =
         (AR.Completion
            { completion_contract = Some [ marker "contract_item" ]
            ; required_evidence = [ marker "evidence_item" ]
+           ; few_shot_block = ""
            })
       ~lookup:AR.No_lookup_surface
       request
@@ -286,20 +293,75 @@ let test_the_cancellation_lookup_is_written_for_a_stop () =
     [ "the tool name", "tool_read_file"; "the root layout", marker "root_layout" ];
   check bool "with no surface: the no-lookup block reaches the model" true
     (Astring.String.is_infix ~affix:"<no_lookup_surface>" without);
+  (* The snapshot and receipt orders live only in the producer-tree slot, so
+     only the with-tools render tests them; asserting them absent from the
+     no-surface render would pass whether or not the split happened.
+     completion_notes was in both, and is the one that works on both. *)
+  List.iter
+    (fun (what, affix) ->
+       check bool ("with tools: " ^ what ^ " is not asked of a stop") false
+         (Astring.String.is_infix ~affix with_tools))
+    [ "the submitted snapshot", "제출될 때 참이었던"
+    ; "an execution receipt", "실행 영수증"
+    ];
   List.iter
     (fun (label, text) ->
-       List.iter
-         (fun (what, affix) ->
-            check
-              bool
-              (label ^ ": " ^ what ^ " is not asked of a stop")
-              false
-              (Astring.String.is_infix ~affix text))
-         [ "the submitted snapshot", "제출될 때 참이었던"
-         ; "an execution receipt", "실행 영수증"
-         ; "completion_notes", "completion_notes"
-         ])
+       check bool (label ^ ": completion_notes is not asked of a stop") false
+         (Astring.String.is_infix ~affix:"completion_notes" text))
     [ "with producer tools", with_tools; "with no lookup surface", without ]
+;;
+
+(* A cancellation is refused for want of a stated basis and for nothing else.
+   The prompt body says so once. The lookup slot's job is to describe the
+   tools, and when it also ordered a rejection — "사유가 가리키는 것이 지금
+   트리에 그대로 있으면, 그 task는 아직 할 일이 남아 있다" — it contradicted
+   that body: a producer stopping because the work belongs upstream leaves
+   the code right where it is, and would have been refused for it. That is
+   the failure #33052 removed, rewritten one slot over. *)
+let test_the_cancellation_lookup_orders_no_rejection () =
+  let affix = "기각" in
+  init ();
+  let slot_text key =
+    let resolved = Prompt_registry.resolve_prompt key in
+    if String.equal resolved.effective ""
+    then failf "prompt %s resolved to nothing" key
+    else resolved.effective
+  in
+  (* The needle is real on both sides: the body states the grounds, and the
+     no-surface slot is allowed to say what is NOT a ground. Only the
+     producer-tree slots must stay silent about refusing. *)
+  check bool "the body states the grounds for refusing" true
+    (Astring.String.is_infix ~affix (cancellation_prompt ()));
+  List.iter
+    (fun (what, key) ->
+       check bool (what ^ " orders no rejection") false
+         (Astring.String.is_infix ~affix (slot_text key)))
+    [ "the cancellation producer-tree slot"
+    , Prompt_names.verification_lookup_producer_tree_cancellation
+    ; "the completion producer-tree slot"
+    , Prompt_names.verification_lookup_producer_tree
+    ]
+;;
+
+(* Two code comments (completion_authority_agent.ml, workspace_verification_store.ml)
+   cite the producer-tree slot as the place the judge is told to prefix a
+   checkout-relative path before calling a file absent. There are two such
+   slots now and the citation names one, so both carry the sentence or the
+   comments are wrong about half the reviews. *)
+let test_both_producer_tree_slots_teach_the_checkout_prefix () =
+  init ();
+  List.iter
+    (fun (what, text) ->
+       List.iter
+         (fun (part, affix) ->
+            check bool (what ^ ": " ^ part) true
+              (Astring.String.is_infix ~affix text))
+         [ "names the checkout prefix", "체크아웃의 접두 경로"
+         ; "says the root is the sandbox root, not the repo", "저장소가 아니라"
+         ])
+    [ "with a completion", rendered_with_lookup ()
+    ; "with a cancellation", cancellation_prompt_with_tools ()
+    ]
 ;;
 
 (* The completion prompt must keep every one of those, or the assertions above
@@ -309,7 +371,7 @@ let test_the_completion_lookup_still_asks_for_evidence () =
     match
       AR.build_prompt
         ~question:
-          (AR.Completion { completion_contract = None; required_evidence = [] })
+          (AR.Completion { completion_contract = None; required_evidence = []; few_shot_block = "" })
         ~lookup:
           (AR.Lookup_tools { schemas; dispatch; root_layout = [ marker "root_layout" ] })
         request
@@ -354,6 +416,14 @@ let () =
             "the cancellation lookup is written for a stop"
             `Quick
             test_the_cancellation_lookup_is_written_for_a_stop
+        ; test_case
+            "the cancellation lookup orders no rejection"
+            `Quick
+            test_the_cancellation_lookup_orders_no_rejection
+        ; test_case
+            "both producer-tree slots teach the checkout prefix"
+            `Quick
+            test_both_producer_tree_slots_teach_the_checkout_prefix
         ; test_case
             "the completion lookup still asks for evidence"
             `Quick

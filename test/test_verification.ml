@@ -3035,7 +3035,12 @@ let test_complete_intent_asks_the_completion_question () =
     Alcotest.fail "Complete_task must not reach the cancellation question"
   | Ok
       (Masc.Task.Anti_rationalization.Completion
-        { completion_contract; required_evidence }) ->
+        { completion_contract; required_evidence; few_shot_block }) ->
+    (* This function maps an intent to a question and reads no store. The
+       calibration block is filled at the review site, where the ledger is
+       opened; a value here would mean this mapping had grown a disk read. *)
+    Alcotest.(check string)
+      "the calibration block is not filled by the mapping" "" few_shot_block;
     Alcotest.(check (option (list string)))
       "the contract carries the request criteria"
       (Some [ "the cancel record is written from the produced status" ])

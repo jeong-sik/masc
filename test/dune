@@ -3562,9 +3562,10 @@
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-board-json)))
 
-; Python unit suites over the scripts/ tree. Every one of these existed with
-; no rule, no workflow, and no caller -- eleven suites of dead verification
-; (the #32245 review found the pattern; this sweep found the rest). They are
+; Python unit suites over the scripts/ tree. These suites were first wired
+; into runtest after the #32245 review found several of them running with no
+; rule, no workflow, and no caller; a later sweep adopted the rest. Every
+; suite below now runs under the default @test/runtest alias in CI. They are
 ; stdlib-only unittest files whose subjects live under scripts/, so each rule
 ; carries the test file plus the exact script files it loads.
 

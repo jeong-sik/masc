@@ -127,7 +127,7 @@ let for_surface = function
       ; b Act "y / n" "approval" ~help:"answer a tool approval"
       ; b Act "Q" "leave"
           ~help:"leave with a turn running, without interrupting it \
-                 (empty draft)"
+                 (empty draft, no capture or edit in flight)"
       ; b Act "Esc" "back" ~help:"back; during a turn, interrupt it"
       ]
   | Keepers Keeper_runtime_pick ->

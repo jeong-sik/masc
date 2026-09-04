@@ -1303,8 +1303,14 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
      [interrupt_turn], so the turn keeps streaming while the operator reads
      something else, and reopening the chat finds it. Empty draft only:
      mid-sentence Q is the letter someone is typing and falls through to the
-     printable arm below. *)
-  | "Q" when Buffer.length state.msg_input = 0 ->
+     printable arm below. Esc settles the innermost thing first -- a capture,
+     a half-edited queued line -- and Q must not strand either: with
+     something to settle, this arm declines and Esc is the key that answers
+     it, so Q leaves only when there is nothing mid-flight to abandon. *)
+  | "Q"
+    when Buffer.length state.msg_input = 0
+         && Option.is_none state.msg_recall_replaces
+         && Option.is_none state.voice_capture ->
     leave_keeper_message state;
     true
   | "\r" ->

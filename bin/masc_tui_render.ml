@@ -9150,11 +9150,16 @@ let render_keeper_message (state : state) =
     in
     (* Named beside the empty-draft Q arm in the dispatch, and reading the
        same condition it does: the hint exists exactly when the key would
-       leave, and is absent exactly when Q is a letter someone is typing.
-       The compact footer omits it for width, not because the key went
-       away -- the help sheet still names it. *)
+       leave, and is absent exactly when Q is a letter someone is typing or
+       something is mid-flight for Esc to settle (a capture, a half-edited
+       queued line). The compact footer omits it for width, not because the
+       key went away -- the help sheet still names it. *)
     let leave_hint =
-      if Buffer.length state.msg_input = 0 then "  Q:leave" else ""
+      if Buffer.length state.msg_input = 0
+         && Option.is_none state.msg_recall_replaces
+         && Option.is_none state.voice_capture
+      then "  Q:leave"
+      else ""
     in
     let switch_hint =
       match next_keeper_message_target state with

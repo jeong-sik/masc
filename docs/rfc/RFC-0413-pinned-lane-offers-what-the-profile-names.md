@@ -183,12 +183,26 @@ Claude Code 쪽 통로는 control_response 만 되돌린다.
 세션 SHOULD 를 어기는 쪽으로 넘어간다. 반대 방향은 MUST 다 —— lifecycle 의 "Only use
 capabilities that were successfully negotiated".
 
-**넷, 유일하게 그 선언을 읽는 클라이언트가 읽고도 아무것도 안 한다.** claude 2.1.260
+**넷, 그 선언을 읽는 유일한 클라이언트가 우리가 확인한 경로에서는 읽고도 아무것도 안
+한다.** claude 2.1.260
 은 `_setupListChangedHandlers` 를 서버의 `listChanged` 선언에 걸어 두지만, CLI 가
 클라이언트를 만들 때 넘기는 값이 `listChanged:{tools:{autoRefresh:!1,debounceMs:0,
 onChanged:()=>{}}}` 이고 핸들러 본체는 `if(!d){_(null,null);return}` 로 빠진다.
 `autoRefresh` 가 꺼져 있고 `onChanged` 가 빈 함수라 `tools/list` 재조회를 하지 않는다.
-바이너리 안 `onChanged:` 여덟 자리가 전부 `()=>{}` 다.
+
+세 자리가 그렇다 —— `tools`, `prompts`, `resources` 를 만드는 자리 셋이고, 설치본
+`2.1.260` 에서 각각 오프셋 `183695407`, `183695462`, `183695519` 다. (앞선 판에는
+"`onChanged:` 여덟 자리가 전부 `()=>{}`" 라고 적혀 있었는데 틀린 수다. `rg 'onChanged:'`
+가 세는 여덟은 이렇게 갈린다: `()=>{}` 셋, 핸들러가 옵션을 꺼내 쓰는
+`{onChanged:u}=r` 둘, 무관한 `onChanged:(C)=>f.subscribe(C)` 하나, 그리고 다른 키의
+꼬리를 substring 으로 문 `versionChanged:` 와 `envUnionChanged:` 둘이다.)
+
+다만 이 셋은 삼항의 한쪽 가지다. 실제 코드는
+`...ye?{}:{listChanged:{tools:{autoRefresh:!1,...}}}` 라, `ye` 가 참이면 `listChanged`
+옵션을 아예 안 넘긴다. 그때 무슨 일이 나는지는 확인하지 못했고, SDK 스키마 기본값이
+`autoRefresh:O().default(!0)` 로 **켬** 이라 재조회 쪽으로 갈 여지가 있다. `ye` 의
+조건도 확인하지 못했다. 그러니 이 넷째 근거는 `ye` 가 거짓인 가지에 한해서만 성립한다.
+결론 자체는 앞의 셋이 각각 따로 받치므로 바뀌지 않는다.
 
 그래서 §3.1 의 문장은 유지되지만 **근거로 MCP capability 를 들 필요는 없다.** 실제
 고정 지점은 레인마다 따로 있고, 셋 다 `listChanged` 로는 풀리지 않는다.
@@ -199,7 +213,7 @@ onChanged:()=>{}}}` 이고 핸들러 본체는 `if(!d){_(null,null);return}` 로
 | codex | MCP 를 아예 쓰지 않는다. 도구는 `thread/start`·`thread/resume` 의 `dynamicTools` 파라미터로 간다 | `runtime_codex_app_server.ml` (파일 전체에 `mcp` 문자열 0건) |
 | antigravity | 턴의 `Eio.Switch.run` 안에서 브리지를 새로 띄우고 릴리스 때 config 를 지운다. MCP 세션 수명이 곧 한 턴이다 | `keeper_antigravity_runtime.ml:815-860` |
 
-RFC-0409 §2 가 같은 결론에 다른 경로로 닿아 있다(그 문서는 `mcp_server.ml:143` 이
+RFC-0409 §2 가 같은 결론에 다른 경로로 닿아 있다(그 문서는 `mcp_server.ml:144` 이
 `listChanged: true` 를 선언하고도 쏘는 코드가 없다는 점을 짚는다). 이 절은 그 관찰을
 공식 클라이언트 세 레인 쪽에서 확인한 것이다.
 

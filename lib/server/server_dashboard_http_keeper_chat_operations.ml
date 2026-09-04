@@ -4,7 +4,6 @@ module Operation_id = Operation.Operation_id
 module Owner = Keeper_owner
 module Registry = Keeper_owner_registry
 
-let read_permission = Masc_domain.CanReadState
 let mutation_permission = Masc_domain.CanBroadcast
 
 type get_route =
@@ -13,6 +12,16 @@ type get_route =
       { keeper_name : string
       ; raw_operation_id : string
       }
+  | Chat_events of { keeper_name : string }
+
+(* Operation reads carry state and input the dashboard already shows. The
+   event log carries the turn's reasoning in full, which /raw-trace and
+   /trajectory?include_thinking already put behind CanAdmin: same data, same
+   gate (server_dashboard_http_keeper_api_types.ml, keeper_get_permission). *)
+let get_permission = function
+  | Operation_list _ | Operation_exact _ -> Masc_domain.CanReadState
+  | Chat_events _ -> Masc_domain.CanAdmin
+;;
 
 type mutation =
   | Edit
@@ -45,6 +54,8 @@ let get_route path =
     Some (Operation_list { keeper_name })
   | [ "api"; "v1"; "keepers"; keeper_name; "chat"; "operations"; raw_operation_id ] ->
     Some (Operation_exact { keeper_name; raw_operation_id })
+  | [ "api"; "v1"; "keepers"; keeper_name; "chat"; "events" ] ->
+    Some (Chat_events { keeper_name })
   | _ -> None
 ;;
 
@@ -136,7 +147,122 @@ let parse_after_sequence request =
      | Some _ | None -> Error (invalid_input "after_sequence must be a non-negative int64"))
 ;;
 
+(* RFC-0412 §3.2, v2 events endpoint: the journal as written, paged over seq.
+   Default page and ceiling are wire constants the TUI (stage 3) pages by. *)
+let chat_events_default_limit = 500
+let chat_events_max_limit = 2000
+
+let parse_since_seq request =
+  match Server_utils.query_param request "since_seq" with
+  | None -> Ok (-1)
+  | Some raw ->
+    (match int_of_string_opt (String.trim raw) with
+     | Some value when value >= -1 -> Ok value
+     | Some _ | None ->
+       Error
+         (invalid_input
+            "since_seq must be an integer >= -1: the last seq already held, or -1 \
+             for the whole journal"))
+;;
+
+let parse_limit request =
+  match Server_utils.query_param request "limit" with
+  | None -> Ok chat_events_default_limit
+  | Some raw ->
+    (match int_of_string_opt (String.trim raw) with
+     | Some value when value >= 1 && value <= chat_events_max_limit -> Ok value
+     | Some _ | None ->
+       Error
+         (invalid_input
+            (Printf.sprintf "limit must be an integer in 1..%d" chat_events_max_limit)))
+;;
+
+let parse_operation_id_query request =
+  match Server_utils.query_param request "operation_id" with
+  | None -> Error (invalid_input "operation_id is required")
+  | Some raw -> operation_id (String.trim raw)
+;;
+
+let rec take_at_most n acc = function
+  | rest when n = 0 -> List.rev acc, rest
+  | [] -> List.rev acc, []
+  | entry :: rest -> take_at_most (n - 1) (entry :: acc) rest
+;;
+
+let chat_events_page ~operation_id ~since_seq ~limit entries =
+  let page, rest =
+    entries
+    |> List.filter (fun (entry : Keeper_chat_event_log.journaled_event) ->
+      entry.seq > since_seq)
+    |> take_at_most limit []
+  in
+  let next_since_seq =
+    match List.rev page with
+    | [] -> since_seq
+    | (last : Keeper_chat_event_log.journaled_event) :: _ -> last.seq
+  in
+  `Assoc
+    [ "schema", `String "masc.keeper_chat_events.v2"
+    ; "operation_id", `String operation_id
+    ; "events", `List (List.map Keeper_chat_event_log.journaled_event_to_json page)
+    ; "has_more", `Bool (not (List.is_empty rest))
+    ; "next_since_seq", `Int next_since_seq
+    ]
+;;
+
 let handle_get state request reqd = function
+  | Chat_events { keeper_name } ->
+    let ( let* ) = Result.bind in
+    (match
+       let* operation_id = parse_operation_id_query request in
+       let* since_seq = parse_since_seq request in
+       let* limit = parse_limit request in
+       Ok (operation_id, since_seq, limit)
+     with
+     | Error error -> respond_error request reqd error
+     | Ok (operation_id, since_seq, limit) ->
+       let base_path = base_path state in
+       let operation_id_text = Operation_id.to_string operation_id in
+       let path =
+         Keeper_chat_event_log.journal_path
+           ~base_dir:base_path
+           ~keeper_name
+           ~operation_id:operation_id_text
+       in
+       let respond entries =
+         Log.Dashboard.debug
+           "keeper_chat_events keeper=%s operation_id=%s since_seq=%d limit=%d journaled=%d"
+           keeper_name
+           operation_id_text
+           since_seq
+           limit
+           (List.length entries);
+         Server_auth.respond_json_value_with_cors
+           request
+           reqd
+           (chat_events_page ~operation_id:operation_id_text ~since_seq ~limit entries)
+       in
+       (match Keeper_chat_event_log.read_journal_path_result path with
+        | Ok entries -> respond entries
+        | Error Keeper_chat_event_log.Journal_missing ->
+          (* No journal is the normal state of a queued operation, so the
+             store decides: an operation it holds has an empty log for now;
+             one it has never seen is unknown. *)
+          (match Registry.exact_operation ~base_path ~keeper_name operation_id with
+           | Ok (Some _) -> respond []
+           | Ok None ->
+             respond_error
+               request
+               reqd
+               (unknown_operation
+                  ("unknown Keeper chat operation: " ^ operation_id_text))
+           | Error error -> respond_error request reqd (api_error_of_command_error error))
+        | Error (Journal_unreadable detail) ->
+          (* This endpoint exists to serve the log, so the log's failure is
+             the response (RFC-0412 §3.5: loud from day one on v2). *)
+          respond_error request reqd (unavailable "journal_unreadable" detail)
+        | Error (Journal_corrupt detail) ->
+          respond_error request reqd (unavailable "journal_corrupt" detail)))
   | Operation_exact { keeper_name; raw_operation_id } ->
     (match operation_id raw_operation_id with
      | Error error -> respond_error request reqd error

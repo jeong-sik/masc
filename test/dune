@@ -4443,3 +4443,8 @@
  (name test_keeper_ssh_integration)
  (modules test_keeper_ssh_integration)
  (libraries masc_test_deps exec_ssh_protocol))
+
+(test
+ (name test_keeper_sandbox_remote_checkouts)
+ (modules test_keeper_sandbox_remote_checkouts)
+ (libraries alcotest masc yojson))

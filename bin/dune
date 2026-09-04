@@ -206,6 +206,7 @@
  (package masc)
  (libraries
   masc
+  masc.masc_process
   masc.prompt_registry
   masc.server
   masc.runtime

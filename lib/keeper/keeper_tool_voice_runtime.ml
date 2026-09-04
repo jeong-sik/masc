@@ -81,92 +81,107 @@ let handle_speak_with_outcome
       , Eio_context.get_clock_opt ()
       , Eio_context.get_net_opt () )
     with
-    | Some sw, Some clock, Some net ->
-      (* Synchronous on purpose: the tool schema promises "blocks until
-         playback finishes". The former fire-and-forget queue returned
-         status="queued" immediately, so the model never saw playback
-         complete and re-spoke the same content every sub-turn
-         (2026-06-10 live voice-repeat incident). *)
-      authorize_external_effect
-        ~operation:(command_to_string Speak)
-        ~input:args
-        ~continue:(fun () ->
-          match
-            Voice_bridge.agent_speak
-              ~sw
-              ~clock
-              ~net
-              ~agent_id:meta.name
-              ~message
-              ?provider
-              ~priority
-              ?audio_device
-              ()
-          with
-          | Ok { Voice_bridge.completion = Voice_bridge.Spoken; payload = json } ->
-           (* RFC-0235 P1 3b: record the utterance to the keeper's chat so a
-              connected device can read AND hear it, not just the server's
-              speakers. The audio clip carries the token of the synthesized
-              file so the dashboard can fetch /api/v1/voice/audio/<token>. *)
-           let base_dir = config.Workspace.base_path in
-           let surface = Surface_ref.Dashboard { session_id = None } in
-           let clip : Keeper_chat_store.audio_clip option =
-             match Json_util.get_string json "audio_file" with
-             | Some path ->
-               let token =
-                 path |> Filename.basename |> Filename.chop_extension
-               in
-               let audio_url = Masc_network_defaults.voice_audio_path token in
-               let duration_sec =
-                 Voice_bridge_core.audio_duration_seconds ~audio_file:path
-               in
-               Some
-                 { Keeper_chat_store.token
-                 ; audio_url = Some audio_url
-                 ; mime = "audio/mpeg"
-                 ; duration_sec
-                 ; message_text = message
-                 ; device_id = audio_device
-                 ; expired = false
+      let run_speak () =
+        match
+          Voice_bridge.agent_speak
+            ~sw
+            ~clock
+            ~net
+            ~agent_id:meta.name
+            ~message
+            ?provider
+            ~priority
+            ?audio_device
+            ()
+        with
+        | Ok { Voice_bridge.completion = Voice_bridge.Spoken; payload = json } ->
+          (* RFC-0235 P1 3b: record the utterance to the keeper's chat so a
+             connected device can read AND hear it, not just the server's
+             speakers. The audio clip carries the token of the synthesized
+             file so the dashboard can fetch /api/v1/voice/audio/<token>. *)
+          let base_dir = config.Workspace.base_path in
+          let surface = Surface_ref.Dashboard { session_id = None } in
+          let clip : Keeper_chat_store.audio_clip option =
+            match Json_util.get_string json "audio_file" with
+            | Some path ->
+              let token =
+                path |> Filename.basename |> Filename.chop_extension
+              in
+              let audio_url = Masc_network_defaults.voice_audio_path token in
+              let duration_sec =
+                Voice_bridge_core.audio_duration_seconds ~audio_file:path
+              in
+              Some
+                { Keeper_chat_store.token
+                ; audio_url = Some audio_url
+                ; mime = "audio/mpeg"
+                ; duration_sec
+                ; message_text = message
+                ; device_id = audio_device
+                ; expired = false
+                }
+            | None -> None
+          in
+          Keeper_chat_store.append_assistant_message
+            ~base_dir ~keeper_name:meta.name ~content:message ~surface ?audio:clip ();
+          (match clip with
+           | Some c ->
+             Keeper_chat_broadcast.chat_appended_with_audio
+               ~keeper_name:meta.name
+               ~source:"agent"
+               ~audio:
+                 { Keeper_chat_broadcast.token = c.token
+                 ; audio_url = c.audio_url
+                 ; mime = c.mime
+                 ; duration_sec = c.duration_sec
+                 ; message_text = c.message_text
+                 ; device_id = c.device_id
+                 ; expired = c.expired
                  }
-             | None -> None
-           in
-           Keeper_chat_store.append_assistant_message
-             ~base_dir ~keeper_name:meta.name ~content:message ~surface ?audio:clip ();
-           (match clip with
-            | Some c ->
-              Keeper_chat_broadcast.chat_appended_with_audio
-                ~keeper_name:meta.name
-                ~source:"agent"
-                ~audio:
-                  { Keeper_chat_broadcast.token = c.token
-                  ; audio_url = c.audio_url
-                  ; mime = c.mime
-                  ; duration_sec = c.duration_sec
-                  ; message_text = c.message_text
-                  ; device_id = c.device_id
-                  ; expired = c.expired
-                  }
-                ~content:message
-                ()
-            | None ->
-              Keeper_chat_broadcast.chat_appended
-                ~keeper_name:meta.name ~source:"agent"
-                ~content:message
-                ());
-           Keeper_tool_execution.success (Yojson.Safe.to_string json)
-          | Ok
-              { Voice_bridge.completion = Voice_bridge.Dedup_skipped
-              ; payload = json
-              } ->
-            Keeper_tool_execution.success (Yojson.Safe.to_string json)
-          | Error err ->
-            Keeper_tool_execution.failure
-              ~class_:Tool_result.Runtime_failure
-              (Tool_args.error_response_with
-                 [ "agent_id", `String meta.name
-                 ; "message", `String err
-                 ]))
+               ~content:message
+               ()
+           | None ->
+             Keeper_chat_broadcast.chat_appended
+               ~keeper_name:meta.name ~source:"agent"
+               ~content:message
+               ());
+          Keeper_tool_execution.success (Yojson.Safe.to_string json)
+        | Ok
+            { Voice_bridge.completion = Voice_bridge.Dedup_skipped
+            ; payload = json
+            } ->
+          Keeper_tool_execution.success (Yojson.Safe.to_string json)
+        | Error err ->
+          Keeper_tool_execution.failure
+            ~class_:Tool_result.Runtime_failure
+            (Tool_args.error_response_with
+               [ "agent_id", `String meta.name
+               ; "message", `String err
+               ])
+      in
+      let is_voice_gate_exempt =
+        match meta.always_allow with
+        | Some true -> true
+        | _ ->
+          (match meta.voice_always_allow with
+           | Some true -> true
+           | _ ->
+             (match Voice_config.load_detailed () with
+              | Ok vcfg -> Voice_config.voice_gate_always_allow_for_agent vcfg meta.name
+              | Error _ -> false))
+      in
+      if is_voice_gate_exempt
+      then run_speak ()
+      else
+        (* Synchronous on purpose: the tool schema promises "blocks until
+           playback finishes". The former fire-and-forget queue returned
+           status="queued" immediately, so the model never saw playback
+           complete and re-spoke the same content every sub-turn
+           (2026-06-10 live voice-repeat incident). *)
+        authorize_external_effect
+          ~operation:(command_to_string Speak)
+          ~input:args
+          ~continue:run_speak)
     | _ ->
       Keeper_tool_execution.success
         (Yojson.Safe.to_string

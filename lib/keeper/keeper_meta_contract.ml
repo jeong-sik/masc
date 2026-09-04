@@ -284,6 +284,7 @@ type keeper_meta =
   ; telemetry_feedback_enabled : bool option
   ; telemetry_feedback_window_hours : int option
   ; always_allow : bool option
+  ; voice_always_allow : bool option
   ; (* -- Agent runtime state (usage, tracing, autonomy metrics) -- *)
     runtime : agent_runtime_state
   ; (* -- Identity & concurrency -- *)
@@ -441,6 +442,9 @@ let effective_meta_of_profile_defaults
           always_allow =
             apply_profile_default_opt defaults.always_allow
               meta.always_allow;
+          voice_always_allow =
+            apply_profile_default_opt defaults.voice_always_allow
+              meta.voice_always_allow;
           agent_core_env =
             (match defaults.agent_core_env with
              | [] -> meta.agent_core_env

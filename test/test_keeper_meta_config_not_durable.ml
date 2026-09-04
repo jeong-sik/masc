@@ -34,6 +34,7 @@ let test_config_writes_are_dropped () =
       autoboot_enabled = not meta.autoboot_enabled
     ; mention_targets = [ "someone" ]
     ; always_allow = Some true
+    ; voice_always_allow = Some true
     ; max_context_override = Some 4242
     ; telemetry_feedback_enabled = Some true
     ; telemetry_feedback_window_hours = Some 7
@@ -45,6 +46,7 @@ let test_config_writes_are_dropped () =
   Alcotest.(check bool) "autoboot_enabled is not durable" true decoded.autoboot_enabled;
   Alcotest.(check (list string)) "mention_targets is not durable" [] decoded.mention_targets;
   Alcotest.(check bool) "always_allow is not durable" true (decoded.always_allow = None);
+  Alcotest.(check bool) "voice_always_allow is not durable" true (decoded.voice_always_allow = None);
   Alcotest.(check bool)
     "max_context_override is not durable" true (decoded.max_context_override = None);
   Alcotest.(check bool)

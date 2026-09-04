@@ -9,13 +9,13 @@ val create_submit_request :
   task:Masc_domain.task ->
   assignee:string ->
   verification_id:string ->
-  evidence_refs:string list ->
+  claim:Masc_domain.verification_claim ->
   (unit, string) result
-(** [create_submit_request ~config ~task ~assignee ~verification_id
-      ~evidence_refs] persists a board post for the verification
-    request.  Returns [Error _] when
-    board persistence fails or the task does not satisfy the
-    contract gap pre-check. *)
+(** [create_submit_request ~config ~task ~assignee ~verification_id ~claim]
+    persists the request record the completion authority reads. The record
+    carries the claim's intent and, for a cancellation, the producer's reason
+    as [cancel_reason] in its output. Returns [Error _] when persistence
+    fails. *)
 
 val delete_verification_request :
   config:Workspace.config ->
@@ -30,7 +30,7 @@ val notify_submit_for_verification :
   task:Masc_domain.task ->
   assignee:string ->
   verification_id:string ->
-  evidence_refs:string list ->
+  claim:Masc_domain.verification_claim ->
   unit
 (** [notify_submit_for_verification ...] emits the
     [masc/verification/requested] SSE event without mutating state.

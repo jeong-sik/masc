@@ -1525,6 +1525,79 @@ let test_operator_rejection_rebinds_producer () =
     | Some { status = Masc_domain.Busy; current_task = Some "task-001"; _ } -> ()
     | _ -> Alcotest.fail "rejection did not restore producer task binding")
 
+(* The authority reads a request record, not the task status, so every path
+   into [AwaitingVerification] must leave one behind. The cancel path did not:
+   task-1303 (2026-09-03) sat awaiting a verdict on a record that was never
+   written while the authority deferred on "verification not found". Driven
+   through the real hooks installed at the top of this file. *)
+let test_cancel_writes_the_record_the_authority_reads () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Stop me" ~priority:1 ~description:"" in
+    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let refused =
+      Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
+        ~action:Masc_domain.Cancel ()
+    in
+    Alcotest.(check bool) "a cancel with no reason is refused" true (Result.is_error refused);
+    (match
+       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
+         ~action:Masc_domain.Cancel ~reason:"the defect no longer reproduces" ()
+     with
+     | Ok _ -> ()
+     | Error _ -> Alcotest.fail "a cancel with a reason must be accepted");
+    let verification_id = verification_id_for_task config "task-001" in
+    match Verification.load_request config.Workspace.base_path verification_id with
+    | Error e -> Alcotest.fail ("the authority would defer on: " ^ e)
+    | Ok request ->
+      Alcotest.(check string) "record carries the producer's reason"
+        "the defect no longer reproduces"
+        Yojson.Safe.Util.(request.output |> member "cancel_reason" |> to_string);
+      (* Which question was asked is the Task's to answer, not the record's. *)
+      (match find_task config "task-001" with
+       | Some { task_status = Masc_domain.AwaitingVerification
+                  { intent = Masc_domain.Cancel_task; _ }; _ } -> ()
+       | Some _ | None ->
+         Alcotest.fail "the task must be awaiting a verdict on a cancellation"))
+
+(* [reason] is optional on this entry point while handoff_context.summary is
+   required for every exit-class action, so a caller can put the whole
+   explanation in the summary — the tool schema tells it to. Reading only
+   [reason] refused exactly that call while the message log would have
+   announced it with the summary as its reason. *)
+let test_cancel_takes_its_reason_from_the_handoff_summary () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Stop me" ~priority:1 ~description:"" in
+    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    (match
+       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
+         ~action:Masc_domain.Cancel
+         ~handoff_context:
+           { summary = "the premise this rests on is gone"
+           ; reason = None
+           ; next_step = None
+           ; failure_mode = None
+           ; reclaim_policy = None
+           ; evidence_refs = []
+           ; updated_at = None
+           ; updated_by = None
+           }
+         ()
+     with
+     | Ok _ -> ()
+     | Error e ->
+       Alcotest.fail
+         ("a cancellation explained in its summary must be accepted: "
+          ^ Masc_domain.masc_error_to_string e));
+    let verification_id = verification_id_for_task config "task-001" in
+    match Verification.load_request config.Workspace.base_path verification_id with
+    | Error e -> Alcotest.fail ("the authority would defer on: " ^ e)
+    | Ok request ->
+      Alcotest.(check string) "the summary is what the judge is given"
+        "the premise this rests on is gone"
+        Yojson.Safe.Util.(request.output |> member "cancel_reason" |> to_string))
+
 let test_operator_verdict_boundary_is_reachable () =
   with_test_env (fun config ->
     let _ =
@@ -1555,13 +1628,13 @@ let test_operator_verdict_boundary_is_reachable () =
         ~action:Masc_domain.Submit_for_verification
         ~notes:"evidence"
         ~prepare_verification_request:
-          (fun ~task ~assignee ~verification_id ~evidence_refs ->
+          (fun ~task ~assignee ~verification_id ~claim ->
              Verification_protocol.create_submit_request
                ~config
                ~task
                ~assignee
                ~verification_id
-               ~evidence_refs)
+               ~claim)
         ()
     in
     Alcotest.(check bool) "submit with evidence snapshot" true
@@ -2593,6 +2666,13 @@ let () =
         test_strict_task_done_requires_verification_submission;
       Alcotest.test_case "default task done requires verification submission" `Quick
         test_default_task_done_requires_verification_submission;
+    ];
+
+    "cancel_verification", [
+      Alcotest.test_case "cancel writes the record the authority reads" `Quick
+        test_cancel_writes_the_record_the_authority_reads;
+      Alcotest.test_case "cancel takes its reason from the handoff summary" `Quick
+        test_cancel_takes_its_reason_from_the_handoff_summary;
     ];
 
     (* === Board Admin Tests === *)

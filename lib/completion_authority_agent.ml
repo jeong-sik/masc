@@ -214,6 +214,7 @@ let required_string_list_field ~context name fields =
 ;;
 
 let completion_contract_of_request
+      ~(intent : Masc_domain.verification_intent)
       (request : Verification.verification_request)
   =
   let completion_contract = request.criteria in
@@ -229,6 +230,30 @@ let completion_contract_of_request
         ~context:"verification request output"
         "required_artifacts"
         fields
+    in
+    (* A stop produces nothing, so the contract and the required artifacts are
+       withheld from the two prompt sections built out of them.
+
+       What that withholds is the instruction, not the text. The request is
+       serialized whole into [completion_notes], so its criteria and its
+       required_artifacts still reach the judge as context — which is right,
+       they say what the Task was for. What no longer reaches it is the
+       contract block's order to "REJECT if the notes do not evidence every
+       item", and the evidence block's per-artifact version of the same. A
+       stop's notes are one sentence saying why the work should not happen; it
+       evidences none of them, so with those blocks rendered every
+       cancellation of a contracted Task is refused for not finishing the work
+       it is asking not to finish.
+
+       This is a narrowing, not the answer. The prompt's own body still asks
+       whether the notes describe concrete work done and whether they read as
+       avoidance, and a refused stop returns the Task to its producer — so a
+       cancellation can still be rejected for being a cancellation. Giving it
+       its own prompt is issue #33052. *)
+    let completion_contract, required_artifacts =
+      match intent with
+      | Masc_domain.Complete_task -> completion_contract, required_artifacts
+      | Masc_domain.Cancel_task -> None, []
     in
     Ok (completion_contract, required_artifacts)
   | other ->
@@ -268,6 +293,24 @@ let prepare_review
       ~(authority : Masc_domain.completion_authority)
   : (prepared_review, string) result
   =
+  (* Which question was asked lives on the Task, put there by the transition
+     that created the obligation. It is not copied into the request record:
+     one field, one owner, and a record that repeated it could disagree with
+     the status the verdict is applied to. *)
+  let* intent =
+    match task.task_status with
+    | Masc_domain.AwaitingVerification { intent; _ } -> Ok intent
+    | Masc_domain.Todo
+    | Masc_domain.Claimed _
+    | Masc_domain.InProgress _
+    | Masc_domain.Done _
+    | Masc_domain.Cancelled _ ->
+      Error
+        (Printf.sprintf
+           "task %s is not awaiting a verdict (status=%s)"
+           task.id
+           (Masc_domain.task_status_to_string task.task_status))
+  in
   let* request = Verification.load_request config.base_path verification_id in
   if not (String.equal request.id verification_id)
   then
@@ -332,7 +375,7 @@ let prepare_review
       else
         let* evidence_refs = evidence_refs_of_output request.output in
         let* completion_contract, required_artifacts =
-          completion_contract_of_request request
+          completion_contract_of_request ~intent request
         in
         (* An artifact reference the store could not read is carried here,
            not refused here.

@@ -164,7 +164,7 @@ val verification_submit_request_fn :
    task:Masc_domain.task ->
    assignee:string ->
    verification_id:string ->
-   evidence_refs:string list ->
+   claim:Masc_domain.verification_claim ->
    (unit, string) result) Atomic.t
 
 (** RFC-0221 §3.1: compensation hook — delete a verification record whose
@@ -183,7 +183,7 @@ val verification_notify_submit_fn :
    task:Masc_domain.task ->
    assignee:string ->
    verification_id:string ->
-   evidence_refs:string list ->
+   claim:Masc_domain.verification_claim ->
    unit) Atomic.t
 
 (** Notify the system LLM completion-authority lane after the task status and

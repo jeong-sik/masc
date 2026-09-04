@@ -41,7 +41,7 @@ Evidence summary for submit_for_verification, or completion notes for done"""
 [[params]]
 name = "reason"
 type = "string"
-description = "Cancellation reason (used with action='cancel')"
+description = "Why this Task should stop existing (used with action='cancel'). Cancelling a Task you hold submits the stop for a verdict and the completion authority judges this sentence and nothing else, so one must be stated — here, or in handoff_context (summary or reason), which exit-class actions already require. Cancelling an unclaimed Task takes no verdict and needs none."
 
 [[params]]
 name = "handoff_context"

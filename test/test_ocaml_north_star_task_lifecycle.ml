@@ -106,7 +106,7 @@ let transition config ~agent_name ~task_id ~action ?(notes = "") ?(reason = "") 
              status, and refuses to move it when that storage is absent. This
              suite has no verification store, so it stands in for one. *)
         ~prepare_verification_request:
-          (fun ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ -> Ok ())
+          (fun ~task:_ ~assignee:_ ~verification_id:_ ~claim:_ -> Ok ())
         ~notes ()
     with
     | Error _ as error -> error

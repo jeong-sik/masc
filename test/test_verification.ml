@@ -1472,9 +1472,9 @@ let test_raw_workspace_submission_notifies_once () =
         Atomic.set Workspace_hooks.verification_notify_submit_fn previous_notification)
       (fun () ->
         Atomic.set Workspace_hooks.verification_notify_submit_fn
-          (fun _config ~task ~assignee ~verification_id ~evidence_refs ->
+          (fun _config ~task ~assignee ~verification_id ~claim ->
              notifications :=
-               (task.id, assignee, verification_id, evidence_refs) :: !notifications);
+               (task.id, assignee, verification_id, claim) :: !notifications);
         let config = W.default_config base_path in
         ignore (W.init config ~agent_name:(Some "raw-workspace-worker"));
         ignore
@@ -1508,7 +1508,7 @@ let test_raw_workspace_submission_notifies_once () =
           1
           (List.length !notifications);
         match !notifications with
-        | [ task_id, assignee, verification_id, _evidence_refs ] ->
+        | [ task_id, assignee, verification_id, _claim ] ->
           Alcotest.(check string) "notification task" "task-001" task_id;
           Alcotest.(check string)
             "notification producer"
@@ -1791,7 +1791,7 @@ let create_protocol_evidence_request ~base_path ~request_id ~evidence_refs =
        ~task
        ~assignee:"omega"
        ~verification_id:request_id
-       ~evidence_refs
+       ~claim:(Masc_domain.Completion_evidence { evidence_refs })
    with
    | Ok () -> ()
    | Error detail -> Alcotest.fail detail);

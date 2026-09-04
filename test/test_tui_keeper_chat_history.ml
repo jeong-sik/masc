@@ -418,15 +418,22 @@ let test_rows_carry_the_operation_id_only_for_direct_turns () =
              ~tool_call_name:"Read" "{}"
          ; row ~role:"assistant" ~delivery_key:key
              ~transcript_slot:(transcript_slot "terminal_assistant") "done"
+         ; row ~role:"system" ~kind:"transport_failure" ~delivery_key:key
+             ~transcript_slot:(transcript_slot "failure") "the wire dropped"
          ; autonomous_turn ~turn_ref:"trace-1#54" [ reason "look"; tool "Read" ]
+         ; row ~role:"user"
+             ~delivery_key:(`Assoc [ "kind", `String "fusion_run"; "request_id", `String "fr-1" ])
+             ~transcript_slot:(transcript_slot "accepted_user") "from a fusion run"
          ])
   in
-  check (list (option string)) "direct rows carry it, autonomous rows do not"
-    [ Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"; None; None ]
+  check (list (option string))
+    "every row of the direct turn carries it; autonomous and other keys do not"
+    [ Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"
+    ; None; None; None ]
     (List.map (fun row -> row.History.operation_id) decoded.History.rows);
   check (list (option string)) "turn identity is unchanged beside it"
-    [ Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"
-    ; Some "trace-1#54"; Some "trace-1#54" ]
+    [ Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"
+    ; Some "trace-1#54"; Some "trace-1#54"; Some "fr-1" ]
     (List.map (fun row -> row.History.turn_id) decoded.History.rows)
 ;;
 

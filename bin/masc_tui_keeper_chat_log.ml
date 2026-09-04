@@ -240,6 +240,7 @@ type events_error =
   | Unknown_operation
   | Journal_pruned
   | Journal_unavailable of string
+  | Events_refused of string
   | Events_undecodable of string
   | Events_transport of string
 
@@ -247,6 +248,7 @@ let events_error_to_string = function
   | Unknown_operation -> "unknown operation"
   | Journal_pruned -> "journal pruned"
   | Journal_unavailable detail -> "journal unavailable: " ^ detail
+  | Events_refused detail -> "events request refused: " ^ detail
   | Events_undecodable detail -> "events body unreadable: " ^ detail
   | Events_transport detail -> "events request failed: " ^ detail
 ;;
@@ -254,9 +256,13 @@ let events_error_to_string = function
 (* The error envelope is [masc.keeper_chat_operation.error.v1]:
    [{schema; error = <code>; message}]. The code is the typed fact; the
    message is what the server said, kept only where the code alone does not
-   tell the pane what to do. *)
-let decode_events_error ~status body =
+   tell the pane what to do. A 401/403 is about this client's credential, not
+   about the journal, and is said the way every other refused request is. *)
+let decode_events_error ~status ~credential_sent body =
   let rejected detail = Events_undecodable (Printf.sprintf "%d %s" status detail) in
+  if status = 401 || status = 403
+  then Events_refused (Masc_tui_credential.refusal ~credential_sent)
+  else
   match Yojson.Safe.from_string body with
   | `Assoc fields ->
     let message =
@@ -273,4 +279,22 @@ let decode_events_error ~status body =
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     rejected body
   | exception Yojson.Json_error _ -> rejected body
+;;
+
+(* A whole journal, page by page, through the caller's fetch. [since_seq] is
+   where to start ([-1] for the whole journal, a held log's [last_seq] to read
+   only what it lacks). The loop follows [has_more] only while
+   [next_since_seq] advances: a page that claimed more without advancing
+   would be read forever, and what came back so far is what there is. *)
+let read_whole_journal ~fetch ~since_seq =
+  let rec page since_seq acc =
+    match fetch ~since_seq with
+    | Error error -> Error error
+    | Ok { events; has_more; next_since_seq; _ } ->
+      let acc = List.rev_append events acc in
+      if has_more && next_since_seq > since_seq
+      then page next_since_seq acc
+      else Ok (List.rev acc)
+  in
+  page since_seq []
 ;;

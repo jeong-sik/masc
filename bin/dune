@@ -335,7 +335,12 @@
  (name masc_tui_keeper_chat_log)
  (wrapped false)
  (modules masc_tui_keeper_chat_log)
- (libraries masc masc.masc_types masc_tui_keeper_chat_live yojson))
+ (libraries
+  masc
+  masc.masc_types
+  masc_tui_credential
+  masc_tui_keeper_chat_live
+  yojson))
 
 (library
  (name masc_tui_observer)

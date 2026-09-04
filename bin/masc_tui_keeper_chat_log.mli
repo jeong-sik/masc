@@ -89,6 +89,9 @@ type events_error =
           rows are all there is. *)
   | Journal_unavailable of string
       (** The journal exists and could not be read now; the server's message. *)
+  | Events_refused of string
+      (** 401/403: this client's credential, not the journal. One sentence
+          for the operator; the pane stops asking for journals this session. *)
   | Events_undecodable of string
       (** A body this build cannot read, or an error with no known code; the
           status and what came back. *)
@@ -96,6 +99,16 @@ type events_error =
 
 val events_error_to_string : events_error -> string
 
-val decode_events_error : status:int -> string -> events_error
-(** The typed error behind a non-2xx events response, read from the error
-    envelope's [error] code; anything else is {!Events_undecodable}. *)
+val decode_events_error : status:int -> credential_sent:bool -> string -> events_error
+(** The typed error behind a non-2xx events response: 401/403 are
+    {!Events_refused} ([credential_sent] is whether the request carried a
+    bearer), the envelope's [error] code names the journal errors, anything
+    else is {!Events_undecodable}. *)
+
+val read_whole_journal :
+  fetch:(since_seq:int -> (events_page, events_error) result) ->
+  since_seq:int ->
+  (Masc.Keeper_chat_event_log.journaled_event list, events_error) result
+(** Every line after [since_seq], page by page through [fetch], following
+    [has_more] only while [next_since_seq] advances. The first error ends the
+    read. *)

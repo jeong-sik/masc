@@ -2229,9 +2229,29 @@ let turn_log_create ~keeper_name ~request_id ~started_at =
   }
 ;;
 
-let turn_log_add ~now turn_log ~seq delta =
-  if Masc_tui_keeper_chat_log.add turn_log.tl_log ~seq delta
-  then Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
+(* The acceptance is the server taking the POST, not a fact about the turn:
+   it never went through the bus, carries no seq, and comes again with every
+   re-POST after a cut. The transcript reads it (it answers "why has this not
+   started"); the log does not keep it, so a resend adds no entry and a log
+   that heard nothing but the acceptance has nothing to draw. *)
+let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
+  match delta with
+  | Masc_tui_keeper_chat_live.Accepted _ ->
+      Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
+  | Masc_tui_keeper_chat_live.Run_started | Masc_tui_keeper_chat_live.Text _
+  | Masc_tui_keeper_chat_live.Thinking _ | Masc_tui_keeper_chat_live.Tool_started _
+  | Masc_tui_keeper_chat_live.Tool_args _ | Masc_tui_keeper_chat_live.Tool_ended _
+  | Masc_tui_keeper_chat_live.Tool_result _
+  | Masc_tui_keeper_chat_live.Stream_protocol_error _
+  | Masc_tui_keeper_chat_live.Approval_requested _
+  | Masc_tui_keeper_chat_live.Approval_settled _ | Masc_tui_keeper_chat_live.Checkpoint
+  | Masc_tui_keeper_chat_live.External_effect_completed
+  | Masc_tui_keeper_chat_live.Reply_details _ | Masc_tui_keeper_chat_live.Run_failed _
+  | Masc_tui_keeper_chat_live.Run_finished
+  | Masc_tui_keeper_chat_live.Runtime_attempt_started
+  | Masc_tui_keeper_chat_live.Undecodable _ ->
+      if Masc_tui_keeper_chat_log.add turn_log.tl_log ~seq delta
+      then Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
 ;;
 
 (* A v2 journal page, line by line: a line that draws is added to the log and
@@ -2253,10 +2273,11 @@ let turn_log_keeper_name turn_log = Masc_tui_keeper_chat_log.keeper_name turn_lo
 let turn_log_request_id turn_log = Masc_tui_keeper_chat_log.request_id turn_log.tl_log
 let turn_log_started_at turn_log = Masc_tui_keeper_chat_log.started_at turn_log.tl_log
 
-(* How many loaded turns one history refresh asks the journal for. A refresh
-   arrives every tick; the turns behind the newest twenty are the ones the
-   operator scrolls back to, and each of those is fetched when its page loads
-   rather than all of them on every tick. *)
+(* How many loaded turns one history load asks the journal for. A load runs
+   when the chat opens, on a refresh key, when the keeper appends a turn and
+   when one settles; the turns behind the newest twenty are the ones the
+   operator scrolls back to, and each of those is asked for when its page
+   loads rather than all of them on every load. *)
 let reload_journal_fetch_cap = 20
 
 (* Which loaded turns a refresh fetches journals for: every operation the
@@ -3371,6 +3392,12 @@ type state = {
      session. A request that never got an answer is not here: the next
      refresh asks again. *)
   mutable msg_journal_unavailable: string list;
+  (* Operations whose journal a fiber is reading right now, so a load that
+     arrives before the read returns does not start a second one. *)
+  mutable msg_journal_inflight: string list;
+  (* The server refused this client's credential for the journal endpoint.
+     Said once; no journal is asked for again this session. *)
+  mutable msg_journal_reads_refused: bool;
   (* The settled logs held when [msg_scroll_pin] was taken. Their rows were on
      the screen the operator anchored, so they are not rows that arrived
      since; a log held later is. *)
@@ -3517,6 +3544,46 @@ let hold_settled_log state turn_log =
 let remember_journal_unavailable state operation_id =
   if not (List.exists (String.equal operation_id) state.msg_journal_unavailable)
   then state.msg_journal_unavailable <- operation_id :: state.msg_journal_unavailable
+;;
+
+let journal_read_started state operation_id =
+  if not (List.exists (String.equal operation_id) state.msg_journal_inflight)
+  then state.msg_journal_inflight <- operation_id :: state.msg_journal_inflight
+;;
+
+let journal_read_finished state operation_id =
+  state.msg_journal_inflight <-
+    List.filter
+      (fun inflight -> not (String.equal inflight operation_id))
+      state.msg_journal_inflight
+;;
+
+(* Where a journal read starts for this operation: after what a held log of
+   it already has (a cut live stream's partial log, or an earlier read of a
+   turn still running), or the whole journal. *)
+let journal_resume_position state ~keeper_name operation_id =
+  match settled_log_for_request state ~keeper_name operation_id with
+  | Some held when not (turn_log_holds_the_turn held) ->
+      Masc_tui_keeper_chat_log.last_seq held.tl_log
+  | Some _ | None -> -1
+;;
+
+(* Whether the loaded transcript says this turn is over: the keeper's reply,
+   or a failure, is on record. A journal that still cannot stand for such a
+   turn has nothing more coming -- the settle-time failure is never journaled
+   (#33108) -- so it is not worth asking for again. *)
+let loaded_turn_has_ended state ~keeper_name request_id =
+  Option.exists (String.equal keeper_name) state.msg_loaded_keeper
+  && List.exists
+       (fun (row : msg_entry) ->
+         String.equal row.me_request_id request_id
+         &&
+         match row.me_role with
+         | Message_keeper | Message_autonomous | Message_error -> true
+         | Message_user _ | Message_status | Message_local | Message_tool
+         | Message_skill _ | Message_thinking | Message_memory ->
+             false)
+       state.msg_loaded
 ;;
 
 (* Whether a reasoning row is drawn at all under this visibility. The
@@ -4175,6 +4242,8 @@ let create_state
   msg_inflight = [];
   msg_settled_logs = [];
   msg_journal_unavailable = [];
+  msg_journal_inflight = [];
+  msg_journal_reads_refused = false;
   msg_scroll_pin_settled = [];
   detail_scroll = 0;
   workspace;

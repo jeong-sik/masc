@@ -2101,6 +2101,11 @@ let post_keeper_chat_watching ~mailbox ~port ~log request =
            , "sending without a live view: no Eio clock to bound the stream" ));
       Masc_tui_http.post_keeper_chat ~host ~port request
   | Some clock ->
+      (* The highest seq this watcher has handed to the mailbox. The log is
+         folded by the main loop, so at the moment of a re-POST it may still
+         be behind what arrived; the resume position is the larger of the
+         two, so the server is never asked for frames already in hand. *)
+      let delivered = ref (-1) in
       let rec watch ~since_seq was_unverified =
         let decoder = Keeper_chat_live.create () in
         (* Each idempotent re-subscribe has its own SSE grammar state. The
@@ -2113,6 +2118,12 @@ let post_keeper_chat_watching ~mailbox ~port ~log request =
           match Keeper_chat_live.feed decoder chunk with
           | [] -> ()
           | deltas ->
+              List.iter
+                (fun (seq, _) ->
+                  match seq with
+                  | Some seq when seq > !delivered -> delivered := seq
+                  | Some _ | None -> ())
+                deltas;
               enqueue_async mailbox
                 (Keeper_chat_stream_deltas (request, deltas))
         in
@@ -2135,11 +2146,11 @@ let post_keeper_chat_watching ~mailbox ~port ~log request =
             (* Re-POSTing the same operation id is the server's idempotent
                subscribe/reconcile path. The in-flight owner stays held until
                one watcher observes terminal truth, so NEXT cannot overlap a
-               turn whose first stream merely disappeared. The position is
-               read when the re-POST goes out, after the mailbox has folded
-               every frame the cut stream delivered. *)
+               turn whose first stream merely disappeared. *)
             Eio.Time.sleep clock 0.5;
-            watch ~since_seq:(Some (Keeper_chat_log.last_seq log)) true
+            watch
+              ~since_seq:(Some (max !delivered (Keeper_chat_log.last_seq log)))
+              true
         | (Ok _ | Error _) as terminal -> terminal
       in
       watch ~since_seq:None false
@@ -4815,34 +4826,24 @@ let launch_keeper_history_load ?(load_file_changes = true) state ~mailbox
    server); a turn longer than one page is read page by page. *)
 let journal_reload_page_limit = 2000
 
-let fetch_whole_journal ~host ~port ~keeper_name ~operation_id =
-  let rec page since_seq acc =
-    match
-      Masc_tui_http.fetch_keeper_chat_events ~host ~port ~keeper_name
-        ~operation_id ~since_seq ~limit:journal_reload_page_limit
-    with
-    | Error error -> Error error
-    | Ok { Keeper_chat_log.events; has_more; next_since_seq; _ } ->
-        let acc = List.rev_append events acc in
-        (* A page that claims more but does not advance would be read
-           forever; the record so far is what there is. *)
-        if has_more && next_since_seq > since_seq
-        then page next_since_seq acc
-        else Ok (List.rev acc)
-  in
-  page (-1) []
-
-(* One fiber per turn, each reading the whole journal and handing it to the
-   mailbox; the handler builds the log. Failures are typed by the fetch and
-   decided there, not here. *)
+(* One fiber per turn, each reading the journal from where the session's
+   record of it ends and handing the lines to the mailbox; the handler folds
+   them. The operation is marked in flight until its result is handled, so a
+   load that arrives meanwhile does not start a second read. Failures are
+   typed by the fetch and decided in the handler, not here. *)
 let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
   let host = server_peer_host in
   let port = state.port in
   List.iter
-    (fun (operation_id, started_at) ->
+    (fun (operation_id, started_at, since_seq) ->
       let run () =
         let journal =
-          try fetch_whole_journal ~host ~port ~keeper_name ~operation_id with
+          try
+            Keeper_chat_log.read_whole_journal ~since_seq
+              ~fetch:(fun ~since_seq ->
+                Masc_tui_http.fetch_keeper_chat_events ~host ~port ~keeper_name
+                  ~operation_id ~since_seq ~limit:journal_reload_page_limit)
+          with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Keeper_chat_log.Events_transport (Printexc.to_string exn))
         in
@@ -4851,12 +4852,13 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
       in
       match Eio_context.get_switch_opt () with
       | Some sw ->
+          journal_read_started state operation_id;
           Eio.Fiber.fork_daemon ~sw (fun () ->
               run ();
               `Stop_daemon)
       | None ->
           (* No switch, no fetch: the v1 rows stay, and nothing is
-             remembered, so a later refresh with a switch asks. *)
+             remembered, so a later load with a switch asks. *)
           ())
     targets
 
@@ -6566,10 +6568,19 @@ let apply_keeper_chat_result state request result =
              (Printf.sprintf "Keeper turn finished: %s" request.request_id)
        | Ok (Keeper_chat.Replayed_succeeded _) ->
            (* The server answered [Existing] for this id: the turn already ran
-              and this POST produced no second one. *)
-           append_chat_history ~turn_phase:Turn_output state request
-             Message_status
-             "Request was already completed; canonical reply is not present in this replay stream";
+              and this POST produced no second one. When the log holds the
+              turn -- a cut after the reply, a re-POST that replayed nothing
+              new -- the reply is on screen and this row would say it is not. *)
+           if
+             not
+               (Option.exists turn_log_holds_the_turn
+                  (settled_log_for_request state
+                     ~keeper_name:request.Keeper_chat.keeper_name
+                     request.request_id))
+           then
+             append_chat_history ~turn_phase:Turn_output state request
+               Message_status
+               "Request was already completed; canonical reply is not present in this replay stream";
            add_event state "message"
              (Printf.sprintf "Keeper request already completed: %s"
                 request.request_id)
@@ -10329,21 +10340,28 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 logs are rebuilt from their journals, reasoning included
                 (RFC-0412 §3.3): the v1 rows carry trace reasoning
                 content-withheld by design. *)
-             journal_targets :=
-               journal_fetch_targets ~cap:reload_journal_fetch_cap
-                 ~held:
-                   (List.map turn_log_request_id
-                      (List.filter turn_log_holds_the_turn state.msg_settled_logs)
-                   @ List.map
-                       (fun entry -> entry.sent_request.Keeper_chat.request_id)
-                       state.msg_inflight)
-                 ~unavailable:state.msg_journal_unavailable
-                 (List.filter_map
-                    (fun (row : Keeper_chat_history.row) ->
-                      Option.map
-                        (fun operation_id -> (operation_id, row.at))
-                        row.operation_id)
-                    rows);
+             if not state.msg_journal_reads_refused then
+               journal_targets :=
+                 journal_fetch_targets ~cap:reload_journal_fetch_cap
+                   ~held:
+                     (List.map turn_log_request_id
+                        (List.filter turn_log_holds_the_turn
+                           (settled_logs_for_keeper state keeper_name))
+                     @ List.map
+                         (fun entry -> entry.sent_request.Keeper_chat.request_id)
+                         state.msg_inflight
+                     @ state.msg_journal_inflight)
+                   ~unavailable:state.msg_journal_unavailable
+                   (List.filter_map
+                      (fun (row : Keeper_chat_history.row) ->
+                        Option.map
+                          (fun operation_id -> (operation_id, row.at))
+                          row.operation_id)
+                      rows)
+                 |> List.map (fun (operation_id, at) ->
+                        ( operation_id
+                        , at
+                        , journal_resume_position state ~keeper_name operation_id ));
              let fresh = msg_entries_of_history_rows state keeper_name rows in
              (* The durable outcome and duration of a held turn's calls reach
                 its block through its log's transcript, not through the rows
@@ -10385,29 +10403,42 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Keeper_chat_journal_loaded { keeper_name; operation_id; started_at; journal } -> (
       (* Not generation-guarded: a journal is the turn's record whichever
          keeper the pane shows now, and the log is kept per keeper. *)
+      journal_read_finished state operation_id;
       match journal with
       | Ok lines ->
-          let log = turn_log_create ~keeper_name ~request_id:operation_id ~started_at in
+          (* The lines join the session's record of the turn when it has one
+             -- a cut live stream's partial log, an earlier read of a turn
+             then still running -- else a fresh log. The same fold, the same
+             seq dedup. *)
+          let log =
+            match settled_log_for_request state ~keeper_name operation_id with
+            | Some held when not (turn_log_holds_the_turn held) -> held
+            | Some _ | None ->
+                turn_log_create ~keeper_name ~request_id:operation_id ~started_at
+          in
           turn_log_add_journaled log lines;
           Keeper_chat_log.commit log.tl_log;
-          (* A journal of a turn still running holds part of it. It is not
-             kept and not remembered, so the next refresh asks again. A
-             journal read whole that still cannot stand for the turn -- a
-             cancelled turn, finished without a recorded reply -- has nothing
-             more to say and is not asked for again either. *)
-          if turn_log_holds_the_turn log then begin
-            hold_settled_log state log;
-            (match state.msg_loaded_keeper with
-             | Some loaded_keeper when String.equal loaded_keeper keeper_name ->
-                 enrich_held_logs_from_rows state ~keeper_name state.msg_loaded
-             | Some _ | None -> ())
-          end
-          else (
-            match Keeper_chat_transcript.phase log.tl_transcript with
-            | Keeper_chat_transcript.Stream_ended
-            | Keeper_chat_transcript.Stream_failed _ ->
-                remember_journal_unavailable state operation_id
-            | Keeper_chat_transcript.Waiting | Keeper_chat_transcript.Working -> ())
+          if Keeper_chat_log.entries log.tl_log <> [] then hold_settled_log state log;
+          if turn_log_holds_the_turn log then (
+            match state.msg_loaded_keeper with
+            | Some loaded_keeper when String.equal loaded_keeper keeper_name ->
+                enrich_held_logs_from_rows state ~keeper_name state.msg_loaded
+            | Some _ | None -> ())
+          else if
+            (* A journal read whole that still cannot stand for the turn has
+               nothing more to say when the loaded transcript says the turn is
+               over: a cancelled turn (finished without a recorded reply), or
+               a failure the server never journaled (#33108). A turn still
+               running is asked again on the next load, from where this read
+               stopped. *)
+            (match Keeper_chat_transcript.phase log.tl_transcript with
+             | Keeper_chat_transcript.Stream_ended
+             | Keeper_chat_transcript.Stream_failed _ ->
+                 true
+             | Keeper_chat_transcript.Waiting | Keeper_chat_transcript.Working ->
+                 false)
+            || loaded_turn_has_ended state ~keeper_name operation_id
+          then remember_journal_unavailable state operation_id
       | Error (Keeper_chat_log.Unknown_operation | Keeper_chat_log.Journal_pruned) ->
           (* Nothing to reload, now or later this session: the v1 rows are
              the turn. *)
@@ -10418,10 +10449,25 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             (Printf.sprintf "journal for %s unavailable: %s"
                (Keeper_chat.compact_request_id operation_id)
                (Keeper_chat.terminal_safe_text detail))
-      | Error
-          ( Keeper_chat_log.Events_undecodable detail
-          | Keeper_chat_log.Events_transport detail ) ->
-          (* Not remembered: the next refresh asks again. *)
+      | Error (Keeper_chat_log.Events_undecodable detail) ->
+          (* A body this build cannot read will not read differently next
+             time; the v1 rows stay and this operation is not asked again. *)
+          remember_journal_unavailable state operation_id;
+          add_event state "error"
+            (Printf.sprintf "journal for %s not readable: %s"
+               (Keeper_chat.compact_request_id operation_id)
+               (Keeper_chat.terminal_safe_text detail))
+      | Error (Keeper_chat_log.Events_refused detail) ->
+          (* This client's credential, not this journal: said once, and no
+             journal is asked for again this session. *)
+          if not state.msg_journal_reads_refused then begin
+            state.msg_journal_reads_refused <- true;
+            add_event state "error"
+              (Printf.sprintf "journals are not readable with this credential: %s"
+                 (Keeper_chat.terminal_safe_text detail))
+          end
+      | Error (Keeper_chat_log.Events_transport detail) ->
+          (* Not remembered: the next load asks again. *)
           add_event state "error"
             (Printf.sprintf "journal for %s not loaded: %s"
                (Keeper_chat.compact_request_id operation_id)

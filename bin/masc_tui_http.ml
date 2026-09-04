@@ -857,17 +857,22 @@ let fetch_keeper_chat_events ~(host : string) ~(port : int)
   match http_get ~host ~port ~path with
   | Error detail -> Error (Masc_tui_keeper_chat_log.Events_transport detail)
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
-      Error (Masc_tui_keeper_chat_log.decode_events_error ~status body)
+      Error
+        (Masc_tui_keeper_chat_log.decode_events_error ~status
+           ~credential_sent:(operator_token_present ()) body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | json -> (
           match Masc_tui_keeper_chat_log.decode_events_page json with
           | Error detail -> Error (Masc_tui_keeper_chat_log.Events_undecodable detail)
-          | Ok page when not (String.equal page.operation_id operation_id) ->
+          | Ok page
+            when not
+                   (String.equal page.Masc_tui_keeper_chat_log.operation_id
+                      operation_id) ->
               Error
                 (Masc_tui_keeper_chat_log.Events_undecodable
                    (Printf.sprintf "page is for operation %s, asked for %s"
-                      page.operation_id operation_id))
+                      page.Masc_tui_keeper_chat_log.operation_id operation_id))
           | Ok page -> Ok page)
       | exception Yojson.Json_error detail ->
           Error

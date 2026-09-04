@@ -979,8 +979,33 @@ let test_journal_fetch_targets_choose_the_newest_unheld_turns () =
     (Tui_types.journal_fetch_targets ~cap:2 ~held:[ "op-held" ]
        ~unavailable:[ "op-gone" ] candidates);
   check (list (pair string (float 0.001))) "nothing named, nothing asked" []
-    (Tui_types.journal_fetch_targets ~cap:10 ~held:[] ~unavailable:[] [])
+    (Tui_types.journal_fetch_targets ~cap:10 ~held:[] ~unavailable:[] []);
+  (* Same instant: the order is the id's, and the cap cuts on that order. *)
+  check (list (pair string (float 0.001))) "a tie is broken by id, and the cap honours it"
+    [ ("op-a", 5.); ("op-b", 5.) ]
+    (Tui_types.journal_fetch_targets ~cap:2 ~held:[] ~unavailable:[]
+       [ ("op-c", 5.); ("op-a", 5.); ("op-b", 5.) ])
 ;;
+
+(* The acceptance is the server taking the POST, not a fact about the turn:
+   the transcript reads it, the log does not keep it, so a re-POST after a
+   cut adds no entry and a log that heard only acceptances has nothing to
+   draw. *)
+let test_the_acceptance_is_read_but_not_logged () =
+  let log =
+    Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"req-1" ~started_at:1.
+  in
+  let accepted = Live.Accepted { admission = Live.Running; queue_length = 2 } in
+  Tui_types.turn_log_add ~now:1. log ~seq:None accepted;
+  Tui_types.turn_log_add ~now:2. log ~seq:None accepted;
+  check int "no entries" 0 (List.length (Log.entries log.Tui_types.tl_log));
+  check bool "the transcript is still waiting for the run" true
+    (Keeper_chat_transcript.phase log.Tui_types.tl_transcript
+     = Keeper_chat_transcript.Waiting);
+  Tui_types.turn_log_add ~now:3. log ~seq:(Some 0) Live.Run_started;
+  check int "a wire frame is an entry" 1 (List.length (Log.entries log.Tui_types.tl_log))
+;;
+
 
 (* A journal page fills a turn log the way the wire does, at the lines' own
    times; a line that draws nothing still holds its position. *)
@@ -1018,6 +1043,31 @@ let journal_log ~request_id ~started_at ?(finished = true) () =
     else []);
   Log.commit log.Tui_types.tl_log;
   log
+;;
+
+(* A journal read starts where the session's record of the turn ends: after a
+   cut live stream's partial log, or from the beginning. *)
+let test_a_journal_read_resumes_after_a_partial_log () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  check int "nothing held: the whole journal" (-1)
+    (Tui_types.journal_resume_position state ~keeper_name:"alpha" "op-1");
+  let partial = journal_log ~request_id:"op-1" ~started_at:1. ~finished:false () in
+  Tui_types.hold_settled_log state partial;
+  check int "a partial log: after what it has" 1
+    (Tui_types.journal_resume_position state ~keeper_name:"alpha" "op-1");
+  check int "another keeper's record does not count" (-1)
+    (Tui_types.journal_resume_position state ~keeper_name:"beta" "op-1");
+  Tui_types.hold_settled_log state (journal_log ~request_id:"op-1" ~started_at:1. ());
+  check int "a whole log is not read again" (-1)
+    (Tui_types.journal_resume_position state ~keeper_name:"alpha" "op-1");
+  Tui_types.journal_read_started state "op-9";
+  Tui_types.journal_read_started state "op-9";
+  check (list string) "a read in flight is remembered once" [ "op-9" ]
+    state.msg_journal_inflight;
+  Tui_types.journal_read_finished state "op-9";
+  check (list string) "and forgotten when it returns" [] state.msg_journal_inflight
 ;;
 
 (* A rebuilt turn takes its place by when it started; a turn the session
@@ -1157,8 +1207,8 @@ let test_the_reload_rebuilds_loaded_turns_from_their_journals () =
       ~callee:"launch_keeper_chat_journal_loads"
   in
   let fetches =
-    in_binding ~binding_name:"fetch_whole_journal"
-      ~callee:"Masc_tui_http.fetch_keeper_chat_events"
+    in_binding ~binding_name:"launch_keeper_chat_journal_loads"
+      ~callee:"Keeper_chat_log.read_whole_journal"
   in
   let folds = in_binding ~binding_name:"apply_async_message" ~callee:"turn_log_add_journaled" in
   let holds = in_binding ~binding_name:"apply_async_message" ~callee:"hold_settled_log" in
@@ -2146,6 +2196,10 @@ let () =
             test_settled_logs_are_read_per_keeper
         ; test_case "journal fetch targets choose the newest unheld turns" `Quick
             test_journal_fetch_targets_choose_the_newest_unheld_turns
+        ; test_case "the acceptance is read but not logged" `Quick
+            test_the_acceptance_is_read_but_not_logged
+        ; test_case "a journal read resumes after a partial log" `Quick
+            test_a_journal_read_resumes_after_a_partial_log
         ; test_case "a journal fills a turn log at the lines' own times" `Quick
             test_a_journal_fills_a_turn_log_at_the_lines_own_times
         ; test_case "hold_settled_log orders by start and replaces only partial logs"

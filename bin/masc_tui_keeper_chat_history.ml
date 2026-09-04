@@ -948,7 +948,8 @@ let reconcile_skill_projection_with_trace summary projection =
       ; replaces_raw_skill_tools = false
       }
 
-let rows_of_skill_projection ~source_id ~turn_sequence ~turn_id at projection =
+let rows_of_skill_projection ~source_id ~turn_sequence ~turn_id ~operation_id at
+    projection =
   List.mapi
     (fun index activity ->
       Utterance
@@ -959,7 +960,7 @@ let rows_of_skill_projection ~source_id ~turn_sequence ~turn_id at projection =
               source_id
         ; turn_sequence
         ; turn_id
-        ; operation_id = None
+        ; operation_id
         ; kind = Skill_activity activity
         ; text = ""
         ; attachments = []
@@ -976,7 +977,7 @@ let plural count noun =
    rides the reasoning block and an omitted count the tool block -- omitted
    steps are steps the turn took, so a block that has nothing but that count
    is still a block of steps. *)
-let rows_of_trace ~source_id ~turn_sequence ~turn_id at summary =
+let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id at summary =
   let identity projection =
     Option.map (fun id -> id ^ ":" ^ projection) source_id
   in
@@ -1014,7 +1015,7 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id at summary =
           ; structural_id = identity "trace-tools"
           ; turn_sequence
           ; turn_id
-          ; operation_id = None
+          ; operation_id
           ; kind = Tool_calls tool_block
           ; text = ""
           ; attachments = []
@@ -1026,7 +1027,7 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id at summary =
           ; structural_id = identity "trace-reasoning"
           ; turn_sequence
           ; turn_id
-          ; operation_id = None
+          ; operation_id
           ; kind = Reasoning (reasoning @ omitted_note)
           ; text = ""
           ; attachments = []
@@ -1038,7 +1039,7 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id at summary =
           ; structural_id = identity "trace-tools"
           ; turn_sequence
           ; turn_id
-          ; operation_id = None
+          ; operation_id
           ; kind = Tool_calls tool_block
           ; text = ""
           ; attachments = []
@@ -1050,7 +1051,7 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id at summary =
           ; structural_id = identity "trace-reasoning"
           ; turn_sequence
           ; turn_id
-          ; operation_id = None
+          ; operation_id
           ; kind = Reasoning reasoning
           ; text = ""
           ; attachments = []
@@ -1060,7 +1061,7 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id at summary =
           ; structural_id = identity "trace-tools"
           ; turn_sequence
           ; turn_id
-          ; operation_id = None
+          ; operation_id
           ; kind = Tool_calls tool_block
           ; text = ""
           ; attachments = []
@@ -1183,12 +1184,12 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                     else summary
                   in
                   ( rows_of_skill_projection ~source_id ~turn_sequence ~turn_id
-                      at skill_projection
-                  , rows_of_trace ~source_id ~turn_sequence ~turn_id at summary
-                  )
+                      ~operation_id at skill_projection
+                  , rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id at
+                      summary )
                 else
                   ( rows_of_skill_projection ~source_id ~turn_sequence ~turn_id
-                      at skill_projection
+                      ~operation_id at skill_projection
                   , [] )
               in
               let said =

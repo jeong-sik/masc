@@ -448,22 +448,30 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                    msg
                | Ok () ->
                  log_lifecycle_result Succeeded;
-                 (* Same [detail] the boot and clear branches carry. The "up"
-                    action lands here, and it was the one action whose
-                    envelope says something no other field does: a create
-                    reports the sandbox profile and network mode the keeper
-                    actually landed on. Dropping it left the caller to guess
-                    the isolation of the keeper it had just made. Read from
-                    [Tool_result.data] rather than re-parsing the rendered
-                    message, which is the same value one round-trip later. *)
+                 (* Three actions reach this branch -- "up", "shutdown" and
+                    "reset" -- and only "up" has anything to report: a create
+                    names the sandbox profile and network mode the keeper
+                    actually landed on, and dropping that left the caller to
+                    guess the isolation of the keeper it had just made. The
+                    other two carry no such report, so they answer with the
+                    fields they always answered with; a [detail] key holding
+                    [`Null] would be a new field on the wire with nothing
+                    behind it. Read from [Tool_result.data] rather than
+                    re-parsing the rendered message, which is the same value
+                    one round-trip later. *)
+                 let create_detail =
+                   if String.equal action "up"
+                   then [ ("detail", Tool_result.data result) ]
+                   else []
+                 in
                  Http.Response.json_value ~compress:true ~request:req
                    (`Assoc
-                      [
-                        ("ok", `Bool true);
-                        ("action", `String action);
-                        ("name", `String name);
-                        ("detail", Tool_result.data result);
-                      ])
+                      ([
+                         ("ok", `Bool true);
+                         ("action", `String action);
+                         ("name", `String name);
+                       ]
+                      @ create_detail))
                    reqd)
             | Some result ->
               let body = Tool_result.message result in

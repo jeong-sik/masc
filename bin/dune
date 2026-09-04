@@ -47,6 +47,7 @@
   fmt
   yojson
   str
+  uri
   cohttp
   cohttp-eio
   masc.prompt_registry

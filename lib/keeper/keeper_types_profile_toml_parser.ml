@@ -188,32 +188,28 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
             | None ->
                 Error
                   (Printf.sprintf
-                     "invalid network_mode '%s' (allowed: none, inherit)"
-                     raw))
+                     "invalid network_mode '%s' (allowed: %s)"
+                     raw
+                     (String.concat ", " valid_network_mode_strings)))
         | None -> Ok ())
   in
-  (* Phase 1 SSH lane (Docker-parity hardening table in
-     docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md
-     section 4.2): [remote_ssh] is transport-only, so [network_mode =
-     "none"] cannot be honored yet. Reject at config load — the same
-     layer that validates the [network_mode] string itself — rather than
-     silently ignoring a knob the operator explicitly set. Per-VM egress
-     policy arrives with the Phase 2 microVM backend. *)
+  (* The profile/mode compatibility rule, read from the type that owns both
+     ({!Keeper_types_profile_sandbox.network_mode_rejection}) rather than
+     restated here. It was restated here, and this was the only layer that
+     ran it: the keeper_up write path never compared the two, so a create
+     could produce a keeper TOML that this very function refused on the next
+     load. *)
   let result =
     Result.bind result (fun () ->
         match
           ( Option.bind (str "sandbox_profile") sandbox_profile_of_string
           , Option.bind (str "network_mode") network_mode_of_string )
         with
-        | Some Remote_ssh, Some Network_none ->
-            Error
-              "remote_ssh_no_network_mode: sandbox_profile \"remote_ssh\" does \
-               not support network_mode = \"none\" (only \"inherit\" is \
-               accepted in Phase 1; per-VM egress policy arrives with the \
-               microVM backend)"
-        (* Every other profile/mode combination keeps its existing
-           semantics; only remote_ssh gains the Phase 1 restriction. *)
-        | Some _, Some _ | Some _, None | None, _ -> Ok ())
+        | Some profile, Some mode -> (
+            match network_mode_rejection profile mode with
+            | Some message -> Error message
+            | None -> Ok ())
+        | Some _, None | None, _ -> Ok ())
   in
   (* Phase 1 SSH lane (Task 1 review follow-up): [remote_endpoint] is only
      meaningful for the remote_ssh profile — it names an

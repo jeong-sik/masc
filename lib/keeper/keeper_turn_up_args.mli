@@ -118,6 +118,12 @@ val resolve_requested_network_mode :
     accepted spelling, and [None] takes the keeper TOML's [fallback] first,
     then the profile's own default.
 
+    A mode the profile cannot hold is an [Error] as well, from
+    {!Keeper_types_profile_sandbox.network_mode_rejection}. Without it,
+    [remote_ssh] with [none] was written to a keeper TOML and reported as
+    created, and the config loader — which held the same rule — refused that
+    file on its next read.
+
     Create and update both call this. They did not: create resolved from
     [fallback] alone and never read the caller's argument, so a caller who
     asked for [inherit] on a new keeper got [none] written to its TOML with

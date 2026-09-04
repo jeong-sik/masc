@@ -1360,6 +1360,49 @@ let test_a_network_mode_rejection_names_every_accepted_spelling () =
       Keeper_types_profile_sandbox.valid_network_mode_strings
 ;;
 
+(* The pair that a create wrote and the next config load refused. [remote_ssh]
+   is transport-only, so it cannot cut the guest off from the network; the
+   keeper TOML parser has always said so, and the resolver did not, which let
+   a create write a file that the loader would not read back. The resolver
+   answers now, before the meta is built. *)
+let test_remote_ssh_refuses_a_network_mode_it_cannot_hold () =
+  let module A = Keeper_turn_up_args in
+  (match
+     A.resolve_requested_network_mode
+       ~requested:(Some "none")
+       ~sandbox_profile:Keeper_types_profile_sandbox.Remote_ssh
+       ~fallback:None
+   with
+   | Ok _ ->
+     failf "remote_ssh with network_mode none must not resolve: the loader refuses it"
+   | Error message ->
+     check
+       bool
+       "the refusal carries the config loader's own code"
+       true
+       (contains "remote_ssh_no_network_mode" message));
+  (* The pair remote_ssh does hold, and the docker pairs, still resolve: the
+     check refuses one combination, not the field. *)
+  check
+    bool
+    "remote_ssh with inherit resolves"
+    true
+    (A.resolve_requested_network_mode
+       ~requested:(Some "inherit")
+       ~sandbox_profile:Keeper_types_profile_sandbox.Remote_ssh
+       ~fallback:None
+     = Ok Keeper_types_profile_sandbox.Network_inherit);
+  check
+    bool
+    "docker with none resolves"
+    true
+    (A.resolve_requested_network_mode
+       ~requested:(Some "none")
+       ~sandbox_profile:Keeper_types_profile_sandbox.Docker
+       ~fallback:None
+     = Ok Keeper_types_profile_sandbox.Network_none)
+;;
+
 (* The stem carries an empty string for this one field on purpose: "none"
    blocks the guest's network and "inherit" opens it, and a form that suggests
    either decides for an operator who is not reading it. A value that parses
@@ -1684,6 +1727,10 @@ let () =
             "a rejection names every accepted spelling"
             `Quick
             test_a_network_mode_rejection_names_every_accepted_spelling
+        ; test_case
+            "remote_ssh refuses a mode it cannot hold"
+            `Quick
+            test_remote_ssh_refuses_a_network_mode_it_cannot_hold
         ; test_case
             "the creation stem's network_mode is not a mode"
             `Quick

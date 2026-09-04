@@ -4831,7 +4831,7 @@ let fetch_whole_journal ~host ~port ~keeper_name ~operation_id =
       Masc_tui_http.fetch_keeper_chat_events ~host ~port ~keeper_name
         ~operation_id ~since_seq ~limit:journal_reload_page_limit
     with
-    | Error _ as error -> error
+    | Error error -> Error error
     | Ok { Keeper_chat_log.events; has_more; next_since_seq; _ } ->
         let acc = List.rev_append events acc in
         (* A page that claims more but does not advance would be read

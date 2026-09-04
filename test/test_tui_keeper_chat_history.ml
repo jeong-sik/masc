@@ -749,9 +749,12 @@ let test_an_autonomous_turn_draws_what_it_did () =
              (starts_with "\xe2\x9c\x93 masc_task_history \xc2\xb7 32ms" (row 0));
            check bool "a call that returned an error carries its own glyph" true
              (starts_with "\xe2\x9c\x97 tool_execute" (row 1));
-           check bool "a call the trace never saw finish carries the open glyph"
+           (* masc #32571 split "started or never returned" into two glyphs:
+              a running call is a hollow circle, one that never returned is
+              this. The distinction is the point of that change. *)
+           check bool "a call the trace never saw finish carries its own glyph"
              true
-             (starts_with "\xc2\xb7 keeper_task_claim" (row 2));
+             (starts_with "! keeper_task_claim" (row 2));
            check bool "a step with no status says it was not recorded" true
              (starts_with "? read_file" (row 3))
        | History.Addressed_to_keeper _ | History.Said_by_keeper

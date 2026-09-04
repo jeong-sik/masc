@@ -19,6 +19,14 @@ let refusal_to_string = function
   | Not_in_allowlist { host } -> Printf.sprintf "%s is not in this keeper's allowlist" host
 ;;
 
+let client_env ~proxy_url =
+  [ "http_proxy", proxy_url
+  ; "https_proxy", proxy_url
+  ; "HTTP_PROXY", proxy_url
+  ; "HTTPS_PROXY", proxy_url
+  ]
+;;
+
 type decision =
   | Admitted of
       { host : Egress_host.t

@@ -45,9 +45,32 @@ val policy_network_present : listing:string -> (bool, string) result
     exist, and the guest would then be refused with a message about creation
     rather than about the listing that could not be read. *)
 
+val policy_network_inspect_argv_for : Keeper_microvm_backend.t -> (string list, string) result
+(** Inspect the policy network, to learn the gateway a guest on it reaches
+    the host at. *)
+
+val policy_network_gateway : inspect:string -> (string, string) result
+(** The [status.ipv4Gateway] of the inspected network.
+
+    Read rather than assumed: container assigns the subnet when the network
+    is created, so a compiled-in address would be right only until a host had
+    a network already on it. Absent or unparseable output is an error, not a
+    fallback -- a guest handed the wrong gateway reaches nothing and says
+    nothing about why. *)
+
+type policy_proxy =
+  { gateway : string
+  ; port : int
+  }
+(** Where a policy guest's one route is: the gateway it sees the host at, and
+    the port its keeper's proxy bound. Both are discovered at boot -- the
+    gateway from the network, the port from the listener -- so neither is a
+    constant. *)
+
 val network_args_for :
   Keeper_microvm_backend.t ->
   dns:string option ->
+  policy_proxy:policy_proxy option ->
   Keeper_types_profile_sandbox.network_mode ->
   (string list, string) result
 (** How one runtime is told to close or open the guest's network.

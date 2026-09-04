@@ -488,6 +488,7 @@ let register_with_state_result
     ; event_queue = Atomic.make initial_event_queue
     ; started_at = Time_compat.now ()
     ; grpc_close = Atomic.make None
+    ; egress_proxy_port = Atomic.make None
     ; lane = Keeper_lane.create ()
     ; done_p
     ; done_r
@@ -768,6 +769,7 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
     ; event_queue = Atomic.make initial_event_queue
     ; started_at = Time_compat.now ()
     ; grpc_close = Atomic.make None
+    ; egress_proxy_port = Atomic.make None
     ; lane = Keeper_lane.create ()
     ; done_p
     ; done_r

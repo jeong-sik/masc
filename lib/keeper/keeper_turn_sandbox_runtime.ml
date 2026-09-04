@@ -380,10 +380,29 @@ let run_argv_with_status ?timeout_sec argv =
 let policy_network_list_timeout_s = 30.0
 let policy_network_create_timeout_s = 60.0
 
+(* Returns the gateway a guest on the policy network reaches the host at, so
+   the boot can point the guest's clients at the proxy behind it. [None] for
+   every other mode, which needs no gateway. *)
 let ensure_policy_network backend (mode : Keeper_types_profile_sandbox.network_mode) =
+  let gateway_of_network () =
+    match Keeper_sandbox_microvm.policy_network_inspect_argv_for backend with
+    | Error _ as error -> error
+    | Ok inspect_argv ->
+      (match run_argv_with_status ~timeout_sec:policy_network_list_timeout_s inspect_argv with
+       | Unix.WEXITED 0, inspect ->
+         (match Keeper_sandbox_microvm.policy_network_gateway ~inspect with
+          | Ok gateway -> Ok (Some gateway)
+          | Error detail -> Error ("microvm_policy_network_unreadable: " ^ detail))
+       | _, output ->
+         Error
+           (Printf.sprintf
+              "microvm_policy_network_unreadable: %s: %s"
+              (String.concat " " inspect_argv)
+              (String.trim output)))
+  in
   match mode with
   | Keeper_types_profile_sandbox.Network_none | Keeper_types_profile_sandbox.Network_inherit
-    -> Ok ()
+    -> Ok None
   | Keeper_types_profile_sandbox.Network_policy ->
     (match Keeper_sandbox_microvm.policy_network_list_argv_for backend with
      | Error _ as error -> error
@@ -404,8 +423,11 @@ let ensure_policy_network backend (mode : Keeper_types_profile_sandbox.network_m
        (match run_argv_with_status ~timeout_sec:policy_network_list_timeout_s list_argv with
         | Unix.WEXITED 0, listing ->
           (match Keeper_sandbox_microvm.policy_network_present ~listing with
-           | Ok true -> Ok ()
-           | Ok false -> create_network ()
+           | Ok true -> gateway_of_network ()
+           | Ok false ->
+             (match create_network () with
+              | Error _ as error -> error
+              | Ok () -> gateway_of_network ())
            | Error detail ->
              Error ("microvm_policy_network_unreadable: " ^ detail))
         | _, listing ->
@@ -984,8 +1006,28 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
             would have been. *)
          (match ensure_policy_network backend t.network_mode with
           | Error detail -> Error ("microvm_start_failed: " ^ detail)
-          | Ok () ->
-         (match Keeper_sandbox_microvm.network_args_for backend ~dns t.network_mode with
+          | Ok policy_gateway ->
+         let policy_proxy =
+           (* The port is read from the keeper's registry entry rather than
+              carried in this state: the proxy is bound once per keeper lane
+              and a guest boots per turn, so the two ends have different
+              lifetimes and the entry is what both can see. *)
+           let bound_port =
+             Keeper_registry.get ~base_path:t.config.base_path t.meta.name
+             |> Option.map (fun (entry : Keeper_registry_types.registry_entry) ->
+                  Atomic.get entry.egress_proxy_port)
+             |> Option.join
+           in
+           match policy_gateway, bound_port with
+           | Some gateway, Some port -> Some { Keeper_sandbox_microvm.gateway; port }
+           (* Either half missing means the guest cannot be told its one
+              route. [network_args_for] refuses on [None] rather than booting
+              a guest that reaches nothing silently. *)
+           | Some _, None | None, _ -> None
+         in
+         (match
+            Keeper_sandbox_microvm.network_args_for backend ~dns ~policy_proxy t.network_mode
+          with
           | Error detail -> Error ("microvm_start_failed: " ^ detail)
           | Ok network_args ->
          let argv_result =

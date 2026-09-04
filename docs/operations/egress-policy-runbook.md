@@ -100,9 +100,27 @@ Two flags, and both are the policy rather than a default:
   name, after the allowlist has judged it. One resolver, downstream of the
   matcher.
 
-The guest is told where the proxy is through the usual proxy environment
-variables. That is convenience, not enforcement: a client that ignores them
-finds no route rather than a way around.
+The guest is told where the proxy is through four environment variables set
+on its boot — `http_proxy`, `https_proxy`, and both upper-case spellings.
+All four, because the common clients do not agree on which they read: curl
+and wget take the lower-case names, many Go and Java clients take the
+upper-case ones, and `gh` inherits whichever its libc build honours. Setting
+one and not the other is how a keeper reaches the proxy for `git` and
+silently finds no route for `gh`.
+
+The value is an address, not a name, because the guest has no resolver. The
+address is the policy network's own gateway, read from the network at boot:
+container assigns the subnet, so a fixed address would be right only until a
+host had a network on that one already.
+
+`NO_PROXY` is deliberately absent. An exception list there would be a second
+allowlist, one the proxy never sees and cannot record.
+
+This is convenience, not enforcement. A client that ignores these finds no
+route rather than a way around — the enforcement point is the host-only
+network, not this list. A guest that is never handed them is merely stuck,
+so a boot that does not know the proxy's address is refused rather than
+started.
 
 ## 4. Reading what a keeper reached
 

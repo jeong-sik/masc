@@ -348,6 +348,15 @@ type registry_entry = {
           and the [TurnDequeue] action. *)
   started_at : float;
   grpc_close : (unit -> unit) option Atomic.t;
+  egress_proxy_port : int option Atomic.t;
+      (** The port this keeper's egress proxy bound, once it has (RFC-0415).
+
+          It lives here because the two ends have different lifetimes: the
+          proxy is forked once per keeper lane, and a guest boots per turn
+          and has to be handed the address in its environment. [None] on
+          every keeper outside the policy lane, and on one whose proxy has
+          not bound yet -- a guest that boots then reaches nothing, which is
+          the closed direction. *)
   lane : Keeper_lane.t;
       (** Structured-concurrency scope owned by this exact registry entry.
           Its exit promise is the authoritative lane join signal. *)

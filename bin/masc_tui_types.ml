@@ -2173,6 +2173,51 @@ let system_log_listing_chrome ~error = listing_chrome ~error + 1
    rather than in structures keyed by id: Keepers can stream concurrently, and
    a single live slot lets the later stream replace the earlier one's tool
    rows. *)
+(* One turn as its event log and the transcript that follows it (RFC-0412
+   §3.3, stage 3a). The log is the record: every delta the stream or the
+   journal delivered, keyed by journal seq. The transcript is its projection,
+   kept in step by the one writer, [turn_log_add], which folds a delta into
+   the transcript exactly when the log accepted it -- so the transcript is
+   always the fold of the log ([Masc_tui_keeper_chat_transcript.of_log], pinned
+   by test), each delta folded at its arrival time rather than re-folded at
+   every frame. A settled turn is the same value with its log committed; the
+   pane draws it through the same projection it drew the live turn with. *)
+type turn_log =
+  { tl_log : Masc_tui_keeper_chat_log.t
+  ; tl_transcript : Masc_tui_keeper_chat_transcript.t
+  }
+
+let turn_log_create ~keeper_name ~request_id ~started_at =
+  { tl_log = Masc_tui_keeper_chat_log.create ~keeper_name ~request_id ~started_at
+  ; tl_transcript =
+      Masc_tui_keeper_chat_transcript.create ~keeper_name ~request_id ~started_at
+  }
+;;
+
+let turn_log_add ~now turn_log ~seq delta =
+  if Masc_tui_keeper_chat_log.add turn_log.tl_log ~seq delta
+  then Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
+;;
+
+let turn_log_keeper_name turn_log = Masc_tui_keeper_chat_log.keeper_name turn_log.tl_log
+let turn_log_request_id turn_log = Masc_tui_keeper_chat_log.request_id turn_log.tl_log
+
+(* A committed log stands for its turn once the stream told it how the turn
+   ended. A log that never heard the end -- the request went without a live
+   view (no Eio clock), or the stream was cut and nothing replayed it -- holds
+   part of the turn at most, and the committed rows keep saying the rest. *)
+let turn_log_holds_the_turn turn_log =
+  Masc_tui_keeper_chat_log.committed turn_log.tl_log
+  &&
+  match Masc_tui_keeper_chat_transcript.phase turn_log.tl_transcript with
+  | Masc_tui_keeper_chat_transcript.Stream_ended
+  | Masc_tui_keeper_chat_transcript.Stream_failed _ ->
+      true
+  | Masc_tui_keeper_chat_transcript.Waiting
+  | Masc_tui_keeper_chat_transcript.Working ->
+      false
+;;
+
 type inflight_phase =
   | Turn_streaming
   | Turn_reconciling
@@ -2191,7 +2236,7 @@ type inflight =
   ; sent_at : float
   ; origin : inflight_origin
   ; mutable phase : inflight_phase
-  ; live : Masc_tui_keeper_chat_transcript.t
+  ; log : turn_log
   }
 
 (* Which workspace the Code surface reads. The workspace routes resolve each
@@ -3151,10 +3196,10 @@ type state = {
      and clearing it there would put the original back in play. *)
   mutable msg_recall_replaces: Masc_tui_keeper_chat_queue.item option;
   (* The selected Keeper's turn currently streaming, if any. The request-owned
-     copy lives in [msg_inflight]; this slot only chooses what the pane draws.
-     Never authoritative -- the recorded reply comes from the strict
-     whole-body decode. *)
-  mutable msg_live: Masc_tui_keeper_chat_transcript.t option;
+     value lives in [msg_inflight]; this slot only chooses what the pane draws.
+     Cleared when the turn settles; the settled value moves to
+     [msg_settled_logs]. *)
+  mutable msg_live: turn_log option;
   (* The keeper's durable transcript as last loaded, for the keeper the pane is
      showing. Replaced wholesale by a load rather than merged: the server holds
      the record of what was said, and reconciling two copies of it row by row
@@ -3228,6 +3273,12 @@ type state = {
      un-acknowledged POST for the whole workspace; with that gone the only
      reason left is per keeper, which is how the server runs turns anyway. *)
   mutable msg_inflight: inflight list;
+  (* The turns this session watched settle, oldest first, every keeper
+     together. A settled turn stays the log it was and is drawn from it, so
+     settling changes a rail, not the rows; the loaded transcript's rows for a
+     turn a log holds are left out of the timeline ([chat_rows_for]). Never
+     pruned within a session: a reload replaces [msg_loaded], not these. *)
+  mutable msg_settled_logs: turn_log list;
   mutable detail_scroll: int;
   workspace: string;
   port: int;
@@ -3314,7 +3365,56 @@ let inflight_for_keeper state keeper_name =
 ;;
 
 let live_for_keeper state keeper_name =
-  Option.map (fun entry -> entry.live) (inflight_for_keeper state keeper_name)
+  Option.map (fun entry -> entry.log) (inflight_for_keeper state keeper_name)
+;;
+
+let settled_log_for_request state request_id =
+  List.find_opt
+    (fun turn_log -> String.equal (turn_log_request_id turn_log) request_id)
+    state.msg_settled_logs
+;;
+
+let settled_logs_for_keeper state keeper_name =
+  List.filter
+    (fun turn_log -> String.equal (turn_log_keeper_name turn_log) keeper_name)
+    state.msg_settled_logs
+;;
+
+(* Whether a reasoning row is drawn at all under this visibility. The
+   committed rows and the log projection ask this one function, so the two
+   cannot disagree about whether THINKING is on the screen. *)
+let reasoning_drawn = function
+  | Reasoning_hidden -> false
+  | Reasoning_folded | Reasoning_full -> true
+;;
+
+(* The rows a turn's log draws itself: the keeper's words, its tool blocks,
+   its skills, its reasoning. What a person said, what the server said about
+   the turn (gate rows), what the pane said, and a failure are drawn from the
+   committed rows whether or not a log holds the turn -- the log draws none of
+   them. *)
+let log_draws_role = function
+  | Message_keeper | Message_autonomous | Message_tool | Message_skill _
+  | Message_thinking ->
+      true
+  | Message_user _ | Message_status | Message_local | Message_error
+  | Message_memory ->
+      false
+;;
+
+(* The committed rows the pane still draws once these request ids are held
+   by settled logs: a turn has one source, and for a held turn that is the
+   log. *)
+let rows_the_logs_do_not_draw ~held_request_ids rows =
+  match held_request_ids with
+  | [] -> rows
+  | held ->
+      List.filter
+        (fun (row : msg_entry) ->
+          not
+            (log_draws_role row.me_role
+            && List.exists (String.equal row.me_request_id) held))
+        rows
 ;;
 
 let promoted_inflight_for_keeper state keeper_name =
@@ -3842,6 +3942,7 @@ let create_state
   msg_spill = None;
   msg_queued = Masc_tui_keeper_chat_queue.empty;
   msg_inflight = [];
+  msg_settled_logs = [];
   detail_scroll = 0;
   workspace;
   port;
@@ -3907,6 +4008,13 @@ let compute_chat_rows_for (state : state) keeper_name ~promoted_request_id
         String.equal entry.me_keeper_name keeper_name && not_promoted entry)
       state.msg_history
   in
+  let held_request_ids =
+    settled_logs_for_keeper state keeper_name
+    |> List.filter turn_log_holds_the_turn
+    |> List.map turn_log_request_id
+  in
+  let loaded = rows_the_logs_do_not_draw ~held_request_ids loaded in
+  let session = rows_the_logs_do_not_draw ~held_request_ids session in
   chat_timeline ~loaded ~session ~queued_request_ids |> chat_timeline_rows
 
 (* One conversation's rows, computed once per change of its inputs.
@@ -3915,9 +4023,10 @@ let compute_chat_rows_for (state : state) keeper_name ~promoted_request_id
    floors, a sort -- and the chat frame asked for it three to four times:
    on every key, every two-second tick and every async message, whether or
    not the conversation had changed. Its inputs are the loaded page, the
-   loaded keeper, the session rows, and two small readings of the queue and
-   the inflight list: which request was promoted out of the queue and which
-   requests still wait. The lists are replaced rather than mutated in place
+   loaded keeper, the session rows, the settled logs (whose held turns leave
+   the timeline), and two small readings of the queue and the inflight list:
+   which request was promoted out of the queue and which requests still
+   wait. The lists are replaced rather than mutated in place
    when the conversation changes, so physical equality on them says whether
    the last answer still holds; the two readings are compared by value, so a
    queue or an inflight turn that changed in a way the rows do not depend on
@@ -3931,6 +4040,7 @@ type chat_rows_memo = {
   crm_loaded_keeper : string option;
   crm_loaded : msg_entry list;
   crm_history : msg_entry list;
+  crm_settled_logs : turn_log list;
   crm_promoted_request_id : string option;
   crm_queued_request_ids : string list;
   crm_rows : msg_entry list;
@@ -3955,6 +4065,7 @@ let chat_rows_for (state : state) keeper_name =
               state.msg_loaded_keeper
          && memo.crm_loaded == state.msg_loaded
          && memo.crm_history == state.msg_history
+         && memo.crm_settled_logs == state.msg_settled_logs
          && Option.equal String.equal memo.crm_promoted_request_id
               promoted_request_id
          && List.equal String.equal memo.crm_queued_request_ids
@@ -3971,6 +4082,7 @@ let chat_rows_for (state : state) keeper_name =
             crm_loaded_keeper = state.msg_loaded_keeper;
             crm_loaded = state.msg_loaded;
             crm_history = state.msg_history;
+            crm_settled_logs = state.msg_settled_logs;
             crm_promoted_request_id = promoted_request_id;
             crm_queued_request_ids = queued_request_ids;
             crm_rows = rows;

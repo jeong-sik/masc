@@ -568,7 +568,7 @@ let awaiting_approval_notice (state : state) =
   match state.msg_live with
   | None -> None
   | Some live -> (
-      match Keeper_chat_transcript.awaiting_approval live with
+      match Keeper_chat_transcript.awaiting_approval live.tl_transcript with
       | None -> None
       | Some awaiting ->
           let where =
@@ -584,7 +584,7 @@ let awaiting_approval_notice (state : state) =
           Some
             (Printf.sprintf "  %s is holding %s%s"
                (Terminal_text.single_line
-                  (Keeper_chat_transcript.keeper_name live))
+                  (Masc_tui_types.turn_log_keeper_name live))
                (Terminal_text.single_line awaiting.Keeper_chat_transcript.tool_name)
                where))
 
@@ -7658,7 +7658,7 @@ let keeper_message_visible_timeline ?messages (state : state) ~keeper_name =
           || message.me_role <> Message_memory)
         |> List.filter (fun (message, _) ->
           message.me_role <> Message_thinking
-          || state.msg_reasoning_visibility <> Reasoning_hidden)
+          || Masc_tui_types.reasoning_drawn state.msg_reasoning_visibility)
         |> Masc_tui_types.fold_memory_summary_runs
              ~visibility:state.msg_memory_visibility
         (* After the filters, so a hidden lane between two Gate rows does not
@@ -8399,35 +8399,148 @@ let render_keeper_message (state : state) =
     let committed_layout_entries =
       keeper_message_layout_entries state ~keeper_name ~chat_cols
     in
-    (* Rows for the turn still streaming. They follow the latest committed
-       causal frontier for the same request rather than escaping to a second
-       bottom-only lane. Parallel rows may remain between earlier request
-       phases; the live bucket uses that latest frontier, not the first input. *)
-    let live_projection =
-      match state.msg_live with
-      | Some live
-        when String.equal (Keeper_chat_transcript.keeper_name live) keeper_name
-             && Option.is_none promoted
-        ->
-          let request_id = Keeper_chat_transcript.request_id live in
-          let request_label = Keeper_chat.compact_request_id request_id in
-          let timeline_at =
-            chat_live_timeline_at ~request_id
-              ~started_at:(Keeper_chat_transcript.started_at live)
-              ~request_messages:committed_timeline_messages
-              committed_visible_timeline
-          in
-          let timeline_bucket =
-            Option.map keeper_message_timeline_bucket timeline_at
-          in
-          let entry ~markdown_source style role_label body =
+    (* Rows for the turns this session holds as logs: every settled turn of
+       this keeper that its log stands for, then the one still streaming. Each
+       block follows the latest committed causal frontier for its own request
+       rather than escaping to a second bottom-only lane; parallel rows may
+       remain between earlier request phases, and the block uses that latest
+       frontier, not the first input. A settled block is the same rows with a
+       closing rail: settling changes the rail, not the words (RFC-0412 §3.3). *)
+    let log_projection ~committed (turn_log : Masc_tui_types.turn_log) =
+      let transcript = turn_log.tl_transcript in
+      let request_id = Masc_tui_types.turn_log_request_id turn_log in
+      let request_label = Keeper_chat.compact_request_id request_id in
+      let started_at = Keeper_chat_transcript.started_at transcript in
+      let timeline_at =
+        chat_live_timeline_at ~request_id ~started_at
+          ~request_messages:committed_timeline_messages
+          committed_visible_timeline
+      in
+      let timeline_bucket =
+        Option.map keeper_message_timeline_bucket timeline_at
+      in
+      (* The opening corner belongs to the turn's first row wherever it is. A
+         turn that began before this block already drew it among the
+         committed rows; one that did not draws it here. *)
+      let turn_opens_here =
+        not
+          (List.exists
+             (fun (message : Masc_tui_types.msg_entry) ->
+               String.equal message.me_request_id request_id)
+             committed_messages)
+      in
+      let keeper_label =
+        Keeper_chat.terminal_safe_text
+          (Masc_tui_types.turn_log_keeper_name turn_log)
+      in
+      (* The turn in the order it happened, one row per stretch
+         ([Keeper_chat_transcript.drawn]): a tool-call round interleaves
+         reasoning, calls and reply text, and drawing them as three pooled
+         blocks read as one wall of text with its calls listed elsewhere. The
+         recorded reply is already reconciled in: by outcome, a differing
+         visible reply stands in for the streamed stretches and a control
+         outcome ends the turn in one STATUS row.
+
+         Indexed and filtered at once. The index is the growing-markdown cache
+         key (#30290) and the filter is how hidden reasoning disappears; the
+         index counts drawn positions, not surviving rows, so hiding reasoning
+         does not renumber the text entries and invalidate every cached render
+         below it. Every stretch rides the growing-markdown cache: a frame
+         whose text did not move reuses the rows outright, and only the new
+         suffix is parsed when it did.
+
+         A superseded attempt's stretches are drawn in place with their own
+         styles, each label ending in the retry mark and the number of the try
+         it came from (" ↺1" = the first try, superseded). The mark goes at the
+         tail because [fit_name] keeps a label's tail when it overruns the
+         column. Not dimmed: the layout has no dim variant per style, and
+         adding one is the 3b restyle. *)
+      let drawn =
+        List.filter_map Fun.id
+        @@ List.mapi
+             (fun entry_index (item : Keeper_chat_transcript.drawn_item) ->
+               let label text =
+                 match item.superseded with
+                 | Some attempt ->
+                     Printf.sprintf "%s \xe2\x86\xba%d" text (attempt + 1)
+                 | None -> text
+               in
+               let markdown_source =
+                 Message_layout.Markdown_growing
+                   { keeper_name; request_id; entry_index }
+               in
+               match item.drawn with
+               | Keeper_chat_transcript.Drawn_thinking _
+                 when not
+                        (Masc_tui_types.reasoning_drawn
+                           state.msg_reasoning_visibility) ->
+                   None
+               | Keeper_chat_transcript.Drawn_thinking lines ->
+                   Some
+                     ( markdown_source
+                     , Message_layout.Thinking
+                     , label "THINKING"
+                     , if state.msg_reasoning_visibility = Reasoning_folded
+                       then folded_thinking_summary (String.concat "\n" lines)
+                       else String.concat "\n" lines )
+               | Keeper_chat_transcript.Drawn_tools block ->
+                   let projection =
+                     Keeper_chat_transcript.project_tool_block
+                       (tool_projection_mode state) block
+                   in
+                   Some
+                     ( markdown_source
+                     , tool_block_style projection
+                     , label "TOOLS"
+                     , String.concat "\n" (projected_tool_rows projection) )
+               | Keeper_chat_transcript.Drawn_skill skill ->
+                   Some
+                     ( markdown_source
+                     , Message_layout.Skill (skill_tone_of_state skill.state)
+                     , label "SKILL"
+                     , String.concat "\n"
+                         (* Full on the block too: the same reason the
+                            committed skill rows are always full — the skill's
+                            delivery and observed actions are the feature this
+                            row reports, not a detail behind the tool toggle. *)
+                         (Keeper_chat_transcript.skill_rows ~full:true skill) )
+               | Keeper_chat_transcript.Drawn_text text
+               | Keeper_chat_transcript.Drawn_reply text ->
+                   Some
+                     ( markdown_source
+                     , Message_layout.Keeper
+                     , label keeper_label
+                     , text )
+               | Keeper_chat_transcript.Drawn_status text ->
+                   Some
+                     ( markdown_source
+                     , Message_layout.Status
+                     , label "STATUS"
+                     , text ))
+             (Keeper_chat_transcript.drawn transcript)
+      in
+      (* Edges after the filter, not at drawn position zero: hidden reasoning
+         drops rows, and the corners belong to the rows the pane actually
+         draws. A block still arriving keeps its bracket open -- the turn ends
+         when the stream does, which is how a running turn reads without a
+         second spinner beside it; a settled block closes on its last row. *)
+      let count = List.length drawn in
+      let entries =
+        List.mapi
+          (fun index (markdown_source, style, role_label, body) ->
+            let edge : Masc_tui_types.turn_edge =
+              match turn_opens_here && index = 0, committed && index = count - 1 with
+              | true, true -> Turn_alone
+              | true, false -> Turn_opens
+              | false, true -> Turn_closes
+              | false, false -> Turn_continues
+            in
             (* One alignment, on the label the row actually carries. Aligning
                the continuation mark and then aligning the result again pays
                the badge's width twice, so the second call trims what the
                first had already fitted. *)
             ({ style;
-               timestamp =
-                 keeper_message_clock (Keeper_chat_transcript.started_at live);
+               timestamp = keeper_message_clock started_at;
                timeline_bucket;
                role_label =
                  Message_layout.align_role_label ~column:role_label_column
@@ -8440,179 +8553,53 @@ let render_keeper_message (state : state) =
                request_label;
                body;
                markdown_source;
-               (* No closing corner while the turn is still arriving. The
-                  bracket stays open until the turn ends, which is how a
-                  running turn reads without a second spinner beside it. *)
-               turn_rail =
-                 turn_rail_of ~edge:Masc_tui_types.Turn_continues ~style;
+               turn_rail = turn_rail_of ~edge ~style;
              }
-              : Message_layout.entry)
-          in
-          (* The opening corner belongs to the turn's first row wherever it
-             is. A turn that began before this trail already drew it among the
-             committed rows; one that did not draws it here. *)
-          let turn_opens_here =
-            not
-              (List.exists
-                 (fun (message : Masc_tui_types.msg_entry) ->
-                   String.equal message.me_request_id request_id)
-                 committed_messages)
-          in
-          (* The turn in the order it happened, one entry per stretch. A
-             tool-call round interleaves reasoning, calls and reply text, and
-             drawing them as three pooled blocks read as one wall of text with
-             its calls listed elsewhere. Reasoning is the only part of a live
-             turn the durable transcript does not keep, so the pane is the one
-             place it can be read — the whole trail, not its last line. *)
-          let keeper_label =
-            Keeper_chat.terminal_safe_text
-              (Keeper_chat_transcript.keeper_name live)
-          in
-          (* Indexed and filtered at once. The index is the growing-markdown
-             cache key (#30290) and the filter is how hidden reasoning
-             disappears; the stdlib has [mapi] and [filter_map] but not both,
-             so the index is taken first and the [None]s dropped after.
-
-             The index counts trail positions, not surviving rows, which is
-             what the cache key needs: hiding reasoning must not renumber the
-             text entries and invalidate every cached render below it.
-
-             Every live stretch rides the growing-markdown cache, reasoning and
-             tool blocks included: a frame whose text did not move reuses the
-             rows outright, and only the new suffix is parsed when it did.
-             Tool rows rewrite earlier lines when a call settles, which is not
-             an append; the cache detects that (the new text no longer starts
-             with the old) and falls back to one full render, the same work
-             the uncached streaming path did on every frame. *)
-          (* A superseded attempt's stretches are drawn in place with their
-             own styles, each label ending in the retry mark and the number of
-             the try it came from (" ↺1" = the first try, superseded): the
-             content the reader had is still there. The mark goes at the tail
-             because [fit_name] keeps a label's tail when it overruns the
-             column. Not dimmed: the layout has no dim variant per style, and
-             adding one is the 3b restyle. Flattened before indexing so the
-             growing-markdown cache key stays one index per drawn stretch. *)
-          let flattened =
-            List.concat_map
-              (fun (item : Keeper_chat_transcript.trail_item) ->
-                match item with
-                | Keeper_chat_transcript.Trail_superseded { attempt; items } ->
-                    List.map (fun nested -> (Some attempt, nested)) items
-                | Keeper_chat_transcript.Trail_thinking _
-                | Keeper_chat_transcript.Trail_skill _
-                | Keeper_chat_transcript.Trail_tools _
-                | Keeper_chat_transcript.Trail_text _ -> [ (None, item) ])
-              (Keeper_chat_transcript.trail live)
-          in
-          let entries =
-            List.filter_map Fun.id
-            @@ List.mapi
-               (fun entry_index
-                    ((superseded, item) : int option * Keeper_chat_transcript.trail_item) ->
-              let label text =
-                match superseded with
-                | Some attempt -> Printf.sprintf "%s \xe2\x86\xba%d" text (attempt + 1)
-                | None -> text
-              in
-              match item with
-              | Keeper_chat_transcript.Trail_superseded _ ->
-                  (* Never nested (see the type), and flattened above. *)
-                  None
-              | Keeper_chat_transcript.Trail_thinking _
-                when state.msg_reasoning_visibility = Reasoning_hidden ->
-                  None
-              | Keeper_chat_transcript.Trail_thinking lines ->
-                  Some
-                    (entry
-                       ~markdown_source:
-                         (Message_layout.Markdown_growing
-                            { keeper_name;
-                              request_id;
-                              entry_index;
-                            })
-                       Message_layout.Thinking (label "THINKING")
-                       (if state.msg_reasoning_visibility = Reasoning_folded
-                        then folded_thinking_summary (String.concat "\n" lines)
-                        else String.concat "\n" lines))
-              | Keeper_chat_transcript.Trail_tools block ->
-                  let projection =
-                    Keeper_chat_transcript.project_tool_block
-                      (tool_projection_mode state) block
-                  in
-                  Some
-                    (entry
-                       ~markdown_source:
-                         (Message_layout.Markdown_growing
-                            { keeper_name;
-                              request_id;
-                              entry_index;
-                            })
-                       (tool_block_style projection) (label "TOOLS")
-                       (String.concat "\n" (projected_tool_rows projection)))
-              | Keeper_chat_transcript.Trail_skill skill ->
-                  Some
-                    (entry
-                       ~markdown_source:
-                         (Message_layout.Markdown_growing
-                            { keeper_name;
-                              request_id;
-                              entry_index;
-                            })
-                       (Message_layout.Skill
-                          (skill_tone_of_state skill.state))
-                       (label "SKILL")
-                       (String.concat "\n"
-                          (* Full on the live trail too: the same reason the
-                             committed skill rows are always full — the skill's
-                             delivery and observed actions are the feature this
-                             row reports, not a detail behind the tool toggle. *)
-                          (Keeper_chat_transcript.skill_rows ~full:true skill)))
-              | Keeper_chat_transcript.Trail_text text ->
-                  Some
-                    (entry
-                       ~markdown_source:
-                         (Message_layout.Markdown_growing
-                            { keeper_name;
-                              request_id;
-                              entry_index;
-                            })
-                       Message_layout.Keeper (label keeper_label) text))
-                 flattened
-          in
-          (* Applied after the filter, not at trail position zero: hidden
-             reasoning drops rows, and the corner belongs to the first row the
-             pane actually draws. *)
-          let entries =
-            match entries with
-            | first :: rest when turn_opens_here ->
-                { first with Message_layout.turn_rail = Message_layout.Rail_opens }
-                :: rest
-            | entries -> entries
-          in
-          Some (request_id, timeline_at, entries)
+              : Message_layout.entry))
+          drawn
+      in
+      (request_id, timeline_at, entries)
+    in
+    let settled_projections =
+      Masc_tui_types.settled_logs_for_keeper state keeper_name
+      |> List.filter Masc_tui_types.turn_log_holds_the_turn
+      |> List.map (log_projection ~committed:true)
+    in
+    let live_projection =
+      match state.msg_live with
+      | Some live
+        when String.equal (Masc_tui_types.turn_log_keeper_name live) keeper_name
+             && Option.is_none promoted ->
+          Some (log_projection ~committed:false live)
       | Some _ | None -> None
+    in
+    let log_projections =
+      settled_projections @ Option.to_list live_projection
     in
     let committed_tagged =
       List.combine committed_messages committed_layout_entries
       |> List.map (fun (message, entry) -> Some message, entry)
     in
-    (* A turn whose rows are still arriving has not closed. Its last committed
-       row carries the closing corner, and the live rows continue below it, so
-       left alone the pane ends the same turn twice.
+    (* A turn whose rows continue in a block has not closed where its
+       committed rows end. Its last committed row carries the closing corner,
+       and the block's rows continue below it, so left alone the pane ends the
+       same turn twice.
 
        Corrected here rather than where the entries are built: the entry memo
-       does not read the live turn -- it is built where it is drawn -- and a
+       does not read the logs -- they are drawn where they are built -- and a
        cached entry would keep whichever corner it was born with. *)
     let committed_tagged =
-      match live_projection with
-      | None -> committed_tagged
-      | Some (live_request_id, _, _) ->
+      match List.map (fun (request_id, _, _) -> request_id) log_projections with
+      | [] -> committed_tagged
+      | block_request_ids ->
           List.map
             (fun ((message, entry) :
                    Masc_tui_types.msg_entry option * Message_layout.entry) ->
               match message with
               | Some message
-                when String.equal message.me_request_id live_request_id -> (
+                when List.exists
+                       (String.equal message.me_request_id)
+                       block_request_ids -> (
                   match entry.Message_layout.turn_rail with
                   | Message_layout.Rail_closes ->
                       ( Some message
@@ -8631,31 +8618,36 @@ let render_keeper_message (state : state) =
               | Some _ | None -> (message, entry))
             committed_tagged
     in
-    let rec insert_at index inserted reversed = function
-      | rest when index <= 0 -> List.rev_append reversed (inserted @ rest)
-      | item :: rest -> insert_at (index - 1) inserted (item :: reversed) rest
-      | [] -> List.rev_append reversed inserted
-    in
+    (* Each block at its own place in the committed timeline. Blocks that
+       land on the same index keep their order -- settled turns in the order
+       they settled, the live one last -- and a block placed past the end
+       follows everything. *)
     let tagged_layout_entries =
-      match live_projection with
-      | None -> committed_tagged
-      | Some (request_id, timeline_at, live_entries) ->
-          let insertion =
-            chat_live_insertion_index ~request_id ~timeline_at
-              committed_visible_timeline
-          in
-          insert_at insertion
-            (List.map (fun entry -> None, entry) live_entries)
-            [] committed_tagged
+      let placed =
+        List.map
+          (fun (request_id, timeline_at, entries) ->
+            ( chat_live_insertion_index ~request_id ~timeline_at
+                committed_visible_timeline
+            , List.map (fun entry -> None, entry) entries ))
+          log_projections
+      in
+      let rec merge index committed placed =
+        match committed with
+        | [] -> List.concat_map snd placed
+        | item :: rest ->
+            let due, later = List.partition (fun (at, _) -> at <= index) placed in
+            List.concat_map snd due @ (item :: merge (index + 1) rest later)
+      in
+      merge 0 committed_tagged placed
     in
-    (* With no turn streaming, the entries the walk measures are the ones
+    (* With no block drawn, the entries the walk measures are the ones
        [layout_entries_memo] holds across frames, and passing that very list
        is what lets the walk keep its row counts: a fresh list of the same
        entries is a different question to it. *)
     let layout_entries =
-      match live_projection with
-      | None -> committed_layout_entries
-      | Some _ -> List.map snd tagged_layout_entries
+      match log_projections with
+      | [] -> committed_layout_entries
+      | _ :: _ -> List.map snd tagged_layout_entries
     in
     let inner_width = max 1 (framed_inner_width chat_cols) in
     (* Clamped here rather than where the key is handled: the limit depends on
@@ -8818,8 +8810,8 @@ let render_keeper_message (state : state) =
       match state.msg_live with
       | Some live
         when state.msg_target_keeper_name
-             = Some (Keeper_chat_transcript.keeper_name live) ->
-        Some (Keeper_chat_transcript.request_id live)
+             = Some (Masc_tui_types.turn_log_keeper_name live) ->
+        Some (Masc_tui_types.turn_log_request_id live)
       | Some _ | None -> None
     in
     (match
@@ -8919,7 +8911,8 @@ let render_keeper_message (state : state) =
     (match state.msg_live with
      | Some live
        when state.msg_target_keeper_name
-            = Some (Keeper_chat_transcript.keeper_name live) ->
+            = Some (Masc_tui_types.turn_log_keeper_name live) ->
+         let live = live.tl_transcript in
          (* The streaming turn is the row the eye waits on: drawn in the
             accent rather than dimmed, behind the mark a running turn wears
             everywhere else on the screen.
@@ -9172,7 +9165,7 @@ let render_keeper_message (state : state) =
       | Some live ->
           (match
              Masc_tui_esc_interrupt.action ~now_ns:(Mtime_clock.elapsed_ns ())
-               (Keeper_chat_transcript.interrupt live)
+               (Keeper_chat_transcript.interrupt live.tl_transcript)
            with
            | Masc_tui_esc_interrupt.Launch_interrupt -> "Esc:interrupt turn"
            | Masc_tui_esc_interrupt.Swallow -> "Esc:interrupt sent"

@@ -118,6 +118,33 @@ let test_replaced_queue_recomputes_and_identical_inflight_does_not () =
     (after_queue == Tui_types.chat_rows_for state "alpha")
 ;;
 
+(* A settled log is an input too: replacing the list recomputes, and the
+   held turn's loaded rows are gone from the answer; the same list keeps
+   the memo. *)
+let test_replaced_settled_logs_are_seen () =
+  let state = fresh_state () in
+  state.Tui_types.msg_loaded <-
+    entry_at ~request_id:"held" 3.0 :: state.Tui_types.msg_loaded;
+  let before = Tui_types.chat_rows_for state "alpha" in
+  Alcotest.(check int) "three rows before" 3 (List.length before);
+  let log =
+    Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"held"
+      ~started_at:3.0
+  in
+  Tui_types.turn_log_add ~now:3.0 log ~seq:(Some 0)
+    Masc_tui_keeper_chat_live.Run_started;
+  Tui_types.turn_log_add ~now:3.0 log ~seq:(Some 1)
+    Masc_tui_keeper_chat_live.Run_finished;
+  Masc_tui_keeper_chat_log.commit log.Tui_types.tl_log;
+  state.Tui_types.msg_settled_logs <- [ log ];
+  let after = Tui_types.chat_rows_for state "alpha" in
+  Alcotest.(check bool) "recomputed" false (before == after);
+  Alcotest.(check (list string)) "the held turn's row is the log's now"
+    [ "row at 1"; "row at 2" ] (texts after);
+  Alcotest.(check bool) "then stable again" true
+    (after == Tui_types.chat_rows_for state "alpha")
+;;
+
 let () =
   Alcotest.run
     "tui chat rows memo"
@@ -131,7 +158,9 @@ let () =
           Alcotest.test_case "another keeper gets its own rows" `Quick
             test_another_keeper_gets_its_own_rows;
           Alcotest.test_case "replaced queue recomputes, identical inflight does not" `Quick
-            test_replaced_queue_recomputes_and_identical_inflight_does_not
+            test_replaced_queue_recomputes_and_identical_inflight_does_not;
+          Alcotest.test_case "replaced settled logs are seen" `Quick
+            test_replaced_settled_logs_are_seen
         ] )
     ]
 ;;

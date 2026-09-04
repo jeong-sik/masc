@@ -11,6 +11,8 @@ open Alcotest
 
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
+module Live = Masc_tui_keeper_chat_live
+module Log = Masc_tui_keeper_chat_log
 module Tui_types = Masc_tui_types
 module Interrupt_signal = Masc_tui_interrupt_signal
 
@@ -653,9 +655,9 @@ let test_steer_queues_then_interrupts_through_distinct_paths () =
 ;;
 
 (* Two Keepers can stream at once. A single [state.msg_live] slot lets the
-   later dispatch replace the earlier transcript, so the earlier turn's next
-   delta and tool rows disappear. Both the streaming and settle paths must
-   resolve the transcript from the request's own in-flight entry. *)
+   later dispatch replace the earlier log, so the earlier turn's next delta
+   and tool rows disappear. Both the streaming and settle paths must resolve
+   the log from the request's own in-flight entry. *)
 let test_concurrent_turns_keep_request_owned_transcripts () =
   List.iter
     (fun binding_name ->
@@ -682,8 +684,8 @@ let test_live_transcripts_are_kept_per_keeper () =
     let sent_request =
       Keeper_chat.create_request ~keeper_name ~message:("hello " ^ keeper_name) ()
     in
-    let live =
-      Keeper_chat_transcript.create
+    let log =
+      Tui_types.turn_log_create
         ~keeper_name
         ~request_id:sent_request.request_id
         ~started_at
@@ -695,21 +697,200 @@ let test_live_transcripts_are_kept_per_keeper () =
      (* A request that has just been POSTed is streaming; reconciling is what
         it becomes after the stream settles. *)
      ; phase = Tui_types.Turn_streaming
-     ; live
+     ; log
      }
       : Tui_types.inflight)
   in
   let alpha = entry "alpha" 1.0 in
   let beta = entry "beta" 2.0 in
   state.msg_inflight <- [ beta; alpha ];
-  check bool "alpha keeps its own live transcript" true
+  check bool "alpha keeps its own live log" true
     (match Tui_types.live_for_keeper state "alpha" with
-     | Some live -> live == alpha.live
+     | Some live -> live == alpha.log
      | None -> false);
-  check bool "beta keeps its own live transcript" true
+  check bool "beta keeps its own live log" true
     (match Tui_types.live_for_keeper state "beta" with
-     | Some live -> live == beta.live
+     | Some live -> live == beta.log
      | None -> false)
+;;
+
+(* The log and its transcript move together: one writer folds a delta into
+   the transcript exactly when the log accepted it, so a seq the log already
+   holds is folded once, and the transcript equals the fold of the log. *)
+let test_a_turn_log_folds_each_accepted_delta_once () =
+  let log =
+    Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"req-1"
+      ~started_at:10.0
+  in
+  let add seq delta = Tui_types.turn_log_add ~now:11.0 log ~seq delta in
+  add (Some 1) Live.Run_started;
+  add (Some 2) (Live.Text "hel");
+  add (Some 2) (Live.Text "hel");
+  add (Some 3) (Live.Text "lo");
+  add None (Live.Text "!");
+  add None (Live.Text "!");
+  check string "a replayed seq is folded once, an id-less frame every time"
+    "hello!!"
+    (Keeper_chat_transcript.text log.Tui_types.tl_transcript);
+  check int "the log holds one entry per accepted delta" 5
+    (List.length (Log.entries log.Tui_types.tl_log));
+  check string "the transcript is the fold of the log"
+    (Keeper_chat_transcript.text
+       (Keeper_chat_transcript.of_log ~now:11.0 log.Tui_types.tl_log))
+    (Keeper_chat_transcript.text log.Tui_types.tl_transcript)
+;;
+
+(* Settling commits the log and keeps it; nothing is copied into session
+   rows any more. The pane goes on drawing the turn from the log. *)
+let test_settle_commits_the_log_instead_of_copying_rows () =
+  let commits =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"settle_live_turn"
+      ~callee:"Keeper_chat_log.commit"
+  in
+  let copies =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"settle_live_turn"
+      ~callee:"append_chat_history"
+  in
+  if commits < 1 || copies <> 0 then
+    failf
+      "settle_live_turn must commit the turn's log and copy nothing into \
+       session rows: commits=%d copies=%d"
+      commits copies
+;;
+
+(* The strict decode's reply row is for a turn whose log never heard the
+   end; a turn the log holds is drawn from the log, reply included. *)
+let test_the_reply_row_defers_to_a_log_that_holds_the_turn () =
+  let n =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"apply_keeper_chat_result"
+      ~callee:"turn_log_holds_the_turn"
+  in
+  if n < 1 then
+    failf
+      "apply_keeper_chat_result must ask whether the settled log holds the \
+       turn before appending a reply row; turn_log_holds_the_turn is called %d \
+       time(s)"
+      n
+;;
+
+let settled_log ~request_id deltas =
+  let log =
+    Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at:100.0
+  in
+  List.iteri
+    (fun seq delta -> Tui_types.turn_log_add ~now:101.0 log ~seq:(Some seq) delta)
+    deltas;
+  Log.commit log.Tui_types.tl_log;
+  log
+;;
+
+let loaded_turn ~request_id =
+  [ chat_entry ~request_id
+      ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you"))
+      ~text:"asked" ~at:100. ()
+  ; chat_entry ~request_id ~role:Tui_types.Message_thinking
+      ~text:"2 reasoning steps, content withheld" ~at:101. ()
+  ; chat_entry ~request_id ~role:Tui_types.Message_tool ~text:"read_file a.ml"
+      ~at:102. ()
+  ; chat_entry ~request_id ~role:Tui_types.Message_status
+      ~text:"Gate approved read_file" ~at:103. ()
+  ; chat_entry ~request_id ~role:Tui_types.Message_keeper ~text:"answered"
+      ~at:104. ()
+  ; chat_entry ~request_id ~role:Tui_types.Message_error ~text:"delivery failed"
+      ~at:105. ()
+  ]
+;;
+
+(* A turn the settled log holds has one source. The loaded transcript's rows
+   the log draws itself -- the keeper's words, tools, reasoning -- leave the
+   timeline; what a person said, what the server said about the turn, and a
+   failure stay, because the log draws none of them. Another turn's rows are
+   untouched, and a later reload does not bring the suppressed rows back. *)
+let test_a_settled_log_holds_its_turn_in_the_timeline () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  state.msg_target_keeper_name <- Some "alpha";
+  state.msg_loaded_keeper <- Some "alpha";
+  state.msg_loaded <-
+    loaded_turn ~request_id:"held"
+    @ [ chat_entry ~request_id:"other" ~role:Tui_types.Message_keeper
+          ~text:"other turn" ~at:200. () ];
+  state.msg_settled_logs <-
+    [ settled_log ~request_id:"held"
+        [ Live.Run_started
+        ; Live.Text "answered"
+        ; Live.Reply_details
+            { reply = "answered"
+            ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
+            ; turn_ref = "trace-1#1"
+            }
+        ; Live.Run_finished
+        ] ];
+  let texts () =
+    Tui_types.chat_rows_for state "alpha"
+    |> List.map (fun (row : Tui_types.msg_entry) -> row.me_text)
+  in
+  check (list string) "the log's rows leave; the rest stay"
+    [ "asked"; "Gate approved read_file"; "delivery failed"; "other turn" ]
+    (texts ());
+  (* A reload replaces the loaded page, not the settled logs. *)
+  state.msg_loaded <- loaded_turn ~request_id:"held";
+  check (list string) "after a reload the held turn is still the log's"
+    [ "asked"; "Gate approved read_file"; "delivery failed" ]
+    (texts ())
+;;
+
+(* A log that never heard how the turn ended holds part of it at most; the
+   committed rows keep saying the rest. *)
+let test_an_unfinished_settled_log_suppresses_nothing () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  state.msg_target_keeper_name <- Some "alpha";
+  state.msg_loaded_keeper <- Some "alpha";
+  state.msg_loaded <- loaded_turn ~request_id:"cut";
+  state.msg_settled_logs <-
+    [ settled_log ~request_id:"cut" [ Live.Run_started; Live.Text "half" ] ];
+  check bool "the log does not stand for the turn" false
+    (Tui_types.turn_log_holds_the_turn (List.hd state.msg_settled_logs));
+  check int "every loaded row is still drawn" 6
+    (List.length (Tui_types.chat_rows_for state "alpha"))
+;;
+
+(* Two turns settled in one session, one of them for another keeper: only
+   alpha's held turn is suppressed from alpha's rows. *)
+let test_settled_logs_are_read_per_keeper () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  state.msg_target_keeper_name <- Some "alpha";
+  state.msg_loaded_keeper <- Some "alpha";
+  state.msg_loaded <-
+    [ chat_entry ~request_id:"shared-id" ~role:Tui_types.Message_keeper
+        ~text:"alpha said" ~at:100. () ];
+  let beta =
+    Tui_types.turn_log_create ~keeper_name:"beta" ~request_id:"shared-id"
+      ~started_at:100.0
+  in
+  Tui_types.turn_log_add ~now:101.0 beta ~seq:(Some 0) Live.Run_started;
+  Tui_types.turn_log_add ~now:101.0 beta ~seq:(Some 1) Live.Run_finished;
+  Log.commit beta.Tui_types.tl_log;
+  state.msg_settled_logs <- [ beta ];
+  check int "beta's log does not hold alpha's row" 1
+    (List.length (Tui_types.chat_rows_for state "alpha"));
+  check (list string) "beta's log is beta's" [ "shared-id" ]
+    (Tui_types.settled_logs_for_keeper state "beta"
+     |> List.map Tui_types.turn_log_request_id);
+  check (list string) "alpha holds none" []
+    (Tui_types.settled_logs_for_keeper state "alpha"
+     |> List.map Tui_types.turn_log_request_id)
 ;;
 
 let test_promoted_queue_request_owns_a_typed_slot_outside_transcript () =
@@ -719,8 +900,8 @@ let test_promoted_queue_request_owns_a_typed_slot_outside_transcript () =
   let request =
     Keeper_chat.create_request ~keeper_name:"alpha" ~message:"queued input" ()
   in
-  let live =
-    Keeper_chat_transcript.create ~keeper_name:"alpha"
+  let log =
+    Tui_types.turn_log_create ~keeper_name:"alpha"
       ~request_id:request.request_id ~started_at:43.0
   in
   state.msg_target_keeper_name <- Some "alpha";
@@ -739,7 +920,7 @@ let test_promoted_queue_request_owns_a_typed_slot_outside_transcript () =
             ; causal_parent_request_id = None
             }
       ; phase = Tui_types.Turn_streaming
-      ; live
+      ; log
       } ];
   check (list string) "promoted USER is withheld from settled transcript" []
     (Tui_types.chat_rows_for state "alpha"
@@ -1550,6 +1731,18 @@ let () =
             test_concurrent_turns_keep_request_owned_transcripts
         ; test_case "live transcripts are kept per Keeper" `Quick
             test_live_transcripts_are_kept_per_keeper
+        ; test_case "a turn log folds each accepted delta once" `Quick
+            test_a_turn_log_folds_each_accepted_delta_once
+        ; test_case "settle commits the log instead of copying rows" `Quick
+            test_settle_commits_the_log_instead_of_copying_rows
+        ; test_case "the reply row defers to a log that holds the turn" `Quick
+            test_the_reply_row_defers_to_a_log_that_holds_the_turn
+        ; test_case "a settled log holds its turn in the timeline" `Quick
+            test_a_settled_log_holds_its_turn_in_the_timeline
+        ; test_case "an unfinished settled log suppresses nothing" `Quick
+            test_an_unfinished_settled_log_suppresses_nothing
+        ; test_case "settled logs are read per keeper" `Quick
+            test_settled_logs_are_read_per_keeper
         ; test_case "promoted queue request owns a typed slot" `Quick
             test_promoted_queue_request_owns_a_typed_slot_outside_transcript
         ; test_case "message scroll accepts the rendered clamp" `Quick

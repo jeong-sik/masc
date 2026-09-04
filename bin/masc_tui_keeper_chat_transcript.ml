@@ -149,6 +149,14 @@ type trail_node =
           so it stays, marked. One block per superseded attempt, siblings in
           the trail, never nested. *)
 
+(* The recorded reply (KEEPER_REPLY_DETAILS): the visible text, how the turn
+   ended, and the turn it was recorded under. *)
+type reply =
+  { reply_text : string
+  ; reply_outcome : Masc.Keeper_turn_outcome.t
+  ; reply_turn_ref : string
+  }
+
 (* Tool calls are held newest-first so opening one is a prepend; [tool_calls]
    reverses on read. Appending an argument fragment walks the list, which a
    turn's handful of calls makes cheap enough -- the list is short and the
@@ -180,10 +188,10 @@ type t =
     mutable admission : (Live.admission * int) option
   ; mutable attempt : int
         (* 0-based runtime attempt the growing trail belongs to. *)
-  ; mutable reply : (string * Masc.Keeper_turn_outcome.t) option
-        (* The recorded reply (KEEPER_REPLY_DETAILS). Not a trail node: the
-           server streams the reply text as deltas -- chunked at the end when
-           nothing streamed -- so the text is already in the trail. *)
+  ; mutable reply : reply option
+        (* Not a trail node: the server streams the reply text as deltas --
+           chunked at the end when nothing streamed -- so the text is already
+           in the trail. [drawn] reconciles the two. *)
   }
 
 let create ~keeper_name ~request_id ~started_at =
@@ -1233,8 +1241,9 @@ let apply ~now t (delta : Live.delta) =
       ()
   | Live.Run_failed { message } -> t.phase <- Stream_failed message
   | Live.Run_finished -> t.phase <- Stream_ended
-  | Live.Reply_details { reply; turn_outcome; turn_ref = _ } ->
-      t.reply <- Some (reply, turn_outcome)
+  | Live.Reply_details { reply; turn_outcome; turn_ref } ->
+      t.reply <-
+        Some { reply_text = reply; reply_outcome = turn_outcome; reply_turn_ref = turn_ref }
   | Live.Undecodable detail ->
       note_unreadable t detail
 
@@ -1253,4 +1262,100 @@ let of_log ~now (log : Masc_tui_keeper_chat_log.t) =
     (fun (entry : Masc_tui_keeper_chat_log.entry) -> apply ~now t entry.delta)
     (Masc_tui_keeper_chat_log.entries log);
   t
+;;
+
+let turn_status_text ~reply ~turn_ref (outcome : Masc.Keeper_turn_outcome.t) =
+  match outcome with
+  | Masc.Keeper_turn_outcome.Visible_reply when String.trim reply <> "" -> reply
+  | Masc.Keeper_turn_outcome.Visible_reply ->
+      Printf.sprintf "Turn completed with non-text visible content (turn %s)" turn_ref
+  | Masc.Keeper_turn_outcome.Continuation_checkpoint ->
+      Printf.sprintf "Continuation checkpoint recorded (turn %s)" turn_ref
+  | Masc.Keeper_turn_outcome.Terminal_effect_settled ->
+      Printf.sprintf "Reply delivered by a terminal tool (turn %s)" turn_ref
+  | Masc.Keeper_turn_outcome.Awaiting_gate_approval ->
+      Printf.sprintf "Waiting for Gate approval (turn %s)" turn_ref
+  | Masc.Keeper_turn_outcome.No_visible_reply ->
+      Printf.sprintf "Turn completed without a visible reply (turn %s)" turn_ref
+;;
+
+type drawn =
+  | Drawn_thinking of string list
+  | Drawn_skill of skill_activity
+  | Drawn_tools of tool_block
+  | Drawn_text of string
+  | Drawn_reply of string
+  | Drawn_status of string
+
+type drawn_item =
+  { superseded : int option
+  ; drawn : drawn
+  }
+
+(* The trail, flattened, with the recorded reply reconciled against what
+   streamed. Superseded blocks are siblings in the trail, never nested (see
+   [trail_item]), so one level of flattening is the whole of it. *)
+let drawn t =
+  let rec flatten superseded = function
+    | Trail_thinking lines -> [ { superseded; drawn = Drawn_thinking lines } ]
+    | Trail_skill skill -> [ { superseded; drawn = Drawn_skill skill } ]
+    | Trail_tools block -> [ { superseded; drawn = Drawn_tools block } ]
+    | Trail_text text -> [ { superseded; drawn = Drawn_text text } ]
+    | Trail_superseded { attempt; items } ->
+        List.concat_map (flatten (Some attempt)) items
+  in
+  let items = List.concat_map (flatten None) (trail t) in
+  let current_text = function
+    | { superseded = None; drawn = Drawn_text _ } -> true
+    | { superseded = Some _; _ }
+    | { superseded = None
+      ; drawn =
+          ( Drawn_thinking _ | Drawn_skill _ | Drawn_tools _ | Drawn_reply _
+          | Drawn_status _ )
+      } ->
+        false
+  in
+  match t.reply with
+  | None -> items
+  | Some { reply_text; reply_outcome = Masc.Keeper_turn_outcome.Visible_reply; _ }
+    when String.trim reply_text <> "" ->
+      let canonical = safe_block reply_text in
+      if String.equal (String.trim (text t)) (String.trim canonical)
+      then items
+      else begin
+        (* The server stripped something from the visible reply that the
+           stream carried, or the stream never carried the reply: the recorded
+           text stands in for the current attempt's stretches, where the last
+           of them was, so it reads after the tool rounds that produced it. *)
+        let last_text =
+          List.fold_left
+            (fun (index, last) item ->
+              (index + 1, if current_text item then Some index else last))
+            (0, None) items
+          |> snd
+        in
+        let reply_item = { superseded = None; drawn = Drawn_reply canonical } in
+        match last_text with
+        | None -> items @ [ reply_item ]
+        | Some last ->
+            List.concat
+              (List.mapi
+                 (fun index item ->
+                   if current_text item
+                   then if index = last then [ reply_item ] else []
+                   else [ item ])
+                 items)
+      end
+  | Some { reply_text; reply_outcome; reply_turn_ref } ->
+      (* Nothing is chunked for a control outcome, and a visible reply with
+         no text has nothing to chunk: the one row that says how the turn
+         ended comes from the recorded reply. *)
+      items
+      @ [ { superseded = None
+          ; drawn =
+              Drawn_status
+                (safe_block
+                   (turn_status_text ~reply:reply_text ~turn_ref:reply_turn_ref
+                      reply_outcome))
+          } ]
 ;;

@@ -27,6 +27,7 @@ module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_history = Masc_tui_keeper_chat_history
 module Chat_queue = Masc_tui_keeper_chat_queue
 module Keeper_chat_live = Masc_tui_keeper_chat_live
+module Keeper_chat_log = Masc_tui_keeper_chat_log
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Composer = Masc_tui_composer
 module Composer_projection = Masc_tui_composer_projection
@@ -1237,14 +1238,14 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   let live_is_on_screen live =
     (* [msg_live] survives leaving the chat, so a prompt for keeper A must
        not be answered (or interrupted) from keeper B's screen. *)
-    state.msg_target_keeper_name
-    = Some (Keeper_chat_transcript.keeper_name live)
+    state.msg_target_keeper_name = Some (turn_log_keeper_name live)
   in
   match state.msg_live, key with
   | Some live, ("y" | "Y" | "n" | "N")
     when live_is_on_screen live
-         && Option.is_some (Keeper_chat_transcript.awaiting_approval live) -> (
-      match Keeper_chat_transcript.awaiting_approval live with
+         && Option.is_some
+              (Keeper_chat_transcript.awaiting_approval live.tl_transcript) -> (
+      match Keeper_chat_transcript.awaiting_approval live.tl_transcript with
       | Some awaiting ->
           answer_approval ~tool_call_id:awaiting.Keeper_chat_transcript.call_id
             ~allow:(String.lowercase_ascii key = "y");
@@ -1646,7 +1647,8 @@ type async_msg =
       * bool
       * (Keeper_chat.response, Keeper_chat.error) result
       * unit Eio.Promise.u
-  | Keeper_chat_stream_deltas of Keeper_chat.request * Keeper_chat_live.delta list
+  | Keeper_chat_stream_deltas of
+      Keeper_chat.request * (int option * Keeper_chat_live.delta) list
   | Keeper_chat_stream_unavailable of Keeper_chat.request * string
   | Keeper_chat_interrupt_done of
       Keeper_chat.request * (Masc_tui_interrupt_signal.interrupt_signal, string) result
@@ -1900,8 +1902,8 @@ let next_chat_operation_seq state request_id =
     (state.msg_loaded @ state.msg_history)
 ;;
 
-let append_chat_history ?tool_block ?skill_activity ?at ?submitted_at ?turn_phase
-    ?operation_seq state request role text =
+let append_chat_history ?at ?submitted_at ?turn_phase ?operation_seq state
+    request role text =
   let text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text in
   let at = Option.value ~default:(Unix.gettimeofday ()) at in
   let turn_phase =
@@ -1929,8 +1931,11 @@ let append_chat_history ?tool_block ?skill_activity ?at ?submitted_at ?turn_phas
           me_memory_summary = None;
           me_gate = None;
           me_submitted_at = submitted_at;
-          me_tool_block = tool_block;
-          me_skill_activity = skill_activity;
+          (* Session rows carry no tool or skill block: a turn's calls are
+             drawn from its log, and a loaded row's block comes from the
+             server ([msg_entry_of_history_row]). *)
+          me_tool_block = None;
+          me_skill_activity = None;
           me_timestamp = clock_text_of_unix at;
           me_keeper_name = request.Keeper_chat.keeper_name;
           me_request_id = request.request_id;
@@ -2087,9 +2092,9 @@ let post_keeper_chat_watching ~mailbox ~port request =
            visible transcript remains request-owned, but an acceptance event
            at the head of the new stream is not a duplicate in that stream. *)
         let on_chunk chunk =
-          (* The seq each delta arrives with is read and, until the
-             per-operation log lands (stage 3a task 5), not yet kept. *)
-          match List.map snd (Keeper_chat_live.feed decoder chunk) with
+          (* Each delta travels with the journal seq of the frame that carried
+             it; the request's log deduplicates on it. *)
+          match Keeper_chat_live.feed decoder chunk with
           | [] -> ()
           | deltas ->
               enqueue_async mailbox
@@ -2136,39 +2141,25 @@ let inflight_by_request_id state request_id =
 (* The strict decode carries no tool information, so the rows the live pane
    drew are the only record of what the turn did. They are committed before
    the reply lands so the scrollback reads in the order it happened. *)
+(* The turn settled: its log is committed and kept, and the pane goes on
+   drawing it from the same projection with a closing rail. Nothing is copied
+   into session rows -- the tool and skill rows used to be, and were then
+   replaced by the loaded transcript's copies on the next refresh, two
+   replacements of the same words with the reasoning lost at the first
+   (RFC-0412 §3.3). A log with no entries is not kept: the POST never left, or
+   the stream never opened, and there is nothing to draw. *)
 let settle_live_turn state (request : Keeper_chat.request) =
   match inflight_entry_by_request_id state request.Keeper_chat.request_id with
   | Some entry
     when Keeper_chat.same_request_identity entry.sent_request request ->
-      let live = entry.live in
-      let rec commit_item = function
-        | Keeper_chat_transcript.Trail_skill skill ->
-            append_chat_history ~skill_activity:skill state request
-              (Message_skill skill.state)
-              (String.concat "\n"
-                 (Keeper_chat_transcript.skill_rows ~full:false skill))
-        | Keeper_chat_transcript.Trail_tools block ->
-            let projection =
-              Keeper_chat_transcript.project_tool_block
-                Keeper_chat_transcript.Full block
-            in
-            (match projection.rows with
-             | [] -> ()
-             | rows ->
-                 append_chat_history ~tool_block:block state request
-                   Message_tool (String.concat "\n" rows))
-        | Keeper_chat_transcript.Trail_superseded { items; _ } ->
-            (* A retried attempt's tool rows were committed before this
-               variant existed (they sat at the top level); they still are. *)
-            List.iter commit_item items
-        | Keeper_chat_transcript.Trail_thinking _
-        | Keeper_chat_transcript.Trail_text _ -> ()
-      in
-      List.iter commit_item (Keeper_chat_transcript.trail live);
+      Keeper_chat_log.commit entry.log.tl_log;
+      if
+        Keeper_chat_log.entries entry.log.tl_log <> []
+        && not (List.memq entry.log state.msg_settled_logs)
+      then state.msg_settled_logs <- state.msg_settled_logs @ [ entry.log ];
       (match state.msg_live with
        | Some visible
-         when String.equal
-                (Keeper_chat_transcript.request_id visible)
+         when String.equal (turn_log_request_id visible)
                 request.Keeper_chat.request_id ->
            state.msg_live <- None
        | Some _ | None -> ())
@@ -5341,8 +5332,8 @@ let launch_keeper_request ?promoted state ~mailbox request =
             ; causal_parent_request_id = item.causal_parent_request_id
             } )
   in
-  let live =
-    Keeper_chat_transcript.create
+  let log =
+    turn_log_create
       ~keeper_name:request.Keeper_chat.keeper_name
       ~request_id:request.request_id
       ~started_at:(Unix.gettimeofday ())
@@ -5353,14 +5344,14 @@ let launch_keeper_request ?promoted state ~mailbox request =
     ; sent_at = Unix.gettimeofday ()
     ; origin
     ; phase = Turn_streaming
-    ; live
+    ; log
     }
     :: state.msg_inflight;
   if
     Option.exists
       (String.equal request.Keeper_chat.keeper_name)
       state.msg_target_keeper_name
-  then state.msg_live <- Some live;
+  then state.msg_live <- Some log;
   let run () =
     if enqueue_dispatch_start mailbox request false
     then begin
@@ -5506,7 +5497,7 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
                     (Keeper_chat.terminal_safe_text keeper_name)
                     active_request.Keeper_chat.request_id waiting);
                if
-                 Keeper_chat_transcript.interrupt live
+                 Keeper_chat_transcript.interrupt live.tl_transcript
                  = Keeper_chat_transcript.Not_requested
                then launch_keeper_interrupt state ~mailbox active_request))
 ;;
@@ -5717,22 +5708,11 @@ let drain_queued_message state ~base_path ~mailbox =
   next ()
 ;;
 
+(* The same words the log projection ends a turn with: one function, so a
+   turn read from the strict decode and one drawn from its log agree. *)
 let chat_status_text completed =
-  let turn_ref = completed.Keeper_chat.turn_ref in
-  match completed.turn_outcome with
-  | Keeper_chat.Visible_reply when String.trim completed.reply <> "" ->
-      completed.reply
-  | Keeper_chat.Visible_reply ->
-      Printf.sprintf "Turn completed with non-text visible content (turn %s)"
-        turn_ref
-  | Keeper_chat.Continuation_checkpoint ->
-      Printf.sprintf "Continuation checkpoint recorded (turn %s)" turn_ref
-  | Keeper_chat.Terminal_effect_settled ->
-      Printf.sprintf "Reply delivered by a terminal tool (turn %s)" turn_ref
-  | Keeper_chat.Awaiting_gate_approval ->
-      Printf.sprintf "Waiting for Gate approval (turn %s)" turn_ref
-  | Keeper_chat.No_visible_reply ->
-      Printf.sprintf "Turn completed without a visible reply (turn %s)" turn_ref
+  Keeper_chat_transcript.turn_status_text ~reply:completed.Keeper_chat.reply
+    ~turn_ref:completed.turn_ref completed.turn_outcome
 
 (* /task in the composer or the chat pane: create the task first, then hand
    the keeper the operator's words with the task id in front. Creation runs
@@ -6373,11 +6353,10 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Buffer.clear state.msg_input;
       match state.msg_live with
       | Some live
-        when Keeper_chat_transcript.interrupt live
+        when Keeper_chat_transcript.interrupt live.tl_transcript
              = Keeper_chat_transcript.Not_requested -> (
           match
-            inflight_by_request_id state
-              (Keeper_chat_transcript.request_id live)
+            inflight_by_request_id state (turn_log_request_id live)
           with
           | Some request -> launch_keeper_interrupt state ~mailbox request
           | None -> notice ~role:Message_local "no turn of this pane's to interrupt")
@@ -6510,19 +6489,29 @@ let apply_keeper_chat_result state request result =
          drop_inflight state request;
          (match result with
        | Ok (Keeper_chat.Turn_completed completed) ->
-           let role =
-             match completed.turn_outcome with
-             | Keeper_chat.Visible_reply
-               when String.trim completed.reply <> "" ->
-                 Message_keeper
-             | Keeper_chat.Visible_reply
-             | Keeper_chat.Continuation_checkpoint
-             | Keeper_chat.Terminal_effect_settled
-             | Keeper_chat.Awaiting_gate_approval
-             | Keeper_chat.No_visible_reply -> Message_status
+           (* A turn the settled log holds is drawn from it, reply included
+              ([Keeper_chat_transcript.drawn] reconciles the recorded reply by
+              outcome). The row here is for a turn whose stream never told the
+              pane how it ended, so the strict decode is the one source. *)
+           let log_holds_the_turn =
+             Option.exists turn_log_holds_the_turn
+               (settled_log_for_request state request.Keeper_chat.request_id)
            in
-           append_chat_history ~turn_phase:Turn_output state request role
-             (chat_status_text completed);
+           if not log_holds_the_turn then begin
+             let role =
+               match completed.turn_outcome with
+               | Keeper_chat.Visible_reply
+                 when String.trim completed.reply <> "" ->
+                   Message_keeper
+               | Keeper_chat.Visible_reply
+               | Keeper_chat.Continuation_checkpoint
+               | Keeper_chat.Terminal_effect_settled
+               | Keeper_chat.Awaiting_gate_approval
+               | Keeper_chat.No_visible_reply -> Message_status
+             in
+             append_chat_history ~turn_phase:Turn_output state request role
+               (chat_status_text completed)
+           end;
            add_event state "message"
              (Printf.sprintf "Keeper turn finished: %s" request.request_id)
        | Ok (Keeper_chat.Replayed_succeeded _) ->
@@ -9890,7 +9879,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 Option.exists
                   (String.equal request.Keeper_chat.keeper_name)
                   state.msg_target_keeper_name
-              then state.msg_live <- Some entry.live;
+              then state.msg_live <- Some entry.log;
               proceed := true
           | Some _ | None -> ())
   | Keeper_chat_done (request, _was_replay, result, acknowledge) ->
@@ -9937,7 +9926,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          when Keeper_chat.same_request_identity entry.sent_request request ->
            entry.phase <- Turn_streaming;
            let now = Unix.gettimeofday () in
-           List.iter (Keeper_chat_transcript.apply ~now entry.live) deltas
+           List.iter
+             (fun (seq, delta) -> turn_log_add ~now entry.log ~seq delta)
+             deltas
        | Some _ | None -> ())
   | Keeper_chat_stream_unavailable (request, detail) ->
       (match
@@ -9958,7 +9949,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           match state.msg_live with
           | None -> None
           | Some live ->
-            Keeper_chat_transcript.tool_calls live
+            Keeper_chat_transcript.tool_calls live.tl_transcript
             |> List.find_opt (fun (activity : Keeper_chat_transcript.tool_activity) ->
                  Option.equal String.equal activity.call_id (Some tool_call_id))
             |> Option.map (fun (activity : Keeper_chat_transcript.tool_activity) ->
@@ -10193,7 +10184,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        with
        | Some entry
          when Keeper_chat.same_request_identity entry.sent_request request ->
-           let live = entry.live in
+           let live = entry.log.tl_transcript in
            let noted =
              match result with
              | Ok (Masc_tui_interrupt_signal.Signalled { turn_id }) ->
@@ -10770,9 +10761,7 @@ let terminal_title_runtime state keeper_name =
 ;;
 
 let terminal_title_snapshot state =
-  let live =
-    Option.map Keeper_chat_transcript.keeper_name state.msg_live
-  in
+  let live = Option.map turn_log_keeper_name state.msg_live in
   let inflight =
     List.map
       (fun entry -> entry.sent_request.keeper_name)
@@ -14070,16 +14059,17 @@ and is loaded on demand through keeper_skill.
                      match state.msg_live with
                      | Some live
                        when state.msg_target_keeper_name
-                            = Some (Keeper_chat_transcript.keeper_name live) ->
+                            = Some (turn_log_keeper_name live) ->
                          (match
                             Masc_tui_esc_interrupt.action
                               ~now_ns:(Mtime_clock.elapsed_ns ())
-                              (Keeper_chat_transcript.interrupt live)
+                              (Keeper_chat_transcript.interrupt
+                                 live.tl_transcript)
                           with
                           | Masc_tui_esc_interrupt.Launch_interrupt ->
                             (match
                                inflight_by_request_id state
-                                 (Keeper_chat_transcript.request_id live)
+                                 (turn_log_request_id live)
                              with
                              | Some request ->
                                launch_keeper_interrupt state
@@ -14095,8 +14085,7 @@ and is loaded on demand through keeper_skill.
                    ~answer_approval:(fun ~tool_call_id ~allow ->
                      match
                        Option.bind state.msg_live (fun live ->
-                         inflight_by_request_id state
-                           (Keeper_chat_transcript.request_id live))
+                         inflight_by_request_id state (turn_log_request_id live))
                      with
                      | Some request ->
                          launch_keeper_approval state ~mailbox:async_messages

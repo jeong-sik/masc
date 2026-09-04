@@ -3050,7 +3050,10 @@
   alcotest
   ast_grep
   astring
+  masc
   masc_tui_interrupt_signal
+  masc_tui_keeper_chat_live
+  masc_tui_keeper_chat_log
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_queue
   masc_tui_keeper_chat_transcript
@@ -3063,12 +3066,18 @@
 (test
  (name test_tui_chat_rows_memo)
  (modules test_tui_chat_rows_memo)
- (libraries alcotest masc_tui_keeper_chat_projection masc_tui_keeper_chat_queue masc_tui_types))
+ (libraries
+  alcotest
+  masc_tui_keeper_chat_live
+  masc_tui_keeper_chat_log
+  masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_queue
+  masc_tui_types))
 
 (test
  (name test_tui_chat_timeline_assembly)
  (modules test_tui_chat_timeline_assembly)
- (libraries alcotest masc_tui_types))
+ (libraries alcotest masc_tui_keeper_chat_transcript masc_tui_types))
 
 (test
  (name test_tui_text_input_target)

@@ -716,10 +716,44 @@ let microvm_guest_provisions (t : t) ~backend ~timeout_sec =
      | Ok shim_host_dir -> Ok { work_volume_name; shim_host_dir })
 ;;
 
+(** Boot invariant (RFC-0052), fail-closed:
+    {!Keeper_sandbox_microvm.work_volume_guest_root} must be a real mountpoint
+    inside the guest before anything is written there. The
+    mkdir and write probe below both succeed against a writable rootfs
+    directory, so without this check a guest whose volume mount is absent at
+    boot serves an ephemeral tree silently -- keeper writes evaporate on the
+    next boot and a delivered paste's log line is a lie (2026-09-04, analyst
+    guest on a stale rootfs tree). *)
+let ensure_microvm_work_volume_mounted ?timeout_sec (t : t) ~backend ~container_name =
+  match Keeper_sandbox_microvm.work_volume_name ~keeper_name:t.meta.name with
+  | Error detail -> Error ("microvm_work_volume_unnamed: " ^ detail)
+  | Ok volume_name ->
+    let probe =
+      Keeper_sandbox_microvm.work_volume_mounted_probe_argv_for backend ~container_name
+    in
+    (match run_argv_with_status ?timeout_sec probe with
+     | Unix.WEXITED 0, _ -> Ok ()
+     | _, out ->
+       let detail = Keeper_sandbox_runtime.docker_failure_output_for_log out in
+       Error
+         (Printf.sprintf
+            "microvm_work_volume_not_mounted: %s is not a mountpoint in guest %s (volume %s)%s; remove the guest to force a fresh boot with the volume attached"
+            Keeper_sandbox_microvm.work_volume_guest_root
+            container_name
+            volume_name
+            (if String.equal (String.trim detail) "" then "" else ": " ^ detail)))
+;;
+
 (** The keeper's root on the work volume, made inside the guest once it is
     up. The volume outlives the guest, so this is a no-op after the first
-    boot; it runs as root because the volume root is root-owned. *)
+    boot; it runs as root because the volume root is root-owned. The mount
+    invariant runs first: existence and writability of the root prove nothing
+    while {!Keeper_sandbox_microvm.work_volume_guest_root} itself may be a
+    rootfs directory. *)
 let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~backend ~container_name =
+  match ensure_microvm_work_volume_mounted ?timeout_sec t ~backend ~container_name with
+  | Error _ as err -> err
+  | Ok () ->
   let root = Keeper_sandbox_microvm.keeper_work_root ~keeper_name:t.meta.name in
   let mkdir =
     Keeper_sandbox_microvm.keeper_work_root_mkdir_argv_for
@@ -806,7 +840,21 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
       | Ok Keeper_sandbox_runtime.Docker_container_absent -> `Boot
     in
     match start_state with
-    | `Adopt snapshot -> adopt snapshot
+    | `Adopt snapshot ->
+      (* A running guest proves its process is up, not that its work volume
+         is mounted: a guest that booted without the mount serves a writable
+         rootfs directory at the same path, and every keeper write there
+         evaporates on the next boot. Adopting on process state alone would
+         hand turns to exactly that guest, so the mount invariant is checked
+         here the same as on a fresh boot, and a guest that fails it is
+         refused rather than adopted. The guest is left running for an
+         operator to inspect; the next start probes it again and fails the
+         same way until it is removed. *)
+      (match
+         ensure_microvm_work_volume_mounted ?timeout_sec t ~backend ~container_name
+       with
+       | Ok () -> adopt snapshot
+       | Error _ as err -> err)
     | `Error error -> Error error
     | `Boot ->
       (* A stopped guest survived [--rm] (host reboot mid-life); clear the
@@ -986,7 +1034,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                   adopt github_identity
                 | Error detail ->
                   take_down_after_boot
-                    ~what:"guest cannot use its keeper root on the work volume"
+                    ~what:"guest cannot prove its work volume is mounted and its keeper root usable"
                     ~detail)
              | Error inspect_out ->
                take_down_after_boot
@@ -1005,8 +1053,25 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
              | Ok Keeper_sandbox_runtime.Docker_container_running ->
                (* The stable-name race adopted the snapshot claimed before
                   either launch. Both launch argv values therefore point at
-                  the same immutable directory. *)
-               adopt github_identity
+                  the same immutable directory.
+
+                  Running proves the winner's process is up, not that its
+                  work volume is mounted -- the race loser must not reach a
+                  guest the mount invariant has not verified, so it adopts
+                  through the same probe as the plain adopt path. A failure
+                  fails closed with the guest left running: it may be serving
+                  the winner's turn off the shared snapshot, which is why the
+                  registered identity is kept here as it is when the state
+                  probe itself fails below. *)
+               (match
+                  ensure_microvm_work_volume_mounted
+                    ?timeout_sec
+                    t
+                    ~backend
+                    ~container_name
+                with
+                | Ok () -> adopt github_identity
+                | Error _ as err -> err)
              | Ok Keeper_sandbox_runtime.Docker_container_stopped
              | Ok Keeper_sandbox_runtime.Docker_container_absent ->
                let removed =

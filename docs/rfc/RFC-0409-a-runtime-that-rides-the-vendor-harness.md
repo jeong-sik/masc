@@ -37,7 +37,7 @@ masc 도구가 도는 이유도 보증이 아니다. 같은 주석: Codex 가 MC
 
 즉 플래그를 켜도 배열은 그대로 건너가고, 절감량은 아무도 모른다. 위 `bootstrap_floor_exceeded` 는 그 플래그가 배포된 **뒤에** 났다.
 
-**MCP `listChanged` 도 답이 아니다.** masc 는 official client 에게 MCP 서버로 붙으면서 `initialize` 에 빈 capability 를 낸다(`runtime_official_client_mcp.ml:289`, ``"tools", `Assoc []``). 다른 MCP 서버는 `listChanged: true` 를 선언하지만(`mcp_server.ml:143`) 그 알림을 **쏘는 코드가 없다** — `broadcast_tools_list_changed` 는 `mcp_server_eio_call_tool.ml:472` 의 인자로만 존재하고 본문에서 적용되지 않으며, 테스트 세 곳은 전부 `(fun () -> ())` 다. 그리고 세 레인 중 Codex 는 MCP 를 아예 안 쓰고(`thread/start` 파라미터), Antigravity 의 브리지는 POST 전용이라 서버발 알림을 나를 통로가 없다.
+**MCP `listChanged` 도 답이 아니다.** masc 는 official client 에게 MCP 서버로 붙으면서 `initialize` 에 빈 capability 를 낸다(`runtime_official_client_mcp.ml:289`, ``"tools", `Assoc []``). 다른 MCP 서버는 `listChanged: true` 를 선언하지만(`mcp_server.ml:144`) 그 알림을 **쏘는 코드가 없다** — `broadcast_tools_list_changed` 는 `mcp_server_eio_call_tool.ml:472` 의 인자로만 존재하고 본문에서 적용되지 않으며, 테스트 세 곳은 전부 `(fun () -> ())` 다. 그리고 세 레인 중 Codex 는 MCP 를 아예 안 쓰고(`thread/start` 파라미터), Antigravity 의 브리지는 POST 전용이라 서버발 알림을 나를 통로가 없다.
 
 ## 3. 제안
 

@@ -1300,6 +1300,58 @@ let test_esc_dispatch_and_footer_read_the_interrupt_table () =
       footer
 ;;
 
+(* The chat surface had exactly one exit, and on a live turn Esc's first
+   press spends itself stopping the turn -- so leaving with the turn running
+   was not expressible: the only way out signalled the turn to stop. The
+   empty-draft Q arm is the leave half without the interrupt half. Two
+   things keep it honest as the executable evolves: the arm must actually
+   reach [leave_keeper_message], and [interrupt_turn] must stay Esc's alone
+   -- the day a second key consults it, "quiet" stops describing Q. *)
+let test_quiet_leave_leaves_without_touching_the_turn () =
+  let leaves =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"handle_message_key"
+      ~callee:"leave_keeper_message"
+  in
+  (* Once for Esc, once for the empty-draft Q. *)
+  if leaves < 2 then
+    failf
+      "the quiet leave must reach leave_keeper_message beside Esc; observed \
+       %d call(s)"
+      leaves;
+  let interrupts =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"handle_message_key"
+      ~callee:"interrupt_turn"
+  in
+  if interrupts <> 1 then
+    failf
+      "only Esc may spend itself on the turn (interrupt_turn observed %d \
+       time(s); the quiet leave must not consult it)"
+      interrupts
+;;
+
+(* A terminal too small to draw the composer still owes the operator the
+   exit. The dispatch admits Q beside Esc into the composer handler because
+   a transcript-only viewport is when stepping away from a running turn
+   matters most; with text in the draft the handler answers Q as an
+   ordinary letter, so this route takes nothing from typing. *)
+let test_quiet_leave_routes_past_the_composer_gate () =
+  let routed =
+    Ast_grep.count_string_literals_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"main"
+      ~literals:[ "Q" ]
+  in
+  if routed < 1 then
+    failf
+      "the dispatch must hand Q to the composer handler beside Esc; observed \
+       %d occurrence(s)"
+      routed
+;;
+
 let test_cancel_and_edit_take_the_row_with_them () =
   let cancelled =
     Ast_grep.count_calls_in_value_binding
@@ -1491,6 +1543,10 @@ let () =
             test_escape_reaches_the_interrupt
         ; test_case "Esc dispatch and footer read the interrupt table" `Quick
             test_esc_dispatch_and_footer_read_the_interrupt_table
+        ; test_case "quiet leave leaves without touching the turn" `Quick
+            test_quiet_leave_leaves_without_touching_the_turn
+        ; test_case "quiet leave routes past the composer gate" `Quick
+            test_quiet_leave_routes_past_the_composer_gate
         ; test_case "the budget and the pane agree about queue rows" `Quick
             test_the_budget_and_the_pane_agree_about_queue_rows
         ; test_case "the budget and the pane agree about the scrollback row"

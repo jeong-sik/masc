@@ -504,12 +504,20 @@ let test_input_cursor_uses_visible_terminal_cells () =
     (supported 13 80 3);
   check bool "status frame keeps three history rows" true
     (supported 14 80 3);
-  check bool "twelve columns cannot preserve a source suffix" false
-    (supported 30 12 0);
-  check bool "thirteen columns preserve a source suffix" true
-    (supported 30 13 0);
-  check int "the minimum terminal leaves nine framed content cells" 9
-    (Frame.inner_width ~cols:13)
+  (* #32984: the width gate derives from a row's fixed chrome -- frame
+     border and padding, body indent, turn rail, the label column floor --
+     plus a readable body floor, and [Layout.chat_min_terminal_cols] carries
+     the result. The thirteen-column contract this replaced was text-only
+     (two indent, four body, three for a shortened source); label-bearing
+     rows shredded mid-word there. *)
+  check bool "one column under the chat minimum is gated out" false
+    (supported 30 (Layout.chat_min_terminal_cols - 1) 0);
+  check bool "the chat minimum is admitted" true
+    (supported 30 Layout.chat_min_terminal_cols 0);
+  (* Frame inner width minus indent (2), rail (2), and the label column
+     floor (10) is the body the gate guarantees. *)
+  check int "the minimum terminal leaves a twenty-cell framed body" 20
+    (Frame.inner_width ~cols:Layout.chat_min_terminal_cols - 2 - 2 - 10)
 
 let test_chat_history_height_uses_the_shared_chrome () =
   check int "46-row pane exposes 38 transcript rows" 38

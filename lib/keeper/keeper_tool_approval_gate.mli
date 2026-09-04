@@ -28,6 +28,7 @@ val create :
   registry:Keeper_tool_approval_registry.t ->
   late_approvals:Keeper_late_approval.t ->
   publish:(Keeper_chat_events.keeper_chat_event -> unit) ->
+  redact_text:(string -> string) ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   keeper_name:string ->
   timeout_sec:float ->
@@ -35,6 +36,11 @@ val create :
 (** A gate for one keeper's turn on one chat stream. Its composition plan
     index has exactly the same lifetime, so another turn cannot overwrite the
     plan this gate judges.
+
+    [redact_text] is the turn's secret redaction, applied to the arguments,
+    question and reason of every [Tool_approval_requested] before it is
+    published: the bus feeds the canonical journal (RFC-0412), so what is
+    published is what is kept.
 
     [timeout_sec] bounds how long a call waits. It is required: a wait with no
     bound parks the turn for the life of the process when nobody is watching,

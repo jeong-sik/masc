@@ -47,7 +47,7 @@ let with_gate ~timeout_sec f =
       let registry = Registry.create () in
       let events = Events.create () in
       let gate =
-        Gate.create ~registry
+        Gate.create ~redact_text:Fun.id ~registry
           ~late_approvals:(Masc.Keeper_late_approval.create ())
           ~publish:(Keeper_chat_events_publish.publish events)
           ~clock ~keeper_name:keeper ~timeout_sec

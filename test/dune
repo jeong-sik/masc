@@ -3158,7 +3158,7 @@
 (test
  (name test_tui_keeper_chat_live)
  (modules test_tui_keeper_chat_live)
- (libraries alcotest fmt masc_tui_keeper_chat_live yojson))
+ (libraries alcotest fmt masc masc_tui_keeper_chat_live yojson))
 
 (test
  (name test_tui_command)

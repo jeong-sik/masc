@@ -1121,7 +1121,7 @@ let test_a_registered_length_name_passes_through_whole () =
 (* The shape a reader follows a long turn by: thinking, then the call, then
    more thinking, then the reply — not three pooled blocks. This is the order
    the live pane draws. *)
-let trail_item_to_string : Transcript.trail_item -> string = function
+let rec trail_item_to_string : Transcript.trail_item -> string = function
   | Transcript.Trail_thinking lines ->
       "thinking(" ^ String.concat "\\n" lines ^ ")"
   | Transcript.Trail_skill skill ->

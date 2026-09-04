@@ -41,6 +41,7 @@ let entry_at ?(id = "") at : Tui_types.msg_entry =
   ; me_operation_seq = 0
   ; me_text = Printf.sprintf "row at %.0f" at
   ; me_memory_summary = None
+  ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
   ; me_skill_activity = None
@@ -64,6 +65,7 @@ let chat_entry ?turn_phase ?turn_sequence ?(operation_seq = 0) ?memory_summary
   ; me_operation_seq = operation_seq
   ; me_text = text
   ; me_memory_summary = memory_summary
+  ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
   ; me_skill_activity = None

@@ -20,6 +20,7 @@ let entry_at ?(keeper = "alpha") ?(request_id = "") at : Tui_types.msg_entry =
   ; me_operation_seq = 0
   ; me_text = Printf.sprintf "row at %.0f" at
   ; me_memory_summary = None
+  ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
   ; me_skill_activity = None

@@ -1853,6 +1853,7 @@ let append_chat_history ?tool_block ?skill_activity ?at ?submitted_at ?turn_phas
           me_operation_seq = operation_seq;
           me_text = text;
           me_memory_summary = None;
+          me_gate = None;
           me_submitted_at = submitted_at;
           me_tool_block = tool_block;
           me_skill_activity = skill_activity;
@@ -4804,6 +4805,20 @@ let locally_submitted_at state keeper_name request_id =
 
 let msg_entry_of_history_row state keeper_name ~operation_seq
     (row : Keeper_chat_history.row) =
+  let gate =
+    match row.Keeper_chat_history.kind with
+    | Keeper_chat_history.Gate_activity { approval_id; phase; tool } ->
+        Some
+          { gs_approval_id = approval_id; gs_phase = phase; gs_tool = tool }
+    | Keeper_chat_history.Memory_activity _
+    | Keeper_chat_history.Addressed_to_keeper _
+    | Keeper_chat_history.Said_by_keeper
+    | Keeper_chat_history.Autonomous_reply
+    | Keeper_chat_history.Delivery_failed _
+    | Keeper_chat_history.Tool_calls _
+    | Keeper_chat_history.Skill_activity _
+    | Keeper_chat_history.Reasoning _ -> None
+  in
   let memory_summary =
     match row.Keeper_chat_history.kind with
     | Keeper_chat_history.Memory_activity { summary } -> summary
@@ -4866,7 +4881,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         , Some activity )
     | Keeper_chat_history.Reasoning lines ->
         (Message_thinking, Turn_progress, String.concat "\n" lines, None, None)
-    | Keeper_chat_history.Gate_activity { phase; tool } ->
+    | Keeper_chat_history.Gate_activity { approval_id = _; phase; tool } ->
         (* Server-owned gate status, drawn from the phase rather than from
            the sentence the store composed. It is not Memory: putting it in
            that lane interleaved approvals with journal commits, and hiding
@@ -4931,6 +4946,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
       Option.map
         (Keeper_chat.terminal_safe_text ~preserve_newlines:false)
         memory_summary
+  ; me_gate = gate
   ; me_submitted_at = submitted_at
   ; me_tool_block = tool_block
   ; me_skill_activity = skill_activity
@@ -5611,6 +5627,7 @@ let chat_notice state ~keeper_name ~role text =
               me_operation_seq = next_chat_operation_seq state "";
               me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text;
               me_memory_summary = None;
+              me_gate = None;
               me_submitted_at = None;
               me_tool_block = None;
               me_skill_activity = None;

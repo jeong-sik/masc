@@ -2794,7 +2794,7 @@ type state = {
      names what a sent draft answers -- [None] publishes a new post,
      [Some post_id] adds a comment to that post -- so one pane covers both
      writes and the payload alone decides which. *)
-  mutable board_draft: Buffer.t;
+  board_draft: Buffer.t;
   mutable board_compose_armed: bool;
   mutable board_compose_reply_to: string option;
   (* One send at a time: the gate a slow server needs so s-s cannot post
@@ -3101,7 +3101,7 @@ type state = {
   mutable system_logs_category: string option;
   mutable system_logs_detail_seq: int option;
   mutable system_logs_detail_scroll: int;
-  mutable msg_input: Buffer.t;
+  msg_input: Buffer.t;
   (* Images staged with :attach, sent with the next message and cleared by the
      send. Held next to the draft because they are part of the same unsent
      message: switching keepers or abandoning the draft must not leave an image
@@ -3118,10 +3118,6 @@ type state = {
   mutable msg_return: keeper_chat_return;
   mutable msg_drafts: (string * string) list;
   mutable msg_history: msg_entry list;
-  (* The first local submission clock for each request. A queued row keeps this
-     clock when it becomes active and when a transcript refresh replaces the
-     session copy. It is presentation metadata, never an ordering key. *)
-  mutable msg_submission_times: (string * float) list;
   (* How far back the arrows have walked through what this pane sent, and the
      draft they set aside to do it. [None] means the composer holds the
      operator's own text, so pressing down has nothing to give back. *)
@@ -3788,7 +3784,6 @@ let create_state
   msg_return = Keeper_chat_return_detail;
   msg_drafts = [];
   msg_history = [];
-  msg_submission_times = [];
   msg_recall_at = None;
   msg_recall_draft = "";
   msg_recall_replaces = None;

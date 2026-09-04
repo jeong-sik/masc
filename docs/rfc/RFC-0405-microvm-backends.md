@@ -234,3 +234,36 @@ D3(파서는 백엔드가 소유하고 모르는 모양은 `Error`)이 그대로
   `container` 의 실측치(부팅 1.3-2.4s, 호출당 0.06-0.10s, 게스트당 ~460MB)는
   `keeper_types_profile_sandbox.ml` 에 있고, 새 백엔드는 자기 수치를 스스로
   가져와야 한다.
+
+## 후기 — gondolin 은 이 RFC 밖이지만 SSH 레인 안이다 (2026-09-04)
+
+이 RFC 가 gondolin 을 뺀 판정은 그대로다. 이미 있는 세션에 명령을 넣는 방법이
+CLI 에 없다. `exec --sock` 은 대화형 bash 가 채널을 쥔 채로 write EPIPE 를
+받고, `attach` 는 `session connection closed` 로 끝난다. 백엔드로는 못 쓴다.
+
+그 판정이 남겨둔 실 — `bash --ssh` — 을 당겨봤다. **통한다.**
+
+```
+gondolin bash --ssh --ssh-port 22222 --ssh-user root < /dev/null
+```
+
+TTY 없이 뜨고, `list` 가 ALIVE 로 보고하고, 연결을 새로 열어도 같은 게스트다.
+그래서 gondolin 게스트는 `microvm_backend` 가 아니라 **`remote_ssh` 엔드포인트**로
+붙는다. 백엔드 변형도, argv 빌더도, dispatch 층도 필요 없다. 이 RFC 가 세우는
+경계 자체를 안 건드린다.
+
+라이브 실측(2026-09-04, macOS 26.6.1, gondolin 0.12.0): `gondolin-probe` 키퍼가
+프리플라이트를 전부 통과하고 턴 하나를 완주했다. `exit 0`, 220ms,
+`via: remote_ssh`, Alpine aarch64, Host Gate 4단계 정상 통과.
+
+즉 "gondolin 은 안 된다" 가 아니라 "gondolin 은 백엔드가 아니라 엔드포인트다".
+운영 절차와 그 대가(네트워크 두 모드, rootfs 휘발, 262MB 한계, 세션 소유자)는
+`docs/operations/ssh-endpoints-runbook.md` 부록에 있다.
+
+같은 회차에 `microvm_backend = "microsandbox"` 도 처음 몰아봤다. **안 뜬다.**
+`msb list --format json` 이 `{created_at, image, name, status}` 만 돌려주고 라벨
+값을 안 실어서, 이 스윕이 유기 판정에 쓰는 owner pid 를 목록에서 읽을 수 없다.
+키퍼는 `microvm_container_listing_failed` 에서 멈춘다. 라벨은 `msb inspect` 의
+`active_config.labels` 에 있으니 게스트당 한 번씩 부르면 되지만, 그 N+1 은 아직
+구현이 없다. 위 검증 표의 "각 백엔드로 keeper 하나를 띄워 턴 하나를 완주" 는
+`apple_container` 만 만족한다.

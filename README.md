@@ -135,11 +135,27 @@ Two axes are reported. The **model source** is where turns get their tokens:
   is on `PATH`, and `signed in` when its own login check passes.
 
 The **execution sandbox** is where a Keeper's tools run. The wizard only reports
-which backends the host can offer — `docker` (daemon reachable), `microvm` via
-Apple's `container` CLI on macOS, and `remote_ssh` (endpoints declared in
-`runtime.toml`). It does not pick one on its own: the sandbox is set per Keeper
-in `.masc/config/keepers/<name>.toml`, or by a `--team <preset>` that carries its
-own choice — pass `--sandbox docker|microvm|remote_ssh` to set the seeded team's.
+which backends the host can offer — `docker` (daemon reachable), `microvm` (a
+guest behind a hypervisor; see below for which runtime provides it), and
+`remote_ssh` (endpoints declared in `runtime.toml`). It does not pick one on its
+own: the sandbox is set per Keeper in `.masc/config/keepers/<name>.toml`, or by a
+`--team <preset>` that carries its own choice — pass
+`--sandbox docker|microvm|remote_ssh` to set the seeded team's.
+
+`microvm` says a Keeper's tree lives on a guest behind a hypervisor boundary. It
+does not say which runtime provides that guest; `microvm_backend` in the Keeper
+TOML does, and RFC-0405 holds the comparison. Omit it and the host's assumed
+backend applies — Apple's `container` on macOS, nothing elsewhere, so a Keeper on
+another host is refused at boot rather than quietly given a different isolation.
+
+| `microvm_backend` | CLI | State, measured 2026-09-04 on macOS 26.6.1 |
+|---|---|---|
+| `apple_container` | `container` | Runs. The assumed backend on macOS. |
+| `microsandbox` | `msb` | Wired, does not boot. `msb list --format json` reports only `{created_at, image, name, status}` and echoes no label values, so the sweep cannot tell which guests are its own; the Keeper stops at `microvm_container_listing_failed`. `msb inspect` does carry the labels, one call per guest. |
+| `nerdctl_kata` | `nerdctl` | Untested here — the CLI is absent, and an absent CLI is refused by name rather than substituted. |
+
+A backend whose CLI is missing is refused at boot. That refusal is the point: a
+Keeper that asked for a microVM never silently receives a shared kernel.
 
 The subscription sign-in check is also a standalone command:
 `masc runtime-probe <runtime_id>` exits `0` when the CLI is signed in and `1`
@@ -342,7 +358,7 @@ dashboard operations are covered by
 | Runtime routing | Assign a provider/model runtime to each Keeper and define ordered runtime lanes | A valid catalog and provider credentials are still required |
 | Fusion | Run panel and judge workflows through `masc_fusion` | Presets and judge runtimes must be configured before use |
 | Connectors | Connect workspace activity to supported external channels, including Discord and Slack | Tokens and channel-to-Keeper bindings are explicit operator configuration |
-| Sandboxes | Run Keeper shell work under `docker`, `microvm` (Apple Container, the guest owns its working tree), or `remote_ssh` | A Keeper with no accepted profile does not run; none of the three is a complete security boundary |
+| Sandboxes | Run Keeper shell work under `docker`, `microvm` (the guest owns its working tree; `microvm_backend` names the runtime), or `remote_ssh` | A Keeper with no accepted profile does not run; none of the three is a complete security boundary. Of the three microVM backends only `apple_container` is known to boot — see the table under First-run setup |
 | IDE | Inspect the experimental in-dashboard collaboration shell | Not the supported front door for normal work |
 
 The product front door is repo workspace collaboration, and the terminal UI is
@@ -393,7 +409,11 @@ evidence with file paths and commands.
 
 Unknown Keeper TOML keys are rejected. `sandbox_profile` accepts `docker`,
 `microvm`, or `remote_ssh`; there is no host profile, and a Keeper declared
-without an accepted one is refused rather than run on the host.
+without an accepted one is refused rather than run on the host. A `microvm`
+Keeper may add `microvm_backend = "apple_container" | "microsandbox" |
+"nerdctl_kata"`; omitted, the host's assumed backend applies. A `remote_ssh`
+Keeper must add `remote_endpoint = "<name>"` naming a table under
+`[exec.ssh.endpoints]` in `runtime.toml`.
 
 ### Keeper event-driven lifecycle
 

@@ -8484,7 +8484,7 @@ let handle_composer_key state ~base_path ~mailbox key =
               across. It is dropped when the mode ends, so a session that moves
               to a different room measures again. *)
            state.voice_continuous <- Some keeper_name;
-           state.voice_floor <- Masc.Voice_bridge.measure_noise_floor ~agent_id:keeper_name;
+           state.voice_floor <- Masc.Voice_bridge.measure_noise_floor ~agent_id:keeper_name ();
            state.last_action <- Some ("voice: continuous on", Unix.gettimeofday ());
            if state.voice_capture = None
            then launch_voice_capture state ~mailbox ~keeper:keeper_name
@@ -13911,7 +13911,7 @@ and is loaded on demand through keeper_skill.
                      | None, Some keeper ->
                          state.voice_continuous <- Some keeper;
                          state.voice_floor <-
-                           Masc.Voice_bridge.measure_noise_floor ~agent_id:keeper;
+                           Masc.Voice_bridge.measure_noise_floor ~agent_id:keeper ();
                          state.last_action <-
                            Some ("voice: continuous on", Unix.gettimeofday ());
                          if state.voice_capture = None

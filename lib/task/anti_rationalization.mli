@@ -16,9 +16,11 @@ type review_request =
     (RFC-0361 D1).
 
     Stated per review rather than defaulted, because the two cases differ in
-    what a verdict means. With [No_lookup_surface] the submitter's references
-    are the upper bound of what could be checked, and an approval says only
-    that the submitted excerpt reads as real work. This module deliberately
+    what a verdict means. With [No_lookup_surface] nothing the request asserts
+    can be checked against the producer's tree: a completion is judged on the
+    submitted excerpt alone, and a stop on its stated reason alone. Both are
+    described to the judge in their own question's words, so the surface is
+    the same value and the prose about it is not. This module deliberately
     does not build the surface itself: the tools that read a producer's tree
     belong above the containment primitives, not inside the review protocol.
     Every advertised filesystem tool is bound to the one producer named by the
@@ -124,6 +126,12 @@ type verdict_question =
   | Completion of
       { completion_contract : string list option
       ; required_evidence : string list
+      ; few_shot_block : string
+            (** Operator disagreements returned to the judge as examples. Only
+                the completion prompt has a slot for it, so it rides in this
+                arm: as a separate argument it was accepted for a cancellation
+                and dropped in silence, and the ledger read behind it ran for
+                nothing. *)
       }
   | Cancellation of
       { reason : string
@@ -137,7 +145,6 @@ val review
   -> ?generator_runtime:string
   -> ?on_verdict:(review_result -> unit)
   -> ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)
-  -> ?few_shot_block:string
   -> ?sw:Eio.Switch.t option
   -> question:verdict_question
   -> lookup:lookup_surface
@@ -161,8 +168,7 @@ val review
 
     There is no inline fallback prompt; an error keeps the Task nonterminal. *)
 val build_prompt
-  :  ?few_shot_block:string
-  -> question:verdict_question
+  :  question:verdict_question
   -> lookup:lookup_surface
   -> review_request
   -> (string, string) result

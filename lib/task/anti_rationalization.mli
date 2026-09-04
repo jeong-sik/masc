@@ -122,10 +122,24 @@ val run
     contract attached — which is what happened, and refused every cancellation
     of a contracted Task for not finishing the work it asks not to finish
     (#33052). *)
+
+(** The evidence posture of a completion submission, as the judge sees it.
+    [Note_only]: zero artifacts it can open — every item a note or an unusable
+    reference. [Usable_artifacts n]: [n] readable, untruncated artifacts. The
+    arithmetic is the judge prompt's rules 3 and 4 made typed, so the prose
+    cannot drift from what the snapshot holds. *)
+type evidence_posture =
+  | Note_only
+  | Usable_artifacts of int
+
 type verdict_question =
   | Completion of
       { completion_contract : string list option
       ; required_evidence : string list
+      ; evidence_posture : evidence_posture
+            (** Computed at the review site from the fixed snapshot. Rides
+                inside the arm like [few_shot_block]: the question picker
+                reads no store. *)
       ; few_shot_block : string
             (** Operator disagreements returned to the judge as examples. Only
                 the completion prompt has a slot for it, so it rides in this

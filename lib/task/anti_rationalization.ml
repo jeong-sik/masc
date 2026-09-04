@@ -129,10 +129,26 @@ let render key vars =
     contract attached — which is what happened, and refused every cancellation
     of a contracted Task for not finishing the work it asks not to finish
     (#33052). *)
+
+(* The evidence posture of a completion submission, as the judge will see it.
+   [Note_only]: zero artifacts it can open — every snapshot item is a
+   narration or an unusable reference. [Usable_artifacts n]: n readable,
+   untruncated artifacts. The count arithmetic is the judge prompt's rules 3
+   and 4 made typed, so the prose cannot drift from what the snapshot holds. *)
+type evidence_posture =
+  | Note_only
+  | Usable_artifacts of int
+
 type verdict_question =
   | Completion of
       { completion_contract : string list option
       ; required_evidence : string list
+      ; evidence_posture : evidence_posture
+            (** Computed at the review site from the fixed snapshot. Rides
+                inside the arm like [few_shot_block]: the question picker
+                reads no store, and a posture passed beside the question
+                would be accepted for a cancellation that never asks about
+                artifacts. *)
       ; few_shot_block : string
             (** Operator disagreements returned to the judge as examples. It
                 lives in this arm because only the completion prompt has a slot
@@ -171,6 +187,19 @@ let evidence_section ~required_evidence =
     render
       Prompt_names.verification_required_evidence
       [ "evidence_items", numbered items ]
+;;
+
+(* The one section that is never empty. A note-only submission faces its own
+   disposition in the question's body, so "no artifacts" is a sentence the
+   judge reads rather than a silence it fills with the notes' own confidence
+   (task-785). *)
+let posture_section = function
+  | Note_only ->
+    render Prompt_names.verification_evidence_posture_note_only []
+  | Usable_artifacts count ->
+    render
+      Prompt_names.verification_evidence_posture_usable
+      [ "usable_artifact_count", string_of_int count ]
 ;;
 
 (* Unavailable or partial roots are rejected while constructing the lookup
@@ -247,12 +276,18 @@ let build_prompt
   let ( let* ) = Result.bind in
   let* lookup_section = lookup_section ~question lookup in
   match question with
-  | Completion { completion_contract; required_evidence; few_shot_block } ->
+  | Completion
+      { completion_contract
+      ; required_evidence
+      ; evidence_posture
+      ; few_shot_block
+      } ->
     let calibration_section =
       if few_shot_block = "" then "" else "\n" ^ few_shot_block ^ "\n"
     in
     let* verification_contract_section = contract_section completion_contract in
     let* required_evidence_section = evidence_section ~required_evidence in
+    let* evidence_posture_section = posture_section evidence_posture in
     let evidence_refs_json =
       req.evidence_refs
       |> List.map (fun reference -> `String reference)
@@ -266,6 +301,7 @@ let build_prompt
       ; "completion_notes", req.completion_notes
       ; "verification_contract_section", verification_contract_section
       ; "evidence_section", required_evidence_section
+      ; "evidence_posture_section", evidence_posture_section
       ; "evidence_refs", evidence_refs_json
       ; "lookup_section", lookup_section
       ; "calibration_section", calibration_section

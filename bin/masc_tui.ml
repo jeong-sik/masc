@@ -1301,14 +1301,20 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
      operator who wants to walk away and let the turn run had no key: the
      only exit signalled the turn to stop. This arm never consults
      [interrupt_turn], so the turn keeps streaming while the operator reads
-     something else, and reopening the chat finds it. Empty draft only:
-     mid-sentence Q is the letter someone is typing and falls through to the
-     printable arm below. Esc settles the innermost thing first -- a capture,
-     a half-edited queued line -- and Q must not strand either: with
-     something to settle, this arm declines and Esc is the key that answers
-     it, so Q leaves only when there is nothing mid-flight to abandon. *)
+     something else, and reopening the chat finds it. The view guard first:
+     [handle_message_key] has a second caller -- the composer row on every
+     other surface -- where every printable key is draft text, and a Q typed
+     into a focused row must be the letter, not a jump out of the surface.
+     Chat side only, too: in the roster pane Esc means "back to chat", so the
+     leave belongs to the composer's focus alone. Empty draft, because
+     mid-sentence Q is the letter someone is typing; nothing mid-flight,
+     because Esc settles the innermost thing first -- a capture, a
+     half-edited queued line -- and Q must not strand either. Decline on any
+     of these and the printable arm answers Q as an ordinary letter. *)
   | "Q"
-    when Buffer.length state.msg_input = 0
+    when state.view = Keepers Keeper_message
+         && state.keeper_message_focus = Right_pane
+         && Buffer.length state.msg_input = 0
          && Option.is_none state.msg_recall_replaces
          && Option.is_none state.voice_capture ->
     leave_keeper_message state;
@@ -13930,10 +13936,11 @@ and is loaded on demand through keeper_skill.
                 the quiet leave must not disappear exactly when the terminal
                 is too small to draw the composer -- a transcript-only
                 viewport is when an operator most needs to step away from a
-                running turn. With text in the draft the handler answers it
-                as an ordinary letter, so this route takes nothing from
-                typing. *)
-             || String.equal k "Q"
+                running turn. Only while the draft is empty: with text in it,
+                this condition fails and Q joins the other printables a
+                too-small viewport silently holds (not drops into a draft
+                nobody can see). *)
+             || (String.equal k "Q" && Buffer.length state.msg_input = 0)
              || display_toggle_key
              || switch_key
              || queue_management_key

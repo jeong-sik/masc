@@ -44,6 +44,16 @@
   without rendering the prose it discards (#33003, #33013), the cancel tool joins
   the embedded-tools manifest (#33081), and a consumer that stops reading stops
   the socket (#33048, #33055). Nightly CI now runs the full test suite (#33070).
+- **Surfaces with no producer are removed rather than drawn empty.** The metrics
+  alias surface (#33019), the handoff rail whose producer died in August
+  (#33014), and the submission-clock field nothing read (#33067). The chat store
+  records an approval instead of wording one (#33028), the duplicate attachment
+  ids and folded image rows the two-writer shape produced are gone (#33063), and
+  `gh` read verbs take the observation-only path instead of the judge (#32999).
+- **Checks that could not fail now fail.** The composable-output gate reaches the
+  paged shape and every probe runs (#33006), goal and run probes carry an item
+  and the collector keeps every failure (#33011), and the output schema rejects
+  the metrics alias fields that were removed (#33030).
 
 ## [0.30.0] - 2026-09-04
 

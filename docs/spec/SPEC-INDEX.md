@@ -4,10 +4,9 @@ status: reference
 
 # MASC Specification Index
 
-> Supersedes: `docs/SPEC.md`, `docs/MERGED-ARCHITECTURE-SSOT.md`
 > Status: Living draft
-> Last Updated: 2026-08-30
-> Snapshot baseline: `dune-project` version `0.29.1`
+> Last Updated: 2026-09-04
+> Snapshot baseline: `dune-project` version `0.31.0`
 
 MASC (Multi-Agent Shared Context)는 OCaml 5.x / Eio 기반 MCP 서버로, 여러 Keeper/MCP client가 동일 workspace에서 Goal, Task, Board, Schedule을 통해 작업하고 현재 실행 상태를 관찰·조정할 수 있게 한다. Keeper turn과 dashboard/operator visibility를 제공하며 MCP JSON-RPC 프로토콜을 통해 주요 AI IDE/CLI와 통합된다.
 
@@ -19,17 +18,17 @@ used as evidence.
 
 | 항목 | 값 |
 |------|-----|
-| Release baseline | 0.29.1 |
+| Release baseline | 0.31.0 |
 | Language | OCaml 5.x (Eio-native, effect-based concurrency) |
-| LOC (lib, `.ml` + `.mli`) | ~248K |
-| LOC (test, `.ml` + `.mli`) | ~155K |
-| OCaml modules under `lib/` (`.ml`) | 713 |
-| `.mli` interfaces under `lib/` | 401 |
-| MCP tool modules (`tool_*.ml`) | 109 |
-| Test files (`test/*.ml`) | 449 |
-| Executables | 6 public (`masc`, `masc-stdio`, `masc-cost`, `masc-trace`, `masc-tui`, `masc-fusion-run`) + 3 internal (`public_tool_manifest`, `gen_tool_descriptors`, `deployment_preflight_helper`) |
+| LOC (lib, `.ml` + `.mli`) | 597,241 |
+| LOC (test, `.ml` + `.mli`) | 505,874 |
+| OCaml modules under `lib/` (`.ml`) | 1,461 |
+| `.mli` interfaces under `lib/` | 1,401 |
+| MCP tool modules (`lib/**/tool_*.ml`) | 117 |
+| Test files (`test/*.ml`, top level) | 1,171 |
+| Executables | 12 public (`masc`, `masc-stdio`, `masc-cost`, `masc-trace`, `masc-tui`, `masc-fusion-run`, `masc-checkpoint-purge`, `masc-exec-shim`, `masc-exec-ssh-bootstrap`, `masc-keeper-capability-probe`, `masc-lane-cli-probe`, `masc-deployment-preflight-helper`) + 2 internal (`public_tool_manifest`, `keeper_store_layout_manifest`) |
 
-숫자는 2026-04-23 repo snapshot 기준. `rg --files lib/ test/ bin/` 및 `wc -l`로 재계산. 최신 truth는 다시 계산해야 한다.
+숫자는 2026-09-04 (v0.31.0) 기준. `git ls-files` 로 추적 파일만 세고 `wc -l` 로 합산했으며, 실행 파일은 `bin/dune` 의 `(executable ...)` stanza 에서 `public_name` 유무로 나눴다. 표의 baseline 행은 `scripts/bump-version.sh` 가 릴리스마다 고쳐 쓰므로, 나머지 행이 그 baseline 보다 오래되면 표가 재보지 않은 숫자를 그 버전의 것이라고 말하게 된다.
 
 ## Layer Diagram
 

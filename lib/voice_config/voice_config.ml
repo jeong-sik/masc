@@ -37,6 +37,13 @@ type stt_config = {
 
 type session_config = { endpoints : endpoint list }
 
+type capture_config = {
+  calibration_seconds : float;
+  trigger_margin_db : float;
+  speech_margin_db : float;
+  noise_reduction : bool;
+}
+
 type local_playback_config = {
   enabled : bool;
   agents : string list;
@@ -46,6 +53,7 @@ type t = {
   tts : tts_config;
   stt : stt_config;
   session : session_config;
+  capture : capture_config;
   local_playback : local_playback_config;
 }
 
@@ -329,6 +337,52 @@ let parse_session json =
     let* endpoints = parse_endpoints ~ctx:"session.endpoints" [] items in
     Ok { endpoints }
 
+(* Defaults measured on one workstation 2026-09-04, which is exactly why they
+   are configurable: a room read 4.48% peak here and speech clipped at 100%,
+   and two earlier margins picked from one room were both wrong. An operator
+   whose captures never start, or never end, needs a knob rather than a PR. *)
+let default_capture =
+  { calibration_seconds = 0.5
+  ; trigger_margin_db = 6.0
+  ; speech_margin_db = 4.0
+  ; noise_reduction = false
+  }
+;;
+
+let parse_capture json =
+  match Json_util.assoc_member_opt "capture" json with
+  | Some (`Assoc _ as capture_json) ->
+      let number key ~default =
+        match Json_util.assoc_member_opt key capture_json with
+        | Some (`Float v) -> v
+        | Some (`Int v) -> float_of_int v
+        | Some _ | None -> default
+      in
+      let calibration_seconds =
+        number "calibration_seconds" ~default:default_capture.calibration_seconds
+      in
+      (* A probe of zero length measures nothing and would hand the filter a
+         threshold derived from an empty file. *)
+      if calibration_seconds <= 0.0 then
+        Error "root.capture.calibration_seconds must be greater than zero"
+      else
+        Ok
+          { calibration_seconds
+          ; trigger_margin_db =
+              number "trigger_margin_db" ~default:default_capture.trigger_margin_db
+          ; speech_margin_db =
+              number "speech_margin_db" ~default:default_capture.speech_margin_db
+          ; noise_reduction =
+              Option.value
+                ~default:default_capture.noise_reduction
+                (Json_util.get_bool capture_json "noise_reduction")
+          }
+  | None | Some `Null -> Ok default_capture
+  | Some other ->
+      Error
+        (Printf.sprintf "root.capture must be an object, got %s: %s"
+           (Json_util.kind_name other) (Json_util.excerpt other))
+
 let parse_local_playback json =
   match Json_util.assoc_member_opt "local_playback" json with
   | Some (`Assoc _ as local_json) ->
@@ -352,8 +406,9 @@ let parse_json json =
   let* tts = parse_tts json in
   let* stt = parse_stt json in
   let* session = parse_session json in
+  let* capture = parse_capture json in
   let* local_playback = parse_local_playback json in
-  Ok { tts; stt; session; local_playback }
+  Ok { tts; stt; session; capture; local_playback }
 
 (** ── runtime.toml [voice] section loading ─────────────────────
     Otoml → Yojson bridge so {!parse_json} can consume a TOML

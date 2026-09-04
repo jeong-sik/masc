@@ -78,6 +78,39 @@ type stt_config = {
 
 type session_config = { endpoints : endpoint list }
 
+type capture_config = {
+  calibration_seconds : float;
+      (** How long the room is measured before recording. Longer is steadier
+          against a passing noise; shorter is less delay between the key and
+          the tone. Must be greater than zero — a probe of no length measures
+          nothing, and the threshold would come from an empty file. *)
+  trigger_margin_db : float;
+      (** How far above the room's {e peak} a sound must rise to start
+          recording. Raise it when captures start on their own and never end;
+          lower it when speaking does not start one.
+
+          Peak, not RMS: sox's silence filter reads peak, and the two are two
+          decades apart on room tone. Measured 2026-09-04 on one workstation,
+          an idle room peaked at 4.48% of full scale and ordinary speech
+          clipped at 100% — 27 dB apart, so this only has to clear the room. *)
+  speech_margin_db : float;
+      (** How far a whole capture must average above the room, read as RMS on
+          both sides, to be transcribed at all. Lower it and whisper starts
+          answering silence with a sentence: three captures of an empty room
+          returned "감사합니다.", "감사합니다." and "네".
+
+          Not comparable to {!trigger_margin_db}, which is a peak margin. *)
+  noise_reduction : bool;
+      (** Subtract the room's profile from a capture before transcribing.
+          Measured on one sample it removed the floor entirely while keeping
+          81% of the speech, and corrected one word.
+
+          Off by default, on a small sample and because it cuts both ways:
+          applied to a capture with no speech it hands whisper a perfect
+          silence, which is what it hallucinates hardest against. It runs only
+          after {!speech_margin_db} has admitted the capture. *)
+}
+
 type local_playback_config = {
   enabled : bool;
   agents : string list;
@@ -91,11 +124,18 @@ type t = {
   tts : tts_config;
   stt : stt_config;
   session : session_config;
+  capture : capture_config;
   local_playback : local_playback_config;
 }
 (** Complete voice configuration. *)
 
 (** {1 Constants (runtime-visible)} *)
+
+val default_capture : capture_config
+(** The values used when [\[voice.capture\]] is absent. Every one was measured
+    on a single workstation, which is the reason the section exists: two
+    earlier margins chosen from one room were both wrong, and an operator
+    whose captures never start needs a knob rather than a release. *)
 
 val default_elevenlabs_base_url : string
 (** [https://api.elevenlabs.io/v1] — pinned as a fallback when

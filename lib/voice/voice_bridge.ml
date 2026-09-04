@@ -786,7 +786,18 @@ let play_tone freq =
    The floor moves by more than 10 dB between passes in one room, which is why
    this is read at each capture rather than configured once. *)
 
-let calibration_seconds = 0.5
+(* Read per capture rather than cached: runtime.toml is hot-reloaded, and an
+   operator turning a knob because captures are not starting wants the next
+   press to use it, not the next restart. [Not_configured] and a broken config
+   both fall back to the measured defaults — a capture is not the place to
+   refuse over a config the endpoint chain will refuse for. *)
+let capture_config () =
+  match Voice_config.load_detailed () with
+  | Ok config -> config.Voice_config.capture
+  | Error _ -> Voice_config.default_capture
+;;
+
+let calibration_seconds = Voice_config.default_capture.Voice_config.calibration_seconds
 
 (* How far above the room's peak a capture must rise to start recording.
 
@@ -801,7 +812,7 @@ let calibration_seconds = 0.5
    microphone. They are not comparable: peak and RMS are two decades apart on
    room tone and about one on speech. The mistake this replaced was using one
    where the other was meant. *)
-let trigger_margin_db = 6.0
+let trigger_margin_db = Voice_config.default_capture.Voice_config.trigger_margin_db
 
 (* What a capture must exceed, over its whole length, to be worth
    transcribing. Below the trigger so a capture that did fire but carries only
@@ -811,7 +822,7 @@ let trigger_margin_db = 6.0
    capture's average against the room's average, where peak would be decided
    by one transient. The floor is measured as peak for the filter's sake, so
    this gate reads its own pair of levels rather than reusing it. *)
-let speech_margin_db = 4.0
+let speech_margin_db = Voice_config.default_capture.Voice_config.speech_margin_db
 
 (* [sox … stat] prints one labelled level per line, to stderr, which
    run_voice_status folds into its output:
@@ -886,7 +897,8 @@ let amplitude_of_db d = if d = neg_infinity then 0.0 else 10.0 ** (d /. 20.0)
 let percent_of_amplitude v = 100.0 *. v
 
 (* One short capture with no silence filter, so it records the room as it is. *)
-let measure_noise_floor ~agent_id =
+let measure_noise_floor ?seconds ~agent_id () =
+  let calibration_seconds = Option.value seconds ~default:calibration_seconds in
   let probe =
     Filename.temp_file (Printf.sprintf "masc_nf_%s_" (safe_agent_id agent_id)) ".wav"
   in
@@ -904,6 +916,40 @@ let measure_noise_floor ~agent_id =
        | _ -> None)
 ;;
 
+(* A copy with the room subtracted, or [None] when either sox step fails —
+   the caller then transcribes what it already had rather than nothing.
+
+   The profile comes from the capture's own leading moment, not a separate
+   recording: sox drops leading silence, so what survives at the start is this
+   room during this capture. A profile taken seconds earlier describes a room
+   that may have changed, and subtracting the wrong profile removes speech. *)
+let noise_reduced_copy ~audio_file =
+  let profile = Filename.temp_file "masc_nr_" ".prof" in
+  let reduced = Filename.temp_file "masc_nr_" ".wav" in
+  let cleanup () = try Sys.remove profile with Sys_error _ -> () in
+  Eio_guard.protect ~finally:cleanup (fun () ->
+    match
+      run_voice_status
+        ~timeout_sec:15.0
+        [ "sox"; audio_file; "-n"; "trim"; "0"; "0.25"; "noiseprof"; profile ]
+    with
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | Unix.WEXITED 0, _ -> (
+      match
+        run_voice_status
+          ~timeout_sec:15.0
+          [ "sox"; audio_file; reduced; "noisered"; profile; "0.21" ]
+      with
+      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+      | Unix.WEXITED 0, _ -> Some reduced
+      | _ ->
+        (try Sys.remove reduced with Sys_error _ -> ());
+        None)
+    | _ ->
+      (try Sys.remove reduced with Sys_error _ -> ());
+      None)
+;;
+
 let record_and_transcribe ~agent_id ?(timeout_sec = 15.0) ?language_code ?noise_floor () =
   let audio_file =
     Filename.temp_file (Printf.sprintf "masc_stt_%s_" (safe_agent_id agent_id)) ".wav"
@@ -914,16 +960,18 @@ let record_and_transcribe ~agent_id ?(timeout_sec = 15.0) ?language_code ?noise_
      A caller that captures repeatedly may pass a floor it already measured.
      The room does not change between two utterances the way it changes across
      a session, and re-probing costs about 1.15 s of the gap between them. *)
+  let capture = capture_config () in
   let noise_floor =
     match noise_floor with
     | Some _ as measured -> measured
-    | None -> measure_noise_floor ~agent_id
+    | None -> measure_noise_floor ~seconds:capture.Voice_config.calibration_seconds ~agent_id ()
   in
   let trigger_percent =
     match noise_floor with
     | Some floor when floor > 0.0 ->
       percent_of_amplitude
-        (amplitude_of_db (db_of_amplitude floor +. trigger_margin_db))
+        (amplitude_of_db
+           (db_of_amplitude floor +. capture.Voice_config.trigger_margin_db))
     | Some _ | None -> 1.0
   in
   let threshold = Printf.sprintf "%.2f%%" trigger_percent in
@@ -998,7 +1046,8 @@ let record_and_transcribe ~agent_id ?(timeout_sec = 15.0) ?language_code ?noise_
         , if file_exists then room_rms_of_capture audio_file else None )
       with
       | Some captured, Some room when room > 0.0 ->
-        db_of_amplitude captured < db_of_amplitude room +. speech_margin_db
+        db_of_amplitude captured
+        < db_of_amplitude room +. capture.Voice_config.speech_margin_db
       | _ -> false
     in
     if (not file_exists) || silent
@@ -1013,5 +1062,19 @@ let record_and_transcribe ~agent_id ?(timeout_sec = 15.0) ?language_code ?noise_
                    then "nothing was said above the room level"
                    else "no speech detected or recording too short") )
             ])
-    else transcribe_audio ~audio_file ?language_code ())
+    else (
+      (* Only now, after the gate has admitted the capture. Applied to a
+         capture with no speech this hands whisper a perfect silence, which is
+         what it hallucinates hardest against: the room tone that survives
+         without it is the only thing keeping some of those answers away.
+
+         Measured on one sample: the floor went to zero, 81% of the speech
+         survived, and one word came back correct that had not been. One
+         sample is why it is off by default. *)
+      let audio_file =
+        if capture.Voice_config.noise_reduction
+        then Option.value (noise_reduced_copy ~audio_file) ~default:audio_file
+        else audio_file
+      in
+      transcribe_audio ~audio_file ?language_code ()))
 ;;

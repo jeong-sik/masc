@@ -206,6 +206,7 @@
  (package masc)
  (libraries
   masc
+  masc.masc_process
   masc.prompt_registry
   masc.server
   masc.runtime
@@ -750,6 +751,12 @@
  (libraries masc_tui_render_schedule))
 
 (library
+ (name masc_tui_audio_device)
+ (wrapped false)
+ (modules masc_tui_audio_device)
+ (libraries unix))
+
+(library
  (name masc_tui_keeper_control)
  (wrapped false)
  (modules masc_tui_keeper_control)
@@ -838,6 +845,7 @@
   masc.time_codec
   masc_tui_acting
   masc_tui_composer
+  masc_tui_audio_device
   masc_tui_agenda
   masc_tui_ask_layout
   masc_tui_ask_projection
@@ -1021,6 +1029,7 @@
   masc_tui_mcp
   masc_tui_keeper_chat_transcript
   masc_tui_composer
+  masc_tui_audio_device
   masc_tui_composer_projection
   masc_tui_keeper_control
   masc_tui_keeper_config

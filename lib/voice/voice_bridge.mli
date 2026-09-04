@@ -152,7 +152,7 @@ val amplitude_of_db : float -> float
 
 (** {1 Microphone record + transcribe} *)
 
-val measure_noise_floor : agent_id:string -> float option
+val measure_noise_floor : ?seconds:float -> agent_id:string -> unit -> float option
 (** One short capture with no silence filter, returning the room's RMS
     amplitude. [None] when the recorder could not run.
 

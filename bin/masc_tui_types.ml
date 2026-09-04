@@ -2217,6 +2217,12 @@ type config_pane =
   | Config_prompts
   | Config_presets
   | Config_themes
+  | Config_voice
+      (** What voice is actually doing, which runtime.toml alone does not say.
+          The [voice] section is 60 lines into a 1,600-line file, and reading
+          it answers what is declared rather than what loaded — a config that
+          fails to parse looks identical to one that was never written. That
+          distinction cost six days once. *)
 
 (* Which section the Tools surface is showing. They used to be one scrolling
    list: five sections concatenated, and the first of them is the effective
@@ -2434,6 +2440,14 @@ type state = {
   (* The Resources surface: the MCP resource inventory, and the one read
      the content pane shows, stamped with its uri. [resource_pending_uri]
      rejects a slow reply after the operator has stepped to another row. *)
+  (* The Config surface's voice pane: the server's own answer about what
+     loaded, and which input device the recorder would use. The device is read
+     locally because no server knows it — sox takes whatever macOS calls
+     default, and an operator whose captures come back empty is usually
+     looking at the wrong microphone. *)
+  mutable voice_config: Yojson.Safe.t option;
+  mutable voice_config_error: string option;
+  mutable voice_input_device: string option;
   mutable resources_list: Masc_tui_mcp.resource list option;
   mutable resources_error: string option;
   mutable resources_cursor: int;
@@ -3420,6 +3434,9 @@ let create_state
   palette_cursor = 0;
   search = None;
   search_last = "";
+  voice_config = None;
+  voice_config_error = None;
+  voice_input_device = None;
   resources_list = None;
   resources_error = None;
   resources_cursor = 0;
@@ -4409,8 +4426,11 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
            (match state.runtime_config_view with
             | None -> 0
             | Some _ -> List.length state.config_models_rows + 1)
+         (* The voice pane draws its own short block rather than the config
+            file, so it scrolls with the same rule as the rest: whatever the
+            renderer laid out. *)
          | Config_runtime | Config_params | Config_prompts | Config_presets
-         | Config_themes ->
+         | Config_themes | Config_voice ->
            (match state.runtime_config_view with
             | None -> 0
             | Some (_, rows) -> List.length rows))

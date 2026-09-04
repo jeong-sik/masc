@@ -914,6 +914,13 @@ type level_phase =
   | Listening of { floor : float }
   | Speaking of { floor : float; quiet_since : float option }
 
+(* What the operator asked for when they ended a recording early. Two ways to
+   end it, and a single variant rather than two flags: "stop" and "discard"
+   cannot both be true, and a pair of booleans would let them be. *)
+type stop_request =
+  | Keep_what_was_heard
+  | Discard
+
 (* Why a recording is over, which is only ever three things. What is done with
    it does not depend on this, though -- it depends on whether speech was
    heard. A capture the operator stopped mid-sentence carries a sentence. *)
@@ -996,9 +1003,14 @@ let end_at_deadline = function
 
    Before any speech it is an abort, and yields nothing -- which is also what
    keeps a room away from a transcriber that answers silence with a sentence. *)
-let end_at_operator_stop = function
-  | Speaking _ -> Ended_after_speech
-  | Calibrating _ | Listening _ -> Ended_by_operator
+let end_at_operator_stop request phase =
+  match request, phase with
+  (* An explicit discard is the operator saying they do not want it, which no
+     amount of speech overrides. Nothing else in the capture path can say
+     that: every other ending is inferred from levels. *)
+  | Discard, _ -> Ended_by_operator
+  | Keep_what_was_heard, Speaking _ -> Ended_after_speech
+  | Keep_what_was_heard, (Calibrating _ | Listening _) -> Ended_by_operator
 ;;
 
 let watch_capture_level
@@ -1015,9 +1027,10 @@ let watch_capture_level
   let rec step phase =
     Eio.Time.sleep clock level_poll_seconds;
     let now = Eio.Time.now clock in
-    if should_stop ()
-    then end_at_operator_stop phase
-    else if now >= deadline
+    match should_stop () with
+    | Some request -> end_at_operator_stop request phase
+    | None ->
+    if now >= deadline
     then end_at_deadline phase
     else (
       let level =
@@ -1061,7 +1074,7 @@ let record_and_transcribe
       ?language_code
       ?noise_floor
       ?(on_level = fun (_ : float) -> ())
-      ?(should_stop = fun () -> false)
+      ?(should_stop = fun () -> None)
       ()
   =
   let audio_file =

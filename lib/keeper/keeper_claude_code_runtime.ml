@@ -550,11 +550,30 @@ let run_without_lifecycle ~runtime_id ~keeper_name
       | Runtime_claude_code.Start -> initial_turn_prompt ~history ~goal
       | Runtime_claude_code.Resume _ -> goal
     in
-    let system_prompt =
-      prepared.system_prompt :: system_messages
-      |> List.filter (fun text -> String.trim text <> "")
-      |> String.concat "\n\n"
-      |> String_util.trim_nonempty
+    (* [None] means "masc named no system prompt, take the client's built-in
+       one" since #33072 stopped passing [--system-prompt ""]. This assembly
+       must therefore not reach [None] by collapsing a blank composition:
+       [String_util.trim_nonempty] returns [None] on an empty string, so a
+       keeper whose composed prompt came out blank would run the turn under
+       Claude Code's built-in coding-agent prompt while masc's tool set and
+       [--permission-mode dontAsk] stayed in place -- a failure that looks like
+       it is working. masc composing nothing is a configuration defect, and it
+       is named here instead. The probe and fusion callers build [None]
+       directly and do not pass through this path. *)
+    let* system_prompt =
+      match
+        prepared.system_prompt :: system_messages
+        |> List.filter (fun text -> String.trim text <> "")
+        |> String.concat "\n\n"
+        |> String_util.trim_nonempty
+      with
+      | Some text -> Ok (Some text)
+      | None ->
+        Error
+          (config_error
+             ~field:"system_prompt"
+             "the composed keeper system prompt is empty; the turn would run \
+              under the client's built-in prompt")
     in
     let client_config : Runtime_claude_code.config =
       { cli_path = config.cli_path

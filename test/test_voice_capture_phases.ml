@@ -150,7 +150,7 @@ let test_a_deadline_before_any_speech_carries_no_transcript () =
    seconds away. Discarding then costs the whole sentence again; transcribing
    something unwanted costs one deletion in a draft that has not been sent. *)
 let test_a_stop_mid_sentence_keeps_what_was_said () =
-  match Bridge.end_at_operator_stop speaking with
+  match Bridge.end_at_operator_stop Bridge.Keep_what_was_heard speaking with
   | Bridge.Ended_after_speech -> ()
   | Bridge.Ended_without_speech | Bridge.Ended_by_operator ->
     fail "a stop after speech must keep it"
@@ -158,7 +158,7 @@ let test_a_stop_mid_sentence_keeps_what_was_said () =
 
 let test_a_stop_during_a_pause_keeps_what_was_said () =
   let paused = Bridge.Speaking { floor = room; quiet_since = Some 5.0 } in
-  match Bridge.end_at_operator_stop paused with
+  match Bridge.end_at_operator_stop Bridge.Keep_what_was_heard paused with
   | Bridge.Ended_after_speech -> ()
   | Bridge.Ended_without_speech | Bridge.Ended_by_operator ->
     fail "a pause inside a sentence is still a sentence"
@@ -169,10 +169,43 @@ let test_a_stop_during_a_pause_keeps_what_was_said () =
 let test_a_stop_before_any_speech_carries_no_transcript () =
   List.iter
     (fun phase ->
-       match Bridge.end_at_operator_stop phase with
+       match Bridge.end_at_operator_stop Bridge.Keep_what_was_heard phase with
        | Bridge.Ended_by_operator -> ()
        | Bridge.Ended_after_speech | Bridge.Ended_without_speech ->
          failf "%s must not be transcribed" (phase_name phase))
+    [ listening; Bridge.Calibrating { until = 1.0; floor = None } ]
+;;
+
+(* Esc, and the only place in the capture path where the operator says what
+   they want instead of the levels inferring it. A recording that picked up
+   something they did not mean to send has to be abandonable, and no amount of
+   speech in it makes that less true. *)
+let test_a_discard_throws_away_even_a_full_sentence () =
+  List.iter
+    (fun phase ->
+       match Bridge.end_at_operator_stop Bridge.Discard phase with
+       | Bridge.Ended_by_operator -> ()
+       | Bridge.Ended_after_speech | Bridge.Ended_without_speech ->
+         failf "a discard must abandon %s" (phase_name phase))
+    [ speaking
+    ; Bridge.Speaking { floor = room; quiet_since = Some 5.0 }
+    ; listening
+    ; Bridge.Calibrating { until = 1.0; floor = None }
+    ]
+;;
+
+(* The two requests are only allowed to differ where there is speech. Before
+   any, both abandon, so an operator who reaches for the wrong key loses
+   nothing. *)
+let test_stop_and_discard_differ_only_once_there_is_speech () =
+  List.iter
+    (fun phase ->
+       check
+         bool
+         (phase_name phase)
+         true
+         (Bridge.end_at_operator_stop Bridge.Keep_what_was_heard phase
+          = Bridge.end_at_operator_stop Bridge.Discard phase))
     [ listening; Bridge.Calibrating { until = 1.0; floor = None } ]
 ;;
 
@@ -189,7 +222,7 @@ let test_a_stop_and_a_deadline_agree_on_whether_there_is_speech () =
          bool
          (phase_name phase)
          (carries (Bridge.end_at_deadline phase))
-         (carries (Bridge.end_at_operator_stop phase)))
+         (carries (Bridge.end_at_operator_stop Bridge.Keep_what_was_heard phase)))
     [ speaking
     ; Bridge.Speaking { floor = room; quiet_since = Some 5.0 }
     ; listening
@@ -253,6 +286,14 @@ let () =
             "a stop before any speech carries no transcript"
             `Quick
             test_a_stop_before_any_speech_carries_no_transcript
+        ; test_case
+            "a discard throws away even a full sentence"
+            `Quick
+            test_a_discard_throws_away_even_a_full_sentence
+        ; test_case
+            "stop and discard differ only once there is speech"
+            `Quick
+            test_stop_and_discard_differ_only_once_there_is_speech
         ; test_case
             "a stop and a deadline agree on whether there is speech"
             `Quick

@@ -2581,11 +2581,11 @@ type state = {
      device and a quiet room look identical — both end as an empty draft. *)
   mutable voice_capture: string option;
   mutable voice_level_db: float option;
-  (* Set by a second ^Y and read by the running capture ten times a second.
-     A flag rather than a cancellation because the recording has to close its
-     file on the way out: killed outright it would leave a header with no
-     length in it. *)
-  mutable voice_stop_requested: bool;
+  (* What a second ^Y or an Esc asked of the running capture, read by it ten
+     times a second. A request rather than a cancellation because the recording
+     has to close its file on the way out: killed outright it would leave a
+     header with no length in it. *)
+  mutable voice_stop_requested: Masc.Voice_bridge.stop_request option;
   (* Continuous mode: the keeper whose row re-arms a capture after each
      transcript, until the operator turns it off. Separate from
      [voice_capture], which is the capture running right now — between two
@@ -3508,7 +3508,7 @@ let create_state
   composer_focused = false;
   voice_capture = None;
   voice_level_db = None;
-  voice_stop_requested = false;
+  voice_stop_requested = None;
   voice_continuous = None;
   voice_floor = None;
   quit_armed = false;

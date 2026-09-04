@@ -3417,6 +3417,16 @@
  (libraries alcotest unix masc_tui_editor))
 
 (test
+ (name test_masc_cli_keeper_create)
+ (modules test_masc_cli_keeper_create)
+ (libraries
+  alcotest
+  masc
+  masc_cli_keeper_create
+  masc_keeper_types_profile_sandbox
+  yojson))
+
+(test
  (name test_tui_keeper_selection)
  (modules test_tui_keeper_selection)
  (libraries alcotest masc_tui_keeper_selection))

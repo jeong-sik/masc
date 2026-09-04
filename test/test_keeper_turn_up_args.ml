@@ -1300,6 +1300,87 @@ let test_the_creation_stem_is_a_declaration_parse_accepts () =
       (Keeper_types_profile.tool_result_body result)
 ;;
 
+(* [network_mode] was resolved twice, and the two answers disagreed: update
+   read the caller's argument, create computed one from [profile_defaults] and
+   dropped the caller's. A keeper created for web search landed on "none" and
+   its operator edited the TOML by hand. The four cases below hold the shared
+   resolver to what both branches now need. *)
+let test_a_requested_network_mode_survives_the_fallback () =
+  let module A = Keeper_turn_up_args in
+  check
+    bool
+    "the caller's inherit wins over a declared none"
+    true
+    (A.resolve_requested_network_mode
+       ~requested:(Some "inherit")
+       ~sandbox_profile:Keeper_types_profile_sandbox.Docker
+       ~fallback:(Some Keeper_types_profile_sandbox.Network_none)
+     = Ok Keeper_types_profile_sandbox.Network_inherit)
+;;
+
+let test_an_absent_network_mode_takes_the_declared_fallback () =
+  let module A = Keeper_turn_up_args in
+  check
+    bool
+    "no argument takes the TOML declaration"
+    true
+    (A.resolve_requested_network_mode
+       ~requested:None
+       ~sandbox_profile:Keeper_types_profile_sandbox.Docker
+       ~fallback:(Some Keeper_types_profile_sandbox.Network_inherit)
+     = Ok Keeper_types_profile_sandbox.Network_inherit);
+  check
+    bool
+    "no argument and no declaration takes the docker default"
+    true
+    (A.resolve_requested_network_mode
+       ~requested:None
+       ~sandbox_profile:Keeper_types_profile_sandbox.Docker
+       ~fallback:None
+     = Ok Keeper_types_profile_sandbox.Network_none)
+;;
+
+let test_a_network_mode_rejection_names_every_accepted_spelling () =
+  let module A = Keeper_turn_up_args in
+  match
+    A.resolve_requested_network_mode
+      ~requested:(Some "lan")
+      ~sandbox_profile:Keeper_types_profile_sandbox.Docker
+      ~fallback:None
+  with
+  | Ok _ -> failf "an unparseable network_mode must not resolve"
+  | Error message ->
+    List.iter
+      (fun spelling ->
+         check
+           bool
+           (Printf.sprintf "the rejection names %s" spelling)
+           true
+           (contains spelling message))
+      Keeper_types_profile_sandbox.valid_network_mode_strings
+;;
+
+(* The stem carries an empty string for this one field on purpose: "none"
+   blocks the guest's network and "inherit" opens it, and a form that suggests
+   either decides for an operator who is not reading it. A value that parses
+   would restore exactly the trap the form exists to close. *)
+let test_the_creation_stem_network_mode_is_not_a_mode () =
+  let declared =
+    match Yojson.Safe.from_string Keeper_turn_up_args.creation_stem with
+    | `Assoc fields ->
+      (match List.assoc_opt "network_mode" fields with
+       | Some (`String raw) -> raw
+       | Some _ | None -> failf "the stem must carry a network_mode string")
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      failf "the stem must be a JSON object"
+  in
+  check
+    bool
+    "the stem's network_mode is not a mode any parse accepts"
+    true
+    (Option.is_none (Keeper_types_profile_sandbox.network_mode_of_string declared))
+;;
+
 let preflight_fixture ~ok : Keeper_sandbox_runtime.docker_preflight =
   { ok
   ; image = "masc-keeper-sandbox:local"
@@ -1589,6 +1670,24 @@ let () =
             "remote endpoint persists and null clears"
             `Quick
             test_remote_endpoint_persistence_round_trip
+        ] )
+    ; ( "network_mode"
+      , [ test_case
+            "a requested mode survives the fallback"
+            `Quick
+            test_a_requested_network_mode_survives_the_fallback
+        ; test_case
+            "an absent mode takes the declared fallback"
+            `Quick
+            test_an_absent_network_mode_takes_the_declared_fallback
+        ; test_case
+            "a rejection names every accepted spelling"
+            `Quick
+            test_a_network_mode_rejection_names_every_accepted_spelling
+        ; test_case
+            "the creation stem's network_mode is not a mode"
+            `Quick
+            test_the_creation_stem_network_mode_is_not_a_mode
         ] )
     ; ( "max_context_override"
       , [ test_case "request values are exact or rejected" `Quick test_parse_max_context_override

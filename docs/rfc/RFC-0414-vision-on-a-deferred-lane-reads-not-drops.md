@@ -68,6 +68,42 @@ Ship **B** first, keep **A** as a follow-up.
 2. Non-deferred image turns are unchanged: a text-first/vision-second lane still reroutes and the model sees pixels (no reading substituted).
 3. With no image-capable runtime configured, the floor still degrades (drops) rather than looping on a read that cannot resolve.
 
+## Implementation finding (2026-09-04)
+
+Starting B revealed a gap in the sketch: **the floor cannot read without an
+artifact**. The eager read produces `"[image read: … | artifact:…]"` because
+ingest **stored** the image first; but ingest only stores on the evict branch
+(`delegates_media = true`). In the deferred-keep case ingest kept the raw block
+and stored nothing, so at the floor there is no artifact for `analyze_image` to
+retrieve. B2's placeholder would point at nothing — it degrades to a
+better-worded drop, not a working read.
+
+Two ways to actually read, both heavier than the sketch:
+
+- **B-store-at-floor.** At the deferred floor, store each dropped image to the
+  `<keeper>.vision` artifact store (the bytes are in hand) and substitute
+  `image_unread_placeholder` with that handle. Localized to
+  `keeper_turn_driver`, but needs a reusable "store one image block → handle"
+  entry from `keeper_vision_ingest`/`keeper_vision_tool` (today the store is
+  internal to `evict_block`).
+- **A'-ingest-aware (preferred for correctness).** Thread the deferred committed
+  runtime into ingest so `delegates_media` evicts (store + eager read) when the
+  committed runtime is text-only: `delegate = not (runtime_takes_images_itself
+  committed)` for a deferred turn, lane-based otherwise. Reuses the whole ingest
+  eviction, but `deferred_runtime_lane` (`keeper_unified_turn.ml:400`) reaches
+  the ingest site (`keeper_turn.ml:374 run_keeper_invocation_turn_admitted_inner`)
+  only through intermediate layers, so it is a multi-signature thread through
+  delicate keeper-runtime code.
+
+Neither is the one-line the first sketch implied. Both touch core keeper-runtime
+(TLA-adjacent), so the implementation is scoped as its own careful change, not
+folded into the floor edit from #33037.
+
+Revised recommendation: **A'-ingest-aware** as the correct read path (it reuses
+store + read and keeps the floor a pure drop for the truly-no-vision-runtime
+case), with **B-store-at-floor** as the lighter alternative if the ingest thread
+proves too invasive. C stays rejected.
+
 ## Boundaries
 
 - Do not change the ingest `delegates_media` decision for non-deferred lanes.

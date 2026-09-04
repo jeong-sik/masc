@@ -171,6 +171,28 @@ let test_record_verdict_reject () =
   check string "verdict = reject:vague notes" "reject:vague notes" v;
   Cal.For_testing.reset_store ()
 
+let test_record_verdict_approve_with_reason () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir () in
+  Cal.For_testing.set_store ~base_dir:dir;
+  let req = make_req () in
+  let result =
+    make_result ~verdict:(AR.Approve "verified artifact and board comment")
+      ~gate:AR.Structured_tool ()
+  in
+  Cal.record_verdict ~task_id:"task-approve-reason" ~req ~result ();
+  let store = Cal.get_store () in
+  let records = Dated_jsonl.read_recent store 10 in
+  let first = List.hd records in
+  let v = Yojson.Safe.Util.(first |> member "verdict" |> to_string) in
+  check string "verdict preserves approve reason"
+    "approve:verified artifact and board comment" v;
+  (match Cal.verdict_of_string v with
+   | Some (AR.Approve "verified artifact and board comment") -> ()
+   | _ -> Alcotest.fail "expected roundtrip to parse approve reason");
+  Cal.For_testing.reset_store ()
+
 let test_record_verdict_hash_matches () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -432,6 +454,8 @@ let () =
       test_case "a date filter does not remove the row cap" `Quick
         test_a_date_filter_does_not_remove_the_row_cap;
       test_case "reject verdict" `Quick test_record_verdict_reject;
+      test_case "approve verdict with reason" `Quick
+        test_record_verdict_approve_with_reason;
       test_case "hash matches" `Quick test_record_verdict_hash_matches;
     ];
     "human_label", [

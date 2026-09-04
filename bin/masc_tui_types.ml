@@ -1934,6 +1934,7 @@ type keeper_chat_return =
 type changes_return =
   | Changes_return_list
   | Changes_return_detail
+  | Changes_return_chat
 
 (** Top-level TUI surface. *)
 
@@ -2949,6 +2950,11 @@ type state = {
   mutable repository_changes_error: string option;
   mutable repository_changes_scroll: int;
   mutable repository_changes_cursor: int;
+  mutable repository_changes_diff: (string * Tui_decode.git_diff) option;
+  mutable repository_changes_diff_error: string option;
+  mutable repository_changes_diff_path: string option;
+  mutable repository_changes_diff_scroll: int;
+  mutable repository_changes_return_chat: bool;
   (* Code surface: one directory level at a time through the lazy /children
      route; the file arrives whole and is lexed once at load. *)
   mutable code_dir: string;
@@ -3710,6 +3716,11 @@ let create_state
   repository_changes_error = None;
   repository_changes_scroll = 0;
   repository_changes_cursor = 0;
+  repository_changes_diff = None;
+  repository_changes_diff_error = None;
+  repository_changes_diff_path = None;
+  repository_changes_diff_scroll = 0;
+  repository_changes_return_chat = false;
   code_dir = "";
   code_entries = [];
   code_entries_error = None;

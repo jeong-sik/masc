@@ -100,10 +100,10 @@ let for_surface = function
   | Keepers Keeper_calls ->
       [ b Navigate "j/k" "scroll"; b Act "Left / Esc" "back" ] @ listing_meta
   | Keepers Keeper_message ->
-      [ b Navigate "h / Left" "roster"
-          ~help:"focus the visible Keeper roster (h when the draft is empty)"
+      [ b Navigate "Left" "roster" ~help:"focus the visible Keeper roster"
       ; b Navigate "Right / Esc" "chat" ~help:"return focus to the chat composer"
-      ; b Navigate "j/k" "roster move" ~help:"move while the roster has focus"
+      ; b Navigate "Up / Down" "roster move"
+          ~help:"move while the roster has focus"
       ; b Act "Enter" "send / open"
           ~help:"send from chat, or open the selected Keeper from the roster"
       ; b Act "Ctrl-J" "newline" ~help:"newline in the draft"
@@ -125,6 +125,9 @@ let for_surface = function
       ; b Act "Ctrl-F" "message metadata"
           ~help:"cycle no clock / inline clock / full timestamp and request id"
       ; b Act "y / n" "approval" ~help:"answer a tool approval"
+      ; b Act "Q" "leave"
+          ~help:"leave with a turn running, without interrupting it \
+                 (empty draft, no capture or edit in flight)"
       ; b Act "Esc" "back" ~help:"back; during a turn, interrupt it"
       ]
   | Keepers Keeper_runtime_pick ->
@@ -613,8 +616,17 @@ let footer_hints_lanes_run_detail ~scroll ~max_scroll =
 let footer_hints_git_changes =
   hints_of_bindings
     ([ b Navigate "j/k" "move"
-     ; b Act "Enter" "open file"
+     ; b Act "Right / d / Enter" "diff"
+     ; b Act "v" "open in code"
      ; b Act "Left / Esc" "back"
+     ]
+     @ listing_meta)
+
+let footer_hints_git_diff =
+  hints_of_bindings
+    ([ b Navigate "j/k" "scroll"
+     ; b Act "v" "open in code"
+     ; b Act "Left / Esc" "back to files"
      ]
      @ listing_meta)
 

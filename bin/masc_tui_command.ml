@@ -7,6 +7,8 @@ type t =
   | Task_missing_title
   | Help
   | Open_settings
+  | Open_diff
+  | Open_changes
   | Switch_keeper of string
   | Switch_keeper_missing_name
   | Interrupt_turn
@@ -56,6 +58,14 @@ let catalog =
   ; { word = "settings"
     ; args = ""
     ; summary = "open type-aware runtime settings"
+    }
+  ; { word = "diff"
+    ; args = ""
+    ; summary = "open git changes and diff for the workspace"
+    }
+  ; { word = "changes"
+    ; args = ""
+    ; summary = "open recorded file changes for this keeper"
     }
   ; { word = "interrupt"
     ; args = ""
@@ -146,6 +156,8 @@ let parse text =
     | "task", title -> Task_for_keeper { title; body }
     | "help", _ -> Help
     | "settings", _ -> Open_settings
+    | "diff", _ -> Open_diff
+    | "changes", _ -> Open_changes
     | "keeper", "" -> Switch_keeper_missing_name
     | "keeper", name -> Switch_keeper name
     | "interrupt", _ -> Interrupt_turn

@@ -280,6 +280,13 @@ names. A line that starts with `/` is a command for the TUI instead:
   the operator's own words with the new id in front: `[task-512] <title>`.
   The keeper claims that exact task. The events row records the creation;
   a failure puts the typed text back into the input, unsent.
+- `/diff` — opens the working-tree Git changes directly in chat. Pressing
+  `Enter`, `d`, or `Right` opens the file's Git diff inline with syntax
+  highlighting and line numbers; `j`/`k` scrolls the diff, `v` opens the
+  file in the Code surface, and `Esc` or `Left` returns back to the files list,
+  or back to chat.
+- `/changes` — switches to the Changes surface showing the active keeper's
+  recent file modifications, with `Esc` returning straight back to chat.
 - Any other `/word` is reported as unknown and sent nowhere - a mistyped
   command must not become an instruction the keeper acts on. Text that
   merely contains a slash later in the line is a message.
@@ -1135,10 +1142,10 @@ category들(정렬순) → All. 필터는 ordinary 사실만 좁힌다 — sourc
 `Stored as:`가 함께 표시되고, 담당 Keeper는 `Keepers:`에서 확인할 수 있다.
 
 Right 또는 `Enter`를 누르면 선택한 저장소 범위의 Code 화면으로 이동한다.
-`d`를 누르면 선택한 저장소의 현재 Git 변경 파일을 연다. 각 행은 staged,
-worktree, untracked, conflict 상태를 구분한다. 이 목록에서 `Enter`를 누르면
-해당 파일을 저장소 범위의 Code 화면에서 연다. Left 또는 `Esc`는 저장소
-목록으로 돌아간다.
+`d`를 누르면 선택한 저장소(또는 Keepers 목록/상세 화면에서 누를 경우 프로젝트)의 현재 Git 변경 파일을 연다. 각 행은 staged,
+worktree, untracked, conflict 상태를 구분한다. 이 목록에서 `Right`, `d`, 또는 `Enter`를 누르면
+해당 파일의 Git diff를 구문 강조와 줄 번호가 포함된 인라인 뷰로 바로 확인한다. diff 뷰에서는 `j`/`k`로 스크롤하고 `Esc`/`Left`로 파일 목록으로 돌아온다.
+`v`를 누르면 해당 파일을 Code 화면에서 직접 열 수 있다. Left 또는 `Esc`는 이전 화면(저장소 목록, Keeper 상세, 또는 채팅)으로 돌아간다.
 
 저장소의 Git 변경 사항과 Keeper가 남긴 작업 기록은 서로 다른 정보다.
 아래 Changes 화면은 선택한 Keeper가 지난 24시간 동안 남긴 기록을 보여준다.
@@ -1148,7 +1155,7 @@ worktree, untracked, conflict 상태를 구분한다. 이 목록에서 `Enter`�
 Changes follows the Keeper selected on the Keepers surface. `[` and `]` move
 that selection directly from Changes and reload the 24-hour change window;
 the header always names whose rows are shown. Right or `Enter` opens the
-selected recorded diff, and Left or `Esc` returns without moving the cursor.
+selected recorded diff, and Left or `Esc` returns without moving the cursor (or back to Keeper chat if opened via `/changes`).
 
 `v` opens the row's file on the Code surface, read through the keeper's own
 workspace (`?keeper=`), so the bytes are the keeper's checkout rather than a

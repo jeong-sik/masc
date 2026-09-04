@@ -1296,6 +1296,29 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
      declined, or errored. Leaving cancels nothing: the interrupt proceeds
      server-side and the pane can be reopened. *)
   | "esc" -> if interrupt_turn () then true else (leave_keeper_message state; true)
+  (* Q is the leave half of Esc with the interrupt half taken out. Esc's
+     first press on a live turn spends itself stopping the turn, so an
+     operator who wants to walk away and let the turn run had no key: the
+     only exit signalled the turn to stop. This arm never consults
+     [interrupt_turn], so the turn keeps streaming while the operator reads
+     something else, and reopening the chat finds it. The view guard first:
+     [handle_message_key] has a second caller -- the composer row on every
+     other surface -- where every printable key is draft text, and a Q typed
+     into a focused row must be the letter, not a jump out of the surface.
+     Chat side only, too: in the roster pane Esc means "back to chat", so the
+     leave belongs to the composer's focus alone. Empty draft, because
+     mid-sentence Q is the letter someone is typing; nothing mid-flight,
+     because Esc settles the innermost thing first -- a capture, a
+     half-edited queued line -- and Q must not strand either. Decline on any
+     of these and the printable arm answers Q as an ordinary letter. *)
+  | "Q"
+    when state.view = Keepers Keeper_message
+         && state.keeper_message_focus = Right_pane
+         && Buffer.length state.msg_input = 0
+         && Option.is_none state.msg_recall_replaces
+         && Option.is_none state.voice_capture ->
+    leave_keeper_message state;
+    true
   | "\r" ->
     let text = Buffer.contents state.msg_input in
     if String.trim text <> "" then begin
@@ -1667,6 +1690,8 @@ type async_msg =
   | Repository_changes_loaded of
       Masc.Tui_decode.repository_change_scope
       * (Masc.Tui_decode.repository_change_snapshot, string) result
+  | Repository_changes_diff_loaded of
+      string * (Masc.Tui_decode.git_diff, string) result
   (* Carries the keeper it was asked about. The surface can be pointed at a
      different keeper while a load is in flight, and an answer that did not
      say whose it was would be filed under whoever is selected when it
@@ -3936,6 +3961,49 @@ let launch_repository_changes_load state ~mailbox ~scope =
         (Repository_changes_loaded
            (scope, Error "Eio switch is unavailable"))
 
+let launch_repository_changes_diff_load state ~mailbox ~scope ~path =
+  let host = server_peer_host in
+  let port = state.port in
+  let repo =
+    match scope with
+    | Tui_decode.Repository_change_repository repository_id -> Some repository_id
+    | Tui_decode.Repository_change_project -> None
+  in
+  let run () =
+    let result =
+      try
+        Masc_tui_loader.load_git_diff ~host ~port ?repo ~keeper:None ~path
+          ~base_ref:tree_diff_base_ref ()
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Repository_changes_diff_loaded (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Repository_changes_diff_loaded
+           (path, Error "Eio switch is unavailable"))
+
+let open_repository_change_diff state ~mailbox ~scope
+    (change : Tui_decode.repository_change) =
+  state.repository_changes_diff <- None;
+  state.repository_changes_diff_error <- None;
+  state.repository_changes_diff_path <- Some change.rc_path;
+  state.repository_changes_diff_scroll <- 0;
+  launch_repository_changes_diff_load state ~mailbox ~scope ~path:change.rc_path
+
+let close_repository_changes_diff state =
+  state.repository_changes_diff <- None;
+  state.repository_changes_diff_error <- None;
+  state.repository_changes_diff_path <- None;
+  state.repository_changes_diff_scroll <- 0
+
 let open_repository_changes state ~mailbox ~scope =
   state.repository_changes_open <- true;
   state.repository_changes_scope <- Some scope;
@@ -3943,6 +4011,10 @@ let open_repository_changes state ~mailbox ~scope =
   state.repository_changes_error <- None;
   state.repository_changes_cursor <- 0;
   state.repository_changes_scroll <- 0;
+  state.repository_changes_diff <- None;
+  state.repository_changes_diff_error <- None;
+  state.repository_changes_diff_path <- None;
+  state.repository_changes_diff_scroll <- 0;
   launch_repository_changes_load state ~mailbox ~scope
 
 let close_repository_changes state =
@@ -3951,15 +4023,25 @@ let close_repository_changes state =
   state.repository_changes <- None;
   state.repository_changes_error <- None;
   state.repository_changes_cursor <- 0;
-  state.repository_changes_scroll <- 0
+  state.repository_changes_scroll <- 0;
+  state.repository_changes_diff <- None;
+  state.repository_changes_diff_error <- None;
+  state.repository_changes_diff_path <- None;
+  state.repository_changes_diff_scroll <- 0
 
 let refresh_repository_changes state ~mailbox =
   match state.repository_changes_scope with
   | None -> ()
   | Some scope ->
-      state.repository_changes <- None;
-      state.repository_changes_error <- None;
-      launch_repository_changes_load state ~mailbox ~scope
+      (match state.repository_changes_diff_path with
+       | Some path ->
+           state.repository_changes_diff <- None;
+           state.repository_changes_diff_error <- None;
+           launch_repository_changes_diff_load state ~mailbox ~scope ~path
+       | None ->
+           state.repository_changes <- None;
+           state.repository_changes_error <- None;
+           launch_repository_changes_load state ~mailbox ~scope)
 
 let open_repository_change_in_code state ~mailbox ~scope
     (change : Tui_decode.repository_change) =
@@ -6245,6 +6327,15 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Buffer.clear state.msg_input;
       notice ~role:Message_local
         (String.concat "\n" Masc_tui_command.help_lines)
+  | Masc_tui_command.Open_diff ->
+      Buffer.clear state.msg_input;
+      state.repository_changes_return_chat <- true;
+      open_repository_changes state ~mailbox
+        ~scope:Tui_decode.Repository_change_project
+  | Masc_tui_command.Open_changes ->
+      Buffer.clear state.msg_input;
+      state.changes_return <- Changes_return_chat;
+      goto_surface state ~mailbox Changes
   | Masc_tui_command.Open_settings ->
       Buffer.clear state.msg_input;
       state.config_pane <- Config_params;
@@ -8607,6 +8698,7 @@ let handle_composer_key state ~base_path ~mailbox key =
            state.view <- Keepers Keeper_message
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.Switch_keeper_missing_name
+       | Masc_tui_command.Open_diff | Masc_tui_command.Open_changes
        | Masc_tui_command.Open_settings
        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Steer_turn _
        | Masc_tui_command.Steer_missing_message
@@ -10360,6 +10452,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              state.repository_changes_error <-
                Some "Git changes response belongs to a different workspace"
          | Error detail -> state.repository_changes_error <- Some detail)
+  | Repository_changes_diff_loaded (path, result) ->
+      if
+        state.repository_changes_open
+        && Option.equal String.equal state.repository_changes_diff_path (Some path)
+      then
+        (match result with
+         | Ok diff ->
+             state.repository_changes_diff <- Some (path, diff);
+             state.repository_changes_diff_error <- None
+         | Error detail -> state.repository_changes_diff_error <- Some detail)
   | Keeper_chat_file_changes_loaded (generation, keeper_name, result) ->
       let still_current =
         generation = state.msg_file_changes_generation
@@ -11495,10 +11597,17 @@ let main () =
      the human's; [n] records the opposite side and takes its reason through
      $EDITOR, because the reason is the text the divergence teaches the judge
      as a few-shot example. The machine's side is read off the closed
-     verdict serialization ("approve" | "reject:<reason>"), compared whole,
-     never by substring. *)
+     verdict serialization ("approve" | "approve:<reason>" | "reject:<reason>"). *)
   let harness_machine_approved (row : Masc.Tui_decode.harness_verdict) =
-    String.equal row.Masc.Tui_decode.hv_verdict "approve"
+    (* [Task] and [Eval_calibration] live in the masc library, which the
+       executable reaches through [Masc] -- the mli spells them the library's
+       way because it sits inside it (#33116 built red on the bare names). *)
+    match Masc.Eval_calibration.verdict_of_string
+            row.Masc.Tui_decode.hv_verdict
+    with
+    | Some (Masc.Task.Anti_rationalization.Approve _) -> Some true
+    | Some (Masc.Task.Anti_rationalization.Reject _) -> Some false
+    | None -> None
   in
   let start_harness_label ~notes_hash ~(verdict : [ `Approve | `Reject ])
       ~reason ~described =
@@ -11522,15 +11631,19 @@ let main () =
   let handle_harness_agree () =
     match harness_cursor_verdict () with
     | None -> ()
-    | Some row ->
-        let approved = harness_machine_approved row in
-        start_harness_label ~notes_hash:row.Masc.Tui_decode.hv_notes_hash
-          ~verdict:(if approved then `Approve else `Reject)
-          ~reason:""
-          ~described:
-            (Printf.sprintf "labelled %s: the %s stands"
-               row.Masc.Tui_decode.hv_task_id
-               (if approved then "approve" else "reject"))
+    | Some row -> (
+        match harness_machine_approved row with
+        | None ->
+            report_action state "error"
+              "cannot label: unrecognized verdict format"
+        | Some approved ->
+            start_harness_label ~notes_hash:row.Masc.Tui_decode.hv_notes_hash
+              ~verdict:(if approved then `Approve else `Reject)
+              ~reason:""
+              ~described:
+                (Printf.sprintf "labelled %s: the %s stands"
+                   row.Masc.Tui_decode.hv_task_id
+                   (if approved then "approve" else "reject")))
   in
   let handle_harness_overrule () =
     match harness_cursor_verdict () with
@@ -11564,15 +11677,19 @@ let main () =
                       report_action state "system"
                         "overrule cancelled (empty reason)"
                     else
-                      let approved = harness_machine_approved row in
-                      start_harness_label
-                        ~notes_hash:row.Masc.Tui_decode.hv_notes_hash
-                        ~verdict:(if approved then `Reject else `Approve)
-                        ~reason
-                        ~described:
-                          (Printf.sprintf "overruled %s: %s was wrong"
-                             row.Masc.Tui_decode.hv_task_id
-                             (if approved then "the approve" else "the reject")))))
+                      match harness_machine_approved row with
+                      | None ->
+                          report_action state "error"
+                            "cannot overrule: unrecognized verdict format"
+                      | Some approved ->
+                          start_harness_label
+                            ~notes_hash:row.Masc.Tui_decode.hv_notes_hash
+                            ~verdict:(if approved then `Reject else `Approve)
+                            ~reason
+                            ~described:
+                              (Printf.sprintf "overruled %s: %s was wrong"
+                                 row.Masc.Tui_decode.hv_task_id
+                                 (if approved then "the approve" else "the reject")))))
   in
   (* Verification reject: the reason is required, and $EDITOR is the form we
      already have. The editor is the confirmation step -- a non-zero exit or
@@ -12535,6 +12652,7 @@ and is loaded on demand through keeper_skill.
       let _terminal_rows, terminal_columns = get_terminal_size () in
       let message_mode =
         (not compact_viewport) && state.view = Keepers Keeper_message
+        && not state.repository_changes_open
       in
       let quit_key =
         match key with
@@ -13845,7 +13963,7 @@ and is loaded on demand through keeper_skill.
        | Some "?" when message_mode && Buffer.length state.msg_input = 0 ->
            state.help_open <- true;
            state.help_scroll <- 0
-        | Some ("right" | "l" | "esc" | "\t")
+        | Some ("right" | "esc" | "\t")
           when message_mode
                && state.keeper_message_focus = Left_pane ->
             state.keeper_message_focus <- Right_pane
@@ -13854,18 +13972,13 @@ and is loaded on demand through keeper_skill.
               && Masc_tui_render.keeper_roster_pane_shown state
                    ~cols:terminal_columns ->
            state.keeper_message_focus <- Left_pane
-       | Some "h"
-         when message_mode && Buffer.length state.msg_input = 0
-              && Masc_tui_render.keeper_roster_pane_shown state
-                   ~cols:terminal_columns ->
-           state.keeper_message_focus <- Left_pane
-       | Some ("j" | "down")
+       | Some "down"
          when message_mode
               && state.keeper_message_focus = Left_pane ->
            state.keeper_cursor <-
              Masc_tui_scroll.cursor_down ~count:(List.length state.keepers)
                state.keeper_cursor
-       | Some ("k" | "up")
+       | Some "up"
          when message_mode
               && state.keeper_message_focus = Left_pane ->
            state.keeper_cursor <-
@@ -13909,6 +14022,15 @@ and is loaded on demand through keeper_skill.
            if
              keeper_message_input_supported state
              || String.equal k "esc"
+             (* Q reaches the composer handler for the same reason Esc does:
+                the quiet leave must not disappear exactly when the terminal
+                is too small to draw the composer -- a transcript-only
+                viewport is when an operator most needs to step away from a
+                running turn. Only while the draft is empty: with text in it,
+                this condition fails and Q joins the other printables a
+                too-small viewport silently holds (not drops into a draft
+                nobody can see). *)
+             || (String.equal k "Q" && Buffer.length state.msg_input = 0)
              || display_toggle_key
              || switch_key
              || queue_management_key
@@ -14437,14 +14559,21 @@ and is loaded on demand through keeper_skill.
                scroll everywhere else. It answers to Enter now, which is what
                the footer has been advertising. *)
             | Config when state.config_pane = Config_themes -> ()
-            | Code when state.repository_changes_open ->
-                let cursor, scroll =
-                  move_row_cursor state ~delta:(direction * page)
-                    ~cursor:state.repository_changes_cursor
-                    ~scroll:state.repository_changes_scroll
-                in
-                state.repository_changes_cursor <- cursor;
-                state.repository_changes_scroll <- scroll
+            | _ when state.repository_changes_open ->
+                (match state.repository_changes_diff_path with
+                 | Some _ ->
+                     state.repository_changes_diff_scroll <-
+                       max 0
+                         (state.repository_changes_diff_scroll
+                         + (direction * page))
+                 | None ->
+                     let cursor, scroll =
+                       move_row_cursor state ~delta:(direction * page)
+                         ~cursor:state.repository_changes_cursor
+                         ~scroll:state.repository_changes_scroll
+                     in
+                     state.repository_changes_cursor <- cursor;
+                     state.repository_changes_scroll <- scroll)
             | Code -> ()
             | Board ->
                 (match state.board_mode with
@@ -14611,11 +14740,11 @@ and is loaded on demand through keeper_skill.
              ~scoped_refresh_followup
              ~mailbox:async_messages;
            (* Also reload logs / Board detail if viewing them. *)
+           if state.repository_changes_open then
+             refresh_repository_changes state ~mailbox:async_messages
+           else
            (match state.view with
-            | Code ->
-                if state.repository_changes_open then
-                  refresh_repository_changes state ~mailbox:async_messages
-                else launch_code_entries_load state ~mailbox:async_messages
+            | Code -> launch_code_entries_load state ~mailbox:async_messages
             | Keepers Keeper_list ->
                 launch_keeper_lanes_load state ~mailbox:async_messages
             | Keepers Keeper_logs ->
@@ -14675,9 +14804,7 @@ and is loaded on demand through keeper_skill.
                        ~keeper_name
                  | None -> ())
             | Repositories ->
-                if state.repository_changes_open then
-                  refresh_repository_changes state ~mailbox:async_messages
-                else launch_repositories_load state ~mailbox:async_messages
+                launch_repositories_load state ~mailbox:async_messages
             | Changes -> (
                 match state.changes_keeper with
                 | Some keeper_name ->
@@ -14716,6 +14843,17 @@ and is loaded on demand through keeper_skill.
                 state.followed_from <- None;
                 goto_surface state ~mailbox:async_messages origin;
                 add_event state "system" "back")
+       | Some "esc" when state.repository_changes_open ->
+           if Option.is_some state.repository_changes_diff_path then
+             close_repository_changes_diff state
+           else begin
+             let return_chat = state.repository_changes_return_chat in
+             close_repository_changes state;
+             if return_chat then begin
+               state.repository_changes_return_chat <- false;
+               state.view <- Keepers Keeper_message
+             end
+           end
        | Some "esc" ->
            (* Esc goes back *)
            (* A running preview is the innermost thing Esc can go back from:
@@ -14892,6 +15030,9 @@ and is loaded on demand through keeper_skill.
                      return for the same reason. *)
                   state.view <-
                     (match state.changes_return, selected_keeper state with
+                     | Changes_return_chat, (Some _ | None) ->
+                         state.changes_return <- Changes_return_list;
+                         Keepers Keeper_message
                      | Changes_return_detail, Some _ -> Keepers Keeper_detail
                      | Changes_return_detail, None
                      | Changes_return_list, (Some _ | None) ->
@@ -14933,6 +15074,17 @@ and is loaded on demand through keeper_skill.
                 (* Off-ring child: back to the parent that opened it. *)
                 goto_surface state ~mailbox:async_messages Config
             | Config -> state.view <- Overview)
+       | Some "left" when state.repository_changes_open ->
+           if Option.is_some state.repository_changes_diff_path then
+             close_repository_changes_diff state
+           else begin
+             let return_chat = state.repository_changes_return_chat in
+             close_repository_changes state;
+             if return_chat then begin
+               state.repository_changes_return_chat <- false;
+               state.view <- Keepers Keeper_message
+             end
+           end
        | Some "left" ->
            (* Left is the non-destructive structural back key. Unlike Esc it
               never interrupts a live chat turn; it only closes a detail the
@@ -15041,6 +15193,19 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_runtime_pick | Keepers Keeper_message
             | Keepers Keeper_list | Acting | Approvals
              | Memory | Repositories | Connectors | Config | Tools | Clients -> ())
+       | Some ("j" | "down" | "wheel-down") when state.repository_changes_open ->
+           (match state.repository_changes_diff_path with
+            | Some _ ->
+                state.repository_changes_diff_scroll <-
+                  state.repository_changes_diff_scroll + 1
+            | None ->
+                let cursor, scroll =
+                  move_row_cursor state ~delta:1
+                    ~cursor:state.repository_changes_cursor
+                    ~scroll:state.repository_changes_scroll
+                in
+                state.repository_changes_cursor <- cursor;
+                state.repository_changes_scroll <- scroll)
        | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
             | Code ->
@@ -15415,6 +15580,19 @@ and is loaded on demand through keeper_skill.
                 if state.runtime_pick_cursor < dispatchable - 1 then
                   state.runtime_pick_cursor <- state.runtime_pick_cursor + 1
             | Keepers Keeper_message -> ())
+       | Some ("k" | "up" | "wheel-up") when state.repository_changes_open ->
+           (match state.repository_changes_diff_path with
+            | Some _ ->
+                state.repository_changes_diff_scroll <-
+                  max 0 (state.repository_changes_diff_scroll - 1)
+            | None ->
+                let cursor, scroll =
+                  move_row_cursor state ~delta:(-1)
+                    ~cursor:state.repository_changes_cursor
+                    ~scroll:state.repository_changes_scroll
+                in
+                state.repository_changes_cursor <- cursor;
+                state.repository_changes_scroll <- scroll)
        | Some "k" | Some "up" | Some "wheel-up" ->
            (match state.view with
             | Code ->
@@ -15771,6 +15949,21 @@ and is loaded on demand through keeper_skill.
                      ~keeper_name:keeper.k_name ~provider_id ~label
                | None -> ())
            | Some _, (Some _ | None) | None, _ -> ())
+       | Some ("\r" | "\n" | "right") when state.repository_changes_open -> (
+           match state.repository_changes_diff_path with
+           | Some _ -> ()
+           | None -> (
+               match state.repository_changes, state.repository_changes_scope with
+               | Some snapshot, Some scope -> (
+                   match
+                     List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
+                       state.repository_changes_cursor
+                   with
+                   | None -> ()
+                   | Some change ->
+                       open_repository_change_diff state
+                         ~mailbox:async_messages ~scope change)
+               | _ -> ()))
        | Some "\r" | Some "\n" | Some "right" ->
            (* Enter remains compatible; Right makes list -> detail and Left
               makes detail -> list consistent across the TUI. *)
@@ -16177,20 +16370,34 @@ and is loaded on demand through keeper_skill.
                 state.runtime_pick_cursor <- 0;
                 state.view <- Keepers Keeper_list
             | None -> state.view <- Keepers Keeper_list)
+       | Some "d" when state.repository_changes_open -> (
+           match state.repository_changes_diff_path with
+           | Some _ -> ()
+           | None -> (
+               match state.repository_changes, state.repository_changes_scope with
+               | Some snapshot, Some scope -> (
+                   match
+                     List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
+                       state.repository_changes_cursor
+                   with
+                   | None -> ()
+                   | Some change ->
+                       open_repository_change_diff state
+                         ~mailbox:async_messages ~scope change)
+               | _ -> ()))
+       | Some "d"
+         when (match state.view with
+               | Keepers (Keeper_list | Keeper_detail) -> true
+               | _ -> false) ->
+           open_repository_changes state ~mailbox:async_messages
+             ~scope:Tui_decode.Repository_change_project
        | Some "d"
          when state.view = Code
-              && (state.repository_changes_open
-                  || (state.code_scope = Code_scope_project
-                      && state.code_focus_file = Left_pane)) ->
-           if state.repository_changes_open then
-             refresh_repository_changes state ~mailbox:async_messages
-           else
-             open_repository_changes state ~mailbox:async_messages
-               ~scope:Tui_decode.Repository_change_project
+              && (state.code_scope = Code_scope_project
+                  && state.code_focus_file = Left_pane) ->
+           open_repository_changes state ~mailbox:async_messages
+             ~scope:Tui_decode.Repository_change_project
        | Some "d" when state.view = Repositories ->
-           if state.repository_changes_open then
-             refresh_repository_changes state ~mailbox:async_messages
-           else
              (match state.repositories with
               | None -> add_event state "error" "no repositories loaded yet"
               | Some snapshot ->
@@ -16280,6 +16487,26 @@ and is loaded on demand through keeper_skill.
               | Planning -> Verification
               | Verification -> Harness
               | Harness | _ -> Planning)
+       | Some "v" when state.repository_changes_open -> (
+           match state.repository_changes, state.repository_changes_scope with
+           | Some snapshot, Some scope -> (
+               let change_opt =
+                 match state.repository_changes_diff_path with
+                 | Some diff_path ->
+                     List.find_opt
+                       (fun (c : Tui_decode.repository_change) ->
+                         String.equal c.rc_path diff_path)
+                       snapshot.Masc.Tui_decode.rcs_changes
+                 | None ->
+                     List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
+                       state.repository_changes_cursor
+               in
+               match change_opt with
+               | None -> add_event state "error" "no change under the cursor"
+               | Some change ->
+                   open_repository_change_in_code state
+                     ~mailbox:async_messages ~scope change)
+           | _ -> ())
        | Some "v" when state.view = Changes ->
            (* View the selected change on the Code surface. The clone-relative
               address resolves through the same ?keeper= axis the git-diff

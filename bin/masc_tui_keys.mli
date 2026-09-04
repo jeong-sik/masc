@@ -96,8 +96,10 @@ val footer_hints_lanes_run_detail : scroll:int -> max_scroll:int -> string
     way back plus the shared tail. *)
 
 val footer_hints_git_changes : string
-(** The shared Git changes list under Repositories and Code. It omits actions
-    such as repository registration that do not act on a changed-file row. *)
+(** The shared Git changes list under Repositories, Code, and Chat. *)
+
+val footer_hints_git_diff : string
+(** The Git diff view for a changed file in repository changes. *)
 
 val footer_hints_memory_facts : string
 (** The Memory fact browser opened by Enter on a health row: row movement,

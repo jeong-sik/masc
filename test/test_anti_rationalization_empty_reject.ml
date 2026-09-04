@@ -22,6 +22,7 @@ let with_reviewer reviewer f =
 let review () =
   AR.review
     ~evaluator_runtime:"task-reviewer"
+    ~question:(AR.Completion { completion_contract = None; required_evidence = [] })
     ~lookup:AR.No_lookup_surface
     ~base_path:(Filename.get_temp_dir_name ())
     request
@@ -39,8 +40,9 @@ let test_explicit_base_path_reaches_reviewer () =
        Ok None)
     (fun () ->
        ignore
-         (AR.review ~evaluator_runtime:"task-reviewer" ~lookup:AR.No_lookup_surface
-            ~base_path:expected request);
+         (AR.review ~evaluator_runtime:"task-reviewer"
+            ~question:(AR.Completion { completion_contract = None; required_evidence = [] })
+            ~lookup:AR.No_lookup_surface ~base_path:expected request);
        match !received with
        | Some actual ->
          Alcotest.(check string) "review uses the caller BasePath" expected actual

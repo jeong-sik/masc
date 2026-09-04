@@ -109,15 +109,37 @@ val run
     template and calls this directly: the two lanes judge different things and
     share no prompt variables. *)
 
+(** Which question the completion authority is being asked, and the material
+    that question needs. The Task's [verification_intent] chooses it.
+
+    One value rather than two optional arguments because the two prompts want
+    opposite things from the same contract: the completion block demands
+    evidence for every item, the cancellation block offers the items as
+    context for a producer asking not to do them. Passed separately, a
+    cancellation could be rendered through the completion prompt with its
+    contract attached — which is what happened, and refused every cancellation
+    of a contracted Task for not finishing the work it asks not to finish
+    (#33052). *)
+type verdict_question =
+  | Completion of
+      { completion_contract : string list option
+      ; required_evidence : string list
+      }
+  | Cancellation of
+      { reason : string
+            (** The producer's stated why. The whole of what is judged: a stop
+                submits no artifacts and is not refused for having none. *)
+      ; contract_context : string list
+      }
+
 val review
   :  ?evaluator_runtime:string
   -> ?generator_runtime:string
-  -> ?completion_contract:string list
-  -> ?required_evidence:string list
   -> ?on_verdict:(review_result -> unit)
   -> ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)
   -> ?few_shot_block:string
   -> ?sw:Eio.Switch.t option
+  -> question:verdict_question
   -> lookup:lookup_surface
   -> base_path:string
   -> review_request
@@ -136,8 +158,7 @@ val review
     There is no inline fallback prompt; an error keeps the Task nonterminal. *)
 val build_prompt
   :  ?few_shot_block:string
-  -> ?completion_contract:string list
-  -> ?required_evidence:string list
+  -> question:verdict_question
   -> lookup:lookup_surface
   -> review_request
   -> (string, string) result

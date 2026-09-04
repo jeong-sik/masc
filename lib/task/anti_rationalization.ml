@@ -182,38 +182,88 @@ let lookup_section = function
       [ "lookup_tools", tool_names schemas; "lookup_root_layout", lookup_root_layout ]
 ;;
 
+(* Which question the completion authority is being asked, and the material
+    that question needs. The Task's [verification_intent] chooses it.
+
+    One value rather than two optional arguments because the two prompts want
+    opposite things from the same contract: the completion block demands
+    evidence for every item, the cancellation block offers the items as
+    context for a producer asking not to do them. Passed separately, a
+    cancellation could be rendered through the completion prompt with its
+    contract attached — which is what happened, and refused every cancellation
+    of a contracted Task for not finishing the work it asks not to finish
+    (#33052). *)
+type verdict_question =
+  | Completion of
+      { completion_contract : string list option
+      ; required_evidence : string list
+      }
+  | Cancellation of
+      { reason : string
+            (** The producer's stated why. The whole of what is judged: a stop
+                submits no artifacts and is not refused for having none. *)
+      ; contract_context : string list
+      }
+
+(* What the Task was for, offered to a cancellation as context. The completion
+   block's job is to demand evidence for each item; this one's is to say what
+   the producer is asking not to do. Same list, opposite instruction, which is
+   why they cannot be the same slot. *)
+let contract_context_section = function
+  | [] -> Ok ""
+  | items ->
+    render
+      Prompt_names.verification_cancellation_contract_context
+      [ "contract_items", numbered items ]
+;;
+
 let build_prompt
       ?(few_shot_block = "")
-      ?completion_contract
-      ?(required_evidence = [])
+      ~(question : verdict_question)
       ~(lookup : lookup_surface)
       (req : review_request) : (string, string) result =
   let ( let* ) = Result.bind in
-  let desc = req.task_description in
   let calibration_section =
     if few_shot_block = "" then "" else "\n" ^ few_shot_block ^ "\n"
   in
-  let* verification_contract_section = contract_section completion_contract in
-  let* required_evidence_section = evidence_section ~required_evidence in
   let* lookup_section = lookup_section lookup in
-  let evidence_refs_json =
-    req.evidence_refs
-    |> List.map (fun reference -> `String reference)
-    |> fun values -> Yojson.Safe.to_string (`List values)
-  in
-  let vars =
-    [ "task_title", req.task_title
-    ; "task_description", desc
-    ; "agent_name", req.agent_name
-    ; "completion_notes", req.completion_notes
-    ; "verification_contract_section", verification_contract_section
-    ; "evidence_section", required_evidence_section
-    ; "evidence_refs", evidence_refs_json
-    ; "lookup_section", lookup_section
-    ; "calibration_section", calibration_section
-    ]
-  in
-  Prompt_registry.render_prompt_template Prompt_names.verification vars
+  match question with
+  | Completion { completion_contract; required_evidence } ->
+    let* verification_contract_section = contract_section completion_contract in
+    let* required_evidence_section = evidence_section ~required_evidence in
+    let evidence_refs_json =
+      req.evidence_refs
+      |> List.map (fun reference -> `String reference)
+      |> fun values -> Yojson.Safe.to_string (`List values)
+    in
+    Prompt_registry.render_prompt_template
+      Prompt_names.verification
+      [ "task_title", req.task_title
+      ; "task_description", req.task_description
+      ; "agent_name", req.agent_name
+      ; "completion_notes", req.completion_notes
+      ; "verification_contract_section", verification_contract_section
+      ; "evidence_section", required_evidence_section
+      ; "evidence_refs", evidence_refs_json
+      ; "lookup_section", lookup_section
+      ; "calibration_section", calibration_section
+      ]
+  | Cancellation { reason; contract_context } ->
+    (* Neither [completion_notes] nor [evidence_refs] is offered. A stop makes
+       no artifacts, and the completion prompt reads their absence as a reason
+       to refuse — which is how every cancellation of a contracted Task came to
+       be refused for not finishing the work it asks not to finish (#33052). *)
+    let* contract_context_section = contract_context_section contract_context in
+    Prompt_registry.render_prompt_template
+      Prompt_names.verification_cancellation
+      [ "task_title", req.task_title
+      ; "task_description", req.task_description
+      ; "agent_name", req.agent_name
+      ; "cancel_reason", reason
+      ; "contract_context_section", contract_context_section
+      ; "lookup_section", lookup_section
+      ; "calibration_section", calibration_section
+      ]
 ;;
 
 (* ================================================================ *)
@@ -520,12 +570,11 @@ let run
 let review
       ?evaluator_runtime
       ?generator_runtime
-      ?(completion_contract : string list option)
-      ?(required_evidence = [])
       ?on_verdict
       ?on_tool_result
       ?(few_shot_block = "")
       ?(sw : Eio.Switch.t option = None)
+      ~(question : verdict_question)
       ~(lookup : lookup_surface)
       ~base_path
       (req : review_request)
@@ -541,8 +590,7 @@ let review
       Log.Task.info "task_id=%s [task-completion-review] %s" req.task_id message)
     ~log_warn:(fun message ->
       Log.Task.warn "task_id=%s [task-completion-review] %s" req.task_id message)
-    ~render_prompt:(fun () ->
-      build_prompt ~few_shot_block ?completion_contract ~required_evidence ~lookup req)
+    ~render_prompt:(fun () -> build_prompt ~few_shot_block ~question ~lookup req)
     ~lookup
     ~base_path
     ()

@@ -54,7 +54,12 @@ let rendered_with_lookup () =
   let lookup =
     AR.Lookup_tools { schemas; dispatch; root_layout = [ marker "root_layout" ] }
   in
-  match AR.build_prompt ~lookup request with
+  match
+    AR.build_prompt
+      ~question:(AR.Completion { completion_contract = None; required_evidence = [] })
+      ~lookup
+      request
+  with
   | Ok text -> text
   | Error detail -> failf "task prompt render failed: %s" detail
 ;;
@@ -97,8 +102,11 @@ let test_every_section_template_renders () =
        match
          AR.build_prompt
            ~lookup
-           ~completion_contract:[ marker "contract_item" ]
-           ~required_evidence:[ marker "evidence_item" ]
+           ~question:
+             (AR.Completion
+                { completion_contract = Some [ marker "contract_item" ]
+                ; required_evidence = [ marker "evidence_item" ]
+                })
            request
        with
        | Error detail -> failf "%s: prompt render failed: %s" label detail
@@ -156,6 +164,94 @@ let test_goal_lookup_template_renders_the_surface () =
       (Astring.String.is_infix ~affix:(marker "root_layout") text)
 ;;
 
+(* A stop is judged on its reason. The completion prompt asks the opposite
+   question — did you finish, and can you evidence it — and a cancellation put
+   through it is refused for having no artifacts and for reading as avoidance,
+   which is exactly what a stop is. These pin that the branch renders the other
+   prompt, not the same one with fields blanked (#33052). *)
+let cancellation_prompt () =
+  init ();
+  match
+    AR.build_prompt
+      ~question:
+        (AR.Cancellation
+           { reason = marker "cancel_reason"
+           ; contract_context = [ marker "contract_context_item" ]
+           })
+      ~lookup:AR.No_lookup_surface
+      request
+  with
+  | Ok text -> text
+  | Error detail -> failf "cancellation prompt render failed: %s" detail
+;;
+
+let test_the_cancellation_prompt_carries_the_reason_and_the_contract () =
+  let text = cancellation_prompt () in
+  check
+    bool
+    "the stated reason is what the judge is given"
+    true
+    (Astring.String.is_infix ~affix:(marker "cancel_reason") text);
+  check
+    bool
+    "the contract reaches it as context"
+    true
+    (Astring.String.is_infix ~affix:(marker "contract_context_item") text);
+  check
+    bool
+    "the task it would stop is named"
+    true
+    (Astring.String.is_infix ~affix:(marker "task_title") text)
+;;
+
+(* The completion prompt rendered from the same request, so the assertions
+   below can be made against text that demonstrably exists. A bare "the
+   cancellation prompt does not contain X" passes for free the day someone
+   rewords X; checking that the completion prompt still does keeps the needle
+   real. *)
+let completion_prompt () =
+  init ();
+  match
+    AR.build_prompt
+      ~question:
+        (AR.Completion
+           { completion_contract = Some [ marker "contract_item" ]
+           ; required_evidence = [ marker "evidence_item" ]
+           })
+      ~lookup:AR.No_lookup_surface
+      request
+  with
+  | Ok text -> text
+  | Error detail -> failf "completion prompt render failed: %s" detail
+;;
+
+(* The failure modes this branch exists to remove, read off the rendered text:
+   the order to reject on unevidenced contract items, the submitted-evidence
+   block, and the completion notes as the thing judged. Each is asserted
+   present in the completion prompt and absent from the cancellation one, so
+   neither half can pass vacuously. *)
+let test_the_cancellation_prompt_does_not_demand_completion_evidence () =
+  let cancellation = cancellation_prompt () in
+  let completion = completion_prompt () in
+  List.iter
+    (fun (what, affix) ->
+       check
+         bool
+         (what ^ ": the completion prompt still carries it")
+         true
+         (Astring.String.is_infix ~affix completion);
+       check
+         bool
+         (what ^ ": a stop is not judged by it")
+         false
+         (Astring.String.is_infix ~affix cancellation))
+    [ "the reject-on-unevidenced-contract order", "계약 항목 전부를 충족해야"
+    ; "the submitted evidence block", "submitted_evidence_refs"
+    ; "the completion notes", marker "completion_notes"
+    ; "avoidance as a rejection signal", "회피 패턴"
+    ]
+;;
+
 let () =
   Alcotest.run
     "review_prompt_sections"
@@ -172,6 +268,14 @@ let () =
             "every section template renders"
             `Quick
             test_every_section_template_renders
+        ; test_case
+            "the cancellation prompt carries the reason and the contract"
+            `Quick
+            test_the_cancellation_prompt_carries_the_reason_and_the_contract
+        ; test_case
+            "the cancellation prompt does not demand completion evidence"
+            `Quick
+            test_the_cancellation_prompt_does_not_demand_completion_evidence
         ; test_case
             "the goal proof prompt renders its variables"
             `Quick

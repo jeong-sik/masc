@@ -36,6 +36,7 @@ let with_lane_and_reviewer ~slots ~reviewer f =
 
 let review () =
   AR.review
+    ~question:(AR.Completion { completion_contract = None; required_evidence = [] })
     ~lookup:AR.No_lookup_surface
     ~base_path:(Filename.get_temp_dir_name ())
     request
@@ -246,6 +247,7 @@ let test_explicit_override_never_consults_the_lane () =
          AR.review
            ~evaluator_runtime:"explicit-runtime"
            ~lookup:AR.No_lookup_surface
+           ~question:(AR.Completion { completion_contract = None; required_evidence = [] })
            ~base_path:(Filename.get_temp_dir_name ())
            request
        in

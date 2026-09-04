@@ -1520,6 +1520,7 @@ let test_turn_spawn_failure_is_pre_dispatch_with_tools () =
            ()
          |> check_pre_dispatch_attempt "turn process spawn failure"))
 ;;
+
 let test_unbounded_turn_keeps_subscription_probe_bounded () =
   let turn_config =
     { (Runtime_claude_code.default_config ~cwd:"/tmp") with timeout_s = None }
@@ -1558,7 +1559,6 @@ let repeated_tool () =
     (fun _ ->
       Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
 ;;
-
 
 (* A blank composition must not reach [Runtime_claude_code.config.system_prompt]
    as [None]. [None] means "omit --system-prompt", which since #33072 hands the

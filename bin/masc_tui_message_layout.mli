@@ -15,6 +15,10 @@ type style =
           from six senders wearing the reader's own colours. *)
   | Keeper
   | Status
+      (** What the server says happened to a turn. *)
+  | Local
+      (** The pane answering a command typed at it. Never left this machine,
+          and belongs to no turn. *)
   | Journal
       (** Auxiliary Memory/Librarian lane. It has its own mark and rail so a
           recorded memory pass never reads as part of ordinary conversation. *)
@@ -22,6 +26,11 @@ type style =
   | Tool
   | Skill of skill_tone
   | Thinking
+
+val all_styles : style list
+(** Every style, listed beside the type so a new variant is added in sight of
+    it. The mark-distinctness check walks this; nothing in the language forces
+    a variant to appear here. *)
 
 type turn_rail =
   | Rail_opens  (** The turn's first row. *)

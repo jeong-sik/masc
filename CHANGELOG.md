@@ -4,56 +4,56 @@
 
 ## [0.31.0] - 2026-09-04
 
-- **A stop is judged on the reason it gives.** A Task cancelled by its producer
-  was weighed against the completion contract and refused for not finishing the
-  work it asked not to finish. The cancel transition now writes the verification
-  record the authority reads (#33046), the authority renders a prompt built for
-  a stop (#33059), and the lookup surface is described in that question's terms
-  rather than the completion wording about submitted snapshots (#33066, #33080).
-- **A consumer that stops reading stops the socket.** A stream reader that
-  decided to stop kept the connection draining until the peer or a timeout ended
-  it. The read loop now carries the consumer's decision (#33048), driven through
-  a real socket in test (#33055).
-- **Chat is one event log with projections.** Per-turn chat events are written
-  to a canonical journal (RFC-0412 stage 1, #33053) with a retention sweep and
-  a repeating-stream decode (#33056), and the duplicate attachment ids and
-  folded image rows that the two-writer shape produced are gone (#33063).
-- **The composer completes what you are typing.** Tab completes slash commands
-  and their arguments (#33068), arrow keys and shift-tab move through the
-  candidates (#33071), and a line typed while a keeper is still being composed
-  for is held rather than dropped (#33047).
-- **Voice capture decides its own boundaries.** The capture marks where speech
-  starts and ends so the meter can follow it (#33062), thresholds moved into
-  `runtime.toml` alongside noise reduction (#33036), the threshold compares the
-  peak that sox reports (#33020), a stop keeps the sentence it interrupted
-  (#33079), and a Config pane shows what voice resolved to and on which
-  microphone (#33032).
-- **Esc means what the screen says.** Esc during a turn stops the turn (#33025)
-  and leaves the chat view once the interrupt is stale, declined, or errored
-  (#33049). A spawned process no longer freezes the UI (#33023), and a run of
-  Gate steps folds back into the one approval it describes (#33024, #33001).
+- **Voice input, end to end.** A Keeper chat can be dictated: the capture decides
+  where speech starts and ends and the meter watches it (#33062), thresholds and
+  noise reduction move into `runtime.toml` (#33036, #33020), a Config pane shows
+  what voice resolved to and on which microphone (#33032), Esc abandons a
+  recording (#33088), and a stop keeps the sentence it interrupted (#33079). The
+  capture meter reaches the chat surface and keeps reading (#33035, #33045).
+- **The composer completes and holds.** Tab autocompletes slash commands and
+  their arguments (#33068), arrow keys and Shift-Tab walk the completions
+  (#33071), and a line typed while a Keeper is still being composed for is held
+  rather than sent past the one in progress (#33047). A lone continuation bullet
+  is now a quiet vertical rail (#33060).
+- **An image a text-only Keeper cannot read is read for it.** A deferred runtime
+  lane degrades an image turn to text instead of crashing on a text-only model
+  (#33037, RFC-0414 #33054), and the cloud vision models are wired as the
+  `media_failover` read fleet so `analyze_image`'s eager read lands on a fast one
+  (#33074).
+- **Chat is one canonical event log.** A per-turn chat event journal records the
+  stream once and projects it (RFC-0412 stage 1, #33053, #33002), with a
+  retention sweep and a repeating-SSE decode fix (#33056).
+- **A stop is judged on its reason.** Verification reads why a turn stopped
+  rather than what it did not build (#33059), the cancellation lookup describes
+  tools instead of ordering a rejection (#33080, #33066), five vacuous checks now
+  fail on the value they check (#33050), and a stop waits on a record the
+  authority can read (#33046).
+- **Interrupts do what the screen says.** Esc during a turn stops the turn
+  (#33025) and leaves the chat once the interrupt is stale, declined, or errored
+  (#33049); a spawned process no longer freezes the UI (#33023); Gate steps fold
+  into the one approval they describe and draw from their typed phase (#33024,
+  #33001).
+- **Keeper hygiene.** `masc keeper-create` lands a Keeper on the network mode it
+  was given (#33084); a moving-result loop is still caught as a loop (#33033);
+  the carried tool set is bounded at its growth boundary (#32988); paste delivery
+  is verified by read-back before it is logged delivered (#33042); a microVM
+  guest whose work volume is not mounted is refused (#33026); the official-client
+  codex profile id is corrected and an unset system prompt omitted (#33072,
+  #33009).
+- **Tool schema and streams.** Canonicalizing a schema derives its description
+  without rendering the prose it discards (#33003, #33013), the cancel tool joins
+  the embedded-tools manifest (#33081), and a consumer that stops reading stops
+  the socket (#33048, #33055). Nightly CI now runs the full test suite (#33070).
 - **Surfaces with no producer are removed rather than drawn empty.** The metrics
   alias surface (#33019), the handoff rail whose producer died in August
-  (#33014), and the submission-clock field nothing read (#33067). Schema
-  canonicalisation stopped rendering prose it discards (#33003, #33013).
-- **Checks that could not fail now fail.** Five vacuous checks were rewritten to
-  assert the value they name (#33050); the composable-output gate reaches the
-  paged shape and every probe runs (#33006); goal and run probes carry an item
-  and the collector keeps every failure (#33011); the output schema rejects the
-  removed metrics alias fields (#33030).
-- **Keeper turns hold their own facts.** A loop whose result keeps moving is
-  still a loop (#33033), the chat store records an approval instead of wording
-  one (#33028), paste delivery is verified by read-back before it is logged
-  delivered (#33042), official-client input attribution is captured instead of
-  written as zero (#33009), and the carried tool set is bounded at the growth
-  boundary (#32988). A microvm guest whose work volume is not mounted is refused
-  (#33026), and `gh` read verbs take the observation-only path (#32999).
-- **Text-only keepers read images when a vision runtime is wired.** Cloud vision
-  is wired as the `media_failover` read fleet (RFC-0414, #33074), and a deferred
-  runtime lane degrades image input rather than failing on it (#33037).
-- **The test suite runs on a schedule.** CI gained a nightly run of the suite
-  (#33070), and the doc-truth gate CONTRIBUTING names now runs in CI, which is
-  how the 0.30.0 version headers drifted for a day without anyone seeing it.
+  (#33014), and the submission-clock field nothing read (#33067). The chat store
+  records an approval instead of wording one (#33028), the duplicate attachment
+  ids and folded image rows the two-writer shape produced are gone (#33063), and
+  `gh` read verbs take the observation-only path instead of the judge (#32999).
+- **Checks that could not fail now fail.** The composable-output gate reaches the
+  paged shape and every probe runs (#33006), goal and run probes carry an item
+  and the collector keeps every failure (#33011), and the output schema rejects
+  the metrics alias fields that were removed (#33030).
 
 ## [0.30.0] - 2026-09-04
 

@@ -39,10 +39,10 @@ all three read and write the same state.
 | **MCP** | Your own agent joins the workspace: claim a task, post to the board, record evidence | Any MCP client over `http://127.0.0.1:8935/mcp` |
 | **Dashboard** | The same state in a browser, for when a terminal is not at hand | Served at `/dashboard/` by the same process |
 
-![MASC terminal UI](docs/screenshots/tui/2026-08-26/surfaces/01-overview.png)
+![MASC terminal UI](docs/screenshots/tui/2026-09-04/surfaces/01-overview.png)
 
 Keeper names and the base path in this frame were replaced with stand-ins of
-the same width; the [surface inventory](docs/screenshots/tui/2026-08-26/surfaces/README.md)
+the same width; the [surface inventory](docs/screenshots/tui/2026-09-04/surfaces/README.md)
 holds four more and the capture metadata. The [Terminal UI](#terminal-ui)
 section below lists every surface and the keys that reach it.
 
@@ -467,10 +467,10 @@ terminal UI reads; reach for it when a browser is handier than a terminal, or
 for the screens that only exist there (the IDE shell, the Lab diagnostics).
 Navigation is defined in `dashboard/src/config/navigation.ts`.
 
-![MASC dashboard overview](docs/screenshots/dashboard/2026-08-26/01-overview.png)
+![MASC dashboard overview](docs/screenshots/dashboard/2026-09-04/01-overview.png)
 
 This image was captured from a live local runtime with operational identifiers
-redacted. The [dashboard inventory](docs/screenshots/dashboard/2026-08-26/README.md)
+redacted. The [dashboard inventory](docs/screenshots/dashboard/2026-09-04/README.md)
 contains 24 screens and the exact capture metadata.
 
 Primary sidebar screens:
@@ -510,7 +510,7 @@ Route examples required by the current dashboard contract:
 `dashboard#connectors?section=connector-status`, and
 `dashboard#workspace?section=verification`. `journey` is a hidden diagnostic.
 
-See the [24-screen inventory](docs/screenshots/dashboard/2026-08-26/README.md)
+See the [24-screen inventory](docs/screenshots/dashboard/2026-09-04/README.md)
 for the captured primary, Monitor, Work, and Lab views.
 
 ## Repository layout

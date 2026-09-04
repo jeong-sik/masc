@@ -170,7 +170,7 @@ let decode json =
    The approval id is what folds a run of steps back into the one approval they
    describe; a lifecycle without it is not a step this pane can place, and
    stays in the neutral lane rather than being drawn as a lone approval. *)
-let gate_row ~ts ~slot ?approval_id ~phase ?tool content =
+let gate_row ~ts ~slot ?approval_id ~phase ?tool ?summary content =
   `Assoc
     [ "id", `String ("gate-" ^ slot)
     ; "role", `String "system"
@@ -185,8 +185,32 @@ let gate_row ~ts ~slot ?approval_id ~phase ?tool content =
               | Some id -> [ "approval_id", `String id ])
            @ (match tool with
               | None -> []
-              | Some name -> [ "tool_name", `String name ])) )
+              | Some name -> [ "tool_name", `String name ])
+           @ (match summary with
+              | None -> []
+              | Some text -> [ "call_summary", `String text ])) )
     ]
+
+(* A step row is read on its own, without the pane going back to the request
+   row: the summary of what the gated call asked for travels with every
+   phase. *)
+let test_a_gate_row_carries_its_call_summary () =
+  let decoded =
+    decode
+      (`List
+         [ gate_row ~ts:1.0 ~slot:"approval_request" ~approval_id:"appr_01s"
+             ~phase:"requested" ~tool:"tool_execute"
+             ~summary:"git reflog --date=iso | head -30" ""
+         ])
+  in
+  (match decoded.History.rows with
+   | [ row ] -> (
+     match row.History.kind with
+     | History.Gate_activity { summary; _ } ->
+       check (option string) "the summary names what was deferred"
+         (Some "git reflog --date=iso | head -30") summary
+     | _ -> failf "expected a gate row")
+   | rows -> failf "expected one gate row, got %d" (List.length rows))
 
 let test_a_gate_row_carries_its_approval () =
   let decoded =
@@ -1565,6 +1589,8 @@ let () =
             test_roles_map_to_what_the_pane_draws
         ; test_case "a gate row carries its approval" `Quick
             test_a_gate_row_carries_its_approval
+        ; test_case "a gate row carries its call summary" `Quick
+            test_a_gate_row_carries_its_call_summary
         ; test_case "a lifecycle without an approval id is not a gate row"
             `Quick test_a_lifecycle_without_an_approval_id_is_not_a_gate_row
         ; test_case "a failed turn names the request it came from" `Quick

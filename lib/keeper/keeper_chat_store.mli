@@ -113,6 +113,12 @@ type approval_lifecycle =
   ; tool_name : string option
   ; phase : approval_lifecycle_phase
   ; artifact_ref : Tool_output.artifact_ref option
+  ; call_summary : string option
+        (** One-line rendering of what the gated call asked for. A fact about
+            the approval, not the phase, so every phase row carries it and a
+            row stays readable on its own when the pane loads a history window
+            that does not include the request. Absent on rows written before
+            the field existed. *)
   }
 
 type append_once_result =

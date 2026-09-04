@@ -4984,9 +4984,13 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     (row : Keeper_chat_history.row) =
   let gate =
     match row.Keeper_chat_history.kind with
-    | Keeper_chat_history.Gate_activity { approval_id; phase; tool } ->
+    | Keeper_chat_history.Gate_activity { approval_id; phase; tool; summary } ->
         Some
-          { gs_approval_id = approval_id; gs_phase = phase; gs_tool = tool }
+          { gs_approval_id = approval_id
+          ; gs_phase = phase
+          ; gs_tool = tool
+          ; gs_summary = summary
+          }
     | Keeper_chat_history.Memory_activity _
     | Keeper_chat_history.Addressed_to_keeper _
     | Keeper_chat_history.Said_by_keeper
@@ -5058,14 +5062,14 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         , Some activity )
     | Keeper_chat_history.Reasoning lines ->
         (Message_thinking, Turn_progress, String.concat "\n" lines, None, None)
-    | Keeper_chat_history.Gate_activity { approval_id = _; phase; tool } ->
+    | Keeper_chat_history.Gate_activity { approval_id = _; phase; tool; summary } ->
         (* Server-owned gate status, drawn from the phase rather than from
            the sentence the store composed. It is not Memory: putting it in
            that lane interleaved approvals with journal commits, and hiding
            the journal hid the gate with it. *)
         ( Message_status
         , Turn_progress
-        , Masc_tui_gate_text.lifecycle_line ~phase ~tool
+        , Masc_tui_gate_text.lifecycle_line ~phase ~tool ~summary
         , None
         , None )
     | Keeper_chat_history.Memory_activity _ ->
@@ -5724,7 +5728,7 @@ let chat_status_text completed =
   | Keeper_chat.Terminal_effect_settled ->
       Printf.sprintf "Reply delivered by a terminal tool (turn %s)" turn_ref
   | Keeper_chat.Awaiting_gate_approval ->
-      Printf.sprintf "Waiting for Gate approval (turn %s)" turn_ref
+      Printf.sprintf "승인 후 턴을 이어서 진행합니다 (turn %s)" turn_ref
   | Keeper_chat.No_visible_reply ->
       Printf.sprintf "Turn completed without a visible reply (turn %s)" turn_ref
 

@@ -4605,6 +4605,7 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
             ~keeper_name
             ~approval_id
             ~tool_name:(Some "external-effect")
+            ~call_summary:None
             ~outcome:canonical_outcome
         with
         | Ok () -> ()
@@ -4615,6 +4616,7 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
             ~keeper_name
             ~approval_id
             ~tool_name:(Some "external-effect")
+            ~call_summary:None
             ~outcome:canonical_outcome
         with
         | Ok () -> ()
@@ -4625,6 +4627,7 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
             ~keeper_name
             ~approval_id
             ~tool_name:(Some "external-effect")
+            ~call_summary:None
             ~outcome:(AQ.Replay_failed stale_ref)
         with
         | Error _ -> ()

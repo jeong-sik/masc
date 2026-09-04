@@ -99,15 +99,25 @@ val transcribe_audio :
     why this is read per capture. *)
 
 val trigger_margin_db : float
-(** How far above the measured floor a capture must rise to start recording.
-    Speech sat 5.0 dB and 6.1 dB above the floor on the two measured passes --
-    an ordinary sentence at a built-in microphone -- so a margin near that
-    separation would swallow the utterance. *)
+(** How far above the room's {e peak} a capture must rise to start recording.
+
+    sox's silence filter takes a percentage of full scale measured as peak,
+    not RMS, and on room tone the two are far apart: 4.48% peak against 1.18%
+    RMS on one workstation. A trigger computed from RMS sat below the room's
+    peak, so the filter saw sound continuously — it started at once and never
+    satisfied its trailing-silence condition, running every capture to the
+    timeout with no closing tone.
+
+    Speech clipped at 100% peak on the same microphone, 27 dB clear of the
+    room, so this margin only has to leave the room behind. *)
 
 val speech_margin_db : float
-(** How far above the floor a whole capture must average to be transcribed at
-    all. Below {!trigger_margin_db}, so a capture that did start but carries
-    only room tone is still refused.
+(** How far a whole capture must average above the room to be transcribed at
+    all, read as RMS on both sides.
+
+    Not comparable to {!trigger_margin_db}, which is a peak margin: an average
+    compared against a peak calls every quiet capture loud. The room is read
+    again as an average for this, from the capture's own leading moment.
 
     This exists because whisper answers silence with a sentence: three captures
     of an empty room returned "감사합니다.", "감사합니다." and "네". Byte size
@@ -115,6 +125,14 @@ val speech_margin_db : float
     on room tone is large. Once audio reaches the endpoint chain a hallucinated
     transcript is indistinguishable from a real one, so the refusal has to
     happen here. *)
+
+val peak_amplitude_of_file : string -> float option
+(** Peak linear amplitude of an audio file, read through [sox stat] --
+    the level sox's own silence filter compares its threshold against.
+
+    Not interchangeable with {!rms_amplitude_of_file}: room tone read 4.48%
+    here and 1.18% there on one measurement. Using one where the other was
+    meant is the defect {!trigger_margin_db} describes. *)
 
 val rms_amplitude_of_file : string -> float option
 (** Linear RMS amplitude of an audio file, read through [sox stat].

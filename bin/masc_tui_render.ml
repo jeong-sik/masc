@@ -360,8 +360,16 @@ let folded_thinking_summary body =
     String.split_on_char '\n' body
     |> List.filter (fun line -> String.trim line <> "")
   in
-  Printf.sprintf "Reasoning · %d line(s) folded · Ctrl-R or /thinking to expand"
-    (List.length lines)
+  match lines with
+  (* A fold summary is itself one line, so folding one line hides nothing and
+     saves nothing. It also promised an expansion: every committed reasoning
+     block is the withheld-step count alone, and Ctrl-R on it redrew the same
+     sentence. A block with nothing to fold draws as itself. *)
+  | [] | [ _ ] -> body
+  | lines ->
+      Printf.sprintf
+        "Reasoning · %d line(s) folded · Ctrl-R or /thinking to expand"
+        (List.length lines)
 
 (* What a page says when it holds nothing, in one place.
 

@@ -10,11 +10,9 @@ import {
   railDetail,
   railFreshness,
   statusCardClass,
-  emptyReasonText,
   verdictTone,
   verdictSummary,
   filterVerdicts,
-  filterHandoffEvents,
   EmptySignal,
   HeroRailCard,
   GateChart,
@@ -24,7 +22,6 @@ import {
 import type {
   HarnessHealthData,
   HarnessVerdictItem,
-  HandoffEvent,
 } from './harness-health-state'
 
 function makeVerdict(overrides: Partial<HarnessVerdictItem> = {}): HarnessVerdictItem {
@@ -46,12 +43,9 @@ function makeData(overrides: Partial<HarnessHealthData['overview']> = {}): Harne
     scope_note: 'test',
     overview: {
       evaluator_status: 'healthy',
-      handoff_status: 'idle',
       last_signal_at: Date.now(),
       evaluator_last_event_at: Date.now(),
-      handoff_last_event_at: null,
       fallback_ratio: 0,
-      latest_handoff_generation: null,
       ...overrides,
     },
     calibration: {
@@ -65,7 +59,6 @@ function makeData(overrides: Partial<HarnessHealthData['overview']> = {}): Harne
       agreement_rate: 0,
     },
     recent_verdicts: [],
-    recent_handoffs: { description: '', recent_events: [], total_recent: 0, status: 'idle', last_event_at: null },
   }
 }
 
@@ -182,14 +175,9 @@ describe('heroBody', () => {
     expect(result).toContain('대체')
   })
 
-  it('describes handoff warning', () => {
-    const data = makeData({ handoff_status: 'warning' })
-    expect(heroBody(data)).toContain('세대 교체')
-  })
-
   it('describes no signal state', () => {
     const data = makeData({ last_signal_at: null })
-    expect(heroBody(data)).toContain('keeper')
+    expect(heroBody(data)).toContain('평가 판정')
   })
 
   it('describes normal state with last signal', () => {
@@ -213,16 +201,6 @@ describe('railDetail', () => {
     const data = makeData()
     expect(railDetail(data, 'evaluator')).toBe('판정 기록 없음')
   })
-
-  it('returns generation for handoff', () => {
-    const data = makeData({ latest_handoff_generation: 5 })
-    expect(railDetail(data, 'handoff')).toBe('5세대')
-  })
-
-  it('returns no handoff for null generation', () => {
-    const data = makeData()
-    expect(railDetail(data, 'handoff')).toBe('최근 교체 없음')
-  })
 })
 
 // ================================================================
@@ -234,13 +212,6 @@ describe('railFreshness', () => {
     const ts = Date.now()
     const data = makeData({ evaluator_last_event_at: ts })
     const result = railFreshness(data, 'evaluator')
-    expect(result).not.toBe('기록 없음')
-  })
-
-  it('returns freshness for handoff', () => {
-    const ts = Date.now()
-    const data = makeData({ handoff_last_event_at: ts })
-    const result = railFreshness(data, 'handoff')
     expect(result).not.toBe('기록 없음')
   })
 
@@ -269,32 +240,6 @@ describe('statusCardClass', () => {
 
   it('returns dim border for unknown', () => {
     expect(statusCardClass('broken' as never)).toBe('border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]')
-  })
-})
-
-describe('emptyReasonText', () => {
-  it('returns window_empty message', () => {
-    expect(emptyReasonText('window_empty')).toBe('선택된 범위에는 신호 없음')
-  })
-
-  it('returns no_recent_events message', () => {
-    expect(emptyReasonText('no_recent_events')).toBe('기록은 있지만 최근 신호 없음')
-  })
-
-  it('returns default message for no_runtime_activity', () => {
-    expect(emptyReasonText('no_runtime_activity')).toBe('아직 이 감시 채널을 통과한 실행 없음')
-  })
-
-  it('returns default message for null', () => {
-    expect(emptyReasonText(null)).toBe('아직 이 감시 채널을 통과한 실행 없음')
-  })
-
-  it('returns default message for undefined', () => {
-    expect(emptyReasonText(undefined)).toBe('아직 이 감시 채널을 통과한 실행 없음')
-  })
-
-  it('returns default message for unknown reason', () => {
-    expect(emptyReasonText('something_else')).toBe('아직 이 감시 채널을 통과한 실행 없음')
   })
 })
 
@@ -411,73 +356,6 @@ describe('filterVerdicts', () => {
     ]
     expect(filterVerdicts(sparse, 'approve')).toHaveLength(1)
     expect(filterVerdicts(sparse, 'anything-else')).toHaveLength(0)
-  })
-})
-
-// ================================================================
-// filterHandoffEvents
-// ================================================================
-
-function makeHandoff(overrides: Partial<HandoffEvent> = {}): HandoffEvent {
-  return {
-    timestamp: 1_700_000_000_000,
-    keeper_name: 'keeper-alpha',
-    trace_id: 'abc12345deadbeef',
-    generation: 3,
-    next_generation: 4,
-    prev_trace_id: 'oldtrace0000',
-    new_trace_id: 'newtrace9999',
-    ...overrides,
-  }
-}
-
-describe('filterHandoffEvents', () => {
-  const items: HandoffEvent[] = [
-    makeHandoff({ keeper_name: 'keeper-alpha', trace_id: 'alpha-trace-aaaa', prev_trace_id: 'prev-alpha', new_trace_id: 'new-alpha' }),
-    makeHandoff({ keeper_name: 'keeper-beta', trace_id: 'beta-trace-bbbb', prev_trace_id: 'prev-beta', new_trace_id: 'new-beta' }),
-    makeHandoff({ keeper_name: 'keeper-gamma', trace_id: 'gamma-trace-cccc', prev_trace_id: null, new_trace_id: null }),
-  ]
-
-  it('returns the input reference when query is empty', () => {
-    expect(filterHandoffEvents(items, '')).toBe(items)
-  })
-
-  it('returns the input reference for whitespace-only query', () => {
-    expect(filterHandoffEvents(items, '   ')).toBe(items)
-  })
-
-  it('matches by keeper_name (case-insensitive)', () => {
-    const result = filterHandoffEvents(items, 'BETA')
-    expect(result.map(r => r.keeper_name)).toEqual(['keeper-beta'])
-  })
-
-  it('matches by trace_id substring', () => {
-    const result = filterHandoffEvents(items, 'gamma-trace')
-    expect(result.map(r => r.keeper_name)).toEqual(['keeper-gamma'])
-  })
-
-  it('matches by prev_trace_id substring', () => {
-    const result = filterHandoffEvents(items, 'prev-alpha')
-    expect(result.map(r => r.keeper_name)).toEqual(['keeper-alpha'])
-  })
-
-  it('matches by new_trace_id substring', () => {
-    const result = filterHandoffEvents(items, 'new-beta')
-    expect(result.map(r => r.keeper_name)).toEqual(['keeper-beta'])
-  })
-
-  it('returns empty when no field matches', () => {
-    expect(filterHandoffEvents(items, 'nonexistent-token')).toHaveLength(0)
-  })
-
-  it('trims query before matching', () => {
-    expect(filterHandoffEvents(items, '  alpha  ')).toHaveLength(1)
-  })
-
-  it('does not mutate the input array', () => {
-    const copy = items.slice()
-    filterHandoffEvents(items, 'alpha')
-    expect(items).toEqual(copy)
   })
 })
 

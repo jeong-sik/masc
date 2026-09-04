@@ -119,6 +119,13 @@ type kind =
           block carried it: the lines the server kept, and a count of the
           steps it withheld. A blank [content] with a trace behind it used
           to draw as an empty line; this is what was behind it. *)
+  | Gate_activity of
+      { phase : string
+      ; tool : string option
+      }
+      (** One durable step of an external-effect approval, read off the row's
+          typed [approval_lifecycle] rather than off prose the store composed.
+          The wording belongs to whoever draws it; the row carries the fact. *)
   | Memory_activity of { summary : string option }
       (** A committed or failed Memory OS journal pass. [row.text] carries
           exact added/removed claims or typed failure detail; [summary] is the

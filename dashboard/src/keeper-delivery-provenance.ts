@@ -7,8 +7,10 @@ export type KeeperChatDeliveryKey =
 export type KeeperChatTranscriptSlot =
   | { readonly kind: 'accepted_user' }
   | { readonly kind: 'terminal_assistant' }
+  | { readonly kind: 'approval_request' }
   | { readonly kind: 'approval_resolution' }
   | { readonly kind: 'approval_replay' }
+  | { readonly kind: 'approval_replay_correction' }
   | { readonly kind: 'approval_continuation' }
   | {
       readonly kind: 'tool_call'
@@ -93,8 +95,10 @@ function sameTranscriptSlot(
   switch (left.kind) {
     case 'accepted_user':
     case 'terminal_assistant':
+    case 'approval_request':
     case 'approval_resolution':
     case 'approval_replay':
+    case 'approval_replay_correction':
     case 'approval_continuation':
       return true
     case 'tool_call':

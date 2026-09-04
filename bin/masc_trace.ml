@@ -206,15 +206,15 @@ let dump_runtime_manifests ~base_path ~keeper ~turn_id =
       in
       Printf.printf
         "=== turn identity === keeper=%s keeper_turn_id=%d manifest_rows=%d \
-         max_agent_core_turn_count=%s provider_attempts=%d/%d provider_lanes=%d \
+         max_agent_core_turn_count=%s runtime_completed=%d runtime_failed=%d provider_lanes=%d \
          checkpoints_saved=%d receipts_appended=%d turn_finished=%d \
          event_bus=%d correlation_id=%s\n"
         keeper turn_id (List.length matches)
         (match max_agent_core_turn_count with
          | None -> "-"
          | Some value -> string_of_int value)
-        (count_event "provider_attempt_started")
-        (count_event "provider_attempt_finished")
+        (count_event "runtime_completed")
+        (count_event "runtime_failed")
         (count_event "provider_lane_resolved")
         (count_event "checkpoint_saved")
         (count_event "receipt_appended")

@@ -873,9 +873,12 @@ def turn_ref(trace: str, generation: str, turn: str) -> str:
 
 
 def manifest_turn_has_successful_provider(rows: list[dict[str, Any]]) -> bool:
-    has_started = any(row_event(row) == "provider_attempt_started" for row in rows)
+    # A dispatch opens with runtime_routed and closes with runtime_completed.
+    # The retired provider_attempt_started / provider_attempt_finished pair had
+    # no producer, so this returned False for every real turn.
+    has_started = any(row_event(row) == "runtime_routed" for row in rows)
     has_finished = any(
-        row_event(row) == "provider_attempt_finished"
+        row_event(row) == "runtime_completed"
         and not status_is_error(row.get("status"))
         for row in rows
     )

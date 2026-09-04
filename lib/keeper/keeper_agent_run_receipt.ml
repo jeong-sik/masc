@@ -67,24 +67,6 @@ let finalize
     ~receipt_lane_attempt_index_ref
     ~receipt_response_text_present_ref
     () =
-  (match turn_result with
-   | Ok _ -> ()
-   | Error err ->
-     let status, exception_kind =
-       match err with
-       | Agent_core.Error.Api (Llm_provider.Retry.Timeout _) ->
-         "timeout", Some "outer_agent_core_timeout"
-       | _ -> "error", Some "outer_agent_core_error"
-     in
-     Keeper_runtime_manifest
-       .append_unfinished_provider_attempt_finished_best_effort
-         ~site:"keeper_llm_bridge_terminal"
-         config
-         runtime_manifest_context
-         ~status
-         ~error:(Agent_core.Error.to_string err)
-         ?exception_kind
-         ());
   let receipt_ended_at = Masc_domain.now_iso () in
   let error_kind, error_message =
     match turn_result with

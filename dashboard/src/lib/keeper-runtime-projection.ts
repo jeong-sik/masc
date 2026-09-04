@@ -351,10 +351,22 @@ function terminalEventLabel(trace: KeeperRuntimeTraceResponse | null): KeeperRun
   const keeperTurn = clock.keeper_turn_id ?? trace.turn_identity.requested_keeper_turn_id ?? trace.turn_id
   const turnLabel = keeperTurn == null ? 'turn unknown' : `turn #${keeperTurn}`
   const terminal = clock.terminal_event_present ? compactToken(clock.terminal_event, 'terminal present') : 'terminal missing'
-  const gapCount = trace.runtime_lens.gaps.length
-  const terminalTone: KeeperRuntimeProjectionTone =
-    gapCount > 0
+  const gaps = trace.runtime_lens.gaps
+  const gapCount = gaps.length
+  // Tone follows gap severity, not gap count. An info gap
+  // (clock_edges_window_truncated fires on any keeper with more manifest rows
+  // than the request window) is not a warning, and counting it as one meant a
+  // healthy keeper could never read anything but warn.
+  const worstSeverity: KeeperRuntimeProjectionTone | null = gaps.some(
+    gap => gap.severity === 'bad',
+  )
+    ? 'bad'
+    : gaps.some(gap => gap.severity === 'warn')
       ? 'warn'
+      : null
+  const terminalTone: KeeperRuntimeProjectionTone =
+    worstSeverity != null
+      ? worstSeverity
       : !clock.terminal_event_present
         ? 'warn'
         : terminal === 'turn_finished'

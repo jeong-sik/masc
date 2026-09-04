@@ -14,8 +14,6 @@ type event_kind =
   | Runtime_failed
   | Pre_dispatch_blocked
   | Provider_lane_resolved
-  | Provider_attempt_started
-  | Provider_attempt_finished
   | Context_injected
   | Event_bus_correlated
   | Checkpoint_loaded
@@ -33,8 +31,6 @@ let all_event_kinds =
     Runtime_failed;
     Pre_dispatch_blocked;
     Provider_lane_resolved;
-    Provider_attempt_started;
-    Provider_attempt_finished;
     Context_injected;
     Event_bus_correlated;
     Checkpoint_loaded;
@@ -52,8 +48,6 @@ let event_kind_to_string = function
   | Runtime_failed -> "runtime_failed"
   | Pre_dispatch_blocked -> "pre_dispatch_blocked"
   | Provider_lane_resolved -> "provider_lane_resolved"
-  | Provider_attempt_started -> "provider_attempt_started"
-  | Provider_attempt_finished -> "provider_attempt_finished"
   | Context_injected -> "context_injected"
   | Event_bus_correlated -> "event_bus_correlated"
   | Checkpoint_loaded -> "checkpoint_loaded"
@@ -70,8 +64,6 @@ let event_kind_of_string = function
   | "runtime_failed" -> Some Runtime_failed
   | "pre_dispatch_blocked" -> Some Pre_dispatch_blocked
   | "provider_lane_resolved" -> Some Provider_lane_resolved
-  | "provider_attempt_started" -> Some Provider_attempt_started
-  | "provider_attempt_finished" -> Some Provider_attempt_finished
   | "context_injected" -> Some Context_injected
   | "event_bus_correlated" -> Some Event_bus_correlated
   | "checkpoint_loaded" -> Some Checkpoint_loaded

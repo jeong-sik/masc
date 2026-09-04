@@ -348,6 +348,10 @@ type prepared_turn =
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   }
 
+type transmitted_model_input =
+  | Whole_input_transmitted of Agent_core.Types.message list
+  | Held_by_client_session
+
 let resolve_reasoning_effort ~enable_thinking ~reasoning_effort =
   match enable_thinking with
   | Some _ ->

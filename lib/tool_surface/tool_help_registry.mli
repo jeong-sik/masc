@@ -80,6 +80,19 @@ val find_entry :
 
 (** {1 Schema canonicalization} *)
 
+val short_description_of_schema : Masc_domain.tool_schema -> string
+(** The description a canonical schema carries: the authored one where a tool
+    definition supplies it, and the derivation from the catalog metadata
+    otherwise. The same two sources {!entry_of_schema} reads, in the same
+    order.
+
+    Separate from the entry because canonicalisation wants this field and
+    nothing else, and building the entry around it rendered the tool's
+    when_to_use, its constraint notes and its prompt hints only to discard
+    them. Those renders ran during module initialisation, before any process
+    could pin the prompt directory, so each one logged an error it could never
+    avoid. *)
+
 val canonicalize_schemas :
   Masc_domain.tool_schema list -> Masc_domain.tool_schema list
 (** [canonicalize_schemas schemas] applies the canonicalization

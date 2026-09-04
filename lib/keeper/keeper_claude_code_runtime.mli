@@ -45,6 +45,8 @@ val run :
   tools:Agent_core.Tool.t list ->
   initial_messages:Agent_core.Types.message list ->
   model_input_projection:Agent_core.Agent.model_input_projection option ->
+  on_transmitted_model_input:
+    (Keeper_official_client_host.transmitted_model_input -> unit) ->
   hooks:Agent_core.Hooks.hooks option ->
   context_injector:Agent_core.Hooks.context_injector option ->
   context:Agent_core.Context.t option ->
@@ -65,4 +67,16 @@ val run :
     history this turn actually carried. The Agent Core path reports the same
     reading through [Keeper_turn_driver]'s callback of that name; without it
     here, every official-client turn record was written with no window and no
-    input composition, which is what [/context] reads. *)
+    input composition, which is what [/context] reads.
+
+    [on_transmitted_model_input] fires once per attempt, after the capacity
+    window has cut the history and before the prompt is built. Required rather
+    than optional: a lane that reports nothing is what wrote every turn's
+    input attribution on this lane as zero (masc#32995).
+
+    It reports [Whole_input_transmitted] only on a [Start], the one branch
+    whose prompt carries the history. A [Resume] reports
+    [Held_by_client_session] and sends the goal alone: the accumulated
+    conversation is the CLI's, not this process's, so it cannot be measured
+    here -- which is what the composition line for this lane has said all
+    along. *)

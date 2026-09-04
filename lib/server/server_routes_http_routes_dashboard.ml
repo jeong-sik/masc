@@ -2773,8 +2773,7 @@ let add_routes ~sw ~clock router =
          let json =
            Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
-               Dashboard_harness_health.json ~config:(Mcp_server.workspace_config state)
-                 ?since ?until ()))
+               Dashboard_harness_health.json ?since ?until ()))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) _request reqd)

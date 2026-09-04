@@ -110,6 +110,16 @@ type delta =
           tell a busy keeper from a stuck one. *)
   | Checkpoint  (** The turn is continuing past a context checkpoint. *)
   | External_effect_completed
+  | Reply_details of
+      { reply : string
+      ; turn_outcome : Masc.Keeper_turn_outcome.t
+      ; turn_ref : string
+      }
+      (** The terminal reply as the server recorded it (KEEPER_REPLY_DETAILS):
+          the text the transcript keeps, the typed outcome, and the store join
+          key. The strict decoder validates the same event; this is what lets
+          the per-operation log project the reply row without a second
+          decode. *)
   | Run_failed of { message : string }
   | Run_finished
   | Undecodable of string

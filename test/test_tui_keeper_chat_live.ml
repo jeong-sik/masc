@@ -49,6 +49,10 @@ let delta_to_string : Live.delta -> string = function
       Printf.sprintf "accepted(%s,%d)" admission queue_length
   | Live.Checkpoint -> "checkpoint"
   | Live.External_effect_completed -> "external_effect_completed"
+  | Live.Reply_details { reply; turn_outcome; turn_ref } ->
+      Printf.sprintf "reply_details(%s,%s,%s)" reply
+        (Masc.Keeper_turn_outcome.to_label turn_outcome)
+        turn_ref
   | Live.Run_failed { message } -> Printf.sprintf "run_failed(%s)" message
   | Live.Run_finished -> "run_finished"
   | Live.Undecodable detail -> Printf.sprintf "undecodable(%s)" detail

@@ -3103,6 +3103,22 @@
   masc_tui_keeper_chat_transcript))
 
 (test
+ (name test_tui_keeper_chat_log)
+ (modules test_tui_keeper_chat_log)
+ ; The golden case runs the server's own AG-UI projection and SSE encoder over
+ ; a journal, so the wire the TUI decodes is the real one, not a fixture.
+ (libraries
+  alcotest
+  fmt
+  masc
+  masc.masc_types
+  masc.ag_ui
+  masc.server
+  masc_tui_keeper_chat_live
+  masc_tui_keeper_chat_log
+  yojson))
+
+(test
  (name test_tui_keeper_chat_history)
  (modules test_tui_keeper_chat_history)
  (libraries

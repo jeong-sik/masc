@@ -60,6 +60,11 @@ type delta =
       }
   | Checkpoint
   | External_effect_completed
+  | Reply_details of
+      { reply : string
+      ; turn_outcome : Masc.Keeper_turn_outcome.t
+      ; turn_ref : string
+      }
   | Run_failed of { message : string }
   | Run_finished
   | Undecodable of string
@@ -274,6 +279,26 @@ let custom_deltas_unvalidated fields =
               ]))
   | Some "KEEPER_CONTINUATION_CHECKPOINT" -> [ Checkpoint ]
   | Some "KEEPER_EXTERNAL_EFFECT_COMPLETED" -> [ External_effect_completed ]
+  | Some "KEEPER_REPLY_DETAILS" -> (
+      (* The same three fields the strict decoder requires
+         (decode_reply_details); read leniently here, as every other event. *)
+      match object_field fields "value" with
+      | None -> [ Undecodable "KEEPER_REPLY_DETAILS value is not an object" ]
+      | Some value -> (
+          match
+            ( string_field value "reply"
+            , Option.bind (string_field value "turn_outcome")
+                Masc.Keeper_turn_outcome.of_label
+            , string_field value "turn_ref" )
+          with
+          | Some reply, Some turn_outcome, Some turn_ref
+            when String.trim turn_ref <> "" ->
+              [ Reply_details { reply; turn_outcome; turn_ref } ]
+          | _ ->
+              [ Undecodable
+                  "KEEPER_REPLY_DETAILS needs reply, a known turn_outcome and \
+                   a nonblank turn_ref"
+              ]))
   | Some name when List.mem name Projection.known_custom_names -> []
   | Some name -> [ Undecodable ("unknown CUSTOM event name: " ^ name) ]
 

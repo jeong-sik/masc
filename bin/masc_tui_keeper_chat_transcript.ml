@@ -1190,5 +1190,9 @@ let apply ~now t (delta : Live.delta) =
       ()
   | Live.Run_failed { message } -> t.phase <- Stream_failed message
   | Live.Run_finished -> t.phase <- Stream_ended
+  | Live.Reply_details _ ->
+      (* Held in the per-operation log; the trail item that draws it arrives
+         with the log re-fold (stage 3a task 4). *)
+      ()
   | Live.Undecodable detail ->
       note_unreadable t detail

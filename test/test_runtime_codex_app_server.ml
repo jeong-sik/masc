@@ -217,12 +217,13 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
 let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
     ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
-    ?(images = []) path =
+    ?(images = []) ?(native = Runtime_native_tools.codex_default) path =
   Eio_main.run (fun env ->
     let clock = Eio.Stdenv.clock env in
     let config =
       { (Runtime_codex_app_server.default_config ()) with
         cli_path = path
+      ; native
       ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
       ; timeout_s = if no_turn_deadline then None else Some timeout_s
       }
@@ -1587,6 +1588,59 @@ let test_protocol_uses_spawn_cwd_and_named_permissions () =
          (params |> Yojson.Safe.Util.member "permissions" |> Yojson.Safe.Util.to_string);
        check bool
          "legacy sandbox omitted"
+         true
+         (Yojson.Safe.Util.member "sandbox" params = `Null))
+;;
+
+(* [permissions] takes a named profile id, which is a different value space
+   from the CLI's [SandboxMode]. codex-cli 0.153.2 answers
+   [permissionProfile/list] with exactly ":read-only", ":workspace" and
+   ":danger-full-access", so the full posture has to name ":workspace".
+   "workspace-write" is a [SandboxMode] value belonging to the [sandbox] field
+   this client never sends, and it names no profile: a thread asking for it
+   would be refused on the first turn a keeper ran with full native tools. *)
+let test_native_full_names_the_workspace_profile () =
+  let workspace = temp_workspace "masc-codex-full-profile-" in
+  let capture_path = Filename.temp_file "masc-codex-full-profile-" ".jsonl" in
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_tree workspace;
+      Sys.remove capture_path)
+    (fun () ->
+       with_fixture
+         ~capture_path
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun fixture ->
+            match
+              run_fixture
+                ~native:Runtime_native_tools.Native_full
+                ~cwd:workspace
+                fixture
+            with
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+            | Ok _ -> ());
+       let requests =
+         In_channel.with_open_bin capture_path (fun input ->
+           In_channel.input_lines input |> List.map Yojson.Safe.from_string)
+       in
+       let thread_start =
+         List.find
+           (fun json -> Yojson.Safe.Util.member "id" json = `Int 3)
+           requests
+       in
+       let params = Yojson.Safe.Util.member "params" thread_start in
+       check string
+         "full posture names a listed profile id"
+         ":workspace"
+         (params |> Yojson.Safe.Util.member "permissions" |> Yojson.Safe.Util.to_string);
+       check bool
+         "legacy sandbox stays omitted under the full posture"
          true
          (Yojson.Safe.Util.member "sandbox" params = `Null))
 ;;
@@ -3673,6 +3727,10 @@ let () =
             "protocol and spawn share cwd authority"
             `Quick
             test_protocol_uses_spawn_cwd_and_named_permissions
+        ; test_case
+            "full posture names the workspace profile"
+            `Quick
+            test_native_full_names_the_workspace_profile
         ; test_case
             "child environment is allowlisted"
             `Quick

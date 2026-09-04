@@ -47,6 +47,15 @@ access = "read-write"
 # coding model (Z.AI 2026-08-14, /api/show 2026-08-29), 1M context, tools+vision.
 # It is dispatchable only because its binding now carries max-request-body-bytes.
 default = "ollama_cloud.ollama-cloud-glm-5-3-flash"
+# Vision read fleet (RFC-0414). When a keeper's assigned runtime cannot take an
+# image, analyze_image's eager read walks these first. Cloud vision on the
+# ollama_cloud wire is fast enough to be usable; a local 27B measured 5+ min per
+# read under load, so it is deliberately not here. gemma4-31b leads for OCR/vision,
+# glm-5.3-flash backs it. Both already declare image input in [models.*].
+media_failover = [
+  "ollama_cloud.ollama-cloud-gemma4-31b",
+  "ollama_cloud.ollama-cloud-glm-5-3-flash",
+]
 # Anti-rationalization/completion-authority work uses a typed verdict tool call.
 # Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
 # this explicit smart lane. The judgement call resolves the verifier_exact

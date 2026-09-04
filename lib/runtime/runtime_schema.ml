@@ -381,6 +381,12 @@ type config =
         registry (Phase 1 SSH lane, spec §4.2). Keeper TOML [remote_endpoint]
         names resolve against this list at keeper load/dispatch; an unknown
         name is a config-load error. *)
+  ; egress_allowlists : Egress_allowlist.t list
+    (** [\[egress.keepers.<name>\]] — what a keeper in the policy lane may
+        reach (RFC-0415). Beside the endpoint registry rather than in the
+        keeper TOML for the same reason: a keeper names a mode, and what
+        that mode permits is the operator's to say. A keeper with no entry
+        has an empty allowlist, which admits nothing. *)
   }
 [@@deriving show, eq]
 

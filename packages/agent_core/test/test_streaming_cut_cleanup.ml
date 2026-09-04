@@ -131,7 +131,9 @@ let run_client ~clock ~net ~port =
                 ~clock
                 ~idle_timeout:idle_timeout_s
                 ~reader
-                ~on_data:(fun ~event_type:_ _ -> incr lines)
+                ~on_data:(fun ~event_type:_ _ ->
+                  incr lines;
+                  Http_client.Continue)
                 ())
             ()
         with

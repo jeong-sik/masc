@@ -17,7 +17,7 @@ type phase =
 
 type interrupt =
   | Not_requested
-  | Signal_sent of { turn_id : int option }
+  | Signal_sent of { turn_id : int option; signalled_at_ns : int64 }
   | Signal_declined of string
   | Signal_error of string
 
@@ -825,9 +825,9 @@ let phase_text ~now t =
 let interrupt_text t =
   match t.interrupt with
   | Not_requested -> None
-  | Signal_sent { turn_id = None } ->
+  | Signal_sent { turn_id = None; signalled_at_ns = _ } ->
       Some "interrupt signalled; still streaming until it stops"
-  | Signal_sent { turn_id = Some turn_id } ->
+  | Signal_sent { turn_id = Some turn_id; signalled_at_ns = _ } ->
       Some
         (Printf.sprintf
            "interrupt signalled for turn %d; still streaming until it stops"

@@ -1230,15 +1230,24 @@ let reasoning_args = function
 let command config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id =
   let* reasoning_args = reasoning_args reasoning_effort in
   let args =
-    [ config.cli_path
-    ; "--output-format"
-    ; "stream-json"
-    ; "--verbose"
-    ; "--system-prompt"
-    ; Option.value config.system_prompt ~default:""
-    ; "--tools"
-    ; Runtime_native_tools.claude_code_tools_arg config.native
-    ]
+    [ config.cli_path; "--output-format"; "stream-json"; "--verbose" ]
+    (* Passing [--system-prompt] replaces the CLI's built-in prompt outright,
+       so omitting the flag is what selects that prompt. An empty string is not
+       the same as omitting it: claude 2.1.260 picks the prompt with
+       [typeof r === "string" ? [r] : Array.isArray(r) ? r : o], where [r] is
+       the given prompt and [o] the built-in one, so "" takes the string branch
+       and the built-in prompt is discarded. The CLI's own --help says as much
+       twice — "Only applies with the default system prompt (ignored with
+       --system-prompt)" under --exclude-dynamic-system-prompt-sections, and
+       "passing --system-prompt or --append-system-prompt turns it off" under
+       --system-prompt-snapshot, whose default-on is lost with the flag
+       present. Docs: https://code.claude.com/docs/en/cli-reference —
+       "--system-prompt: Replace the entire system prompt with custom text".
+       [None] therefore drops the flag instead of sending "". *)
+    @ (match config.system_prompt with
+       | None -> []
+       | Some prompt -> [ "--system-prompt"; prompt ])
+    @ [ "--tools"; Runtime_native_tools.claude_code_tools_arg config.native ]
     @ ((* [Native_read] pre-approves its built-in read tools alongside the
           MCP tools so [dontAsk] never has a prompt to suppress.
           [Native_full] enables the whole built-in set via [--tools default],

@@ -5,6 +5,7 @@
  (public_name masc.runtime)
  (wrapped false)
  (libraries
+  masc.egress_host
   masc.build_version
   yojson
   cstruct

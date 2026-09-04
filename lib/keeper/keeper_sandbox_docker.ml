@@ -470,9 +470,9 @@ let run_docker_shell_command_with_status_internal
         let container_name = keeper_sandbox_container_name meta in
               let container_root = keeper_private_container_root meta in
               let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in
-              let network_args, network_label =
-                Keeper_sandbox_runtime.docker_network_args network_mode
-              in
+              match Keeper_sandbox_runtime.docker_network_args network_mode with
+              | Error msg -> sandbox_error msg
+              | Ok (network_args, network_label) ->
               let mount_preflight_error ~reason ~detail_msg mount_path =
                 let details =
                   docker_mount_preflight_details

@@ -157,11 +157,72 @@ type keeper_chat_event =
       ; result_summary : string option
       }
 
-let create () = Eio.Stream.create 512
+type published =
+  { seq : int
+  ; ts : float
+  ; event : keeper_chat_event
+  }
 
-let publish stream event = Eio.Stream.add stream event
+type t =
+  { stream : published Eio.Stream.t
+  ; on_publish : (seq:int -> ts:float -> keeper_chat_event -> unit) option
+  ; now : unit -> float
+  ; mutable next_seq : int
+  }
 
-let subscribe stream = Eio.Stream.take stream
+let create ?(now = Time_compat.now) ?on_publish () =
+  { stream = Eio.Stream.create 512; on_publish; now; next_seq = 0 }
+;;
+
+(* [publish] is the single choke point every turn event passes through — route
+   lifecycle, bridge-translated deltas, and terminal paths all call it. The
+   hook runs BEFORE the bus add so the canonical journal records what the turn
+   produced even when a full bus suspends the add. The ordering guarantee rests
+   on one invariant: every [publish] for a given bus runs in the single
+   publisher fiber (the process_single_turn / consume_worker_events call tree
+   in server_routes_http_keeper_stream.ml), so seq assignment → hook → bus add
+   executes sequentially within that fiber and journal order == seq order ==
+   bus order with no extra lock. The journal hook's blocking Unix I/O is
+   offloaded via Fs_compat.run_blocking_private_file_transaction
+   (Eio_unix.run_in_systhread when called from an Eio fiber), which suspends
+   only the calling fiber — that keeps sibling fibers responsive but is not
+   what makes the ordering safe. *)
+let publish t event =
+  let seq = t.next_seq in
+  t.next_seq <- seq + 1;
+  (* One clock reading per event. The journal line and every live projection
+     of this event carry this same [ts], which is what lets a replay from the
+     journal reproduce the live frames byte for byte. A raising clock falls
+     back to the real one rather than breaking the turn. *)
+  let ts =
+    try t.now () with
+    | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+    | exn ->
+      Log.Keeper.error
+        "keeper_chat_events: clock raised seq=%d: %s; falling back to Time_compat.now"
+        seq
+        (Printexc.to_string exn);
+      Time_compat.now ()
+  in
+  (match t.on_publish with
+   | None -> ()
+   | Some hook ->
+     (try hook ~seq ~ts event with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Log.Keeper.error
+          "keeper_chat_events: on_publish hook failed seq=%d: %s"
+          seq
+          (Printexc.to_string exn)));
+  Eio.Stream.add t.stream { seq; ts; event }
+;;
+
+let subscribe t = (Eio.Stream.take t.stream).event
+let subscribe_published t = Eio.Stream.take t.stream
+
+let take_nonblocking t =
+  Option.map (fun published -> published.event) (Eio.Stream.take_nonblocking t.stream)
+;;
 
 let json_opt key value =
   match value with
@@ -241,6 +302,7 @@ let stream_protocol_error_kind_of_string = function
   | "sse_unsupported_part" -> Some Sse_unsupported_part
   | "sse_unsupported_response" -> Some Sse_unsupported_response
   | "sse_stream_incomplete" -> Some Sse_stream_incomplete
+  | "sse_stream_repeating" -> Some Sse_stream_repeating
   | _ -> None
 
 let stream_protocol_error_summary error =

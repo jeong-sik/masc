@@ -43,9 +43,8 @@ val transition_task_outcome_r :
     (task:Masc_domain.task ->
      assignee:string ->
      verification_id:string ->
-     evidence_refs:string list ->
+     claim:Masc_domain.verification_claim ->
      (unit, string) result) ->
-  ?compensate_verification_request:(verification_id:string -> unit) ->
   ?expected_version:int -> ?notes:string -> ?reason:string ->
   ?handoff_context:Masc_domain.task_handoff_context ->
   unit -> transition_outcome Masc_domain.masc_result
@@ -79,9 +78,8 @@ val transition_task_r :
     (task:Masc_domain.task ->
      assignee:string ->
      verification_id:string ->
-     evidence_refs:string list ->
+     claim:Masc_domain.verification_claim ->
      (unit, string) result) ->
-  ?compensate_verification_request:(verification_id:string -> unit) ->
   ?expected_version:int -> ?notes:string -> ?reason:string ->
   ?handoff_context:Masc_domain.task_handoff_context ->
   unit -> string Masc_domain.masc_result

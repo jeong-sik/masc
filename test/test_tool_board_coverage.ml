@@ -151,10 +151,17 @@ let test_board_error_to_string () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
+  (* Whole-string compares, because every arm of [board_error_to_string]
+     echoes its payload: "has text" held for all eight, and 'b' was satisfied
+     by the payload "bad" rather than by the label — "Validation error" has no
+     'b' in it, so the old check tested none of what it was named for.  Two
+     arms rendered under one label would have passed both. *)
   let s = Board_tool.board_error_to_string (Board.Post_not_found "test-id") in
-  Alcotest.(check bool) "post_not_found has text" true (String.length s > 0);
+  Alcotest.(check string) "post_not_found renders its own label"
+    "Post not found: test-id" s;
   let s2 = Board_tool.board_error_to_string (Board.Validation_error "bad") in
-  Alcotest.(check bool) "validation_error" true (String.contains s2 'b');
+  Alcotest.(check string) "validation_error renders its own label"
+    "Validation error: bad" s2;
   (* A guessed id can carry the accepted c-hex shape (keeper:polisher voted
      c-000…0 on 2026-08-24), so the shape check lets it through and the
      lookup miss is the only reply the caller gets. It must name the two

@@ -494,26 +494,26 @@ let install () =
            { kind = degraded.degraded_kind; detail = degraded.degraded_detail });
 
   Atomic.set Workspace_hooks.verification_submit_request_fn
-    (fun config ~task ~assignee ~verification_id ~evidence_refs ->
+    (fun config ~task ~assignee ~verification_id ~claim ->
        Verification_protocol.create_submit_request
          ~config
          ~task
          ~assignee
          ~verification_id
-         ~evidence_refs);
+         ~claim);
 
   Atomic.set Workspace_hooks.verification_delete_request_fn
     (fun config ~verification_id ->
        Verification_protocol.delete_verification_request ~config ~verification_id);
 
   Atomic.set Workspace_hooks.verification_notify_submit_fn
-    (fun config ~task ~assignee ~verification_id ~evidence_refs ->
+    (fun config ~task ~assignee ~verification_id ~claim ->
        Verification_protocol.notify_submit_for_verification
          ~config
          ~task
          ~assignee
          ~verification_id
-         ~evidence_refs);
+         ~claim);
 
   Atomic.set Workspace_hooks.verification_notify_verdict_fn
     (fun ~task_id ~authority ~verification_id ~decision ->

@@ -218,6 +218,14 @@ let prune_shared_jsonl_stores ~prune_dir ~days ~masc_root =
   + prune_children_dirs
       ~prune_dir:(prune_flat_jsonl_older_than ~days)
       (Filename.concat masc_root "trajectories")
+  (* keeper_chat_events: flat <operation_id>.jsonl under
+     keeper_chat_events/<keeper>/ (RFC-0412 stage 1). Same mtime safety as
+     logs/: a live operation's journal keeps a fresh mtime, so only finished
+     operations age out. These files hold full reasoning text — aging out is
+     the privacy posture, not just disk hygiene. *)
+  + prune_children_dirs
+      ~prune_dir:(prune_flat_jsonl_older_than ~days)
+      (Filename.concat masc_root "keeper_chat_events")
   + prune_children_dirs ~prune_dir (Filename.concat masc_root "resilience_audit")
   (* decision_audit: [<keeper>/YYYY-MM/DD.jsonl] written via
      [Keeper_decision_audit.append] ([keeper_decision_audit.ml:185]). Same

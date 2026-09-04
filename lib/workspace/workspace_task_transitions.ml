@@ -20,7 +20,7 @@ type verification_submission =
   { task : Masc_domain.task
   ; assignee : string
   ; verification_id : string
-  ; evidence_refs : string list
+  ; claim : Masc_domain.verification_claim
   ; (* Set when the submission superseded a pending one, so the record it
        replaced can be removed after the commit. The task points only at the
        new id; leaving the old file behind would show the dashboard a request
@@ -51,7 +51,7 @@ type verification_submission =
    and published a bare "Released <id>", dropping the explanation it was given.
    [Masc_domain.stated_reason] owns that rule so the author wake resolves the
    same "why" from the same task rather than reading only the status field. *)
-let transition_broadcast_content ~action ~task_id ~reason ~handoff_context
+let transition_broadcast_content ~new_status ~task_id ~reason ~handoff_context
   : string option
   =
   let with_reason verb =
@@ -59,20 +59,39 @@ let transition_broadcast_content ~action ~task_id ~reason ~handoff_context
     | None -> Some (Printf.sprintf "%s %s" verb task_id)
     | Some reason -> Some (Printf.sprintf "%s %s - %s" verb task_id reason)
   in
-  match (action : Masc_domain.task_action) with
-  | Masc_domain.Claim -> Some (Printf.sprintf "Claimed %s" task_id)
-  | Masc_domain.Start -> Some (Printf.sprintf "Started %s" task_id)
-  | Masc_domain.Cancel -> with_reason "Cancelled"
-  | Masc_domain.Release -> with_reason "Released"
-  (* Submission posts the request, its criteria, and its evidence refs to Board
-     through [Verification_protocol.notify_submit_for_verification]. A message
-     row would restate a strictly poorer version of that post. *)
-  | Masc_domain.Submit_for_verification -> None
-  (* [Done_action] never reaches this commit: the lifecycle answers it with
+  (* The message says what happened to the Task, so it is read off the status
+     the transition produced rather than the action that asked for it. Read off
+     the action, [Cancel] announced "Cancelled" for a stop that had only been
+     submitted — since a producer's stop waits for a verdict, that message
+     named a terminal the Task had not reached and might never reach.
+
+     Each status is produced by exactly one action, so nothing is lost:
+     [Claimed] only by [Claim], [InProgress] only by [Start], [Todo] only by
+     [Release], [Cancelled] only by a [Cancel] the authority approved or one on
+     an unclaimed Task. The idempotent repeats ([Cancel] on [Cancelled],
+     [Release] on [Todo]) are filtered as no-ops before this is reached. *)
+  match (new_status : Masc_domain.task_status) with
+  | Masc_domain.Claimed _ -> Some (Printf.sprintf "Claimed %s" task_id)
+  | Masc_domain.InProgress _ -> Some (Printf.sprintf "Started %s" task_id)
+  | Masc_domain.Cancelled _ -> with_reason "Cancelled"
+  | Masc_domain.Todo -> with_reason "Released"
+  (* A completion submission posts its request, criteria and evidence refs to
+     Board through [Verification_protocol.notify_submit_for_verification]; a
+     message row would restate a strictly poorer version of that post.
+
+     A stop is the other way round. Its whole payload is one sentence, and the
+     Board post carrying it is [Unlisted] — reachable by id, absent from the
+     feed. The measurement that put cancellations in this log in the first
+     place is the same one: a reason no reader sees is a reason that did not
+     arrive. So it keeps its row, worded as the request it is. *)
+  | Masc_domain.AwaitingVerification { intent = Masc_domain.Complete_task; _ } -> None
+  | Masc_domain.AwaitingVerification { intent = Masc_domain.Cancel_task; _ } ->
+    with_reason "Cancellation requested for"
+  (* [Done] never reaches this commit: the lifecycle answers [Done_action] with
      [Verification_submission_required] from every non-terminal status, and
      Done→Done is filtered earlier as a no-op. Completion commits through
      [commit_verdict_r], which posts the verdict to Board. *)
-  | Masc_domain.Done_action -> None
+  | Masc_domain.Done _ -> None
 ;;
 
 let transition_task_outcome_r
@@ -81,7 +100,6 @@ let transition_task_outcome_r
       ~task_id
       ~action
       ?prepare_verification_request
-      ?compensate_verification_request
       ?expected_version
       ?(notes = "")
       ?(reason = "")
@@ -90,59 +108,40 @@ let transition_task_outcome_r
   : transition_outcome Masc_domain.masc_result
   =
   (* The workspace API owns the task FSM, while persistence of the
-     verification request remains behind the neutral hook registry.  The
+     verification request remains behind the neutral hook registry. The
      caller may provide an explicit adapter, but omitting it must still use
      the installed runtime adapter; otherwise the FSM would create an
      [AwaitingVerification] state with no request for the system LLM authority
-     to inspect. *)
+     to inspect. Which transitions need one is decided below from the state
+     the lifecycle produced, not from the action that produced it. *)
   let prepare_verification_request =
     match prepare_verification_request with
-    | Some prepare -> Some prepare
+    | Some prepare -> prepare
     | None ->
-      (match action with
-       | Masc_domain.Submit_for_verification ->
-         Some
-           (fun ~task ~assignee ~verification_id ~evidence_refs ->
-              (Atomic.get Workspace_hooks.verification_submit_request_fn)
-                config
-                ~task
-                ~assignee
-                ~verification_id
-                ~evidence_refs)
-       | Masc_domain.Claim
-       | Masc_domain.Start
-       | Masc_domain.Done_action
-       | Masc_domain.Cancel
-       | Masc_domain.Release -> None)
+      fun ~task ~assignee ~verification_id ~claim ->
+        (Atomic.get Workspace_hooks.verification_submit_request_fn)
+          config
+          ~task
+          ~assignee
+          ~verification_id
+          ~claim
   in
-  (* Compensation has the same defaulting rule.  Its result type is [unit],
-     so a failed cleanup is logged by the adapter but cannot hide the original
-     commit failure. *)
-  let compensate_verification_request =
-    match compensate_verification_request with
-    | Some compensate -> Some compensate
-    | None ->
-      (match action with
-       | Masc_domain.Submit_for_verification ->
-         Some
-           (fun ~verification_id ->
-              match
-                (Atomic.get Workspace_hooks.verification_delete_request_fn)
-                  config
-                  ~verification_id
-              with
-              | Ok () -> ()
-              | Error detail ->
-                Log.TaskState.error
-                  "verification request compensation degraded task_id=%s verification_id=%s detail=%s"
-                  task_id
-                  verification_id
-                  detail)
-       | Masc_domain.Claim
-       | Masc_domain.Start
-       | Masc_domain.Done_action
-       | Masc_domain.Cancel
-       | Masc_domain.Release -> None)
+  (* Compensation is not a caller's choice. Its result type is [unit], so a
+     failed cleanup is logged by the adapter but cannot hide the original
+     commit failure, and no caller ever had a reason to supply its own. *)
+  let compensate_verification_request ~verification_id =
+    (match
+           (Atomic.get Workspace_hooks.verification_delete_request_fn)
+             config
+             ~verification_id
+         with
+         | Ok () -> ()
+         | Error detail ->
+           Log.TaskState.error
+             "verification request compensation degraded task_id=%s verification_id=%s detail=%s"
+             task_id
+             verification_id
+             detail)
   in
   let open Result.Syntax in
   let* () =
@@ -289,94 +288,97 @@ let transition_task_outcome_r
         in
         let new_status = decision.Workspace_task_lifecycle.new_status in
         let set_current = decision.set_current in
-        let verification_submission_evidence_refs =
-          match action with
-          | Masc_domain.Submit_for_verification ->
-            Workspace_task_verification.verification_submission_evidence_refs
-              task
-              ~notes
-              handoff_context
-          | Masc_domain.Claim
-          | Masc_domain.Start
-          | Masc_domain.Done_action
-          | Masc_domain.Cancel
-          | Masc_domain.Release -> []
+        (* The obligation the lifecycle just created, if any. A completion
+           carries the evidence references parsed from the notes and handoff;
+           a stop carries the producer's reason. Keyed on the produced state so
+           every path into [AwaitingVerification] writes the record the
+           authority reads. Keyed on the action, the cancel path wrote none,
+           and the authority deferred the Task on "verification not found"
+           until an operator noticed (task-1303, 2026-09-03). *)
+        let pending_verification =
+          match new_status with
+          | Masc_domain.AwaitingVerification
+              { assignee; verification_id; intent = Masc_domain.Complete_task; _ } ->
+            Some
+              ( assignee
+              , verification_id
+              , Masc_domain.Completion_evidence
+                  { evidence_refs =
+                      Workspace_task_verification.verification_submission_evidence_refs
+                        task
+                        ~notes
+                        handoff_context
+                  } )
+          | Masc_domain.AwaitingVerification
+              { assignee; verification_id; intent = Masc_domain.Cancel_task; _ } ->
+            (* The why arrives on either argument. [reason] is optional on this
+               entry point while [handoff_context.summary] is required for every
+               exit-class action, so a caller that put the whole explanation in
+               the summary — which the tool schema told it to fill — has stated
+               one. [stated_reason] is the same resolution the broadcast below
+               uses; reading only [reason] here would refuse a cancellation the
+               message log would then have announced with its reason. *)
+            Some
+              ( assignee
+              , verification_id
+              , Masc_domain.Cancellation_reason
+                  { reason =
+                      Option.value
+                        ~default:""
+                        (Masc_domain.stated_reason
+                           ~reason:(Some reason)
+                           ~handoff_context:
+                             (match handoff_context with
+                              | Some _ -> handoff_context
+                              | None -> task.handoff_context))
+                  } )
+          | Masc_domain.Todo
+          | Masc_domain.Claimed _
+          | Masc_domain.InProgress _
+          | Masc_domain.Done _
+          | Masc_domain.Cancelled _ -> None
         in
         let* () =
-          match action with
-          | Masc_domain.Submit_for_verification
-            when String.length (String.trim notes) = 0 ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    "submit_for_verification requires non-empty notes describing the \
-                     deliverable and evidence references"))
-          | Masc_domain.Claim
-          | Masc_domain.Start
-          | Masc_domain.Done_action
-          | Masc_domain.Cancel
-          | Masc_domain.Release
-          | Masc_domain.Submit_for_verification -> Ok ()
+          match pending_verification with
+          | None -> Ok ()
+          | Some (_, _, Masc_domain.Completion_evidence _) ->
+            if String.length (String.trim notes) = 0
+            then
+              Error
+                (Masc_domain.Task
+                   (Masc_domain.Task_error.InvalidState
+                      "submit_for_verification requires non-empty notes describing the \
+                       deliverable and evidence references"))
+            else Ok ()
+          | Some (_, _, Masc_domain.Cancellation_reason { reason }) ->
+            if String.length (String.trim reason) = 0
+            then
+              Error
+                (Masc_domain.Task
+                   (Masc_domain.Task_error.InvalidState
+                      "cancel requires a stated reason: pass reason, or state it in \
+                       handoff_context (summary or reason). The completion \
+                       authority judges that sentence and nothing else"))
+            else Ok ()
         in
-        (* WORKAROUND: action (9) × task_status (6) × new_status (6) × option (2) = 648 combos. *)
         let* () =
-          (match action, task.task_status, new_status, prepare_verification_request with
-          | ( Masc_domain.Submit_for_verification
-            , _
-            , Masc_domain.AwaitingVerification { assignee; verification_id; _ }
-            , prepare_opt ) ->
-            (* Collect evidence refs as observability metadata for
-               the verifier request output. Empty list is valid for
-               analysis-only and no-contract tasks. *)
-            (match prepare_opt with
-             | None -> Ok ()
-             | Some prepare ->
-               (match
-                  prepare
-                    ~task
-                    ~assignee
-                    ~verification_id
-                    ~evidence_refs:verification_submission_evidence_refs
-                with
-                | Ok () -> Ok ()
-                | Error e ->
-                  Error
-                    (Masc_domain.System
-                       (Masc_domain.System_error.IoError
-                          (Printf.sprintf
-                             "verification request creation failed before status transition \
-                              (task=%s vrf=%s): %s"
-                             task_id
-                             verification_id
-                             e)))))
-          | ( Masc_domain.Submit_for_verification
-            , _
-            , _
-            , Some _ ) ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    (Printf.sprintf
-                       "submit_for_verification did not produce AwaitingVerification for \
-                        task %s"
-                       task_id)))
-          | ( ( Masc_domain.Claim
-              | Masc_domain.Start
-              | Masc_domain.Done_action
-              | Masc_domain.Cancel
-              | Masc_domain.Release )
-            , _
-            , _
-            , Some _ ) -> Ok ()
-          | ( ( Masc_domain.Claim
-              | Masc_domain.Start
-              | Masc_domain.Done_action
-              | Masc_domain.Cancel
-              | Masc_domain.Release
-              | Masc_domain.Submit_for_verification )
-            , _
-            , _
-            , None ) -> Ok ()) [@warning "-4"]
+          match pending_verification with
+          | None -> Ok ()
+          | Some (assignee, verification_id, claim) ->
+            (match
+               prepare_verification_request ~task ~assignee ~verification_id ~claim
+             with
+             | Ok () -> Ok ()
+             | Error e ->
+               Error
+                 (Masc_domain.System
+                    (Masc_domain.System_error.IoError
+                       (Printf.sprintf
+                          "verification request creation failed before status transition \
+                           (task=%s vrf=%s): %s"
+                          task_id
+                          verification_id
+                          e))))
         in
         (match action, task.task_status with
          | Masc_domain.Release, Masc_domain.Todo ->
@@ -413,46 +415,37 @@ let transition_task_outcome_r
               ~handoff_context
           in
           (* RFC-0221 §3.1: [write_backlog] is the atomic commit point for the
-             task outcome. Submit writes the verification record before this
-             commit (content the verifier reads); if the commit fails after the
-             record was written, compensate by deleting the record so the record
-             store and [task_status] are never left disagreeing, then surface
-             the failure. Submit is the only action that writes a record before
-             this point, so the match scopes compensation to it. Cancellation is
-             re-raised without compensating — the orphan is inert (its task is
-             not [AwaitingVerification]) and reaped later, and running store I/O
-             inside a cancelled fiber is unsafe. *)
+             task outcome. A transition into [AwaitingVerification] writes the
+             verification record before this commit (content the verifier
+             reads); if the commit fails after the record was written,
+             compensate by deleting the record so the record store and
+             [task_status] are never left disagreeing, then surface the
+             failure. Fiber cancellation is re-raised without compensating,
+             because running store I/O inside a cancelled fiber is unsafe. The
+             record it leaves is not always inert: cancelling a Task that was
+             already awaiting writes a second record while the Task still
+             points at the first, which is the two-open-requests shape the
+             supersede delete below exists to prevent. The exposure predates
+             this change — resubmission has always written before the commit —
+             and the dashboard shows such a record while [decide_verdict]
+             refuses any verdict carrying its id. *)
           (try write_backlog config backlog_update.backlog with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
-             (match compensate_verification_request with
+             (match pending_verification with
               | None -> ()
-              | Some compensate ->
-                (match action with
-                 | Masc_domain.Submit_for_verification ->
-                   (match new_status with
-                    | Masc_domain.AwaitingVerification { verification_id; _ } ->
-                      compensate ~verification_id
-                    | Masc_domain.Todo
-                    | Masc_domain.Claimed _
-                    | Masc_domain.InProgress _
-                    | Masc_domain.Done _
-                    | Masc_domain.Cancelled _ -> ())
-                 | Masc_domain.Claim
-                 | Masc_domain.Start
-                 | Masc_domain.Done_action
-                 | Masc_domain.Cancel
-                 | Masc_domain.Release -> ()));
+              | Some (_, verification_id, _) ->
+                compensate_verification_request ~verification_id);
              raise exn);
-          (match action, new_status with
-           | ( Masc_domain.Submit_for_verification
-             , Masc_domain.AwaitingVerification { assignee; verification_id; _ } ) ->
+          (match pending_verification with
+           | None -> ()
+           | Some (assignee, verification_id, claim) ->
              committed_verification_submission :=
                Some
                  { task = { task with task_status = new_status }
                  ; assignee
                  ; verification_id
-                 ; evidence_refs = verification_submission_evidence_refs
+                 ; claim
                  ; superseded_verification_id =
                      (match task.task_status with
                       | Masc_domain.AwaitingVerification
@@ -463,19 +456,7 @@ let transition_task_outcome_r
                       | Masc_domain.InProgress _
                       | Masc_domain.Done _
                       | Masc_domain.Cancelled _ -> None)
-                 }
-           | ( ( Masc_domain.Claim
-               | Masc_domain.Start
-               | Masc_domain.Done_action
-               | Masc_domain.Cancel
-               | Masc_domain.Release
-               | Masc_domain.Submit_for_verification )
-             , ( Masc_domain.Todo
-               | Masc_domain.Claimed _
-               | Masc_domain.InProgress _
-               | Masc_domain.Done _
-               | Masc_domain.AwaitingVerification _
-               | Masc_domain.Cancelled _ ) ) -> ());
+                 });
           (* RFC-0221 §3.3: clear stale agent task-cache entries AFTER the
              commit so agents that cache the task don't emit stale broadcasts
              referencing the old status. *)
@@ -513,7 +494,7 @@ let transition_task_outcome_r
              propagates: a cancelled fiber must not be resumed. *)
           (match
              transition_broadcast_content
-               ~action
+               ~new_status
                ~task_id
                ~reason
                ~handoff_context:backlog_update.persisted_handoff_context
@@ -726,7 +707,7 @@ let transition_task_outcome_r
   in
   (match !committed_verification_submission with
    | None -> ()
-   | Some { task; assignee; verification_id; evidence_refs; superseded_verification_id }
+   | Some { task; assignee; verification_id; claim; superseded_verification_id }
      ->
      (* Order matters: remove the superseded record before announcing the new
         one, so no reader woken by the notification can see two open requests
@@ -755,7 +736,7 @@ let transition_task_outcome_r
           ~task
           ~assignee
           ~verification_id
-          ~evidence_refs
+          ~claim
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -773,7 +754,6 @@ let transition_task_r
       ~task_id
       ~action
       ?prepare_verification_request
-      ?compensate_verification_request
       ?expected_version
       ?notes
       ?reason
@@ -787,7 +767,6 @@ let transition_task_r
     ~task_id
     ~action
     ?prepare_verification_request
-    ?compensate_verification_request
     ?expected_version
     ?notes
     ?reason

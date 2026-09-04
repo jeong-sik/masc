@@ -411,24 +411,20 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
   with
   | Error msg -> tool_result_error ~class_:Tool_result.Policy_rejection msg
   | Ok sandbox_profile ->
+  (* Same non-durable pin as [sandbox_profile] above: [fallback] is the TOML
+     declaration, never [old.network_mode]. The meta decoder fixes that field
+     to the profile default, so reading it back would flip a declared "none"
+     to inherit on any field-only update.
+
+     The resolution itself is [Keeper_turn_up_args]'s, shared with create.
+     It was not: create computed its own from [profile_defaults] and threw
+     away the caller's argument, so the same declaration produced a different
+     keeper depending on whether the name already existed. *)
   match
-    match p.network_mode_opt with
-    | None ->
-      (* Same non-durable pin as [sandbox_profile] above: the meta decoder
-         fixes [network_mode] to the Local default, so trusting
-         [old.network_mode] would flip a TOML-declared "none" to inherit on
-         any field-only update. TOML declaration first, then the resolved
-         profile's own default. *)
-      Ok
-        (resolve_network_mode
-           ~sandbox_profile
-           ~fallback:p.profile_defaults.network_mode)
-    | Some raw ->
-      match network_mode_of_string raw with
-      | Some nm -> Ok nm
-      | None ->
-        Error
-          (Printf.sprintf "invalid network_mode: %S (expected: inherit or none)" raw)
+    resolve_requested_network_mode
+      ~requested:p.network_mode_opt
+      ~sandbox_profile
+      ~fallback:p.profile_defaults.network_mode
   with
   | Error msg -> tool_result_error ~class_:Tool_result.Policy_rejection msg
   | Ok network_mode ->

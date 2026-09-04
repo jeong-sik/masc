@@ -11,6 +11,9 @@ type 'request t =
   | Sends
   | Queues_behind of 'request
 
-val of_state : inflight:'request option -> 'request t
-(** [Queues_behind] exactly when a turn for this keeper is in flight; the
-    queue drains when it settles. Otherwise Enter sends. *)
+val of_state :
+  inflight:'request option -> waiting:'request option -> 'request t
+(** [Queues_behind] when a turn for this keeper is in flight, or when a line is
+    already waiting for it ([waiting] is the line a new one would join). The
+    queue drains when the turn settles and the operator is no longer composing.
+    Otherwise Enter sends. *)

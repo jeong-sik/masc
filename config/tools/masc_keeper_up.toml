@@ -50,6 +50,20 @@ split is why the field is not marked required here, and why it carries no \
 default: nothing fills it in for you."""
 
 [[params]]
+name = "network_mode"
+type = "string"
+enum = ["none", "inherit"]
+description = """
+Whether the sandbox guest reaches the network. \"none\" gives it none: a web \
+search, a git push, or any HTTP call inside the guest fails. \"inherit\" \
+gives it the host's network. Omitted on create, the keeper takes its sandbox \
+profile's default, and docker and microvm both default to \"none\", so a \
+keeper whose work is web search or repository traffic has to pass \
+\"inherit\" here. remote_ssh accepts only \"inherit\": the Phase 1 SSH lane \
+carries transport only, and \"none\" on it is refused when the keeper config \
+loads."""
+
+[[params]]
 name = "remote_endpoint"
 type = "string"
 description = """

@@ -52,14 +52,18 @@ let read_sse_over ~budget_kind lines =
         ~clock
         ~first_event_timeout:first_event_budget_s
         ~reader
-        ~on_data:(fun ~event_type data -> events := (event_type, data) :: !events)
+        ~on_data:(fun ~event_type data ->
+          events := (event_type, data) :: !events;
+          Http_client.Continue)
         ()
     | `Idle ->
       Http_client.read_sse
         ~clock
         ~idle_timeout:idle_budget_s
         ~reader
-        ~on_data:(fun ~event_type data -> events := (event_type, data) :: !events)
+        ~on_data:(fun ~event_type data ->
+          events := (event_type, data) :: !events;
+          Http_client.Continue)
         ()
   in
   match read () with

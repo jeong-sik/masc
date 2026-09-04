@@ -3276,6 +3276,7 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; lane_decls = []
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []
+    ; egress_allowlists = []
     }
   in
   let binding =

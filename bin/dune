@@ -9,6 +9,9 @@
  (libraries
   masc
   masc.auth
+  masc.http_client
+  masc_cli_keeper_create
+  masc_tui_editor
   masc.crypto_rng
   masc.dashboard
   masc.operator
@@ -44,6 +47,7 @@
   fmt
   yojson
   str
+  uri
   cohttp
   cohttp-eio
   masc.prompt_registry
@@ -433,6 +437,12 @@
  (modules masc_tui_mode))
 
 (library
+ (name masc_tui_esc_interrupt)
+ (wrapped false)
+ (modules masc_tui_esc_interrupt)
+ (libraries masc_tui_keeper_chat_transcript))
+
+(library
  (name masc_tui_file_icon)
  (wrapped false)
  (modules masc_tui_file_icon))
@@ -801,6 +811,18 @@
  (modules masc_tui_editor)
  (libraries unix))
 
+;; The declaration [masc keeper-create] sends and the answer it reads, both
+;; pure, so the flag surface is a test rather than a running server.
+(library
+ (name masc_cli_keeper_create)
+ (wrapped false)
+ (modules masc_cli_keeper_create)
+ (libraries
+  masc
+  masc_core
+  masc_keeper_types_profile_sandbox
+  yojson))
+
 (library
  (name masc_tui_keeper_config)
  (wrapped false)
@@ -995,6 +1017,7 @@
   masc_tui_terminal_title
   masc_tui_runtime_config_receipt
   masc_tui_interrupt_signal
+  masc_tui_esc_interrupt
   masc.runtime
   masc.keeper_registry
   masc_skill_reference

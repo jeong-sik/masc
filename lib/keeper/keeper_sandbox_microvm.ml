@@ -111,19 +111,68 @@ let work_volume_guest_root = "/masc-work"
     host not found". [inherit] therefore means container's NAT, not the
     host's namespace, and the two differ in what the guest can reach on
     localhost. *)
+(* The host-only network every [Network_policy] guest is attached to. One
+   name for the fleet rather than one per keeper: the network carries no
+   allowlist -- it only removes every route except the host gateway -- and
+   the per-keeper judgement happens at the proxy on the other side of that
+   gateway. Creating it is the server's job; a guest is never attached to a
+   network that does not exist, because [container run] fails rather than
+   falling back to the default network. *)
+let policy_network_name = "masc-egress-policy"
+
 let network_args_for backend ~dns (mode : Keeper_types_profile_sandbox.network_mode) =
   match (backend : Backend.t) with
-  | Backend.Apple_container | Backend.Nerdctl_kata ->
+  | Backend.Apple_container ->
     Ok
       (match mode with
        | Keeper_types_profile_sandbox.Network_none -> [ "--network"; "none" ]
        | Keeper_types_profile_sandbox.Network_inherit ->
          (match dns with
           | Some server when String.trim server <> "" -> [ "--dns"; String.trim server ]
-          | Some _ | None -> []))
+          | Some _ | None -> [])
+       | Keeper_types_profile_sandbox.Network_policy ->
+         (* Two flags, and both are the policy rather than a default.
+
+            The host-only network is the enforcement point. Measured
+            2026-09-04 on container 1.3.1: a guest attached to an
+            [--internal] network could not reach 1.1.1.1:443 or a public
+            address by raw TCP, and could reach a listener on the host
+            gateway. So a subprocess carrying its own socket does not get
+            out, which is what [HTTPS_PROXY] alone cannot promise.
+
+            [--no-dns] leaves the guest with no resolver on purpose. The
+            proxy speaks CONNECT, so the guest hands it a name and the proxy
+            resolves it -- after the allowlist has judged that same name.
+            One resolver, downstream of the matcher, is what closes the gap
+            a null-byte bypass goes through: there is no second parser to
+            disagree with the first. *)
+         [ "--network"; policy_network_name; "--no-dns" ])
+  | Backend.Nerdctl_kata ->
+    (match mode with
+     | Keeper_types_profile_sandbox.Network_none -> Ok [ "--network"; "none" ]
+     | Keeper_types_profile_sandbox.Network_inherit ->
+       Ok
+         (match dns with
+          | Some server when String.trim server <> "" -> [ "--dns"; String.trim server ]
+          | Some _ | None -> [])
+     | Keeper_types_profile_sandbox.Network_policy ->
+       Error
+         "microvm_network_mode_unmeasured: nerdctl can create an internal \
+          network, so the shape is plausible, but whether a Kata guest on one \
+          can still reach a public address by raw TCP has not been measured \
+          (RFC-0415). A mode that is policy on one backend and advice on \
+          another is worse than one that refuses. Next: measure it, then \
+          replace this arm.")
   | Backend.Microsandbox ->
     (match mode with
      | Keeper_types_profile_sandbox.Network_none -> Ok [ "--no-net" ]
+     | Keeper_types_profile_sandbox.Network_policy ->
+       Error
+         "microvm_network_mode_unmeasured: msb spells its own network policy \
+          (--no-net / --net <PROFILE>), and which profile leaves only a host \
+          listener reachable has not been measured (RFC-0415). msb also does \
+          not boot under masc today -- its list output carries no labels -- \
+          so this arm has no live path to measure on yet."
      | Keeper_types_profile_sandbox.Network_inherit ->
        Error
          "microvm_network_mode_unexpressible: msb 0.6.16 rejects --network \
@@ -586,6 +635,72 @@ let shim_exec_prefix_for backend ~container_name ~uid ~gid ~remote_root ~shim_co
    against [msb remove --force] -- and stop the same way. Measured against
    msb 0.6.16 on 2026-09-03; a spelling this file guesses at would fail every
    call rather than fail once, so each is written from that CLI's own help. *)
+(* Creating and checking the host-only network the policy lane attaches to.
+
+   Only Apple's runtime answers these, because it is the only backend whose
+   policy arm exists; the other two refuse the mode before anything asks for
+   a network. Returning an error rather than an empty argv keeps that
+   agreement visible: a backend that gained a policy arm without gaining
+   these would fail here rather than boot a guest onto a network nobody
+   created. *)
+let policy_network_create_argv_for backend =
+  match (backend : Backend.t) with
+  | Backend.Apple_container ->
+    Ok
+      (command_argv_for backend
+       @ [ "network"; "create"; "--internal"; policy_network_name ])
+  | Backend.Microsandbox | Backend.Nerdctl_kata ->
+    Error
+      (Printf.sprintf
+         "microvm_policy_network_unsupported: %s has no policy lane, so it has no \
+          host-only network to create"
+         (Backend.to_string backend))
+;;
+
+let policy_network_list_argv_for backend =
+  match (backend : Backend.t) with
+  | Backend.Apple_container ->
+    (* [--format json], not the default table. The table is for a person, and
+       reading it means splitting on whitespace and hoping the first column is
+       the name -- a spacing change upstream would then read as "the network
+       is absent" and boot a guest onto one nobody created. The machine form
+       is asked for explicitly, the same way [msb inspect] is. *)
+    Ok (command_argv_for backend @ [ "network"; "list"; "--format"; "json" ])
+  | Backend.Microsandbox | Backend.Nerdctl_kata ->
+    Error
+      (Printf.sprintf
+         "microvm_policy_network_unsupported: %s has no policy lane, so it has no \
+          host-only network to list"
+         (Backend.to_string backend))
+;;
+
+(* [container network list --format json] answers an array whose entries
+   carry the network's [id]. Compared as a decoded string, so nothing here
+   depends on how the CLI spaces a column.
+
+   Unparseable JSON is an error rather than "absent". Reading a failed decode
+   as absence would drive a create against a network that may already exist,
+   and that create fails on this CLI -- so the guest would be refused with a
+   message about creation rather than about the listing that could not be
+   read. *)
+let policy_network_present ~listing =
+  match Yojson.Safe.from_string listing with
+  | `List entries ->
+    Ok
+      (List.exists
+         (fun entry ->
+            match entry with
+            | `Assoc fields ->
+              (match List.assoc_opt "id" fields with
+               | Some (`String id) -> String.equal id policy_network_name
+               | Some _ | None -> false)
+            | _ -> false)
+         entries)
+  | _ -> Error "container network list: expected a JSON array"
+  | exception Yojson.Json_error detail ->
+    Error ("container network list: unparseable JSON: " ^ detail)
+;;
+
 let stop_argv_for backend ~container_name =
   command_argv_for backend @ [ "stop"; container_name ]
 ;;

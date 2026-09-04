@@ -567,7 +567,9 @@ let test_stream_connection_close_does_not_park () =
          ~headers:[]
          ~body:""
          ~f:(fun reader ->
-           Http_client.read_sse ~reader ~on_data:(fun ~event_type:_ _ -> incr seen) ();
+           Http_client.read_sse ~reader ~on_data:(fun ~event_type:_ _ ->
+             incr seen;
+             Http_client.Continue) ();
            Ok ())
          ()
      with

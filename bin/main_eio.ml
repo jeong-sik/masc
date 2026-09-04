@@ -456,11 +456,17 @@ let login_role =
   let role_conv = Arg.conv (parse_login_role, role_printer) in
   Arg.(value & opt role_conv Masc_domain.Admin & info ["role"] ~docv:"ROLE" ~doc)
 
+(* One spelling of the workspace's own operator identity. [login] mints under
+   it and [keeper-create] presents what [login] wrote, so the two reading
+   different names would send a keeper-create out with no credential while
+   [masc login] reported success. *)
+let default_login_agent = "local-admin"
+
 let login_agent =
   let doc = "Agent identity bound to the minted bearer token" in
   Arg.(
     value
-    & opt string "local-admin"
+    & opt string default_login_agent
     & info ["agent"] ~docv:"AGENT" ~doc)
 
 let login_shell =
@@ -1433,6 +1439,395 @@ let schedule_prune_cmd =
   let info = Cmd.info "schedule-prune" ~doc in
   Cmd.v info Term.(const schedule_prune_cmd_exit $ base_path)
 
+(* ── masc keeper-create ──────────────────────────────────────────────────
+
+   The one path that creates a keeper without an MCP client. It exists because
+   the tool that did the creating could not set [network_mode]: the descriptor
+   did not declare it and the create branch dropped it, so a keeper made to
+   search the web landed with no network and its operator edited the TOML by
+   hand afterwards. This command refuses to send a declaration that leaves the
+   field unsaid. *)
+
+let keeper_create_name =
+  let doc = "Keeper handle to create. Required unless --edit is given." in
+  Arg.(value & opt string "" & info [ "name" ] ~docv:"NAME" ~doc)
+
+let keeper_create_instructions =
+  let doc =
+    "What this keeper is for, written verbatim into its TOML declaration."
+  in
+  Arg.(value & opt string "" & info [ "instructions" ] ~docv:"TEXT" ~doc)
+
+let keeper_create_sandbox_profile =
+  let doc =
+    "Sandbox isolation profile: docker, microvm or remote_ssh. Required unless \
+     --edit is given; a creation without one is refused by the server. The \
+     spelling is the server's to judge, not this command's."
+  in
+  Arg.(value & opt string "" & info [ "sandbox-profile" ] ~docv:"PROFILE" ~doc)
+
+let keeper_create_network_mode =
+  let doc =
+    "Whether the sandbox guest reaches the network: none or inherit. Required. \
+     With none, a web search or a git push inside the guest fails; the server's \
+     own default for docker and microvm is none, which is why this command \
+     will not send a declaration that leaves it unsaid."
+  in
+  Arg.(value & opt (some string) None & info [ "network-mode" ] ~docv:"MODE" ~doc)
+
+let keeper_create_remote_endpoint =
+  let doc =
+    "Endpoint registry name under [exec.ssh.endpoints.<name>] in runtime.toml. \
+     The server requires one with --sandbox-profile remote_ssh."
+  in
+  Arg.(
+    value & opt (some string) None & info [ "remote-endpoint" ] ~docv:"NAME" ~doc)
+
+let keeper_create_mention_target =
+  let doc =
+    "Direct-mention token that wakes this keeper. Repeatable. Omitted \
+     entirely, the server uses the keeper's own name."
+  in
+  Arg.(
+    value & opt_all string [] & info [ "mention-target" ] ~docv:"TOKEN" ~doc)
+
+let keeper_create_skill =
+  let doc =
+    "Exact Keeper Skill name to select. Repeatable. Omitted entirely, the \
+     selection is left to the server."
+  in
+  Arg.(value & opt_all string [] & info [ "skill" ] ~docv:"NAME" ~doc)
+
+let keeper_create_no_skills =
+  let doc =
+    "Select no Skills at all. This is the empty selection, which repeating \
+     --skill zero times cannot say: omitting --skill leaves the selection \
+     alone, and this clears it."
+  in
+  Arg.(value & flag & info [ "no-skills" ] ~doc)
+
+let keeper_create_max_context_override =
+  let doc = "Absolute context token limit for this keeper. 0 clears it." in
+  Arg.(
+    value
+    & opt (some int) None
+    & info [ "max-context-override" ] ~docv:"N" ~doc)
+
+(* Tri-state, not [Arg.flag]. A [bool] cannot say "leave the key out", and the
+   key's absence is load-bearing: the config writer persists whatever the meta
+   holds, so a two-valued flag would write an autoboot decision the operator
+   never made. [vflag] also lets cmdliner refuse both spellings at once. *)
+let keeper_create_autoboot =
+  Arg.(
+    value
+    & vflag
+        None
+        [ ( Some true
+          , info [ "autoboot" ] ~doc:"Start this keeper on every server boot." )
+        ; ( Some false
+          , info
+              [ "no-autoboot" ]
+              ~doc:
+                "Persist this keeper but do not start it on future server \
+                 boots. It still starts once now." )
+        ])
+
+let keeper_create_proactive =
+  Arg.(
+    value
+    & vflag
+        None
+        [ ( Some true
+          , info
+              [ "proactive" ]
+              ~doc:"Let scheduled cycles produce proactive responses." )
+        ; ( Some false
+          , info
+              [ "no-proactive" ]
+              ~doc:"Answer only when addressed." )
+        ])
+
+(* This command's own [--host] and [--port], not the server's. The shared
+   terms are [masc serve]'s bind address, and they render in this command's
+   [--help] as "Port to listen on" and "Host/IP to bind" -- true of the
+   server, false of a client, and an operator reading them as the scope of the
+   request is told the wrong thing by the help text itself. The defaults are
+   unchanged: the workspace's own server is the one this command usually
+   means. What decides which server is reached is these two terms alone --
+   [--base-path] only says where to look for the credential, and the manpage
+   now says so. *)
+let keeper_create_host =
+  let doc =
+    "Host of the running masc server this declaration is sent to. Defaults to \
+     loopback. This is a request target, not a bind address."
+  in
+  Arg.(
+    value
+    & opt string (Env_config.masc_host ())
+    & info [ "host" ] ~docv:"HOST" ~doc)
+
+let keeper_create_port =
+  let doc =
+    "Port of the running masc server this declaration is sent to. This is a \
+     request target, not a port to listen on."
+  in
+  Arg.(
+    value
+    & opt int (Env_config_core.masc_http_port_int ())
+    & info [ "p"; "port" ] ~docv:"PORT" ~doc)
+
+let keeper_create_token =
+  let doc =
+    "Bearer to present instead of the one masc login persisted for --agent."
+  in
+  Arg.(value & opt (some string) None & info [ "token" ] ~docv:"TOKEN" ~doc)
+
+let keeper_create_edit =
+  let doc =
+    "Fill the declaration in the editor named by the EDITOR or VISUAL \
+     environment variable, instead of passing flags. Needs a terminal, and it \
+     cannot be combined with the declaration flags."
+  in
+  Arg.(value & flag & info [ "edit" ] ~doc)
+
+let keeper_create_flags_term =
+  let build
+        name
+        instructions
+        sandbox_profile
+        network_mode
+        remote_endpoint
+        mention_targets
+        skill_names
+        no_skills
+        max_context_override
+        autoboot
+        proactive
+    : (Masc_cli_keeper_create.flags, string) result
+    =
+    let selected_skills =
+      match skill_names, no_skills with
+      | _ :: _, true ->
+        Error
+          "masc keeper-create: --skill and --no-skills contradict each other. \
+           Nothing was created."
+      | [], true -> Ok (Some [])
+      | [], false -> Ok None
+      | (_ :: _ as names), false -> Ok (Some names)
+    in
+    match selected_skills with
+    | Error message -> Error message
+    | Ok skills ->
+      let booleans : Masc_cli_keeper_create.booleans = { autoboot; proactive } in
+      let flags : Masc_cli_keeper_create.flags =
+        { name
+        ; instructions
+        ; sandbox_profile
+        ; network_mode
+        ; remote_endpoint
+        ; mention_targets
+        ; skills
+        ; max_context_override
+        ; booleans
+        }
+      in
+      Ok flags
+  in
+  Term.(
+    const build
+    $ keeper_create_name
+    $ keeper_create_instructions
+    $ keeper_create_sandbox_profile
+    $ keeper_create_network_mode
+    $ keeper_create_remote_endpoint
+    $ keeper_create_mention_target
+    $ keeper_create_skill
+    $ keeper_create_no_skills
+    $ keeper_create_max_context_override
+    $ keeper_create_autoboot
+    $ keeper_create_proactive)
+
+(* [--edit] takes the whole declaration from the editor, so a flag passed
+   alongside it would be read by nobody. Naming the conflict costs one
+   comparison; dropping the flags silently is the shape this command exists to
+   stop. *)
+let keeper_create_flags_are_absent (flags : Masc_cli_keeper_create.flags) =
+  String.equal (String.trim flags.name) ""
+  && String.equal (String.trim flags.instructions) ""
+  && String.equal (String.trim flags.sandbox_profile) ""
+  && Option.is_none flags.network_mode
+  && Option.is_none flags.remote_endpoint
+  && List.is_empty flags.mention_targets
+  && Option.is_none flags.skills
+  && Option.is_none flags.max_context_override
+  && Option.is_none flags.booleans.autoboot
+  && Option.is_none flags.booleans.proactive
+
+let keeper_create_edit_conflict_message =
+  "masc keeper-create: --edit takes the declaration from the editor, so it \
+   cannot be combined with the declaration flags. Nothing was created."
+
+let keeper_create_declaration_from_editor () =
+  match
+    Masc_cli_keeper_create.form_input_refusal
+      ~stdin_is_tty:(Unix.isatty Unix.stdin)
+      ~editor:(Masc_tui_editor.editor_command ())
+  with
+  | Some message -> Error message
+  | None ->
+    (* This process is not a TUI: it never left cooked mode, so there is no
+       terminal state to hand back and none to reclaim. *)
+    (match
+       Masc_tui_editor.roundtrip
+         ~restore:(fun () -> ())
+         ~reenter:(fun () -> ())
+         Masc_cli_keeper_create.form_stem
+     with
+     | Error abort ->
+       Error
+         (Printf.sprintf
+            "masc keeper-create --edit: %s. Nothing was created."
+            (Masc_tui_editor.abort_detail abort))
+     | Ok edited -> Masc_cli_keeper_create.declaration_of_form edited)
+
+(* The keeper name becomes a path segment in the request URL, so it is both
+   checked and encoded. [Keeper_config.validate_name] runs first and admits
+   only [A-Za-z0-9._-], which makes the encoding a no-op today -- and that is
+   the reason to have it rather than to skip it: relying on the two staying in
+   step leaves a widened name grammar to show up as a malformed request line.
+   The TUI's own keeper calls encode the same segment. *)
+let keeper_create_post ~base_path ~host ~port ~agent ~token ~keeper_name
+      ~declaration =
+  let bearer =
+    match token with
+    | Some raw -> Some raw
+    | None -> Auth_login.read_persisted_token ~base_path ~agent_name:agent
+  in
+  let headers =
+    ("content-type", "application/json")
+    :: (match bearer with
+        | None -> []
+        | Some value -> [ "authorization", "Bearer " ^ value ])
+  in
+  let url =
+    Printf.sprintf
+      "http://%s:%d/api/v1/keepers/%s/up"
+      host
+      port
+      (Uri.pct_encode keeper_name)
+  in
+  let body = Yojson.Safe.to_string declaration in
+  let outcome =
+    Eio_main.run (fun env ->
+      Eio.Switch.run (fun sw ->
+        Eio_context.set_env env;
+        Eio_context.set_switch sw;
+        Eio_context.set_net (Eio.Stdenv.net env);
+        Eio_context.set_clock (Eio.Stdenv.clock env);
+        (* The same deadline the TUI's own create already runs under; this
+           command does not invent a second one. *)
+        match
+          Masc_http_client.post_sync
+            ~clock:(Eio.Stdenv.clock env)
+            ~timeout_sec:Masc_http_client.default_request_timeout_sec
+            ~url
+            ~headers
+            ~body
+            ()
+        with
+        | Error message -> Masc_cli_keeper_create.Unreachable message
+        | Ok (status, response_body) ->
+          Masc_cli_keeper_create.outcome_of_response ~status ~body:response_body))
+  in
+  let text, code = Masc_cli_keeper_create.render outcome in
+  if code = 0 then print_endline text else prerr_endline text;
+  code
+
+let keeper_create_cmd_exit base_path host port flags_result token agent edit =
+  let declaration_result =
+    match edit, flags_result with
+    | true, Ok flags when not (keeper_create_flags_are_absent flags) ->
+      Error keeper_create_edit_conflict_message
+    | true, Error _ -> Error keeper_create_edit_conflict_message
+    | true, Ok _ -> keeper_create_declaration_from_editor ()
+    | false, Error message -> Error message
+    | false, Ok (flags : Masc_cli_keeper_create.flags) ->
+      (match Masc_cli_keeper_create.declaration_of_flags flags with
+       | Error message -> Error message
+       | Ok declaration -> Ok (declaration, String.trim flags.name))
+  in
+  match declaration_result with
+  | Error message ->
+    prerr_endline message;
+    2
+  | Ok (declaration, keeper_name) ->
+    if not (Keeper_config.validate_name keeper_name)
+    then (
+      prerr_endline (Keeper_config.invalid_name_error keeper_name);
+      prerr_endline "Nothing was created.";
+      2)
+    else
+      keeper_create_post ~base_path ~host ~port ~agent ~token ~keeper_name
+        ~declaration
+
+let keeper_create_cmd =
+  let doc = "Create a keeper from the command line." in
+  let example =
+    String.concat
+      "\n"
+      [ "  masc keeper-create --name scout --sandbox-profile docker"
+      ; "                     --network-mode inherit"
+      ; "                     --instructions 'Search the web.'"
+      ; ""
+      ; "  masc keeper-create --edit"
+      ]
+  in
+  let man =
+    [ `S Manpage.s_description
+    ; `P
+        "Sends one create-or-update declaration to a running server at \
+         --host/--port. The keeper starts immediately: the server boots it \
+         inside the same call, and a create answers only once its keepalive \
+         lane is running."
+    ; `P
+        "--host and --port choose that server, and they are the only things \
+         that do. --base-path does not: it says where to look for the bearer \
+         token masc login persisted for --agent, and a base path with no \
+         running server of its own still sends the declaration to \
+         --host/--port. Scoping a create to a scratch workspace means \
+         pointing --host/--port at that workspace's server."
+    ; `P
+        "--network-mode is required, on the flags and in the --edit form \
+         alike. The server's default for docker and microvm is none, which \
+         gives the guest no network at all, so a keeper whose work is web \
+         search or repository traffic has to say inherit here. This command \
+         refuses rather than choosing for you."
+    ; `P
+        "Naming a keeper that already exists reconfigures it instead of \
+         making a second one, and this command says so. Read what the \
+         required flags do on that path: --sandbox-profile and \
+         --network-mode are sent on every invocation, so they overwrite the \
+         existing keeper's isolation with whatever was typed. --instructions \
+         is the opposite -- left blank it is not sent, and the existing text \
+         stands. To change only the instructions, restate the profile and \
+         the network mode the keeper already has."
+    ; `S Manpage.s_examples
+    ; `Pre example
+    ]
+  in
+  let info = Cmd.info "keeper-create" ~doc ~man in
+  Cmd.v
+    info
+    Term.(
+      const keeper_create_cmd_exit
+      $ base_path
+      $ keeper_create_host
+      $ keeper_create_port
+      $ keeper_create_flags_term
+      $ keeper_create_token
+      $ login_agent
+      $ keeper_create_edit)
+
 let keeper_github_keeper_arg =
   let doc = "Keeper name whose GitHub CLI identity is managed." in
   Arg.(required & opt (some string) None & info [ "keeper" ] ~docv:"NAME" ~doc)
@@ -1566,6 +1961,7 @@ let cmd =
     ; runtime_wizard_catalog_cmd
     ; runtime_probe_cmd
     ; schedule_prune_cmd
+    ; keeper_create_cmd
     ; keeper_github_cmd
     ; build_commit_cmd
     ]

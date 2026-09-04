@@ -793,11 +793,50 @@ let test_lane_media_degrade_uses_first_candidate_runtime_id () =
             "expected first candidate runtime %S to be configured"
             first_candidate_id
       in
+      (* The whole lane, head included, so the assigned runtime is offered back to
+         the decision as a candidate. It still must not be picked: a reroute to
+         the runtime being rerouted away from is not an outcome the decision can
+         produce. *)
+      let remaining_runtimes =
+        List.map
+          (fun runtime_id ->
+             match Runtime.get_runtime_by_id runtime_id with
+             | Some runtime -> runtime
+             | None -> Alcotest.failf "missing lane candidate %s" runtime_id)
+          (Runtime_lane.ordered_candidates lane)
+      in
+      let image_block =
+        Agent_core.Types.Image
+          { media_type = "image/png"
+          ; data = Base64.encode_string "image"
+          ; source_type = Agent_core.Types.Base64
+          }
+      in
+      (* The decision is produced, not hand-built: [reroute_decision] is private,
+         so a degrade floor value can only come from the decision function. No
+         candidate in this lane takes images, so that is what it returns. *)
+      let decision_for_image =
+        Driver.For_testing.lane_modality_reroute_decision
+          ~checkpoint_messages:[]
+          ~initial_messages:[]
+          ~goal_blocks:[ image_block ]
+          ~first_candidate
+          ~remaining_runtimes
+      in
+      (match decision_for_image with
+       | Runtime_agent.No_capable_runtime { required } ->
+         Alcotest.(check (list string))
+           "degrade floor names the required modality"
+           [ "image" ]
+           required
+       | Runtime_agent.No_reroute_needed ->
+         Alcotest.fail "text-only lane should not admit an image turn"
+       | Runtime_agent.Reroute { target; _ } ->
+         Alcotest.failf "text-only lane rerouted to %s" target.Runtime.id);
       let selected_runtime_id, selected_runtime =
         Driver.For_testing.first_runtime_after_modality_reroute
           ~keeper_name:"test-keeper" ~assignment_id:"resilient"
-          ~first_candidate_id ~first_candidate
-          (Runtime_agent.No_capable_runtime { required = [ "image" ] })
+          ~first_candidate_id ~first_candidate decision_for_image
       in
       Alcotest.(check string)
         "selected runtime id"
@@ -1034,11 +1073,11 @@ let test_lane_media_reroute_stays_within_lane () =
           ~first_candidate
           ~remaining_runtimes
       with
-      | Runtime_agent.Reroute { to_runtime_id; _ } ->
+      | Runtime_agent.Reroute { target; _ } ->
         Alcotest.(check string)
           "reroute uses lane candidate, not global media_failover"
           "lanevision.vision_model"
-          to_runtime_id
+          target.Runtime.id
       | Runtime_agent.No_reroute_needed ->
         Alcotest.fail "text-only first candidate should require image reroute"
       | Runtime_agent.No_capable_runtime _ ->

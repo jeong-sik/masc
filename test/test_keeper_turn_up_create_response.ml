@@ -37,9 +37,10 @@ let test_envelope_names_the_isolation_the_keeper_landed_on () =
   check string "network_mode" "none" (string_field "network_mode" json)
 ;;
 
-(* network_mode is dashboard-owned and stays undeclared on the MCP contract
-   (test_tool_input_validation pins that). So the envelope is a report, not an
-   echo: it must follow the meta, whatever the meta says. *)
+(* network_mode is a declared keeper_up argument (test_tool_input_validation
+   pins that), but the envelope is still a report rather than an echo: the
+   mode the keeper lands on is resolved from the argument, the keeper TOML and
+   the profile default, so it must follow the meta whatever the caller sent. *)
 let test_envelope_follows_the_meta_not_a_default () =
   let json =
     envelope ~sandbox_profile:Keeper_types_profile.Remote_ssh

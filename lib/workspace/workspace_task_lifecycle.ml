@@ -131,9 +131,22 @@ let decide
            ; verification_id = new_verification_id ()
            })
     else Error Invalid_transition
-  | Masc_domain.Cancel, Masc_domain.AwaitingVerification { assignee; _ } ->
+  (* A stop asked for while a submission is pending supersedes that
+     submission the way a resubmission does: fresh verification id, same
+     producer, [started_at] kept. Ending the Task here outright would hand the
+     producer the one terminal state the arm above denies it — submit, then
+     cancel, and no verdict is ever waited for. *)
+  | Masc_domain.Cancel, Masc_domain.AwaitingVerification { assignee; started_at; _ } ->
     if same_agent assignee
-    then ok (cancelled_status ~agent_name ~now ~reason)
+    then
+      ok
+        (Masc_domain.AwaitingVerification
+           { assignee
+           ; started_at
+           ; submitted_at = now
+           ; intent = Masc_domain.Cancel_task
+           ; verification_id = new_verification_id ()
+           })
     else Error Invalid_transition
   | Masc_domain.Cancel, Masc_domain.Done _ -> Error Invalid_transition
   | ( Masc_domain.Release

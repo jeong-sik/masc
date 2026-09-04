@@ -16,6 +16,11 @@ related: ["0409"]
 로그에 영속화하고 "reasoning"으로 표현된 채 settle 후에도 남는다.
 런타임별 손수 번역기 3개는 하나의 정규화 델타 계약으로 수렴한다.
 
+**주의 — 이 RFC는 프라이버시 정책을 하나 뒤집는다.** reasoning 원문의
+디스크 영속화는 `Withheld_thinking` posture(증거:
+`docs/evidence/keeper-thinking-privacy-live-2026-08-17.json`)의 의식적
+번복이다. 제목만으로는 보이지 않는 결정이므로 여기에 명시한다 (§3.1, §5).
+
 ## 1. 증상
 
 오퍼레이터가 보고한 것:
@@ -39,15 +44,16 @@ TUI는 같은 대화를 세 자료구조로 들고 렌더 시점에 병합한다
 - `msg_live` — 라이브 턴의 ordered trail (`bin/masc_tui_keeper_chat_transcript.ml:139-173`)
 - `msg_history` — 이 세션에서 로컬 append한 row
 - `msg_loaded` — durable transcript. **"replaced wholesale by a load rather
-  than merged"** (`bin/masc_tui_types.ml:3036-3040`)
+  than merged"** (`bin/masc_tui_types.ml:3046-3049`)
 
 세 표현은 인터리빙 규칙이 각각 다르고, 전환은 전부 append가 아니라
 replace다:
 
 - **settle**: `settle_live_turn`이 `Trail_thinking`/`Trail_text`를 버리고
-  (`bin/masc_tui.ml:2082-2083`) `msg_live <- None`. 라이브 뷰 전체가 한
+  (`bin/masc_tui.ml:2084-2085`) `msg_live <- None` (:2092). 라이브 뷰 전체가 한
   프레임에 사라지고 strict-decode reply row 하나로 대체된다. reasoning은
-  여기서 영구 소실 — `masc_tui_render.ml:8353-8356` 주석이 그대로 말한다:
+  여기서 영구 소실 — `bin/masc_tui_keeper_chat_transcript.ml:270-274` 주석이
+  그대로 말한다:
   "Reasoning is the only part of a live turn the durable transcript does
   not keep."
 - **transcript reload**: tick마다 history를 다시 읽고
@@ -207,7 +213,27 @@ journal은 별 생산자 레인인데 timestamp로 대화에 섞인다: Memory O
   보내지 않는다"를 알 수 있어야 하고, Ctrl-R은 capability 없는 런타임에서
   조용히 아무것도 안 하는 대신 그 사실을 표시한다.
 
-### 3.5 god 파일 분리
+### 3.5 전환기 정합성: fail-open은 언제 fail-closed가 되는가
+
+스테이지 1의 저널은 부차적 사본이라 fail-open이 맞다(append 실패는 로그만
+남기고 턴은 계속). 그러나 스테이지 2에서 읽기 경로가 로그를 원천으로
+서빙하는 순간, fail-open의 구멍은 곧 유실된 행이다. 전환은 이렇게 통제한다:
+
+- **dual-write 구간의 어긋남은 정합성 감사자가 잡는다.** 스테이지 2의 첫
+  태스크로, 턴 단위로 저널 이벤트와 `keeper_chat_store` row를 대조하는
+  감사(이벤트 수, 터미널 outcome, assistant 텍스트 해시, 그리고 seq gap —
+  hook 예외가 삼켜지면 seq는 소비되지만 저널 행은 없으므로 gap 자체가
+  불일치 신호다)을 돌린다. 불일치는 `Log.Keeper.error` + 운영 메트릭으로
+  표면화한다. 읽기 경로를 바꾸기 **전에** 돌아가야 한다.
+- **fail-closed 전환점 = 첫 읽기 전환.** v1 history의 로그 기반 재구현이
+  켜지는 그 PR에서 append 실패는 더 이상 삼키지 않는다 — 턴 에러 이벤트 +
+  오퍼레이터 가시 신호로 격상한다. 즉 fail-open은 "로그가 부차 사본인
+  기간"에만 유효한 한시적 posture다.
+- **스테이지 2 진입 조건**: 감사자가 일정 soak 창(최소 수일의 실운영 턴)
+  동안 미설명 불일치 0건을 보고할 것. 이 조건을 못 채우면 읽기 전환을
+  미룬다.
+
+### 3.6 god 파일 분리
 
 채팅 수명주기(queue → dispatch → stream → settle → reload)와 렌더링을
 `masc_tui.ml`(16.9k)/`masc_tui_render.ml`(16.4k)에서 분리한다. 단일
@@ -218,8 +244,11 @@ journal은 별 생산자 레인인데 timestamp로 대화에 섞인다: Memory O
 각 스테이지는 독립 PR 체인이다.
 
 1. **정준 로그**: codec + seq/ts + 저널 + dual-write. 읽기 경로 불변.
-2. **서빙 전환**: SSE since_seq/리플레이, v2 events 엔드포인트, v1의
-   로그 기반 재구현(바이트 호환 검증), reasoning의 trajectory 대체.
+2. **서빙 전환**: 정합성 감사자(dual-write 대조, §3.5) → soak 통과 확인
+   → SSE since_seq/리플레이, v2 events 엔드포인트, v1의 로그 기반 재구현
+   (바이트 호환 검증 — 이 시점에 저널은 fail-closed로 전환), reasoning의
+   trajectory 대체. retention 스윕은 이 스테이지의 컷오버 **전에** 땅에
+   닿아 있어야 한다(§5).
 3. **TUI 단일 projection**: 세 표현 통一, 토글 단일화, 메모 교체,
    attempt superseded.
 4. **런타임 수렴**: 어댑터 통一, 합성 스트리밍, capability 선언.
@@ -234,8 +263,12 @@ journal은 별 생산자 레인인데 timestamp로 대화에 섞인다: Memory O
   스토어와 같은 base-path 하위라 외부 노출 면이 새로 생기지는 않지만,
   reasoning full text가 디스크에 남는다는 점은 변화다.
 - 크기: reasoning 영속화로 로그가 커진다. 읽기 창(v1의 4MiB 캡에
-  상응하는 v2 페이징)과 `dated_jsonl`의 retention 패턴 도입을 스테이지
-  2의 범위로 둔다.
+  상응하는 v2 페이징)은 스테이지 2 범위로 두되, **retention은 스테이지
+  2로 온전히 미루지 않는다** — 이 장비의 데이터 볼륨이 이미 3.5Ti/3.6Ti
+  수준이고 history 응답의 1.65MB/2.51MB가 trace인 현실에서 "한 스테이지
+  유예"의 값이 크다. `dated_jsonl` 패턴의 보존 기간 스윕(예: N일 경과
+  저널 삭제)을 스테이지 1 직후의 소형 후속 PR로 땅에 내리고, 스테이지 2
+  컷오버의 선행 조건으로 둔다.
 - 버스 backpressure: 저널 append가 라이브를 블록하지 않아야 한다 —
   스테이지 1의 성능 검증 항목.
 
@@ -243,8 +276,12 @@ journal은 별 생산자 레인인데 timestamp로 대화에 섞인다: Memory O
 
 - 스테이지 1: 로그 리플레이 == 라이브 스트림 바이트 동등 (골든 테스트).
 - 스테이지 2: v1 응답 바이트 회귀 테스트(기존 fixture), dashboard
-  계약 스모크(`scripts/harness_dashboard_keeper_chat_contract_smoke.sh`).
+  계약 스모크(`scripts/harness_dashboard_keeper_chat_contract_smoke.sh`),
+  그리고 컷오버 게이트 — 정합성 감사자의 soak 창 미설명 불일치 0건(§3.5).
 - 스테이지 3: 기존 TUI 테스트 스위트(projection/transcript/history/
-  timeline ~9.8k 라인)가 단일 projection 위에서 그대로 통과 + settle/
-  리로드/재시도 시나리오의 "행 소멸 없음" 신규 핀.
+  timeline ~9.8k 라인)는 세 표현 시대에 쓰였으므로 일부는 현행 병합
+  동작을 고정하고 있을 것이다. "그대로 통과"를 기대하지 않는다 —
+  병합 동작을 핀한 테스트를 식별하고 갈아엎을 분량을 스테이지 착수 시
+  산정하는 것이 첫 태스크다. 그 위에서 settle/리로드/재시도 시나리오의
+  "행 소멸 없음" 신규 핀을 추가한다.
 - 스테이지 4: 런타임별 동일 시나리오 스트림 골든(합성 델타 포함).

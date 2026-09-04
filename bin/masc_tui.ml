@@ -16969,6 +16969,17 @@ let run_with_eio_context f =
                     Masc_tui_server_lifecycle.stop owned ~grace_sec:2.0
                 | None -> ());
             Fs_compat.set_fs (Eio.Stdenv.fs env);
+            (* Without this, Process_eio falls back to a Unix path that waits on
+               Unix.select. Eio is cooperative, so that blocks the whole domain
+               rather than one fiber: a microphone capture forked to keep the
+               UI responsive froze every key instead, for as long as the
+               recorder ran. The server and fusion_run already init here; the
+               TUI did not, and nothing it spawned had been long enough to
+               notice until a capture ran for 15 s. *)
+            Process_eio.init
+              ~cwd_default:(Eio.Stdenv.cwd env)
+              ~proc_mgr:(Eio.Stdenv.process_mgr env)
+              ~clock:(Eio.Stdenv.clock env);
             Eio_context.set_env env;
             Eio_context.set_switch sw;
             Eio_context.set_net (Eio.Stdenv.net env);

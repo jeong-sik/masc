@@ -5995,8 +5995,7 @@ let draw_image state ~refuse ~title data =
         ^ Masc_tui_graphics.place ~data box
         ^ Printf.sprintf "\x1b[%d;1H%s" rows
             (Message_layout.fit_width "  any key: back" (max 1 (columns - 1))));
-      state.image_open <-
-        Some { image_title = title; image_bytes = String.length data }
+      state.image_open <- true
 
 (* Put a picture on the terminal, or say why not. The refusal is text for the
    pane: there is nothing to draw, and taking the screen away from the frame
@@ -6112,9 +6111,9 @@ let open_named_image state =
    its own layer, so clearing the screen is not enough to remove one. *)
 let close_image state =
   match state.image_open with
-  | None -> ()
-  | Some _ ->
-      state.image_open <- None;
+  | false -> ()
+  | true ->
+      state.image_open <- false;
       write_to_terminal Masc_tui_graphics.delete_all
 
 (* [/find] and its arg-less repeat, which differ only in where the walk starts.
@@ -12378,7 +12377,7 @@ and is loaded on demand through keeper_skill.
          and is not also a keystroke for the surface underneath -- an operator
          pressing j to dismiss a screenshot did not mean to move a cursor. *)
       let dismissed_image =
-        Option.is_some state.image_open && Option.is_some input
+        state.image_open && Option.is_some input
       in
       if dismissed_image then begin
         close_image state;
@@ -17071,7 +17070,7 @@ and is loaded on demand through keeper_skill.
        with
        (* The terminal belongs to the picture until it is dismissed. A frame
           drawn now would clear the rows it occupies and leave the rest. *)
-       | Render_schedule.Render when Option.is_some state.image_open -> ()
+       | Render_schedule.Render when state.image_open -> ()
        | Render_schedule.Render ->
            let frame, clamped, approval =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build

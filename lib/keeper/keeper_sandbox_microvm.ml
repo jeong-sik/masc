@@ -845,6 +845,36 @@ let keeper_work_root_mkdir_argv_for backend ~container_name ~keeper_name =
       [ "mkdir"; "-p"; "-m"; work_root_dir_mode; keeper_work_root ~keeper_name ]
 ;;
 
+(** Boot invariant (RFC-0052): {!work_volume_guest_root} must be a real
+    mountpoint inside the guest, not a directory on the guest rootfs.
+
+    The check exists because the two probes below cannot tell the difference:
+    [mkdir -p] and a write both succeed against a writable rootfs directory,
+    so a guest whose volume mount is absent at boot would pass them and then
+    serve an ephemeral tree -- every keeper write evaporating on the next
+    boot, with the delivery log still saying "delivered" (2026-09-04: an
+    analyst guest served a turn off a stale rootfs tree). [/proc/mounts] is
+    the kernel's own answer and the pattern names the mountpoint field with
+    its surrounding spaces, so a prefix like [/masc-work-stale] cannot match.
+    [-F] makes the match a fixed string structurally rather than by the
+    pattern happening to carry no regex metacharacters. [grep] over
+    [/proc/mounts] rather than [mountpoint(1)]: the image
+    (Dockerfile.keeper-sandbox, ubuntu-24.04) ships grep as essential and
+    util-linux's mountpoint is not in the apt list. Runs as root from [/] so
+    the answer does not depend on the keeper's uid or a workdir that is the
+    very thing under test. *)
+let work_volume_mounted_probe_argv_for backend ~container_name =
+  exec_argv_for
+    backend
+    ~container_name
+    ~uid:0
+    ~gid:0
+    ~container_cwd:"/"
+    ~stdin:false
+    ~command_argv:
+      [ "grep"; "-qF"; Printf.sprintf " %s " work_volume_guest_root; "/proc/mounts" ]
+;;
+
 (** The write that follows the mkdir, as the uid the keeper's commands run
     under. The mkdir proves the root exists; only a write as that uid proves
     the keeper can use it. The tree below the root can carry any ownership

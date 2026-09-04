@@ -2026,7 +2026,9 @@ let call_summary_of_input (input : Yojson.Safe.t) : string option =
   in
   match member "input" with
   | Some (`Assoc inner) ->
-    List.assoc_opt "argv" inner |> Option.bind string_argv |> Option.bind of_argv
+    (match List.assoc_opt "argv" inner with
+     | Some argv -> Option.bind (string_argv argv) of_argv
+     | None -> None)
   | _ ->
     (match member "provider_id", member "remote_name" with
      | Some (`String provider), Some (`String remote) ->

@@ -150,21 +150,6 @@ path = "/models"
 type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
 
-[providers.ollama_cloud_native]
-display-name = "Ollama Cloud Native"
-protocol = "ollama-http"
-endpoint = "https://ollama.com"
-# Mirrors [providers.ollama_cloud]. This lane uses native /api/chat for schema
-# output, not OpenAI-compatible /v1/chat/completions.
-connect-timeout-s = 600.0
-
-[providers.ollama_cloud_native.healthcheck]
-path = "/api/tags"
-
-[providers.ollama_cloud_native.credentials]
-type = "env"
-key = "OLLAMA_CLOUD_API_KEY"
-
 [providers.deepseek]
 display-name = "DeepSeek API"
 protocol = "openai-compatible-http"
@@ -734,9 +719,10 @@ supports-response-format-json = true
 # carries the tool schemas and JSON overhead.
 max-request-body-bytes = 524288
 
-# MiniMax M3 (Ollama Cloud) — chat/runtime binding retained for explicit
-# operator use. Do not route provider-native structured-output lanes here unless
-# the AGENT_CORE catalog proves a native schema guarantee for this runtime.
+# MiniMax M3 (Ollama Cloud) — chat/runtime binding. No wire schema guarantee:
+# the 2026-08-29 probe found ollama.com cloud ignores json_schema on /v1 and
+# `format` on /api/chat alike, so structured output is a prompt+parser
+# contract here, never a runtime capability claim.
 # api-name originally verified 2026-06-18 against
 # https://ollama.com/v1/chat/completions.
 [models.minimax-m3]
@@ -760,32 +746,6 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.minimax-m3]
-
-# MiniMax M3 native Ollama Cloud structured-output lane. This uses the same
-# provider-owned model id as [models.minimax-m3], but a distinct runtime model key
-# because the OpenAI-compatible /v1 transport does not strictly enforce
-# response_format/json_schema while native /api/chat `format` does.
-[models.minimax-m3-native-structured]
-api-name = "minimax-m3"
-max-context = 524288
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.minimax-m3-native-structured.capabilities]
-max-output-tokens = 131072
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "ollama_think"
-supports-response-format-json = true
-supports-structured-output = true
-supports-image-input = true
-supports-multimodal-inputs = true
-
-[ollama_cloud_native.minimax-m3-native-structured]
-wizard-default = true
-max-request-body-bytes = 524288
 
 # Kimi K2.7 Code (Ollama Cloud) — vision-capable Cloud runtime. The model name
 # is kept separate from Kimi's direct API route; AGENT_CORE owns provider/model wire
@@ -1303,13 +1263,14 @@ staged_judge_group_size = 3
 
 # 패널 프리셋. 패널 답변은 free text다. 2026-07-01 사고(ollama.com cloud가 json_schema를
 # 조용히 무시 → 패널 전멸) 이후 패널의 provider-native structured output 요구는 제거됐다
-# (fusion_panel.ml). 따라서 패널 런타임은 supports-structured-output 선언이 필요 없다 —
-# structured output 요구는 아래 judge에만 남는다.
+# (fusion_panel.ml). 따라서 패널 런타임은 supports-structured-output 선언이 필요 없다.
+# 심판도 마찬가지다 — 출력 계약은 wire 가 아닌 프롬프트 asset(fusion.judge.output)과
+# strict parser 가 진다(아래 judge 주석의 2026-08-29 재실측).
 # 프롬프트는 행동을 정의하므로 코드 default가 아니라 여기서 받는다 (누락 시 로드
 # 단계에서 fail-fast). 튜닝은 재컴파일 없이 이 값만 바꾸면 된다.
 [fusion.presets.trio]
 panel = [
-  "ollama_cloud_native.minimax-m3-native-structured",
+  "ollama_cloud.minimax-m3",
   "ollama_cloud.ollama-cloud-deepseek-v4-pro",
 ]
 # The judge output contract is carried by the prompt and the strict parser, not
@@ -1319,7 +1280,7 @@ panel = [
 # keys the schema never named, while local Ollama honoured the same request. So
 # a judge runtime does not need supports-structured-output; pick it for answer
 # quality, and keep the judges on different models so the lenses stay independent.
-judge = "ollama_cloud_native.minimax-m3-native-structured"
+judge = "ollama_cloud.minimax-m3"
 panel_system_prompt = """
 You are an expert panelist. Answer the user's question directly and concisely \
 with your best independent analysis. Do not defer to other models; give your \
@@ -1340,15 +1301,18 @@ web_tools = false
 # "requires >= 2 judges"로 fail-closed된다 → 키퍼가 JoJ topology를 쓸 수 없었다.
 # quorum은 서로 다른 렌즈(evidence/coverage)의 1차 심판 2명을 두고, meta judge(judge=)가
 # 두 종합을 재조정한다. 키퍼 사용: masc_fusion preset="quorum" topology="judge_of_judges".
-# Panel models and Fusion judge/refine/meta paths request provider-native
-# structured output, so every panel and judge runtime below must declare
-# supports-structured-output=true. Distinct labels preserve lens identity while
-# the schema contract prevents config drift back to JSON-mode-only runtimes.
+# No panel or judge runtime below needs a supports-structured-output
+# declaration: the wire carries no schema at all (fusion_judge.ml strips the
+# response format before dispatch), and the output contract lives in the
+# fusion.judge.output prompt asset plus the strict parser (2026-08-29
+# re-probe: ollama.com cloud ignores json_schema on both /v1 and /api/chat).
+# Distinct labels preserve lens identity; keep judges on different models so
+# the lenses stay independent.
 # staged_judge_of_judges는 [fusion].staged_judge_group_size(=3)의 정확한 배수
 # 그룹을 요구하므로 quorum(2 judges)은 비대상 — 별도 preset 필요.
 [fusion.presets.quorum]
 panel = [
-  "ollama_cloud_native.minimax-m3-native-structured",
+  "ollama_cloud.minimax-m3",
   "ollama_cloud.ollama-cloud-deepseek-v4-pro",
 ]
 panel_system_prompt = """
@@ -1369,12 +1333,12 @@ web_tools = false
 
 # 1차 심판 — 서로 다른 렌즈로 패널을 독립 종합한다 (JoJ requires >= 2; RFC-0283).
 # label이 정체성을 주므로 distinct lens는 distinct identity가 된다 (Duplicate_judge 회피).
-# Strict structured-output support is mandatory for panel and judge runtimes in
-# this seed. Some model families overlap across panel and judge lanes because the
-# checked-in schema-capable runtime set is intentionally narrow; distinct labels
-# still preserve lens identity for judge-of-judges routing.
+# Panel and judge runtimes need no structured-output declaration — see the
+# preset comment above. Some model families overlap across panel and judge
+# lanes; distinct labels still preserve lens identity for judge-of-judges
+# routing.
 [[fusion.presets.quorum.judges]]
-model = "ollama_cloud_native.minimax-m3-native-structured"
+model = "ollama_cloud.minimax-m3"
 label = "evidence"
 system_prompt = """
 You are an impartial first-pass judge. Synthesize the panel of model answers \
@@ -1402,8 +1366,9 @@ Respond with ONLY the requested JSON object, no prose and no code fences.
 # feasibility/simplicity/adversarial. 각 stage meta가 그룹 종합을 만들고 최종
 # meta judge(judge=)가 stage 종합들을 재조정한다. label이 정체성을 주므로
 # 같은 모델이 다른 lens로 반복 등장해도 Duplicate_judge가 아니다 (quorum 주석과
-# 동일 계약). judge/meta 경로는 provider-native structured output을 요구하므로
-# 심판 런타임은 전부 supports-structured-output=true 선언 모델만 쓴다.
+# 동일 계약). 심판 런타임은 supports-structured-output 선언이 필요 없다 — wire 는
+# schema 를 싣지 않고 계약은 프롬프트 asset(fusion.judge.output)과 strict parser 가
+# 진다(2026-08-29 재실측).
 # 비용/지연: LLM 호출 12회(panel 3 + 1차 심판 6 + stage meta 2 + 최종 meta 1).
 # 실행은 4단 순차 파이프라인(panel → 1차 심판 병렬 → stage meta 병렬 → 최종
 # meta, fusion_orchestrator run_staged_judge_of_judges)이며 각 단의 경과 시간은 관측된다.
@@ -1411,7 +1376,7 @@ Respond with ONLY the requested JSON object, no prose and no code fences.
 # (judge_of_judges topology도 동일 preset으로 사용 가능 — 6 lens 병렬 후 meta).
 [fusion.presets.council]
 panel = [
-  "ollama_cloud_native.minimax-m3-native-structured",
+  "ollama_cloud.minimax-m3",
   "ollama_cloud.ollama-cloud-deepseek-v4-pro",
 ]
 panel_system_prompt = """
@@ -1431,7 +1396,7 @@ prose and no code fences.
 web_tools = false
 
 [[fusion.presets.council.judges]]
-model = "ollama_cloud_native.minimax-m3-native-structured"
+model = "ollama_cloud.minimax-m3"
 label = "evidence"
 system_prompt = """
 You are an impartial first-pass judge. Synthesize the panel of model answers \
@@ -1461,7 +1426,7 @@ gracefully. Respond with ONLY the requested JSON object, no prose and no code fe
 """
 
 [[fusion.presets.council.judges]]
-model = "ollama_cloud_native.minimax-m3-native-structured"
+model = "ollama_cloud.minimax-m3"
 label = "feasibility"
 system_prompt = """
 You are an impartial first-pass judge. Synthesize the panel of model answers \

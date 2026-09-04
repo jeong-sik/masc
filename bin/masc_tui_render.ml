@@ -11019,13 +11019,109 @@ let repository_change_status (row : Masc.Tui_decode.repository_change) =
     | false, true -> "worktree"
     | false, false -> "unknown"
 
-let render_repository_changes (state : state) =
-  let terminal_rows, cols = get_terminal_size () in
-  let changes =
-    match state.repository_changes with
-    | Some snapshot -> snapshot.Masc.Tui_decode.rcs_changes
-    | None -> []
+let tree_diff_row_span ~width (row : Masc.Tui_decode.git_diff_row) =
+  let background, marker =
+    match row.Masc.Tui_decode.gdr_kind with
+    | Masc.Tui_decode.Gd_removed -> (Span.bg Theme.Syntax.diff_removed_bg, "-")
+    | Masc.Tui_decode.Gd_added -> (Span.bg Theme.Syntax.diff_added_bg, "+")
+    | Masc.Tui_decode.Gd_context -> (Span.plain, " ")
   in
+  let gutter =
+    Printf.sprintf "%s %s %s "
+      (Diff.line_number_cell row.Masc.Tui_decode.gdr_old_line)
+      (Diff.line_number_cell row.Masc.Tui_decode.gdr_new_line)
+      marker
+  in
+  let text_style =
+    match row.Masc.Tui_decode.gdr_kind with
+    | Masc.Tui_decode.Gd_context -> Span.combine background (Span.weight Ansi.dim)
+    | Masc.Tui_decode.Gd_added | Masc.Tui_decode.Gd_removed -> background
+  in
+  let composed =
+    Span.concat
+      [ Span.text (Span.combine background (Span.weight Ansi.dim)) gutter
+      ; Span.text text_style
+          (Terminal_text.single_line row.Masc.Tui_decode.gdr_text)
+      ]
+  in
+  Span.pad_to width background (Span.truncate width composed)
+
+let render_repository_changes_diff (state : state) ~path =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  let diff_rows =
+    match state.repository_changes_diff with
+    | Some (p, diff) when String.equal p path -> diff.Masc.Tui_decode.gd_rows
+    | _ -> []
+  in
+  let total = List.length diff_rows in
+  let header =
+    Printf.sprintf "%s %s  vs HEAD  %s"
+      (screen_title " MASC Git Diff")
+      (Terminal_text.single_line path)
+      (connection_badge state)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  box_line_styled buf cols ~style:(Theme.recede ())
+    "  old   new     what the working tree holds, against its last commit";
+  box_divider buf cols;
+  (match state.repository_changes_diff_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:(Theme.bad ())
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows =
+    7 + if Option.is_some state.repository_changes_diff_error then 2 else 0
+  in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (total - content_height) in
+  let scroll = max 0 (min state.repository_changes_diff_scroll max_scroll) in
+  if total = 0 then begin
+    let empty =
+      match (state.repository_changes_diff, state.repository_changes_diff_error) with
+      | _, Some _ -> "  (the read failed; nothing here is a reading)"
+      | None, None -> "  (reading the tree)"
+      | Some (_, diff), None ->
+          if diff.Masc.Tui_decode.gd_has_changes then
+            "  (the tree reports a change and sent no lines)"
+          else "  (this file matches its last commit, or is untracked)"
+    in
+    box_line_styled buf cols ~style:(Theme.recede ()) empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      match List.nth_opt diff_rows (i + scroll) with
+      | None -> box_empty buf cols
+      | Some row ->
+          box_line_span buf cols (tree_diff_row_span ~width:(framed_inner_width cols) row)
+    done;
+  box_line_styled buf cols ~style:(Theme.recede ())
+    (if total > content_height then
+       Printf.sprintf "[%d lines, scroll %d]  esc back to files" total scroll
+     else "  esc back to files");
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols ~hints:Masc_tui_keys.footer_hints_git_diff);
+  finish_surface state
+    ~surface_key:"repository-changes-diff" ~rows:terminal_rows ~cols buf
+
+let render_repository_changes (state : state) =
+  match state.repository_changes_diff_path with
+  | Some path -> render_repository_changes_diff state ~path
+  | None ->
+      let terminal_rows, cols = get_terminal_size () in
+      let changes =
+        match state.repository_changes with
+        | Some snapshot -> snapshot.Masc.Tui_decode.rcs_changes
+        | None -> []
+      in
   let scope_name =
     match state.repository_changes_scope, state.repositories with
     | Some Tui_decode.Repository_change_project, _ -> "Project workspace"
@@ -11969,35 +12065,6 @@ let render_changes_list (state : state) =
     (footer_line state ~max_cells:cols ~hints:"j/k:move  right/Enter:diff  [/]:keeper  d:tree diff  v:code  o:editor  r:refresh  q:quit");
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
-(* One current-tree diff row. Same three layers as the tool-call reading, plus
-   git's per-row numbers. Producer-recorded Edit ranges describe the completed
-   tool execution instead; they are not this later tree observation. *)
-let tree_diff_row_span ~width (row : Masc.Tui_decode.git_diff_row) =
-  let background, marker =
-    match row.Masc.Tui_decode.gdr_kind with
-    | Masc.Tui_decode.Gd_removed -> (Span.bg Theme.Syntax.diff_removed_bg, "-")
-    | Masc.Tui_decode.Gd_added -> (Span.bg Theme.Syntax.diff_added_bg, "+")
-    | Masc.Tui_decode.Gd_context -> (Span.plain, " ")
-  in
-  let gutter =
-    Printf.sprintf "%s %s %s "
-      (Diff.line_number_cell row.Masc.Tui_decode.gdr_old_line)
-      (Diff.line_number_cell row.Masc.Tui_decode.gdr_new_line)
-      marker
-  in
-  let text_style =
-    match row.Masc.Tui_decode.gdr_kind with
-    | Masc.Tui_decode.Gd_context -> Span.combine background (Span.weight Ansi.dim)
-    | Masc.Tui_decode.Gd_added | Masc.Tui_decode.Gd_removed -> background
-  in
-  let composed =
-    Span.concat
-      [ Span.text (Span.combine background (Span.weight Ansi.dim)) gutter
-      ; Span.text text_style
-          (Terminal_text.single_line row.Masc.Tui_decode.gdr_text)
-      ]
-  in
-  Span.pad_to width background (Span.truncate width composed)
 
 (* What the tree holds for the file the cursor names. Separate from the
    tool-call reading by decision, not by accident: one says what the keeper
@@ -15115,11 +15182,17 @@ let render_surface (state : state) =
            | Some task -> render_task_detail state task
            | None -> render_overview state )
        | None -> render_overview state)
-  | Keepers Keeper_list -> render_keeper_list state
-  | Keepers Keeper_detail -> render_keeper_detail state
+  | Keepers Keeper_list ->
+      if state.repository_changes_open then render_repository_changes state
+      else render_keeper_list state
+  | Keepers Keeper_detail ->
+      if state.repository_changes_open then render_repository_changes state
+      else render_keeper_detail state
   | Keepers Keeper_logs -> render_keeper_logs state
   | Keepers Keeper_calls -> render_keeper_calls state
-  | Keepers Keeper_message -> render_keeper_message state
+  | Keepers Keeper_message ->
+      if state.repository_changes_open then render_repository_changes state
+      else render_keeper_message state
   | Keepers Keeper_runtime_pick -> render_runtime_pick state
   | Lanes -> render_lanes state
   | Clients -> render_clients state

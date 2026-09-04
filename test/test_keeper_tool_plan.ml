@@ -995,7 +995,9 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
              ] )
        ]);
   accepts "masc_get_metrics" metrics_value;
-  accepts
+  (* PR #33019 removed requested_agent_name/resolved_agent_name aliases from
+     the schema, so outputs carrying those ghost fields must be rejected. *)
+  rejects
     "masc_get_metrics"
     (match metrics_value with
      | `Assoc fields ->

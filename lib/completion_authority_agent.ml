@@ -589,6 +589,18 @@ let commit_verdict
     , Verification_run_registry.Commit_failed { detail } )
 ;;
 
+(** RFC-0415 §4.1: which verification intents the system lane may review at
+    all. Completion review is the system LLM's job; a cancellation is
+    permission for work to stop existing, and that authority belongs to the
+    operator's one click. The gate is pure so the contract is testable
+    without a runtime; the process path consults it and records the refusal
+    as [Not_reviewed { gate = "operator_routing" }] instead of reviewing in
+    the dark. *)
+let system_review_allowed = function
+  | Masc_domain.Complete_task -> true
+  | Masc_domain.Cancel_task -> false
+;;
+
 let process_task_once
       (runtime : runtime)
       (task : Masc_domain.task)
@@ -636,6 +648,31 @@ let process_task_once
       , Verification_run_registry.Infrastructure_unavailable { stage; detail } )
   in
   try
+    (* RFC-0415 §4.1: the gate above is the contract; this is its teeth. A
+       cancel claim is not deferred for retry and not auto-finalized — the
+       Task stays [AwaitingVerification] (§5 stay_pending) until the operator
+       clicks, so a keeper's refusal of its own cancel request cannot be
+       laundered into a system-LLM verdict either. The refusal is recorded,
+       not silent. *)
+    if
+      match task.task_status with
+      | Masc_domain.AwaitingVerification { intent; _ } ->
+        not (system_review_allowed intent)
+      | Masc_domain.Todo
+      | Masc_domain.Claimed _
+      | Masc_domain.InProgress _
+      | Masc_domain.Done _
+      | Masc_domain.Cancelled _ ->
+        false
+    then
+      complete
+        ( Deferred
+        , Verification_run_registry.Not_reviewed
+            { gate = "operator_routing"
+            ; detail =
+                "cancel intent is operator-routed; the system LLM does not review it"
+            } )
+    else
     match
       prepare_review
         ~config:runtime.config
@@ -1024,4 +1061,8 @@ module For_testing = struct
     | Targets of review_key list
 
   let entries_in_scope = entries_in_scope
+
+  (* RFC-0415 §4.1: the pure operator-routing gate, exposed for the refusal
+     contract test. *)
+  let system_review_allowed = system_review_allowed
 end

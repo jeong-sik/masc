@@ -65,32 +65,6 @@ output_per_million = 2.2
 cache_write_multiplier = 1.0
 cache_read_multiplier = 0.18333333333333332
 
-# Ollama Cloud does not admit structured JSON output. Keep the native transport
-# model row for non-exact runtime use without inventing a JSON/schema guarantee.
-[[models]]
-id_prefix = "minimax-m3"
-provider_name = "ollama_cloud_native"
-base = "ollama_cloud"
-max_context_tokens = 524288
-max_output_tokens = 131072
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-# Mirror repair: this overlay row replaces the embedded minimax-m3 base row
-# wholesale, and the copy dropped the base row's declaration — No_replay
-# fallback made code-reviewer repeat an identical five-tool bundle ~11x per
-# turn (task-838, measured 2026-08-28). Value from the embedded base row.
-reasoning_replay = "preserve_always"
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_response_format_json = false
-supports_structured_output = false
-supports_native_streaming = true
-
 # Kimi Code coding-plan gateway under [providers.kimi_code].
 [[models]]
 id_prefix = "kimi-for-coding"
@@ -217,8 +191,10 @@ supports_extended_thinking = true
 supports_reasoning_budget = false
 thinking_control_format = "none"
 reasoning_streaming_format = "delta:reasoning"
-# Mirror repair: same dropped-key repair as the ollama_cloud_native row above
-# (task-838). Value from the embedded base minimax-m3 row.
+# Mirror repair: an overlay copy that replaces the embedded base row wholesale
+# must not drop the base row's declarations — the dropped reasoning_replay made
+# code-reviewer repeat an identical five-tool bundle ~11x per turn (task-838,
+# measured 2026-08-28). Value from the embedded base minimax-m3 row.
 reasoning_replay = "preserve_always"
 supports_multimodal_inputs = true
 supports_image_input = true

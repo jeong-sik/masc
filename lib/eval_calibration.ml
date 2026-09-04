@@ -40,17 +40,17 @@ let label_verdict_of_string = function
   | _ -> None
 
 let verdict_to_string = function
-  | Task.Anti_rationalization.Approve _ -> "approve"
+  | Task.Anti_rationalization.Approve "" -> "approve"
+  | Task.Anti_rationalization.Approve reason -> "approve:" ^ reason
   | Task.Anti_rationalization.Reject "" -> "reject"
   | Task.Anti_rationalization.Reject reason -> "reject:" ^ reason
 
-(* The label format stays what it was: one piece for approve, "reject:<reason>"
-   for a rejection. Calibration compares verdicts against hand labels, so an
-   approval's stated reason has no place in the label and reads back empty. *)
+(* Machine verdicts preserve stated reasons for both outcomes:
+   "approve" / "approve:<reason>" and "reject" / "reject:<reason>". *)
 let verdict_of_string raw =
   match String.split_on_char ':' raw with
-  | ["approve"] -> Some (Task.Anti_rationalization.Approve "")
-  | ["reject"] -> Some (Task.Anti_rationalization.Reject "")
+  | "approve" :: reason_parts ->
+      Some (Task.Anti_rationalization.Approve (String.concat ":" reason_parts))
   | "reject" :: reason_parts ->
       Some (Task.Anti_rationalization.Reject (String.concat ":" reason_parts))
   | _ -> None

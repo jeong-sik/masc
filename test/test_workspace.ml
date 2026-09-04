@@ -1560,6 +1560,55 @@ let test_cancel_writes_the_record_the_authority_reads () =
        | Some _ | None ->
          Alcotest.fail "the task must be awaiting a verdict on a cancellation"))
 
+(* RFC-0415 §4.2/§6.2: the operator's one click closes a cancellation. The
+   evidence card must name the question it answers (intent=cancellation), and
+   a single approve verdict through the same commit path completions use must
+   land Cancelled — the authority on the verdict is the operator's, no system
+   lane in between. *)
+let test_operator_one_click_cancels_a_cancel_claim () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Stop me" ~priority:1 ~description:"" in
+    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let _ =
+      Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
+        ~action:Masc_domain.Cancel ~reason:"the defect no longer reproduces" ()
+    in
+    let evidence =
+      Server_routes_http_routes_verification.For_testing.operator_evidence_json
+        ~config
+        ~operator_id:"operator-test"
+        ~task_id:"task-001"
+    in
+    (match evidence with
+     | Ok json ->
+       Alcotest.(check string) "the card names the question it answers"
+         "cancellation"
+         Yojson.Safe.Util.(json |> member "intent" |> to_string)
+     | Error message -> Alcotest.fail message);
+    let parsed =
+      Server_routes_http_routes_verification.For_testing
+      .parse_operator_verdict_json
+        (`Assoc
+          [ "task_id", `String "task-001"
+          ; "verdict", `String "approve"
+          ; "notes", `String "reason confirmed"
+          ])
+    in
+    let request = match parsed with Ok request -> request | Error m -> Alcotest.fail m in
+    let committed =
+      Server_routes_http_routes_verification.For_testing.commit_operator_verdict
+        ~config
+        ~operator_id:"operator-test"
+        request
+    in
+    Alcotest.(check bool) "one operator click closes the cancellation" true
+      (Result.is_ok committed);
+    match find_task config "task-001" with
+    | Some { task_status = Masc_domain.Cancelled _; _ } -> ()
+    | Some _ | None ->
+      Alcotest.fail "the operator-approved cancellation must land Cancelled")
+
 (* [reason] is optional on this entry point while handoff_context.summary is
    required for every exit-class action, so a caller can put the whole
    explanation in the summary — the tool schema tells it to. Reading only
@@ -2654,6 +2703,8 @@ let () =
         test_operator_rejection_rebinds_producer;
       Alcotest.test_case "operator verdict boundary is reachable" `Quick
         test_operator_verdict_boundary_is_reachable;
+      Alcotest.test_case "operator one-click cancels a cancel claim" `Quick
+        test_operator_one_click_cancels_a_cancel_claim;
       Alcotest.test_case "operator rejection parser requires reason" `Quick
         test_operator_verdict_parser_rejects_reasonless_rejection;
       Alcotest.test_case "operator rejection requires non-empty reason" `Quick

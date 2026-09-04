@@ -319,15 +319,37 @@ let test_the_cancellation_lookup_is_written_for_a_stop () =
    the code right where it is, and would have been refused for it. That is
    the failure #33052 removed, rewritten one slot over.
 
-   The order is checked by its verb, not by the noun. This file writes the
-   same act three ways — REJECT, 기각, 거절 — and both slots legitimately say
-   "거절 사유에" to mean "put this in the reason you write". Banning the noun
-   would fail on that; banning only one spelling would let the deleted
-   sentence back in wearing another. "기각하지 않습니다" forbids rather than
-   orders, and does not contain "기각합니다", so the affirmative forms
-   separate cleanly. *)
+   The bare noun is not the test. This file writes the same act three ways —
+   REJECT, 기각, 거절 — and both producer-tree slots legitimately say "거절
+   사유에는" to mean "put this in the reason you write", while the body says
+   "중단 사유입니다" to mean the opposite of a refusal. What is listed is the
+   affirmative predicate: the verb forms, and the noun form that asserts
+   something IS a ground. Each one's negation is a different string —
+   "기각하지 않습니다" does not contain "기각합니다", and "기각 사유가
+   아닙니다" does not contain "기각 사유입니다" — so the two separate without
+   a negation rule.
+
+   This is a substring list over prose and it does not close. A rewrite in a
+   form nobody has written yet passes it. It is worth what it is: the three
+   spellings this file actually uses, in the shapes it actually uses them, so
+   the deleted sentence cannot return by changing its clothes. The check that
+   would not have this hole is a harness one — put "the work was absorbed
+   upstream" to the assembled cancellation prompt and measure whether the
+   verdict comes back REJECT, which is the question task-1303 asked. If this
+   guard is bypassed again, write that rather than lengthening this list. *)
 let rejection_orders =
-  [ "기각합니다"; "기각한다"; "거절합니다"; "거절한다"; "REJECT 합니다"; "REJECT합니다" ]
+  [ "기각합니다"
+  ; "기각한다"
+  ; "기각 사유입니다"
+  ; "거절합니다"
+  ; "거절한다"
+  ; "거절 사유입니다"
+  ; "REJECT 합니다"
+  ; "REJECT합니다"
+  ; "REJECT 한다"
+  ; "REJECT한다"
+  ; "REJECT 사유입니다"
+  ]
 ;;
 
 let test_the_cancellation_lookup_orders_no_rejection () =

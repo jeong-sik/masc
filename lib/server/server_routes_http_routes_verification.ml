@@ -90,8 +90,23 @@ let awaiting_task config task_id =
 
 let operator_evidence_json ~config ~operator_id ~task_id =
   let open Result.Syntax in
-  let* _task, producer, verification_id = awaiting_task config task_id in
+  let* task, producer, verification_id = awaiting_task config task_id in
   let authority = Masc_domain.Human_operator { operator_id } in
+  (* RFC-0415 §4.2: the operator clicks with the question in view. A cancel
+     claim and a completion claim are different questions about the same
+     evidence card, so the card names which one it answers. The intent is read
+     off the Task status — the same source the authority reads (#33046), one
+     field, one owner. *)
+  let intent =
+    match task.task_status with
+    | Masc_domain.AwaitingVerification { intent; _ } -> (
+      match intent with
+      | Masc_domain.Complete_task -> "completion"
+      | Masc_domain.Cancel_task -> "cancellation")
+    (* Unreachable: [awaiting_task] only returns tasks in this status. Kept
+       total so a future awaiting_task change fails here, not in JSON. *)
+    | _ -> "unknown"
+  in
   let evidence =
     Workspace_verification_store.inspect_submitted_evidence_for_authority
       ~base_path:config.Workspace.base_path
@@ -105,6 +120,7 @@ let operator_evidence_json ~config ~operator_id ~task_id =
       [ "task_id", `String task_id
       ; "verification_id", `String verification_id
       ; "producer", `String producer
+      ; "intent", `String intent
       ; ( "authority_kind"
         , `String (Masc_domain.completion_authority_kind authority) )
       ; ( "authority_actor"

@@ -21,6 +21,10 @@ type t =
   | Help  (** [/help] — draw the command list into the pane. *)
   | Open_settings
       (** [/settings] — open the type-aware Runtime parameters pane. *)
+  | Open_diff
+      (** [/diff] — open Git working-tree changes and diff for the workspace. *)
+  | Open_changes
+      (** [/changes] — open recorded file changes for this keeper. *)
   | Switch_keeper of string
       (** [/keeper <name>] — point this pane at another keeper. *)
   | Switch_keeper_missing_name  (** [/keeper] with no name on the line. *)

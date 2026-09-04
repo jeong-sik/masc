@@ -26,7 +26,9 @@ val goal_verification_lookup : string
     metric reach its declared target value? *)
 
 val verification_lookup_none : string
+val verification_lookup_none_cancellation : string
 val verification_lookup_producer_tree : string
+val verification_lookup_producer_tree_cancellation : string
 val verification_lookup_root_layout_empty : string
 (** The line a readable-but-empty lookup root produces in the root layout. *)
 val verification_cancellation : string

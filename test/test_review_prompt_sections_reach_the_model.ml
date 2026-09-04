@@ -169,7 +169,7 @@ let test_goal_lookup_template_renders_the_surface () =
    through it is refused for having no artifacts and for reading as avoidance,
    which is exactly what a stop is. These pin that the branch renders the other
    prompt, not the same one with fields blanked (#33052). *)
-let cancellation_prompt () =
+let cancellation_prompt ?(lookup = AR.No_lookup_surface) () =
   init ();
   match
     AR.build_prompt
@@ -178,11 +178,21 @@ let cancellation_prompt () =
            { reason = marker "cancel_reason"
            ; contract_context = [ marker "contract_context_item" ]
            })
-      ~lookup:AR.No_lookup_surface
+      ~lookup
       request
   with
   | Ok text -> text
   | Error detail -> failf "cancellation prompt render failed: %s" detail
+;;
+
+(* The only shape [process_task_once] ever produces. Rendering a cancellation
+   with [No_lookup_surface] alone left the production prompt unexercised, and
+   the completion wording reached it through the shared lookup slot. *)
+let cancellation_prompt_with_tools () =
+  cancellation_prompt
+    ~lookup:
+      (AR.Lookup_tools { schemas; dispatch; root_layout = [ marker "root_layout" ] })
+    ()
 ;;
 
 let test_the_cancellation_prompt_carries_the_reason_and_the_contract () =
@@ -247,8 +257,72 @@ let test_the_cancellation_prompt_does_not_demand_completion_evidence () =
          (Astring.String.is_infix ~affix cancellation))
     [ "the reject-on-unevidenced-contract order", "계약 항목 전부를 충족해야"
     ; "the submitted evidence block", "submitted_evidence_refs"
-    ; "the completion notes", marker "completion_notes"
+    ; "the completion notes value", marker "completion_notes"
+    (* The identifier, not just the fixture value. The value's absence only
+       says the variable was not substituted; the name's absence is what says
+       the judge is not being pointed at a block it does not have. It reached
+       the cancellation prompt through the shared lookup slot until the slots
+       were split by question. *)
+    ; "the completion notes identifier", "completion_notes"
     ; "avoidance as a rejection signal", "회피 패턴"
+    ]
+;;
+
+(* The production shape. Both lookup surfaces are asserted, because the
+   contradiction this closes lived in the text spliced at {{lookup_section}}:
+   with tools it demanded submitted snapshots and execution receipts, without
+   them it named completion_notes as the only place checkable evidence lives —
+   in a prompt that carries neither. *)
+let test_the_cancellation_lookup_is_written_for_a_stop () =
+  let with_tools = cancellation_prompt_with_tools () in
+  let without = cancellation_prompt () in
+  (* The surface is still described, or the assertions below would pass on an
+     empty slot. With tools that means the tool name and the root listing; with
+     none it means the block that says so. *)
+  List.iter
+    (fun (what, affix) ->
+       check bool ("with tools: " ^ what ^ " reaches the model") true
+         (Astring.String.is_infix ~affix with_tools))
+    [ "the tool name", "tool_read_file"; "the root layout", marker "root_layout" ];
+  check bool "with no surface: the no-lookup block reaches the model" true
+    (Astring.String.is_infix ~affix:"<no_lookup_surface>" without);
+  List.iter
+    (fun (label, text) ->
+       List.iter
+         (fun (what, affix) ->
+            check
+              bool
+              (label ^ ": " ^ what ^ " is not asked of a stop")
+              false
+              (Astring.String.is_infix ~affix text))
+         [ "the submitted snapshot", "제출될 때 참이었던"
+         ; "an execution receipt", "실행 영수증"
+         ; "completion_notes", "completion_notes"
+         ])
+    [ "with producer tools", with_tools; "with no lookup surface", without ]
+;;
+
+(* The completion prompt must keep every one of those, or the assertions above
+   pass because the wording moved rather than because the split worked. *)
+let test_the_completion_lookup_still_asks_for_evidence () =
+  let text =
+    match
+      AR.build_prompt
+        ~question:
+          (AR.Completion { completion_contract = None; required_evidence = [] })
+        ~lookup:
+          (AR.Lookup_tools { schemas; dispatch; root_layout = [ marker "root_layout" ] })
+        request
+    with
+    | Ok text -> text
+    | Error detail -> failf "completion prompt render failed: %s" detail
+  in
+  List.iter
+    (fun (what, affix) ->
+       check bool (what ^ ": still asked of a completion") true
+         (Astring.String.is_infix ~affix text))
+    [ "the submitted snapshot", "제출될 때 참이었던"
+    ; "an execution receipt", "실행 영수증"
     ]
 ;;
 
@@ -276,6 +350,14 @@ let () =
             "the cancellation prompt does not demand completion evidence"
             `Quick
             test_the_cancellation_prompt_does_not_demand_completion_evidence
+        ; test_case
+            "the cancellation lookup is written for a stop"
+            `Quick
+            test_the_cancellation_lookup_is_written_for_a_stop
+        ; test_case
+            "the completion lookup still asks for evidence"
+            `Quick
+            test_the_completion_lookup_still_asks_for_evidence
         ; test_case
             "the goal proof prompt renders its variables"
             `Quick

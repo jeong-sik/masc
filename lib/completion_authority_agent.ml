@@ -990,6 +990,7 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
 module For_testing = struct
   let authority_actor = authority_actor
   let evidence_refs_of_output = evidence_refs_of_output
+  let verdict_question_of_request = verdict_question_of_request
   let completion_verdict_of_review = completion_verdict_of_review
   let review_notes = review_notes
 

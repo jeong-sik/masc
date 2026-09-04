@@ -19,6 +19,13 @@ module For_testing : sig
   val evidence_refs_of_output :
     Yojson.Safe.t -> (string list, string) result
 
+  val verdict_question_of_request :
+    intent:Masc_domain.verification_intent ->
+    Verification.verification_request ->
+    (Task.Anti_rationalization.verdict_question, string) result
+  (** The intent-to-question mapping. Which prompt a Task's obligation reaches
+      is decided here and nowhere else, so it is exported to be pinned. *)
+
   val completion_verdict_of_review :
     Task.Anti_rationalization.verdict -> Masc_domain.completion_verdict
 

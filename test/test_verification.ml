@@ -3003,6 +3003,86 @@ let test_unreadable_artifacts_reach_the_judge () =
     carried
 ;;
 
+(* The intent-to-question mapping. A Task reaching the authority carries an
+   intent, and that intent alone decides which question the judge is put. The
+   request supplies the material for whichever branch the intent picked; it
+   never picks the branch itself. *)
+let request_with ~output =
+  { V.id = "vrf-question"
+  ; task_id = "task-question"
+  ; output
+  ; criteria = [ "the cancel record is written from the produced status" ]
+  ; worker = "worker-1"
+  ; created_at = 1234.5
+  }
+;;
+
+let completion_output =
+  `Assoc [ "required_artifacts", `List [ `String "note:done" ] ]
+;;
+
+let cancellation_output =
+  `Assoc [ "cancel_reason", `String "the upstream schema landed instead" ]
+;;
+
+let test_complete_intent_asks_the_completion_question () =
+  match
+    CA.For_testing.verdict_question_of_request ~intent:Masc_domain.Complete_task
+      (request_with ~output:completion_output)
+  with
+  | Error e -> Alcotest.fail ("completion question must be built: " ^ e)
+  | Ok (Masc.Task.Anti_rationalization.Cancellation _) ->
+    Alcotest.fail "Complete_task must not reach the cancellation question"
+  | Ok
+      (Masc.Task.Anti_rationalization.Completion
+        { completion_contract; required_evidence }) ->
+    Alcotest.(check (option (list string)))
+      "the contract carries the request criteria"
+      (Some [ "the cancel record is written from the produced status" ])
+      completion_contract;
+    Alcotest.(check (list string))
+      "the required evidence is the request's required_artifacts"
+      [ "note:done" ] required_evidence
+;;
+
+let test_cancel_intent_asks_the_cancellation_question () =
+  match
+    CA.For_testing.verdict_question_of_request ~intent:Masc_domain.Cancel_task
+      (request_with ~output:cancellation_output)
+  with
+  | Error e -> Alcotest.fail ("cancellation question must be built: " ^ e)
+  | Ok (Masc.Task.Anti_rationalization.Completion _) ->
+    Alcotest.fail "Cancel_task must not reach the completion question"
+  | Ok
+      (Masc.Task.Anti_rationalization.Cancellation { reason; contract_context })
+    ->
+    Alcotest.(check string)
+      "the reason is the request's cancel_reason"
+      "the upstream schema landed instead" reason;
+    Alcotest.(check (list string))
+      "the contract travels as context, not as the thing being judged"
+      [ "the cancel record is written from the produced status" ]
+      contract_context
+;;
+
+(* The intent picks the branch, so an output shaped for the other branch is a
+   missing field, not a fallback into the question it happens to fit. *)
+let test_intent_not_payload_shape_picks_the_question () =
+  let expect_error label intent output =
+    match CA.For_testing.verdict_question_of_request ~intent (request_with ~output) with
+    | Ok _ -> Alcotest.fail (label ^ " must not build a question")
+    | Error _ -> ()
+  in
+  expect_error "a completion intent over a cancellation output"
+    Masc_domain.Complete_task cancellation_output;
+  expect_error "a cancellation intent over a completion output"
+    Masc_domain.Cancel_task completion_output;
+  expect_error "a blank cancel_reason" Masc_domain.Cancel_task
+    (`Assoc [ "cancel_reason", `String "   " ]);
+  expect_error "a non-object output" Masc_domain.Cancel_task
+    (`String "the upstream schema landed instead")
+;;
+
 let () =
   Alcotest.run "Verification" [
     "verification_evidence wire", [
@@ -3011,6 +3091,14 @@ let () =
         test_verification_evidence_fields_are_the_encoded_object;
       Alcotest.test_case "decode requires both keys" `Quick
         test_verification_evidence_decode_requires_both_keys;
+    ];
+    "verdict question", [
+      Alcotest.test_case "a completion intent asks the completion question" `Quick
+        test_complete_intent_asks_the_completion_question;
+      Alcotest.test_case "a cancel intent asks the cancellation question" `Quick
+        test_cancel_intent_asks_the_cancellation_question;
+      Alcotest.test_case "the intent picks the branch, not the payload shape" `Quick
+        test_intent_not_payload_shape_picks_the_question;
     ];
     "criterion", [
       Alcotest.test_case "roundtrip" `Quick test_criterion_roundtrip;

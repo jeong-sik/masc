@@ -154,7 +154,11 @@ val review
     attempt. An explicit [~evaluator_runtime] is a single-slot lane with no
     failover. *)
 
-(** Render {!Prompt_names.verification}, the task completion review prompt.
+(** Render the review prompt the [question] selects: {!Prompt_names.verification}
+    for a completion, {!Prompt_names.verification_cancellation} for a stop. The
+    lookup surface is described in that question's terms too, so a cancellation
+    is not handed the completion wording about submitted snapshots.
+
     There is no inline fallback prompt; an error keeps the Task nonterminal. *)
 val build_prompt
   :  ?few_shot_block:string

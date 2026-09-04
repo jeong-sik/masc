@@ -20,18 +20,27 @@
 | `tasks/goal_task_links.json` | 골과 태스크의 연결 | 골별 태스크 묶기 |
 | `goals.json` | 골 하나 | 골 목록과 상태 |
 | `goal_events.jsonl` | 골 상태가 바뀐 순간 | `goal_id`, `event_type`, `ts`, `payload` |
-| `goal_verifications.json` | 골 검증 결과 | 골별 통과 여부 |
+| `goal_verifications.json` | `{version, updated_at, records[]}` 봉투 | `records[].completion.state`, `records[].goal_id` |
 | `goal-verification-runs.jsonl` | 검증을 돌린 이력 | 시간축 |
 | `board_posts.jsonl` | 보드 글 하나 | `author`, `created_at`, `reply_count`, `votes_up`, `votes_down`, `post_kind` |
 | `board_comments.jsonl` | 댓글 하나 | 작성자와 시각 |
 | `board_votes.jsonl` | 표 하나 | 누가 누구에게 |
 | `autonomy_stats.jsonl` | keeper 하나의 누계 | `name`, `posts_created`, `comments_created`, `selections`, `skips`, `total_votes_up`, `total_votes_down` |
 
-한 가지 함정. `autonomy_stats.jsonl` 은 시계열이 아니다. 확인한 파일은 83 줄에 고유
-이름도 83 개였다 — agent 하나당 한 줄이고, 갱신될 때 그 줄이 덮인다. 그래서 여기서는
-현재 누계만 나온다. 시간에 따른 변화를 보려면 시각이 박힌 쪽을 써야 한다:
-`board_posts.jsonl`, `board_comments.jsonl`, `goal_events.jsonl`, 그리고
-`tasks-archive.json` 의 `created_at` / `completed_at`.
+### 함정 둘. 둘 다 `autonomy_stats.jsonl` 이야기다
+
+**시계열이 아니다.** 확인한 파일은 83 줄에 고유 이름도 83 개였다 — agent 하나당 한
+줄이고 갱신될 때 그 줄이 덮인다. 여기서는 현재 누계만 나온다.
+
+**그리고 그 누계가 비어 있다.** 같은 날 확인해 보니 83 행 전부 `posts_created`,
+`comments_created`, `selections` 가 0 이었다. 그런데 같은 base path 의
+`board_posts.jsonl` 에는 20 명이 쓴 글 1725 개가 있다. 이 배포에서 그 카운터는 채워지지
+않는다.
+
+그래서 산출량을 여기서 읽으면 안 된다. **`board_posts.jsonl` 과
+`board_comments.jsonl` 의 `author` 를 직접 세라.** 시각이 박혀 있으니 주기별로도
+쪼갤 수 있다. `autonomy_stats.jsonl` 은 값이 들어오기 시작하는지 확인하는 용도로만
+곁에 두고, 0 이면 0 이라고 보고하지 말고 미계측이라고 보고한다.
 
 ## 여덟 가지 값
 
@@ -39,7 +48,9 @@
 
 ### 1. 산출량
 
-keeper 별 `posts_created`, `comments_created`. 그리고 태스크를 몇 개 만들고 몇 개 끝냈는지.
+`board_posts.jsonl` 과 `board_comments.jsonl` 에서 `author` 별로 센다. 그리고 태스크를
+몇 개 만들고 몇 개 끝냈는지. `autonomy_stats.jsonl` 의 `posts_created` 는 쓰지 않는다 —
+위 함정 참조.
 
 세계마다 다를 것으로 보는 이유: `world-approval` 은 내보이는 게 재화라서 글이 많아야
 하고, `world-scarcity` 는 말하는 것도 지출이라서 적어야 한다. 이 예상이 틀리면 그건
@@ -47,12 +58,14 @@ keeper 별 `posts_created`, `comments_created`. 그리고 태스크를 몇 개 �
 
 ### 2. 움직이기로 한 비율
 
-`selections` 대 `skips`. keeper 가 깨어나서 실제로 뭔가 하기로 한 비율.
+`autonomy_stats.jsonl` 의 `selections` 대 `skips`. **단, 이 값이 실제로 채워지는지 먼저
+확인한다.** 확인한 배포에서는 전부 0 이었다. 0 이면 이 값은 없는 것으로 두고 1 번의
+주기별 글 수로 대체한다.
 
 ### 3. 받은 표
 
-`total_votes_up`, `total_votes_down`, 그리고 `board_posts.jsonl` 의 `reply_count`.
-평판 클러스터 네 세계를 가르는 값이다.
+`board_posts.jsonl` 의 `votes_up`, `votes_down`, `reply_count`. 글 행에 직접 박혀 있으니
+`autonomy_stats.jsonl` 의 누계를 거치지 않는다. 평판 클러스터 네 세계를 가르는 값이다.
 
 ### 4. 태스크 소요
 
@@ -80,8 +93,13 @@ keeper 별 `posts_created`, `comments_created`. 그리고 태스크를 몇 개 �
 
 ### 8. 같은 골의 성공률
 
-이게 사용자가 원한 축이다. 같은 골 문구를 세계마다 넣고, `goal_verifications.json` 과
-`goal-verification-runs.jsonl` 로 통과율을 본다. 한 번이 아니라 여러 번, 여러 달에 걸쳐.
+이게 사용자가 원한 축이다. 같은 골 문구를 세계마다 넣고, `goal_verifications.json` 의
+`records[].completion.state` 로 통과율을 본다. 그 파일은 골별 map 이 아니라
+`{version, updated_at, records[]}` 봉투이고, 각 record 는 `goal_id`, `completion`,
+`updated_at` 세 필드다. 확인한 배포에는 record 가 8 개 있었고 `state` 값으로
+`proof_refuted` 같은 것이 들어 있었다. 시간축은 `goal-verification-runs.jsonl` 에서 온다.
+
+한 번이 아니라 여러 번, 여러 달에 걸쳐 본다.
 
 ## 비교가 망가지는 다섯 가지
 

@@ -42,7 +42,7 @@ concurrency:
 
 jobs:
   test:
-    name: dune test
+    name: test suite
     runs-on: ubuntu-latest
     # This cap counts from job start, not from the Test step. On an opam
     # cache miss the setup steps can consume 40-75 minutes (compiler

@@ -2985,6 +2985,56 @@ let operation_submit_error_code = function
     "store_unavailable"
 ;;
 
+(* Reconnect dedup (RFC-0412 §3.2): a live or buffered event is dropped only
+   when the replay already wrote that exact seq. A "highest seq written" mark
+   would also drop an event whose journal append failed (stage-1 fail-open):
+   with seq 4 absent from the journal and 5 replayed, a mark of 5 loses 4,
+   which only the live sink still holds. Membership loses nothing; such an
+   event may then arrive after a higher replayed seq, which is the price of
+   the fail-open journal, not of the reconnect. Events without a seq never
+   went through the bus and always pass. *)
+let live_event_is_new ~replayed = function
+  | None -> true
+  | Some seq -> not (Hashtbl.mem replayed seq)
+;;
+
+(* Everything a reconnect replays, or nothing. Reads the journal, projects it
+   with the keeper's current redaction snapshot, and keeps every failure
+   inside this function — missing, unreadable, corrupt, or a journaled event
+   the projection refuses (Ag_ui.make_event rejects an empty run_error
+   message) — because the caller runs on the server-lifetime switch, where an
+   escaped exception would take the server down. A missing journal is a
+   queued operation with nothing journaled yet, so it is silent; the rest
+   warn and the stream continues live-only, as before this feature. *)
+let journal_replay_frames ~base_path ~keeper_name ~operation_id ~since_seq =
+  let path =
+    Keeper_chat_event_log.journal_path ~base_dir:base_path ~keeper_name ~operation_id
+  in
+  let skipped detail =
+    Log.Keeper.warn
+      "keeper chat replay skipped operation=%s since_seq=%d: %s"
+      operation_id
+      since_seq
+      detail;
+    []
+  in
+  match Keeper_chat_event_log.read_journal_path_result path with
+  | Error Keeper_chat_event_log.Journal_missing -> []
+  | Error (Journal_unreadable detail | Journal_corrupt detail) -> skipped detail
+  | Ok entries ->
+    (match
+       let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+       Server_keeper_chat_replay.replay
+         ~redact_text:(Keeper_secret_redaction.redact_text redaction)
+         ~redact_json:(Keeper_secret_redaction.redact_json redaction)
+         ~since_seq
+         entries
+     with
+     | frames -> frames
+     | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+     | exception exn -> skipped (Printexc.to_string exn))
+;;
+
 let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payload =
   let origin = get_origin request in
   let headers = keeper_chat_stream_headers origin in
@@ -3024,37 +3074,24 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
       let buffered = ref [] in
       let buffered_mu = Stdlib.Mutex.create () in
       let base_path = (Mcp_server.workspace_config state).base_path in
-      (* Highest journal seq already written to this stream. A reconnect
-         replays the journaled suffix first and the live sink attaches after,
-         so a live or buffered event at or below this mark is a duplicate of a
-         replayed frame and is dropped. Events without a journal seq (the
-         settle glue's synthesized run_error never went through the bus) have
-         no mark and always pass. Guarded by [buffered_mu]: it orders the
-         same stream, and sinks run on the Owner's fiber. *)
-      let last_sent_seq = ref (-1) in
-      let claim_seq seq =
-        Stdlib.Mutex.protect buffered_mu (fun () ->
-          match seq with
-          | None -> true
-          | Some seq when seq <= !last_sent_seq -> false
-          | Some seq ->
-            last_sent_seq := seq;
-            true)
-      in
+      (* Seqs the reconnect replay wrote to this stream. Filled by the handler
+         fiber before [accepted] flips (under [buffered_mu]), read by the live
+         sink only after it observes the flip, so the mutex orders the two. *)
+      let replayed : (int, unit) Hashtbl.t = Hashtbl.create 64 in
       let send_event ~seq event =
-        if claim_seq seq
-        then begin
-          let sent = keeper_stream_send_event ?seq writer mutex closed event in
-          if
-            (not sent)
-            || match event.Ag_ui.event_type with
-               | Ag_ui.Run_finished | Ag_ui.Run_error -> true
-               | Run_started | Step_started | Step_finished | Text_message_start
-               | Text_message_content | Text_message_end | Tool_call_start
-               | Tool_call_args | Tool_call_end | State_snapshot | State_delta
-               | Custom -> false
-          then finish ()
-        end
+        let sent = keeper_stream_send_event ?seq writer mutex closed event in
+        if
+          (not sent)
+          || match event.Ag_ui.event_type with
+             | Ag_ui.Run_finished | Ag_ui.Run_error -> true
+             | Run_started | Step_started | Step_finished | Text_message_start
+             | Text_message_content | Text_message_end | Tool_call_start
+             | Tool_call_args | Tool_call_end | State_snapshot | State_delta
+             | Custom -> false
+        then finish ()
+      in
+      let send_live ~seq event =
+        if live_event_is_new ~replayed seq then send_event ~seq event
       in
       let sink ~seq event =
         let send_now =
@@ -3065,7 +3102,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
               buffered := (seq, event) :: !buffered;
               false))
         in
-        if send_now then send_event ~seq event
+        if send_now then send_live ~seq event
       in
       let unregister = register_operation_live_sink ~operation_id sink in
       Eio.Switch.on_release stream_sw unregister;
@@ -3092,39 +3129,21 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
         ignore (keeper_stream_send_event writer mutex closed event);
         (* Replay before live attach (RFC-0412 §3.2): the journaled suffix
            above [since_seq] goes out through the same pure projection the
-           live adapter uses, so the bytes equal the frames the client
-           missed. A missing journal is a queued operation with nothing
-           journaled yet; unreadable or corrupt degrades to today's
-           live-only stream with a warning. The sink is already registered,
-           so events published meanwhile sit in [buffered] and flush below,
-           where [claim_seq] drops the ones the replay already wrote. *)
+           live adapter uses, with the ts the bus stamped, so the bytes equal
+           the frames the client missed. The sink is already registered, so
+           events published meanwhile sit in [buffered] and flush below,
+           where [send_live] drops the seqs the replay already wrote. *)
         (match payload.since_seq with
          | None -> ()
          | Some since_seq ->
-           let path =
-             Keeper_chat_event_log.journal_path
-               ~base_dir:base_path
-               ~keeper_name:payload.name
-               ~operation_id
-           in
-           (match Keeper_chat_event_log.read_journal_path_result path with
-            | Error Keeper_chat_event_log.Journal_missing -> ()
-            | Error (Journal_unreadable detail | Journal_corrupt detail) ->
-              Log.Keeper.warn
-                "keeper chat replay skipped operation=%s since_seq=%d: %s"
-                operation_id
-                since_seq
-                detail
-            | Ok entries ->
-              let redaction =
-                Keeper_secret_redaction.snapshot ~base_path ~keeper_name:payload.name
-              in
-              Server_keeper_chat_replay.replay
-                ~redact_text:(Keeper_secret_redaction.redact_text redaction)
-                ~redact_json:(Keeper_secret_redaction.redact_json redaction)
-                ~since_seq
-                entries
-              |> List.iter (fun (seq, event) -> send_event ~seq:(Some seq) event)));
+           journal_replay_frames
+             ~base_path
+             ~keeper_name:payload.name
+             ~operation_id
+             ~since_seq
+           |> List.iter (fun (seq, event) ->
+             Hashtbl.replace replayed seq ();
+             send_event ~seq:(Some seq) event));
         let pending =
           Stdlib.Mutex.protect buffered_mu (fun () ->
             accepted := true;
@@ -3132,7 +3151,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
             buffered := [];
             pending)
         in
-        List.iter (fun (seq, event) -> send_event ~seq event) pending;
+        List.iter (fun (seq, event) -> send_live ~seq event) pending;
         if Keeper_owner.Chat_operation.is_terminal operation.state then finish ()
       in
       let submit_result =
@@ -3183,6 +3202,8 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
 
 module For_testing = struct
   let parse_request = parse_keeper_chat_stream_request
+  let live_event_is_new = live_event_is_new
+  let journal_replay_frames = journal_replay_frames
   let has_connector_context = has_connector_context
   let has_external_speaker = has_external_speaker
   let message_for_request = message_for_request

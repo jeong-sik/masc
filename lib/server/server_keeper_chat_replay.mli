@@ -15,5 +15,9 @@ val replay :
     carries the message and run identity established before it. Entries
     that project to [None] (connector-only blocks) leave gaps in the returned
     seqs, so [since_seq] is a journal position, not a frame count. Each
-    entry's own [ts] feeds the projection, which is what makes the output
-    byte-identical to the frames the live adapter wrote. *)
+    entry's own [ts] feeds the projection; the bus stamped that ts once and
+    the live adapter projected with the same value
+    ({!Keeper_chat_events.published}), so the output is byte-identical to the
+    frames the live adapter wrote under the same redaction. The caller passes
+    the redaction it has now: a secret registered for the keeper after the
+    turn is redacted here and was not on the live wire. *)

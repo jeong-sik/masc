@@ -330,6 +330,19 @@ type operation_wire_stream = Wire_started | Wire_terminal_sent
 
 module For_testing : sig
   val parse_request : string -> (keeper_chat_stream_request, string) result
+
+  (** Reconnect dedup: [false] only for a seq the replay already wrote. *)
+  val live_event_is_new : replayed:(int, unit) Hashtbl.t -> int option -> bool
+
+  (** The frames a reconnect replays for [since_seq], or [] when the journal
+      is missing, unreadable, corrupt, or holds an event the projection
+      refuses; never raises (except cancellation). *)
+  val journal_replay_frames :
+    base_path:string ->
+    keeper_name:string ->
+    operation_id:string ->
+    since_seq:int ->
+    (int * Ag_ui.event) list
   val has_connector_context : keeper_chat_stream_request -> bool
   val has_external_speaker : keeper_chat_stream_request -> bool
   val message_for_request : keeper_chat_stream_request -> string

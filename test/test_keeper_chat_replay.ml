@@ -1,7 +1,9 @@
 (* RFC-0412 stage 2 — since_seq replay. The journaled suffix re-folded from
    [Projection.initial] reproduces the live SSE bytes, frame ids are journal
-   seqs (so entries that project to [None] leave gaps), and the stream request
-   parser admits [since_seq] only as an integer >= -1. *)
+   seqs (so entries that project to [None] leave gaps), the stream request
+   parser admits [since_seq] only as an integer >= -1, the reconnect dedup
+   keeps an event the journal lost, and the handler-side replay never raises
+   into the server switch. *)
 
 open Masc
 module E = Keeper_chat_events
@@ -160,6 +162,147 @@ let test_parser_rejects_malformed_since_seq () =
            (Astring.String.is_infix ~affix:"since_seq" message))
     [ "-2"; {|"12"|}; "1.5"; "null" ]
 
+(* ---- handler side: typed reads, dedup, and the exception boundary ---- *)
+
+let rec remove_tree path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path
+    end
+    else Sys.remove path
+
+let temp_base_path prefix =
+  Filename.concat
+    (Filename.get_temp_dir_name ())
+    (Printf.sprintf "%s-%d-%d" prefix (Unix.getpid ()) (Random.bits ()))
+
+let with_base prefix f =
+  let base_dir = temp_base_path prefix in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () -> f base_dir)
+
+let keeper_name = "replay-keeper"
+let operation_id = "req-replay-op"
+
+let write_journal ~base_dir entries =
+  let journal = L.open_journal ~base_dir ~keeper_name ~operation_id () in
+  List.iter
+    (fun (entry : L.journaled_event) -> L.append journal ~seq:entry.seq ~ts:entry.ts entry.event)
+    entries;
+  L.journal_path ~base_dir ~keeper_name ~operation_id
+
+let test_read_result_names_missing_corrupt_and_unreadable () =
+  with_base "keeper-chat-replay-read" (fun base_dir ->
+    let path = L.journal_path ~base_dir ~keeper_name ~operation_id in
+    (match L.read_journal_path_result path with
+     | Error L.Journal_missing -> ()
+     | Error (L.Journal_unreadable d) -> Alcotest.fail ("missing read as unreadable: " ^ d)
+     | Error (L.Journal_corrupt d) -> Alcotest.fail ("missing read as corrupt: " ^ d)
+     | Ok _ -> Alcotest.fail "missing journal read as entries");
+    let path = write_journal ~base_dir journaled in
+    (match L.read_journal_path_result path with
+     | Ok entries ->
+       Alcotest.(check int) "every line decodes" (List.length journaled) (List.length entries)
+     | Error _ -> Alcotest.fail "a written journal must read back");
+    let oc = open_out_gen [ Open_append; Open_wronly ] 0o600 path in
+    output_string oc "this line is not an envelope\n";
+    close_out oc;
+    (match L.read_journal_path_result path with
+     | Error (L.Journal_corrupt _) -> ()
+     | Error L.Journal_missing -> Alcotest.fail "corrupt read as missing"
+     | Error (L.Journal_unreadable d) -> Alcotest.fail ("corrupt read as unreadable: " ^ d)
+     | Ok _ -> Alcotest.fail "a corrupt line decoded");
+    (* root reads a 0o000 file, so the classification cannot be observed there. *)
+    if Unix.geteuid () <> 0
+    then begin
+      Unix.chmod path 0o000;
+      Fun.protect
+        ~finally:(fun () -> Unix.chmod path 0o600)
+        (fun () ->
+           match L.read_journal_path_result path with
+           | Error (L.Journal_unreadable _) -> ()
+           | Error L.Journal_missing -> Alcotest.fail "unreadable read as missing"
+           | Error (L.Journal_corrupt d) -> Alcotest.fail ("unreadable read as corrupt: " ^ d)
+           | Ok _ -> Alcotest.fail "an unreadable file yielded entries")
+    end)
+
+(* Seq 4's append failed (fail-open), 5's succeeded; the client reconnects
+   with since_seq = 3. The replay wrote 5. The live sink still holds 4, and
+   4 must go out: a highest-seq mark would have dropped it. *)
+let test_dedup_keeps_the_event_the_journal_lost () =
+  let replayed = Hashtbl.create 4 in
+  Hashtbl.replace replayed 5 ();
+  let is_new = Stream.For_testing.live_event_is_new ~replayed in
+  Alcotest.(check bool) "seq 4 was never replayed, so it is new" true (is_new (Some 4));
+  Alcotest.(check bool) "seq 5 was replayed, so it is a duplicate" false (is_new (Some 5));
+  Alcotest.(check bool) "seq 6 arrives live only" true (is_new (Some 6));
+  Alcotest.(check bool) "a seq-less settle event always passes" true (is_new None)
+
+let test_handler_replay_matches_the_pure_fold () =
+  with_base "keeper-chat-replay-handler" (fun base_dir ->
+    ignore (write_journal ~base_dir journaled : string);
+    let frames =
+      Stream.For_testing.journal_replay_frames
+        ~base_path:base_dir
+        ~keeper_name
+        ~operation_id
+        ~since_seq:4
+      |> List.map frame
+    in
+    (* No secret is registered under this base, so the redaction the handler
+       takes is the identity on this fixture and the bytes must match. *)
+    Alcotest.(check (list string))
+      "handler replay equals the pure fold"
+      (replay 4 |> List.map frame)
+      frames)
+
+let test_handler_replay_degrades_to_nothing () =
+  with_base "keeper-chat-replay-degrade" (fun base_dir ->
+    let replay_frames () =
+      Stream.For_testing.journal_replay_frames
+        ~base_path:base_dir
+        ~keeper_name
+        ~operation_id
+        ~since_seq:(-1)
+    in
+    Alcotest.(check int) "missing journal replays nothing" 0 (List.length (replay_frames ()));
+    let path = write_journal ~base_dir journaled in
+    let oc = open_out_gen [ Open_append; Open_wronly ] 0o600 path in
+    output_string oc "{\"v\":1,\"seq\":99}\n";
+    close_out oc;
+    Alcotest.(check int)
+      "corrupt journal replays nothing rather than a prefix"
+      0
+      (List.length (replay_frames ())));
+  (* A journaled run_error with an empty message is refused by
+     Ag_ui.make_event with Invalid_argument. On the live path fork_adapter
+     absorbed that; the reconnect must absorb it too instead of raising into
+     the server switch. *)
+  with_base "keeper-chat-replay-refused" (fun base_dir ->
+    ignore
+      (write_journal
+         ~base_dir
+         [ { L.seq = 0; ts = 1.0; event = E.Run_started { run_id = "r"; thread_id = "keeper:r" } }
+         ; { L.seq = 1; ts = 1.5; event = E.Event_error { message = "" } }
+         ]
+        : string);
+    match
+      Stream.For_testing.journal_replay_frames
+        ~base_path:base_dir
+        ~keeper_name
+        ~operation_id
+        ~since_seq:(-1)
+    with
+    | frames ->
+      Alcotest.(check int) "a refused event empties the replay" 0 (List.length frames)
+    | exception exn ->
+      Alcotest.fail ("replay raised into the caller: " ^ Printexc.to_string exn))
+
 let () =
   Alcotest.run
     "keeper_chat_replay"
@@ -180,5 +323,15 @@ let () =
             test_parser_reads_since_seq
         ; Alcotest.test_case "parser rejects malformed since_seq" `Quick
             test_parser_rejects_malformed_since_seq
+        ] )
+    ; ( "handler"
+      , [ Alcotest.test_case "read result names missing, corrupt and unreadable" `Quick
+            test_read_result_names_missing_corrupt_and_unreadable
+        ; Alcotest.test_case "dedup keeps the event the journal lost" `Quick
+            test_dedup_keeps_the_event_the_journal_lost
+        ; Alcotest.test_case "handler replay matches the pure fold" `Quick
+            test_handler_replay_matches_the_pure_fold
+        ; Alcotest.test_case "handler replay degrades to nothing" `Quick
+            test_handler_replay_degrades_to_nothing
         ] )
     ]

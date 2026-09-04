@@ -251,9 +251,13 @@ let joined_opt parts =
   | [] -> None
   | rows -> Some (String.concat " · " rows)
 
+(* The profile, not the runtime under it: this wire carries which sandbox a
+   Keeper declared and not which microVM CLI serves it. Naming Apple here
+   labelled every msb and nerdctl Keeper with a runtime it does not use. The
+   runtime appears in the logs section, which does carry it. *)
 let profile_label = function
   | Some Docker -> "Docker"
-  | Some Micro_vm -> "Apple Container VM"
+  | Some Micro_vm -> "microVM guest"
   | Some Remote_ssh -> "Remote SSH"
   | None -> "not reported"
 
@@ -422,9 +426,23 @@ let view_lines ~width reading =
   @ wrapped_rows ~width ~label:"Container stdio" ~tone:`Info "o  actual logs"
   @ wrapped_rows ~width ~label:"Sandbox calls" ~tone:`Info "t  tool calls"
 
+(* The server answers the runtime's own spelling, so every runtime it can
+   name has to be a value here. A strict decoder is the point -- an unknown
+   string blanks the whole panel rather than guessing -- which is why a new
+   microVM runtime is a change on both sides of this wire.
+
+   This type is parallel to the server's closed sum rather than the same
+   type: this library links no server code, so the compiler cannot ask. What
+   asks is
+   [test_the_reader_accepts_every_runtime_the_server_can_name] in
+   test/test_tui_keeper_sandbox.ml, which iterates
+   [Keeper_microvm_backend.valid_strings] and fails when one has no arm
+   below. Adding a runtime there without adding it here fails the suite. *)
 type log_backend =
   | Docker_log_backend
   | Apple_container_log_backend
+  | Microsandbox_log_backend
+  | Nerdctl_kata_log_backend
 
 type log_instance =
   { log_instance_id : string
@@ -435,11 +453,17 @@ type log_instance =
   ; log_error : string option
   }
 
+(* The server's three states, each carrying only what that state owns. A
+   backend with no instances and a Keeper with no local stream at all are
+   different answers, and neither is an error. *)
+type log_source =
+  | Local_instances of log_backend * log_instance list
+  | Local_no_instance of log_backend
+  | No_local_stream of string
+
 type logs =
-  { log_backend : log_backend
-  ; log_state : [ `Available | `No_instance ]
+  { log_source : log_source
   ; log_tail : int
-  ; log_instances : log_instance list
   }
 
 let decode_logs ~sanitize json =
@@ -450,20 +474,6 @@ let decode_logs ~sanitize json =
     | Some (`String value) -> Ok value
     | Some _ -> Error (path ^ " must be a string")
     | None -> Error (path ^ " is required")
-  in
-  let* backend = required_string "sandbox logs.backend" "backend" fields in
-  let* log_backend =
-    match backend with
-    | "docker" -> Ok Docker_log_backend
-    | "apple_container" -> Ok Apple_container_log_backend
-    | value -> Error ("sandbox logs.backend has unsupported value " ^ sanitize value)
-  in
-  let* state = required_string "sandbox logs.state" "state" fields in
-  let* log_state =
-    match state with
-    | "available" -> Ok `Available
-    | "no_instance" -> Ok `No_instance
-    | value -> Error ("sandbox logs.state has unsupported value " ^ sanitize value)
   in
   let* log_tail =
     match field "tail" fields with
@@ -514,33 +524,70 @@ let decode_logs ~sanitize json =
     | Some _ -> Error "sandbox logs.instances must be a list"
     | None -> Error "sandbox logs.instances is required"
   in
-  if log_state = `No_instance && log_instances <> [] then
-    Error "sandbox logs.no_instance cannot carry instances"
-  else if log_state = `Available && log_instances = [] then
-    Error "sandbox logs.available requires an instance"
-  else Ok { log_backend; log_state; log_tail; log_instances }
+  (* A Keeper with no local stream names no backend, so the field is null
+     there and a string only for the two local states. *)
+  let* log_backend =
+    match field "backend" fields with
+    | None | Some `Null -> Ok None
+    | Some (`String "docker") -> Ok (Some Docker_log_backend)
+    | Some (`String "apple_container") -> Ok (Some Apple_container_log_backend)
+    | Some (`String "microsandbox") -> Ok (Some Microsandbox_log_backend)
+    | Some (`String "nerdctl_kata") -> Ok (Some Nerdctl_kata_log_backend)
+    | Some (`String value) ->
+      Error ("sandbox logs.backend has unsupported value " ^ sanitize value)
+    | Some _ -> Error "sandbox logs.backend must be a string or null"
+  in
+  let* state = required_string "sandbox logs.state" "state" fields in
+  let* log_source =
+    match state with
+    | "available" ->
+      (match log_backend, log_instances with
+       | None, _ -> Error "sandbox logs.available requires a backend"
+       | Some _, [] -> Error "sandbox logs.available requires an instance"
+       | Some backend, instances -> Ok (Local_instances (backend, instances)))
+    | "no_instance" ->
+      (match log_backend, log_instances with
+       | None, _ -> Error "sandbox logs.no_instance requires a backend"
+       | Some _, _ :: _ -> Error "sandbox logs.no_instance cannot carry instances"
+       | Some backend, [] -> Ok (Local_no_instance backend))
+    | "no_local_stream" ->
+      let* reason = required_string "sandbox logs.reason" "reason" fields in
+      (match log_backend, log_instances with
+       | Some _, _ -> Error "sandbox logs.no_local_stream cannot name a backend"
+       | None, _ :: _ -> Error "sandbox logs.no_local_stream cannot carry instances"
+       | None, [] -> Ok (No_local_stream (sanitize reason)))
+    | value -> Error ("sandbox logs.state has unsupported value " ^ sanitize value)
+  in
+  Ok { log_source; log_tail }
 ;;
 
 let logs_view_lines ~width logs =
-  let backend =
-    match logs.log_backend with
+  let title = [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "container logs" ] in
+  let backend_label = function
     | Docker_log_backend -> "Docker"
     | Apple_container_log_backend -> "Apple Container"
+    | Microsandbox_log_backend -> "microsandbox"
+    | Nerdctl_kata_log_backend -> "nerdctl (Kata)"
   in
-  let header =
-    [ ""
-    ; " " ^ styled Masc_tui_theme.Sgr.bold "container logs"
-    ; Printf.sprintf "  %-18s %s · last %d lines per instance" "Source" backend
-        logs.log_tail
-    ]
+  (* A tail count belongs to a stream. Without one, neither it nor a backend
+     name is printed: there is nothing they would describe. *)
+  let source_row backend =
+    Printf.sprintf "  %-18s %s · last %d lines per instance" "Source"
+      (backend_label backend) logs.log_tail
   in
-  match logs.log_state with
-  | `No_instance ->
-    header
+  match logs.log_source with
+  | No_local_stream reason ->
+    title
+    @ [ Printf.sprintf "  %-18s %s" "Source" "no local stream on this host" ]
+    @ wrapped_rows ~width ~label:"Where" ~tone:`Info reason
+  | Local_no_instance backend ->
+    title
+    @ [ source_row backend ]
     @ wrapped_rows ~width ~label:"State" ~tone:`Muted
         "No container instance exists yet; run a sandbox command first."
-  | `Available ->
-    header
+  | Local_instances (backend, instances) ->
+    title
+    @ [ source_row backend ]
     @ List.concat_map
         (fun instance ->
           let state =
@@ -559,4 +606,4 @@ let logs_view_lines ~width logs =
              | Some detail -> wrapped_rows ~width ~label:"Error" ~tone:`Bad detail)
           @ List.map (fun line -> "  out  " ^ line) instance.log_stdout
           @ List.map (fun line -> "  err  " ^ line) instance.log_stderr)
-        logs.log_instances
+        instances

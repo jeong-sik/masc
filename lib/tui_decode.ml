@@ -1219,12 +1219,29 @@ let split_headers_body response =
 
 let is_success_http_status status_code = status_code >= 200 && status_code < 300
 
+(* A refused request usually answers [{"ok":false,"error":"..."}] with a
+   4xx or 5xx status. Pasting that envelope into the pane hands the operator
+   JSON to read when the server already wrote the sentence, so the sentence
+   wins and the envelope is the fallback. *)
+let json_error_sentence body =
+  match Yojson.Safe.from_string body with
+  | `Assoc fields -> (
+    match List.assoc_opt "error" fields with
+    | Some (`String message) when String.trim message <> "" -> Some (String.trim message)
+    | Some _ | None -> None)
+  | _ -> None
+  | exception Yojson.Json_error _ -> None
+;;
+
 let http_status_error ~status_code ~body =
   let body = String.trim body in
   let detail =
-    if body = "" then "empty response body"
-    else if String.length body > 240 then String.sub body 0 240 ^ "..."
-    else body
+    match json_error_sentence body with
+    | Some sentence -> sentence
+    | None ->
+      if body = "" then "empty response body"
+      else if String.length body > 240 then String.sub body 0 240 ^ "..."
+      else body
   in
   Printf.sprintf "HTTP %d: %s" status_code detail
 
@@ -5181,6 +5198,85 @@ let decode_file_mount_paths items =
     (fun item -> required_string_field item "container_path")
     items
 
+type client_status =
+  | Client_active
+  | Client_busy
+  | Client_listening
+  | Client_inactive
+
+type client_row = {
+  cr_name : string;
+  cr_agent_type : string;
+  cr_status : client_status;
+  cr_current_task : string option;
+  cr_keeper_name : string option;
+  cr_session_bound_at : string;
+  cr_last_seen : string;
+  cr_capabilities : string list;
+}
+
+type clients_snapshot = {
+  cls_observed_at : string;
+  cls_clients : client_row list;
+}
+
+(* The clients roster's status is the agent_status ADT on the wire. The
+   emitter ([string_of_agent_status], which [dashboard_agent_json] uses)
+   spells the four closed values lowercase and nothing else, so this reads
+   exactly those four words: a spelling the producer never sends is a
+   different enum and rejects the row rather than drawing a wrong dot. *)
+let client_status_of_string value =
+  match value with
+  | "active" -> Ok Client_active
+  | "busy" -> Ok Client_busy
+  | "listening" -> Ok Client_listening
+  | "inactive" -> Ok Client_inactive
+  | other -> Error ("clients: unknown status " ^ other)
+
+let client_status_to_string = function
+  | Client_active -> "active"
+  | Client_busy -> "busy"
+  | Client_listening -> "listening"
+  | Client_inactive -> "inactive"
+
+let decode_client_row json =
+  let* cr_name = required_string_field json "name" in
+  let* cr_agent_type = required_string_field json "agent_type" in
+  let* status = required_string_field json "status" in
+  let* cr_status = client_status_of_string status in
+  let* cr_current_task = required_nullable_string_field json "current_task" in
+  let* cr_keeper_name = required_nullable_string_field json "keeper_name" in
+  let* cr_session_bound_at = required_string_field json "session_bound_at" in
+  let* cr_last_seen = required_string_field json "last_seen" in
+  let* capabilities = required_list_field json "capabilities" in
+  let* cr_capabilities = decode_string_list "capabilities" capabilities in
+  Ok
+    { cr_name
+    ; cr_agent_type
+    ; cr_status
+    ; cr_current_task
+    ; cr_keeper_name
+    ; cr_session_bound_at
+    ; cr_last_seen
+    ; cr_capabilities
+    }
+
+let decode_clients_snapshot json =
+  let* schema = required_string_field json "schema" in
+  let* () =
+    if String.equal schema "masc.dashboard.clients.v1" then Ok ()
+    else Error ("clients: unsupported schema " ^ schema)
+  in
+  let* cls_observed_at = required_string_field json "generated_at" in
+  let* observation_only = required_bool_field json "observation_only" in
+  let* () =
+    if observation_only then Ok ()
+    else Error "clients snapshot is not observation-only"
+  in
+  let* rows = required_list_field json "clients" in
+  let* cls_clients = decode_list "clients" decode_client_row rows in
+  Ok { cls_observed_at; cls_clients }
+
 let decode_keeper_secret_projection ~keeper json =
   let* status = required_string_field json "status" in
   let ksp_status = keeper_secret_status_of_string status in
@@ -6462,6 +6558,175 @@ let decode_prompts json =
     { ps_rows = List.rev reversed
     ; ps_runtime_assets = List.rev reversed_runtime_assets
     }
+;;
+
+(* ── Prompt presets (/api/v1/presets) ────────────────────────────────── *)
+
+type preset_manifest =
+  { pm_name : string
+  ; pm_description : string
+  ; pm_created_at : string
+  ; pm_override_count : int
+  ; pm_keepers : string list
+  ; pm_assignment_count : int
+  ; pm_lane_count : int
+  }
+
+type presets_snapshot =
+  { pss_presets : preset_manifest list
+  ; pss_unreadable : (string * string) list
+  }
+
+type preset_part =
+  { pp_effect : string
+  ; pp_applied : string list
+  ; pp_skipped : (string * string) list
+  }
+
+type preset_runtime_status =
+  | Preset_runtime_unchanged
+  | Preset_runtime_committed
+  | Preset_runtime_failed of string
+
+type preset_restore_report =
+  { prr_restored : string
+  ; prr_autosave : string
+  ; prr_prompt_overrides : preset_part
+  ; prr_instructions : preset_part
+  ; prr_runtime : preset_runtime_status
+  }
+
+(* The routes answer [{ok:false, error}] on a refused request; read that
+   before any field, so the operator sees the server's sentence. *)
+(* [ok] is false on a refusal, but the auth and warm-up answers carry only
+   [error] and ride a 200, so an [error] field is an error whatever [ok]
+   says. *)
+let preset_ok json =
+  match (member "ok" json, member "error" json) with
+  | `Bool false, `String message -> Error message
+  | `Bool false, _ -> Error "the server refused the request without a reason"
+  | _, `String message when String.trim message <> "" -> Error (String.trim message)
+  | _ -> Ok ()
+;;
+
+let decode_string_list json key =
+  let* items = required_list_field json key in
+  List.fold_left
+    (fun result item ->
+       let* acc = result in
+       match item with
+       | `String value -> Ok (value :: acc)
+       | value -> field_type_error key "strings" value)
+    (Ok []) items
+  |> Result.map List.rev
+;;
+
+(* The server writes [schema_version] and refuses to read any value but its
+   own (prompt_preset.ml). A reader that ignores it would draw a future
+   manifest as whatever subset it recognises. *)
+let preset_manifest_schema_version = 1
+
+let decode_preset_manifest json =
+  let* schema_version = required_int_field json "schema_version" in
+  let* () =
+    if schema_version = preset_manifest_schema_version then Ok ()
+    else
+      Error
+        (Printf.sprintf "preset manifest schema_version %d, this build reads %d"
+           schema_version preset_manifest_schema_version)
+  in
+  let* pm_name = required_string_field json "name" in
+  let* pm_description = required_string_field json "description" in
+  let* pm_created_at = required_string_field json "created_at" in
+  let* pm_override_count = required_int_field json "override_count" in
+  let* pm_keepers = decode_string_list json "keepers" in
+  let* pm_assignment_count = required_int_field json "assignment_count" in
+  let* pm_lane_count = required_int_field json "lane_count" in
+  Ok
+    { pm_name
+    ; pm_description
+    ; pm_created_at
+    ; pm_override_count
+    ; pm_keepers
+    ; pm_assignment_count
+    ; pm_lane_count
+    }
+;;
+
+let decode_name_reason_list json key ~name_key ~reason_key =
+  let* items = required_list_field json key in
+  List.fold_left
+    (fun result item ->
+       let* acc = result in
+       let* name = required_string_field item name_key in
+       let* reason = required_string_field item reason_key in
+       Ok ((name, reason) :: acc))
+    (Ok []) items
+  |> Result.map List.rev
+;;
+
+let decode_presets json =
+  let* () = preset_ok json in
+  let* presets_json = required_list_field json "presets" in
+  let* reversed =
+    List.fold_left
+      (fun result item ->
+         let* acc = result in
+         let* manifest = decode_preset_manifest item in
+         Ok (manifest :: acc))
+      (Ok []) presets_json
+  in
+  let* pss_unreadable =
+    decode_name_reason_list json "unreadable" ~name_key:"name" ~reason_key:"reason"
+  in
+  Ok { pss_presets = List.rev reversed; pss_unreadable }
+;;
+
+let decode_preset_saved json =
+  let* () = preset_ok json in
+  match member "preset" json with
+  | `Null -> Error "the save answer carries no preset"
+  | preset -> decode_preset_manifest preset
+;;
+
+let decode_preset_part json key =
+  match member key json with
+  | `Null -> Error (Printf.sprintf "restore report has no %s part" key)
+  | part ->
+    let* pp_effect = required_string_field part "effect" in
+    let* pp_applied = decode_string_list part "applied" in
+    let* pp_skipped =
+      decode_name_reason_list part "skipped" ~name_key:"key" ~reason_key:"reason"
+    in
+    Ok { pp_effect; pp_applied; pp_skipped }
+;;
+
+let decode_preset_runtime json =
+  match member "runtime" json with
+  | `Null -> Error "restore report has no runtime part"
+  | runtime ->
+    let* status = required_string_field runtime "status" in
+    (match status with
+     | "unchanged" -> Ok Preset_runtime_unchanged
+     | "committed" -> Ok Preset_runtime_committed
+     | "failed" ->
+       (match member "error" runtime with
+        | `String message -> Ok (Preset_runtime_failed message)
+        | _ -> Ok (Preset_runtime_failed "runtime.toml commit failed without a reason"))
+     | other -> Error (Printf.sprintf "unknown runtime restore status %S" other))
+;;
+
+let decode_preset_restore json =
+  let* () = preset_ok json in
+  match member "report" json with
+  | `Null -> Error "the restore answer carries no report"
+  | report ->
+    let* prr_restored = required_string_field report "restored" in
+    let* prr_autosave = required_string_field report "autosave" in
+    let* prr_prompt_overrides = decode_preset_part report "prompt_overrides" in
+    let* prr_instructions = decode_preset_part report "instructions" in
+    let* prr_runtime = decode_preset_runtime report in
+    Ok { prr_restored; prr_autosave; prr_prompt_overrides; prr_instructions; prr_runtime }
 ;;
 
 type librarian_run_page =

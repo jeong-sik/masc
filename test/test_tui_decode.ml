@@ -1336,8 +1336,9 @@ let test_decode_json_response_body_rejects_error_status () =
   with
   | Ok _ -> Alcotest.fail "expected HTTP 400 to fail"
   | Error err ->
-      Alcotest.(check string)
-        "http error" "HTTP 400: {\"error\":\"bad confirm\"}" err
+      (* The status still leads; the envelope no longer follows it, because
+         the server already wrote the sentence. *)
+      Alcotest.(check string) "http error" "HTTP 400: bad confirm" err
 
 let test_decode_json_response_body_allows_empty_success () =
   match
@@ -3486,6 +3487,98 @@ let test_every_lane_status_word_fits_its_column () =
     ; Tui_decode.Standalone_no_retained_observation
     ]
 
+(* decode_clients — the Runtime family's roster reading of everyone attached
+   to the workspace. The rows below carry the dashboard's own field set
+   (emoji, koreanName among them) so the test also pins that the roster
+   ignores the profile decorations rather than rejecting them. *)
+let clients_row_json ~name ~agent_type ~status ~keeper ~task =
+  `Assoc
+    [ "name", `String name
+    ; "agent_type", `String agent_type
+    ; "keeper_name"
+      , (match keeper with Some keeper -> `String keeper | None -> `Null)
+    ; "keeper_id", `Null
+    ; "status", `String status
+    ; "current_task"
+      , (match task with Some task -> `String task | None -> `Null)
+    ; "session_bound_at", `String "2026-09-04T01:00:00Z"
+    ; "last_seen", `String "2026-09-04T01:20:00Z"
+    ; "capabilities", `List [ `String "chat" ]
+    ; "emoji", `String "x"
+    ; "koreanName", `String "client"
+    ]
+
+let clients_snapshot_json rows =
+  `Assoc
+    [ "schema", `String "masc.dashboard.clients.v1"
+    ; "generated_at", `String "2026-09-04T01:21:00Z"
+    ; "observation_only", `Bool true
+    ; "clients", `List rows
+    ]
+
+let test_decode_clients_reads_the_status_enum_and_ignores_profile () =
+  let json =
+    clients_snapshot_json
+      [ clients_row_json ~name:"codex-mcp-client" ~agent_type:"codex"
+          ~status:"active" ~keeper:None ~task:None
+      ; clients_row_json ~name:"analyst-agent" ~agent_type:"keeper"
+          ~status:"busy" ~keeper:(Some "analyst") ~task:(Some "task-845")
+      ]
+  in
+  match Tui_decode.decode_clients_snapshot json with
+  | Error detail -> Alcotest.failf "decode failed: %s" detail
+  | Ok snapshot ->
+      (match snapshot.Tui_decode.cls_clients with
+       | [ mcp; bound ] ->
+           Alcotest.(check (option string))
+             "a non-keeper client carries no keeper" None
+             mcp.Tui_decode.cr_keeper_name;
+           Alcotest.(check (option string))
+             "a bound row carries its task" (Some "task-845")
+             bound.Tui_decode.cr_current_task;
+           Alcotest.(check string)
+             "the wire spelling decodes" "active"
+             (Tui_decode.client_status_to_string mcp.Tui_decode.cr_status);
+           Alcotest.(check string)
+             "busy decodes" "busy"
+             (Tui_decode.client_status_to_string bound.Tui_decode.cr_status)
+       | _ -> Alcotest.fail "expected both rows")
+
+let test_decode_clients_rejects_unknown_status_and_schema () =
+  (match
+     Tui_decode.decode_clients_snapshot
+       (clients_snapshot_json
+          [ clients_row_json ~name:"x" ~agent_type:"codex"
+              ~status:"hibernating" ~keeper:None ~task:None ])
+   with
+   | Ok _ -> Alcotest.fail "an unknown status decoded"
+   | Error detail ->
+       Alcotest.(check bool) "error names the status" true
+         (String.starts_with ~prefix:"clients: unknown status" detail));
+  (match
+     Tui_decode.decode_clients_snapshot
+       (clients_snapshot_json
+          [ clients_row_json ~name:"x" ~agent_type:"codex"
+              ~status:"Active" ~keeper:None ~task:None ])
+   with
+   | Ok _ -> Alcotest.fail "the capital spelling decoded"
+   | Error detail ->
+       Alcotest.(check bool) "error names the status" true
+         (String.starts_with ~prefix:"clients: unknown status" detail));
+  match
+    Tui_decode.decode_clients_snapshot
+      (`Assoc
+         [ "schema", `String "masc.dashboard.clients.v2"
+         ; "generated_at", `String "2026-09-04T01:21:00Z"
+         ; "observation_only", `Bool true
+         ; "clients", `List []
+         ])
+  with
+  | Ok _ -> Alcotest.fail "a wrong schema decoded"
+  | Error detail ->
+      Alcotest.(check bool) "error names the schema" true
+        (String.starts_with ~prefix:"clients: unsupported schema" detail)
+
 let test_decode_standalone_lanes_rejects_duplicate_ids () =
   let duplicate = standalone_lane_json "board_attention_exact" "Board" in
   let json =
@@ -4900,6 +4993,110 @@ let prompts_payload =
               ]
           ] );
     ]
+
+let presets_payload : Yojson.Safe.t =
+  `Assoc
+    [ ("ok", `Bool true)
+    ; ( "presets"
+      , `List
+          [ `Assoc
+              [ ("schema_version", `Int 1)
+              ; ("name", `String "morning")
+              ; ("description", `String "before the campaign")
+              ; ("created_at", `String "2026-09-03T10:26:08Z")
+              ; ("override_count", `Int 1)
+              ; ("keepers", `List [ `String "analyst"; `String "sangsu" ])
+              ; ("assignment_count", `Int 12)
+              ; ("lane_count", `Int 4)
+              ]
+          ] )
+    ; ("unreadable", `List [ `Assoc [ ("name", `String "torn"); ("reason", `String "manifest.json missing") ] ])
+    ]
+
+let restore_payload : Yojson.Safe.t =
+  `Assoc
+    [ ("ok", `Bool true)
+    ; ( "report"
+      , `Assoc
+          [ ("restored", `String "morning")
+          ; ("autosave", `String "_autosave-20260903T103201Z")
+          ; ( "prompt_overrides"
+            , `Assoc
+                [ ("effect", `String "immediate")
+                ; ("applied", `List [ `String "keeper" ])
+                ; ("skipped", `List [ `Assoc [ ("key", `String "stale"); ("reason", `String "contract revision mismatch") ] ])
+                ] )
+          ; ( "instructions"
+            , `Assoc
+                [ ("effect", `String "keeper_restart")
+                ; ("applied", `List [ `String "analyst" ])
+                ; ("skipped", `List [])
+                ] )
+          ; ("runtime", `Assoc [ ("effect", `String "runtime_commit"); ("status", `String "failed"); ("error", `String "invalid runtime TOML") ])
+          ] )
+    ]
+
+let test_decode_presets_reads_manifests_and_unreadable () =
+  match Tui_decode.decode_presets presets_payload with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+    let first = List.hd snapshot.Tui_decode.pss_presets in
+    Alcotest.(check string) "name" "morning" first.Tui_decode.pm_name;
+    Alcotest.(check int) "assignments" 12 first.Tui_decode.pm_assignment_count;
+    Alcotest.(check (list string)) "keepers" [ "analyst"; "sangsu" ] first.Tui_decode.pm_keepers;
+    Alcotest.(check (list (pair string string))) "unreadable"
+      [ "torn", "manifest.json missing" ] snapshot.Tui_decode.pss_unreadable
+
+let test_decode_preset_restore_reads_each_surface () =
+  match Tui_decode.decode_preset_restore restore_payload with
+  | Error detail -> Alcotest.fail detail
+  | Ok report ->
+    Alcotest.(check string) "autosave" "_autosave-20260903T103201Z" report.Tui_decode.prr_autosave;
+    Alcotest.(check (list string)) "overrides applied" [ "keeper" ]
+      report.Tui_decode.prr_prompt_overrides.Tui_decode.pp_applied;
+    Alcotest.(check (list (pair string string))) "overrides skipped"
+      [ "stale", "contract revision mismatch" ]
+      report.Tui_decode.prr_prompt_overrides.Tui_decode.pp_skipped;
+    Alcotest.(check string) "instructions effect" "keeper_restart"
+      report.Tui_decode.prr_instructions.Tui_decode.pp_effect;
+    Alcotest.(check bool) "runtime failure carries its reason" true
+      (report.Tui_decode.prr_runtime = Tui_decode.Preset_runtime_failed "invalid runtime TOML")
+
+let test_a_two_hundred_carrying_only_an_error_is_an_error () =
+  (* The auth and warm-up answers ride a 200 with no [ok] field. *)
+  let warming : Yojson.Safe.t = `Assoc [ ("error", `String "not initialized") ] in
+  (match Tui_decode.decode_presets warming with
+   | Error detail -> Alcotest.(check string) "list" "not initialized" detail
+   | Ok _ -> Alcotest.fail "a warm-up answer decoded as a snapshot");
+  (match Tui_decode.decode_preset_saved warming with
+   | Error detail -> Alcotest.(check string) "save" "not initialized" detail
+   | Ok _ -> Alcotest.fail "a warm-up answer decoded as a manifest");
+  match Tui_decode.decode_preset_restore warming with
+  | Error detail -> Alcotest.(check string) "restore" "not initialized" detail
+  | Ok _ -> Alcotest.fail "a warm-up answer decoded as a report"
+
+let test_a_json_refusal_shows_its_sentence_not_the_envelope () =
+  let decode status body =
+    match
+      Tui_decode.decode_json_response_body ~allow_empty:true ~status_code:status ~body
+    with
+    | Ok _ -> Alcotest.fail "a refusal decoded as a body"
+    | Error detail -> detail
+  in
+  Alcotest.(check string) "the server's sentence, with its status"
+    "HTTP 400: invalid preset name: ../x"
+    (decode 400 {|{"ok":false,"error":"invalid preset name: ../x"}|});
+  Alcotest.(check string) "a body that is not a JSON error keeps its text"
+    "HTTP 500: upstream exploded" (decode 500 "upstream exploded")
+
+let test_decode_preset_refusal_is_the_servers_sentence () =
+  let refused : Yojson.Safe.t = `Assoc [ ("ok", `Bool false); ("error", `String "invalid preset name: bad name") ] in
+  (match Tui_decode.decode_preset_saved refused with
+   | Error detail -> Alcotest.(check string) "save refusal" "invalid preset name: bad name" detail
+   | Ok _ -> Alcotest.fail "a refused save decoded as a manifest");
+  match Tui_decode.decode_presets refused with
+  | Error detail -> Alcotest.(check string) "list refusal" "invalid preset name: bad name" detail
+  | Ok _ -> Alcotest.fail "a refused list decoded as a snapshot"
 
 let test_decode_prompts_reads_the_live_shape () =
   match Tui_decode.decode_prompts prompts_payload with
@@ -6930,6 +7127,13 @@ let () =
         Alcotest.test_case "every lane status word fits its column" `Quick
           test_every_lane_status_word_fits_its_column;
       ] );
+    ( "decode_clients",
+      [
+        Alcotest.test_case "reads both status spellings, ignores the profile" `Quick
+          test_decode_clients_reads_the_status_enum_and_ignores_profile;
+        Alcotest.test_case "rejects an unknown status and a wrong schema" `Quick
+          test_decode_clients_rejects_unknown_status_and_schema;
+      ] );
     ( "decode_lane_runs",
       [
         Alcotest.test_case "page filters to one lane and keeps the cursor" `Quick
@@ -7169,7 +7373,17 @@ let () =
     ( "prompts",
       [
         Alcotest.test_case "reads the live shape" `Quick
-          test_decode_prompts_reads_the_live_shape;
+          test_decode_prompts_reads_the_live_shape
+      ; Alcotest.test_case "decode_presets reads manifests and unreadable rows" `Quick
+          test_decode_presets_reads_manifests_and_unreadable
+      ; Alcotest.test_case "decode_preset_restore reads each surface" `Quick
+          test_decode_preset_restore_reads_each_surface
+      ; Alcotest.test_case "a preset refusal decodes to the server's sentence" `Quick
+          test_decode_preset_refusal_is_the_servers_sentence
+      ; Alcotest.test_case "a 200 carrying only an error is an error" `Quick
+          test_a_two_hundred_carrying_only_an_error_is_an_error
+      ; Alcotest.test_case "a JSON refusal shows its sentence, not the envelope" `Quick
+          test_a_json_refusal_shows_its_sentence_not_the_envelope;
         Alcotest.test_case "reads separate read-only runtime assets" `Quick
           test_decode_prompts_reads_runtime_assets;
         Alcotest.test_case "hides assembly fragments by default" `Quick

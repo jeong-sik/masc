@@ -49,10 +49,10 @@ let finalize
      already reached the reader rather than defaulting to "did not". *)
   let terminal_effect_settled =
     match turn_outcome with
-    | Keeper_turn_outcome.External_effect_completed -> true
+    | Keeper_turn_outcome.Terminal_effect_settled -> true
     | Keeper_turn_outcome.Visible_reply
     | Keeper_turn_outcome.Continuation_checkpoint
-    | Keeper_turn_outcome.External_effect_pending
+    | Keeper_turn_outcome.Awaiting_gate_approval
     | Keeper_turn_outcome.No_visible_reply -> false
   in
   (* RFC-0385: an internal turn's wake cue and final text are not conversation.
@@ -74,7 +74,10 @@ let finalize
   Keeper_replay_checkpoint.emit_wire_capture_response_suppressed_metrics
     ~keeper_name:meta.name
     suppression_reasons;
-  let { Keeper_agent_run_response_text.response_text } =
+  (* The replay decision is [suppress_visible_response], computed above and
+     passed in; the finalized record no longer answers it by emptying the
+     string, so the operator surface keeps what the keeper said. *)
+  let { Keeper_agent_run_response_text.response_text; withheld_from_replay = _ } =
     Keeper_agent_run_response_text.finalize
       ~stop_reason:result.stop_reason
       ~raw_response_text

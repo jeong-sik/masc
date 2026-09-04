@@ -26,17 +26,14 @@ interface CalibrationStats {
 
 interface HarnessOverview {
   evaluator_status: RailStatus
-  handoff_status: RailStatus
   last_signal_at: number | null
   evaluator_last_event_at: number | null
-  handoff_last_event_at: number | null
   fallback_ratio: number
   // Added by lib/dashboard/dashboard_harness_health.ml as part of #6565.
   // Ratio of verdicts whose generator_runtime ≠ evaluator_runtime among
   // verdicts that carried a generator_runtime. undefined when the backend
   // had zero eligible verdicts to compute the ratio.
   cross_model_rate?: number
-  latest_handoff_generation: number | null
 }
 
 export interface HarnessVerdictItem {
@@ -53,33 +50,12 @@ export interface HarnessVerdictItem {
   fallback_reason?: string | null
 }
 
-
-export interface HandoffEvent {
-  timestamp: number
-  keeper_name: string
-  trace_id: string
-  generation: number
-  next_generation: number | null
-  prev_trace_id: string | null
-  new_trace_id: string | null
-}
-
-export interface HarnessSignalSection<T> {
-  description: string
-  recent_events: T[]
-  total_recent: number
-  status: RailStatus
-  last_event_at: number | null
-  empty_reason?: string | null
-}
-
 export interface HarnessHealthData {
   generated_at: number
   scope_note: string
   overview: HarnessOverview
   calibration: CalibrationStats
   recent_verdicts: HarnessVerdictItem[]
-  recent_handoffs: HarnessSignalSection<HandoffEvent>
 }
 
 const HARNESS_RELOAD_DEBOUNCE_MS = 700
@@ -172,65 +148,6 @@ function processHarnessEvent(evt: unknown): void {
         ...data.overview,
         last_signal_at: nextItem.timestamp,
         evaluator_last_event_at: nextItem.timestamp,
-      },
-    }))
-    scheduleHarnessReload()
-  }
-
-  if (
-    type === 'agent_core:masc:harness:handoff'
-    || type === 'keeper_handoff'
-    || type === 'masc/keeper_handoff'
-  ) {
-    const handoffPayload: Record<string, unknown> = payload ?? event
-    const hasTimestamp =
-      handoffPayload.timestamp != null || handoffPayload.ts_unix != null
-    const hasKeeperIdentity =
-      handoffPayload.keeper_name != null || handoffPayload.name != null
-    const hasGeneration =
-      handoffPayload.generation != null
-      || handoffPayload.from_generation != null
-      || handoffPayload.next_generation != null
-      || handoffPayload.to_generation != null
-    if (!(hasTimestamp && hasKeeperIdentity && hasGeneration)) {
-      console.warn('[harness-health] ignoring malformed handoff event', {
-        type,
-        candidate: handoffPayload,
-      })
-      return
-    }
-    const nextGeneration = asNumber(handoffPayload.next_generation)
-    const toGeneration = asNumber(handoffPayload.to_generation)
-    const nextItem: HandoffEvent = {
-      timestamp: asNumber(handoffPayload.timestamp) ?? asNumber(handoffPayload.ts_unix) ?? Date.now() / 1000,
-      keeper_name: asString(handoffPayload.keeper_name) ?? asString(handoffPayload.name, ''),
-      trace_id: asString(handoffPayload.trace_id) ?? asString(handoffPayload.new_trace_id, ''),
-      generation: asNumber(handoffPayload.generation) ?? asNumber(handoffPayload.from_generation, 0),
-      next_generation: nextGeneration ?? toGeneration ?? null,
-      prev_trace_id: asString(handoffPayload.prev_trace_id) ?? null,
-      new_trace_id: asString(handoffPayload.new_trace_id) ?? null,
-    }
-    updateHarnessData(data => ({
-      ...data,
-      recent_handoffs: {
-        ...data.recent_handoffs,
-        recent_events: mergeRecent(
-          data.recent_handoffs.recent_events,
-          nextItem,
-          (left, right) =>
-            left.timestamp === right.timestamp
-            && left.trace_id === right.trace_id,
-          8,
-        ),
-        total_recent: data.recent_handoffs.total_recent + 1,
-        last_event_at: nextItem.timestamp,
-        empty_reason: null,
-      },
-      overview: {
-        ...data.overview,
-        last_signal_at: nextItem.timestamp,
-        handoff_last_event_at: nextItem.timestamp,
-        latest_handoff_generation: nextItem.next_generation ?? nextItem.generation,
       },
     }))
     scheduleHarnessReload()

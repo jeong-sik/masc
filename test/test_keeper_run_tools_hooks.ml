@@ -602,7 +602,7 @@ let test_budget_still_bounds_a_large_input () =
     (encoded_json_bytes kept
      <= Masc.Keeper_gate_causal_context.evidence_budget_bytes);
   check bool "older calls were dropped" true (omitted > 0);
-  (* Nothing may vanish unreported: judge.effect.md tells the judge to read
+  (* Nothing may vanish unreported: judge.md, slot effect tells the judge to read
      [completed_tool_calls_omitted] before treating the list as the whole turn. *)
   check int "every call is either kept or counted" total (List.length kept + omitted);
   let open Yojson.Safe.Util in

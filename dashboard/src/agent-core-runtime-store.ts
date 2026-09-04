@@ -302,7 +302,7 @@ function maybeAppendLiveTrace(
   event: AgentCoreRuntimeEnvelope,
   detail: {
     idSuffix: string
-    kind: 'lifecycle' | 'agent_core_tool' | 'agent_core_turn' | 'agent_core_context'
+    kind: 'lifecycle' | 'agent_core_tool' | 'agent_core_turn'
     summary: string
     data: Record<string, unknown>
     toolName?: string

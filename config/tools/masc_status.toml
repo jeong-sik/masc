@@ -1,4 +1,5 @@
 name = "masc_status"
+title = "Project Status"
 description = """
 Get current project status: active agents, task queue, recent broadcasts, \
 and cluster info. Use when you need a snapshot of who is online and what \

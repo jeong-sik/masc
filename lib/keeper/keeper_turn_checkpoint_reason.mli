@@ -14,7 +14,6 @@ type t =
   | Durable_stimulus_arrived
       (** A newer durable stimulus arrived; the turn yielded so the next
           turn carries it. *)
-  | Awaiting_external_effect
       (** A tool call was deferred to the approval Gate; the turn ended and
           the resolution arrives as a stimulus. *)
   | Repeated_tool_call of

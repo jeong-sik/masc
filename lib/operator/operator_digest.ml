@@ -5,13 +5,18 @@ include Operator_digest_types
 open Operator_digest_guidance
 
 (* Retained from Operator_digest_session — used for workspace-level attention health *)
+(* Read off the severities, not off the length. The old shape asked only
+   whether any row was [Sev_bad] and called every other non-empty list "warn",
+   which had two consequences: a [Sev_critical] row reported as amber, and a
+   purely informational row -- a Keeper holding messages it has not answered
+   yet -- turned the whole workspace amber. On the live runtime the second one
+   held health at "warning" for eleven days over three Discord asides. *)
 let health_from_attention_items (items : attention_item list) =
-  if
-    List.exists
-      (fun (item : attention_item) -> item.severity = Sev_bad)
-      items
-  then "bad"
-  else if items <> [] then "warn"
+  let has severity =
+    List.exists (fun (item : attention_item) -> item.severity = severity) items
+  in
+  if has Sev_critical || has Sev_bad then "bad"
+  else if has Sev_warn then "warn"
   else "ok"
 
 let tool_host_attention_window_sec = 900.0
@@ -123,70 +128,75 @@ let keeper_attention_summary ~(meta : Keeper_meta_contract.keeper_meta) ~reason
       Printf.sprintf "%s needs operator attention (%s)" meta.name summary
   | None, None -> Printf.sprintf "%s needs operator attention" meta.name
 
-let metadata_string key metadata =
-  match List.assoc_opt key metadata with
-  | Some value ->
-      let value = String.trim value in
-      if String.equal value "" then None else Some value
-  | None -> None
+(* Waiting connector messages are read off the event queue, not off the
+   attention log. The queue is what makes a Keeper judge a message: a turn
+   consumes the stimulus and settles it, and nothing else does. The attention
+   log records that the message arrived, which is a different fact -- and when
+   the queue dropped its pending stimuli on a snapshot it could not decode,
+   the two disagreed for eleven days while this row insisted the work was
+   still coming.
 
-let metadata_json metadata =
-  `Assoc (List.map (fun (key, value) -> (key, `String value)) metadata)
+   One row per Keeper rather than one per message. The operator decision here
+   is whether a Keeper is falling behind, not what any single message said;
+   the message itself is in that Keeper's chat, with its author and surface. *)
+let connector_attention_pending_selections ~base_path ~keeper_name =
+  let snapshot =
+    Keeper_event_queue_persistence.load_selections_with_errors ~base_path
+      ~keeper_name
+  in
+  snapshot.Keeper_event_queue_persistence.pending
+  |> List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
+    match selection.Keeper_event_queue_state.source.payload with
+    | Keeper_event_queue.Connector_attention _ -> true
+    | _ -> false)
 
-let external_attention_kind (item : Keeper_external_attention.item) =
-  match metadata_string "kind" item.metadata with
-  | Some kind -> "keeper_" ^ kind
-  | None -> "keeper_external_attention"
-
-let external_attention_severity (item : Keeper_external_attention.item) =
-  match item.urgency with
-  | Keeper_external_attention.System -> Sev_bad
-  | Keeper_external_attention.Mention
-  | Keeper_external_attention.Direct_message
-  | Keeper_external_attention.Ambient -> Sev_warn
-
-let external_attention_summary (item : Keeper_external_attention.item) =
-  let preview = String.trim item.content_preview in
-  if String.equal preview "" then
-    Printf.sprintf "%s has external attention from %s" item.keeper_name
-      item.source_label
-  else
-    Printf.sprintf "%s has external attention from %s: %s" item.keeper_name
-      item.source_label preview
-
-let external_attention_evidence (item : Keeper_external_attention.item) =
-  let grounded_fields =
-    match metadata_string "grounded_verdict" item.metadata with
-    | Some value -> [ ("grounded_verdict", `String value) ]
-    | None -> []
+let connector_attention_evidence ~keeper_name selections =
+  let event_ids =
+    selections
+    |> List.filter_map
+         (fun (selection : Keeper_event_queue_state.pending_selection) ->
+            match selection.Keeper_event_queue_state.source.payload with
+            | Keeper_event_queue.Connector_attention { event_id; _ } ->
+              Some (`String event_id)
+            | _ -> None)
+  in
+  let oldest =
+    List.fold_left
+      (fun oldest (selection : Keeper_event_queue_state.pending_selection) ->
+         Float.min oldest selection.Keeper_event_queue_state.source.arrived_at)
+      Float.max_float selections
   in
   `Assoc
-    ([
-       ("source", `String "keeper_external_attention");
-       ("event_id", `String item.event_id);
-       ("dedupe_key", `String item.dedupe_key);
-       ("keeper_name", `String item.keeper_name);
-       ("source_label", `String item.source_label);
-       ("urgency", `String (Keeper_external_attention.urgency_to_string item.urgency));
-       ("content_preview", `String item.content_preview);
-       ("metadata", metadata_json item.metadata);
-     ]
-     @ grounded_fields)
+    [ ("source", `String "keeper_event_queue");
+      ("keeper_name", `String keeper_name);
+      ("pending_count", `Int (List.length selections));
+      ("oldest_arrived_at", `Float oldest);
+      ("event_ids", `List event_ids)
+    ]
 
-let external_attention_projection item =
-  let severity = external_attention_severity item in
-  let attention_item =
-    {
-      kind = external_attention_kind item;
-      severity;
-      summary = external_attention_summary item;
-      target_type = Operator_action_constants.keeper_target_type;
-      target_id = Some item.keeper_name;
-      actor = Some item.keeper_name;
-      evidence = external_attention_evidence item;
-    }
-  in
-  attention_item
+let connector_attention_projection ~base_path ~keeper_name =
+  match connector_attention_pending_selections ~base_path ~keeper_name with
+  | [] -> None
+  | _ :: _ as selections ->
+    let count = List.length selections in
+    Some
+      { kind = "keeper_connector_attention_pending";
+        (* Not a warning. A Keeper holding messages it has not answered yet is
+           the runtime working, and a health reading that turns amber on it
+           spends the operator's attention on nothing. It earns a row so the
+           queue is visible; it does not earn an alarm. *)
+        severity = Sev_info;
+        summary =
+          (if count = 1 then
+             Printf.sprintf "%s has 1 external message waiting" keeper_name
+           else
+             Printf.sprintf "%s has %d external messages waiting" keeper_name
+               count);
+        target_type = Operator_action_constants.keeper_target_type;
+        target_id = Some keeper_name;
+        actor = Some keeper_name;
+        evidence = connector_attention_evidence ~keeper_name selections
+      }
 
 let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta) =
   let attention_fields = Keeper_status_bridge.attention_fields_json config meta in
@@ -235,14 +245,12 @@ let keeper_attention_projection_items config =
       | Ok (Some meta) -> keeper_attention_projection config meta
       | Ok None | Error _ -> None)
   in
-  let external_attention =
+  let connector_attention =
     keeper_names
-    |> List.concat_map (fun keeper_name ->
-      Keeper_external_attention.pending_for_keeper ~base_path:config.base_path
-        ~keeper_name ~limit:3 ()
-      |> List.map external_attention_projection)
+    |> List.filter_map (fun keeper_name ->
+      connector_attention_projection ~base_path:config.base_path ~keeper_name)
   in
-  status_attention @ external_attention
+  status_attention @ connector_attention
 
 let workspace_state_json config =
   if not (Workspace.is_initialized config) then

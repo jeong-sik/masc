@@ -13,10 +13,12 @@ Eleven more surfaces hang off parents instead of holding Tab stops:
 Planning's `v` walks Task Review, Evaluator Verdicts, Schedules, and Fusion;
 the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,
 Automation, and Runs as tabs. Runtime reaches standalone Lanes with `p` (its
-third stop), Workspace reaches Code with `Enter` on a repository row, and
+third stop) and the clients roster with `c`, Workspace reaches Code with
+`Enter` on a repository row, and
 Config reaches Resources with `s` and Tools with `t`, and Activity
 reaches the server log with `l`. Task Review, Schedules, Fusion, Lanes,
-Code, Resources, Tools, and Logs also keep `go <name>` palette entries;
+Clients, Code, Resources, Tools, and Logs also keep `go <name>` palette
+entries;
 Verdicts, Changes, and Keeper operations are reached from their parents
 only.
 
@@ -57,6 +59,7 @@ decides whether launching one is worth it.
 | Overview - summary, Attention | unavailable | `GET /api/v1/dashboard/briefing` |
 | Overview - transport tail | unavailable | `GET /api/v1/dashboard/transport-health` |
 | Lanes | unavailable | `GET /api/v1/keepers/composite` |
+| Clients | unavailable | `GET /api/v1/dashboard/clients` |
 | Approvals | unavailable | `GET /api/v1/operator`, `POST /api/v1/operator/confirm` |
 | Board | unavailable | `GET /api/v1/board` |
 | Planning | unavailable | `GET /api/v1/dashboard/planning` |
@@ -99,14 +102,22 @@ row it shows.
 reverse-video selection stay. `MASC_TUI_FORCE_COLOR=1` overrides.
 
 The Config surface's Themes pane picks a bundled base16 scheme (monokai,
-solarized, and others) for the session. To keep a pick across restarts,
-name it in `runtime.toml` under a `[tui]` table — the TUI reads it at boot
-and applies it, and an absent or unknown name just follows the terminal:
+solarized, and others). Moving the cursor previews a scheme, `Esc` puts back
+whatever was in force, `Enter` keeps the pick and `x` withdraws it.
+
+A kept pick is written to `runtime.toml` under a `[tui]` table, which the TUI
+reads at boot, so it is still there on the next start. Withdrawing removes the
+key rather than naming a scheme, because following the terminal is the absence
+of a choice. The same key can be set by hand, and an absent or unknown name
+follows the terminal:
 
 ```toml
 [tui]
 theme = "monokai"
 ```
+
+If the file cannot be written, the scheme still applies for this session and
+the event log says which of the two happened.
 
 The table measures the seven colours MASC uses for semantic text against a
 4.5:1 contrast floor. `native 7/7` means the theme clears it without help;
@@ -329,6 +340,28 @@ off Runtime rather than holding a Tab stop: `p` on Runtime walks keeper
 lanes, all runtimes, and then this surface. From the lane overview, `p` or
 `Esc` returns to Runtime; inside the run list and run detail, `Esc` first
 backs out one drill-down level as before. The palette keeps `go Lanes`.
+
+### Clients
+
+Everyone attached to this workspace in one reading: directory agents,
+state-backed sessions, and runtime fibers. The Keepers roster answers which
+Keepers exist; this answers who is here now, which includes identities no
+other surface lists, such as a non-keeper MCP client. It hangs off Runtime
+with `c`; `Esc`, `Left`, or `p` returns to Runtime, and the palette keeps
+`go Clients`. `/` jumps the cursor to a matching name.
+
+```
+ MASC Runtime · Clients (12 attached)  17:02:53  [connected]
+  Status    Name                 Type        Keeper           Task      Last seen
+ >active   codex-mcp-client      codex       -                -         17:02:41
+  busy     analyst-agent         keeper      analyst          task-845  17:02:50
+```
+
+Rows come from `GET /api/v1/dashboard/clients`, sorted by name. The status
+is the closed agent enum (`active`, `busy`, `listening`, `inactive`);
+inactive rows stay in the roster, receded, because "who left" is part of
+the reading. This is a registry view, not a socket list - a leftover
+process holding a connection is still an `lsof` question.
 
 ```
  MASC Lanes · Standalone (4 lanes)  17:02:53  [connected]
@@ -605,6 +638,31 @@ promoted to a successful reply. Requests are tracked per keeper, so a turn
 running for one keeper does not decide what `Enter` does in another's window;
 sends going elsewhere show as `(also sending to X)`. Drafts are retained per
 keeper while navigating.
+
+#### Prompt presets
+
+Config 탭의 `presets` 패널(`p` 로 순환)이 이 기능의 자리다. 목록은 프리셋마다
+이름과 개수(프롬프트 오버라이드, 지시문을 담은 keeper, 런타임 배정, exact 레인),
+저장 시각을 보여주고, 아래 상세에는 설명과 keeper 목록이, 그 아래에는 이번
+세션의 마지막 복원 보고서가 남는다. manifest 가 읽히지 않는 디렉터리는 `!` 줄로
+따로 보인다. 키는 `j`/`k` 선택, `n` 저장(이름을 입력하고 Enter, Esc 취소),
+`u` 두 번 되돌리기, `r` 새로고침이다. Config 에서 `s` 와 `t` 는 이미 Resources 와
+Tools 로 가는 키라 쓰지 않는다. 되돌리기는 세 표면을 덮어쓰므로 `u` 한 번은
+무장만 하고, 다른 키를 누르면 풀린다. 이름을 입력하는 동안에는 패널이 모든
+인쇄 가능 키를 가져가므로 이름에 `n` 이나 `u` 가 들어가도 키가 발화하지 않는다.
+
+채팅 창에서도 같은 일을 할 수 있다. `/preset` lists the prompt presets the server holds under `.masc/presets`:
+one line per preset with its counts (prompt overrides, keepers with
+instructions, runtime assignments, exact-output lanes), its description, and
+when it was saved; a directory whose manifest does not read gets a `!` line.
+`/preset save <name> [description]` snapshots the live state under that name.
+`/preset restore <name>` saves the live state first (the report names that
+autosave), then applies the preset surface by surface and reports each one:
+prompt overrides take effect at once, keeper instructions at each keeper's
+next up, and runtime routing through a runtime.toml commit. Every skipped key
+is listed with its reason, and a restore that skipped anything or whose
+commit failed is shown as an error. The three answers land in the chat pane
+of the keeper selected when the command was typed.
 
 #### Context inspector
 

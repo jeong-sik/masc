@@ -153,7 +153,7 @@ def write_persistent_work_evidence(
     # older than max_silence_hours (audit_args pins 2400h) via min_ts. A fixed
     # calendar date rots out of that window (#30748); anchor to "now" instead.
     # Row shape required by manifest_turn_has_successful_provider(): every turn
-    # needs provider_attempt_started, provider_attempt_finished with a
+    # needs runtime_routed, runtime_completed with a
     # non-error status, and (when present) turn_finished with a non-error
     # status. If you change the emitted events, re-check that gate.
     base_ts = time.time()
@@ -213,7 +213,7 @@ def write_persistent_work_evidence(
             "trace_id": trace,
             "generation": 1,
             "keeper_turn_id": 1,
-            "event": "provider_attempt_started",
+            "event": "runtime_routed",
             "status": "started",
             "links": {},
         },
@@ -223,7 +223,7 @@ def write_persistent_work_evidence(
             "trace_id": trace,
             "generation": 1,
             "keeper_turn_id": 1,
-            "event": "provider_attempt_finished",
+            "event": "runtime_completed",
             "status": "provider_returned",
             "links": {},
         },

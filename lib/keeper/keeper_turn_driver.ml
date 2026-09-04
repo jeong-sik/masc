@@ -594,6 +594,7 @@ let run_named
     ?event_bus
     ?on_runtime_observation
     ?on_request_wire_observation
+    ?on_request_attribution
     ?on_official_client_result_handoff
     ?on_official_client_native_action
     ?on_model_input_window_observation
@@ -737,16 +738,23 @@ let run_named
     | Some _ -> Ok []
     | None -> resolve_runtime_candidates remaining_candidate_ids
   in
+  (* RFC-0265 media handling applies to deferred lanes too, but only the degrade
+     floor — never a reroute. A deferred lane commits to a single budgeted
+     assignment, so [remaining_runtimes] is already [[]] above and
+     [decide_modality_reroute] cannot pick a [Reroute] target from an empty
+     candidate list: the decision here is only [No_reroute_needed] (the deferred
+     candidate accepts the turn's modality) or [No_capable_runtime] (it does not,
+     so the unsupported media is stripped and the turn runs text-only). The
+     earlier [Some _ -> No_reroute_needed] short-circuit skipped the degrade as
+     well, letting an image-bearing turn dispatch to a text-only deferred
+     candidate and hit the hard multimodal gate instead of degrading (#33034). *)
   let reroute_decision =
-    match deferred_runtime_lane with
-    | Some _ -> Runtime_agent.No_reroute_needed
-    | None ->
-      lane_modality_reroute_decision
-        ~checkpoint_messages
-        ~initial_messages
-        ~goal_blocks:current_goal_blocks
-        ~first_candidate
-        ~remaining_runtimes
+    lane_modality_reroute_decision
+      ~checkpoint_messages
+      ~initial_messages
+      ~goal_blocks:current_goal_blocks
+      ~first_candidate
+      ~remaining_runtimes
   in
   let first_runtime_id, first_runtime =
     first_runtime_after_modality_reroute ~keeper_name ~assignment_id:runtime_id
@@ -920,6 +928,12 @@ let run_named
       match runtime.Runtime.execution with
       | Runtime_execution.Codex_app_server config ->
         let run_codex ~initial_messages () =
+          let on_transmitted_model_input transmitted =
+            Option.iter
+              (fun observe ->
+                 observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
+              on_request_attribution
+          in
           Keeper_codex_runtime.run
             ~runtime_id:attempt_runtime_id
             ~keeper_name
@@ -931,6 +945,7 @@ let run_named
             ~tools
             ~initial_messages
             ~model_input_projection
+            ~on_transmitted_model_input
             (* Codex assembles the wire itself, so the shape masc can report
                is the list it handed over. Same reading the Agent Core path
                publishes; without it the turn record has no window. *)
@@ -1039,6 +1054,12 @@ let run_named
         , codex_attempt.effect_disposition )
       | Runtime_execution.Antigravity_cli config ->
         let run_antigravity ~initial_messages () =
+          let on_transmitted_model_input transmitted =
+            Option.iter
+              (fun observe ->
+                 observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
+              on_request_attribution
+          in
           Keeper_antigravity_runtime.run
             ~runtime_id:attempt_runtime_id
             ~keeper_name
@@ -1057,6 +1078,7 @@ let run_named
             ~tools
             ~initial_messages
             ~model_input_projection
+            ~on_transmitted_model_input
             ~hooks
             ~context_injector
             ~context
@@ -1137,6 +1159,12 @@ let run_named
       | Runtime_execution.Claude_code config ->
         let run_claude ~initial_messages () =
           let tools = if runtime.model.tools_support then tools else [] in
+          let on_transmitted_model_input transmitted =
+            Option.iter
+              (fun observe ->
+                 observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
+              on_request_attribution
+          in
           Keeper_claude_code_runtime.run
             ~runtime_id:attempt_runtime_id
             ~keeper_name
@@ -1148,6 +1176,7 @@ let run_named
             ~tools
             ~initial_messages
             ~model_input_projection
+            ~on_transmitted_model_input
             (* [Durable_shape] because that is what was measured: the official
                client assembles the wire itself, so masc can only report the
                list it handed over. The Agent Core path reports [Wire_shape]

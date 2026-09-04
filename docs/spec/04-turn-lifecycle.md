@@ -101,10 +101,9 @@ what happened, not authority to pause, retry, or stop the Keeper.
 ## 7. Lifecycle authority
 
 Only explicit operator stop and durable process-death tombstone end a Keeper
-lane. Ordinary provider failure, context compaction, a pending Gate, an unmet
-Task/Goal, FD/disk pressure, no tool call, or lack of recent activity cannot do
-so. Compaction and handoff are lane-local maintenance and must wake or continue
-the lane when complete.
+lane. Ordinary provider failure, a pending Gate, an unmet Task/Goal, FD/disk
+pressure, no tool call, or lack of recent activity cannot do so. Handoff is
+lane-local maintenance and must wake or continue the lane when complete.
 
 ## 8. Required invariants
 

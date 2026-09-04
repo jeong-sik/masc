@@ -96,6 +96,7 @@
   masc.keeper_tooling
   masc.keeper_metrics
   masc.keeper_failure_taxonomy
+  masc.keeper_paste_naming
   masc.keeper_types
   masc.keeper_types_profile_sandbox
   masc.keeper_usage_trust
@@ -105,6 +106,7 @@
   masc.keeper_chat_operations
   masc.runtime_model
   masc.runtime
+  masc.toml_line_editor
   masc.provider_tool_support
   masc.auth
   masc.fd_accountant

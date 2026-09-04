@@ -374,10 +374,11 @@ offline/no-embedding tenet and slot onto the organs above (full extract:
   promote). Confirms the §2.2 shape: exactly one writer to durable memory, staging
   and reflection non-mutating, text re-grounded at promote time — the antidote to
   the 1800→89-line confabulation drift.
-- **Compaction circuit breaker** (claude-code `MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES
-  =3`, cited against 250K-wasted-calls/day thrash). Out of scope for memory-os but
-  the single highest-value transferable anti-thrash control for the keeper
-  compaction path — tracked separately (Track C).
+- **Consecutive-failure circuit breaker** (claude-code
+  `MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES=3`, cited against 250K-wasted-calls/day
+  thrash). Out of scope for memory-os. The keeper path it was read against is
+  gone, so what transfers is the shape — a retry loop over a durable target
+  needs a bound that is not a count of turns — tracked separately (Track C).
 
 These are enrichments, not new organs; each is additive and default-off, gated the
 same way as the core phases.

@@ -117,7 +117,11 @@ let for_surface = function
       ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
       ; b Act "Ctrl-D" "tool detail" ~help:"toggle compact / full tool-call detail"
       ; b Act "Ctrl-N" "memory detail"
-          ~help:"cycle Memory journal summary / full detail / hidden"
+          (* The three words are the states' own, the way Ctrl-R above spells
+             its own. Pressing this answers "Librarian/Memory timeline: full",
+             so a help promising "full detail" sends a reader looking for a
+             state the pane never names. *)
+          ~help:"cycle Memory journal summary / full / hidden"
       ; b Act "Ctrl-F" "message metadata"
           ~help:"cycle no clock / inline clock / full timestamp and request id"
       ; b Act "y / n" "approval" ~help:"answer a tool approval"
@@ -145,6 +149,16 @@ let for_surface = function
       ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
+  | Clients ->
+      [ b Navigate "j/k" "move" ~help:"move the roster cursor"
+      ; b Navigate "p" "runtime"
+          ~help:"back to the Runtime surface this hangs off"
+      ; b Act "Esc" "runtime" ~help:"back to the Runtime surface it hangs off"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching attached name"
+      ; b Search "n / N" "next / previous match"
+      ]
+      @ listing_meta
   | Board ->
       [ b Navigate "j/k" "move"
       ; b Act "Right / Enter" "read" ~help:"read the post"
@@ -161,6 +175,10 @@ let for_surface = function
       ; b Act "Y" "copy link" ~help:"copy the selected post reference"
       ; b Navigate "Ctrl-W" "pane" ~help:"switch between the post list and detail pane"
       ; b Navigate "h/l" "pane" ~help:"focus the post list or detail pane"
+        (* Beside [f], not instead of it: [f] narrows the list to one hearth,
+           this jumps the cursor to a post without changing what is listed. *)
+      ; b Search "/" "find" ~help:"jump the cursor to a matching post id, author or title"
+      ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
   | Approvals ->
@@ -194,6 +212,10 @@ let for_surface = function
       ; b Act "x" "drop"
       ; b Act "o" "reopen"
       ; b Act "Y" "copy link" ~help:"copy the selected goal reference"
+        (* Over the goals [f] and [s] left on screen, in the order they are
+           drawn: the search walks what the list shows, not the snapshot. *)
+      ; b Search "/" "find" ~help:"jump the cursor to a matching goal id or title"
+      ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
   | Schedules ->
@@ -314,6 +336,9 @@ let for_surface = function
       ; b Navigate "p" "keeper lanes / all runtimes / service lanes"
           ~help:"walk the three substrate readings; the third is the \
                  standalone Lanes surface"
+      ; b Navigate "c" "clients"
+          ~help:"everyone attached to this workspace, off the ring under \
+                 Runtime"
       ; b Act "Left / Esc" "back"
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching lane id or runtime id"
@@ -616,6 +641,7 @@ let help_surfaces : (string * surface) list =
   ; "Keeper detail", Keepers Keeper_detail
   ; "Chat", Keepers Keeper_message
   ; "Runtime / Lanes", Lanes
+  ; "Runtime / Clients", Clients
   ; "Board", Board
   ; "Approvals", Approvals
   ; "Planning / Goals", Planning

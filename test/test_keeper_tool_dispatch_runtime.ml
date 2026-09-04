@@ -1,5 +1,34 @@
 open Alcotest
 
+(* The Gate replay/resolution wording lives in managed prompt templates
+   under the config/prompts/keeper.gate_replay prefix; without a loaded
+   registry the
+   execution path falls back to bare data and the wording assertions below
+   see nothing. Same repo-root idiom test_tool_task_coverage uses — that
+   executable passes inside the CI sandbox, so the mechanism is CI-proven. *)
+let has_prompt_root path =
+  Sys.file_exists (Filename.concat path "config/prompts/verification.md")
+;;
+
+let repo_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when has_prompt_root root -> root
+  | _ ->
+    let rec ascend path =
+      if has_prompt_root path
+      then path
+      else (
+        let parent = Filename.dirname path in
+        if String.equal parent path then Sys.getcwd () else ascend parent)
+    in
+    ascend (Sys.getcwd ())
+;;
+
+let () =
+  Prompt_registry.set_markdown_dir (Filename.concat (repo_root ()) "config/prompts");
+  Masc.Prompt_defaults.init ()
+;;
+
 module KET = struct
   include Masc.Keeper_tool_dispatch_runtime
   include Masc.Keeper_tool_dispatch_runtime.Compatibility
@@ -100,7 +129,12 @@ let make_meta ?(name = "keeper-exec-tools") () =
           ("trace_id", `String "keeper-exec-tools-trace");
         ])
   with
-  | Ok meta -> meta
+  | Ok meta ->
+    (* The decoder leaves a placeholder here that its own file calls a bug to
+       read as authority, and nothing overwrote it, so every case ran under
+       whatever that placeholder was -- Docker. What this suite measures is
+       tool dispatch, not a backend. *)
+    { meta with sandbox_profile = Masc_test_deps.fixture_sandbox_profile () }
   | Error err -> failwith ("make_meta failed: " ^ err)
 
 (* Durable HITL intake reads the recipient's metadata to decide whether the
@@ -4176,7 +4210,7 @@ let test_invalid_surface_post_input_stays_correction_capable () =
          fail "later failure was hidden by the completed terminal effect")
 ;;
 
-let with_openai_tool_call_server ~tool_name ~tool_input f =
+let with_openai_tool_call_server ?second_response ~tool_name ~tool_input f =
   let sw =
     match Eio_context.get_switch_opt () with
     | Some sw -> sw
@@ -4231,11 +4265,16 @@ let with_openai_tool_call_server ~tool_name ~tool_input f =
     incr provider_call_count;
     if !provider_call_count = 1
     then Cohttp_eio.Server.respond_string ~status:`OK ~body:response_body ()
-    else
-      Cohttp_eio.Server.respond_string
-        ~status:`Internal_server_error
-        ~body:{|{"error":"terminal failure re-entered the provider"}|}
-        ()
+    else (
+      (* A caller that expects the turn to continue supplies the next answer;
+         without one, a second call is the failure the test is looking for. *)
+      match second_response with
+      | Some body -> Cohttp_eio.Server.respond_string ~status:`OK ~body ()
+      | None ->
+        Cohttp_eio.Server.respond_string
+          ~status:`Internal_server_error
+          ~body:{|{"error":"terminal failure re-entered the provider"}|}
+          ())
   in
   let socket =
     Eio.Net.listen
@@ -4258,7 +4297,10 @@ let with_openai_tool_call_server ~tool_name ~tool_input f =
   result, !provider_call_count
 ;;
 
-let test_deferred_web_search_yields_before_provider_retry () =
+(* A Gate deferral parks the search and the turn keeps going: the model gets
+   the deferred tool result and answers in the same turn. The parked call is
+   replayed by the host once the approval resolves. *)
+let test_deferred_web_search_keeps_the_turn_going () =
   with_exec_fixture
     ~bind_eio_context:true
     "deferred_web_search_yield"
@@ -4281,6 +4323,32 @@ let test_deferred_web_search_yields_before_provider_retry () =
        in
        let runtime_result, provider_call_count =
          with_openai_tool_call_server
+           ~second_response:
+             (Yojson.Safe.to_string
+                (`Assoc
+                    [ "id", `String "deferred-effect-followup"
+                    ; "object", `String "chat.completion"
+                    ; "created", `Int 0
+                    ; "model", `String "deferred-effect-model"
+                    ; ( "choices"
+                      , `List
+                          [ `Assoc
+                              [ "index", `Int 0
+                              ; ( "message"
+                                , `Assoc
+                                    [ "role", `String "assistant"
+                                    ; ( "content"
+                                      , `String "search parked; continuing" )
+                                    ] )
+                              ; "finish_reason", `String "stop"
+                              ] ] )
+                    ; ( "usage"
+                      , `Assoc
+                          [ "prompt_tokens", `Int 1
+                          ; "completion_tokens", `Int 1
+                          ; "total_tokens", `Int 2
+                          ] )
+                    ]))
            ~tool_name:"WebSearch"
            ~tool_input:
              (`Assoc [ "query", `String "hourly scheduled search" ])
@@ -4312,8 +4380,8 @@ let test_deferred_web_search_yields_before_provider_retry () =
            [ Agent_core.Types.Text "search for the tool" ]
        in
        check int
-         "deferred effect stops before a second provider call"
-         1
+         "the turn continued past the parked effect"
+         2
          provider_call_count;
        (match
           Masc.Keeper_approval_queue.list_pending_entries_for_workspace
@@ -4328,20 +4396,15 @@ let test_deferred_web_search_yields_before_provider_retry () =
           fail
             (Masc.Keeper_approval_queue.storage_error_to_string error));
        (match runtime_result with
-        | Ok
-            { Runtime_agent.stop_reason =
-                Runtime_agent.Awaiting_external_effect _
-            ; _
-            } ->
-          ()
+        | Ok { Runtime_agent.stop_reason = Runtime_agent.Completed; _ } -> ()
         | Ok result ->
           failf
-            "deferred effect returned stop_reason=%s"
+            "parked effect returned stop_reason=%s"
             (Masc.Keeper_execution_receipt_types.stop_reason_to_string
                result.Runtime_agent.stop_reason)
         | Error error ->
           failf
-            "deferred effect failed instead of yielding: %s"
+            "parked effect failed instead of continuing: %s"
             (Agent_core.Error.to_string error));
        match bundle.terminal_effect_state () with
        | Masc.Keeper_tools_agent_core.External_effect_deferred -> ()
@@ -7040,20 +7103,65 @@ let composable_output_probes =
     ; prepare =
         (fun ~config ~meta:_ ->
            (* A tool that reads durable state needs some, or it fails before
-              it can emit the shape under test. *)
-           ignore
-             (Workspace.add_task
-                config
-                ~created_by:"composable-output-probe"
-                ~title:"composable output probe"
-                ~priority:3
-                ~description:"");
-           `Assoc [])
+              it can emit the shape under test.
+
+              Two rows and a limit of one, not one row and no limit: this
+              producer emits [next_cursor] only when a page is cut short, so
+              an unpaged fixture never reaches that field. One row passed
+              here while production failed on every composition holding a
+              tasks node -- #32488 added the cursor to the response without
+              widening the declared schema, and this probe could not see it
+              (masc #32953). A probe that only meets the shape its fixture
+              happens to produce does not cover the shapes the producer can
+              produce. *)
+           List.iter
+             (fun title ->
+                ignore
+                  (Workspace.add_task
+                     config
+                     ~created_by:"composable-output-probe"
+                     ~title
+                     ~priority:3
+                     ~description:""))
+             [ "composable output probe"; "composable output probe (second page)" ];
+           `Assoc [ "limit", `Int 1 ])
     }
   ; probe "masc_board_stats" (`Assoc [])
   ; probe "masc_board_list" (`Assoc [])
-  ; probe "masc_goal_list" (`Assoc [])
-  ; probe "masc_run_list" (`Assoc [])
+  ; { tool_name = "masc_goal_list"
+    ; prepare =
+        (fun ~config ~meta:_ ->
+           (* An empty list validates the envelope and nothing else. The goal
+              item's own fields -- id, title, priority, phase, timestamps --
+              live inside [goals], so a probe that leaves it empty never puts
+              them in front of the schema. Same shape of blind spot that let
+              the keeper_tasks_list cursor drift through (masc #33000). *)
+           ignore
+             (Goal_store.upsert_goal
+                config
+                ~title:"composable output probe goal"
+                ~metric:"probes covered"
+                ~target_value:"1"
+                ~priority:2
+                ());
+           `Assoc [])
+    }
+  ; { tool_name = "masc_run_list"
+    ; prepare =
+        (fun ~config ~meta:_ ->
+           (* Same reason as the goal probe: the run item's task_id, plan and
+              timestamps are only reachable through a non-empty [runs]. *)
+           let stamp = "2026-01-01T00:00:00Z" in
+           Masc.Run_eio.write_run
+             config
+             { Masc.Run_eio.task_id = "composable-output-probe-run"
+             ; agent_name = None
+             ; plan = "probe plan"
+             ; created_at = stamp
+             ; updated_at = stamp
+             };
+           `Assoc [])
+    }
   ; { tool_name = "masc_get_metrics"
     ; prepare =
         (fun ~config:_ ~meta -> `Assoc [ "agent_name", `String meta.Masc.Keeper_meta_contract.name ])
@@ -7176,33 +7284,66 @@ let test_composable_outputs_satisfy_declared_schema () =
          ; handoff_from = None
          ; handoff_to = None
          };
-       List.iter
-         (fun { tool_name; prepare } ->
-            let input = prepare ~config ~meta in
-            let result =
-              KET.execute_keeper_tool_call_with_outcome
-                ~config
-                ~meta
-                ~publication_recovery
-                ~ctx_work
-                ~name:tool_name
-                ~input
-                ()
-            in
-            if not (String.equal "success" (outcome_label result.KTE.disposition))
-            then
-              failf
-                "%s did not complete, so its output went unobserved: %s"
-                tool_name
-                result.KTE.raw_output;
-            match result.KTE.data with
-            | Some data -> validate_probe_output ~tool_name ~data
-            | None ->
-              failf
-                "%s completed without typed data; a composition node would \
-                 have nothing to validate"
-                tool_name)
-         composable_output_probes)
+       (* Every probe runs, then the failures are reported together.
+
+          Aborting at the first one hides the rest: [Execute] leads this list
+          and needs a sandbox runtime, so on a machine with no container
+          daemon it failed first and the nine probes behind it never ran --
+          the gate reported one problem while saying nothing about the tools
+          it exists to cover. One unavailable runtime is not a reason to stop
+          asking the other producers whether they still match their declared
+          schema. *)
+       let failures =
+         List.filter_map
+           (fun { tool_name; prepare } ->
+              let input = prepare ~config ~meta in
+              let result =
+                KET.execute_keeper_tool_call_with_outcome
+                  ~config
+                  ~meta
+                  ~publication_recovery
+                  ~ctx_work
+                  ~name:tool_name
+                  ~input
+                  ()
+              in
+              if not (String.equal "success" (outcome_label result.KTE.disposition))
+              then
+                Some
+                  (Printf.sprintf
+                     "%s did not complete, so its output went unobserved: %s"
+                     tool_name
+                     result.KTE.raw_output)
+              else (
+                match result.KTE.data with
+                | Some data ->
+                  (* Alcotest's [fail] raises its own exception, not
+                     [Failure], so catching [Failure] alone let a schema
+                     rejection escape and abort the loop again -- the very
+                     thing this collector exists to stop. Catch every
+                     exception a probe can raise and keep its message. *)
+                  (try
+                     validate_probe_output ~tool_name ~data;
+                     None
+                   with
+                   | Failure detail -> Some detail
+                   | exn -> Some (Printexc.to_string exn))
+                | None ->
+                  Some
+                    (Printf.sprintf
+                       "%s completed without typed data; a composition node \
+                        would have nothing to validate"
+                       tool_name)))
+           composable_output_probes
+       in
+       match failures with
+       | [] -> ()
+       | failures ->
+         failf
+           "%d of %d composable-output probes failed:\n%s"
+           (List.length failures)
+           (List.length composable_output_probes)
+           (String.concat "\n" failures))
 
 let () =
   Masc_test_deps.init_unified_tool_registry ();
@@ -7290,8 +7431,8 @@ let () =
         test_malformed_json_looking_success_stays_success;
       test_case "only typed producer failure is failure" `Quick
         test_only_typed_producer_failure_is_failure;
-      test_case "deferred WebSearch yields before provider retry" `Quick
-        test_deferred_web_search_yields_before_provider_retry;
+      test_case "deferred WebSearch keeps the turn going" `Quick
+        test_deferred_web_search_keeps_the_turn_going;
       test_case "invalid surface input stays correction-capable" `Quick
         test_invalid_surface_post_input_stays_correction_capable;
       test_case "surface append failure is not terminal completion" `Quick

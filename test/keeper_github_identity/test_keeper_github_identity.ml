@@ -156,8 +156,11 @@ let test_fake_gh_login_and_effective_identity () =
   Fun.protect
     ~finally:(fun () -> Unix.putenv "PATH" previous_path)
     (fun () ->
-       Alcotest.(check int) "fake login exits successfully" 0
-         (Github.run_cli_login ~config ~keeper_name ~hostname:"github.com");
+       (match Github.local_lane ~config ~keeper_name ~hostname:"github.com" with
+        | Error message -> Alcotest.fail message
+        | Ok lane ->
+          Alcotest.(check int) "fake login exits successfully" 0
+            (Github.run_cli_login ~lane));
        let keeper_config = Github.config_dir ~config ~keeper_name in
        let login_args = read_file (Filename.concat keeper_config "login-args") in
        Alcotest.(check bool) "web login argv reached fake gh" true
@@ -175,7 +178,8 @@ let test_fake_gh_login_and_effective_identity () =
          Alcotest.(check string) "effective probe is explicitly host-scoped"
            "host_process_credential_only"
            (match observation.effective_probe_scope with
-            | `Host_process_credential_only -> "host_process_credential_only"))
+            | `Host_process_credential_only -> "host_process_credential_only"
+            | `Endpoint_process_only -> "endpoint_process_only"))
 ;;
 
 let test_config_dir_does_not_chmod_ancestor () =

@@ -50,7 +50,7 @@ let result_of_json ~tool_name ~start_time = function
            ~class_:Tool_result.Workflow_rejection
            ~start_time
            ~data:json
-           "Workspace message persisted, but Keeper delivery was rejected; do not resend"
+           (Tool_guidance.to_string Tool_guidance.Workspace_message_delivery_rejected)
        | Some _ | None ->
          Tool_result.make_ok ~tool_name ~start_time ~data:json ())
   | Error message ->
@@ -64,117 +64,11 @@ let result_of_json ~tool_name ~start_time = function
 
 let json_ok = Tool_agent.json_ok
 
-let schema_properties entries = `Assoc entries
-
-let strict_action_enums =
-  [
-    `String "broadcast";
-    `String "namespace_pause";
-    `String "namespace_resume";
-    `String "task_inject";
-    `String "keeper_message";
-    `String "keeper_probe";
-    `String "keeper_recover";
-  ]
-
-let target_type_enums =
-  List.map
-    (fun value -> `String value)
-    Operator_action_constants.valid_target_type_strings
-
-let snapshot_schema ~remote =
-  {
-    name = "masc_operator_snapshot";
-    description =
-      if remote then
-        "Read unified operator state. Use this when you need current workspace, keeper, message, and pending-confirm data before taking action."
-      else
-        "Read unified operator state for the default workspace, keepers, recent messages, and pending confirmations before acting.";
-    input_schema =
-      `Assoc
-        [
-          ("type", `String "object");
-          ( "properties",
-            schema_properties
-              [
-                ("actor", `Assoc [ ("type", `String "string") ]);
-                (* Derive the enum from the typed snapshot-view SSOT. *)
-                ("view", `Assoc [ ("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) Operator_control_snapshot.valid_snapshot_view_strings)) ]);
-                ("include_messages", `Assoc [ ("type", `String "boolean") ]);
-                ("include_keepers", `Assoc [ ("type", `String "boolean") ]);
-              ] );
-        ];
-  }
-
-let digest_target_type_enums =
-  [ `String Operator_action_constants.workspace_target_type ]
-let digest_schema ~remote =
-  {
-    name = "masc_operator_digest";
-    description =
-      if remote then
-        "Read an intervention-oriented operator digest with workspace health, attention items, worker summaries, and recommended next actions."
-      else
-        "Read a high-signal operator digest with intervention recommendations for the default workspace when raw snapshot data is too low-level.";
-    input_schema =
-      `Assoc
-        [
-          ("type", `String "object");
-          ( "properties",
-            schema_properties
-              [
-                ("actor", `Assoc [ ("type", `String "string") ]);
-                ( "target_type",
-                  `Assoc
-                    [
-                      ("type", `String "string");
-                      ("enum", `List digest_target_type_enums);
-                    ] );
-                ("target_id", `Assoc [ ("type", `String "string") ]);
-                ("include_workers", `Assoc [ ("type", `String "boolean") ]);
-              ] );
-        ];
-  }
-
+let snapshot_schemas = Operator_tool_toml.snapshot
+let digest_schemas = Operator_tool_toml.digest
 let board_attention_quarantine_requeue_schema = Operator_tool_toml.quarantine_requeue
-
 let task_recovery_schema = Operator_tool_toml.task_recovery_resolve
-
-let action_schema ~remote =
-  {
-    name = "masc_operator_action";
-    description =
-      if remote then
-        "Preview or run a structured operator action. Use this when you need to broadcast, pause a namespace, inject work, or message a keeper through the remote operator surface."
-      else
-        "Run a structured operator action against the namespace or a keeper. Use this when you need guided control with preview-confirm safety for disruptive actions.";
-    input_schema =
-      `Assoc
-        [
-          ("type", `String "object");
-          ( "properties",
-            schema_properties
-              [
-                ("actor", `Assoc [ ("type", `String "string") ]);
-                ( "action_type",
-                  `Assoc
-                    [
-                      ("type", `String "string");
-                      ("enum", `List strict_action_enums);
-                    ] );
-                ( "target_type",
-                  `Assoc
-                    [
-                      ("type", `String "string");
-                      ("enum", `List target_type_enums);
-                    ] );
-                ("target_id", `Assoc [ ("type", `String "string") ]);
-                ("payload", `Assoc [ ("type", `String "object") ]);
-              ] );
-            ("required", `List [ `String "action_type"; `String "payload" ]);
-        ];
-  }
-
+let action_schemas = Operator_tool_toml.action
 let confirm_schema = Operator_tool_toml.confirm
 
 let board_attention_quarantine_failure_class = function
@@ -391,25 +285,25 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
       None
 
 let schemas : tool_schema list =
-  [
-    snapshot_schema ~remote:false;
-    digest_schema ~remote:false;
-    action_schema ~remote:false;
-    board_attention_quarantine_requeue_schema;
-    task_recovery_schema;
-    confirm_schema;
-    judgment_write_schema;
+  [ snapshot_schemas.local
+  ; digest_schemas.local
+  ; action_schemas.local
+  ; board_attention_quarantine_requeue_schema
+  ; task_recovery_schema
+  ; confirm_schema
+  ; judgment_write_schema
   ]
+;;
 
 let remote_schemas : tool_schema list =
-  [
-    snapshot_schema ~remote:true;
-    digest_schema ~remote:true;
-    action_schema ~remote:true;
-    board_attention_quarantine_requeue_schema;
-    task_recovery_schema;
-    confirm_schema;
+  [ snapshot_schemas.remote
+  ; digest_schemas.remote
+  ; action_schemas.remote
+  ; board_attention_quarantine_requeue_schema
+  ; task_recovery_schema
+  ; confirm_schema
   ]
+;;
 
 let remote_tool_names : string list = Operator_remote_name.all_strings
 

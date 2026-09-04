@@ -6,7 +6,8 @@ import { get, post } from './core'
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray, isPositiveSafeInteger } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
-import type { KeeperConfig, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision, KeeperConfigRevisionState } from '../types'
+import type { KeeperConfig, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision, KeeperConfigRevisionState, SandboxProfile } from '../types'
+import { UNKNOWN_NETWORK_MODE, UNKNOWN_SANDBOX_PROFILE } from '../types'
 
 function asLooseBoolean(value: unknown, fallback = false): boolean {
   const booleanValue = asBoolean(value)
@@ -344,8 +345,9 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       decodeConfigWarnings(data.config_transaction_warnings),
     autoboot_enabled: asLooseBoolean(data.autoboot_enabled, true),
     max_context_override: maxContextOverride,
-    sandbox_profile: asNullableString(data.sandbox_profile) ?? '(unknown sandbox_profile)',
-    network_mode: asNullableString(data.network_mode) ?? '(unknown network_mode)',
+    sandbox_profile: asNullableString(data.sandbox_profile) ?? UNKNOWN_SANDBOX_PROFILE,
+    network_mode: asNullableString(data.network_mode) ?? UNKNOWN_NETWORK_MODE,
+    remote_endpoint: asNullableString(data.remote_endpoint),
     keeper_last_error: asNullableString(data.keeper_last_error),
     sandbox_roots: normalizeStringList(data.sandbox_roots),
     prompt: {
@@ -434,7 +436,10 @@ export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
     .then(raw => normalizeKeeperConfig(raw, name))
 }
 
-export type SandboxProfile = 'local' | 'docker' | 'microvm'
+// The closed profile set is declared once, in types/core.ts, next to the
+// coverage record that drives the panel's parser and its select. This module
+// re-exports it so `from './api/dashboard'` consumers are unchanged.
+export type { SandboxProfile } from '../types'
 export type SandboxNetworkMode = 'none' | 'inherit'
 
 export type KeeperConfigUpdatePayload = {
@@ -445,6 +450,9 @@ export type KeeperConfigUpdatePayload = {
   // Sandbox
   sandbox_profile?: SandboxProfile
   network_mode?: SandboxNetworkMode
+  // null detaches the endpoint. Omitting it carries the keeper TOML's value
+  // into the new profile, which the runtime then refuses.
+  remote_endpoint?: string | null
   // Prompt fields
   instructions?: string
   // Proactive

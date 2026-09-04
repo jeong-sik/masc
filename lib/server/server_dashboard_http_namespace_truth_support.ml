@@ -227,24 +227,22 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
     json_int_field "visible_count" pending_confirm_summary
       ~default:(json_int_field "total_count" pending_confirm_summary ~default:0)
   in
-  let sandbox_error_count =
-    count_where live_keepers (fun keeper ->
-      Option.is_some (json_string_field_opt "keeper_last_error" keeper))
-  in
-  let sandbox_profile_live_count profile =
-    count_where live_keepers (fun keeper ->
-      json_string_field_opt "sandbox_profile" keeper = Some profile)
-  in
-  let docker_live_count = sandbox_profile_live_count "docker" in
-  let microvm_live_count = sandbox_profile_live_count "microvm" in
-  let local_live_count =
-    count_where live_keepers (fun keeper ->
-      json_string_field_opt "sandbox_profile" keeper = Some "local")
-  in
-  let unknown_sandbox_count =
-    count_where live_keepers (fun keeper ->
-      Option.is_none (json_string_field_opt "sandbox_profile" keeper))
-  in
+  (* No sandbox counters here. The keeper rows this function reads come from
+     the execution surface, which builds them from the operator control
+     snapshot ([Operator_control_snapshot], plus the identity, blocker and
+     attention field lists in [Keeper_status_bridge]). None of those emit
+     [sandbox_profile] or [keeper_last_error] — the only producers of those two
+     keys are the roster ([Dashboard_http_keeper]), the per-keeper config
+     ([Dashboard_http_keeper_snapshot]), the goal timeline
+     ([Dashboard_goals_types_timeline]) and the status detail
+     ([Keeper_status_detail]), and none of them feed this surface.
+
+     So the profile buckets that used to sit here read zero on every request,
+     and the "missing sandbox provenance" reason counted every live keeper and
+     pinned this pillar to "warn" whenever any keeper was up: a normal fleet
+     reported as a fault. The pillar now states only what this surface can
+     observe. Restoring a sandbox metric means first emitting the field on the
+     execution keeper row, not counting an absence here. *)
   let runtime_blocker_count =
     count_where live_keepers (fun keeper ->
       Option.is_some (json_string_field_opt "runtime_blocker_class" keeper))
@@ -269,22 +267,10 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
         (if pending_visible > 0 then
            Some (Printf.sprintf "%d operator approvals are still pending" pending_visible)
          else None);
-        (if sandbox_error_count > 0 then
-           Some (Printf.sprintf "%d live keepers report sandbox errors" sandbox_error_count)
-         else None);
-        (if local_live_count > 0 then
-           Some (Printf.sprintf "%d live keepers are still running in local sandbox" local_live_count)
-         else None);
-        (if unknown_sandbox_count > 0 then
-           Some (Printf.sprintf "%d live keepers are missing sandbox provenance" unknown_sandbox_count)
-         else None);
       ]
   in
   let execution_safety_status =
-    if pending_visible > 0 then "bad"
-    else if sandbox_error_count > 0 || local_live_count > 0 || unknown_sandbox_count > 0
-    then "warn"
-    else "ok"
+    if pending_visible > 0 then "bad" else "ok"
   in
   let autonomy_reliability_reasons =
     List.filter_map Fun.id
@@ -337,14 +323,11 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
         ~key:"execution_safety"
         ~label:"Execution Safety"
         ~status:execution_safety_status
-        ~ok_message:"Approval and sandbox posture are visible for live keepers."
+        ~ok_message:"No operator approvals are waiting for live keepers."
         ~reasons:execution_safety_reasons
         ~metrics:
           [
             ("live_keepers", List.length live_keepers);
-            ("docker_live", docker_live_count);
-            ("microvm_live", microvm_live_count);
-            ("local_live", local_live_count);
             ("pending_approvals", pending_visible);
           ];
       readiness_pillar_json

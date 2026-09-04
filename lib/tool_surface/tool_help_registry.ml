@@ -44,6 +44,32 @@ let first_sentence text =
 let truncate ~max_len text =
   String_util.utf8_safe ~max_bytes:((max 0 (max_len - 1)) + 3) ~suffix:"…" text |> String_util.to_string
 
+(* The shared fallback prose and the markdown scaffold live in
+   [config/prompts/tool_help.md] slots; this module keeps the derivation and
+   supplies the entry data. A slot that does not render is logged and falls
+   back to the bare data, never to prose written here — the same contract as
+   the keeper turn-assembly fallback (#32848), and
+   [test_prompt_templates_render] renders every registered slot, so a broken
+   template is a test failure rather than something this branch absorbs. *)
+let render_fragment key vars ~fallback =
+  match Prompt_registry.render_prompt_template key vars with
+  | Ok text -> text
+  | Error detail ->
+    Log.Misc.error
+      "tool help prompt %s did not render, falling back to the bare data: %s"
+      key
+      detail;
+    fallback
+;;
+
+let render_fragment_opt key =
+  match Prompt_registry.render_prompt_template key [] with
+  | Ok text -> Some text
+  | Error detail ->
+    Log.Misc.error "tool help prompt %s did not render, dropping the note: %s" key detail;
+    None
+;;
+
 (* RFC-0089 §4-1 G1: tool family typed classifier.
 
    Closed sum over live tool name prefixes.  Adding a new family
@@ -83,16 +109,21 @@ let help_doc_refs name =
   | None -> []
 
 let help_prompt_hints name =
-  if String.equal name "masc_tool_help" then
-    [ "Use prompt 'tool_help' when the caller needs a guided explanation." ]
-  else
-    []
+  if String.equal name "masc_tool_help"
+  then (
+    match render_fragment_opt Prompt_names.tool_help_prompt_hint_tool_help with
+    | Some hint -> [ hint ]
+    | None -> [])
+  else []
+;;
 
 let default_when_to_use name =
-  if String.equal name "masc_tool_help" then
-    "Use when you need canonical guidance for a specific MASC tool."
-  else
-    "Use when you need this tool's canonical action."
+  let key =
+    if String.equal name "masc_tool_help"
+    then Prompt_names.tool_help_when_to_use_tool_help
+    else Prompt_names.tool_help_when_to_use_generic
+  in
+  render_fragment key [] ~fallback:name
 
 (* Internal: same body as [constraints_from_metadata] but operates on a
    pre-fetched [Tool_catalog.metadata] value to avoid re-doing the
@@ -100,17 +131,17 @@ let default_when_to_use name =
 let constraints_from_meta (meta : Tool_catalog.metadata) =
   let visibility_note =
     match meta.visibility with
-    | Tool_catalog.Hidden -> [ "Hidden from the default tool list." ]
+    | Tool_catalog.Hidden -> [ Prompt_names.tool_help_constraint_hidden ]
     | Tool_catalog.Default -> []
   in
   let implementation_note =
     match meta.implementation_status with
-    | Tool_catalog.Placeholder -> [ "Placeholder implementation; not a truthful default surface." ]
-    | Tool_catalog.Simulation -> [ "Simulation-backed implementation." ]
-    | Tool_catalog.Adapter -> [ "Compatibility or adapter surface." ]
+    | Tool_catalog.Placeholder -> [ Prompt_names.tool_help_constraint_placeholder ]
+    | Tool_catalog.Simulation -> [ Prompt_names.tool_help_constraint_simulation ]
+    | Tool_catalog.Adapter -> [ Prompt_names.tool_help_constraint_adapter ]
     | Tool_catalog.Real -> []
   in
-  visibility_note @ implementation_note
+  List.filter_map render_fragment_opt (visibility_note @ implementation_note)
 
 (* Authored help lives in the tool's own [config/tools/<name>.toml] [help]
    table (RFC prompts-and-tool-definitions-outside-ocaml §2.2; the in-code
@@ -169,15 +200,17 @@ let derived_short_description_with_meta (_meta : Tool_catalog.metadata) name ori
     | "" -> default_when_to_use name
     | sentence -> sentence
   in
-  let cleaned =
-    seed |> normalize_spaces |> truncate ~max_len:120
-  in
-  if String.equal cleaned "" then
-    "MASC tool."
-  else if String.ends_with ~suffix:"." cleaned then
-    cleaned
-  else
-    cleaned ^ "."
+  let cleaned = seed |> normalize_spaces |> truncate ~max_len:120 in
+  if String.equal cleaned ""
+  then
+    render_fragment
+      Prompt_names.tool_help_short_description_empty
+      []
+      ~fallback:(name ^ ".")
+  else if String.ends_with ~suffix:"." cleaned
+  then cleaned
+  else cleaned ^ "."
+;;
 
 let derived_details_with_meta (meta : Tool_catalog.metadata) original =
   let base = normalize_spaces original in
@@ -251,9 +284,37 @@ let find_entry (schemas : Masc_domain.tool_schema list) name =
   |> List.find_opt (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
   |> Option.map entry_of_schema
 
+(* Only the short description, without building the rest of the entry.
+
+   [canonicalize_schema] took [entry_of_schema] and kept one field. Building
+   the whole entry also renders [when_to_use] and the constraint notes, and
+   those renders read the prompt registry -- so canonicalizing the catalog
+   asked for prompts and then threw the answers away.
+
+   That mattered because [Config.all_tool_schemas] is a top-level binding:
+   it runs at module initialization, before any process has loaded prompts.
+   Every binary that links this library opened with one ERROR line per tool
+   whose help needed a prompt, for fields nobody was going to read (masc
+   #32991). Deriving the description alone keeps the registry out of the
+   initialization path. *)
+let short_description_of_schema (schema : Masc_domain.tool_schema) =
+  match toml_help schema.name with
+  | Some (help : Tool_definition_toml.help) ->
+    (match help.short_description with
+     | Some text -> text
+     | None ->
+       derived_short_description_with_meta
+         (Tool_catalog.metadata schema.name)
+         schema.name
+         schema.description)
+  | None ->
+    derived_short_description_with_meta
+      (Tool_catalog.metadata schema.name)
+      schema.name
+      schema.description
+
 let canonicalize_schema (schema : Masc_domain.tool_schema) : Masc_domain.tool_schema =
-  let entry = entry_of_schema schema in
-  { schema with description = entry.short_description }
+  { schema with description = short_description_of_schema schema }
 
 let canonicalize_schemas schemas =
   List.map canonicalize_schema schemas
@@ -286,92 +347,78 @@ let entry_markdown (entry : help_entry) =
   let meta = Tool_catalog.metadata entry.name in
   let lifecycle = Tool_catalog.lifecycle_to_string meta.lifecycle in
   let visibility = Tool_catalog.visibility_to_string meta.visibility in
+  let bullet item = "- " ^ item in
+  let code_bullet item = "- `" ^ item ^ "`" in
   let header =
-    [
-      "# " ^ entry.name;
-      "";
-      entry.short_description;
-      "";
-      "- visibility: `" ^ visibility ^ "`";
-      "- lifecycle: `" ^ lifecycle ^ "`";
-    ]
-  in
-  let when_lines =
-    [
-      "";
-      "## When To Use";
-      "";
-      entry.when_to_use;
-    ]
-  in
-  let constraint_lines =
-    if Stdlib.List.length entry.key_constraints = 0 then
-      []
-    else
-      [
-        "";
-        "## Key Constraints";
-        "";
+    render_fragment
+      Prompt_names.tool_help_entry_header
+      [ "name", entry.name
+      ; "short_description", entry.short_description
+      ; "visibility", visibility
+      ; "lifecycle", lifecycle
       ]
-      @ List.map (fun item -> "- " ^ item) entry.key_constraints
+      ~fallback:
+        (String.concat
+           "\n"
+           [ entry.name
+           ; ""
+           ; entry.short_description
+           ; ""
+           ; "visibility=" ^ visibility
+           ; "lifecycle=" ^ lifecycle
+           ])
   in
-  let detail_lines =
-    [
-      "";
-      "## Details";
-      "";
-      entry.details_markdown;
-    ]
+  let when_section =
+    render_fragment
+      Prompt_names.tool_help_entry_when_to_use
+      [ "when_to_use", entry.when_to_use ]
+      ~fallback:entry.when_to_use
   in
-  let doc_lines =
-    if Stdlib.List.length entry.doc_refs = 0 then
-      []
-    else
-      [
-        "";
-        "## Docs";
-        "";
-      ]
-      @ List.map (fun item -> "- `" ^ item ^ "`") entry.doc_refs
+  (* An empty list omits the section entirely; the row prefix ("- ", backtick
+     quoting) is structure and stays here, the heading is the template's. *)
+  let optional_section key var items render_item =
+    if Stdlib.List.length items = 0
+    then []
+    else (
+      let body = String.concat "\n" (List.map render_item items) in
+      [ render_fragment key [ var, body ] ~fallback:body ])
   in
-  let prompt_lines =
-    if Stdlib.List.length entry.prompt_hints = 0 then
-      []
-    else
-      [
-        "";
-        "## Prompt Hints";
-        "";
-      ]
-      @ List.map (fun item -> "- " ^ item) entry.prompt_hints
+  let details_section =
+    render_fragment
+      Prompt_names.tool_help_entry_details
+      [ "details_markdown", entry.details_markdown ]
+      ~fallback:entry.details_markdown
   in
-  let example_lines =
-    if Stdlib.List.length entry.examples = 0 then
-      []
-    else
-      [
-        "";
-        "## Examples";
-        "";
-      ]
-      @ List.map (fun item -> "- `" ^ item ^ "`") entry.examples
-  in
-  let alternative_lines =
-    if Stdlib.List.length entry.alternatives = 0 then
-      []
-    else
-      [
-        "";
-        "## Alternatives";
-        "";
-      ]
-      @ List.map (fun item -> "- `" ^ item ^ "`") entry.alternatives
-  in
-  let workflow_lines = [] in
-  String.concat "\n"
-    (header @ when_lines @ constraint_lines @ detail_lines
-   @ doc_lines @ prompt_lines @ example_lines @ alternative_lines
-   @ workflow_lines)
+  String.concat
+    "\n\n"
+    ([ header; when_section ]
+     @ optional_section
+         Prompt_names.tool_help_entry_key_constraints
+         "constraints"
+         entry.key_constraints
+         bullet
+     @ [ details_section ]
+     @ optional_section
+         Prompt_names.tool_help_entry_docs
+         "docs"
+         entry.doc_refs
+         code_bullet
+     @ optional_section
+         Prompt_names.tool_help_entry_prompt_hints
+         "prompt_hints"
+         entry.prompt_hints
+         bullet
+     @ optional_section
+         Prompt_names.tool_help_entry_examples
+         "examples"
+         entry.examples
+         code_bullet
+     @ optional_section
+         Prompt_names.tool_help_entry_alternatives
+         "alternatives"
+         entry.alternatives
+         code_bullet)
+;;
 
 let index_markdown (schemas : Masc_domain.tool_schema list) =
   let rows =
@@ -382,12 +429,8 @@ let index_markdown (schemas : Masc_domain.tool_schema list) =
            let entry = entry_of_schema schema in
            Printf.sprintf "- `%s` — %s" schema.name entry.short_description)
   in
-  String.concat "\n"
-    ([
-       "# Tool Help Index";
-       "";
-       "Canonical help entries for MCP-exposed MASC tools.";
-       "";
-     ]
-    @ rows)
-
+  let header = render_fragment Prompt_names.tool_help_index_header [] ~fallback:"" in
+  match rows with
+  | [] -> header ^ "\n"
+  | _ -> header ^ "\n\n" ^ String.concat "\n" rows
+;;

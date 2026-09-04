@@ -99,7 +99,6 @@ Checkpointed 사이클은 ack 없이 같은 head 를 다시 읽는다 (128 사�
 
 | 종류 | 규칙 |
 |---|---|
-| `Manual_compaction_requested` | 지금처럼 단독 선점 (데이터 자극과 같은 턴에 들어가지 않음) |
 | `Hitl_resolved` | 지금처럼 승인 id 가 pending map 을 떠난 뒤에만 준비됨; 준비 안 된 항목은 건너뛴다 |
 | `Connector_attention` | RFC-0377 §3 유지 — 턴당 대화 하나. 정렬상 첫 `Connector_attention` 의 대화만 admit, 다른 대화는 잔류 |
 | 그 외 (`Board_signal`, `Board_attention`, `Bootstrap`, `Fusion_completed`, `Schedule_due`, `Completion_authority_rejected`, `Task_cancelled`, `Workspace_message`) | 준비된 것 전부 |
@@ -116,8 +115,8 @@ Checkpointed 사이클은 ack 없이 같은 head 를 다시 읽는다 (128 사�
 
 | 턴 결과 | 큐 |
 |---|---|
-| `Completed`, `Manual_compaction_applied` | admit 된 전부 ack (`Turn_completed` receipt) |
-| `Failed`, `Manual_compaction_failed`, `Manual_compaction_not_applied`, `Checkpointed`, `Input_required`, `Cancelled`, `Skipped`, 없음 | 아무 것도 하지 않음 — 자극은 pending 에 남고 다음 사이클이 다시 admit |
+| `Completed` | admit 된 전부 ack (`Turn_completed` receipt) |
+| `Failed`, `Checkpointed`, `Input_required`, `Cancelled`, `Skipped`, 없음 | 아무 것도 하지 않음 — 자극은 pending 에 남고 다음 사이클이 다시 admit |
 
 삭제: `Batch_quarantine`, `Batch_defer`, `Quarantine_source`, `Defer_to_queue_tail`, `terminalize_failed_selection`,
 `defer_selection_to_queue_tail`, `Keeper_registry_event_queue.defer_pending_result` /

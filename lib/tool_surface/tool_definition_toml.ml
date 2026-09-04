@@ -556,9 +556,12 @@ let loading_to_string = function
 
 type loaded =
   { schema : Masc_domain.tool_schema
+  ; title : string option
   ; keeper_projection : Masc_domain.tool_schema option
+  ; agent_core_projection : Masc_domain.tool_schema option
   ; help : help option
   ; loading : loading
+  ; operator_remote_description : string option
   ; shell_command : string list option
         (** RFC tools-as-shell-commands: the sub-command path this tool is
             reachable under inside a keeper's shell line ([board post get]
@@ -727,8 +730,11 @@ let assemble_input_schema ~params ~additional_properties ~alternatives : Yojson.
         | _ :: _ -> [ "oneOf", `List alternatives ]))
 ;;
 
-let keeper_projection_of_pairs ~name pairs =
-  let context = "keeper_projection" in
+(* The two projection tables — [keeper_projection] and
+   [agent_core_projection] — share one grammar: a deliberately narrower
+   description and input schema for one consumer surface, decoded with the
+   same known-keys discipline as the file itself. *)
+let projection_of_pairs ~context ~name pairs =
   let* description =
     match List.assoc_opt "description" pairs with
     | None -> Error (sprintf "%s is missing the required key \"description\"" context)
@@ -789,6 +795,13 @@ let tool_of_pairs ~name pairs =
     | None -> Error "missing the required key \"description\""
     | Some value -> as_non_empty_string ~context:"description" value
   in
+  let* title =
+    match List.assoc_opt "title" pairs with
+    | None -> Ok None
+    | Some value ->
+      let* text = as_non_empty_string ~context:"title" value in
+      Ok (Some text)
+  in
   let* additional_properties =
     match List.assoc_opt "additional_properties" pairs with
     | None -> Ok None
@@ -807,6 +820,13 @@ let tool_of_pairs ~name pairs =
     | Some value ->
       let* flag = as_bool ~context:"defer_loading" value in
       Ok (if flag then Deferrable else Always_loaded)
+  in
+  let* operator_remote_description =
+    match List.assoc_opt "operator_remote_description" pairs with
+    | None -> Ok None
+    | Some value ->
+      let* text = as_non_empty_string ~context:"operator_remote_description" value in
+      Ok (Some text)
   in
   let* shell_command =
     match List.assoc_opt "shell_command" pairs with
@@ -827,7 +847,23 @@ let tool_of_pairs ~name pairs =
     | Some value ->
       let* projection_pairs = as_table_pairs ~context:"keeper_projection" value in
       let* projection =
-        keeper_projection_of_pairs ~name:declared_name projection_pairs
+        projection_of_pairs
+          ~context:"keeper_projection"
+          ~name:declared_name
+          projection_pairs
+      in
+      Ok (Some projection)
+  in
+  let* agent_core_projection =
+    match List.assoc_opt "agent_core_projection" pairs with
+    | None -> Ok None
+    | Some value ->
+      let* projection_pairs = as_table_pairs ~context:"agent_core_projection" value in
+      let* projection =
+        projection_of_pairs
+          ~context:"agent_core_projection"
+          ~name:declared_name
+          projection_pairs
       in
       Ok (Some projection)
   in
@@ -845,12 +881,15 @@ let tool_of_pairs ~name pairs =
         (String.equal key)
         [ "name"
         ; "description"
+        ; "title"
         ; "additional_properties"
         ; "params"
         ; "one_of"
         ; "keeper_projection"
+        ; "agent_core_projection"
         ; "help"
         ; "defer_loading"
+        ; "operator_remote_description"
         ; "shell_command"
         ]
     in
@@ -868,9 +907,12 @@ let tool_of_pairs ~name pairs =
         ; input_schema =
             assemble_input_schema ~params ~additional_properties ~alternatives
         }
+    ; title
     ; keeper_projection
+    ; agent_core_projection
     ; help
     ; loading
+    ; operator_remote_description
     ; shell_command
     }
 ;;

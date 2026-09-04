@@ -1,6 +1,7 @@
 (** TUI data loading functions — split from masc_tui.ml (#3808) *)
 
 module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_status_runtime = Masc.Keeper_status_runtime
 module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Keeper_runtime_root_entry = Masc.Keeper_runtime_root_entry
@@ -243,9 +244,9 @@ let load_from_masc_dir (state : state) (base_path : string) =
   let current_keeper_mode =
     match state.view with
     | Keepers mode -> Some mode
-    | Overview | Acting | Memory | Lanes | Board | Approvals | Planning
-    | Schedules | Verification | Harness | Fusion | Repositories | Code
-    | Changes | Connectors | Runtime | Config | Resources | Tools
+    | Overview | Acting | Memory | Lanes | Clients | Board | Approvals
+    | Planning | Schedules | Verification | Harness | Fusion | Repositories
+    | Code | Changes | Connectors | Runtime | Config | Resources | Tools
     | System_logs -> None
   in
   let current_navigation =
@@ -1023,6 +1024,43 @@ let load_transport_health ~(host : string) ~(port : int) :
   | Error err -> Error ("transport health load failed: " ^ err)
   | Ok json -> Tui_decode.decode_transport_health json
 
+(* The briefing gives each Keeper the control plane's own liveness word, and
+   [Keeper_status_runtime] owns both ends of that vocabulary -- the producer
+   writes through its printer, so parsing through its strict reader is what
+   keeps the two from drifting apart. A word this build does not know counts
+   as unreadable rather than as the nearest state: the Overview row would
+   otherwise report a Keeper as idle on no evidence at all. *)
+let keeper_liveness_of_briefs briefs =
+  let empty =
+    { klc_active = 0
+    ; klc_inactive = 0
+    ; klc_offline = 0
+    ; klc_idle = 0
+    ; klc_paused = 0
+    ; klc_unreadable = 0
+    }
+  in
+  List.fold_left
+    (fun counts brief ->
+      match Yojson.Safe.Util.member "status" brief with
+      | `String status -> (
+          match Keeper_status_runtime.control_plane_status_of_string_opt status with
+          | Some Keeper_status_runtime.Cp_paused ->
+              { counts with klc_paused = counts.klc_paused + 1 }
+          | Some (Keeper_status_runtime.Cp_surface surface) -> (
+              match surface with
+              | Keeper_status_runtime.Surface_active ->
+                  { counts with klc_active = counts.klc_active + 1 }
+              | Keeper_status_runtime.Surface_inactive ->
+                  { counts with klc_inactive = counts.klc_inactive + 1 }
+              | Keeper_status_runtime.Surface_offline ->
+                  { counts with klc_offline = counts.klc_offline + 1 }
+              | Keeper_status_runtime.Surface_idle ->
+                  { counts with klc_idle = counts.klc_idle + 1 })
+          | None -> { counts with klc_unreadable = counts.klc_unreadable + 1 })
+      | _ -> { counts with klc_unreadable = counts.klc_unreadable + 1 })
+    empty briefs
+
 (** Load overview snapshot from /api/v1/dashboard/briefing *)
 let load_overview ~(host : string) ~(port : int) :
     (overview_snapshot, string) result =
@@ -1037,10 +1075,6 @@ let load_overview ~(host : string) ~(port : int) :
       in
       let* attention_queue =
         let* items = optional_list_field json "attention_queue" in
-        decode_attention_items items
-      in
-      let* attention_items =
-        let* items = optional_list_field json "attention_items" in
         decode_attention_items items
       in
       let* agent_briefs = optional_list_field json "agent_briefs" in
@@ -1070,8 +1104,8 @@ let load_overview ~(host : string) ~(port : int) :
          [lib/dashboard/dashboard_briefing.ml] writes no count into it -- so
          a count read from there was a default dressed as a reading. *)
       let ov_keepers = List.length keeper_briefs in
+      let ov_keeper_liveness = keeper_liveness_of_briefs keeper_briefs in
       let ov_mcp_agents = List.length agent_briefs in
-      let ov_incident_count = List.length incidents in
       let* ov_generated_at = required_string_field json "generated_at" in
       Ok
         {
@@ -1079,8 +1113,8 @@ let load_overview ~(host : string) ~(port : int) :
           ov_cluster;
           ov_project;
           ov_keepers;
+          ov_keeper_liveness;
           ov_mcp_agents;
-          ov_incident_count;
           (* The briefing projects one fact onto two lists: an incident is
              also queued for operator attention, as the same JSON row. On the
              live runtime all three incidents came back on both lists and the
@@ -1089,7 +1123,7 @@ let load_overview ~(host : string) ~(port : int) :
              again, not a second fact. Items that differ in any field keep
              both rows. *)
           ov_attention_items =
-            (incidents @ attention_queue @ attention_items
+            (incidents @ attention_queue
             |> List.fold_left
                  (fun kept item ->
                    if List.mem item kept then kept else item :: kept)
@@ -1230,6 +1264,13 @@ let load_standalone_lanes ~(host : string) ~(port : int) :
   | Error err -> Error ("standalone lanes load failed: " ^ err)
   | Ok json -> Tui_decode.decode_standalone_lanes_snapshot json
 
+(** Load the clients roster from /api/v1/dashboard/clients *)
+let load_clients ~(host : string) ~(port : int) :
+    (Tui_decode.clients_snapshot, string) result =
+  match fetch_clients ~host ~port with
+  | Error err -> Error ("clients load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_clients_snapshot json
+
 (** Load the repository list from /api/v1/repositories *)
 let load_repositories ~(host : string) ~(port : int) :
     (Tui_decode.repository_snapshot, string) result =
@@ -1331,6 +1372,34 @@ let load_prompts ~(host : string) ~(port : int) :
   match fetch_prompts ~host ~port with
   | Error err -> Error ("prompts load failed: " ^ err)
   | Ok json -> Tui_decode.decode_prompts json
+
+(** The prompt presets from /api/v1/presets. *)
+let load_presets ~(host : string) ~(port : int) :
+    (Tui_decode.presets_snapshot, string) result =
+  match Masc_tui_http.fetch_presets ~host ~port with
+  | Error err -> Error ("presets load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_presets json
+
+(** POST /api/v1/presets — the manifest the server wrote. *)
+let save_preset ~(host : string) ~(port : int) ~(name : string) ~(description : string)
+    : (Tui_decode.preset_manifest, string) result =
+  match Masc_tui_http.post_preset_save ~host ~port ~name ~description with
+  | Error err -> Error ("preset save failed: " ^ err)
+  | Ok json -> Tui_decode.decode_preset_saved json
+
+(** POST /api/v1/presets/restore — the per-surface report. A transport
+    failure leaves the outcome unknown: the server writes an autosave and
+    three surfaces, and it may have finished after the client gave up, so the
+    operator is told to read the preset list rather than to retry. *)
+let restore_preset ~(host : string) ~(port : int) ~(name : string)
+    : (Tui_decode.preset_restore_report, string) result =
+  match Masc_tui_http.post_preset_restore ~host ~port ~name with
+  | Error (`Refused message) -> Error ("preset restore refused: " ^ message)
+  | Error (`Unknown_outcome message) ->
+    Error
+      ("preset restore outcome unknown — the server may have finished it; \
+        check the preset list for a new autosave before retrying: " ^ message)
+  | Ok json -> Tui_decode.decode_preset_restore json
 
 (* The fleet reading answers what the keeper list cannot: a keeper that never
    started has no row, so the roster shows nine keepers whether the tenth is

@@ -1973,6 +1973,25 @@ let broadcast_pending entry audit_receipt =
       exn
 ;;
 
+let publish_chat_projection_append ~keeper_name = function
+  | Error _ as error -> error
+  | Ok (Keeper_chat_store.Already_present _) -> Ok ()
+  | Ok (Keeper_chat_store.Appended _) ->
+    Keeper_chat_broadcast.chat_appended
+      ~keeper_name
+      ~source:"approval_lifecycle"
+      ();
+    Ok ()
+;;
+
+let append_chat_projection ~base_path ~keeper_name lifecycle =
+  Keeper_chat_store.append_approval_lifecycle_once
+    ~base_dir:base_path
+    ~keeper_name
+    ~lifecycle
+  |> publish_chat_projection_append ~keeper_name
+;;
+
 let record_pending (entry : pending_approval) =
   Log.Keeper.info
     "HITL_APPROVAL_PENDING: id=%s sequence=%d keeper=%s tool=%s"
@@ -1993,6 +2012,26 @@ let record_pending (entry : pending_approval) =
       ()
   in
   broadcast_pending entry audit_receipt;
+  (* The parked call becomes visible before its answer does. The turn that
+     asked keeps running, so without this row the operator sees a tool call
+     and then nothing at all until the resolution lands. A projection failure
+     is logged and dropped: it must not stop the approval from being queued. *)
+  (match
+     append_chat_projection
+       ~base_path:entry.audit_base_path
+       ~keeper_name:entry.keeper_name
+       { Keeper_chat_store.approval_id = entry.id
+       ; tool_name = Some entry.tool_name
+       ; phase = Keeper_chat_store.Approval_requested
+       ; artifact_ref = None
+       }
+   with
+   | Ok () -> ()
+   | Error detail ->
+     Log.Keeper.error
+       "approval request chat projection failed approval=%s: %s"
+       entry.id
+       detail);
   audit_receipt
 ;;
 
@@ -2986,25 +3025,6 @@ let deliver_resolution ~base_path (entry : pending_approval) decision =
     ~approval_id:entry.id
     ~decision:(hitl_resolution_decision_of_approval_decision decision)
     ~channel:entry.continuation_channel
-;;
-
-let publish_chat_projection_append ~keeper_name = function
-  | Error _ as error -> error
-  | Ok (Keeper_chat_store.Already_present _) -> Ok ()
-  | Ok (Keeper_chat_store.Appended _) ->
-    Keeper_chat_broadcast.chat_appended
-      ~keeper_name
-      ~source:"approval_lifecycle"
-      ();
-    Ok ()
-;;
-
-let append_chat_projection ~base_path ~keeper_name lifecycle =
-  Keeper_chat_store.append_approval_lifecycle_once
-    ~base_dir:base_path
-    ~keeper_name
-    ~lifecycle
-  |> publish_chat_projection_append ~keeper_name
 ;;
 
 let ensure_resolution_chat_projection

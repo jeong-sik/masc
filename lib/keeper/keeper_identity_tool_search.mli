@@ -56,6 +56,32 @@ type surface =
             without a cell are tools this can name and never make callable. *)
   ; history : Agent_core.Types.message list
         (** The conversation this turn continues, read for {!already_used}. *)
+  ; carry_window : int
+        (** How far back through the conversation a tool's last call may be
+            and still be placed with its schema, counted in [ToolUse] blocks
+            of any tool. [0] or less places every tool this conversation has
+            ever run; the caller sets this field, and the runtime param behind
+            it is clamped at [0], so a negative value is a caller defect and
+            is treated as off rather than as a window of its own.
+
+            Not a continuous bound. The carry is measured against this window
+            only on a call to a tool the carry does not already hold, because
+            that is the call that changes the tool array and so forfeits the
+            provider's cache prefix anyway ({!already_used}). Between two such
+            calls the set is frozen, so a tool can sit further back than this
+            and still be placed. A Keeper that keeps re-using the tools it
+            already carries stops evicting until it reaches for one it does
+            not.
+
+            Counted in tool calls rather than turns because that is the same
+            evidence {!already_used} reads, so no turn boundary has to be
+            recovered from a flat message list, and because a built-in call
+            fills the conversation the same way an attached one does.
+
+            Set by the caller rather than read from configuration here: two
+            turns built from the same history must place the same tools, and a
+            window this module fetched for itself would make that depend on
+            when it was fetched. *)
   }
 
 val summary_of : string -> string
@@ -106,9 +132,55 @@ type placement =
             a possible 133 and still climbing. Use stops where the work stops.
 
             Empty until something runs, so a Keeper that never reaches its
-            attached services pays nothing for this. Compaction drops the
-            evidence with the messages and the model re-asks, which is what it
-            does today. *)
+            attached services pays nothing for this. The set is a fold over
+            the conversation's own history, so it survives anything short of
+            that history being dropped ([masc_keeper_clear], checkpoint
+            purge). A restart is not one of those: it restores the same
+            history from the checkpoint and rebuilds the same set.
+
+            Cut back to [carry_window] on the calls that grow the carry -- a
+            call to a tool the carry does not already hold. The tool array is
+            the head of the provider's cache prefix (agent_core's Anthropic
+            backend puts the [cache_control] breakpoint on the last tool), so
+            a turn whose array differs from the turn before forfeits the
+            cached read of the whole prefix, history included. A call to a
+            name already carried leaves the array identical and is not cut on;
+            a call to a name not carried grows the array and forfeits the
+            prefix anyway, so the cut there costs no invalidation that was not
+            already being paid. See [carry_window] for what that buys and what
+            it gives up: the window is sampled at those calls, not enforced
+            continuously, so between them a tool can age past it and stay
+            placed.
+
+            A tool the window drops returns to the listing on the same
+            request, because the listing omits exactly the names placed with
+            schemas. Nothing becomes unreachable; what changes is whether a
+            tool's schema is charged before it is asked for. A call the model
+            makes to a dropped name is refused by admission and costs a round
+            trip -- see {!make} for what the model is told.
+
+            The claim once made here that the 138 and 150-tool requests
+            (masc#32939) are this set is withdrawn: those requests carry no
+            listing at all -- they are official-client lanes, which pin their
+            tool set at spawn and hold every tool as a schema. Measured
+            2026-09-04 over 8,105 [kind:request] rows in
+            [wire-capture/2026-09] with each request's tool array resolved
+            through [tools_ref._blob.sha256]: requests with no
+            [keeper_tool_search] in the array are 28.2% of all tool-schema
+            bytes, and the (138, no-listing) and (150, no-listing) shapes
+            account for 374 and 177 requests. Nothing here reaches them.
+
+            The sizing figures below are inherited from the replay that chose
+            the default and were produced against the earlier cut rule (cut at
+            a name's first use in the conversation), not the rule above; they
+            are the reason for the default rather than a measurement of what
+            ships. Measured over 19,100 turns 2026-09-01..03: per-keeper median
+            carried 32.1 KB falling to 17.4 KB at a window of 300, turns whose
+            array differs rising from 1.0% to 3.3%, against 57,600 tokens of
+            prefix at the measured median. The current rule cuts strictly more
+            often than the rule those came from, so the carried figure is an
+            upper bound and the differing-turns figure a lower one. Re-running
+            the replay against this rule is not done. *)
   ; observe_turn : unit -> turn_discovery
         (** Call once when the turn ends, on both the ordinary and the raised
             path, and records {!Loaded_unused} where an operator can read it.
@@ -129,6 +201,15 @@ val make : keeper_name:string -> surface -> placement option
     Every deferred tool is held here and callable; what changes is that the
     model is shown a name and a line rather than an argument schema until it
     asks.
+
+    A tool whose schema is not placed is not in the running agent's callable
+    set either, so a call the model makes to it by name is dropped by
+    [Agent_core] admission before dispatch and the block does not enter the
+    transcript. The model is told the name was not available on that request
+    and is pointed at loading it through an offered listing; it is not told
+    the name is unknown, because here it is not. Recovering costs one round
+    trip. This is why the carry exists at all: a tool the conversation is
+    still using should be placed rather than re-asked for.
 
     Raises [Invalid_argument] if the argument schema this builds is refused,
     which can only be a defect in the literal it is built from. *)

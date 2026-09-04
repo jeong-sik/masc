@@ -425,6 +425,63 @@ let test_fanout_fanin_layers_are_dependency_owned () =
      | None -> fail "plan-owned descriptor was not found")
 ;;
 
+
+(* A composition node's output is validated against the descriptor's declared
+   composable schema, and an undeclared field is a hard failure -- not an
+   ignored extra. #32488 added [next_cursor] to the keeper_tasks_list
+   response without widening that schema, so every composition holding a
+   tasks node stopped returning and answered
+   [output_validation_failed / unexpected_field: next_cursor] instead. The
+   live keeper_compose_work-intake evidence carries exactly that cause.
+
+   This pins the paged shape against the schema so the producer and the
+   declaration cannot drift apart again in that direction. *)
+let test_tasks_list_output_schema_admits_the_page_cursor () =
+  let tasks_id = node_id "tasks" in
+  let tasks = node ~id:"tasks" ~tool_name:"keeper_tasks_list" literal_object in
+  let plan =
+    match Plan.create ~descriptors:(descriptors ()) [ tasks ] with
+    | Ok plan -> plan
+    | Error _ -> fail "single keeper_tasks_list node was rejected"
+  in
+  let run_id = Plan.Run_id.fresh () in
+  let paged_response =
+    `Assoc
+      [ "backlog_authority", `String "store"
+      ; "degraded", `Bool false
+      ; "projection", `String "snapshot"
+      ; "kind", `String "snapshot"
+      ; "revision", `String "42"
+      ; "snapshot", `List []
+      ; "matching_count", `Int 120
+      ; "returned_count", `Int 20
+      ; "truncated", `Bool true
+      ; "next_cursor", `String "opaque-keyset-cursor"
+      ]
+  in
+  (match Plan.validate_output plan ~run_id ~node_id:tasks_id paged_response with
+   | Ok _ -> ()
+   | Error _ ->
+     fail "a truncated keeper_tasks_list page violated its descriptor schema");
+  (* The last page carries no cursor, so the field stays optional. *)
+  let last_page =
+    `Assoc
+      [ "backlog_authority", `String "store"
+      ; "degraded", `Bool false
+      ; "projection", `String "snapshot"
+      ; "kind", `String "snapshot"
+      ; "revision", `String "42"
+      ; "snapshot", `List []
+      ; "matching_count", `Int 20
+      ; "returned_count", `Int 20
+      ; "truncated", `Bool false
+      ]
+  in
+  match Plan.validate_output plan ~run_id ~node_id:tasks_id last_page with
+  | Ok _ -> ()
+  | Error _ -> fail "an unpaged keeper_tasks_list response was rejected"
+;;
+
 let test_output_schema_and_consumer_input_are_enforced () =
   let time_id = node_id "time" in
   let time = node ~id:"time" ~tool_name:"keeper_time_now" literal_object in
@@ -938,7 +995,9 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
              ] )
        ]);
   accepts "masc_get_metrics" metrics_value;
-  accepts
+  (* PR #33019 removed requested_agent_name/resolved_agent_name aliases from
+     the schema, so outputs carrying those ghost fields must be rejected. *)
+  rejects
     "masc_get_metrics"
     (match metrics_value with
      | `Assoc fields ->
@@ -2248,6 +2307,10 @@ let () =
             "producer and consumer schemas"
             `Quick
             test_output_schema_and_consumer_input_are_enforced
+        ; test_case
+            "keeper_tasks_list output schema admits the page cursor"
+            `Quick
+            test_tasks_list_output_schema_admits_the_page_cursor
         ; test_case
             "invalid graphs and output edges"
             `Quick

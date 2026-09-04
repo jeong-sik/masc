@@ -2834,6 +2834,60 @@ let test_handle_request_resources_list_paginates () =
   Alcotest.(check bool) "resources reasonable count (>= 10)" true (resource_count >= 10);
   cleanup_dir base_path
 
+(* The catalogue the server lists (config/mcp/resources.toml, surfaced as
+   [Mcp_server.resources] / [resource_templates]) and the reader dispatch in
+   mcp_server_eio_resource.ml are two files; a renamed reader arm would leave
+   a listed URI reading as not-found. Pin the join: every listed uri, and
+   every uri_template with concrete values substituted, parses to an id the
+   dispatch handles. [worktrees.json] is reader-only and deliberately
+   unlisted, so it is not in the handled set. *)
+let handled_resource_id id =
+  match id with
+  | "tool-help-index" | "status" | "status.json" | "tasks" | "tasks.json"
+  | "who" | "who.json" | "agents" | "agents.json" | "messages"
+  | "messages/recent" | "messages.json" | "messages.json/recent" | "events"
+  | "events.json" | "library" | "library.json" ->
+      true
+  | _ ->
+      String.starts_with ~prefix:"tool-help/" id
+      || String.starts_with ~prefix:"library/" id
+
+let concrete_uri_of_template uri_template =
+  (* RFC 6570: a query expression ({?...}) drops out; a path variable
+     ({topic}) becomes one concrete segment. *)
+  let len = String.length uri_template in
+  let buf = Buffer.create len in
+  let rec walk i =
+    if i < len then
+      match uri_template.[i] with
+      | '{' ->
+          let close = String.index_from uri_template i '}' in
+          if i + 1 < len && uri_template.[i + 1] = '?' then
+            ()
+          else
+            Buffer.add_char buf 'x';
+          walk (close + 1)
+      | c ->
+          Buffer.add_char buf c;
+          walk (i + 1)
+  in
+  walk 0;
+  Buffer.contents buf
+
+let test_listed_resource_uris_have_readers () =
+  let check_uri uri =
+    let id, _uri = Mcp.parse_masc_resource_uri uri in
+    Alcotest.(check bool)
+      (Printf.sprintf "%s reads as handled id %S" uri id)
+      true
+      (handled_resource_id id)
+  in
+  List.iter (fun (r : Mcp.mcp_resource) -> check_uri r.uri) Mcp.resources;
+  List.iter
+    (fun (t : Mcp.mcp_resource_template) ->
+      check_uri (concrete_uri_of_template t.uri_template))
+    Mcp.resource_templates
+
 let test_handle_request_tools_list_paginates () =
   with_env "MASC_LIST_PAGE_SIZE" "10" @@ fun () ->
   Eio_main.run @@ fun env ->
@@ -3152,6 +3206,8 @@ let eio_tests = [
     test_handle_request_resources_list_rejects_unknown_field;
   "handle resources/list paginates", `Quick,
     test_handle_request_resources_list_paginates;
+  "listed resource uris have readers", `Quick,
+    test_listed_resource_uris_have_readers;
   "handle resources/read tool-help", `Quick, test_handle_request_tool_help_resource_read;
   "handle resources/read matrix", `Quick, test_handle_request_resources_read_matrix;
   "handle resources/templates/list rejects invalid cursor", `Quick,

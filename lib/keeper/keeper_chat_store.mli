@@ -93,10 +93,13 @@ type stream_lifecycle_event =
   | Run_finished
   | Run_error
 
-(** Durable operator-visible lifecycle of one Gate approval. Resolution and
-    replay are distinct phases: an approved request has permission, but its
-    effect is not reported as applied until a replay row exists. *)
+(** Durable operator-visible lifecycle of one Gate approval. Request,
+    resolution and replay are distinct phases: a requested call is parked
+    but the turn it was asked on keeps running, an approved request has
+    permission, and its effect is not reported as applied until a replay
+    row exists. *)
 type approval_lifecycle_phase =
+  | Approval_requested
   | Approval_resolved_approved
   | Approval_resolved_rejected
   | Approval_replay_applied

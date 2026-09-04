@@ -15,6 +15,13 @@ type style =
   | Skill of skill_tone
   | Thinking
 
+type turn_rail =
+  | Rail_opens
+  | Rail_says
+  | Rail_does
+  | Rail_closes
+  | Rail_none
+
 type markdown_source =
   | Markdown_stable of {
       keeper_name : string;
@@ -46,6 +53,7 @@ type entry = {
   request_label : string;
   body : string;
   markdown_source : markdown_source;
+  turn_rail : turn_rail;
 }
 
 type metadata =
@@ -76,6 +84,7 @@ type row = {
   kind : row_kind;
   shade : shade;
   text : string;
+  gutter_rail_cells : int;
   gutter_label_at : int;
   gutter : string;
 }
@@ -116,6 +125,38 @@ let drop_last_utf8_scalar text =
         find_last (offset + scalar_length) offset
     in
     String.sub text 0 (find_last 0 0)
+
+(* Ctrl-W, and Alt+Backspace where the terminal sends ESC DEL: the last word
+   goes, the separator before it stays, and two presses walk two words. The
+   separators are the blanks a chat draft can hold -- space, tab, and the
+   newline Ctrl-J puts in. A blank is always a whole one-byte scalar, so
+   testing the lead byte is the whole test. *)
+let drop_last_utf8_word text =
+  if String.equal text "" || not (String.is_valid_utf_8 text) then text
+  else
+    let length = String.length text in
+    let blank_at offset =
+      match text.[offset] with ' ' | '\t' | '\n' -> true | _ -> false
+    in
+    let rec collect offset acc =
+      if offset >= length then acc
+      else
+        let scalar_length =
+          String.get_utf_8_uchar text offset |> Uchar.utf_decode_length
+        in
+        collect (offset + scalar_length) ((offset, scalar_length) :: acc)
+    in
+    (* The span list comes out newest-first: trailing blanks go first, then
+       the word run before them. *)
+    let rec skip_while blanking spans =
+      match spans with
+      | (start, _) :: rest when Bool.equal blanking (blank_at start) ->
+          skip_while blanking rest
+      | _ -> spans
+    in
+    match collect 0 [] |> skip_while true |> skip_while false with
+    | (start, scalar_length) :: _ -> String.sub text 0 (start + scalar_length)
+    | [] -> ""
 
 let ansi_csi_end text offset =
   let length = String.length text in
@@ -422,13 +463,27 @@ let url_ends_at ch =
   | ' ' | '\t' | '\x1b' | '"' | '\'' | ')' | ']' | '>' | '<' -> true
   | _ -> Char.code ch < 0x20
 
-let url_begins_at text index =
-  let begins prefix =
-    let plen = String.length prefix in
-    index + plen <= String.length text
-    && String.equal (String.sub text index plen) prefix
+(* Does [prefix] sit at [index]? Answered by comparing bytes where they are.
+   Cutting the substring to compare it allocated one for every character of
+   every message body -- two, since two prefixes are tried -- so a pane of
+   half a megabyte of transcript produced a million short-lived strings on
+   every frame, and the collector spent the frame on them. *)
+let prefix_at text index prefix =
+  let plen = String.length prefix in
+  index + plen <= String.length text
+  &&
+  let rec same offset =
+    offset >= plen
+    || (Char.equal text.[index + offset] prefix.[offset] && same (offset + 1))
   in
-  begins "http://" || begins "https://"
+  same 0
+
+let url_begins_at text index =
+  (* Both schemes start with the same letter, and almost no character in a
+     transcript does, so this decides the common case in one comparison. *)
+  index < String.length text
+  && Char.equal text.[index] 'h'
+  && (prefix_at text index "http://" || prefix_at text index "https://")
 
 let url_end text index =
   let length = String.length text in
@@ -634,6 +689,30 @@ let speaker_mark : style -> string = function
   | Skill Skill_failure -> "\xe2\x9c\x97"
   | Thinking -> "\xc2\xb7"
 
+(* The bracket a turn draws down the left margin. One cell of box drawing plus
+   the space that keeps it off the clock.
+
+   Separate from {!speaker_mark} on purpose: that alphabet answers "who is
+   talking" and this one answers "which turn is this row part of". Folding the
+   second question into the first was the shape that failed -- a mark that
+   means two things stops meaning either.
+
+   [Rail_none] is a blank rather than a fifth glyph. A turn of one row has no
+   hierarchy to show, and marking it would put the rail on nearly every row of
+   an ordinary conversation, which is where a reader stops seeing it. *)
+let turn_rail_glyph : turn_rail -> string = function
+  | Rail_opens -> "\xe2\x95\xad"   (* the turn starts here *)
+  | Rail_says -> "\xe2\x94\x82"    (* the turn itself, still going *)
+  | Rail_does -> "\xe2\x94\x9c"    (* work hanging off the turn *)
+  | Rail_closes -> "\xe2\x95\xb0"  (* the turn ended on this row *)
+  | Rail_none -> " "
+
+(* Charged to every row, drawn or not. The margin's width is what the body's
+   width is taken from, so a rail column that appeared and vanished with the
+   rows would re-wrap the conversation under a scroll position taken before
+   it. Two cells out of a sixty-cell pane, spent once. *)
+let turn_rail_cells = 2
+
 (* Cells the speaker mark and its separator occupy at the head of a label, or
    zero when the column was too narrow to keep the mark at all. One reader, so
    the renderer that styles the mark and the layout that lays it out cannot
@@ -830,6 +909,7 @@ let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
       ; kind = Metadata metadata
       ; shade = Shade_none
       ; text = fitted
+      ; gutter_rail_cells = 0
       ; gutter_label_at = 0
       ; gutter = ""
       }
@@ -869,6 +949,7 @@ let timeline_break_row ~(previous : entry option) ~inner_width (entry : entry) =
         ; kind = Metadata (Timeline_break bucket)
         ; shade = Shade_none
         ; text
+        ; gutter_rail_cells = 0
         ; gutter_label_at = 0
         ; gutter = ""
         }
@@ -972,8 +1053,22 @@ let origin_gutter ~origin ~previous ~inner_width entry =
          {!rows_of_entry} floors the body at; the margin gets whatever is
          left, and on a pane with nothing left it gets nothing rather than
          pushing the messages out. *)
-      let ceiling = max 0 (inner_width - 2 - min_body_cells) in
+      let spare = inner_width - 2 - min_body_cells in
       let role_cells = display_width entry.role_label in
+      (* The rail is dropped before the name is, on the same reasoning the mark
+         is: a pane too narrow for both keeps the fact that says who is
+         talking. The bar is the whole label, not the rail's own two cells --
+         paying for the rail out of a margin that was already cutting the name
+         took the tail off exactly the identifiers a reader needs to tell two
+         keepers apart. Thirteen terminal cells drew "…aa" before and "…"
+         after.
+
+         The label arrives padded to one column, so every row on a pane
+         decides this the same way and the margin keeps one width. *)
+      let rail_cells =
+        if role_cells + turn_rail_cells <= spare then turn_rail_cells else 0
+      in
+      let ceiling = max 0 (spare - rail_cells) in
       let role_fits = role_cells <= ceiling in
       let label, mark_cells =
         if role_fits then
@@ -1014,7 +1109,7 @@ let origin_gutter ~origin ~previous ~inner_width entry =
          deriving it would be measuring the same two things a second time.
          [mark_cells] is zero for a shortened source, because that row no
          longer contains the mark the original boundary described. *)
-      let label_at = clock_cells + mark_cells in
+      let label_at = rail_cells + clock_cells + mark_cells in
 
       if continues_previous ~previous entry then
         (* Padded rather than repeated: a second row from the same speaker in
@@ -1032,13 +1127,18 @@ let origin_gutter ~origin ~previous ~inner_width entry =
            the telling -- a name appears only where the speaker changes. *)
         (* No label to hold back on a row that draws no name. *)
         let continued = clock ^ continued_mark entry.style ^ " " in
-        Some (fit_width continued (display_width filled), 0)
-      else Some (filled, label_at)
+        (* The rail keeps its own span even here. Past it the row is all
+           receded: a continuation draws no name, so there is no boundary left
+           between a mark and a label to colour differently. *)
+        Some (fit_width continued (display_width filled), rail_cells, rail_cells)
+      else Some (filled, rail_cells, label_at)
 
 let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry =
   let gutter = origin_gutter ~origin ~previous ~inner_width entry in
   let gutter_width =
-    match gutter with None -> 0 | Some (text, _) -> display_width text
+    match gutter with
+    | None -> 0
+    | Some (text, rail_cells, _) -> rail_cells + display_width text
   in
   let body_width = max min_body_cells (inner_width - 2 - gutter_width) in
   (* Keepers write markdown. Rendering it is the caller's to supply, so this
@@ -1061,16 +1161,39 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     | chunks -> chunks
   in
   let body_rows =
-    let margin, label_at = Option.value gutter ~default:("", 0) in
+    let margin, rail_cells, label_at = Option.value gutter ~default:("", 0, 0) in
     let blank = fit_width "" (display_width margin) in
+    let last = List.length body_chunks - 1 in
+    (* The bracket runs the height of the entry, so a wrapped body keeps the
+       line its first row started. Broken at every wrap it would read as one
+       turn per screen line, which is the opposite of what it is for.
+
+       The corners go where they mean something: the opening one on the row the
+       entry starts, the closing one on the row it ends. A [Rail_closes] entry
+       whose reply wraps ten rows would otherwise end the turn at the top of
+       its own last paragraph. *)
+    let rail_at index =
+      if rail_cells = 0 then ""
+      else
+        let piece =
+          match entry.turn_rail with
+          | Rail_none -> Rail_none
+          | Rail_says -> Rail_says
+          | Rail_opens -> if index = 0 then Rail_opens else Rail_says
+          | Rail_does -> if index = 0 then Rail_does else Rail_says
+          | Rail_closes -> if index = last then Rail_closes else Rail_says
+        in
+        turn_rail_glyph piece ^ String.make (rail_cells - 1) ' '
+    in
     body_chunks
     |> List.mapi (fun index chunk ->
       { style = entry.style
       ; kind = Body
       ; shade = shade_of_style entry.style
       ; text = "  " ^ chunk
-      ; gutter_label_at = (if index = 0 then label_at else 0)
-      ; gutter = (if index = 0 then margin else blank)
+      ; gutter_rail_cells = rail_cells
+      ; gutter_label_at = (if index = 0 then label_at else rail_cells)
+      ; gutter = rail_at index ^ (if index = 0 then margin else blank)
       })
   in
   let message_rows =
@@ -1126,10 +1249,18 @@ let same_repeatable_body_row left right =
 
 let collapse_repeated_body_rows ~inner_width rows =
   let gap row repeated_rows =
+    (* The gap keeps the repeated row's margin, so its text budget is what
+       the margin leaves -- fitting to the whole [inner_width] drew the row
+       margin plus a full-width text and spilled past the border, exactly the
+       spill [origin_gutter] bounds its own margin against. *)
     { style = Status
     ; kind = Viewport_gap { hidden_rows = repeated_rows }
     ; shade = Shade_none
-    ; text = repeated_rows_gap_text ~inner_width repeated_rows
+    ; text =
+        repeated_rows_gap_text
+          ~inner_width:(inner_width - display_width row.gutter)
+          repeated_rows
+    ; gutter_rail_cells = row.gutter_rail_cells
     ; gutter_label_at = 0
     ; gutter = row.gutter
     }
@@ -1192,6 +1323,7 @@ let newest_entry_window ~inner_width ~height rows =
         ; kind = Viewport_gap { hidden_rows }
         ; shade = Shade_none
         ; text = viewport_gap_text ~inner_width hidden_rows
+        ; gutter_rail_cells = 0
         ; gutter_label_at = 0
         ; gutter = ""
         }
@@ -1285,40 +1417,126 @@ let clamp_scroll ?markdown ?origin ~inner_width ~height requested entries =
     min requested (max 0 (count 0 (List.rev entries) - height))
   end
 
-(* Clamp and slice from the rows one walk already measured. The separate
-   [clamp_scroll] then [scrolled_rows] calls traverse the same newest prefix;
-   with a bounded render cache, a prefix larger than the cache can evict its
-   own later hits during the second traversal. Keeping the rows from this walk
-   avoids a frame-local cache of another size and makes every visited entry
-   pay for layout once. *)
+(* How many rows each entry takes, newest first, for one list of entries at
+   one width.
+
+   Reading back through a conversation asks the same question of the same
+   entries on every frame: a wheel notch moves the window three rows and the
+   frame lays out the whole distance again to find where the window now
+   starts. The distance is what a deep scroll makes long, so that walk cost
+   what the reader had scrolled past rather than what they were looking at.
+
+   A row count does not change while the entry, the width, and the origin
+   shape stay as they were, so the counts are kept and the next frame extends
+   them only as far as it newly reaches. Rendering the rows themselves stays
+   where it was: the frame does it for the entries its window touches. *)
+type row_counts = {
+  rc_entries : entry list;
+  rc_inner_width : int;
+  rc_origin : origin_display;
+  rc_newest_first : entry array;
+  rc_counts : int array;
+  mutable rc_filled : int;
+      (** Entries from the newest whose count is known, so a frame that
+          scrolled further extends this rather than starting again. *)
+}
+
+let row_counts_memo : row_counts option ref = ref None
+
+let row_counts_for entries ~inner_width ~origin =
+  match !row_counts_memo with
+  | Some held
+    when held.rc_entries == entries
+         && held.rc_inner_width = inner_width
+         && held.rc_origin = origin ->
+      held
+  | Some _ | None ->
+      let newest_first = Array.of_list (List.rev entries) in
+      let held =
+        { rc_entries = entries;
+          rc_inner_width = inner_width;
+          rc_origin = origin;
+          rc_newest_first = newest_first;
+          rc_counts = Array.make (Array.length newest_first) 0;
+          rc_filled = 0;
+        }
+      in
+      row_counts_memo := Some held;
+      held
+
+let entry_rows_at held ?markdown index =
+  let count = Array.length held.rc_newest_first in
+  let previous =
+    if index + 1 < count then Some held.rc_newest_first.(index + 1) else None
+  in
+  rows_of_entry ?markdown ~origin:held.rc_origin ~inner_width:held.rc_inner_width
+    ~previous held.rc_newest_first.(index)
+
+(* Extend the known counts from the newest until they cover [wanted] rows, or
+   until the conversation runs out. Answers how many rows and how many entries
+   that took, which is the walk the window is then cut out of. *)
+let count_rows_until held ?markdown ~wanted () =
+  let entry_count = Array.length held.rc_newest_first in
+  let rec walk index total =
+    if total >= wanted || index >= entry_count then (index, total)
+    else begin
+      if index >= held.rc_filled
+      then begin
+        held.rc_counts.(index) <-
+          List.length (entry_rows_at held ?markdown index);
+        held.rc_filled <- index + 1
+      end;
+      walk (index + 1) (total + held.rc_counts.(index))
+    end
+  in
+  walk 0 0
+
+(* The window, and the scroll it had to be clamped to.
+
+   Rows are numbered from the oldest of the entries the walk visited, which is
+   the numbering the window is expressed in. Entry [index] -- counting from
+   the newest -- holds the rows [total - before - count] up to
+   [total - before], where [before] is what the entries newer than it take. *)
 let clamped_scrolled_rows ?markdown ?origin ~inner_width ~height ~requested entries =
   if requested <= 0 then
     requested, visible_rows ?markdown ?origin ~inner_width ~height entries
   else begin
     let inner_width = max 1 inner_width in
+    let origin = Option.value origin ~default:Origin_row in
     let window_height = max 0 height in
     let bound_height = max 1 height in
-    let enough = requested + bound_height in
-    let rec collect gathered gathered_count = function
-      | [] -> gathered, gathered_count
-      | _ when gathered_count >= enough -> gathered, gathered_count
-      | entry :: older ->
-          let rows =
-            rows_of_entry ?markdown ?origin ~inner_width
-              ~previous:(List.nth_opt older 0) entry
-          in
-          collect (rows @ gathered) (gathered_count + List.length rows) older
+    let held = row_counts_for entries ~inner_width ~origin in
+    let visited, total =
+      count_rows_until held ?markdown ~wanted:(requested + bound_height) ()
     in
-    let gathered, gathered_count = collect [] 0 (List.rev entries) in
-    let from_bottom =
-      min requested (max 0 (gathered_count - bound_height))
-    in
-    let bottom = max 0 (gathered_count - from_bottom) in
+    let from_bottom = min requested (max 0 (total - bound_height)) in
+    let bottom = max 0 (total - from_bottom) in
     let first = max 0 (bottom - window_height) in
-    ( from_bottom
-    , List.filteri
-        (fun index _ -> index >= first && index < bottom)
-        gathered )
+    let rec gather index before selected =
+      if index >= visited then selected
+      else begin
+        let count = held.rc_counts.(index) in
+        let low = total - before - count in
+        let high = total - before in
+        let selected =
+          if high <= first || low >= bottom then selected
+          else begin
+            let rows = entry_rows_at held ?markdown index in
+            let take_from = max first low and take_to = min bottom high in
+            let chosen =
+              List.filteri
+                (fun offset _ ->
+                  let position = low + offset in
+                  position >= take_from && position < take_to)
+                rows
+            in
+            chosen @ selected
+          end
+        in
+        gather (index + 1) (before + count) selected
+      end
+    in
+    (from_bottom, gather 0 0 [])
   end
 
 let last_page_start ~height row_costs =

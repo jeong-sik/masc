@@ -294,16 +294,33 @@ let select_examples ~(max_examples : int) : calibration_example list =
     if List.length sorted <= max_examples then sorted
     else List.filteri (fun i _ -> i < max_examples) sorted
   in
-  List.map (fun d ->
-    let correct =
-      match d.human_verdict with
-      | Approve_label -> "APPROVE"
-      | Reject_label -> "REJECT: evaluator incorrectly approved"
-    in
-    { task_title = d.task_title;
-      notes_excerpt = "(see task notes)";
-      correct_verdict = correct }
-  ) limited
+  List.map
+    (fun d ->
+       let correct =
+         match d.human_verdict with
+         | Approve_label -> "APPROVE"
+         | Reject_label ->
+           (* The label a divergence example carries is prompt prose; it lives in
+              eval.calibration.few_shot.md beside the template that renders it. *)
+           (match
+              Prompt_registry.render_prompt_template
+                Prompt_names.eval_calibration_few_shot_rejected_label
+                []
+            with
+            | Ok text -> String.trim text
+            | Error detail ->
+              invalid_arg
+                (Printf.sprintf
+                   "missing or invalid calibration prompt %s: %s"
+                   Prompt_names.eval_calibration_few_shot_rejected_label
+                   detail))
+       in
+       { task_title = d.task_title
+       ; notes_excerpt = "(see task notes)"
+       ; correct_verdict = correct
+       })
+    limited
+;;
 
 let format_few_shot_block (examples : calibration_example list) : string =
   if examples = [] then ""

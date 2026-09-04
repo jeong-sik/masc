@@ -8,10 +8,13 @@
 
     - {!Openssh}: the pinned OpenSSH argv of RFC-0395, for an endpoint
       declared in [runtime.toml];
-    - {!Container_exec}: [container exec -i <guest> masc-exec-shim], for an
-      Apple [container] guest that owns its tree on a named volume
-      (RFC-0400). The guest runs on this host, so there is no key, no pinned
-      host key and no sshd: the CLI is the channel.
+    - {!Container_exec}: one microVM runtime's exec into a guest that owns
+      its tree on a named volume (RFC-0400), ending at [masc-exec-shim]. The
+      guest runs on this host, so there is no key, no pinned host key and no
+      sshd: the CLI is the channel. The prefix arrives already built,
+      because which flags spell it is the declaring runtime's business
+      ({!Keeper_sandbox_microvm.shim_exec_prefix_for}) and one of the three
+      cannot spell it at all.
 
     Error codes carry the lane, [remote_ssh_*] for OpenSSH and
     [microvm_remote_*] for the guest, so a log line names the transport that
@@ -33,12 +36,9 @@ type openssh =
   }
 
 type container_exec =
-  { cli : string list
+  { prefix : string list
   ; container_name : string
-  ; uid : int
-  ; gid : int
   ; shim_path : string
-  ; shim_config_path : string
   }
 
 type transport =
@@ -108,6 +108,7 @@ let keeper_root ~remote_root ~keeper_name =
 ;;
 
 let remote_keeper_root t = keeper_root ~remote_root:t.remote_root ~keeper_name:t.keeper_name
+let gh_config_dir t = t.gh_config_dir
 
 let of_openssh ~base_path ~keeper_name (o : openssh) =
   let remote_root = o.endpoint.remote_root in
@@ -190,38 +191,25 @@ let openssh_prefix (o : openssh) =
   ]
 ;;
 
-(* [-w] is only the initial directory of the exec'd process; the shim moves
-   to the request cwd itself and jails it under the config root. The shim
-   config location is the one environment entry the shim reads for itself
-   ([Exec_ssh_protocol.shim_config_env_var]); payload env never travels this
-   way. *)
-let container_exec_prefix (c : container_exec) ~remote_root =
-  c.cli
-  @ [ "exec"
-    ; "-i"
-    ; "--user"
-    ; Printf.sprintf "%d:%d" c.uid c.gid
-    ; "-w"
-    ; remote_root
-    ; "--env"
-    ; Exec_ssh_protocol.shim_config_env_var ^ "=" ^ c.shim_config_path
-    ; c.container_name
-    ]
-;;
-
+(* [c.prefix] ends at the guest name (and, on a runtime that needs one, its
+   command separator), so the shim path is all that is appended here. It
+   carries the exec's [-w], which is only the initial directory of the exec'd
+   process -- the shim moves to the request cwd itself and jails it under the
+   config root -- and the one environment entry the shim reads for itself
+   ([Exec_ssh_protocol.shim_config_env_var]). Payload env never travels this
+   way on either transport. *)
 let transport_argv t =
   match t.transport with
   | Openssh o -> openssh_prefix o @ [ shim_command ]
-  | Container_exec c -> container_exec_prefix c ~remote_root:t.remote_root @ [ c.shim_path ]
+  | Container_exec c -> c.prefix @ [ c.shim_path ]
 ;;
 
-(* OpenSSH hands the remote command to a shell, so the probe is one word;
-   [container exec] takes an argv, so the flag is its own element. *)
+(* OpenSSH hands the remote command to a shell, so the probe is one word; a
+   guest exec takes an argv, so the flag is its own element. *)
 let probe_argv t =
   match t.transport with
   | Openssh o -> openssh_prefix o @ [ shim_command ^ " " ^ probe_flag ]
-  | Container_exec c ->
-    container_exec_prefix c ~remote_root:t.remote_root @ [ c.shim_path; probe_flag ]
+  | Container_exec c -> c.prefix @ [ c.shim_path; probe_flag ]
 ;;
 
 let host_label t =
@@ -335,13 +323,35 @@ type stderr_stream =
   ; mutable tail : string
   }
 
+(* The trailer is the final RS-delimited frame, so its opening delimiter is the
+   second-to-last RS of the completed stream, and every byte before that RS is
+   payload no matter what arrives next. Returns how much of [text] can be handed
+   to the caller now. Holding the whole tail back instead would delay a stderr
+   line until the process exits, and [gh auth login] writes its one-time code to
+   stderr and then waits for the browser: a code delivered at exit arrives after
+   the login it was needed for has already timed out. *)
+let releasable_prefix_len text =
+  match String.rindex_opt text rs with
+  | None -> String.length text
+  | Some last ->
+    (match String.rindex_from_opt text (last - 1) rs with
+     | None -> last
+     | Some second_last -> second_last)
+;;
+
 let stream_stderr_chunk stream chunk =
   let combined = stream.tail ^ chunk in
-  let excess = String.length combined - trailer_tail_limit in
-  if excess > 0
+  (* The tail limit still bounds the retained region when payload bytes carry an
+     RS of their own; a trailer is orders of magnitude below it. *)
+  let release =
+    max (releasable_prefix_len combined) (String.length combined - trailer_tail_limit)
+  in
+  if release > 0
   then (
-    Option.iter (fun callback -> callback (String.sub combined 0 excess)) stream.callback;
-    stream.tail <- String.sub combined excess (String.length combined - excess))
+    Option.iter
+      (fun callback -> callback (String.sub combined 0 release))
+      stream.callback;
+    stream.tail <- String.sub combined release (String.length combined - release))
   else stream.tail <- combined
 ;;
 

@@ -1,0 +1,45 @@
+name = "keeper_task_cancel"
+description = """
+Ask for a task you hold to be stopped for good, because the work it asks for \
+should not be done. Use this when the premise is gone: the defect was fixed \
+elsewhere, the thing it describes no longer exists, or the task asks for \
+something that cannot be true. This is not for work you merely cannot finish \
+— hand that back with keeper_task_release so someone else can take it. Your \
+request goes to a completion authority the same way a finished task does, \
+and the task ends only when that verdict approves it. A refused request \
+comes back to you with the reason. You must own the task."""
+
+# release 와 같은 근거로 지연한다: 소유한 task 가 있고 그 전제가 무너졌을 때만
+# 필요한 도구라, 매 요청에 스키마를 싣는 값이 부르는 턴 수보다 크다.
+defer_loading = true
+
+[[params]]
+name = "task_id"
+type = "string"
+required = true
+description = "Task ID you currently hold"
+min_length = 1
+
+[[params]]
+name = "reason"
+type = "string"
+required = true
+description = """
+Why this task should stop existing rather than move to someone else. The \
+authority reads this and nothing else. Example: 'the microvm profile was \
+legalised in #32078; the invalid-config the task describes no longer \
+occurs'."""
+min_length = 1
+
+[help]
+short_description = "Ask for a task you hold to be cancelled, with a reason the authority reads."
+when_to_use = "Use when the task's premise is gone — the defect was fixed elsewhere, or what it describes does not exist."
+key_constraints = [
+  "Caller must own the task.",
+  "reason is required; it is the whole case the authority judges.",
+  "The task waits for a verdict. It is not cancelled until one approves.",
+  "A refused request returns the task to you, in progress, with the reason.",
+]
+details_markdown = "Cancelling is judged, not declared — the same rule that keeps a Keeper from marking its own work done. Use keeper_task_release instead when the work is still worth doing and you simply cannot do it."
+examples = ["task_id='task-704' reason='microvm was legalised in #32078 and the scheduler fires normally; the invalid-config this task describes no longer exists'"]
+alternatives = ["keeper_task_release", "keeper_task_done"]

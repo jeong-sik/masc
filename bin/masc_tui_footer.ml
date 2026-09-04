@@ -350,10 +350,32 @@ let line ?(status = []) ~dim ~reset ~max_cells ~port ~hints () =
     one-row guarantee is proven against the string the pane actually draws.
     As two hand-copies the strings drifted twice — first Ctrl-F/Ctrl-O, then
     Ctrl-N never reached the test's copy. *)
+(* The hint line a capture replaces, and the bar that replaces it.
+
+   The chat surface draws its own input row rather than the composer's, so the
+   meter that row carries never reaches this screen — and this is the one an
+   operator speaks from. A microphone that is hearing them and one that is not
+   both end as an empty draft; the bar is what separates those.
+
+   Here rather than inline in the pane so its width can be checked against the
+   same one-row budget as the hints it stands in for. *)
+let voice_bar ~width ~db =
+  let filled =
+    match db with
+    | None -> 0
+    | Some level when level = Float.neg_infinity -> 0
+    | Some level -> max 0 (min width (int_of_float ((level +. 60.) /. (60. /. float_of_int width))))
+  in
+  String.concat "" (List.init filled (fun _ -> "\xe2\x96\x88"))
+  ^ String.concat "" (List.init (width - filled) (fun _ -> "\xc2\xb7"))
+;;
+
+let voice_bar_width = 16
+
 let chat_hints ~enter_hint ~scroll_hint ~switch_hint ~escape_hint =
   Printf.sprintf
     "%s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-N:journal  \
-     Ctrl-F:metadata  Ctrl-O:image  %s%s  %s  Ctrl-U:clear"
+     Ctrl-F:metadata  Ctrl-O:image  %s%s  %s  Ctrl-U:clear  Ctrl-W:word"
     enter_hint scroll_hint switch_hint escape_hint
 
 (** Below 120 columns the fixed set drops to what leaves room for the message

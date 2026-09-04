@@ -1,4 +1,5 @@
 name = "masc_transition"
+title = "Transition Task State"
 description = """
 Move a Task through the agent actions claim, start, submit_for_verification, \
 cancel, or release. Ownership is exact and cannot be overridden by caller \

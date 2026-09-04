@@ -32,6 +32,7 @@ let status_awaiting =
     { assignee = "k1"
     ; started_at = now
     ; submitted_at = now
+    ; intent = Complete_task
     ; verification_id = "req-1"
     }
 

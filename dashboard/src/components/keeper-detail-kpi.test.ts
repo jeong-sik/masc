@@ -16,11 +16,8 @@ function metricPoint(overrides: Partial<KeeperMetricPoint>): KeeperMetricPoint {
     context_tokens: 200,
     context_max: 1000,
     latency_ms: 2000,
-    generation: 1,
     channel: 'turn',
-    is_handoff: false,
     cost_usd: 0.01,
-    handoff_new_generation: null,
     prompt_fingerprint: null,
     prompt_metrics: null,
     ctx_composition: null,
@@ -34,7 +31,7 @@ function metricPoint(overrides: Partial<KeeperMetricPoint>): KeeperMetricPoint {
 }
 
 describe('KpiGrid', () => {
-  it('renders live heartbeat and no retired compaction aggregates', () => {
+  it('renders live heartbeat', () => {
     const keeper = {
       name: 'sangsu',
       status: 'active',
@@ -44,10 +41,6 @@ describe('KpiGrid', () => {
     render(h(KpiGrid, { keeper }))
 
     expect(screen.getByText('하트비트')).toBeInTheDocument()
-    // The compaction lane is gone; neither the per-turn saving tile nor the
-    // older window aggregate may come back through this grid.
-    expect(screen.queryByText('마지막 압축 절약')).not.toBeInTheDocument()
-    expect(screen.queryByText('압축 절감률')).not.toBeInTheDocument()
   })
 
   it('surfaces latest keeper tok/sec in the detail KPI grid', () => {

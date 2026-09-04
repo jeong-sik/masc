@@ -34,6 +34,42 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
   })
 })
 
+describe('normalizeKeepers sandbox_profile', () => {
+  // The switch listed 'local' and 'docker' only. dashboard_http_keeper.ml emits
+  // sandbox_profile_to_string, so a microvm or remote_ssh keeper normalized to
+  // null and the fleet chip read it as an unknown sandbox
+  // (fleet-telemetry-panel.ts). That chip is the consumer this path feeds. The
+  // goal tree's 샌드박스 cell is not: it decodes
+  // dashboard_goals_types_timeline.ml through decodeGoalDetailKeeper, which
+  // never calls this normalizer. Neither is the detail alert strip, whose
+  // sandbox_profile arm sits behind sandbox_target — emitted with
+  // ~default:"unknown", so the `||` never falls through to it.
+  it('keeps every profile the runtime can emit', () => {
+    const keepers = normalizeKeepers([
+      { name: 'a', status: 'active', sandbox_profile: 'docker' },
+      { name: 'b', status: 'active', sandbox_profile: 'microvm' },
+      { name: 'c', status: 'active', sandbox_profile: 'remote_ssh' },
+    ])
+    expect(keepers.map(keeper => keeper.sandbox_profile)).toEqual([
+      'docker',
+      'microvm',
+      'remote_ssh',
+    ])
+  })
+
+  // 'local' is not a string sandbox_profile_of_string parses, so a row carrying
+  // it is a row this dashboard cannot read -- not a fourth profile.
+  it('reads anything outside the runtime set as null', () => {
+    const keepers = normalizeKeepers([
+      { name: 'a', status: 'active', sandbox_profile: 'local' },
+      { name: 'b', status: 'active', sandbox_profile: 'some_future_profile' },
+      { name: 'c', status: 'active', sandbox_profile: '' },
+      { name: 'd', status: 'active' },
+    ])
+    expect(keepers.map(keeper => keeper.sandbox_profile)).toEqual([null, null, null, null])
+  })
+})
+
 describe('normalizeKeepers phase field', () => {
   it('normalizes lowercase backend phase to PascalCase KeeperPhase', () => {
     const [keeper] = normalizeKeepers([
@@ -240,7 +276,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
     })
   })
 
-  it('accepts the current nested handoff contract', () => {
+  it('normalizes a producer-shaped metrics series row', () => {
     const [keeper] = normalizeKeepers([
       {
         name: 'beta',
@@ -252,14 +288,8 @@ describe('normalizeKeepers lifecycle metrics', () => {
             context_tokens: 880,
             context_max: 1000,
             latency_ms: 140,
-            generation: 5,
             channel: 'turn',
             cost_usd: 0.2,
-            handoff_performed: true,
-            handoff: {
-              performed: true,
-              to_generation: 6,
-            },
           },
         ],
       },
@@ -268,10 +298,11 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(keeper?.metrics_series).toHaveLength(1)
     const metric = keeper!.metrics_series![0]
     expect(metric).toMatchObject({
-      is_handoff: true,
-      handoff_new_generation: 6,
+      ts: 2,
+      channel: 'turn',
+      latency_ms: 140,
     })
-    expect(deriveLifecycleState(keeper!)).toBe('handoff-imminent')
+    expect(deriveLifecycleState(keeper!)).toBe('active')
   })
 
   it('keeps runtime tool audit fields while ignoring retired context source', () => {
@@ -654,12 +685,16 @@ describe('normalizeKeepers lifecycle metrics', () => {
             cost_usd: 0.04,
             ctx_composition: {
               actual_input_tokens: 1000,
-              attributed_bytes: 1160,
-              segments: {
-                'prompt.keeper_instructions': { bytes: 320, fingerprint: null },
-                message_user: { bytes: 210, fingerprint: null },
-                message_tool_use: { bytes: 90, fingerprint: null },
-                message_tool_result: { bytes: 540, fingerprint: null },
+              attribution: {
+                status: 'attributed',
+                runtime_profile: 'glm-coding.glm-5',
+                attributed_bytes: 1160,
+                segments: {
+                  'prompt.keeper_instructions': { bytes: 320, fingerprint: null },
+                  message_user: { bytes: 210, fingerprint: null },
+                  message_tool_use: { bytes: 90, fingerprint: null },
+                  message_tool_result: { bytes: 540, fingerprint: null },
+                },
               },
             },
           },
@@ -671,14 +706,75 @@ describe('normalizeKeepers lifecycle metrics', () => {
     const metric = keeper?.metrics_series?.[0]
     expect(metric?.ctx_composition).toEqual({
       actual_input_tokens: 1000,
-      attributed_bytes: 1160,
-      segments: {
-        'prompt.keeper_instructions': { bytes: 320, fingerprint: null },
-        message_user: { bytes: 210, fingerprint: null },
-        message_tool_use: { bytes: 90, fingerprint: null },
-        message_tool_result: { bytes: 540, fingerprint: null },
+      attribution: {
+        status: 'attributed',
+        runtime_profile: 'glm-coding.glm-5',
+        attributed_bytes: 1160,
+        segments: {
+          'prompt.keeper_instructions': { bytes: 320, fingerprint: null },
+          message_user: { bytes: 210, fingerprint: null },
+          message_tool_use: { bytes: 90, fingerprint: null },
+          message_tool_result: { bytes: 540, fingerprint: null },
+        },
       },
     })
+  })
+
+  // A turn that was never attributed and a turn attributed at zero bytes used
+  // to normalize to the same point, which is the reading masc#32995 removed.
+  it('keeps a not-measured turn distinct from zero bytes', () => {
+    const keeper = normalizeKeepers([
+      {
+        name: 'gap-keeper',
+        status: 'active',
+        metrics_series: [
+          {
+            ts_unix: 5,
+            channel: 'turn',
+            cost_usd: 0.01,
+            ctx_composition: {
+              actual_input_tokens: 4200,
+              attribution: {
+                status: 'not_measured',
+                reason: 'dispatch_not_reached',
+                detail: null,
+              },
+            },
+          },
+        ],
+      },
+    ])[0]
+
+    expect(keeper?.metrics_series?.[0]?.ctx_composition).toEqual({
+      actual_input_tokens: 4200,
+      attribution: {
+        status: 'not_measured',
+        reason: 'dispatch_not_reached',
+        detail: null,
+      },
+    })
+  })
+
+  // Rows written before the attribution shape existed cannot say whether the
+  // turn was measured. Reading them as zero is the defect; answering for them
+  // either way records a judgement nobody made.
+  it('drops a composition row written before the attribution shape', () => {
+    const keeper = normalizeKeepers([
+      {
+        name: 'legacy-keeper',
+        status: 'active',
+        metrics_series: [
+          {
+            ts_unix: 5,
+            channel: 'turn',
+            cost_usd: 0.01,
+            ctx_composition: { actual_input_tokens: 1000, attributed_bytes: 0, segments: {} },
+          },
+        ],
+      },
+    ])[0]
+
+    expect(keeper?.metrics_series?.[0]?.ctx_composition).toBeNull()
   })
 
   it('derives wall tok/s from usage output tokens and latency', () => {

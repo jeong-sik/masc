@@ -184,8 +184,8 @@ prefers smaller diffs.
 ## 8. Acceptance criteria
 
 - [ ] Operator opening `monitoring?section=agents&view=keepers&keeper=X`
-      sees all six FSM lanes (phase, turn_phase, decision, runtime,
-      compaction, circuit_breaker) at the top of 운영 상태 개요.
+      sees all five FSM lanes (phase, turn_phase, decision, runtime,
+      circuit_breaker) at the top of 운영 상태 개요.
 - [ ] No component on the detail surface reads `keeper.phase` /
       `keeper.pipeline_stage` directly *except* the page-header
       breadcrumb (`KeeperPhaseAndStage`).

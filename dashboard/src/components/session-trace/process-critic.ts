@@ -76,20 +76,6 @@ export function evaluateProcessTrace({
     })
   }
 
-  if (summary.agent_core_context_count > 0 || summary.agent_core_tokens_saved > 0) {
-    findings.push({
-      id: 'context-pressure',
-      severity: 'warning',
-      title: 'Context pressure is active',
-      detail: 'The trace includes context compaction, so the safer process move is to preserve the current decision boundary before opening a wider search.',
-      action: 'Checkpoint or split scope',
-      evidence: [
-        `context compactions ${summary.agent_core_context_count}`,
-        summary.agent_core_tokens_saved > 0 ? `tokens saved ${summary.agent_core_tokens_saved}` : '',
-      ].filter(Boolean),
-    })
-  }
-
   const totalTools = summary.tool_call_count + summary.agent_core_tool_count
   if (totalTools >= TOOL_CHURN_THRESHOLD && summary.task_completed_count === 0) {
     findings.push({

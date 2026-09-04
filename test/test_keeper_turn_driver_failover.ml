@@ -1983,7 +1983,7 @@ let test_attempt_loop_overflow_on_last_candidate_is_terminal () =
    | Ok _ -> Alcotest.fail "expected terminal overflow"
    | Error err ->
      Alcotest.(check bool)
-       "typed overflow preserved for reactive compaction"
+       "typed overflow preserved through lane exhaustion"
        true
        (Masc.Keeper_error_classify.is_context_overflow err));
   Alcotest.(check (list string))

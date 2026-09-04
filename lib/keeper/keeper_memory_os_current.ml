@@ -1243,6 +1243,80 @@ let make_snapshot
     ()
 ;;
 
+(* Apply a librarian's disposition to whatever the snapshot holds when the
+   lock is taken.
+
+   The librarian says three things about the facts it was shown: keep this one,
+   retire that one for this reason, add these new claims. Those statements are
+   what it decided; the whole-set list it also carries is a projection of them
+   against the snapshot it read, and projecting early is what forced the write
+   to demand that nothing had changed since. A keeper recording one fact of its
+   own during the pass moved the revision and the pass was thrown away -- 758
+   times on the fleet, 590 of them in one week (masc #32859).
+
+   A fact the disposition never mentions is one the librarian never saw, so it
+   is left alone. That is the whole difference.
+
+   A fact the librarian retires is retired even if the keeper re-observed it
+   during the pass: the judgment was about the claim, and a re-observation does
+   not answer it. The keeper can state it again on its next turn. *)
+let apply_disposition
+      ?clock
+      ?dropped_statements
+      ~keepers_dir
+      ~keeper_id
+      ~now
+      ~source
+      ~retained_memory_ids
+      ~new_claims
+      ()
+  =
+  let retired =
+    List.fold_left
+      (fun ids (statement : Keeper_memory_os_types.dropped_statement) ->
+         Set_util.StringSet.add statement.memory_id ids)
+      Set_util.StringSet.empty
+      (Option.value dropped_statements ~default:[])
+  in
+  let (_ : string list) = retained_memory_ids in
+  update_locked
+    ?clock
+    ?dropped_statements
+    ~keepers_dir
+    ~keeper_id
+    ~now
+    (fun previous ->
+       let current =
+         match previous with
+         | None -> []
+         | Some snapshot -> snapshot.facts
+       in
+       let kept =
+         List.filter
+           (fun fact -> not (Set_util.StringSet.mem (memory_id fact) retired))
+           current
+       in
+       let kept_ids =
+         List.fold_left
+           (fun ids fact -> Set_util.StringSet.add (memory_id fact) ids)
+           Set_util.StringSet.empty
+           kept
+       in
+       (* The store rejects a repeated identity outright, so a claim the keeper
+          already wrote during the pass is not appended a second time. *)
+       let added, _ =
+         List.fold_left
+           (fun (acc, seen) fact ->
+              let identity = memory_id fact in
+              if Set_util.StringSet.mem identity seen
+              then acc, seen
+              else fact :: acc, Set_util.StringSet.add identity seen)
+           ([], kept_ids)
+           new_claims
+       in
+       make_snapshot ~previous ~now ~source ~facts:(kept @ List.rev added) ())
+;;
+
 let replace
       ?clock
       ?dropped_statements

@@ -12,6 +12,7 @@ import { ApiRequestError } from '../api/core'
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import type { DashboardRuntimeProviderSnapshot, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
 import type { KeeperConfig, KeeperHookSlot } from '../types'
+import { SANDBOX_PROFILE_OPTIONS, UNKNOWN_SANDBOX_PROFILE, isGuestSandboxProfile, toSandboxProfile } from '../types'
 import { formatTokens } from '../lib/format-number'
 import {
   PHASE_LABEL_KO,
@@ -320,9 +321,11 @@ export type RuntimeDraft = {
   runtime_id: string
   autoboot_enabled: boolean
   max_context_override: string
-  sandbox_profile: SandboxProfile
+  sandbox_profile: SandboxProfile | null
   mention_targets_text: string
   network_mode: SandboxNetworkMode
+  // '' = no endpoint. Only meaningful under remote_ssh; serialised as null.
+  remote_endpoint: string
   proactive_enabled: boolean
   // Keeper-level autonomous wake prompt; '' = inherit fleet (sent as null)
   skill_selection:
@@ -469,20 +472,11 @@ function retainKeeperConfigPanelSubscriptions(): () => void {
   }
 }
 
-// A value this panel has not been taught used to become 'local' -- the
-// loosest profile -- so a keeper declaring microvm would have been shown, and
-// saved back, as running on the host. Match every known profile by name and
-// keep 'local' for the genuinely absent case only.
-export function coerceSandboxProfile(raw: string | undefined): SandboxProfile {
-  switch (raw) {
-    case 'docker':
-      return 'docker'
-    case 'microvm':
-      return 'microvm'
-    default:
-      return 'local'
-  }
-}
+// The profile parser and the select's option list both read
+// SANDBOX_PROFILE_COVERAGE (types/core.ts), so this panel holds no second copy
+// of the runtime's set. `toSandboxProfile` returns null for a value it cannot
+// name: the old default was 'local', the loosest profile, so a keeper
+// declaring microvm was shown — and saved back — as running on the host.
 
 export function coerceNetworkMode(raw: string | undefined): SandboxNetworkMode {
   return raw === 'none' ? 'none' : 'inherit'
@@ -493,9 +487,10 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     runtime_id: c.execution.selected_runtime_id ?? '',
     autoboot_enabled: c.autoboot_enabled,
     max_context_override: String(c.max_context_override ?? 0),
-    sandbox_profile: coerceSandboxProfile(c.sandbox_profile),
+    sandbox_profile: toSandboxProfile(c.sandbox_profile),
     mention_targets_text: c.workspace.mention_targets.join('\n'),
     network_mode: coerceNetworkMode(c.network_mode),
+    remote_endpoint: c.remote_endpoint ?? '',
     proactive_enabled: proactiveConfigValue(c),
     skill_selection: c.skills.names === null
       ? { mode: 'all', prior_names_text: '' }
@@ -529,6 +524,9 @@ export function rebaseRuntimeDraftOnFreshConfig(
     rebased.mention_targets_text = draft.mention_targets_text
   }
   if (draft.network_mode !== base.network_mode) rebased.network_mode = draft.network_mode
+  if (draft.remote_endpoint !== base.remote_endpoint) {
+    rebased.remote_endpoint = draft.remote_endpoint
+  }
   if (draft.proactive_enabled !== base.proactive_enabled) {
     rebased.proactive_enabled = draft.proactive_enabled
   }
@@ -957,26 +955,49 @@ export function keeperConfigControlInventory(
   }
 }
 
+/** The control an operator has to change to clear a build failure. The panel
+ *  renders the message under exactly this control; without it every message
+ *  landed on the 컨텍스트 오버라이드 input, which was the only failure producer
+ *  when the single error channel was written. */
+export type RuntimePayloadControl =
+  | 'max_context_override'
+  | 'sandbox_profile'
+  | 'remote_endpoint'
+
+/** A failed build still reports `payload` — the edits the draft could express.
+ *  It is never sent (both `saveRuntimeConfig` and {@link buildRuntimePayload}
+ *  branch on `ok` first); it exists so the dirty markers and the save footer
+ *  read one field in both outcomes instead of special-casing whichever control
+ *  happens to be the failing one. */
 export type RuntimePayloadBuildResult =
   | { ok: true; payload: KeeperConfigUpdatePayload }
-  | { ok: false; error: string }
+  | { ok: false; control: RuntimePayloadControl; error: string; payload: KeeperConfigUpdatePayload }
 
 export function buildRuntimePayloadResult(
   draft: RuntimeDraft,
   orig: KeeperConfig,
 ): RuntimePayloadBuildResult {
   const maxContextOverride = parseMaxContextOverrideDraft(draft.max_context_override)
-  if (!maxContextOverride.ok) return maxContextOverride
+  const profile = draft.sandbox_profile
+  const endpointDraft = draft.remote_endpoint.trim()
+  const endpointOrig = (orig.remote_endpoint ?? '').trim()
+
   const payload: KeeperConfigUpdatePayload = {}
   const newMentionTargets = listTextToStrings(draft.mention_targets_text)
   if (draft.runtime_id.trim() !== (orig.execution.selected_runtime_id ?? '').trim()) payload.runtime_id = draft.runtime_id.trim()
   if (draft.autoboot_enabled !== orig.autoboot_enabled) payload.autoboot_enabled = draft.autoboot_enabled
-  if (maxContextOverride.value !== orig.max_context_override) {
+  if (maxContextOverride.ok && maxContextOverride.value !== orig.max_context_override) {
     payload.max_context_override = maxContextOverride.value
   }
   if (!sameStringArray(newMentionTargets, orig.workspace.mention_targets)) payload.mention_targets = newMentionTargets
-  if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
+  if (profile !== null && profile !== toSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = profile
   if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
+  // null is an explicit detach. Leaving the field out instead carries the
+  // keeper TOML's endpoint into the new profile, which the runtime refuses
+  // with remote_endpoint_requires_remote_ssh.
+  if (endpointDraft !== endpointOrig) {
+    payload.remote_endpoint = endpointDraft === '' ? null : endpointDraft
+  }
   if (draft.proactive_enabled !== proactiveConfigValue(orig)) payload.proactive_enabled = draft.proactive_enabled
   if (draft.skill_selection.mode === 'all') {
     if (orig.skills.names !== null) payload.skills = {}
@@ -984,6 +1005,40 @@ export function buildRuntimePayloadResult(
     const names = listTextToStrings(draft.skill_selection.names_text)
     if (orig.skills.names === null || !sameStringArray(names, orig.skills.names)) {
       payload.skills = { names }
+    }
+  }
+
+  if (!maxContextOverride.ok) {
+    return { ok: false, control: 'max_context_override', error: maxContextOverride.error, payload }
+  }
+  if (profile === null) {
+    return {
+      ok: false,
+      control: 'sandbox_profile',
+      error: '샌드박스 프로필을 읽지 못했습니다. 새로 고친 뒤 다시 선택해 주세요.',
+      payload,
+    }
+  }
+  if (profile === 'remote_ssh' && endpointDraft === '') {
+    return {
+      ok: false,
+      control: 'remote_endpoint',
+      error:
+        'remote_ssh 는 remote_endpoint 가 있어야 합니다. runtime.toml 의 [exec.ssh.endpoints.<이름>] 에 등록된 이름을 넣어 주세요.',
+      payload,
+    }
+  }
+  // Keeper_turn_up_args.parse refuses the whole update with
+  // remote_endpoint_requires_remote_ssh when a non-remote_ssh profile still
+  // carries an endpoint — including an update that only flips autoboot. The
+  // endpoint has to be cleared first, so the panel says so instead of sending
+  // a request the runtime is certain to reject.
+  if (profile !== 'remote_ssh' && endpointDraft !== '') {
+    return {
+      ok: false,
+      control: 'remote_endpoint',
+      error: `remote_endpoint 는 remote_ssh 에서만 쓸 수 있습니다. ${profile} 로 저장하려면 먼저 비워 주세요.`,
+      payload,
     }
   }
   return { ok: true, payload }
@@ -1002,10 +1057,19 @@ function updateRuntimeDraft(field: keyof RuntimeDraft, value: boolean | number |
   // 'none' belongs to the guest profiles. Testing against 'docker' alone put
   // a microvm keeper back on 'inherit', which container cannot honour at all:
   // it has no host network, so the keeper would have been saved with a mode
-  // its own backend refuses.
-  const isGuest = next.sandbox_profile === 'docker' || next.sandbox_profile === 'microvm'
+  // its own backend refuses. The answer now comes from
+  // SANDBOX_PROFILE_IS_GUEST (types/core.ts), which a new profile cannot be
+  // added to the union without answering.
+  const isGuest = isGuestSandboxProfile(next.sandbox_profile)
   if ((field === 'sandbox_profile' || field === 'network_mode') && !isGuest && next.network_mode === 'none') {
     next.network_mode = 'inherit'
+  }
+  // The endpoint names an [exec.ssh.endpoints.<name>] entry only the SSH
+  // dispatch reads. Carrying it into another profile is refused at config load
+  // (remote_endpoint_requires_remote_ssh), so switching away clears it here and
+  // the payload sends null rather than leaving the field out.
+  if (field === 'sandbox_profile' && next.sandbox_profile !== 'remote_ssh') {
+    next.remote_endpoint = ''
   }
   runtimeDraft.value = { ...state, draft: next }
 }
@@ -1058,16 +1122,22 @@ function listTextToStrings(text: string): string[] {
 
 function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<string, boolean> {
   const result = buildRuntimePayloadResult(rd, c)
-  const payload = result.ok ? result.payload : {}
+  // The payload carries every expressible edit whether or not the build
+  // succeeded, so a control blocked by another control's error still shows its
+  // dirty marker.
+  const payload = result.payload
   return {
     runtime_id: 'runtime_id' in payload,
     autoboot_enabled: 'autoboot_enabled' in payload,
-    max_context_override: result.ok
-      ? 'max_context_override' in payload
-      : rd.max_context_override !== String(c.max_context_override ?? 0),
+    // An unparseable draft ('abc') cannot reach the payload at all, so its
+    // marker falls back to comparing the raw text.
+    max_context_override:
+      'max_context_override' in payload
+      || rd.max_context_override !== String(c.max_context_override ?? 0),
     mention_targets: 'mention_targets' in payload,
     sandbox_profile: 'sandbox_profile' in payload,
     network_mode: 'network_mode' in payload,
+    remote_endpoint: 'remote_endpoint' in payload,
     proactive_enabled: 'proactive_enabled' in payload,
     skills: 'skills' in payload,
   }
@@ -1338,12 +1408,40 @@ function SetToggle({ on, onChange, ariaLabel }: { on: boolean; onChange: (v: boo
   `
 }
 
-function ConfigRow({ label, value }: { label: string; value: string }) {
+function ConfigRow({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string
+  value: string
+  tone?: 'neutral' | 'warn'
+}) {
+  const valueClass =
+    tone === 'warn'
+      ? 'text-sm font-semibold text-[var(--color-status-warn)]'
+      : 'text-sm font-semibold text-text-strong'
   return html`
     <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 v2-monitoring-row">
       <span class="text-sm font-medium text-text-muted">${label}</span>
-      <span class="text-sm font-semibold text-text-strong">${value}</span>
+      <span class=${valueClass}>${value}</span>
     </div>
+  `
+}
+
+/* What a Keeper without a network actually looks like from the inside, because
+   the tools do not say it. `gh` cannot reach github.com to check a token, so it
+   reports the token as invalid; a Keeper reads that literally and tells its
+   owner to re-authenticate, which changes nothing. Seen on
+   kidsnote-pr-jira-checker, 2026-09-03: a valid token, the right hosts.yml
+   mounted into the guest, and three rounds of re-authentication. */
+function NoNetworkCallout() {
+  return html`
+    <${Callout}
+      title="이 Keeper 는 네트워크가 없습니다"
+      body="게스트에서 나가는 연결이 전부 막힙니다. gh, curl, git 은 실패하고, gh 는 그 실패를 '토큰이 invalid' 로 보고합니다 — 자격증명이 멀쩡해도 그렇게 보입니다. 인증을 다시 하기 전에 이 값을 먼저 보세요. inherit 으로 바꾸면 sandbox 를 다시 만들어야 반영됩니다."
+      tone="warn"
+    />
   `
 }
 
@@ -1478,30 +1576,93 @@ function InlineContextOverrideRow({ value, onChange, error, dirty = false }: {
   `
 }
 
+/** The error line for a control that has no error slot of its own. Renders
+ *  nothing for `null`, so a control without a failure carries no empty row. */
+function InlineControlError(message: string | null) {
+  if (message === null) return null
+  return html`
+    <div class="kcf-inline-error -mt-1 mb-2 px-4 text-2xs text-[var(--color-status-err)]" role="alert">${message}</div>
+  `
+}
+
+/** A labelled `<select>` over a closed option list.
+ *
+ *  When `value` is not one of `options`, a disabled placeholder option carrying
+ *  that value is rendered first and stays selected. Without it the browser
+ *  selects index 0, so a keeper whose sandbox_profile could not be read was
+ *  displayed as 'docker' — and 'docker' was then unpickable, because selecting
+ *  the option already showing fires no change event and the draft stayed null.
+ *  The placeholder is disabled because "not read" is not a state the operator
+ *  can choose; it is a state they have to leave. */
 export function InlineSelectRow({
   label,
   value,
   options,
+  placeholder,
   onChange,
   dirty = false,
+  tone = 'neutral',
 }: {
   label: string
   value: string
   options: readonly string[]
+  placeholder?: string
   onChange: (v: string) => void
   dirty?: boolean
+  tone?: 'neutral' | 'warn'
 }) {
+  const valueIsListed = options.includes(value)
+  const controlClass =
+    tone === 'warn'
+      ? 'kcf-inline-control text-sm bg-[var(--warn-10)] border border-[var(--warn-20)] rounded-[var(--r-1)] px-3 py-1.5 text-[var(--color-status-warn)] font-semibold'
+      : 'kcf-inline-control text-sm bg-card/60 border border-card-border rounded-[var(--r-1)] px-3 py-1.5 text-text-strong'
   return html`
     <div class="kcf-inline-row flex items-center justify-between py-2.5 px-4 rounded-[var(--r-4)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 gap-3 v2-monitoring-row">
       <span class="text-sm font-medium text-text-muted">${label}${dirty ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</span>
       <select
         aria-label=${label}
-        class="kcf-inline-control text-sm bg-card/60 border border-card-border rounded-[var(--r-1)] px-3 py-1.5 text-text-strong"
+        class=${controlClass}
         value=${value}
         onChange=${(e: Event) => onChange((e.target as HTMLSelectElement).value)}
       >
+        ${valueIsListed
+          ? null
+          : html`<option value=${value} disabled>${placeholder ?? '(고르지 않음)'}</option>`}
         ${options.map(option => html`<option value=${option}>${option}</option>`)}
       </select>
+    </div>
+  `
+}
+
+export function InlineTextRow({
+  label,
+  value,
+  placeholder,
+  hint,
+  onChange,
+  dirty = false,
+}: {
+  label: string
+  value: string
+  placeholder?: string
+  hint?: string
+  onChange: (v: string) => void
+  dirty?: boolean
+}) {
+  return html`
+    <div class="kcf-inline-row py-2.5 px-4 rounded-[var(--r-4)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 mb-2 v2-monitoring-row">
+      <div class="flex items-center justify-between gap-3">
+        <span class="text-sm font-medium text-text-muted">${label}${dirty ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</span>
+        <input
+          type="text"
+          aria-label=${label}
+          placeholder=${placeholder ?? ''}
+          class="kcf-inline-control w-48 text-sm bg-card/60 border border-card-border rounded-[var(--r-1)] px-3 py-1.5 text-text-strong"
+          value=${value}
+          onInput=${(event: Event) => onChange((event.target as HTMLInputElement).value)}
+        />
+      </div>
+      ${hint ? html`<div class="mt-1 text-2xs text-text-dim">${hint}</div>` : null}
     </div>
   `
 }
@@ -1681,10 +1842,19 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   const runtimeValidationError = runtimePayloadResult && !runtimePayloadResult.ok
     ? runtimePayloadResult.error
     : null
+  // The message belongs under the control that has to change. Every other
+  // control renders no error, so a valid field never carries someone else's.
+  const runtimeErrorFor = (control: RuntimePayloadControl): string | null =>
+    runtimePayloadResult && !runtimePayloadResult.ok && runtimePayloadResult.control === control
+      ? runtimePayloadResult.error
+      : null
+  // A failed build has no payload to size, so the footer keys on whether the
+  // operator has edited anything at all. Keying it on max_context_override
+  // alone hid the footer for the sandbox and endpoint failures.
   const runtimeHasChanges = runtimeCanEdit && rd && runtimePayloadResult
     ? runtimePayloadResult.ok
       ? Object.keys(runtimePayloadResult.payload).length > 0
-      : dirtyFlags.max_context_override === true
+      : Object.values(dirtyFlags).some(flag => flag === true)
     : false
   const runtimeOptions = rd
     ? dedupeStrings([
@@ -2108,7 +2278,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         <${InlineContextOverrideRow}
           value=${rd.max_context_override}
           onChange=${(value: string) => updateRuntimeDraft('max_context_override', value)}
-          error=${runtimeValidationError}
+          error=${runtimeErrorFor('max_context_override')}
           dirty=${dirtyFlags.max_context_override} />
       ` : html`
         <${ConfigRow} label="컨텍스트 오버라이드" value=${c.max_context_override != null ? formatTokens(c.max_context_override) : MISSING_DATA_DASH} />
@@ -2203,31 +2373,68 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     ${rd && runtimeCanEdit ? html`
       <${InlineSelectRow}
         label="sandbox_profile"
-        value=${rd.sandbox_profile}
-        options=${['local', 'docker', 'microvm'] as const}
+        value=${rd.sandbox_profile ?? ''}
+        options=${SANDBOX_PROFILE_OPTIONS}
+        placeholder="(읽지 못함)"
         onChange=${(value: string) => updateRuntimeDraft('sandbox_profile', value as SandboxProfile)}
         dirty=${dirtyFlags.sandbox_profile}
       />
-      ${(c.sandbox_profile === 'docker' || c.sandbox_profile === 'microvm') && rd.sandbox_profile === 'local' ? html`
+      ${InlineControlError(runtimeErrorFor('sandbox_profile'))}
+      <!-- Two different things land here and the operator needs to tell them
+           apart. The server omits sandbox_profile entirely when the keeper's
+           profile fails to load (the 200 + config_error body), and
+           normalizeKeeperConfig fills UNKNOWN_SANDBOX_PROFILE in its place —
+           quoting that back as "the server sent" named a string the server
+           never wrote. Anything else in this state is a value the server did
+           send and this bundle does not know. -->
+      ${rd.sandbox_profile === null ? html`
         <${Callout}
-          title="격리 해제 경고"
-          body=${`${c.sandbox_profile} → local 전환은 격리를 해제하고 호스트에서 바로 실행합니다.`}
+          title="sandbox_profile 을 읽지 못했습니다"
+          body=${(c.sandbox_profile === undefined || c.sandbox_profile === UNKNOWN_SANDBOX_PROFILE
+            ? '서버 응답에 sandbox_profile 이 없습니다. 이 keeper 의 프로필 파일을 읽는 데 실패했을 때 그렇습니다 — 위쪽 설정 오류를 먼저 보세요.'
+            : `서버가 보낸 값은 ${c.sandbox_profile} 인데, 이 화면이 아는 프로필이 아닙니다.`)
+            + ` ${SANDBOX_PROFILE_OPTIONS.join(', ')} 중 하나를 고르기 전에는 저장되지 않습니다.`}
+          tone="warn"
+        />
+      ` : null}
+      <!-- The row also has to appear for a keeper whose profile is not
+           remote_ssh but whose TOML still carries an endpoint: the runtime
+           refuses every save for that pairing, so hiding the field named in
+           the refusal left the operator with nothing to change. The read-only
+           branch below has always shown it on the same condition. -->
+      ${rd.sandbox_profile === 'remote_ssh' || c.remote_endpoint ? html`
+        <${InlineTextRow}
+          label="remote_endpoint"
+          value=${rd.remote_endpoint}
+          placeholder="builder"
+          hint="runtime.toml 의 [exec.ssh.endpoints.<이름>] 에 등록된 이름. 등록되지 않은 이름은 저장할 때 거절됩니다."
+          onChange=${(value: string) => updateRuntimeDraft('remote_endpoint', value)}
+          dirty=${dirtyFlags.remote_endpoint}
+        />
+        ${InlineControlError(runtimeErrorFor('remote_endpoint'))}
+      ` : null}
+      ${rd.sandbox_profile === 'remote_ssh' ? html`
+        <${Callout}
+          title="remote_ssh 는 원격 호스트에서 실행합니다"
+          body="이 keeper 의 명령은 remote_endpoint 가 가리키는 호스트에서 돌아갑니다. 매번 버리는 게스트가 아니라 그 호스트의 계정을 그대로 씁니다. network_mode 는 inherit 하나만 받습니다 — none 으로 적은 TOML 은 설정을 읽는 단계에서 remote_ssh_no_network_mode 로 거절됩니다. docker 쪽 격리 설정은 이 프로필에 적용되지 않습니다."
           tone="warn"
         />
       ` : null}
       <${InlineSelectRow}
         label="network_mode"
         value=${rd.network_mode}
-        options=${rd.sandbox_profile === 'docker' || rd.sandbox_profile === 'microvm'
+        options=${isGuestSandboxProfile(rd.sandbox_profile)
           ? ['inherit', 'none'] as const
           : ['inherit'] as const}
         onChange=${(value: string) => updateRuntimeDraft('network_mode', value as SandboxNetworkMode)}
         dirty=${dirtyFlags.network_mode}
+        tone=${rd.network_mode === 'none' ? 'warn' : 'neutral'}
       />
+      ${rd.network_mode === 'none' ? html`<${NoNetworkCallout} />` : null}
       <div class="kcf-paths">
         <span class="kcf-path-eff mono">sandbox: ${(c.sandbox_roots ?? []).join(', ')}</span>
       </div>
-      ${rd.sandbox_profile === 'docker' || rd.sandbox_profile === 'microvm' ? html`
+      ${isGuestSandboxProfile(rd.sandbox_profile) ? html`
         <${SetupGuideCard} connectorId="sandbox_hardened" />
       ` : null}
       ${rd.sandbox_profile === 'microvm' ? html`
@@ -2238,8 +2445,14 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         />
       ` : null}
     ` : html`
-      <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? 'local'} />
-      <${ConfigRow} label="network_mode" value=${c.network_mode ?? 'inherit'} />
+      <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? '(미선언)'} />
+      ${c.remote_endpoint ? html`<${ConfigRow} label="remote_endpoint" value=${c.remote_endpoint} />` : null}
+      <${ConfigRow}
+        label="network_mode"
+        value=${c.network_mode ?? 'inherit'}
+        tone=${(c.network_mode ?? 'inherit') === 'none' ? 'warn' : 'neutral'}
+      />
+      ${(c.network_mode ?? 'inherit') === 'none' ? html`<${NoNetworkCallout} />` : null}
 
       <${ConfigRow} label="sandbox_roots" value=${(c.sandbox_roots ?? []).join(', ')} />
     `}

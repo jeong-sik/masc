@@ -127,6 +127,20 @@ let test_no_capable_runtime_floor () =
        (decide ~assigned:(caps ()) ~required:[ "image" ]
           ~candidates:[ ("text_b", caps ()); ("audio_c", caps ~audio:true ()) ]))
 
+(* Regression #33034: a deferred runtime lane commits to a single budgeted
+   candidate, so [Keeper_turn_driver] resolves no remaining candidates and this
+   decision runs with [candidates = []]. An image turn on a text-only committed
+   candidate must land on the [No_capable_runtime] degrade floor — strip the
+   media and run text-only — never a reroute (nowhere to go) and never the hard
+   multimodal gate. Before the fix the deferred-lane branch short-circuited to
+   [No_reroute_needed], which skipped the degrade and let the image dispatch to
+   the text-only candidate and fail at the gate. *)
+let test_no_candidate_image_hits_degrade_floor () =
+  check string "empty candidates image → degrade floor"
+    "no_capable:image"
+    (decision_to_string
+       (decide ~assigned:(caps ()) ~required:[ "image" ] ~candidates:[]))
+
 (* Regression: when no configured runtime can accept media, the final floor gate
    must validate prior history too. Otherwise a text-only follow-up after a
    vision turn leaks image history to the provider and fails as a provider 400
@@ -457,6 +471,8 @@ let () =
             test_initial_message_media_drives_reroute
         ; test_case "candidate order honored" `Quick test_candidate_order_is_honored
         ; test_case "no capable floor" `Quick test_no_capable_runtime_floor
+        ; test_case "empty candidates image → degrade floor" `Quick
+            test_no_candidate_image_hits_degrade_floor
         ; test_case "history media floor rejects before provider" `Quick
             test_history_media_floor_rejects_before_provider
         ; test_case "checkpoint media drives reroute and floor" `Quick

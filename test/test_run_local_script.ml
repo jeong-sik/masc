@@ -100,6 +100,10 @@ let dashboard_test_path () =
        []
   |> String.concat ":"
 
+let rec waitpid_retrying pid =
+  try Unix.waitpid [] pid with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_retrying pid
+
 let run_process ?(env = []) ?(unset_env = []) ~cwd prog argv =
   let out = Filename.temp_file "run-local-out" ".txt" in
   let err = Filename.temp_file "run-local-err" ".txt" in
@@ -118,7 +122,7 @@ let run_process ?(env = []) ?(unset_env = []) ~cwd prog argv =
           (env_array ~unset_env env)
           Unix.stdin out_fd err_fd)
   in
-  let _, status = Unix.waitpid [] pid in
+  let _, status = waitpid_retrying pid in
   let code =
     match status with
     | Unix.WEXITED code -> code

@@ -2,6 +2,78 @@
 
 ## Unreleased
 
+## [0.30.0] - 2026-09-04
+
+- **The install wizard detects what is ready before it asks.** The setup
+  catalog no longer dies on a provider it cannot resolve (#32852) and now offers
+  subscription CLIs — Claude Code, Codex, Antigravity — beside HTTP providers
+  (#32857). It reports which local model servers are actually running (#32868)
+  and which execution sandboxes the host can offer — docker, microvm via Apple's
+  `container` CLI, remote_ssh (#32884). When there is no terminal it uses the one
+  source that is ready rather than error or skip (#32914), and the menu default
+  lands on a ready source instead of a dead one (#32903).
+- **A subscription is shown as signed in, not just installed.** `masc
+  runtime-probe <runtime_id>` reports whether a Claude Code or Codex CLI is
+  actually signed in, reusing the server's own login probe rather than parsing
+  credential files, and the wizard uses it to distinguish "installed" from
+  "signed in" (#32897).
+- **Connecting an MCP client is one command.** `masc mcp-config
+  [--client env|codex|claude-desktop]` mints a bearer and prints a ready client
+  config block, so a client connects without hand-wiring the URL, token, and
+  header (#32907).
+- **The README and RFC-0408 match what shipped.** The README documents the
+  first-run detection and the one-command MCP setup (#32901, #32907); RFC-0408
+  is marked implemented and its sandbox premise corrected to what the code does
+  (#32919).
+
+## [0.29.1] - 2026-09-03
+
+- **The release gate runs again.** Four scenarios in the release evidence
+  bundle were red, and every one of them was a test that had never passed:
+  owner fixtures and prompt prose pinned what the product had deliberately
+  changed (#32695), the verification surface tests stood their producer on
+  Docker while the release job builds no daemon or image (#32710), the owner
+  suite gated on that same daemon (#32719), and the speak-gate test ran in a
+  runtime that could not speak, so it measured the text fallback instead of
+  the Gate (#32723). Two main breakages were repaired alongside them: an
+  unclosed paren in the replay body and a field label two records had come to
+  share (#32676, #32694), and a cancelled-fiber pattern that needed
+  parentheses (#32684).
+- **A verifier reads the producer it is judging.** The verification lookup
+  reached no producer at all: a microvm keeper's tree was refused as
+  unreachable, and a workspace producer — which declares no sandbox profile by
+  design — could not get a surface once the profile became mandatory (#32710).
+- **A Keeper carries the tools its profile names.** Nineteen rarely-needed
+  tools move behind the listing (#32711), the ask family is deferred and the
+  prefix vocabulary closes (#32718), a Keeper takes the attached tools its
+  profile names rather than every tool its services offer (#32679), and the
+  tool surface takes public names instead of reaching into the Keeper domain
+  (#32677, #32699).
+- **The Gate reviews what it can replay.** An approved speak is replayed by
+  the host and listen never queues a request, because an approval cycle
+  outlives the microphone window (#32668); the deferred wording promises only
+  what the replay engine supports (#32674); the observation fast path reads
+  the typed sandbox profile instead of wire strings (#32672); an observation
+  script runs a read-only argv table (#32705, RFC-0404).
+- **The chat and the TUI.** A line typed while another waits joins it instead
+  of queueing behind (#32682); a skill row is always full rather than behind
+  the tool toggle (#32685); an attempt boundary drops the unfinished stretch,
+  not the whole turn's speech (#32693); an Execute row's subject can be a
+  shell line as well as argv (#32692); the chrome becomes a library so a
+  surface can leave the god file (#32728).
+- **Providers and runtime.** The DashScope provider kind is removed and the
+  Qwen id it had overwritten is restored (#32709), and the top-level
+  `enable_thinking` wire form goes with it (#32713). A host stop carries the
+  assistant usage sum and logs the stop as designed (#32687); the segment
+  accumulator keeps a fingerprint it was given (#32688); a turn that routed
+  something still says what it dropped (#32717); three wildcard catches stop
+  answering for a cancelled fiber (#32680); a refused tool call says which
+  name it refused (#32706); the health probe reports the transition rather
+  than the steady state (#32707).
+- **The campaign runner survives a rate limit.** HTTP 429 is treated as
+  "later", every rejection is recorded, and the call retries within a budget —
+  r8 run1 had died on its first 429 (#32673).
+
 ## [0.29.0] - 2026-09-02
 
 - **Tool calls read as trees.** A call's JSON arrives as structure and the

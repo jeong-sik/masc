@@ -29,6 +29,34 @@ val draft_for : draft option -> row:Masc.Tui_decode.ask_row -> draft
 val response_for :
   draft -> question:Masc.Tui_decode.ask_question -> draft_response option
 
+val summarize_answer : draft -> row:Masc.Tui_decode.ask_row -> string
+(** A human line for what the draft answers, in the labels the operator saw
+    (never choice ids): chosen labels joined per question, a written answer
+    quoted, a skipped question named. Empty when nothing is answered yet, so a
+    caller can fall back to the Keeper name alone. *)
+
+val open_rows :
+  Masc.Tui_decode.asks_snapshot -> Masc.Tui_decode.ask_row list
+(** The asks still waiting on a human, in wire order. The panel, its footer,
+    and the executable all walk this list; a second copy of the predicate is
+    how the cursor and the drawn rows come to disagree about which ask is
+    selected. *)
+
+val newly_opened_ask_ids :
+  previous:Masc.Tui_decode.asks_snapshot option ->
+  current:Masc.Tui_decode.asks_snapshot ->
+  string list
+(** Ask ids open in [current] but not in [previous] — the questions that
+    arrived since the last read. A re-read of the same asks, and a first read
+    (no previous), both return none, so a caller rings once per new question
+    rather than once per poll or once at start-up. *)
+
+val should_ring_for_new_ask :
+  new_ids:string list -> operator_is_watching_asks:bool -> bool
+(** Whether an arrival should ring: something arrived ([new_ids] non-empty) and
+    the operator is not already watching the asks surface. The watching flag is
+    the caller's to compute from the surface (and later window focus). *)
+
 val toggle_choice :
   draft ->
   question:Masc.Tui_decode.ask_question ->
@@ -48,6 +76,13 @@ val free_text_slot : Masc.Tui_decode.ask_question -> free_text_slot option
     server would refuse. *)
 
 val free_text_hint : free_text_slot -> string option
+
+val free_text_question_id : free_text_slot -> string
+(** Which question the slot writes to. The editor holds a slot while the
+    operator types, and the panel has to know which row to draw the caret
+    on; reading it back here keeps the answer in one place rather than
+    storing the id a second time beside the slot. *)
+
 val set_text : draft -> slot:free_text_slot -> text:string -> draft
 (** Blank text clears the response instead of recording it: the domain rejects
     a blank write, and an editor emptied by backspaces means unanswered. *)

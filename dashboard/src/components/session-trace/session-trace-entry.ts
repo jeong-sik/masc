@@ -6,7 +6,6 @@ import { useSignal } from '@preact/signals'
 import { JsonViewerCard, parseJsonLikeData } from '../common/json-viewer'
 import { TimeAgo } from '../common/time-ago'
 import { Markdown } from '../common/markdown'
-import { ProgressBar } from '../common/progress-bar'
 import { truncate } from '../../lib/truncate'
 import { asNullableString, asRecord, extractCodeLocation, type CodeLocation } from '../common/normalize'
 import { deriveTokPerSec, formatCost, formatMsCompact, formatTokPerSec } from '../../lib/format-number'
@@ -28,7 +27,6 @@ const TRACE_TONE = {
   brassText: 'text-[var(--color-brass-fg)]',
   brassPanel: 'bg-[var(--color-brass-soft)] border border-[var(--color-brass-border)]',
   infoText: 'text-[var(--color-info-fg)]',
-  infoFill: 'bg-[var(--color-info-fg)]',
   infoPanel: 'bg-[var(--color-info-soft)] border border-[var(--color-info-border)]',
 } as const
 
@@ -126,7 +124,6 @@ const KIND_STYLES: Record<TraceEventKind, KindStyle> = {
   thinking:   { icon: '\u{1F4AD}', color: TRACE_TONE.infoText, label: '내부 사고' },
   agent_core_tool:   { icon: 'O', color: 'text-[var(--amber-bright)]', label: 'Agent Core 도구' },
   agent_core_turn:   { icon: 'R', color: 'text-[var(--rose-light)]', label: 'Agent Core 턴' },
-  agent_core_context: { icon: 'C', color: TRACE_TONE.infoText, label: 'Agent Core 압축' },
 }
 
 // Use shared tool category from tool-call-shared (SSOT)
@@ -344,7 +341,6 @@ function traceRouteSurface(event: UnifiedTraceEvent): string {
   if (event.kind === 'tool_call') return 'Tool'
   if (event.kind === 'agent_core_tool') return 'Tool'
   if (event.kind === 'agent_core_turn') return 'Turn'
-  if (event.kind === 'agent_core_context') return 'Context'
   return KIND_STYLES[event.kind]?.label ?? event.kind
 }
 
@@ -628,37 +624,6 @@ function AgentCoreDetail({ event }: { event: UnifiedTraceEvent }) {
     `
   }
 
-  // ── Agent Core context compaction ──
-  if (event.kind === 'agent_core_context') {
-    const before = typeof d.before_tokens === 'number' ? d.before_tokens : null
-    const after = typeof d.after_tokens === 'number' ? d.after_tokens : null
-    const saved = before != null && after != null ? before - after : null
-    const ratio = before != null && after != null && before > 0 ? ((saved ?? 0) / before * 100) : null
-    const compactPhase = typeof d.phase === 'string' ? d.phase : ''
-    return html`
-      <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] ${TRACE_TONE.infoPanel} space-y-2">
-        <div class="flex items-center gap-3 text-xs">
-          ${before != null ? html`<span><span class="text-[var(--color-fg-disabled)]">Before:</span> <span class="font-mono">${before.toLocaleString()}</span></span>` : null}
-          <span class="text-[var(--color-fg-disabled)]">→</span>
-          ${after != null ? html`<span><span class="text-[var(--color-fg-disabled)]">After:</span> <span class="font-mono">${after.toLocaleString()}</span></span>` : null}
-        </div>
-        ${saved != null && saved > 0 ? html`
-          <div class="flex items-center gap-2">
-            <${ProgressBar}
-              pct=${ratio ?? 0}
-              size="md"
-              trackTone="muted"
-              trackClass="flex-1"
-              class=${TRACE_TONE.infoFill}
-            />
-            <span class="text-3xs font-mono ${TRACE_TONE.infoText}">-${saved.toLocaleString()}tok (${(ratio ?? 0).toFixed(0)}%)</span>
-          </div>
-        ` : null}
-        ${compactPhase ? html`<div class="text-3xs text-[var(--color-fg-disabled)]">단계: ${compactPhase}</div>` : null}
-      </div>
-    `
-  }
-
   // ── Lifecycle with durable_kind ──
   const durableKind = typeof d.durable_kind === 'string' ? d.durable_kind : ''
 
@@ -793,7 +758,6 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
     || event.kind === 'thinking'
     || event.kind === 'agent_core_tool'
     || event.kind === 'agent_core_turn'
-    || event.kind === 'agent_core_context'
     || (event.kind === 'lifecycle' && event.detail.durable_kind)
     || contextLinks.length > 0
 
@@ -867,7 +831,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
         ${event.kind === 'broadcast' ? html`<${BroadcastDetail} event=${event} />` : null}
         ${event.kind === 'task' ? html`<${TaskDetail} event=${event} />` : null}
         ${event.kind === 'thinking' ? html`<${ThinkingDetail} event=${event} />` : null}
-        ${event.kind === 'agent_core_tool' || event.kind === 'agent_core_turn' || event.kind === 'agent_core_context'
+        ${event.kind === 'agent_core_tool' || event.kind === 'agent_core_turn'
           || (event.kind === 'lifecycle' && event.detail.durable_kind)
           ? html`<${AgentCoreDetail} event=${event} />`
           : null}

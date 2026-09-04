@@ -1256,9 +1256,9 @@ let set_turn_phase_direct ~base_path name ~event_kind (turn_phase : packed_turn_
 let set_turn_phase_with ~base_path name ~event_kind ~target ~update_obs =
   (* RFC-0072 Phase 4b + Phase 5 variant: resolve the turn_phase transition
      and let the caller apply additional observation mutations atomically in
-     the same CAS.  This keeps multi-field setters (gate rejection,
-     compaction retry) on the same resolver / guard / broadcast pathway as
-     [set_turn_phase] instead of calling the legacy
+     the same CAS.  This keeps multi-field setters (gate rejection) on the
+     same resolver / guard / broadcast pathway as [set_turn_phase] instead
+     of calling the legacy
      [validate_turn_phase_transition] directly.  Idempotent self-loops are
      no-ops and do not emit a broadcast, matching [set_turn_phase].  The
      [event_kind] label is forwarded to [raise_turn_phase_transition_violation]

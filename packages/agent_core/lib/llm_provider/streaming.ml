@@ -214,7 +214,7 @@ let sse_event_is_first_token_signal (e : sse_event) : bool =
   | SSEUnsupportedResponse _
   | Connected
   | Timeout _
-  | StreamIncomplete _ -> false
+  | StreamIncomplete _ | StreamRepeating _ -> false
 ;;
 
 let sse_event_is_deliverable_progress_signal (e : sse_event) : bool =
@@ -242,7 +242,7 @@ let sse_event_is_deliverable_progress_signal (e : sse_event) : bool =
   | SSEUnsupportedResponse _
   | Connected
   | Timeout _
-  | StreamIncomplete _ -> false
+  | StreamIncomplete _ | StreamRepeating _ -> false
 ;;
 
 (** Emit synthetic SSE events from a complete [api_response].
@@ -802,11 +802,21 @@ type openai_stream_state =
   ; mutable next_block_index : int
   ; mutable thinking_state : thinking_state
   ; mutable gemini_message_model : Model_id.t option
+  ; inline_reasoning : Inline_reasoning_split.state option
+    (** Present only for a model that declares [template_parser]: its content
+        channel also carries reasoning wrapped in tags, and drawing that as
+        speech is what put a wall of thinking where the reply belonged. A
+        model that does not declare it keeps every byte of its content. *)
   ; provider : string
   ; model : string
   }
 
-let create_openai_stream_state ?(provider = "") ?(model = "") () =
+let create_openai_stream_state
+      ?(provider = "")
+      ?(model = "")
+      ?(inline_reasoning = false)
+      ()
+  =
   { thinking_block_started = false
   ; thinking_block_index = -1
   ; text_block_started = false
@@ -817,6 +827,8 @@ let create_openai_stream_state ?(provider = "") ?(model = "") () =
   ; next_block_index = 0
   ; thinking_state = Not_thinking
   ; gemini_message_model = None
+  ; inline_reasoning =
+      (if inline_reasoning then Some (Inline_reasoning_split.create ()) else None)
   ; provider
   ; model
   }
@@ -1130,31 +1142,33 @@ let project_openai_chunk ?tx (state : openai_stream_state) (chunk : openai_chunk
   let emit evt = events := evt :: !events in
   let telemetry_event = ref None in
   (* Reasoning content delta — emitted before text *)
+  let emit_thinking_delta text =
+    (match state.thinking_state with
+     | Not_thinking -> state.thinking_state <- Thinking_started (Unix.gettimeofday ())
+     | Thinking_started _ | Thinking_done ->
+       (* Already started, or model is re-emitting reasoning after a
+          closure — keep current state. Enumerated explicitly so adding
+          a new [thinking_state] variant forces review of how it should
+          react to a fresh reasoning chunk. *)
+       ());
+    if not state.thinking_block_started
+    then (
+      state.thinking_block_index <- state.next_block_index;
+      emit
+        (ContentBlockStart
+           { index = state.next_block_index
+           ; content_type = "thinking"
+           ; tool_id = None
+           ; tool_name = None
+           });
+      state.thinking_block_started <- true;
+      state.next_block_index <- state.next_block_index + 1);
+    emit
+      (ContentBlockDelta
+         { index = state.thinking_block_index; delta = ThinkingDelta text })
+  in
   (match chunk.delta_reasoning with
-   | Some text when text <> "" ->
-     (match state.thinking_state with
-      | Not_thinking -> state.thinking_state <- Thinking_started (Unix.gettimeofday ())
-      | Thinking_started _ | Thinking_done ->
-        (* Already started, or model is re-emitting reasoning after a
-           closure — keep current state. Enumerated explicitly so adding
-           a new [thinking_state] variant forces review of how it should
-           react to a fresh reasoning chunk. *)
-        ());
-     if not state.thinking_block_started
-     then (
-       state.thinking_block_index <- state.next_block_index;
-       emit
-         (ContentBlockStart
-            { index = state.next_block_index
-            ; content_type = "thinking"
-            ; tool_id = None
-            ; tool_name = None
-            });
-       state.thinking_block_started <- true;
-       state.next_block_index <- state.next_block_index + 1);
-     emit
-       (ContentBlockDelta
-          { index = state.thinking_block_index; delta = ThinkingDelta text })
+   | Some text when text <> "" -> emit_thinking_delta text
    | Some "" ->
      (match state.thinking_state with
       | Thinking_started t0 ->
@@ -1198,22 +1212,35 @@ let project_openai_chunk ?tx (state : openai_stream_state) (chunk : openai_chunk
                 { reasoning_content = delta_reasoning_content; details = delta_details }
           })
    | None -> ());
-  (* Text content delta *)
+  let emit_text_delta text =
+    if not state.text_block_started
+    then (
+      state.text_block_index <- state.next_block_index;
+      emit
+        (ContentBlockStart
+           { index = state.next_block_index
+           ; content_type = "text"
+           ; tool_id = None
+           ; tool_name = None
+           });
+      state.text_block_started <- true;
+      state.next_block_index <- state.next_block_index + 1);
+    emit (ContentBlockDelta { index = state.text_block_index; delta = TextDelta text })
+  in
+  (* Text content delta. A model that declares [template_parser] also puts
+     reasoning in this channel, wrapped in tags; it is separated here so the
+     reply block carries the reply and nothing else. Reasoning goes out ahead
+     of the text it preceded, which is the order it arrived in. *)
   (match chunk.delta_content with
    | Some text when text <> "" ->
-     if not state.text_block_started
-     then (
-       state.text_block_index <- state.next_block_index;
-       emit
-         (ContentBlockStart
-            { index = state.next_block_index
-            ; content_type = "text"
-            ; tool_id = None
-            ; tool_name = None
-            });
-       state.text_block_started <- true;
-       state.next_block_index <- state.next_block_index + 1);
-     emit (ContentBlockDelta { index = state.text_block_index; delta = TextDelta text })
+     (match state.inline_reasoning with
+      | None -> emit_text_delta text
+      | Some split ->
+        let { Inline_reasoning_split.reasoning; text } =
+          Inline_reasoning_split.feed split text
+        in
+        if reasoning <> "" then emit_thinking_delta reasoning;
+        if text <> "" then emit_text_delta text)
    | Some empty_text ->
      let (_ : string) = empty_text in
      ()
@@ -1269,6 +1296,18 @@ let project_openai_chunk ?tx (state : openai_stream_state) (chunk : openai_chunk
           Without this the OpenAI-compat stream leaves tool blocks open and a
           downstream per-message block-index consumer collides on the next
           message's reused index. *)
+       (* Bytes the inline-reasoning splitter was holding back belong to this
+          message. Release them before the blocks close: an unterminated tag
+          means the stream was cut mid-thought, and dropping what it carried
+          would lose the reasoning outright. *)
+       (match state.inline_reasoning with
+        | None -> ()
+        | Some split ->
+          let { Inline_reasoning_split.reasoning; text } =
+            Inline_reasoning_split.flush split
+          in
+          if reasoning <> "" then emit_thinking_delta reasoning;
+          if text <> "" then emit_text_delta text);
        List.iter emit (openai_open_block_stops state);
        emit
          (MessageDelta
@@ -1350,7 +1389,7 @@ let[@warning "-32"] test_tool_use_start_with_name = function
   | SSEUnsupportedResponse _
   | Connected
   | Timeout _
-  | StreamIncomplete _ -> None
+  | StreamIncomplete _ | StreamRepeating _ -> None
 ;;
 
 (* Inline-test-only; the release profile strips the tests that call it. *)
@@ -1372,7 +1411,7 @@ let[@warning "-32"] test_tool_use_start = function
   | SSEUnsupportedResponse _
   | Connected
   | Timeout _
-  | StreamIncomplete _ -> None
+  | StreamIncomplete _ | StreamRepeating _ -> None
 ;;
 
 (* Inline-test-only; the release profile strips the tests that call it. *)
@@ -1394,7 +1433,7 @@ let[@warning "-32"] test_input_json_delta = function
   | SSEUnsupportedResponse _
   | Connected
   | Timeout _
-  | StreamIncomplete _ -> None
+  | StreamIncomplete _ | StreamRepeating _ -> None
 ;;
 
 let%test
@@ -1433,6 +1472,103 @@ let%test
   let deltas = List.filter_map test_input_json_delta events in
   starts = [ 0, Some "list_tasks"; 1, Some "run_shell"; 2, Some "read_file" ]
   && deltas = [ 0, {|{"limit":5}|}; 1, {|{"argv":["git"]}|}; 2, {|{"file_path":"x"}|} ]
+;;
+
+(* Inline-test-only helpers for the inline-reasoning split. *)
+let[@warning "-32"] test_thinking_text = function
+  | ContentBlockDelta { delta = ThinkingDelta s; _ } -> Some s
+  | _ -> None
+;;
+
+let[@warning "-32"] test_reply_text = function
+  | ContentBlockDelta { delta = TextDelta s; _ } -> Some s
+  | _ -> None
+;;
+
+let[@warning "-32"] test_content_chunk ?(finish_reason = None) content =
+  { chunk_id = "c"
+  ; chunk_model = "minimax-m3"
+  ; delta_content = Some content
+  ; delta_reasoning = None
+  ; delta_reasoning_details = None
+  ; delta_tool_calls = []
+  ; finish_reason
+  ; chunk_usage = None
+  ; chunk_timings = None
+  }
+;;
+
+let%test "minimax-m3 declares inline reasoning without losing its reasoning stream" =
+  (* Both halves matter. The declaration is worthless if it does not reach the
+     capability record, and folding it into [reasoning_streaming_format] would
+     displace [Delta_reasoning_details] and cost the model the reasoning it
+     already streams correctly. *)
+  match Capabilities.for_model_id "minimax-m3" with
+  | None -> false
+  | Some caps ->
+    let inline =
+      match caps.Capabilities.content_inline_reasoning with
+      | Capabilities.Think_tags -> true
+      | Capabilities.No_content_inline_reasoning -> false
+    in
+    let stream_intact =
+      match (Reasoning_dialect.of_capabilities caps).streaming with
+      | Reasoning_dialect.Delta_reasoning_details -> true
+      | Reasoning_dialect.No_streaming_reasoning
+      | Reasoning_dialect.Delta_field _
+      | Reasoning_dialect.Template_parser -> false
+    in
+    inline && stream_intact
+;;
+
+let%test "openai_chunk_to_events: a declared template model keeps reasoning out of the reply"
+  =
+  let state = create_openai_stream_state ~inline_reasoning:true () in
+  let events, _ =
+    openai_chunk_to_events state (test_content_chunk "<think>weighing</think>the answer")
+  in
+  List.filter_map test_thinking_text events = [ "weighing" ]
+  && List.filter_map test_reply_text events = [ "the answer" ]
+;;
+
+let%test "openai_chunk_to_events: an undeclared model keeps every byte of its content" =
+  (* The split is a declaration, not a guess about text that looks like a tag. *)
+  let state = create_openai_stream_state () in
+  let events, _ =
+    openai_chunk_to_events state (test_content_chunk "<think>weighing</think>the answer")
+  in
+  List.filter_map test_thinking_text events = []
+  && List.filter_map test_reply_text events = [ "<think>weighing</think>the answer" ]
+;;
+
+let%test "openai_chunk_to_events: a tag split across chunks leaks no fragment" =
+  let state = create_openai_stream_state ~inline_reasoning:true () in
+  let feed content =
+    fst (openai_chunk_to_events state (test_content_chunk content))
+  in
+  (* Bound in order: [@] does not fix the order its arguments are evaluated in,
+     and a stream fed backwards proves nothing. *)
+  let first = feed "<thi" in
+  let second = feed "nk>mid</th" in
+  let third = feed "ink>done" in
+  let events = first @ second @ third in
+  List.filter_map test_thinking_text events = [ "mid" ]
+  && List.filter_map test_reply_text events = [ "done" ]
+;;
+
+let%test "openai_chunk_to_events: a cut thought is released as reasoning at stream end" =
+  (* Every unbalanced block measured on the live fleet was short exactly one
+     closing tag. The held bytes are reasoning, not reply, and not nothing. *)
+  let state = create_openai_stream_state ~inline_reasoning:true () in
+  let opened, _ = openai_chunk_to_events state (test_content_chunk "<think>cut off") in
+  let terminal, _ =
+    openai_chunk_to_events
+      state
+      { (test_content_chunk "") with finish_reason = Some "stop" }
+  in
+  let events = opened @ terminal in
+  List.filter_map test_thinking_text events = [ "cut off" ]
+  && List.filter_map test_reply_text events = []
 ;;
 
 let%test "openai_chunk_to_events: id-less continuation fragment stays in its call's block"

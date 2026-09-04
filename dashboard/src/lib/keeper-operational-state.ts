@@ -392,7 +392,7 @@ export function derivePreferredPhase(
 // 주의 필요 vs 차단 · 확인 필요, 오프라인 vs 중지 · 미기동). All of them
 // now source their top-level label from this table, keyed on the typed
 // `KeeperOperationalState['kind']` so a new kind forces the compiler to
-// flag every consumer. Fine-grained detail axes (압축 중, 인계 중, …)
+// flag every consumer. Fine-grained detail axes (인계 중, …)
 // stay in `lib/fleet-tone.ts` — the coarse 4-state verdict is the
 // primary keyspace here.
 //

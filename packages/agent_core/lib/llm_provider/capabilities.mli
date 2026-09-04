@@ -41,6 +41,14 @@ type assistant_tool_content_format = Capability_vocab.assistant_tool_content_for
   | Assistant_tool_content_null
   | Assistant_tool_content_empty_string
 
+type content_inline_reasoning = Capability_vocab.content_inline_reasoning =
+  | No_content_inline_reasoning
+  | Think_tags
+      (** The model also wraps reasoning in [<think>] tags inside its content
+          channel. Independent of {!reasoning_streaming_format}: a model can do
+          both, and separating them is what keeps a wall of thinking out of the
+          reply. *)
+
 type reasoning_output_format = Capability_vocab.reasoning_output_format =
   | No_reasoning_output_format
   | Split_reasoning_fields
@@ -110,6 +118,7 @@ type capabilities =
         serialization. *)
   ; thinking_control_format : thinking_control_format
   ; preserve_thinking_control_format : preserve_thinking_control_format
+  ; content_inline_reasoning : content_inline_reasoning
   ; reasoning_output_format : reasoning_output_format
   ; reasoning_streaming_format : reasoning_streaming_format
   ; reasoning_replay_override : reasoning_replay_override

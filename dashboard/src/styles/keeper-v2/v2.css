@@ -1140,23 +1140,11 @@
 
 /* keeper sandbox 표시 — git worktree 격리 (브라스) */
 .kcf-top-sandbox { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.04em; color: var(--volt-strong); border: 1px solid var(--volt-dim); background: var(--volt-wash); padding: 2px 9px; border-radius: var(--radius-pill); white-space: nowrap; }
-.fl-sandbox { margin-left: 6px; color: var(--volt-strong); font-size: var(--fs-10); cursor: help; }
-.kp-sandbox { color: var(--volt-strong); font-size: 9.5px; cursor: help; }
 .sub-sandbox { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-mono); font-size: var(--fs-10); color: var(--volt-strong); border: 1px solid var(--volt-dim); background: var(--volt-wash); padding: 1px 7px; border-radius: var(--radius-pill); white-space: nowrap; }
 
 /* nav 라이브 활동 점 — 스트리밍 중 keeper / 진행 중 fusion */
 .nav-live { position: absolute; top: 7px; right: 7px; width: 7px; height: 7px; border-radius: 50%; background: var(--volt-strong); box-shadow: 0 0 7px var(--volt-glow); animation: nav-live-pulse 1.8s ease-in-out infinite; pointer-events: none; }
 @keyframes nav-live-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.65); } }
-
-/* 컴팩트 confirm (context rail) */
-.cmp-confirm { display: flex; flex-direction: column; gap: 9px; padding: 10px 11px; border: 1px solid var(--volt-dim); border-radius: var(--radius-sm); background: var(--volt-wash); }
-.cmp-confirm-q { font-size: 11.5px; line-height: 1.45; color: var(--text-bright); }
-.cmp-confirm-btns { display: flex; gap: 7px; }
-.cmp-confirm-yes, .cmp-confirm-no { font-family: var(--font-ui); font-size: var(--fs-12); padding: 6px 14px; border-radius: var(--radius-xs); cursor: pointer; transition: 0.14s; }
-.cmp-confirm-yes { border: 1px solid var(--volt-strong); background: var(--volt-wash); color: var(--volt-strong); }
-.cmp-confirm-yes:hover { background: color-mix(in oklab, var(--volt) 22%, transparent); color: var(--text-bright); }
-.cmp-confirm-no { border: 1px solid var(--border-main); background: var(--bg-sunken); color: var(--text-dim); }
-.cmp-confirm-no:hover { color: var(--text-bright); }
 
 /* runtime card 사양 (최대 컨텍스트·출력·샘플링) */
 .rtc-spec { font-size: var(--fs-10); color: var(--text-dim); margin-top: 3px; line-height: 1.4; }
@@ -1498,13 +1486,6 @@
 .rail-hb-sep { opacity: 0.5; }
 .rail-hb-note { margin-left: auto; font-size: var(--fs-9); color: var(--text-dim); border: 1px solid var(--border-main); border-radius: var(--radius-pill); padding: 1px 7px; }
 
-/* compaction full-context before/after toggle */
-.cmp-side-toggle { display: flex; gap: 5px; margin-bottom: 9px; }
-.cmp-side { flex: 1; font-family: var(--font-ui); font-size: var(--fs-11); padding: 7px 9px; border-radius: var(--radius-sm); border: 1px solid var(--border-main); background: var(--bg-sunken); color: var(--text-dim); cursor: pointer; transition: 0.14s; }
-.cmp-side:hover { color: var(--text-mid); }
-.cmp-side.on { color: var(--text-bright); border-color: var(--volt-dim); background: var(--volt-wash); }
-.cmp-ctx-pre { max-height: 280px; overflow-y: auto; }
-
 /* ════ MOBILE-ONLY HEADER CONTROLS (rendered only ≤900px via JS) ════ */
 /* feedback voted state + regen tag */
 .fbk-btn.on.up { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 45%, transparent); }
@@ -1627,7 +1608,7 @@
 .bcast-rcpt.acked::before { background: var(--status-ok); box-shadow: 0 0 6px color-mix(in oklab, var(--status-ok) 60%, transparent); }
 .bcast-rcpt.read::before { background: var(--info); }
 
-/* compaction inspector trigger (ctx rail) */
+/* memory inspector trigger (ctx rail) */
 .cmp-open {
   width: 100%; margin-top: 10px; display: flex; align-items: center; gap: 7px;
   font-family: var(--font-ui); font-size: 11.5px; color: var(--text-mid);
@@ -1688,35 +1669,6 @@
   display: flex; flex-direction: column;
 }
 
-/* compaction inspector body */
-.cmp-empty { font-size: 12.5px; line-height: 1.7; color: var(--text-dim); text-align: center; padding: 30px 12px; }
-.cmp-trigger { font-size: var(--fs-12); color: var(--text-mid); margin-bottom: 4px; }
-.cmp-trigger .sub-k { margin-right: 6px; }
-.cmp-headline { display: flex; align-items: center; gap: 10px; font-size: var(--fs-20); margin-bottom: 12px; }
-.cmp-rollback-row { margin: 8px 0 4px; }
-.cmp-rollback { display: inline-flex; align-items: baseline; gap: 8px; font-family: var(--font-ui); font-size: 11.5px; color: var(--text-mid); padding: 7px 12px; border: 1px solid var(--border-main); border-radius: var(--radius-sm); background: var(--bg-sunken); cursor: pointer; transition: 0.16s; }
-.cmp-rollback:hover { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 45%, transparent); background: color-mix(in oklab, var(--status-warn) 10%, transparent); }
-.cmp-rollback-sub { font-size: var(--fs-10); color: var(--text-dim); }
-.cmp-rolled { display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--status-warn); }
-.cmp-regrow { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border-soft); font-size: var(--fs-13); }
-.cmp-regrow .sub-k { color: var(--text-dim); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: 0.1em; }
-.cmp-regrow-now { color: var(--status-warn); }
-.cmp-regrow-lbl { margin-left: auto; font-size: 10.5px; color: var(--text-dim); }
-.cmp-arrow { color: var(--text-dim); }
-.cmp-reduce { margin-left: auto; font-family: var(--font-mono); font-size: var(--fs-13); color: var(--status-ok); border: 1px solid color-mix(in oklab, var(--status-ok) 40%, transparent); background: color-mix(in oklab, var(--status-ok) 10%, transparent); padding: 2px 9px; border-radius: var(--radius-pill); }
-.cmp-stat { display: grid; grid-template-columns: 54px 1fr; gap: 10px; align-items: start; margin-top: 12px; }
-.cmp-stat-k { font-family: var(--font-ui); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); padding-top: 2px; }
-.cmp-bars { display: flex; flex-direction: column; gap: 3px; }
-.cmp-line { display: flex; align-items: baseline; justify-content: space-between; }
-.cmp-line .t { font-family: var(--font-ui); font-size: var(--fs-10); color: var(--text-dim); }
-.cmp-line .v { font-family: var(--font-mono); font-weight: 500; font-size: var(--fs-12); color: var(--text-bright); }
-.cmp-line .v.ok { color: var(--status-ok); }
-.cmp-line:nth-of-type(3) { margin-top: 5px; }
-.cmp-bar { position: relative; height: 7px; background: var(--bg-sunken); border-radius: 3px; overflow: hidden; }
-.cmp-bar span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; }
-.cmp-bar.before span { background: color-mix(in oklab, var(--text-dim) 55%, transparent); }
-.cmp-bar.after span { background: var(--status-ok); }
-
 /* context absolute-token line */
 .ctx-tok { display: flex; align-items: baseline; gap: 5px; margin-top: 8px; }
 .ctx-tok .mono { font-size: var(--fs-13); color: var(--text-bright); }
@@ -1736,17 +1688,6 @@
 .ci-detail .tk { font-family: var(--font-mono); font-size: var(--fs-9); color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.1em; margin-top: 8px; }
 .ci-detail .tk:first-child { margin-top: 0; }
 .ci-detail pre { margin: 3px 0 0; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-mid); line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-.cmp-diff { display: grid; grid-template-columns: 1fr; gap: 10px; }
-.cmp-col { border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 9px 11px; }
-.cmp-col-h { font-family: var(--font-ui); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 7px; }
-.cmp-col.kept { border-left: 2px solid var(--status-ok); }
-.cmp-col.kept .cmp-col-h { color: var(--status-ok); }
-.cmp-col.summ { border-left: 2px solid var(--info); }
-.cmp-col.summ .cmp-col-h { color: var(--info); }
-.cmp-col.drop { border-left: 2px solid var(--text-dim); }
-.cmp-col.drop .cmp-col-h { color: var(--text-dim); }
-.cmp-li { font-size: var(--fs-12); line-height: 1.5; color: var(--text-mid); padding: 3px 0; border-top: 1px solid var(--border-soft); }
-.cmp-li:first-of-type { border-top: 0; }
 
 .chat-back, .chat-ctx-btn {
   flex: none; width: 34px; height: 34px; border-radius: var(--radius-sm);

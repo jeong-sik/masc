@@ -27,7 +27,7 @@ status: Draft
 
 **공통점**: 재시도 가능성이 타입이 아니라 (a) catch-all, (b) 문자열 관례(`"retryable …"`), (c) 다른 축과의 결합(`InvalidRequest` 하나가 재시도와 회전을 동시에 차단)으로 결정된다.
 
-† **#25443 은 형태 A 가 아니다 (2026-07-21 재분류, 2026-07-30 current-state 정정).** typed rejection 구분은 compaction domain 안에서 보존되며 event queue는 pending source와 ACK만 소유한다. `No_compaction`과 compaction outcome을 위한 queue transition이나 decoder는 없다. reactive compaction은 durable checkpoint가 줄었을 때만 source를 재개하며, 실패 횟수나 retry ceiling을 별도 권한으로 저장하지 않는다. 행을 삭제하지 않고 남기는 이유는 같은 증상이 형태 A로 오분류되기 쉽다는 점 자체가 §2의 근거이기 때문이다.
+† **#25443 은 형태 A 가 아니다 (2026-07-21 재분류).** 위 실측은 2026-07 의 기록이고, 그 계획을 만들던 경로는 2026-08 에 없어졌다. 행을 남기는 이유는 실측 자체가 §2 의 근거이기 때문이다 — 같은 증상이 형태 A 로 오분류되기 쉽다는 것을 보여주는 유일한 사례다. 경로가 사라졌다고 오분류가 사라지지는 않으므로, 새 재시도 루프를 설계할 때 이 행을 먼저 읽는다.
 
 ### 1.2 형태 B — 실패 사유가 소실 → 진단 불가, 이어서 로그 강등으로 은폐
 

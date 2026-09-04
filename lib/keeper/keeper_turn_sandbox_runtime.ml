@@ -443,6 +443,26 @@ let is_microvm (t : t) =
   t.meta.sandbox_profile = Keeper_types_profile_sandbox.Micro_vm
 ;;
 
+(* Which runtime this guest is on. [effective_meta_of_profile_defaults]
+   resolves it and refuses a Micro_vm keeper that has none, so a guest that
+   reached dispatch has one -- but two constructors write the field directly
+   ([Keeper_turn_up_create], [Keeper_meta_json_parse]), so the empty case is
+   reachable. It is a refusal rather than an assumed runtime: naming Apple
+   here is how a keeper that declared microsandbox booted under container
+   and was then stopped with msb (#32837). *)
+let microvm_backend_of (t : t) =
+  match t.meta.microvm_backend with
+  | Some backend -> Ok backend
+  | None ->
+    Error
+      (Printf.sprintf
+         "microvm_backend_unresolved: keeper %s declares sandbox_profile=microvm \
+          and no microvm_backend, so there is no runtime to boot it on. Next: \
+          set microvm_backend in the keeper's TOML to one of: %s"
+         t.meta.name
+         (String.concat ", " Keeper_microvm_backend.valid_strings))
+;;
+
 (* The Docker exec prefix: [docker exec [-i] --user u:g -w cwd [env...]].
    Only the Docker lane execs into a mounted tree. A microvm guest owns its
    tree on the work volume and is reached through the shim over the remote
@@ -467,11 +487,15 @@ let docker_exec_only (t : t) =
   else Ok ()
 ;;
 
-let inspect_container_exists ?timeout_sec ~microvm container_name =
+(* [microvm_backend] names the runtime to ask, or [None] for the Docker
+   daemon. Two probes of the same fact taking the backend differently is how
+   one of them drifts back to a single runtime, so this reads it the way
+   [inspect_container_running] already does. *)
+let inspect_container_exists ?timeout_sec ~microvm_backend container_name =
   let inspect_argv =
-    if microvm
-    then Keeper_sandbox_microvm.inspect_argv ~container_name
-    else
+    match microvm_backend with
+    | Some backend -> Keeper_sandbox_microvm.inspect_argv_for backend ~container_name
+    | None ->
       Keeper_sandbox_runtime.docker_command_argv ()
       @ [ "inspect"; "--format"; "{{.Id}}"; container_name ]
   in
@@ -485,26 +509,26 @@ let inspect_container_exists ?timeout_sec ~microvm container_name =
 
 (* [container] has no [--format] template; state comes back as JSON and a
    missing container as a non-zero exit, which maps to absent. *)
-let probe_microvm_container_state ?timeout_sec container_name =
+let probe_microvm_container_state ?timeout_sec ~backend container_name =
   let st, out =
     run_argv_with_status
       ?timeout_sec
-      (Keeper_sandbox_microvm.inspect_argv ~container_name)
+      (Keeper_sandbox_microvm.inspect_argv_for backend ~container_name)
   in
   match st with
   | Unix.WEXITED 0 ->
-    (match Keeper_sandbox_microvm.running_of_inspect_json out with
+    (match Keeper_sandbox_microvm.running_of_inspect_json_for backend out with
      | Ok true -> Ok Keeper_sandbox_runtime.Docker_container_running
      | Ok false -> Ok Keeper_sandbox_runtime.Docker_container_stopped
      | Error _ as err -> err)
   | _ -> Ok Keeper_sandbox_runtime.Docker_container_absent
 ;;
 
-let inspect_container_running ?timeout_sec ~microvm container_name =
+let inspect_container_running ?timeout_sec ~microvm_backend container_name =
   match
-    (if microvm
-     then probe_microvm_container_state ?timeout_sec container_name
-     else
+    (match microvm_backend with
+     | Some backend -> probe_microvm_container_state ?timeout_sec ~backend container_name
+     | None ->
        Keeper_sandbox_runtime.probe_container_state_optional
          ~container_name ?timeout_sec ())
   with
@@ -527,7 +551,9 @@ let failed_exec_recovery ?timeout_sec (t : t) =
   | Running { container_name } ->
     (match
        (if is_microvm t
-        then probe_microvm_container_state ?timeout_sec container_name
+        then
+          Result.bind (microvm_backend_of t) (fun backend ->
+            probe_microvm_container_state ?timeout_sec ~backend container_name)
         else
           Keeper_sandbox_runtime.probe_container_state_optional
             ~container_name
@@ -585,21 +611,21 @@ let bind_registered_microvm_identity t container_name =
     Some snapshot
 ;;
 
-let stop_and_delete_microvm_container ?timeout_sec container_name =
+let stop_and_delete_microvm_container ?timeout_sec ~backend container_name =
   let stop_st, stop_out =
     run_argv_with_status
       ?timeout_sec
-      (Keeper_sandbox_microvm.stop_argv ~container_name)
+      (Keeper_sandbox_microvm.stop_argv_for backend ~container_name)
   in
   let delete_st, delete_out =
     run_argv_with_status
       ?timeout_sec
-      (Keeper_sandbox_microvm.delete_force_argv ~container_name)
+      (Keeper_sandbox_microvm.delete_force_argv_for backend ~container_name)
   in
   (* Both commands can race a guest that is already absent, so their exit
      codes are only diagnostics. The postcondition is authoritative: do not
      release the mounted identity snapshot until the guest name is gone. *)
-  match probe_microvm_container_state ?timeout_sec container_name with
+  match probe_microvm_container_state ?timeout_sec ~backend container_name with
   | Ok Keeper_sandbox_runtime.Docker_container_absent ->
     forget_microvm_work_root container_name;
     Ok ()
@@ -628,12 +654,13 @@ let stop_and_delete_microvm_container ?timeout_sec container_name =
     it is not there yet; refusing rather than booting without it follows
     [image_present] in the same lane -- a guest with no work volume has no
     tree, and the remote lane has nowhere to run. *)
-let microvm_work_volume ~keeper_name ~timeout_sec =
+let microvm_work_volume ~backend ~keeper_name ~timeout_sec =
   match Keeper_sandbox_microvm.work_volume_name ~keeper_name with
   | Error message -> Error ("microvm_work_volume_unnamed: " ^ message)
   | Ok volume_name ->
     (match
-       Keeper_sandbox_microvm.ensure_work_volume
+       Keeper_sandbox_microvm.ensure_work_volume_for
+         backend
          ~volume_name
          ~size:(Env_config_sandbox.Runtime.microvm_work_volume_size ())
          ~timeout_sec
@@ -680,8 +707,8 @@ type microvm_guest_provisions =
 
 (** Everything a guest boot mounts besides config and identity, established
     before [container run] so a boot never starts without one of them. *)
-let microvm_guest_provisions (t : t) ~timeout_sec =
-  match microvm_work_volume ~keeper_name:t.meta.name ~timeout_sec with
+let microvm_guest_provisions (t : t) ~backend ~timeout_sec =
+  match microvm_work_volume ~backend ~keeper_name:t.meta.name ~timeout_sec with
   | Error _ as err -> err
   | Ok work_volume_name ->
     (match prepare_microvm_shim_dir t with
@@ -689,13 +716,48 @@ let microvm_guest_provisions (t : t) ~timeout_sec =
      | Ok shim_host_dir -> Ok { work_volume_name; shim_host_dir })
 ;;
 
+(** Boot invariant (RFC-0052), fail-closed:
+    {!Keeper_sandbox_microvm.work_volume_guest_root} must be a real mountpoint
+    inside the guest before anything is written there. The
+    mkdir and write probe below both succeed against a writable rootfs
+    directory, so without this check a guest whose volume mount is absent at
+    boot serves an ephemeral tree silently -- keeper writes evaporate on the
+    next boot and a delivered paste's log line is a lie (2026-09-04, analyst
+    guest on a stale rootfs tree). *)
+let ensure_microvm_work_volume_mounted ?timeout_sec (t : t) ~backend ~container_name =
+  match Keeper_sandbox_microvm.work_volume_name ~keeper_name:t.meta.name with
+  | Error detail -> Error ("microvm_work_volume_unnamed: " ^ detail)
+  | Ok volume_name ->
+    let probe =
+      Keeper_sandbox_microvm.work_volume_mounted_probe_argv_for backend ~container_name
+    in
+    (match run_argv_with_status ?timeout_sec probe with
+     | Unix.WEXITED 0, _ -> Ok ()
+     | _, out ->
+       let detail = Keeper_sandbox_runtime.docker_failure_output_for_log out in
+       Error
+         (Printf.sprintf
+            "microvm_work_volume_not_mounted: %s is not a mountpoint in guest %s (volume %s)%s; remove the guest to force a fresh boot with the volume attached"
+            Keeper_sandbox_microvm.work_volume_guest_root
+            container_name
+            volume_name
+            (if String.equal (String.trim detail) "" then "" else ": " ^ detail)))
+;;
+
 (** The keeper's root on the work volume, made inside the guest once it is
     up. The volume outlives the guest, so this is a no-op after the first
-    boot; it runs as root because the volume root is root-owned. *)
-let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~container_name =
+    boot; it runs as root because the volume root is root-owned. The mount
+    invariant runs first: existence and writability of the root prove nothing
+    while {!Keeper_sandbox_microvm.work_volume_guest_root} itself may be a
+    rootfs directory. *)
+let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~backend ~container_name =
+  match ensure_microvm_work_volume_mounted ?timeout_sec t ~backend ~container_name with
+  | Error _ as err -> err
+  | Ok () ->
   let root = Keeper_sandbox_microvm.keeper_work_root ~keeper_name:t.meta.name in
   let mkdir =
-    Keeper_sandbox_microvm.keeper_work_root_mkdir_argv
+    Keeper_sandbox_microvm.keeper_work_root_mkdir_argv_for
+      backend
       ~container_name
       ~keeper_name:t.meta.name
   in
@@ -707,7 +769,8 @@ let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~container_name =
        volume kept from an earlier life -- is refused here, with its owner
        and mode, instead of on the first Write of a turn. *)
     let probe =
-      Keeper_sandbox_microvm.keeper_work_root_write_probe_argv
+      Keeper_sandbox_microvm.keeper_work_root_write_probe_argv_for
+        backend
         ~container_name
         ~uid:t.uid
         ~gid:t.gid
@@ -732,6 +795,12 @@ let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~container_name =
 ;;
 
 let start_microvm_container_unlocked ?timeout_sec (t : t) =
+  (* The runtime is read once, before anything is spawned. A keeper whose
+     TOML names none is refused here rather than booted on an assumed one,
+     which is what pointed a boot and its cleanup at two CLIs (#32837). *)
+  match microvm_backend_of t with
+  | Error detail -> Error ("microvm_start_failed: " ^ detail)
+  | Ok backend ->
   let image = resolve_image t in
   if String.trim image = ""
   then Error "keeper sandbox docker image is not configured"
@@ -743,7 +812,12 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
       Ok container_name
     in
     let start_state =
-      match probe_microvm_container_state ?timeout_sec container_name with
+      match
+        probe_microvm_container_state
+          ?timeout_sec
+          ~backend
+          container_name
+      with
       | Ok Keeper_sandbox_runtime.Docker_container_running ->
         (match bind_registered_microvm_identity t container_name with
          | Some snapshot -> `Adopt snapshot
@@ -752,7 +826,12 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
               its temp snapshot capability died with that process. It is not
               safe to guess the mount or use credentials we cannot redact.
               Replace the guest with one whose snapshot this process owns. *)
-           (match stop_and_delete_microvm_container ?timeout_sec container_name with
+           (match
+              stop_and_delete_microvm_container
+                ?timeout_sec
+                ~backend
+                container_name
+            with
             | Ok () -> `Boot
             | Error error -> `Error error))
       | Error probe_error ->
@@ -761,7 +840,21 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
       | Ok Keeper_sandbox_runtime.Docker_container_absent -> `Boot
     in
     match start_state with
-    | `Adopt snapshot -> adopt snapshot
+    | `Adopt snapshot ->
+      (* A running guest proves its process is up, not that its work volume
+         is mounted: a guest that booted without the mount serves a writable
+         rootfs directory at the same path, and every keeper write there
+         evaporates on the next boot. Adopting on process state alone would
+         hand turns to exactly that guest, so the mount invariant is checked
+         here the same as on a fresh boot, and a guest that fails it is
+         refused rather than adopted. The guest is left running for an
+         operator to inspect; the next start probes it again and fails the
+         same way until it is removed. *)
+      (match
+         ensure_microvm_work_volume_mounted ?timeout_sec t ~backend ~container_name
+       with
+       | Ok () -> adopt snapshot
+       | Error _ as err -> err)
     | `Error error -> Error error
     | `Boot ->
       (* A stopped guest survived [--rm] (host reboot mid-life); clear the
@@ -769,7 +862,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
       let (_ : Unix.process_status * string) =
         run_argv_with_status
           ?timeout_sec
-          (Keeper_sandbox_microvm.delete_force_argv ~container_name)
+          (Keeper_sandbox_microvm.delete_force_argv_for backend ~container_name)
       in
       let image_timeout =
         match timeout_sec with
@@ -778,8 +871,11 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
       in
       (match
          Result.bind
-           (Keeper_sandbox_microvm.image_present ~image ~timeout_sec:image_timeout)
-           (fun () -> microvm_guest_provisions t ~timeout_sec:image_timeout)
+           (Keeper_sandbox_microvm.image_present_for
+              backend
+              ~image
+              ~timeout_sec:image_timeout)
+           (fun () -> microvm_guest_provisions t ~backend ~timeout_sec:image_timeout)
        with
        | Error _ as err -> err
        | Ok provisions ->
@@ -825,8 +921,17 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
           | Error err ->
             Error ("microvm_start_failed: github_identity_invalid: " ^ err)
           | Ok (github_identity, github_identity_is_new) ->
-         let argv =
-           Keeper_sandbox_microvm.turn_start_argv
+         (* The network policy is spelled by the runtime, and one of the three
+            cannot say every mode. Resolved before the argv so a boot refuses
+            rather than handing msb Docker's flags, which it rejects at
+            argument parsing with no statement of what the guest's network
+            would have been. *)
+         (match Keeper_sandbox_microvm.network_args_for backend ~dns t.network_mode with
+          | Error detail -> Error ("microvm_start_failed: " ^ detail)
+          | Ok network_args ->
+         let argv_result =
+           Keeper_sandbox_microvm.turn_start_argv_for
+             backend
              ~container_name
              ~label_args:
                (Keeper_sandbox_runtime.docker_label_args
@@ -848,8 +953,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                (match Env_config_sandbox.Runtime.microvm_cpus () with
                 | "" -> None
                 | count -> Some count)
-             ~network_args:
-               (Keeper_sandbox_microvm.network_args ~dns t.network_mode)
+             ~network_args
              (* Config and the GitHub identity. Config has no cleanup, so it
                 travels as-is. The identity does: the Docker lane runs that
                 cleanup under [Eio_guard] at turn end, which would delete the
@@ -875,7 +979,17 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                 @ Keeper_sandbox_microvm.shim_mount_args
                     ~host_dir:provisions.shim_host_dir)
              ~image
+             (* Asked for by name, so a runtime with no flag for one of them
+                refuses the boot instead of running a keeper on a weaker
+                sandbox than the profile it declared. *)
+             ~constraints:Keeper_microvm_backend.all_guest_constraints
          in
+         (match argv_result with
+          | Error refusals ->
+            Error
+              ("microvm_start_failed: "
+               ^ Keeper_sandbox_microvm.constraint_refusals_message backend refusals)
+          | Ok argv ->
          let st, out = run_argv_with_status ?timeout_sec argv in
          (* A guest that came up but cannot be seen, or cannot hold the
             keeper's root on its volume, is taken down again: the remote
@@ -884,7 +998,10 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
          let take_down_after_boot ~what ~detail =
            let removed =
              match
-               stop_and_delete_microvm_container ?timeout_sec container_name
+               stop_and_delete_microvm_container
+                 ?timeout_sec
+                 ~backend
+                 container_name
              with
              | Ok () -> true
              | Error _ -> false
@@ -899,16 +1016,25 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
          (match st with
           | Unix.WEXITED 0 ->
             (match
-               inspect_container_exists ?timeout_sec ~microvm:true container_name
+               inspect_container_exists
+                 ?timeout_sec
+                 ~microvm_backend:(Some backend)
+                 container_name
              with
              | Ok () ->
-               (match ensure_microvm_keeper_work_root ?timeout_sec t ~container_name with
+               (match
+                  ensure_microvm_keeper_work_root
+                    ?timeout_sec
+                    t
+                    ~backend
+                    ~container_name
+                with
                 | Ok () ->
                   mark_microvm_work_root_ready container_name;
                   adopt github_identity
                 | Error detail ->
                   take_down_after_boot
-                    ~what:"guest cannot use its keeper root on the work volume"
+                    ~what:"guest cannot prove its work volume is mounted and its keeper root usable"
                     ~detail)
              | Error inspect_out ->
                take_down_after_boot
@@ -919,18 +1045,41 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                the loser's run fails on the name and the guest the winner
                booted is the one both wanted. *)
             (match
-               probe_microvm_container_state ?timeout_sec container_name
+               probe_microvm_container_state
+                 ?timeout_sec
+                 ~backend
+                 container_name
              with
              | Ok Keeper_sandbox_runtime.Docker_container_running ->
                (* The stable-name race adopted the snapshot claimed before
                   either launch. Both launch argv values therefore point at
-                  the same immutable directory. *)
-               adopt github_identity
+                  the same immutable directory.
+
+                  Running proves the winner's process is up, not that its
+                  work volume is mounted -- the race loser must not reach a
+                  guest the mount invariant has not verified, so it adopts
+                  through the same probe as the plain adopt path. A failure
+                  fails closed with the guest left running: it may be serving
+                  the winner's turn off the shared snapshot, which is why the
+                  registered identity is kept here as it is when the state
+                  probe itself fails below. *)
+               (match
+                  ensure_microvm_work_volume_mounted
+                    ?timeout_sec
+                    t
+                    ~backend
+                    ~container_name
+                with
+                | Ok () -> adopt github_identity
+                | Error _ as err -> err)
              | Ok Keeper_sandbox_runtime.Docker_container_stopped
              | Ok Keeper_sandbox_runtime.Docker_container_absent ->
                let removed =
                  match
-                   stop_and_delete_microvm_container ?timeout_sec container_name
+                   stop_and_delete_microvm_container
+                     ?timeout_sec
+                     ~backend
+                     container_name
                  with
                  | Ok () -> true
                  | Error _ -> false
@@ -951,7 +1100,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                Error
                  (Printf.sprintf
                     "microvm_start_failed: %s"
-                    (Keeper_sandbox_runtime.docker_failure_output_for_log out)))))))
+                    (Keeper_sandbox_runtime.docker_failure_output_for_log out)))))))))
 ;;
 
 let start_microvm_container ?timeout_sec t =
@@ -967,6 +1116,7 @@ let teardown_keeper_sandbox_by_name
       ~(config : Workspace.config)
       ~(keeper_name : string)
       ~(backend : Keeper_sandbox.backend)
+      ?microvm_backend
       ()
   =
   let timeout_sec =
@@ -986,13 +1136,33 @@ let teardown_keeper_sandbox_by_name
       ~timeout_sec
       ()
   | Keeper_sandbox.Micro_vm ->
-    let guest_name = microvm_container_name ~config ~keeper_name in
-    with_microvm_lifecycle_lock (fun () ->
-      match stop_and_delete_microvm_container ~timeout_sec guest_name with
-      | Error _ as error -> error
-      | Ok () ->
-        release_registered_microvm_identity guest_name;
-        Ok ())
+    (* Teardown runs after the registry entry is gone, so there is no meta
+       left to read the backend from. The caller passes the one the keeper
+       declared; shutdown supplies it from the meta it still holds. Without
+       it there is nothing to remove the guest with -- an assumed runtime
+       would send `container delete --force` to a guest msb booted and
+       report success while it kept running. *)
+    (match microvm_backend with
+     | None ->
+       Error
+         (Printf.sprintf
+            "microvm_teardown_backend_unresolved: keeper %s's guest cannot be \
+             removed without the runtime it was booted on; the caller passes it \
+             from the keeper's meta"
+            keeper_name)
+     | Some microvm_backend ->
+       let guest_name = microvm_container_name ~config ~keeper_name in
+       with_microvm_lifecycle_lock (fun () ->
+         match
+           stop_and_delete_microvm_container
+             ~timeout_sec
+             ~backend:microvm_backend
+             guest_name
+         with
+         | Error _ as error -> error
+         | Ok () ->
+           release_registered_microvm_identity guest_name;
+           Ok ()))
 ;;
 
 let teardown_keeper_sandbox
@@ -1012,6 +1182,10 @@ let teardown_keeper_sandbox
     ~config
     ~keeper_name:meta.name
     ~backend
+    (* The meta is still here, so the runtime the guest was booted on travels
+       with the removal. Without it a microsandbox guest would be sent
+       [container delete --force] and survive its own teardown. *)
+    ?microvm_backend:meta.microvm_backend
     ()
 ;;
 
@@ -1160,7 +1334,7 @@ let start_container ?timeout_sec (t : t) =
                 (match
                    inspect_container_exists
                      ?timeout_sec
-                     ~microvm:false
+                     ~microvm_backend:None
                      container_name
                  with
                  | Ok () ->
@@ -1242,7 +1416,7 @@ let start_container ?timeout_sec (t : t) =
     if start_st = Unix.WEXITED 0
     then (
       match
-        inspect_container_exists ?timeout_sec ~microvm:false container_name
+        inspect_container_exists ?timeout_sec ~microvm_backend:None container_name
       with
       | Ok () -> adopt_running ()
       | Error inspect_out ->
@@ -1267,9 +1441,21 @@ let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
     if not validate_running
     then Ok container_name
     else (
-      match
-        inspect_container_running ?timeout_sec ~microvm:(is_microvm t) container_name
-      with
+      (* A microvm keeper with no runtime recorded cannot be probed at all, so
+         the validation is a refusal rather than a restart against a runtime
+         nobody named. *)
+      let probe =
+        if is_microvm t
+        then
+          Result.bind (microvm_backend_of t) (fun backend ->
+            inspect_container_running
+              ?timeout_sec
+              ~microvm_backend:(Some backend)
+              container_name)
+        else
+          inspect_container_running ?timeout_sec ~microvm_backend:None container_name
+      in
+      match probe with
       | Ok () -> Ok container_name
       | Error _ ->
         set_state t Not_started;
@@ -1299,26 +1485,37 @@ let microvm_remote_endpoint_of_running (t : t) ~container_name =
              ~container_root:t.container_root)
         ~keeper_name:t.meta.name
     in
-    Ok
-      (Keeper_sandbox_remote.of_container_exec
-         ~base_path:t.config.base_path
-         ~keeper_name:t.meta.name
-         ~remote_root:Keeper_sandbox_microvm.work_volume_guest_root
-         ~gh_config_dir
-         ~injected_env:
-           (Keeper_sandbox_runtime.docker_config_env
-              ~base_path:t.config.base_path
-              ~container_root:t.container_root)
-         ~env_allowlist:Keeper_sandbox_microvm.remote_env_allowlist
-         ~connect_timeout_sec:Keeper_sandbox_microvm.remote_connect_timeout_sec
-         ~max_concurrent_sessions:Keeper_sandbox_microvm.remote_max_concurrent_sessions
-         { cli = Keeper_sandbox_microvm.command_argv ()
-         ; container_name
-         ; uid = t.uid
-         ; gid = t.gid
-         ; shim_path = Keeper_sandbox_microvm.shim_guest_path
-         ; shim_config_path = Keeper_sandbox_microvm.shim_config_guest_path
-         })
+    (* The exec prefix is the declaring runtime's, built here because this is
+       where the runtime, the work root and the shim config path are all in
+       hand -- and because one runtime cannot express it, which the transport
+       (returning an argv, not a result) has no way to say. *)
+    Result.bind (microvm_backend_of t) (fun backend ->
+      Result.map
+        (fun prefix ->
+          Keeper_sandbox_remote.of_container_exec
+            ~base_path:t.config.base_path
+            ~keeper_name:t.meta.name
+            ~remote_root:Keeper_sandbox_microvm.work_volume_guest_root
+            ~gh_config_dir
+            ~injected_env:
+              (Keeper_sandbox_runtime.docker_config_env
+                 ~base_path:t.config.base_path
+                 ~container_root:t.container_root)
+            ~env_allowlist:Keeper_sandbox_microvm.remote_env_allowlist
+            ~connect_timeout_sec:Keeper_sandbox_microvm.remote_connect_timeout_sec
+            ~max_concurrent_sessions:
+              Keeper_sandbox_microvm.remote_max_concurrent_sessions
+            { prefix
+            ; container_name
+            ; shim_path = Keeper_sandbox_microvm.shim_guest_path
+            })
+        (Keeper_sandbox_microvm.shim_exec_prefix_for
+           backend
+           ~container_name
+           ~uid:t.uid
+           ~gid:t.gid
+           ~remote_root:Keeper_sandbox_microvm.work_volume_guest_root
+           ~shim_config_path:Keeper_sandbox_microvm.shim_config_guest_path))
 ;;
 
 (* The keeper's root on the volume is made at boot, so a guest this process
@@ -1332,12 +1529,15 @@ let microvm_remote_endpoint ?timeout_sec (t : t) =
     let root =
       if microvm_work_root_ready container_name
       then Ok ()
-      else (
-        match ensure_microvm_keeper_work_root ?timeout_sec t ~container_name with
-        | Ok () ->
-          mark_microvm_work_root_ready container_name;
-          Ok ()
-        | Error _ as err -> err)
+      else
+        Result.bind (microvm_backend_of t) (fun backend ->
+          match
+            ensure_microvm_keeper_work_root ?timeout_sec t ~backend ~container_name
+          with
+          | Ok () ->
+            mark_microvm_work_root_ready container_name;
+            Ok ()
+          | Error _ as err -> err)
     in
     (match root with
      | Error _ as err -> err
@@ -1371,7 +1571,13 @@ let microvm_guest_absence_reason ?timeout_sec ~(config : Workspace.config)
   then None
   else
     let container_name = microvm_container_name ~config ~keeper_name:meta.name in
-    match probe_microvm_container_state ?timeout_sec container_name with
+    (* No recorded runtime means nothing here can state a fact about the
+       guest, so the caller's own error stands rather than a probe run
+       against a runtime the keeper never named. *)
+    match meta.microvm_backend with
+    | None -> None
+    | Some backend ->
+    match probe_microvm_container_state ?timeout_sec ~backend container_name with
     | Ok Keeper_sandbox_runtime.Docker_container_running -> None
     | Error _ -> None
     | Ok (Keeper_sandbox_runtime.Docker_container_stopped
@@ -1396,7 +1602,10 @@ let stop_container_for_github_identity_refresh ?timeout_sec t =
   then
     with_microvm_lifecycle_lock (fun () ->
       let container_name = keeper_vm_name t in
-      match stop_and_delete_microvm_container ?timeout_sec container_name with
+      match
+        Result.bind (microvm_backend_of t) (fun backend ->
+          stop_and_delete_microvm_container ?timeout_sec ~backend container_name)
+      with
       | Error _ as error -> error
       | Ok () ->
         release_registered_microvm_identity container_name;

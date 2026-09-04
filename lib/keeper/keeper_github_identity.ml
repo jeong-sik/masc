@@ -12,6 +12,11 @@ type auth_result =
   ; error : string option
   }
 
+type effective_probe_scope =
+  [ `Host_process_credential_only
+  | `Endpoint_process_only
+  ]
+
 type observation =
   { keeper : string
   ; hostname : string
@@ -19,8 +24,17 @@ type observation =
   ; projected_token_env_names : string list
   ; stored : auth_result
   ; effective : auth_result
-  ; effective_probe_scope : [ `Host_process_credential_only ]
+  ; effective_probe_scope : effective_probe_scope
   ; checked_at_unix : float
+  }
+
+type login_lane =
+  { run_login :
+      on_stdout_chunk:(string -> unit)
+      -> on_stderr_chunk:(string -> unit)
+      -> Unix.process_status * string * string
+  ; secure_after_login : unit -> (unit, string) result
+  ; observe_after_login : unit -> (observation, string) result
   }
 
 let config_dir_name = "github-cli"
@@ -785,6 +799,8 @@ let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
                })))
 ;;
 
+let login_timeout_sec = 600.0
+
 let login_argv ~hostname =
   [ "gh"
   ; "auth"
@@ -874,20 +890,31 @@ let run_capture ~env = function
       argv
 ;;
 
-let auth_result_of_command ~redact ~env ~hostname =
-  let status, stdout, stderr =
-    run_capture
-      ~env
-      [ "gh"; "api"; "--hostname"; hostname; "user"; "--jq"; ".login" ]
-  in
+let auth_probe_argv ~hostname =
+  [ "gh"; "api"; "--hostname"; hostname; "user"; "--jq"; ".login" ]
+;;
+
+let auth_result_of_run ~redact (status, stdout, stderr) =
   let login = String.trim stdout in
   match status with
   | Unix.WEXITED 0 when not (String.equal login "") ->
     { authenticated = true; login = Some login; error = None }
-  | _ ->
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
     let detail = String.trim (redact stderr) in
     let detail = if String.equal detail "" then process_exit_text status else detail in
     { authenticated = false; login = None; error = Some detail }
+;;
+
+let auth_result_of_command ~redact ~env ~hostname =
+  auth_result_of_run ~redact (run_capture ~env (auth_probe_argv ~hostname))
+;;
+
+(* A lane that runs the probe on another machine still reads its outcome by
+   this rule; the redaction snapshot is the Keeper's, wherever the process
+   ran. *)
+let auth_result_of_probe ~base_path ~keeper_name run =
+  let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+  auth_result_of_run ~redact:(Keeper_secret_redaction.redact_text redaction) run
 ;;
 
 let observe ~config ~keeper_name ~hostname =
@@ -961,7 +988,7 @@ let auth_result_to_yojson result =
     ]
 ;;
 
-let observation_to_yojson observation =
+let observation_to_yojson (observation : observation) =
   `Assoc
     [ "ok", `Bool true
     ; "keeper", `String observation.keeper
@@ -971,7 +998,11 @@ let observation_to_yojson observation =
       , `List (List.map (fun value -> `String value) observation.projected_token_env_names) )
     ; "stored", auth_result_to_yojson observation.stored
     ; "effective", auth_result_to_yojson observation.effective
-    ; "effective_probe_scope", `String "host_process_credential_only"
+    ; ( "effective_probe_scope"
+      , `String
+          (match observation.effective_probe_scope with
+           | `Host_process_credential_only -> "host_process_credential_only"
+           | `Endpoint_process_only -> "endpoint_process_only") )
     ; "checked_at_unix", `Float observation.checked_at_unix
     ]
 ;;
@@ -995,7 +1026,27 @@ let secure_config_files ~config ~keeper_name =
          (Unix.error_message error))
 ;;
 
-let stream_login ~config ~keeper_name ~hostname ~env ~is_closed ~send_event =
+let local_lane ~config ~keeper_name ~hostname =
+  match login_env ~config ~keeper_name with
+  | Error _ as error -> error
+  | Ok env ->
+    let lane : login_lane =
+      { run_login =
+          (fun ~on_stdout_chunk ~on_stderr_chunk ->
+            Process_eio.run_argv_with_status_split_streaming
+              ~timeout_sec:login_timeout_sec
+              ~env
+              ~on_stdout_chunk
+              ~on_stderr_chunk
+              (login_argv ~hostname))
+      ; secure_after_login = (fun () -> secure_config_files ~config ~keeper_name)
+      ; observe_after_login = (fun () -> observe ~config ~keeper_name ~hostname)
+      }
+    in
+    Ok lane
+;;
+
+let stream_login ~config ~keeper_name ~make_lane ~is_closed ~send_event =
   let base_path = config.Workspace.base_path in
   let send event json =
     if is_closed ()
@@ -1021,7 +1072,7 @@ let stream_login ~config ~keeper_name ~hostname ~env ~is_closed ~send_event =
       if not (String.equal text "")
       then send "output" (`Assoc [ "stream", `String stream; "text", `String text ])
     in
-    let run_process () =
+    let run_process (lane : login_lane) =
       let finished = Atomic.make false in
       let process_result = ref None in
       Eio.Cancel.sub (fun cancellation ->
@@ -1032,14 +1083,11 @@ let stream_login ~config ~keeper_name ~hostname ~env ~is_closed ~send_event =
                (fun () ->
                   process_result :=
                     Some
-                      (Process_eio.run_argv_with_status_split_streaming
-                         ~timeout_sec:600.0
-                         ~env
+                      (lane.run_login
                          ~on_stdout_chunk:
                            (send_redacted_output "stdout" stdout_redaction)
                          ~on_stderr_chunk:
-                           (send_redacted_output "stderr" stderr_redaction)
-                         (login_argv ~hostname))))
+                           (send_redacted_output "stderr" stderr_redaction))))
           (fun () ->
              while (not (Atomic.get finished)) && not (is_closed ()) do
                Eio.Time.sleep clock 0.1
@@ -1054,29 +1102,40 @@ let stream_login ~config ~keeper_name ~hostname ~env ~is_closed ~send_event =
       | None -> failwith "GitHub login process completed without a result"
     in
     (try
-       let status, _, stderr = run_process () in
-       finish_redacted_output "stdout" stdout_redaction;
-       finish_redacted_output "stderr" stderr_redaction;
-       let stderr = Keeper_secret_redaction.redact_text redaction stderr in
-       (match status with
-        | Unix.WEXITED 0 ->
-          (match secure_config_files ~config ~keeper_name with
-           | Error message -> send "error" (`Assoc [ "message", `String message ])
-           | Ok () ->
-             (match observe ~config ~keeper_name ~hostname with
-              | Ok observation ->
-                send
-                  "complete"
-                  (`Assoc [ "observation", observation_to_yojson observation ])
-              | Error message ->
-                send "error" (`Assoc [ "message", `String message ])))
-        | failed ->
-          let detail = String.trim stderr in
-          let detail =
-            if String.equal detail "" then process_exit_text failed else detail
-          in
-          send "error" (`Assoc [ "message", `String detail ]));
-       Ok ()
+       (* The lane is shaped here rather than by the caller so that a lane which
+          has to reach another machine does it after the response headers are
+          out. Built before them, a slow or unreachable endpoint left the
+          operator's browser with no reply at all for as long as the shaping
+          steps took, and a failure to shape one is reported as the same [error]
+          event every other failure uses. *)
+       match make_lane () with
+       | Error message ->
+         send "error" (`Assoc [ "message", `String message ]);
+         Ok ()
+       | Ok (lane : login_lane) ->
+         let status, _, stderr = run_process lane in
+         finish_redacted_output "stdout" stdout_redaction;
+         finish_redacted_output "stderr" stderr_redaction;
+         let stderr = Keeper_secret_redaction.redact_text redaction stderr in
+         (match status with
+          | Unix.WEXITED 0 ->
+            (match lane.secure_after_login () with
+             | Error message -> send "error" (`Assoc [ "message", `String message ])
+             | Ok () ->
+               (match lane.observe_after_login () with
+                | Ok observation ->
+                  send
+                    "complete"
+                    (`Assoc [ "observation", observation_to_yojson observation ])
+                | Error message ->
+                  send "error" (`Assoc [ "message", `String message ])))
+          | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as failed ->
+            let detail = String.trim stderr in
+            let detail =
+              if String.equal detail "" then process_exit_text failed else detail
+            in
+            send "error" (`Assoc [ "message", `String detail ]));
+         Ok ()
      with
      | Eio.Cancel.Cancelled _ when is_closed () -> Ok ()
      | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1146,27 +1205,46 @@ let run_inherited ~timeout_sec ~env = function
        Unix.WEXITED 127)
 ;;
 
-let run_cli_login ~config ~keeper_name ~hostname =
-  match login_env ~config ~keeper_name with
-  | Error message ->
-    prerr_endline message;
-    1
-  | Ok env ->
-    let status = run_inherited ~timeout_sec:600.0 ~env (login_argv ~hostname) in
-    let secured =
-      match status with
-      | Unix.WEXITED 0 ->
-        (match secure_config_files ~config ~keeper_name with
-         | Ok () -> true
-         | Error message ->
-           prerr_endline message;
-           false)
-      | _ ->
-        prerr_endline ("gh auth login failed: " ^ process_exit_text status);
-        false
-    in
-    let observed = print_observation ~config ~keeper_name ~hostname in
-    if secured && observed then 0 else 1
+(* Inherited stdio would hand [gh] a terminal, and with one it renders an
+   interactive survey prompt instead of writing the one-time code as a plain
+   line. The lane streams both of the child's streams to this terminal instead.
+   Measured 2026-09-03 against [login_argv] with no terminal attached: [gh]
+   writes nothing to stdout and puts the one-time code and the verification URL
+   on stderr, so the stderr callback is the one an operator reads. *)
+let run_cli_login ~(lane : login_lane) =
+  let status, _stdout, _stderr =
+    lane.run_login
+      ~on_stdout_chunk:(fun chunk ->
+        print_string chunk;
+        flush stdout)
+      ~on_stderr_chunk:(fun chunk ->
+        prerr_string chunk;
+        flush stderr)
+  in
+  let secured =
+    match status with
+    | Unix.WEXITED 0 ->
+      (match lane.secure_after_login () with
+       | Ok () -> true
+       | Error message ->
+         prerr_endline message;
+         false)
+    | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+      (* The captured stderr is not repeated here: [on_stderr_chunk] already put
+         every byte of it on this terminal as it arrived. *)
+      prerr_endline ("gh auth login failed: " ^ process_exit_text status);
+      false
+  in
+  let observed =
+    match lane.observe_after_login () with
+    | Error message ->
+      prerr_endline message;
+      false
+    | Ok observation ->
+      observation_to_yojson observation |> Yojson.Safe.pretty_to_string |> print_endline;
+      true
+  in
+  if secured && observed then 0 else 1
 ;;
 
 let run_cli_status ~config ~keeper_name ~hostname =

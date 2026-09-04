@@ -567,17 +567,35 @@ let cause_to_json = function
       ]
 ;;
 
-let failure_data ~tool_name ~tool_kind (failure : Executor.failure) =
+(* Why the failure comes before the settled nodes.
+
+   This payload is what the durable tool-call row carries, and that row is
+   truncated to [Keeper_tool_call_log.max_output_len] bytes on the serialized
+   string. [settled] grows with the plan -- a node returning a task list put
+   12KB in one row -- so with [settled] first the cut landed inside it and
+   [cause] never reached disk. Eight failures of one composition on
+   2026-09-03 were recorded with no readable reason for that exact ordering.
+
+   [cause] and [effect_disposition] are bounded; [settled] is not. The
+   unbounded field goes last so the diagnosis survives the cut. *)
+let failure_payload ~tool_name ~tool_kind ~cause ~effect_disposition ~settled =
   `Assoc
     (("composition_tool", `String tool_name)
      :: tool_kind_field tool_kind
-     :: [ "settled", `List (List.map node_result_to_json failure.settled)
-       ; "cause", cause_to_json failure.cause
-       ; ( "effect_disposition"
-         , `String
-             (Tool_result.failure_effect_disposition_to_string
-                failure.effect_disposition) )
-       ])
+     :: [ "cause", cause
+        ; "effect_disposition", `String effect_disposition
+        ; "settled", `List settled
+        ])
+;;
+
+let failure_data ~tool_name ~tool_kind (failure : Executor.failure) =
+  failure_payload
+    ~tool_name
+    ~tool_kind
+    ~cause:(cause_to_json failure.cause)
+    ~effect_disposition:
+      (Tool_result.failure_effect_disposition_to_string failure.effect_disposition)
+    ~settled:(List.map node_result_to_json failure.settled)
 ;;
 
 let failure_class (failure : Executor.failure) =
@@ -1239,7 +1257,7 @@ let make_instruction_skill_tool
   Tool_bridge.agent_core_tool_of_masc_with_execution_env
     ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
     ~base_path:config.base_path
-    ~model_projection:Tool_output.bounded_inline_model_projection
+    ~model_projection:(fun () -> Tool_output.bounded_inline_model_projection)
     ~name
     ~description
     ~input_schema:skill_reference_input_schema
@@ -1306,7 +1324,7 @@ let make_instruction_skill_tool
               in
               let record_and_return ~content ~wire_content metadata =
                 let wire_bytes = String.length wire_content in
-                if wire_bytes > Common.max_tool_output_bytes
+                if wire_bytes > Common.max_tool_result_wire_bytes
                 then
                   Tool_result.make_err
                     ~tool_name:name
@@ -1318,13 +1336,13 @@ let make_instruction_skill_tool
                            , `Assoc
                                [ "kind", `String "provider_inline_too_large"
                                ; "observed_bytes", `Int wire_bytes
-                               ; "max_bytes", `Int Common.max_tool_output_bytes
+                               ; "max_bytes", `Int Common.max_tool_result_wire_bytes
                                ] )
                          ])
                     (Printf.sprintf
                        "Skill content does not fit the provider inline tool-result boundary: observed_bytes=%d max_bytes=%d"
                        wire_bytes
-                       Common.max_tool_output_bytes)
+                       Common.max_tool_result_wire_bytes)
                 else
                   match record_activation with
                   | Some record ->
@@ -1427,6 +1445,7 @@ let make_instruction_skill_tool
 ;;
 
 module For_testing = struct
+  let failure_payload = failure_payload
   let instruction_skill_description = instruction_skill_description
   let make_instruction_skill_tool = make_instruction_skill_tool
   let status_result = status_result

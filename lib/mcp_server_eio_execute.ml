@@ -310,7 +310,6 @@ let execute_tool_eio
                       : Tool_local_runtime_core.context)
                      ~name
                      ~args:coerced_args
-                 | Mod_compact -> None
                  | Mod_run ->
                    Tool_run.dispatch
                      { Tool_run.config; agent_name = Some agent_name }

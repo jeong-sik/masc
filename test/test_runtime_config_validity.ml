@@ -1247,9 +1247,9 @@ check
   (list (pair string (list string)))
   "Board exact-output lanes and opaque slot order"
   [ ( "board_attention_exact"
-    , [ "glm-coding.glm-5-turbo"; "glm-coding.glm-4-7-coding" ] )
+    , [ "glm-coding.glm-5-3"; "ollama_cloud.deepseek-v4-flash-0731" ] )
   ; ( "hitl_auto_judge"
-    , [ "glm-coding.glm-5-turbo"; "glm-coding.glm-4-7-coding" ] )
+    , [ "glm-coding.glm-5-3"; "ollama_cloud.deepseek-v4-flash-0731" ] )
   ]
   (List.filter
      (fun (lane_id, _) ->
@@ -1261,7 +1261,7 @@ check
 check
   (option (list string))
   "verifier_exact slot order is frozen"
-  (Some [ "glm-coding.glm-5-turbo"; "kimi_coding.kimi-for-coding" ])
+  (Some [ "glm-coding.glm-5-3"; "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731" ])
   (match
      List.find_opt
        (fun (lane_id, _) -> String.equal lane_id "verifier_exact")
@@ -2367,6 +2367,51 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
     actual
 ;;
 
+(* [edit_config_text] exists so a caller does not have to load runtime.toml
+   itself: loading outside the lock and then committing loses any write that
+   landed in between, and the server and the TUI edit different tables of this
+   one file. What that buys is only real if the edit is handed the file's
+   current text, which is what the first check reads.
+
+   The fixture is the repo's own runtime.toml rather than a hand-written
+   minimal one, because the second thing this has to answer is whether the
+   [\[tui\]] table the TUI writes there makes the config invalid. The schema
+   models no such table; a hand-made fixture would not prove that the file the
+   write actually lands on still loads. *)
+let test_edit_config_text_reads_the_file_and_commits_the_edit () =
+  let source =
+    Fs_compat.load_file (Filename.concat (repo_root ()) "config/runtime.toml")
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "edit_config_text_" ".toml" in
+  let oc = open_out path in
+  output_string oc source;
+  close_out oc;
+  let handed = ref None in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       match
+         Runtime.edit_config_text ~runtime_config_path:path (fun content ->
+           handed := Some content;
+           content ^ "\n[tui]\ntheme = \"gruvbox-dark\"\n")
+       with
+       | Error detail ->
+         failf "a [tui] table must not make runtime.toml invalid: %s" detail
+       | Ok _receipt ->
+         check bool "the edit was handed the file's own text" true
+           (match !handed with
+            | Some seen -> String.equal seen source
+            | None -> false);
+         check bool "the committed file carries the edit" true
+           (String_util.contains_substring
+              (Fs_compat.load_file path)
+              "theme = \"gruvbox-dark\""))
+;;
+
 let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
   let content =
     "[providers.local]\n\
@@ -2937,6 +2982,65 @@ let test_runtime_binding_disable_excludes_only_that_binding () =
         (String_util.contains_substring msg "local.disabled");
       check bool "error identifies configured disable" true
         (String_util.contains_substring msg "disabled by runtime.toml"))
+;;
+
+(* verifier_exact slots are read twice: the exact registry admits them against
+   the AGENT_CORE catalog, and completion-authority judgement dispatches them
+   through resolve_assignment, which knows only configured runtimes and lanes.
+   A slot that satisfies the catalog and names no configured route used to
+   load, then fail at every judgement — 113 of them on 2026-09-02. *)
+let exact_lane_runtime_toml ~lane ~slot =
+  Printf.sprintf
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n\
+     \n\
+     [runtime.exact_output_lanes.%s]\n\
+     slots = [\"local.sample\", %S]\n"
+    lane
+    slot
+;;
+
+let test_verifier_exact_slot_must_name_a_configured_route () =
+  with_temp_runtime_toml
+    (exact_lane_runtime_toml ~lane:"verifier_exact" ~slot:"local.absent")
+    (fun path ->
+       match Runtime.load_list ~config_path:path with
+       | Ok _ ->
+         failf "a verifier_exact slot naming no configured runtime should be rejected"
+       | Error msg ->
+         check bool "error names the lane's slots" true
+           (String_util.contains_substring
+              msg
+              "[runtime.exact_output_lanes.verifier_exact].slots");
+         check bool "error names the unresolved id" true
+           (String_util.contains_substring msg "local.absent"))
+;;
+
+(* The sibling lanes dispatch through the registry alone, so a catalog-only
+   target id is correct for them — hitl_auto_judge holds one today
+   (glm-coding.glm-5.3-flash-nothink, which is no configured runtime). Load
+   must not reject it, or the check above takes the fleet down with it. *)
+let test_sibling_exact_lanes_keep_catalog_only_slots () =
+  List.iter
+    (fun lane ->
+       with_temp_runtime_toml
+         (exact_lane_runtime_toml ~lane ~slot:"local.absent")
+         (fun path ->
+            match Runtime.load_list ~config_path:path with
+            | Ok _ -> ()
+            | Error msg ->
+              failf "%s must accept a catalog-only slot id, got: %s" lane msg))
+    [ "hitl_auto_judge"; "librarian_exact"; "board_attention_exact" ]
 ;;
 
 (* masc#28404. Same config the test above proves must still boot: [local.sample]
@@ -4599,6 +4703,10 @@ let () =
             test_runtime_provider_disable_excludes_its_bindings;
           test_case "disabled binding is excluded and rejected when referenced" `Quick
             test_runtime_binding_disable_excludes_only_that_binding;
+          test_case "verifier_exact slot must name a configured route" `Quick
+            test_verifier_exact_slot_must_name_a_configured_route;
+          test_case "sibling exact lanes keep catalog-only slots" `Quick
+            test_sibling_exact_lanes_keep_catalog_only_slots;
           test_case "unreferenced binding naming an undeclared model fails the load"
             `Quick test_binding_naming_an_undeclared_model_fails_the_load;
           test_case "non-provider top-level namespaces are not bindings" `Quick
@@ -4736,5 +4844,8 @@ let () =
         ; test_case
             "load allows a lane that mixes checkpoint owners"
             `Quick test_load_allows_a_lane_that_mixes_checkpoint_owners
+        ; test_case
+            "edit_config_text edits the file's own text and commits it"
+            `Quick test_edit_config_text_reads_the_file_and_commits_the_edit
         ] )
     ]

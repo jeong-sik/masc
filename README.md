@@ -115,6 +115,37 @@ A release carries the server binary, the terminal UI, and the deployment
 preflight helpers. The installer puts `masc-tui` next to `masc` and prints the
 command that starts it.
 
+### First-run setup
+
+After placing the binaries the installer runs a one-time setup wizard (skip it
+with `--no-wizard`). It reports what it detects on this host before writing
+anything, and the only files it writes are `.masc/config/.env.local` (one
+provider key) and `[runtime].default` in `runtime.toml`.
+
+Two axes are reported. The **model source** is where turns get their tokens:
+
+- A cloud provider (Anthropic, OpenAI, GLM, DeepSeek, …) is offered against its
+  API-key environment variable. Pass `--provider <id>` to select one without
+  prompting, and `--api-key` or `--api-key-stdin` to supply the key.
+- A local server (Ollama, llama-server, MLX) is curled at its healthcheck path
+  and shown `reachable` or `not running`, so a server that is not up is visible
+  before it is chosen.
+- A subscription CLI (Claude Code, Codex, Antigravity) is reached through that
+  CLI's own login, so it needs no key. It is shown `installed` once its command
+  is on `PATH`, and `signed in` when its own login check passes.
+
+The **execution sandbox** is where a Keeper's tools run. The wizard only reports
+which backends the host can offer — `docker` (daemon reachable), `microvm` via
+Apple's `container` CLI on macOS, and `remote_ssh` (endpoints declared in
+`runtime.toml`). It does not pick one on its own: the sandbox is set per Keeper
+in `.masc/config/keepers/<name>.toml`, or by a `--team <preset>` that carries its
+own choice — pass `--sandbox docker|microvm|remote_ssh` to set the seeded team's.
+
+The subscription sign-in check is also a standalone command:
+`masc runtime-probe <runtime_id>` exits `0` when the CLI is signed in and `1`
+when it is not, reusing the server's login probe instead of reading credential
+files.
+
 ## Terminal UI
 
 A release install puts `masc-tui` on `PATH` next to `masc`; from a source
@@ -210,6 +241,20 @@ tables, per-surface behavior, themes, and troubleshooting are in
 [`docs/TUI-GUIDE.md`](docs/TUI-GUIDE.md).
 
 ## MCP client setup
+
+The one-step path is `masc mcp-config`: it mints a bearer and prints a ready
+config block for your client, so you paste one block instead of assembling the
+URL, token, and header by hand.
+
+```bash
+masc mcp-config --base-path /path/to/project --client codex
+masc mcp-config --base-path /path/to/project --client claude-desktop
+masc mcp-config --base-path /path/to/project --client env   # shell exports
+```
+
+It mints a long-lived worker token (pass `--expiring` for a session-scoped one)
+and embeds the endpoint, token, and header for the chosen client. The manual
+pieces below are the same shapes, for wiring a client the command does not cover.
 
 HTTP is the public MCP path. First load the worker bearer created by
 `quickstart.sh`:
@@ -469,12 +514,14 @@ masc/
 |---|---|
 | [`docs/MCP-TEMPLATE.md`](docs/MCP-TEMPLATE.md) | MCP client configuration |
 | [`docs/TUI-GUIDE.md`](docs/TUI-GUIDE.md) | Terminal UI surfaces, keys, and troubleshooting |
+| [`docs/PROMPT-MAP.md`](docs/PROMPT-MAP.md) | Which prompt file each reader gets, and where it lands on the wire |
 | [`docs/KEEPER-USER-MANUAL.md`](docs/KEEPER-USER-MANUAL.md) | Configuring, starting, and watching Keepers |
 | [`docs/KEEPER-IDENTITY-MANUAL.md`](docs/KEEPER-IDENTITY-MANUAL.md) | Attaching Jira, Notion, Google and 51 other services to a Keeper |
 | [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md) | Current Keeper file and runtime assignment contract |
 | [`docs/SKILLS.md`](docs/SKILLS.md) | Declaring a capability in `SKILL.md` and handing it to a Keeper |
 | [`docs/ENV-CONTRACT.md`](docs/ENV-CONTRACT.md) | Environment variables the runtime reads |
 | [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | Local bearer and dashboard write access |
+| [`docs/operations/ssh-endpoints-runbook.md`](docs/operations/ssh-endpoints-runbook.md) | Provisioning a `remote_ssh` endpoint with `masc-exec-ssh-bootstrap`, migrating a Keeper onto it, and every preflight failure code |
 | [`docs/AGENT-CORE-BOUNDARY.md`](docs/AGENT-CORE-BOUNDARY.md) | Responsibility split between MASC and embedded Agent Core |
 | [`docs/spec/SPEC-INDEX.md`](docs/spec/SPEC-INDEX.md) | Specification index; inventory counts inside it are historical unless marked current |
 | [`docs/RELEASE-EVIDENCE.md`](docs/RELEASE-EVIDENCE.md) | Release evidence format; verify its version header before reuse |

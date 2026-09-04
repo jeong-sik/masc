@@ -303,6 +303,14 @@ type msg_identity =
 
 (** Request-correlated message history entry. [me_turn_phase], rather than the
     display role or timestamp, is the ordering authority inside one turn. *)
+(* The typed half of a Gate status row: which approval it belongs to, which
+   step it is, and the tool the approval is for. *)
+type gate_step = {
+  gs_approval_id: string;
+  gs_phase: string;
+  gs_tool: string option;
+}
+
 type msg_entry = {
   me_role: msg_role;
   me_identity: msg_identity;
@@ -319,6 +327,11 @@ type msg_entry = {
       (** Producer-built compact text for a Memory journal row. [None] for
           ordinary conversation and neutral system rows; renderers never
           recover this boundary by splitting display text. *)
+  me_gate: gate_step option;
+      (** The typed approval step behind a Gate status row. Carried so a run
+          of steps can be folded back into the one approval they describe;
+          [None] on every other row, including other status rows, which must
+          not be folded with them. *)
   me_submitted_at: float option;
       (** First local Enter time for an operator input. Preserved when the
           durable transcript replaces the session copy and used as that input
@@ -333,6 +346,111 @@ type msg_entry = {
      earlier-phase clock before the rows merge with parallel lanes. *)
   me_at: float;
 }
+
+(* A run of journal rows says one thing: where the memory ended up. Each row
+   in summary mode still wraps to about two lines, so three commits in a row
+   took six lines of a pane whose whole point is the conversation. The newest
+   row carries the current revision, so it is the one kept; the ones before it
+   are counted, and Ctrl-N still opens all of them.
+
+   Full mode is not folded: it exists to show every commit. *)
+let fold_memory_summary_runs ~visibility entries =
+  match visibility with
+  | Memory_hidden | Memory_full -> entries
+  | Memory_summary ->
+    let annotate folded (entry, extra) =
+      if folded = 0 then (entry, extra)
+      else
+        ( { entry with
+            me_memory_summary =
+              Option.map
+                (fun summary -> Printf.sprintf "%s · +%d earlier" summary folded)
+                entry.me_memory_summary
+          }
+        , extra )
+    in
+    let rec go acc run = function
+      | [] -> (
+        match run with
+        | [] -> List.rev acc
+        | newest :: older -> List.rev (annotate (List.length older) newest :: acc))
+      | ((entry, _) as row) :: rest -> (
+        match entry.me_role with
+        | Message_memory -> go acc (row :: run) rest
+        | Message_user _ | Message_keeper | Message_autonomous | Message_status
+        | Message_error | Message_tool | Message_skill _ | Message_thinking -> (
+          match run with
+          | [] -> go (row :: acc) [] rest
+          | newest :: older ->
+            go (row :: annotate (List.length older) newest :: acc) [] rest))
+    in
+    go [] [] entries
+;;
+
+(* A run of Gate rows says one thing: where an external effect ended up. The
+   store keeps a row per phase, which is right -- each is a durable fact -- but
+   drawn one row per phase a single approval took four lines of the pane and
+   repeated the tool name on each.
+
+   Only consecutive rows fold, and only within one approval id. That leaves a
+   request still waiting for an operator on its own line, which is the state
+   worth seeing, and folds the burst of steps that lands when it finally
+   resolves. Two approvals resolving back to back stay two rows.
+
+   The newest row of each approval is the one kept, so the run holds its place
+   in the timeline; its text is recomposed from every phase the run carried. *)
+let fold_gate_runs entries =
+  let close run acc =
+    (* Newest first within the run, and one entry per approval id. Emitting in
+       the order each approval was first seen keeps the rows where the reader
+       last saw them. *)
+    let ids =
+      List.fold_left
+        (fun ids (entry, _) ->
+          match entry.me_gate with
+          | Some gate when not (List.mem gate.gs_approval_id ids) ->
+            gate.gs_approval_id :: ids
+          | Some _ | None -> ids)
+        [] run
+    in
+    List.fold_left
+      (fun acc approval_id ->
+        let steps =
+          List.filter
+            (fun (entry, _) ->
+              match entry.me_gate with
+              | Some gate -> String.equal gate.gs_approval_id approval_id
+              | None -> false)
+            run
+        in
+        match steps with
+        | [] -> acc
+        | (newest, extra) :: _ ->
+          let phases =
+            List.rev_map
+              (fun (entry, _) ->
+                match entry.me_gate with
+                | Some gate -> gate.gs_phase
+                | None -> "")
+              steps
+          in
+          let tool =
+            match newest.me_gate with Some gate -> gate.gs_tool | None -> None
+          in
+          (match Masc_tui_gate_text.fold_line ~phases ~tool with
+           | Some text -> ({ newest with me_text = text }, extra) :: acc
+           | None -> (newest, extra) :: acc))
+      acc ids
+  in
+  let rec go acc run = function
+    | [] -> List.rev (close run acc)
+    | ((entry, _) as row) :: rest -> (
+      match entry.me_gate with
+      | Some _ -> go acc (row :: run) rest
+      | None -> go (row :: close run acc) [] rest)
+  in
+  go [] [] entries
+;;
 
 type chat_turn = {
   ct_request_id: string;
@@ -361,41 +479,52 @@ let message_display_at row =
   | Some _ | None -> if valid row.me_at then Some row.me_at else None
 ;;
 
+(* One moment per row, with a floor per request id so a turn's rows cannot
+   read as moving backwards.
+
+   Both tables were assoc lists. A conversation carries about as many request
+   ids as it has turns, and the floor list was rebuilt with
+   [List.remove_assoc] on every row: 561 rows over 200 turns walked a hundred
+   thousand pairs to answer a question that is one lookup per row. The tables
+   are created and dropped inside the call, so this is still a map from rows
+   to moments and nothing outside sees them. *)
 let chat_projected_timeline_ats messages =
-  let first_known_by_request =
-    List.fold_left
-      (fun known (row : msg_entry) ->
-        let request_id = row.me_request_id in
-        if String.equal request_id "" || List.mem_assoc request_id known
-        then known
-        else
-          match message_display_at row with
-          | Some at -> (request_id, at) :: known
-          | None -> known)
-      [] messages
-  in
-  let rec project floors reversed = function
+  let first_known_by_request = Hashtbl.create 64 in
+  List.iter
+    (fun (row : msg_entry) ->
+      let request_id = row.me_request_id in
+      if (not (String.equal request_id ""))
+         && not (Hashtbl.mem first_known_by_request request_id)
+      then
+        (* A row without a moment does not claim the id: a later row of the
+           same request can still be the first known one. *)
+        match message_display_at row with
+        | Some at -> Hashtbl.replace first_known_by_request request_id at
+        | None -> ())
+    messages;
+  let floors = Hashtbl.create 64 in
+  let rec project reversed = function
     | [] -> List.rev reversed
-    | row :: rest ->
+    | (row : msg_entry) :: rest ->
         let request_id = row.me_request_id in
         let raw_at = message_display_at row in
         if String.equal request_id ""
-        then project floors (raw_at :: reversed) rest
+        then project (raw_at :: reversed) rest
         else
           let projected_at =
-            match List.assoc_opt request_id floors, raw_at with
+            (* A floor recorded as [None] is a request known to have no
+               moment, which is not the same as a request not seen yet. *)
+            match Hashtbl.find_opt floors request_id, raw_at with
             | None, Some at -> Some at
-            | None, None -> List.assoc_opt request_id first_known_by_request
+            | None, None -> Hashtbl.find_opt first_known_by_request request_id
             | Some None, _ -> None
             | Some (Some floor), Some at -> Some (Float.max floor at)
             | Some (Some floor), None -> Some floor
           in
-          let floors =
-            (request_id, projected_at) :: List.remove_assoc request_id floors
-          in
-          project floors (projected_at :: reversed) rest
+          Hashtbl.replace floors request_id projected_at;
+          project (projected_at :: reversed) rest
   in
-  project [] [] messages
+  project [] messages
 ;;
 
 type msg_anchor =
@@ -437,51 +566,105 @@ let order_chat_turn_rows rows =
     rows
 ;;
 
-let same_turn_user left right =
-  match left.me_role, right.me_role with
-  | Message_user _, Message_user _ ->
-      String.equal left.me_request_id right.me_request_id
-      && String.equal left.me_text right.me_text
-  | (Message_keeper | Message_autonomous | Message_status | Message_error
-    | Message_tool | Message_thinking | Message_memory | Message_skill _), _
-  | _, (Message_keeper | Message_autonomous | Message_status | Message_error
-       | Message_tool | Message_thinking | Message_memory | Message_skill _) ->
+(* A turn while it is being assembled. The rows arrive in the order the
+   conversation carries them and are ordered once, when the turn is finished;
+   [order_chat_turn_rows] is a stable sort, so sorting once over the arrival
+   order lands every row where sorting after each arrival did.
+
+   [ctb_user_texts] is what recognises a user line the transcript already
+   holds. Two user rows of one request with the same text are one line
+   submitted twice -- the session copy and the server's persisted copy -- and
+   only one belongs on screen. Within a turn the request id is fixed, so the
+   text alone is the question, and the table answers it without walking the
+   turn. Non-user rows never fold: two tool rows with the same text are two
+   calls. *)
+type chat_turn_builder = {
+  ctb_request_id : string;
+  mutable ctb_rows_rev : msg_entry list;
+  mutable ctb_turn_sequence : int option;
+  ctb_user_texts : (string, unit) Hashtbl.t;
+}
+
+type chat_timeline_slot =
+  | Slot_turn of chat_turn_builder
+  | Slot_unowned of msg_entry
+  | Slot_memory of msg_entry
+
+let is_user_row row =
+  match row.me_role with
+  | Message_user _ -> true
+  | Message_keeper | Message_autonomous | Message_status | Message_error
+  | Message_tool | Message_thinking | Message_memory | Message_skill _ ->
       false
 ;;
 
-let append_chat_timeline_row items row =
-  if row.me_role = Message_memory
-  then items @ [ Chat_memory row ]
-  else if String.equal row.me_request_id ""
-  then items @ [ Chat_unowned row ]
-  else
-    let rec append reversed = function
-      | [] ->
-          List.rev
-            (Chat_turn
-               { ct_request_id = row.me_request_id
-               ; ct_turn_sequence = row.me_turn_sequence
-               ; ct_rows = [ row ]
-               }
-             :: reversed)
-      | Chat_turn turn :: rest
-        when String.equal turn.ct_request_id row.me_request_id ->
-          let rows =
-            if List.exists (same_turn_user row) turn.ct_rows
-            then turn.ct_rows
-            else order_chat_turn_rows (turn.ct_rows @ [ row ])
-          in
-          let ct_turn_sequence =
-            match turn.ct_turn_sequence, row.me_turn_sequence with
-            | None, sequence | sequence, None -> sequence
-            | Some left, Some right when Int.equal left right -> Some left
-            | Some _, Some _ -> None
-          in
-          List.rev_append reversed
-            (Chat_turn { turn with ct_turn_sequence; ct_rows = rows } :: rest)
-      | item :: rest -> append (item :: reversed) rest
-    in
-    append [] items
+(* Two rows of one turn can disagree about which turn of the conversation it
+   was. A disagreement is not a tie to break: the turn stops claiming a
+   number rather than picking one of them. *)
+let merge_turn_sequence held arriving =
+  match held, arriving with
+  | None, sequence | sequence, None -> sequence
+  | Some left, Some right when Int.equal left right -> Some left
+  | Some _, Some _ -> None
+;;
+
+(* The conversation's rows as turns, journal lines and unowned lines, in the
+   order each first appears.
+
+   Assembling this walked the items built so far for every row and rebuilt
+   the list to put one row in one turn, so a conversation cost the square of
+   its length. The table finds the turn a row belongs to in one lookup; the
+   slots keep the order the walk found. *)
+let chat_timeline_slots rows =
+  let slots_rev = ref [] in
+  let builders : (string, chat_turn_builder) Hashtbl.t = Hashtbl.create 64 in
+  List.iter
+    (fun (row : msg_entry) ->
+      if row.me_role = Message_memory
+      then slots_rev := Slot_memory row :: !slots_rev
+      else if String.equal row.me_request_id ""
+      then slots_rev := Slot_unowned row :: !slots_rev
+      else
+        match Hashtbl.find_opt builders row.me_request_id with
+        | Some builder ->
+            (* The sequence is merged even when the row itself folds into a
+               line already held: a duplicate still carries what it knows
+               about which turn this was. *)
+            builder.ctb_turn_sequence <-
+              merge_turn_sequence builder.ctb_turn_sequence row.me_turn_sequence;
+            let folds =
+              is_user_row row && Hashtbl.mem builder.ctb_user_texts row.me_text
+            in
+            if not folds
+            then begin
+              if is_user_row row
+              then Hashtbl.replace builder.ctb_user_texts row.me_text ();
+              builder.ctb_rows_rev <- row :: builder.ctb_rows_rev
+            end
+        | None ->
+            let user_texts = Hashtbl.create 4 in
+            if is_user_row row then Hashtbl.replace user_texts row.me_text ();
+            let builder =
+              { ctb_request_id = row.me_request_id
+              ; ctb_rows_rev = [ row ]
+              ; ctb_turn_sequence = row.me_turn_sequence
+              ; ctb_user_texts = user_texts
+              }
+            in
+            Hashtbl.replace builders row.me_request_id builder;
+            slots_rev := Slot_turn builder :: !slots_rev)
+    rows;
+  List.rev_map
+    (function
+      | Slot_memory row -> Chat_memory row
+      | Slot_unowned row -> Chat_unowned row
+      | Slot_turn builder ->
+          Chat_turn
+            { ct_request_id = builder.ctb_request_id
+            ; ct_turn_sequence = builder.ctb_turn_sequence
+            ; ct_rows = order_chat_turn_rows (List.rev builder.ctb_rows_rev)
+            })
+    !slots_rev
 ;;
 
 type projected_chat_row =
@@ -549,10 +732,82 @@ let chat_timeline ~loaded ~session ~queued_request_ids =
   let visible_session =
     List.filter (fun row -> not (queued row.me_request_id)) session
   in
-  let items =
-    List.fold_left append_chat_timeline_row [] (loaded @ visible_session)
-  in
-  { ctl_items = items }
+  { ctl_items = chat_timeline_slots (loaded @ visible_session) }
+;;
+
+(* Which lane a chat row belongs to, asked of the row rather than of where it
+   happens to sit.
+
+   The pane draws nine kinds of row on one clock: what a person said, what the
+   keeper answered, what an autonomous turn answered, its thinking, its tool
+   block, its skills, a memory commit, a status line, an error. Another agent's
+   broadcast and an external request arrive on the same clock and belong to no
+   turn at all. Laid out flat they are in the right order and in no order that
+   says what produced what.
+
+   The timeline already sorts rows this way to place them
+   ({!chat_timeline_slots}); this is the same question asked of one row, so a
+   renderer can draw the boundary without rebuilding the timeline. *)
+type chat_row_lane =
+  | Lane_turn of string
+      (** Produced inside the turn with this request id. *)
+  | Lane_unowned
+      (** No request owns it: another agent's broadcast, a system line. It
+          shares the clock with a turn without being part of one, and drawing
+          it inside the turn's boundary would say the keeper read it. *)
+  | Lane_memory
+      (** A memory journal commit. It carries no request either -- the store
+          records when it was written, not which turn asked -- so its place is
+          beside the turns rather than in one. *)
+
+let chat_row_lane (row : msg_entry) =
+  if row.me_role = Message_memory then Lane_memory
+  else if String.equal row.me_request_id "" then Lane_unowned
+  else Lane_turn row.me_request_id
+
+(* Where a row sits in its turn, for a renderer drawing the turn's edges. *)
+type turn_edge =
+  | Turn_opens
+  | Turn_continues
+  | Turn_closes
+  | Turn_alone  (** A turn of one row: it opens and closes on the same line. *)
+  | Turn_outside  (** Belongs to no turn; nothing to open or close. *)
+
+(* A turn opens once and closes once even when its rows are not adjacent.
+
+   Rows of one request can be separated by a broadcast that arrived mid-turn,
+   and comparing each row with its neighbour would then close the turn and
+   reopen it around the interruption -- drawing two turns where the keeper took
+   one. The edges are the request's first and last row in this list, not the
+   gaps between neighbours. *)
+let mark_turn_edges rows =
+  let first = Hashtbl.create 16 in
+  let last = Hashtbl.create 16 in
+  List.iteri
+    (fun index row ->
+      match chat_row_lane row with
+      | Lane_unowned | Lane_memory -> ()
+      | Lane_turn request_id ->
+          if not (Hashtbl.mem first request_id) then
+            Hashtbl.replace first request_id index;
+          Hashtbl.replace last request_id index)
+    rows;
+  List.mapi
+    (fun index row ->
+      let edge =
+        match chat_row_lane row with
+        | Lane_unowned | Lane_memory -> Turn_outside
+        | Lane_turn request_id -> (
+            let opens = Hashtbl.find_opt first request_id = Some index in
+            let closes = Hashtbl.find_opt last request_id = Some index in
+            match opens, closes with
+            | true, true -> Turn_alone
+            | true, false -> Turn_opens
+            | false, true -> Turn_closes
+            | false, false -> Turn_continues)
+      in
+      (row, edge))
+    rows
 ;;
 
 let chat_timeline_rows timeline =
@@ -1088,6 +1343,15 @@ type ask_answer_mode =
   | Ask_browsing
   | Ask_answering of { aam_ask_id: string }
 
+(* An answer being typed, for the questions a choice cannot answer. The slot
+   is what the domain accepts a write through, and it names its own question,
+   so an editor left open while the snapshot moves underneath still lands on
+   the question it was opened for. *)
+type ask_text_entry = {
+  ate_slot: Masc_tui_ask_projection.free_text_slot;
+  ate_text: string;
+}
+
 (** Overview snapshot from /api/v1/dashboard/briefing *)
 type workspace_health =
   | Workspace_health_critical
@@ -1135,13 +1399,32 @@ let acting_retained_entries = 1000
    screens at the row heights this TUI draws. *)
 let acting_retained_quiet = 200
 
+(** How many Keepers stand in each state the control plane names, counted off
+    [keeper_briefs]. The briefing carries a liveness word per Keeper and the
+    Overview row used to carry only their number, so a fleet with two Keepers
+    that had stopped doing anything and one an operator had paused read the
+    same as nine running ones.
+
+    [klc_unreadable] counts rows whose word is missing or outside the
+    vocabulary. They are not folded into any state: a Keeper whose liveness
+    this build cannot name is a different fact from an idle one, and the row
+    says so rather than picking the convenient neighbour. *)
+type keeper_liveness_counts = {
+  klc_active: int;
+  klc_inactive: int;
+  klc_offline: int;
+  klc_idle: int;
+  klc_paused: int;
+  klc_unreadable: int;
+}
+
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_cluster: string;
   ov_project: string;
   ov_keepers: int;  (** [keeper_briefs] the briefing carried *)
+  ov_keeper_liveness: keeper_liveness_counts;
   ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
-  ov_incident_count: int;
   ov_attention_items: attention_item list;
   ov_top_attention: attention_item option;
   ov_generated_at: string;
@@ -1636,9 +1919,12 @@ type changes_return =
 (* A picture currently on the terminal. Only the drawn case: a refusal has
    nothing to draw, and putting one here would take the screen away from the
    frame to show a message the frame is the only thing that can show. Refusals
-   go to the pane as text, like every other thing that did not happen. *)
+   go to the pane as text, like every other thing that did not happen.
+   [image_title] is the line drawn above the picture: a path when the
+   conversation named one, the attachment's name when a staged image is shown
+   -- a staged image has no path, so the field is not called one. *)
 type image_shown = {
-  image_path : string;
+  image_title : string;
   image_bytes : int;
 }
 
@@ -1648,6 +1934,7 @@ type surface =
   | Keepers of keeper_mode
   | Memory
   | Lanes
+  | Clients
   | Board
   | Approvals
   | Planning
@@ -1706,6 +1993,7 @@ let surface_ring_index (view : surface) =
     | Verification | Harness -> Planning
     | Changes | Connectors | Schedules | Fusion -> Keepers Keeper_list
     | Lanes -> Runtime
+    | Clients -> Runtime
     | Code -> Repositories
     | Resources | Tools -> Config
     | System_logs -> Acting
@@ -1782,7 +2070,7 @@ let surface_needs : surface -> surface_needs = function
      different machinery. *)
   | Approvals ->
       { nothing with needs_operator_approvals = true; needs_asks = true }
-  | Memory | Lanes | Schedules | Verification | Harness | Fusion
+  | Memory | Lanes | Clients | Schedules | Verification | Harness | Fusion
   | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
   | Tools ->
       nothing
@@ -1927,7 +2215,14 @@ type config_pane =
   | Config_models
   | Config_params
   | Config_prompts
+  | Config_presets
   | Config_themes
+  | Config_voice
+      (** What voice is actually doing, which runtime.toml alone does not say.
+          The [voice] section is 60 lines into a 1,600-line file, and reading
+          it answers what is declared rather than what loaded — a config that
+          fails to parse looks identical to one that was never written. That
+          distinction cost six days once. *)
 
 (* Which section the Tools surface is showing. They used to be one scrolling
    list: five sections concatenated, and the first of them is the effective
@@ -2145,6 +2440,14 @@ type state = {
   (* The Resources surface: the MCP resource inventory, and the one read
      the content pane shows, stamped with its uri. [resource_pending_uri]
      rejects a slow reply after the operator has stepped to another row. *)
+  (* The Config surface's voice pane: the server's own answer about what
+     loaded, and which input device the recorder would use. The device is read
+     locally because no server knows it — sox takes whatever macOS calls
+     default, and an operator whose captures come back empty is usually
+     looking at the wrong microphone. *)
+  mutable voice_config: Yojson.Safe.t option;
+  mutable voice_config_error: string option;
+  mutable voice_input_device: string option;
   mutable resources_list: Masc_tui_mcp.resource list option;
   mutable resources_error: string option;
   mutable resources_cursor: int;
@@ -2177,6 +2480,17 @@ type state = {
   mutable prompts_librarian_input: (string * string list) option;
   mutable prompts_librarian_input_error: string option;
   mutable prompts_librarian_input_loading: bool;
+  (* Prompt presets (#32777). The pane holds the listing, the name being
+     typed for a save, the preset armed for a restore, and the last report —
+     which stays on screen because it is the only place the skipped keys and
+     the runtime.toml outcome are said. *)
+  mutable presets_snapshot: Tui_decode.presets_snapshot option;
+  mutable presets_error: string option;
+  mutable presets_cursor: int;
+  mutable preset_save_draft: string option;
+  mutable preset_restore_armed: string option;
+  mutable preset_report: Tui_decode.preset_restore_report option;
+  mutable preset_busy: bool;
   (* Rows of coloured segments, the shape the Code surface keeps, so the two
      surfaces read the same file the same way. Plain text is derived where it
      is needed rather than stored beside them: two copies of the same rows
@@ -2263,6 +2577,28 @@ type state = {
      once it is already receiving text cannot be found by looking. Focus is
      what routes keys into it, and the operator takes and releases that. *)
   mutable composer_focused: bool;
+  (* A microphone capture in flight, and the level it is hearing.
+     [voice_capture] is the keeper the transcript is bound for, taken when the
+     capture starts: the roster cursor moves on its own under a refresh, and a
+     transcript that arrived seconds later would otherwise land on whoever is
+     selected now.
+
+     [voice_level_db] is the last level read from the growing recording, so an
+     operator can see the microphone is hearing them. Without it a dead input
+     device and a quiet room look identical — both end as an empty draft. *)
+  mutable voice_capture: string option;
+  mutable voice_level_db: float option;
+  (* Continuous mode: the keeper whose row re-arms a capture after each
+     transcript, until the operator turns it off. Separate from
+     [voice_capture], which is the capture running right now — between two
+     utterances the mode is on and no capture is in flight.
+
+     [voice_floor] is the room level measured when the mode started, reused for
+     every capture in it. Re-probing costs about 1.15 s of the gap between
+     utterances, and a room does not change between two sentences the way it
+     changes across a session. *)
+  mutable voice_continuous: string option;
+  mutable voice_floor: float option;
   (* A top-level [q] arms exit instead of ending the TUI immediately. The next
      unrelated input clears it; a second [q] exits. *)
   mutable quit_armed: bool;
@@ -2345,6 +2681,11 @@ type state = {
   (* One answer at a time. The draft carries the ask it belongs to, so moving
      the cursor cannot post an answer under the wrong question. *)
   mutable ask_draft: Masc_tui_ask_projection.draft option;
+  (* Open while the operator types an answer no choice covers. A question the
+     server sent with no choices at all can be answered only this way, and
+     until this existed the terminal drew "free text welcome" over a keyboard
+     that had nowhere to put the text. *)
+  mutable ask_text_entry: ask_text_entry option;
   mutable pending_ask_submit: string option;
   mutable ask_submit_inflight: bool;
   (* The tool calls keepers are holding, drawn above the operator actions on
@@ -2504,6 +2845,14 @@ type state = {
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
   mutable standalone_lanes_error: string option;
   mutable standalone_lanes_generation: int;
+  (* The clients roster, off the ring under Runtime the way Lanes is. A
+     cursor, not just a scroll: "/" search lands on a row by name, and the
+     cursor is where it lands. *)
+  mutable clients_surface: Tui_decode.clients_snapshot option;
+  mutable clients_surface_error: string option;
+  mutable clients_surface_scroll: int;
+  mutable clients_surface_cursor: int;
+  mutable clients_surface_generation: int;
   (* Run drill-down under the standalone observation rows. [lane_runs] is the
      summary page of the lane named in [lanes_mode]; payloads stay behind the
      per-run detail fetch, so the list never holds one. *)
@@ -2753,6 +3102,13 @@ type state = {
      message: switching keepers or abandoning the draft must not leave an image
      attached to whatever is typed later. *)
   mutable msg_attachments: Masc_tui_keeper_chat_projection.attachment list;
+  (* Ctrl-O weighs a staged image against a .png the conversation named by
+     which is newer, so the batch carries a recency marker: an anchor to the
+     history row that was newest when the newest attachment entered the
+     composer. [None] is a real answer -- staged while the history was empty,
+     so any row it holds now arrived later. Meaningful only while
+     [msg_attachments] is non-empty and reset when it clears. *)
+  mutable msg_attachments_since: msg_anchor option;
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;
   mutable msg_drafts: (string * string) list;
@@ -2857,6 +3213,72 @@ type state = {
   port: int;
   refresh_interval: float;
 }
+
+(* Which field a typed character lands in.
+
+   Seven fields take letters. Paste named four of them and typing named all
+   seven, each with its own guard written where the field was added, so a
+   paste into the palette, into row search, or into a preset name went to the
+   chat draft the operator was not looking at -- or, with no keeper selected,
+   nowhere at all. The operator sees a paste that works on one screen and
+   does nothing on the next.
+
+   Both paths read this now. A field added here has to be answered by every
+   match over the result, which is what keeps the next field from taking
+   letters without taking pasted text.
+
+   The board draft is one of these and the chat composer is not, which reads
+   backwards until you look at what a paste has to do in each. Both hold many
+   lines, but the composer's paste also classifies a dropped file and spills a
+   long paste to a file in the keeper's workspace -- neither of which a board
+   post has anywhere to go. What the board draft needs is the text, and that
+   is what a case here gives it.
+
+   The chat composer is not one of these. It is the fallback both paths already
+   share -- keys reach it through [Composer.classify_key] before this is
+   consulted, and a paste reaches it when this says [None] -- and its paste
+   path does work these cannot (a dropped file, a spill to disk) that has no
+   meaning in a one-line field.
+
+   [compact_viewport] is the frame's, not the state's: a surface the last
+   paint had to draw compact is not showing the field, and the two identity
+   fields already refused keys on that ground. Passed in rather than read,
+   because this module cannot see a frame. *)
+type text_input_target =
+  | Text_preset_name
+  | Text_runtime_param
+  | Text_palette
+  | Text_row_search
+  | Text_identity_app_form
+  | Text_identity_filter
+  | Text_board_draft
+
+(* The order is the key dispatch's order, which is what an operator already
+   experiences: a preset name being typed holds every letter, and the two
+   identity fields come last because the surface under them reads letters as
+   commands. *)
+let text_input_target (state : state) ~compact_viewport =
+  let identity_surface =
+    state.view = Keepers Keeper_detail
+    && state.detail_tab = Detail_identity
+    && not compact_viewport
+  in
+  if
+    state.view = Config
+    && state.config_pane = Config_presets
+    && Option.is_some state.preset_save_draft
+  then Some Text_preset_name
+  else if Option.is_some state.runtime_param_edit then Some Text_runtime_param
+  else if state.palette_open then Some Text_palette
+  else if Option.is_some state.search then Some Text_row_search
+  else if identity_surface && Option.is_some state.identity_app_form then
+    Some Text_identity_app_form
+  else if identity_surface && Option.is_some state.identity_filter then
+    Some Text_identity_filter
+  else if state.view = Board && state.board_mode = Board_compose then
+    Some Text_board_draft
+  else None
+;;
 
 (* One reading of the state for both the send path and the footer; the order
    and the reasoning live in [Masc_tui_send_disposition]. *)
@@ -3012,6 +3434,9 @@ let create_state
   palette_cursor = 0;
   search = None;
   search_last = "";
+  voice_config = None;
+  voice_config_error = None;
+  voice_input_device = None;
   resources_list = None;
   resources_error = None;
   resources_cursor = 0;
@@ -3028,6 +3453,13 @@ let create_state
   prompts_snapshot = None;
   prompts_error = None;
   prompts_cursor = 0;
+  presets_snapshot = None;
+  presets_error = None;
+  presets_cursor = 0;
+  preset_save_draft = None;
+  preset_restore_armed = None;
+  preset_report = None;
+  preset_busy = false;
   prompts_show_fragments = false;
   prompts_show_runtime_assets = false;
   prompts_librarian_input = None;
@@ -3072,6 +3504,10 @@ let create_state
   keeper_action_pending = None;
   keeper_action_serial = 0;
   composer_focused = false;
+  voice_capture = None;
+  voice_level_db = None;
+  voice_continuous = None;
+  voice_floor = None;
   quit_armed = false;
   last_action = None;
   fleet_safety = None;
@@ -3112,6 +3548,7 @@ let create_state
   ask_cursor = 0;
   ask_question_cursor = 0;
   ask_draft = None;
+  ask_text_entry = None;
   pending_ask_submit = None;
   ask_submit_inflight = false;
   keeper_tool_approvals = [];
@@ -3184,6 +3621,11 @@ let create_state
   standalone_lanes = None;
   standalone_lanes_error = None;
   standalone_lanes_generation = 0;
+  clients_surface = None;
+  clients_surface_error = None;
+  clients_surface_scroll = 0;
+  clients_surface_cursor = 0;
+  clients_surface_generation = 0;
   lanes_mode = Lanes_overview;
   lanes_standalone_cursor = 0;
   lane_runs = None;
@@ -3327,6 +3769,7 @@ let create_state
   system_logs_detail_scroll = 0;
   msg_input = Buffer.create 256;
   msg_attachments = [];
+  msg_attachments_since = None;
   msg_target_keeper_name = None;
   msg_return = Keeper_chat_return_detail;
   msg_drafts = [];
@@ -3411,12 +3854,8 @@ let empty_page_of ~snapshot ~error =
   | None, None -> Page_unread
   | Some _, None -> Page_empty
 
-let chat_rows_for (state : state) keeper_name =
-  let promoted_request_id =
-    Option.map
-      (fun entry -> entry.sent_request.request_id)
-      (promoted_inflight_for_keeper state keeper_name)
-  in
+let compute_chat_rows_for (state : state) keeper_name ~promoted_request_id
+    ~queued_request_ids =
   let not_promoted row =
     not
       (Option.exists
@@ -3435,11 +3874,75 @@ let chat_rows_for (state : state) keeper_name =
         String.equal entry.me_keeper_name keeper_name && not_promoted entry)
       state.msg_history
   in
+  chat_timeline ~loaded ~session ~queued_request_ids |> chat_timeline_rows
+
+(* One conversation's rows, computed once per change of its inputs.
+
+   The projection walks every loaded row -- grouping into turns, timeline
+   floors, a sort -- and the chat frame asked for it three to four times:
+   on every key, every two-second tick and every async message, whether or
+   not the conversation had changed. Its inputs are the loaded page, the
+   loaded keeper, the session rows, and two small readings of the queue and
+   the inflight list: which request was promoted out of the queue and which
+   requests still wait. The lists are replaced rather than mutated in place
+   when the conversation changes, so physical equality on them says whether
+   the last answer still holds; the two readings are compared by value, so a
+   queue or an inflight turn that changed in a way the rows do not depend on
+   (a live turn streaming, another keeper's line) keeps the answer.
+
+   Module state rather than a field on [state], like the renderer's markdown
+   cache: a derived reading is not authority, and the input layer that reads
+   these rows would otherwise have to invalidate it at every mutation site. *)
+type chat_rows_memo = {
+  crm_keeper_name : string;
+  crm_loaded_keeper : string option;
+  crm_loaded : msg_entry list;
+  crm_history : msg_entry list;
+  crm_promoted_request_id : string option;
+  crm_queued_request_ids : string list;
+  crm_rows : msg_entry list;
+}
+
+let chat_rows_memo : chat_rows_memo option ref = ref None
+
+let chat_rows_for (state : state) keeper_name =
+  let promoted_request_id =
+    Option.map
+      (fun entry -> entry.sent_request.request_id)
+      (promoted_inflight_for_keeper state keeper_name)
+  in
   let queued_request_ids =
     Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name
     |> List.map (fun item -> item.Masc_tui_keeper_chat_queue.request.request_id)
   in
-  chat_timeline ~loaded ~session ~queued_request_ids |> chat_timeline_rows
+  match !chat_rows_memo with
+  | Some memo
+    when String.equal memo.crm_keeper_name keeper_name
+         && Option.equal String.equal memo.crm_loaded_keeper
+              state.msg_loaded_keeper
+         && memo.crm_loaded == state.msg_loaded
+         && memo.crm_history == state.msg_history
+         && Option.equal String.equal memo.crm_promoted_request_id
+              promoted_request_id
+         && List.equal String.equal memo.crm_queued_request_ids
+              queued_request_ids ->
+      memo.crm_rows
+  | Some _ | None ->
+      let rows =
+        compute_chat_rows_for state keeper_name ~promoted_request_id
+          ~queued_request_ids
+      in
+      chat_rows_memo :=
+        Some
+          { crm_keeper_name = keeper_name;
+            crm_loaded_keeper = state.msg_loaded_keeper;
+            crm_loaded = state.msg_loaded;
+            crm_history = state.msg_history;
+            crm_promoted_request_id = promoted_request_id;
+            crm_queued_request_ids = queued_request_ids;
+            crm_rows = rows;
+          };
+      rows
 
 (* The one place [msg_scroll] moves, so the pin it counts back from cannot be
    forgotten at one of the dozen keys that scroll. Leaving the bottom takes the
@@ -3838,6 +4341,11 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
       (match state.lanes_mode with
        | Lanes_run_detail _ -> None
        | Lanes_overview | Lanes_run_list _ -> Some (lanes_scrolled state))
+  | Clients ->
+      listing ~error:state.clients_surface_error
+        (match state.clients_surface with
+         | None -> 0
+         | Some snapshot -> List.length snapshot.Tui_decode.cls_clients)
   | Harness ->
       if Option.is_some state.harness_detail then None
       else
@@ -3918,7 +4426,11 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
            (match state.runtime_config_view with
             | None -> 0
             | Some _ -> List.length state.config_models_rows + 1)
-         | Config_runtime | Config_params | Config_prompts | Config_themes ->
+         (* The voice pane draws its own short block rather than the config
+            file, so it scrolls with the same rule as the rest: whatever the
+            renderer laid out. *)
+         | Config_runtime | Config_params | Config_prompts | Config_presets
+         | Config_themes | Config_voice ->
            (match state.runtime_config_view with
             | None -> 0
             | Some (_, rows) -> List.length rows))
@@ -3958,6 +4470,29 @@ let code_note_stem ~anchor =
    searchable and [texts] is the same decoded list the row cursor names, in
    the same order -- a match index is a cursor position. [None] keeps "/"
    closed on that surface. *)
+(* One list under one cursor: the calls keepers are holding first (they run
+   out in [kta_timeout_sec]; the operator actions keep), then the operator
+   actions. The two kinds answer through different routes, so the row is a
+   sum the key handler matches on rather than a shape it infers. *)
+type approval_row =
+  | Keeper_tool_row of Tui_decode.keeper_tool_approval
+  | Gate_row of Tui_decode.gate_pending
+      (** A durable Gate approval — an external-service write among them.
+          It keeps: nobody watching loses nothing. Answered through the
+          dashboard resolve route. *)
+  | Operator_row of Masc_tui_operator_projection.approval_item
+
+let operator_approval_items (state : state) =
+  match state.approval_snapshot with
+  | Some snapshot -> snapshot.aps_items
+  | None -> []
+
+let approval_items (state : state) =
+  List.map (fun held -> Keeper_tool_row held) state.keeper_tool_approvals
+  @ List.map (fun pending -> Gate_row pending) state.gate_pending
+  @ List.map (fun item -> Operator_row item) (operator_approval_items state)
+
+
 let surface_row_texts (state : state) : surface -> string list option = function
   | Keepers Keeper_list ->
       Some (List.map (fun (k : keeper) -> k.k_name) state.keepers)
@@ -3993,6 +4528,16 @@ let surface_row_texts (state : state) : surface -> string list option = function
                    snapshot.Tui_decode.sls_lanes
            in
            (match standalone with [] -> None | _ -> Some standalone))
+  | Clients ->
+      let names =
+        match state.clients_surface with
+        | None -> []
+        | Some snapshot ->
+            List.map
+              (fun (row : Tui_decode.client_row) -> row.Tui_decode.cr_name)
+              snapshot.Tui_decode.cls_clients
+      in
+      (match names with [] -> None | _ -> Some names)
   | Verification ->
       if Option.is_some state.verification_detail_request_id then None
       else
@@ -4102,7 +4647,48 @@ let surface_row_texts (state : state) : surface -> string list option = function
              (fun (n : Tui_decode.workspace_tree_node) -> n.Tui_decode.wt_label)
              state.code_entries)
   (* Cursorless or otherwise-navigated surfaces: no row list to search. *)
-  | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
+  (* The list, and only while the list is the pane: reading a post or
+     writing one draws something else, and "/" there would move a cursor
+     nobody can see. The text is what identifies a row -- its id, who wrote
+     it, its title -- which is what a reader has in mind when they reach for
+     the key. *)
+  | Board ->
+      (match state.board_mode with
+       | Board_read _ | Board_compose -> None
+       | Board_list ->
+           (match state.board_posts with
+            | [] -> None
+            | posts ->
+                Some
+                  (List.map
+                     (fun (post : board_post) ->
+                       post.bp_id ^ " " ^ post.bp_author ^ " " ^ post.bp_title)
+                     posts)))
+  (* The goals the filter and sort left on screen, in the order they are
+     drawn: the cursor counts positions in that list, not in the snapshot. *)
+  | Planning ->
+      (match state.planning_mode with
+       | Planning_detail _ -> None
+       | Planning_list ->
+           Option.bind state.planning (fun snapshot ->
+               match
+                 planning_visible_goals ~filter:state.planning_filter
+                   ~sort:state.planning_sort snapshot.pl_goals
+               with
+               | [] -> None
+               | goals ->
+                   Some
+                     (List.map
+                        (fun (goal : planning_goal) ->
+                          goal.pg_id ^ " " ^ goal.pg_title)
+                        goals)))
+  (* Approvals is absent on purpose. Its rows would search well, but [n] on
+     that surface is deny, unarmed and immediate: offering "/" there invites
+     the reflex that follows it, and on this surface that reflex refuses an
+     approval instead of stepping to the next match. Verification met the
+     same collision and moved its rejection to [x]; until Approvals makes
+     that call, the safe answer is no row search. *)
+  | Overview | Acting | Keepers _ | Approvals | Schedules
   | Fusion | Resources | Changes | Config | Tools ->
       None
 
@@ -4147,6 +4733,23 @@ let keeper_message_pending_status_rows items =
     0 (keeper_message_pending_preview items)
 ;;
 
+(* External effects this Keeper handed to the Gate and has not got back.
+
+   Measured over 2026-09-01..03: 2,067 of 35,658 recorded calls were deferred,
+   and in 872 of them the Keeper went on to make further calls in the same
+   turn. Those rows draw in the chat as ordinary returns, because a deferral
+   returns successfully -- the effect is what is outstanding, not the call. The
+   pane had no way to say so.
+
+   Read from [gate_pending], which rides every tick from every surface for the
+   strip's badge, so this is as current in the chat pane as it is on Approvals.
+   A projection of rows already loaded: no new field, no new request. *)
+let keeper_effects_at_the_gate (state : state) ~keeper_name =
+  List.filter
+    (fun (pending : Tui_decode.gate_pending) ->
+      String.equal pending.gp_keeper keeper_name)
+    state.gate_pending
+
 let keeper_message_status_rows (state : state) =
   let unavailable_target =
     match state.msg_target_keeper_name with
@@ -4187,6 +4790,14 @@ let keeper_message_status_rows (state : state) =
      transcript. When its turn starts those two rows are handed to the active
      USER one-for-one, so the text does not jump through an older turn's
      tool/output block. *)
+  (* One row whatever the queue holds, so the reservation cannot drift from
+     the drawing: the pane names as many effects as fit on it and truncates
+     the rest, the way every other single-line status row does. *)
+  + (match state.msg_target_keeper_name with
+     | Some keeper_name
+       when keeper_effects_at_the_gate state ~keeper_name <> [] ->
+         1
+     | Some _ | None -> 0)
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
   + (if state.msg_memory_visibility <> Memory_hidden
         && Option.is_some state.msg_memory_error then 1 else 0)
@@ -4204,28 +4815,6 @@ let keeper_message_status_rows (state : state) =
    rendered history still uses the exact rows it currently draws. *)
 let keeper_message_support_status_rows state ~status_rows =
   status_rows + if keeper_message_reading_back state then 0 else 1
-
-(* One list under one cursor: the calls keepers are holding first (they run
-   out in [kta_timeout_sec]; the operator actions keep), then the operator
-   actions. The two kinds answer through different routes, so the row is a
-   sum the key handler matches on rather than a shape it infers. *)
-type approval_row =
-  | Keeper_tool_row of Tui_decode.keeper_tool_approval
-  | Gate_row of Tui_decode.gate_pending
-      (** A durable Gate approval — an external-service write among them.
-          It keeps: nobody watching loses nothing. Answered through the
-          dashboard resolve route. *)
-  | Operator_row of Masc_tui_operator_projection.approval_item
-
-let operator_approval_items (state : state) =
-  match state.approval_snapshot with
-  | Some snapshot -> snapshot.aps_items
-  | None -> []
-
-let approval_items (state : state) =
-  List.map (fun held -> Keeper_tool_row held) state.keeper_tool_approvals
-  @ List.map (fun pending -> Gate_row pending) state.gate_pending
-  @ List.map (fun item -> Operator_row item) (operator_approval_items state)
 
 
 (* Command-palette jump targets. Surfaces come from the same ring the strip
@@ -4245,9 +4834,7 @@ type palette_action =
 (* Prefix match: the lowercased label starts with the query. An empty query
    is a prefix of everything. *)
 let palette_starts_with ~needle haystack =
-  let h = String.lowercase_ascii haystack in
-  let n = String.length needle in
-  String.length h >= n && String.equal (String.sub h 0 n) needle
+  String.starts_with ~prefix:needle (String.lowercase_ascii haystack)
 
 let palette_contains ~needle haystack =
   let h = String.lowercase_ascii haystack in
@@ -4336,6 +4923,7 @@ let palette_entries (state : state) =
   [ "settings", Palette_config Config_params ]
   @ [ "go Task Review", Palette_goto Verification ]
   @ [ "go Lanes", Palette_goto Lanes ]
+  @ [ "go Clients", Palette_goto Clients ]
   @ [ "go Schedules", Palette_goto Schedules ]
   @ [ "go Fusion", Palette_goto Fusion ]
   @ [ "go Code", Palette_goto Code ]

@@ -27,6 +27,19 @@ let rows_for ~terminal_rows =
 let focus_key = "i"
 let release_key = "esc"
 
+(* Ctrl-Y. Every printable key in a focused row is draft text, so a voice
+   binding cannot be a letter without taking it from typing. Ctrl-Y is the one
+   control code this TUI does not already spend: A is line-start by convention,
+   L is redraw, and C/D/H/I/J/M/Q/S/Z never reach the application. *)
+let listen_key = "\025"
+
+(* Ctrl-A. The same reasoning as [listen_key]: a focused row spends every
+   printable key on draft text. Ctrl-K was the other candidate and is taken —
+   it cancels a queued line (masc_tui.ml checks Char.code 11). Ctrl-A appears
+   nowhere in this TUI, and the composer binds no line-editing shortcuts that
+   would claim it by convention. *)
+let continuous_key = "\001"
+
 let prompt composer =
   match composer.target with
   | No_target -> "no keeper selected"
@@ -52,6 +65,8 @@ type key_outcome =
   | Take_focus
   | Release_focus
   | Send
+  | Start_listening
+  | Toggle_continuous
   | Edit
   | Pass_to_surface
 
@@ -66,6 +81,14 @@ let classify_key composer key =
       else Pass_to_surface
   | Focused ->
       if String.equal key release_key then Release_focus
+      else if String.equal key listen_key
+      then
+        (* The recipient is what makes a capture worth taking: a transcript
+           with nowhere to go is a recording the operator cannot send. *)
+        (if can_send { composer with draft = "x" } then Start_listening else Edit)
+      else if String.equal key continuous_key
+      then
+        (if can_send { composer with draft = "x" } then Toggle_continuous else Edit)
       else if is_send_key key then if can_send composer then Send else Edit
       else Edit
 

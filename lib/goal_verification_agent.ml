@@ -18,7 +18,7 @@
     the handler binds [ctx.agent_name] into the verdict, and this lane's
     context names the lane. Evidence is the model's stated reason, which the
     verdict itself now carries on either outcome, and
-    config/prompts/goal_verification.proof.md makes it mandatory for both. A
+    config/prompts/goal_verification.md (slot proof) makes it mandatory for both. A
     verdict without a stated reason is not a judgment: nothing is committed and
     the pending row stays durable.
 
@@ -160,7 +160,7 @@ let collect_pending config : (pending_work list, string) result =
 
    A Goal declares a metric and a target value when it is created. The proof
    review asks one question: did that metric reach that target. The prompt is
-   config/prompts/goal_verification.proof.md and its variables are the goal's
+   config/prompts/goal_verification.md (slot proof) and its variables are the goal's
    own — nothing about Tasks reaches the judge, because a Task proves its own
    contract and says nothing about a Goal's metric. *)
 
@@ -180,15 +180,25 @@ let render_lookup_section (lookup : Task.Anti_rationalization.lookup_surface) =
       |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
       |> String.concat ", "
     in
+    (* The empty-root sentence is the same prose the task verifier renders;
+       both lanes share the one slot in verification.md. *)
     let root_layout_lines =
       match root_layout with
-      | [] -> "  (this root is empty)"
+      | [] ->
+        Result.map
+          (fun text -> "  " ^ String.trim text)
+          (Prompt_registry.render_prompt_template
+             Prompt_names.verification_lookup_root_layout_empty
+             [])
       | entries ->
-        entries |> List.map (fun entry -> "  " ^ entry) |> String.concat "\n"
+        Ok (entries |> List.map (fun entry -> "  " ^ entry) |> String.concat "\n")
     in
-    Prompt_registry.render_prompt_template
-      Prompt_names.goal_verification_lookup
-      [ "lookup_tools", tool_names; "lookup_root_layout", root_layout_lines ]
+    (match root_layout_lines with
+     | Error _ as error -> error
+     | Ok root_layout_lines ->
+       Prompt_registry.render_prompt_template
+         Prompt_names.goal_verification_lookup
+         [ "lookup_tools", tool_names; "lookup_root_layout", root_layout_lines ])
 ;;
 
 let render_proof_prompt ~lookup (goal : Goal_store.goal) =

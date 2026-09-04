@@ -150,7 +150,6 @@ type continuation_route_disposition =
 type checkpoint_reason = Keeper_turn_checkpoint_reason.t =
   | Operation_queued
   | Durable_stimulus_arrived
-  | Awaiting_external_effect
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int

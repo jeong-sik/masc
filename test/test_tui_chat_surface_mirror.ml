@@ -68,7 +68,7 @@ let decoded_surface surface =
      | History.Said_by_keeper | History.Autonomous_reply
      | History.Delivery_failed _ | History.Tool_calls _
      | History.Skill_activity _ | History.Reasoning _
-     | History.Memory_activity _ ->
+     | History.Gate_activity _ | History.Memory_activity _ ->
        failf "expected an addressed row")
   | Ok _ -> failf "expected exactly one row"
 ;;

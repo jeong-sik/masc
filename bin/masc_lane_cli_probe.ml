@@ -102,6 +102,14 @@ let () =
      this the slot answers "requires Eio_context env and clock". *)
   Eio_context.set_env env;
   Eio_context.set_clock (Eio.Stdenv.clock env);
+  (* And the process manager, or the spawn falls back to a Unix path that waits
+     on Unix.select. This probe exists to time that subprocess, so a blocking
+     wait does not merely stall it — it measures the wrong thing, since the
+     fallback path is not the one a server takes. *)
+  Process_eio.init
+    ~cwd_default:(Eio.Stdenv.cwd env)
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
   (* The server installs the deployment capability overlay at boot and a CLI
      does not; keeper_capability_probe_cli carries the same call for the same
      reason. *)

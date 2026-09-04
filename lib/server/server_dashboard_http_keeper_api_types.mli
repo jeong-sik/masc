@@ -155,10 +155,6 @@ val unique_present_paths : string option list -> string list
 val take_last : int -> 'a list -> 'a list
 (** [take_last n xs] returns the last [n] elements of [xs]. *)
 
-val provider_attempt_row_json :
-  Keeper_runtime_manifest.t -> Yojson.Safe.t
-(** Pure: provider-attempt manifest row → JSON record. *)
-
 val string_contains_substring : string -> string -> bool
 (** Pure: naive substring presence test. *)
 

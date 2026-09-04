@@ -610,6 +610,587 @@ let test_keeper_name_width_never_shrinks_as_the_terminal_grows () =
     previous := name
   done
 
+(* Memory fleet columns.
+
+   The header row and the data row are built from one description of the
+   columns. These check that the pair actually lands on the same offsets, and
+   that no reading can move a cell -- the two things the screen lost while the
+   header and the row each carried their own widths in a format string. *)
+
+(* One cell per column, so a mark's position is the cell's position. *)
+let memory_probe =
+  { Schedule.mrow_state = "S"
+  ; mrow_name = "N"
+  ; mrow_revision = "R"
+  ; mrow_facts = "F"
+  ; mrow_size = "Z"
+  ; mrow_source = "U"
+  ; mrow_delta = "D"
+  }
+
+(* Every reading past its budget, including the two that used to push the row:
+   a keeper name over eighteen cells and an ordinary reading over fourteen. *)
+let memory_overflowing =
+  { Schedule.mrow_state = "read-error-and-then-some"
+  ; mrow_name = "kidsnote-pr-jira-checker-and-a-longer-tail"
+  ; mrow_revision = "1234567890"
+  ; mrow_facts = "9876543"
+  ; mrow_size = "1234567.8 MB"
+  ; mrow_source = "r32 i8 1.5 KB with more than the cell holds"
+  ; mrow_delta = "+1000 -1000"
+  }
+
+let index_of haystack needle =
+  let haystack_length = String.length haystack in
+  let needle_length = String.length needle in
+  let rec walk index =
+    if index + needle_length > haystack_length then None
+    else if String.sub haystack index needle_length = needle then Some index
+    else walk (index + 1)
+  in
+  walk 0
+
+let offset_of needle text =
+  match index_of text needle with
+  | Some index -> index
+  | None -> failf "%S is not in %S" needle text
+
+(* Offsets are asked in display cells, not bytes: the delta column is headed
+   with a two-byte glyph that occupies one cell. *)
+let cells_before text byte_offset =
+  Masc_tui_message_layout.display_width (String.sub text 0 byte_offset)
+
+let check_left_cell label mark ~header ~row ~inner_width =
+  check int
+    (Printf.sprintf "inner %d: %s starts where its cell starts" inner_width label)
+    (cells_before header (offset_of label header))
+    (cells_before row (offset_of mark row))
+
+let check_right_cell label mark ~header ~row ~inner_width =
+  let ends text needle =
+    cells_before text (offset_of needle text)
+    + Masc_tui_message_layout.display_width needle
+  in
+  check int
+    (Printf.sprintf "inner %d: %s ends where its cell ends" inner_width label)
+    (ends header label) (ends row mark)
+
+let memory_minimum_row_width =
+  Schedule.memory_columns_used_width
+    (Schedule.allocate_memory_columns ~inner_width:0)
+
+(* The row must never be wider than the box that holds it. *)
+let test_memory_columns_never_exceed_their_width () =
+  for inner_width = 0 to 400 do
+    let columns = Schedule.allocate_memory_columns ~inner_width in
+    let used = Schedule.memory_columns_used_width columns in
+    check bool
+      (Printf.sprintf "inner %d fits (used %d)" inner_width used)
+      true
+      (used <= max inner_width memory_minimum_row_width)
+  done
+
+(* The defect this pair replaces: a header naming a column the row drew
+   somewhere else. Every visible column is checked at every width. *)
+let test_memory_header_and_row_share_their_offsets () =
+  for inner_width = memory_minimum_row_width to 240 do
+    let columns = Schedule.allocate_memory_columns ~inner_width in
+    let header = Schedule.memory_header_row columns in
+    let row = Schedule.memory_row columns memory_probe in
+    check_left_cell "STATE" "S" ~header ~row ~inner_width;
+    check_left_cell "KEEPER" "N" ~header ~row ~inner_width;
+    if columns.Schedule.mcol_show_revision then
+      check_right_cell "REV" "R" ~header ~row ~inner_width;
+    check_right_cell "FACTS" "F" ~header ~row ~inner_width;
+    check_right_cell "SIZE" "Z" ~header ~row ~inner_width;
+    if columns.Schedule.mcol_show_source then
+      check_left_cell "SOURCE" "U" ~header ~row ~inner_width;
+    check_right_cell "\xce\x94" "D" ~header ~row ~inner_width
+  done
+
+(* A reading wider than its cell is folded, never allowed to push the cells
+   after it. Both rows are laid out on the same allocation, so both are exactly
+   as wide as the header. *)
+let test_memory_row_width_does_not_depend_on_its_readings () =
+  for inner_width = memory_minimum_row_width to 240 do
+    let columns = Schedule.allocate_memory_columns ~inner_width in
+    let width text = Masc_tui_message_layout.display_width text in
+    let header = width (Schedule.memory_header_row columns) in
+    check int
+      (Printf.sprintf "inner %d: a short row matches the header" inner_width)
+      header
+      (width (Schedule.memory_row columns memory_probe));
+    check int
+      (Printf.sprintf "inner %d: an overflowing row matches the header" inner_width)
+      header
+      (width (Schedule.memory_row columns memory_overflowing))
+  done
+
+(* An empty reading still holds its cell, or the columns after it move on the
+   rows that read normally -- which is every row on a healthy fleet. *)
+let test_memory_empty_readings_still_hold_their_cells () =
+  let columns = Schedule.allocate_memory_columns ~inner_width:200 in
+  let blank =
+    { Schedule.mrow_state = ""
+    ; mrow_name = ""
+    ; mrow_revision = ""
+    ; mrow_facts = ""
+    ; mrow_size = ""
+    ; mrow_source = ""
+    ; mrow_delta = ""
+    }
+  in
+  check int "a blank row is as wide as the header"
+    (Masc_tui_message_layout.display_width (Schedule.memory_header_row columns))
+    (Masc_tui_message_layout.display_width (Schedule.memory_row columns blank))
+
+(* Columns drop from the right, and the keeper's identity never drops. *)
+let test_memory_columns_drop_from_the_right () =
+  let narrow = Schedule.allocate_memory_columns ~inner_width:50 in
+  check bool "no source when narrow" false narrow.Schedule.mcol_show_source;
+  check bool "no revision when narrow" false narrow.Schedule.mcol_show_revision;
+  check bool "the name still has cells" true (narrow.Schedule.mcol_name > 0);
+  (* Wide enough for the revision beside a keeper name at its widest, which is
+     what a returning column now waits for. *)
+  let medium = Schedule.allocate_memory_columns ~inner_width:80 in
+  check bool "revision returns first" true medium.Schedule.mcol_show_revision;
+  check bool "source is still out" false medium.Schedule.mcol_show_source;
+  let wide = Schedule.allocate_memory_columns ~inner_width:120 in
+  check bool "source returns when wide" true wide.Schedule.mcol_show_source
+
+(* A width that added a column while narrowing the name would make the same
+   keeper unreadable on the larger terminal. *)
+let test_memory_name_width_never_shrinks_as_the_terminal_grows () =
+  let previous = ref 0 in
+  for inner_width = memory_minimum_row_width to 400 do
+    let name = (Schedule.allocate_memory_columns ~inner_width).Schedule.mcol_name in
+    check bool
+      (Printf.sprintf "inner %d keeps the name at least as wide" inner_width)
+      true (name >= !previous);
+    previous := name
+  done
+
+(* Workspace repository columns.
+
+   This screen printed one format string twice and sized its path cell by
+   subtracting a constant from the terminal width. Both are gone; these check
+   what replaced them. *)
+
+let workspace_probe =
+  { Schedule.wrow_name = "N"
+  ; wrow_branch = "B"
+  ; wrow_status = "S"
+  ; wrow_sync = "Y"
+  ; wrow_path = "P"
+  }
+
+let workspace_overflowing =
+  { Schedule.wrow_name = "kidsnote-web-store-and-a-longer-tail"
+  ; wrow_branch = "feature/PK-12345-a-long-branch"
+  ; wrow_status = "conflicted"
+  ; wrow_sync = "manual"
+  ; wrow_path = "/Users/dancer/me/workspace/kidsnote/kidsnote-web-store"
+  }
+
+(* The path takes what the named columns leave, so the row fills the frame it
+   was allocated for rather than falling short of it or spilling past it. *)
+let test_workspace_path_takes_the_remainder () =
+  for inner_width = 20 to 300 do
+    let path_width = Schedule.workspace_path_width ~inner_width in
+    let drawn =
+      Masc_tui_message_layout.display_width
+        (Schedule.workspace_header_row ~path_width)
+    in
+    if path_width > Schedule.workspace_minimum_path_width then
+      check int
+        (Printf.sprintf "inner %d is fully allocated" inner_width)
+        inner_width drawn
+    else
+      check bool
+        (Printf.sprintf "inner %d keeps the path readable" inner_width)
+        true
+        (path_width = Schedule.workspace_minimum_path_width)
+  done
+
+(* The defect that stood here: a header and a row carrying the same widths in
+   two format strings. *)
+let test_workspace_header_and_row_share_their_offsets () =
+  for inner_width = 60 to 240 do
+    let path_width = Schedule.workspace_path_width ~inner_width in
+    let header = Schedule.workspace_header_row ~path_width in
+    let row = Schedule.workspace_row ~path_width workspace_probe in
+    check_left_cell "NAME" "N" ~header ~row ~inner_width;
+    check_left_cell "BRANCH" "B" ~header ~row ~inner_width;
+    check_left_cell "STATUS" "S" ~header ~row ~inner_width;
+    check_left_cell "SYNC" "Y" ~header ~row ~inner_width;
+    check_left_cell "PATH" "P" ~header ~row ~inner_width
+  done
+
+(* A repository named past its cell, on a branch named past its cell, at a path
+   longer than the frame: none of it may move a column. *)
+let test_workspace_row_width_does_not_depend_on_its_readings () =
+  for inner_width = 60 to 240 do
+    let path_width = Schedule.workspace_path_width ~inner_width in
+    let width text = Masc_tui_message_layout.display_width text in
+    let header = width (Schedule.workspace_header_row ~path_width) in
+    check int
+      (Printf.sprintf "inner %d: a short row" inner_width)
+      header
+      (width (Schedule.workspace_row ~path_width workspace_probe));
+    check int
+      (Printf.sprintf "inner %d: an overflowing row" inner_width)
+      header
+      (width (Schedule.workspace_row ~path_width workspace_overflowing))
+  done
+
+(* System log columns.
+
+   This screen threaded five colours through the widths in its row's format
+   string, so the widths could not be compared with the header's by reading
+   either. The colours ride the cells now; these check that they cost nothing
+   in layout. *)
+
+let system_log_probe =
+  { Schedule.slog_time = "T"
+  ; slog_level = "L"
+  ; slog_module = "M"
+  ; slog_keeper = "K"
+  ; slog_category = "C"
+  ; slog_message = "G"
+  }
+
+let system_log_dressed =
+  { Schedule.slog_time_style = "\027[2m"
+  ; slog_module_style = "\027[36m"
+  ; slog_keeper_style = "\027[35m"
+  ; slog_category_style = "\027[2m"
+  }
+
+let system_log_overflowing =
+  { Schedule.slog_time = "11:08:43.512"
+  ; slog_level = "! CRITICAL"
+  ; slog_module = "execution_lane_writer_and_more"
+  ; slog_keeper = "kidsnote-pr-jira-checker"
+  ; slog_category = "provider-router"
+  ; slog_message = String.concat "" (List.init 20 (fun _ -> "message "))
+  }
+
+(* Escapes have no display width, so a dressed row measures exactly what an
+   undressed one does -- and what the header does. A colour cannot move a
+   column. *)
+let test_system_log_colour_costs_no_cells () =
+  for inner_width = 60 to 240 do
+    let message_width = Schedule.system_log_message_width ~inner_width in
+    let width text = Masc_tui_message_layout.display_width text in
+    let header = width (Schedule.system_log_header_row ~message_width) in
+    let plain =
+      Schedule.system_log_row ~message_width ~level_style:""
+        ~styles:Schedule.system_log_plain_styles system_log_probe
+    in
+    let dressed =
+      Schedule.system_log_row ~message_width ~level_style:"\027[33m"
+        ~styles:system_log_dressed system_log_probe
+    in
+    check int
+      (Printf.sprintf "inner %d: plain matches the header" inner_width)
+      header (width plain);
+    check int
+      (Printf.sprintf "inner %d: dressed matches the header" inner_width)
+      header (width dressed);
+    check int
+      (Printf.sprintf "inner %d: an overflowing dressed row" inner_width)
+      header
+      (width
+         (Schedule.system_log_row ~message_width ~level_style:"\027[31m"
+            ~styles:system_log_dressed system_log_overflowing))
+  done
+
+(* The message takes the remainder, down to a floor below which a log line
+   says nothing worth the row it costs. *)
+let test_system_log_message_takes_the_remainder () =
+  for inner_width = 20 to 300 do
+    let message_width = Schedule.system_log_message_width ~inner_width in
+    let drawn =
+      Masc_tui_message_layout.display_width
+        (Schedule.system_log_header_row ~message_width)
+    in
+    if message_width > Schedule.system_log_minimum_message_width then
+      check int
+        (Printf.sprintf "inner %d is fully allocated" inner_width)
+        inner_width drawn
+    else
+      check bool
+        (Printf.sprintf "inner %d keeps the message readable" inner_width)
+        true
+        (message_width = Schedule.system_log_minimum_message_width)
+  done
+
+(* The offsets the two format strings could disagree about. *)
+let test_system_log_header_and_row_share_their_offsets () =
+  for inner_width = 60 to 240 do
+    let message_width = Schedule.system_log_message_width ~inner_width in
+    let header = Schedule.system_log_header_row ~message_width in
+    let row =
+      Schedule.system_log_row ~message_width ~level_style:""
+        ~styles:Schedule.system_log_plain_styles system_log_probe
+    in
+    check_left_cell "TIME" "T" ~header ~row ~inner_width;
+    check_left_cell "LEVEL" "L" ~header ~row ~inner_width;
+    check_left_cell "MODULE" "M" ~header ~row ~inner_width;
+    check_left_cell "KEEPER" "K" ~header ~row ~inner_width;
+    check_left_cell "CATEGORY" "C" ~header ~row ~inner_width;
+    check_left_cell "MESSAGE" "G" ~header ~row ~inner_width
+  done
+
+(* Lane run and file change columns.
+
+   Both wrote their widths twice, and both spliced colours into the row's copy
+   so the two could not be compared by reading either. *)
+
+let lane_probe =
+  { Schedule.lrow_started = "A"
+  ; lrow_subject = "B"
+  ; lrow_status = "C"
+  ; lrow_elapsed = "D"
+  ; lrow_slot = "E"
+  ; lrow_run_id = "F"
+  }
+
+let lane_overflowing =
+  { Schedule.lrow_started = "2026-09-03 11:08:43.512"
+  ; lrow_subject = "kidsnote-pr-jira-checker"
+  ; lrow_elapsed = "1234.5s"
+  ; lrow_status = "cancelled-by-operator"
+  ; lrow_slot = "antigravity_subscription.gemini-3-8-flash-high"
+  ; lrow_run_id = "run-1788427841647-00000-abcdef"
+  }
+
+let change_probe =
+  { Schedule.crow_turn = "A"
+  ; crow_task = "B"
+  ; crow_op = "C"
+  ; crow_result = "D"
+  ; crow_file = "E"
+  ; crow_summary = "F"
+  }
+
+let change_overflowing =
+  { Schedule.crow_turn = "1234567"
+  ; crow_task = "task-1279-and-more"
+  ; crow_op = "delete"
+  ; crow_result = "attempted"
+  ; crow_file = "bin/masc_tui_render_schedule.mli and a much longer path than fits"
+  ; crow_summary = String.concat "" (List.init 20 (fun _ -> "summary "))
+  }
+
+let test_lane_columns_hold_their_offsets () =
+  for inner_width = 80 to 240 do
+    let run_id_width = Schedule.lane_run_id_width ~inner_width in
+    let identity_header = "ACTOR" in
+    let width text = Masc_tui_message_layout.display_width text in
+    let header =
+      Schedule.lane_run_header_row ~identity_header ~run_id_width
+    in
+    let row =
+      Schedule.lane_run_row ~identity_header ~status_style:"" ~run_id_width
+        lane_probe
+    in
+    check_left_cell "STARTED" "A" ~header ~row ~inner_width;
+    check_left_cell identity_header "B" ~header ~row ~inner_width;
+    check_left_cell "STATUS" "C" ~header ~row ~inner_width;
+    check_left_cell "SLOT" "E" ~header ~row ~inner_width;
+    check_left_cell "RUN ID" "F" ~header ~row ~inner_width;
+    check int
+      (Printf.sprintf "inner %d: a dressed overflowing run" inner_width)
+      (width header)
+      (width
+         (Schedule.lane_run_row ~identity_header ~status_style:"\027[31m"
+            ~run_id_width lane_overflowing))
+  done
+
+let test_change_columns_hold_their_offsets () =
+  for inner_width = 80 to 240 do
+    let summary_width = Schedule.change_summary_width ~inner_width in
+    let width text = Masc_tui_message_layout.display_width text in
+    let header = Schedule.change_header_row ~summary_width in
+    let row =
+      Schedule.change_row ~op_style:"" ~result_style:"" ~summary_width
+        change_probe
+    in
+    check_right_cell "TURN" "A" ~header ~row ~inner_width;
+    check_left_cell "TASK" "B" ~header ~row ~inner_width;
+    check_left_cell "OP" "C" ~header ~row ~inner_width;
+    check_left_cell "RESULT" "D" ~header ~row ~inner_width;
+    check_left_cell "FILE" "E" ~header ~row ~inner_width;
+    check_left_cell "WHAT" "F" ~header ~row ~inner_width;
+    (* The file cell was padded and never fitted, so this row used to be wider
+       than its header by the length of the path. *)
+    check int
+      (Printf.sprintf "inner %d: a long path no longer widens the row" inner_width)
+      (width header)
+      (width
+         (Schedule.change_row ~op_style:"\027[33m" ~result_style:"\027[31m"
+            ~summary_width change_overflowing))
+  done
+
+(* Every column name has to survive its own column.
+
+   Header and row are padded through the same fit, so a name wider than the
+   column it labels can no longer push the columns after it -- it folds
+   instead. That trades a shifted table for an unreadable one: "Task ->
+   Overview" in a column of fourteen would have been drawn "Task -> Ov...iew".
+   Neither is acceptable, and only this notices the second. *)
+
+(* The widest bracketed phase label the renderer computes; the columns after
+   it are placed from this, so the sweep uses one value for both. *)
+let planning_phase_width = 11
+
+let test_headers_fit_their_columns () =
+  for inner_width = 80 to 240 do
+    let headers =
+      [ ( "memory"
+        , Schedule.memory_header_row
+            (Schedule.allocate_memory_columns ~inner_width) )
+      ; ( "workspace"
+        , Schedule.workspace_header_row
+            ~path_width:(Schedule.workspace_path_width ~inner_width) )
+      ; ( "system log"
+        , Schedule.system_log_header_row
+            ~message_width:(Schedule.system_log_message_width ~inner_width) )
+      ; ( "lane run"
+        , Schedule.lane_run_header_row ~identity_header:"ACTOR"
+            ~run_id_width:(Schedule.lane_run_id_width ~inner_width) )
+      ; ( "change"
+        , Schedule.change_header_row
+            ~summary_width:(Schedule.change_summary_width ~inner_width) )
+      ; ( "fusion"
+        , let keeper_width = 16 in
+          Schedule.fusion_header_row ~keeper_width
+            ~run_width:(Schedule.fusion_run_width ~inner_width ~keeper_width) )
+      ; ( "planning"
+        , let phase_width = planning_phase_width in
+          Schedule.planning_header_row ~phase_width
+            ~title_width:
+              (Schedule.planning_title_width ~inner_width ~phase_width) )
+      ; ( "harness"
+        , Schedule.harness_header_row
+            ~reason_width:(Schedule.harness_reason_width ~inner_width) )
+      ; ( "board"
+        , Schedule.board_header_row
+            ~title_width:(Schedule.board_title_width ~inner_width) )
+      ]
+    in
+    List.iter
+      (fun (screen, header) ->
+        check bool
+          (Printf.sprintf "inner %d: %s names every column whole" inner_width
+             screen)
+          true
+          (index_of header "\xe2\x80\xa6" = None))
+      headers
+  done
+
+(* Harness verdict columns. The header called the task column
+   "Task -> Overview" -- fifteen cells in a column of fourteen -- so it pushed
+   every column after it one cell right of the rows it labelled. *)
+
+let harness_probe =
+  { Schedule.hrow_time = "A"
+  ; hrow_task = "B"
+  ; hrow_gate = "C"
+  ; hrow_verdict = "D"
+  ; hrow_evaluator = "E"
+  ; hrow_reason = "F"
+  }
+
+let harness_overflowing =
+  { Schedule.hrow_time = "2026-09-03 11:08:43.512"
+  ; hrow_task = "task-1279-and-a-good-deal-more"
+  ; hrow_gate = "completion-contract"
+  ; hrow_verdict = "inconclusive"
+  ; hrow_evaluator = "kidsnote-pr-jira-checker-verifier"
+  ; hrow_reason = String.concat "" (List.init 20 (fun _ -> "reason "))
+  }
+
+let test_harness_columns_hold_their_offsets () =
+  for inner_width = 80 to 240 do
+    let reason_width = Schedule.harness_reason_width ~inner_width in
+    let width text = Masc_tui_message_layout.display_width text in
+    let header = Schedule.harness_header_row ~reason_width in
+    let row = Schedule.harness_row ~verdict_style:"" ~reason_width harness_probe in
+    check_left_cell "TIME" "A" ~header ~row ~inner_width;
+    check_left_cell "TASK" "B" ~header ~row ~inner_width;
+    check_left_cell "GATE" "C" ~header ~row ~inner_width;
+    check_left_cell "VERDICT" "D" ~header ~row ~inner_width;
+    check_left_cell "EVALUATOR" "E" ~header ~row ~inner_width;
+    check_left_cell "REASON" "F" ~header ~row ~inner_width;
+    (* The task and gate cells were padded and never fitted, so a long id used
+       to make this row wider than the header it sits under. *)
+    check int
+      (Printf.sprintf "inner %d: a long id no longer widens the row" inner_width)
+      (width header)
+      (width
+         (Schedule.harness_row ~verdict_style:"\027[31m" ~reason_width
+            harness_overflowing))
+  done
+
+(* Fusion run columns. The run id was unbounded where it was named and cut at
+   fourteen where it was filled. *)
+
+let fusion_probe =
+  { Schedule.frow_time = "A"
+  ; frow_age = "B"
+  ; frow_state = "C"
+  ; frow_keeper = "D"
+  ; frow_preset = "E"
+  ; frow_run = "F"
+  }
+
+let fusion_overflowing =
+  { Schedule.frow_time = "11:08:43.512"
+  ; frow_age = "1234.5s"
+  ; frow_state = "cancelled-by-the-operator"
+  ; frow_keeper = "kidsnote-pr-jira-checker"
+  ; frow_preset = "antigravity-high"
+  ; frow_run = "run-1788427841647-00000-abcdef"
+  }
+
+let test_fusion_columns_hold_their_offsets () =
+  let keeper_width = 16 in
+  for inner_width = 80 to 240 do
+    let run_width = Schedule.fusion_run_width ~inner_width ~keeper_width in
+    let width text = Masc_tui_message_layout.display_width text in
+    let header = Schedule.fusion_header_row ~keeper_width ~run_width in
+    let row =
+      Schedule.fusion_row ~state_style:"" ~keeper_width ~run_width fusion_probe
+    in
+    check_left_cell "TIME" "A" ~header ~row ~inner_width;
+    check_right_cell "AGE" "B" ~header ~row ~inner_width;
+    check_left_cell "STATE" "C" ~header ~row ~inner_width;
+    check_left_cell "KEEPER" "D" ~header ~row ~inner_width;
+    check_left_cell "PRESET" "E" ~header ~row ~inner_width;
+    check_left_cell "RUN" "F" ~header ~row ~inner_width;
+    check int
+      (Printf.sprintf "inner %d: a dressed overflowing run" inner_width)
+      (width header)
+      (width
+         (Schedule.fusion_row ~state_style:"\027[31m" ~keeper_width ~run_width
+            fusion_overflowing))
+  done
+
+(* The keeper cell is sized to the names on screen, so a wider one has to come
+   out of the run id rather than out of the frame. *)
+let test_fusion_keeper_growth_comes_out_of_the_run_id () =
+  let inner_width = 140 in
+  let narrow = Schedule.fusion_run_width ~inner_width ~keeper_width:16 in
+  let wide = Schedule.fusion_run_width ~inner_width ~keeper_width:26 in
+  check int "ten cells move from the run id to the keeper" (narrow - 10) wide;
+  check int "and the row is the same width either way"
+    (Masc_tui_message_layout.display_width
+       (Schedule.fusion_header_row ~keeper_width:16 ~run_width:narrow))
+    (Masc_tui_message_layout.display_width
+       (Schedule.fusion_header_row ~keeper_width:26 ~run_width:wide))
+
 (* The strip named five stops while the Planning walk had three: Schedules and
    Fusion had become tabs of the selected Keeper and nothing took their names
    off this row. A reader pressing 4 or 5 arrived nowhere. *)
@@ -688,6 +1269,177 @@ let test_keeper_columns_grow_identifiers_first () =
     (one_twenty.kcol_name > (at 118).kcol_name
     || one_twenty.kcol_task > (at 118).kcol_task)
 
+(* Planning goal columns.
+
+   The list named nothing and sized its title by subtracting a constant from
+   the terminal, minus however wide the age and the due date happened to be.
+   Both readings are optional, so the pair at the end of the row began at a
+   different column on every row. *)
+
+let planning_probe =
+  { Schedule.prow_phase = "A"
+  ; prow_proof = "B"
+  ; prow_priority = "C"
+  ; prow_open = "D"
+  ; prow_title = "E"
+  ; prow_age = "F"
+  ; prow_due = "G"
+  }
+
+let planning_row_of ~title_width values =
+  Schedule.planning_row ~phase_style:"" ~phase_width:planning_phase_width
+    ~title_width values
+
+let test_planning_columns_hold_their_offsets () =
+  for inner_width = 80 to 240 do
+    let title_width =
+      Schedule.planning_title_width ~inner_width
+        ~phase_width:planning_phase_width
+    in
+    let header =
+      Schedule.planning_header_row ~phase_width:planning_phase_width
+        ~title_width
+    in
+    let row = planning_row_of ~title_width planning_probe in
+    check_left_cell "PHASE" "A" ~header ~row ~inner_width;
+    check_left_cell "PRI" "C" ~header ~row ~inner_width;
+    check_left_cell "OPEN" "D" ~header ~row ~inner_width;
+    check_left_cell "TITLE" "E" ~header ~row ~inner_width;
+    check_right_cell "AGE" "F" ~header ~row ~inner_width;
+    check_left_cell "DUE" "G" ~header ~row ~inner_width
+  done
+
+let board_probe =
+  { Schedule.brow_mark = "@"
+  ; brow_id = "A"
+  ; brow_hearth = "B"
+  ; brow_author = "C"
+  ; brow_title = "D"
+  ; brow_age = "E"
+  ; brow_score = "F"
+  ; brow_replies = "G"
+  }
+
+let board_row_of ~title_width values =
+  Schedule.board_row ~styles:Schedule.board_no_styles ~title_width values
+
+let test_board_columns_hold_their_offsets () =
+  for inner_width = 80 to 240 do
+    let title_width = Schedule.board_title_width ~inner_width in
+    let header = Schedule.board_header_row ~title_width in
+    let row = board_row_of ~title_width board_probe in
+    check_left_cell "ID" "A" ~header ~row ~inner_width;
+    check_left_cell "HEARTH" "B" ~header ~row ~inner_width;
+    check_left_cell "AUTHOR" "C" ~header ~row ~inner_width;
+    check_left_cell "TITLE" "D" ~header ~row ~inner_width;
+    check_right_cell "AGE" "E" ~header ~row ~inner_width;
+    check_left_cell "SCORE" "F" ~header ~row ~inner_width;
+    check_left_cell "REPLIES" "G" ~header ~row ~inner_width
+  done
+
+(* The defect this closes. The rows sized the title to the terminal minus a
+   hand-summed constant and the header claimed its own, so at eighty columns
+   the header ran long, pushed SCORE into the frame and REPLIES off it. Both
+   read one description now, so a row is exactly as wide as the header over it
+   whatever any reading measures. *)
+let test_a_board_row_is_as_wide_as_its_header () =
+  List.iter
+    (fun inner_width ->
+      let title_width = Schedule.board_title_width ~inner_width in
+      let header = Schedule.board_header_row ~title_width in
+      let width text = Masc_tui_message_layout.display_width text in
+      List.iter
+        (fun (name, values) ->
+          check int
+            (Printf.sprintf "inner %d: %s stays on the header's width"
+               inner_width name)
+            (width header)
+            (width (board_row_of ~title_width values)))
+        [ ( "empty"
+          , { Schedule.brow_mark = ""
+            ; brow_id = ""
+            ; brow_hearth = ""
+            ; brow_author = ""
+            ; brow_title = ""
+            ; brow_age = ""
+            ; brow_score = ""
+            ; brow_replies = ""
+            } )
+        ; "probe", board_probe
+        ; ( "an id past its column"
+          , { board_probe with Schedule.brow_id = String.make 40 'x' } )
+        ; ( "a title past its column"
+          , { board_probe with Schedule.brow_title = String.make 300 'x' } )
+        ; ( "an author past its column"
+          , { board_probe with Schedule.brow_author = String.make 40 'x' } )
+        ])
+    [ 80; 100; 120; 200 ]
+
+(* The gaps came back to one with the rest of the fleet. Board was spacing its
+   columns two cells apart, which spent six cells of every title on being
+   different from every other table on the screen.
+
+   Measured with every column overfull, so nothing between two readings is a
+   column's own padding: what is left between them is the gap, and one gap is
+   one space. *)
+let test_board_spaces_its_columns_like_every_other_table () =
+  let inner_width = 120 in
+  let title_width = Schedule.board_title_width ~inner_width in
+  let fill char = String.make 60 char in
+  let row =
+    board_row_of ~title_width
+      { Schedule.brow_mark = "@"
+      ; brow_id = fill 'a'
+      ; brow_hearth = fill 'b'
+      ; brow_author = fill 'c'
+      ; brow_title = fill 'd'
+      ; brow_age = fill 'e'
+      ; brow_score = fill 'f'
+      ; brow_replies = fill 'g'
+      }
+  in
+  check int "the contract's gap is what every table spaces by" 1
+    Masc_tui_table.cell_gap;
+  check bool "no two readings are further apart than that" false
+    (index_of row "  " <> None)
+
+(* The defect this closes. A goal with no due date used to pull the age and
+   the date ten cells left of the goal above it, because the title was sized
+   from what those two happened to measure on that row. *)
+let test_an_absent_date_does_not_move_the_age () =
+  let inner_width = 120 in
+  let title_width =
+    Schedule.planning_title_width ~inner_width ~phase_width:planning_phase_width
+  in
+  let with_both =
+    planning_row_of ~title_width
+      { planning_probe with Schedule.prow_age = "F"; prow_due = "2026-09-04" }
+  in
+  let without_date =
+    planning_row_of ~title_width
+      { planning_probe with Schedule.prow_age = "F"; prow_due = "" }
+  in
+  let long_title =
+    planning_row_of ~title_width
+      { planning_probe with
+        Schedule.prow_title = String.make 200 'x'
+      ; prow_age = "F"
+      ; prow_due = ""
+      }
+  in
+  let age_at row =
+    match index_of row "F" with
+    | Some at -> Masc_tui_message_layout.display_width (String.sub row 0 at)
+    | None -> Alcotest.failf "the age is not in %S" row
+  in
+  check int "an absent date leaves the age where it was" (age_at with_both)
+    (age_at without_date);
+  check int "and a title past its column does not move it either"
+    (age_at with_both) (age_at long_title);
+  check int "every row is as wide as the others"
+    (Masc_tui_message_layout.display_width with_both)
+    (Masc_tui_message_layout.display_width without_date)
+
 let () =
   run "tui_render_schedule"
     [ ( "render scheduling"
@@ -743,6 +1495,52 @@ let () =
             test_keeper_name_width_never_shrinks_as_the_terminal_grows
         ; test_case "keeper columns grow identifiers first" `Quick
             test_keeper_columns_grow_identifiers_first
+        ; test_case "memory columns never exceed their width" `Quick
+            test_memory_columns_never_exceed_their_width
+        ; test_case "memory header and row share their offsets" `Quick
+            test_memory_header_and_row_share_their_offsets
+        ; test_case "memory row width ignores its readings" `Quick
+            test_memory_row_width_does_not_depend_on_its_readings
+        ; test_case "memory empty readings still hold their cells" `Quick
+            test_memory_empty_readings_still_hold_their_cells
+        ; test_case "memory columns drop from the right" `Quick
+            test_memory_columns_drop_from_the_right
+        ; test_case "memory name width never shrinks" `Quick
+            test_memory_name_width_never_shrinks_as_the_terminal_grows
+        ; test_case "workspace path takes the remainder" `Quick
+            test_workspace_path_takes_the_remainder
+        ; test_case "workspace header and row share their offsets" `Quick
+            test_workspace_header_and_row_share_their_offsets
+        ; test_case "workspace row width ignores its readings" `Quick
+            test_workspace_row_width_does_not_depend_on_its_readings
+        ; test_case "system log colour costs no cells" `Quick
+            test_system_log_colour_costs_no_cells
+        ; test_case "system log message takes the remainder" `Quick
+            test_system_log_message_takes_the_remainder
+        ; test_case "system log header and row share their offsets" `Quick
+            test_system_log_header_and_row_share_their_offsets
+        ; test_case "lane columns hold their offsets" `Quick
+            test_lane_columns_hold_their_offsets
+        ; test_case "change columns hold their offsets" `Quick
+            test_change_columns_hold_their_offsets
+        ; test_case "harness columns hold their offsets" `Quick
+            test_harness_columns_hold_their_offsets
+        ; test_case "planning columns hold their offsets" `Quick
+            test_planning_columns_hold_their_offsets
+        ; test_case "board columns hold their offsets" `Quick
+            test_board_columns_hold_their_offsets
+        ; test_case "a board row is as wide as its header" `Quick
+            test_a_board_row_is_as_wide_as_its_header
+        ; test_case "board spaces its columns like every other table" `Quick
+            test_board_spaces_its_columns_like_every_other_table
+        ; test_case "an absent date does not move the age" `Quick
+            test_an_absent_date_does_not_move_the_age
+        ; test_case "every header fits its column" `Quick
+            test_headers_fit_their_columns
+        ; test_case "fusion columns hold their offsets" `Quick
+            test_fusion_columns_hold_their_offsets
+        ; test_case "fusion keeper growth comes out of the run id" `Quick
+            test_fusion_keeper_growth_comes_out_of_the_run_id
         ; test_case "planning strip names only its own stops" `Quick
             test_planning_strip_names_only_its_own_stops
         ; test_case "planning window rides the active stop" `Quick

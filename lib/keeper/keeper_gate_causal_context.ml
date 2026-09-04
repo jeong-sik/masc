@@ -28,7 +28,7 @@ let record_tool_result t ~operation ~input result =
 
 (* The payload a tool returned is not recorded. The judge is the only
    consumer, its question is "may this next call proceed", and
-   config/prompts/judge.effect.md asks it to weigh the operation identity and
+   config/prompts/judge.md, slot effect asks it to weigh the operation identity and
    the complete input, never the payload a previous tool returned. Rendering
    that payload put a tool's entire output into a prompt about a different
    call: measured on live pending approvals 2026-08-09, the largest bundle was
@@ -44,7 +44,7 @@ let record_tool_result t ~operation ~input result =
    [disposition] already carries whether the call completed, deferred or
    failed, which is the part the judgment turns on. A judgment that needs to
    inspect what a tool returned is a different contract than this one and would
-   have to be stated in judge.effect.md first. *)
+   have to be stated in judge.md, slot effect first. *)
 let completed_call_to_yojson call =
   `Assoc
     [ "operation", `String call.operation

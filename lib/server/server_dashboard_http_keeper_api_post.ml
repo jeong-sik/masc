@@ -43,47 +43,44 @@ let handle_keeper_github_login_post state req reqd =
   else if not (Keeper_config.validate_name name) then
     respond_error reqd (Printf.sprintf "invalid keeper name: %s" name)
   else
-    match Keeper_meta_store.read_meta config name with
+    (* Effective meta, not persisted meta: [sandbox_profile] is TOML-owned and
+       a persisted read answers with the default, which would send every
+       Keeper's login to this host. *)
+    match Keeper_meta_store.read_effective_meta config name with
     | Error message -> respond_error ~status:`Internal_server_error reqd message
     | Ok None ->
       respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
-    | Ok (Some _) ->
+    | Ok (Some meta) ->
       let hostname =
         match Server_utils.query_param req "hostname" with
         | Some hostname -> hostname
         | None -> "github.com"
       in
-      (match
-         Keeper_github_identity.login_env
-           ~config
-           ~keeper_name:name
-       with
-       | Error message -> respond_error reqd message
-       | Ok env ->
-         let headers =
-           github_login_stream_headers (Server_auth.get_origin req)
-         in
-         let response = Httpun.Response.create ~headers `OK in
-         let writer = Httpun.Reqd.respond_with_streaming reqd response in
-         Fun.protect
-           ~finally:(fun () -> Httpun.Body.Writer.close writer)
-           (fun () ->
-              match
-                Keeper_github_identity.stream_login
-                  ~config
-                  ~keeper_name:name
-                  ~hostname
-                  ~env
-                  ~is_closed:(fun () -> Httpun.Body.Writer.is_closed writer)
-                  ~send_event:(github_login_stream_send writer)
-              with
-              | Ok () -> ()
-              | Error message when not (Httpun.Body.Writer.is_closed writer) ->
-                github_login_stream_send
-                  writer
-                  "error"
-                  (`Assoc [ "message", `String message ])
-              | Error _ -> ()))
+      let headers = github_login_stream_headers (Server_auth.get_origin req) in
+      let response = Httpun.Response.create ~headers `OK in
+      let writer = Httpun.Reqd.respond_with_streaming reqd response in
+      Fun.protect
+        ~finally:(fun () -> Httpun.Body.Writer.close writer)
+        (fun () ->
+           match
+             Keeper_github_identity.stream_login
+               ~config
+               ~keeper_name:name
+               (* Shaping a Remote_ssh lane runs commands on the endpoint. Doing
+                  that before this response existed left the browser waiting on
+                  a request that had not answered at all. *)
+               ~make_lane:(fun () ->
+                 Keeper_github_login_lane.for_keeper ~config ~meta ~hostname)
+               ~is_closed:(fun () -> Httpun.Body.Writer.is_closed writer)
+               ~send_event:(github_login_stream_send writer)
+           with
+           | Ok () -> ()
+           | Error message when not (Httpun.Body.Writer.is_closed writer) ->
+             github_login_stream_send
+               writer
+               "error"
+               (`Assoc [ "message", `String message ])
+           | Error _ -> ())
 ;;
 
 let declared_provider_id json =
@@ -338,10 +335,6 @@ let terminal_event_present_for_turn = Scan_summary.terminal_event_present_for_tu
 let runtime_lens_json =
   Server_dashboard_http_keeper_api_runtime_lens.runtime_lens_json
 
-let provider_attempts_summary_json =
-  Server_dashboard_http_keeper_api_summary_aggregates.provider_attempts_summary_json
-;;
-
 let turn_identity_summary_json =
   Server_dashboard_http_keeper_api_summary_aggregates.turn_identity_summary_json
 ;;
@@ -450,7 +443,6 @@ let keeper_runtime_trace_json (config : Workspace.config) (name : string)
               ("receipt_returned_rows", `Int (List.length receipts));
               ( "turn_identity",
                 turn_identity_summary_json ?turn_id manifest_scan receipts );
-              ("provider_attempts", provider_attempts_summary_json manifest_scan);
               ("event_bus", event_bus_summary_json manifest_scan);
               ( "runtime_lens",
                 runtime_lens_json ~config ~keeper_name:name ~trace_id ?turn_id
@@ -597,6 +589,14 @@ let dashboard_config_string_list_fields =
     "mention_targets";
   ]
 
+(* Accepts a string or an explicit null, so it cannot join
+   [dashboard_config_string_fields] -- that list's check demands a string and
+   would refuse the clear. Null is how an operator detaches the endpoint when
+   moving off remote_ssh; omitting the field instead carries the keeper TOML's
+   value forward into a profile that refuses it
+   ([remote_endpoint_requires_remote_ssh]). *)
+let remote_endpoint_field = "remote_endpoint"
+
 (* Control field (not persisted): explicit acknowledgement that reducing
    [max_context_override] may make the existing conversation exceed the next
    request budget. Stripped before the config is parsed/applied. *)
@@ -610,6 +610,7 @@ let dashboard_config_patch_allowed_fields =
   ; "max_context_override"
   ; confirm_context_shrink_field
   ; expected_config_revision_field
+  ; remote_endpoint_field
   ]
   @
   dashboard_config_string_fields
@@ -761,6 +762,17 @@ let validate_dashboard_config_field key value =
   else if key = expected_config_revision_field then
     Keeper_turn_up_config_persistence.config_revision_of_yojson value
     |> Result.map ignore
+  else if key = remote_endpoint_field then
+    (* Shape only. Whether the name is declared under [exec.ssh.endpoints], and
+       whether the profile admits an endpoint at all, are decided by
+       [Keeper_turn_up_args.parse] on the apply path. *)
+    (match value with
+     | `String raw ->
+         if String.trim raw = "" then
+           Error "remote_endpoint must not be blank (send null to clear it)"
+         else Ok ()
+     | `Null -> Ok ()
+     | other -> dashboard_field_type_error key "a string or null" other)
   else if List.mem key dashboard_config_string_fields then
     match value with
     | `String _ -> Ok ()

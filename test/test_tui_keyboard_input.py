@@ -4129,6 +4129,73 @@ PASTE_START = b"\x1b[200~"
 PASTE_END = b"\x1b[201~"
 
 
+def paste_into_a_field_interaction() -> Interaction:
+    """A paste goes into the field that is taking characters.
+
+    Seven fields take typed characters; paste used to name four, and row
+    search and the command palette were not among them. Their text went to
+    the chat draft behind the surface -- invisible there, and on a surface
+    with no keeper selected, nowhere at all. The operator saw paste work on
+    one screen and do nothing on the next."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        wait_for_output(
+            process, master_fd, output, BRACKETED_PASTE_ON, start=0, timeout=5.0
+        )
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+
+        # Row search draws its query in the footer, so the pasted characters
+        # are asserted where they landed rather than through what they did.
+        send_and_wait(process, master_fd, output, b"/", b"MASC Keepers")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            PASTE_START + b"alph" + PASTE_END,
+            b"/alph",
+        )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+
+        # The palette runs what it was given. Its first entry with an empty
+        # query is "settings", so landing on Lanes is only possible if the
+        # pasted characters reached the query: a dropped paste sends the
+        # operator to Config instead.
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b":" + PASTE_START + b"go lanes" + PASTE_END + b"\r",
+            b"MASC Lanes",
+        )
+
+        # A board post is written in its own draft, not in the chat composer,
+        # and it holds many lines: the paste goes in whole. CR is what a
+        # terminal writes for a break in pasted text, which is the byte that
+        # would otherwise have been Return.
+        palette_go(process, master_fd, output, b"go board", b"MASC Board")
+        send_and_wait(process, master_fd, output, b"w", b"MASC Board")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            PASTE_START + b"pasted board line\rsecond board line" + PASTE_END,
+            b"second board line",
+        )
+        # Esc arms the draft's send-or-discard; d throws it away and leaves
+        # the pane, where q is draft text rather than quit.
+        send_and_wait(process, master_fd, output, b"\x1b", b"s:send  d:discard")
+        send_and_wait(process, master_fd, output, b"d", b"MASC Board")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def bracketed_paste_interaction(requests: HttpRequests) -> Interaction:
     """A multi-line paste is one draft, not one message per line.
 
@@ -4207,6 +4274,93 @@ def bracketed_paste_interaction(requests: HttpRequests) -> Interaction:
                 f"the keeper was sent something other than what was pasted: "
                 f"{message!r}"
             )
+        # Chat opened from detail, so Esc goes back there first.
+        send_and_wait(
+            process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def word_delete_interaction(requests: HttpRequests) -> Interaction:
+    """Ctrl-W and Alt+Backspace delete the word behind the composer cursor.
+
+    A chat draft answers two readline muscle memories: Ctrl-W rubs out the
+    last word, and Alt+Backspace -- ESC DEL on the wire -- does the same.
+    Without a binding Ctrl-W fell through to a no-op, and ESC DEL was
+    swallowed as a bare Esc: the draft stayed whole and the chat closed
+    under the typist's thumb."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        wait_for_output(
+            process, master_fd, output, BRACKETED_PASTE_ON, start=0, timeout=5.0
+        )
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(
+            process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"m",
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+        )
+
+        # Ctrl-W takes the last word and keeps the separator before it: the
+        # draft reads "hello ", and the caret ends one cell past it. The
+        # composer row is all a draft edit repaints, so the caret's column is
+        # where "kept the separator" can be told from "ate it": 13 is the
+        # prompt plus "hello ", 12 is what "hello" would give.
+        send_and_wait(process, master_fd, output, b"hello world", b"hello world")
+        frame = send_and_wait(process, master_fd, output, b"\x17", b"hello")
+        plain = CSI_RE.sub(b"", frame)
+        if b"hello world" in plain:
+            raise AssertionError(f"Ctrl-W left the whole draft: {plain!r}")
+        if b"hello" not in plain:
+            raise AssertionError(f"Ctrl-W took more than the word: {plain!r}")
+        cursor = CURSOR_RE.search(frame)
+        if cursor is None or cursor.group(2) != b"13":
+            raise AssertionError(
+                f"Ctrl-W did not stop after the kept separator: {frame!r}"
+            )
+
+        # Alt+Backspace arrives as ESC DEL: delete-word-back like Ctrl-W, not
+        # Esc. A draft edit does not repaint the breadcrumb, so the proof the
+        # chat stayed open is that the next letters still land in the
+        # composer -- on the detail surface they would bind to keys instead.
+        os.write(master_fd, b"\x1b\x7f")
+        frame = send_and_wait(process, master_fd, output, b"still here", b"still here")
+        plain = CSI_RE.sub(b"", frame)
+        if b"hello" in plain:
+            raise AssertionError(f"Alt+Backspace left the draft: {plain!r}")
+
+        # Nothing was sent while the draft was being edited.
+        posted = [path for path, _ in requests if path.endswith("/chat/stream")]
+        if posted:
+            raise AssertionError(f"an edit dispatched something: {posted!r}")
+
+        # Enter still sends what survived the editing.
+        os.write(master_fd, b"\r")
+        body = wait_for_http_request(
+            process,
+            master_fd,
+            output,
+            requests,
+            path="/api/v1/keepers/chat/stream",
+        )
+        message = json.loads(body).get("message")
+        if message != "still here":
+            raise AssertionError(f"the keeper was sent {message!r}")
         # Chat opened from detail, so Esc goes back there first.
         send_and_wait(
             process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
@@ -9243,6 +9397,14 @@ def changes_keeper_and_arrow_detail_interaction(
                 f"right opened a diff that is not the marked row ({needle!r} "
                 f"missing): {second_diff_plain!r}"
             )
+    # The row that says how to leave. The screen tallied its own chrome one
+    # row short, which put it a row over its budget, and a surface over budget
+    # loses its last rows -- the footer being the last of them. Nothing else
+    # on this screen names the key that closes it.
+    if "open in editor" not in second_diff_plain:
+        raise AssertionError(
+            f"the diff drew no footer: {second_diff_plain[-800:]!r}"
+        )
     send_and_wait(process, master_fd, output, b"\x1b[D", b"Turn")
     # An open diff scrolls to its end and stops there. The keypress steps
     # without a bound -- the rows are the drawing's -- so the frame reports
@@ -11115,6 +11277,24 @@ def run_keyboard_regression(executable: str) -> None:
             )
         },
         http_requests=paste_requests,
+    )
+    run_terminal_scenario(
+        executable,
+        description="A paste goes into the field taking characters",
+        interact=paste_into_a_field_interaction(),
+    )
+    word_requests: HttpRequests = []
+    run_terminal_scenario(
+        executable,
+        description="Ctrl-W and Alt+Backspace delete a word in the composer",
+        interact=word_delete_interaction(word_requests),
+        http_fixtures={
+            "/api/v1/keepers/chat/stream": (
+                503,
+                {"error": "stop after the word-delete request capture"},
+            )
+        },
+        http_requests=word_requests,
     )
     chat_queue_fixtures, chat_queue_gate = chat_queue_http_fixtures()
     run_terminal_scenario(

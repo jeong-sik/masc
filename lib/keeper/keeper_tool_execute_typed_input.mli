@@ -67,8 +67,11 @@ type execute_input = {
   cwd : string option;
   timeout_sec : float option;
 }
-(** [cwd] applies to the command. [timeout_sec] is an explicit
-    optional execution boundary; absence means unbounded execution. *)
+(** [cwd] applies to the command. [timeout_sec] is the caller's explicit
+    execution boundary. Absence is not unbounded: this module leaves the
+    field alone, and {!Keeper_tool_execute_input.typed_input_timeout_budget}
+    resolves [None] to {!Keeper_tool_execute_input.default_timeout_sec},
+    which every dispatch route applies. *)
 
 type validation_error =
   | Empty_argv

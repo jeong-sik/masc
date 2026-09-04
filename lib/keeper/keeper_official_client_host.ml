@@ -9,7 +9,6 @@ let internal_error detail = Agent_core.Error.Internal detail
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
   | Terminal_completed
   | Durable_stimulus_deferred
-  | External_effect_deferred
   | Terminal_failed of
       { failure_class : Tool_result.tool_failure_class
       ; effect_disposition : Tool_result.failure_effect_disposition
@@ -187,7 +186,6 @@ let lifecycle_outcome = function
        Agent_core.Agent_lifecycle_events.Input_required request
      | Runtime_agent.Yielded_to_operation_queued { turns_used }
      | Runtime_agent.Yielded_to_durable_stimulus { turns_used }
-     | Runtime_agent.Awaiting_external_effect { turns_used }
      | Runtime_agent.Yielded_after_repeated_tool_call { turns_used; _ }
      | Runtime_agent.Yielded_after_repeated_assistant_text { turns_used; _ } ->
        Agent_core.Agent_lifecycle_events.Yielded { turn = turns_used })
@@ -276,9 +274,7 @@ let host_stop_result ~runtime_id ~model ~session_id ~turn_id ~turns_used ~latenc
   | ( Repeated_tool_call _
     | Terminal_tool_boundary
         { outcome =
-            ( Terminal_completed
-            | Durable_stimulus_deferred
-            | External_effect_deferred )
+            (Terminal_completed | Durable_stimulus_deferred)
         ; _
         } ) ->
     let response : Agent_core.Types.api_response =
@@ -303,8 +299,6 @@ let host_stop_result ~runtime_id ~model ~session_id ~turn_id ~turns_used ~latenc
         Runtime_agent.Completed
       | Terminal_tool_boundary { outcome = Durable_stimulus_deferred; _ } ->
         Runtime_agent.Yielded_to_durable_stimulus { turns_used }
-      | Terminal_tool_boundary { outcome = External_effect_deferred; _ } ->
-        Runtime_agent.Awaiting_external_effect { turns_used }
       | Terminal_tool_boundary { outcome = Terminal_failed _; _ } -> assert false
     in
     (* masc#31312: this host-stop path was the one producer that returned
@@ -353,6 +347,10 @@ type prepared_turn =
   ; tools : Agent_core.Tool.t list
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   }
+
+type transmitted_model_input =
+  | Whole_input_transmitted of Agent_core.Types.message list
+  | Held_by_client_session
 
 let resolve_reasoning_effort ~enable_thinking ~reasoning_effort =
   match enable_thinking with
@@ -905,7 +903,8 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
                     { stage = (Post_tool_use | Post_tool_use_failure); _ } ->
                   record_terminal_error terminal_error detail;
                   { success = true
-                  ; content = "Tool completed, but its post-execution hook failed; do not retry"
+                  ; content =
+                      Tool_guidance.to_string Tool_guidance.Post_execution_hook_failed
                   ; abort_turn = None
                   }
                 | Agent_core.Agent_tools.Hook_execution_failed _ ->
@@ -954,12 +953,12 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
                       { tool_name = tool.schema.name
                       ; outcome = Terminal_completed
                       })
-               | Keeper_tools_agent_core.External_effect_deferred ->
-                 Some
-                   (Terminal_tool_boundary
-                      { tool_name = tool.schema.name
-                      ; outcome = External_effect_deferred
-                      })
+               (* A Gate deferral parks one call and nothing has happened
+                  yet, so a terminal tool is no exception: the turn keeps
+                  going and the host replays the call once the approval
+                  resolves. See Keeper_tool_terminal_boundary, which makes
+                  the same decision for the native loop. *)
+               | Keeper_tools_agent_core.External_effect_deferred -> None
                | Keeper_tools_agent_core.Deferred_tool_result ->
                  Some
                    (Terminal_tool_boundary

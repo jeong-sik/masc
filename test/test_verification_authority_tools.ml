@@ -6,6 +6,20 @@ module Descriptor = Masc.Keeper_tool_descriptor
 module VAT = Masc.Verification_authority_tools
 module AR = Masc.Task.Anti_rationalization
 
+(* Prompts moved from code into config/prompts; load them so verification.lookup
+   templates render instead of reporting missing. Matches the other
+   prompt-rendering tests. *)
+let () =
+  let prompt_dir =
+    Filename.concat
+      (match Sys.getenv_opt "DUNE_SOURCEROOT" with
+       | Some root -> root
+       | None -> Sys.getcwd ())
+      "config/prompts"
+  in
+  Prompt_registry.set_markdown_dir prompt_dir;
+  Prompt_registry.load_prompts_from_directory prompt_dir
+
 let producer = "test-producer"
 
 let temp_dir () =
@@ -529,7 +543,7 @@ let test_prompt_states_the_root_and_not_a_repository () =
        prompts were translated (#32133), and the check had been asserting
        prose no template could produce. What the section says -- a missing
        path answers about the path, not about the work -- is reviewed in
-       config/prompts/verification.lookup.producer_tree.md. *)
+       config/prompts/verification.md, slot lookup.producer_tree. *)
     Alcotest.(check bool)
       "the live lookup section reaches the prompt"
       true
@@ -583,7 +597,7 @@ let test_prompt_states_the_available_surface () =
       false
       (Astring.String.is_infix ~affix:"<no_lookup_surface>" with_tools);
     (* The read-only boundary is a sentence inside the live-lookup fragment
-       (config/prompts/verification.lookup.producer_tree.md); the prompt is
+       (config/prompts/verification.md, slot lookup.producer_tree); the prompt is
        checked for carrying that fragment, and the sentence is reviewed there. *)
     Alcotest.(check bool)
       "tool prompt carries the live lookup section"

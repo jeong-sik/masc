@@ -30,8 +30,13 @@
     else. *)
 
 type field = Connector
-(** Fields of the Execute schema a rewrite can point at. [Connector] is the
-    conditional that joins two programs. *)
+(** Where a rewrite points a caller who nested one pipeline inside another:
+    at the connector between stages, so each stage is named once.
+
+    Not a field of the Execute schema. It read as one when the schema carried
+    a typed [pipeline]; since #32650 the schema is [argv], [script], [shell],
+    [cwd], [timeout_sec], and this arm is unreachable until the Shell IR
+    parser judges [script] -- the same note {!of_reason} carries above. *)
 
 type call =
   | Spawn
@@ -65,7 +70,9 @@ val of_reason : Masc_exec_command_gate.Shell_command_gate.too_complex_reason -> 
 
 val to_string : t -> string
 (** One line, for a log or a message back to the caller: what to do, and why
-    this construct needs it. *)
+    this construct needs it. The sentence templates are managed prompts
+    ([config/prompts/subset_rewrite.md]); on render failure the bare
+    [because] is returned and the miss is logged. *)
 
 val tag : t -> string
 (** Closed-vocabulary tag for aggregation, coarser than {!to_string}. *)

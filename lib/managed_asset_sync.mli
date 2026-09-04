@@ -3,20 +3,22 @@
     RFC prompts-and-tool-definitions-outside-ocaml).
 
     The binary embeds the repo's [config/] tree ([Embedded_config]); the
-    runtime copies under [<config-root>/prompts] and [<config-root>/tools]
-    are derived distribution state. A runtime file that differs from the
-    embedded asset is stale, not customized — prompt customization lives in
-    [prompt_overrides.json], and tool definitions have no runtime edit layer
-    at all — so overwriting is the correct convergence. The rest of the
-    config root (runtime.toml, keeper manifests, …) is operator-edited in
-    place and is never synced. *)
+    runtime copies under [<config-root>/prompts], [<config-root>/tools] and
+    [<config-root>/mcp] are derived distribution state. A runtime file that
+    differs from the embedded asset is stale, not customized — prompt
+    customization lives in [prompt_overrides.json], and tool definitions have
+    no runtime edit layer at all — so overwriting is the correct convergence.
+    The rest of the config root (runtime.toml, keeper manifests, …) is
+    operator-edited in place and is never synced. *)
 
 (** The closed set of embedded subtrees this sync may own. Each carries its
-    asset prefix inside the embedded tree ([prompts/] / [tools/]) and the
-    manifest [schema] string its [managed-assets.json] must declare. *)
+    asset prefix inside the embedded tree ([prompts/] / [tools/] / [mcp/])
+    and the manifest [schema] string its [managed-assets.json] must
+    declare. *)
 type domain =
   | Prompts
   | Tools
+  | Mcp
 
 type sync_result =
   { copied : string list

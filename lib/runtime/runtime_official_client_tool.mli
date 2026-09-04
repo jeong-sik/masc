@@ -13,7 +13,6 @@
 type terminal_boundary_outcome =
   | Terminal_completed
   | Durable_stimulus_deferred
-  | External_effect_deferred
   | Terminal_failed of
       { failure_class : Tool_result.tool_failure_class
       ; effect_disposition : Tool_result.failure_effect_disposition

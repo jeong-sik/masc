@@ -205,7 +205,7 @@ let handle_tool_execute_typed
       ?continuation_channel
       ?gate_context
       ?gate_grant
-      ?shell_ir_rewrite
+      ~shell_ir_rewrite
       ~(args : Yojson.Safe.t)
       ()
   =
@@ -385,10 +385,14 @@ let handle_tool_execute_typed
            inferred authorization semantics. *)
         (* RFC tools-as-shell-commands: the one conversion point.  Stages
            whose program is the bare reserved word [masc] become delegated
-           tool calls before dispatch.  Callers without a turn context
-           (replay) skip the rewrite, so a shell line stays process-only
-           there.  A rewrite refusal reads as a typed refusal with its own
-           code; both refusals travel the same failure shape below. *)
+           tool calls before dispatch.  Every caller supplies a surface, and
+           a lane with no turn to look a tool up in supplies the one that
+           refuses ([Keeper_shell_tool_command.refuse_reserved_command]).
+           There is no absent case: routing lives in the IR's sandbox field,
+           so a line that skipped the rewrite is not refused, it runs as a
+           host program of that name (#32730).  A refusal reads as a typed
+           refusal with its own code; both refusals travel the same failure
+           shape below. *)
         let shell_ir_error =
           match
             Keeper_tool_execute_typed_input.to_shell_ir
@@ -398,13 +402,9 @@ let handle_tool_execute_typed
           | Error e ->
             Error (typed_validation_error_text e, "typed_validation_failed")
           | Ok ir -> (
-            match shell_ir_rewrite with
-            | None -> Ok ir
-            | Some rewrite_ir -> (
-              match rewrite_ir ir with
-              | Ok rewritten -> Ok rewritten
-              | Error message ->
-                Error (message, "shell_tool_command_rejected")))
+            match shell_ir_rewrite ir with
+            | Ok rewritten -> Ok rewritten
+            | Error message -> Error (message, "shell_tool_command_rejected"))
         in
         match shell_ir_error with
         | Error (text, code) ->
@@ -590,7 +590,14 @@ let handle_tool_execute_typed
              multi-stage call whose second stage is still [bash -c] has not
              left its shell behind because its first stage did.  Reading only
              the [Simple] arm and calling the other two lowered said the
-             opposite. *)
+             opposite.
+
+             Since #32662 no multi-stage call reaches here: [Argv] and
+             [Script] both lower to one [Simple]. The stage traversal is
+             {!Keeper_tooling.Shell_costume.ir_keeps_a_shell}'s answer for
+             the whole [Shell_ir.t] type, and only its own tests still take
+             it. Kept because the predicate is about the type, not about
+             which caller happens to be the last one standing. *)
           let lowered = not (Keeper_tooling.Shell_costume.ir_keeps_a_shell ir) in
           let costume_findings =
             Keeper_tool_execute_typed_input.hidden_script_findings
@@ -930,7 +937,7 @@ let handle_tool_execute_with_outcome
       ?continuation_channel
       ?gate_context
       ?gate_grant
-      ?shell_ir_rewrite
+      ~shell_ir_rewrite
       ~(args : Yojson.Safe.t)
       ()
   =
@@ -946,7 +953,7 @@ let handle_tool_execute_with_outcome
     ?continuation_channel
     ?gate_context
     ?gate_grant
-    ?shell_ir_rewrite
+    ~shell_ir_rewrite
     ~args
     ()
 ;;
@@ -958,7 +965,7 @@ let handle_tool_execute
       ?continuation_channel
       ?gate_context
       ?gate_grant
-      ?shell_ir_rewrite
+      ~shell_ir_rewrite
       ~args
       ()
   =
@@ -969,7 +976,7 @@ let handle_tool_execute
      ?continuation_channel
      ?gate_context
      ?gate_grant
-     ?shell_ir_rewrite
+     ~shell_ir_rewrite
      ~args
      ()).raw_output
 ;;

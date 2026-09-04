@@ -176,6 +176,51 @@ let render_shell report =
         (single_quote_shell report.dashboard_url);
     ]
 
+type mcp_client =
+  | Codex
+  | Claude_desktop
+  | Env
+
+let mcp_client_of_string = function
+  | "codex" -> Some Codex
+  | "claude-desktop" -> Some Claude_desktop
+  | "env" -> Some Env
+  | _ -> None
+
+(* A ready block a new user pastes into one MCP client, so connecting is one
+   step instead of assembling the URL, bearer, and header by hand. [Env] is the
+   portable shell-export form (any client that reads the token from the
+   environment); [Codex] is the bearer-env TOML; [Claude_desktop] bridges over
+   mcp-remote. These are the shapes docs/MCP-TEMPLATE.md and the README already
+   document, kept here beside the other renderers so one test covers them. *)
+let render_mcp_client_config report = function
+  | Env -> render_shell report
+  | Codex ->
+      Printf.sprintf
+        {|# Add to your Codex / bearer-env MCP client config (TOML):
+[mcp_servers.masc]
+url = "%s"
+bearer_token_env_var = "%s"
+http_headers = { "Accept" = "application/json, text/event-stream" }
+
+# Then export the token in the shell that launches the client:
+export %s=%s|}
+        report.mcp_url report.mcp_token_env_var report.mcp_token_env_var
+        report.bearer_token
+  | Claude_desktop ->
+      Printf.sprintf
+        {|# Add to claude_desktop_config.json (bridges over mcp-remote):
+{
+  "mcpServers": {
+    "masc": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "%s"],
+      "env": { "%s": "%s" }
+    }
+  }
+}|}
+        report.mcp_url report.mcp_token_env_var report.bearer_token
+
 let render_text report =
   String.concat "\n"
     [

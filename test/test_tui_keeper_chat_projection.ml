@@ -166,8 +166,8 @@ let test_finished_requires_reply_details () =
 let test_typed_nonvisible_outcomes () =
   let cases =
     [ "continuation_checkpoint", Chat.Continuation_checkpoint
-    ; "external_effect_completed", Chat.External_effect_completed
-    ; "external_effect_pending", Chat.External_effect_pending
+    ; "external_effect_completed", Chat.Terminal_effect_settled
+    ; "external_effect_pending", Chat.Awaiting_gate_approval
     ; "no_visible_reply", Chat.No_visible_reply
     ]
   in

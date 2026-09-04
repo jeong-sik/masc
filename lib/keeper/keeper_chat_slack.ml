@@ -769,7 +769,7 @@ let adapter_loop_with_transport
     | Status_block status ->
         let block = status_block_json status in
         (match status.Keeper_chat_blocks.kind with
-         | Keeper_chat_blocks.External_effect_pending ->
+         | Keeper_chat_blocks.Awaiting_gate_approval ->
            (* The turn's partial text is deliberately replaced by the
               pending-approval status; External_effect_completed later deletes
               the streaming message. *)

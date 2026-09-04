@@ -61,11 +61,12 @@ let run_llm_reviewer_fn
   = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
       Error (Agent_core.Error.Internal "Workspace_hooks: run_llm_reviewer_fn not connected"))
 
-(** Issue #8436: schema enum used to be hand-rolled as a 2-element
-    string list. Payload-bearing [Reject _] prevents the simple
-    [List.map] trick. Witness function below ensures every variant
-    maps to a name in [valid_verdict_strings]. Adding a 3rd
-    constructor will fail compilation in [verdict_constructor_name]. *)
+(** Issue #8436: the verdict vocabulary is owned by this variant. Witness
+    function below ensures every variant maps to a name in
+    [valid_verdict_strings]. Adding a 3rd constructor will fail compilation
+    in [verdict_constructor_name]. The [report_review_verdict] tool schema in
+    [config/tools/report_review_verdict.toml] declares the same enum as a
+    literal, and [test_anti_rationalization_empty_reject] mirrors the two. *)
 let verdict_constructor_name = function
   | Approve _ -> "APPROVE"
   | Reject _ -> "REJECT"
@@ -97,7 +98,7 @@ type review_result =
 (* LLM verification prompt                                          *)
 (* ================================================================ *)
 
-(* Review prose lives in [config/prompts/verification.*.md]. This module picks
+(* Review prose lives in [config/prompts/verification.md] and its slots. This module picks
    the template and supplies the data it renders — a tool-name list, a root
    listing, a numbered item list — and holds no review instructions of its own.
    Two things go wrong when the prose sits here instead: a code change that
@@ -145,10 +146,24 @@ let evidence_section ~required_evidence =
 
 (* Unavailable or partial roots are rejected while constructing the lookup
    surface. Reaching this renderer with no entries therefore means the
-   authority measured a readable, empty root. *)
+   authority measured a readable, empty root. The empty-marker sentence lives
+   in verification.md ([lookup.root_layout_empty]); the two-space indent is
+   layout, not prose. *)
 let root_layout_lines = function
-  | [] -> "  (this root is empty)"
-  | entries -> entries |> List.map (fun entry -> "  " ^ entry) |> String.concat "\n"
+  | [] ->
+    (match
+       Prompt_registry.render_prompt_template
+         Prompt_names.verification_lookup_root_layout_empty
+         []
+     with
+     | Ok text -> Ok ("  " ^ String.trim text)
+     | Error detail ->
+       Error
+         (sprintf
+            "prompt %s: %s"
+            Prompt_names.verification_lookup_root_layout_empty
+            detail))
+  | entries -> Ok (entries |> List.map (fun entry -> "  " ^ entry) |> String.concat "\n")
 ;;
 
 let tool_names schemas =
@@ -160,14 +175,16 @@ let tool_names schemas =
 let lookup_section = function
   | No_lookup_surface -> render Prompt_names.verification_lookup_none []
   | Lookup_tools { schemas; dispatch = _; root_layout } ->
+    let ( let* ) = Result.bind in
+    let* lookup_root_layout = root_layout_lines root_layout in
     render
       Prompt_names.verification_lookup_producer_tree
-      [ "lookup_tools", tool_names schemas
-      ; "lookup_root_layout", root_layout_lines root_layout
-      ]
+      [ "lookup_tools", tool_names schemas; "lookup_root_layout", lookup_root_layout ]
 ;;
 
-let build_prompt ?(few_shot_block = "") ?completion_contract
+let build_prompt
+      ?(few_shot_block = "")
+      ?completion_contract
       ?(required_evidence = [])
       ~(lookup : lookup_surface)
       (req : review_request) : (string, string) result =
@@ -203,40 +220,30 @@ let build_prompt ?(few_shot_block = "") ?completion_contract
 (* Structured Review Verdict: Tool Schema + JSON Parsing (ADR D3)   *)
 (* ================================================================ *)
 
-(** JSON schema for the report_review_verdict tool.
-    Forces the LLM to call a tool with typed parameters.
-    verdict is constrained to APPROVE/REJECT by enum. *)
+(** JSON schema for the report_review_verdict tool, read from
+    [config/tools/report_review_verdict.toml] (RFC
+    prompts-and-tool-definitions-outside-ocaml §2.2). Forces the LLM to call
+    a tool with typed parameters; verdict is constrained to APPROVE/REJECT by
+    the TOML enum literal, which the mirror test in
+    [test_anti_rationalization_empty_reject] pins to [valid_verdict_strings]
+    (the variant SSOT). Decoded once at module initialization; a missing or
+    undecodable file refuses the boot. *)
+let schema_of_name name : Masc_domain.tool_schema =
+  let rel = "tools/" ^ name ^ ".toml" in
+  match Embedded_config.read rel with
+  | None -> failwith (Printf.sprintf "embedded tool definition missing: %s" rel)
+  | Some contents ->
+    (match Tool_definition_toml.load ~name ~contents with
+     | Ok { Tool_definition_toml.schema; _ } -> schema
+     | Error message -> failwith message)
+;;
+
+(* What to say on each verdict lives in config/prompts/verification.md, not
+   in the schema — model-facing prose belongs in the prompt files (RFC
+   prompts-and-tool-definitions-outside-ocaml), and the ratchet on this file
+   enforces that. *)
 let report_review_verdict_schema : Masc_domain.tool_schema =
-  { name = "report_review_verdict"
-  ; description =
-      "Report your review verdict. You MUST call this tool with your assessment. verdict \
-       must be exactly APPROVE or REJECT."
-  ; input_schema =
-      `Assoc
-        [ "type", `String "object"
-        ; ( "properties"
-          , `Assoc
-              [ ( "verdict"
-                , `Assoc
-                    [ "type", `String "string"
-                    ; (* Issue #8436: derived from Variant SSOT. Hand-rolled enum
-             risks dropping a constructor on extension. *)
-                      "enum", `List (List.map (fun s -> `String s) valid_verdict_strings)
-                    ; "description", `String "APPROVE or REJECT."
-                    ] )
-              (* What to say on each verdict lives in config/prompts/
-                 verification.md, not here — model-facing prose belongs in the
-                 prompt files (RFC prompts-and-tool-definitions-outside-ocaml),
-                 and the ratchet on this file enforces that. *)
-              ; ( "reason"
-                , `Assoc
-                    [ "type", `String "string"
-                    ; "description", `String "Why this verdict. Required for REJECT."
-                    ] )
-              ] )
-        ; "required", `List [ `String "verdict" ]
-        ]
-  }
+  schema_of_name "report_review_verdict"
 ;;
 
 (** Parse review verdict from tool call JSON arguments (deterministic). *)
@@ -254,8 +261,11 @@ let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) re
     match verdict_str with
     | "APPROVE" -> Ok (Approve reason)
     | "REJECT" ->
+      (* A tool result the reviewer LLM reads back, so the sentence is a
+         managed prompt; the pure parse errors below stay inline (RFC §6
+         mechanically-derived validation). *)
       if String.equal (String.trim reason) ""
-      then Error "REJECT verdict requires a non-empty reason"
+      then Error (Tool_guidance.to_string Tool_guidance.Reject_verdict_requires_reason)
       else Ok (Reject reason)
     | other -> Error (sprintf "unexpected review verdict value: %s" other)
   with

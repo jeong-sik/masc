@@ -283,9 +283,9 @@ Wave D RFC after Phase 2 stabilizes. Justifications:
 2. `(wrapped false)` is internally consistent with cdal, trajectory,
    host_config, briefing_compactors, dashboard_eval_feed, memory_jsonl,
    chronicle_event, tool_call_quality_benchmark, keeper_event_queue,
-   keeper_invariant, compaction_trigger — 11 precedent sub-libraries.
+   keeper_invariant — 10 precedent sub-libraries.
    Switching keeper alone to `(wrapped true)` introduces inconsistency.
-3. Wave D RFC can then sweep **all 12** sub-libraries to `(wrapped true)
+3. Wave D RFC can then sweep **all 11** sub-libraries to `(wrapped true)
    + -open` consistently, with a single migration script and one
    reviewer round.
 

@@ -64,12 +64,14 @@ let make_handoff_tool ~(delegate : string -> Types.tool_result) (target : handof
         ; error_class = Some Types.Deterministic
         }
   in
+  let text = Tool_guidance_text.current () in
   Tool.create
     ~name:target.name
-    ~description:(Printf.sprintf "Hand off to %s: %s" target.name target.description)
+    ~description:
+      (text.handoff_description ~name:target.name ~description:target.description)
     ~parameters:
       [ { Types.name = "prompt"
-        ; description = "Instructions for the sub-agent"
+        ; description = text.handoff_prompt_param_description
         ; param_type = Types.String
         ; required = true
         }

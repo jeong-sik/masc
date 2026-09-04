@@ -138,6 +138,7 @@ type stream_lifecycle_event =
   | Run_error
 
 type approval_lifecycle_phase =
+  | Approval_requested
   | Approval_resolved_approved
   | Approval_resolved_rejected
   | Approval_replay_applied
@@ -178,6 +179,7 @@ let stream_lifecycle_event_of_label = function
   | _ -> None
 
 let approval_lifecycle_phase_to_label = function
+  | Approval_requested -> "requested"
   | Approval_resolved_approved -> "resolved_approved"
   | Approval_resolved_rejected -> "resolved_rejected"
   | Approval_replay_applied -> "replay_applied"
@@ -188,6 +190,7 @@ let approval_lifecycle_phase_to_label = function
 ;;
 
 let approval_lifecycle_phase_of_label = function
+  | "requested" -> Some Approval_requested
   | "resolved_approved" -> Some Approval_resolved_approved
   | "resolved_rejected" -> Some Approval_resolved_rejected
   | "replay_applied" -> Some Approval_replay_applied
@@ -662,6 +665,7 @@ let parse_approval_lifecycle ~path = function
            | Ok artifact_ref ->
              let phase_requires_artifact =
                match phase with
+               | Approval_requested
                | Approval_resolved_approved
                | Approval_resolved_rejected
                | Approval_continuation_recorded -> false
@@ -828,6 +832,7 @@ let validate_delivery_execution_identity ~execution_id
           Error "tool_delivery transcript slot forbids row execution_id"
       | ( Keeper_chat_delivery_identity.Accepted_user
         | Keeper_chat_delivery_identity.Terminal_assistant
+        | Keeper_chat_delivery_identity.Approval_request
         | Keeper_chat_delivery_identity.Approval_resolution
         | Keeper_chat_delivery_identity.Approval_replay
         | Keeper_chat_delivery_identity.Approval_replay_correction
@@ -836,6 +841,7 @@ let validate_delivery_execution_identity ~execution_id
           Ok ()
       | ( Keeper_chat_delivery_identity.Accepted_user
         | Keeper_chat_delivery_identity.Terminal_assistant
+        | Keeper_chat_delivery_identity.Approval_request
         | Keeper_chat_delivery_identity.Approval_resolution
         | Keeper_chat_delivery_identity.Approval_replay
         | Keeper_chat_delivery_identity.Approval_replay_correction
@@ -849,7 +855,8 @@ let validate_delivery_role ~role_label
   match provenance.transcript_slot, role_label with
   | Keeper_chat_delivery_identity.Accepted_user, "user"
   | Keeper_chat_delivery_identity.Terminal_assistant, "assistant"
-  | ( Keeper_chat_delivery_identity.Approval_resolution
+  | ( Keeper_chat_delivery_identity.Approval_request
+    | Keeper_chat_delivery_identity.Approval_resolution
     | Keeper_chat_delivery_identity.Approval_replay
     | Keeper_chat_delivery_identity.Approval_replay_correction
     | Keeper_chat_delivery_identity.Approval_continuation ),
@@ -862,7 +869,8 @@ let validate_delivery_role ~role_label
     Error "accepted_user transcript slot requires a user row"
   | Keeper_chat_delivery_identity.Terminal_assistant, _ ->
     Error "terminal_assistant transcript slot requires an assistant row"
-  | ( Keeper_chat_delivery_identity.Approval_resolution
+  | ( Keeper_chat_delivery_identity.Approval_request
+    | Keeper_chat_delivery_identity.Approval_resolution
     | Keeper_chat_delivery_identity.Approval_replay
     | Keeper_chat_delivery_identity.Approval_replay_correction
     | Keeper_chat_delivery_identity.Approval_continuation ),
@@ -1051,6 +1059,7 @@ let provenance_index_of_existing existing =
       | Keeper_chat_delivery_identity.Tool_delivery { ordinal } -> Some ordinal
       | Keeper_chat_delivery_identity.Accepted_user
       | Keeper_chat_delivery_identity.Terminal_assistant
+      | Keeper_chat_delivery_identity.Approval_request
       | Keeper_chat_delivery_identity.Approval_resolution
       | Keeper_chat_delivery_identity.Approval_replay
       | Keeper_chat_delivery_identity.Approval_replay_correction
@@ -1080,6 +1089,7 @@ let provenance_index_of_existing existing =
     | Keeper_chat_delivery_identity.Accepted_user
     | Keeper_chat_delivery_identity.Tool_delivery _
     | Keeper_chat_delivery_identity.Terminal_assistant
+    | Keeper_chat_delivery_identity.Approval_request
     | Keeper_chat_delivery_identity.Approval_resolution
     | Keeper_chat_delivery_identity.Approval_replay
     | Keeper_chat_delivery_identity.Approval_replay_correction
@@ -1141,6 +1151,7 @@ let find_indexed_provenance index ~provenance =
       | Keeper_chat_delivery_identity.Accepted_user
       | Keeper_chat_delivery_identity.Tool_delivery _
       | Keeper_chat_delivery_identity.Terminal_assistant
+      | Keeper_chat_delivery_identity.Approval_request
       | Keeper_chat_delivery_identity.Approval_resolution
       | Keeper_chat_delivery_identity.Approval_replay
       | Keeper_chat_delivery_identity.Approval_replay_correction
@@ -1154,6 +1165,7 @@ let find_indexed_provenance index ~provenance =
       | Keeper_chat_delivery_identity.Tool_delivery { ordinal } -> Some ordinal
       | Keeper_chat_delivery_identity.Accepted_user
       | Keeper_chat_delivery_identity.Terminal_assistant
+      | Keeper_chat_delivery_identity.Approval_request
       | Keeper_chat_delivery_identity.Approval_resolution
       | Keeper_chat_delivery_identity.Approval_replay
       | Keeper_chat_delivery_identity.Approval_replay_correction
@@ -1509,6 +1521,7 @@ let transcript_slot_ordinal = function
   | Keeper_chat_delivery_identity.Tool_delivery { ordinal } -> Some ordinal
   | Keeper_chat_delivery_identity.Accepted_user
   | Keeper_chat_delivery_identity.Terminal_assistant
+  | Keeper_chat_delivery_identity.Approval_request
   | Keeper_chat_delivery_identity.Approval_resolution
   | Keeper_chat_delivery_identity.Approval_replay
   | Keeper_chat_delivery_identity.Approval_replay_correction
@@ -1542,6 +1555,7 @@ let validate_append_once_lines lines =
         | Keeper_chat_delivery_identity.Accepted_user
         | Keeper_chat_delivery_identity.Tool_delivery _
         | Keeper_chat_delivery_identity.Terminal_assistant
+        | Keeper_chat_delivery_identity.Approval_request
         | Keeper_chat_delivery_identity.Approval_resolution
         | Keeper_chat_delivery_identity.Approval_replay
         | Keeper_chat_delivery_identity.Approval_replay_correction
@@ -2199,6 +2213,12 @@ let parse_line ~file_path (line : string) : chat_message option =
       Option.is_some audio
       || Option.exists (fun values -> values <> []) attachments
       || Option.exists (fun values -> values <> []) blocks
+      (* A Gate lifecycle row's payload is its typed phase. The store used to
+         compose a sentence beside it, so the row also had text and passed
+         here by accident; with the sentence gone the row is all typed field,
+         and dropping it would delete the durable record of an external
+         effect on read. *)
+      || Option.is_some approval_lifecycle
     in
     if not delivery_execution_identity_valid then None
     else if role_label = "" || (content = "" && not has_structured_payload) then (
@@ -2468,33 +2488,12 @@ let approval_lifecycle_equal left right =
   && artifact_equal left.artifact_ref right.artifact_ref
 ;;
 
-let approval_lifecycle_content lifecycle =
-  let tool =
-    match lifecycle.tool_name with
-    | None -> "Gate operation"
-    | Some tool_name -> tool_name
-  in
-  match lifecycle.phase with
-  | Approval_resolved_approved ->
-    Printf.sprintf
-      "승인됨 · %s\n외부 효과는 아직 적용 확인 전입니다."
-      tool
-  | Approval_resolved_rejected -> Printf.sprintf "승인 거절됨 · %s" tool
-  | Approval_replay_applied -> Printf.sprintf "승인 작업 적용 완료 · %s" tool
-  | Approval_replay_applied_with_warning ->
-    Printf.sprintf "승인 작업 적용 완료(경고 있음) · %s" tool
-  | Approval_replay_failed -> Printf.sprintf "승인 작업 적용 실패 · %s" tool
-  | Approval_replay_indeterminate ->
-    Printf.sprintf "승인 작업 적용 여부 불명 · %s" tool
-  | Approval_continuation_recorded ->
-    Printf.sprintf "승인 후 후속 작업 이어가기 기록됨 · %s" tool
-;;
-
 type approval_lifecycle_append =
   | Approval_lifecycle_exact of append_once_result
   | Approval_lifecycle_conflict of approval_lifecycle
 
 let approval_lifecycle_is_replay = function
+  | Approval_requested -> false
   | Approval_replay_applied
   | Approval_replay_applied_with_warning
   | Approval_replay_failed
@@ -2509,7 +2508,6 @@ let append_approval_lifecycle_at_slot_once
       ~keeper_name
       ~lifecycle
       ~transcript_slot
-      ~corrected
   =
   let open Keeper_chat_delivery_identity in
   match Request_id.of_string lifecycle.approval_id with
@@ -2524,22 +2522,17 @@ let append_approval_lifecycle_at_slot_once
        let path = chat_path ~base_dir ~keeper_name in
        let ts = Time_compat.now () in
        let row_id = mint_message_id ~ts in
-       let content = approval_lifecycle_content lifecycle in
-       let content =
-         if corrected
-         then
-           String.concat
-             "\n"
-             [ "승인 작업 결과 정정"
-             ; content
-             ; "이전 표시보다 durable replay journal 결과가 우선합니다."
-             ]
-         else content
-       in
+       (* The row's fact is [approval_lifecycle], and [transcript_slot] says
+          which step it is -- a correction is [Approval_replay_correction], not
+          a sentence saying so. The store used to compose a Korean retelling of
+          both into [content], which made a machine-written row read as
+          something a Keeper said and put display wording in the persistence
+          layer. Every reader now takes the typed fields and words them itself
+          (masc #33016). *)
        let line =
          encode_line
            ~role:Role.System
-           ~content
+           ~content:""
            ~ts
            ~message_id:row_id
            ~approval_lifecycle:lifecycle
@@ -2576,6 +2569,7 @@ let append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
   let open Keeper_chat_delivery_identity in
   let transcript_slot =
     match lifecycle.phase with
+    | Approval_requested -> Approval_request
     | Approval_resolved_approved | Approval_resolved_rejected ->
       Approval_resolution
     | Approval_replay_applied
@@ -2590,7 +2584,6 @@ let append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
       ~keeper_name
       ~lifecycle
       ~transcript_slot
-      ~corrected:false
   with
   | Error _ as error -> error
   | Ok (Approval_lifecycle_exact result) -> Ok result
@@ -2644,7 +2637,6 @@ let reconcile_approval_replay_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
            ~keeper_name
            ~lifecycle
            ~transcript_slot:Approval_replay
-           ~corrected:false
        with
        | Error _ as error -> error
        | Ok (Approval_lifecycle_exact result) -> Ok result
@@ -2655,7 +2647,6 @@ let reconcile_approval_replay_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
               ~keeper_name
               ~lifecycle
               ~transcript_slot:Approval_replay_correction
-              ~corrected:true
           with
           | Error _ as error -> error
           | Ok

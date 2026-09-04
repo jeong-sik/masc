@@ -70,7 +70,7 @@ let origin_request_id = function
   | History.Addressed_to_keeper _ | History.Said_by_keeper
   | History.Autonomous_reply
   | History.Tool_calls _ | History.Skill_activity _ | History.Reasoning _
-  | History.Memory_activity _ -> None
+  | History.Gate_activity _ | History.Memory_activity _ -> None
 
 let full_tool_rows = History.tool_rows
 
@@ -87,6 +87,9 @@ let kind_to_string : History.kind -> string = function
         (String.concat " | " (Transcript.skill_rows ~full:true skill))
   | History.Reasoning lines ->
       Printf.sprintf "thinking[%s]" (String.concat " | " lines)
+  | History.Gate_activity { approval_id; phase; tool } ->
+      Printf.sprintf "gate[%s %s%s]" approval_id phase
+        (match tool with None -> "" | Some tool -> " " ^ tool)
   | History.Memory_activity _ -> "memory"
 
 (* An assistant row the way an autonomous turn persists it: the server's
@@ -163,6 +166,54 @@ let decode json =
   | Ok decoded -> decoded
   | Error detail -> failf "expected a decode, got %s" detail
 
+(* A Gate row is drawn from its typed phase, so it has to reach the pane as one.
+   The approval id is what folds a run of steps back into the one approval they
+   describe; a lifecycle without it is not a step this pane can place, and
+   stays in the neutral lane rather than being drawn as a lone approval. *)
+let gate_row ~ts ~slot ?approval_id ~phase ?tool content =
+  `Assoc
+    [ "id", `String ("gate-" ^ slot)
+    ; "role", `String "system"
+    ; "content", `String content
+    ; "ts", `Float ts
+    ; "transcript_slot", `Assoc [ "kind", `String slot ]
+    ; ( "approval_lifecycle"
+      , `Assoc
+          ([ "phase", `String phase ]
+           @ (match approval_id with
+              | None -> []
+              | Some id -> [ "approval_id", `String id ])
+           @ (match tool with
+              | None -> []
+              | Some name -> [ "tool_name", `String name ])) )
+    ]
+
+let test_a_gate_row_carries_its_approval () =
+  let decoded =
+    decode
+      (`List
+         [ gate_row ~ts:1.0 ~slot:"approval_request" ~approval_id:"appr_01a"
+             ~phase:"requested" ~tool:"Execute" ""
+         ; gate_row ~ts:2.0 ~slot:"approval_replay" ~approval_id:"appr_01a"
+             ~phase:"replay_applied" ~tool:"Execute" ""
+         ])
+  in
+  check int "nothing was dropped" 0 decoded.History.dropped;
+  check (list string) "each step keeps its approval, phase and tool"
+    [ "gate[appr_01a requested Execute]"; "gate[appr_01a replay_applied Execute]" ]
+    (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
+
+let test_a_lifecycle_without_an_approval_id_is_not_a_gate_row () =
+  let decoded =
+    decode
+      (`List
+         [ gate_row ~ts:1.0 ~slot:"approval_replay" ~phase:"replay_applied"
+             ~tool:"Execute" "적용 완료"
+         ])
+  in
+  check (list string) "it stays in the neutral lane" [ "memory" ]
+    (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
+
 let test_roles_map_to_what_the_pane_draws () =
   let decoded =
     decode
@@ -188,6 +239,7 @@ let test_roles_map_to_what_the_pane_draws () =
     [ "고쳐줘"; "고쳤어요"; "slack 5xx"; "승인됨 · Execute" ]
     (List.map (fun r -> r.History.text) decoded.History.rows);
   (match (List.nth decoded.History.rows 3).History.kind with
+   | History.Gate_activity _ -> failf "unexpected gate row"
    | History.Memory_activity { summary } ->
        check (option string) "a neutral system row stays whole" None summary
    | History.Addressed_to_keeper _ | History.Said_by_keeper
@@ -376,6 +428,7 @@ let test_an_addressed_row_says_who_sent_it_not_only_what_to_draw () =
     | History.Said_by_keeper | History.Autonomous_reply
     | History.Delivery_failed _ | History.Tool_calls _
     | History.Skill_activity _ | History.Reasoning _
+    | History.Gate_activity _ -> failf "unexpected gate row"
     | History.Memory_activity _ ->
         failf "expected an addressed row"
   in
@@ -406,6 +459,7 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
     | History.Said_by_keeper | History.Autonomous_reply
     | History.Delivery_failed _ | History.Tool_calls _
     | History.Skill_activity _ | History.Reasoning _
+    | History.Gate_activity _ -> failf "unexpected gate row"
     | History.Memory_activity _ ->
         failf "expected an addressed row"
   in
@@ -569,7 +623,8 @@ let test_consecutive_tool_rows_become_one_block () =
        | History.Autonomous_reply
        | History.Delivery_failed _ | History.Skill_activity _
        | History.Reasoning _
-       | History.Memory_activity _ ->
+       | History.Gate_activity _ -> failf "unexpected gate row"
+    | History.Memory_activity _ ->
            fail "expected the middle row to be a tool block");
       check (float 0.0) "the block is keyed to its first call" 2.0
         tools.History.at
@@ -660,7 +715,7 @@ let test_an_autonomous_turn_draws_what_it_did () =
   match decoded.History.rows with
   | [ thinking; tools ] ->
       check string "the withheld reasoning is counted, not drawn blank"
-        "thinking[(2 reasoning steps, content withheld)]"
+        "thinking[2 reasoning steps · text not recorded]"
         (kind_to_string thinking.History.kind);
       (match tools.History.kind with
        | History.Tool_calls block ->
@@ -694,16 +749,20 @@ let test_an_autonomous_turn_draws_what_it_did () =
              (starts_with "\xe2\x9c\x93 masc_task_history \xc2\xb7 32ms" (row 0));
            check bool "a call that returned an error carries its own glyph" true
              (starts_with "\xe2\x9c\x97 tool_execute" (row 1));
-           check bool "a call the trace never saw finish carries the open glyph"
+           (* masc #32571 split "started or never returned" into two glyphs:
+              a running call is a hollow circle, one that never returned is
+              this. The distinction is the point of that change. *)
+           check bool "a call the trace never saw finish carries its own glyph"
              true
-             (starts_with "\xc2\xb7 keeper_task_claim" (row 2));
+             (starts_with "! keeper_task_claim" (row 2));
            check bool "a step with no status says it was not recorded" true
              (starts_with "? read_file" (row 3))
        | History.Addressed_to_keeper _ | History.Said_by_keeper
        | History.Autonomous_reply
        | History.Delivery_failed _ | History.Skill_activity _
        | History.Reasoning _
-       | History.Memory_activity _ ->
+       | History.Gate_activity _ -> failf "unexpected gate row"
+    | History.Memory_activity _ ->
            fail "expected the second row to be a tool block");
       check (float 0.0) "both rows are keyed to the turn" 5.0 tools.History.at
   | rows -> failf "expected two rows, got %d" (List.length rows)
@@ -1119,7 +1178,8 @@ let test_memory_commit_names_added_removed_and_drop_reason () =
       check bool "journal has a stable producer identity" true
         (Option.is_some row.structural_id);
       (match row.kind with
-       | History.Memory_activity { summary } ->
+       | History.Gate_activity _ -> failf "unexpected gate row"
+   | History.Memory_activity { summary } ->
            check (option string) "typed summary is producer-built"
              (Some
                 "Librarian committed current memory revision 7 \xc2\xb7 now 1 added, 1 removed, 3 retained")
@@ -1175,7 +1235,8 @@ let test_memory_failure_keeps_kind_and_detail () =
       check bool "failed observation has a stable producer identity" true
         (Option.is_some row.structural_id);
       (match row.kind with
-       | History.Memory_activity { summary } ->
+       | History.Gate_activity _ -> failf "unexpected gate row"
+   | History.Memory_activity { summary } ->
            check (option string) "failure summary omits the detail body"
              (Some "Librarian failed \xc2\xb7 exact_execution_failure") summary
        | History.Addressed_to_keeper _ | History.Said_by_keeper
@@ -1502,6 +1563,10 @@ let () =
     [ ( "rows"
       , [ test_case "roles map to what the pane draws" `Quick
             test_roles_map_to_what_the_pane_draws
+        ; test_case "a gate row carries its approval" `Quick
+            test_a_gate_row_carries_its_approval
+        ; test_case "a lifecycle without an approval id is not a gate row"
+            `Quick test_a_lifecycle_without_an_approval_id_is_not_a_gate_row
         ; test_case "a failed turn names the request it came from" `Quick
             test_a_failed_turn_names_the_request_it_came_from
         ; test_case "runtime interruption becomes a recovered lifecycle" `Quick

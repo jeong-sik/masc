@@ -603,6 +603,21 @@ let pending_board_event_of_board_signal
    full answer also persists in the sink's board post + chat lane. *)
 let fusion_result_preview_max_len = 480
 
+(* Event-row wording renders through the prompt registry at observation-
+   creation time: the row carries finished text, so the template must render
+   here rather than at prompt assembly. The condition (which row, which
+   outcome) stays in this module; only the wording lives in
+   config/prompts/keeper.world.event_rows.md. A render failure logs and falls
+   back to the bare data — the held-task-skills precedent: losing the wording
+   is recoverable, losing the fact is not. *)
+let event_row_text key vars ~fallback =
+  match Prompt_registry.render_prompt_template key vars with
+  | Ok text -> String.trim text
+  | Error detail ->
+    Log.Keeper.warn "keeper world event row prompt %s did not render: %s" key detail;
+    fallback
+;;
+
 (* RFC-0266: turn a completed async fusion deliberation into actionable turn
    input. The sink already created a System_post board record carrying the
    panel/judge detail; here we surface that result as a just-arrived
@@ -619,12 +634,26 @@ let pending_board_event_of_fusion_completion
   let title, message =
     match fc.terminal with
     | Keeper_event_queue.Fusion_succeeded answer ->
-      Printf.sprintf "Fusion deliberation complete (run %s)" fc.run_id, answer
+      ( event_row_text
+          Prompt_names.keeper_world_event_rows_fusion_title_succeeded
+          [ "run_id", fc.run_id ]
+          ~fallback:fc.run_id
+      , answer )
     | Keeper_event_queue.Fusion_failed detail ->
-      Printf.sprintf "Fusion deliberation failed (run %s)" fc.run_id, detail
+      ( event_row_text
+          Prompt_names.keeper_world_event_rows_fusion_title_failed
+          [ "run_id", fc.run_id ]
+          ~fallback:fc.run_id
+      , detail )
     | Keeper_event_queue.Fusion_cancelled ->
-      ( Printf.sprintf "Fusion deliberation cancelled (run %s)" fc.run_id
-      , "The asynchronous Fusion run was structurally cancelled before producing a result." )
+      ( event_row_text
+          Prompt_names.keeper_world_event_rows_fusion_title_cancelled
+          [ "run_id", fc.run_id ]
+          ~fallback:fc.run_id
+      , event_row_text
+          Prompt_names.keeper_world_event_rows_fusion_cancelled_preview
+          []
+          ~fallback:"" )
   in
   { event_kind = Fusion_completed
   ; post_id
@@ -743,7 +772,11 @@ let pending_board_event_of_scheduled_wake
   let title =
     match sw.title with
     | Some title -> title
-    | None -> "Scheduled keeper wake due"
+    | None ->
+      event_row_text
+        Prompt_names.keeper_world_event_rows_scheduled_wake_title
+        []
+        ~fallback:sw.schedule_id
   in
   { event_kind = Schedule_due sw
   ; post_id
@@ -793,11 +826,13 @@ let pending_board_event_of_external_attention
   ; post_id = "connector-attention:" ^ item.event_id
   ; author = actor
   ; title =
-      Printf.sprintf
-        "External %s attention (%s, conversation %s)"
-        surface_label
-        urgency_label
-        item.conversation.conversation_id
+      event_row_text
+        Prompt_names.keeper_world_event_rows_external_attention_title
+        [ "surface", surface_label
+        ; "urgency", urgency_label
+        ; "conversation_id", item.conversation.conversation_id
+        ]
+        ~fallback:item.conversation.conversation_id
   ; preview = short_preview ~max_len:fusion_result_preview_max_len item.content_preview
   ; hearth = None
   ; post_kind = Board.Human_post
@@ -831,7 +866,8 @@ let ask_answer_line (ask : Keeper_ask.ask) (answer : Keeper_ask.answer) =
   let said =
     match answer.Keeper_ask.response with
     | Keeper_ask.Wrote text -> text
-    | Keeper_ask.Skipped -> "(skipped)"
+    | Keeper_ask.Skipped ->
+      event_row_text Prompt_names.keeper_world_event_rows_ask_skipped [] ~fallback:""
     | Keeper_ask.Chose { choice_ids } ->
       let label choice_id =
         match question with
@@ -874,10 +910,12 @@ let pending_board_event_of_ask_answer
   ; post_id = "keeper-ask:" ^ ask.Keeper_ask.ask_id
   ; author = who
   ; title =
-      Printf.sprintf
-        "Answer to your question (%s, from %s)"
-        ask.Keeper_ask.ask_id
-        (Surface_ref.lane_label responder.Keeper_ask.surface)
+      event_row_text
+        Prompt_names.keeper_world_event_rows_ask_title
+        [ "ask_id", ask.Keeper_ask.ask_id
+        ; "surface", Surface_ref.lane_label responder.Keeper_ask.surface
+        ]
+        ~fallback:ask.Keeper_ask.ask_id
   ; preview = short_preview ~max_len:fusion_result_preview_max_len body
   ; hearth = None
     (* Not a Board post: masc wrote this row, nobody posted it. Marked
@@ -905,18 +943,22 @@ let pending_board_event_of_completion_authority_rejection
   ; post_id = Keeper_event_queue.completion_authority_rejection_post_id rejection
   ; author = Masc_domain.completion_authority_actor rejection.car_authority
   ; title =
-      Printf.sprintf
-        "Completion evidence rejected for task %s"
-        rejection.car_task_id
+      event_row_text
+        Prompt_names.keeper_world_event_rows_completion_authority_title
+        [ "task_id", rejection.car_task_id ]
+        ~fallback:rejection.car_task_id
   ; preview =
       short_preview
         ~max_len:fusion_result_preview_max_len
-        (Printf.sprintf
-           "Task %s verification %s was rejected by %s. Follow-up reason: %s"
-           rejection.car_task_id
-           rejection.car_verification_id
-           (Masc_domain.completion_authority_kind rejection.car_authority)
-           rejection.car_reason)
+        (event_row_text
+           Prompt_names.keeper_world_event_rows_completion_authority_preview
+           [ "task_id", rejection.car_task_id
+           ; "verification_id", rejection.car_verification_id
+           ; ( "authority_kind"
+             , Masc_domain.completion_authority_kind rejection.car_authority )
+           ; "reason", rejection.car_reason
+           ]
+           ~fallback:(rejection.car_task_id ^ " " ^ rejection.car_verification_id))
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -942,20 +984,30 @@ let pending_board_event_of_task_cancellation
   let reason_text =
     match cancellation.tc_reason with
     | Some reason when String.trim reason <> "" -> reason
-    | Some _ | None -> "no reason was given"
+    | Some _ | None ->
+      event_row_text
+        Prompt_names.keeper_world_event_rows_task_cancelled_no_reason
+        []
+        ~fallback:""
   in
   { event_kind = Task_cancelled cancellation
   ; post_id = Keeper_event_queue.task_cancellation_post_id cancellation
   ; author = cancellation.tc_cancelled_by
-  ; title = Printf.sprintf "Task %s was cancelled" cancellation.tc_task_id
+  ; title =
+      event_row_text
+        Prompt_names.keeper_world_event_rows_task_cancelled_title
+        [ "task_id", cancellation.tc_task_id ]
+        ~fallback:cancellation.tc_task_id
   ; preview =
       short_preview
         ~max_len:fusion_result_preview_max_len
-        (Printf.sprintf
-           "Task %s, which you created, was cancelled by %s. Stated reason: %s"
-           cancellation.tc_task_id
-           cancellation.tc_cancelled_by
-           reason_text)
+        (event_row_text
+           Prompt_names.keeper_world_event_rows_task_cancelled_preview
+           [ "task_id", cancellation.tc_task_id
+           ; "cancelled_by", cancellation.tc_cancelled_by
+           ; "reason", reason_text
+           ]
+           ~fallback:(cancellation.tc_task_id ^ " " ^ cancellation.tc_cancelled_by))
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at

@@ -148,6 +148,20 @@ end
     without an enclosing Keeper turn. *)
 
 module For_testing : sig
+  val failure_payload :
+    tool_name:string ->
+    tool_kind:Keeper_tool_descriptor.tool_kind ->
+    cause:Yojson.Safe.t ->
+    effect_disposition:string ->
+    settled:Yojson.Safe.t list ->
+    Yojson.Safe.t
+  (** The durable payload of a failed composition, in the order it is written.
+
+      Exposed because the order is the contract: the tool-call row is truncated
+      on the serialized string at [Keeper_tool_call_log.max_output_len], and
+      [settled] has no bound, so anything after it can be cut away. [cause] and
+      [effect_disposition] precede it for that reason. *)
+
   val instruction_skill_description :
     instruction_skill list -> string
 

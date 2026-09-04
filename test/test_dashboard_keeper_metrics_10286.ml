@@ -17,10 +17,8 @@ let metric ?(channel = "turn") tools =
       ("ts_unix", `Float 1.0);
       ("channel", `String channel);
       ("trace_id", `String "trace-current");
-      ("generation", `Int 1);
       ("latency_ms", `Int 1);
       ("turn_mode", `String "tool_use");
-      ("handoff_performed", `Bool false);
       ("tools_used", `List (List.map (fun tool -> `String tool) tools));
       ("tool_call_count", `Int (List.length tools));
     ])
@@ -42,10 +40,8 @@ let current_turn_metric () =
       ("ts_unix", `Float 10.0);
       ("channel", `String "turn");
       ("trace_id", `String "trace-current");
-      ("generation", `Int 1);
       ("latency_ms", `Int 20);
       ("turn_mode", `String "text_response");
-      ("handoff_performed", `Bool false);
       (* Retired persisted fields must not regain authority. *)
       ("context_ratio", `Float 0.75);
       ("context_tokens", `Int 750);
@@ -62,7 +58,14 @@ let current_turn_metric () =
         `Assoc
           [
             ("actual_input_tokens", `Int 120);
-            ("attributed_bytes", `Int 640);
+            ( "attribution",
+              `Assoc
+                [
+                  ("status", `String "attributed");
+                  ("runtime_profile", `String "runtime.current");
+                  ("attributed_bytes", `Int 640);
+                  ("segments", `Assoc []);
+                ] );
           ] );
       ( "runtime",
         `Assoc
@@ -111,7 +114,7 @@ let test_contains_ci_preserves_literal_ascii_semantics () =
     (Metrics.contains_ci "keeper" "keeper-agent")
 
 let test_metrics_window_does_not_classify_execute_as_pr_work () =
-  let _, summary, _ =
+  let _, summary =
     Detail.compute_metrics_window
       ~parsed_metrics:
         [
@@ -132,7 +135,7 @@ let test_metrics_window_does_not_classify_execute_as_pr_work () =
     retired_pr_work_summary_fields
 
 let test_metrics_series_preserves_current_turn_telemetry () =
-  let items, summary, _ =
+  let items, summary =
     Detail.compute_metrics_window
       ~parsed_metrics:
         [
@@ -153,13 +156,17 @@ let test_metrics_series_preserves_current_turn_telemetry () =
       check int "current usage retained" 120
         (row |> member "usage" |> member "input_tokens" |> to_int);
       check int "current composition retained" 640
-        (row |> member "ctx_composition" |> member "attributed_bytes" |> to_int);
+        (row
+        |> member "ctx_composition"
+        |> member "attribution"
+        |> member "attributed_bytes"
+        |> to_int);
       check string "current runtime retained" "completed"
         (row |> member "runtime" |> member "outcome" |> to_string)
   | other ->
       failf "expected one metrics series row, got %d" (List.length other)
 
-let test_metrics_window_omits_retired_model_and_handoff_labels () =
+let test_metrics_window_omits_retired_labels () =
   let row =
     `Assoc
       (Keeper_metrics_record.fields Keeper_metrics_record.Turn
@@ -168,24 +175,14 @@ let test_metrics_window_omits_retired_model_and_handoff_labels () =
         ("ts_unix", `Float 20.0);
         ("channel", `String "turn");
         ("trace_id", `String "trace-a");
-        ("generation", `Int 1);
         ("latency_ms", `Int 20);
         ("turn_mode", `String "text_response");
         ("tool_call_count", `Int 0);
         ("tools_used", `List []);
         ("message_count", `Int 4);
-        ("handoff_performed", `Bool true);
-        ( "handoff",
-          `Assoc
-            [
-              ("performed", `Bool true);
-              ("prev_trace_id", `String "trace-a");
-              ("new_trace_id", `String "trace-b");
-              ("to_generation", `Int 2);
-            ] );
       ])
   in
-  let items, _summary, last_handoff =
+  let items, summary =
     Detail.compute_metrics_window
       ~parsed_metrics:[ row ]
       ~compact:false
@@ -195,22 +192,21 @@ let test_metrics_window_omits_retired_model_and_handoff_labels () =
     | `Assoc fields -> List.mem_assoc key fields
     | _ -> false
   in
-  (match items with
+  check bool "summary handoff_count omitted" true
+    (summary_missing "handoff_count" summary);
+  check bool "summary generation_equipment omitted" true
+    (summary_missing "generation_equipment" summary);
+  match items with
   | [ item ] ->
       check bool "series model_used omitted" false
         (has_field "model_used" item);
-      check bool "series handoff_to_model omitted" false
-        (has_field "handoff_to_model" item);
-      let handoff = Yojson.Safe.Util.member "handoff" item in
-      check bool "nested handoff to_model omitted" false
-        (has_field "to_model" handoff)
+      check bool "series generation omitted" false
+        (has_field "generation" item);
+      check bool "series handoff_performed omitted" false
+        (has_field "handoff_performed" item);
+      check bool "series handoff omitted" false (has_field "handoff" item)
   | other ->
-      failf "expected one metrics series row, got %d" (List.length other));
-  (match last_handoff with
-  | Some handoff ->
-      check bool "last handoff to_model omitted" false
-        (has_field "to_model" handoff)
-  | None -> fail "expected last handoff summary")
+      failf "expected one metrics series row, got %d" (List.length other)
 
 let with_temp_history content f =
   let path = Filename.temp_file "khist" ".jsonl" in
@@ -303,59 +299,22 @@ let test_history_summary_routes_by_source_not_content () =
           failf "expected one user-authored history item, got %s"
             (Yojson.Safe.to_string other))
 
-(* [generation_stats] rows are values held in a table: each turn rebinds the
-   entry rather than writing through a shared record. Two turns in the same
-   generation must still accumulate, a second generation must not inherit the
-   first one's totals, and the per-generation tool table must survive the
-   rebinding. *)
-let test_generation_equipment_accumulates_across_rebinds () =
-  let turn ~generation ~ts_unix tools =
-    match metric tools with
-    | `Assoc fields ->
-        `Assoc
-          (("generation", `Int generation)
-          :: ("ts_unix", `Float ts_unix)
-          :: List.filter
-               (fun (key, _) -> key <> "generation" && key <> "ts_unix")
-               fields)
-    | other -> other
-  in
-  let _, summary, _ =
+(* #32971 Root B: the Turn row the producer writes today carries neither
+   [generation] (removed by #29590) nor [handoff_performed] (removed by
+   #31522). While the window required both, every Turn row fell through the
+   tuple match and the series and the turn counters read zero for a Keeper
+   with hundreds of turns. *)
+let test_producer_shaped_turn_rows_enter_the_window () =
+  let items, summary =
     Detail.compute_metrics_window
-      ~parsed_metrics:
-        [
-          turn ~generation:1 ~ts_unix:10.0 [ "tool_execute" ];
-          turn ~generation:1 ~ts_unix:30.0 [ "tool_execute" ];
-          turn ~generation:2 ~ts_unix:50.0 [ "tool_read" ];
-        ]
+      ~parsed_metrics:[ metric [ "tool_execute" ]; metric [ "tool_read" ] ]
       ~compact:false
       ~series_points:80
   in
-  let open Yojson.Safe.Util in
-  let equipment = summary |> member "generation_equipment" |> to_list in
-  check int "one entry per generation" 2 (List.length equipment);
-  let entry generation =
-    match
-      List.find_opt
-        (fun row -> row |> member "generation" |> to_int = generation)
-        equipment
-    with
-    | Some row -> row
-    | None -> fail (Printf.sprintf "generation %d missing" generation)
-  in
-  let first = entry 1 in
-  check int "same generation accumulates turns" 2 (first |> member "turns" |> to_int);
-  check (float 0.001) "earliest ts retained" 10.0
-    (first |> member "first_ts_unix" |> to_float);
-  check (float 0.001) "latest ts retained" 30.0
-    (first |> member "last_ts_unix" |> to_float);
-  check int "tool table survives the rebind" 2
-    (first |> member "top_tool" |> member "count" |> to_int);
-  let second = entry 2 in
-  check int "a new generation starts from zero" 1
-    (second |> member "turns" |> to_int);
-  check (float 0.001) "new generation keeps its own first ts" 50.0
-    (second |> member "first_ts_unix" |> to_float)
+  check int "producer-shaped rows reach the series" 2 (List.length items);
+  check int "turn_points counts them" 2 (summary_int "turn_points" summary);
+  check int "sample_points counts them" 2 (summary_int "sample_points" summary);
+  check int "tool calls accumulate" 2 (summary_int "tool_call_count" summary)
 ;;
 
 let () =
@@ -372,10 +331,10 @@ let () =
             test_metrics_window_does_not_classify_execute_as_pr_work;
           test_case "preserves current turn telemetry" `Quick
             test_metrics_series_preserves_current_turn_telemetry;
-          test_case "generation equipment accumulates across rebinds" `Quick
-            test_generation_equipment_accumulates_across_rebinds;
-          test_case "omits retired model and handoff labels" `Quick
-            test_metrics_window_omits_retired_model_and_handoff_labels;
+          test_case "producer-shaped turn rows enter the window" `Quick
+            test_producer_shaped_turn_rows_enter_the_window;
+          test_case "omits retired labels" `Quick
+            test_metrics_window_omits_retired_labels;
         ] );
       ( "history_summary",
         [

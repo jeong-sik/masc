@@ -55,6 +55,18 @@ val focus_key : string
 val release_key : string
 (** The key that returns focus to the surface. *)
 
+val continuous_key : string
+(** The key that turns continuous capture on and off from a focused row.
+    Ctrl-A, chosen for the same reason as {!listen_key}: a focused row spends
+    every printable key on draft text. *)
+
+val listen_key : string
+(** The key that starts a microphone capture from a focused row. Ctrl-Y.
+
+    Every printable key in a focused row is draft text, so this cannot be a
+    letter without taking it from typing. Ctrl-Y is the one control code this
+    TUI does not already spend. *)
+
 val prompt : t -> string
 (** The label before the draft: who the message would reach, or why it could
     not be sent. Plain text — the caller styles and fits it. *)
@@ -73,6 +85,13 @@ type key_outcome =
   | Take_focus
   | Release_focus
   | Send
+  | Start_listening
+      (** The row asks for a microphone capture. Classification only — this
+          module performs no I/O, and the caller runs the capture and puts the
+          transcript in the draft. *)
+  | Toggle_continuous
+      (** The row asks to start or stop capturing repeatedly. The caller holds
+          that mode; this only reports the keypress. *)
   | Edit
       (** The key belongs to the draft; the caller applies it to the buffer. *)
   | Pass_to_surface

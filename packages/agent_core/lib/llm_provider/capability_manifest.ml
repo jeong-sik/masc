@@ -72,6 +72,7 @@ type entry =
         thinking_object_keep_all / chat_template_kwargs_preserve_thinking /
         top_level_preserve_thinking / always_preserved). Parsed + applied in
         {!Capabilities.apply_manifest_entry}. *)
+  ; content_inline_reasoning : string option
   ; reasoning_output_format : string option
     (** Canonical request-side reasoning output split control (none /
         split_reasoning_fields). Parsed + applied in
@@ -325,6 +326,7 @@ let known_entry_keys =
   ; "thinking_control_token"
   ; "anthropic_thinking_control"
   ; "preserve_thinking_control_format"
+  ; "content_inline_reasoning"
   ; "reasoning_output_format"
   ; "reasoning_streaming_format"
   ; "reasoning_replay"
@@ -422,6 +424,12 @@ let parse_entry json =
       ~allowed:Capability_vocab.preserve_thinking_control_format_values
       json
   in
+  let* content_inline_reasoning =
+    canonical_choice
+      "content_inline_reasoning"
+      ~allowed:Capability_vocab.content_inline_reasoning_values
+      json
+  in
   let* reasoning_output_format =
     canonical_choice
       "reasoning_output_format"
@@ -513,6 +521,7 @@ let parse_entry json =
     ; thinking_control_format
     ; anthropic_thinking_control
     ; preserve_thinking_control_format
+    ; content_inline_reasoning
     ; reasoning_output_format
     ; reasoning_streaming_format
     ; reasoning_replay

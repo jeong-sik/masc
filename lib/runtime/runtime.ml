@@ -917,6 +917,34 @@ let verifier_exact_slot_ids_of_lane_decls
   | Some lane -> lane.slot_ids
 ;;
 
+(* [verifier_exact] is the one exact-output lane whose slot ids are read
+   twice. The exact registry admits them against the AGENT_CORE catalog, and
+   completion-authority judgement dispatches them through
+   [resolve_assignment], which knows only configured runtimes and lanes. An id
+   that satisfies the catalog but names no configured route is admitted at
+   boot and then fails at every judgement: on 2026-09-02 a degraded first slot
+   sent judgements to such an id 113 times, one failure each, and the trace
+   was a Board post per attempt rather than a config that refused to load.
+
+   The sibling lanes are deliberately not checked here. They dispatch through
+   the registry alone, so a catalog-only target id is right for them, and
+   [hitl_auto_judge] holds one today. *)
+let verifier_exact_slot_references
+      (decls : Runtime_schema.exact_output_lane_decl list)
+  =
+  List.map
+    (fun id ->
+       { site =
+           Printf.sprintf
+             "[runtime.exact_output_lanes.%s].slots"
+             verifier_exact_lane_id
+       ; shape = List_entry
+       ; id
+       ; domain = Lane_then_runtime
+       })
+    (verifier_exact_slot_ids_of_lane_decls decls)
+;;
+
 (* Keeper provider attempts originate at the configured default, an explicit
    keeper assignment, an explicit media-failover runtime, the verifier_exact
    exact-output lane's slots, or cross verifier. A lane is
@@ -1312,6 +1340,10 @@ let materialize_config
   let* () =
     validate_runtime_references ~config_path ~dropped_bindings runtimes lanes
       (media_failover_references cfg.media_failover)
+  in
+  let* () =
+    validate_runtime_references ~config_path ~dropped_bindings runtimes lanes
+      (verifier_exact_slot_references cfg.exact_output_lane_decls)
   in
   let* () =
     if validate_max_context
@@ -2316,6 +2348,24 @@ let save_config_text ?runtime_config_path content =
     ?runtime_config_path
     ~replace_file:Fs_compat.save_file_atomic_strict_staged
     content
+;;
+
+(* The read-modify-write form of [save_config_text]. A caller that loads the
+   file itself and then hands the edited text to [save_config_text] loses any
+   write that landed in between, because only the write is inside the lock.
+   Here the load, the edit and the commit are all inside it. Different
+   processes edit different tables of this one file -- the server writes
+   keeper assignments and lanes, the TUI writes the reader's [\[tui\]] keys --
+   so that gap is reachable rather than theoretical. *)
+let edit_config_text ?runtime_config_path edit =
+  let* path = runtime_config_path_result ?runtime_config_path () in
+  let* locked =
+    with_runtime_config_write_lock path (fun () ->
+      let* content = load_file_result path in
+      commit_runtime_config_text ~path (edit content))
+  in
+  let* receipt = locked.value in
+  Ok (attach_lock_warnings locked.warnings receipt)
 ;;
 
 let validate_config_text ?runtime_config_path content =

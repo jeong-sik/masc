@@ -58,13 +58,13 @@ class Thresholds:
     min_success_provider_turns_per_keeper: int = 0
     min_receipt_coverage_pct: float = 100.0
     min_checkpoint_coverage_pct: float = 100.0
-    min_provider_closure_pct: float = 100.0
+    min_runtime_closure_pct: float = 100.0
     min_event_bus_coverage_pct: float = 100.0
     min_tool_log_coverage_pct: float = 100.0
     min_timestamp_coverage_pct: float = 100.0
     max_missing_artifacts: int = 0
     max_order_violations: int = 0
-    max_dangling_provider_attempts: int = 0
+    max_unclosed_dispatch_turns: int = 0
     max_evidence_span_sec: float = 600.0
 
 
@@ -86,7 +86,7 @@ class ReadinessMetrics:
     parseable_timestamp_rows: int = 0
     missing_artifacts: int = 0
     order_violations: int = 0
-    dangling_provider_attempts: int = 0
+    unclosed_dispatch_turns: int = 0
     max_evidence_span_sec: float = 0.0
 
 
@@ -315,11 +315,12 @@ def check_timestamp_order(rows: list[dict[str, Any]]) -> tuple[int, float]:
                         violations += 1
             started = [
                 parse_ts(row.get("ts"))
-                for row in event_rows(rows, "provider_attempt_started")
+                for row in event_rows(rows, "runtime_routed")
             ]
             finished = [
                 parse_ts(row.get("ts"))
-                for row in event_rows(rows, "provider_attempt_finished")
+                for row in event_rows(rows, "runtime_completed")
+                + event_rows(rows, "runtime_failed")
             ]
             if started and finished:
                 max_started = (
@@ -448,8 +449,7 @@ def evaluate(
 
         provider = bool(
             event_rows(rows, "provider_lane_resolved")
-            or event_rows(rows, "provider_attempt_started")
-            or event_rows(rows, "provider_attempt_finished")
+            or event_rows(rows, "runtime_routed")
         )
         if provider:
             metrics.provider_turns += 1
@@ -458,12 +458,25 @@ def evaluate(
                 metrics.success_provider_turns += 1
                 keeper_metric.success_provider_turns += 1
 
-        started_count = len(event_rows(rows, "provider_attempt_started"))
-        finished_count = len(event_rows(rows, "provider_attempt_finished"))
-        if provider and started_count > 0 and finished_count >= started_count:
+        # A dispatch opens with runtime_routed and closes with
+        # runtime_completed or runtime_failed. This replaces the retired
+        # provider_attempt_started / provider_attempt_finished pair, which no
+        # producer has written since #19536.
+        #
+        # The two events do not pair one-to-one. runtime_routed is appended per
+        # candidate the router considers, so a live turn carries 1-6 of them
+        # (median 2) against a single closure; comparing the counts reports
+        # 31,825 "dangling" dispatches over a store where 23,140 of 23,293
+        # dispatching turns closed cleanly. So this asks whether the turn
+        # closed at all, and counts turns, not rows.
+        dispatch_opened = bool(event_rows(rows, "runtime_routed"))
+        dispatch_closed = bool(
+            event_rows(rows, "runtime_completed") or event_rows(rows, "runtime_failed")
+        )
+        if provider and dispatch_opened and dispatch_closed:
             metrics.provider_closed_turns += 1
-        if provider and finished_count < started_count:
-            metrics.dangling_provider_attempts += started_count - finished_count
+        if provider and dispatch_opened and not dispatch_closed:
+            metrics.unclosed_dispatch_turns += 1
 
         if matching_receipt_rows(base_path, rows):
             metrics.receipt_ok_turns += 1
@@ -502,7 +515,7 @@ def evaluate(
         "checkpoint_coverage_pct": pct(
             metrics.checkpoint_ok_turns, metrics.success_provider_turns
         ),
-        "provider_closure_pct": pct(
+        "runtime_closure_pct": pct(
             metrics.provider_closed_turns, metrics.provider_turns
         ),
         "event_bus_coverage_pct": pct(
@@ -568,9 +581,9 @@ def evaluate(
         failures.append(
             f"checkpoint_coverage_pct {derived['checkpoint_coverage_pct']} < {thresholds.min_checkpoint_coverage_pct}"
         )
-    if derived["provider_closure_pct"] < thresholds.min_provider_closure_pct:
+    if derived["runtime_closure_pct"] < thresholds.min_runtime_closure_pct:
         failures.append(
-            f"provider_closure_pct {derived['provider_closure_pct']} < {thresholds.min_provider_closure_pct}"
+            f"runtime_closure_pct {derived['runtime_closure_pct']} < {thresholds.min_runtime_closure_pct}"
         )
     if derived["event_bus_coverage_pct"] < thresholds.min_event_bus_coverage_pct:
         failures.append(
@@ -592,9 +605,9 @@ def evaluate(
         failures.append(
             f"order_violations {metrics.order_violations} > {thresholds.max_order_violations}"
         )
-    if metrics.dangling_provider_attempts > thresholds.max_dangling_provider_attempts:
+    if metrics.unclosed_dispatch_turns > thresholds.max_unclosed_dispatch_turns:
         failures.append(
-            f"dangling_provider_attempts {metrics.dangling_provider_attempts} > {thresholds.max_dangling_provider_attempts}"
+            f"unclosed_dispatch_turns {metrics.unclosed_dispatch_turns} > {thresholds.max_unclosed_dispatch_turns}"
         )
     if metrics.max_evidence_span_sec > thresholds.max_evidence_span_sec:
         failures.append(
@@ -715,10 +728,10 @@ def write_fixture_turn(
     rows = []
     events = [
         "provider_lane_resolved",
-        "provider_attempt_started",
+        "runtime_routed",
     ]
     if provider_finished:
-        events.append("provider_attempt_finished")
+        events.append("runtime_completed")
     events.extend(
         [
             "event_bus_correlated",
@@ -835,13 +848,13 @@ def thresholds_from_args(args: argparse.Namespace) -> Thresholds:
         min_success_provider_turns_per_keeper=args.min_success_provider_turns_per_keeper,
         min_receipt_coverage_pct=args.min_receipt_coverage_pct,
         min_checkpoint_coverage_pct=args.min_checkpoint_coverage_pct,
-        min_provider_closure_pct=args.min_provider_closure_pct,
+        min_runtime_closure_pct=args.min_runtime_closure_pct,
         min_event_bus_coverage_pct=args.min_event_bus_coverage_pct,
         min_tool_log_coverage_pct=args.min_tool_log_coverage_pct,
         min_timestamp_coverage_pct=args.min_timestamp_coverage_pct,
         max_missing_artifacts=args.max_missing_artifacts,
         max_order_violations=args.max_order_violations,
-        max_dangling_provider_attempts=args.max_dangling_provider_attempts,
+        max_unclosed_dispatch_turns=args.max_unclosed_dispatch_turns,
         max_evidence_span_sec=args.max_evidence_span_sec,
     )
 
@@ -880,13 +893,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-success-provider-turns-per-keeper", type=int, default=0)
     parser.add_argument("--min-receipt-coverage-pct", type=float, default=100.0)
     parser.add_argument("--min-checkpoint-coverage-pct", type=float, default=100.0)
-    parser.add_argument("--min-provider-closure-pct", type=float, default=100.0)
+    parser.add_argument("--min-runtime-closure-pct", type=float, default=100.0)
     parser.add_argument("--min-event-bus-coverage-pct", type=float, default=100.0)
     parser.add_argument("--min-tool-log-coverage-pct", type=float, default=100.0)
     parser.add_argument("--min-timestamp-coverage-pct", type=float, default=100.0)
     parser.add_argument("--max-missing-artifacts", type=int, default=0)
     parser.add_argument("--max-order-violations", type=int, default=0)
-    parser.add_argument("--max-dangling-provider-attempts", type=int, default=0)
+    parser.add_argument("--max-unclosed-dispatch-turns", type=int, default=0)
     parser.add_argument("--max-evidence-span-sec", type=float, default=600.0)
     return parser
 

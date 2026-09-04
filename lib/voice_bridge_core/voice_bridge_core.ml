@@ -48,21 +48,51 @@ let default_agent_voices () = Voice_runtime_overlay.default_agent_voices ()
 
 let request_timeout_seconds () = default_timeout_seconds
 
+(* [Voice_config.load_detailed] separates "voice was never set up" from "a
+   config exists and is broken", and its own interface says the second must
+   reach the operator instead of being answered with defaults. The readers
+   below matched [Error _], so a broken config was indistinguishable from an
+   absent one and every caller got a plausible substitute.
+
+   Measured: [runtime.toml [voice]] carried [max_retries] on both endpoint
+   lists, which the field whitelist does not accept. Voice had been failing to
+   load since 2026-08-28 — when voice_config.ml introduced that whitelist —
+   and nothing said so. The only surface that reported it was
+   [GET /api/v1/voice/config], which returns 500 and is not called on a
+   normal turn.
+
+   [Not_configured] stays silent: an environment without voice is not a
+   fault. [Invalid] is logged once per read. *)
+let config_or_report ~what = function
+  | Ok config -> Some config
+  | Error Voice_config.Not_configured -> None
+  | Error (Voice_config.Invalid message) ->
+    Log.Voice.error
+      "[VoiceBridge] %s falling back: voice config is present but unusable: %s"
+      what
+      message;
+    None
+;;
+
 let agent_voices () =
-  match Voice_config.load_detailed () with
-  | Ok config -> config.tts.agent_voices
-  | Error _ -> default_agent_voices ()
+  match config_or_report ~what:"agent_voices" (Voice_config.load_detailed ()) with
+  | Some config -> config.tts.agent_voices
+  | None -> default_agent_voices ()
 
 let tuning_for_agent agent_id =
-  match Voice_config.load_detailed () with
-  | Ok config -> Voice_config.tuning_for_agent config agent_id
-  | Error _ ->
+  match config_or_report ~what:"tuning_for_agent" (Voice_config.load_detailed ()) with
+  | Some config -> Voice_config.tuning_for_agent config agent_id
+  | None ->
       { Voice_config.stability = 0.5; similarity_boost = 0.75; style = 0.0 }
 
 let local_playback_enabled_for_agent agent_id =
-  match Voice_config.load_detailed () with
-  | Ok config -> Voice_config.local_playback_enabled_for_agent config agent_id
-  | Error _ -> false
+  match
+    config_or_report
+      ~what:"local_playback_enabled_for_agent"
+      (Voice_config.load_detailed ())
+  with
+  | Some config -> Voice_config.local_playback_enabled_for_agent config agent_id
+  | None -> false
 
 let default_voice_uri path =
   Uri.of_string (Voice_runtime_overlay.default_session_url ~path)
@@ -372,9 +402,9 @@ let run_local_playback ~sw:_ ~agent_id ~message ~audio_file () =
 let last_resort_voice = "Sarah"
 
 let default_voice () =
-  match Voice_config.load_detailed () with
-  | Ok config -> config.tts.default_voice
-  | Error _ -> last_resort_voice
+  match config_or_report ~what:"default_voice" (Voice_config.load_detailed ()) with
+  | Some config -> config.tts.default_voice
+  | None -> last_resort_voice
 
 (** Pick the voice for [agent_id]: the explicit per-agent mapping in
     [config.tts.agent_voices] when present, otherwise

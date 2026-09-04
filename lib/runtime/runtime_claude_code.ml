@@ -112,7 +112,6 @@ type turn_result =
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
   | Terminal_completed
   | Durable_stimulus_deferred
-  | External_effect_deferred
   | Terminal_failed of
       { failure_class : Tool_result.tool_failure_class
       ; effect_disposition : Tool_result.failure_effect_disposition
@@ -1695,9 +1694,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
               ( Repeated_tool_call _
               | Terminal_tool_boundary
                   { outcome =
-                      ( Terminal_completed
-                      | Durable_stimulus_deferred
-                      | External_effect_deferred )
+                      (Terminal_completed | Durable_stimulus_deferred)
                   ; _
                   } )
           ; _

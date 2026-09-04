@@ -6,7 +6,7 @@ author: Claude Opus 5 (1M context)
 created: 2026-08-05
 supersedes: []
 related:
-  - RFC-0351 (memory-first context management, compaction sunset) — this implements the L5 tool_result line
+  - RFC-0351 (memory-first context management) — this implements the L5 tool_result line
   - RFC-memory-os-bounded-context-and-librarian-curator (#26534)
   - "#26545 / #26551 / #26800 (Runtime_model_input_tail_window)"
   - "#25096 (Tool_output / Tool_blob_store externalization)"
@@ -30,7 +30,13 @@ Tool 결과는 생성 시점에 64 KB 를 넘을 때만 blob 으로 나간다. �
 | 인라인 크기 p10 / p50 / p90 / p99 / max | 751 / **2,862** / 8,264 / 10,761 / 67,351 B |
 | **현행 임계(65,536 B) 초과 개수** | **1** |
 
-`Tool_bridge.maybe_externalize` 의 기본 임계는 `Common.max_tool_output_bytes` = 65,536 (`lib/core/common.ml:102`). 중앙값 tool 결과는 그 1/23 이다. **쓰기 시점 externalization 은 이 분포에서 사실상 발화하지 않는다.**
+`Tool_bridge.maybe_externalize` 의 기본 임계는 `Common.max_tool_output_bytes` = 65,536. 중앙값 tool 결과는 그 1/23 이다. **쓰기 시점 externalization 은 이 분포에서 사실상 발화하지 않는다.**
+
+> **2026-09-03 갱신 — 위 문단의 전제가 더는 성립하지 않는다.** #32748 이 발행 임계를 `Common.max_tool_result_wire_bytes` = 16,384 으로 내렸다. 공식 클라이언트 CLI 가 그보다 큰 결과를 자기 세션 디렉터리 파일로 흘리는데 Keeper 는 그 경로를 열 수 없어서다. 옛 상수 `max_tool_output_bytes` 는 제거됐다.
+>
+> 새 임계로 다시 세면 2026-09-01~03 `tool_calls` 기록 30,368건 중 **1,262건(4.2%)** 이 초과한다 (`keeper_artifact_read` 311, `keeper_tasks_list` 171, `masc_schedule_list` 81 등). 쓰기 시점 externalization 은 이제 발화한다.
+>
+> 이 RFC 의 나머지 논증은 2026-08-05 기준 측정 위에 서 있으므로 그대로 둔다. 다만 1장이 이득의 근거로 삼은 "쓰기 시점은 효과 없음" 은 재측정 없이 인용하지 말 것.
 
 ### 1.1 이득은 요청 축소가 아니라 히스토리 깊이다
 
@@ -172,14 +178,12 @@ where saturating_ref = make_artifact_ref
 - **유일하게 checkpoint 28.2 MB 도 줄이는 안이다.** 본 RFC 채택 후에도 durable 히스토리는 계속 자란다.
 - 매 턴 해싱 없음 (blob 은 생성 시 1 회).
 - 대신 durable 포맷이 바뀌고, **모델이 자기 턴의 tool 출력을 마커로 받으면 안 된다**는 보장이 새로 필요하다. 그 보장이 깨지면 모델이 자기 출력을 읽으려 `keeper_artifact_read` 를 호출하는 낭비가 매 턴 발생한다.
-- `Common.max_tool_output_bytes` 의 다른 소비자 blast radius 조사가 선행되어야 한다 (본 RFC 범위 밖, 미조사).
+- ~~`Common.max_tool_output_bytes` 의 다른 소비자 blast radius 조사가 선행되어야 한다 (본 RFC 범위 밖, 미조사).~~ 2026-09-03 조사 완료: 프로덕션 소비자는 keeper status tail 하나뿐이었고, 그 자리는 자기 값을 갖도록 바뀌었다. 상수는 제거됐다.
 
 채택하지 않는 이유는 롤백 비용이다. 본 RFC 는 projection 단계 제거로 되돌아가고, 안 B 는 durable 포맷을 되돌려야 한다. 다만 **checkpoint 크기 문제는 본 RFC 가 풀지 않는다**는 사실을 기록한다 — 후속 RFC 로 남긴다.
 
 ## 5. 비목표
 
-- 컴팩션 파이프라인 투자 — RFC-0351 §8 금지.
-- 자동 컴팩션 트리거 복구 — 별건. receipt 없는 window 로 트리거를 쏘면 조용한 손실이 예정된 조용한 손실이 된다.
 - durable 히스토리 재작성.
 - checkpoint 크기 축소 (안 B 의 영역).
 - 중요도 점수 · 문자열 분류 · 휴리스틱 임계값 — RFC-0351 §2 원칙 2.

@@ -18,10 +18,6 @@ type stop_reason =
     (* The current autonomous cycle completed at least one AGENT_CORE provider turn,
        then released its lane because another durable stimulus was queued
        behind the stimulus already leased by this cycle. *)
-  | Awaiting_external_effect of { turns_used : int }
-    (* A typed external-effect handler recorded a Gate request. The request is
-       still live, and its origin must receive an acknowledgement while the
-       durable resolution owns the eventual continuation. *)
   | Yielded_after_repeated_tool_call of
       { turns_used : int
       ; tool_name : string

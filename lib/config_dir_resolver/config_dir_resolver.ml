@@ -328,6 +328,11 @@ let keepers_dir () =
 let tools_dir () =
   Filename.concat (resolve ()).config_root.path "tools"
 
+(* Same standing as [tools_dir]: created on demand by the asset sync, kept
+   out of the diagnostics record. *)
+let mcp_dir () =
+  Filename.concat (resolve ()).config_root.path "mcp"
+
 let inputs_for_base_path ~base_path =
   {
     cwd = base_path;

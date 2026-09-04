@@ -276,6 +276,37 @@ let modalities blocks =
        | User_audio _ -> add_unique "audio" acc)
     [] blocks
 
+(* Attachments are a byte store: only user_blocks media blocks referencing an
+   attachment_id are materialized into AGENT_CORE content blocks. An
+   attachment nothing references would be silently dropped, so the request is
+   rejected instead of succeeding without the media. *)
+let validate_attachment_references ~attachments blocks =
+  let referenced =
+    List.filter_map
+      (function
+        | User_text _ -> None
+        | User_image media | User_document media | User_audio media ->
+            Some media.attachment_id)
+      blocks
+  in
+  let orphan_ids =
+    List.filter_map
+      (fun (att : Keeper_chat_store.attachment) ->
+        if List.exists (String.equal att.id) referenced then None
+        else Some att.id)
+      attachments
+  in
+  match orphan_ids with
+  | [] -> Ok ()
+  | first :: _ ->
+      let ids =
+        orphan_ids |> List.map (Printf.sprintf "%S") |> String.concat ", "
+      in
+      Error
+        (Printf.sprintf
+           "attachments not referenced by user_blocks: %s; every attachment must be referenced by a user_blocks media block such as {\"type\":\"image\",\"attachment_id\":%S}"
+           ids first)
+
 let find_attachment ~attachments attachment_id =
   List.find_opt
     (fun (att : Keeper_chat_store.attachment) ->

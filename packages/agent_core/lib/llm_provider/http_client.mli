@@ -132,6 +132,10 @@ type provider_wire_error_kind =
   | Malformed_payload
   | Unknown_event
   | Incomplete_stream
+  | Repeating_generation
+  (** The generation repeated one paragraph past the threshold and was ended
+        by this client. Bytes and framing are both fine; what ended is the
+        answer, not the transport. *)
   | Oversized_payload
   (** One payload unit — a joined SSE event, or a single line — exceeded the
         byte limit this client reads under. Distinct from

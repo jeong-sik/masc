@@ -398,9 +398,7 @@ let test_terminal_post_effect_failure_aborts_the_official_client_turn () =
     | Some
         (Terminal_tool_boundary
           { outcome =
-              ( Terminal_completed
-              | Durable_stimulus_deferred
-              | External_effect_deferred )
+              (Terminal_completed | Durable_stimulus_deferred)
           ; _
           })
     | Some (Repeated_tool_call _)
@@ -468,7 +466,10 @@ let test_terminal_pre_effect_failure_remains_correction_capable () =
       (Option.is_none result.abort_turn))
 ;;
 
-let test_terminal_external_deferral_keeps_pending_stop () =
+(* A Gate deferral parks the call and nothing has run yet, so the turn keeps
+   going even for a terminal tool. The host replays the parked call once the
+   approval resolves. *)
+let test_terminal_external_deferral_keeps_the_turn_going () =
   with_active_raw_trace (fun ~path:_ ~active ->
     let state = ref Masc.Keeper_tools_agent_core.Terminal_effect_open in
     let tool, _terminal_error =
@@ -488,14 +489,9 @@ let test_terminal_external_deferral_keeps_pending_stop () =
     in
     let result = tool.call ~call_id:"terminal-deferred" (`Assoc []) in
     match result.abort_turn with
-    | Some
-        (Terminal_tool_boundary
-          { outcome = External_effect_deferred; tool_name = "effect" }) ->
-      ()
-    | Some (Terminal_tool_boundary _)
-    | Some (Repeated_tool_call _)
-    | None ->
-      fail "external deferral did not retain its pending terminal stop")
+    | None -> ()
+    | Some (Terminal_tool_boundary _) | Some (Repeated_tool_call _) ->
+      fail "a parked external effect ended the turn")
 ;;
 
 let test_terminal_generic_deferral_keeps_durable_stimulus_stop () =
@@ -604,14 +600,6 @@ let test_terminal_host_stop_preserves_completed_deferred_and_failed () =
        } ->
      ()
    | Ok _ | Error _ -> fail "generic deferral changed outcome");
-  (match project External_effect_deferred with
-   | Ok
-       { Runtime_agent.stop_reason =
-           Runtime_agent.Awaiting_external_effect { turns_used = 4 }
-       ; _
-       } ->
-     ()
-   | Ok _ | Error _ -> fail "external deferral changed outcome");
   match
     project
       (Terminal_failed
@@ -1658,9 +1646,9 @@ let () =
             `Quick
             test_terminal_pre_effect_failure_remains_correction_capable
         ; test_case
-            "terminal external deferral keeps pending stop"
+            "terminal external deferral keeps the turn going"
             `Quick
-            test_terminal_external_deferral_keeps_pending_stop
+            test_terminal_external_deferral_keeps_the_turn_going
         ; test_case
             "terminal generic deferral keeps durable-stimulus stop"
             `Quick

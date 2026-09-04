@@ -388,6 +388,700 @@ let allocate_keeper_columns ~inner_width =
     ; kcol_task = base.kcol_task + slack
     }
 
+module Table = Masc_tui_table
+
+(* Memory fleet columns.
+
+   The Keepers table's rule, applied to a screen that had none: every cell
+   declares a width, slack goes to the name, and the columns answering a
+   second question drop first.
+
+   What differs is the values. A keeper's memory reading is three numbers in
+   three units -- which revision, how many facts, how many bytes -- and the
+   screen printed all three into one cell joined by slashes. No header can
+   name a cell like that, and a reading wider than the cell pushed every cell
+   after it: "r6476/139/94.4 KB" is seventeen cells in a fourteen-cell budget,
+   so most rows sat three cells right of their own header. Each number gets a
+   cell here.
+
+   [memory_cells] is this screen's description of its columns; {!Masc_tui_table}
+   draws both the header and the rows from it, so the two cannot drift. *)
+
+let memory_state_width = 10
+let memory_minimum_name_width = 16
+let memory_maximum_name_width = 26
+let memory_revision_width = 6
+let memory_facts_width = 5
+let memory_size_width = 9
+let memory_source_width = 20
+let memory_delta_width = 6
+
+type memory_columns = {
+  mcol_show_revision : bool;
+  mcol_show_source : bool;
+  mcol_name : int;
+}
+
+type memory_row_values = {
+  mrow_state : string;
+  mrow_name : string;
+  mrow_revision : string;
+  mrow_facts : string;
+  mrow_size : string;
+  mrow_source : string;
+  mrow_delta : string;
+}
+
+(* The header carries no values, and the row carries no labels; one shape
+   holds both so neither can be built without the other's widths. *)
+let memory_no_values =
+  { mrow_state = ""
+  ; mrow_name = ""
+  ; mrow_revision = ""
+  ; mrow_facts = ""
+  ; mrow_size = ""
+  ; mrow_source = ""
+  ; mrow_delta = ""
+  }
+
+let memory_cells ?(state_style = "") ?(size_style = "") ?(delta_style = "")
+    columns values =
+  let revision =
+    if columns.mcol_show_revision then
+      [ Table.cell ~align:Table.Right ~header:"REV"
+          ~width:memory_revision_width values.mrow_revision
+      ]
+    else []
+  in
+  let source =
+    if columns.mcol_show_source then
+      [ Table.cell ~header:"SOURCE" ~width:memory_source_width
+          values.mrow_source
+      ]
+    else []
+  in
+  [ Table.cell ~style:state_style ~header:"STATE" ~width:memory_state_width
+      values.mrow_state
+  ; Table.cell ~header:"KEEPER" ~width:columns.mcol_name values.mrow_name
+  ]
+  @ revision
+  @ [ Table.cell ~align:Table.Right ~header:"FACTS" ~width:memory_facts_width
+        values.mrow_facts
+    ; Table.cell ~align:Table.Right ~style:size_style ~header:"SIZE"
+        ~width:memory_size_width values.mrow_size
+    ]
+  @ source
+  @ [ Table.cell ~align:Table.Right ~style:delta_style ~header:"\xce\x94"
+        ~width:memory_delta_width values.mrow_delta
+    ]
+
+let memory_columns_used_width columns =
+  Table.used_width (memory_cells columns memory_no_values)
+
+(* The source-bound reading answers "is anything pinned to a file", and the
+   revision answers "how far has the snapshot moved". Neither is the question
+   the screen exists for -- which keeper remembers how much -- so they are the
+   two that leave, in that order, and a dropped one returns only once it fits
+   beside a keeper name at its widest.
+
+   Both used to return at a hand-typed width measured against the narrowest
+   name, so the returning column took back cells the name had already grown
+   into: at 61 cells the name held 23, at 62 the revision returned and left it
+   16, and the same keeper read worse on the wider terminal. *)
+let memory_columns_minimum_inner_width ~show_revision ~show_source =
+  memory_columns_used_width
+    { mcol_show_revision = show_revision
+    ; mcol_show_source = show_source
+    ; mcol_name = memory_maximum_name_width
+    }
+
+let allocate_memory_columns ~inner_width =
+  let inner_width = max 0 inner_width in
+  let show_revision =
+    inner_width
+    >= memory_columns_minimum_inner_width ~show_revision:true ~show_source:false
+  in
+  let show_source =
+    inner_width
+    >= memory_columns_minimum_inner_width ~show_revision:true ~show_source:true
+  in
+  let base =
+    { mcol_show_revision = show_revision
+    ; mcol_show_source = show_source
+    ; mcol_name = memory_minimum_name_width
+    }
+  in
+  let slack = inner_width - memory_columns_used_width base in
+  if slack <= 0 then base
+  else
+    (* Unlike the roster there is no cell here that grows without bound: every
+       column has a reading whose widest form is known, so surplus width stays
+       margin rather than padding one cell out to the frame. *)
+    let growth =
+      min (memory_maximum_name_width - memory_minimum_name_width) slack
+    in
+    { base with mcol_name = base.mcol_name + growth }
+
+let memory_header_row columns =
+  Table.header_row (memory_cells columns memory_no_values)
+
+let memory_row ?state_style ?size_style ?delta_style ?close columns values =
+  Table.row ?close
+    (memory_cells ?state_style ?size_style ?delta_style columns values)
+
+(* Workspace repository columns.
+
+   This screen wrote one format string twice -- once for the header and once
+   for the rows -- so the two were a copy-paste apart from disagreeing, and the
+   path cell was sized by subtracting 55 from the terminal width, a number that
+   matched the other four columns only by hand. The columns are declared here
+   and the leftover is computed from them. *)
+
+let workspace_name_width = 18
+let workspace_branch_width = 12
+let workspace_status_width = 9
+let workspace_sync_width = 6
+
+(* A path is the one reading here with no widest form; it takes what the named
+   columns leave. Below this it is folded so hard that neither end identifies
+   the repository, and the screen is better off dropping cells from the frame
+   than showing a path nobody can place. *)
+let workspace_minimum_path_width = 8
+
+type workspace_row_values = {
+  wrow_name : string;
+  wrow_branch : string;
+  wrow_status : string;
+  wrow_sync : string;
+  wrow_path : string;
+}
+
+let workspace_no_values =
+  { wrow_name = ""
+  ; wrow_branch = ""
+  ; wrow_status = ""
+  ; wrow_sync = ""
+  ; wrow_path = ""
+  }
+
+let workspace_cells ~path_width values =
+  [ Table.cell ~header:"NAME" ~width:workspace_name_width values.wrow_name
+  ; Table.cell ~header:"BRANCH" ~width:workspace_branch_width values.wrow_branch
+  ; Table.cell ~header:"STATUS" ~width:workspace_status_width values.wrow_status
+  ; Table.cell ~header:"SYNC" ~width:workspace_sync_width values.wrow_sync
+  ; Table.cell ~header:"PATH" ~width:path_width values.wrow_path
+  ]
+
+let workspace_path_width ~inner_width =
+  let named =
+    Table.used_width
+      (workspace_cells ~path_width:0 workspace_no_values)
+  in
+  max workspace_minimum_path_width (inner_width - named)
+
+let workspace_header_row ~path_width =
+  Table.header_row
+    (workspace_cells ~path_width workspace_no_values)
+
+let workspace_row ~path_width values =
+  Table.row (workspace_cells ~path_width values)
+
+(* System log columns.
+
+   The header wrote its widths in one format string and the rows in another,
+   and the row's had grown a second job: it interleaved five colours with the
+   five readings, so the widths sat between escape sequences where nothing
+   could check them against the header's. The row had already been taught to
+   fit its module and keeper cells -- a comment there records a long module
+   name pushing every column right of it -- but the header it was fitting to
+   was a separate string.
+
+   The colours ride the cells now. Four of them never vary and are passed once;
+   the level's changes with the reading, which is the one thing on this screen
+   a colour is for. *)
+
+let system_log_time_width = 8
+let system_log_level_width = 7
+let system_log_module_width = 16
+let system_log_keeper_width = 12
+let system_log_category_width = 9
+let system_log_minimum_message_width = 12
+
+type system_log_row_values = {
+  slog_time : string;
+  slog_level : string;
+  slog_module : string;
+  slog_keeper : string;
+  slog_category : string;
+  slog_message : string;
+}
+
+(* The four dresses a log row wears whatever it says: a timestamp is always
+   receded, a module is always the accent, a keeper is always its origin
+   colour, a category is always dim. Passed once rather than per row, because
+   nothing in a reading changes them. *)
+type system_log_styles = {
+  slog_time_style : string;
+  slog_module_style : string;
+  slog_keeper_style : string;
+  slog_category_style : string;
+}
+
+let system_log_plain_styles =
+  { slog_time_style = ""
+  ; slog_module_style = ""
+  ; slog_keeper_style = ""
+  ; slog_category_style = ""
+  }
+
+let system_log_no_values =
+  { slog_time = ""
+  ; slog_level = ""
+  ; slog_module = ""
+  ; slog_keeper = ""
+  ; slog_category = ""
+  ; slog_message = ""
+  }
+
+let system_log_cells ?(styles = system_log_plain_styles) ?(level_style = "")
+    ~message_width values =
+  [ Table.cell ~style:styles.slog_time_style ~header:"TIME"
+      ~width:system_log_time_width values.slog_time
+  ; Table.cell ~style:level_style ~header:"LEVEL"
+      ~width:system_log_level_width values.slog_level
+  ; Table.cell ~style:styles.slog_module_style ~header:"MODULE"
+      ~width:system_log_module_width values.slog_module
+  ; Table.cell ~style:styles.slog_keeper_style ~header:"KEEPER"
+      ~width:system_log_keeper_width values.slog_keeper
+  ; Table.cell ~style:styles.slog_category_style ~header:"CATEGORY"
+      ~width:system_log_category_width values.slog_category
+  ; Table.cell ~header:"MESSAGE" ~width:message_width values.slog_message
+  ]
+
+let system_log_message_width ~inner_width =
+  let named =
+    Table.used_width
+      (system_log_cells ~message_width:0 system_log_no_values)
+  in
+  max system_log_minimum_message_width (inner_width - named)
+
+let system_log_header_row ~message_width =
+  Table.header_row
+    (system_log_cells ~message_width system_log_no_values)
+
+let system_log_row ~styles ~level_style ~message_width values =
+  Table.row
+    (system_log_cells ~styles ~level_style ~message_width values)
+
+(* Lane run columns.
+
+   The header and the rows carried the same six widths in two format strings,
+   the row's with the status colour spliced between two of them. The run id was
+   the tail of the header and a twelve-cell fit in the row, so the column the
+   header opened had no end and the reading in it had one nobody could see. *)
+
+let lane_started_width = 17
+let lane_subject_width = 16
+let lane_status_width = 11
+let lane_elapsed_width = 8
+let lane_slot_width = 16
+
+(* A run id truncated below this identifies nothing; the screen is better off
+   dropping the frame's last cells than showing half of one. *)
+let lane_minimum_run_id_width = 12
+
+type lane_run_row_values = {
+  lrow_started : string;
+  lrow_subject : string;
+  lrow_status : string;
+  lrow_elapsed : string;
+  lrow_slot : string;
+  lrow_run_id : string;
+}
+
+let lane_run_no_values =
+  { lrow_started = ""
+  ; lrow_subject = ""
+  ; lrow_status = ""
+  ; lrow_elapsed = ""
+  ; lrow_slot = ""
+  ; lrow_run_id = ""
+  }
+
+(* The identity column is named by the caller: this table lists runs of one
+   keeper under one heading and runs of many under another. *)
+let lane_run_cells ~identity_header ?(status_style = "") ~run_id_width values =
+  [ Table.cell ~header:"STARTED" ~width:lane_started_width values.lrow_started
+  ; Table.cell ~header:identity_header ~width:lane_subject_width
+      values.lrow_subject
+  ; Table.cell ~style:status_style ~header:"STATUS" ~width:lane_status_width
+      values.lrow_status
+  ; Table.cell ~align:Table.Right ~header:"ELAPSED" ~width:lane_elapsed_width
+      values.lrow_elapsed
+  ; Table.cell ~header:"SLOT" ~width:lane_slot_width values.lrow_slot
+  ; Table.cell ~header:"RUN ID" ~width:run_id_width values.lrow_run_id
+  ]
+
+let lane_run_id_width ~inner_width =
+  let named =
+    Table.used_width
+      (lane_run_cells ~identity_header:"" ~run_id_width:0 lane_run_no_values)
+  in
+  max lane_minimum_run_id_width (inner_width - named)
+
+let lane_run_header_row ~identity_header ~run_id_width =
+  Table.header_row
+    (lane_run_cells ~identity_header ~run_id_width lane_run_no_values)
+
+let lane_run_row ~identity_header ~status_style ~run_id_width values =
+  Table.row
+    (lane_run_cells ~identity_header ~status_style ~run_id_width values)
+
+(* File change columns.
+
+   Six widths in the header's format string and the same six in the row's, the
+   row's split around two colours. The file cell was padded but never fitted,
+   so a path longer than its budget pushed the summary beside it off the frame
+   -- the one column an operator reads to know what the turn did. *)
+
+let change_turn_width = 6
+let change_task_width = 10
+let change_op_width = 5
+let change_result_width = 8
+let change_file_width = 38
+let change_minimum_summary_width = 12
+
+type change_row_values = {
+  crow_turn : string;
+  crow_task : string;
+  crow_op : string;
+  crow_result : string;
+  crow_file : string;
+  crow_summary : string;
+}
+
+let change_no_values =
+  { crow_turn = ""
+  ; crow_task = ""
+  ; crow_op = ""
+  ; crow_result = ""
+  ; crow_file = ""
+  ; crow_summary = ""
+  }
+
+let change_cells ?(op_style = "") ?(result_style = "") ~summary_width values =
+  [ Table.cell ~align:Table.Right ~header:"TURN" ~width:change_turn_width
+      values.crow_turn
+  ; Table.cell ~header:"TASK" ~width:change_task_width values.crow_task
+  ; Table.cell ~style:op_style ~header:"OP" ~width:change_op_width
+      values.crow_op
+  ; Table.cell ~style:result_style ~header:"RESULT" ~width:change_result_width
+      values.crow_result
+  ; Table.cell ~header:"FILE" ~width:change_file_width values.crow_file
+  ; Table.cell ~header:"WHAT" ~width:summary_width values.crow_summary
+  ]
+
+let change_summary_width ~inner_width =
+  let named =
+    Table.used_width
+      (change_cells ~summary_width:0 change_no_values)
+  in
+  max change_minimum_summary_width (inner_width - named)
+
+let change_header_row ~summary_width =
+  Table.header_row
+    (change_cells ~summary_width change_no_values)
+
+let change_row ~op_style ~result_style ~summary_width values =
+  Table.row
+    (change_cells ~op_style ~result_style ~summary_width values)
+
+(* Fusion run columns.
+
+   Six widths in the header and the same six in the row, the row's wrapped
+   around the status colour. The run id was unbounded in the header and cut at
+   fourteen in the row, so the column had no end where it was named and an
+   invisible one where it was filled. *)
+
+let fusion_time_width = 8
+let fusion_age_width = 7
+let fusion_state_width = 18
+let fusion_preset_width = 10
+let fusion_minimum_run_width = 12
+
+type fusion_row_values = {
+  frow_time : string;
+  frow_age : string;
+  frow_state : string;
+  frow_keeper : string;
+  frow_preset : string;
+  frow_run : string;
+}
+
+let fusion_no_values =
+  { frow_time = ""
+  ; frow_age = ""
+  ; frow_state = ""
+  ; frow_keeper = ""
+  ; frow_preset = ""
+  ; frow_run = ""
+  }
+
+let fusion_cells ?(state_style = "") ~keeper_width ~run_width values =
+  [ Table.cell ~header:"TIME" ~width:fusion_time_width values.frow_time
+  ; Table.cell ~align:Table.Right ~header:"AGE" ~width:fusion_age_width
+      values.frow_age
+  ; Table.cell ~style:state_style ~header:"STATE" ~width:fusion_state_width
+      values.frow_state
+  ; Table.cell ~header:"KEEPER" ~width:keeper_width values.frow_keeper
+  ; Table.cell ~header:"PRESET" ~width:fusion_preset_width values.frow_preset
+  ; Table.cell ~header:"RUN" ~width:run_width values.frow_run
+  ]
+
+let fusion_run_width ~inner_width ~keeper_width =
+  let named =
+    Table.used_width
+      (fusion_cells ~keeper_width ~run_width:0 fusion_no_values)
+  in
+  max fusion_minimum_run_width (inner_width - named)
+
+let fusion_header_row ~keeper_width ~run_width =
+  Table.header_row
+    (fusion_cells ~keeper_width ~run_width fusion_no_values)
+
+let fusion_row ~state_style ~keeper_width ~run_width values =
+  Table.row
+    (fusion_cells ~state_style ~keeper_width ~run_width values)
+
+(* Harness verdict columns.
+
+   Six widths in the header and the same six in the rows. The header called
+   the task column "Task -> Overview" -- fifteen cells in a column of
+   fourteen -- so the header itself ran over and pushed Gate and every column
+   after it one cell right of the rows they labelled. The arrow was also
+   saying something the footer already says: it names the cursor's task as a
+   link on every draw. The task and gate cells were padded and never cut, so
+   an id longer than its column moved those same columns again from the row
+   side. *)
+
+let harness_time_width = 8
+let harness_task_width = 14
+let harness_gate_width = 9
+let harness_verdict_width = 9
+let harness_evaluator_width = 24
+let harness_minimum_reason_width = 12
+
+type harness_row_values = {
+  hrow_time : string;
+  hrow_task : string;
+  hrow_gate : string;
+  hrow_verdict : string;
+  hrow_evaluator : string;
+  hrow_reason : string;
+}
+
+let harness_no_values =
+  { hrow_time = ""
+  ; hrow_task = ""
+  ; hrow_gate = ""
+  ; hrow_verdict = ""
+  ; hrow_evaluator = ""
+  ; hrow_reason = ""
+  }
+
+let harness_cells ?(verdict_style = "") ~reason_width values =
+  [ Table.cell ~header:"TIME" ~width:harness_time_width values.hrow_time
+  ; Table.cell ~header:"TASK" ~width:harness_task_width values.hrow_task
+  ; Table.cell ~header:"GATE" ~width:harness_gate_width values.hrow_gate
+  ; Table.cell ~style:verdict_style ~header:"VERDICT"
+      ~width:harness_verdict_width values.hrow_verdict
+  ; Table.cell ~header:"EVALUATOR" ~width:harness_evaluator_width
+      values.hrow_evaluator
+  ; Table.cell ~header:"REASON" ~width:reason_width values.hrow_reason
+  ]
+
+let harness_reason_width ~inner_width =
+  let named =
+    Table.used_width
+      (harness_cells ~reason_width:0 harness_no_values)
+  in
+  max harness_minimum_reason_width (inner_width - named)
+
+let harness_header_row ~reason_width =
+  Table.header_row
+    (harness_cells ~reason_width harness_no_values)
+
+let harness_row ~verdict_style ~reason_width values =
+  Table.row
+    (harness_cells ~verdict_style ~reason_width values)
+
+(* Planning goal columns.
+
+   This list named no columns at all. A reader met "[shaping] * P2  3 open 1
+   ver" and had to work out every field from its shape, and the two fields
+   whose shape says least -- a priority and a tally -- are the two a reader
+   scans a list of goals for.
+
+   The title took the terminal minus forty-seven minus however wide the age and
+   the due date happened to be, and both of those are optional, so the pair at
+   the end of the row began at a different column on every row: a goal with no
+   due date started them ten cells left of the goal above it. Each has a widest
+   form and each gets a column.
+
+   The phase carries the brackets it is drawn in, so the caller passes the
+   width of the bracketed label rather than the label's own. *)
+
+let planning_proof_width = 1
+let planning_priority_width = 3
+let planning_open_width = 16
+let planning_age_width = 6
+let planning_due_width = 10
+let planning_minimum_title_width = 12
+
+type planning_row_values = {
+  prow_phase : string;
+  prow_proof : string;
+  prow_priority : string;
+  prow_open : string;
+  prow_title : string;
+  prow_age : string;
+  prow_due : string;
+}
+
+let planning_no_values =
+  { prow_phase = ""
+  ; prow_proof = ""
+  ; prow_priority = ""
+  ; prow_open = ""
+  ; prow_title = ""
+  ; prow_age = ""
+  ; prow_due = ""
+  }
+
+let planning_cells ?(phase_style = "") ~phase_width ~title_width values =
+  [ Table.cell ~style:phase_style ~header:"PHASE" ~width:phase_width
+      values.prow_phase
+    (* The proof mark is a mark, like the roster's. A name would be four cells
+       wider than the cell it names, and the contract folds a header that does
+       not fit rather than letting it push the columns after it. *)
+  ; Table.cell ~header:" " ~width:planning_proof_width values.prow_proof
+  ; Table.cell ~header:"PRI" ~width:planning_priority_width values.prow_priority
+  ; Table.cell ~header:"OPEN" ~width:planning_open_width values.prow_open
+  ; Table.cell ~header:"TITLE" ~width:title_width values.prow_title
+  ; Table.cell ~align:Table.Right ~header:"AGE" ~width:planning_age_width
+      values.prow_age
+  ; Table.cell ~header:"DUE" ~width:planning_due_width values.prow_due
+  ]
+
+let planning_title_width ~inner_width ~phase_width =
+  let named =
+    Table.used_width
+      (planning_cells ~phase_width ~title_width:0 planning_no_values)
+  in
+  max planning_minimum_title_width (inner_width - named)
+
+let planning_header_row ~phase_width ~title_width =
+  Table.header_row (planning_cells ~phase_width ~title_width planning_no_values)
+
+let planning_row ~phase_style ~phase_width ~title_width values =
+  Table.row (planning_cells ~phase_style ~phase_width ~title_width values)
+
+(* Board post columns.
+
+   The list sized its title as [cols] minus a constant summed by hand from ten
+   widths and their gaps, and its header carried a second copy of the same
+   arithmetic. They disagreed: the rows sized the title to [cols - 68] while
+   the header claimed a fixed twenty, so at eighty columns the header ran eight
+   cells long, pushed SCORE into the frame and REPLIES off it -- two columns
+   still drawn on every row with nothing left saying what they were. The
+   repair at the time was a third number.
+
+   The gaps came back to one with the rest of the fleet. Board was spacing its
+   columns two cells apart, which is six cells of the title spent on being
+   different from every other table on the screen. *)
+
+let board_mark_width = 1
+let board_id_width = 12
+let board_hearth_width = 12
+let board_author_width = 16
+let board_age_width = 6
+let board_score_width = 5
+let board_replies_width = 7
+let board_minimum_title_width = 12
+
+type board_row_values = {
+  brow_mark : string;
+  brow_id : string;
+  brow_hearth : string;
+  brow_author : string;
+  brow_title : string;
+  brow_age : string;
+  brow_score : string;
+  brow_replies : string;
+}
+
+type board_row_styles = {
+  bstyle_id : string;
+  bstyle_hearth : string;
+  bstyle_author : string;
+  bstyle_age : string;
+  bstyle_score : string;
+  bstyle_replies : string;
+}
+
+let board_no_values =
+  { brow_mark = ""
+  ; brow_id = ""
+  ; brow_hearth = ""
+  ; brow_author = ""
+  ; brow_title = ""
+  ; brow_age = ""
+  ; brow_score = ""
+  ; brow_replies = ""
+  }
+
+let board_no_styles =
+  { bstyle_id = ""
+  ; bstyle_hearth = ""
+  ; bstyle_author = ""
+  ; bstyle_age = ""
+  ; bstyle_score = ""
+  ; bstyle_replies = ""
+  }
+
+let board_cells ?(styles = board_no_styles) ~title_width values =
+  [ (* The kind mark is a mark, like Planning's proof. A name would be wider
+       than the cell holding it, and it carries its own dress: the glyph and
+       its colour are chosen together. *)
+    Table.cell ~header:" " ~width:board_mark_width values.brow_mark
+  ; Table.cell ~style:styles.bstyle_id ~header:"ID" ~width:board_id_width
+      values.brow_id
+  ; Table.cell ~style:styles.bstyle_hearth ~header:"HEARTH"
+      ~width:board_hearth_width values.brow_hearth
+  ; Table.cell ~style:styles.bstyle_author ~header:"AUTHOR"
+      ~width:board_author_width values.brow_author
+  ; Table.cell ~header:"TITLE" ~width:title_width values.brow_title
+    (* Right, the way Planning's age reads. A span is a number and the two
+       screens are read one after the other; left on one and right on the
+       other is the drift this description exists to close. *)
+  ; Table.cell ~align:Table.Right ~style:styles.bstyle_age ~header:"AGE"
+      ~width:board_age_width values.brow_age
+  ; Table.cell ~style:styles.bstyle_score ~header:"SCORE"
+      ~width:board_score_width values.brow_score
+  ; Table.cell ~style:styles.bstyle_replies ~header:"REPLIES"
+      ~width:board_replies_width values.brow_replies
+  ]
+
+let board_title_width ~inner_width =
+  let named = Table.used_width (board_cells ~title_width:0 board_no_values) in
+  max board_minimum_title_width (inner_width - named)
+
+let board_header_row ~title_width =
+  Table.header_row (board_cells ~title_width board_no_values)
+
+let board_row ?close ~styles ~title_width values =
+  Table.row ?close (board_cells ~styles ~title_width values)
+
 module Terminal_size_cache = struct
   type refresh =
     | Changed of (int * int)

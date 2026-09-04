@@ -25,6 +25,9 @@ Options:
   --surface-only     Resolve the tool surface offline; send no provider request
   --list-runtimes    Print every runtime id and its lane, then exit
   --list-tools       Print every model-facing tool name, then exit
+  --doctor           Sweep every keeper tool: surface verdict + defer state,
+                     flag names advertised to keepers that no descriptor
+                     projects (invisible to agent-core keepers), then exit
   -h, --help         Print this help
 
 The surface pass runs first for every tool and is free. A tool that is not
@@ -41,6 +44,7 @@ type config =
   ; surface_only : bool
   ; list_runtimes : bool
   ; list_tools : bool
+  ; doctor : bool
   }
 
 let initial_config =
@@ -52,6 +56,7 @@ let initial_config =
   ; surface_only = false
   ; list_runtimes = false
   ; list_tools = false
+  ; doctor = false
   }
 ;;
 
@@ -76,6 +81,7 @@ let rec parse_args argv index cfg =
     | "--surface-only" -> parse_args argv (index + 1) { cfg with surface_only = true }
     | "--list-runtimes" -> parse_args argv (index + 1) { cfg with list_runtimes = true }
     | "--list-tools" -> parse_args argv (index + 1) { cfg with list_tools = true }
+    | "--doctor" -> parse_args argv (index + 1) { cfg with doctor = true }
     | "--runtime" ->
       parse_args argv (index + 2) { cfg with runtimes = cfg.runtimes @ [ need "--runtime" ] }
     | "--tool" -> parse_args argv (index + 2) { cfg with tools = cfg.tools @ [ need "--tool" ] }
@@ -284,6 +290,75 @@ let run_invocation_pass ~sw ~net ~secure_random ~clock ~mgr ~fs ~base_path ~cfg
     cfg.runtimes
 ;;
 
+let loading_label name =
+  match Tool_loading_declarations.loading_of_tool name with
+  | Tool_definition_toml.Deferrable -> "deferred"
+  | Tool_definition_toml.Always_loaded -> "always"
+;;
+
+let verdict_short (verdict : Probe.verdict) =
+  match verdict with
+  | Probe.Projected _ -> "projected"
+  | Probe.Not_a_descriptor -> "no-descriptor"
+  | Probe.Operator_only -> "operator-only"
+  | Probe.Aliased { projected_by } -> "aliased->" ^ projected_by
+  | Probe.Withheld_by_schema_error _ -> "schema-error"
+;;
+
+(* One offline sweep of every keeper tool. Per tool: the surface verdict (is it
+   projected to the keeper model, operator-only, an alias, or backed by no
+   descriptor) and whether it is deferred or rides every turn. It names two
+   classes the manual eye keeps missing:
+
+   - advertised to keepers on the spawned-agent MCP surface but backed by no
+     descriptor, so agent-core keepers -- most of the fleet -- never see it.
+     This is the #32699 class. (masc_messages is a known member that is
+     delivered as turn context instead, so this reports rather than fails.)
+   - projected AND always-loaded: the schema rides every keeper turn. Deferring
+     a rarely-used one is what [config/tools/<name>.toml] defer_loading is for.
+
+   No provider request -- the surface pass is free. *)
+let run_doctor () =
+  let spawned = Tool_catalog_surfaces.spawned_agent_surface_tools in
+  let names = List.sort_uniq String.compare (spawned @ Probe.model_facing_names ()) in
+  let verdict_of = List.map (fun name -> name, Probe.probe_surface ~tool:name) names in
+  let no_descriptor_on_surface =
+    List.filter
+      (fun (name, verdict) ->
+        List.mem name spawned
+        && (match verdict with Probe.Not_a_descriptor -> true | _ -> false))
+      verdict_of
+  in
+  let rides_every_turn =
+    List.filter
+      (fun (name, verdict) ->
+        (match verdict with Probe.Projected _ -> true | _ -> false)
+        && (match Tool_loading_declarations.loading_of_tool name with
+            | Tool_definition_toml.Always_loaded -> true
+            | Tool_definition_toml.Deferrable -> false))
+      verdict_of
+  in
+  Printf.printf "== masc tool doctor -- %d tool names ==\n\n" (List.length names);
+  List.iter
+    (fun (name, verdict) ->
+      Printf.printf "  %-38s %-20s %-9s%s\n" name (verdict_short verdict)
+        (loading_label name)
+        (if List.mem_assoc name no_descriptor_on_surface then "  <- no agent-core descriptor"
+         else ""))
+    verdict_of;
+  Printf.printf "\nprojected AND always-loaded (rides every keeper turn): %d\n"
+    (List.length rides_every_turn);
+  List.iter
+    (fun (name, _) -> Printf.printf "  always  %s\n" name)
+    rides_every_turn;
+  Printf.printf
+    "\nadvertised on the spawned MCP surface but no descriptor projects it: %d\n"
+    (List.length no_descriptor_on_surface);
+  List.iter
+    (fun (name, _) -> Printf.printf "  check   %s\n" name)
+    no_descriptor_on_surface
+;;
+
 let () =
   let cfg = parse_args Sys.argv 1 initial_config in
   let base_path =
@@ -337,6 +412,10 @@ let () =
   if cfg.list_tools
   then (
     List.iter print_endline (Probe.model_facing_names ());
+    exit 0);
+  if cfg.doctor
+  then (
+    run_doctor ();
     exit 0);
   if cfg.tools = [] then error "at least one --tool is required";
   let cfg =

@@ -39,6 +39,12 @@ let describe = function
   | Command.View_image_missing_path -> "image-missing-path"
   | Command.Attach_image path -> "attach:" ^ path
   | Command.Attach_image_missing_path -> "attach-missing-path"
+  | Command.Preset_list -> "preset-list"
+  | Command.Preset_save { name; description } ->
+      Printf.sprintf "preset-save:%s|%s" name description
+  | Command.Preset_save_missing_name -> "preset-save-missing-name"
+  | Command.Preset_restore name -> "preset-restore:" ^ name
+  | Command.Preset_restore_missing_name -> "preset-restore-missing-name"
   | Command.Unknown word -> "unknown:" ^ word
 
 let test_plain_text_is_a_message () =
@@ -115,17 +121,45 @@ let test_pane_commands_parse_by_word () =
        ; "/image   "
        ])
 
+let test_preset_commands_parse_verb_name_and_description () =
+  check (list string) "preset commands"
+    [ "preset-list"
+    ; "preset-save:morning|"
+    ; "preset-save:morning|state before the campaign"
+    ; "preset-save:morning|first line\nand the rest"
+    ; "preset-save:morning|only the body"
+    ; "preset-save-missing-name"
+    ; "preset-restore:morning"
+    ; "preset-restore-missing-name"
+    ; "unknown:preset drop"
+    ]
+    (List.map
+       (fun text -> describe (Command.parse text))
+       [ "/preset"
+       ; "/preset save morning"
+       ; "/preset save   morning  state before the campaign"
+       ; "/preset save morning first line\nand the rest"
+       ; "/preset save morning\nonly the body"
+       ; "/preset save"
+       ; "/preset restore morning"
+       ; "/preset restore"
+       ; "/preset drop morning"
+       ])
+
 let test_every_command_has_a_help_line () =
-  (* /help itself and every slash word the parser knows appear in the list,
-     so a new command cannot ship silently undocumented. *)
+  (* Read from the catalog, so a command added there is checked without
+     anyone remembering to extend a list here. The hand-written list this
+     replaced had gone stale twice: it never gained image, attach or
+     preset. *)
+  check bool "the catalog is not empty" true (Command.catalog <> []);
   List.iter
-    (fun word ->
+    (fun (entry : Command.command_help) ->
+      let word = entry.Command.word in
       check bool (Printf.sprintf "help mentions /%s" word) true
         (List.exists
            (fun line -> String.starts_with ~prefix:("/" ^ word) line)
            Command.help_lines))
-    [ "task"; "keeper"; "settings"; "interrupt"; "steer"; "thinking"; "tools"; "memory"
-    ; "find"; "context"; "help" ]
+    Command.catalog
 
 let test_keeper_names_resolve_by_unique_prefix () =
   let names = [ "orbiter"; "orbit"; "lantern"; "zephyr" ] in
@@ -400,7 +434,7 @@ let test_the_typed_run_is_what_was_pressed () =
      outgrew an 80-column composer, so the row says how many words it could
      not carry and points at the list that is complete by definition. *)
   check string "the bare slash highlights only itself"
-    "T[/]U[task keeper settings interrupt thinking tools memory find]D[ +4 more (/help)]"
+    "T[/]U[task keeper settings interrupt steer thinking tools memory find]D[ +5 more (/help)]"
     (spans "/")
 
 (* The row an operator types knowing nothing is the one that must not run off
@@ -536,6 +570,8 @@ let () =
             test_pane_commands_parse_by_word
         ; test_case "every command has a help line" `Quick
             test_every_command_has_a_help_line
+        ; test_case "preset commands parse verb, name and description" `Quick
+            test_preset_commands_parse_verb_name_and_description
         ; test_case "/task takes the line as title and the rest as body" `Quick
             test_task_takes_the_line_as_title_and_the_rest_as_body
         ; test_case "an unknown command is named, not sent" `Quick

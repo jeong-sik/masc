@@ -29,8 +29,16 @@ type logs
 val decode_logs :
   sanitize:(string -> string) -> Yojson.Safe.t -> (logs, string) result
 (** Decode the authenticated host-runtime log response. Log payloads are split
-    into lines before each line is terminal-sanitized. *)
+    into lines before each line is terminal-sanitized. The three server states
+    decode into distinct values: a backend with instances, a backend with
+    none, and a Keeper whose profile keeps no stream on this host, which
+    carries the server's sentence saying where the logs are. A state whose
+    backend or instance list contradicts it is refused. *)
 
 val logs_view_lines : width:int -> logs -> string list
-(** Render actual Docker or Apple Container stdout/stderr, distinct from
-    Keeper activity and tool-call history. *)
+(** Render the log pane for one Keeper, distinct from Keeper activity and
+    tool-call history: Docker or Apple Container stdout/stderr when a local
+    stream exists, and otherwise the sentence saying where the logs are.
+    A Keeper with no local stream previously drew the red fetch-failure row;
+    it now gets that sentence in the informational tone, and no backend name
+    or tail count, because there is no stream for either to describe. *)

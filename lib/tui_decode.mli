@@ -1059,6 +1059,40 @@ val standalone_lane_status_to_string : standalone_lane_status -> string
 val decode_standalone_lanes_snapshot :
   Yojson.Safe.t -> (standalone_lanes_snapshot, string) result
 
+(** [GET /api/v1/dashboard/clients] body — everyone attached to this
+    workspace in one reading: directory agents, state-backed sessions, and
+    runtime fibers. The status is the closed [agent_status] enum; the row
+    keeps the fields the Runtime family draws and ignores the profile
+    decorations (emoji, korean name) the same producer carries for the
+    dashboard, so the two surfaces can grow separately. A keeper-bound row
+    names its keeper; a non-keeper MCP client carries [None], which is the
+    row this surface exists to show. *)
+type client_status =
+  | Client_active
+  | Client_busy
+  | Client_listening
+  | Client_inactive
+
+type client_row = {
+  cr_name : string;
+  cr_agent_type : string;
+  cr_status : client_status;
+  cr_current_task : string option;
+  cr_keeper_name : string option;
+  cr_session_bound_at : string;
+  cr_last_seen : string;
+  cr_capabilities : string list;
+}
+
+type clients_snapshot = {
+  cls_observed_at : string;
+  cls_clients : client_row list;
+}
+
+val client_status_to_string : client_status -> string
+val decode_clients_snapshot :
+  Yojson.Safe.t -> (clients_snapshot, string) result
+
 (** What the secret projection reports for one Keeper. The producer computes
     this from the directory: [Secret_absent] when no root is configured,
     [Secret_empty] when a configured root holds nothing, [Secret_ready] when
@@ -1564,6 +1598,54 @@ val prompt_rows_for_operator : show_fragments:bool -> prompts_snapshot -> prompt
     assembly fragments without flattening them into the main catalog. *)
 
 val decode_prompts : Yojson.Safe.t -> (prompts_snapshot, string) result
+
+(** {2 Prompt presets} — [/api/v1/presets] (#32777). *)
+
+type preset_manifest = {
+  pm_name : string;
+  pm_description : string;
+  pm_created_at : string;
+  pm_override_count : int;
+  pm_keepers : string list;
+  pm_assignment_count : int;
+  pm_lane_count : int;
+}
+
+type presets_snapshot = {
+  pss_presets : preset_manifest list;
+  pss_unreadable : (string * string) list;
+      (** directory name, why its manifest did not read *)
+}
+
+type preset_part = {
+  pp_effect : string;  (** when the surface takes effect, as the server names it *)
+  pp_applied : string list;
+  pp_skipped : (string * string) list;  (** key, reason *)
+}
+
+type preset_runtime_status =
+  | Preset_runtime_unchanged
+  | Preset_runtime_committed
+  | Preset_runtime_failed of string
+
+type preset_restore_report = {
+  prr_restored : string;
+  prr_autosave : string;
+  prr_prompt_overrides : preset_part;
+  prr_instructions : preset_part;
+  prr_runtime : preset_runtime_status;
+}
+
+val decode_presets : Yojson.Safe.t -> (presets_snapshot, string) result
+(** GET /api/v1/presets. Any [error] field is the error, whatever [ok] says:
+    the server answers its warm-up and auth refusals with [error] alone on a
+    200. *)
+
+val decode_preset_saved : Yojson.Safe.t -> (preset_manifest, string) result
+(** POST /api/v1/presets — the manifest of the preset just written. *)
+
+val decode_preset_restore : Yojson.Safe.t -> (preset_restore_report, string) result
+(** POST /api/v1/presets/restore — the per-surface report. *)
 
 val decode_latest_librarian_run_id : Yojson.Safe.t -> (string, string) result
 (** Read the first Librarian row from the newest-first exact-lane summary. The

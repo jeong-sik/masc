@@ -46,6 +46,14 @@ let all_playgrounds_prefix : string =
     components [.] / [..] are replaced with [_], so
     [sanitize_keeper_name ".."] returns ["__"] rather than returning a
     traversal segment as a directory name. *)
+(** The [repos] segment inside a keeper's bundle, spelled once. The repo
+    tree has a second, unrelated [repos]: the server-side registration
+    store under [.masc/repos/<id>] owned by [Config_dir_resolver]. Same
+    spelling, different concept — one names the clone directory inside
+    one keeper's bundle, the other a store under the server base path.
+    They are two constants. *)
+let bundle_repos_dirname = "repos"
+
 let sanitize_keeper_name (name : string) : string =
   let mapped =
     String.map (fun c ->
@@ -137,7 +145,7 @@ let parse_bundle_relative_repo_path bundle_relative =
    anchor looks like, and the parser above would stop being the authority the
    moment they disagreed. *)
 let bundle_relative_repo_path ~repo_id relative_path =
-  String.concat "/" [ "repos"; repo_id; relative_path ]
+  String.concat "/" [ bundle_repos_dirname; repo_id; relative_path ]
 ;;
 
 (* RFC-0128 §4.5 — parse a sandbox playground absolute file path back

@@ -52,6 +52,7 @@ type model_entry =
        or a token without that format — fails closed here. *)
   ; anthropic_thinking_control : Capability_vocab.anthropic_thinking_control option
   ; preserve_thinking_control_format : string option
+  ; content_inline_reasoning : string option
   ; reasoning_output_format : string option
   ; reasoning_streaming_format : string option
   ; reasoning_replay : string option
@@ -354,6 +355,7 @@ let known_entry_keys =
   ; "thinking_control_token"
   ; "anthropic_thinking_control"
   ; "preserve_thinking_control_format"
+  ; "content_inline_reasoning"
   ; "reasoning_output_format"
   ; "reasoning_streaming_format"
   ; "reasoning_replay"
@@ -530,6 +532,13 @@ let parse_entry entry_toml =
       ~allowed:Capability_vocab.preserve_thinking_control_format_values
       entry_toml
   in
+  let* content_inline_reasoning =
+    canonical_string_opt
+      ~entry_id:id_prefix
+      "content_inline_reasoning"
+      ~allowed:Capability_vocab.content_inline_reasoning_values
+      entry_toml
+  in
   let* reasoning_output_format =
     canonical_string_opt
       ~entry_id:id_prefix
@@ -602,6 +611,7 @@ let parse_entry entry_toml =
     ; thinking_control_format
     ; anthropic_thinking_control
     ; preserve_thinking_control_format
+    ; content_inline_reasoning
     ; reasoning_output_format
     ; reasoning_streaming_format
     ; reasoning_replay

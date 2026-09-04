@@ -55,7 +55,6 @@ type stop_reason =
   | Completed
   | Yielded_to_operation_queued of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
-  | Awaiting_external_effect of { turns_used : int }
   | Yielded_after_repeated_tool_call of
       { turns_used : int
       ; tool_name : string
@@ -73,7 +72,6 @@ type stop_reason =
 type cooperative_yield_reason =
   | Operation_queued
   | Durable_stimulus_waiting
-  | External_effect_deferred
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
@@ -781,7 +779,6 @@ let stop_reason_of_cooperative_yield ~turns_used = function
   | Operation_queued -> Yielded_to_operation_queued { turns_used }
   | Durable_stimulus_waiting ->
     Yielded_to_durable_stimulus { turns_used }
-  | External_effect_deferred -> Awaiting_external_effect { turns_used }
   | Repeated_tool_call { tool_name; repeated_count } ->
     Yielded_after_repeated_tool_call
       { turns_used; tool_name; repeated_count }
@@ -889,8 +886,6 @@ let dashboard_status_of_stop_reason = function
       Dashboard_agent_core_bridge.Cancelled { reason = "yielded_to_operation_queued" }
   | Yielded_to_durable_stimulus _ ->
       Dashboard_agent_core_bridge.Cancelled { reason = "yielded_to_durable_stimulus" }
-  | Awaiting_external_effect _ ->
-      Dashboard_agent_core_bridge.Cancelled { reason = "awaiting_external_effect" }
   | Yielded_after_repeated_tool_call _ ->
       Dashboard_agent_core_bridge.Cancelled
         { reason = "yielded_after_repeated_tool_call" }

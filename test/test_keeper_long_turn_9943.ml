@@ -1,9 +1,8 @@
 (* test/test_keeper_long_turn_9943.ml
 
-   #9943 reports a 20-minute turn where the post-turn
-   compaction step appears to no-op and the turn keeps
-   running.  Several adjacent issues report the same
-   "long-running turn that nobody noticed" symptom from
+   #9943 reports a 20-minute turn that keeps running with
+   nothing surfacing it.  Several adjacent issues report
+   the same "long-running turn that nobody noticed" symptom from
    different angles (#9982 trust pause, #10121 repeated turn attempts).
 
    This test pins the observability surface that surfaces

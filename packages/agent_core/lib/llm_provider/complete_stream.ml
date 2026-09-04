@@ -26,6 +26,8 @@ let stream_error_event = function
   | Types.Stream_ndjson_parse_failed { reason; raw } ->
     Types.NDJSONParseFailed { reason; raw }
   | Types.Stream_incomplete { reason } -> Types.StreamIncomplete { reason }
+  | Types.Stream_repeating { paragraph; occurrences; bytes_seen } ->
+    Types.StreamRepeating { paragraph; occurrences; bytes_seen }
   | Types.Stream_unknown_event { event_type; raw } ->
     Types.SSEUnknownEventType { event_type; raw }
   | Types.Stream_unsupported_part { provider_kind; part; raw } ->
@@ -41,7 +43,8 @@ let event_carries_stream_failure = function
   | Types.NDJSONParseFailed _
   | Types.SSEUnknownEventType _
   | Types.SSEUnsupportedPart _
-  | Types.SSEUnsupportedResponse _ -> true
+  | Types.SSEUnsupportedResponse _
+  | Types.StreamRepeating _ -> true
   | Types.Connected
   | Types.MessageStart _
   | Types.ContentBlockStart _
@@ -471,7 +474,7 @@ let complete_stream_http
         | Types.NDJSONParseFailed _ -> `Wire_error Http_client.Ndjson
         | Types.Connected -> `Skip
         | Types.Timeout _ -> `Wire_error active_wire_format
-        | Types.StreamIncomplete _ -> `Skip
+        | Types.StreamIncomplete _ | Types.StreamRepeating _ -> `Skip
       in
       let percentiles () =
         match !inter_chunk_samples with
@@ -558,6 +561,14 @@ let complete_stream_http
               let streaming_reasoning =
                 (Reasoning_dialect.for_provider_config config).streaming
               in
+              (* Whether this model also embeds reasoning in its content
+                 channel. Separate from [streaming_reasoning], which says how
+                 reasoning arrives on its own channel: minimax-m3 uses both. *)
+              let content_inline_reasoning =
+                match Capabilities.for_model_id model with
+                | Some caps -> caps.Capabilities.content_inline_reasoning
+                | None -> Capabilities.No_content_inline_reasoning
+              in
               (* Agent Core contract: first_chunk_seen / chunk_counter / last_chunk_t
                  hoisted out of body_logic so publish_summary on
                  exception paths sees consistent state. *)
@@ -565,7 +576,18 @@ let complete_stream_http
                 match !openai_state with
                 | Some s -> s
                 | None ->
-                  let s = Streaming.create_openai_stream_state ~provider ~model () in
+                  let inline_reasoning =
+                    match content_inline_reasoning with
+                    | Capabilities.Think_tags -> true
+                    | Capabilities.No_content_inline_reasoning -> false
+                  in
+                  let s =
+                    Streaming.create_openai_stream_state
+                      ~provider
+                      ~model
+                      ~inline_reasoning
+                      ()
+                  in
                   openai_state := Some s;
                   s
               in
@@ -918,7 +940,8 @@ let complete_stream_http
                              | Types.Stream_parse_failed _
                              | Types.Stream_ndjson_parse_failed _
                              | Types.Stream_unknown_event _
-                             | Types.Stream_incomplete _ ->
+                             | Types.Stream_incomplete _
+                             | Types.Stream_repeating _ ->
                                Complete_stream_error.wire_error_terminal_label
                                  active_wire_format
                              | Types.Stream_unsupported_part _

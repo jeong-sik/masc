@@ -2000,6 +2000,7 @@ let test_health_json_keeps_awaiting_verification_in_system_llm_lane () =
                    assignee = "producer-agent";
                    started_at = "2026-06-26T00:00:00Z";
                    submitted_at = "2026-06-26T00:00:01Z";
+                   intent = Complete_task;
                    verification_id = "verification-system-llm-001";
                  })
             ()

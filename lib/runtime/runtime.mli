@@ -669,6 +669,16 @@ val load_config_observation :
 (** Load one immutable runtime.toml observation, including its exact source
     revision. *)
 
+val update_runtime_assignment_text :
+  string -> keeper_name:string -> runtime_id:string -> string
+(** runtime.toml text with [keeper_name] assigned to [runtime_id] in
+    [\[runtime.assignments\]]: the row is replaced or appended, the section
+    is created when absent, every other line is kept. Keys are quoted, so a
+    dotted keeper name stays one key. Pure; the commit is the caller's. *)
+
+val remove_runtime_assignment_text : string -> keeper_name:string -> string
+(** runtime.toml text without [keeper_name]'s row. Pure. *)
+
 val save_config_text :
   ?runtime_config_path:string -> string -> (config_commit_receipt, string) result
 (** Validate raw runtime.toml and prepare its exact-output replacement without
@@ -682,6 +692,17 @@ val save_config_text :
     fully durable replacement returns an [Ok] receipt carrying [Durable]. Before exact-output registry bootstrap,
     the same write-stage rules apply to the runtime cache while the registry
     remains unpublished. *)
+
+val edit_config_text :
+  ?runtime_config_path:string ->
+  (string -> string) ->
+  (config_commit_receipt, string) result
+(** Read runtime.toml, hand its text to [edit], and commit what comes back --
+    all three inside the config write lock, so a write that lands between the
+    read and the commit cannot be silently overwritten. Everything after the
+    edit is {!save_config_text}'s: the same validation, the same atomic
+    replace, the same receipt. Use this rather than loading the file and
+    calling {!save_config_text}, which leaves that gap open. *)
 
 val validate_config_text :
   ?runtime_config_path:string -> string -> (unit, string) result

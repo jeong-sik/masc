@@ -5,8 +5,6 @@ type metrics_summary =
   ; turn_points : int
   ; heartbeat_points : int
   ; proactive_points : int
-  ; handoff_count : int
-  ; last_handoff : Yojson.Safe.t option
   }
 
 type tool_audit_snapshot =
@@ -46,8 +44,6 @@ let empty_metrics_summary =
   ; turn_points = 0
   ; heartbeat_points = 0
   ; proactive_points = 0
-  ; handoff_count = 0
-  ; last_handoff = None
   }
 
 let empty_tool_audit_snapshot =
@@ -75,11 +71,6 @@ let metrics_summary_to_json (summary : metrics_summary) : Yojson.Safe.t =
       , Json_util.int_ratio_json summary.proactive_points interaction_points )
     ; ( "intervention_per_turn"
       , Json_util.int_ratio_json summary.proactive_points summary.turn_points )
-    ; "handoff_count", `Int summary.handoff_count
-    ; ( "last_handoff"
-      , match summary.last_handoff with
-        | Some json -> json
-        | None -> `Null )
     ]
 
 let summarize_metrics_lines (lines : string list) : metrics_summary =
@@ -118,15 +109,9 @@ let summarize_metrics_lines (lines : string list) : metrics_summary =
             (match
                Safe_ops.json_float_opt "ts_unix" json,
                Safe_ops.json_string_nonempty_opt "trace_id" json,
-               Safe_ops.json_int_opt "generation" json,
-               Safe_ops.json_bool_opt "handoff_performed" json,
                parsed_channel
              with
-             | ( Some ts_unix
-               , Some trace_id
-               , Some generation
-               , Some handoff_performed
-               , Some channel ) ->
+             | Some _, Some _, Some channel ->
                  let is_turn =
                    match channel with
                    | Keeper_world_observation.Reactive -> true
@@ -135,37 +120,6 @@ let summarize_metrics_lines (lines : string list) : metrics_summary =
                  let is_scheduled_autonomous =
                    Keeper_world_observation.is_autonomous channel
                  in
-                 let handoff_json =
-                   if handoff_performed
-                   then
-                     let handoff =
-                       Option.value
-                         ~default:`Null
-                         (Json_util.assoc_member_opt "handoff" json)
-                     in
-                     Some
-                       (`Assoc
-                         [ "ts_unix", `Float ts_unix
-                         ; "trace_id", `String trace_id
-                         ; "generation", `Int generation
-                         ; ( "prev_trace_id"
-                           , Json_util.string_opt_to_json
-                               (Safe_ops.json_string_nonempty_opt
-                                  "prev_trace_id"
-                                  handoff) )
-                         ; ( "new_trace_id"
-                           , Json_util.string_opt_to_json
-                               (Safe_ops.json_string_nonempty_opt
-                                  "new_trace_id"
-                                  handoff) )
-                         ; ( "to_generation"
-                           , Json_util.int_opt_to_json
-                               (Safe_ops.json_int_opt
-                                  "to_generation"
-                                  handoff) )
-                         ])
-                   else acc.last_handoff
-                 in
                  { sample_points = acc.sample_points + 1
                  ; turn_points =
                      acc.turn_points + if is_turn then 1 else 0
@@ -173,9 +127,6 @@ let summarize_metrics_lines (lines : string list) : metrics_summary =
                  ; proactive_points =
                      acc.proactive_points
                      + if is_scheduled_autonomous then 1 else 0
-                 ; handoff_count =
-                     acc.handoff_count + if handoff_performed then 1 else 0
-                 ; last_handoff = handoff_json
                  }
              | _ -> acc)
       with

@@ -8,7 +8,8 @@
   prompt_override_persistence
   prompt_registry_store
   prompt_registry
-  prompt_names)
+  prompt_names
+  tool_guidance)
  (wrapped false)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags

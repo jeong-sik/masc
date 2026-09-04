@@ -355,6 +355,14 @@ module For_testing : sig
     has_tool_calls:bool ->
     [ `Visible_blocks | `Tool_calls_only | `Failure ]
 
+  val control_turn_delivery :
+    turn_outcome:Keeper_turn_outcome.t ->
+    spoken:string option ->
+    [ `Assistant_row of string | `Tool_calls_only ]
+  (** What a control-boundary or external-effect turn writes. [spoken] is the
+      turn's trimmed words. Words are kept on every outcome; only a wordless
+      [External_effect_completed] writes no assistant row. *)
+
   val surface_context_to_instructions : Yojson.Safe.t -> string option
   val keeper_tool_failure_log_details :
     tool_name:string ->

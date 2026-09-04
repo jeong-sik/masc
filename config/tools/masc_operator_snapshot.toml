@@ -1,0 +1,24 @@
+name = "masc_operator_snapshot"
+description = """
+Read unified operator state for the default workspace, keepers, recent \
+messages, and pending confirmations before acting."""
+operator_remote_description = """
+Read unified operator state. Use this when you need current workspace, \
+keeper, message, and pending-confirm data before taking action."""
+
+[[params]]
+name = "actor"
+type = "string"
+
+[[params]]
+name = "view"
+type = "string"
+enum = ["summary", "keepers", "messages", "full"]
+
+[[params]]
+name = "include_messages"
+type = "boolean"
+
+[[params]]
+name = "include_keepers"
+type = "boolean"

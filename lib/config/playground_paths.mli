@@ -65,6 +65,15 @@ val parse_bundle_relative_repo_path : string -> (string * string) option
     not reject [.] or [..] segments, and callers turning the result into an
     I/O path must resolve it themselves. *)
 
+val bundle_repos_dirname : string
+(** The literal [repos] segment inside a keeper's bundle. Spelled once, here.
+
+    The repo tree has a second, unrelated [repos]: the server-side
+    registration store under [.masc/repos/<id>] owned by
+    [Config_dir_resolver]. Same spelling, different concept — one names
+    the clone directory inside one keeper's bundle, the other a store
+    under the server base path. They are two constants. *)
+
 val bundle_relative_repo_path : repo_id:string -> string -> string
 (** [bundle_relative_repo_path ~repo_id rel] is the bundle-relative path of
     [rel] inside [repo_id]'s clone — the inverse of

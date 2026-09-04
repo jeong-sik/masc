@@ -1,6 +1,11 @@
 name = "masc_heartbeat"
+title = "Send Heartbeat"
 description = """
 Publish the caller's heartbeat observation. Heartbeats are telemetry only \
 and do not grant another component authority to stop, evict, or release the \
 caller's work."""
+additional_properties = false
+
+[agent_core_projection]
+description = "Send an immediate heartbeat so this agent stays fresh in MASC visibility."
 additional_properties = false

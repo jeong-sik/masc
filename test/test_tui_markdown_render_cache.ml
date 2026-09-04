@@ -28,7 +28,7 @@ let render cache calls ?(theme_revision = 1) ?(palette_generation = 0)
 
 let test_same_complete_source_renders_once () =
   let calls = ref 0 in
-  let cache = Cache.create ~capacity:4 ~equal:String.equal in
+  let cache = Cache.create ~capacity:4 in
   let source = stable "entry-a" "# heading\nbody" in
   let first = render cache calls source in
   let second = render cache calls source in
@@ -39,7 +39,7 @@ let test_same_complete_source_renders_once () =
 
 let test_every_render_input_invalidates () =
   let calls = ref 0 in
-  let cache = Cache.create ~capacity:4 ~equal:String.equal in
+  let cache = Cache.create ~capacity:4 in
   ignore (render cache calls (stable "entry-a" "body") : string list);
   ignore (render cache calls (stable "entry-a" "body changed") : string list);
   ignore
@@ -56,7 +56,7 @@ let test_every_render_input_invalidates () =
 
 let test_different_entries_do_not_share_rows () =
   let calls = ref 0 in
-  let cache = Cache.create ~capacity:4 ~equal:String.equal in
+  let cache = Cache.create ~capacity:4 in
   ignore (render cache calls (stable "entry-a" "same body") : string list);
   ignore (render cache calls (stable "entry-b" "same body") : string list);
   ignore (render cache calls (stable "entry-a" "same body") : string list);
@@ -66,7 +66,7 @@ let test_different_entries_do_not_share_rows () =
 
 let test_streaming_source_never_reuses_partial_rows () =
   let calls = ref 0 in
-  let cache = Cache.create ~capacity:4 ~equal:String.equal in
+  let cache = Cache.create ~capacity:4 in
   ignore (render cache calls (Cache.Streaming_source "part") : string list);
   ignore (render cache calls (Cache.Streaming_source "part") : string list);
   let grown = render cache calls (Cache.Streaming_source "partial") in
@@ -78,7 +78,7 @@ let test_streaming_source_never_reuses_partial_rows () =
 
 let test_retention_is_bounded_and_recent () =
   let calls = ref 0 in
-  let cache = Cache.create ~capacity:2 ~equal:String.equal in
+  let cache = Cache.create ~capacity:2 in
   ignore (render cache calls (stable "entry-a" "a") : string list);
   ignore (render cache calls (stable "entry-b" "b") : string list);
   ignore (render cache calls (stable "entry-a" "a") : string list);
@@ -89,7 +89,7 @@ let test_retention_is_bounded_and_recent () =
     (Cache.For_testing.retained_entries cache)
 
 let assert_incremental_matches_full ~label ~width chunks =
-  let cache = Cache.create ~capacity:4 ~equal:String.equal in
+  let cache = Cache.create ~capacity:4 in
   let calls = ref [] in
   let source = Buffer.create 256 in
   List.iteri
@@ -137,7 +137,7 @@ let test_every_chunk_matches_the_canonical_full_render () =
     ]
 
 let test_closed_blocks_are_not_rendered_again () =
-  let cache = Cache.create ~capacity:4 ~equal:String.equal in
+  let cache = Cache.create ~capacity:4 in
   let calls = ref [] in
   let source = Buffer.create 64 in
   let append chunk =
@@ -158,7 +158,7 @@ let test_closed_blocks_are_not_rendered_again () =
     (List.rev !calls)
 
 let test_unchanged_growing_snapshot_never_reaches_the_renderer () =
-  let cache = Cache.create ~capacity:4 ~equal:String.equal in
+  let cache = Cache.create ~capacity:4 in
   let calls = ref [] in
   let text = "alpha\nbeta" in
   let first = render_growing cache calls "entry-a" text in
@@ -170,7 +170,7 @@ let test_unchanged_growing_snapshot_never_reaches_the_renderer () =
     [ text ] (List.rev !calls)
 
 let test_appended_text_parses_only_the_new_suffix () =
-  let cache = Cache.create ~capacity:4 ~equal:String.equal in
+  let cache = Cache.create ~capacity:4 in
   let calls = ref [] in
   let source = Buffer.create 64 in
   let append chunk =
@@ -188,7 +188,7 @@ let test_appended_text_parses_only_the_new_suffix () =
     (List.rev !calls)
 
 let test_growing_retention_is_bounded_and_recent () =
-  let cache = Cache.create ~capacity:2 ~equal:String.equal in
+  let cache = Cache.create ~capacity:2 in
   let calls = ref [] in
   ignore (render_growing cache calls "entry-a" "a" : string list);
   ignore (render_growing cache calls "entry-b" "b" : string list);
@@ -201,7 +201,7 @@ let test_growing_retention_is_bounded_and_recent () =
     (Cache.For_testing.retained_growing_entries cache)
 
 let test_growing_keys_and_non_prefix_snapshots_reset () =
-  let cache = Cache.create ~capacity:4 ~equal:String.equal in
+  let cache = Cache.create ~capacity:4 in
   let calls = ref [] in
   let source = "alpha\nbeta" in
   ignore (render_growing cache calls "entry-a" source : string list);

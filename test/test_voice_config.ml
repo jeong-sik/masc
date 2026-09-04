@@ -308,9 +308,168 @@ let test_endpoint_voice_is_absent_when_not_declared () =
       config.Vc.tts.endpoints
 ;;
 
+
+(* The whitelist is the contract the live config is written against, and
+   nothing compared the two. [runtime.toml [voice]] carried [max_retries] on
+   both endpoint lists; the whitelist introduced 2026-08-28 does not accept
+   it, so every voice read failed from that day until 2026-09-03. The only
+   surface that reported it was GET /api/v1/voice/config, which returns 500
+   and no turn calls.
+
+   This pins the shape a working endpoint actually has. A field added to the
+   live config without being added here fails at parse, which is where it
+   should. *)
+let test_a_live_shaped_endpoint_parses () =
+  let endpoint id =
+    `Assoc
+      [ "id", `String id
+      ; "kind", `String "elevenlabs_direct"
+      ; "api_key_env", `String "ELEVENLABS_API_KEY"
+      ; "enabled", `Bool true
+      ; "timeout_seconds", `Float 35.0
+      ]
+  in
+  let json =
+    `Assoc
+      [ ( "tts"
+        , `Assoc
+            [ "default_model", `String "eleven_multilingual_v2"
+            ; "default_voice", `String "SAz9YHcvj6GT2YYXdXww"
+            ; "endpoints", `List [ endpoint "elevenlabs-tts" ]
+            ] )
+      ; ( "stt"
+        , `Assoc
+            [ "default_model", `String "scribe_v2"
+            ; "endpoints", `List [ endpoint "elevenlabs-stt" ]
+            ] )
+      ]
+  in
+  match Vc.parse_json json with
+  | Ok config ->
+    check int "one tts endpoint" 1 (List.length config.Vc.tts.Vc.endpoints);
+    check int "one stt endpoint" 1 (List.length config.Vc.stt.Vc.endpoints)
+  | Error message -> fail ("a live-shaped voice config must parse: " ^ message)
+;;
+
+(* The field that broke it. Rejection is correct -- no reader consumes a retry
+   count, and the fallback is the endpoint chain rather than a repeat of one
+   endpoint (a repeated TTS attempt risks speaking twice). What was missing is
+   anything that notices, so this pins that the rejection names the field. *)
+let test_an_unknown_endpoint_field_is_rejected_by_name () =
+  let json =
+    `Assoc
+      [ ( "tts"
+        , `Assoc
+            [ "default_voice", `String "SAz9YHcvj6GT2YYXdXww"
+            ; ( "endpoints"
+              , `List
+                  [ `Assoc
+                      [ "id", `String "elevenlabs-tts"
+                      ; "kind", `String "elevenlabs_direct"
+                      ; "enabled", `Bool true
+                      ; "max_retries", `Int 2
+                      ]
+                  ] )
+            ] )
+      ]
+  in
+  match Vc.parse_json json with
+  | Ok _ -> fail "max_retries is not a supported endpoint field"
+  | Error message ->
+    check
+      bool
+      "the rejection names the field so an operator can find it"
+      true
+      (String_util.string_contains_substring ~needle:"max_retries" message)
+;;
+
+
+(* The capture section. It exists because every default in it was measured on
+   one workstation, and two margins picked that way were both wrong before an
+   operator could do anything about it. *)
+let test_capture_defaults_when_the_section_is_absent () =
+  match Vc.parse_json (`Assoc []) with
+  | Error message -> fail ("an absent capture section must parse: " ^ message)
+  | Ok config ->
+    check
+      bool
+      "absent means the measured defaults"
+      true
+      (config.Vc.capture = Vc.default_capture)
+;;
+
+let test_capture_values_are_read () =
+  let json =
+    `Assoc
+      [ ( "capture"
+        , `Assoc
+            [ "calibration_seconds", `Float 1.25
+            ; "trigger_margin_db", `Float 9.0
+            ; "speech_margin_db", `Int 3
+            ; "noise_reduction", `Bool true
+            ] )
+      ]
+  in
+  match Vc.parse_json json with
+  | Error message -> fail message
+  | Ok config ->
+    let capture = config.Vc.capture in
+    check (float 0.001) "calibration" 1.25 capture.Vc.calibration_seconds;
+    check (float 0.001) "trigger" 9.0 capture.Vc.trigger_margin_db;
+    (* An int where a float is meant is what an operator types. Rejecting it
+       would fail the config over a decimal point. *)
+    check (float 0.001) "speech, given as an int" 3.0 capture.Vc.speech_margin_db;
+    check bool "noise reduction" true capture.Vc.noise_reduction
+;;
+
+(* A partial section keeps the defaults for what it does not say, so tuning one
+   value does not silently reset the others. *)
+let test_a_partial_capture_section_keeps_the_rest () =
+  match Vc.parse_json (`Assoc [ "capture", `Assoc [ "trigger_margin_db", `Float 2.0 ] ]) with
+  | Error message -> fail message
+  | Ok config ->
+    check (float 0.001) "the one given" 2.0 config.Vc.capture.Vc.trigger_margin_db;
+    check
+      (float 0.001)
+      "the rest default"
+      Vc.default_capture.Vc.speech_margin_db
+      config.Vc.capture.Vc.speech_margin_db
+;;
+
+(* A probe of no length measures nothing, and the threshold would then come
+   from an empty file rather than a room. *)
+let test_a_zero_calibration_is_refused () =
+  match Vc.parse_json (`Assoc [ "capture", `Assoc [ "calibration_seconds", `Float 0.0 ] ]) with
+  | Ok _ -> fail "a zero-length calibration probe must be refused"
+  | Error message ->
+    check
+      bool
+      "the rejection names the field"
+      true
+      (String_util.string_contains_substring ~needle:"calibration_seconds" message)
+;;
+
 let () =
   Alcotest.run "voice_config"
     [
+      ( "capture",
+        [
+          test_case "defaults when the section is absent"
+            `Quick test_capture_defaults_when_the_section_is_absent;
+          test_case "values are read"
+            `Quick test_capture_values_are_read;
+          test_case "a partial section keeps the rest"
+            `Quick test_a_partial_capture_section_keeps_the_rest;
+          test_case "a zero calibration is refused"
+            `Quick test_a_zero_calibration_is_refused;
+        ] );
+      ( "live_shape",
+        [
+          test_case "a live-shaped endpoint parses"
+            `Quick test_a_live_shaped_endpoint_parses;
+          test_case "an unknown endpoint field is rejected by name"
+            `Quick test_an_unknown_endpoint_field_is_rejected_by_name;
+        ] );
       ( "load_detailed",
         [
           test_case "unconfigured is Not_configured"

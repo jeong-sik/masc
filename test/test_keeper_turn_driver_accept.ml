@@ -406,6 +406,88 @@ let accept_rejected_core_error
        ; reason
        })
 
+(* A max-tokens rejection owed the checkpoint two different things, and one
+   condition decided both: the cut only happened when thinking had been on.
+   With thinking already off there was no second attempt to make -- and the
+   response accept had just called unusable stayed in the checkpoint, becoming
+   input on every later turn.
+
+   Measured on sangsu, 2026-09-03, thinking off throughout: collapse into one
+   repeated word, rejected at max_tokens, message_assistant_text 136 KB ->
+   308 KB over twelve turns in 30-40 KB steps -- the size of the rejected
+   text each time. *)
+let truncation_recovery ~enable_thinking ~result ~checkpoint =
+  Masc.Keeper_turn_driver_try_provider.For_testing.truncation_recovery
+    ~enable_thinking ~result ~checkpoint
+
+let max_tokens_rejection () =
+  Error
+    (accept_rejected_core_error
+       ~stop_reason:(Some Agent_core.Types.MaxTokens)
+       ~response_shape:None
+       ~reason:"response rejected by accept: stop_reason=max_tokens"
+       ())
+
+let assistant_ended_checkpoint () =
+  checkpoint_with_messages
+    [ message ~role:Agent_core.Types.Tool [ Agent_core.Types.Text "tool output" ]
+    ; message [ Agent_core.Types.Text "collapsed" ]
+    ]
+
+let test_a_rejected_response_leaves_the_checkpoint_either_way () =
+  let checkpoint = assistant_ended_checkpoint () in
+  let cut_messages = function
+    | Masc.Keeper_turn_driver_try_provider.For_testing.Retry_without_thinking c
+    | Masc.Keeper_turn_driver_try_provider.For_testing.Drop_rejected_response c ->
+      List.length c.Agent_core.Checkpoint.messages
+    | Masc.Keeper_turn_driver_try_provider.For_testing.Recovery_not_applicable ->
+      Alcotest.fail "a max-tokens rejection must reach the checkpoint"
+  in
+  (match
+     truncation_recovery ~enable_thinking:(Some true)
+       ~result:(max_tokens_rejection ()) ~checkpoint:(Some checkpoint)
+   with
+   | Masc.Keeper_turn_driver_try_provider.For_testing.Retry_without_thinking _ as
+     plan ->
+     Alcotest.(check int) "thinking on: retry on the cut checkpoint" 1
+       (cut_messages plan)
+   | _ -> Alcotest.fail "thinking on must still retry without thinking");
+  (* The case that was silently keeping the rejected text. *)
+  match
+    truncation_recovery ~enable_thinking:(Some false)
+      ~result:(max_tokens_rejection ()) ~checkpoint:(Some checkpoint)
+  with
+  | Masc.Keeper_turn_driver_try_provider.For_testing.Drop_rejected_response _ as
+    plan ->
+    Alcotest.(check int) "thinking off: the rejected response is still dropped" 1
+      (cut_messages plan)
+  | Masc.Keeper_turn_driver_try_provider.For_testing.Retry_without_thinking _ ->
+    Alcotest.fail "thinking is already off; there is no remedy to retry"
+  | Masc.Keeper_turn_driver_try_provider.For_testing.Recovery_not_applicable ->
+    Alcotest.fail "the rejected response must leave the checkpoint"
+
+let test_recovery_is_scoped_to_max_tokens_rejections () =
+  let checkpoint = assistant_ended_checkpoint () in
+  let not_applicable name plan =
+    match plan with
+    | Masc.Keeper_turn_driver_try_provider.For_testing.Recovery_not_applicable ->
+      ()
+    | _ -> Alcotest.failf "%s must not cut the checkpoint" name
+  in
+  not_applicable "a successful turn"
+    (truncation_recovery ~enable_thinking:(Some false)
+       ~result:(Ok (run_result ())) ~checkpoint:(Some checkpoint));
+  not_applicable "a rejection that did not stop at max_tokens"
+    (truncation_recovery ~enable_thinking:(Some false)
+       ~result:
+         (Error
+            (accept_rejected_core_error ~stop_reason:(Some Agent_core.Types.EndTurn)
+               ~response_shape:None ~reason:"clean no-progress" ()))
+       ~checkpoint:(Some checkpoint));
+  not_applicable "a rejection with no checkpoint to cut"
+    (truncation_recovery ~enable_thinking:(Some false)
+       ~result:(max_tokens_rejection ()) ~checkpoint:None)
+
 let test_accept_rejected_threads_stop_reason () =
   (* RFC-0271 §4.5 slice 1: apply_accept preserves the provider's typed
      stop_reason on the rejected turn's Accept_rejected, so a MaxTokens
@@ -626,32 +708,6 @@ let test_finalization_blank_response_is_typed_accept_rejection () =
      | None ->
        Alcotest.failf "expected typed keeper error, got %s"
          (Agent_core.Error.to_string err))
-
-let test_external_effect_finalization_returns_no_synthetic_prose () =
-  let run_result =
-    { (run_result ()) with
-      stop_reason = Runtime_agent.Awaiting_external_effect { turns_used = 1 }
-    }
-  in
-  match
-    Masc.Keeper_agent_run.For_testing.normalize_response_text_for_finalization
-      ~runtime_id:"test-runtime"
-      ~initial_messages:[]
-      ~run_result
-      ~text:""
-      ~tool_names:[]
-      ()
-  with
-  | Ok response_text ->
-    Alcotest.(check string)
-      "external effect status stays out of assistant speech"
-      ""
-      response_text
-  | Error error ->
-    Alcotest.failf
-      "external effect typed status unexpectedly rejected: %s"
-      (Agent_core.Error.to_string error)
-;;
 
 let test_finalization_does_not_surface_hidden_reasoning () =
   let hidden = "private chain of thought must not become a user reply" in
@@ -2012,10 +2068,6 @@ let () =
             `Quick
             test_finalization_blank_response_is_typed_accept_rejection;
           Alcotest.test_case
-            "external effect finalization returns no synthetic prose"
-            `Quick
-            test_external_effect_finalization_returns_no_synthetic_prose;
-          Alcotest.test_case
             "finalization does not surface hidden reasoning"
             `Quick
             test_finalization_does_not_surface_hidden_reasoning;
@@ -2117,5 +2169,13 @@ let () =
             "keeper tool slot callbacks are always wired"
             `Quick
             test_keeper_tool_slot_callbacks_are_always_wired;
+          Alcotest.test_case
+            "a rejected response leaves the checkpoint either way"
+            `Quick
+            test_a_rejected_response_leaves_the_checkpoint_either_way;
+          Alcotest.test_case
+            "truncation recovery is scoped to max-tokens rejections"
+            `Quick
+            test_recovery_is_scoped_to_max_tokens_rejections;
         ] );
     ]

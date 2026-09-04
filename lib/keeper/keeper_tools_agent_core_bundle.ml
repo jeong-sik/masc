@@ -56,10 +56,27 @@ let make_tool_bundle_for_descriptors_with_policy
       ?(allow_unrecorded_skill_surface = false)
       ?turn_ctx_cell
       ?capability_surface
+      ?(checkpoint_owner = fun () -> None)
       ~(descriptors : Keeper_tool_descriptor.t list)
       ()
   : tool_bundle
   =
+  (* Which lane will execute this call. The bundle is built before the turn
+     resolves a runtime, so this is asked per call rather than read now.
+
+     [Store_above] is constructed in exactly one place —
+     [Tool_output.default_model_projection] — so matching it here is matching
+     "the descriptor did not choose a projection". A descriptor that did
+     choose one ([keeper.artifact.read] is the only one today) keeps it: its
+     page size answers a different question than the wire ceiling. *)
+  let model_projection_for_call (descriptor : Keeper_tool_descriptor.t) () =
+    match checkpoint_owner (), descriptor.model_output_projection with
+    | Some Runtime_execution.Masc_agent_core, Tool_output.Store_above _ ->
+      Tool_output.agent_core_model_projection
+    | (Some Runtime_execution.Official_client | None), projection
+    | Some Runtime_execution.Masc_agent_core, (Tool_output.Inline_up_to _ as projection) ->
+      projection
+  in
   let descriptors =
     List.map
       (fun (descriptor : Keeper_tool_descriptor.t) ->
@@ -417,7 +434,7 @@ let make_tool_bundle_for_descriptors_with_policy
              Tool_bridge.agent_core_tool_of_masc_with_execution_env
                ?descriptor:agent_core_descriptor
                ~base_path:config.base_path
-               ~model_projection:descriptor.model_output_projection
+               ~model_projection:(model_projection_for_call descriptor)
                ?on_externalization_error
                ~name:model_name
                ~description:descriptor.description
@@ -604,6 +621,7 @@ let make_tool_bundle_for_descriptors_with_policy
                List.map deferred_of deferred_builtin_tools
            ; agent_cell = ref None
            ; history = []
+           ; carry_window = Keeper_config.keeper_tool_carry_window ()
            })
     | Some surface ->
       Keeper_identity_tool_search.make
@@ -615,6 +633,7 @@ let make_tool_bundle_for_descriptors_with_policy
             @ List.map deferred_of deferred_builtin_tools
         ; agent_cell = surface.Keeper_tools_agent_core.agent_cell
         ; history = surface.Keeper_tools_agent_core.history
+        ; carry_window = Keeper_config.keeper_tool_carry_window ()
         }
   in
   (* The lanes that cannot widen a turn get every tool as a schema: holding
@@ -674,6 +693,7 @@ let make_tool_bundle_for_descriptors_with_policy
         Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
   ; terminal_effect_state = (fun () -> Atomic.get terminal_effect_state)
   ; gate_replay_delivery
+  ; turn_sandbox_factory
   }
 ;;
 
@@ -690,6 +710,7 @@ let make_tool_bundle_for_capability_surface
       ?composition_plan_index
       ?skill_activation_context
       ?turn_ctx_cell
+      ?checkpoint_owner
       ~capability_surface
       ()
   =
@@ -708,6 +729,7 @@ let make_tool_bundle_for_capability_surface
     ?skill_activation_context
     ~allow_unrecorded_skill_surface:false
     ?turn_ctx_cell
+    ?checkpoint_owner
     ~descriptors:(Keeper_capability_surface.descriptors capability_surface)
     ~capability_surface
     ()

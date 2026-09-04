@@ -228,10 +228,13 @@ type model_projection =
   | Inline_up_to of { maximum_bytes : int }
 
 let default_model_projection =
-  Store_above { threshold_bytes = Common.max_tool_output_bytes }
+  Store_above { threshold_bytes = Common.max_tool_result_wire_bytes }
 
 let bounded_inline_model_projection =
-  Inline_up_to { maximum_bytes = Common.max_tool_output_bytes }
+  Inline_up_to { maximum_bytes = Common.max_tool_result_wire_bytes }
+
+let agent_core_model_projection =
+  Store_above { threshold_bytes = Common.max_agent_core_inline_result_bytes }
 
 let marker_prefix = "[masc:blob sha256="
 

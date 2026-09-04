@@ -176,6 +176,26 @@ let test_bundle_relative_agrees_with_absolute () =
         (both bundle_relative))
     cases
 
+(* The [repos] segment inside a keeper's bundle is named once, here. The tree
+   has a second, unrelated [repos]: the server-side registration store under
+   [.masc/repos/<id>] owned by [Config_dir_resolver]. Same spelling, different
+   concept — one names the clone directory inside one keeper's bundle, the
+   other a store under the server base path. They must stay two constants, and
+   neither spelling may be re-decided at a call site. *)
+let test_bundle_repos_dirname_names_the_anchor () =
+  check string "anchor segment" "repos" PP.bundle_repos_dirname;
+  let roundtrip repo_id rel =
+    check (option (pair string string))
+      ("build then parse: " ^ repo_id ^ "/" ^ rel)
+      (Some (repo_id, rel))
+      (PP.parse_bundle_relative_repo_path
+         (PP.bundle_relative_repo_path ~repo_id rel))
+  in
+  roundtrip "masc" "lib/foo.ml";
+  (* A repository whose id is the anchor segment itself: the parser must take
+     the id from position, never from scanning for the segment. *)
+  roundtrip "repos" "verify-468.sh"
+
 let test_parse_playground_file_path () =
   let base_path = "/tmp/masc-base" in
   let parse rel =
@@ -235,5 +255,7 @@ let () =
         test_case "bundle-relative agrees with absolute" `Quick
           test_bundle_relative_agrees_with_absolute;
         test_case "parse playground file path" `Quick test_parse_playground_file_path;
+        test_case "bundle repos dirname names the anchor" `Quick
+          test_bundle_repos_dirname_names_the_anchor;
       ]);
     ]

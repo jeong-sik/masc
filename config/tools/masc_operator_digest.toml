@@ -1,0 +1,24 @@
+name = "masc_operator_digest"
+description = """
+Read a high-signal operator digest with intervention recommendations for \
+the default workspace when raw snapshot data is too low-level."""
+operator_remote_description = """
+Read an intervention-oriented operator digest with workspace health, \
+attention items, worker summaries, and recommended next actions."""
+
+[[params]]
+name = "actor"
+type = "string"
+
+[[params]]
+name = "target_type"
+type = "string"
+enum = ["workspace"]
+
+[[params]]
+name = "target_id"
+type = "string"
+
+[[params]]
+name = "include_workers"
+type = "boolean"

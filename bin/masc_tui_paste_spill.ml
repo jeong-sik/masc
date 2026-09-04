@@ -29,7 +29,10 @@ let of_paste ~now_iso ~nonce text =
       { text
       ; lines
       ; bytes
-      ; file_name = Printf.sprintf "pasted-%s-%s.txt" now_iso nonce
+      (* The name shape is owned by [Keeper_paste_naming]: the turn-setup
+         delivery recognises staged files through the same module, so the
+         writer and the matcher cannot drift apart. *)
+      ; file_name = Keeper_paste_naming.file_name ~now_iso ~nonce
       }
 
 (* Sizes an operator can act on: lines to recognise what they pasted, bytes

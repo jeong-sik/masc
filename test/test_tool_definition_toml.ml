@@ -373,6 +373,106 @@ let test_keeper_projection_rejections () =
     "must be a table"
 ;;
 
+(* An [agent_core_projection] table is the same grammar under a second name:
+   the deliberately narrower shape Agent_core_tool_contract hands to
+   agent-core models. The batch case needs an array param whose object items
+   declare their own params, so the round trip pins the nesting here. *)
+let agent_core_projection_toml =
+  {|name = "masc_example_batch"
+description = "Batch canonical."
+
+[agent_core_projection]
+description = "Batch for agent core."
+additional_properties = false
+
+[[agent_core_projection.params]]
+name = "tasks"
+type = "array"
+required = true
+description = "Array of task objects"
+min_items = 1
+
+[agent_core_projection.params.items]
+type = "object"
+additional_properties = false
+
+[[agent_core_projection.params.items.params]]
+name = "title"
+type = "string"
+required = true
+description = "Task title"
+|}
+;;
+
+let check_loads_agent_core_projection ~name ~contents (expected : Masc_domain.tool_schema)
+  =
+  match Tool_definition_toml.load ~name ~contents with
+  | Ok { Tool_definition_toml.agent_core_projection = Some projection; _ } ->
+    check
+      string
+      "agent-core projection JSON"
+      (json_string expected)
+      (json_string projection)
+  | Ok { Tool_definition_toml.agent_core_projection = None; _ } ->
+    fail "expected an agent-core projection, got none"
+  | Error message -> failf "expected an agent-core projection, got error: %s" message
+;;
+
+let test_agent_core_projection_round_trip () =
+  check_loads_agent_core_projection
+    ~name:"masc_example_batch"
+    ~contents:agent_core_projection_toml
+    { name = "masc_example_batch"
+    ; description = "Batch for agent core."
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ ( "tasks"
+                  , `Assoc
+                      [ "type", `String "array"
+                      ; "description", `String "Array of task objects"
+                      ; "minItems", `Int 1
+                      ; ( "items"
+                        , `Assoc
+                            [ "type", `String "object"
+                            ; "additionalProperties", `Bool false
+                            ; ( "properties"
+                              , `Assoc
+                                  [ ( "title"
+                                    , `Assoc
+                                        [ "type", `String "string"
+                                        ; "description", `String "Task title"
+                                        ] )
+                                  ] )
+                            ; "required", `List [ `String "title" ]
+                            ] )
+                      ] )
+                ] )
+          ; "required", `List [ `String "tasks" ]
+          ; "additionalProperties", `Bool false
+          ]
+    }
+;;
+
+let test_agent_core_projection_rejections () =
+  check_rejects
+    ~name:"t"
+    ~contents:(minimal "t" ^ "[agent_core_projection]\nadditional_properties = false\n")
+    "agent_core_projection is missing the required key \"description\"";
+  check_rejects
+    ~name:"t"
+    ~contents:
+      (minimal "t"
+       ^ "[agent_core_projection]\ndescription = \"d.\"\nvisibility = \"model\"\n")
+    "agent_core_projection: unknown key \"visibility\"";
+  check_rejects
+    ~name:"t"
+    ~contents:(minimal "t" ^ "agent_core_projection = \"core\"\n")
+    "must be a table"
+;;
+
 (* ── Rejections ───────────────────────────────────────────────────────── *)
 
 let test_rejections () =
@@ -515,6 +615,54 @@ let test_shipped_embedded_tree_loads () =
   | Ok () -> ()
   | Error message ->
     failf "the shipped embedded tool tree does not load: %s" message
+;;
+
+(* ── Optional title key ─────────────────────────────────────────────────
+   The human-readable tool name MCP clients show moved out of
+   mcp_server_eio_tool_profile's custom_tool_titles table into each tool's
+   own file. *)
+let test_title_key () =
+  (match
+     Tool_definition_toml.load ~name:"masc_example_ok"
+       ~contents:(minimal "masc_example_ok")
+   with
+   | Ok loaded ->
+     check bool "absent title decodes to None" true
+       (Option.is_none loaded.Tool_definition_toml.title)
+   | Error message -> failf "expected the minimal file to load: %s" message);
+  (match
+     Tool_definition_toml.load ~name:"masc_example_ok"
+       ~contents:
+         "name = \"masc_example_ok\"\ndescription = \"d.\"\ntitle = \"Example Tool\"\n"
+   with
+   | Ok loaded ->
+     check (option string) "title decodes" (Some "Example Tool")
+       loaded.Tool_definition_toml.title
+   | Error message -> failf "expected a titled file to load: %s" message);
+  match
+    Tool_definition_toml.load ~name:"masc_example_ok"
+      ~contents:
+        "name = \"masc_example_ok\"\ndescription = \"d.\"\ntitle = \"\"\n"
+  with
+  | Ok _ -> fail "expected an empty title to be an error"
+  | Error message ->
+    check bool "empty title named" true (contains ~needle:"title" message)
+;;
+
+(* Same shipped-tree gate as [test_shipped_embedded_tree_loads], for the
+   config/mcp/ pair: boot calls exactly this validator
+   (server_runtime_bootstrap.ml: validate_embedded_mcp_surface), so a
+   resources.toml or prompts.toml that does not decode fails the build here
+   instead of refusing every boot after the release. *)
+let test_shipped_embedded_mcp_surface_loads () =
+  match
+    Masc.Mcp_surface_toml.validate_embedded
+      ~read:Embedded_config.read
+      ~files:Embedded_config.file_list
+  with
+  | Ok () -> ()
+  | Error message ->
+    failf "the shipped embedded mcp surface does not load: %s" message
 ;;
 
 
@@ -951,6 +1099,14 @@ let () =
         ; test_case "keeper_projection decode is fail-closed" `Quick
             test_keeper_projection_rejections
         ; test_case
+            "agent_core_projection table yields the agent-core schema"
+            `Quick
+            test_agent_core_projection_round_trip
+        ; test_case
+            "agent_core_projection decode is fail-closed"
+            `Quick
+            test_agent_core_projection_rejections
+        ; test_case
             "an object parameter declares its own params"
             `Quick
             test_an_object_parameter_declares_its_own_params
@@ -1016,6 +1172,10 @@ let () =
             test_validate_embedded
         ; test_case "the shipped embedded tree loads" `Quick
             test_shipped_embedded_tree_loads
+        ; test_case "the shipped embedded mcp surface loads" `Quick
+            test_shipped_embedded_mcp_surface_loads
         ] )
+    ; ( "title"
+      , [ test_case "optional, non-empty when present" `Quick test_title_key ] )
     ]
 ;;

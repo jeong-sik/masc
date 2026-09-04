@@ -82,6 +82,10 @@ type tool_projection =
    outcome from these two booleans. *)
 type live_tool_call =
   { local_id : int
+  ; started_at : float
+      (** When TOOL_CALL_START arrived. A turn age says how long the turn has
+          run; only this says whether the thing it is in right now has been
+          running that whole time. *)
   ; occurrence : Live.tool_occurrence
   ; call_id : string option
   ; execution_id : string option
@@ -721,7 +725,20 @@ let approval_outcome_to_string = function
   | Displaced -> "displaced"
   | Approval_other other -> safe_line other
 
-let phase_text t =
+(* The oldest call still open. Two calls in flight are rare and the older one
+   is the one a watcher is waiting on. *)
+let oldest_open_call t =
+  t.reversed_tool_calls
+  |> List.filter (fun (call : live_tool_call) -> not call.ended)
+  |> List.fold_left
+       (fun acc (call : live_tool_call) ->
+         match acc with
+         | Some (older : live_tool_call) when older.started_at <= call.started_at -> acc
+         | Some _ | None -> Some call)
+       None
+;;
+
+let phase_text ~now t =
   match t.phase with
   | Waiting -> (
       (* The wait before RUN_STARTED is the one an operator cannot read from
@@ -746,11 +763,50 @@ let phase_text t =
   | Working ->
       let activities = tool_calls t in
       let calls = List.length activities in
+      (* The row exists to answer "is this slow or stuck", and the count alone
+         cannot: seven tools reads the same whether all seven returned and the
+         model is writing, or two are still out. The outcome is on every
+         activity and this row was dropping it.
+
+         Named rather than counted, and placed before the mix: the question is
+         which call is still out, the names are few -- a round holds a handful
+         -- and a long tool mix is what a narrow row loses first. *)
+      let still_running =
+        List.filter
+          (fun activity ->
+            match activity.outcome with
+            | Started | Awaiting_result -> true
+            | Returned | Failed | Never_returned | Outcome_unrecorded -> false)
+          activities
+      in
+      let running =
+        match still_running with
+        | [] -> ""
+        | running ->
+            Printf.sprintf " · still running: %s"
+              (String.concat ", " (compact_tool_parts running))
+      in
+      (* The turn age alone cannot tell a slow tool from a stall. This says how
+         long the call it is sitting in has been open, which is the number that
+         stops moving when something is stuck.
+
+         Beside the names rather than after the mix (#32955 put it there before
+         the names existed): the two describe the same open calls, and the mix
+         is long enough to push whatever follows it off a narrow row. *)
+      let in_this_call =
+        match oldest_open_call t with
+        | None -> ""
+        | Some call -> (
+          match Masc_tui_message_layout.age_text ~now ~since:call.started_at with
+          | None -> ""
+          | Some age -> Printf.sprintf " · in this call %s" age)
+      in
       let work =
-        if calls = 0 then "working"
+        if calls = 0 then "working" ^ in_this_call
         else
-          Printf.sprintf "working · %s · %s"
-            (plural calls "tool") (compact_tool_mix activities)
+          Printf.sprintf "working · %s%s%s · %s"
+            (plural calls "tool") running in_this_call
+            (compact_tool_mix activities)
       in
       (* A checkpoint means the turn ran out of context and carried on rather
          than stopping. An operator watching a turn take a long time is owed
@@ -797,8 +853,8 @@ let elapsed_text ~now t =
 
 let progress_text ~now t =
   match elapsed_text ~now t with
-  | None -> phase_text t
-  | Some age -> Printf.sprintf "%s · %s" (phase_text t) age
+  | None -> phase_text ~now t
+  | Some age -> Printf.sprintf "%s · %s" (phase_text ~now t) age
 
 (* The question, as an Attention row. It is the one row an operator has to act
    on, so it is styled like the others that need them rather than like
@@ -968,7 +1024,7 @@ let apply_tool_result t ~(occurrence : Live.tool_occurrence) ~execution_id =
             "KEEPER_TOOL_RESULT_READY occurrence conflicted during update"))
 ;;
 
-let apply t (delta : Live.delta) =
+let apply ~now t (delta : Live.delta) =
   match delta with
   | Live.Run_started -> (
       match t.phase with
@@ -1030,6 +1086,7 @@ let apply t (delta : Live.delta) =
          t.next_tool_local_id <- local_id + 1;
          t.reversed_tool_calls <-
            { local_id
+           ; started_at = now
            ; occurrence
            ; call_id = occurrence.tool_call_id
            ; execution_id = None

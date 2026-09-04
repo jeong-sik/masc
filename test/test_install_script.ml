@@ -102,6 +102,139 @@ max-request-body-bytes = 1048576
   runtime_file
 ;;
 
+(* A config whose default is a subscription runtime (CLI transport, no endpoint,
+   no API key). It sits beside an HTTP provider so the catalog is not
+   subscription-only, matching how real deployments mix the two. *)
+let write_runtime_catalog_with_subscription base_path =
+  let config_dir = Filename.concat base_path ".masc/config" in
+  let runtime_file = Filename.concat config_dir "runtime.toml" in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote config_dir));
+  write_file
+    runtime_file
+    {|
+[runtime]
+default = "claude_code.claude-sonnet-5"
+
+[providers.ollama]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[providers.ollama.healthcheck]
+path = "/api/tags"
+
+[providers.claude_code]
+display-name = "Claude Code Max Subscription"
+protocol = "claude-code"
+command = "claude-test-cli"
+is-non-interactive = true
+
+[models.claude-sonnet-5]
+api-name = "claude-sonnet-5"
+max-context = 200000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.gemma4-26b-a4b-qat]
+api-name = "gemma4-26b-a4b-qat"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[ollama.gemma4-26b-a4b-qat]
+wizard-default = true
+
+[claude_code.claude-sonnet-5]
+wizard-default = true
+|};
+  runtime_file
+;;
+
+(* A config whose default is a local model server, bound to a closed loopback
+   port (127.0.0.1:1 refuses instantly) so the reachability probe deterministically
+   reports "not running". A cloud provider sits beside it to exercise the "cloud"
+   label, which is never probed. *)
+(* A subscription whose CLI is on PATH (/bin/echo stands in), so the wizard gets
+   past "installed" and runs the login probe. /bin/echo is not the real client,
+   so the probe's JSON parse fails and runtime-probe reports "not signed in" --
+   a deterministic stand-in for a present-but-not-signed-in CLI. *)
+let write_runtime_catalog_with_installed_subscription base_path =
+  let config_dir = Filename.concat base_path ".masc/config" in
+  let runtime_file = Filename.concat config_dir "runtime.toml" in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote config_dir));
+  write_file
+    runtime_file
+    {|
+[runtime]
+default = "claude_code.claude-sonnet-5"
+
+[providers.claude_code]
+display-name = "Claude Code Max Subscription"
+protocol = "claude-code"
+command = "/bin/echo"
+is-non-interactive = true
+
+[models.claude-sonnet-5]
+api-name = "claude-sonnet-5"
+max-context = 200000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[claude_code.claude-sonnet-5]
+wizard-default = true
+|};
+  runtime_file
+;;
+
+let write_runtime_catalog_with_local_server base_path =
+  let config_dir = Filename.concat base_path ".masc/config" in
+  let runtime_file = Filename.concat config_dir "runtime.toml" in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote config_dir));
+  write_file
+    runtime_file
+    {|
+[runtime]
+default = "local_llama.qwen"
+
+[providers.local_llama]
+display-name = "Local llama.cpp"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+
+[providers.local_llama.healthcheck]
+path = "/models"
+
+[providers.deepseek]
+display-name = "DeepSeek API"
+protocol = "openai-compatible-http"
+endpoint = "https://api.deepseek.com"
+
+[providers.deepseek.healthcheck]
+path = "/models"
+
+[providers.deepseek.credentials]
+type = "env"
+key = "DEEPSEEK_API_KEY"
+
+[models.qwen]
+api-name = "qwen"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[local_llama.qwen]
+wizard-default = true
+
+[deepseek.qwen]
+wizard-default = true
+|};
+  runtime_file
+;;
+
 let write_runtime_catalog_with_invalid_key base_path =
   let config_dir = Filename.concat base_path ".masc/config" in
   let runtime_file = Filename.concat config_dir "runtime.toml" in
@@ -927,6 +1060,191 @@ let test_provider_display_name_with_pipe_round_trips () =
         "truncated provider wizard catalog record")
 ;;
 
+let test_wizard_offers_subscription_runtime () =
+  let tmpdir = Filename.temp_file "masc-install-subscription-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_subscription tmpdir);
+      (* No --api-key: a subscription signs in through its own CLI. *)
+      let output, status =
+        run_install_status [ "--dry-run"; "--provider"; "claude_code" ] tmpdir
+      in
+      check bool "subscription provider exits 0" true (status = Unix.WEXITED 0);
+      assert_contains
+        "subscription default runtime is set"
+        output
+        {|[dry-run] would set [runtime].default = "claude_code.claude-sonnet-5"|};
+      assert_contains
+        "subscription needs no API key"
+        output
+        "does not require an API key";
+      assert_not_contains
+        "subscription record is not rejected as unknown kind"
+        output
+        "unknown provider wizard catalog record kind";
+      assert_not_contains
+        "subscription record does not truncate the catalog"
+        output
+        "truncated provider wizard catalog record")
+;;
+
+let test_wizard_reports_model_source_availability () =
+  let tmpdir = Filename.temp_file "masc-install-detect-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_local_server tmpdir);
+      let output, status =
+        run_install_status
+          [ "--dry-run"; "--provider"; "deepseek"; "--api-key"; "fake-key" ]
+          tmpdir
+      in
+      check bool "detection report exits 0" true (status = Unix.WEXITED 0);
+      assert_contains
+        "wizard prints a detection report"
+        output
+        "detected model sources:";
+      assert_contains
+        "a down local server is reported as not running"
+        output
+        "Local llama.cpp: not running";
+      assert_contains
+        "a cloud provider is labeled cloud, not probed"
+        output
+        "DeepSeek API: cloud")
+;;
+
+let test_wizard_warns_when_selected_local_server_is_down () =
+  let tmpdir = Filename.temp_file "masc-install-detect-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_local_server tmpdir);
+      (* local_llama is keyless, so no --api-key is needed to select it. *)
+      let output, status =
+        run_install_status [ "--dry-run"; "--provider"; "local_llama" ] tmpdir
+      in
+      check bool "selecting a down local server still exits 0" true (status = Unix.WEXITED 0);
+      assert_contains
+        "the down local server is called out before finishing"
+        output
+        "Local llama.cpp is not running at http://127.0.0.1:1/v1";
+      assert_contains
+        "the default runtime is still set to the chosen server"
+        output
+        {|[dry-run] would set [runtime].default = "local_llama.qwen"|})
+;;
+
+let test_wizard_reports_execution_sandboxes () =
+  let tmpdir = Filename.temp_file "masc-install-sandbox-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_local_server tmpdir);
+      let output, status =
+        run_install_status [ "--dry-run"; "--provider"; "local_llama" ] tmpdir
+      in
+      check bool "sandbox report exits 0" true (status = Unix.WEXITED 0);
+      (* Host-independent structure: the section and each of the three real
+         backends are listed. Whether each is "available" depends on the host,
+         so that is measured, not asserted here. *)
+      assert_contains
+        "the sandbox axis is reported"
+        output
+        "detected execution sandboxes";
+      assert_contains "docker backend is listed" output "docker:";
+      assert_contains
+        "the microvm backend is listed"
+        output
+        "microvm (apple container):";
+      assert_contains "the remote_ssh backend is listed" output "remote_ssh:";
+      assert_contains
+        "the report points at where the choice is actually made"
+        output
+        "sandbox_profile in .masc/config/keepers")
+;;
+
+let test_wizard_reports_subscription_sign_in () =
+  let tmpdir = Filename.temp_file "masc-install-signin-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_installed_subscription tmpdir);
+      let output, status =
+        run_install_status [ "--dry-run"; "--provider"; "claude_code" ] tmpdir
+      in
+      check bool "subscription sign-in probe exits 0" true (status = Unix.WEXITED 0);
+      (* /bin/echo is present (so past "installed") but is not the real client,
+         so runtime-probe reports it as not signed in. *)
+      assert_contains
+        "the report distinguishes installed from signed in"
+        output
+        "Claude Code Max Subscription: installed, not signed in")
+;;
+
+let test_wizard_zero_config_auto_selects_single_ready_source () =
+  let tmpdir = Filename.temp_file "masc-install-zeroconf-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_local_server tmpdir);
+      (* Non-TTY (the harness pipes stdio) and no --provider. The local server is
+         down and only the cloud provider has its key, so exactly one source is
+         ready and the wizard uses it without being told to. *)
+      let output, status =
+        run_install_status ~extra_env:"DEEPSEEK_API_KEY=fake-key" [ "--dry-run" ]
+          tmpdir
+      in
+      check bool "zero-config auto-select exits 0" true (status = Unix.WEXITED 0);
+      assert_contains
+        "the one ready source is selected without a prompt"
+        output
+        "using the only ready source: DeepSeek";
+      assert_contains
+        "the selected source becomes the default"
+        output
+        {|[dry-run] would set [runtime].default = "deepseek.qwen"|})
+;;
+
+let test_wizard_skips_when_no_single_ready_source () =
+  let tmpdir = Filename.temp_file "masc-install-zeroconf-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_local_server tmpdir);
+      (* Same config, but with no key the cloud provider is not ready either, so
+         no source is unambiguously ready. Without a terminal the wizard leaves
+         the choice to the operator rather than guess. *)
+      let output, status =
+        run_install_status ~extra_env:"env -u DEEPSEEK_API_KEY" [ "--dry-run" ]
+          tmpdir
+      in
+      check bool "no-ready-source skip exits 0" true (status = Unix.WEXITED 0);
+      assert_contains
+        "the wizard says it will not choose"
+        output
+        "no single ready source";
+      assert_not_contains
+        "and does not seed a default"
+        output
+        "would set [runtime].default")
+;;
+
 let test_provider_ping_does_not_expose_key_in_curl_argv () =
   let script = install_script () in
   assert_contains
@@ -1374,6 +1692,38 @@ let test_missing_provider_flag_value_errors () =
       assert_contains "missing provider value message" output "--provider requires a value")
 ;;
 
+let test_invalid_sandbox_profile_rejected () =
+  let tmpdir = Filename.temp_file "masc-install-sandbox-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      let output, status = run_install_status [ "--sandbox"; "bogus" ] tmpdir in
+      check bool "invalid sandbox exits nonzero" true (status <> Unix.WEXITED 0);
+      assert_contains
+        "invalid sandbox names the three real profiles"
+        output
+        "--sandbox must be docker, microvm, or remote_ssh")
+;;
+
+let test_local_sandbox_profile_rejected () =
+  let tmpdir = Filename.temp_file "masc-install-sandbox-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      (* "local" is not a loadable sandbox_profile, so seeding it would break the
+         keeper; the flag rejects it rather than write a keeper that fails to load. *)
+      let output, status = run_install_status [ "--sandbox"; "local" ] tmpdir in
+      check bool "local sandbox exits nonzero" true (status <> Unix.WEXITED 0);
+      assert_contains
+        "local sandbox is called out as not loadable"
+        output
+        "not a loadable profile")
+;;
+
 let test_runtime_default_failure_does_not_write_env_local () =
   if Unix.geteuid () = 0 then Alcotest.skip ();
   let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
@@ -1606,12 +1956,42 @@ let () =
             "invalid provider key env name errors"
             `Quick
             test_invalid_provider_key_env_name_errors
+        ; test_case
+            "wizard offers a subscription runtime with no api key"
+            `Quick
+            test_wizard_offers_subscription_runtime
+        ; test_case
+            "wizard reports which model sources are available"
+            `Quick
+            test_wizard_reports_model_source_availability
+        ; test_case
+            "wizard warns when the selected local server is down"
+            `Quick
+            test_wizard_warns_when_selected_local_server_is_down
+        ; test_case
+            "wizard reports available execution sandboxes"
+            `Quick
+            test_wizard_reports_execution_sandboxes
+        ; test_case
+            "wizard auto-selects the single ready source without a terminal"
+            `Quick
+            test_wizard_zero_config_auto_selects_single_ready_source
+        ; test_case
+            "wizard skips when no single source is ready"
+            `Quick
+            test_wizard_skips_when_no_single_ready_source
+        ; test_case
+            "wizard reports whether a subscription is signed in"
+            `Quick
+            test_wizard_reports_subscription_sign_in
         ; test_case "wizard parses the real runtime.toml catalog" `Quick test_wizard_parses_real_runtime_toml
         ; test_case
             "real runtime.toml providers declare healthcheck paths"
             `Quick
             test_real_runtime_toml_provider_healthchecks
         ; test_case "--provider requires a value" `Quick test_missing_provider_flag_value_errors
+        ; test_case "invalid --sandbox is rejected" `Quick test_invalid_sandbox_profile_rejected
+        ; test_case "--sandbox local is rejected" `Quick test_local_sandbox_profile_rejected
         ; test_case
             "runtime default failure does not write env.local"
             `Quick

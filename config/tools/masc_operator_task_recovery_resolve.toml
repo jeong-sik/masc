@@ -1,4 +1,5 @@
 name = "masc_operator_task_recovery_resolve"
+title = "Resolve Task Recovery"
 description = """
 Recover exactly one claimed or in-progress Task to todo. The observed \
 task_id, persisted assignee, and backlog version must all match; this tool \

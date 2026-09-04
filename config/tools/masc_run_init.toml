@@ -1,9 +1,8 @@
 name = "masc_run_init"
 description = """
-Create an execution memory directory (.masc/runs/{task_id}/) to track the \
-run plan. Call when starting work on a claimed task to enable structured \
-progress tracking. After init, use masc_run_plan to set approach and \
-masc_run_get to review."""
+Create an execution memory directory to track the run plan.
+
+The directory is .masc/runs/{task_id}/. Call when starting work on a claimed task to enable structured progress tracking. After init, use masc_run_plan to set approach and masc_run_get to review."""
 additional_properties = false
 
 
@@ -11,6 +10,7 @@ additional_properties = false
 # 2026-09-01..03: 27 turns needed it across 6317 provider requests, and its
 # 527 B schema rode every one of those requests. Loading it on demand costs
 # one extra request on those 27 turns and saves the 527 B on the rest.
+# What that trade does not cover is in Tool_loading_declarations.
 defer_loading = true
 [[params]]
 name = "task_id"

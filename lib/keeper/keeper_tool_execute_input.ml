@@ -1,7 +1,7 @@
 (* Typed Execute input projections.
 
    Static helpers around [Keeper_tool_execute_typed_input] - quote a token for
-   policy strings, render an [Exec]/[Pipeline] back to a shell-command
+   policy strings, render its [Argv] or [Script] back to a shell-command
    string (for policy validation + auditing), and pretty-print a validation
    error.
 

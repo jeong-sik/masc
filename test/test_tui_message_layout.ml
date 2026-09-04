@@ -16,6 +16,7 @@ let entry ?(timestamp = "12:34:56") ?timeline_bucket
   ; request_label
   ; body
   ; markdown_source
+  ; turn_rail = Layout.Rail_none
   }
 
 let test_keeps_latest_reply () =
@@ -338,6 +339,23 @@ let test_backspace_removes_one_utf8_scalar () =
   check string "invalid buffer is preserved" invalid
     (Layout.drop_last_utf8_scalar invalid)
 
+let test_word_delete_removes_blanks_then_word () =
+  let word input = Layout.drop_last_utf8_word input in
+  check string "last word goes, separator stays" "hello " (word "hello world");
+  check string "trailing blanks go with the word" "hello  "
+    (word "hello  world  ");
+  check string "a second press walks the next word" "" (word "hello ");
+  check string "a lone word empties the draft" "" (word "hello");
+  check string "empty stays empty" "" (word "");
+  check string "only blanks empty the draft" "" (word "   ");
+  check string "tab is a separator" "hello\t" (word "hello\tworld");
+  check string "newline is a separator" "one\n" (word "one\ntwo");
+  check string "multi-byte words go whole" "한글 " (word "한글 단어");
+  check string "multi-byte separator side survives" "한글 "
+    (word "한글 세종🙂");
+  let invalid = "word \xE2" in
+  check string "invalid buffer is preserved" invalid (word invalid)
+
 let test_input_viewport_keeps_latest_complete_scalars () =
   let viewport max_cells input = Layout.input_viewport ~max_cells input in
   check string "short input stays complete" "abc" (viewport 8 "abc");
@@ -405,19 +423,19 @@ let test_input_cursor_uses_visible_terminal_cells () =
     Layout.align_role_label ~style label
   in
   check int "short role label pads to the column"
-    16 (Layout.display_width (badge "you"));
+    10 (Layout.display_width (badge "you"));
   check int "wide-char role label pads by cells not bytes"
-    16 (Layout.display_width (badge "한글"));
-  (* Right-aligned, so the cut is at the head: two canaries differ only in
-     their tails and a head-preserving cut would draw them identically. *)
+    10 (Layout.display_width (badge "한글"));
+  (* An overrun is cut at the head: two canaries differ only in their tails
+     and a head-preserving cut would draw them identically. *)
   check string "long role label loses its head, not its tail"
-    ("\xe2\x97\x8f " ^ "…456789abcdefg")
+    ("\xe2\x97\x8f " ^ "…abcdefg")
     (badge "0123456789abcdefg");
-  check string "column-width role label only pads"
-    ("\xe2\x97\x8f " ^ "0123456789abcd")
-    (badge "0123456789abcd");
-  check string "short role label pads on the left"
-    ("\xe2\x97\x8f " ^ String.make 11 ' ' ^ "you")
+  check string "inner-width role label reads whole"
+    ("\xe2\x97\x8f " ^ "01234567")
+    (badge "01234567");
+  check string "short role label pads on the right"
+    ("\xe2\x97\x8f " ^ "you" ^ String.make 5 ' ')
     (badge "you");
   (* The mark sits outside the truncation. Inside it, the labels that overrun
      would be the ones that lost their glyph -- and those are the names a
@@ -472,7 +490,7 @@ let test_input_cursor_uses_visible_terminal_cells () =
   in
   check int "a long speaker name does not re-wrap the pane"
     (wrapped "omega")
-    (wrapped "keeper-canary-10t-cdx-sol-xhigh-r2-20260820-agent Â· agent");
+    (wrapped "keeper-canary-10t-cdx-sol-xhigh-r2-20260820-agent · agent");
   let supported rows cols status_rows =
     Layout.message_viewport_supported ~terminal_rows:rows ~terminal_cols:cols
       ~status_rows
@@ -595,22 +613,13 @@ let transcript count =
             index;
         role_label_mark_cells = 0;
         markdown_source = Layout.Markdown_streaming;
+        turn_rail = Layout.Rail_none;
       })
 
 let test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity () =
   let rendered = ref [] in
-  let equal_identity
-      (left_keeper, left_request, left_at, left_index)
-      (right_keeper, right_request, right_at, right_index) =
-    String.equal left_keeper right_keeper
-    && String.equal left_request right_request
-    && Float.equal left_at right_at
-    && left_index = right_index
-  in
   let cache_capacity = 2 in
-  let cache =
-    Markdown_cache.create ~capacity:cache_capacity ~equal:equal_identity
-  in
+  let cache = Markdown_cache.create ~capacity:cache_capacity in
   let markdown ~(entry : Layout.entry) ~width =
     let source =
       match entry.markdown_source with
@@ -669,6 +678,48 @@ let test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity () =
     [ "turn-0"; "turn-1"; "turn-2" ] !rendered;
   check int "persistent retention remains bounded" cache_capacity
     (Markdown_cache.For_testing.retained_entries cache)
+
+(* Reading further back does not lay out again what it already measured.
+
+   A wheel notch moves the window three rows, and the frame has to know how
+   far back the window now starts. That distance is what a deep scroll makes
+   long. The row counts of the entries behind the window do not change while
+   the entries and the width do not, so the second walk pays for what it
+   newly reaches and for what it draws, not for the whole distance. *)
+let test_a_second_walk_pays_for_what_it_newly_reaches () =
+  let entries = transcript 60 in
+  let inner_width = 30 in
+  let height = 8 in
+  let laid_out = ref 0 in
+  let markdown ~(entry : Layout.entry) ~width =
+    incr laid_out;
+    Layout.wrap_words ~max_cells:width entry.body
+  in
+  let walk requested =
+    laid_out := 0;
+    let scroll, rows =
+      Layout.clamped_scrolled_rows ~markdown ~inner_width ~height ~requested
+        entries
+    in
+    (scroll, rows, !laid_out)
+  in
+  let _, first_rows, first_cost = walk 90 in
+  let _, second_rows, second_cost = walk 93 in
+  check bool "the first walk reaches far back" true (first_cost > 20);
+  check bool
+    (Printf.sprintf "the second walk costs %d against the first's %d"
+       second_cost first_cost)
+    true
+    (second_cost * 3 < first_cost);
+  check bool "and both drew a window" true
+    (List.length first_rows > 0 && List.length second_rows > 0);
+  (* A width the counts were not measured at is a different question. *)
+  laid_out := 0;
+  ignore
+    (Layout.clamped_scrolled_rows ~markdown ~inner_width:(inner_width + 6)
+       ~height ~requested:93 entries
+      : int * Layout.row list);
+  check bool "a new width measures again" true (!laid_out > second_cost)
 
 let test_clamping_a_scroll_reads_only_as_far_as_it_must () =
   List.iter
@@ -1414,11 +1465,17 @@ let first_gutter ~origin entries =
   | row :: _ -> row.Layout.gutter
   | [] -> failwith "no rows"
 
+(* Every folded margin opens with the turn rail's column, blank on a row with
+   no turn to hang from. It is charged to every row whether or not a rail is
+   drawn: a column that came and went with the rail would re-wrap the bodies
+   under it. These pin the bytes after it. *)
+let no_rail = String.make Layout.turn_rail_cells ' '
+
 let test_inline_margin_carries_clock_and_speaker () =
   let entries = [ entry Layout.User "you" "tui-..aaaaaaaa" "hello" ] in
-  check string "clock cut to the minute, speaker kept" "12:34 you"
+  check string "clock cut to the minute, speaker kept" (no_rail ^ "12:34 you")
     (first_gutter ~origin:Layout.Origin_inline entries);
-  check string "bare keeps the speaker only" "you"
+  check string "bare keeps the speaker only" (no_rail ^ "you")
     (first_gutter ~origin:Layout.Origin_bare entries)
 
 let inline_rows ~terminal_cols source =
@@ -1438,9 +1495,11 @@ let inline_rows ~terminal_cols source =
 
 (* The clock used to take the narrow gutter from the left and cut the source
    away before its first cell. These widths exercise the smallest supported
-   pane and two wider ceilings. The two source names share their head and
-   differ at the tail, so distinct suffixes prove that the identity -- not
-   just a generic speaker mark -- survived. *)
+   pane and two wider ceilings; at twenty columns and up the aligned badge
+   leaves room for the clock beside it, and the gutter is no longer a bare
+   source. The two source names share their head and differ at the tail, so
+   distinct suffixes prove that the identity -- not just a generic speaker
+   mark -- survived. *)
 let test_a_narrow_inline_margin_keeps_the_source () =
   List.iter
     (fun terminal_cols ->
@@ -1456,13 +1515,15 @@ let test_a_narrow_inline_margin_keeps_the_source () =
       check bool
         (Printf.sprintf "%d terminal cells keep sources distinct" terminal_cols)
         true (not (String.equal one.Layout.gutter two.Layout.gutter));
+      (* A shortened source keeps no mark, so the label boundary is the rail's
+         own column and nothing more. *)
       check int
         (Printf.sprintf "%d terminal cells omit the truncated mark" terminal_cols)
-        0 one.Layout.gutter_label_at;
+        one.Layout.gutter_rail_cells one.Layout.gutter_label_at;
       check int
         (Printf.sprintf "%d terminal cells omit the other truncated mark"
            terminal_cols)
-        0 two.Layout.gutter_label_at;
+        two.Layout.gutter_rail_cells two.Layout.gutter_label_at;
       check bool
         (Printf.sprintf "%d terminal cells remove the mark bytes" terminal_cols)
         false
@@ -1478,7 +1539,7 @@ let test_a_narrow_inline_margin_keeps_the_source () =
              + Layout.display_width row.Layout.text
             <= inner_width))
         (one_rows @ two_rows))
-    [ 13; 16; 24 ]
+    [ 13; 16; 18 ]
 
 (* A normal pane has room for both pieces. Pin the exact bytes, including the
    aligned badge, and the continuation rule: keep the clock, drop the repeated
@@ -1501,14 +1562,15 @@ let test_normal_inline_margin_bytes_stay_stable () =
   with
   | [ first; second ] ->
       check string "normal first gutter bytes"
-        ("12:34 " ^ Layout.speaker_mark Layout.Keeper ^ "     keeper.one")
+        (no_rail ^ "12:34 " ^ Layout.speaker_mark Layout.Keeper ^ " …per.one")
         first.Layout.gutter;
       check string "normal continuation bytes"
-        ("12:35 " ^ Layout.speaker_mark Layout.Keeper ^ String.make 15 ' ')
+        (no_rail ^ "12:35 " ^ Layout.speaker_mark Layout.Keeper
+        ^ String.make 9 ' ')
         second.Layout.gutter;
-      check int "normal gutter keeps clock plus mark boundary" 8
-        first.Layout.gutter_label_at;
-      check int "continuation has no source boundary" 0
+      check int "normal gutter keeps clock plus mark boundary"
+        (Layout.turn_rail_cells + 8) first.Layout.gutter_label_at;
+      check int "continuation has no source boundary" Layout.turn_rail_cells
         second.Layout.gutter_label_at;
       check int "continuation keeps the first gutter width"
         (Layout.display_width first.Layout.gutter)
@@ -1520,7 +1582,7 @@ let test_normal_inline_margin_bytes_stay_stable () =
    one that would otherwise lose bytes silently. *)
 let test_a_timestamp_of_another_shape_survives () =
   let entries = [ entry ~timestamp:"just now" Layout.User "you" "r" "hello" ] in
-  check string "unshortened" "just now you"
+  check string "unshortened" (no_rail ^ "just now you")
     (first_gutter ~origin:Layout.Origin_inline entries)
 
 let test_wrapped_rows_indent_under_the_first () =
@@ -1715,15 +1777,22 @@ let test_a_continuation_survives_the_renderer_cut () =
   | [ _; second ] ->
       let gutter = second.Layout.gutter in
       let at = second.Layout.gutter_label_at in
-      (* Asserted rather than assumed: this row is the whole reason a zero cut
-         happens here, and a continuation that started reporting a boundary
-         would leave the checks below passing on a row that was never it. *)
-      check int "a continuation asks to be cut at zero" 0 at;
-      check string "the renderer redraws the margin it was given" gutter
-        (Layout.take_cells gutter at ^ Layout.drop_cells gutter at);
+      (* Asserted rather than assumed: this row is the whole reason the cut
+         lands where it does, and a continuation that started reporting a
+         speaker boundary would leave the checks below passing on a row that
+         was never it. Past the rail there is nothing left to separate: a
+         continuation draws no name. *)
+      check int "a continuation is cut at the rail and no further"
+        second.Layout.gutter_rail_cells at;
+      let rail = Layout.take_cells gutter second.Layout.gutter_rail_cells in
+      let rest = Layout.drop_cells gutter second.Layout.gutter_rail_cells in
+      let redrawn =
+        rail ^ Layout.take_cells rest (at - second.Layout.gutter_rail_cells)
+        ^ Layout.drop_cells rest (at - second.Layout.gutter_rail_cells)
+      in
+      check string "the renderer redraws the margin it was given" gutter redrawn;
       check string "the clock reads once" "22:32"
-        (Layout.take_cells gutter at ^ Layout.drop_cells gutter at
-        |> fun redrawn -> Layout.take_cells redrawn 5)
+        (Layout.take_cells (Layout.drop_cells redrawn Layout.turn_rail_cells) 5)
   | _ -> failwith "expected two rows"
 ;;
 
@@ -1776,6 +1845,15 @@ let test_the_two_link_readers_agree () =
     ; ("two in a row", "https://a.test/one https://a.test/two")
     ; ("closed by punctuation", "the evidence (https://a.test/x).")
     ; ("at the very end", "read https://a.test/z")
+      (* The scheme test reads bytes where they are now, so the cases that
+         run off the end of the text, or share a first letter without
+         sharing the scheme, have to answer as they always did. *)
+    ; ("a truncated scheme at the end", "cut off here http")
+    ; ("almost the scheme", "https:/a.test/x and http:/b.test/y")
+    ; ("a word that starts the same way", "https and http and httpx://a.test/q")
+    ; ("upper case is a different scheme", "HTTPS://a.test/x")
+    ; ("the text is one character", "h")
+    ; ("nothing at all", "")
     ]
 
 (* The margin is paid for out of the body, not out of the frame. A row that
@@ -1876,6 +1954,8 @@ let () =
             test_utf8_scalar_input_contract
         ; test_case "backspace removes one UTF-8 scalar" `Quick
             test_backspace_removes_one_utf8_scalar
+        ; test_case "word delete removes blanks then word" `Quick
+            test_word_delete_removes_blanks_then_word
         ; test_case "input viewport keeps latest scalars" `Quick
             test_input_viewport_keeps_latest_complete_scalars
         ; test_case "input cursor uses visible cells" `Quick
@@ -1912,6 +1992,8 @@ let () =
             test_a_body_of_one_line_is_one_row
         ; test_case "a rendered body is escaped before it is rendered" `Quick
             test_a_rendered_body_is_escaped_before_it_is_rendered
+        ; test_case "a second walk pays for what it newly reaches" `Quick
+            test_a_second_walk_pays_for_what_it_newly_reaches
         ; test_case "clamping a scroll reads only as far as it must" `Quick
             test_clamping_a_scroll_reads_only_as_far_as_it_must
         ; test_case "a scrolled window matches the full walk" `Quick

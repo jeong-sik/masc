@@ -136,10 +136,260 @@ let override_restore_failure_count () =
     ~labels:[ ("prompt", "override_restore") ]
     ()
 
+(* ── Fragment-group slots (#32780, #32814) ───────────────────────────
+
+   A group file registers each [### marker] paragraph as <group>.<marker>
+   in file order, and the prose before the first marker under the group
+   key itself. A marker obeys the prompt-key grammar, so a markdown
+   heading with spaces stays inside its paragraph. *)
+let with_prompts_dir files f =
+  let dir = test_dir () in
+  let prompts_dir = Filename.concat dir "prompts" in
+  Unix.mkdir prompts_dir 0o755;
+  List.iter
+    (fun (name, content) -> write_file (Filename.concat prompts_dir name) content)
+    files;
+  Fun.protect
+    ~finally:(fun () ->
+      Prompt_registry.clear ();
+      cleanup_dir dir)
+    (fun () ->
+      Prompt_registry.clear ();
+      Prompt_registry.set_markdown_dir prompts_dir;
+      Lib.Prompt_defaults.init ();
+      f ())
+;;
+
+(* (key, operator_surface) for every registered prompt. *)
+let registered_surfaces () =
+  match Prompt_registry.prompts_json () with
+  | `Assoc [ ("prompts", `List prompts) ] ->
+    List.filter_map
+      (function
+        | `Assoc fields -> (
+          match
+            (List.assoc_opt "key" fields, List.assoc_opt "operator_surface" fields)
+          with
+          | Some (`String key), Some (`String surface) -> Some (key, surface)
+          | _ -> None)
+        | _ -> None)
+      prompts
+  | _ -> []
+;;
+
+(* The registered description of one key; [None] when unregistered. *)
+let registered_description key =
+  match Prompt_registry.prompts_json () with
+  | `Assoc [ ("prompts", `List prompts) ] ->
+    List.find_map
+      (function
+        | `Assoc fields -> (
+          match (List.assoc_opt "key" fields, List.assoc_opt "description" fields) with
+          | Some (`String k), Some (`String d) when String.equal k key -> Some d
+          | _ -> None)
+        | _ -> None)
+      prompts
+  | _ -> None
+;;
+
+(* The registered template_variables of one key; [None] when unregistered. *)
+let registered_variables key =
+  match Prompt_registry.prompts_json () with
+  | `Assoc [ ("prompts", `List prompts) ] ->
+    List.find_map
+      (function
+        | `Assoc fields -> (
+          match (List.assoc_opt "key" fields, List.assoc_opt "template_variables" fields) with
+          | Some (`String k), Some (`List vars) when String.equal k key ->
+            Some
+              (List.filter_map
+                 (function `String v -> Some v | _ -> None)
+                 vars)
+          | _ -> None)
+        | _ -> None)
+      prompts
+  | _ -> None
+;;
+
+let group_fixture =
+  {|---
+description: group fragments for the slot test
+category: test
+---
+### standing.current (vars: target, behind)
+At {{target}}, even with {{behind}} behind.
+
+### section (vars: count, rows)
+### Repository Checkouts ({{count}})
+Where each checkout stands.
+
+{{rows}}
+
+### standing.diverged
+Diverged; no numbers.
+|}
+;;
+
+let test_fragment_group_slots () =
+  let open Alcotest in
+  with_prompts_dir [ ("test.group.md", group_fixture) ] (fun () ->
+      check string "the first slot is its own paragraph"
+        "At {{target}}, even with {{behind}} behind."
+        (Prompt_registry.get_prompt "test.group.standing.current");
+      check string "the last slot keeps its paragraph" "Diverged; no numbers."
+        (Prompt_registry.get_prompt "test.group.standing.diverged");
+      check string "a heading with spaces stays inside its slot"
+        "### Repository Checkouts ({{count}})\nWhere each checkout stands.\n\n{{rows}}"
+        (Prompt_registry.get_prompt "test.group.section");
+      check bool "a heading with spaces is not a slot" false
+        (List.exists
+           (fun (key, _) -> String.starts_with ~prefix:"test.group.Repository" key)
+           (registered_surfaces ()));
+      (match
+         Prompt_registry.render_prompt_template "test.group.standing.current"
+           [ ("target", "T"); ("behind", "2") ]
+       with
+       | Ok rendered ->
+         check string "a slot renders its declared variables"
+           "At T, even with 2 behind." rendered
+       | Error message -> fail ("render failed: " ^ message));
+      check string "a group without preamble leaves the group key unregistered"
+        "" (Prompt_registry.get_prompt "test.group"))
+;;
+
+let body_and_slots_fixture =
+  {|---
+description: a main body that also carries slots
+category: test
+operator_surface: primary
+template_variables: [name]
+---
+You are {{name}}.
+
+### identity (vars: role)
+Your role is {{role}}.
+|}
+;;
+
+let test_group_body_registers_under_group_key () =
+  let open Alcotest in
+  with_prompts_dir [ ("test.body.md", body_and_slots_fixture) ] (fun () ->
+      check string "the prose before the first marker is the group body"
+        "You are {{name}}." (Prompt_registry.get_prompt "test.body");
+      check string "the slot is still its own paragraph" "Your role is {{role}}."
+        (Prompt_registry.get_prompt "test.body.identity");
+      let surfaces = registered_surfaces () in
+      check (option string) "the group body keeps the frontmatter surface"
+        (Some "primary") (List.assoc_opt "test.body" surfaces);
+      (* A slot is a fragment of what its group assembles unless its marker
+         says otherwise; [test_a_slot_declares_its_own_surface] covers the
+         marked case. *)
+      check (option string) "an unmarked slot is a fragment" (Some "fragment")
+        (List.assoc_opt "test.body.identity" surfaces))
+;;
+
+let slot_surface_fixture =
+  {|---
+description: a group whose slots do not share one surface
+category: test
+operator_surface: primary
+---
+The body an operator tunes.
+
+### identity (vars: name) [primary: what the keeper is called]
+You are {{name}}.
+
+### row (vars: id)
+- {{id}}
+|}
+;;
+
+(* Folding files by reader put operator-facing prompts and assembly fragments
+   in one file, so the surface has to be per slot. A slot is a fragment unless
+   its marker says otherwise. *)
+let test_a_slot_declares_its_own_surface () =
+  let open Alcotest in
+  with_prompts_dir [ ("test.surface.md", slot_surface_fixture) ] (fun () ->
+      let surfaces = registered_surfaces () in
+      check (option string) "the group body keeps the file surface" (Some "primary")
+        (List.assoc_opt "test.surface" surfaces);
+      check (option string) "a marked slot is operator-facing" (Some "primary")
+        (List.assoc_opt "test.surface.identity" surfaces);
+      check (option string) "an unmarked slot is a fragment" (Some "fragment")
+        (List.assoc_opt "test.surface.row" surfaces);
+      check string "the marker suffix is not part of the value" "You are {{name}}."
+        (Prompt_registry.get_prompt "test.surface.identity");
+      check (option (list string)) "variables still parse beside the suffix"
+        (Some [ "name" ]) (registered_variables "test.surface.identity");
+      (* Without its own sentence every row in a folded file would repeat the
+         group's description, which is what the operator reads the list by. *)
+      check (option string) "a marked slot carries its own description"
+        (Some "what the keeper is called")
+        (registered_description "test.surface.identity");
+      check (option string) "an unmarked slot falls back to the group's"
+        (Some "a group whose slots do not share one surface")
+        (registered_description "test.surface.row"))
+;;
+
+let test_heading_only_body_is_prose () =
+  let open Alcotest in
+  with_prompts_dir
+    [ ( "test.heading.md",
+        "---\ndescription: a heading-only body\ncategory: test\n---\n\n### Skills Named by Tasks You Hold\n"
+      )
+    ; ( "test.oneword.md",
+        "---\ndescription: a one-word capitalised heading\ncategory: test\n---\nIntro.\n\n### Summary\nText.\n"
+      ) ]
+    (fun () ->
+      let surfaces = registered_surfaces () in
+      check string "the heading is the prompt's own body"
+        "### Skills Named by Tasks You Hold"
+        (String.trim (Prompt_registry.get_prompt "test.heading"));
+      check bool "the file key is registered" true
+        (List.mem_assoc "test.heading" surfaces);
+      check bool "no slot key is minted from the heading" false
+        (List.exists
+           (fun (key, _) -> String.starts_with ~prefix:"test.heading." key)
+           surfaces);
+      check string "a capitalised one-word heading is prose"
+        "Intro.\n\n### Summary\nText."
+        (String.trim (Prompt_registry.get_prompt "test.oneword"));
+      check bool "no slot key is minted from a capitalised heading" false
+        (List.exists
+           (fun (key, _) -> String.starts_with ~prefix:"test.oneword." key)
+           surfaces))
+;;
+
+let test_duplicate_and_empty_slots () =
+  let open Alcotest in
+  with_prompts_dir
+    [ ( "test.dup.md",
+        "---\ndescription: repeated and empty markers\ncategory: test\n---\n### a (vars: x)\nA {{x}}\n\n### a\nB\n\n### b\n"
+      ) ]
+    (fun () ->
+      check string "the first paragraph of a repeated marker stands" "A {{x}}"
+        (Prompt_registry.get_prompt "test.dup.a");
+      check (option (list string)) "its variables come from the same paragraph"
+        (Some [ "x" ]) (registered_variables "test.dup.a");
+      check (option (list string)) "a marker without a paragraph is not registered"
+        None (registered_variables "test.dup.b"))
+;;
+
 let () =
   let open Alcotest in
   run "Prompt_registry_defaults"
     [
+      ( "fragment_group_slots",
+        [ test_case "slots keep their own paragraphs in file order" `Quick
+            test_fragment_group_slots
+        ; test_case "prose before the first marker registers under the group key"
+            `Quick test_group_body_registers_under_group_key
+        ; test_case "a heading-only body is prose, not a slot" `Quick
+            test_heading_only_body_is_prose
+        ; test_case "a slot declares its own operator surface" `Quick
+            test_a_slot_declares_its_own_surface
+        ; test_case "a repeated marker keeps its first paragraph and an empty one is skipped"
+            `Quick test_duplicate_and_empty_slots ] );
       ( "registration",
         [
           (* Guards the count assertion below: a bulk key rename that maps two
@@ -641,3 +891,4 @@ let () =
               | _ -> fail "unexpected prompt JSON");
         ] );
     ]
+

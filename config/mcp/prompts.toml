@@ -1,0 +1,20 @@
+# MCP prompts/list + prompts/get catalogue prose (RFC
+# prompts-and-tool-definitions-outside-ocaml §3 item 8). The catalogue is one
+# prompt long; test_mcp_server_eio pins that length and the description's
+# "tool" wording. Decoded once at boot by Mcp_surface_toml. Icons stay in
+# OCaml (Mcp_prompt_surface): they are generated SVG data, not prose.
+
+[[prompts]]
+name = "tool_help"
+title = "Tool Help"
+description = "Compose a grounded explanation for a specific MASC MCP tool."
+
+[[prompts.arguments]]
+name = "tool_name"
+description = "Exact MCP tool name"
+required = true
+
+[[prompts.arguments]]
+name = "focus"
+description = "Optional question or emphasis"
+required = false

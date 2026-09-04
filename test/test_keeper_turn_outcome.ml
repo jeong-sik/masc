@@ -25,8 +25,8 @@ let outcome : TO.t testable =
 let all =
   [ TO.Visible_reply
   ; TO.Continuation_checkpoint
-  ; TO.External_effect_completed
-  ; TO.External_effect_pending
+  ; TO.Terminal_effect_settled
+  ; TO.Awaiting_gate_approval
   ; TO.No_visible_reply
   ]
 
@@ -37,6 +37,39 @@ let test_label_round_trip () =
         (Some t)
         (TO.of_label (TO.to_label t)))
     all
+
+(* The label below is on disk in chat lanes written before a Gate deferral
+   stopped ending the turn, and the store is append-only, so nothing retires
+   those rows. Its constructor was renamed and no turn produces it any more;
+   what still has to hold is that the string decodes, because both readers
+   reject an unknown label rather than skipping the row.
+
+   The round-trip test above cannot carry this. It asks whether [to_label]
+   and [of_label] agree with each other, which stays true when a rename moves
+   both together and takes the disk rows out from under them. This asks for
+   the string itself. *)
+let test_parked_call_label_still_decodes () =
+  check (option outcome) "the outcome a pre-change lane holds"
+    (Some TO.Awaiting_gate_approval)
+    (TO.of_label "external_effect_pending");
+  check string "and it goes back out unchanged" "external_effect_pending"
+    (TO.to_label TO.Awaiting_gate_approval);
+  let row =
+    `List
+      [ `Assoc
+          [ ("t", `String "status")
+          ; ("kind", `String "external_effect_pending")
+          ]
+      ]
+  in
+  match Masc.Keeper_chat_blocks.blocks_of_yojson row with
+  | Some
+      [ Masc.Keeper_chat_blocks.Status
+          { kind = Masc.Keeper_chat_blocks.Awaiting_gate_approval }
+      ] ->
+    ()
+  | Some _ | None ->
+    fail "a status block from a pre-change lane no longer decodes"
 
 let test_unknown_label_is_none () =
   List.iter
@@ -62,9 +95,6 @@ let test_of_stop_reason () =
   check outcome "durable stimulus yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 }));
-  check outcome "external effect wait -> typed pending" TO.External_effect_pending
-    (TO.of_stop_reason
-       (Runtime_agent.Awaiting_external_effect { turns_used = 2 }));
   check outcome "repeated tool yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.Yielded_after_repeated_tool_call
@@ -88,18 +118,10 @@ let test_of_result_surface () =
     TO.No_visible_reply
     (TO.of_result_surface ~response_text:"   " Runtime_agent.Completed)
 
-let test_external_effect_wait_is_typed_status () =
-  let stop_reason = Runtime_agent.Awaiting_external_effect { turns_used = 2 } in
-  check bool "external effect prose is suppressed" true
-    (Response_text.stop_reason_suppresses_visible_response stop_reason);
-  check outcome "external effect remains typed with blank text"
-    TO.External_effect_pending
-    (TO.of_result_surface ~response_text:"" stop_reason)
-
 let test_external_effect_completed_has_no_direct_reply_error () =
   let payload_json =
     `Assoc
-      [ TO.wire_key, `String (TO.to_label TO.External_effect_completed)
+      [ TO.wire_key, `String (TO.to_label TO.Terminal_effect_settled)
       ; "reply", `String ""
       ]
   in
@@ -119,7 +141,7 @@ let test_canonical_payload_carries_delivery_target () =
        @ target_json)
     |> Yojson.Safe.to_string
   in
-  let body_with = body_for TO.External_effect_completed in
+  let body_with = body_for TO.Terminal_effect_settled in
   (match
      Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
        (body_with
@@ -205,7 +227,7 @@ let test_canonical_payload_carries_memory_revision () =
        @ effect_json)
     |> Yojson.Safe.to_string
   in
-  let body_with = body_for TO.External_effect_completed in
+  let body_with = body_for TO.Terminal_effect_settled in
   let revision_key = Masc.Keeper_tool_execution.memory_revision_wire_key in
   (* A memory-write completion is the other receipt shape for this outcome:
      it proves the effect through its revision and has no delivery target
@@ -277,11 +299,10 @@ let test_canonical_payload_carries_memory_revision () =
   | Ok _ -> fail "a duplicated memory revision must reject the payload"
 
 let test_external_effect_status_survives_server_projection () =
-  let turn_outcome =
-    TO.of_result_surface
-      ~response_text:""
-      (Runtime_agent.Awaiting_external_effect { turns_used = 2 })
-  in
+  (* No stop reason maps here any more -- a Gate deferral parks the call and
+     the turn keeps running.  The outcome is still written by lanes recorded
+     before that change, so the server projection has to carry it. *)
+  let turn_outcome = TO.Awaiting_gate_approval in
   let turn_ref = Ids.Turn_ref.make ~trace_id:"gate-ack" ~absolute_turn:2 in
   let body =
     `Assoc
@@ -299,7 +320,7 @@ let test_external_effect_status_survives_server_projection () =
       (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
          error)
   | Ok canonical ->
-    check outcome "server preserves typed Gate wait" TO.External_effect_pending
+    check outcome "server preserves typed Gate wait" TO.Awaiting_gate_approval
       canonical.turn_outcome;
     check string "server keeps control status out of reply text" "" canonical.visible_reply;
     check (option string) "server accepts typed control status without prose"
@@ -321,12 +342,12 @@ let test_external_effect_status_survives_server_projection () =
 let test_external_effect_status_becomes_persisted_chat_block () =
   match
     Stream.For_testing.persisted_reply_blocks
-      ~turn_outcome:TO.External_effect_pending
+      ~turn_outcome:TO.Awaiting_gate_approval
       None
   with
   | Some
       [ Masc.Keeper_chat_blocks.Status
-          { kind = Masc.Keeper_chat_blocks.External_effect_pending }
+          { kind = Masc.Keeper_chat_blocks.Awaiting_gate_approval }
       ] ->
     ()
   | Some _ -> fail "typed Gate wait persisted the wrong block shape"
@@ -353,7 +374,6 @@ let test_terminal_effect_defer_kinds_remain_distinct () =
       check string label expected
         (match actual with
          | Runtime_agent.Durable_stimulus_waiting -> "durable_stimulus_waiting"
-         | Runtime_agent.External_effect_deferred -> "external_effect_deferred"
          | Runtime_agent.Operation_queued -> "operation_queued"
          | Runtime_agent.Repeated_tool_call _ -> "repeated_tool_call"
          | Runtime_agent.Repeated_assistant_text _ -> "repeated_assistant_text"
@@ -365,10 +385,16 @@ let test_terminal_effect_defer_kinds_remain_distinct () =
     "generic deferred tool preserves existing checkpoint"
     Masc.Keeper_tools_agent_core.Deferred_tool_result
     "durable_stimulus_waiting";
-  expect_yield
-    "typed external effect uses Gate acknowledgement path"
-    Masc.Keeper_tools_agent_core.External_effect_deferred
-    "external_effect_deferred"
+  (* A Gate deferral parks one call and nothing has run yet, so the turn keeps
+     going. The host replays the parked call once the approval resolves. *)
+  match
+    Masc.Keeper_agent_run.terminal_effect_boundary_decision
+      Masc.Keeper_tools_agent_core.External_effect_deferred
+  with
+  | Ok Runtime_agent.Continue -> ()
+  | Ok (Runtime_agent.Yield _) -> fail "a parked external effect ended the turn"
+  | Error error ->
+    fail ("parked external effect: " ^ Agent_core.Error.to_string error)
 
 let test_applied_gate_replay_seeds_terminal_settlement () =
   let output_ref =
@@ -453,6 +479,64 @@ let tool_call ?(input = Some "input") ?(output = Some "output") tool_name
   ; input_fingerprint = input
   ; output_fingerprint = output
   }
+
+(* The clock axis. [repeated_exact_tool_call] needs the output fingerprint to
+   stand still as proof that nothing advanced, so a tool whose result is a
+   timestamp escapes it by construction: live, one keeper made 280 of a turn's
+   281 tool calls to keeper_time_now and neither the tool axis nor the text
+   axis saw it (masc #33021). This axis drops the output and requires the
+   repeats to be adjacent instead. *)
+let test_repeated_tool_call_input_boundary () =
+  let detect =
+    Masc.Keeper_agent_run.For_testing.repeated_tool_call_input ~threshold:5
+  in
+  let clock n =
+    List.init n (fun i ->
+      tool_call ~output:(Some (Printf.sprintf "11:07:%02dZ" i)) "keeper_time_now")
+  in
+  check
+    (option (pair string int))
+    "a moving result no longer hides the loop"
+    (Some ("keeper_time_now", 5))
+    (detect (clock 5));
+  check
+    (option (pair string int))
+    "the exact axis cannot see the same calls"
+    None
+    (Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call
+       ~threshold:5
+       (clock 5));
+  check
+    (option (pair string int))
+    "four consecutive is still ordinary work"
+    None
+    (detect (clock 4));
+  check
+    (option (pair string int))
+    "a different input breaks the streak"
+    None
+    (detect
+       (tool_call ~input:(Some "a") "Execute"
+        :: tool_call ~input:(Some "b") "Execute"
+        :: List.init 4 (fun _ -> tool_call ~input:(Some "a") "Execute")));
+  check
+    (option (pair string int))
+    "non-adjacent repeats are re-reads, not a loop"
+    None
+    (detect
+       [ tool_call ~input:(Some "a") "Read"
+       ; tool_call ~input:(Some "b") "Read"
+       ; tool_call ~input:(Some "a") "Read"
+       ; tool_call ~input:(Some "b") "Read"
+       ; tool_call ~input:(Some "a") "Read"
+       ; tool_call ~input:(Some "b") "Read"
+       ]);
+  check
+    (option (pair string int))
+    "missing fingerprints never guess"
+    None
+    (detect (List.init 5 (fun _ -> tool_call ~input:None "keeper_time_now")))
+;;
 
 let test_repeated_exact_tool_call_boundary () =
   let detect =
@@ -549,7 +633,6 @@ let test_autonomous_yield_boundary_contract () =
   (match F.runtime_yield_reason chat with
     | Runtime_agent.Operation_queued -> ()
     | Runtime_agent.Durable_stimulus_waiting
-    | Runtime_agent.External_effect_deferred
     | Runtime_agent.Repeated_tool_call _
    | Runtime_agent.Repeated_assistant_text _
    | Runtime_agent.Terminal_tool_completed ->
@@ -557,7 +640,6 @@ let test_autonomous_yield_boundary_contract () =
   (match F.runtime_yield_reason durable_stimulus with
     | Runtime_agent.Durable_stimulus_waiting -> ()
     | Runtime_agent.Operation_queued
-    | Runtime_agent.External_effect_deferred
    | Runtime_agent.Repeated_tool_call _
    | Runtime_agent.Repeated_assistant_text _
    | Runtime_agent.Terminal_tool_completed ->
@@ -578,7 +660,6 @@ let test_autonomous_yield_boundary_contract () =
      | Runtime_agent.Completed
      | Runtime_agent.Yielded_to_operation_queued _
      | Runtime_agent.Yielded_to_durable_stimulus _
-     | Runtime_agent.Awaiting_external_effect _
      | Runtime_agent.Yielded_after_repeated_tool_call _
      | Runtime_agent.Yielded_after_repeated_assistant_text _
      | Runtime_agent.InputRequired _ ->
@@ -595,7 +676,6 @@ let test_autonomous_yield_boundary_contract () =
      | Runtime_agent.Completed
      | Runtime_agent.Yielded_to_operation_queued _
      | Runtime_agent.Yielded_to_durable_stimulus _
-     | Runtime_agent.Awaiting_external_effect _
      | Runtime_agent.Yielded_after_repeated_tool_call _
      | Runtime_agent.Yielded_after_repeated_assistant_text _
      | Runtime_agent.InputRequired _ ->
@@ -609,7 +689,6 @@ let test_autonomous_yield_boundary_contract () =
      | Runtime_agent.Completed -> true
      | Runtime_agent.Yielded_to_operation_queued _
      | Runtime_agent.Yielded_to_durable_stimulus _
-     | Runtime_agent.Awaiting_external_effect _
      | Runtime_agent.Yielded_after_repeated_tool_call _
      | Runtime_agent.Yielded_after_repeated_assistant_text _
      | Runtime_agent.InputRequired _ -> false)
@@ -676,7 +755,7 @@ let test_payload_decode () =
   check outcome "visible label" TO.Visible_reply
     (decoded_exn
        (payload [ (TO.wire_key, `String "visible_reply") ]));
-  check outcome "completed external effect label" TO.External_effect_completed
+  check outcome "completed external effect label" TO.Terminal_effect_settled
     (decoded_exn
        (payload [ (TO.wire_key, `String "external_effect_completed") ]));
   check outcome "no visible reply label" TO.No_visible_reply
@@ -805,6 +884,46 @@ let test_terminal_commit_error_cannot_become_delivery_success () =
   | Error observed -> check string "operation commit preserves typed Error" persist_error observed
   | Ok _ -> fail "operation commit was downgraded to delivery success"
 
+let spoken_row name ~turn_outcome ~spoken expected =
+  match Stream.For_testing.control_turn_delivery ~turn_outcome ~spoken with
+  | `Assistant_row observed -> check string name expected observed
+  | `Tool_calls_only -> fail (name ^ ": the keeper's words were dropped")
+
+(* The defect this pins: all three of these outcomes wrote [content = ""]
+   whether or not the turn had spoken, so an operator who asked a direct
+   question received an empty assistant row while the raw trace still held the
+   reply (masc #32727, #32660). *)
+let test_control_turn_keeps_spoken_words () =
+  let words = "I read the file; the clone failed on DNS." in
+  spoken_row "continuation checkpoint keeps the words"
+    ~turn_outcome:Masc.Keeper_turn_outcome.Continuation_checkpoint
+    ~spoken:(Some words) words;
+  spoken_row "pending external effect keeps the words"
+    ~turn_outcome:Masc.Keeper_turn_outcome.Awaiting_gate_approval
+    ~spoken:(Some words) words;
+  spoken_row "completed external effect keeps the words"
+    ~turn_outcome:Masc.Keeper_turn_outcome.Terminal_effect_settled
+    ~spoken:(Some words) words
+
+let test_wordless_control_turn_delivery () =
+  (* A wordless checkpoint still writes its row: the typed status block is the
+     row's content. A wordless completed effect writes no row at all, because
+     its tool-call record is the whole of what the turn did. *)
+  spoken_row "wordless checkpoint still writes a row"
+    ~turn_outcome:Masc.Keeper_turn_outcome.Continuation_checkpoint
+    ~spoken:None "";
+  spoken_row "wordless pending effect still writes a row"
+    ~turn_outcome:Masc.Keeper_turn_outcome.Awaiting_gate_approval
+    ~spoken:None "";
+  match
+    Stream.For_testing.control_turn_delivery
+      ~turn_outcome:Masc.Keeper_turn_outcome.Terminal_effect_settled
+      ~spoken:None
+  with
+  | `Tool_calls_only -> ()
+  | `Assistant_row _ ->
+    fail "a wordless completed effect must not manufacture an assistant row"
+
 let test_media_only_queued_reply_uses_delivery_path () =
   match
     Stream.For_testing.empty_reply_delivery_plan
@@ -914,10 +1033,10 @@ let test_direct_reply_visible_text () =
 let test_connector_projection_keeps_external_wait_typed () =
   match
     Masc.Keeper_chat_blocks.connector_projection
-      ~turn_outcome:TO.External_effect_pending
+      ~turn_outcome:TO.Awaiting_gate_approval
       ~reply:(Some "assistant preface that must not survive")
   with
-  | Connector_status { kind = External_effect_pending } -> ()
+  | Connector_status { kind = Awaiting_gate_approval } -> ()
   | Connector_status { kind = Continuation_checkpoint }
   | Connector_text _ | Connector_no_visible_reply ->
     fail "external-effect wait must remain a typed connector status"
@@ -929,14 +1048,14 @@ let test_connector_projection_keeps_continuation_typed () =
       ~reply:(Some "assistant preface that must not survive")
   with
   | Connector_status { kind = Continuation_checkpoint } -> ()
-  | Connector_status { kind = External_effect_pending }
+  | Connector_status { kind = Awaiting_gate_approval }
   | Connector_text _ | Connector_no_visible_reply ->
     fail "continuation checkpoint must remain a typed connector status"
 
 let test_connector_projection_suppresses_completed_external_effect () =
   match
     Masc.Keeper_chat_blocks.connector_projection
-      ~turn_outcome:TO.External_effect_completed
+      ~turn_outcome:TO.Terminal_effect_settled
       ~reply:None
   with
   | Connector_no_visible_reply -> ()
@@ -951,7 +1070,7 @@ let test_direct_reply_projection_keeps_external_wait_typed () =
          ; ("turn_outcome", `String "external_effect_pending")
          ])
   with
-  | Ok (Connector_status { kind = External_effect_pending }) -> ()
+  | Ok (Connector_status { kind = Awaiting_gate_approval }) -> ()
   | Ok (Connector_status { kind = Continuation_checkpoint })
   | Ok (Connector_text _ | Connector_no_visible_reply) ->
     fail "direct reply collapsed external-effect wait into silence"
@@ -965,13 +1084,13 @@ let () =
         [
           test_case "label round trip" `Quick test_label_round_trip;
           test_case "unknown label is None" `Quick test_unknown_label_is_none;
+          test_case "the parked-call label still decodes" `Quick
+            test_parked_call_label_still_decodes;
         ] );
       ( "mapping",
         [
           test_case "of_stop_reason" `Quick test_of_stop_reason;
           test_case "of_result_surface" `Quick test_of_result_surface;
-          test_case "external effect wait is typed status" `Quick
-            test_external_effect_wait_is_typed_status;
           test_case "completed external effect has no direct reply error" `Quick
             test_external_effect_completed_has_no_direct_reply_error;
           test_case "external effect status survives server projection" `Quick
@@ -988,6 +1107,8 @@ let () =
             test_applied_gate_replay_seeds_terminal_settlement;
           test_case "repeated exact tool call boundary" `Quick
             test_repeated_exact_tool_call_boundary;
+          test_case "repeated tool input boundary" `Quick
+            test_repeated_tool_call_input_boundary;
           test_case "repeated assistant text boundary" `Quick
             test_repeated_assistant_text_boundary;
           test_case "autonomous yield boundary contract" `Quick
@@ -1005,6 +1126,10 @@ let () =
             test_queued_delivery_requires_exact_turn_ref;
           test_case "terminal commit error cannot become delivery success" `Quick
             test_terminal_commit_error_cannot_become_delivery_success;
+          test_case "control turn keeps the keeper's words" `Quick
+            test_control_turn_keeps_spoken_words;
+          test_case "wordless control turn delivery" `Quick
+            test_wordless_control_turn_delivery;
           test_case "media-only queued reply uses delivery path" `Quick
             test_media_only_queued_reply_uses_delivery_path;
           test_case "media continuation uses assistant delivery path" `Quick

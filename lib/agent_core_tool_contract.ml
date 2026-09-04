@@ -11,11 +11,6 @@ type agent_core_tool_binding = {
   arg_bindings : (string * arg_source) list;
 }
 
-let assoc_field name value = (name, value)
-
-let string_prop = Tool_schema_dsl.string_prop
-let object_schema = Tool_schema_dsl.object_schema
-
 let identity_arg_bindings = function
   | `Assoc schema_fields ->
     (match List.assoc_opt "properties" schema_fields with
@@ -34,72 +29,59 @@ let canonical_add_task =
   | Some schema -> schema
   | None -> invalid_arg "canonical masc_add_task schema is not registered"
 
-let task_item_schema =
-  object_schema ~required:[ "title"; "description" ]
-    [
-      assoc_field "title" (string_prop "Task title");
-      assoc_field "description" (string_prop "Task description");
-    ]
+(* The deliberately narrower agent-core wording and input shape live in the
+   [agent_core_projection] table of the tool's own config/tools/<name>.toml
+   declaration (RFC prompts-and-tool-definitions-outside-ocaml §2.2), decoded
+   once here at module initialization. A missing file, a missing table, or a
+   declaration that does not decode refuses the boot — the same posture as
+   [canonical_add_task] above. *)
+let projection_of_name name : Masc_domain.tool_schema =
+  let rel = "tools/" ^ name ^ ".toml" in
+  match Embedded_config.read rel with
+  | None -> invalid_arg (Printf.sprintf "embedded tool definition missing: %s" rel)
+  | Some contents ->
+    (match Tool_definition_toml.load ~name ~contents with
+     | Ok { Tool_definition_toml.agent_core_projection = Some schema; _ } -> schema
+     | Ok { Tool_definition_toml.agent_core_projection = None; _ } ->
+       invalid_arg (Printf.sprintf "%s declares no agent_core_projection table" rel)
+     | Error message -> invalid_arg message)
+;;
+
+let batch_add_tasks_projection = projection_of_name "masc_batch_add_tasks"
+let broadcast_projection = projection_of_name "masc_broadcast"
+let heartbeat_projection = projection_of_name "masc_heartbeat"
 
 let agent_core_bindings : agent_core_tool_binding list =
-  [
-    {
-      name = "masc_add_task";
-      canonical_operation = "masc_add_task";
-      description = canonical_add_task.description;
-      input_schema = canonical_add_task.input_schema;
-      arg_bindings = identity_arg_bindings canonical_add_task.input_schema;
-    };
-    {
-      name = "masc_batch_add_tasks";
-      canonical_operation = "masc_batch_add_tasks";
-      description = "Create multiple tasks at once for planner-driven decomposition.";
-      input_schema =
-        object_schema ~required:[ "tasks" ]
-          [
-            ( "tasks",
-              `Assoc
-                [
-                  assoc_field "type" (`String "array");
-                  assoc_field "description"
-                    (`String "Array of {title, description} task objects");
-                  assoc_field "minItems" (`Int 1);
-                  assoc_field "items" task_item_schema;
-                ] );
-          ];
-      arg_bindings = [ ("tasks", Input_field "tasks") ];
-    };
-    {
-      name = "masc_broadcast";
-      canonical_operation = "masc_broadcast";
-      description = "Broadcast a message to all active agents. Use when sharing status updates, workspace signals, or requesting help from any available agent.";
-      input_schema =
-        object_schema ~required:[ "content" ]
-          [
-            assoc_field "content" (string_prop "Broadcast body text");
-            assoc_field "task_cache_subject_agent"
-              (string_prop
-                 "Agent whose current-task cache was observed; supply together with task_cache_task_id");
-            assoc_field "task_cache_task_id"
-              (string_prop
-                 "Task ID observed in the subject agent cache; supply together with task_cache_subject_agent");
-          ];
+  [ { name = "masc_add_task"
+    ; canonical_operation = "masc_add_task"
+    ; description = canonical_add_task.description
+    ; input_schema = canonical_add_task.input_schema
+    ; arg_bindings = identity_arg_bindings canonical_add_task.input_schema
+    }
+  ; { name = "masc_batch_add_tasks"
+    ; canonical_operation = "masc_batch_add_tasks"
+    ; description = batch_add_tasks_projection.description
+    ; input_schema = batch_add_tasks_projection.input_schema
+    ; arg_bindings = identity_arg_bindings batch_add_tasks_projection.input_schema
+    }
+  ; { name = "masc_broadcast"
+    ; canonical_operation = "masc_broadcast"
+    ; description = broadcast_projection.description
+    ; input_schema = broadcast_projection.input_schema
+    ; (* [agent_name] is injected from the caller identity, so the projection
+         deliberately omits it from the model-facing schema. *)
       arg_bindings =
-        [
-          ("agent_name", Agent_name);
-          ("content", Input_field "content");
-          ("task_cache_subject_agent", Input_field "task_cache_subject_agent");
-          ("task_cache_task_id", Input_field "task_cache_task_id");
-        ];
-    };
-    { name = "masc_heartbeat";
-      canonical_operation = "masc_heartbeat";
-      description =
-        "Send an immediate heartbeat so this agent stays fresh in MASC visibility.";
-      input_schema = object_schema [];
-      arg_bindings = [ ("agent_name", Agent_name) ];
-    };
+        ("agent_name", Agent_name)
+        :: identity_arg_bindings broadcast_projection.input_schema
+    }
+  ; { name = "masc_heartbeat"
+    ; canonical_operation = "masc_heartbeat"
+    ; description = heartbeat_projection.description
+    ; input_schema = heartbeat_projection.input_schema
+    ; arg_bindings = [ "agent_name", Agent_name ]
+    }
   ]
+;;
 
 let agent_core_binding_by_name name =
   List.find_opt (fun binding -> String.equal binding.name name) agent_core_bindings

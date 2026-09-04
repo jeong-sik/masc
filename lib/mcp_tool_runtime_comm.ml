@@ -148,9 +148,9 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
              ~class_:Tool_result.Workflow_rejection
              ~start_time
              ~data
-             (Printf.sprintf
-                "Broadcast persisted, but the explicit Keeper delivery was rejected; do not resend; request_id=%s"
-                delivery.request_id))
+             (Tool_guidance.to_string
+                (Tool_guidance.Broadcast_delivery_rejected
+                   { request_id = delivery.request_id })))
 
 (** masc_messages — retrieve recent messages *)
 let handle_messages ~tool_name ~start_time (ctx : context) : tool_result option =

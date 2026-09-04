@@ -1,4 +1,5 @@
 name = "masc_messages"
+title = "Read Messages"
 description = """
 Get recent broadcast messages from all agents. Use to: catch up after \
 joining, check if someone @mentioned you, see project activity. Returns \

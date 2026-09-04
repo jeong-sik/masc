@@ -1547,10 +1547,6 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
     gap: 6px;
   }
 
-  .kw-mobile-rail-drawer .kw-cmp-readonly {
-    gap: 6px;
-  }
-
   .kw-mobile-rail-drawer .kw-tasktag {
     padding: 8px 10px;
   }
@@ -1578,30 +1574,6 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-att-item.bad .kw-att-dot { background: var(--color-status-err); box-shadow: 0 0 6px var(--color-status-err); }
 .kw-att-item.warn .kw-att-dot { background: var(--color-status-warn); box-shadow: 0 0 6px var(--color-status-warn); }
 .kw-att-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-/* ════ CONTEXT COMPACTION (rail) ═════════════════════════════════ */
-.kw-cmp-readonly {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid var(--color-border-divider);
-  font-size: var(--fs-11);
-  color: var(--color-fg-secondary);
-}
-.kw-cmp-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 10px;
-}
-.kw-compact-btn {
-  background: var(--color-accent-fg); color: var(--bg-deep); border-radius: 999px;
-  padding: 6px 10px;
-  font-size: var(--fs-11);
-}
-.kw-compact-btn:hover { background: var(--accent-brass-hover); color: var(--bg-deep); }
-.kw-compact-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ════ B3 — message bubbles: asymmetric "speech tail" + emboss ═══════
  * Ported from the standalone v2 .bubble: a sharp corner on the speaker side

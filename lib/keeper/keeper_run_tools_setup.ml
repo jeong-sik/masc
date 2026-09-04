@@ -8,7 +8,7 @@ open Keeper_agent_result
 open Keeper_agent_error
 open Keeper_agent_prompt_metrics
 
-(* [config/prompts/judge.effect.md] hands the judge this bundle as its
+(* config/prompts/judge.md, slot effect hands the judge this bundle as its
    entire visible evidence, and [keeper_gate_causal_context.mli] declares that
    evidence to be turn-local. The capture did not match. Measured on live
    pending approvals 2026-07-28: [history_messages] was 1,278,158 B of a
@@ -453,6 +453,7 @@ let prepare_agent_setup
     ; cleanup = keeper_tools_cleanup
     ; terminal_effect_state
     ; gate_replay_delivery
+    ; turn_sandbox_factory
     }
     =
     Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
@@ -473,6 +474,7 @@ let prepare_agent_setup
       ?composition_plan_index
       ~skill_activation_context
       ~turn_ctx_cell
+      ~checkpoint_owner:(fun () -> !active_checkpoint_owner)
       ()
   in
   let replay_delivery =
@@ -525,6 +527,27 @@ let prepare_agent_setup
           | Keeper_gate_replay.Indeterminate _ ) )
     | None ->
       Ok ()
+  in
+  (* A paste the TUI staged into this keeper's host bookkeeping bundle is
+     readable to an endpoint-owned keeper only once it sits on the endpoint;
+     the keeper-facing message already names the bare file. The turn owns the
+     endpoint -- its factory is the one allowed to start a stopped guest --
+     so delivery runs here, ahead of prompt assembly, so the first Read of
+     the turn finds the file. Shared-mount keepers read the staged file
+     directly and this is a no-op for them. *)
+  let retained_pastes =
+    Keeper_paste_delivery.deliver_for_turn ~config ~meta ~turn_sandbox_factory
+  in
+  (* For every retained paste the pointer in the message ("It is in your
+     working directory") is false. The TUI's own contract for a paste it
+     cannot place is to send the text itself, so the correction does exactly
+     that: it says the file is not there and carries the text, riding the
+     turn message the transcript persists -- visible to keeper and operator
+     alike. *)
+  let user_message =
+    match Keeper_paste_delivery.inlined_correction retained_pastes with
+    | None -> user_message
+    | Some correction -> user_message ^ "\n\n" ^ correction
   in
   let model_message =
     Keeper_gate_replay.compose_model_message

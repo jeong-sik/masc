@@ -1,5 +1,5 @@
-(** The binary's own prompt and tool assets sync into a runtime directory
-    without a single failure.
+(** The binary's own prompt, tool, and MCP surface assets sync into a runtime
+    directory without a single failure.
 
     [Managed_asset_sync.sync] refuses the whole domain when the embedded
     manifest and the embedded asset set disagree -- the state of a binary
@@ -59,6 +59,8 @@ let () =
             (syncs_without_failure ~label:"prompts" ~domain:Sync.Prompts)
         ; test_case "tools" `Quick
             (syncs_without_failure ~label:"tools" ~domain:Sync.Tools)
+        ; test_case "mcp" `Quick
+            (syncs_without_failure ~label:"mcp" ~domain:Sync.Mcp)
         ] )
     ]
 ;;

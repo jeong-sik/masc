@@ -53,7 +53,7 @@ let deferred_lane =
 let assert_no_queue_action label outcome =
   match Loop.batch_disposition_of_cycle_outcome (Some outcome) with
   | Loop.Batch_no_action -> ()
-  | Loop.Batch_ack_completed _ | Loop.Batch_ack_attention_only ->
+  | Loop.Batch_ack_completed | Loop.Batch_ack_attention_only ->
     failf "%s incorrectly authorized ACK of failed-turn input" label
 ;;
 
@@ -89,7 +89,7 @@ let test_nonterminal_outcomes_preserve_batch () =
   |> List.iter (fun outcome ->
     match Loop.batch_disposition_of_cycle_outcome outcome with
     | Loop.Batch_no_action -> ()
-    | Loop.Batch_ack_completed _ | Loop.Batch_ack_attention_only ->
+    | Loop.Batch_ack_completed | Loop.Batch_ack_attention_only ->
       fail "an unfinished turn incorrectly authorized Event Queue ACK")
 ;;
 
@@ -103,7 +103,6 @@ let test_nonterminal_outcomes_preserve_batch () =
 let every_checkpoint_reason =
   [ "durable stimulus arrived", Turn.Durable_stimulus_arrived
   ; "repeated assistant text", Turn.Repeated_assistant_text { repeated_count = 3 }
-  ; "awaiting external effect", Turn.Awaiting_external_effect
   ; ( "repeated tool call"
     , Turn.Repeated_tool_call { tool_name = "keeper_tasks_list"; repeated_count = 3 } )
   ; "operation queued", Turn.Operation_queued
@@ -124,7 +123,7 @@ let test_every_checkpoint_reason_acks_admitted_attention () =
                  }))
        with
        | Loop.Batch_ack_attention_only -> ()
-       | Loop.Batch_ack_completed _ ->
+       | Loop.Batch_ack_completed ->
          failf "%s: a checkpoint was treated as a completed connector disposition" label
        | Loop.Batch_no_action ->
          failf "%s: a checkpoint retained attention the turn already projected" label)
@@ -162,7 +161,7 @@ let test_durable_stimulus_checkpoint_acks_admitted_batch () =
             }))
   with
   | Loop.Batch_ack_attention_only -> ()
-  | Loop.Batch_ack_completed _ ->
+  | Loop.Batch_ack_completed ->
     fail "a checkpoint was treated as a fully completed connector disposition"
   | Loop.Batch_no_action ->
     fail "a newer durable stimulus left the already-admitted batch pending"
@@ -180,7 +179,7 @@ let test_repeated_assistant_checkpoint_acks_admitted_attention () =
             }))
   with
   | Loop.Batch_ack_attention_only -> ()
-  | Loop.Batch_ack_completed _ ->
+  | Loop.Batch_ack_completed ->
     fail "a loop-guard checkpoint was treated as a completed connector disposition"
   | Loop.Batch_no_action ->
     fail "a repeated-assistant checkpoint retained already-observed attention"

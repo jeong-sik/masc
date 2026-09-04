@@ -20,31 +20,24 @@ type source_clock =
   | Wall
   | Monotonic
   | Logical
-  | Provider
   | Event_bus
 
 let source_clock_to_string = function
   | Wall -> "wall"
   | Monotonic -> "monotonic"
   | Logical -> "logical"
-  | Provider -> "provider"
   | Event_bus -> "agent_core_event_bus"
 
 let source_clock_of_string = function
   | "wall" -> Some Wall
   | "monotonic" -> Some Monotonic
   | "logical" -> Some Logical
-  | "provider" -> Some Provider
   | "agent_core_event_bus" -> Some Event_bus
   | _ -> None
 
 let source_clock_of_event = function
   | Event_bus_correlated -> Event_bus
-  | Provider_attempt_started
-  | Provider_attempt_finished ->
-    Provider
-  | Context_injected ->
-    Logical
+  | Context_injected -> Logical
   | _ -> Wall
 
 type logical_ordering = {
@@ -83,7 +76,7 @@ let int_field_opt key value =
   | None -> None
 
 let clock_refs ?edge_id ?lane ?source_clock ?observed_at ?started_at
-    ?finished_at ?elapsed_ms ?provider_attempt_id ?tool_batch_id ?checkpoint_id
+    ?finished_at ?elapsed_ms ?tool_batch_id ?checkpoint_id
     ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by
     ?logical_seq () =
   `Assoc
@@ -98,7 +91,6 @@ let clock_refs ?edge_id ?lane ?source_clock ?observed_at ?started_at
          string_field_opt "started_at" started_at;
          string_field_opt "finished_at" finished_at;
          int_field_opt "elapsed_ms" elapsed_ms;
-         string_field_opt "provider_attempt_id" provider_attempt_id;
          string_field_opt "tool_batch_id" tool_batch_id;
          string_field_opt "checkpoint_id" checkpoint_id;
          string_field_opt "event_bus_correlation_id" event_bus_correlation_id;
@@ -170,9 +162,6 @@ let clock_lane_of_event = function
   | Runtime_failed
   | Provider_lane_resolved ->
     "masc_policy_runtime"
-  | Provider_attempt_started
-  | Provider_attempt_finished ->
-    "provider"
   | Checkpoint_loaded
   | Checkpoint_saved ->
     "agent_core_agent"
@@ -299,7 +288,7 @@ let links_to_json links =
 let decision_public_allowlist =
   StringSet.of_list
     [ "edge_id"; "lane"; "source_clock"; "observed_at"; "started_at"; "finished_at"
-    ; "elapsed_ms"; "provider_attempt_id"; "tool_batch_id"; "checkpoint_id"
+    ; "elapsed_ms"; "tool_batch_id"; "checkpoint_id"
     ; "event_bus_correlation_id"
     ; "event_bus_run_id"; "parent_event_id"; "caused_by"; "logical_seq"
     ; "repair_reason"; "matched_started_ts"
@@ -329,7 +318,7 @@ let decision_public_allowlist =
 let clock_refs_public_allowlist =
   StringSet.of_list
     [ "edge_id"; "lane"; "source_clock"; "observed_at"; "started_at"; "finished_at"
-    ; "elapsed_ms"; "provider_attempt_id"; "tool_batch_id"; "checkpoint_id"
+    ; "elapsed_ms"; "tool_batch_id"; "checkpoint_id"
     ; "event_bus_correlation_id"
     ; "event_bus_run_id"; "parent_event_id"; "caused_by"; "logical_seq"
     ]
@@ -639,93 +628,3 @@ let append_best_effort ?(site = "runtime_manifest") config manifest =
         (event_kind_to_string manifest.event)
         msg
 
-let read_rows_from_path path =
-  try
-    let rows =
-      Fs_compat.fold_jsonl_lines
-        ~init:[]
-        ~f:(fun acc ~line_no:_ json ->
-          match of_json json with
-          | Ok row -> row :: acc
-          | Error _ -> acc)
-        path
-      |> List.rev
-    in
-    Ok rows
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (Printexc.to_string exn)
-
-let last_unfinished_provider_attempt config (ctx : turn_context) =
-  let path =
-    path_for_trace config ~keeper_name:ctx.manifest_keeper_name
-      ~trace_id:ctx.manifest_trace_id
-  in
-  match read_rows_from_path path with
-  | Error msg -> Error msg
-  | Ok rows ->
-    let same_turn row =
-      match ctx.manifest_keeper_turn_id with
-      | None -> true
-      | Some turn -> row.keeper_turn_id = Some turn
-    in
-    let pending =
-      List.fold_left
-        (fun pending row ->
-           if not (same_turn row) then
-             pending
-           else
-             match row.event with
-             | Provider_attempt_started -> Some row
-             | Provider_attempt_finished -> None
-             | _ -> pending)
-        None
-        rows
-    in
-    Ok pending
-
-let append_unfinished_provider_attempt_finished_best_effort
-      ?(site = "runtime_manifest_unfinished_provider_terminal")
-      config
-      ctx
-      ~status
-      ~error
-      ?exception_kind
-      ()
-  =
-  match last_unfinished_provider_attempt config ctx with
-  | Error msg ->
-    Log.Keeper.warn ~keeper_name:ctx.manifest_keeper_name
-      "runtime_manifest unfinished provider scan failed site=%s trace_id=%s: %s"
-      site ctx.manifest_trace_id msg
-  | Ok None -> ()
-  | Ok (Some started) ->
-    let inherited_fields =
-      match started.decision with
-      | `Assoc fields ->
-        List.filter (fun (k, _) -> not (String.equal k "clock_refs")) fields
-      | _ -> []
-    in
-    let terminal_fields =
-      [
-        ( "repair_reason",
-          `String "outer_timeout_or_cancellation_interrupted_provider_attempt" );
-        ("matched_started_ts", `String started.ts);
-        ("matched_started_status", `String started.status);
-        ("error", `String error);
-      ]
-    in
-    let terminal_fields =
-      match exception_kind with
-      | None -> terminal_fields
-      | Some kind -> ("exception_kind", `String kind) :: terminal_fields
-    in
-    let decision = `Assoc (inherited_fields @ terminal_fields) in
-    let clock_refs = clock_refs_for_context ctx ~event:Provider_attempt_finished () in
-    let decision = with_clock_refs ~clock_refs decision in
-    make_for_context ctx ~event:Provider_attempt_finished
-      ?runtime_id:started.runtime_id
-      ~status
-      ~decision
-      ()
-    |> append_best_effort ~site config

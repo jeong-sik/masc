@@ -10,39 +10,14 @@
     [truncate_text] stays private — it is used only by the
     history-summary preview builder. *)
 
-(** {1 Model name normalization (runtime-visible)} *)
-
-(** {1 Per-keeper window statistics (runtime-visible)} *)
-
-type keeper_gen_window_stats = {
-  turns : int;
-  usage_points : int;
-  input_tokens : int;
-  output_tokens : int;
-  total_tokens : int;
-  handoffs : int;
-  first_ts : float;
-  last_ts : float;
-  tools : (string, int) Hashtbl.t;
-}
-(** Per-keeper rolling-window statistics record.  All counters
-    are mutable for in-place increment as the aggregator scans
-    keeper events.  Concrete record because runtime consumer
-    ({!Dashboard_http_keeper_detail}) reads / writes fields
-    directly. *)
-
-val create_keeper_gen_window_stats : unit -> keeper_gen_window_stats
-(** [create_keeper_gen_window_stats ()] returns a fresh
-    zero-initialised stats record with empty Hashtbls for
-    [models] / [tools]. *)
+(** {1 Window counters (runtime-visible)} *)
 
 val count_table_incr :
   (string, int) Hashtbl.t -> string -> unit
 (** [count_table_incr tbl key] increments [tbl.(key)] by 1
     (initialising to 1 when missing).  Trims [key] before lookup
     to avoid whitespace-driven duplicates.  Used to update the
-    [models] / [tools] counters inside
-    {!keeper_gen_window_stats}. *)
+    work-kind / tool counters of the keeper metrics window. *)
 
 (** {1 Top-count rendering (runtime-visible)} *)
 
@@ -56,12 +31,6 @@ val top_counts_json :
     fields [name_key -> entry name] and ["count" -> count].
     Sorted by count descending.  Used to render top-models /
     top-tools sections of keeper-detail JSON. *)
-
-val top_count_name_and_count :
-  (string, int) Hashtbl.t -> (string * int) option
-(** [top_count_name_and_count tbl] returns [Some (name, count)]
-    for the highest-count entry, [None] when [tbl] is empty.
-    Convenience for the "primary model / tool" badge. *)
 
 val keeper_history_summary_json :
   all_keeper_names:string list ->

@@ -116,11 +116,7 @@ The runtime may inject selected memory into a future prompt as context. That
 context is advisory and cannot mutate task, goal, lifecycle, HITL, connector,
 or scheduler state.
 
-## Compaction
-
-agent core reduces active context through its checkpoint/context APIs. MASC may
-request a configured strategy and observe the outcome, but must not rewrite
-the transcript through domain-specific text parsing.
+## Librarian disposition
 
 The librarian LLM returns exactly one retain/drop disposition for every current
 memory ID plus any new claims. Missing or duplicate dispositions invalidate the

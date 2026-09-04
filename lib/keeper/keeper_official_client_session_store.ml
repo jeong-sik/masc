@@ -764,8 +764,8 @@ let plan_claim ~expected ~client_kind ~runtime_id =
        (observed live: two keepers replaying ~1.27M-token requests per
        heartbeat on 2026-08-23). A different client_kind/runtime_id still
        starts fresh above — that branch is operator-driven, not a heartbeat
-       replay. Re-entry needs [resolve_recovery] (restart_fresh after the
-       keeper context is compacted, or retry_previous). *)
+       replay. Re-entry needs [resolve_recovery] -- [Restart_fresh], which
+       abandons the conversation, or [Retry_previous]. *)
     | Some
         { phase =
             Recovery_required

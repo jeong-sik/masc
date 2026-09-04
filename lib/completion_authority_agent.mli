@@ -67,4 +67,9 @@ module For_testing : sig
       which have no key to name. Pure, so the scope rule is checkable without a
       backlog or an Eio runtime. *)
 
+  (** RFC-0415 §4.1: the pure operator-routing gate, exposed for the refusal
+      contract test. Completion review stays with the system lane; a cancel
+      verdict belongs to the operator's one click. *)
+  val system_review_allowed : Masc_domain.verification_intent -> bool
+
 end

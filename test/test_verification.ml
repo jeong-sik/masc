@@ -433,6 +433,22 @@ let test_scan_scope_limits_a_submission_to_its_own_verification () =
     (names (For_testing.entries_in_scope ~scope:(For_testing.Targets []) entries))
 
 
+(* RFC-0415 §4.1/§6.3: the system lane's authority ends where a cancellation
+   begins. The pure gate is the contract; the runtime path consults it before
+   any review starts and records [Not_reviewed { gate = "operator_routing" }],
+   leaving the Task pending for the operator's one click — no timer behind it. *)
+let test_cancel_intent_is_refused_by_system_review () =
+  let module For_testing = Masc.Completion_authority_agent.For_testing in
+  Alcotest.(check bool)
+    "completion review stays with the system lane"
+    true
+    (For_testing.system_review_allowed Masc_domain.Complete_task);
+  Alcotest.(check bool)
+    "cancel verdicts belong to the operator alone"
+    false
+    (For_testing.system_review_allowed Masc_domain.Cancel_task)
+
+
 let test_system_llm_review_notes_are_metadata_only () =
   let request : V.verification_request =
     { id = "vrf-metadata-only"
@@ -946,6 +962,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
           in
           let config = W.default_config base_path in
           ignore (W.init config ~agent_name:(Some "system-test-worker"));
+          ensure_keeper_meta config "system-test-worker";
           ensure_producer_playground config "system-test-worker";
           ignore
             (W.add_task
@@ -2652,6 +2669,8 @@ let test_changed_during_read_maps_to_typed_unreadable_reason () =
 
 let test_submitted_evidence_requires_exact_task_assignment_identity () =
   with_eio_temp_dir (fun base_path ->
+    let config = W.default_config base_path in
+    ensure_keeper_meta config "omega";
     let artifact_dir =
       Filename.concat
         base_path
@@ -3023,6 +3042,8 @@ let () =
         test_system_llm_authority_helpers_are_typed;
       Alcotest.test_case "system LLM retry disposition is typed" `Quick
         test_system_llm_retry_disposition_is_typed;
+      Alcotest.test_case "cancel intent is refused by the system reviewer" `Quick
+        test_cancel_intent_is_refused_by_system_review;
       Alcotest.test_case "scan scope limits a submission to its own verification" `Quick
         test_scan_scope_limits_a_submission_to_its_own_verification;
       Alcotest.test_case "system LLM notes keep metadata only" `Quick

@@ -8485,29 +8485,35 @@ let render_keeper_message (state : state) =
              with the old) and falls back to one full render, the same work
              the uncached streaming path did on every frame. *)
           (* A superseded attempt's stretches are drawn in place with their
-             own styles, each label carrying the retry mark: the content the
-             reader had is still there, and which attempt it came from is
-             visible. Flattened before indexing so the growing-markdown cache
-             key stays one index per drawn stretch. *)
+             own styles, each label ending in the retry mark and the number of
+             the try it came from (" ↺1" = the first try, superseded): the
+             content the reader had is still there. The mark goes at the tail
+             because [fit_name] keeps a label's tail when it overruns the
+             column. Not dimmed: the layout has no dim variant per style, and
+             adding one is the 3b restyle. Flattened before indexing so the
+             growing-markdown cache key stays one index per drawn stretch. *)
           let flattened =
             List.concat_map
               (fun (item : Keeper_chat_transcript.trail_item) ->
                 match item with
-                | Keeper_chat_transcript.Trail_superseded { items; _ } ->
-                    List.map (fun nested -> (true, nested)) items
+                | Keeper_chat_transcript.Trail_superseded { attempt; items } ->
+                    List.map (fun nested -> (Some attempt, nested)) items
                 | Keeper_chat_transcript.Trail_thinking _
                 | Keeper_chat_transcript.Trail_skill _
                 | Keeper_chat_transcript.Trail_tools _
-                | Keeper_chat_transcript.Trail_text _ -> [ (false, item) ])
+                | Keeper_chat_transcript.Trail_text _ -> [ (None, item) ])
               (Keeper_chat_transcript.trail live)
           in
-          let superseded_mark = "\xe2\x86\xba " in
           let entries =
             List.filter_map Fun.id
             @@ List.mapi
                (fun entry_index
-                    ((superseded, item) : bool * Keeper_chat_transcript.trail_item) ->
-              let label text = if superseded then superseded_mark ^ text else text in
+                    ((superseded, item) : int option * Keeper_chat_transcript.trail_item) ->
+              let label text =
+                match superseded with
+                | Some attempt -> Printf.sprintf "%s \xe2\x86\xba%d" text (attempt + 1)
+                | None -> text
+              in
               match item with
               | Keeper_chat_transcript.Trail_superseded _ ->
                   (* Never nested (see the type), and flattened above. *)

@@ -319,24 +319,36 @@ let test_runtime_attempt_restarts_the_per_attempt_totals () =
      check string "settled outcome survives the retry" "returned"
        (outcome_to_string call.outcome)
    | calls -> failf "expected one preserved tool call, got %d" (List.length calls));
-  (* A second retry folds the first superseded block into the new one: the
-     trail is never nested more than one level. *)
+  (* A second retry folds only what came after the first boundary: the two
+     superseded attempts sit side by side, each with its number, and neither
+     block holds a block. *)
   feed t [ Live.Runtime_attempt_started; Live.Text "third try" ];
   check int "two retries" 2 (Transcript.attempt t);
   match Transcript.trail t with
-  | [ Transcript.Trail_superseded { attempt = 1; items }; Transcript.Trail_text "third try" ] ->
-      check bool "the block holds no nested block" true
-        (List.for_all
-           (function Transcript.Trail_superseded _ -> false | _ -> true)
-           items);
+  | [ Transcript.Trail_superseded { attempt = 0; items = first }
+    ; Transcript.Trail_superseded { attempt = 1; items = second }
+    ; Transcript.Trail_text "third try"
+    ] ->
+      let flat items =
+        List.for_all (function Transcript.Trail_superseded _ -> false | _ -> true) items
+      in
+      check bool "the first block holds no nested block" true (flat first);
+      check bool "the second block holds no nested block" true (flat second);
       check bool "the first attempt's text is still readable" true
         (List.exists
            (function
              | Transcript.Trail_text text ->
                  String_util.contains_substring text "failed reply"
              | _ -> false)
-           items)
-  | other -> failf "expected one flat superseded block, got %d items" (List.length other)
+           first);
+      check bool "the second attempt's text is still readable" true
+        (List.exists
+           (function
+             | Transcript.Trail_text text ->
+                 String_util.contains_substring text "fallback reply"
+             | _ -> false)
+           second)
+  | other -> failf "expected two sibling superseded blocks, got %d items" (List.length other)
 ;;
 
 let reply_details ?(reply = "Let me look.") () =

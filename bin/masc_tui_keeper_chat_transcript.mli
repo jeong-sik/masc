@@ -250,8 +250,9 @@ type trail_item =
       (** What runtime attempt [attempt] produced before the next attempt
           began, in order. Kept rather than wiped (RFC-0412 §3.3) so a retry
           never takes back what the reader was reading; the pane marks it.
-          Never nested: each attempt boundary folds the whole trail so far,
-          earlier superseded blocks included, into one block. *)
+          One block per superseded attempt, siblings in the trail in attempt
+          order, never nested: a boundary folds only the stretches since the
+          previous boundary. *)
 
 val trail : t -> trail_item list
 (** Empty stretches are dropped, so every item draws at least one row. *)

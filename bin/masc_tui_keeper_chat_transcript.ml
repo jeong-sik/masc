@@ -144,9 +144,10 @@ type trail_node =
       { attempt : int
       ; nodes : trail_node list  (** In arrival order. *)
       }
-      (** Everything an earlier runtime attempt produced, kept whole when
+      (** Everything one earlier runtime attempt produced, kept whole when
           the next attempt began (RFC-0412 §3.3): the reader was reading it,
-          so it stays, marked. *)
+          so it stays, marked. One block per superseded attempt, siblings in
+          the trail, never nested. *)
 
 (* Tool calls are held newest-first so opening one is a prepend; [tool_calls]
    reverses on read. Appending an argument fragment walks the list, which a
@@ -1075,11 +1076,23 @@ let apply ~now t (delta : Live.delta) =
          in [reversed_tool_calls] and the superseded node still names them. *)
       Buffer.clear t.text_buffer;
       Buffer.clear t.thinking_buffer;
-      (match t.reversed_trail with
+      (* Only the nodes since the last boundary fold; earlier superseded
+         blocks stay where they are, so blocks are siblings -- one per
+         superseded attempt, each keeping its number -- and never nest.
+         [reversed_trail] is newest-first, so consing while walking towards
+         the older blocks leaves [since] in arrival order. *)
+      let since, older =
+        let rec split acc = function
+          | (Node_superseded _ :: _) as older -> (acc, older)
+          | node :: rest -> split (node :: acc) rest
+          | [] -> (acc, [])
+        in
+        split [] t.reversed_trail
+      in
+      (match since with
        | [] -> ()
        | nodes ->
-           t.reversed_trail <-
-             [ Node_superseded { attempt = t.attempt; nodes = List.rev nodes } ]);
+           t.reversed_trail <- Node_superseded { attempt = t.attempt; nodes } :: older);
       t.attempt <- t.attempt + 1;
       t.awaiting <- None;
       (match t.phase with

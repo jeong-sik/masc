@@ -1207,6 +1207,72 @@ let test_undecodable_output_is_an_error_not_absence () =
     ; "not json", "garbage is refused"
     ]
 
+(* A policy guest has one route and it is the proxy. A boot that does not
+   know that address would produce a guest reaching nothing with no way to
+   say why, so it is refused instead -- which is the shape this lane shipped
+   in and did not work. *)
+let test_a_policy_boot_without_its_proxy_is_refused () =
+  match
+    Masc.Keeper_sandbox_microvm.network_args_for
+      Masc.Keeper_microvm_backend.Apple_container
+      ~dns:None
+      ~policy_proxy:None
+      Keeper_types_profile_sandbox.Network_policy
+  with
+  | Ok args ->
+    Alcotest.failf "a policy guest booted with no proxy address: %s"
+      (String.concat " " args)
+  | Error detail ->
+    Alcotest.(check bool) "the refusal names the missing address" true
+      (String_util.contains_substring detail "proxy")
+
+(* And with one, the guest is told where it is. Every spelling, because the
+   clients do not agree on which they read. *)
+let test_a_policy_boot_points_the_guest_at_its_proxy () =
+  match
+    Masc.Keeper_sandbox_microvm.network_args_for
+      Masc.Keeper_microvm_backend.Apple_container
+      ~dns:None
+      ~policy_proxy:(Some { Masc.Keeper_sandbox_microvm.gateway = "192.168.128.1"; port = 51234 })
+      Keeper_types_profile_sandbox.Network_policy
+  with
+  | Error detail -> Alcotest.failf "expected a policy boot, got %s" detail
+  | Ok args ->
+    let joined = String.concat " " args in
+    Alcotest.(check bool) "attached to the host-only network" true
+      (String_util.contains_substring joined
+         Masc.Keeper_sandbox_microvm.policy_network_name);
+    Alcotest.(check bool) "with no resolver of its own" true
+      (List.mem "--no-dns" args);
+    List.iter
+      (fun name ->
+        Alcotest.(check bool) (name ^ " points at the proxy") true
+          (String_util.contains_substring joined
+             (name ^ "=http://192.168.128.1:51234")))
+      [ "http_proxy"; "https_proxy"; "HTTP_PROXY"; "HTTPS_PROXY" ];
+    (* An exception list here would be a second allowlist the proxy never
+       sees and cannot record. *)
+    Alcotest.(check bool) "and no NO_PROXY exception list" false
+      (String_util.contains_substring joined "NO_PROXY")
+
+(* The gateway is whatever container assigned the network, read rather than
+   assumed: a compiled-in address is right until a host has a network on that
+   subnet already. *)
+let test_the_gateway_is_read_from_the_network () =
+  Alcotest.(check (result string string)) "the inspected gateway comes through"
+    (Ok "192.168.130.1")
+    (Masc.Keeper_sandbox_microvm.policy_network_gateway
+       ~inspect:{|[{"id":"masc-egress-policy","status":{"ipv4Gateway":"192.168.130.1"}}]|});
+  List.iter
+    (fun (inspect, label) ->
+      Alcotest.(check bool) label true
+        (Result.is_error
+           (Masc.Keeper_sandbox_microvm.policy_network_gateway ~inspect)))
+    [ {|[{"id":"masc-egress-policy","status":{}}]|}, "an absent gateway is an error"
+    ; "[]", "an empty listing is an error"
+    ; "not json", "garbage is an error"
+    ]
+
 (* Only the backend that carries the lane has a network to create. *)
 let test_only_the_policy_backend_has_a_policy_network () =
   Alcotest.(check bool) "apple_container answers" true
@@ -2320,6 +2386,12 @@ let run_tests ~clock () =
             test_undecodable_output_is_an_error_not_absence;
           Alcotest.test_case "only the policy backend has a policy network" `Quick
             test_only_the_policy_backend_has_a_policy_network;
+          Alcotest.test_case "a policy boot without its proxy is refused" `Quick
+            test_a_policy_boot_without_its_proxy_is_refused;
+          Alcotest.test_case "a policy boot points the guest at its proxy" `Quick
+            test_a_policy_boot_points_the_guest_at_its_proxy;
+          Alcotest.test_case "the gateway is read from the network" `Quick
+            test_the_gateway_is_read_from_the_network;
           Alcotest.test_case "docker nofile args follow config" `Quick
             test_docker_nofile_args_follow_config;
           Alcotest.test_case "docker MASC config binding pins paths" `Quick

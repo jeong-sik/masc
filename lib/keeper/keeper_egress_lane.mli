@@ -28,11 +28,19 @@ val request_line_read_timeout_s : float
     which may be long-lived. *)
 
 val listen_address : Eio.Net.Sockaddr.stream
-(** Where a keeper's proxy binds: the loopback address, on a port the OS
-    picks.
+(** Where a keeper's proxy binds: every interface, on a port the OS picks.
 
-    Loopback rather than the host-only network's gateway because the guest
-    reaches the host through NAT on that network, and binding the gateway
-    address would tie the listener to a network that may not exist yet. The
-    port is ephemeral because one is needed per keeper and a fixed range
+    Loopback was wrong, and measured wrong rather than argued: a guest on the
+    host-only network reaches the host at that network's gateway address, and
+    a listener bound to 127.0.0.1 answers such a connection with
+    [Connection refused] (container 1.3.1, 2026-09-05 — a listener on
+    0.0.0.0 answered the same request from the same guest). A policy keeper
+    with a loopback-bound proxy therefore reached nothing at all.
+
+    Binding every interface is what the guest can reach. It is not a wider
+    boundary than the lane already has: the port carries one keeper's
+    allowlist, and every request across it is judged and recorded whoever
+    opened it.
+
+    The port is ephemeral because one is needed per keeper and a fixed range
     would be a second thing to keep in step with the roster. *)

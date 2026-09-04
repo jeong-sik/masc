@@ -23,6 +23,23 @@ val refusal_to_string : refusal -> string
 (** One line for the evidence row and the 403 body. Contains no raw request
     bytes. *)
 
+val client_env : proxy_url:string -> (string * string) list
+(** The environment a client needs to find this proxy, as [(name, value)]
+    pairs.
+
+    Every spelling the common clients read, because they do not agree: curl
+    and wget take the lower-case names, many Go and Java clients take the
+    upper-case ones, and [gh] inherits whichever its libc build honours.
+    Setting one and not the other is how a keeper reaches the proxy for [git]
+    and silently finds no route for [gh].
+
+    [NO_PROXY] is deliberately absent: an exception list here would be a
+    second allowlist, one this proxy never sees and cannot record.
+
+    This is convenience, not enforcement. On the policy lane a client that
+    ignores these finds no route rather than a way around, because the
+    enforcement point is the guest's network and not this list. *)
+
 type decision =
   | Admitted of
       { host : Egress_host.t

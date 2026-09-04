@@ -266,6 +266,51 @@ let journal_tagged_deltas events =
     (fun (seq, event) -> Option.map (fun d -> (Some seq, d)) (Log.delta_of_journaled event))
     events
 
+let events_error =
+  testable (Fmt.of_to_string Log.events_error_to_string) ( = )
+
+let envelope ?(schema = "masc.keeper_chat_operation.error.v1") code message =
+  Yojson.Safe.to_string
+    (`Assoc
+      [ "schema", `String schema; "error", `String code; "message", `String message ])
+;;
+
+(* The code decides; the message rides along only where the code alone does
+   not say what to do. *)
+let test_decode_events_error_by_code () =
+  check events_error "404 unknown_operation" Log.Unknown_operation
+    (Log.decode_events_error ~status:404 (envelope "unknown_operation" "no such op"));
+  check events_error "410 journal_pruned" Log.Journal_pruned
+    (Log.decode_events_error ~status:410 (envelope "journal_pruned" "gone"));
+  check events_error "503 journal_unreadable keeps the message"
+    (Log.Journal_unavailable "disk says no")
+    (Log.decode_events_error ~status:503 (envelope "journal_unreadable" "disk says no"));
+  check events_error "503 journal_corrupt keeps the message"
+    (Log.Journal_unavailable "bad line 7")
+    (Log.decode_events_error ~status:503 (envelope "journal_corrupt" "bad line 7"));
+  check events_error "an unknown code is undecodable with the status and message"
+    (Log.Events_undecodable "400 operation_id is required")
+    (Log.decode_events_error ~status:400 (envelope "invalid_input" "operation_id is required"));
+  check events_error "a body that is not JSON is undecodable as it came"
+    (Log.Events_undecodable "502 <html>bad gateway</html>")
+    (Log.decode_events_error ~status:502 "<html>bad gateway</html>");
+  check events_error "an object with no error code is undecodable"
+    (Log.Events_undecodable "500 {\"oops\":true}")
+    (Log.decode_events_error ~status:500 "{\"oops\":true}")
+;;
+
+let test_hold_seq_counts_without_an_entry () =
+  let log = Log.create ~keeper_name:"k" ~request_id:"r" ~started_at:0. in
+  Log.hold_seq log 4;
+  check int "held position moves last_seq" 4 (Log.last_seq log);
+  check int "and adds no entry" 0 (List.length (Log.entries log));
+  check bool "a frame arriving at a held position is a duplicate" false
+    (Log.add log ~seq:(Some 4) Live.Run_started);
+  let revision = Log.revision log in
+  Log.hold_seq log 4;
+  check int "holding again changes nothing" revision (Log.revision log)
+;;
+
 let test_golden_journal_equals_wire () =
   let events = List.mapi (fun seq event -> (seq, event)) golden in
   let wire = wire_tagged_deltas events in
@@ -362,6 +407,10 @@ let () =
       , [ test_case "decode events page" `Quick test_decode_events_page
         ; test_case "add_journaled holds undrawn positions" `Quick
             test_add_journaled_holds_undrawn_positions
+        ; test_case "decode events error by code" `Quick
+            test_decode_events_error_by_code
+        ; test_case "hold_seq counts without an entry" `Quick
+            test_hold_seq_counts_without_an_entry
         ] )
     ; ( "golden"
       , [ test_case "journal equals wire" `Quick test_golden_journal_equals_wire

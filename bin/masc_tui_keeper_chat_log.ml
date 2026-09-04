@@ -162,18 +162,22 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
   | E.Tool_context_block _ -> None
 ;;
 
+(* Nothing to draw, so no entry and no revision bump; the position is still
+   held so a later live frame with this seq is a duplicate and a resume asks
+   past it. *)
+let hold_seq t seq =
+  if not (Hashtbl.mem t.held_seqs seq)
+  then begin
+    Hashtbl.replace t.held_seqs seq ();
+    if seq > t.last_seq then t.last_seq <- seq
+  end
+;;
+
 let add_journaled t (lines : Journal.journaled_event list) =
   List.iter
     (fun (line : Journal.journaled_event) ->
        match delta_of_journaled line.event with
-       | None ->
-         (* Nothing to draw, so no entry and no revision bump; the position is
-            still held so a later live frame with this seq is a duplicate. *)
-         if not (Hashtbl.mem t.held_seqs line.seq)
-         then begin
-           Hashtbl.replace t.held_seqs line.seq ();
-           if line.seq > t.last_seq then t.last_seq <- line.seq
-         end
+       | None -> hold_seq t line.seq
        | Some delta -> ignore (add t ~seq:(Some line.seq) delta : bool))
     lines
 ;;
@@ -230,4 +234,43 @@ let decode_events_page (json : Yojson.Safe.t) =
     Ok { operation_id; events; has_more; next_since_seq }
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Error "events body is not an object"
+;;
+
+type events_error =
+  | Unknown_operation
+  | Journal_pruned
+  | Journal_unavailable of string
+  | Events_undecodable of string
+  | Events_transport of string
+
+let events_error_to_string = function
+  | Unknown_operation -> "unknown operation"
+  | Journal_pruned -> "journal pruned"
+  | Journal_unavailable detail -> "journal unavailable: " ^ detail
+  | Events_undecodable detail -> "events body unreadable: " ^ detail
+  | Events_transport detail -> "events request failed: " ^ detail
+;;
+
+(* The error envelope is [masc.keeper_chat_operation.error.v1]:
+   [{schema; error = <code>; message}]. The code is the typed fact; the
+   message is what the server said, kept only where the code alone does not
+   tell the pane what to do. *)
+let decode_events_error ~status body =
+  let rejected detail = Events_undecodable (Printf.sprintf "%d %s" status detail) in
+  match Yojson.Safe.from_string body with
+  | `Assoc fields ->
+    let message =
+      match List.assoc_opt "message" fields with
+      | Some (`String message) -> message
+      | Some _ | None -> body
+    in
+    (match List.assoc_opt "error" fields with
+     | Some (`String "unknown_operation") -> Unknown_operation
+     | Some (`String "journal_pruned") -> Journal_pruned
+     | Some (`String ("journal_unreadable" | "journal_corrupt")) ->
+       Journal_unavailable message
+     | Some (`String _) | Some _ | None -> rejected message)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    rejected body
+  | exception Yojson.Json_error _ -> rejected body
 ;;

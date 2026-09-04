@@ -3,31 +3,10 @@
 open Masc
 
 (* The [done] transition runs the configured-LLM completion review (#24332),
-   which renders the [verification] registry prompt. This
-   executable exercises the real tool-dispatch path, so it pins prompt
-   resolution to the repo's own prompt files — the same idiom
-   test_tool_task_coverage uses so the prompt resolves whether run under dune
-   (DUNE_SOURCEROOT) or as a bare executable. *)
-let has_prompt_root path =
-  Sys.file_exists
-    (Filename.concat path "config/prompts/verification.md")
-
-let repo_root () =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root when has_prompt_root root -> root
-  | _ ->
-    let rec ascend path =
-      if has_prompt_root path then path
-      else
-        let parent = Filename.dirname path in
-        if String.equal parent path then Sys.getcwd () else ascend parent
-    in
-    ascend (Sys.getcwd ())
-
-let () =
-  Prompt_registry.set_markdown_dir
-    (Filename.concat (repo_root ()) "config/prompts")
-
+   which renders the [verification] registry prompt. This executable
+   exercises the real tool-dispatch path,. Loading them into the registry is
+   what [Prompt_defaults.init] does below; the registry locates
+   config/prompts itself under Dune. *)
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in
   let restore () =

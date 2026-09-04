@@ -27,33 +27,12 @@ end
 
 (* The keeper.world event-row prose this suite asserts (the fusion
    cancellation preview) moved out of the .ml sources into
-   config/prompts/keeper.world.*.md group files, rendered through the prompt
+   config/prompts/keeper.md as world.* keys, rendered through the prompt
    registry at observation time. This executable never pinned a markdown
    dir, so prompt resolution depended on whatever the host/dune context
    happened to expose — green on developer machines, bare-data fallbacks
-   inside the CI dune sandbox. Pin resolution to the repo's own prompt
-   files — the same idiom test_tool_task_coverage uses; that executable
-   passes inside the CI sandbox, so the mechanism is CI-proven. *)
-let has_prompt_root path =
-  Sys.file_exists (Filename.concat path "config/prompts/keeper.world.frame.md")
-;;
-
-let repo_root () =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root when has_prompt_root root -> root
-  | _ ->
-    let rec ascend path =
-      if has_prompt_root path
-      then path
-      else (
-        let parent = Filename.dirname path in
-        if String.equal parent path then Sys.getcwd () else ascend parent)
-    in
-    ascend (Sys.getcwd ())
-;;
-
+   inside the CI dune sandbox. *)
 let () =
-  Prompt_registry.set_markdown_dir (Filename.concat (repo_root ()) "config/prompts");
   Masc.Prompt_defaults.init ()
 ;;
 

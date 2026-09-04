@@ -13,28 +13,7 @@ module Memory = Masc.Keeper_memory_os_types
 module Fixture = Exact_output_fixture
 module Ids = Ids
 
-let has_prompt_root root =
-  Sys.file_exists (Filename.concat root "config/prompts/librarian.md")
-;;
-
-let repo_root () =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root when has_prompt_root root -> root
-  | _ ->
-    let rec ascend path =
-      if has_prompt_root path
-      then path
-      else (
-        let parent = Filename.dirname path in
-        if String.equal parent path then Sys.getcwd () else ascend parent)
-    in
-    ascend (Sys.getcwd ())
-;;
-
-let () =
-  let prompts_dir = Filename.concat (repo_root ()) "config/prompts" in
-  Prompt_registry.set_markdown_dir prompts_dir;
-  Masc.Prompt_defaults.init ()
+let () = Masc.Prompt_defaults.init ()
 ;;
 
 let fact ~claim : Memory.fact =

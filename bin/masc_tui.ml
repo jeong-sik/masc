@@ -1272,6 +1272,15 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       (Buffer.contents state.msg_input)
   in
   match key with
+  (* Esc cancels the innermost thing, and a running capture is inside
+     everything else here: the operator is mid-utterance, not mid-turn. ^Y
+     stops one and keeps what was said, which is the common case; this is the
+     other one, and without it there is no way to abandon a recording that
+     picked up something the operator did not mean to send. *)
+  | "esc" when Option.is_some state.voice_capture ->
+    state.voice_stop_requested <- Some Masc.Voice_bridge.Discard;
+    state.last_action <- Some ("voice: discarding", Unix.gettimeofday ());
+    true
   | "esc" when Option.is_some state.msg_recall_replaces ->
     state.msg_recall_replaces <- None;
     clear_staged_attachments state;
@@ -8471,7 +8480,7 @@ let launch_voice_capture state ~mailbox ~keeper =
   | Some sw ->
     state.voice_capture <- Some keeper;
     state.voice_level_db <- None;
-    state.voice_stop_requested <- false;
+    state.voice_stop_requested <- None;
     Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
 ;;
 
@@ -8524,7 +8533,7 @@ let handle_composer_key state ~base_path ~mailbox key =
          leaving two recorders on one device with no way to end either. *)
       (match state.voice_capture, composer.Composer.target with
        | Some _, _ ->
-           state.voice_stop_requested <- true;
+           state.voice_stop_requested <- Some Masc.Voice_bridge.Keep_what_was_heard;
            state.last_action <- Some ("voice: stopping", Unix.gettimeofday ())
        | None, Composer.Ready keeper_name ->
            launch_voice_capture state ~mailbox ~keeper:keeper_name
@@ -8548,8 +8557,16 @@ let handle_composer_key state ~base_path ~mailbox key =
        | None, (Composer.No_target | Composer.Unreachable _) -> ());
       true
   | Composer.Release_focus ->
-      save_message_draft state;
-      state.composer_focused <- false;
+      (* A running capture is the innermost thing Esc can leave, so it goes
+         first and the row keeps its focus. ^Y stops one and keeps what was
+         said; this abandons it. *)
+      (match state.voice_capture with
+       | Some _ ->
+           state.voice_stop_requested <- Some Masc.Voice_bridge.Discard;
+           state.last_action <- Some ("voice: discarding", Unix.gettimeofday ())
+       | None ->
+           save_message_draft state;
+           state.composer_focused <- false);
       true
   | Composer.Send ->
       state.composer_focused <- false;
@@ -13976,7 +13993,7 @@ and is loaded on demand through keeper_skill.
                          launch_voice_capture state ~mailbox:async_messages ~keeper
                      (* The same toggle the composer row carries. *)
                      | Some _ ->
-                         state.voice_stop_requested <- true;
+                         state.voice_stop_requested <- Some Masc.Voice_bridge.Keep_what_was_heard;
                          state.last_action <-
                            Some ("voice: stopping", Unix.gettimeofday ())
                      | None -> ())

@@ -317,9 +317,20 @@ let test_the_cancellation_lookup_is_written_for_a_stop () =
    트리에 그대로 있으면, 그 task는 아직 할 일이 남아 있다" — it contradicted
    that body: a producer stopping because the work belongs upstream leaves
    the code right where it is, and would have been refused for it. That is
-   the failure #33052 removed, rewritten one slot over. *)
+   the failure #33052 removed, rewritten one slot over.
+
+   The order is checked by its verb, not by the noun. This file writes the
+   same act three ways — REJECT, 기각, 거절 — and both slots legitimately say
+   "거절 사유에" to mean "put this in the reason you write". Banning the noun
+   would fail on that; banning only one spelling would let the deleted
+   sentence back in wearing another. "기각하지 않습니다" forbids rather than
+   orders, and does not contain "기각합니다", so the affirmative forms
+   separate cleanly. *)
+let rejection_orders =
+  [ "기각합니다"; "기각한다"; "거절합니다"; "거절한다"; "REJECT 합니다"; "REJECT합니다" ]
+;;
+
 let test_the_cancellation_lookup_orders_no_rejection () =
-  let affix = "기각" in
   init ();
   let slot_text key =
     let resolved = Prompt_registry.resolve_prompt key in
@@ -327,19 +338,27 @@ let test_the_cancellation_lookup_orders_no_rejection () =
     then failf "prompt %s resolved to nothing" key
     else resolved.effective
   in
-  (* The needle is real on both sides: the body states the grounds, and the
-     no-surface slot is allowed to say what is NOT a ground. Only the
-     producer-tree slots must stay silent about refusing. *)
-  check bool "the body states the grounds for refusing" true
-    (Astring.String.is_infix ~affix (cancellation_prompt ()));
+  let states_an_order text =
+    List.exists (fun affix -> Astring.String.is_infix ~affix text) rejection_orders
+  in
+  (* The needle, proven on the prompt body alone rather than on the assembled
+     text. The assembly also carries lookup.none.cancellation, which says what
+     is NOT a ground; reading the needle off the assembly would let a reword of
+     the body pass on the slot's sentence. *)
+  check bool "the cancellation prompt body states the order to refuse" true
+    (states_an_order (slot_text Prompt_names.verification_cancellation));
   List.iter
     (fun (what, key) ->
        check bool (what ^ " orders no rejection") false
-         (Astring.String.is_infix ~affix (slot_text key)))
+         (states_an_order (slot_text key)))
     [ "the cancellation producer-tree slot"
     , Prompt_names.verification_lookup_producer_tree_cancellation
     ; "the completion producer-tree slot"
     , Prompt_names.verification_lookup_producer_tree
+    ; "the cancellation no-surface slot"
+    , Prompt_names.verification_lookup_none_cancellation
+    ; "the completion no-surface slot"
+    , Prompt_names.verification_lookup_none
     ]
 ;;
 

@@ -14,11 +14,10 @@ open Keeper_turn_up_args
 
 
 (* The envelope a successful create hands back. It names the isolation the
-   keeper actually landed on, not the isolation the caller asked for:
-   [network_mode] is not a keeper_up argument -- it is dashboard-owned -- so a
-   keeper created through this tool always takes its sandbox profile's
-   default, and docker and microvm both default to none. This is the only
-   point at which the creating operator learns that. Without it a keeper whose
+   keeper actually landed on. [network_mode] is a keeper_up argument; when the
+   caller omits it the keeper takes its sandbox profile's default, and docker
+   and microvm both default to none. This envelope is where the creating
+   operator learns which of the two happened. Without it a keeper whose
    instructions name a network service is created blocked, and the block first
    shows up as a credential error inside the guest. *)
 let create_response_json ~name ~trace_id ~instructions ~proactive_enabled
@@ -100,11 +99,21 @@ let create_keeper ~expected_config_revision (ctx : _ context)
           p.name err;
         tool_result_error ~class_:Tool_result.Policy_rejection err
     | Ok sandbox_profile ->
-            let network_mode =
-              resolve_network_mode
-                ~sandbox_profile
-                ~fallback:p.profile_defaults.network_mode
-            in
+      match
+        resolve_requested_network_mode
+          ~requested:p.network_mode_opt
+          ~sandbox_profile
+          ~fallback:p.profile_defaults.network_mode
+      with
+      | Error message ->
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string LifecycleDispatchRejections)
+          ~labels:[("keeper", p.name); ("event", "create_network_mode_validation")]
+          ();
+        Log.Keeper.warn "create_keeper failed network_mode validation for %s: %s"
+          p.name message;
+        tool_result_error ~class_:Tool_result.Policy_rejection message
+      | Ok network_mode ->
             let mention_targets =
               resolve_mention_targets
                 ~mention_targets_opt:p.mention_targets_opt

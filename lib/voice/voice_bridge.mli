@@ -143,6 +143,11 @@ type level_phase =
   | Listening of { floor : float }
   | Speaking of { floor : float; quiet_since : float option }
 
+(** Why a recording ended. What happens to it turns on whether speech was
+    heard, not on which of these it was: a capture stopped mid-sentence, and
+    one that ran out of time mid-sentence, both carry a sentence.
+    [Ended_by_operator] therefore means a stop that came before anything was
+    said. *)
 type capture_end =
   | Ended_after_speech
   | Ended_without_speech
@@ -172,6 +177,12 @@ val end_at_deadline : level_phase -> capture_end
     cut off mid-sentence still carries speech; one that never rose above the
     room is a recording of a room, and must not be transcribed. *)
 
+val end_at_operator_stop : level_phase -> capture_end
+(** The same question asked of a stop. Mid-sentence it is "send what I said",
+    which is usually why the key is pressed -- the alternative is waiting out
+    {!Voice_config.trailing_silence_seconds}. Before any speech it is an
+    abort. *)
+
 val record_and_transcribe :
   agent_id:string ->
   ?timeout_sec:float ->
@@ -195,7 +206,11 @@ val record_and_transcribe :
     the capture ends.
 
     [should_stop] is polled at the same rate; returning [true] ends the
-    recording and yields no transcript.
+    recording. What was said up to that point is still transcribed -- the
+    usual reason to stop a capture is that the speaker has finished and does
+    not want to wait out {!Voice_config.trailing_silence_seconds}. A stop
+    before any speech yields no transcript, which is what keeps a room away
+    from a transcriber that answers silence with a sentence.
 
     [noise_floor] reuses an RMS level already measured, skipping calibration.
     Omitted, the room is read from the capture's own opening.

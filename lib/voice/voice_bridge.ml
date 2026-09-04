@@ -914,6 +914,9 @@ type level_phase =
   | Listening of { floor : float }
   | Speaking of { floor : float; quiet_since : float option }
 
+(* Why a recording is over, which is only ever three things. What is done with
+   it does not depend on this, though -- it depends on whether speech was
+   heard. A capture the operator stopped mid-sentence carries a sentence. *)
 type capture_end =
   | Ended_after_speech
   | Ended_without_speech
@@ -985,6 +988,19 @@ let end_at_deadline = function
   | Calibrating _ | Listening _ -> Ended_without_speech
 ;;
 
+(* The same question, asked of the other way a recording ends. The key says
+   "stop", and the reason to press it is usually that the speaker has finished
+   and does not want to sit out the trailing-silence wait; discarding then
+   costs them the sentence again, while transcribing something unwanted costs
+   one deletion in a draft that has not been sent.
+
+   Before any speech it is an abort, and yields nothing -- which is also what
+   keeps a room away from a transcriber that answers silence with a sentence. *)
+let end_at_operator_stop = function
+  | Speaking _ -> Ended_after_speech
+  | Calibrating _ | Listening _ -> Ended_by_operator
+;;
+
 let watch_capture_level
       ~clock
       ~audio_file
@@ -1000,7 +1016,7 @@ let watch_capture_level
     Eio.Time.sleep clock level_poll_seconds;
     let now = Eio.Time.now clock in
     if should_stop ()
-    then Ended_by_operator
+    then end_at_operator_stop phase
     else if now >= deadline
     then end_at_deadline phase
     else (
@@ -1117,12 +1133,15 @@ let record_and_transcribe
       on_level Float.neg_infinity;
       (match outcome with
        | Error message -> Error message
+       (* Stopped before anything was said. Distinct from the message below
+          because nothing waited for speech here -- saying the room was too
+          quiet would blame a microphone that was never given a chance. *)
        | Ok Ended_by_operator ->
          Ok
            (`Assoc
                [ "status", `String "no_audio"
                ; "text", `String ""
-               ; "message", `String "capture stopped"
+               ; "message", `String "stopped before anything was said"
                ])
        | Ok Ended_without_speech ->
          (* The gate that keeps a room away from the transcriber. It used to

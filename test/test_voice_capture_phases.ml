@@ -145,6 +145,58 @@ let test_a_deadline_before_any_speech_carries_no_transcript () =
     [ listening; Bridge.Calibrating { until = 1.0; floor = None } ]
 ;;
 
+(* The key says "stop", not "cancel", and the reason to reach for it is
+   usually that the sentence is finished and the trailing-silence wait is two
+   seconds away. Discarding then costs the whole sentence again; transcribing
+   something unwanted costs one deletion in a draft that has not been sent. *)
+let test_a_stop_mid_sentence_keeps_what_was_said () =
+  match Bridge.end_at_operator_stop speaking with
+  | Bridge.Ended_after_speech -> ()
+  | Bridge.Ended_without_speech | Bridge.Ended_by_operator ->
+    fail "a stop after speech must keep it"
+;;
+
+let test_a_stop_during_a_pause_keeps_what_was_said () =
+  let paused = Bridge.Speaking { floor = room; quiet_since = Some 5.0 } in
+  match Bridge.end_at_operator_stop paused with
+  | Bridge.Ended_after_speech -> ()
+  | Bridge.Ended_without_speech | Bridge.Ended_by_operator ->
+    fail "a pause inside a sentence is still a sentence"
+;;
+
+(* Before any speech it is an abort, and the transcriber must not see it:
+   whisper answers a room with a fluent sentence. *)
+let test_a_stop_before_any_speech_carries_no_transcript () =
+  List.iter
+    (fun phase ->
+       match Bridge.end_at_operator_stop phase with
+       | Bridge.Ended_by_operator -> ()
+       | Bridge.Ended_after_speech | Bridge.Ended_without_speech ->
+         failf "%s must not be transcribed" (phase_name phase))
+    [ listening; Bridge.Calibrating { until = 1.0; floor = None } ]
+;;
+
+(* Why a recording ended does not decide what happens to it -- what was heard
+   does. The two endings agree wherever that question has the same answer. *)
+let test_a_stop_and_a_deadline_agree_on_whether_there_is_speech () =
+  let carries = function
+    | Bridge.Ended_after_speech -> true
+    | Bridge.Ended_without_speech | Bridge.Ended_by_operator -> false
+  in
+  List.iter
+    (fun phase ->
+       check
+         bool
+         (phase_name phase)
+         (carries (Bridge.end_at_deadline phase))
+         (carries (Bridge.end_at_operator_stop phase)))
+    [ speaking
+    ; Bridge.Speaking { floor = room; quiet_since = Some 5.0 }
+    ; listening
+    ; Bridge.Calibrating { until = 1.0; floor = None }
+    ]
+;;
+
 let () =
   run
     "Voice capture phases"
@@ -187,6 +239,24 @@ let () =
             "a pause that outlasts the window ends the capture"
             `Quick
             test_a_pause_that_outlasts_the_window_ends_the_capture
+        ] )
+    ; ( "the operator stops it"
+      , [ test_case
+            "a stop mid-sentence keeps what was said"
+            `Quick
+            test_a_stop_mid_sentence_keeps_what_was_said
+        ; test_case
+            "a stop during a pause keeps what was said"
+            `Quick
+            test_a_stop_during_a_pause_keeps_what_was_said
+        ; test_case
+            "a stop before any speech carries no transcript"
+            `Quick
+            test_a_stop_before_any_speech_carries_no_transcript
+        ; test_case
+            "a stop and a deadline agree on whether there is speech"
+            `Quick
+            test_a_stop_and_a_deadline_agree_on_whether_there_is_speech
         ] )
     ; ( "running out of time"
       , [ test_case

@@ -104,6 +104,31 @@ store + read and keeps the floor a pure drop for the truly-no-vision-runtime
 case), with **B-store-at-floor** as the lighter alternative if the ingest thread
 proves too invasive. C stays rejected.
 
+## Live finding (2026-09-04, kidsnote-pr-jira-checker) — invalidates B's placeholder
+
+A live text-only keeper (`ollama_cloud.ollama-cloud-deepseek-v4-flash-0731`)
+received a pasted image and reported, in its own turn:
+
+> vision read 실패 + analyze_image 접근 불가 … keeper_analyze_image가 operator_only로
+> 표시 … (operator_only, not_model_invocable)
+
+Two facts the sketch got wrong:
+
+1. **`keeper_analyze_image` is `Operator_only` by design** (`keeper_tool_descriptor.ml:2109`): "the model has its own analyze_image builtin … hiding it takes its schema off every keeper turn." That reasoning assumes a **vision-capable model**. A text-only keeper has no builtin *and* cannot call the hidden tool — so **B2's "call analyze_image" placeholder points at a tool the keeper cannot invoke**. B2 is invalid for exactly the keepers this RFC is about.
+2. **The eager read itself failed** ("vision read 실패"). The eager read is the *only* path left for a text-only keeper, and it did not produce a reading. Likely causes, in order of suspicion: no reachable image-capable runtime (config declares `supports-image-input = true` on e.g. `kimi-for-coding` at runtime.toml:717, but a coding model rejecting an image would fail the read), or `media_failover` is unset (no `media-failover` key in `config/runtime.toml`) so `vision_runtime_candidates` falls back to possibly over-declared main-list caps.
+
+So the problem is deeper than "deferred drops the image": for a text-only keeper there is **no working read path at all** — the model can't see pixels, the eager read fails, and the tool is operator-only.
+
+### Revised direction
+
+The floor/ingest edits (A'/B-store) are moot until a **read actually succeeds**. The gating question is runtime, not routing:
+
+1. **Is any image-capable runtime actually reachable, and are its caps accurate?** Verify `first_vision_runtime_id ()` resolves to a runtime the provider will accept an image on (probe it — the "vision read 실패" says the current pick does not work). Fix over-declared `supports-image-input` caps, or configure a real `media-failover` vision fleet.
+2. **Then** the eager read carries the image's meaning as text at ingest, and the deferred floor never sees an image. A' (ingest-aware evict for a deferred-committed text-only runtime) becomes the routing fix on top of a working read.
+3. Only if a text-only keeper must read on demand does surfacing `analyze_image` to it (making `keeper_model_projection` conditional on the runtime lacking image input) come into play — and it still needs a working vision runtime.
+
+C stays rejected. B2 (placeholder → keeper calls analyze_image) is **withdrawn** — the tool is not model-invocable.
+
 ## Boundaries
 
 - Do not change the ingest `delegates_media` decision for non-deferred lanes.

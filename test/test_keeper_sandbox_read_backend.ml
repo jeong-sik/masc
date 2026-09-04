@@ -1173,19 +1173,39 @@ let test_docker_network_args_follow_masc_policy () =
 (* The listing is parsed by column, not by substring: a network whose name
    contains the policy network's must not read as it already existing, or a
    policy guest boots onto a network nobody created. *)
-let test_the_policy_network_is_matched_by_name_not_substring () =
+let network_row id = Printf.sprintf {|{"id":"%s","status":{}}|} id
+
+let present listing =
+  match Masc.Keeper_sandbox_microvm.policy_network_present ~listing with
+  | Ok answer -> answer
+  | Error detail -> Alcotest.failf "expected the listing to decode: %s" detail
+;;
+
+let test_the_policy_network_is_matched_by_id_not_substring () =
   let name = Masc.Keeper_sandbox_microvm.policy_network_name in
-  Alcotest.(check bool) "an exact row matches" true
-    (Masc.Keeper_sandbox_microvm.policy_network_present
-       ~listing:(Printf.sprintf "NETWORK  SUBNET\n%s  192.168.128.0/24\n" name));
+  Alcotest.(check bool) "an exact id matches" true
+    (present (Printf.sprintf "[%s]" (network_row name)));
   Alcotest.(check bool) "a longer name does not" false
-    (Masc.Keeper_sandbox_microvm.policy_network_present
-       ~listing:(Printf.sprintf "NETWORK  SUBNET\n%s-staging  192.168.130.0/24\n" name));
+    (present (Printf.sprintf "[%s]" (network_row (name ^ "-staging"))));
   Alcotest.(check bool) "a name it is a suffix of does not" false
-    (Masc.Keeper_sandbox_microvm.policy_network_present
-       ~listing:(Printf.sprintf "NETWORK  SUBNET\nold-%s  192.168.131.0/24\n" name));
-  Alcotest.(check bool) "and neither does the header alone" false
-    (Masc.Keeper_sandbox_microvm.policy_network_present ~listing:"NETWORK  SUBNET\n")
+    (present (Printf.sprintf "[%s]" (network_row ("old-" ^ name))));
+  Alcotest.(check bool) "an empty array does not" false (present "[]");
+  Alcotest.(check bool) "and it is found beside others" true
+    (present (Printf.sprintf "[%s,%s]" (network_row "default") (network_row name)))
+
+(* Output that does not decode is an error, never "absent": reading it as
+   absence drives a create against a network that may already exist, and the
+   guest is then refused with a message about the wrong step. *)
+let test_undecodable_output_is_an_error_not_absence () =
+  List.iter
+    (fun (listing, label) ->
+      Alcotest.(check bool) label true
+        (Result.is_error (Masc.Keeper_sandbox_microvm.policy_network_present ~listing)))
+    [ "NETWORK  SUBNET\nmasc-egress-policy  192.168.128.0/24\n", "the human table is refused"
+    ; "", "empty output is refused"
+    ; "{\"id\":\"masc-egress-policy\"}", "a bare object is refused"
+    ; "not json", "garbage is refused"
+    ]
 
 (* Only the backend that carries the lane has a network to create. *)
 let test_only_the_policy_backend_has_a_policy_network () =
@@ -2294,8 +2314,10 @@ let run_tests ~clock () =
             test_docker_network_args_follow_masc_policy;
           Alcotest.test_case "docker refuses the policy lane" `Quick
             test_docker_refuses_the_policy_lane;
-          Alcotest.test_case "the policy network is matched by name not substring" `Quick
-            test_the_policy_network_is_matched_by_name_not_substring;
+          Alcotest.test_case "the policy network is matched by id not substring" `Quick
+            test_the_policy_network_is_matched_by_id_not_substring;
+          Alcotest.test_case "undecodable output is an error not absence" `Quick
+            test_undecodable_output_is_an_error_not_absence;
           Alcotest.test_case "only the policy backend has a policy network" `Quick
             test_only_the_policy_backend_has_a_policy_network;
           Alcotest.test_case "docker nofile args follow config" `Quick

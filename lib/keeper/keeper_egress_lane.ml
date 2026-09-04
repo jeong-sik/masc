@@ -35,4 +35,6 @@ let resolve_allowlist ~base_path ~keeper_name =
   | Some entry -> Ok entry.Egress_allowlist.allow
 ;;
 
+let listen_backlog = 16
+let request_line_read_timeout_s = 10.0
 let listen_address = `Tcp (Eio.Net.Ipaddr.V4.loopback, 0)

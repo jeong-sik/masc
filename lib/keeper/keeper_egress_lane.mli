@@ -17,6 +17,16 @@ val resolve_allowlist
     because then nothing is known -- including whether an allowlist was
     meant. *)
 
+val listen_backlog : int
+(** How many guest connections may queue before the accept loop takes them.
+    One guest is behind this listener and a turn's tool calls are serial, so
+    the queue exists for the burst a single turn makes, not for a fleet. *)
+
+val request_line_read_timeout_s : float
+(** How long a connected client has to send its CONNECT line. Bounds a client
+    that connects and says nothing; it does not bound an admitted tunnel,
+    which may be long-lived. *)
+
 val listen_address : Eio.Net.Sockaddr.stream
 (** Where a keeper's proxy binds: the loopback address, on a port the OS
     picks.

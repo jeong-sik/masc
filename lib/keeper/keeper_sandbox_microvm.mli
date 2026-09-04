@@ -34,10 +34,16 @@ val policy_network_create_argv_for : Keeper_microvm_backend.t -> (string list, s
 val policy_network_list_argv_for : Keeper_microvm_backend.t -> (string list, string) result
 (** List networks, to see whether {!policy_network_name} already exists. *)
 
-val policy_network_present : listing:string -> bool
-(** Whether the listing names {!policy_network_name}. Matched on the first
-    column rather than as a substring, so a network whose name contains this
-    one's does not read as a match. *)
+val policy_network_present : listing:string -> (bool, string) result
+(** Whether [container network list --format json] carries
+    {!policy_network_name}. Compared as a decoded [id], so nothing depends on
+    how the CLI spaces a column, and a network whose name contains this one's
+    cannot answer for it.
+
+    Unparseable output is an error rather than "absent": reading a failed
+    decode as absence would drive a create against a network that may already
+    exist, and the guest would then be refused with a message about creation
+    rather than about the listing that could not be read. *)
 
 val network_args_for :
   Keeper_microvm_backend.t ->

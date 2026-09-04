@@ -660,7 +660,12 @@ let policy_network_create_argv_for backend =
 let policy_network_list_argv_for backend =
   match (backend : Backend.t) with
   | Backend.Apple_container ->
-    Ok (command_argv_for backend @ [ "network"; "list" ])
+    (* [--format json], not the default table. The table is for a person, and
+       reading it means splitting on whitespace and hoping the first column is
+       the name -- a spacing change upstream would then read as "the network
+       is absent" and boot a guest onto one nobody created. The machine form
+       is asked for explicitly, the same way [msb inspect] is. *)
+    Ok (command_argv_for backend @ [ "network"; "list"; "--format"; "json" ])
   | Backend.Microsandbox | Backend.Nerdctl_kata ->
     Error
       (Printf.sprintf
@@ -669,16 +674,31 @@ let policy_network_list_argv_for backend =
          (Backend.to_string backend))
 ;;
 
-(* container's [network list] is a plain table whose first column is the
-   name. Parsed by column rather than by substring so a network whose name
-   contains this one's does not read as a match. *)
+(* [container network list --format json] answers an array whose entries
+   carry the network's [id]. Compared as a decoded string, so nothing here
+   depends on how the CLI spaces a column.
+
+   Unparseable JSON is an error rather than "absent". Reading a failed decode
+   as absence would drive a create against a network that may already exist,
+   and that create fails on this CLI -- so the guest would be refused with a
+   message about creation rather than about the listing that could not be
+   read. *)
 let policy_network_present ~listing =
-  listing
-  |> String.split_on_char '\n'
-  |> List.exists (fun line ->
-       match String.split_on_char ' ' (String.trim line) with
-       | name :: _ -> String.equal name policy_network_name
-       | [] -> false)
+  match Yojson.Safe.from_string listing with
+  | `List entries ->
+    Ok
+      (List.exists
+         (fun entry ->
+            match entry with
+            | `Assoc fields ->
+              (match List.assoc_opt "id" fields with
+               | Some (`String id) -> String.equal id policy_network_name
+               | Some _ | None -> false)
+            | _ -> false)
+         entries)
+  | _ -> Error "container network list: expected a JSON array"
+  | exception Yojson.Json_error detail ->
+    Error ("container network list: unparseable JSON: " ^ detail)
 ;;
 
 let stop_argv_for backend ~container_name =

@@ -7659,6 +7659,9 @@ let keeper_message_visible_timeline ?messages (state : state) ~keeper_name =
           || state.msg_reasoning_visibility <> Reasoning_hidden)
         |> Masc_tui_types.fold_memory_summary_runs
              ~visibility:state.msg_memory_visibility
+        (* After the filters, so a hidden lane between two Gate rows does not
+           split their run and draw the same approval twice. *)
+        |> Masc_tui_types.fold_gate_runs
       in
       visible_timeline_memo :=
         Some

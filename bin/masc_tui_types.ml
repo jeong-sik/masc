@@ -303,6 +303,14 @@ type msg_identity =
 
 (** Request-correlated message history entry. [me_turn_phase], rather than the
     display role or timestamp, is the ordering authority inside one turn. *)
+(* The typed half of a Gate status row: which approval it belongs to, which
+   step it is, and the tool the approval is for. *)
+type gate_step = {
+  gs_approval_id: string;
+  gs_phase: string;
+  gs_tool: string option;
+}
+
 type msg_entry = {
   me_role: msg_role;
   me_identity: msg_identity;
@@ -319,6 +327,11 @@ type msg_entry = {
       (** Producer-built compact text for a Memory journal row. [None] for
           ordinary conversation and neutral system rows; renderers never
           recover this boundary by splitting display text. *)
+  me_gate: gate_step option;
+      (** The typed approval step behind a Gate status row. Carried so a run
+          of steps can be folded back into the one approval they describe;
+          [None] on every other row, including other status rows, which must
+          not be folded with them. *)
   me_submitted_at: float option;
       (** First local Enter time for an operator input. Preserved when the
           durable transcript replaces the session copy and used as that input
@@ -372,6 +385,71 @@ let fold_memory_summary_runs ~visibility entries =
             go (row :: annotate (List.length older) newest :: acc) [] rest))
     in
     go [] [] entries
+;;
+
+(* A run of Gate rows says one thing: where an external effect ended up. The
+   store keeps a row per phase, which is right -- each is a durable fact -- but
+   drawn one row per phase a single approval took four lines of the pane and
+   repeated the tool name on each.
+
+   Only consecutive rows fold, and only within one approval id. That leaves a
+   request still waiting for an operator on its own line, which is the state
+   worth seeing, and folds the burst of steps that lands when it finally
+   resolves. Two approvals resolving back to back stay two rows.
+
+   The newest row of each approval is the one kept, so the run holds its place
+   in the timeline; its text is recomposed from every phase the run carried. *)
+let fold_gate_runs entries =
+  let close run acc =
+    (* Newest first within the run, and one entry per approval id. Emitting in
+       the order each approval was first seen keeps the rows where the reader
+       last saw them. *)
+    let ids =
+      List.fold_left
+        (fun ids (entry, _) ->
+          match entry.me_gate with
+          | Some gate when not (List.mem gate.gs_approval_id ids) ->
+            gate.gs_approval_id :: ids
+          | Some _ | None -> ids)
+        [] run
+    in
+    List.fold_left
+      (fun acc approval_id ->
+        let steps =
+          List.filter
+            (fun (entry, _) ->
+              match entry.me_gate with
+              | Some gate -> String.equal gate.gs_approval_id approval_id
+              | None -> false)
+            run
+        in
+        match steps with
+        | [] -> acc
+        | (newest, extra) :: _ ->
+          let phases =
+            List.rev_map
+              (fun (entry, _) ->
+                match entry.me_gate with
+                | Some gate -> gate.gs_phase
+                | None -> "")
+              steps
+          in
+          let tool =
+            match newest.me_gate with Some gate -> gate.gs_tool | None -> None
+          in
+          (match Masc_tui_gate_text.fold_line ~phases ~tool with
+           | Some text -> ({ newest with me_text = text }, extra) :: acc
+           | None -> (newest, extra) :: acc))
+      acc ids
+  in
+  let rec go acc run = function
+    | [] -> List.rev (close run acc)
+    | ((entry, _) as row) :: rest -> (
+      match entry.me_gate with
+      | Some _ -> go acc (row :: run) rest
+      | None -> go (row :: close run acc) [] rest)
+  in
+  go [] [] entries
 ;;
 
 type chat_turn = {

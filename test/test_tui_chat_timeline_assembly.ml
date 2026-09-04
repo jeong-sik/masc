@@ -20,6 +20,7 @@ let row ?(keeper = "alpha") ?(request_id = "") ?turn_sequence
   ; me_operation_seq = operation_seq
   ; me_text = text
   ; me_memory_summary = None
+  ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
   ; me_skill_activity = None

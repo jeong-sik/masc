@@ -120,7 +120,8 @@ type kind =
           steps it withheld. A blank [content] with a trace behind it used
           to draw as an empty line; this is what was behind it. *)
   | Gate_activity of
-      { phase : string
+      { approval_id : string
+      ; phase : string
       ; tool : string option
       }
       (** One durable step of an external-effect approval, read off the row's

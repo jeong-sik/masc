@@ -87,8 +87,8 @@ let kind_to_string : History.kind -> string = function
         (String.concat " | " (Transcript.skill_rows ~full:true skill))
   | History.Reasoning lines ->
       Printf.sprintf "thinking[%s]" (String.concat " | " lines)
-  | History.Gate_activity { phase; tool } ->
-      Printf.sprintf "gate[%s%s]" phase
+  | History.Gate_activity { approval_id; phase; tool } ->
+      Printf.sprintf "gate[%s %s%s]" approval_id phase
         (match tool with None -> "" | Some tool -> " " ^ tool)
   | History.Memory_activity _ -> "memory"
 
@@ -165,6 +165,54 @@ let decode json =
   match History.rows_of_json json with
   | Ok decoded -> decoded
   | Error detail -> failf "expected a decode, got %s" detail
+
+(* A Gate row is drawn from its typed phase, so it has to reach the pane as one.
+   The approval id is what folds a run of steps back into the one approval they
+   describe; a lifecycle without it is not a step this pane can place, and
+   stays in the neutral lane rather than being drawn as a lone approval. *)
+let gate_row ~ts ~slot ?approval_id ~phase ?tool content =
+  `Assoc
+    [ "id", `String ("gate-" ^ slot)
+    ; "role", `String "system"
+    ; "content", `String content
+    ; "ts", `Float ts
+    ; "transcript_slot", `Assoc [ "kind", `String slot ]
+    ; ( "approval_lifecycle"
+      , `Assoc
+          ([ "phase", `String phase ]
+           @ (match approval_id with
+              | None -> []
+              | Some id -> [ "approval_id", `String id ])
+           @ (match tool with
+              | None -> []
+              | Some name -> [ "tool_name", `String name ])) )
+    ]
+
+let test_a_gate_row_carries_its_approval () =
+  let decoded =
+    decode
+      (`List
+         [ gate_row ~ts:1.0 ~slot:"approval_request" ~approval_id:"appr_01a"
+             ~phase:"requested" ~tool:"Execute" ""
+         ; gate_row ~ts:2.0 ~slot:"approval_replay" ~approval_id:"appr_01a"
+             ~phase:"replay_applied" ~tool:"Execute" ""
+         ])
+  in
+  check int "nothing was dropped" 0 decoded.History.dropped;
+  check (list string) "each step keeps its approval, phase and tool"
+    [ "gate[appr_01a requested Execute]"; "gate[appr_01a replay_applied Execute]" ]
+    (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
+
+let test_a_lifecycle_without_an_approval_id_is_not_a_gate_row () =
+  let decoded =
+    decode
+      (`List
+         [ gate_row ~ts:1.0 ~slot:"approval_replay" ~phase:"replay_applied"
+             ~tool:"Execute" "적용 완료"
+         ])
+  in
+  check (list string) "it stays in the neutral lane" [ "memory" ]
+    (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
 
 let test_roles_map_to_what_the_pane_draws () =
   let decoded =
@@ -1512,6 +1560,10 @@ let () =
     [ ( "rows"
       , [ test_case "roles map to what the pane draws" `Quick
             test_roles_map_to_what_the_pane_draws
+        ; test_case "a gate row carries its approval" `Quick
+            test_a_gate_row_carries_its_approval
+        ; test_case "a lifecycle without an approval id is not a gate row"
+            `Quick test_a_lifecycle_without_an_approval_id_is_not_a_gate_row
         ; test_case "a failed turn names the request it came from" `Quick
             test_a_failed_turn_names_the_request_it_came_from
         ; test_case "runtime interruption becomes a recovered lifecycle" `Quick

@@ -13,6 +13,7 @@ let entry ?summary role text =
   ; me_operation_seq = 0
   ; me_text = text
   ; me_memory_summary = summary
+  ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
   ; me_skill_activity = None

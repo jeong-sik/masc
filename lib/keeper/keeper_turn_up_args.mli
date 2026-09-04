@@ -108,8 +108,22 @@ val resolve_sandbox_profile :
     [requested] is the caller's raw string; an unparseable one is treated as absent,
     since the gate rejects those first. *)
 
-val resolve_network_mode :
+val resolve_requested_network_mode :
+  requested:string option ->
   sandbox_profile:sandbox_profile ->
   fallback:network_mode option ->
-  network_mode
+  (network_mode, string) result
+(** The network mode a keeper lands on. [requested] is the caller's raw
+    [network_mode] argument; an unparseable one is an [Error] naming every
+    accepted spelling, and [None] takes the keeper TOML's [fallback] first,
+    then the profile's own default.
 
+    Create and update both call this. They did not: create resolved from
+    [fallback] alone and never read the caller's argument, so a caller who
+    asked for [inherit] on a new keeper got [none] written to its TOML with
+    nothing said, while the same argument on an existing keeper was honoured.
+    A keeper created to search the web reached the operator unable to.
+
+    [fallback] is the keeper TOML's declaration, never a live meta's
+    [network_mode]: the meta decoder pins that field, so reading it back would
+    flip a declared [none] to [inherit] on any field-only update. *)

@@ -976,9 +976,33 @@ let test_keeper_clear_accepts_live_traffic_fields () =
       "expected masc_keeper_clear to accept its live-traffic fields, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
-(* [network_mode] stays undeclared on the MCP contract. *)
-let test_keeper_up_rejects_network_mode () =
-  assert_rejects_undeclared_field ~tool:"masc_keeper_up" ~field:"network_mode"
+(* [network_mode] is on the MCP contract. It was not, and the exclusion had no
+   owner left: it rested on a [~allow_sandbox_fields] flag that was deleted,
+   after which the parser read the field from every caller while the
+   descriptor forbade sending it. A keeper whose whole job was web search was
+   created with no network because of that gap, so the guard now pins the
+   declaration rather than its absence.
+
+   This door checks declared-ness and type, not enum membership -- nothing in
+   [Tool_input_validation] or [Agent_core.Tool_middleware] reads "enum". The
+   advertised spellings are held to their typed owner by
+   [test_enum_mirror_sync], and an unparseable value is refused one layer in by
+   [Keeper_turn_up_args.resolve_requested_network_mode], which has its own
+   case. *)
+let test_keeper_up_accepts_network_mode () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:(keeper_schema_input "masc_keeper_up")
+      ~name:"masc_keeper_up"
+      ~args:(`Assoc [ "name", `String "alpha"; "network_mode", `String "inherit" ])
+      ()
+  with
+  | Ok _ -> ()
+  | Error result ->
+    Alcotest.failf
+      "expected masc_keeper_up to accept network_mode, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
+
 
 (* Every schema in the keeper surface forbids undeclared fields. A new tool
    added without [additionalProperties] reopens the silent-drop path, so the
@@ -2513,8 +2537,8 @@ let () =
         test_keeper_up_accepts_live_traffic_fields;
       Alcotest.test_case "keeper_clear accepts live-traffic fields" `Quick
         test_keeper_clear_accepts_live_traffic_fields;
-      Alcotest.test_case "keeper_up rejects dashboard-only network_mode" `Quick
-        test_keeper_up_rejects_network_mode;
+      Alcotest.test_case "keeper_up accepts network_mode" `Quick
+        test_keeper_up_accepts_network_mode;
       Alcotest.test_case "every keeper schema forbids additional properties" `Quick
         test_every_keeper_schema_forbids_additional_properties;
     ]);

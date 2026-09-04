@@ -363,12 +363,25 @@ val align_role_label : ?column:int -> style:style -> string -> string
     tail: these read [agent · surface] and share long prefixes, so the end is
     what tells two of them apart. Remaining column cells follow the name. *)
 
+val chat_readable_body_cells : int
+(** The body-column floor the chat pane's width gate guarantees: twenty
+    cells, enough for prose to wrap at word boundaries instead of mid-word. *)
+
+val chat_min_terminal_cols : int
+(** The narrowest terminal the keeper chat pane renders at, derived from a
+    row's fixed chrome -- frame border and padding (4), body indent (2),
+    {!turn_rail_cells}, and the {!chat_role_label_column} floor -- plus
+    {!chat_readable_body_cells}. Below it the pane draws the resize notice
+    instead of shredding prose. *)
+
 val message_viewport_supported :
   terminal_rows:int -> terminal_cols:int -> status_rows:int -> bool
 (** Whether the full chat frame plus its final newline fits without terminal
     scrolling. Unsupported viewports render a compact resize gate and suppress
-    message editing. The width gate also reserves enough framed content for a
-    four-cell body and a shortened source with two identifying tail cells. *)
+    message editing. The width gate admits the pane only at
+    {!chat_min_terminal_cols} or wider, where the body column keeps
+    {!chat_readable_body_cells} beside the label column, rail, indent, and
+    frame. *)
 
 val wrap_words : max_cells:int -> string -> string list
 (** Wrap a plain single-line string at spaces using a terminal-cell budget.

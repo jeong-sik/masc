@@ -772,17 +772,32 @@ let split_aligned_role_label ~style label =
   , String.sub after_mark 0 boundary
   , String.sub after_mark boundary (String.length after_mark - boundary) )
 
+(* #32984: the width gate below is derived from a chat row's fixed chrome,
+   not chosen. Before its body, a row pays the frame's border and padding
+   (4 cells -- [Masc_tui_frame.inner_width] is [cols - 4], pinned in the
+   layout tests), the body indent (2, in {!rows_of_entry}), the turn rail
+   ({!turn_rail_cells}), and the speaker/tool label column at its floor
+   ({!chat_role_label_column}). What remains is the body, and a body reads
+   when it keeps twenty cells: three or four English words per row, so a
+   tool summary wraps at word boundaries. Under the gate this replaced --
+   thirteen columns on a text-only contract -- a 22-column terminal left
+   four body cells and "returned" drew as "retu/rned".
+
+   The derivation assumes the default [Origin_bare] row. [Origin_inline]'s
+   clock spends six further body cells; it is a user toggle, so that spend
+   is visible and self-inflicted rather than gated. *)
+let chat_readable_body_cells = 20
+
+let chat_min_terminal_cols =
+  4 + 2 + turn_rail_cells + chat_role_label_column + chat_readable_body_cells
+
 let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
-  (* At thirteen columns the frame leaves nine content cells: two for the
-     body indent, four for the body itself, and three for a shortened source
-     such as […aa]. Eleven columns left one source cell, which could draw only
-     the omission marker and therefore admitted a chat pane with no identity. *)
   (* The fixed chrome costs eight rows. The title and operational identity use
      separate rows so a provider id cannot cut the title or context reading.
      Three history rows are the minimum that
      can show an oversized entry's identity/opening, an omission marker, and
      its latest output instead of silently dropping one of those facts. *)
-  terminal_cols >= 13
+  terminal_cols >= chat_min_terminal_cols
   && message_history_height ~terminal_rows ~status_rows >= 3
 
 let take_last count values =

@@ -160,8 +160,8 @@ into the binary"), 2026-09-04 기준 두 트리는 파일 하나 차이가 났�
 ### 3.3 고정은 MCP 가 만든 것이 아니다
 
 masc#33065 감사는 §3.1 의 "넓히지 못한다"가 masc 스스로 만든 제약 아니냐고 물었다.
-근거는 `runtime_official_client_mcp.ml:277` 이 MCP capability 를 `"tools", `Assoc []`
-로 내면서 `listChanged` 를 선언하지 않는다는 점이다. 확인해 보니 **아니다.** 그
+근거는 `runtime_official_client_mcp.ml:289` 가 MCP capability 를
+``"tools", `Assoc []`` 로 내면서 `listChanged` 를 선언하지 않는다는 점이다. 확인해 보니 **아니다.** 그
 capability 를 켜도 도는 세션의 도구 집합은 바뀌지 않는다. 네 가지가 각각 독립적으로
 막는다.
 

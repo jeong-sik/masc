@@ -308,6 +308,7 @@ let test_profile_update_preserves_owner_runtime_state () =
     ; telemetry_feedback_enabled = Some true
     ; telemetry_feedback_window_hours = Some 24
     ; always_allow = Some false
+    ; voice_always_allow = Some false
     ; agent_core_env = [ "PROFILE_TEST", "1" ]
     ; updated_at = "profile-updated"
     }
@@ -319,7 +320,8 @@ let test_profile_update_preserves_owner_runtime_state () =
     "profile update preserves additive turns"
     current.runtime.usage.total_turns
     committed.runtime.usage.total_turns;
-  check bool "profile update changes autoboot" true committed.autoboot_enabled
+  check bool "profile update changes autoboot" true committed.autoboot_enabled;
+  check bool "profile update changes voice_always_allow" true (committed.voice_always_allow = Some false)
 ;;
 
 let test_actor_concurrent_commands_are_exact () =

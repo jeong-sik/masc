@@ -1369,7 +1369,7 @@ Respond with ONLY the requested JSON object, no prose and no code fences.
 # 동일 계약). 심판 런타임은 supports-structured-output 선언이 필요 없다 — wire 는
 # schema 를 싣지 않고 계약은 프롬프트 asset(fusion.judge.output)과 strict parser 가
 # 진다(2026-08-29 재실측).
-# 비용/지연: LLM 호출 12회(panel 3 + 1차 심판 6 + stage meta 2 + 최종 meta 1).
+# 비용/지연: LLM 호출 11회(panel 2 + 1차 심판 6 + stage meta 2 + 최종 meta 1).
 # 실행은 4단 순차 파이프라인(panel → 1차 심판 병렬 → stage meta 병렬 → 최종
 # meta, fusion_orchestrator run_staged_judge_of_judges)이며 각 단의 경과 시간은 관측된다.
 # 키퍼 사용: masc_fusion preset="council" topology="staged_judge_of_judges"

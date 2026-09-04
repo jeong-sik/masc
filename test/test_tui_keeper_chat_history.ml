@@ -87,7 +87,7 @@ let kind_to_string : History.kind -> string = function
         (String.concat " | " (Transcript.skill_rows ~full:true skill))
   | History.Reasoning lines ->
       Printf.sprintf "thinking[%s]" (String.concat " | " lines)
-  | History.Gate_activity { approval_id; phase; tool } ->
+  | History.Gate_activity { approval_id; phase; tool; _ } ->
       Printf.sprintf "gate[%s %s%s]" approval_id phase
         (match tool with None -> "" | Some tool -> " " ^ tool)
   | History.Memory_activity _ -> "memory"

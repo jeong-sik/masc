@@ -2012,7 +2012,12 @@ let call_summary_of_input (input : Yojson.Safe.t) : string option =
     let trimmed = String.trim first_line in
     if trimmed = "" then None
     else if String.length trimmed <= call_summary_max_length then Some trimmed
-    else Some (String.sub trimmed 0 call_summary_max_length)
+    else
+      (* A byte cut can split a multibyte char and persist a broken string;
+         the boundary index keeps the cap without doing so. *)
+      Some
+        (String.sub trimmed 0
+           (String_util.utf8_char_boundary trimmed call_summary_max_length))
   in
   let string_argv = function
     | `List items when List.for_all (function `String _ -> true | _ -> false) items ->

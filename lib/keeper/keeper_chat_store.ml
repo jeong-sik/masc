@@ -515,6 +515,7 @@ let redact_approval_lifecycle redaction lifecycle =
   in
   { lifecycle with
     tool_name = Option.map (redact_string redaction) lifecycle.tool_name
+  ; call_summary = Option.map (redact_string redaction) lifecycle.call_summary
   ; artifact_ref
   }
 

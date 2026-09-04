@@ -122,14 +122,62 @@ allowlist 에 없는 목적지는 거부한다. 로그만 남기고 통과시키
 | 백엔드마다 번역된다 | `network_args_for` 가 백엔드별로 프록시 주소를 낸다 |
 | 라이브 | 키퍼 하나를 `policy` 로 옮기고 턴 하나를 완주 |
 
+### D5. 강제 지점은 하네스 아래다 — 환경변수가 아니다
+
+초안은 "프록시를 어떻게 알리나"를 미확인으로 뒀다. 조사해보니 이건 열린
+질문이 아니라 이미 답이 있는 질문이다.
+
+`HTTPS_PROXY` 는 **권고지 정책이 아니다.** 원시 소켓을 열거나 자기 HTTP
+클라이언트를 들고 오는 하위 프로세스는 그냥 나간다. 강제 지점은 하네스 **아래**
+여야 한다 — OS 네트워크 네임스페이스, 또는 컨테이너 경계의 forward proxy.
+
+masc 에 유리한 점이 하나 있다. **백엔드들이 이미 그 경계에 있다.** Apple
+`container` 의 `--network`, gondolin 의 `--allow-host` 는 게스트 프로세스가 못
+건드리는 자리에서 판정한다. 이 RFC 가 강제 지점을 새로 발명할 필요가 없고,
+`network_args_for` 가 각 백엔드의 그 자리로 번역하면 된다.
+
+그래서 `Network_policy` 의 계약은 이렇다. **환경변수는 편의고, 정책은 백엔드
+네트워크 argv 다.** 환경변수만 세팅되고 argv 가 안 붙는 조합은 이 모드가 아니다.
+
+### D6. 매처가 신뢰 경계다 — 문자열로 비교하지 않는다
+
+allowlist 를 도입하면 **매처 자체가 새 공격면**이 된다. 이건 가정이 아니라
+실제로 뚫린 자리다.
+
+Claude Code 의 샌드박스는 나가는 트래픽을 SOCKS5 프록시로 돌리고, 호스트명을
+JavaScript `endsWith()` 로 allowlist 와 비교했다. 공격자가
+`attacker-host.com\x00.google.com` 을 주면 — JS 는 뒤의 `.google.com` 을 보고
+통과시키고, libc `getaddrinfo()` 는 널 바이트에서 끊어 `attacker-host.com` 을
+해석한다. **같은 바이트를 두 파서가 다르게 읽는 것**이 우회다.
+`sandbox-runtime <= 0.0.42` 가 SOCKS5 CONNECT 의 DOMAINNAME 원시 바이트를
+매처에 그대로 넘겼고, 널 바이트 거부도 길이 상한도 문자 화이트리스트도 없었다.
+0.0.43 의 `isValidHost()` 가 `\x00`·`%`·CRLF 를 매처 앞에서 거부하며 닫혔다
+(Claude Code 2.1.90 포함). 공개 시점 기준 CVE 나 보안 권고는 없었다고
+보고되어 있다.
+
+OCaml 문자열도 바이트 열이고 `\x00` 을 담는다. 같은 종류의 버그가 그대로
+도달한다.
+
+그래서 이 RFC 는 매처를 문자열 비교로 두지 않는다. 호스트명을 **타입으로
+파싱**한 뒤 비교한다 — 라벨 분해, 허용 문자 집합, 길이 상한, 널 바이트 거부가
+파서 안에서 끝난다. 파싱에 실패한 입력은 "매칭 실패"가 아니라 **거부**다.
+`Parse, don't validate` 가 여기서는 취향이 아니라 이 사고의 직접적인 교훈이다.
+
 ## 미확인
 
-- 프록시를 게스트에 어떻게 알리는가 — 환경변수(`HTTPS_PROXY`)로 충분한지,
-  아니면 백엔드별 네트워크 argv 가 필요한지. `env_keeper_scrub` 이 프록시
-  변수를 이미 알고 있으므로(`NO_PROXY` 가 목록에 있다) 환경변수 경로가
-  열려 있을 가능성이 있으나 확인하지 않았다.
-- 프록시를 우회할 수 있는지. 환경변수만으로 두면 그걸 무시하는 클라이언트는
-  그냥 나간다. fail-closed 를 지키려면 백엔드 네트워크 자체를 프록시로만
-  향하게 해야 하고, 그게 백엔드마다 되는지 재봐야 한다.
+- 백엔드마다 경계 강제가 실제로 되는지. Apple `container` 와 gondolin 은 그
+  자리에 argv 가 있는 것을 확인했지만, 그 argv 로 **프록시 한 곳만** 남기고
+  나머지를 막을 수 있는지는 재보지 않았다. docker 는 확인하지 않았다.
+- DNS 를 누가 해석하는가. 게스트가 스스로 해석하면 매처가 보는 이름과 실제
+  연결 대상이 갈라질 수 있다 — 위 사고가 정확히 그 틈이었다. 프록시가 이름
+  해석까지 소유해야 하는지 확인이 필요하다.
 
-두 번째가 이 설계의 타당성을 정한다. 환경변수만으로는 정책이 아니라 권고다.
+첫 번째가 이 설계의 타당성을 정한다. 강제 지점이 없으면 이 RFC 는 정책이
+아니라 권고를 만드는 것이 된다.
+
+## 출처
+
+- [Agent Network Egress Policy — AgentPatterns.ai](https://agentpatterns.ai/security/agent-network-egress-policy/)
+- [Claude Code Sandbox Bypass (SOCKS5 Null-Byte) — PoC](https://oddguan.com/blog/claude-code-sandbox-2/README.md)
+- [Second Time, Same Sandbox — Aonan Guan](https://oddguan.com/blog/second-time-same-sandbox-anthropic-claude-code-network-allowlist-bypass-data-exfiltration/)
+- [How OpenShell Works — NVIDIA](https://docs.nvidia.com/openshell/about/how-it-works)

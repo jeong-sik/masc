@@ -28,6 +28,7 @@ let test_operation_event_has_singular_identity () =
     B.operation_event_to_json
       ~keeper_name:"fixture-keeper"
       ~operation_id:"kmsg-operation-1"
+      ~seq:None
       ~event
     |> fields_without_ts_unix
   in
@@ -162,7 +163,7 @@ let test_operation_event_carries_seq_when_given () =
     B.operation_event_to_json
       ~keeper_name:"fixture-keeper"
       ~operation_id:"kmsg-operation-1"
-      ~seq:7
+      ~seq:(Some 7)
       ~event
     |> fields_without_ts_unix
   in

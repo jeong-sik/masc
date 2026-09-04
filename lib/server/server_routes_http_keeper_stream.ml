@@ -106,7 +106,7 @@ let register_operation_live_sink ~operation_id sink =
         else Hashtbl.replace operation_live_sinks operation_id remaining)
 ;;
 
-let publish_operation_live_event ~operation_id ?seq event =
+let publish_operation_live_event ~operation_id ~seq event =
   let sinks =
     Stdlib.Mutex.protect operation_live_sinks_mu (fun () ->
       match Hashtbl.find_opt operation_live_sinks operation_id with
@@ -2678,9 +2678,9 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                         Keeper_chat_broadcast.operation_event
                           ~keeper_name
                           ~operation_id
-                          ~seq
+                          ~seq:(Some seq)
                           ~event;
-                        publish_operation_live_event ~operation_id ~seq event)
+                        publish_operation_live_event ~operation_id ~seq:(Some seq) event)
                      projected;
                    if Server_keeper_chat_agui_projection.is_terminal event
                    then settle_delivery (Ok ())
@@ -2893,8 +2893,8 @@ let synthesize_wire_terminal_on_settle ~keeper_name ~operation_id ~execution =
         ()
     in
     note_operation_wire_event ~operation_id event;
-    Keeper_chat_broadcast.operation_event ~keeper_name ~operation_id ~event;
-    publish_operation_live_event ~operation_id event
+    Keeper_chat_broadcast.operation_event ~keeper_name ~operation_id ~seq:None ~event;
+    publish_operation_live_event ~operation_id ~seq:None event
   | Some Wire_started, Keeper_owner.Operation_succeeded _ ->
     Log.Misc.warn
       "keeper chat operation %s succeeded without a wire terminal event"

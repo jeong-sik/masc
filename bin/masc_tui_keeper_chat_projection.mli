@@ -135,6 +135,12 @@ type error_certainty =
     extract from an event, not in what counts as one. *)
 type sse_line =
   | Sse_ignored
+  | Sse_id of int
+      (** An [id:] line whose value is an int: the journal seq of the frame
+          whose [data:] follows (every frame the server projected from the
+          bus carries one since #33103). An [id:] with any other value is
+          [Sse_ignored]. *)
+  | Sse_frame_end  (** The empty line that ends a frame. *)
   | Sse_data of string
   | Sse_noncanonical_data
 

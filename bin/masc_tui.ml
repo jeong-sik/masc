@@ -2087,7 +2087,9 @@ let post_keeper_chat_watching ~mailbox ~port request =
            visible transcript remains request-owned, but an acceptance event
            at the head of the new stream is not a duplicate in that stream. *)
         let on_chunk chunk =
-          match Keeper_chat_live.feed decoder chunk with
+          (* The seq each delta arrives with is read and, until the
+             per-operation log lands (stage 3a task 5), not yet kept. *)
+          match List.map snd (Keeper_chat_live.feed decoder chunk) with
           | [] -> ()
           | deltas ->
               enqueue_async mailbox

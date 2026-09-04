@@ -162,6 +162,10 @@ let accepted ?(operation_id = "op-1") ~state ~queued_count () =
 
 let feed_whole body =
   let decoder = Live.create () in
+  List.map snd (Live.feed decoder body)
+
+let feed_whole_tagged body =
+  let decoder = Live.create () in
   Live.feed decoder body
 
 (* Split [body] into [size]-byte chunks and concatenate what each feed
@@ -176,7 +180,21 @@ let feed_in_chunks ~size body =
       let chunk = String.sub body offset take in
       loop (offset + take) (List.rev_append (Live.feed decoder chunk) acc)
   in
+  List.map snd (loop 0 [])
+
+let feed_in_chunks_tagged ~size body =
+  let decoder = Live.create () in
+  let length = String.length body in
+  let rec loop offset acc =
+    if offset >= length then List.rev acc
+    else
+      let take = min size (length - offset) in
+      let chunk = String.sub body offset take in
+      loop (offset + take) (List.rev_append (Live.feed decoder chunk) acc)
+  in
   loop 0 []
+
+let tagged = pair (option int) delta
 
 (* ── Tests ───────────────────────────────────────────────────────── *)
 
@@ -203,10 +221,52 @@ let test_partial_line_emits_nothing_until_it_ends () =
   let head = String.sub body 0 split_at in
   let tail = String.sub body split_at (String.length body - split_at) in
   check (list delta) "an unfinished line yields no delta" []
-    (Live.feed decoder head);
+    (List.map snd (Live.feed decoder head));
   check (list delta) "the delta arrives when the line ends"
     [ Live.Text "hello" ]
-    (Live.feed decoder tail)
+    (List.map snd (Live.feed decoder tail))
+
+(* ── Journal seq on the frame ─────────────────────────────────────── *)
+
+let with_id seq frame = Printf.sprintf "id: %d\n%s" seq frame
+
+let test_a_frame_id_tags_its_deltas () =
+  check (list tagged) "the id line's seq rides the delta"
+    [ (Some 7, Live.Text "hello") ]
+    (feed_whole_tagged (with_id 7 (sse (text_content "hello"))))
+
+let test_an_id_held_across_a_chunk_boundary () =
+  let decoder = Live.create () in
+  check (list tagged) "the id line alone yields nothing" []
+    (Live.feed decoder "id: 7\n");
+  check (list tagged) "the data line that follows carries it"
+    [ (Some 7, Live.Text "hello") ]
+    (Live.feed decoder (sse (text_content "hello")))
+
+let test_an_id_less_frame_does_not_inherit_the_previous_seq () =
+  let body =
+    with_id 3 (sse (text_content "a"))
+    ^ sse (accepted ~state:"Running" ~queued_count:1 ())
+    ^ with_id 4 (sse (text_content "b"))
+  in
+  check (list tagged) "acceptance is None between two tagged frames"
+    [ (Some 3, Live.Text "a")
+    ; (None, Live.Accepted { admission = Live.Running; queue_length = 1 })
+    ; (Some 4, Live.Text "b")
+    ]
+    (feed_whole_tagged body);
+  List.iter
+    (fun size ->
+      check (list tagged)
+        (Printf.sprintf "the same tags in %d-byte chunks" size)
+        (feed_whole_tagged body)
+        (feed_in_chunks_tagged ~size body))
+    [ 1; 2; 3; 7; 13 ]
+
+let test_a_non_integer_id_is_no_seq () =
+  check (list tagged) "id: x tags nothing"
+    [ (None, Live.Text "hello") ]
+    (feed_whole_tagged ("id: x\n" ^ sse (text_content "hello")))
 
 let test_unreadable_line_is_reported_and_does_not_stop_the_stream () =
   let body =
@@ -530,6 +590,12 @@ let () =
             test_run_error_is_a_failure_even_with_no_message
         ; test_case "undrawn events stay silent" `Quick
             test_events_this_view_does_not_draw_are_silent
+        ; test_case "a frame id tags its deltas" `Quick test_a_frame_id_tags_its_deltas
+        ; test_case "an id held across a chunk boundary" `Quick
+            test_an_id_held_across_a_chunk_boundary
+        ; test_case "an id-less frame does not inherit the previous seq" `Quick
+            test_an_id_less_frame_does_not_inherit_the_previous_seq
+        ; test_case "a non-integer id is no seq" `Quick test_a_non_integer_id_is_no_seq
         ; test_case "unknown custom event is reported" `Quick
             test_unknown_custom_event_is_reported
         ] )

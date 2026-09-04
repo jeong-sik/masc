@@ -127,7 +127,12 @@ type t
 
 val create : unit -> t
 
-val feed : t -> string -> delta list
+val feed : t -> string -> (int option * delta) list
 (** [feed t chunk] adds [chunk] to what has been read and returns the deltas
-    completed by it, in stream order. Bytes of a line that is still
-    incomplete are held until the rest arrives. *)
+    completed by it, in stream order, each with the journal seq of the frame
+    that carried it: the value of the frame's [id:] line, or [None] for a
+    frame without one (the acceptance event and the settle-time run_error
+    never went through the bus). The id is held across a chunk boundary and
+    dropped at the frame's end, so an id-less frame cannot inherit the seq of
+    the frame before it. Bytes of a line that is still incomplete are held
+    until the rest arrives. *)

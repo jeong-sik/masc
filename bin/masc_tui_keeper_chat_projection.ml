@@ -637,6 +637,8 @@ let validate_run_identity request ~surface state fields =
 (* How one line of the server-sent event stream reads. *)
 type sse_line =
   | Sse_ignored
+  | Sse_id of int
+  | Sse_frame_end
   | Sse_data of string
   | Sse_noncanonical_data
 
@@ -1219,10 +1221,16 @@ let protocol_failure state stream_error =
    at all, and that answer has to be the same for both. *)
 let classify_sse_line raw_line =
   let line = String.trim raw_line in
-  if line = "" || String.starts_with ~prefix:"retry:" line
-     || String.starts_with ~prefix:"id:" line
-     || String.starts_with ~prefix:":" line
+  if line = "" then Sse_frame_end
+  else if String.starts_with ~prefix:"retry:" line
+          || String.starts_with ~prefix:":" line
   then Sse_ignored
+  else if String.starts_with ~prefix:"id:" line then (
+    (* The server writes the journal seq here (Sse_wire.add_optional_headers).
+       Anything else on an id line is not a seq and is not guessed at. *)
+    match int_of_string_opt (String.trim (String.sub line 3 (String.length line - 3))) with
+    | Some seq -> Sse_id seq
+    | None -> Sse_ignored)
   else if String.starts_with ~prefix:"data: " line then
     Sse_data (String.sub line 6 (String.length line - 6) |> String.trim)
   else if String.starts_with ~prefix:"data:" line then Sse_noncanonical_data
@@ -1233,7 +1241,9 @@ let decode_sse_with_provenance ~request body =
     | [] -> Ok state
     | raw_line :: rest -> (
         match classify_sse_line raw_line with
-        | Sse_ignored -> loop (line_no + 1) state rest
+        (* The strict decode reads events, not their journal position: the
+           seq is the live decoder's concern. *)
+        | Sse_ignored | Sse_id _ | Sse_frame_end -> loop (line_no + 1) state rest
         | Sse_data payload ->
             let* json =
               try Ok (Yojson.Safe.from_string payload)

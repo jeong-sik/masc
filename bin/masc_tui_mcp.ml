@@ -44,7 +44,9 @@ let response_json body =
     |> List.filter_map (fun line ->
            match Projection.classify_sse_line line with
            | Projection.Sse_data payload -> Some payload
-           | Projection.Sse_ignored | Projection.Sse_noncanonical_data -> None)
+           | Projection.Sse_ignored | Projection.Sse_id _ | Projection.Sse_frame_end
+           | Projection.Sse_noncanonical_data ->
+               None)
   in
   let raw = match data_lines with first :: _ -> first | [] -> String.trim body in
   match Yojson.Safe.from_string raw with

@@ -64,9 +64,17 @@ type delta =
   | Run_finished
   | Undecodable of string
 
-type t = { pending : Buffer.t }
+type t =
+  { pending : Buffer.t
+  ; mutable pending_seq : int option
+        (* The [id:] of the frame being read, held until its [data:] line or
+           the frame's end. It lives on [t], not in one [feed], because a
+           chunk may end between the two lines. Cleared at the frame end so a
+           later frame without an id (acceptance, the settle-time run_error)
+           cannot inherit it. *)
+  }
 
-let create () = { pending = Buffer.create 4096 }
+let create () = { pending = Buffer.create 4096; pending_seq = None }
 
 let string_field fields name =
   match List.assoc_opt name fields with
@@ -322,16 +330,23 @@ let event_deltas (event : Yojson.Safe.t) =
          stops the build instead of landing here. *)
       [ Undecodable "event is not a JSON object" ]
 
-let line_deltas raw_line =
+let line_deltas t raw_line =
+  let tagged deltas = List.map (fun delta -> (t.pending_seq, delta)) deltas in
   match Projection.classify_sse_line raw_line with
   | Projection.Sse_ignored -> []
+  | Projection.Sse_id seq ->
+      t.pending_seq <- Some seq;
+      []
+  | Projection.Sse_frame_end ->
+      t.pending_seq <- None;
+      []
   | Projection.Sse_noncanonical_data ->
-      [ Undecodable "non-canonical data field" ]
+      tagged [ Undecodable "non-canonical data field" ]
   | Projection.Sse_data payload -> (
       match Yojson.Safe.from_string payload with
-      | json -> event_deltas json
+      | json -> tagged (event_deltas json)
       | exception Yojson.Json_error detail ->
-          [ Undecodable ("invalid JSON: " ^ detail) ])
+          tagged [ Undecodable ("invalid JSON: " ^ detail) ])
 
 let feed t chunk =
   Buffer.add_string t.pending chunk;
@@ -349,4 +364,6 @@ let feed t chunk =
       in
       Buffer.clear t.pending;
       Buffer.add_string t.pending remainder;
-      String.split_on_char '\n' complete |> List.concat_map line_deltas
+      (* [concat_map] visits lines in order, which the [pending_seq] state
+         depends on: an id line must be seen before the data line it tags. *)
+      String.split_on_char '\n' complete |> List.concat_map (line_deltas t)

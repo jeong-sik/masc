@@ -1142,6 +1142,73 @@ let test_wizard_warns_when_selected_local_server_is_down () =
         {|[dry-run] would set [runtime].default = "local_llama.qwen"|})
 ;;
 
+(* The interactive wizard offers a connectivity test and can retry or abort. The
+   non-TTY path (CI, scripted --provider, or the zero-config auto-select) used to
+   return blind after writing the default. It now runs the same check
+   report-only: local_llama is keyless and bound to a closed loopback port, so
+   the check fails instantly without any network, and the install must still
+   finish 0 -- a first-run install surfaces an unreachable provider, it does not
+   gate on it. This is not a --dry-run: the run reaches the post-write step. *)
+let test_wizard_nontty_runs_report_only_connectivity_check () =
+  let tmpdir = Filename.temp_file "masc-install-nontty-ping-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_local_server tmpdir);
+      let output, status =
+        run_install_status [ "--provider"; "local_llama" ] tmpdir
+      in
+      check
+        bool
+        "a failed connectivity check does not fail the install"
+        true
+        (status = Unix.WEXITED 0);
+      assert_contains
+        "the non-TTY wizard reports the connectivity result instead of returning blind"
+        output
+        "provider connectivity check did not pass")
+;;
+
+(* MASC_INSTALL_NO_PING=1 is the air-gapped/offline opt-out: the non-TTY wizard
+   skips the connectivity check entirely, so neither the ok nor the failed
+   report line appears. *)
+let test_wizard_nontty_connectivity_check_opt_out () =
+  let tmpdir = Filename.temp_file "masc-install-nontty-noping-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_local_server tmpdir);
+      let output, status =
+        run_install_status
+          ~extra_env:"MASC_INSTALL_NO_PING=1"
+          [ "--provider"; "local_llama" ]
+          tmpdir
+      in
+      check bool "opt-out install still exits 0" true (status = Unix.WEXITED 0);
+      assert_not_contains
+        "the opt-out skips the post-write connectivity check"
+        output
+        "provider connectivity")
+;;
+
+(* Cheap regression guard that runs without the masc binary: the non-TTY branch's
+   report line and its opt-out env both stay wired into install.sh. *)
+let test_nontty_wizard_connectivity_check_is_wired () =
+  let script = install_script () in
+  assert_contains
+    "the non-TTY wizard has a report-only connectivity result line"
+    script
+    "provider connectivity: ok";
+  assert_contains
+    "the non-TTY connectivity check has an air-gapped opt-out"
+    script
+    "MASC_INSTALL_NO_PING"
+;;
+
 let test_wizard_reports_execution_sandboxes () =
   let tmpdir = Filename.temp_file "masc-install-sandbox-" "" in
   Sys.remove tmpdir;
@@ -1968,6 +2035,18 @@ let () =
             "wizard warns when the selected local server is down"
             `Quick
             test_wizard_warns_when_selected_local_server_is_down
+        ; test_case
+            "non-TTY wizard runs a report-only connectivity check without gating"
+            `Quick
+            test_wizard_nontty_runs_report_only_connectivity_check
+        ; test_case
+            "non-TTY connectivity check honors the MASC_INSTALL_NO_PING opt-out"
+            `Quick
+            test_wizard_nontty_connectivity_check_opt_out
+        ; test_case
+            "non-TTY connectivity check and its opt-out stay wired into install.sh"
+            `Quick
+            test_nontty_wizard_connectivity_check_is_wired
         ; test_case
             "wizard reports available execution sandboxes"
             `Quick

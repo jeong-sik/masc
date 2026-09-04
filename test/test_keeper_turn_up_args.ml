@@ -1365,6 +1365,80 @@ let test_a_network_mode_rejection_names_every_accepted_spelling () =
    keeper TOML parser has always said so, and the resolver did not, which let
    a create write a file that the loader would not read back. The resolver
    answers now, before the meta is built. *)
+(* Every profile against every mode, from the module's own enumerations.
+
+   The pairs used to be hand-picked here, and a hand-picked set is one a new
+   variant walks past: [Network_policy] arrived in #33085 while
+   [network_mode_rejection] was being written in #33092, each PR green against
+   a base without the other, and main merged with three pairs undecided. The
+   function's comment had promised that exactly this could not happen -- "a
+   new profile or a new mode fails to compile here until someone decides its
+   answer" -- and it was right about the compiler and silent about two green
+   PRs landing minutes apart.
+
+   So the table is walked rather than sampled. A new profile or mode fails
+   here until its answer is written down, whichever order the PRs land in. *)
+let test_every_profile_and_mode_pair_has_a_decided_answer () =
+  let module S = Keeper_types_profile_sandbox in
+  let expected profile mode =
+    match profile, mode with
+    (* microVM is the backend policy mode was built for. *)
+    | S.Micro_vm, _ -> `Accepted
+    | S.Docker, (S.Network_none | S.Network_inherit) -> `Accepted
+    (* RFC-0415: the Docker egress boundary is unmeasured. *)
+    | S.Docker, S.Network_policy -> `Refused
+    | S.Remote_ssh, S.Network_inherit -> `Accepted
+    (* Phase 1 is transport-only and holds no network knob. *)
+    | S.Remote_ssh, (S.Network_none | S.Network_policy) -> `Refused
+  in
+  List.iter
+    (fun profile ->
+       List.iter
+         (fun mode ->
+            let label =
+              Printf.sprintf
+                "%s + %s"
+                (S.sandbox_profile_to_string profile)
+                (S.network_mode_to_string mode)
+            in
+            match S.network_mode_rejection profile mode, expected profile mode with
+            | None, `Accepted -> ()
+            | Some _, `Refused -> ()
+            | Some message, `Accepted ->
+              failf "%s must be accepted, and was refused: %s" label message
+            | None, `Refused -> failf "%s must be refused, and was accepted" label)
+         S.all_network_modes)
+    S.all_sandbox_profiles
+;;
+
+(* A refusal an operator cannot act on is one they file a bug about, so each
+   names the profile, the mode, and what to do instead. *)
+let test_every_refusal_names_the_pair_it_refuses () =
+  let module S = Keeper_types_profile_sandbox in
+  List.iter
+    (fun profile ->
+       List.iter
+         (fun mode ->
+            match S.network_mode_rejection profile mode with
+            | None -> ()
+            | Some message ->
+              let names needle =
+                check
+                  bool
+                  (Printf.sprintf
+                     "the refusal of %s + %s names %S"
+                     (S.sandbox_profile_to_string profile)
+                     (S.network_mode_to_string mode)
+                     needle)
+                  true
+                  (contains needle message)
+              in
+              names (S.sandbox_profile_to_string profile);
+              names (S.network_mode_to_string mode))
+         S.all_network_modes)
+    S.all_sandbox_profiles
+;;
+
 let test_remote_ssh_refuses_a_network_mode_it_cannot_hold () =
   let module A = Keeper_turn_up_args in
   (match
@@ -1727,6 +1801,14 @@ let () =
             "a rejection names every accepted spelling"
             `Quick
             test_a_network_mode_rejection_names_every_accepted_spelling
+        ; test_case
+            "every profile and mode pair has a decided answer"
+            `Quick
+            test_every_profile_and_mode_pair_has_a_decided_answer
+        ; test_case
+            "every refusal names the pair it refuses"
+            `Quick
+            test_every_refusal_names_the_pair_it_refuses
         ; test_case
             "remote_ssh refuses a mode it cannot hold"
             `Quick

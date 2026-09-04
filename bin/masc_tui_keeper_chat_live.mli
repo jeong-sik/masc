@@ -110,6 +110,16 @@ type delta =
           tell a busy keeper from a stuck one. *)
   | Checkpoint  (** The turn is continuing past a context checkpoint. *)
   | External_effect_completed
+  | Reply_details of
+      { reply : string
+      ; turn_outcome : Masc.Keeper_turn_outcome.t
+      ; turn_ref : string
+      }
+      (** The terminal reply as the server recorded it (KEEPER_REPLY_DETAILS):
+          the text the transcript keeps, the typed outcome, and the store join
+          key. The strict decoder validates the same event; this is what lets
+          the per-operation log project the reply row without a second
+          decode. *)
   | Run_failed of { message : string }
   | Run_finished
   | Undecodable of string
@@ -127,7 +137,16 @@ type t
 
 val create : unit -> t
 
-val feed : t -> string -> delta list
+val feed : t -> string -> (int option * delta) list
 (** [feed t chunk] adds [chunk] to what has been read and returns the deltas
-    completed by it, in stream order. Bytes of a line that is still
-    incomplete are held until the rest arrives. *)
+    completed by it, in stream order, each with the journal seq of the frame
+    that carried it: the value of the frame's [id:] line, or [None] for a
+    frame without one (the acceptance event and the settle-time run_error
+    never went through the bus). The id is held across a chunk boundary and
+    dropped at the frame's end, so an id-less frame cannot inherit the seq of
+    the frame before it. The server writes [id:] before [data:] in every
+    frame ([Sse_wire.add_optional_headers]); an id after its data would tag
+    nothing. Bytes of a line that is still incomplete are held until the rest
+    arrives -- so a decoder must not be carried across a reconnect: a stream
+    cut after an [id:] line would leave the seq and the partial bytes armed
+    for the next stream's first frame. *)

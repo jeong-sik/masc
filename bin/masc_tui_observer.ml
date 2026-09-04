@@ -359,7 +359,7 @@ let create () = { pending = Buffer.create 4096 }
 
 let decoded_of_line raw_line =
   match Projection.classify_sse_line raw_line with
-  | Projection.Sse_ignored -> []
+  | Projection.Sse_ignored | Projection.Sse_id _ | Projection.Sse_frame_end -> []
   | Projection.Sse_noncanonical_data ->
       [ Undecodable "data line without the canonical \"data: \" prefix" ]
   | Projection.Sse_data payload -> (

@@ -49,6 +49,10 @@ let delta_to_string : Live.delta -> string = function
       Printf.sprintf "accepted(%s,%d)" admission queue_length
   | Live.Checkpoint -> "checkpoint"
   | Live.External_effect_completed -> "external_effect_completed"
+  | Live.Reply_details { reply; turn_outcome; turn_ref } ->
+      Printf.sprintf "reply_details(%s,%s,%s)" reply
+        (Masc.Keeper_turn_outcome.to_label turn_outcome)
+        turn_ref
   | Live.Run_failed { message } -> Printf.sprintf "run_failed(%s)" message
   | Live.Run_finished -> "run_finished"
   | Live.Undecodable detail -> Printf.sprintf "undecodable(%s)" detail
@@ -162,6 +166,10 @@ let accepted ?(operation_id = "op-1") ~state ~queued_count () =
 
 let feed_whole body =
   let decoder = Live.create () in
+  List.map snd (Live.feed decoder body)
+
+let feed_whole_tagged body =
+  let decoder = Live.create () in
   Live.feed decoder body
 
 (* Split [body] into [size]-byte chunks and concatenate what each feed
@@ -176,7 +184,21 @@ let feed_in_chunks ~size body =
       let chunk = String.sub body offset take in
       loop (offset + take) (List.rev_append (Live.feed decoder chunk) acc)
   in
+  List.map snd (loop 0 [])
+
+let feed_in_chunks_tagged ~size body =
+  let decoder = Live.create () in
+  let length = String.length body in
+  let rec loop offset acc =
+    if offset >= length then List.rev acc
+    else
+      let take = min size (length - offset) in
+      let chunk = String.sub body offset take in
+      loop (offset + take) (List.rev_append (Live.feed decoder chunk) acc)
+  in
   loop 0 []
+
+let tagged = pair (option int) delta
 
 (* ── Tests ───────────────────────────────────────────────────────── *)
 
@@ -203,10 +225,118 @@ let test_partial_line_emits_nothing_until_it_ends () =
   let head = String.sub body 0 split_at in
   let tail = String.sub body split_at (String.length body - split_at) in
   check (list delta) "an unfinished line yields no delta" []
-    (Live.feed decoder head);
+    (List.map snd (Live.feed decoder head));
   check (list delta) "the delta arrives when the line ends"
     [ Live.Text "hello" ]
-    (Live.feed decoder tail)
+    (List.map snd (Live.feed decoder tail))
+
+(* ── Journal seq on the frame ─────────────────────────────────────── *)
+
+let with_id seq frame = Printf.sprintf "id: %d\n%s" seq frame
+
+let test_a_frame_id_tags_its_deltas () =
+  check (list tagged) "the id line's seq rides the delta"
+    [ (Some 7, Live.Text "hello") ]
+    (feed_whole_tagged (with_id 7 (sse (text_content "hello"))))
+
+let test_an_id_held_across_a_chunk_boundary () =
+  let decoder = Live.create () in
+  check (list tagged) "the id line alone yields nothing" []
+    (Live.feed decoder "id: 7\n");
+  check (list tagged) "the data line that follows carries it"
+    [ (Some 7, Live.Text "hello") ]
+    (Live.feed decoder (sse (text_content "hello")))
+
+let test_an_id_less_frame_does_not_inherit_the_previous_seq () =
+  let body =
+    with_id 3 (sse (text_content "a"))
+    ^ sse (accepted ~state:"Running" ~queued_count:1 ())
+    ^ with_id 4 (sse (text_content "b"))
+  in
+  check (list tagged) "acceptance is None between two tagged frames"
+    [ (Some 3, Live.Text "a")
+    ; (None, Live.Accepted { admission = Live.Running; queue_length = 1 })
+    ; (Some 4, Live.Text "b")
+    ]
+    (feed_whole_tagged body);
+  List.iter
+    (fun size ->
+      check (list tagged)
+        (Printf.sprintf "the same tags in %d-byte chunks" size)
+        (feed_whole_tagged body)
+        (feed_in_chunks_tagged ~size body))
+    [ 1; 2; 3; 7; 13 ]
+
+let test_a_non_integer_id_is_no_seq () =
+  check (list tagged) "id: x tags nothing"
+    [ (None, Live.Text "hello") ]
+    (feed_whole_tagged ("id: x\n" ^ sse (text_content "hello")));
+  List.iter
+    (fun raw ->
+      check (list tagged) (raw ^ " is not a decimal seq")
+        [ (None, Live.Text "hello") ]
+        (feed_whole_tagged (raw ^ "\n" ^ sse (text_content "hello"))))
+    [ "id: 0x10"; "id: 1_0"; "id: -1"; "id: +5" ]
+
+let test_id_line_spellings () =
+  check (list tagged) "no space after the colon" [ (Some 7, Live.Text "hello") ]
+    (feed_whole_tagged ("id:7\n" ^ sse (text_content "hello")));
+  check (list tagged) "trailing spaces" [ (Some 7, Live.Text "hello") ]
+    (feed_whole_tagged ("id: 7   \n" ^ sse (text_content "hello")));
+  check (list tagged) "two id lines: the last one wins" [ (Some 8, Live.Text "hello") ]
+    (feed_whole_tagged ("id: 7\nid: 8\n" ^ sse (text_content "hello")))
+
+(* SSE dispatches on the empty line alone; a line of spaces is a nameless
+   field and must not end the frame -- or the seq would be dropped before the
+   data line it belongs to. *)
+let test_a_whitespace_line_is_not_a_frame_end () =
+  check (list tagged) "the seq survives a blank-but-not-empty line"
+    [ (Some 7, Live.Text "hello") ]
+    (feed_whole_tagged ("id: 7\n   \n" ^ sse (text_content "hello")))
+
+let reply_details_value ?(outcome = "visible_reply") ?(turn_ref = "trace-1#3") () =
+  `Assoc
+    [ "reply", `String "done"
+    ; "turn_outcome", `String outcome
+    ; "turn_ref", `String turn_ref
+    ]
+
+let test_reply_details_is_read_whole () =
+  check (list delta) "the three fields come through"
+    [ Live.Reply_details
+        { reply = "done"
+        ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
+        ; turn_ref = "trace-1#3"
+        }
+    ]
+    (feed_whole (sse (custom "KEEPER_REPLY_DETAILS" (reply_details_value ()))))
+
+let test_reply_details_short_of_a_field_is_reported () =
+  let undecodable body =
+    match feed_whole body with
+    | [ Live.Undecodable _ ] -> true
+    | _ -> false
+  in
+  check bool "a non-object value" true
+    (undecodable (sse (custom "KEEPER_REPLY_DETAILS" (`String "x"))));
+  check bool "an unknown outcome" true
+    (undecodable
+       (sse (custom "KEEPER_REPLY_DETAILS" (reply_details_value ~outcome:"shrug" ()))));
+  check bool "a turn_ref that is not <trace>#<turn>" true
+    (undecodable
+       (sse (custom "KEEPER_REPLY_DETAILS" (reply_details_value ~turn_ref:"nope" ()))))
+
+(* Two data lines in one frame share the frame's id: the seq is cleared at
+   the frame end, not at the first data line. *)
+let test_two_data_lines_in_one_frame_share_the_seq () =
+  let frame =
+    "id: 7\n"
+    ^ "data: " ^ Yojson.Safe.to_string (text_content "a") ^ "\n"
+    ^ "data: " ^ Yojson.Safe.to_string (text_content "b") ^ "\n\n"
+  in
+  check (list tagged) "both carry seq 7"
+    [ (Some 7, Live.Text "a"); (Some 7, Live.Text "b") ]
+    (feed_whole_tagged frame)
 
 let test_unreadable_line_is_reported_and_does_not_stop_the_stream () =
   let body =
@@ -530,6 +660,20 @@ let () =
             test_run_error_is_a_failure_even_with_no_message
         ; test_case "undrawn events stay silent" `Quick
             test_events_this_view_does_not_draw_are_silent
+        ; test_case "a frame id tags its deltas" `Quick test_a_frame_id_tags_its_deltas
+        ; test_case "an id held across a chunk boundary" `Quick
+            test_an_id_held_across_a_chunk_boundary
+        ; test_case "an id-less frame does not inherit the previous seq" `Quick
+            test_an_id_less_frame_does_not_inherit_the_previous_seq
+        ; test_case "a non-integer id is no seq" `Quick test_a_non_integer_id_is_no_seq
+        ; test_case "id line spellings" `Quick test_id_line_spellings
+        ; test_case "a whitespace line is not a frame end" `Quick
+            test_a_whitespace_line_is_not_a_frame_end
+        ; test_case "two data lines in one frame share the seq" `Quick
+            test_two_data_lines_in_one_frame_share_the_seq
+        ; test_case "reply details is read whole" `Quick test_reply_details_is_read_whole
+        ; test_case "reply details short of a field is reported" `Quick
+            test_reply_details_short_of_a_field_is_reported
         ; test_case "unknown custom event is reported" `Quick
             test_unknown_custom_event_is_reported
         ] )

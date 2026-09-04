@@ -8484,11 +8484,40 @@ let render_keeper_message (state : state) =
              an append; the cache detects that (the new text no longer starts
              with the old) and falls back to one full render, the same work
              the uncached streaming path did on every frame. *)
+          (* A superseded attempt's stretches are drawn in place with their
+             own styles, each label ending in the retry mark and the number of
+             the try it came from (" ↺1" = the first try, superseded): the
+             content the reader had is still there. The mark goes at the tail
+             because [fit_name] keeps a label's tail when it overruns the
+             column. Not dimmed: the layout has no dim variant per style, and
+             adding one is the 3b restyle. Flattened before indexing so the
+             growing-markdown cache key stays one index per drawn stretch. *)
+          let flattened =
+            List.concat_map
+              (fun (item : Keeper_chat_transcript.trail_item) ->
+                match item with
+                | Keeper_chat_transcript.Trail_superseded { attempt; items } ->
+                    List.map (fun nested -> (Some attempt, nested)) items
+                | Keeper_chat_transcript.Trail_thinking _
+                | Keeper_chat_transcript.Trail_skill _
+                | Keeper_chat_transcript.Trail_tools _
+                | Keeper_chat_transcript.Trail_text _ -> [ (None, item) ])
+              (Keeper_chat_transcript.trail live)
+          in
           let entries =
             List.filter_map Fun.id
             @@ List.mapi
-               (fun entry_index (item : Keeper_chat_transcript.trail_item) ->
+               (fun entry_index
+                    ((superseded, item) : int option * Keeper_chat_transcript.trail_item) ->
+              let label text =
+                match superseded with
+                | Some attempt -> Printf.sprintf "%s \xe2\x86\xba%d" text (attempt + 1)
+                | None -> text
+              in
               match item with
+              | Keeper_chat_transcript.Trail_superseded _ ->
+                  (* Never nested (see the type), and flattened above. *)
+                  None
               | Keeper_chat_transcript.Trail_thinking _
                 when state.msg_reasoning_visibility = Reasoning_hidden ->
                   None
@@ -8501,7 +8530,7 @@ let render_keeper_message (state : state) =
                               request_id;
                               entry_index;
                             })
-                       Message_layout.Thinking "THINKING"
+                       Message_layout.Thinking (label "THINKING")
                        (if state.msg_reasoning_visibility = Reasoning_folded
                         then folded_thinking_summary (String.concat "\n" lines)
                         else String.concat "\n" lines))
@@ -8518,7 +8547,7 @@ let render_keeper_message (state : state) =
                               request_id;
                               entry_index;
                             })
-                       (tool_block_style projection) "TOOLS"
+                       (tool_block_style projection) (label "TOOLS")
                        (String.concat "\n" (projected_tool_rows projection)))
               | Keeper_chat_transcript.Trail_skill skill ->
                   Some
@@ -8531,7 +8560,7 @@ let render_keeper_message (state : state) =
                             })
                        (Message_layout.Skill
                           (skill_tone_of_state skill.state))
-                       "SKILL"
+                       (label "SKILL")
                        (String.concat "\n"
                           (* Full on the live trail too: the same reason the
                              committed skill rows are always full — the skill's
@@ -8547,8 +8576,8 @@ let render_keeper_message (state : state) =
                               request_id;
                               entry_index;
                             })
-                       Message_layout.Keeper keeper_label text))
-                 (Keeper_chat_transcript.trail live)
+                       Message_layout.Keeper (label keeper_label) text))
+                 flattened
           in
           (* Applied after the filter, not at trail position zero: hidden
              reasoning drops rows, and the corner belongs to the first row the

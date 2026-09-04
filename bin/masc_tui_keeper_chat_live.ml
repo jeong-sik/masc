@@ -60,13 +60,26 @@ type delta =
       }
   | Checkpoint
   | External_effect_completed
+  | Reply_details of
+      { reply : string
+      ; turn_outcome : Masc.Keeper_turn_outcome.t
+      ; turn_ref : string
+      }
   | Run_failed of { message : string }
   | Run_finished
   | Undecodable of string
 
-type t = { pending : Buffer.t }
+type t =
+  { pending : Buffer.t
+  ; mutable pending_seq : int option
+        (* The [id:] of the frame being read, held until the frame's end;
+           every [data:] line of the frame is tagged with it. It lives on [t],
+           not in one [feed], because a chunk may end between the two lines.
+           Cleared at the frame end so a later frame without an id
+           (acceptance, the settle-time run_error) cannot inherit it. *)
+  }
 
-let create () = { pending = Buffer.create 4096 }
+let create () = { pending = Buffer.create 4096; pending_seq = None }
 
 let string_field fields name =
   match List.assoc_opt name fields with
@@ -266,6 +279,27 @@ let custom_deltas_unvalidated fields =
               ]))
   | Some "KEEPER_CONTINUATION_CHECKPOINT" -> [ Checkpoint ]
   | Some "KEEPER_EXTERNAL_EFFECT_COMPLETED" -> [ External_effect_completed ]
+  | Some "KEEPER_REPLY_DETAILS" -> (
+      (* The same three fields the strict decoder requires
+         (decode_reply_details); read leniently here, as every other event. *)
+      match object_field fields "value" with
+      | None -> [ Undecodable "KEEPER_REPLY_DETAILS value is not an object" ]
+      | Some value -> (
+          match
+            ( string_field value "reply"
+            , Option.bind (string_field value "turn_outcome")
+                Masc.Keeper_turn_outcome.of_label
+            , Option.bind (string_field value "turn_ref") Ids.Turn_ref.of_string )
+          with
+          | Some reply, Some turn_outcome, Some turn_ref ->
+              [ Reply_details
+                  { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref }
+              ]
+          | _ ->
+              [ Undecodable
+                  "KEEPER_REPLY_DETAILS needs reply, a known turn_outcome and \
+                   a well-formed turn_ref"
+              ]))
   | Some name when List.mem name Projection.known_custom_names -> []
   | Some name -> [ Undecodable ("unknown CUSTOM event name: " ^ name) ]
 
@@ -322,16 +356,23 @@ let event_deltas (event : Yojson.Safe.t) =
          stops the build instead of landing here. *)
       [ Undecodable "event is not a JSON object" ]
 
-let line_deltas raw_line =
+let line_deltas t raw_line =
+  let tagged deltas = List.map (fun delta -> (t.pending_seq, delta)) deltas in
   match Projection.classify_sse_line raw_line with
   | Projection.Sse_ignored -> []
+  | Projection.Sse_id seq ->
+      t.pending_seq <- Some seq;
+      []
+  | Projection.Sse_frame_end ->
+      t.pending_seq <- None;
+      []
   | Projection.Sse_noncanonical_data ->
-      [ Undecodable "non-canonical data field" ]
+      tagged [ Undecodable "non-canonical data field" ]
   | Projection.Sse_data payload -> (
       match Yojson.Safe.from_string payload with
-      | json -> event_deltas json
+      | json -> tagged (event_deltas json)
       | exception Yojson.Json_error detail ->
-          [ Undecodable ("invalid JSON: " ^ detail) ])
+          tagged [ Undecodable ("invalid JSON: " ^ detail) ])
 
 let feed t chunk =
   Buffer.add_string t.pending chunk;
@@ -349,4 +390,6 @@ let feed t chunk =
       in
       Buffer.clear t.pending;
       Buffer.add_string t.pending remainder;
-      String.split_on_char '\n' complete |> List.concat_map line_deltas
+      (* [concat_map] visits lines in order, which the [pending_seq] state
+         depends on: an id line must be seen before the data line it tags. *)
+      String.split_on_char '\n' complete |> List.concat_map (line_deltas t)

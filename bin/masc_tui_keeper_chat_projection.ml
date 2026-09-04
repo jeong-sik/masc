@@ -637,6 +637,8 @@ let validate_run_identity request ~surface state fields =
 (* How one line of the server-sent event stream reads. *)
 type sse_line =
   | Sse_ignored
+  | Sse_id of int
+  | Sse_frame_end
   | Sse_data of string
   | Sse_noncanonical_data
 
@@ -1217,12 +1219,28 @@ let protocol_failure state stream_error =
    {!Masc_tui_keeper_chat_live} that drives the live view. The event payloads
    they extract differ on purpose — this decides what counts as an event line
    at all, and that answer has to be the same for both. *)
+let is_decimal text =
+  text <> "" && String.for_all (fun c -> c >= '0' && c <= '9') text
+
 let classify_sse_line raw_line =
+  (* Only the empty line ends a frame (SSE dispatches on it); a line of
+     spaces is a field with no name and is ignored like any other unknown
+     field. Tested before the trim so the two stay apart. *)
+  if raw_line = "" || raw_line = "\r" then Sse_frame_end
+  else
   let line = String.trim raw_line in
   if line = "" || String.starts_with ~prefix:"retry:" line
-     || String.starts_with ~prefix:"id:" line
      || String.starts_with ~prefix:":" line
   then Sse_ignored
+  else if String.starts_with ~prefix:"id:" line then (
+    (* The server writes the journal seq here with string_of_int
+       (Sse_wire.add_optional_headers): decimal digits only. Anything else on
+       an id line -- a sign, a base prefix, an underscore, letters -- is not a
+       seq and is not guessed at. *)
+    let value = String.trim (String.sub line 3 (String.length line - 3)) in
+    if is_decimal value
+    then (match int_of_string_opt value with Some seq -> Sse_id seq | None -> Sse_ignored)
+    else Sse_ignored)
   else if String.starts_with ~prefix:"data: " line then
     Sse_data (String.sub line 6 (String.length line - 6) |> String.trim)
   else if String.starts_with ~prefix:"data:" line then Sse_noncanonical_data
@@ -1233,7 +1251,9 @@ let decode_sse_with_provenance ~request body =
     | [] -> Ok state
     | raw_line :: rest -> (
         match classify_sse_line raw_line with
-        | Sse_ignored -> loop (line_no + 1) state rest
+        (* The strict decode reads events, not their journal position: the
+           seq is the live decoder's concern. *)
+        | Sse_ignored | Sse_id _ | Sse_frame_end -> loop (line_no + 1) state rest
         | Sse_data payload ->
             let* json =
               try Ok (Yojson.Safe.from_string payload)

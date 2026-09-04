@@ -926,8 +926,14 @@ type stop_request =
    heard. A capture the operator stopped mid-sentence carries a sentence. *)
 type capture_end =
   | Ended_after_speech
-  | Ended_without_speech
-  | Ended_by_operator
+  (* Both carry the room the capture measured, when it got that far. An
+     operator whose draft came back empty cannot tell a microphone that heard
+     nothing from a transcriber that failed, and the two levels are the
+     difference: "you were at -38, speech had to clear -32" is a thing to act
+     on, where "nothing was heard" is not. [None] when the recorder never
+     produced a sample to measure. *)
+  | Ended_without_speech of float option
+  | Ended_by_operator of float option
 
 (* Watches the recording as it is written and decides when it is over.
 
@@ -992,7 +998,8 @@ let advance_phase ~(capture : Voice_config.capture_config) ~now ~level phase =
    sentence. *)
 let end_at_deadline = function
   | Speaking _ -> Ended_after_speech
-  | Calibrating _ | Listening _ -> Ended_without_speech
+  | Calibrating { floor; _ } -> Ended_without_speech floor
+  | Listening { floor } -> Ended_without_speech (Some floor)
 ;;
 
 (* The same question, asked of the other way a recording ends. The key says
@@ -1008,9 +1015,12 @@ let end_at_operator_stop request phase =
   (* An explicit discard is the operator saying they do not want it, which no
      amount of speech overrides. Nothing else in the capture path can say
      that: every other ending is inferred from levels. *)
-  | Discard, _ -> Ended_by_operator
+  | Discard, Speaking { floor; _ } -> Ended_by_operator (Some floor)
+  | Discard, Calibrating { floor; _ } -> Ended_by_operator floor
+  | Discard, Listening { floor } -> Ended_by_operator (Some floor)
   | Keep_what_was_heard, Speaking _ -> Ended_after_speech
-  | Keep_what_was_heard, (Calibrating _ | Listening _) -> Ended_by_operator
+  | Keep_what_was_heard, Calibrating { floor; _ } -> Ended_by_operator floor
+  | Keep_what_was_heard, Listening { floor } -> Ended_by_operator (Some floor)
 ;;
 
 let watch_capture_level
@@ -1066,6 +1076,30 @@ let watch_capture_level
     step
       (Calibrating
           { until = start +. capture.Voice_config.calibration_seconds; floor = None })
+;;
+
+(* What a capture that carries no speech says for itself.
+
+   The levels are in it because without them the answer is not actionable: an
+   empty draft looks the same whether the microphone heard nothing, the room
+   rose over the threshold, or the transcriber failed. With them it is a
+   number and a target, and an operator who reads "-38.2 dB, speech had to
+   clear -32.2 dB" knows both that the capture ran and what to change. *)
+let no_audio ~reason ~floor (capture : Voice_config.capture_config) =
+  let detail =
+    match floor with
+    | Some floor ->
+      Printf.sprintf
+        "%s — room %.1f dB, speech had to clear %.1f dB"
+        reason
+        (db_of_amplitude floor)
+        (db_of_amplitude floor +. capture.Voice_config.trigger_margin_db)
+    (* The recorder produced nothing to measure, which is its own answer and a
+       different one: not a room too loud but a microphone that delivered no
+       samples at all. *)
+    | None -> reason ^ " — the recorder produced no audio to measure"
+  in
+  `Assoc [ "status", `String "no_audio"; "text", `String ""; "message", `String detail ]
 ;;
 
 let record_and_transcribe
@@ -1128,7 +1162,10 @@ let record_and_transcribe
              | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
              | exception exn ->
                Error (Printf.sprintf "rec exception: %s" (Printexc.to_string exn))
-             | Unix.WEXITED 0, _ -> Ok Ended_without_speech
+             (* The recorder has no end of its own, so reaching one means it
+                stopped on its own arm without the watcher having decided
+                anything. No floor was settled. *)
+             | Unix.WEXITED 0, _ -> Ok (Ended_without_speech None)
              | Unix.WEXITED code, _ -> Error (Printf.sprintf "rec exit %d" code)
              | _ -> Error "rec process failed")
           (fun () ->
@@ -1146,27 +1183,17 @@ let record_and_transcribe
       on_level Float.neg_infinity;
       (match outcome with
        | Error message -> Error message
-       (* Stopped before anything was said. Distinct from the message below
-          because nothing waited for speech here -- saying the room was too
-          quiet would blame a microphone that was never given a chance. *)
-       | Ok Ended_by_operator ->
-         Ok
-           (`Assoc
-               [ "status", `String "no_audio"
-               ; "text", `String ""
-               ; "message", `String "stopped before anything was said"
-               ])
-       | Ok Ended_without_speech ->
+       | Ok (Ended_by_operator floor) ->
+         (* Stopped before anything was said. Distinct from the message below
+            because nothing waited for speech here -- saying the room was too
+            quiet would blame a microphone that was never given a chance. *)
+         Ok (no_audio ~reason:"stopped before anything was said" ~floor capture)
+       | Ok (Ended_without_speech floor) ->
          (* The gate that keeps a room away from the transcriber. It used to
             re-read the finished file and compare its average against its own
             opening; now the watcher has already compared every tenth of a
             second against the room and knows no reading cleared it. *)
-         Ok
-           (`Assoc
-               [ "status", `String "no_audio"
-               ; "text", `String ""
-               ; "message", `String "nothing was said above the room level"
-               ])
+         Ok (no_audio ~reason:"nothing rose above the room" ~floor capture)
        | Ok Ended_after_speech ->
          let audio_file =
            if capture.Voice_config.noise_reduction

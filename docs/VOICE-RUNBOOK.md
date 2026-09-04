@@ -131,6 +131,10 @@ number drives the trigger, the end, and the bar the operator watches.
 - **End**: the level falls back under room + `speech_margin_db` and stays
   there for `trailing_silence_seconds`. A shorter pause is inside a sentence.
 - **Gate**: a capture in which no reading ever cleared the trigger is not sent.
+  It says so in the transcript, with the room it measured and the level speech
+  had to clear -- an empty draft looks the same whether the microphone heard
+  nothing, the room sat above the threshold, or the transcriber failed, and
+  those two numbers are what separates them.
 - All four are `[voice.capture]` keys in `runtime.toml`.
 
 Stopping the recording is a cancel, and the reap sends `SIGTERM` before

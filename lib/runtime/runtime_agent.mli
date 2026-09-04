@@ -190,22 +190,33 @@ val runtime_observation_for_terminal_config :
 
 (** {1 RFC-0265 — capability-driven proactive runtime reroute} *)
 
-type reroute_decision =
+type 'target reroute_decision = private
   | No_reroute_needed
-  | Reroute of { to_runtime_id : string; reason : string }
+  | Reroute of { target : 'target; reason : string }
   | No_capable_runtime of { required : string list }
+(** Outcome of the pre-dispatch modality decision. ['target] is what a [Reroute]
+    names: a runtime id for the capability-level decision, an already-resolved
+    [Runtime.t] for the keeper-dispatch decision. The type is [private]: other
+    modules match on these values but cannot build them, so every [Reroute] in
+    the system came from a decision function in this module, which selects the
+    target from a candidate set the assigned runtime was removed from. A reroute
+    naming the runtime it reroutes away from therefore has no producer. *)
 
 val decide_modality_reroute :
   assigned_caps:Llm_provider.Capabilities.capabilities ->
   required_modalities:string list ->
   candidates:(string * Llm_provider.Capabilities.capabilities) list ->
-  reroute_decision
-(** Pure pre-dispatch reroute decision. [No_reroute_needed] when [assigned_caps]
-    already admit [required_modalities]; [Reroute] to the first [candidates] entry
-    whose capabilities admit them (declaration/[media_failover] order is the
-    caller's responsibility); [No_capable_runtime] when none qualify (caller keeps
-    the loud capability rejection as the floor). Deterministic: no I/O, no provider
-    liveness (deferred to RFC-0260). *)
+  string reroute_decision
+(** Pure pre-dispatch reroute decision over capability records. Returns
+    [No_reroute_needed] when [assigned_caps] already admit [required_modalities];
+    [Reroute] naming the first [candidates] entry whose capabilities admit them
+    (declaration/[media_failover] order is the caller's responsibility);
+    [No_capable_runtime] when none qualify, which the caller answers with the
+    media degrade or the loud capability rejection. Does no I/O and does not
+    consult provider liveness (deferred to RFC-0260), so two identical inputs
+    decide identically. [candidates] is taken as given: this entry point does not
+    know which runtime is assigned, so callers holding runtimes use
+    [decide_modality_reroute_for_runtime_candidates] instead. *)
 
 val content_blocks_for_run :
   initial_messages:Agent_core.Types.message list ->
@@ -234,19 +245,27 @@ val decide_modality_reroute_for_runtime_candidates :
   ?checkpoint_messages:Agent_core.Types.message list ->
   ?initial_messages:Agent_core.Types.message list ->
   Agent_core.Types.content_block list ->
-  reroute_decision
+  Runtime.t reroute_decision
 (** Keeper-dispatch variant for scoped candidate sets such as explicit runtime
-    lanes. It preserves the caller-provided candidate order and does not consult
-    global [runtime.media_failover]. *)
+    lanes. Preserves the caller-provided candidate order and does not consult
+    global [runtime.media_failover]. Removes [assigned] from [candidates] before
+    selecting, and returns the selected [Runtime.t] itself rather than its id, so
+    the caller dispatches to the runtime the decision picked without a second
+    lookup. Required modalities are read from [blocks] together with
+    [checkpoint_messages] and [initial_messages], so media already in a resumed
+    checkpoint counts. *)
 
 val strip_unsupported_modality_blocks :
   Llm_provider.Capabilities.capabilities ->
   Agent_core.Types.content_block list ->
   Agent_core.Types.content_block list * (string * int) list
-(** RFC-0265 follow-up media degrade. Drop the top-level [Image]/[Document]/[Audio]
-    blocks whose modality [caps] does not admit; keep text/thinking/tool blocks.
-    Returns the kept blocks and a per-modality drop count. ToolResult-nested media
-    is left intact (the capability gate floor still applies to it). *)
+(** RFC-0265 follow-up media degrade. Drop the [Image]/[Document]/[Audio] blocks
+    whose modality [caps] does not admit; keep text/thinking/tool blocks. Descends
+    into [ToolResult.content_blocks] and strips there too, keeping the enclosing
+    [ToolResult] with its remaining blocks. Returns the kept blocks and a
+    per-modality drop count summed across both levels. Covers the same blocks
+    [required_modalities_of_content_blocks] reads, so a modality reported as
+    required is a modality this function removes. *)
 
 val strip_unsupported_modality_messages :
   Llm_provider.Capabilities.capabilities ->

@@ -245,8 +245,13 @@ module For_testing : sig
     assignment_id:string ->
     first_candidate_id:string ->
     first_candidate:Runtime.t ->
-    Runtime_agent.reroute_decision ->
+    Runtime.t Runtime_agent.reroute_decision ->
     string * Runtime.t
+  (** Runtime the turn dispatches to after the RFC-0265 decision. On [Reroute],
+      returns the decision's target and logs a WARN naming the runtime left, the
+      runtime taken and [assignment_id]; on [No_reroute_needed] and
+      [No_capable_runtime], returns [first_candidate_id]/[first_candidate]
+      unchanged and logs nothing (the caller reports the degrade). *)
 
   val lane_modality_reroute_decision :
     checkpoint_messages:Agent_core.Types.message list ->
@@ -254,7 +259,7 @@ module For_testing : sig
     goal_blocks:Agent_core.Types.content_block list ->
     first_candidate:Runtime.t ->
     remaining_runtimes:Runtime.t list ->
-    Runtime_agent.reroute_decision
+    Runtime.t Runtime_agent.reroute_decision
 
   val dedupe_runtimes_preserve_order : Runtime.t list -> Runtime.t list
   val resolve_runtime_candidates :

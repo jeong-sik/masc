@@ -10198,11 +10198,11 @@ let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
         @ wrapped "Why the requested evaluator did not run" reason
   in
   let ruling, reason =
-    let whole = Terminal_text.single_line verdict.hv_verdict in
+    let whole = verdict.hv_verdict in
     match String.index_opt whole ':' with
-    | None -> whole, ""
+    | None -> Terminal_text.single_line whole, ""
     | Some at ->
-        ( String.sub whole 0 at
+        ( Terminal_text.single_line (String.sub whole 0 at)
         , String.trim
             (String.sub whole (at + 1) (String.length whole - at - 1)) )
   in

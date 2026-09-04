@@ -51,9 +51,9 @@ export function isOfflineStatus(status: string): boolean {
 // ── Harness verdict ──────────────────────────────────────
 //
 // The producer is a closed variant. `lib/eval_calibration.ml:42` serialises
-// `Task.Anti_rationalization.Approve | Reject of string` as exactly three
-// shapes -- `approve`, `reject`, and `reject:<reason>` -- and line 246 is the
-// only place the `verdict` field is written.
+// `Task.Anti_rationalization.Approve | Reject of string` as four
+// shapes -- `approve`, `approve:<reason>`, `reject`, and `reject:<reason>` --
+// and is the only place the `verdict` field is written.
 //
 // Reading it back with `startsWith` accepted strings the producer cannot make
 // (`approvex` read as approve) and misread one it does make: `reject` with no
@@ -68,6 +68,7 @@ export type HarnessVerdict =
   | { readonly kind: 'unknown'; readonly raw: string }
 
 export function parseHarnessVerdict(raw: string): HarnessVerdict {
+  if (!raw) return { kind: 'unknown', raw: '' }
   const [head, ...rest] = raw.split(':')
   if (head === 'approve') {
     const reason = rest.join(':').trim()

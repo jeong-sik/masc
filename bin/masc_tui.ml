@@ -11497,10 +11497,10 @@ let main () =
      as a few-shot example. The machine's side is read off the closed
      verdict serialization ("approve" | "approve:<reason>" | "reject:<reason>"). *)
   let harness_machine_approved (row : Masc.Tui_decode.harness_verdict) =
-    let whole = row.Masc.Tui_decode.hv_verdict in
-    match String.index_opt whole ':' with
-    | None -> String.equal whole "approve"
-    | Some at -> String.equal (String.sub whole 0 at) "approve"
+    match Eval_calibration.verdict_of_string row.Masc.Tui_decode.hv_verdict with
+    | Some (Task.Anti_rationalization.Approve _) -> Some true
+    | Some (Task.Anti_rationalization.Reject _) -> Some false
+    | None -> None
   in
   let start_harness_label ~notes_hash ~(verdict : [ `Approve | `Reject ])
       ~reason ~described =
@@ -11524,15 +11524,19 @@ let main () =
   let handle_harness_agree () =
     match harness_cursor_verdict () with
     | None -> ()
-    | Some row ->
-        let approved = harness_machine_approved row in
-        start_harness_label ~notes_hash:row.Masc.Tui_decode.hv_notes_hash
-          ~verdict:(if approved then `Approve else `Reject)
-          ~reason:""
-          ~described:
-            (Printf.sprintf "labelled %s: the %s stands"
-               row.Masc.Tui_decode.hv_task_id
-               (if approved then "approve" else "reject"))
+    | Some row -> (
+        match harness_machine_approved row with
+        | None ->
+            report_action state "error"
+              "cannot label: unrecognized verdict format"
+        | Some approved ->
+            start_harness_label ~notes_hash:row.Masc.Tui_decode.hv_notes_hash
+              ~verdict:(if approved then `Approve else `Reject)
+              ~reason:""
+              ~described:
+                (Printf.sprintf "labelled %s: the %s stands"
+                   row.Masc.Tui_decode.hv_task_id
+                   (if approved then "approve" else "reject")))
   in
   let handle_harness_overrule () =
     match harness_cursor_verdict () with
@@ -11566,15 +11570,19 @@ let main () =
                       report_action state "system"
                         "overrule cancelled (empty reason)"
                     else
-                      let approved = harness_machine_approved row in
-                      start_harness_label
-                        ~notes_hash:row.Masc.Tui_decode.hv_notes_hash
-                        ~verdict:(if approved then `Reject else `Approve)
-                        ~reason
-                        ~described:
-                          (Printf.sprintf "overruled %s: %s was wrong"
-                             row.Masc.Tui_decode.hv_task_id
-                             (if approved then "the approve" else "the reject")))))
+                      match harness_machine_approved row with
+                      | None ->
+                          report_action state "error"
+                            "cannot overrule: unrecognized verdict format"
+                      | Some approved ->
+                          start_harness_label
+                            ~notes_hash:row.Masc.Tui_decode.hv_notes_hash
+                            ~verdict:(if approved then `Reject else `Approve)
+                            ~reason
+                            ~described:
+                              (Printf.sprintf "overruled %s: %s was wrong"
+                                 row.Masc.Tui_decode.hv_task_id
+                                 (if approved then "the approve" else "the reject")))))
   in
   (* Verification reject: the reason is required, and $EDITOR is the form we
      already have. The editor is the confirmation step -- a non-zero exit or

@@ -248,12 +248,10 @@ describe('verdictTone', () => {
     expect(verdictTone('approve')).toBe('bg-[var(--color-status-ok)]')
   })
 
-  // 생산자는 승인을 `approve` 한 마디로만 내보내고(eval_calibration.ml:42),
-  // OCaml 쪽 역변환도 `["approve"]` 한 조각일 때만 승인으로 읽는다. 콜론이
-  // 붙은 승인은 어느 쪽도 만들지 못하고 어느 쪽도 이해하지 못하는 값이라,
-  // 접두사만 보고 승인 색을 칠하던 예전 동작을 따라가지 않는다.
-  it('콜론 붙은 approve 는 승인으로 읽지 않는다', () => {
-    expect(verdictTone('approve:conditional')).toBe('bg-[var(--color-status-err)]')
+  // 생산자는 승인을 `approve` 또는 `approve:<reason>` 으로 내보낸다(eval_calibration.ml:42).
+  // 사유가 포함된 승인도 정상적으로 승인 색을 칠한다.
+  it('콜론 붙은 approve 도 승인으로 읽는다', () => {
+    expect(verdictTone('approve:conditional')).toBe('bg-[var(--color-status-ok)]')
   })
 
   it('returns bad for reject', () => {
@@ -266,8 +264,12 @@ describe('verdictTone', () => {
 })
 
 describe('verdictSummary', () => {
-  it('passes through non-reject verdicts', () => {
+  it('passes through non-reject verdicts without reason', () => {
     expect(verdictSummary('approve')).toBe('approve')
+  })
+
+  it('shows approve reason when present', () => {
+    expect(verdictSummary('approve:good work')).toBe('good work')
   })
 
   it('strips reject: prefix', () => {

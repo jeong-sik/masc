@@ -13878,7 +13878,7 @@ and is loaded on demand through keeper_skill.
        | Some "?" when message_mode && Buffer.length state.msg_input = 0 ->
            state.help_open <- true;
            state.help_scroll <- 0
-        | Some ("right" | "l" | "esc" | "\t")
+        | Some ("right" | "esc" | "\t")
           when message_mode
                && state.keeper_message_focus = Left_pane ->
             state.keeper_message_focus <- Right_pane
@@ -13887,18 +13887,13 @@ and is loaded on demand through keeper_skill.
               && Masc_tui_render.keeper_roster_pane_shown state
                    ~cols:terminal_columns ->
            state.keeper_message_focus <- Left_pane
-       | Some "h"
-         when message_mode && Buffer.length state.msg_input = 0
-              && Masc_tui_render.keeper_roster_pane_shown state
-                   ~cols:terminal_columns ->
-           state.keeper_message_focus <- Left_pane
-       | Some ("j" | "down")
+       | Some "down"
          when message_mode
               && state.keeper_message_focus = Left_pane ->
            state.keeper_cursor <-
              Masc_tui_scroll.cursor_down ~count:(List.length state.keepers)
                state.keeper_cursor
-       | Some ("k" | "up")
+       | Some "up"
          when message_mode
               && state.keeper_message_focus = Left_pane ->
            state.keeper_cursor <-

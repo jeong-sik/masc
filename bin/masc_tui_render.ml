@@ -9235,7 +9235,7 @@ let render_keeper_message (state : state) =
           Ansi.reset
       | None ->
       if state.keeper_message_focus = Left_pane then
-        "j/k or Up/Down:move  Enter:open  Right/l/Esc:chat"
+        "Up/Down:move  Enter:open  Right/Esc:chat"
       else if chat_cols < 120 then
         let compact_enter_hint =
           match disposition with

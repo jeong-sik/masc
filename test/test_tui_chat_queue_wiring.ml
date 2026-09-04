@@ -1300,6 +1300,33 @@ let test_esc_dispatch_and_footer_read_the_interrupt_table () =
       footer
 ;;
 
+(* The chat roster's vim letters are gone: each duplicated an arrow (left,
+   down, up, right) and each cost the first letter of a message an operator
+   types into an empty draft -- "hi" began with a jump to the roster. The
+   footer is the one surface that still names these keys, so pinning the new
+   spelling keeps the hint from re-advertising letters the dispatch no longer
+   answers; a footer naming a dead key was a real bug twice before
+   (Ctrl-F/Ctrl-O, then Ctrl-N, #32367). *)
+let test_roster_footer_names_arrows_not_vim_letters () =
+  let named_arrows =
+    Ast_grep.count_string_literals_in_value_binding
+      ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_keeper_message"
+      ~literals:[ "Up/Down:move  Enter:open  Right/Esc:chat" ]
+  in
+  let named_letters =
+    Ast_grep.count_string_literals_in_value_binding
+      ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_keeper_message"
+      ~literals:[ "j/k or Up/Down:move  Enter:open  Right/l/Esc:chat" ]
+  in
+  if named_arrows <> 1 || named_letters <> 0 then
+    failf
+      "the roster footer must name the arrows and no h/j/k/l: arrows=%d \
+       letters=%d"
+      named_arrows named_letters
+;;
+
 (* The chat surface had exactly one exit, and on a live turn Esc's first
    press spends itself stopping the turn -- so leaving with the turn running
    was not expressible: the only way out signalled the turn to stop. The
@@ -1549,6 +1576,8 @@ let () =
             test_quiet_leave_leaves_without_touching_the_turn
         ; test_case "quiet leave routes past the composer gate" `Quick
             test_quiet_leave_routes_past_the_composer_gate
+        ; test_case "roster footer names arrows, not vim letters" `Quick
+            test_roster_footer_names_arrows_not_vim_letters
         ; test_case "the budget and the pane agree about queue rows" `Quick
             test_the_budget_and_the_pane_agree_about_queue_rows
         ; test_case "the budget and the pane agree about the scrollback row"

@@ -1218,7 +1218,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     ~(open_named_image : unit -> unit) ~(inspect_context : unit -> unit)
     ~(load_tool_changes : unit -> unit) ~(drain_queue : unit -> unit)
     ~(start_voice : unit -> unit) ~(toggle_voice_continuous : unit -> unit)
-    (key : string) : bool =
+    ~(interrupt_turn : unit -> bool) (key : string) : bool =
   (* y and n answer a held call, and only while one is held -- otherwise they
      are letters someone is typing. The prompt on screen is what makes them
      mean anything, so it is also what decides whether they are taken. *)
@@ -1258,9 +1258,13 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     Buffer.clear state.msg_input;
     drain_queue ();
     true
-  | "esc" ->
-    leave_keeper_message state;
-    true
+  (* The footer draws "Esc:interrupt turn" while a turn is live and the help
+     row says "back; during a turn, interrupt it". Both were promises this arm
+     did not keep: it left unconditionally and answered [true], so the
+     surface-level Esc handling that does interrupt was never reached. Leaving
+     is one keypress away again once the turn settles; a turn the operator
+     wants stopped is the more urgent of the two. *)
+  | "esc" -> if interrupt_turn () then true else (leave_keeper_message state; true)
   | "\r" ->
     let text = Buffer.contents state.msg_input in
     if String.trim text <> "" then begin
@@ -8533,6 +8537,9 @@ let handle_composer_key state ~base_path ~mailbox key =
          failure. *)
       let (_handled : bool) =
         handle_message_key state
+          (* The composer row is not the chat surface: no turn of its own is
+             on screen, so Esc here has nothing to stop. *)
+          ~interrupt_turn:(fun () -> false)
           ~submit_message:(fun _ -> ())
           ~answer_approval:(fun ~tool_call_id:_ ~allow:_ -> ())
           ~load_older:(fun ~before:_ -> ())
@@ -13803,6 +13810,35 @@ and is loaded on demand through keeper_skill.
              end else
                let (_handled : bool) =
                  handle_message_key state
+                   ~interrupt_turn:(fun () ->
+                     (* Answers whether the press was spent on the turn. The
+                        keeper the pane is showing is the one Esc can stop:
+                        another keeper's turn is not on screen, and stopping
+                        it from here would be a keypress the reader cannot
+                        see the target of. A second press while the first is
+                        unanswered is not a second interrupt -- it reports
+                        [true] so it does not fall through to leaving, which
+                        is not what the reader asked for either. *)
+                     match state.msg_live with
+                     | Some live
+                       when state.msg_target_keeper_name
+                            = Some (Keeper_chat_transcript.keeper_name live)
+                            && Keeper_chat_transcript.interrupt live
+                               = Keeper_chat_transcript.Not_requested ->
+                         (match
+                            inflight_by_request_id state
+                              (Keeper_chat_transcript.request_id live)
+                          with
+                          | Some request ->
+                              launch_keeper_interrupt state
+                                ~mailbox:async_messages request;
+                              true
+                          | None -> false)
+                     | Some live
+                       when state.msg_target_keeper_name
+                            = Some (Keeper_chat_transcript.keeper_name live) ->
+                         true
+                     | Some _ | None -> false)
                    ~submit_message:
                      (send_operator_text state ~base_path
                         ~mailbox:async_messages)
@@ -14614,30 +14650,11 @@ and is loaded on demand through keeper_skill.
                 state.keeper_detail_focus <- Right_pane;
                 state.keeper_calls_scroll <- 0;
                 state.detail_scroll <- 0
-            | Keepers Keeper_message ->
-                (* While a turn is streaming, Esc interrupts it instead of
-                   leaving: leaving is one keypress away again once it settles,
-                   and a turn an operator wants stopped is the more urgent of
-                   the two. Asking twice does not stack -- the second press is
-                   ignored while the first is unanswered. *)
-                (match state.msg_live with
-                 | Some live
-                   when state.msg_target_keeper_name
-                        = Some (Keeper_chat_transcript.keeper_name live)
-                        && Keeper_chat_transcript.interrupt live
-                           = Keeper_chat_transcript.Not_requested ->
-                     (match
-                        inflight_by_request_id state
-                          (Keeper_chat_transcript.request_id live)
-                      with
-                      | Some request ->
-                          launch_keeper_interrupt state
-                            ~mailbox:async_messages request
-                      | None -> leave_keeper_message state)
-                 | Some _ ->
-                     (* An interrupt is already outstanding for this turn. *)
-                     ()
-                 | None -> leave_keeper_message state)
+            (* Esc on this surface never arrives here: the composer takes it
+               first ([handle_message_key], which the dispatch above routes
+               every key to while the chat is open) and answers it there,
+               interrupt included. *)
+            | Keepers Keeper_message -> ()
             | Board ->
                 (match state.board_mode with
                  | Board_read _ ->

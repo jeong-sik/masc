@@ -170,7 +170,7 @@ let create ?on_publish () =
 (* [publish] is the single choke point every turn event passes through — route
    lifecycle, bridge-translated deltas, and terminal paths all call it. The
    hook runs BEFORE the bus add so the canonical journal records what the turn
-   produced even when a full bus raises on add. [publish] performs only
+   produced even when a full bus suspends the add. [publish] performs only
    blocking Unix I/O inside the hook (which suspends the whole domain briefly
    but never interleaves fibers in it), so seq assignment → hook → bus add is
    effectively atomic and journal order == seq order == bus order. *)

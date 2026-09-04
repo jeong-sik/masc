@@ -211,8 +211,11 @@ type t
 val create : ?on_publish:(seq:int -> keeper_chat_event -> unit) -> unit -> t
 
 (** [publish t event] runs the journal hook (if any) and adds [event] to the
-    stream. Non-blocking; raises if the stream is full (backpressure) — the
-    hook has already run by then, so the journal still holds the event. *)
+    stream. With a journal hook installed, the hook performs brief blocking
+    Unix I/O (fsync + rollback per line); hook-free buses are non-blocking
+    until full. A full stream suspends the writer fiber until a reader frees
+    a slot (Eio backpressure) — the hook has already run by then, so the
+    journal still holds the event. *)
 val publish : t -> keeper_chat_event -> unit
 
 (** [subscribe t] blocks until an event is available, then returns it. *)

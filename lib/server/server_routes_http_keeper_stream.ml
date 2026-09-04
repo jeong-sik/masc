@@ -2613,7 +2613,21 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
             let operation_id =
               Keeper_owner.Chat_operation.Operation_id.to_string operation.operation_id
             in
-            let events = Keeper_chat_events.create () in
+            (* RFC-0412 stage 1 dual-write: every event published on this bus
+               is also appended to the per-operation canonical journal.
+               Fail-open — a journal failure never breaks the live turn. *)
+            let journal =
+              Keeper_chat_event_log.open_journal
+                ~base_dir:(Mcp_server.workspace_config state).base_path
+                ~keeper_name
+                ~operation_id
+                ()
+            in
+            let events =
+              Keeper_chat_events.create
+                ~on_publish:(Keeper_chat_event_log.append journal)
+                ()
+            in
             let closed = ref false in
             let delivery, resolve_delivery = Eio.Promise.create () in
             let settle_delivery result =

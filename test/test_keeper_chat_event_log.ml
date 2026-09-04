@@ -364,6 +364,73 @@ let test_on_publish_hook_failure_does_not_break_publish () =
   | E.Text_delta "still delivered" -> ()
   | _ -> Alcotest.fail "event lost after hook failure"
 
+let test_full_bus_hook_runs_before_add () =
+  let hook_calls = ref 0 in
+  let last_seq = ref (-1) in
+  let bus =
+    Masc.Keeper_chat_events.create
+      ~on_publish:(fun ~seq _ ->
+        incr hook_calls;
+        last_seq := seq)
+      ()
+  in
+  for _ = 1 to 512 do
+    Masc.Keeper_chat_events.publish bus (E.Text_delta "filler")
+  done;
+  Alcotest.(check int) "512 publishes reached the hook" 512 !hook_calls;
+  (* The 513th publish cannot complete normally: Eio.Stream.add on a full
+     stream suspends the writer, and with no scheduler running (this test is
+     a plain Alcotest function) the Suspend effect raises unhandled. Either
+     way the hook has already run by then — that hook-before-add ordering is
+     what this test pins. *)
+  (match Masc.Keeper_chat_events.publish bus (E.Text_delta "overflow") with
+   | () -> Alcotest.fail "publish on a full bus must not silently succeed"
+   | exception _ -> ());
+  Alcotest.(check int) "hook observed the overflowing publish" 513 !hook_calls;
+  Alcotest.(check int) "hook saw seq = 512 for the overflowing publish" 512 !last_seq
+
+let test_bus_journal_integration_records_all_events () =
+  let base_dir = temp_base_path "keeper-chat-event-log-bus" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let journal =
+         L.open_journal ~base_dir ~keeper_name:"k" ~operation_id:"op-9" ()
+       in
+       let bus =
+         Masc.Keeper_chat_events.create ~on_publish:(L.append journal) ()
+       in
+       List.iter (Masc.Keeper_chat_events.publish bus) all_events;
+       let journaled = L.read_journal journal in
+       Alcotest.(check int)
+         "every published event is journaled"
+         (List.length all_events)
+         (List.length journaled);
+       List.iteri
+         (fun i (entry : L.journaled_event) ->
+            Alcotest.(check int) "seq" i entry.seq)
+         journaled;
+       (* The adapter-only block events are journaled even though they
+          project to None on the AG-UI surface. [all_events] carries 8 such
+          instances across the five kinds: 1 Link + 2 Image (caption
+          populated/absent) + 2 Status + 2 Audio + 1 Tool_context. *)
+       let adapter_blocks =
+         List.filter
+           (fun (entry : L.journaled_event) ->
+              match entry.event with
+              | E.Link_block _
+              | E.Image_block _
+              | E.Status_block _
+              | E.Audio_block _
+              | E.Tool_context_block _ -> true
+              | _ -> false)
+           journaled
+       in
+       Alcotest.(check int)
+         "all adapter-only block instances are journaled"
+         8
+         (List.length adapter_blocks))
+
 let () =
   Alcotest.run
     "keeper_chat_event_log"
@@ -406,5 +473,15 @@ let () =
             "hook failure does not break publish"
             `Quick
             test_on_publish_hook_failure_does_not_break_publish
+        ; Alcotest.test_case
+            "full bus hook runs before add"
+            `Quick
+            test_full_bus_hook_runs_before_add
+        ] )
+    ; ( "integration"
+      , [ Alcotest.test_case
+            "bus journal records every published event"
+            `Quick
+            test_bus_journal_integration_records_all_events
         ] )
     ]

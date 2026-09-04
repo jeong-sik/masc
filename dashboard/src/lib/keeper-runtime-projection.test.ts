@@ -104,7 +104,6 @@ function runtimeTrace(overrides: Partial<KeeperRuntimeTraceResponse> = {}): Keep
     manifest_returned_rows: 6,
     receipt_returned_rows: 1,
     turn_identity: { requested_keeper_turn_id: 7 },
-    provider_attempts: {},
     event_bus: {},
     memory: {},
     runtime_lens: {
@@ -236,6 +235,69 @@ describe('deriveKeeperRuntimeProjection', () => {
 
     expect(projection.headline).toBe('턴 진행 중')
     expect(projection.tone).toBe('ok')
+  })
+
+  // The terminal-evidence tone reads the worst gap severity, not the gap
+  // count. clock_edges_window_truncated is severity 'info' and fires on any
+  // keeper holding more manifest rows than the request window, so counting
+  // gaps meant a healthy keeper could never read anything but warn.
+  const traceWithGaps = (
+    gaps: ReadonlyArray<{ code: string; severity: string; lane: string }>,
+  ) =>
+    runtimeTrace({
+      runtime_lens: {
+        turn_clock: {
+          keeper_turn_id: 7,
+          terminal_event_present: true,
+          terminal_event: 'turn_finished',
+          max_agent_core_turn_count: 3,
+        },
+        axes: {},
+        swimlanes: {},
+        clock_edges: [],
+        clock_groups: [],
+        gaps,
+      },
+    } as unknown as Partial<KeeperRuntimeTraceResponse>)
+
+  const traceEvidenceTone = (
+    gaps: ReadonlyArray<{ code: string; severity: string; lane: string }>,
+  ) =>
+    deriveKeeperRuntimeProjection({
+      keeper: keeper({}),
+      composite: composite({}),
+      runtimeTrace: traceWithGaps(gaps),
+      nowMs: NOW_MS,
+    }).traceEvidence.tone
+
+  it('reads an info-only gap as ok, not warn', () => {
+    expect(
+      traceEvidenceTone([
+        { code: 'clock_edges_window_truncated', severity: 'info', lane: 'keeper' },
+      ]),
+    ).toBe('ok')
+  })
+
+  it('reads a warn gap as warn even beside an info gap', () => {
+    expect(
+      traceEvidenceTone([
+        { code: 'clock_edges_window_truncated', severity: 'info', lane: 'keeper' },
+        { code: 'receipt_missing', severity: 'warn', lane: 'keeper' },
+      ]),
+    ).toBe('warn')
+  })
+
+  it('reads a bad gap as bad, not as warn', () => {
+    expect(
+      traceEvidenceTone([
+        { code: 'receipt_missing', severity: 'warn', lane: 'keeper' },
+        { code: 'clock_edge_lane_unknown', severity: 'bad', lane: 'keeper' },
+      ]),
+    ).toBe('bad')
+  })
+
+  it('reads no gaps at all as ok', () => {
+    expect(traceEvidenceTone([])).toBe('ok')
   })
 })
 

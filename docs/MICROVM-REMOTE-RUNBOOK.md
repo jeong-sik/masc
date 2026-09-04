@@ -21,6 +21,29 @@ microvm_backend = "apple_container"   # | "microsandbox" | "nerdctl_kata"
 생략하면 macOS 는 `apple_container` 를 쓰고, **그 밖의 호스트는 부팅을 거절한다**
 (`microvm_backend_unresolved`). 선언한 것과 다른 격리를 조용히 주지 않는다.
 
+### 지금 실제로 뜨는 건 `apple_container` 하나다 (#32837)
+
+세 값 다 TOML 에서 통과하지만, 부팅까지 가는 건 `apple_container` 뿐이다.
+나머지 둘은 아래 이유로 부팅 자체를 거절한다. 거절 문구가 이유를 그대로 말한다.
+
+| 값 | 부팅 결과 | 이유 |
+|---|---|---|
+| `apple_container` | 뜬다 | — |
+| `microsandbox` | `microvm_constraint_unexpressible` | `msb 0.6.16` 에 `--cap-drop` 과 `--read-only` 가 없다. 프로필이 약속한 격리를 못 주면서 뜨느니 안 뜬다 |
+| `nerdctl_kata` | `microvm_work_volume_unsupported` | `nerdctl volume create` 에 크기 플래그가 없어서 keeper 작업 볼륨(RFC-0400)을 만들 방법이 없다 |
+
+이 표는 **이미지가 그 런타임 저장소에 있을 때** 나오는 답이다. 부팅은
+이미지 확인 → 작업 볼륨 → 부팅 argv 순서로 가기 때문에, 이미지가 없으면 위
+문구 대신 `microvm_image_missing` 이 먼저 나온다. `msb` 는 `msb image list
+--format json`, `nerdctl` 은 `nerdctl images` 로 각자 저장소를 확인한다.
+런타임마다 이미지 저장소가 따로라서, Docker 로 빌드해 둔 이미지는 셋 중
+어디에도 보이지 않는다.
+
+전에는 셋 다 뜨는 것처럼 보였는데, 그건 셋 다 Apple `container` 로 떴기 때문이다.
+그래서 `microsandbox` 라고 적은 keeper 의 게스트를 `msb stop` 으로 내리려 하면
+`sandbox not found` 가 났고, 실제로 떠 있는 게스트는 아무도 못 치웠다.
+지금은 부팅이 런타임을 따라가고, 못 따라가면 부팅을 안 한다.
+
 이 문서의 나머지는 `apple_container` 기준이다 — `container` 자리에 그 백엔드의
 CLI 를 놓고 읽으면 된다. 아래 계약 표의 항목 1·2 는 백엔드마다 다르고, 3·4(shim
 과 작업 볼륨)는 셋 다 같다.

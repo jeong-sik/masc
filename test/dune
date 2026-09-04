@@ -3131,6 +3131,11 @@
  (libraries alcotest masc_tui_types))
 
 (test
+ (name test_tui_gate_text)
+ (modules test_tui_gate_text)
+ (libraries alcotest masc_tui_gate_text))
+
+(test
  (name test_tui_server_identity_refresh)
  (modules test_tui_server_identity_refresh)
  (libraries alcotest masc masc_tui_types unix))
@@ -3945,7 +3950,13 @@
  ; masc_tui_message_layout so a column offset is asked in display cells rather
  ; than bytes: the delta column is headed with a two-byte glyph one cell wide,
  ; and a byte offset would report the header and its own cell as misaligned.
- (libraries alcotest masc_tui_message_layout masc_tui_render_schedule))
+ ; masc_tui_table so the gap between columns is asked of the contract that
+ ; sets it, not spelled again here.
+ (libraries
+  alcotest
+  masc_tui_message_layout
+  masc_tui_render_schedule
+  masc_tui_table))
 
 (test
  (name test_tui_terminal_write_repair)

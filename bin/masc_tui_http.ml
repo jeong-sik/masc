@@ -1110,6 +1110,11 @@ let fetch_runtime_resolved ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/runtime/resolved"
 
+(** GET /api/v1/dashboard/clients — everyone attached to this workspace:
+    directory agents, state-backed sessions, runtime fibers. *)
+let fetch_clients ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/dashboard/clients"
+
 (** GET /api/v1/dashboard/runtime-probe — cached provider metadata
     reachability. [force] schedules a background refresh past the route's
     recent-value window; the returned [refresh_state] remains authoritative. *)

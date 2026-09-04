@@ -109,17 +109,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                 (Hashtbl.fold
                    (fun clock count acc -> (clock, `Int count) :: acc)
                    scan.source_clock_counts []) );
-            ( "provider_attempt",
-              `Assoc
-                [
-                  ("started_count", `Int scan.provider_started_count);
-                  ("finished_count", `Int scan.provider_finished_count);
-                  ( "terminal_status",
-                    Json_util.string_opt_to_json
-                      (Option.map
-                         (fun row -> row.Keeper_runtime_manifest.status)
-                         scan.provider_terminal_row) );
-                ] );
             ("config_drift", config_drift);
             ( "context",
               `Assoc
@@ -190,17 +179,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                    then "checkpoint_loaded"
                    else "empty")
                 ~synthetic_events:[] );
-            ( "provider",
-              runtime_lens_swimlane_json swimlane_scan gaps ~lane:"provider"
-                ~label:"Provider"
-                ~events:
-                  [
-                    Keeper_runtime_manifest.Provider_attempt_started;
-                    Keeper_runtime_manifest.Provider_attempt_finished;
-                  ]
-                ~terminal_status:(runtime_lens_provider_terminal_status scan)
-                ~synthetic_events:[]
-            );
             ( "tool_runtime",
               runtime_lens_swimlane_json swimlane_scan gaps ~lane:"tool_runtime"
                 ~label:"Tool Runtime"

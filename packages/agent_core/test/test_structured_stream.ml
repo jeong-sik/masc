@@ -124,6 +124,7 @@ let test_on_event_callback_fires () =
       | Connected -> "connected"
       | Timeout _ -> "timeout"
       | StreamIncomplete _ -> "stream_incomplete"
+      | StreamRepeating _ -> "stream_repeating"
     in
     event_types := t :: !event_types);
   let types = List.rev !event_types in

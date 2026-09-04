@@ -62,11 +62,24 @@ let live_containers ~config ~meta ~timeout_sec =
     ~timeout_sec
     ()
 
-let live_microvm_containers ~config ~meta ~timeout_sec =
-  Keeper_sandbox_microvm.list_live_containers
-    ~base_path:config.Workspace.base_path
-    ~keeper_name:meta.name
-    ~timeout_sec
+(* Which runtime holds this Keeper's guests is the Keeper's own declaration.
+   A microvm Keeper with none has no inventory to read, and saying so beats
+   an empty list that reads as "no guests". *)
+let live_microvm_containers ~config ~(meta : keeper_meta) ~timeout_sec =
+  match meta.microvm_backend with
+  | None ->
+    Error
+      (Printf.sprintf
+         "microvm_backend_unresolved: keeper %s declares \
+          sandbox_profile=microvm and no microvm_backend, so there is no runtime \
+          to list guests on"
+         meta.name)
+  | Some backend ->
+    Keeper_sandbox_microvm.list_live_containers_for
+      backend
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:meta.name
+      ~timeout_sec
 
 let live_containers_for_keeper ~(meta : keeper_meta) containers =
   let keeper_label = Keeper_sandbox_runtime.sanitize_label_value meta.name in
@@ -624,7 +637,14 @@ let why_no_container (meta : keeper_meta) ~preflight containers =
   else
     match meta.sandbox_profile with
     | Micro_vm ->
-      Some "no visible Apple Container VM; a microvm guest is created on this Keeper's first sandboxed tool execution"
+      (* Named from the Keeper's own meta. The Apple-only wording sent an msb
+         operator to look for a guest under a runtime the Keeper never uses. *)
+      Some
+        (Printf.sprintf
+           "no visible %s microVM guest; a guest is created on this Keeper's first sandboxed tool execution"
+           (match meta.microvm_backend with
+            | Some backend -> Keeper_microvm_backend.to_string backend
+            | None -> "declared"))
     | Remote_ssh ->
       Some "remote_ssh executes on its configured endpoint and does not own a local container"
     | Docker -> (
@@ -783,7 +803,7 @@ let live_status_json ?(include_preflight = true)
 
 type sandbox_log_backend =
   | Docker_logs
-  | Apple_container_logs
+  | Micro_vm_logs of Keeper_microvm_backend.t
 
 type sandbox_log_source =
   | Local_backend of sandbox_log_backend
@@ -794,9 +814,12 @@ type sandbox_logs_error =
   | Sandbox_logs_keeper_not_found
   | Sandbox_logs_backend_failed of string
 
+(* The microVM label is the runtime's own spelling, so a Keeper on msb no
+   longer reports "apple_container" on this wire. [apple_container] is
+   unchanged for the runtime that actually is Apple's. *)
 let sandbox_log_backend_label = function
   | Docker_logs -> "docker"
-  | Apple_container_logs -> "apple_container"
+  | Micro_vm_logs backend -> Keeper_microvm_backend.to_string backend
 ;;
 
 (* The sentence an operator reads when the profile keeps nothing local. It
@@ -817,13 +840,17 @@ let resolve_sandbox_log_target ~(config : Workspace.config) ~keeper_name =
   | Ok (Some meta) ->
     (match meta.sandbox_profile with
      | Docker -> Ok (Local_backend Docker_logs, meta.name)
-     (* [meta.microvm_backend] is in scope and unread: every microvm Keeper
-        resolves to Apple's runtime, so one naming microsandbox or
-        nerdctl_kata reaches a CLI it does not run and its healthy state
-        reads as [Sandbox_logs_backend_failed]. Threading the backend
-        changes the wire label and the reader that parses it, which is
-        RFC-0405's work rather than this profile fix: issue 32916. *)
-     | Micro_vm -> Ok (Local_backend Apple_container_logs, meta.name)
+     | Micro_vm ->
+       (match meta.microvm_backend with
+        | Some backend -> Ok (Local_backend (Micro_vm_logs backend), meta.name)
+        | None ->
+          Error
+            (Sandbox_logs_backend_failed
+               (Printf.sprintf
+                  "microvm_backend_unresolved: keeper %s declares \
+                   sandbox_profile=microvm and no microvm_backend, so there is no \
+                   runtime to read a log stream from"
+                  meta.name)))
      | Remote_ssh ->
        Ok (No_local_stream remote_ssh_no_local_stream_reason, meta.name))
 ;;
@@ -833,9 +860,8 @@ let sandbox_log_argv backend ~tail ~container_id =
   | Docker_logs ->
     Keeper_sandbox_runtime.docker_command_argv ()
     @ [ "logs"; "--tail"; string_of_int tail; container_id ]
-  | Apple_container_logs ->
-    Keeper_sandbox_microvm.command_argv ()
-    @ [ "logs"; "-n"; string_of_int tail; container_id ]
+  | Micro_vm_logs microvm_backend ->
+    Keeper_sandbox_microvm.logs_tail_argv_for microvm_backend ~tail ~container_id
 ;;
 
 let logs_json ~(config : Workspace.config) ~keeper_name ~timeout_sec ~tail () =
@@ -865,8 +891,9 @@ let logs_json ~(config : Workspace.config) ~keeper_name ~timeout_sec ~tail () =
           ~base_path:config.Workspace.base_path
           ~timeout_sec
           ()
-      | Apple_container_logs ->
-        Keeper_sandbox_microvm.list_live_containers
+      | Micro_vm_logs microvm_backend ->
+        Keeper_sandbox_microvm.list_live_containers_for
+          microvm_backend
           ~base_path:config.Workspace.base_path
           ~keeper_name:effective_keeper_name
           ~timeout_sec

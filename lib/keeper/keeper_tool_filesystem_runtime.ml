@@ -46,23 +46,58 @@ let read_window_fetch_bytes ~max_bytes = function
   | _ -> read_file_max_max_bytes
 ;;
 
+(* Every model-facing guidance sentence this module emits lives in a managed
+   template under the keeper.tool_filesystem prefix; the execution path only
+   picks the variant and supplies the data. The variant and its renderer live
+   in [Keeper_tool_filesystem_guidance]: the remote write lane
+   ([Keeper_tool_filesystem_remote_write]) renders the same slots and this
+   module already calls into that lane, so keeping the machinery here would
+   close a module cycle. The type equation keeps the constructors in scope
+   unqualified, so the call sites below read exactly as before. *)
+type fs_guidance = Keeper_tool_filesystem_guidance.t =
+  | Offset_not_1_based of { offset : int }
+  | Limit_not_positive of { limit : int }
+  | Available_cwds_partial of
+      { limit : string
+      ; cwds : string
+      }
+  | Checkout_scan_failed of { detail : string }
+  | Cwd_not_directory of { cwd : string }
+  | Offset_beyond_window of
+      { offset : int
+      ; window_bytes : int
+      }
+  | Offset_beyond_scan_budget of
+      { offset : int
+      ; file_bytes : int
+      ; budget : int
+      }
+  | Capability_unavailable
+  | Publication_failed
+  | Directory_publication_failed
+  | Append_capability_failed
+  | Append_incomplete
+  | Recovery_lane_committed
+  | Recovery_lane_effect_observed
+  | Recovery_lane_not_executed
+  | Recovery_lane_indeterminate
+  | Recovery_lane_cleanup_detail
+  | Gate_record_unavailable
+  | Path_required
+  | Patch_requires_old_string
+  | Patch_target_missing
+
+let fs_guidance_text = Keeper_tool_filesystem_guidance.text
+
 (* Range violations are rejected loudly instead of being defaulted: a model
    that sent [limit=0] or [offset=-3] gets a payload naming the contract, so
    the next attempt can self-correct. *)
 let read_line_window_of_args args =
   match Safe_ops.json_int_opt "offset" args, Safe_ops.json_int_opt "limit" args with
   | Some offset, _ when offset < 1 ->
-    Error
-      (Printf.sprintf
-         "offset must be a 1-based line number (got %d). Read returns lines; \
-          use next_offset from the previous response to continue."
-         offset)
+    Error (fs_guidance_text (Offset_not_1_based { offset }))
   | _, Some limit when limit < 1 ->
-    Error
-      (Printf.sprintf
-         "limit must be a positive number of lines (got %d). Omit limit to \
-          read up to the byte budget."
-         limit)
+    Error (fs_guidance_text (Limit_not_positive { limit }))
   | offset, max_lines ->
     (* DET-OK: absent offset = the schema-declared default (line 1); range
        violations are rejected above — documented-default resolution. *)
@@ -198,18 +233,22 @@ let available_cwd_hint ~config ~meta =
     (* Presenting a truncated list as complete is worse than saying it is
        truncated: a keeper that cannot find its repo in a list that looks
        exhaustive concludes it should stop asking. *)
-    Printf.sprintf
-      " available cwds (partial, %s): %s"
-      (Keeper_playground_checkouts.limit_to_string limit)
-      (String.concat
-         ", "
-         (List.map
-            (fun (c : Keeper_playground_checkouts.checkout) -> c.relative_path)
-            found))
+    " "
+    ^ fs_guidance_text
+        (Available_cwds_partial
+           { limit = Keeper_playground_checkouts.limit_to_string limit
+           ; cwds =
+               String.concat
+                 ", "
+                 (List.map
+                    (fun (c : Keeper_playground_checkouts.checkout) -> c.relative_path)
+                    found)
+           })
   | Error error ->
-    Printf.sprintf
-      " workspace checkout scan failed (%s); cwds could not be enumerated"
-      (Keeper_playground_checkouts.scan_error_to_string error)
+    " "
+    ^ fs_guidance_text
+        (Checkout_scan_failed
+           { detail = Keeper_playground_checkouts.scan_error_to_string error })
 ;;
 
 let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cwd =
@@ -294,13 +333,12 @@ let handle_read_file_with_outcome
                [ "path", `String target
                ; "offset", `Int window.start_line
                ]
-             (Printf.sprintf
-                "offset %d is beyond the scanned window (%d bytes; the file \
-                 continues past the scan budget). Read line ranges within the \
-                 first %d bytes, or narrow the file another way (e.g. Grep)."
-                window.start_line
-                (String.length body)
-                read_file_max_max_bytes))
+             (fs_guidance_text
+                (Offset_beyond_scan_budget
+                   { offset = window.start_line
+                   ; file_bytes = String.length body
+                   ; budget = read_file_max_max_bytes
+                   })))
       | Ok slice ->
         let optional_fields =
           List.concat
@@ -530,10 +568,7 @@ let handle_owned_read_file_with_outcome
       | Error rejection ->
         Error (Fs_compat.owned_directory_chain_rejection_to_string rejection)
       | Ok Fs_compat.Owned_directory_missing ->
-        Error
-          (Printf.sprintf
-             "cwd_not_directory: %s (directory does not exist)"
-             cwd_abs)
+        Error (fs_guidance_text (Cwd_not_directory { cwd = cwd_abs }))
       | Ok (Fs_compat.Owned_directory _) ->
         let target =
           if Filename.is_relative target_rel
@@ -580,10 +615,11 @@ let handle_owned_read_file_with_outcome
                  [ "path", `String target
                  ; "offset", `Int window.start_line
                  ]
-               (Printf.sprintf
-                  "offset %d is beyond the scanned window (%d bytes)"
-                  window.start_line
-                  (String.length prefix.content)))
+               (fs_guidance_text
+                  (Offset_beyond_window
+                     { offset = window.start_line
+                     ; window_bytes = String.length prefix.content
+                     })))
         | Ok slice ->
           let optional_fields =
             List.concat
@@ -1191,9 +1227,7 @@ let rec split_leaf_components = function
 
 let with_confined_write_parent confined f =
   match Fs_compat.get_fs_opt () with
-  | None ->
-    Error
-      "filesystem capability unavailable: Eio filesystem was not installed at runtime startup"
+  | None -> Error (fs_guidance_text Capability_unavailable)
   | Some fs ->
     (try
        let anchor_root = Keeper_alerting_path.confined_anchor_root confined in
@@ -1666,7 +1700,7 @@ let capability_write_error_payload
                capability_write_cleanup_failure_json
                error.cleanup_failures) )
       ]
-    "Filesystem publication failed; target effect and cleanup outcome are reported explicitly."
+    (fs_guidance_text Publication_failed)
 ;;
 
 let created_directory_commit_payload ~target ~created_parents commit =
@@ -1688,7 +1722,7 @@ let created_directory_commit_payload ~target ~created_parents commit =
       ; ( "filesystem_directory_parent_sync"
         , created_directory_sync_outcome_json commit.parent_sync )
       ]
-    "Filesystem parent directory publication failed; creation effect and durability outcomes are reported explicitly."
+    (fs_guidance_text Directory_publication_failed)
 ;;
 
 let observe_created_directory_failure_backtrace
@@ -1767,7 +1801,7 @@ let capability_append_open_error_payload ~target error =
                   (Fs_compat.capability_append_open_error_to_string error) )
             ] )
       ]
-    "Filesystem append capability acquisition failed explicitly."
+    (fs_guidance_text Append_capability_failed)
 ;;
 
 let observe_capability_append_open_error ~keeper_name ~target error =
@@ -1842,7 +1876,7 @@ let append_write_outcome_payload ~target outcome =
           | None -> `Null
           | Some { exception_; _ } -> `String (Printexc.to_string exception_) )
       ]
-    "Filesystem append did not complete normally; exact written bytes and sync outcome are reported explicitly."
+    (fs_guidance_text Append_incomplete)
 ;;
 
 let observe_append_write_outcome ~keeper_name ~target outcome =
@@ -1948,18 +1982,13 @@ let publication_recovery_cleanup_failed_attempt
        release_failure);
   let message, write_executed =
     match execution with
-    | Publication_write_completed ->
-      ( "filesystem publication committed, but publication recovery lane cleanup failed"
-      , `Bool true )
+    | Publication_write_completed -> fs_guidance_text Recovery_lane_committed, `Bool true
     | Publication_write_effect_observed ->
-      ( "filesystem publication produced an observable filesystem effect before the publication callback and recovery lane cleanup both failed"
-      , `Bool true )
+      fs_guidance_text Recovery_lane_effect_observed, `Bool true
     | Publication_write_not_executed ->
-      ( "filesystem publication left the target unchanged, but publication recovery lane cleanup failed"
-      , `Bool false )
+      fs_guidance_text Recovery_lane_not_executed, `Bool false
     | Publication_write_indeterminate ->
-      ( "filesystem publication callback and publication recovery lane cleanup both failed"
-      , `Null )
+      fs_guidance_text Recovery_lane_indeterminate, `Null
   in
   Write_failed_data
     { message
@@ -1968,8 +1997,7 @@ let publication_recovery_cleanup_failed_attempt
           [ "error", `String "publication_recovery_cleanup_failed"
           ; "failure_class", `String "runtime_failure"
           ; "state", `String "lane_release_failed"
-          ; "detail"
-          , `String "publication recovery lane cleanup failed after the publication callback returned"
+          ; "detail", `String (fs_guidance_text Recovery_lane_cleanup_detail)
           ; "write_executed", write_executed
           ; "keeper_active", `Bool true
           ; "publication_result", publication_result
@@ -2210,7 +2238,7 @@ let handle_file_write_with_outcome
                      ; "gate_reason"
                      , `String (Keeper_gate.unavailable_reason_to_string reason)
                      ]
-                   "External effect was not executed because the Gate could not durably record its decision state. This Keeper remains active and may continue other work."
+                   (fs_guidance_text Gate_record_unavailable)
              ; class_ = Tool_result.Runtime_failure
              })
       | Keeper_gate.Allow authorization ->
@@ -2603,7 +2631,7 @@ let handle_file_write_with_outcome
   then
     Keeper_tool_execution.failure
       ~class_:Tool_result.Policy_rejection
-      (error_json "path is required. Good: path='lib/foo.ml'. Bad: path=''.")
+      (error_json (fs_guidance_text Path_required))
   else (
     match mode_result with
     | Error mode_raw ->
@@ -2618,8 +2646,7 @@ let handle_file_write_with_outcome
       then
         Keeper_tool_execution.failure
           ~class_:Tool_result.Policy_rejection
-          (error_json
-             "mode=patch requires non-empty old_string. Good: old_string='let x = 1'.")
+          (error_json (fs_guidance_text Patch_requires_old_string))
       else
         (match
            resolve_keeper_confined_write_path
@@ -2793,7 +2820,7 @@ let handle_file_write_with_outcome
                      { payload =
                          error_json
                            ~fields:[ "path", `String target ]
-                           "patch target file does not exist. Use mode=overwrite to create it."
+                           (fs_guidance_text Patch_target_missing)
                      ; class_ = Tool_result.Workflow_rejection
                      })
               in

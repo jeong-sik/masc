@@ -788,36 +788,95 @@ let play_tone freq =
 
 let calibration_seconds = 0.5
 
-(* Speech sat 5.0 dB and 6.1 dB above the floor on the two measured passes --
-   an ordinary sentence at a laptop's built-in microphone, not a quiet one. A
-   margin near that separation swallows the utterance, so the trigger is set
-   just clear of the room and the gate below decides whether anything was said. *)
-let trigger_margin_db = 3.0
+(* How far above the room's peak a capture must rise to start recording.
 
-(* What a capture must exceed, over its whole length, to be worth transcribing.
-   Below the trigger margin so that a capture which did fire but carries only
-   room tone is still refused. *)
-let speech_margin_db = 2.0
+   Measured 2026-09-04 on one workstation: an idle room peaked at 4.48% of
+   full scale and an ordinary spoken sentence clipped at 100%. That is 27 dB
+   apart, so this margin has room on both sides — it only has to clear the
+   room, not approach the voice. A live capture at the derived threshold (8%,
+   the same order as this margin gives) started and ended on speech and
+   transcribed correctly.
 
-let rms_amplitude_of_file audio_file =
+   Earlier numbers here were 5-6 dB, taken from RMS separation on the same
+   microphone. They are not comparable: peak and RMS are two decades apart on
+   room tone and about one on speech. The mistake this replaced was using one
+   where the other was meant. *)
+let trigger_margin_db = 6.0
+
+(* What a capture must exceed, over its whole length, to be worth
+   transcribing. Below the trigger so a capture that did fire but carries only
+   room tone is still refused.
+
+   Read as RMS on both sides, unlike the trigger: this compares a whole
+   capture's average against the room's average, where peak would be decided
+   by one transient. The floor is measured as peak for the filter's sake, so
+   this gate reads its own pair of levels rather than reusing it. *)
+let speech_margin_db = 4.0
+
+(* [sox … stat] prints one labelled level per line, to stderr, which
+   run_voice_status folds into its output:
+
+     Maximum amplitude:     0.044830
+     RMS     amplitude:     0.011830
+
+   Two of those matter and they are not interchangeable — see
+   [peak_amplitude_of_file]. *)
+let stat_amplitude_of_file ~label audio_file =
   match run_voice_status ~timeout_sec:10.0 [ "sox"; audio_file; "-n"; "stat" ] with
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-  (* sox reports a level whatever its exit code, and a non-zero exit on a
-     truncated capture still carries the line we read. The parse decides, not
-     the status. *)
+  (* sox reports levels whatever its exit code, and a non-zero exit on a
+     truncated capture still carries the lines. The parse decides, not the
+     status. *)
   | _, output ->
-    (* sox writes stat to stderr, which run_voice_status folds into output. The
-       line is "RMS     amplitude:    0.013946". *)
     let line =
       String.split_on_char '\n' output
       |> List.find_opt (fun l ->
-        String_util.string_contains_substring ~needle:"RMS" l
+        String_util.string_contains_substring ~needle:label l
         && String_util.string_contains_substring ~needle:"amplitude" l)
     in
     Option.bind line (fun l ->
-      match List.filter (fun t -> t <> "") (String.split_on_char ' ' l) with
-      | _ :: _ :: value :: _ -> float_of_string_opt value
-      | _ -> None)
+      match List.rev (List.filter (fun t -> t <> "") (String.split_on_char ' ' l)) with
+      | value :: _ -> float_of_string_opt value
+      | [] -> None)
+;;
+
+let rms_amplitude_of_file audio_file = stat_amplitude_of_file ~label:"RMS" audio_file
+
+(* The level sox's own silence filter compares against.
+
+   Its threshold percentage is peak, not RMS, and the two are far apart on
+   room tone: measured 2026-09-04 on one workstation, an idle room read 1.18%
+   RMS and 4.48% peak. A trigger computed from RMS therefore sat below the
+   room's peak, so the filter saw sound continuously — it started recording at
+   once and never satisfied its trailing-silence condition. Captures ran to
+   the timeout with no closing tone, which is what an operator noticed.
+
+   Speech is nowhere near either: the same microphone read 11.9% RMS and a
+   clipped 100% peak on an ordinary sentence. The room and the voice are two
+   decades apart on peak, which is what makes a peak threshold workable. *)
+(* The room's average level, taken from the first moment of a capture rather
+   than a separate probe. sox's silence filter drops leading silence, so what
+   survives at the start is the quietest sound that cleared the trigger; that
+   is a closer read of this capture's room than a probe taken seconds earlier.
+
+   Falls back to [None] when the capture is too short to have a leading
+   moment, and the gate then does not fire. *)
+let room_rms_of_capture audio_file =
+  let head = Filename.temp_file "masc_room_" ".wav" in
+  let cleanup () = try Sys.remove head with Sys_error _ -> () in
+  Eio_guard.protect ~finally:cleanup (fun () ->
+    match
+      run_voice_status
+        ~timeout_sec:10.0
+        [ "sox"; audio_file; head; "trim"; "0"; "0.25" ]
+    with
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | Unix.WEXITED 0, _ -> stat_amplitude_of_file ~label:"RMS" head
+    | _ -> None)
+;;
+
+let peak_amplitude_of_file audio_file =
+  stat_amplitude_of_file ~label:"Maximum" audio_file
 ;;
 
 let db_of_amplitude v = if v > 0.0 then 20.0 *. log10 v else neg_infinity
@@ -841,7 +900,7 @@ let measure_noise_floor ~agent_id =
            ; "trim"; "0"; Printf.sprintf "%.2f" calibration_seconds ]
        with
        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-       | Unix.WEXITED 0, _ -> rms_amplitude_of_file probe
+       | Unix.WEXITED 0, _ -> peak_amplitude_of_file probe
        | _ -> None)
 ;;
 
@@ -927,10 +986,19 @@ let record_and_transcribe ~agent_id ?(timeout_sec = 15.0) ?language_code ?noise_
        not sent. This is the only place that refusal can happen; once the audio
        reaches the endpoint chain, a hallucinated transcript is indistinguishable
        from a real one. *)
+    (* Both sides read as RMS. [noise_floor] is the room's *peak*, measured
+       for sox's filter, and comparing a capture's average against a peak
+       would call every quiet capture loud. The room is therefore re-read
+       here as an average, from the capture's own leading moment rather than
+       a second probe: whatever the recorder heard before speech began is the
+       room as it was during this capture. *)
     let silent =
-      match noise_floor, if file_exists then rms_amplitude_of_file audio_file else None with
-      | Some floor, Some captured when floor > 0.0 ->
-        db_of_amplitude captured < db_of_amplitude floor +. speech_margin_db
+      match
+        ( (if file_exists then rms_amplitude_of_file audio_file else None)
+        , if file_exists then room_rms_of_capture audio_file else None )
+      with
+      | Some captured, Some room when room > 0.0 ->
+        db_of_amplitude captured < db_of_amplitude room +. speech_margin_db
       | _ -> false
     in
     if (not file_exists) || silent

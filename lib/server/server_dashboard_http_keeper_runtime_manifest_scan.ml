@@ -14,10 +14,10 @@ type runtime_manifest_scan =
   { path : string
   ; limit : int
   ; returned_rows : Keeper_runtime_manifest.t Queue.t
-  ; provider_attempt_rows : Keeper_runtime_manifest.t Queue.t
   ; event_counts : (string, int) Hashtbl.t
   ; total_rows : int
   ; has_terminal : bool
+  ; terminal_row : Keeper_runtime_manifest.t option
   ; terminal_keeper_turn_ids : int list
   ; max_agent_core_turn_count : int option
   ; keeper_turn_ids : int list
@@ -30,9 +30,6 @@ type runtime_manifest_scan =
   ; payload_role_counts : (string, int) Hashtbl.t
   ; source_clock_counts : (string, int) Hashtbl.t
   ; context_injected_count : int
-  ; provider_started_count : int
-  ; provider_finished_count : int
-  ; provider_terminal_row : Keeper_runtime_manifest.t option
   ; latest_context_injected_row : Keeper_runtime_manifest.t option
   ; dag_edges : (string * string) list
   ; scanned_lines : int
@@ -62,10 +59,10 @@ let make_runtime_manifest_scan ~path ~limit ~scan_line_limit ~scan_scope =
   { path
   ; limit
   ; returned_rows = Queue.create ()
-  ; provider_attempt_rows = Queue.create ()
   ; event_counts = Hashtbl.create 17
   ; total_rows = 0
   ; has_terminal = false
+  ; terminal_row = None
   ; terminal_keeper_turn_ids = []
   ; max_agent_core_turn_count = None
   ; keeper_turn_ids = []
@@ -78,9 +75,6 @@ let make_runtime_manifest_scan ~path ~limit ~scan_line_limit ~scan_scope =
   ; payload_role_counts = Hashtbl.create 17
   ; source_clock_counts = Hashtbl.create 17
   ; context_injected_count = 0
-  ; provider_started_count = 0
-  ; provider_finished_count = 0
-  ; provider_terminal_row = None
   ; latest_context_injected_row = None
   ; dag_edges = []
   ; scanned_lines = 0
@@ -271,7 +265,7 @@ let update_runtime_manifest_scan scan (row : Keeper_runtime_manifest.t) =
   in
   match row.Keeper_runtime_manifest.event with
   | Keeper_runtime_manifest.Turn_finished ->
-    let scan = { scan with has_terminal = true } in
+    let scan = { scan with has_terminal = true; terminal_row = Some row } in
     (match row.Keeper_runtime_manifest.keeper_turn_id with
      | Some value ->
        { scan with
@@ -310,15 +304,6 @@ let update_runtime_manifest_scan scan (row : Keeper_runtime_manifest.t) =
       | None -> scan
     in
     scan
-  | Keeper_runtime_manifest.Provider_attempt_started ->
-    push_bounded scan.provider_attempt_rows scan.limit row;
-    { scan with provider_started_count = scan.provider_started_count + 1 }
-  | Keeper_runtime_manifest.Provider_attempt_finished ->
-    push_bounded scan.provider_attempt_rows scan.limit row;
-    { scan with
-      provider_finished_count = scan.provider_finished_count + 1
-    ; provider_terminal_row = Some row
-    }
   | _ -> scan
 
 let manifest_identity_matches ?turn_id keeper_name trace_id

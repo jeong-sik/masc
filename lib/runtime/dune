@@ -30,6 +30,10 @@
   masc_eio_context
   masc.runtime_model
   masc.tool_types
+  ; The model-facing MCP outcome-unknown line is a managed prompt
+  ; (config/prompts/tool_guidance.md); the masc.prompt_registry closure does
+  ; not reach this library, so the edge is cycle-free.
+  masc.prompt_registry
   masc.masc_tool_dispatch
   masc.config
   masc.config_dir_resolver

@@ -116,12 +116,39 @@ let tag = function
   | Unrepresentable _ -> "unrepresentable"
 ;;
 
+(* The sentence templates live in config/prompts/subset_rewrite.md; this
+   module picks the slot and supplies the data. A template that does not
+   render is logged and falls back to the bare [because] — the one piece of
+   data the caller always has — never to prose written here (#32848
+   precedent). [tag] stays inline: it is the census category identifier (RFC
+   execute-subset-dispositions §3.7 keys its corpus table on these), not
+   model-facing prose. *)
+let render_advice key vars ~fallback =
+  match Prompt_registry.render_prompt_template key vars with
+  | Ok text -> String.trim text
+  | Error detail ->
+    Log.Misc.warn
+      "subset_rewrite advice %s did not render, falling back to the bare data: %s"
+      key
+      detail;
+    fallback
+;;
+
 let to_string = function
   | Move_to_field { field; because } ->
-    Printf.sprintf "use the %s field: %s" (field_name field) because
+    render_advice
+      Prompt_names.subset_rewrite_move_to_field
+      [ "field", field_name field; "because", because ]
+      ~fallback:because
   | Call_this_instead { call; because } ->
-    Printf.sprintf "call %s instead: %s" (call_instruction call) because
+    render_advice
+      Prompt_names.subset_rewrite_call_this_instead
+      [ "call", call_instruction call; "because", because ]
+      ~fallback:because
   | Spell_it_as { spelling; because } ->
-    Printf.sprintf "write it as [%s]: %s" spelling because
+    render_advice
+      Prompt_names.subset_rewrite_spell_it_as
+      [ "spelling", spelling; "because", because ]
+      ~fallback:because
   | Unrepresentable { construct = _; because } -> because
 ;;

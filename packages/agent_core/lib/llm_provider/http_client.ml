@@ -75,6 +75,7 @@ type provider_wire_error_kind =
   | Malformed_payload
   | Unknown_event
   | Incomplete_stream
+  | Repeating_generation
   | Oversized_payload
 
 let cli_startup_failure_reason_to_string = function
@@ -94,6 +95,7 @@ let provider_wire_error_kind_to_string = function
   | Malformed_payload -> "malformed_payload"
   | Unknown_event -> "unknown_event"
   | Incomplete_stream -> "incomplete_stream"
+  | Repeating_generation -> "repeating_generation"
   | Oversized_payload -> "oversized_payload"
 ;;
 

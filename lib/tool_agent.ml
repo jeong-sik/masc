@@ -105,8 +105,12 @@ let handle_get_metrics ?(tool_name = "masc_get_metrics") ?(start_time = 0.0) ctx
         json_ok ~tool_name ~start_time
           (Metrics_store_eio.agent_metrics_to_yojson metrics)
     | None ->
-        workflow_err_envelope ~tool_name ~start_time ~code:Not_found
-          (Printf.sprintf "no metrics found for agent: %s" target)
+        workflow_err_envelope
+          ~tool_name
+          ~start_time
+          ~code:Not_found
+          (Tool_guidance.to_string
+             (Tool_guidance.No_metrics_found_for_agent { agent = target }))
 
 (** Create default metrics for agent *)
 let create_default_metrics ~agent_id ~days =
@@ -222,9 +226,15 @@ let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx a
   let action_raw = get_string args "action" "get" in
   match agent_card_action_of_string action_raw with
   | None ->
-      workflow_err_envelope ~tool_name ~start_time ~code:Validation_error
-        (Printf.sprintf "invalid action %S; expected one of: %s" action_raw
-           (String.concat ", " valid_agent_card_action_strings))
+      workflow_err_envelope
+        ~tool_name
+        ~start_time
+        ~code:Validation_error
+        (Tool_guidance.to_string
+           (Tool_guidance.Invalid_agent_card_action
+              { action_quoted = Printf.sprintf "%S" action_raw
+              ; valid_actions = String.concat ", " valid_agent_card_action_strings
+              }))
   | Some action ->
       let agents = Workspace.get_agents_raw ctx.config in
       let target = get_string_opt args "agent_name" in

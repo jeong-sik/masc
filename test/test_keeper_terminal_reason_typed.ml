@@ -927,8 +927,9 @@ let () =
     in
     let ctx_composition : Masc.Keeper_agent_prompt_metrics.ctx_composition_metrics =
       { actual_input_tokens = None
-      ; attributed_bytes = 0
-      ; segments = []
+      ; attribution =
+          Masc.Keeper_agent_prompt_metrics.Not_measured
+            Masc.Keeper_agent_prompt_metrics.Dispatch_not_reached
       }
     in
     let tool_surface : Masc.Keeper_agent_tool_surface.tool_surface_metrics =

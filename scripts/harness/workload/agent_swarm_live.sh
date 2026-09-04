@@ -241,7 +241,7 @@ cat >"$SUMMARY_MD" <<EOF
 
 This gate inspects read-only keeper runtime evidence. A passing run proves that
 persisted keeper runtime manifests have complete receipt, checkpoint,
-provider-closure,
+runtime-dispatch-closure,
 memory-injection, and tool-log chains for the configured 18+ keeper fleet.
 EOF
 

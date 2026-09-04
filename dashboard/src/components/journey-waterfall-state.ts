@@ -48,10 +48,8 @@ export interface JourneyWaterfallRuntimeEvidence {
   traceId: string
   keeperTurnId: number | null
   maxAgentCoreTurnCount: number | null
-  providerTerminalStatus: string | null
-  providerTerminalExceptionKind: string | null
-  providerAttemptStartedCount: number
-  providerAttemptFinishedCount: number
+  runtimeCompletedCount: number
+  runtimeFailedCount: number
   eventBusCorrelatedCount: number
   memoryInjectedCount: number
   memoryFlushedCount: number
@@ -195,10 +193,8 @@ export function summarizeRuntimeTrace(
     traceId: trace.trace_id,
     keeperTurnId: runtimeKeeperTurnId(trace),
     maxAgentCoreTurnCount: clock.max_agent_core_turn_count ?? trace.turn_identity.max_agent_core_turn_count,
-    providerTerminalStatus: trace.provider_attempts.terminal_status,
-    providerTerminalExceptionKind: trace.provider_attempts.terminal_exception_kind,
-    providerAttemptStartedCount: trace.provider_attempts.started_count,
-    providerAttemptFinishedCount: trace.provider_attempts.finished_count,
+    runtimeCompletedCount: trace.turn_identity.runtime_completed_count,
+    runtimeFailedCount: trace.turn_identity.runtime_failed_count,
     eventBusCorrelatedCount: trace.event_bus.event_bus_correlated_count,
     memoryInjectedCount: trace.memory.memory_injected_count,
     memoryFlushedCount: trace.memory.memory_flushed_count,

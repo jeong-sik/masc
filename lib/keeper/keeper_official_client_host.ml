@@ -348,6 +348,10 @@ type prepared_turn =
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   }
 
+type transmitted_model_input =
+  | Whole_input_transmitted of Agent_core.Types.message list
+  | Held_by_client_session
+
 let resolve_reasoning_effort ~enable_thinking ~reasoning_effort =
   match enable_thinking with
   | Some _ ->
@@ -899,7 +903,8 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
                     { stage = (Post_tool_use | Post_tool_use_failure); _ } ->
                   record_terminal_error terminal_error detail;
                   { success = true
-                  ; content = "Tool completed, but its post-execution hook failed; do not retry"
+                  ; content =
+                      Tool_guidance.to_string Tool_guidance.Post_execution_hook_failed
                   ; abort_turn = None
                   }
                 | Agent_core.Agent_tools.Hook_execution_failed _ ->

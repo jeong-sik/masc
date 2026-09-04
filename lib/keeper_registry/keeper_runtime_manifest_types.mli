@@ -7,8 +7,6 @@ type event_kind =
   | Runtime_failed
   | Pre_dispatch_blocked
   | Provider_lane_resolved
-  | Provider_attempt_started
-  | Provider_attempt_finished
   | Context_injected
   | Event_bus_correlated
   | Checkpoint_loaded

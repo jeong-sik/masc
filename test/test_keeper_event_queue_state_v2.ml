@@ -4,6 +4,20 @@ module Persistence = Keeper_event_queue_persistence
 module Keeper_reaction_ledger = Masc.Keeper_reaction_ledger
 module Registry_event_queue = Masc.Keeper_registry_event_queue
 
+(* Prompts moved from code into config/prompts; load them so keeper world event
+   rows render a non-empty title and preview. Matches the other
+   prompt-rendering tests. *)
+let () =
+  let prompt_dir =
+    Filename.concat
+      (match Sys.getenv_opt "DUNE_SOURCEROOT" with
+       | Some root -> root
+       | None -> Sys.getcwd ())
+      "config/prompts"
+  in
+  Prompt_registry.set_markdown_dir prompt_dir;
+  Prompt_registry.load_prompts_from_directory prompt_dir
+
 let require_ok label = function
   | Ok value -> value
   | Error detail -> Alcotest.failf "%s: %s" label detail

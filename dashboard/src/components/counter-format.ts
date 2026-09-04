@@ -2,8 +2,7 @@
 //
 //   1. RatioPair  — invariant: numerator ≤ denominator. Safe to render as
 //                   "N/M" because that visually implies a "of-quota" ratio.
-//                   Examples: manifest_returned_rows / manifest_total_rows,
-//                   provider_attempt_finished_count / provider_attempt_started_count.
+//                   Example: manifest_returned_rows / manifest_total_rows.
 //
 //   2. IndependentCounters — two monotonic lifetime counters with NO ordering
 //                   invariant between them. Rendering as "N/M" implicates a

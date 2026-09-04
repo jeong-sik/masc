@@ -214,7 +214,7 @@ let sse_event_is_first_token_signal (e : sse_event) : bool =
   | SSEUnsupportedResponse _
   | Connected
   | Timeout _
-  | StreamIncomplete _ -> false
+  | StreamIncomplete _ | StreamRepeating _ -> false
 ;;
 
 let sse_event_is_deliverable_progress_signal (e : sse_event) : bool =
@@ -242,7 +242,7 @@ let sse_event_is_deliverable_progress_signal (e : sse_event) : bool =
   | SSEUnsupportedResponse _
   | Connected
   | Timeout _
-  | StreamIncomplete _ -> false
+  | StreamIncomplete _ | StreamRepeating _ -> false
 ;;
 
 (** Emit synthetic SSE events from a complete [api_response].
@@ -1389,7 +1389,7 @@ let[@warning "-32"] test_tool_use_start_with_name = function
   | SSEUnsupportedResponse _
   | Connected
   | Timeout _
-  | StreamIncomplete _ -> None
+  | StreamIncomplete _ | StreamRepeating _ -> None
 ;;
 
 (* Inline-test-only; the release profile strips the tests that call it. *)
@@ -1411,7 +1411,7 @@ let[@warning "-32"] test_tool_use_start = function
   | SSEUnsupportedResponse _
   | Connected
   | Timeout _
-  | StreamIncomplete _ -> None
+  | StreamIncomplete _ | StreamRepeating _ -> None
 ;;
 
 (* Inline-test-only; the release profile strips the tests that call it. *)
@@ -1433,7 +1433,7 @@ let[@warning "-32"] test_input_json_delta = function
   | SSEUnsupportedResponse _
   | Connected
   | Timeout _
-  | StreamIncomplete _ -> None
+  | StreamIncomplete _ | StreamRepeating _ -> None
 ;;
 
 let%test

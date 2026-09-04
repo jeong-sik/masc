@@ -99,9 +99,8 @@ check "V2-importance-scores" 0 \
   'importance_scores' \
   "lib/keeper/"
 
-# V4: MASC domain marker constant definitions (message content pollution)
-# Allowed: keeper_working_context.ml (goal_prefix),
-#          tool_goals.ml (goal_prefix)
+# V4: MASC domain marker constant definitions (message content pollution).
+# Zero-pinned — no lib/ site defines either prefix, and adding one fails here.
 check "V4-marker-definitions" 0 \
   'let goal_prefix\|let memory_summary_prefix' \
   "lib/"

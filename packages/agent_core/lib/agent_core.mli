@@ -84,6 +84,7 @@ module Agent = Agent
 module Builder = Builder
 module Agent_card = Agent_card
 module Agent_tool = Agent_tool
+module Tool_guidance_text = Tool_guidance_text
 module Otel_tracer = Otel_tracer
 module Otel_export = Otel_export
 module Runtime = Runtime

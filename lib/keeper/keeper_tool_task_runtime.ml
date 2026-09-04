@@ -564,7 +564,7 @@ let handle_keeper_task_tool_with_outcome
     then
       Keeper_tool_execution.failure
         ~class_:Tool_result.Policy_rejection
-        (error_json "content is required. Good: content='Build complete, all tests pass.'.")
+        (error_json (Tool_guidance.to_string Tool_guidance.Broadcast_content_required))
     else (
       match task_cache_signal_result with
       | Error detail ->
@@ -607,9 +607,9 @@ let handle_keeper_task_tool_with_outcome
              ~class_:Tool_result.Workflow_rejection
              ~effect_disposition:Tool_result.Proven_post_effect
              ~message:
-               (Printf.sprintf
-                  "Broadcast persisted, but the explicit Keeper delivery was rejected; do not resend; request_id=%s"
-                  delivery.request_id)
+               (Tool_guidance.to_string
+                  (Tool_guidance.Broadcast_delivery_rejected
+                     { request_id = delivery.request_id }))
              data))
     | Task_create ->
     let title = Safe_ops.json_string ~default:"" "title" args |> String.trim in

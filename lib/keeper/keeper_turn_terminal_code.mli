@@ -22,9 +22,9 @@ type t =
           original [code] field. *)
   | Fiber_unresolved (** [Keeper_registry.Fiber_unresolved]. *)
   | Turn_overflow_failure
-  (** [Keeper_registry.Turn_overflow_failure]: context overflow with
-          compact retry exhausted; the failure is observed without changing
-          Keeper pause state. *)
+  (** [Keeper_registry.Turn_overflow_failure]: the turn's request
+          exceeded the context window; the failure is recorded without
+          changing Keeper pause state. *)
   | Operator_interrupt
   (** [Keeper_registry.Operator_interrupt]: the current turn was cancelled
           by an explicit operator request, typically from the dashboard

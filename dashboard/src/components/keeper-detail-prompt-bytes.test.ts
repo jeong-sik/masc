@@ -16,11 +16,8 @@ function metricPoint(overrides: Partial<KeeperMetricPoint>): KeeperMetricPoint {
     context_tokens: 0,
     context_max: 0,
     latency_ms: null,
-    generation: 1,
     channel: 'turn',
-    is_handoff: false,
     cost_usd: 0,
-    handoff_new_generation: null,
     prompt_fingerprint: null,
     prompt_metrics: null,
     ctx_composition: null,
@@ -68,10 +65,14 @@ describe('keeper prompt byte telemetry', () => {
       metrics_series: [metricPoint({
         ctx_composition: {
           actual_input_tokens: 1000,
-          attributed_bytes: 1160,
-          segments: {
-            'prompt.keeper_instructions': { bytes: 320, fingerprint: null },
-            message_tool_result: { bytes: 840, fingerprint: null },
+          attribution: {
+            status: 'attributed',
+            runtime_profile: 'glm-coding.glm-5',
+            attributed_bytes: 1160,
+            segments: {
+              'prompt.keeper_instructions': { bytes: 320, fingerprint: null },
+              message_tool_result: { bytes: 840, fingerprint: null },
+            },
           },
         },
       })],

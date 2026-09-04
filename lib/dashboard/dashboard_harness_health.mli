@@ -16,7 +16,7 @@
       [server_routes_http_routes_dashboard].
 
     Internal helpers stay private at this boundary
-    ([rail_status] type, [handoff_event] type,
+    ([rail_status] type,
     [wake_payload_event_json] /
     [wake_payload_event_of_json], [date_bounds] /
     [start_date] / [end_date], [max_recent_verdicts],
@@ -143,7 +143,7 @@ val set_wake_payload_store_for_testing : base_dir:string -> unit
     eval-calibration stats, recent verdicts, and
     wake-payload telemetry — clipped to the
     [?since] / [?until] window when provided. *)
-val json : config:Workspace.config -> ?since:string -> ?until:string -> unit -> Yojson.Safe.t
+val json : ?since:string -> ?until:string -> unit -> Yojson.Safe.t
 
 (** {1 Operator labels} *)
 

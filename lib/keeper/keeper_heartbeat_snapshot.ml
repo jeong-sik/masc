@@ -44,7 +44,6 @@ let write_heartbeat_snapshot
         ; "trace_id", `String (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)
         ; ( "message_count"
           , Json_util.option_to_yojson (fun count -> `Int count) message_count )
-        ; "handoff", `Assoc [ "performed", `Bool false ]
         ; "stage_timing", Keeper_keepalive_signal.stage_timing_to_json ~ring:timing_ring ~count:timing_filled
         ])
     in

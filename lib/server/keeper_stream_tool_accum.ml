@@ -963,7 +963,10 @@ let on_event t (evt : Agent_core.Types.sse_event) =
   | Agent_core.Types.NDJSONParseFailed _
   | Agent_core.Types.SSEUnknownEventType _
   | Agent_core.Types.SSEUnsupportedPart _
-  | Agent_core.Types.SSEUnsupportedResponse _ -> invalidate_current_scope t
+  | Agent_core.Types.SSEUnsupportedResponse _
+  (* A repeat ends the generation, not just its tool blocks: the text this
+     scope carries is the repetition itself. *)
+  | Agent_core.Types.StreamRepeating _ -> invalidate_current_scope t
   | Agent_core.Types.StreamIncomplete { reason } ->
     let stream_scope = t.current_stream_scope in
     let (_ : string) = reason in

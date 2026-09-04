@@ -647,7 +647,7 @@ let reject_quarantined_content_event ~stream_scope state
     | SSEUnsupportedResponse _
     | Connected
     | Timeout _
-    | StreamIncomplete _ -> None
+    | StreamIncomplete _ | StreamRepeating _ -> None
   in
   match index with
   | None -> None
@@ -1285,5 +1285,35 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
             ; Event_error
                 { message =
                     redact_text ("Provider stream incomplete: " ^ reason) }
+            ]
+      }
+  | StreamRepeating { paragraph; occurrences; bytes_seen } ->
+      (* Same shape as an incomplete stream: the scope is poisoned and the
+         operator is told why. The reason names the repeat rather than a
+         truncation, because the bytes arrived fine and the answer did not. *)
+      let reason =
+        redact_text
+          (Printf.sprintf
+             "generation repeated one paragraph %d times after %d bytes: %S"
+             occurrences
+             bytes_seen
+             (if String.length paragraph <= 120
+              then paragraph
+              else String.sub paragraph 0 120))
+      in
+      let quarantined =
+        poison_scope bridge_state ~kind:Sse_stream_repeating ~reason
+      in
+      { bridge_state =
+          { quarantined.bridge_state with
+            scope_failure = bridge_state.scope_failure
+          ; message_open = bridge_state.message_open
+          }
+      ; chat_events =
+          (if tools_in_current_scope bridge_state = []
+           then []
+           else quarantined.chat_events)
+          @ [ protocol_error ~reason Sse_stream_repeating
+            ; Event_error { message = reason }
             ]
       }

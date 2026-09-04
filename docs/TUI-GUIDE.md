@@ -13,10 +13,12 @@ Eleven more surfaces hang off parents instead of holding Tab stops:
 Planning's `v` walks Task Review, Evaluator Verdicts, Schedules, and Fusion;
 the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,
 Automation, and Runs as tabs. Runtime reaches standalone Lanes with `p` (its
-third stop), Workspace reaches Code with `Enter` on a repository row, and
+third stop) and the clients roster with `c`, Workspace reaches Code with
+`Enter` on a repository row, and
 Config reaches Resources with `s` and Tools with `t`, and Activity
 reaches the server log with `l`. Task Review, Schedules, Fusion, Lanes,
-Code, Resources, Tools, and Logs also keep `go <name>` palette entries;
+Clients, Code, Resources, Tools, and Logs also keep `go <name>` palette
+entries;
 Verdicts, Changes, and Keeper operations are reached from their parents
 only.
 
@@ -57,6 +59,7 @@ decides whether launching one is worth it.
 | Overview - summary, Attention | unavailable | `GET /api/v1/dashboard/briefing` |
 | Overview - transport tail | unavailable | `GET /api/v1/dashboard/transport-health` |
 | Lanes | unavailable | `GET /api/v1/keepers/composite` |
+| Clients | unavailable | `GET /api/v1/dashboard/clients` |
 | Approvals | unavailable | `GET /api/v1/operator`, `POST /api/v1/operator/confirm` |
 | Board | unavailable | `GET /api/v1/board` |
 | Planning | unavailable | `GET /api/v1/dashboard/planning` |
@@ -337,6 +340,28 @@ off Runtime rather than holding a Tab stop: `p` on Runtime walks keeper
 lanes, all runtimes, and then this surface. From the lane overview, `p` or
 `Esc` returns to Runtime; inside the run list and run detail, `Esc` first
 backs out one drill-down level as before. The palette keeps `go Lanes`.
+
+### Clients
+
+Everyone attached to this workspace in one reading: directory agents,
+state-backed sessions, and runtime fibers. The Keepers roster answers which
+Keepers exist; this answers who is here now, which includes identities no
+other surface lists, such as a non-keeper MCP client. It hangs off Runtime
+with `c`; `Esc`, `Left`, or `p` returns to Runtime, and the palette keeps
+`go Clients`. `/` jumps the cursor to a matching name.
+
+```
+ MASC Runtime · Clients (12 attached)  17:02:53  [connected]
+  Status    Name                 Type        Keeper           Task      Last seen
+ >active   codex-mcp-client      codex       -                -         17:02:41
+  busy     analyst-agent         keeper      analyst          task-845  17:02:50
+```
+
+Rows come from `GET /api/v1/dashboard/clients`, sorted by name. The status
+is the closed agent enum (`active`, `busy`, `listening`, `inactive`);
+inactive rows stay in the roster, receded, because "who left" is part of
+the reading. This is a registry view, not a socket list - a leftover
+process holding a connection is still an `lsof` question.
 
 ```
  MASC Lanes · Standalone (4 lanes)  17:02:53  [connected]

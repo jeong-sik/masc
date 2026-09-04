@@ -1059,6 +1059,40 @@ val standalone_lane_status_to_string : standalone_lane_status -> string
 val decode_standalone_lanes_snapshot :
   Yojson.Safe.t -> (standalone_lanes_snapshot, string) result
 
+(** [GET /api/v1/dashboard/clients] body — everyone attached to this
+    workspace in one reading: directory agents, state-backed sessions, and
+    runtime fibers. The status is the closed [agent_status] enum; the row
+    keeps the fields the Runtime family draws and ignores the profile
+    decorations (emoji, korean name) the same producer carries for the
+    dashboard, so the two surfaces can grow separately. A keeper-bound row
+    names its keeper; a non-keeper MCP client carries [None], which is the
+    row this surface exists to show. *)
+type client_status =
+  | Client_active
+  | Client_busy
+  | Client_listening
+  | Client_inactive
+
+type client_row = {
+  cr_name : string;
+  cr_agent_type : string;
+  cr_status : client_status;
+  cr_current_task : string option;
+  cr_keeper_name : string option;
+  cr_session_bound_at : string;
+  cr_last_seen : string;
+  cr_capabilities : string list;
+}
+
+type clients_snapshot = {
+  cls_observed_at : string;
+  cls_clients : client_row list;
+}
+
+val client_status_to_string : client_status -> string
+val decode_clients_snapshot :
+  Yojson.Safe.t -> (clients_snapshot, string) result
+
 (** What the secret projection reports for one Keeper. The producer computes
     this from the directory: [Secret_absent] when no root is configured,
     [Secret_empty] when a configured root holds nothing, [Secret_ready] when

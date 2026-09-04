@@ -115,6 +115,7 @@ let sse_event_progress_kind (event : Agent_core.Types.sse_event) =
   | Agent_core.Types.SSEUnsupportedPart _ -> Some "sse_unsupported_part"
   | Agent_core.Types.SSEUnsupportedResponse _ -> Some "sse_unsupported_response"
   | Agent_core.Types.StreamIncomplete _ -> Some "sse_stream_incomplete"
+  | Agent_core.Types.StreamRepeating _ -> Some "sse_stream_repeating"
   | Agent_core.Types.Connected -> Some "sse_connected"
   | Agent_core.Types.Timeout _ -> Some "sse_timeout"
 

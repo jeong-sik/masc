@@ -1,7 +1,15 @@
-(** Apple [container] argv for the [Micro_vm] sandbox profile.
+(** microVM argv for the [Micro_vm] sandbox profile.
 
-    One lightweight VM per container through Virtualization.framework, so a
-    guest runs its own Linux kernel instead of sharing the host's. Measured
+    Every builder here takes the runtime the keeper declared
+    ({!Keeper_microvm_backend.t}). Before #32837 the lifecycle surfaces took
+    it and the boot, exec, image and listing surfaces did not, so a keeper
+    naming [microsandbox] booted under Apple's [container] and was then
+    stopped and inspected with [msb] -- two runtimes for one guest, and
+    nothing able to reap the one that actually booted.
+
+    One lightweight VM per container through Virtualization.framework, so an
+    Apple guest runs its own Linux kernel instead of sharing the host's.
+    Measured
     2026-08-28 on macOS 26.6.1 / M3 Max with container CLI 1.3.0: about
     460 MB of host memory per running guest, and the guest reporting
     [Linux <uuid> 6.18.35].
@@ -25,11 +33,6 @@ module Backend = Keeper_microvm_backend
    choice travels with the call instead of sitting in module state that a
    second keeper on a second backend would race. *)
 let command_argv_for backend = [ Backend.cli_name backend ]
-
-(* The Apple runtime stays the default so every existing call site keeps the
-   argv it had. RFC-0405 moves the choice to the keeper's TOML; a caller that
-   has not been threaded yet still builds what it built before. *)
-let command_argv () = command_argv_for Backend.Apple_container
 
 (** Flags Docker takes that [container run] rejects outright.
 
@@ -67,7 +70,25 @@ let unsupported_docker_flags = [ "--security-opt"; "--pids-limit" ]
     20,027. *)
 let work_volume_guest_root = "/masc-work"
 
-(** What [container] is told about the network.
+(** What each runtime is told about the network.
+
+    A closed network is an isolation property, so it is spelled per runtime
+    rather than in one grammar handed to all three. [container] and
+    [nerdctl] take Docker's [--network none] / [--dns]. [msb] takes neither:
+    [msb run --network none] answers "unexpected argument '--network' found"
+    and [--dns] the same (0.6.16, 2026-09-04). Its own spellings are
+    [--no-net] ("Disable all network access by default... without rules, the
+    guest has no network reachability"), [--net <PROFILE>], and
+    [--dns-nameserver <ADDR>].
+
+    [Network_inherit] is a refusal for [msb]: leaving the flags off would
+    hand the guest whatever msb's unstated default network is, and that is
+    the difference between a keeper that reaches GitHub and one that reaches
+    the host. What msb's default is has not been measured, so it is not
+    assumed. [--no-net] answers [Network_none] and that is the only mode this
+    module can say in msb's grammar today.
+
+    Below is what was measured for Apple's runtime.
 
     [Network_none] closes it with [--network none].
 
@@ -90,13 +111,28 @@ let work_volume_guest_root = "/masc-work"
     host not found". [inherit] therefore means container's NAT, not the
     host's namespace, and the two differ in what the guest can reach on
     localhost. *)
-let network_args ~dns (mode : Keeper_types_profile_sandbox.network_mode) =
-  match mode with
-  | Keeper_types_profile_sandbox.Network_none -> [ "--network"; "none" ]
-  | Keeper_types_profile_sandbox.Network_inherit ->
-    (match dns with
-     | Some server when String.trim server <> "" -> [ "--dns"; String.trim server ]
-     | Some _ | None -> [])
+let network_args_for backend ~dns (mode : Keeper_types_profile_sandbox.network_mode) =
+  match (backend : Backend.t) with
+  | Backend.Apple_container | Backend.Nerdctl_kata ->
+    Ok
+      (match mode with
+       | Keeper_types_profile_sandbox.Network_none -> [ "--network"; "none" ]
+       | Keeper_types_profile_sandbox.Network_inherit ->
+         (match dns with
+          | Some server when String.trim server <> "" -> [ "--dns"; String.trim server ]
+          | Some _ | None -> []))
+  | Backend.Microsandbox ->
+    (match mode with
+     | Keeper_types_profile_sandbox.Network_none -> Ok [ "--no-net" ]
+     | Keeper_types_profile_sandbox.Network_inherit ->
+       Error
+         "microvm_network_mode_unexpressible: msb 0.6.16 rejects --network \
+          and --dns and spells its own policy --no-net / --net <PROFILE> / \
+          --dns-nameserver. --no-net answers network_mode = \"none\", but \
+          what msb's network is with no flag at all has not been measured, \
+          so network_mode = \"inherit\" is not handed to it as an omission. \
+          Next: set network_mode = \"none\" on this Keeper, or measure msb's \
+          default network and name the profile that matches inherit.")
 ;;
 
 (** Whether [image] is in container's own store.
@@ -135,6 +171,27 @@ type image_probe_outcome =
   | Image_cli_unavailable
   | Image_probe_failed of image_probe_failure
 
+(** The shapes a machine-readable image answer arrives in.
+
+    Measured 2026-09-04, container 1.3.1 and msb 0.6.16:
+
+    {v
+      container image list --format json     [ {...}, ... ]   array
+      container image inspect <ref>          [ {...} ]        array
+      msb image list --format json           [ {...}, ... ]   array
+      msb image inspect --format json <ref>  { ... }          object
+      nerdctl images --format '{{json .}}'   one object/line  lines
+    v}
+
+    An object read with the array check would call a healthy answer malformed
+    and turn "image is present" into "the probe could not say" -- which is
+    what an earlier version of this module did to every [msb] keeper. The
+    shape is chosen by the runtime and the question, never assumed. *)
+type json_shape =
+  | Json_array
+  | Json_object
+  | Json_lines
+
 let json_array_error raw =
   match Yojson.Safe.from_string raw with
   | `List _ -> None
@@ -142,14 +199,49 @@ let json_array_error raw =
   | exception Yojson.Json_error detail -> Some ("invalid JSON: " ^ detail)
 ;;
 
+let json_object_error raw =
+  match Yojson.Safe.from_string raw with
+  | `Assoc _ -> None
+  | _ -> Some "expected a JSON object"
+  | exception Yojson.Json_error detail -> Some ("invalid JSON: " ^ detail)
+;;
+
+let json_lines_error raw =
+  String.split_on_char '\n' raw
+  |> List.map String.trim
+  |> List.filter (fun line -> not (String.equal line ""))
+  |> List.fold_left
+       (fun found line ->
+         match found with
+         | Some _ -> found
+         | None ->
+           (match Yojson.Safe.from_string line with
+            | _ -> None
+            | exception Yojson.Json_error detail ->
+              Some ("invalid JSON line: " ^ detail)))
+       None
+;;
+
+let json_shape_error shape raw =
+  match shape with
+  | Json_array -> json_array_error raw
+  | Json_object -> json_object_error raw
+  | Json_lines -> json_lines_error raw
+;;
+
 let probe_failure ~phase ~status ~stdout ~stderr ~reason =
   Image_probe_failed { phase; status; stdout; stderr; reason }
 ;;
 
-let classify_image_probe ~inspect:(inspect_status, inspect_stdout, inspect_stderr) ~listing =
+let classify_image_probe
+      ~inspect_shape
+      ~listing_shape
+      ~inspect:(inspect_status, inspect_stdout, inspect_stderr)
+      ~listing
+  =
   match inspect_status with
   | Unix.WEXITED 0 ->
-    (match json_array_error inspect_stdout with
+    (match json_shape_error inspect_shape inspect_stdout with
      | None -> Image_present
      | Some reason ->
        probe_failure
@@ -162,7 +254,7 @@ let classify_image_probe ~inspect:(inspect_status, inspect_stdout, inspect_stder
   | Unix.WEXITED 1 ->
     (match listing with
      | Some (Unix.WEXITED 0 as status, stdout, stderr) ->
-       (match json_array_error stdout with
+       (match json_shape_error listing_shape stdout with
         | None -> Image_missing
         | Some reason ->
           probe_failure ~phase:Image_list ~status ~stdout ~stderr ~reason)
@@ -199,62 +291,129 @@ let output_for_log ~stdout ~stderr =
 
 let phase_label = function
   | Image_inspect -> "image inspect"
-  | Image_list -> "image list --format json"
+  | Image_list -> "image listing"
 ;;
 
-let image_present_result ~image = function
+(* Each runtime keeps its own image store, so the refusal names the CLI that
+   was asked. Telling an [msb] keeper to install Apple container -- which the
+   Apple-only wording did -- sends the operator to fix a runtime the keeper
+   does not use. *)
+let image_present_result_for backend ~image = function
   | Image_present -> Ok ()
   | Image_missing ->
     Error
       (Printf.sprintf
-         "microvm_image_missing: %s is not in the container image store. \
-          container keeps its images apart from Docker, and container run \
-          has no --pull=never, so running without this check fetches from a \
-          registry instead of failing. Next: build or load the image with \
-          `container image` before starting a microvm keeper."
-         image)
+         "microvm_image_missing: %s is not in %s's image store. Each microVM \
+          runtime keeps its images apart from Docker's, and none of these \
+          runs has a --pull=never, so running without this check fetches from \
+          a registry instead of failing. Next: build or load the image into \
+          %s before starting a microvm keeper."
+         image
+         (Backend.cli_name backend)
+         (Backend.cli_name backend))
   | Image_cli_unavailable ->
     Error
-      "microvm_cli_unavailable: the `container` CLI is not on PATH. Next: \
-       install Apple container, or move the keeper to sandbox_profile = \
-       \"docker\"."
+      (Printf.sprintf
+         "microvm_cli_unavailable: keeper declares microvm_backend = %s and \
+          the `%s` CLI is not on PATH. Next: install it, name a runtime this \
+          host has (%s), or move the keeper to sandbox_profile = \"docker\"."
+         (Backend.to_string backend)
+         (Backend.cli_name backend)
+         (String.concat ", " Backend.valid_strings))
   | Image_probe_failed failure ->
     Error
       (Printf.sprintf
-         "microvm_image_probe_failed: `container %s` did not establish whether \
-          image %s exists (%s; %s: %s). Next: check that the \
-          container system is running with `container system status`."
+         "microvm_image_probe_failed: `%s %s` did not establish whether image \
+          %s exists (%s; %s: %s). Next: check that the %s runtime is running."
+         (Backend.cli_name backend)
          (phase_label failure.phase)
          image
          failure.reason
          (Keeper_sandbox_exec_failure.status_label failure.status)
-         (output_for_log ~stdout:failure.stdout ~stderr:failure.stderr))
+         (output_for_log ~stdout:failure.stdout ~stderr:failure.stderr)
+         (Backend.cli_name backend))
 ;;
 
-let image_probe ~image ~timeout_sec =
-  let inspect_argv = command_argv () @ [ "image"; "inspect"; image ] in
-  let inspect = Process_eio.run_argv_with_status_split ~timeout_sec inspect_argv in
+(* [nerdctl] has no [image list]; its listing is [images]. Its command
+   reference documents both [--format=json] and the Go template; the template
+   is the spelling used here because it is the one whose per-line output this
+   module's [Json_lines] reader is written against. [container image list
+   --format json] and [msb image list --format json] both answer an array,
+   measured 0.6.16 and 1.3.1 on 2026-09-04. *)
+let image_listing_argv_for backend =
+  match (backend : Backend.t) with
+  | Backend.Apple_container | Backend.Microsandbox ->
+    command_argv_for backend @ [ "image"; "list"; "--format"; "json" ]
+  | Backend.Nerdctl_kata ->
+    command_argv_for backend @ [ "images"; "--format"; "{{json .}}" ]
+;;
+
+let image_listing_shape_for backend =
+  match (backend : Backend.t) with
+  | Backend.Apple_container | Backend.Microsandbox -> Json_array
+  | Backend.Nerdctl_kata -> Json_lines
+;;
+
+(* [container image inspect] answers JSON with no flag; [msb image inspect]
+   answers a human table unless [--format json] is asked for, and then answers
+   a bare object rather than an array. [nerdctl image inspect] documents
+   [--mode=(dockercompat|native)] with no stated default, so the mode is named
+   rather than assumed -- dockercompat, which is Docker's array-of-one shape
+   this module already reads. *)
+let image_inspect_argv_for backend ~image =
+  match (backend : Backend.t) with
+  | Backend.Apple_container -> command_argv_for backend @ [ "image"; "inspect"; image ]
+  | Backend.Microsandbox ->
+    command_argv_for backend @ [ "image"; "inspect"; "--format"; "json"; image ]
+  | Backend.Nerdctl_kata ->
+    command_argv_for backend
+    @ [ "image"; "inspect"; "--mode"; "dockercompat"; image ]
+;;
+
+let image_inspect_shape_for backend =
+  match (backend : Backend.t) with
+  | Backend.Apple_container | Backend.Nerdctl_kata -> Json_array
+  | Backend.Microsandbox -> Json_object
+;;
+
+let image_probe_for backend ~image ~timeout_sec =
+  let inspect =
+    Process_eio.run_argv_with_status_split
+      ~timeout_sec
+      (image_inspect_argv_for backend ~image)
+  in
   let listing =
     match inspect with
     | Unix.WEXITED 1, _, _ ->
-      let list_argv = command_argv () @ [ "image"; "list"; "--format"; "json" ] in
-      Some (Process_eio.run_argv_with_status_split ~timeout_sec list_argv)
+      Some
+        (Process_eio.run_argv_with_status_split
+           ~timeout_sec
+           (image_listing_argv_for backend))
     | _ -> None
   in
-  classify_image_probe ~inspect ~listing
+  classify_image_probe
+    ~inspect_shape:(image_inspect_shape_for backend)
+    ~listing_shape:(image_listing_shape_for backend)
+    ~inspect
+    ~listing
 ;;
 
-let image_present ~image ~timeout_sec =
-  image_probe ~image ~timeout_sec |> image_present_result ~image
+let image_present_for backend ~image ~timeout_sec =
+  image_probe_for backend ~image ~timeout_sec |> image_present_result_for backend ~image
 ;;
 
 (* ── Turn-container argv ─────────────────────────────────────────────
 
-   The turn model mirrors the Docker lane: one detached guest per turn
-   holding [tail -f /dev/null], commands delivered by [exec], the
-   container gone on [stop] because it was started with [--rm]. Every
-   flag below was accepted by a live container 1.3.0 run on 2026-08-28;
-   [exec] propagated exit codes (observed rc=7) and stdin
+   The guest model is shared and the spellings are not. One detached guest
+   per keeper holding [tail -f /dev/null], commands delivered by [exec],
+   the working tree on the per-keeper work volume, no host playground:
+   that is RFC-0400's model and it does not change with the hypervisor
+   under it. What changes is how each CLI is told, so the flags come from
+   {!Keeper_microvm_backend} and the guarantees the boot asks for are
+   named rather than spelled.
+
+   Apple's spellings were accepted by a live container 1.3.0 run on
+   2026-08-28; [exec] propagated exit codes (observed rc=7) and stdin
    ([bash -l -s] echoed piped input).
 
    Deliberately absent against the Docker turn argv, stated so a reader
@@ -266,10 +425,43 @@ let image_present ~image ~timeout_sec =
 
    [mount_args] carries what the caller projects -- config, GitHub
    identity, the work volume and the shim. Measured 2026-08-28 against
-   masc-keeper-sandbox:local, a guest reads through [-v host:container:ro]
-   and takes [--env-file], both in Docker's own spelling. *)
+   masc-keeper-sandbox:local, an Apple guest reads through
+   [-v host:container:ro] and takes [--env-file], both in Docker's own
+   spelling. Neither is established for msb: it rejects [--env-file]
+   outright (0.6.16, 2026-09-04), and [:ro] is not among the volume
+   options its help documents. *)
 
-let turn_start_argv
+(** The runtime a guest was booted on, written on the guest itself. Every
+    other surface reads the keeper's TOML; this one is on the object, so a
+    listing can tell an [msb] guest from an Apple one without a second read. *)
+let microvm_backend_label_key = "masc.mcp.microvm_backend"
+
+(** The [Lifecycle] guarantees this runtime could not spell, so the drop is
+    on the guest rather than only in a log line the boot already emitted. *)
+let microvm_dropped_constraints_label_key = "masc.mcp.microvm_dropped"
+
+type constraint_refusal =
+  { guest_constraint : Backend.guest_constraint
+  ; reason : string
+  }
+
+let constraint_refusals_message backend refusals =
+  Printf.sprintf
+    "microvm_constraint_unexpressible: %s cannot express %s"
+    (Backend.to_string backend)
+    (String.concat
+       "; "
+       (List.map
+          (fun (refusal : constraint_refusal) ->
+            Printf.sprintf
+              "%s (%s)"
+              (Backend.guest_constraint_to_string refusal.guest_constraint)
+              refusal.reason)
+          refusals))
+;;
+
+let turn_start_argv_for
+      backend
       ~container_name
       ~label_args
       ~uid
@@ -279,32 +471,115 @@ let turn_start_argv
       ~network_args
       ~mount_args
       ~image
+      ~constraints
   =
-  command_argv ()
-  @ [ "run"; "-d"; "--rm"; "--name"; container_name ]
-  @ label_args
-  @ [ "--user"; Printf.sprintf "%d:%d" uid gid ]
-  @ [ "--cap-drop"; "ALL"; "--read-only" ]
-  @ [ "--memory"; memory ]
-  @ (match cpus with
-     | Some count -> [ "--cpus"; count ]
-     | None -> [])
-  @ mount_args
-  @ [ "--workdir"; work_volume_guest_root ]
-  @ network_args
-  @ [ image; "tail"; "-f"; "/dev/null" ]
+  let expressed, refused, dropped =
+    List.fold_left
+      (fun (expressed, refused, dropped) guest_constraint ->
+        match Backend.run_constraint_argv backend guest_constraint with
+        | Backend.Expressed tokens -> expressed @ tokens, refused, dropped
+        | Backend.Not_expressible reason ->
+          (match Backend.constraint_class guest_constraint with
+           | Backend.Isolation ->
+             ( expressed
+             , ({ guest_constraint; reason } : constraint_refusal) :: refused
+             , dropped )
+           | Backend.Lifecycle -> expressed, refused, guest_constraint :: dropped))
+      ([], [], [])
+      constraints
+  in
+  match List.rev refused with
+  | _ :: _ as refusals -> Error refusals
+  | [] ->
+    let dropped_label_args =
+      match List.rev dropped with
+      | [] -> []
+      | dropped ->
+        [ "--label"
+        ; microvm_dropped_constraints_label_key
+          ^ "="
+          ^ String.concat "," (List.map Backend.guest_constraint_to_string dropped)
+        ]
+    in
+    Ok
+      (command_argv_for backend
+       @ [ "run"; "-d"; "--name"; container_name ]
+       @ label_args
+       @ [ "--label"; microvm_backend_label_key ^ "=" ^ Backend.to_string backend ]
+       @ dropped_label_args
+       @ [ "--user"; Printf.sprintf "%d:%d" uid gid ]
+       @ expressed
+       @ [ "--memory"; memory ]
+       @ (match cpus with
+          | Some count -> [ "--cpus"; count ]
+          | None -> [])
+       @ Backend.run_runtime_args backend
+       @ mount_args
+       @ [ "--workdir"; work_volume_guest_root ]
+       @ network_args
+       @ Backend.command_separator backend
+       @ [ image; "tail"; "-f"; "/dev/null" ])
 ;;
 
-(* [~command_argv] shadows the CLI-prefix function of the same name, so
-   the prefix is captured under another binding first. *)
-let cli_prefix = command_argv
-
-let exec_argv ~container_name ~uid ~gid ~container_cwd ~stdin ~command_argv =
-  cli_prefix ()
+(* [--user uid:gid] is a value [container exec] and [nerdctl exec] document
+   and [msb exec] does not -- see {!shim_exec_prefix_for} for the whole
+   reading. Every msb caller of this builder is behind an earlier refusal
+   today ({!ensure_work_volume_for}), so the numeric form never reaches msb.
+   Lifting that refusal without settling the identity would make this the
+   place a keeper's tree gets written under the wrong uid. *)
+let exec_argv_for backend ~container_name ~uid ~gid ~container_cwd ~stdin ~command_argv =
+  command_argv_for backend
   @ [ "exec" ]
-  @ (if stdin then [ "-i" ] else [])
+  @ (if stdin then Backend.exec_stdin_args backend else [])
   @ [ "--user"; Printf.sprintf "%d:%d" uid gid; "-w"; container_cwd ]
-  @ (container_name :: command_argv)
+  @ [ container_name ]
+  @ Backend.command_separator backend
+  @ command_argv
+;;
+
+(** The prefix the remote lane delivers a framed shim request through.
+
+    It differs from {!exec_argv_for} in one thing the shim cannot do without:
+    the guest has to be told where its config is, and that travels as an
+    environment entry on the exec. All three CLIs document that entry --
+    [msb exec] has [-e, --env <ENV>] the same as the other two.
+
+    What [msb] does not document is the identity the shim runs under.
+    [container exec --user] documents [name|uid[:gid]] and nerdctl takes
+    Docker's, so the mapped [uid:gid] this lane runs the keeper's commands as
+    is a value those CLIs accept. [msb exec -u, --user <USER>] documents
+    "Run the command as the specified guest user" and no numeric form
+    (0.6.16, 2026-09-04). Sending [501:20] there would be a value read from
+    no help output, and if msb resolved it as a user name the shim would run
+    as somebody else on a tree owned by that uid -- a silent wrong-identity
+    write, not a failed call. So this refuses. Settling it means either msb
+    documenting the numeric form or the lane naming a guest user, which is a
+    decision about identity rather than a spelling. *)
+let shim_exec_prefix_for backend ~container_name ~uid ~gid ~remote_root ~shim_config_path =
+  match (backend : Backend.t) with
+  | Backend.Apple_container | Backend.Nerdctl_kata ->
+    Ok
+      (command_argv_for backend
+       @ [ "exec" ]
+       @ Backend.exec_stdin_args backend
+       @ [ "--user"
+         ; Printf.sprintf "%d:%d" uid gid
+         ; "-w"
+         ; remote_root
+         ; "--env"
+         ; Exec_ssh_protocol.shim_config_env_var ^ "=" ^ shim_config_path
+         ; container_name
+         ]
+       @ Backend.command_separator backend)
+  | Backend.Microsandbox ->
+    Error
+      "microvm_shim_exec_unsupported: msb 0.6.16 exec takes the environment \
+       entry the shim needs (-e/--env), but its --user documents a guest \
+       user name and no uid:gid form, so the identity this lane runs a \
+       keeper's commands under cannot be named. Sent anyway, msb would \
+       either reject it or resolve it as somebody else's name and write to \
+       the keeper's tree as that user. Next: name a guest user for the lane, \
+       or use a runtime whose --user takes uid:gid (RFC-0405 follow-up)."
 ;;
 
 (* The two runtimes spell removal differently -- [container delete --force]
@@ -325,12 +600,6 @@ let delete_force_argv_for backend ~container_name =
     command_argv_for backend @ [ "rm"; "--force"; container_name ]
 ;;
 
-let stop_argv ~container_name = stop_argv_for Backend.Apple_container ~container_name
-
-let delete_force_argv ~container_name =
-  delete_force_argv_for Backend.Apple_container ~container_name
-;;
-
 (* ── The work volume and the shim (RFC-0400) ────────────────────────── *)
 
 (** Volume names reach [container] as an argument and become a directory name
@@ -345,8 +614,14 @@ let valid_volume_segment segment =
          | _ -> false)
        segment
 
-let volume_create_argv ~volume_name ~size =
-  command_argv () @ [ "volume"; "create"; "-s"; size; volume_name ]
+(** Apple's spelling of a sized volume. It is named after the runtime rather
+    than left as the lane's default because the other two do not share it:
+    [msb] rejects [-s] and wants [--kind disk --size] (measured 0.6.16), and
+    [nerdctl volume create] documents [--label] only and no size flag at all.
+    {!ensure_work_volume_for} is the entry that answers for all three. *)
+let apple_volume_create_argv ~volume_name ~size =
+  command_argv_for Backend.Apple_container
+  @ [ "volume"; "create"; "-s"; size; volume_name ]
 ;;
 
 let work_volume_name ~keeper_name =
@@ -465,13 +740,14 @@ let classify_volume_probe ~volume_name ~inspect ~listing =
   | outcome -> Volume_probe_failed (described "inspect" outcome)
 ;;
 
-let volume_probe ~volume_name ~timeout_sec =
-  let inspect_argv = command_argv () @ [ "volume"; "inspect"; volume_name ] in
+let apple_volume_probe ~volume_name ~timeout_sec =
+  let cli = command_argv_for Backend.Apple_container in
+  let inspect_argv = cli @ [ "volume"; "inspect"; volume_name ] in
   let inspect = Process_eio.run_argv_with_status_split ~timeout_sec inspect_argv in
   let listing =
     match inspect with
     | Unix.WEXITED 1, _, _ ->
-      let list_argv = command_argv () @ [ "volume"; "list"; "--format"; "json" ] in
+      let list_argv = cli @ [ "volume"; "list"; "--format"; "json" ] in
       Some (Process_eio.run_argv_with_status_split ~timeout_sec list_argv)
     | _ -> None
   in
@@ -485,13 +761,13 @@ let volume_probe ~volume_name ~timeout_sec =
     "already exists" -- so existence is settled by the probe above rather than
     by reading that message. The size is a ceiling: the image is sparse, and
     4 GiB nominal measured 84 MB on disk. *)
-let ensure_work_volume ~volume_name ~size ~timeout_sec =
-  match volume_probe ~volume_name ~timeout_sec with
+let ensure_apple_work_volume ~volume_name ~size ~timeout_sec =
+  match apple_volume_probe ~volume_name ~timeout_sec with
   | Volume_present -> Ok `Already_present
   | Volume_probe_failed message ->
     Error (Printf.sprintf "microvm_work_volume_probe_failed: %s" message)
   | Volume_absent ->
-    let argv = volume_create_argv ~volume_name ~size in
+    let argv = apple_volume_create_argv ~volume_name ~size in
     (match Process_eio.run_argv_with_status_split ~timeout_sec argv with
      | Unix.WEXITED 0, _, _ -> Ok `Created
      | status, stdout, stderr ->
@@ -506,6 +782,47 @@ let ensure_work_volume ~volume_name ~size ~timeout_sec =
             (output_for_log ~stdout ~stderr)))
 ;;
 
+(** The work volume, for whichever runtime this keeper declared.
+
+    Only Apple's grammar is established here, so the other two refuse instead
+    of guessing at one.
+
+    For [msb] the create is known ([volume create --kind disk --size],
+    measured 0.6.16, [-s] rejected), and so is half of the existence check:
+    [msb volume list --format json] is documented and answers an array
+    (measured, [[]] on a host with no volumes). The other half is not.
+    [msb volume inspect] carries no [--format], so it answers a human table,
+    and this probe is written as inspect-then-listing the way Apple's is:
+    a create over a volume that already holds a keeper's working tree is the
+    failure the check exists for, and human prose is not a protocol to settle
+    it on. Establishing the row shape of the listing -- which needs an msb
+    volume to observe, and this host has none -- is what would let the pair
+    be rewritten as a listing-only check.
+
+    For [nerdctl] there is nothing to establish -- its [volume create]
+    documents [--label] and no size flag (nerdctl command reference), so the
+    sized per-keeper volume RFC-0400 asks for has no nerdctl spelling. *)
+let ensure_work_volume_for backend ~volume_name ~size ~timeout_sec =
+  match (backend : Backend.t) with
+  | Backend.Apple_container -> ensure_apple_work_volume ~volume_name ~size ~timeout_sec
+  | Backend.Microsandbox ->
+    Error
+      "microvm_work_volume_unsupported: msb 0.6.16 creates a sized volume \
+       with `volume create --kind disk --size` (-s is rejected), and `msb \
+       volume list --format json` is machine-readable, but `msb volume \
+       inspect` carries no --format and answers a human table, so the \
+       inspect half of the existence check this provisioning runs has no \
+       machine form. Creating over a volume that already holds a keeper's \
+       working tree is the failure that check exists for. Next: settle \
+       existence from the listing alone, which needs the row shape of `msb \
+       volume list --format json` observed against a real volume."
+  | Backend.Nerdctl_kata ->
+    Error
+      "microvm_work_volume_unsupported: nerdctl volume create documents \
+       --label only and no size flag, so the sized per-keeper work volume \
+       RFC-0400 puts the keeper's tree on has no nerdctl spelling."
+;;
+
 (** The keeper's root on the work volume, created inside the guest.
 
     The host cannot create it: it lives inside the volume's ext4 image. The
@@ -516,8 +833,9 @@ let ensure_work_volume ~volume_name ~size ~timeout_sec =
     Idempotent. *)
 let work_root_dir_mode = "0777"
 
-let keeper_work_root_mkdir_argv ~container_name ~keeper_name =
-  exec_argv
+let keeper_work_root_mkdir_argv_for backend ~container_name ~keeper_name =
+  exec_argv_for
+    backend
     ~container_name
     ~uid:0
     ~gid:0
@@ -539,8 +857,9 @@ let keeper_work_root_write_probe_script =
    \"owner=%u:%g mode=%a %n\" \"$d\" >&2; exit 1; }"
 ;;
 
-let keeper_work_root_write_probe_argv ~container_name ~uid ~gid ~keeper_name =
-  exec_argv
+let keeper_work_root_write_probe_argv_for backend ~container_name ~uid ~gid ~keeper_name =
+  exec_argv_for
+    backend
     ~container_name
     ~uid
     ~gid
@@ -616,9 +935,6 @@ let running_of_inspect_json_for backend raw =
   | Backend.Nerdctl_kata -> running_of_nerdctl_state_json raw
 ;;
 
-let running_of_inspect_json raw = running_of_apple_inspect_json raw
-
-
 (* [container inspect] answers JSON by default; [msb inspect] answers a
    human table unless asked, so the machine form is requested explicitly. *)
 let inspect_argv_for backend ~container_name =
@@ -626,16 +942,32 @@ let inspect_argv_for backend ~container_name =
   | Backend.Apple_container -> command_argv_for backend @ [ "inspect"; container_name ]
   | Backend.Microsandbox ->
     command_argv_for backend @ [ "inspect"; container_name; "--format"; "json" ]
-  (* [nerdctl inspect] defaults to --mode dockercompat, so the Go template
-     Docker already answers works here unchanged. Asking for the one field
-     rather than the whole document keeps the parse to a literal. *)
+  (* [nerdctl inspect] documents [--mode=(dockercompat|native)] and states no
+     default, so the mode is named. [{{json .State.Running}}] resolves only
+     in dockercompat; inherited from an unstated default it would be a
+     template that stops resolving the day the default moves, which prints an
+     empty line and reads as "not running". Asking for the one field rather
+     than the whole document keeps the parse to a literal. *)
   | Backend.Nerdctl_kata ->
     command_argv_for backend
-    @ [ "inspect"; "--format"; "{{json .State.Running}}"; container_name ]
+    @ [ "inspect"
+      ; "--mode"
+      ; "dockercompat"
+      ; "--format"
+      ; "{{json .State.Running}}"
+      ; container_name
+      ]
 ;;
 
-let inspect_argv ~container_name =
-  inspect_argv_for Backend.Apple_container ~container_name
+(* [container logs] takes [-n]; [msb logs] rejects [-n] and takes [--tail]
+   (measured 0.6.16, 2026-09-04: "unexpected argument '-n' found"), and
+   nerdctl documents [-n, --tail]. *)
+let logs_tail_argv_for backend ~tail ~container_id =
+  match (backend : Backend.t) with
+  | Backend.Apple_container ->
+    command_argv_for backend @ [ "logs"; "-n"; string_of_int tail; container_id ]
+  | Backend.Microsandbox | Backend.Nerdctl_kata ->
+    command_argv_for backend @ [ "logs"; "--tail"; string_of_int tail; container_id ]
 ;;
 
 (** Guests whose owning server is gone.
@@ -771,20 +1103,77 @@ let live_containers_of_json ~base_path ~keeper_name = function
   | _ -> Error "microvm container list must be a JSON array"
 ;;
 
-let list_live_containers ~base_path ~keeper_name ~timeout_sec =
-  let argv = command_argv () @ [ "list"; "-a"; "--format"; "json" ] in
-  match Process_eio.run_argv_with_status_split ~timeout_sec argv with
-  | Unix.WEXITED 0, stdout, _ -> (
-    match Yojson.Safe.from_string stdout with
-    | json -> live_containers_of_json ~base_path ~keeper_name json
-    | exception Yojson.Json_error detail ->
-      Error ("microvm container list returned invalid JSON: " ^ detail))
-  | status, stdout, stderr ->
+(** How a runtime answers "which guests are here", and whether that answer
+    carries the labels the scoping above reads.
+
+    What the sweep needs from a row is not just "which guests" but "whose":
+    the base path hash, the keeper name, and the owner pid it decides
+    abandonment on. Filtering is not enough -- the pid has to be read back.
+
+    Apple's [container list -a --format json] answers a JSON array whose
+    entries nest [configuration.labels], which is where all three live.
+
+    [msb list] documents [--label <LABEL>] (repeatable, AND-matched), so a
+    guest can be scoped server-side; what its [--format json] rows carry is
+    only created_at, image, name and status, with no label values at all
+    (measured 0.6.16, 2026-09-04). The owner pid the sweep needs is therefore
+    not in the answer, and msb keeps labels in [inspect] under
+    [active_config.labels] -- one call per guest rather than one listing.
+
+    [nerdctl] has no [list] subcommand (it is [ps]), and its command
+    reference does document [--format=json]. What the reference does not
+    document for those rows is a [.Labels] field, so the nested labels object
+    this scoping reads has no established nerdctl shape; nerdctl is not
+    installed on this host, so it could not be measured either.
+
+    Naming the gap rather than running the Apple argv is the point: read as
+    "no guests", an unscopable listing is exactly the answer that leaves a
+    guest running with nothing able to reap it. *)
+type container_listing =
+  | Labelled_json_array of string list
+  | Listing_not_established of string
+
+let container_listing_for backend =
+  match (backend : Backend.t) with
+  | Backend.Apple_container ->
+    Labelled_json_array
+      (command_argv_for backend @ [ "list"; "-a"; "--format"; "json" ])
+  | Backend.Microsandbox ->
+    Listing_not_established
+      "msb list can be scoped server-side with --label, but its --format \
+       json rows report only {created_at, image, name, status} and echo no \
+       label values, so the owner pid this sweep decides abandonment on \
+       cannot be read back from the listing; msb keeps labels in `inspect` \
+       under active_config.labels, one call per guest"
+  | Backend.Nerdctl_kata ->
+    Listing_not_established
+      "nerdctl has no `list` subcommand (it is `ps`), and while its reference \
+       documents `--format=json` it documents no .Labels field on those rows, \
+       so the nested labels object this scoping reads has no established \
+       nerdctl shape"
+;;
+
+let list_live_containers_for backend ~base_path ~keeper_name ~timeout_sec =
+  match container_listing_for backend with
+  | Listing_not_established reason ->
     Error
       (Printf.sprintf
-         "microvm container list failed (%s): %s"
-         (Keeper_sandbox_exec_failure.status_label status)
-         (output_for_log ~stdout ~stderr))
+         "microvm_container_listing_unsupported: %s: %s"
+         (Backend.to_string backend)
+         reason)
+  | Labelled_json_array argv ->
+    (match Process_eio.run_argv_with_status_split ~timeout_sec argv with
+     | Unix.WEXITED 0, stdout, _ ->
+       (match Yojson.Safe.from_string stdout with
+        | json -> live_containers_of_json ~base_path ~keeper_name json
+        | exception Yojson.Json_error detail ->
+          Error ("microvm container list returned invalid JSON: " ^ detail))
+     | status, stdout, stderr ->
+       Error
+         (Printf.sprintf
+            "microvm container list failed (%s): %s"
+            (Keeper_sandbox_exec_failure.status_label status)
+            (output_for_log ~stdout ~stderr)))
 ;;
 
 let sweep_candidates_of_json ~base_path ~is_pid_alive json =
@@ -832,11 +1221,39 @@ type sweep_outcome =
   ; failed : (string * string) list
   }
 
-(** Remove every guest whose owning server is gone.
+(* One runtime's share of the sweep. Returns what it did rather than
+   raising: a guest that refuses to stop is worth reporting, and is not a
+   reason to fail whatever asked for the sweep. A listing that cannot be read
+   removes nothing. *)
+let sweep_one_backend backend ~base_path ~timeout_sec ~is_pid_alive ~run_argv listing =
+  match run_argv ~timeout_sec listing with
+  | Unix.WEXITED 0, out ->
+    let candidates =
+      match Yojson.Safe.from_string out with
+      | json -> sweep_candidates_of_json ~base_path ~is_pid_alive json
+      | exception Yojson.Json_error _ -> []
+    in
+    List.fold_left
+      (fun acc candidate ->
+        match
+          run_argv
+            ~timeout_sec
+            (delete_force_argv_for backend ~container_name:candidate.container_id)
+        with
+        | Unix.WEXITED 0, _ -> { acc with removed = candidate.container_id :: acc.removed }
+        | _, detail ->
+          { acc with failed = (candidate.container_id, detail) :: acc.failed })
+      { removed = []; failed = [] }
+      candidates
+  | _, _ -> { removed = []; failed = [] }
+;;
 
-    Returns what it did rather than raising: a guest that refuses to stop is
-    worth reporting, and is not a reason to fail whatever asked for the
-    sweep. A listing that cannot be read removes nothing. *)
+(** Remove every abandoned guest, per runtime.
+
+    No keeper is in scope here and none should be: a guest this process did
+    not boot belongs to a keeper this process may not have. What is in scope
+    is the set of runtimes, so each is asked for its own guests with its own
+    argv and removed with its own removal spelling. *)
 let sweep_abandoned_guests
       ~base_path
       ~command_available
@@ -844,33 +1261,22 @@ let sweep_abandoned_guests
       ~is_pid_alive
       ~run_argv
   =
-  match command_argv () with
-  | [] -> invalid_arg "microvm CLI argv is empty"
-  | command :: _ when not (command_available command) -> None
-  | _ ->
-    let listing = command_argv () @ [ "list"; "-a"; "--format"; "json" ] in
-    Some
-      (match run_argv ~timeout_sec listing with
-       | Unix.WEXITED 0, out ->
-         let candidates =
-           match Yojson.Safe.from_string out with
-           | json -> sweep_candidates_of_json ~base_path ~is_pid_alive json
-           | exception Yojson.Json_error _ -> []
-         in
-         List.fold_left
-           (fun acc candidate ->
-              match
-                run_argv
-                  ~timeout_sec
-                  (delete_force_argv ~container_name:candidate.container_id)
-              with
-              | Unix.WEXITED 0, _ ->
-                { acc with removed = candidate.container_id :: acc.removed }
-              | _, detail ->
-                { acc with
-                  failed = (candidate.container_id, detail) :: acc.failed
-                })
-           { removed = []; failed = [] }
-           candidates
-       | _, _ -> { removed = []; failed = [] })
+  List.filter_map
+    (fun backend ->
+      if not (command_available (Backend.cli_name backend))
+      then None
+      else (
+        match container_listing_for backend with
+        | Listing_not_established _ -> None
+        | Labelled_json_array listing ->
+          Some
+            ( backend
+            , sweep_one_backend
+                backend
+                ~base_path
+                ~timeout_sec
+                ~is_pid_alive
+                ~run_argv
+                listing )))
+    Backend.all
 ;;

@@ -24,6 +24,7 @@ type stream_protocol_error_kind =
   | Sse_unsupported_part
   | Sse_unsupported_response
   | Sse_stream_incomplete
+  | Sse_stream_repeating
 
 type runtime_attempt_scope_disposition =
   | Preserve_previous_scope
@@ -214,6 +215,7 @@ let stream_protocol_error_kind_to_string = function
   | Sse_unsupported_part -> "sse_unsupported_part"
   | Sse_unsupported_response -> "sse_unsupported_response"
   | Sse_stream_incomplete -> "sse_stream_incomplete"
+  | Sse_stream_repeating -> "sse_stream_repeating"
 
 let stream_protocol_error_kind_of_string = function
   | "tool_start_duplicate_index" -> Some Tool_start_duplicate_index

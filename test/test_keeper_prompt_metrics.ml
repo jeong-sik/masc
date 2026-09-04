@@ -287,8 +287,8 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
       ~parameters:[]
       (fun _input -> Ok { content = "ok"; _meta = None })
   in
-  let metrics =
-    KAPM.build_ctx_composition_metrics
+  let segments =
+    KAPM.build_ctx_segments
       ~prompt_blocks:
         [ prompt_block Prompt_block_id.Keeper_instructions "System prompt"
         ; prompt_block Prompt_block_id.Dynamic_context "Dynamic context"
@@ -297,7 +297,12 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
         ]
       ~tools:[ tool ]
       ~input_messages
-      ~actual_input_tokens:(Some 1000)
+  in
+  let metrics : KAPM.ctx_composition_metrics =
+    { KAPM.actual_input_tokens = Some 1000
+    ; attribution =
+        KAPM.Attributed { runtime_profile = "probe.runtime"; segments }
+    }
   in
   (* The record is named at each accessor. [prompt_metrics] is declared after
      [prompt_segment_metrics] and #32666 gave it a [fingerprint] of its own, so
@@ -305,13 +310,13 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
      stops compiling. Naming the type here also keeps [bytes] from moving the
      same way when a later record claims that label. *)
   let segment_bytes key =
-    metrics.segments
+    segments
     |> List.assoc_opt key
     |> Option.map (fun (segment : KAPM.prompt_segment_metrics) -> segment.KAPM.bytes)
     |> Option.value ~default:0
   in
   let segment_fingerprint key =
-    metrics.segments
+    segments
     |> List.assoc_opt key
     |> Option.map (fun (segment : KAPM.prompt_segment_metrics) ->
       segment.KAPM.fingerprint)
@@ -333,13 +338,14 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
     metrics.actual_input_tokens;
   check bool "the tool bucket carries a fingerprint" true
     (Option.is_some (segment_fingerprint Turn_record.Tool_schemas));
-  check int "total bytes equal segment sum"
-    (List.fold_left
-       (fun total ((_, segment) : _ * KAPM.prompt_segment_metrics) ->
-         total + segment.KAPM.bytes)
-       0
-       metrics.segments)
-    metrics.attributed_bytes
+  check (option int) "total bytes equal segment sum"
+    (Some
+       (List.fold_left
+          (fun total ((_, segment) : _ * KAPM.prompt_segment_metrics) ->
+            total + segment.KAPM.bytes)
+          0
+          segments))
+    (KAPM.attributed_bytes metrics.attribution)
 
 let message text : Agent_core.Types.message = Agent_core.Types.user_msg text
 
@@ -500,15 +506,14 @@ let test_a_merged_bucket_has_no_fingerprint_and_a_single_one_keeps_it () =
       ~parameters:[]
       (fun _input -> Ok { content = "ok"; _meta = None })
   in
-  let metrics =
-    KAPM.build_ctx_composition_metrics
+  let segments =
+    KAPM.build_ctx_segments
       ~prompt_blocks:[]
       ~tools:[ tool "alpha" ]
       ~input_messages:[ user "one"; user "two" ]
-      ~actual_input_tokens:None
   in
   let fingerprint key =
-    metrics.KAPM.segments
+    segments
     |> List.assoc_opt key
     |> Option.map (fun (segment : KAPM.prompt_segment_metrics) -> segment.KAPM.fingerprint)
     |> Option.join
@@ -528,14 +533,7 @@ let test_tool_schema_fingerprint_follows_the_order_sent () =
       (fun _input -> Ok { content = "ok"; _meta = None })
   in
   let fingerprint_of tools =
-    let metrics =
-      KAPM.build_ctx_composition_metrics
-        ~prompt_blocks:[]
-        ~tools
-        ~input_messages:[]
-        ~actual_input_tokens:None
-    in
-    metrics.segments
+    KAPM.build_ctx_segments ~prompt_blocks:[] ~tools ~input_messages:[]
     |> List.assoc_opt Turn_record.Tool_schemas
     |> Option.map (fun (segment : KAPM.prompt_segment_metrics) ->
       segment.KAPM.fingerprint)
@@ -548,6 +546,154 @@ let test_tool_schema_fingerprint_follows_the_order_sent () =
     (fingerprint_of [ a; b ] = fingerprint_of [ b; a ]);
   check bool "and it is present at all" true
     (Option.is_some (fingerprint_of [ a; b ]))
+;;
+
+(* The defect: a turn whose input was never attributed and a turn attributed
+   at zero bytes were written as byte-identical rows, so 40% of the fleet's
+   turns read as "this turn cost nothing" (masc#32995). The constructor, not
+   the byte count, is what separates them now. *)
+let test_not_measured_omits_the_byte_total () =
+  let json =
+    KAPM.ctx_composition_to_json
+      { KAPM.actual_input_tokens = None
+      ; attribution = KAPM.Not_measured KAPM.Dispatch_not_reached
+      }
+  in
+  let attribution = Yojson.Safe.Util.member "attribution" json in
+  check string "status names the absence" "not_measured"
+    (attribution |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+  check string "and the reason says which absence" "dispatch_not_reached"
+    (attribution |> Yojson.Safe.Util.member "reason" |> Yojson.Safe.Util.to_string);
+  check bool "no byte total is emitted" true
+    (Yojson.Safe.Util.member "attributed_bytes" attribution = `Null);
+  check bool "and no segment map is emitted" true
+    (Yojson.Safe.Util.member "segments" attribution = `Null);
+  check (option int) "the accessor refuses to invent one" None
+    (KAPM.attributed_bytes (KAPM.Not_measured KAPM.Dispatch_not_reached))
+;;
+
+let test_attributed_zero_differs_from_not_measured () =
+  let measured_at_zero =
+    KAPM.ctx_composition_to_json
+      { KAPM.actual_input_tokens = None
+      ; attribution =
+          KAPM.Attributed { runtime_profile = "probe.runtime"; segments = [] }
+      }
+  in
+  let never_measured =
+    KAPM.ctx_composition_to_json
+      { KAPM.actual_input_tokens = None
+      ; attribution = KAPM.Not_measured KAPM.Dispatch_not_reached
+      }
+  in
+  check bool "the two facts are not one row" false
+    (Yojson.Safe.to_string measured_at_zero
+     = Yojson.Safe.to_string never_measured);
+  check (option int) "a measured empty turn still has a total" (Some 0)
+    (KAPM.attributed_bytes
+       (KAPM.Attributed { runtime_profile = "probe.runtime"; segments = [] }))
+;;
+
+(* The provenance failure used to end at a warn line, so the record said the
+   turn had no bytes without saying which check refused. *)
+let test_provenance_failure_reaches_the_record () =
+  let failure =
+    KAPM.Input_prefix_dropped
+      { projection_input_messages = 9; projected_messages = 4 }
+  in
+  let json =
+    KAPM.ctx_composition_to_json
+      { KAPM.actual_input_tokens = Some 12
+      ; attribution =
+          KAPM.Not_measured (KAPM.Input_provenance_unresolved failure)
+      }
+  in
+  let attribution = Yojson.Safe.Util.member "attribution" json in
+  check string "the reason is the provenance reason"
+    "projection_dropped_input_prefix"
+    (attribution |> Yojson.Safe.Util.member "reason" |> Yojson.Safe.Util.to_string);
+  check string "and the measured values ride along" "handed=9 returned=4"
+    (attribution |> Yojson.Safe.Util.member "detail" |> Yojson.Safe.Util.to_string);
+  check bool "the provider token count survives the gap" true
+    (Yojson.Safe.Util.member "actual_input_tokens" json = `Int 12)
+;;
+
+(* An official-client lane hands over a list its tail window already cut, so
+   there is no projection pair to compare. Running the prefix check on that
+   list refuses every turn, which would trade a fabricated zero for a
+   fabricated gap. *)
+let test_transmitted_carrier_removal_ignores_a_prefix_cut () =
+  let carrier = prompt_carrier "[system context] dynamic blocks" in
+  let texts result =
+    Result.to_option result
+    |> Option.map
+         (List.map (fun (message : Agent_core.Types.message) ->
+            Agent_core.Types.text_of_content message.Agent_core.Types.content))
+  in
+  (* The head of the history is gone: this is what a tail window returns. *)
+  let transmitted = [ message "surviving history"; carrier; message "goal" ] in
+  check (option (list string)) "the carrier is removed by identity, not position"
+    (Some [ "surviving history"; "goal" ])
+    (texts
+       (KAPM.provider_content_of_transmitted
+          ~prompt_context_present:true
+          ~messages:transmitted));
+  check (option (list string)) "and a turn without one passes through"
+    (Some [ "surviving history"; "goal" ])
+    (texts
+       (KAPM.provider_content_of_transmitted
+          ~prompt_context_present:false
+          ~messages:[ message "surviving history"; message "goal" ]));
+  check string "a carrier the window cut away is a typed refusal"
+    "prompt_context_presence_mismatch"
+    (match
+       KAPM.provider_content_of_transmitted
+         ~prompt_context_present:true
+         ~messages:[ message "surviving history" ]
+     with
+     | Ok _ -> "unexpected success"
+     | Error failure -> KAPM.provenance_failure_reason failure)
+;;
+
+(* The second half of masc#32995. Reporting the local window on a resumed
+   official-client turn attributes history the client never re-sent -- and on
+   Antigravity, where the only thing a resume does transmit is the carrier
+   [provider_content_of_transmitted] removes, it attributes the history that
+   stayed home and drops the message that left. A resume is not a measurement,
+   and this gap says so without borrowing either of the other two reasons. *)
+let test_client_session_gap_is_its_own_reason () =
+  let gap_json gap =
+    KAPM.ctx_composition_to_json
+      { KAPM.actual_input_tokens = Some 4_211; attribution = KAPM.Not_measured gap }
+    |> Yojson.Safe.Util.member "attribution"
+  in
+  let held = gap_json KAPM.Client_session_holds_input in
+  check string "the reason names the session, not a failed check"
+    "client_session_holds_input"
+    (held |> Yojson.Safe.Util.member "reason" |> Yojson.Safe.Util.to_string);
+  check bool "no byte total is emitted" true
+    (Yojson.Safe.Util.member "attributed_bytes" held = `Null);
+  check bool "and no segment map is emitted" true
+    (Yojson.Safe.Util.member "segments" held = `Null);
+  check (option int) "the accessor refuses to invent one" None
+    (KAPM.attributed_bytes (KAPM.Not_measured KAPM.Client_session_holds_input));
+  check bool "a resumed turn does not read as a turn that never dispatched"
+    false
+    (Yojson.Safe.to_string held
+     = Yojson.Safe.to_string (gap_json KAPM.Dispatch_not_reached));
+  check bool "nor as an input the reader failed to classify" false
+    (Yojson.Safe.to_string held
+     = Yojson.Safe.to_string
+         (gap_json
+            (KAPM.Input_provenance_unresolved
+               KAPM.Prompt_context_carrier_repeated)));
+  check bool "the provider token count survives the gap" true
+    (Yojson.Safe.Util.member "actual_input_tokens"
+       (KAPM.ctx_composition_to_json
+          { KAPM.actual_input_tokens = Some 4_211
+          ; attribution = KAPM.Not_measured KAPM.Client_session_holds_input
+          })
+     = `Int 4_211)
 ;;
 
 let () =
@@ -593,5 +739,18 @@ let () =
             "rejects projection rewrites"
             `Quick
             test_provider_content_messages_rejects_projection_rewrite;
+        ] );
+      ( "attribution_gap",
+        [
+          test_case "not measured omits the byte total" `Quick
+            test_not_measured_omits_the_byte_total;
+          test_case "attributed at zero is not not-measured" `Quick
+            test_attributed_zero_differs_from_not_measured;
+          test_case "provenance failure reaches the record" `Quick
+            test_provenance_failure_reaches_the_record;
+          test_case "transmitted carrier removal ignores a prefix cut" `Quick
+            test_transmitted_carrier_removal_ignores_a_prefix_cut;
+          test_case "a resumed client session is its own reason" `Quick
+            test_client_session_gap_is_its_own_reason;
         ] );
     ]

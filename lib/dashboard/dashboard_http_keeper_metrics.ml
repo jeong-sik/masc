@@ -1,5 +1,5 @@
-(** Dashboard_http_keeper_metrics — keeper metrics window types,
-    generation stats, history summary, and helper utilities.
+(** Dashboard_http_keeper_metrics — keeper metrics window counters,
+    history summary, and helper utilities.
 
     {b Note for code auditors}: this module does {b not} access a SQL
     database — the helpers here are pure parsers / aggregators over
@@ -15,31 +15,6 @@
     aggregation over those same JSONL reads rather than SQL —
     RFC-0029 candidate, tracked in #10710.  *)
 
-
-type keeper_gen_window_stats = {
-  turns: int;
-  usage_points: int;
-  input_tokens: int;
-  output_tokens: int;
-  total_tokens: int;
-  handoffs: int;
-  first_ts: float;
-  last_ts: float;
-  tools: (string, int) Hashtbl.t;
-}
-
-let create_keeper_gen_window_stats () : keeper_gen_window_stats =
-  {
-    turns = 0;
-    usage_points = 0;
-    input_tokens = 0;
-    output_tokens = 0;
-    total_tokens = 0;
-    handoffs = 0;
-    first_ts = 0.0;
-    last_ts = 0.0;
-    tools = Hashtbl.create 8;
-  }
 
 let count_table_incr (tbl : (string, int) Hashtbl.t) (key : string) : unit =
   let key = String.trim key in
@@ -168,14 +143,3 @@ let top_counts_json
   |> List.map (fun (k, v) ->
        `Assoc [ (name_key, `String k); ("count", `Int v) ])
 
-let top_count_name_and_count
-    (tbl : (string, int) Hashtbl.t) : (string * int) option =
-  tbl
-  |> Hashtbl.to_seq
-  |> List.of_seq
-  |> List.sort (fun (ka, va) (kb, vb) ->
-       let c = compare vb va in
-       if c <> 0 then c else String.compare ka kb)
-  |> function
-  | (k, v) :: _ -> Some (k, v)
-  | [] -> None

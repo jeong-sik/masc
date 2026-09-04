@@ -349,10 +349,24 @@ export interface PromptTelemetry {
   segments: Record<string, PromptSegmentTelemetry>
 }
 
+// Byte attribution of one turn's model input. `not_measured` carries no byte
+// count: reading an absent measurement as 0 is what made 40% of Keeper turns
+// look free (masc#32995). Splitting the union puts `attributed_bytes` only on
+// the branch that has one, so `?? 0` on the other branch is a type error.
+export type CtxAttribution =
+  | {
+      status: 'attributed'
+      // The lane attempt that produced this attribution. It can differ from
+      // the turn's settled runtime after a failover.
+      runtime_profile: string
+      attributed_bytes: number
+      segments: Record<string, PromptSegmentTelemetry>
+    }
+  | { status: 'not_measured'; reason: string; detail: string | null }
+
 export interface CtxCompositionTelemetry {
   actual_input_tokens: number | null
-  attributed_bytes: number
-  segments: Record<string, PromptSegmentTelemetry>
+  attribution: CtxAttribution
 }
 
 export interface KeeperMetricPoint {
@@ -361,11 +375,8 @@ export interface KeeperMetricPoint {
   context_tokens: number | null
   context_max: number | null
   latency_ms: number | null
-  generation: number
   channel: string
-  is_handoff: boolean
   cost_usd: number
-  handoff_new_generation: number | null
   prompt_fingerprint: string | null
   prompt_metrics: PromptTelemetry | null
   ctx_composition: CtxCompositionTelemetry | null
@@ -619,6 +630,7 @@ export interface KeeperDiagnostic {
 export type KeeperConversationRole = 'user' | 'assistant' | 'system' | 'tool' | 'other'
 
 export type KeeperApprovalLifecyclePhase =
+  | 'requested'
   | 'resolved_approved'
   | 'resolved_rejected'
   | 'replay_applied'
@@ -1074,9 +1086,6 @@ export interface MetricsWindow {
   window_turns?: number
   window_series_max_lines?: number
 
-  // -- Handoff --
-  handoff_count?: number
-
   // -- Intervention --
   intervention_share?: number
   intervention_per_turn?: number
@@ -1087,7 +1096,6 @@ export interface MetricsWindow {
   // -- Top-N lists --
   top_work_kinds?: MetricsWindowTopItem[]
   top_tools?: MetricsWindowTopItem[]
-  generation_equipment?: MetricsWindowTopItem[]
 
   // Catch-all for future fields
   [key: string]: unknown

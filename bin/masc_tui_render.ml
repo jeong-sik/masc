@@ -8484,11 +8484,40 @@ let render_keeper_message (state : state) =
              an append; the cache detects that (the new text no longer starts
              with the old) and falls back to one full render, the same work
              the uncached streaming path did on every frame. *)
+          (* A superseded attempt's stretches are drawn in place with their
+             own styles, each label ending in the retry mark and the number of
+             the try it came from (" ↺1" = the first try, superseded): the
+             content the reader had is still there. The mark goes at the tail
+             because [fit_name] keeps a label's tail when it overruns the
+             column. Not dimmed: the layout has no dim variant per style, and
+             adding one is the 3b restyle. Flattened before indexing so the
+             growing-markdown cache key stays one index per drawn stretch. *)
+          let flattened =
+            List.concat_map
+              (fun (item : Keeper_chat_transcript.trail_item) ->
+                match item with
+                | Keeper_chat_transcript.Trail_superseded { attempt; items } ->
+                    List.map (fun nested -> (Some attempt, nested)) items
+                | Keeper_chat_transcript.Trail_thinking _
+                | Keeper_chat_transcript.Trail_skill _
+                | Keeper_chat_transcript.Trail_tools _
+                | Keeper_chat_transcript.Trail_text _ -> [ (None, item) ])
+              (Keeper_chat_transcript.trail live)
+          in
           let entries =
             List.filter_map Fun.id
             @@ List.mapi
-               (fun entry_index (item : Keeper_chat_transcript.trail_item) ->
+               (fun entry_index
+                    ((superseded, item) : int option * Keeper_chat_transcript.trail_item) ->
+              let label text =
+                match superseded with
+                | Some attempt -> Printf.sprintf "%s \xe2\x86\xba%d" text (attempt + 1)
+                | None -> text
+              in
               match item with
+              | Keeper_chat_transcript.Trail_superseded _ ->
+                  (* Never nested (see the type), and flattened above. *)
+                  None
               | Keeper_chat_transcript.Trail_thinking _
                 when state.msg_reasoning_visibility = Reasoning_hidden ->
                   None
@@ -8501,7 +8530,7 @@ let render_keeper_message (state : state) =
                               request_id;
                               entry_index;
                             })
-                       Message_layout.Thinking "THINKING"
+                       Message_layout.Thinking (label "THINKING")
                        (if state.msg_reasoning_visibility = Reasoning_folded
                         then folded_thinking_summary (String.concat "\n" lines)
                         else String.concat "\n" lines))
@@ -8518,7 +8547,7 @@ let render_keeper_message (state : state) =
                               request_id;
                               entry_index;
                             })
-                       (tool_block_style projection) "TOOLS"
+                       (tool_block_style projection) (label "TOOLS")
                        (String.concat "\n" (projected_tool_rows projection)))
               | Keeper_chat_transcript.Trail_skill skill ->
                   Some
@@ -8531,7 +8560,7 @@ let render_keeper_message (state : state) =
                             })
                        (Message_layout.Skill
                           (skill_tone_of_state skill.state))
-                       "SKILL"
+                       (label "SKILL")
                        (String.concat "\n"
                           (* Full on the live trail too: the same reason the
                              committed skill rows are always full — the skill's
@@ -8547,8 +8576,8 @@ let render_keeper_message (state : state) =
                               request_id;
                               entry_index;
                             })
-                       Message_layout.Keeper keeper_label text))
-                 (Keeper_chat_transcript.trail live)
+                       Message_layout.Keeper (label keeper_label) text))
+                 flattened
           in
           (* Applied after the filter, not at trail position zero: hidden
              reasoning drops rows, and the corner belongs to the first row the
@@ -10760,6 +10789,91 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
               ]
               @ fusion_wrapped_block ~width ~indent:"    " failure.fj_error
         in
+        (* RFC-0284 judge nodes. The canonical [Judge] row above is the final
+           synthesis; this block is the topology it came through -- first the
+           observed shape as one line, then one card per first-pass lens.
+           Meta/stage/final nodes stay in the shape line only: their output
+           is intermediate synthesis, and printing it next to the final one
+           would render the same deliberation twice. Pre-RFC posts decode
+           with no nodes and draw none of this. *)
+        let judges_lines =
+          match evidence.fe_judges with
+          | [] -> []
+          | nodes ->
+              let count_role wanted =
+                List.fold_left
+                  (fun n node ->
+                    if node.fjn_role = wanted then n + 1 else n)
+                  0 nodes
+              in
+              let firsts = count_role Judge_first in
+              let metas = count_role Judge_meta in
+              let stage_metas = count_role Judge_stage_meta in
+              let final_metas = count_role Judge_final_meta in
+              let refines = count_role Judge_refine in
+              let singles = count_role Judge_single in
+              let shape =
+                (* Same reading the dashboard's shape classifier makes: a
+                   first-pass judge only exists in a judge-of-judges run,
+                   and stage/final metas only in the staged one. *)
+                if stage_metas > 0 || final_metas > 0 then "staged judge-of-judges"
+                else if firsts > 0 then "judge-of-judges"
+                else if refines > 0 then "refine"
+                else "single"
+              in
+              let counts =
+                List.filter_map
+                  (fun (label, n) ->
+                    if n > 0 then Some (Printf.sprintf "%s \xc3\x97%d" label n) else None)
+                  [ ("first", firsts); ("meta", metas); ("stage-meta", stage_metas)
+                  ; ("final-meta", final_metas); ("refine", refines)
+                  ; ("single", singles) ]
+              in
+              let first_cards =
+                nodes
+                |> List.filter (fun node -> node.fjn_role = Judge_first)
+                |> List.mapi (fun index node ->
+                       match node.fjn_outcome with
+                       | Judge_node_synthesized synthesized ->
+                           [ ( Ansi.magenta
+                             , Printf.sprintf
+                                 "  First %d [synthesized] %s  (%d in / %d out)"
+                                 (index + 1)
+                                 (Terminal_text.single_line node.fjn_identity)
+                                 synthesized.fjno_input_tokens
+                                 synthesized.fjno_output_tokens )
+                           ]
+                           @ fusion_labeled_markdown ~width
+                               ~label:
+                                 (Printf.sprintf "First %d %s" (index + 1)
+                                    (Terminal_text.single_line node.fjn_identity))
+                               synthesized.fjno_resolved_answer
+                       | Judge_node_failed failed ->
+                           let clock =
+                             match (failed.fjno_timed_out, failed.fjno_elapsed_s) with
+                             | true, _ -> "  (timed out)"
+                             | false, Some seconds ->
+                                 Printf.sprintf "  (%.0fs)" seconds
+                             | false, None -> ""
+                           in
+                           [ ( (Theme.bad ())
+                             , Printf.sprintf
+                                 "  First %d [failed] %s  [%s]%s"
+                                 (index + 1)
+                                 (Terminal_text.single_line node.fjn_identity)
+                                 (Terminal_text.single_line failed.fjno_failure_code)
+                                 clock )
+                           ]
+                           @ fusion_wrapped_block ~width ~indent:"    "
+                               failed.fjno_error)
+                |> List.concat
+              in
+              [ Ansi.dim, "" ]
+              @ ( Ansi.dim
+                , Printf.sprintf "  Judge topology: %s  \xc2\xb7  %s" shape
+                    (String.concat "  \xc2\xb7  " counts) )
+              :: first_cards
+        in
         let tool_lines =
           fusion_tool_trace_lines ~width evidence.fe_tool_trace
         in
@@ -10781,6 +10895,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
           ; Ansi.magenta, "  3  JUDGE"
           ]
         @ judge_lines
+        @ judges_lines
         @ [ Ansi.dim, ""
           ; Ansi.bold, "  4  TOOL EXECUTIONS"
           ]
@@ -13469,6 +13584,7 @@ let render_acting (state : state) =
       | Masc_tui_observer.Keeper_chat_appended _
       | Masc_tui_observer.Keeper_chat_stream_frame _
       | Masc_tui_observer.Keeper_waiting_inventory_changed _
+      | Masc_tui_observer.Fusion_run_status _
       | Masc_tui_observer.Snapshot _
       | Masc_tui_observer.Other _ ->
           None

@@ -103,6 +103,37 @@ let test_request_body_and_identity () =
   check bool "fresh id per send" false
     (String.equal request.request_id second.request_id)
 
+(* Since #33103 every projected frame carries id: <seq>. The strict decode
+   reads events, not positions: a body with id lines decodes to exactly what
+   the same body without them does. *)
+let test_id_lines_do_not_change_the_strict_decode () =
+  let events =
+    [ acceptance (); run_started; text_start; delta "hel"; delta "lo"
+    ; reply_details (); text_end; run_finished
+    ]
+  in
+  let plain = events |> List.map sse_event |> String.concat "" in
+  let with_ids =
+    events
+    |> List.mapi (fun seq event -> Printf.sprintf "id: %d\n%s" seq (sse_event event))
+    |> String.concat ""
+  in
+  check bool "id lines classify as Sse_id" true
+    (Chat.classify_sse_line "id: 12" = Chat.Sse_id 12);
+  check bool "the frame end classifies on its own" true
+    (Chat.classify_sse_line "" = Chat.Sse_frame_end);
+  check bool "a non-integer id is ignored" true
+    (Chat.classify_sse_line "id: abc" = Chat.Sse_ignored);
+  check bool "a whitespace-only line is ignored, not a frame end" true
+    (Chat.classify_sse_line "   " = Chat.Sse_ignored);
+  check bool "same outcome with and without id lines" true
+    (Chat.decode_response ~request plain = Chat.decode_response ~request with_ids);
+  match Chat.decode_response ~request with_ids with
+  | Ok (Chat.Turn_completed completed) ->
+      check string "the reply is read through the id lines" "hello" completed.reply
+  | Ok (Chat.Replayed_succeeded _) -> fail "replayed instead of completed"
+  | Error error -> fail (Chat.stream_error_to_string error)
+
 let test_matching_acceptance_and_reply () =
   match
     decode
@@ -1144,6 +1175,8 @@ let () =
     [ ( "keeper chat"
       , [ test_case "exact request body and UUIDv7" `Quick
             test_request_body_and_identity
+        ; test_case "id lines do not change the strict decode" `Quick
+            test_id_lines_do_not_change_the_strict_decode
         ; test_case "matching acceptance and reply" `Quick
             test_matching_acceptance_and_reply
         ; test_case "acceptance id mismatch" `Quick

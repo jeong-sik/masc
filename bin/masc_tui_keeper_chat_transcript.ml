@@ -140,6 +140,14 @@ type trail_node =
   | Node_thinking of Buffer.t
   | Node_text of Buffer.t
   | Node_tool of int
+  | Node_superseded of
+      { attempt : int
+      ; nodes : trail_node list  (** In arrival order. *)
+      }
+      (** Everything one earlier runtime attempt produced, kept whole when
+          the next attempt began (RFC-0412 §3.3): the reader was reading it,
+          so it stays, marked. One block per superseded attempt, siblings in
+          the trail, never nested. *)
 
 (* Tool calls are held newest-first so opening one is a prepend; [tool_calls]
    reverses on read. Appending an argument fragment walks the list, which a
@@ -170,6 +178,12 @@ type t =
        for the run to start" whether the keeper was busy with something else
        or the run was stuck. *)
     mutable admission : (Live.admission * int) option
+  ; mutable attempt : int
+        (* 0-based runtime attempt the growing trail belongs to. *)
+  ; mutable reply : (string * Masc.Keeper_turn_outcome.t) option
+        (* The recorded reply (KEEPER_REPLY_DETAILS). Not a trail node: the
+           server streams the reply text as deltas -- chunked at the end when
+           nothing streamed -- so the text is already in the trail. *)
   }
 
 let create ~keeper_name ~request_id ~started_at =
@@ -189,6 +203,8 @@ let create ~keeper_name ~request_id ~started_at =
   ; awaiting = None
   ; last_approval_settlement = None
   ; admission = None
+  ; attempt = 0
+  ; reply = None
   }
 
 (* Consecutive deltas of one kind are one stretch; a delta of another kind in
@@ -197,7 +213,7 @@ let create ~keeper_name ~request_id ~started_at =
 let trail_thinking t text =
   (match t.reversed_trail with
    | Node_thinking buffer :: _ -> Buffer.add_string buffer text
-   | (Node_text _ | Node_tool _) :: _ | [] ->
+   | (Node_text _ | Node_tool _ | Node_superseded _) :: _ | [] ->
        let buffer = Buffer.create 256 in
        Buffer.add_string buffer text;
        t.reversed_trail <- Node_thinking buffer :: t.reversed_trail)
@@ -205,7 +221,7 @@ let trail_thinking t text =
 let trail_text t text =
   (match t.reversed_trail with
    | Node_text buffer :: _ -> Buffer.add_string buffer text
-   | (Node_thinking _ | Node_tool _) :: _ | [] ->
+   | (Node_thinking _ | Node_tool _ | Node_superseded _) :: _ | [] ->
        let buffer = Buffer.create 256 in
        Buffer.add_string buffer text;
        t.reversed_trail <- Node_text buffer :: t.reversed_trail)
@@ -213,6 +229,8 @@ let trail_text t text =
 let keeper_name t = t.keeper_name
 let request_id t = t.request_id
 let started_at t = t.started_at
+let attempt t = t.attempt
+let reply t = t.reply
 let phase t = t.phase
 let interrupt t = t.interrupt
 let note_interrupt t interrupt = t.interrupt <- interrupt
@@ -647,6 +665,10 @@ type trail_item =
   | Trail_skill of skill_activity
   | Trail_tools of tool_block
   | Trail_text of string
+  | Trail_superseded of
+      { attempt : int
+      ; items : trail_item list
+      }
 
 (* The turn in arrival order, one item per stretch. Consecutive tool calls
    render as one block so their names align, same as [tool_rows]; a call whose
@@ -684,6 +706,14 @@ let trail t =
         match call_of local_id with
         | Some call -> walk acc (call :: group) rest
         | None -> walk acc group rest)
+    | Node_superseded { attempt; nodes } :: rest ->
+        let acc = flush_tools acc group in
+        let acc =
+          match walk [] [] nodes with
+          | [] -> acc
+          | items -> Trail_superseded { attempt; items } :: acc
+        in
+        walk acc [] rest
     | Node_thinking buffer :: rest ->
         let acc = flush_tools acc group in
         let lines =
@@ -1038,19 +1068,32 @@ let apply ~now t (delta : Live.delta) =
          only answers "why has it not started yet". *)
       t.admission <- Some (admission, queue_length)
   | Live.Runtime_attempt_started ->
+      (* The per-attempt totals start over; the trail does not. What the
+         earlier attempt produced -- finished stretches and the one still
+         growing -- is folded into one superseded node so the reader keeps
+         what they were reading and can see which attempt it belonged to
+         (RFC-0412 §3.3). Tool evidence stays where it was: the calls remain
+         in [reversed_tool_calls] and the superseded node still names them. *)
       Buffer.clear t.text_buffer;
       Buffer.clear t.thinking_buffer;
-      (* The event's contract is to discard UNFINISHED text/thinking from the
-         prior attempt, not everything it said. A stretch is finished the
-         moment a node of another kind opens after it -- [trail_text] and
-         [trail_thinking] only append to the head -- so the head is the only
-         node that can still be growing. Filtering every text node out also
-         took speech the reader had already read, leaving the tool nodes
-         standing alone with the turn's words missing between them. *)
-      t.reversed_trail <-
-        (match t.reversed_trail with
-         | (Node_text _ | Node_thinking _) :: finished -> finished
-         | (Node_tool _ :: _ | []) as finished -> finished);
+      (* Only the nodes since the last boundary fold; earlier superseded
+         blocks stay where they are, so blocks are siblings -- one per
+         superseded attempt, each keeping its number -- and never nest.
+         [reversed_trail] is newest-first, so consing while walking towards
+         the older blocks leaves [since] in arrival order. *)
+      let since, older =
+        let rec split acc = function
+          | (Node_superseded _ :: _) as older -> (acc, older)
+          | node :: rest -> split (node :: acc) rest
+          | [] -> (acc, [])
+        in
+        split [] t.reversed_trail
+      in
+      (match since with
+       | [] -> ()
+       | nodes ->
+           t.reversed_trail <- Node_superseded { attempt = t.attempt; nodes } :: older);
+      t.attempt <- t.attempt + 1;
       t.awaiting <- None;
       (match t.phase with
        | Waiting | Working -> t.phase <- Working
@@ -1190,5 +1233,24 @@ let apply ~now t (delta : Live.delta) =
       ()
   | Live.Run_failed { message } -> t.phase <- Stream_failed message
   | Live.Run_finished -> t.phase <- Stream_ended
+  | Live.Reply_details { reply; turn_outcome; turn_ref = _ } ->
+      t.reply <- Some (reply, turn_outcome)
   | Live.Undecodable detail ->
       note_unreadable t detail
+
+(* The same fold the live path runs one delta at a time, over a whole log. A
+   transcript rebuilt from a log is equal to one that grew with it -- pinned
+   by test -- which is what lets a settled or reloaded turn be drawn by the
+   projection the live turn used. *)
+let of_log ~now (log : Masc_tui_keeper_chat_log.t) =
+  let t =
+    create
+      ~keeper_name:(Masc_tui_keeper_chat_log.keeper_name log)
+      ~request_id:(Masc_tui_keeper_chat_log.request_id log)
+      ~started_at:(Masc_tui_keeper_chat_log.started_at log)
+  in
+  List.iter
+    (fun (entry : Masc_tui_keeper_chat_log.entry) -> apply ~now t entry.delta)
+    (Masc_tui_keeper_chat_log.entries log);
+  t
+;;

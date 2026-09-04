@@ -2087,7 +2087,9 @@ let post_keeper_chat_watching ~mailbox ~port request =
            visible transcript remains request-owned, but an acceptance event
            at the head of the new stream is not a duplicate in that stream. *)
         let on_chunk chunk =
-          match Keeper_chat_live.feed decoder chunk with
+          (* The seq each delta arrives with is read and, until the
+             per-operation log lands (stage 3a task 5), not yet kept. *)
+          match List.map snd (Keeper_chat_live.feed decoder chunk) with
           | [] -> ()
           | deltas ->
               enqueue_async mailbox
@@ -2139,26 +2141,30 @@ let settle_live_turn state (request : Keeper_chat.request) =
   | Some entry
     when Keeper_chat.same_request_identity entry.sent_request request ->
       let live = entry.live in
-      List.iter
-        (function
-          | Keeper_chat_transcript.Trail_skill skill ->
-              append_chat_history ~skill_activity:skill state request
-                (Message_skill skill.state)
-                (String.concat "\n"
-                   (Keeper_chat_transcript.skill_rows ~full:false skill))
-          | Keeper_chat_transcript.Trail_tools block ->
-              let projection =
-                Keeper_chat_transcript.project_tool_block
-                  Keeper_chat_transcript.Full block
-              in
-              (match projection.rows with
-               | [] -> ()
-               | rows ->
-                   append_chat_history ~tool_block:block state request
-                     Message_tool (String.concat "\n" rows))
-          | Keeper_chat_transcript.Trail_thinking _
-          | Keeper_chat_transcript.Trail_text _ -> ())
-        (Keeper_chat_transcript.trail live);
+      let rec commit_item = function
+        | Keeper_chat_transcript.Trail_skill skill ->
+            append_chat_history ~skill_activity:skill state request
+              (Message_skill skill.state)
+              (String.concat "\n"
+                 (Keeper_chat_transcript.skill_rows ~full:false skill))
+        | Keeper_chat_transcript.Trail_tools block ->
+            let projection =
+              Keeper_chat_transcript.project_tool_block
+                Keeper_chat_transcript.Full block
+            in
+            (match projection.rows with
+             | [] -> ()
+             | rows ->
+                 append_chat_history ~tool_block:block state request
+                   Message_tool (String.concat "\n" rows))
+        | Keeper_chat_transcript.Trail_superseded { items; _ } ->
+            (* A retried attempt's tool rows were committed before this
+               variant existed (they sat at the top level); they still are. *)
+            List.iter commit_item items
+        | Keeper_chat_transcript.Trail_thinking _
+        | Keeper_chat_transcript.Trail_text _ -> ()
+      in
+      List.iter commit_item (Keeper_chat_transcript.trail live);
       (match state.msg_live with
        | Some visible
          when String.equal
@@ -4984,9 +4990,13 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     (row : Keeper_chat_history.row) =
   let gate =
     match row.Keeper_chat_history.kind with
-    | Keeper_chat_history.Gate_activity { approval_id; phase; tool } ->
+    | Keeper_chat_history.Gate_activity { approval_id; phase; tool; summary } ->
         Some
-          { gs_approval_id = approval_id; gs_phase = phase; gs_tool = tool }
+          { gs_approval_id = approval_id
+          ; gs_phase = phase
+          ; gs_tool = tool
+          ; gs_summary = summary
+          }
     | Keeper_chat_history.Memory_activity _
     | Keeper_chat_history.Addressed_to_keeper _
     | Keeper_chat_history.Said_by_keeper
@@ -5058,14 +5068,14 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         , Some activity )
     | Keeper_chat_history.Reasoning lines ->
         (Message_thinking, Turn_progress, String.concat "\n" lines, None, None)
-    | Keeper_chat_history.Gate_activity { approval_id = _; phase; tool } ->
+    | Keeper_chat_history.Gate_activity { approval_id = _; phase; tool; summary } ->
         (* Server-owned gate status, drawn from the phase rather than from
            the sentence the store composed. It is not Memory: putting it in
            that lane interleaved approvals with journal commits, and hiding
            the journal hid the gate with it. *)
         ( Message_status
         , Turn_progress
-        , Masc_tui_gate_text.lifecycle_line ~phase ~tool
+        , Masc_tui_gate_text.lifecycle_line ~phase ~tool ~summary
         , None
         , None )
     | Keeper_chat_history.Memory_activity _ ->
@@ -5724,7 +5734,7 @@ let chat_status_text completed =
   | Keeper_chat.Terminal_effect_settled ->
       Printf.sprintf "Reply delivered by a terminal tool (turn %s)" turn_ref
   | Keeper_chat.Awaiting_gate_approval ->
-      Printf.sprintf "Waiting for Gate approval (turn %s)" turn_ref
+      Printf.sprintf "승인 후 턴을 이어서 진행합니다 (turn %s)" turn_ref
   | Keeper_chat.No_visible_reply ->
       Printf.sprintf "Turn completed without a visible reply (turn %s)" turn_ref
 
@@ -8931,6 +8941,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          shows the whole history anyway, and the loader is generation-
          guarded, so the flag only remembers that a reload is due. *)
       let open_chat_gained_turn = ref false in
+      (* Same shape as [open_chat_gained_turn]: remember that a fusion run
+         pushed a status, decide once per batch after the loop. The run id
+         rides along so an open detail only refetches when it is the run
+         that moved. *)
+      let fusion_status_seen = ref None in
       List.iter
         (fun item ->
           match item with
@@ -8946,6 +8961,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                       && state.msg_target_keeper_name = Some appended_keeper ->
                    open_chat_gained_turn := true
                | Some _ | None -> ());
+              (match event with
+               | Masc_tui_observer.Fusion_run_status { run_id; _ } ->
+                   fusion_status_seen := Some run_id
+               | _ -> ());
               state.acting <-
                 { Masc_tui_acting.ae_at = received; ae_event = event }
                 :: state.acting;
@@ -8985,7 +9004,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          | Some keeper_name ->
              launch_keeper_history_load ~load_file_changes:false state ~mailbox
                ~keeper_name
-         | None -> ())
+         | None -> ());
+      (* A fusion push reloads only the surface that shows it. The event
+         says a run moved; HTTP says what it is now -- the same
+         trigger/SSOT split the dashboard applies (sse-store). Both loaders
+         are inflight-guarded, so a run that pushes several stage frames
+         collapses to one fetch, and a missed frame is healed by the
+         cadence reload the Fusion view already runs. *)
+      (match (!fusion_status_seen, state.view) with
+       | Some run_id, Fusion ->
+           launch_fusion_runs_load state ~mailbox;
+           (match state.fusion_mode with
+            | Fusion_detail open_id when String.equal run_id open_id ->
+                launch_fusion_detail_load state ~mailbox ~run_id
+            | _ -> ())
+       | _ -> ())
   | Task_dispatched { keeper; task_id; title; body } ->
       add_event state "task" (Printf.sprintf "%s created for %s" task_id keeper);
       (* The jump lands on a clean screen: a modal or roster search opened
@@ -14942,7 +14975,7 @@ and is loaded on demand through keeper_skill.
                      state.fusion_detail_generation <-
                        state.fusion_detail_generation + 1
                  | Fusion_list ->
-                     goto_surface state ~mailbox:async_messages Planning)
+                     goto_surface state ~mailbox:async_messages Overview)
             | Overview ->
                 (* Back out one level: an open task detail closes to the panel,
                    a focused task panel hands j/k back to the event log. *)

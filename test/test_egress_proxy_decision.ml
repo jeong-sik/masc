@@ -75,19 +75,36 @@ let test_an_address_needs_its_own_rule () =
     (admitted [ "140.82.121.6" ] "CONNECT 140.82.121.6:443 HTTP/1.1")
 ;;
 
-let test_only_443_is_carried () =
-  check bool "port 80 is refused" true
+(* A rule says which port it permits, so the port is the allowlist's answer
+   rather than a constant this module holds. *)
+let test_the_port_comes_from_the_rule () =
+  check (pair string int) "a rule can name another port"
+    ("registry.internal", 8443)
+    (admitted [ "registry.internal:8443" ] "CONNECT registry.internal:8443 HTTP/1.1");
+  check bool "and then 443 is refused" true
+    (match refusal [ "registry.internal:8443" ] "CONNECT registry.internal:443 HTTP/1.1" with
+     | D.Port_not_allowed { port = 443; allowed = [ 8443 ]; _ } -> true
+     | _ -> false);
+  check bool "an unqualified rule means 443 only" true
     (match refusal [ "github.com" ] "CONNECT github.com:80 HTTP/1.1" with
-     | D.Port_not_allowed 80 -> true
-     | _ -> false);
-  check bool "a high port is refused" true
-    (match refusal [ "github.com" ] "CONNECT github.com:9001 HTTP/1.1" with
-     | D.Port_not_allowed 9001 -> true
-     | _ -> false);
-  check bool "the refusal is a port refusal, not an allowlist miss" true
-    (match refusal [ "*.github.com" ] "CONNECT api.github.com:22 HTTP/1.1" with
-     | D.Port_not_allowed 22 -> true
+     | D.Port_not_allowed { port = 80; allowed = [ 443 ]; _ } -> true
      | _ -> false)
+;;
+
+(* A host on the wrong port and a host nobody listed are different operator
+   mistakes, fixed in different places, so the refusal keeps them apart and
+   names the ports that would have worked. *)
+let test_a_wrong_port_is_not_an_unlisted_host () =
+  check bool "a listed host on a wrong port says so" true
+    (match refusal [ "*.github.com" ] "CONNECT api.github.com:22 HTTP/1.1" with
+     | D.Port_not_allowed { host = "api.github.com"; port = 22; allowed = [ 443 ] } -> true
+     | _ -> false);
+  check bool "an unlisted host stays an allowlist miss" true
+    (is_not_in_allowlist (refusal [ "*.github.com" ] "CONNECT evil.com:22 HTTP/1.1"));
+  check bool "and the message names the permitted port" true
+    (String_util.contains_substring
+       (D.refusal_to_string (refusal [ "github.com" ] "CONNECT github.com:80 HTTP/1.1"))
+       "443")
 ;;
 
 let test_the_request_line_is_parsed_strictly () =
@@ -155,7 +172,9 @@ let () =
             test_a_refusal_never_echoes_the_offending_byte_raw
         ] )
     ; ( "protocol"
-      , [ test_case "only 443 is carried" `Quick test_only_443_is_carried
+      , [ test_case "the port comes from the rule" `Quick test_the_port_comes_from_the_rule
+        ; test_case "a wrong port is not an unlisted host" `Quick
+            test_a_wrong_port_is_not_an_unlisted_host
         ; test_case "the request line is parsed strictly" `Quick
             test_the_request_line_is_parsed_strictly
         ; test_case "a trailing CR is the terminator not the host" `Quick

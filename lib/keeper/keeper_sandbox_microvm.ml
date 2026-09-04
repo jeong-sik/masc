@@ -120,33 +120,74 @@ let work_volume_guest_root = "/masc-work"
    falling back to the default network. *)
 let policy_network_name = "masc-egress-policy"
 
-let network_args_for backend ~dns (mode : Keeper_types_profile_sandbox.network_mode) =
+(* The proxy a policy guest is pointed at: the gateway it sees the host at,
+   and the port that keeper's listener bound. Both are discovered at boot --
+   the gateway from the network, the port from the listener -- so neither is
+   a constant here. *)
+type policy_proxy =
+  { gateway : string
+  ; port : int
+  }
+
+let network_args_for
+      backend
+      ~dns
+      ~(policy_proxy : policy_proxy option)
+      (mode : Keeper_types_profile_sandbox.network_mode)
+  =
   match (backend : Backend.t) with
   | Backend.Apple_container ->
-    Ok
-      (match mode with
-       | Keeper_types_profile_sandbox.Network_none -> [ "--network"; "none" ]
-       | Keeper_types_profile_sandbox.Network_inherit ->
+    (match mode with
+     | Keeper_types_profile_sandbox.Network_none -> Ok [ "--network"; "none" ]
+     | Keeper_types_profile_sandbox.Network_inherit ->
+       Ok
          (match dns with
           | Some server when String.trim server <> "" -> [ "--dns"; String.trim server ]
           | Some _ | None -> [])
-       | Keeper_types_profile_sandbox.Network_policy ->
-         (* Two flags, and both are the policy rather than a default.
+     | Keeper_types_profile_sandbox.Network_policy ->
+       (match policy_proxy with
+        | None ->
+          (* A guest on this network has one route, and it is this proxy. A
+             boot that does not know the address would produce a guest that
+             reaches nothing and cannot say why, so it is refused instead. *)
+          Error
+            "microvm_policy_proxy_unknown: network_mode = \"policy\" needs the \
+             address of this keeper's egress proxy, and the lane has not \
+             reported one. The proxy is forked with the keeper lane; a guest \
+             booting before it binds is refused rather than started with no \
+             route."
+        | Some { gateway; port } ->
+          (* Three things, and all three are the policy rather than a default.
 
-            The host-only network is the enforcement point. Measured
-            2026-09-04 on container 1.3.1: a guest attached to an
-            [--internal] network could not reach 1.1.1.1:443 or a public
-            address by raw TCP, and could reach a listener on the host
-            gateway. So a subprocess carrying its own socket does not get
-            out, which is what [HTTPS_PROXY] alone cannot promise.
+             The host-only network is the enforcement point. Measured
+             2026-09-04 on container 1.3.1: a guest attached to an
+             [--internal] network could not reach 1.1.1.1:443 or a public
+             address by raw TCP, and could reach a listener on the host
+             gateway. So a subprocess carrying its own socket does not get
+             out, which is what proxy environment variables alone cannot
+             promise.
 
-            [--no-dns] leaves the guest with no resolver on purpose. The
-            proxy speaks CONNECT, so the guest hands it a name and the proxy
-            resolves it -- after the allowlist has judged that same name.
-            One resolver, downstream of the matcher, is what closes the gap
-            a null-byte bypass goes through: there is no second parser to
-            disagree with the first. *)
-         [ "--network"; policy_network_name; "--no-dns" ])
+             [--no-dns] leaves the guest with no resolver on purpose. The
+             proxy speaks CONNECT, so the guest hands it a name and the proxy
+             resolves it -- after the allowlist has judged that same name.
+             One resolver, downstream of the matcher, is what closes the gap
+             a null-byte bypass goes through: there is no second parser to
+             disagree with the first.
+
+             The proxy variables are how a client finds the one route that
+             exists. They are convenience, not enforcement: a client that
+             ignores them finds no route rather than a way around. Without
+             them the guest is merely stuck, which is how this lane shipped
+             and did not work. *)
+          Ok
+            ([ "--network"; policy_network_name; "--no-dns" ]
+             @ List.concat_map
+                 (fun (name, value) -> [ "-e"; name ^ "=" ^ value ])
+                 (Egress_proxy_decision.client_env
+                    ~proxy_url:
+                      (* An address rather than a name: the lane passes
+                         --no-dns, so the guest resolves nothing. *)
+                      (Printf.sprintf "http://%s:%d" gateway port)))))
   | Backend.Nerdctl_kata ->
     (match mode with
      | Keeper_types_profile_sandbox.Network_none -> Ok [ "--network"; "none" ]
@@ -699,6 +740,39 @@ let policy_network_present ~listing =
   | _ -> Error "container network list: expected a JSON array"
   | exception Yojson.Json_error detail ->
     Error ("container network list: unparseable JSON: " ^ detail)
+;;
+
+let policy_network_inspect_argv_for backend =
+  match (backend : Backend.t) with
+  | Backend.Apple_container ->
+    Ok
+      (command_argv_for backend
+       @ [ "network"; "inspect"; policy_network_name; "--format"; "json" ])
+  | Backend.Microsandbox | Backend.Nerdctl_kata ->
+    Error
+      (Printf.sprintf
+         "microvm_policy_network_unsupported: %s has no policy lane, so it has no \
+          host-only network to inspect"
+         (Backend.to_string backend))
+;;
+
+(* The gateway a guest on this network sees the host at. Read rather than
+   assumed: container assigns the subnet when the network is created, so a
+   compiled-in 192.168.128.1 would be right until someone had a network
+   already on it. *)
+let policy_network_gateway ~inspect =
+  match Yojson.Safe.from_string inspect with
+  | `List (`Assoc fields :: _) | `Assoc fields ->
+    (match List.assoc_opt "status" fields with
+     | Some (`Assoc status) ->
+       (match List.assoc_opt "ipv4Gateway" status with
+        | Some (`String gateway) when String.trim gateway <> "" -> Ok (String.trim gateway)
+        | Some _ | None ->
+          Error "container network inspect: status.ipv4Gateway missing")
+     | Some _ | None -> Error "container network inspect: status missing")
+  | _ -> Error "container network inspect: expected an object or a one-element array"
+  | exception Yojson.Json_error detail ->
+    Error ("container network inspect: unparseable JSON: " ^ detail)
 ;;
 
 let stop_argv_for backend ~container_name =

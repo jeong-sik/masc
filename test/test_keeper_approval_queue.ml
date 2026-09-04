@@ -4573,6 +4573,7 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
          ; tool_name = Some "external-effect"
          ; phase = Chat_store.Approval_replay_failed
          ; artifact_ref = Some stale_ref
+         ; call_summary = None
          }
        in
        (match
@@ -4605,6 +4606,7 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
             ~keeper_name
             ~approval_id
             ~tool_name:(Some "external-effect")
+            ~call_summary:None
             ~outcome:canonical_outcome
         with
         | Ok () -> ()
@@ -4615,6 +4617,7 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
             ~keeper_name
             ~approval_id
             ~tool_name:(Some "external-effect")
+            ~call_summary:None
             ~outcome:canonical_outcome
         with
         | Ok () -> ()
@@ -4625,6 +4628,7 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
             ~keeper_name
             ~approval_id
             ~tool_name:(Some "external-effect")
+            ~call_summary:None
             ~outcome:(AQ.Replay_failed stale_ref)
         with
         | Error _ -> ()
@@ -5130,10 +5134,46 @@ let test_resolved_audit_event_carries_judge_evidence () =
            (row |> member "exact_attempt"))
 ;;
 
+(* The summary is derived from the persisted input. Every shape the fleet
+   sends has to land on one line or in [None] -- never in a guess -- and the
+   cap may not split a multibyte char. *)
+let test_call_summary_of_input () =
+  let check_summary label expected input =
+    Alcotest.(check (option string)) label expected (AQ.call_summary_of_input input)
+  in
+  let argv text =
+    `Assoc [ "input", `Assoc [ "argv", `List [ `String "bash"; `String "-lc"; `String text ] ] ]
+  in
+  check_summary "argv is joined onto one line"
+    (Some "bash -lc cd repos/masc && git log --oneline -8 -- test/dune")
+    (argv "cd repos/masc && git log --oneline -8 -- test/dune");
+  check_summary "a newline ends the summary" (Some "first line")
+    (argv "first line\nsecond line");
+  check_summary "an identity call names its provider surface"
+    (Some "github/issue_write")
+    (`Assoc [ "provider_id", `String "github"; "remote_name", `String "issue_write" ]);
+  check_summary "an ascii cap cuts at the budget"
+    (Some ("bash -lc " ^ String.make 71 'a'))
+    (argv (String.make 120 'a'));
+  (* The join starts with "bash -lc " (9 bytes), so the budget lands inside the
+     24th Korean char: the boundary backs up to 78 bytes, whole chars only. *)
+  check_summary "the cap does not split a multibyte char"
+    (Some ("bash -lc " ^ String.concat "" (List.init 23 (fun _ -> "가"))))
+    (argv (String.concat "" (List.init 40 (fun _ -> "가"))));
+  check_summary "a blank argv is no summary" None (argv "   ");
+  check_summary "a non-string argv is no summary" None
+    (`Assoc [ "input", `Assoc [ "argv", `List [ `Int 1 ] ] ]);
+  check_summary "an input naming neither argv nor a provider is no summary" None
+    (`Assoc [ "input", `Assoc [ "cwd", `String "/tmp" ] ]);
+  check_summary "a non-object input is no summary" None (`String "tool_execute")
+;;
+
 let () =
   Alcotest.run
     "Keeper_approval_queue"
-    [ ( "nonhierarchical queue"
+    [ ( "call summary"
+      , [ Alcotest.test_case "of input" `Quick test_call_summary_of_input ] )
+    ; ( "nonhierarchical queue"
       , [ Alcotest.test_case
             "durable lock serializes Eio fibers"
             `Quick

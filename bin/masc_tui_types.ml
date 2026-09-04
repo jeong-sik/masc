@@ -317,11 +317,13 @@ type msg_identity =
 (** Request-correlated message history entry. [me_turn_phase], rather than the
     display role or timestamp, is the ordering authority inside one turn. *)
 (* The typed half of a Gate status row: which approval it belongs to, which
-   step it is, and the tool the approval is for. *)
+   step it is, the tool the approval is for, and what the gated call asked
+   for. *)
 type gate_step = {
   gs_approval_id: string;
   gs_phase: string;
   gs_tool: string option;
+  gs_summary: string option;
 }
 
 type msg_entry = {
@@ -451,7 +453,18 @@ let fold_gate_runs entries =
           let tool =
             match newest.me_gate with Some gate -> gate.gs_tool | None -> None
           in
-          (match Masc_tui_gate_text.fold_line ~phases ~tool with
+          (* The summary is a fact about the approval, so every step row of
+             the run carries the same one; the newest is read first only
+             because it is already in hand. *)
+          let summary =
+            List.find_map
+              (fun (entry, _) ->
+                match entry.me_gate with
+                | Some gate -> gate.gs_summary
+                | None -> None)
+              steps
+          in
+          (match Masc_tui_gate_text.fold_line ~phases ~tool ~summary with
            | Some text -> ({ newest with me_text = text }, extra) :: acc
            | None -> (newest, extra) :: acc))
       acc ids
@@ -1970,7 +1983,10 @@ type surface =
    API and permission boundary, but neither is a second top-level
    destination. Verdicts is the far half of Task Review -- one lists what is
    waiting for a ruling and the other what was ruled -- and a top-level tab
-   called "Harness" said neither. *)
+   called "Harness" said neither. Fusion is a ring stop because a
+   deliberation is a destination of its own: the run list is where fusion
+   results are read, and before this stop it was reachable only through the
+   palette or a deep link, so the surface existed but could not be found. *)
 let surface_ring : (surface * string) list =
   [ (Overview, "Overview");
     (Acting, "Activity");
@@ -1979,6 +1995,7 @@ let surface_ring : (surface * string) list =
     (Approvals, "Approvals");
     (Board, "Board");
     (Planning, "Planning");
+    (Fusion, "Fusion");
     (Repositories, "Workspace");
     (Runtime, "Runtime");
     (Config, "Config");
@@ -2001,7 +2018,7 @@ let surface_ring_index (view : surface) =
     match view with
     | Keepers _ -> Keepers Keeper_list
     | Verification | Harness -> Planning
-    | Changes | Connectors | Schedules | Fusion -> Keepers Keeper_list
+    | Changes | Connectors | Schedules -> Keepers Keeper_list
     | Lanes -> Runtime
     | Clients -> Runtime
     | Code -> Repositories
@@ -4958,7 +4975,6 @@ let palette_entries (state : state) =
   @ [ "go Lanes", Palette_goto Lanes ]
   @ [ "go Clients", Palette_goto Clients ]
   @ [ "go Schedules", Palette_goto Schedules ]
-  @ [ "go Fusion", Palette_goto Fusion ]
   @ [ "go Code", Palette_goto Code ]
   @ [ "go Resources", Palette_goto Resources ]
   @ [ "go Tools", Palette_goto Tools ]

@@ -3643,9 +3643,18 @@ let empty_fusion_tool_trace_json =
 
 let fusion_recorded_detail_json ?(source = "fusion")
     ?(origin_run_id = "fusion-recorded-501")
-    ?(tool_trace = empty_fusion_tool_trace_json) () =
+    ?(tool_trace = empty_fusion_tool_trace_json)
+    ?(judges = None) () =
   let run_id = "fusion-recorded-501" in
   let tool_trace_fields = [ "tool_trace", tool_trace ] in
+  (* RFC-0284 의 additive 배열. [None]이면 키 자체를 실어 보내지 않는다 -- 그
+     이전의 post 가 실제로 그렇게 생겼고, 디코더가 [] 로 답하는 호환을 여기서
+     핀으로 잡는다. *)
+  let judges_fields =
+    match judges with
+    | None -> []
+    | Some nodes -> [ ("judges", `List nodes) ]
+  in
   `Assoc
     [ "generated_at", `String "2026-08-24T09:00:00Z"
     ; "run", fusion_run_json run_id
@@ -3688,7 +3697,7 @@ let fusion_recorded_detail_json ?(source = "fusion")
                             ; "synthesis", `String "judge-reason-501"
                             ] )
                       ]
-                       @ tool_trace_fields) )
+                       @ judges_fields @ tool_trace_fields) )
                 ] )
           ] )
     ]
@@ -3803,6 +3812,126 @@ let test_decode_fusion_list_and_exact_detail () =
         (String.starts_with
            ~prefix:"runs[0]: unknown fusion topology \"recursive\""
            detail)
+
+(* RFC-0284 judge nodes: pre-RFC posts carry no array and decode as [],
+   JoJ nodes keep role/identity/outcome, and an untaught role fails its
+   node instead of passing as something it is not. *)
+let test_decode_fusion_judge_nodes () =
+  (match
+     Tui_decode.decode_fusion_detail (fusion_recorded_detail_json ())
+   with
+   | Error err -> Alcotest.failf "old-post detail decode failed: %s" err
+   | Ok detail ->
+       (match detail.Tui_decode.fud_evidence with
+        | Some evidence ->
+            Alcotest.(check int) "a post from before the RFC has no nodes" 0
+              (List.length evidence.Tui_decode.fe_judges)
+        | None -> Alcotest.fail "recorded evidence lost its Board post"));
+  let joj_nodes =
+    [ `Assoc
+        [ "role", `String "first"
+        ; "identity", `String "ollama_cloud.minimax-m3"
+        ; "status", `String "synthesized"
+        ; "decision", `String "answer"
+        ; "resolved_answer", `String "first-resolved-501"
+        ; "synthesis", `String "first-synthesis-501"
+        ; "input_tokens", `Int 100
+        ; "output_tokens", `Int 200
+        ]
+    ; `Assoc
+        [ "role", `String "first"
+        ; "identity", `String "ollama_cloud.deepseek-v4-pro"
+        ; "status", `String "failed"
+        ; "error", `String "judge body timed out"
+        ; "failure_code", `String "timeout"
+        ; "input_tokens", `Int 300
+        ; "output_tokens", `Int 0
+        ; "elapsed_s", `Null
+        ; "timed_out", `Bool true
+        ]
+    ; `Assoc
+        [ "role", `String "meta"
+        ; "identity", `String "meta"
+        ; "status", `String "synthesized"
+        ; "decision", `String "answer"
+        ; "resolved_answer", `String "meta-resolved-501"
+        ; "synthesis", `String "meta-synthesis-501"
+        ; "input_tokens", `Int 400
+        ; "output_tokens", `Int 500
+        ]
+    ]
+  in
+  (match
+     Tui_decode.decode_fusion_detail
+       (fusion_recorded_detail_json ~judges:(Some joj_nodes) ())
+   with
+   | Error err -> Alcotest.failf "JoJ detail decode failed: %s" err
+   | Ok detail ->
+       (match detail.Tui_decode.fud_evidence with
+        | Some evidence ->
+            (match evidence.Tui_decode.fe_judges with
+             | [ first_ok; first_failed; meta ] ->
+                 (match
+                    (first_ok.Tui_decode.fjn_role, first_ok.Tui_decode.fjn_identity)
+                  with
+                  | Tui_decode.Judge_first, "ollama_cloud.minimax-m3" -> ()
+                  | role, identity ->
+                      Alcotest.failf
+                        "first node decoded as (%s, %s)"
+                        (match role with
+                         | Tui_decode.Judge_first -> "first"
+                         | Tui_decode.Judge_meta -> "meta"
+                         | _ -> "other")
+                        identity);
+                 (match first_ok.Tui_decode.fjn_outcome with
+                  | Tui_decode.Judge_node_synthesized s ->
+                      Alcotest.(check string) "first lens keeps its resolution"
+                        "first-resolved-501" s.fjno_resolved_answer;
+                      Alcotest.(check int) "first lens keeps its usage" 200
+                        s.fjno_output_tokens
+                  | Tui_decode.Judge_node_failed _ ->
+                      Alcotest.fail "synthesized first decoded as failed");
+                 (match first_failed.Tui_decode.fjn_outcome with
+                  | Tui_decode.Judge_node_failed f ->
+                      Alcotest.(check bool) "a timeout says so" true
+                        f.fjno_timed_out;
+                      Alcotest.(check (option (float 0.001)))
+                        "a failure with no clock reads as none" None
+                        f.fjno_elapsed_s
+                  | Tui_decode.Judge_node_synthesized _ ->
+                      Alcotest.fail "failed first decoded as synthesized");
+                 Alcotest.(check string) "the canonical judge is untouched"
+                   "judge-reason-501"
+                   (match evidence.Tui_decode.fe_judge with
+                    | Tui_decode.Fusion_judge_synthesized j -> j.fj_reason
+                    | Tui_decode.Fusion_judge_failed _ -> "failed");
+                 (match meta.Tui_decode.fjn_role with
+                  | Tui_decode.Judge_meta -> ()
+                  | _ -> Alcotest.fail "meta node lost its role")
+             | nodes ->
+                 Alcotest.failf "expected three judge nodes, got %d"
+                   (List.length nodes))
+        | None -> Alcotest.fail "recorded evidence lost its Board post"));
+  let untaught_role =
+    `Assoc
+      [ "role", `String "jury"
+      ; "identity", `String "jury"
+      ; "status", `String "synthesized"
+      ; "decision", `String "answer"
+      ; "resolved_answer", `String "x"
+      ; "synthesis", `String "x"
+      ; "input_tokens", `Int 0
+      ; "output_tokens", `Int 0
+      ]
+  in
+  (match
+     Tui_decode.decode_fusion_detail
+       (fusion_recorded_detail_json ~judges:(Some [ untaught_role ]) ())
+   with
+   | Ok _ -> Alcotest.fail "an untaught judge role decoded"
+   | Error detail ->
+       Alcotest.(check bool) "the closed role set names what it rejected" true
+         (String.starts_with ~prefix:"unknown fusion judge role \"jury\"" detail))
 
 let test_decode_fusion_progress_and_completion_summary () =
   let running =
@@ -7165,6 +7294,8 @@ let () =
       [
         Alcotest.test_case "keeps typed origin and panel-to-judge order" `Quick
           test_decode_fusion_list_and_exact_detail;
+        Alcotest.test_case "decodes RFC-0284 judge nodes" `Quick
+          test_decode_fusion_judge_nodes;
         Alcotest.test_case "keeps live progress and completion summary" `Quick
           test_decode_fusion_progress_and_completion_summary;
         Alcotest.test_case "keeps actual Tool events and coverage gaps" `Quick

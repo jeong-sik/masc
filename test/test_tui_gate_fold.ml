@@ -26,15 +26,16 @@ let entry ?gate role text =
   ; me_at = 0.
   }
 
-let step ?(approval = "appr_1") ?(tool = "Execute") phase =
+let step ?(approval = "appr_1") ?(tool = "Execute") ?(summary = None) phase =
   entry
     ~gate:
       { Types.gs_approval_id = approval
       ; gs_phase = phase
       ; gs_tool = Some tool
+      ; gs_summary = summary
       }
     Types.Message_status
-    (Gate_text.lifecycle_line ~phase ~tool:(Some tool))
+    (Gate_text.lifecycle_line ~phase ~tool:(Some tool) ~summary)
 
 let said text = entry Types.Message_keeper text
 let rows entries = List.map (fun e -> (e, ())) entries
@@ -43,7 +44,7 @@ let fold entries = describe (Types.fold_gate_runs (rows entries))
 
 let test_one_approval_is_one_row () =
   check (list string) "the whole run says where the effect ended up"
-    [ "Execute 적용 완료 · 이어서 진행" ]
+    [ "Execute · 미뤘던 호출 적용됨 · 턴 이어서 진행" ]
     (fold
        [ step "requested"
        ; step "resolved_approved"
@@ -51,18 +52,29 @@ let test_one_approval_is_one_row () =
        ; step "continuation_recorded"
        ])
 
+let test_the_summary_names_the_deferred_call () =
+  (* Every step row of one approval carries the same summary, so the folded
+     line says what was gated even though the request row itself is gone. *)
+  check (list string) "the folded line keeps the call's own words"
+    [ "tool_execute · git reflog --date=iso | head -30 · 미뤘던 호출 적용됨" ]
+    (fold
+       [ step ~summary:(Some "git reflog --date=iso | head -30") "requested"
+       ; step ~summary:(Some "git reflog --date=iso | head -30") "resolved_approved"
+       ; step ~summary:(Some "git reflog --date=iso | head -30") "replay_applied"
+       ])
+
 let test_a_correction_supersedes_the_row_it_corrects () =
   (* A replay correction is a second row for the same approval carrying the
      canonical phase. Ranking by severity kept showing the phase the
      correction exists to overturn. *)
   check (list string) "the canonical phase is the one drawn"
-    [ "Execute 적용 완료" ]
+    [ "Execute · 미뤘던 호출 적용됨" ]
     (fold
        [ step "resolved_approved"; step "replay_failed"; step "replay_applied" ])
 
 let test_a_replay_outranks_the_resolution_before_it () =
   check (list string) "the outcome, not how the Gate answered"
-    [ "Execute 적용 여부 불명 · 대상을 직접 확인하세요" ]
+    [ "Execute · 적용 여부 불명 · 대상을 직접 확인하세요" ]
     (fold [ step "requested"; step "resolved_approved"; step "replay_indeterminate" ])
 
 let test_a_problem_outranks_a_later_step () =
@@ -70,7 +82,7 @@ let test_a_problem_outranks_a_later_step () =
      has to see that the effect never landed. The turn did carry on, so that
      stays on the line -- it just does not get to be the whole line. *)
   check (list string) "the failure is the outcome, not the newest step"
-    [ "Execute 적용 실패 · 이어서 진행" ]
+    [ "Execute · 적용 실패 · 턴 이어서 진행" ]
     (fold
        [ step "resolved_approved"
        ; step "replay_failed"
@@ -79,15 +91,15 @@ let test_a_problem_outranks_a_later_step () =
 
 let test_a_waiting_request_keeps_its_own_row () =
   check (list string) "a request still waiting is not folded away"
-    [ "Execute 승인 대기 · 이 호출은 승인될 때까지 실행되지 않습니다"
+    [ "Execute · 판정 중 · 이 호출은 미뤄짐"
     ; "말"
-    ; "Execute 적용 완료"
+    ; "Execute · 미뤘던 호출 적용됨"
     ]
     (fold [ step "requested"; said "말"; step "resolved_approved"; step "replay_applied" ])
 
 let test_two_approvals_stay_two_rows () =
   check (list string) "back to back approvals do not merge"
-    [ "Execute 적용 완료"; "Write 승인 거절" ]
+    [ "Execute · 미뤘던 호출 적용됨"; "Write · 승인 거절" ]
     (fold
        [ step ~approval:"appr_1" "resolved_approved"
        ; step ~approval:"appr_1" "replay_applied"
@@ -106,6 +118,8 @@ let () =
   run "tui_gate_fold"
     [ ( "fold"
       , [ test_case "one approval is one row" `Quick test_one_approval_is_one_row
+        ; test_case "the summary names the deferred call" `Quick
+            test_the_summary_names_the_deferred_call
         ; test_case "a problem outranks a later step" `Quick
             test_a_problem_outranks_a_later_step
         ; test_case "a correction supersedes the row it corrects" `Quick

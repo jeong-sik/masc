@@ -132,34 +132,71 @@ let parse raw =
     else Ok (Name labels)
 ;;
 
-type rule =
+type rule_host =
   | Exact of t
   | Subdomains_of of string list
       (** [*.example.com] as the labels of its apex. *)
 
-let rule_to_string = function
+type rule =
+  { rule_host : rule_host
+  ; port : int
+  }
+
+let default_rule_port = 443
+let rule_port rule = rule.port
+
+let rule_host_to_string = function
   | Exact host -> to_string host
   | Subdomains_of labels -> "*." ^ String.concat "." labels
 ;;
 
-let rule_of_string raw =
-  let wildcard_prefix = "*." in
-  let prefix_length = String.length wildcard_prefix in
-  if
-    String.length raw > prefix_length
-    && String.equal (String.sub raw 0 prefix_length) wildcard_prefix
-  then
-    let apex = String.sub raw prefix_length (String.length raw - prefix_length) in
-    match normalize apex with
-    | Error _ as error -> error
-    | Ok labels -> Ok (Subdomains_of labels)
-  else
-    match parse raw with
-    | Error _ as error -> error
-    | Ok host -> Ok (Exact host)
+let rule_to_string rule =
+  if Int.equal rule.port default_rule_port then rule_host_to_string rule.rule_host
+  else Printf.sprintf "%s:%d" (rule_host_to_string rule.rule_host) rule.port
 ;;
 
-let equal_rule left right =
+(* The port is split off here, at the last colon, and nowhere else. A second
+   splitter could disagree with this one about which bytes are the host, and
+   a disagreement about that boundary is what an allowlist bypass is. The
+   host parser refuses a colon outright, so a host that kept one would be
+   refused rather than silently re-read. *)
+let split_port raw =
+  match String.rindex_opt raw ':' with
+  | None -> Ok (raw, default_rule_port)
+  | Some index ->
+    let host = String.sub raw 0 index in
+    let port_text = String.sub raw (index + 1) (String.length raw - index - 1) in
+    (match int_of_string_opt port_text with
+     | Some port when port > 0 && port <= 65535 -> Ok (host, port)
+     (* Not a port, so the colon belongs to the host -- and a host with a
+        colon in it is refused by the host parser, which is where that
+        refusal should come from. *)
+     | Some _ | None -> Ok (raw, default_rule_port))
+;;
+
+let rule_of_string raw =
+  match split_port raw with
+  | Error _ as error -> error
+  | Ok (host_text, port) ->
+    let wildcard_prefix = "*." in
+    let prefix_length = String.length wildcard_prefix in
+    if
+      String.length host_text > prefix_length
+      && String.equal (String.sub host_text 0 prefix_length) wildcard_prefix
+    then (
+      let apex =
+        String.sub host_text prefix_length (String.length host_text - prefix_length)
+      in
+      match normalize apex with
+      | Error _ as error -> error
+      | Ok labels -> Ok { rule_host = Subdomains_of labels; port })
+    else (
+      match parse host_text with
+      | Error _ as error -> error
+      | Ok host -> Ok { rule_host = Exact host; port })
+;;
+
+let equal_rule_host left right =
   match left, right with
   | Exact left, Exact right ->
     (match left, right with
@@ -168,6 +205,10 @@ let equal_rule left right =
      | Name _, Ip_literal _ | Ip_literal _, Name _ -> false)
   | Subdomains_of left, Subdomains_of right -> List.equal String.equal left right
   | Exact _, Subdomains_of _ | Subdomains_of _, Exact _ -> false
+;;
+
+let equal_rule left right =
+  Int.equal left.port right.port && equal_rule_host left.rule_host right.rule_host
 ;;
 
 let pp_rule formatter rule = Format.pp_print_string formatter (rule_to_string rule)
@@ -185,8 +226,8 @@ let rec labels_end_with ~suffix labels =
     | _ :: rest -> labels_end_with ~suffix rest
 ;;
 
-let matches rule host =
-  match rule, host with
+let matches_host rule_host host =
+  match rule_host, host with
   | Exact (Ip_literal expected), Ip_literal actual -> String.equal expected actual
   | Exact (Name expected), Name actual -> List.equal String.equal expected actual
   | Exact (Ip_literal _), Name _ | Exact (Name _), Ip_literal _ -> false
@@ -199,4 +240,19 @@ let matches rule host =
     List.length actual > List.length apex && labels_end_with ~suffix:apex actual
 ;;
 
-let admits rules host = List.exists (fun rule -> matches rule host) rules
+let matches rule host ~port =
+  Int.equal rule.port port && matches_host rule.rule_host host
+;;
+
+let admits rules host ~port = List.exists (fun rule -> matches rule host ~port) rules
+
+let admits_host rules host =
+  List.exists (fun rule -> matches_host rule.rule_host host) rules
+;;
+
+let ports_for_host rules host =
+  rules
+  |> List.filter_map (fun rule ->
+       if matches_host rule.rule_host host then Some rule.port else None)
+  |> List.sort_uniq Int.compare
+;;

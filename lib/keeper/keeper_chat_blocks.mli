@@ -110,6 +110,13 @@ val status_kind_connector_text : status_kind -> string
 (** Channel-facing presentation for a typed status. This is delivery UI text,
     not assistant output, and must not be persisted as assistant content. *)
 
+val status_kind_to_label : status_kind -> string
+(** Stable persistence label shared by the chat store and the RFC-0412
+    canonical event journal. *)
+
+val status_kind_of_label : string -> status_kind option
+(** Inverse of {!status_kind_to_label}; [None] on any other label. *)
+
 type connector_projection =
   | Connector_text of string
   | Connector_status of status_block

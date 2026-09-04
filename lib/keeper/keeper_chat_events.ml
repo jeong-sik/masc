@@ -157,11 +157,48 @@ type keeper_chat_event =
       ; result_summary : string option
       }
 
-let create () = Eio.Stream.create 512
+type t =
+  { stream : keeper_chat_event Eio.Stream.t
+  ; on_publish : (seq:int -> keeper_chat_event -> unit) option
+  ; mutable next_seq : int
+  }
 
-let publish stream event = Eio.Stream.add stream event
+let create ?on_publish () =
+  { stream = Eio.Stream.create 512; on_publish; next_seq = 0 }
+;;
 
-let subscribe stream = Eio.Stream.take stream
+(* [publish] is the single choke point every turn event passes through — route
+   lifecycle, bridge-translated deltas, and terminal paths all call it. The
+   hook runs BEFORE the bus add so the canonical journal records what the turn
+   produced even when a full bus suspends the add. The ordering guarantee rests
+   on one invariant: every [publish] for a given bus runs in the single
+   publisher fiber (the process_single_turn / consume_worker_events call tree
+   in server_routes_http_keeper_stream.ml), so seq assignment → hook → bus add
+   executes sequentially within that fiber and journal order == seq order ==
+   bus order with no extra lock. The journal hook's blocking Unix I/O is
+   offloaded via Fs_compat.run_blocking_private_file_transaction
+   (Eio_unix.run_in_systhread when called from an Eio fiber), which suspends
+   only the calling fiber — that keeps sibling fibers responsive but is not
+   what makes the ordering safe. *)
+let publish t event =
+  (match t.on_publish with
+   | None -> ()
+   | Some hook ->
+     let seq = t.next_seq in
+     t.next_seq <- seq + 1;
+     (try hook ~seq event with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Log.Keeper.error
+          "keeper_chat_events: on_publish hook failed seq=%d: %s"
+          seq
+          (Printexc.to_string exn)));
+  Eio.Stream.add t.stream event
+;;
+
+let subscribe t = Eio.Stream.take t.stream
+
+let take_nonblocking t = Eio.Stream.take_nonblocking t.stream
 
 let json_opt key value =
   match value with

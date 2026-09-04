@@ -480,6 +480,64 @@ let tool_call ?(input = Some "input") ?(output = Some "output") tool_name
   ; output_fingerprint = output
   }
 
+(* The clock axis. [repeated_exact_tool_call] needs the output fingerprint to
+   stand still as proof that nothing advanced, so a tool whose result is a
+   timestamp escapes it by construction: live, one keeper made 280 of a turn's
+   281 tool calls to keeper_time_now and neither the tool axis nor the text
+   axis saw it (masc #33021). This axis drops the output and requires the
+   repeats to be adjacent instead. *)
+let test_repeated_tool_call_input_boundary () =
+  let detect =
+    Masc.Keeper_agent_run.For_testing.repeated_tool_call_input ~threshold:5
+  in
+  let clock n =
+    List.init n (fun i ->
+      tool_call ~output:(Some (Printf.sprintf "11:07:%02dZ" i)) "keeper_time_now")
+  in
+  check
+    (option (pair string int))
+    "a moving result no longer hides the loop"
+    (Some ("keeper_time_now", 5))
+    (detect (clock 5));
+  check
+    (option (pair string int))
+    "the exact axis cannot see the same calls"
+    None
+    (Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call
+       ~threshold:5
+       (clock 5));
+  check
+    (option (pair string int))
+    "four consecutive is still ordinary work"
+    None
+    (detect (clock 4));
+  check
+    (option (pair string int))
+    "a different input breaks the streak"
+    None
+    (detect
+       (tool_call ~input:(Some "a") "Execute"
+        :: tool_call ~input:(Some "b") "Execute"
+        :: List.init 4 (fun _ -> tool_call ~input:(Some "a") "Execute")));
+  check
+    (option (pair string int))
+    "non-adjacent repeats are re-reads, not a loop"
+    None
+    (detect
+       [ tool_call ~input:(Some "a") "Read"
+       ; tool_call ~input:(Some "b") "Read"
+       ; tool_call ~input:(Some "a") "Read"
+       ; tool_call ~input:(Some "b") "Read"
+       ; tool_call ~input:(Some "a") "Read"
+       ; tool_call ~input:(Some "b") "Read"
+       ]);
+  check
+    (option (pair string int))
+    "missing fingerprints never guess"
+    None
+    (detect (List.init 5 (fun _ -> tool_call ~input:None "keeper_time_now")))
+;;
+
 let test_repeated_exact_tool_call_boundary () =
   let detect =
     Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
@@ -1049,6 +1107,8 @@ let () =
             test_applied_gate_replay_seeds_terminal_settlement;
           test_case "repeated exact tool call boundary" `Quick
             test_repeated_exact_tool_call_boundary;
+          test_case "repeated tool input boundary" `Quick
+            test_repeated_tool_call_input_boundary;
           test_case "repeated assistant text boundary" `Quick
             test_repeated_assistant_text_boundary;
           test_case "autonomous yield boundary contract" `Quick

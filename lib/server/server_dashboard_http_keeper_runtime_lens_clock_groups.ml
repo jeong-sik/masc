@@ -46,7 +46,6 @@ type clock_group_acc =
 let clock_group_terminal_event group_type event =
   match group_type, event with
   | "turn", ("turn_finished" | "pre_dispatch_blocked") -> true
-  | "provider_attempt", "provider_attempt_finished" -> true
   | "tool_batch", "provider_lane_resolved" -> true
   | "checkpoint", "checkpoint_saved" -> true
   | "event_bus_correlation", "event_bus_correlated" -> true
@@ -153,7 +152,6 @@ let runtime_lens_clock_groups_json scan =
     in
     update_group "turn" turn_group_id edge;
     add_if_present edge "tool_batch" "tool_batch_id";
-    add_if_present edge "provider_attempt" "provider_attempt_id";
     add_if_present edge "checkpoint" "checkpoint_id";
     add_if_present edge "event_bus_correlation" "event_bus_correlation_id");
   !ordered_keys
@@ -232,14 +230,6 @@ let runtime_lens_clock_group_gaps scan =
   []
   |> (fun gaps ->
        match
-         clock_group_open_gap ~code:"clock_provider_group_open"
-           ~severity:(if scan.has_terminal then "bad" else "warn") ~lane:"provider"
-           ~label:"provider_attempt" (groups_of_type "provider_attempt")
-       with
-       | Some gap -> gap :: gaps
-       | None -> gaps)
-  |> (fun gaps ->
-       match
          clock_group_open_gap ~code:"clock_checkpoint_group_open" ~severity:"warn"
            ~lane:"agent_core_agent" ~label:"checkpoint" (groups_of_type "checkpoint")
        with
@@ -290,33 +280,11 @@ let runtime_lens_clock_gaps scan =
            gaps
        else gaps)
   |> (fun gaps ->
-       if scan.provider_started_count > scan.provider_finished_count then
-         add ~code:"clock_provider_attempt_unfinished"
-           ~severity:(if scan.has_terminal then "bad" else "warn")
-           ~lane:"provider"
-           ~detail:
-             (Printf.sprintf
-                "provider attempts started=%d finished=%d"
-                scan.provider_started_count scan.provider_finished_count)
-           gaps
-       else gaps)
-  |> (fun gaps ->
-       if scan.provider_finished_count > scan.provider_started_count then
-         add ~code:"clock_provider_attempt_finished_without_start"
-           ~severity:"bad" ~lane:"provider"
-           ~detail:
-             (Printf.sprintf
-                "provider attempts finished=%d started=%d"
-                scan.provider_finished_count scan.provider_started_count)
-           gaps
-       else gaps)
-  |> (fun gaps ->
-       if scan.provider_started_count > 0 && scan.context_injected_count = 0
+       if scan.has_terminal && scan.context_injected_count = 0
        then
          add ~code:"clock_context_injection_missing" ~severity:"warn"
            ~lane:"memory_context"
-           ~detail:
-             "provider attempt exists without a context_injected clock edge"
+           ~detail:"turn finished without a context_injected clock edge"
            gaps
        else gaps)
   |> (fun gaps ->

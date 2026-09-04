@@ -53,7 +53,6 @@ type source_clock =
   | Wall
   | Monotonic
   | Logical
-  | Provider
   | Event_bus
 
 (** {2 F5: Clock separation policy}
@@ -84,7 +83,6 @@ val clock_refs :
   ?started_at:string ->
   ?finished_at:string ->
   ?elapsed_ms:int ->
-  ?provider_attempt_id:string ->
   ?tool_batch_id:string ->
   ?checkpoint_id:string ->
   ?event_bus_correlation_id:string ->
@@ -163,16 +161,6 @@ val path_for_trace : Workspace.config -> keeper_name:string -> trace_id:string -
 
 val append : Workspace.config -> t -> (unit, string) result
 val append_best_effort : ?site:string -> Workspace.config -> t -> unit
-
-val append_unfinished_provider_attempt_finished_best_effort :
-  ?site:string ->
-  Workspace.config ->
-  turn_context ->
-  status:string ->
-  error:string ->
-  ?exception_kind:string ->
-  unit ->
-  unit
 
 (** Extract the source_clock from a manifest's decision JSON. *)
 val source_clock_from_manifest : t -> source_clock option

@@ -49,6 +49,7 @@ let stream_payload_exn
   ; channel_workspace_id
   ; attachments
   ; direct_message
+  ; since_seq = None
   }
 
 let rec remove_tree path =
@@ -335,6 +336,20 @@ let test_parse_keeper_chat_stream_request_rejects_unknown_user_block_type () =
       check string "validation message"
         {|unsupported user_blocks type "tool_result": expected text, image, document, or audio|}
         err
+
+(* #32984: two attachments sharing an id both parse, but a user_blocks
+   reference reaches only the first -- the other is silently shadowed, the
+   same silent-drop class as an unreferenced attachment. Reject the duplicate
+   at the parse boundary, fail closed like the orphan check, naming the id. *)
+let test_parse_keeper_chat_stream_request_rejects_duplicate_attachment_id () =
+  let body =
+    {|{"request_id":"kmsg-dup-id","name":"luna","message":"compare these","attachments":[{"id":"att-img","type":"image","name":"one.png","size":1,"mime_type":"image/png","data":"abc"},{"id":"att-img","type":"image","name":"two.png","size":1,"mime_type":"image/png","data":"def"}],"user_blocks":[{"type":"image","attachment_id":"att-img","name":"one.png","mime_type":"image/png","size":1}]}|}
+  in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok _ -> fail "expected a duplicate attachment id to be rejected"
+  | Error err ->
+      check bool "duplicated id is named" true
+        (string_contains err {|"att-img"|})
 
 (* #32845: attachments are a byte store; only user_blocks media blocks
    referencing an attachment_id reach AGENT_CORE. An attachment nothing
@@ -3559,6 +3574,8 @@ let () =
             test_parse_keeper_chat_stream_request_rejects_unknown_user_block_type;
           test_case "stream request rejects orphan attachment" `Quick
             test_parse_keeper_chat_stream_request_rejects_orphan_attachment;
+          test_case "stream request rejects duplicate attachment id" `Quick
+            test_parse_keeper_chat_stream_request_rejects_duplicate_attachment_id;
           test_case "stream request rejects orphan attachment with empty user blocks"
             `Quick
             test_parse_keeper_chat_stream_request_rejects_orphan_attachment_with_empty_user_blocks;

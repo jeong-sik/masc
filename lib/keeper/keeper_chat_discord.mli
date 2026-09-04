@@ -39,7 +39,7 @@ val adapter_loop :
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   token:string ->
   channel_id:string ->
-  events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
+  events:Keeper_chat_events.t ->
   ?base_url:string ->
   ?on_send_result:((unit, error) result -> unit) ->
   unit ->
@@ -104,7 +104,7 @@ module For_testing : sig
   val adapter_loop :
     token:string ->
     channel_id:string ->
-    events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
+    events:Keeper_chat_events.t ->
     post_message:(content:string -> (string, error) result) ->
     edit_message:(message_id:string -> content:string -> (unit, error) result) ->
     send_message:(content:string -> (unit, error) result) ->

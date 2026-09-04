@@ -16,9 +16,11 @@ type review_request =
     (RFC-0361 D1).
 
     Stated per review rather than defaulted, because the two cases differ in
-    what a verdict means. With [No_lookup_surface] the submitter's references
-    are the upper bound of what could be checked, and an approval says only
-    that the submitted excerpt reads as real work. This module deliberately
+    what a verdict means. With [No_lookup_surface] nothing the request asserts
+    can be checked against the producer's tree: a completion is judged on the
+    submitted excerpt alone, and a stop on its stated reason alone. Both are
+    described to the judge in their own question's words, so the surface is
+    the same value and the prose about it is not. This module deliberately
     does not build the surface itself: the tools that read a producer's tree
     belong above the containment primitives, not inside the review protocol.
     Every advertised filesystem tool is bound to the one producer named by the
@@ -109,15 +111,42 @@ val run
     template and calls this directly: the two lanes judge different things and
     share no prompt variables. *)
 
+(** Which question the completion authority is being asked, and the material
+    that question needs. The Task's [verification_intent] chooses it.
+
+    One value rather than two optional arguments because the two prompts want
+    opposite things from the same contract: the completion block demands
+    evidence for every item, the cancellation block offers the items as
+    context for a producer asking not to do them. Passed separately, a
+    cancellation could be rendered through the completion prompt with its
+    contract attached — which is what happened, and refused every cancellation
+    of a contracted Task for not finishing the work it asks not to finish
+    (#33052). *)
+type verdict_question =
+  | Completion of
+      { completion_contract : string list option
+      ; required_evidence : string list
+      ; few_shot_block : string
+            (** Operator disagreements returned to the judge as examples. Only
+                the completion prompt has a slot for it, so it rides in this
+                arm: as a separate argument it was accepted for a cancellation
+                and dropped in silence, and the ledger read behind it ran for
+                nothing. *)
+      }
+  | Cancellation of
+      { reason : string
+            (** The producer's stated why. The whole of what is judged: a stop
+                submits no artifacts and is not refused for having none. *)
+      ; contract_context : string list
+      }
+
 val review
   :  ?evaluator_runtime:string
   -> ?generator_runtime:string
-  -> ?completion_contract:string list
-  -> ?required_evidence:string list
   -> ?on_verdict:(review_result -> unit)
   -> ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)
-  -> ?few_shot_block:string
   -> ?sw:Eio.Switch.t option
+  -> question:verdict_question
   -> lookup:lookup_surface
   -> base_path:string
   -> review_request
@@ -132,12 +161,14 @@ val review
     attempt. An explicit [~evaluator_runtime] is a single-slot lane with no
     failover. *)
 
-(** Render {!Prompt_names.verification}, the task completion review prompt.
+(** Render the review prompt the [question] selects: {!Prompt_names.verification}
+    for a completion, {!Prompt_names.verification_cancellation} for a stop. The
+    lookup surface is described in that question's terms too, so a cancellation
+    is not handed the completion wording about submitted snapshots.
+
     There is no inline fallback prompt; an error keeps the Task nonterminal. *)
 val build_prompt
-  :  ?few_shot_block:string
-  -> ?completion_contract:string list
-  -> ?required_evidence:string list
+  :  question:verdict_question
   -> lookup:lookup_surface
   -> review_request
   -> (string, string) result

@@ -9,7 +9,9 @@
      stub endpoint CLI, pinning that a staged paste lands at the endpoint's
      workspace root under its bare name -- the same place the keeper's Read
      of that name resolves to ([Keeper_remote_path] translation, pinned
-     separately in test_keeper_remote_path);
+     separately in test_keeper_remote_path) -- and that "delivered" is only
+     claimed after the read-back through the same endpoint finds the same
+     byte count (a mismatch or a failed read-back retains the paste);
    - [deliver_for_turn]'s profile gate: no-op for Shared_mount, typed
      retention when an endpoint cannot be acquired;
    - the writer/matcher naming contract across the bin/lib boundary;
@@ -119,7 +121,9 @@ let test_delivers_only_staged_pastes () =
 let test_failed_write_retains_the_staged_paste () =
   with_staging_dir (fun dir ->
     write_staged dir paste_a "paste body";
-    let write ~file_name:_ ~content:_ = Error "endpoint unreachable" in
+    let write ~file_name:_ ~content:_ =
+      Error (Delivery.Remote_write_failed "endpoint unreachable")
+    in
     match Delivery.deliver_staged_pastes ~write ~staging_dir:dir with
     | [ Delivery.Retained { file_name; reason; content } ] ->
       check string "the retained file is the staged paste" paste_a file_name;
@@ -127,7 +131,8 @@ let test_failed_write_retains_the_staged_paste () =
        | Delivery.Remote_write_failed detail ->
          check string "the endpoint's answer is the retained evidence"
            "endpoint unreachable" detail
-       | Delivery.Endpoint_unavailable _ | Delivery.Staging_read_failed _ ->
+       | Delivery.Endpoint_unavailable _ | Delivery.Staging_read_failed _
+       | Delivery.Readback_mismatch _ ->
          fail "the staged file was readable; the endpoint refused the write");
       check (option string) "the text rides along for the fallback"
         (Some "paste body") content;
@@ -204,7 +209,8 @@ let test_endpoint_owned_without_factory_retains () =
       check string "the retained file is the staged paste" paste_a file_name;
       (match reason with
        | Delivery.Endpoint_unavailable _ -> ()
-       | Delivery.Staging_read_failed _ | Delivery.Remote_write_failed _ ->
+       | Delivery.Staging_read_failed _ | Delivery.Remote_write_failed _
+       | Delivery.Readback_mismatch _ ->
          fail "no endpoint was ever acquired, so no write was attempted");
       check (option string) "the text rides along for the fallback"
         (Some "paste body") content;
@@ -219,8 +225,13 @@ let test_endpoint_owned_without_factory_retains () =
 
 (* Same stub contract as test_keeper_tool_filesystem_remote_write: the stub
    decodes the framed request, records it beside itself, and answers with
-   the trailer for exit 0. Here the recorded frame pins where the delivery
-   lands on the endpoint. *)
+   the trailer for the payload's exit code. Here the stub is also the fake
+   endpoint's filesystem: a write payload's stdin is stored by basename, and
+   a read-back request answers the stored byte count — so the delivery's
+   read-back verification is exercised end to end. [mode] scripts the
+   failure classes: ["truncate"] stores one byte short (the write reports
+   success while the endpoint holds fewer bytes), ["fail-readback"] answers
+   the read-back with exit 1. *)
 
 let write_all fd content =
   let bytes = Bytes.unsafe_of_string content in
@@ -252,12 +263,13 @@ let save path content =
 
 let stub_main () =
   let frame_path = Sys.argv.(2) in
+  let mode = if Array.length Sys.argv > 3 then Sys.argv.(3) else "ok" in
   let header = read_exact Unix.stdin 8 in
   let body_len = Bytes.get_int64_be (Bytes.unsafe_of_string header) 0 |> Int64.to_int in
   let frame = header ^ read_exact Unix.stdin body_len in
-  let trailer =
+  let trailer exit_code =
     Exec_ssh_protocol.render_trailer
-      { v = Exec_ssh_protocol.protocol_version; exit = Some 0; signal = None
+      { v = Exec_ssh_protocol.protocol_version; exit = Some exit_code; signal = None
       ; timed_out = false; shim_error = None }
   in
   match Exec_ssh_protocol.decode_request frame with
@@ -267,10 +279,37 @@ let stub_main () =
          { v = Exec_ssh_protocol.protocol_version; exit = None; signal = None
          ; timed_out = false; shim_error = Some error });
     exit 1
-  | Ok (_request, _stdin) ->
-    save (frame_path ^ ".write") frame;
-    write_all Unix.stderr trailer;
-    exit 0
+  | Ok (request, stdin) ->
+    let fs_dir = frame_path ^ ".fs" in
+    let remote_path = List.nth request.argv (List.length request.argv - 1) in
+    let stored = Filename.concat fs_dir (Filename.basename remote_path) in
+    (match request.argv with
+     | [ "sh"; "-c"; script; _; _ ]
+       when String.equal script Delivery.readback_script ->
+       save (frame_path ^ ".readback") frame;
+       (match String.equal mode "fail-readback", Sys.file_exists stored with
+        | true, _ | _, false ->
+          (* wc(1) of a missing file exits 1; so does a read-back the lane
+             cannot complete. *)
+          write_all Unix.stderr (trailer 1);
+          exit 0
+        | false, true ->
+          write_all Unix.stdout
+            (Printf.sprintf "%d\n" (String.length (read_file stored)));
+          write_all Unix.stderr (trailer 0);
+          exit 0)
+     | _ ->
+       save (frame_path ^ ".write") frame;
+       (try Unix.mkdir fs_dir 0o755
+        with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+       let stored_bytes =
+         if String.equal mode "truncate" && String.length stdin > 0
+         then String.sub stdin 0 (String.length stdin - 1)
+         else stdin
+       in
+       save stored stored_bytes;
+       write_all Unix.stderr (trailer 0);
+       exit 0)
 ;;
 
 let shell_quote s = "'" ^ String.concat "'\\''" (String.split_on_char '\'' s) ^ "'"
@@ -285,35 +324,38 @@ let with_eio f =
   Fun.protect ~finally:Process_eio.reset_for_testing f
 ;;
 
-(* A staged paste delivered through the production transport lands at the
-   endpoint's workspace root under its bare name — the same path the
-   keeper's Read of that name resolves to. *)
-let test_delivery_lands_at_the_endpoint_workspace_root () =
+(* One staged paste, one stub endpoint in [mode], delivered through the
+   production transport; [f] gets the outcomes, the staging dir and the
+   stub's recording path. *)
+let deliver_with_stub ~mode ~content f =
   with_eio @@ fun () ->
   with_staging_dir (fun dir ->
     let config = Masc.Workspace.default_config dir in
     let meta = make_meta Keeper_types_profile_sandbox.Remote_ssh "keeper-a" in
     let staging_dir = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
     Fs_compat.mkdir_p staging_dir;
-    write_staged staging_dir paste_a "pasted body over the wire";
+    write_staged staging_dir paste_a content;
     let frame_path = Filename.concat dir "frame" in
     let cli = Filename.concat dir "cli-stub" in
     save cli
-      (Printf.sprintf "#!/bin/sh\nexec %s --paste-delivery-stub %s \"$@\"\n"
+      (Printf.sprintf "#!/bin/sh\nexec %s --paste-delivery-stub %s %s \"$@\"\n"
          (shell_quote Sys.executable_name)
-         (shell_quote frame_path));
+         (shell_quote frame_path)
+         (shell_quote mode));
     Unix.chmod cli 0o755;
     let endpoint =
       Masc.Keeper_sandbox_remote.of_container_exec ~base_path:dir
         ~keeper_name:"keeper-a" ~remote_root:"/masc-work"
         ~gh_config_dir:"/identity/gh" ~injected_env:[] ~env_allowlist:[]
         ~connect_timeout_sec:1 ~max_concurrent_sessions:2
-        { Masc.Keeper_sandbox_remote.cli = [ cli ]
+        { Masc.Keeper_sandbox_remote.prefix =
+            [ cli; "exec"; "-i"; "--user"; "501:20"; "-w"; "/masc-work"
+            ; "--env"
+            ; "MASC_EXEC_SHIM_CONFIG=/opt/masc-exec-shim/masc-exec-shim.conf"
+            ; "masc-keeper-vm-keeper-a"
+            ]
         ; container_name = "masc-keeper-vm-keeper-a"
-        ; uid = 501
-        ; gid = 20
         ; shim_path = "/opt/masc-exec-shim/masc-exec-shim"
-        ; shim_config_path = "/opt/masc-exec-shim/masc-exec-shim.conf"
         }
     in
     let outcomes =
@@ -321,28 +363,97 @@ let test_delivery_lands_at_the_endpoint_workspace_root () =
         ~write:(Delivery.write_through_endpoint ~endpoint ~config ~meta)
         ~staging_dir
     in
-    (match outcomes with
-     | [ Delivery.Delivered { file_name; bytes } ] ->
-       check string "the staged paste delivered" paste_a file_name;
-       check int "byte count" (String.length "pasted body over the wire") bytes
-     | outcomes ->
-       failf "one staged paste must deliver, got %d outcome(s)"
-         (List.length outcomes));
-    check bool "staged copy removed" false
-      (Sys.file_exists (Filename.concat staging_dir paste_a));
-    match Exec_ssh_protocol.decode_request (read_file (frame_path ^ ".write")) with
-    | Error error -> fail error
-    | Ok (request, stdin) ->
-      let remote_path = "/masc-work/keeper-a/" ^ paste_a in
-      check (list string) "atomic replace payload at the translated bare name"
-        (Masc.Keeper_tool_filesystem_remote_write.write_argv
-           ~mode:Masc.Keeper_tool_filesystem_remote_write.Replace_whole
-           ~remote_path)
-        request.argv;
-      check string "the paste text travels on stdin"
-        "pasted body over the wire" stdin;
-      check string "runs from the keeper's workspace root"
-        "/masc-work/keeper-a" request.cwd)
+    f ~staging_dir ~frame_path outcomes)
+;;
+
+(* A staged paste delivered through the production transport lands at the
+   endpoint's workspace root under its bare name — the same path the
+   keeper's Read of that name resolves to — and is only called delivered
+   after the read-back finds the same byte count at that path. *)
+let test_delivery_lands_at_the_endpoint_workspace_root () =
+  let content = "pasted body over the wire" in
+  deliver_with_stub ~mode:"ok" ~content @@ fun ~staging_dir ~frame_path outcomes ->
+  (match outcomes with
+   | [ Delivery.Delivered { file_name; bytes } ] ->
+     check string "the staged paste delivered" paste_a file_name;
+     check int "byte count" (String.length content) bytes
+   | outcomes ->
+     failf "one staged paste must deliver, got %d outcome(s)"
+       (List.length outcomes));
+  check bool "staged copy removed" false
+    (Sys.file_exists (Filename.concat staging_dir paste_a));
+  let remote_path = "/masc-work/keeper-a/" ^ paste_a in
+  (match Exec_ssh_protocol.decode_request (read_file (frame_path ^ ".write")) with
+   | Error error -> fail error
+   | Ok (request, stdin) ->
+     check (list string) "atomic replace payload at the translated bare name"
+       (Masc.Keeper_tool_filesystem_remote_write.write_argv
+          ~mode:Masc.Keeper_tool_filesystem_remote_write.Replace_whole
+          ~remote_path)
+       request.argv;
+     check string "the paste text travels on stdin" content stdin;
+     check string "runs from the keeper's workspace root"
+       "/masc-work/keeper-a" request.cwd);
+  match Exec_ssh_protocol.decode_request (read_file (frame_path ^ ".readback")) with
+  | Error error -> fail error
+  | Ok (request, _stdin) ->
+    check (list string) "read-back counts bytes at the same translated path"
+      (Delivery.readback_argv ~remote_path)
+      request.argv
+;;
+
+(* The incident class from #33010: the write reports success, but what the
+   endpoint holds is not what it was handed. The paste is retained with the
+   read-back reason — the staged copy stays, so the inlined-correction
+   fallback carries the text to the keeper. *)
+let test_readback_count_mismatch_retains_the_staged_paste () =
+  let content = "pasted body over the wire" in
+  deliver_with_stub ~mode:"truncate" ~content @@ fun ~staging_dir ~frame_path:_ outcomes ->
+  match outcomes with
+  | [ Delivery.Retained { file_name; reason; content = retained } ] ->
+    check string "the retained file is the staged paste" paste_a file_name;
+    (match reason with
+     | Delivery.Readback_mismatch detail ->
+       check bool "names the byte counts" true
+         (Astring.String.is_infix
+            ~affix:(Printf.sprintf "%d bytes" (String.length content - 1))
+            detail)
+     | Delivery.Endpoint_unavailable _ | Delivery.Staging_read_failed _
+     | Delivery.Remote_write_failed _ ->
+       fail "the write succeeded; the read-back disagreed")
+    ;
+    check (option string) "the text rides along for the fallback"
+      (Some content) retained;
+    check bool "staged copy kept for the next turn" true
+      (String.equal (read_file (Filename.concat staging_dir paste_a)) content)
+  | outcomes ->
+    failf "a disagreeing read-back must retain one paste, got %d outcome(s)"
+      (List.length outcomes)
+;;
+
+(* A read-back that cannot complete — the lane answers non-zero — is the
+   same retention: "delivered" is never claimed on an unverified write. *)
+let test_readback_failure_retains_the_staged_paste () =
+  let content = "pasted body over the wire" in
+  deliver_with_stub ~mode:"fail-readback" ~content
+  @@ fun ~staging_dir ~frame_path:_ outcomes ->
+  match outcomes with
+  | [ Delivery.Retained { file_name; reason; content = retained } ] ->
+    check string "the retained file is the staged paste" paste_a file_name;
+    (match reason with
+     | Delivery.Readback_mismatch detail ->
+       check bool "says the read-back failed" true
+         (Astring.String.is_infix ~affix:"read-back" detail)
+     | Delivery.Endpoint_unavailable _ | Delivery.Staging_read_failed _
+     | Delivery.Remote_write_failed _ ->
+       fail "the write succeeded; the read-back could not complete");
+    check (option string) "the text rides along for the fallback"
+      (Some content) retained;
+    check bool "staged copy kept for the next turn" true
+      (String.equal (read_file (Filename.concat staging_dir paste_a)) content)
+  | outcomes ->
+    failf "a failed read-back must retain one paste, got %d outcome(s)"
+      (List.length outcomes)
 ;;
 
 (* ── The turn-message correction for retained pastes ──────────────── *)
@@ -392,6 +503,10 @@ let () =
               test_endpoint_owned_without_factory_retains
           ; test_case "delivery lands at the endpoint workspace root" `Quick
               test_delivery_lands_at_the_endpoint_workspace_root
+          ; test_case "read-back count mismatch retains the staged paste" `Quick
+              test_readback_count_mismatch_retains_the_staged_paste
+          ; test_case "read-back failure retains the staged paste" `Quick
+              test_readback_failure_retains_the_staged_paste
           ] )
       ; ( "correction"
         , [ test_case "correction inlines the retained text" `Quick

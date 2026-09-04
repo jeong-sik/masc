@@ -112,6 +112,15 @@ val verification_intent_of_string : string -> (verification_intent, string) resu
     unrecognised intent as [Complete_task] would turn a cancellation into a
     completion at the moment a verdict lands. *)
 
+(** What the producer places before the authority. [verification_intent] is
+    the projection the task status carries; the request record the authority
+    reads carries the claim itself. *)
+type verification_claim =
+  | Completion_evidence of { evidence_refs : string list }
+  | Cancellation_reason of { reason : string }
+
+val verification_intent_of_claim : verification_claim -> verification_intent
+
 type task_status =
   | Todo
   | Claimed of { assignee : string; claimed_at : string }

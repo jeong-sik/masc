@@ -144,15 +144,31 @@ let stage_route
    Anthropic path fold it into the tool_result message it follows
    ([Api_common.merge_tool_result_followup_user_messages] requires
    [is_mergeable_followup], and empty metadata satisfies it). On the OpenAI
-   path it stays its own [role: user] message after the [role: tool] ones. *)
+   path it stays its own [role: user] message after the [role: tool] ones.
+
+   What the sentence may assert is bounded by what admission actually checked:
+   the name was not in this request's tool set. It used to say the name was
+   not registered, which is a claim about the host's whole catalogue that this
+   check cannot make. A host may send a subset of the tools it knows and offer
+   a listing tool for loading the rest by name -- masc's Keepers do, and a
+   tool whose schema was left out of one request is named in that listing on
+   the same request. Telling such a model its own tool does not exist is false
+   and teaches it against a tool it is meant to use, and because this is a
+   [User] message the transcript replays that for the rest of the
+   conversation. So the sentence names the request as the scope, gives both
+   reasons a name can be missing, and points at loading before re-sending. *)
 let admission_refusal_message names : Types.message =
   { Types.role = User
   ; content =
       [ Types.Text
           (Printf.sprintf
-             "%d tool call(s) in your previous message named no registered \
-              tool and were not run: %s. Send a registered tool name on its \
-              own and put every argument in the input object."
+             "%d tool call(s) in your previous message named no tool available \
+              on that request and were not run: %s. A name can be missing \
+              because no such tool exists or because its schema was not sent \
+              on that request; if a tool for loading tools by name is offered, \
+              ask it for the name and call it again. Otherwise send an \
+              available tool name on its own and put every argument in the \
+              input object."
              (List.length names)
              (Agent_tools.describe_rejected_names names))
       ]
@@ -538,7 +554,7 @@ let stage_output ?raw_trace_run ?before_tool_execution ~turn ~rejected_tool_call
          in
          (match Nonempty.of_list tool_uses with
           | None when rejected_tool_calls <> [] ->
-            (* Every call this turn named no registered tool, so admission kept
+            (* Every call this turn named no available tool, so admission kept
                none of them (see [Agent_tools.admit_tool_use_names]). The turn
                did reach a decision — it just routed nowhere — and the note
                appended in [stage_collect] tells the model so. Continuing here

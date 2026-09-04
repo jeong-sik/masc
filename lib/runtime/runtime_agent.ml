@@ -449,8 +449,8 @@ let supported_modalities_of_capabilities
   @ (if caps.supports_audio_input then [ "audio" ] else [])
 
 (* The modality a content block demands of a runtime. The producers
-   ([block_required_modality], [required_modalities_of_content_blocks]) match
-   exhaustively over [content_block], so the set is closed — it travels as a
+   ([required_modalities_of_content_blocks], [strip_unsupported_modality_blocks])
+   match exhaustively over [content_block], so the set is closed — it travels as a
    string only because the capability count list and the public
    [strip_unsupported_modality_blocks] surface are keyed by string. Parsing it
    back here keeps the decision below exhaustive: the catch-all lives at the
@@ -533,21 +533,13 @@ let caps_admit_required_modalities
    blocks and proceeds on text. These helpers are the pure block/message
    filters: drop the top-level [Image]/[Document]/[Audio] blocks whose modality
    [caps] does not admit, keep everything else, and report a per-modality drop
-   count for the caller's non-silent degrade reporting. ToolResult-nested media is
-   left intact (rare; the capability gate floor still applies), keeping the
-   strip a total function over the leaf media blocks an operator attaches. *)
-let block_required_modality (block : Agent_core.Types.content_block) =
-  match block with
-  | Agent_core.Types.Image _ -> Some "image"
-  | Agent_core.Types.Document _ -> Some "document"
-  | Agent_core.Types.Audio _ -> Some "audio"
-  | Agent_core.Types.Text _
-  | Agent_core.Types.Thinking _
-  | Agent_core.Types.ReasoningDetails _
-  | Agent_core.Types.RedactedThinking _
-  | Agent_core.Types.ToolUse _
-  | Agent_core.Types.ToolResult _ -> None
-
+   count for the caller's non-silent degrade reporting. The strip descends into
+   [ToolResult.content_blocks] because [required_modalities_of_content_blocks]
+   descends there too: when the two disagreed, a turn whose only media sat inside
+   a tool result required the image modality yet dropped nothing, so the degrade
+   produced no note and the caller fell through to the provider gate with the
+   media still attached. Both walks now cover the same blocks, so a modality
+   this module reports as required is a modality this function can remove. *)
 let bump_modality_count modality counts =
   let prev = match List.assoc_opt modality counts with Some n -> n | None -> 0 in
   (modality, prev + 1) :: List.remove_assoc modality counts
@@ -562,17 +554,42 @@ let merge_modality_counts a b =
     a
     b
 
-let strip_unsupported_modality_blocks
+let rec strip_unsupported_modality_blocks
     (caps : Llm_provider.Capabilities.capabilities)
     (blocks : Agent_core.Types.content_block list) :
     Agent_core.Types.content_block list * (string * int) list =
+  let keep_or_drop modality block kept dropped =
+    if supports_required_modality caps modality then (block :: kept, dropped)
+    else (kept, bump_modality_count modality dropped)
+  in
   let kept, dropped =
     List.fold_left
-      (fun (kept, dropped) block ->
-         match block_required_modality block with
-         | Some modality when not (supports_required_modality caps modality) ->
-             (kept, bump_modality_count modality dropped)
-         | _ -> (block :: kept, dropped))
+      (fun (kept, dropped) (block : Agent_core.Types.content_block) ->
+         match block with
+         | Agent_core.Types.Image _ -> keep_or_drop "image" block kept dropped
+         | Agent_core.Types.Document _ ->
+             keep_or_drop "document" block kept dropped
+         | Agent_core.Types.Audio _ -> keep_or_drop "audio" block kept dropped
+         | Agent_core.Types.ToolResult
+             { tool_use_id; content; outcome; json
+             ; content_blocks = Some nested } ->
+             let nested_kept, nested_dropped =
+               strip_unsupported_modality_blocks caps nested
+             in
+             ( Agent_core.Types.ToolResult
+                 { tool_use_id
+                 ; content
+                 ; outcome
+                 ; json
+                 ; content_blocks = Some nested_kept }
+               :: kept
+             , merge_modality_counts dropped nested_dropped )
+         | Agent_core.Types.ToolResult { content_blocks = None; _ }
+         | Agent_core.Types.Text _
+         | Agent_core.Types.Thinking _
+         | Agent_core.Types.ReasoningDetails _
+         | Agent_core.Types.RedactedThinking _
+         | Agent_core.Types.ToolUse _ -> (block :: kept, dropped))
       ([], [])
       blocks
   in
@@ -724,16 +741,28 @@ let validate_content_blocks_for_config
    gathers [candidates] from the configured runtimes (media_failover order, then
    declaration order) and resolves [assigned_caps]/[candidate caps] via
    [input_capabilities_for_config]. *)
-type reroute_decision =
+(* ['target] is what a reroute names. The capability-level decision below names a
+   runtime id ([string]); the keeper-dispatch decision names an already-resolved
+   [Runtime.t]. Keeping them one type but two instantiations means the dispatch
+   path cannot be handed a decision it still has to look up: the runtime the
+   decision selected is the runtime the caller dispatches to. The type is
+   [private] in the .mli, so [Reroute] exists only where this module builds it —
+   a reroute-to-self is not something another module can hand the driver. *)
+type 'target reroute_decision =
   | No_reroute_needed
-  | Reroute of { to_runtime_id : string; reason : string }
+  | Reroute of { target : 'target; reason : string }
   | No_capable_runtime of { required : string list }
+
+let reroute_reason (required_modalities : string list) =
+  Printf.sprintf
+    "assigned runtime lacks %s input"
+    (String.concat "," required_modalities)
 
 let decide_modality_reroute
     ~(assigned_caps : Llm_provider.Capabilities.capabilities)
     ~(required_modalities : string list)
     ~(candidates : (string * Llm_provider.Capabilities.capabilities) list) :
-    reroute_decision =
+    string reroute_decision =
   if caps_admit_required_modalities assigned_caps required_modalities then
     No_reroute_needed
   else
@@ -743,32 +772,49 @@ let decide_modality_reroute
           caps_admit_required_modalities caps required_modalities)
         candidates
     with
-    | Some (to_runtime_id, _caps) ->
-        Reroute
-          { to_runtime_id
-          ; reason =
-              Printf.sprintf
-                "assigned runtime lacks %s input"
-                (String.concat "," required_modalities)
-          }
+    | Some (target, _caps) ->
+        Reroute { target; reason = reroute_reason required_modalities }
     | None -> No_capable_runtime { required = required_modalities }
 
+(* The eligible set is built by removing [assigned] first, and the reroute target
+   is taken from that set — so the decision cannot name the runtime it is
+   rerouting away from, and there is no id left over for a caller to re-resolve
+   into some other runtime. The previous shape returned the winning id as a bare
+   string and left [Runtime.get_runtime_by_id] to the driver, whose [None] arm
+   silently kept the runtime that could not accept the turn. *)
 let decide_modality_reroute_for_runtime_candidates ~(assigned : Runtime.t)
     ~(candidates : Runtime.t list)
     ?(checkpoint_messages = [])
     ?(initial_messages = [])
-    (blocks : Agent_core.Types.content_block list) : reroute_decision =
-  decide_modality_reroute
-    ~assigned_caps:(input_capabilities_of_runtime assigned)
-    ~required_modalities:
-      (required_modalities_for_run_with_checkpoint ~checkpoint_messages
-         ~initial_messages ~goal_blocks:blocks)
-    ~candidates:
-      (candidates
-       |> List.filter (fun (runtime : Runtime.t) ->
-         not (String.equal runtime.Runtime.id assigned.Runtime.id))
-       |> List.map (fun (runtime : Runtime.t) ->
-         runtime.Runtime.id, input_capabilities_of_runtime runtime))
+    (blocks : Agent_core.Types.content_block list) :
+    Runtime.t reroute_decision =
+  let required_modalities =
+    required_modalities_for_run_with_checkpoint ~checkpoint_messages
+      ~initial_messages ~goal_blocks:blocks
+  in
+  if
+    caps_admit_required_modalities
+      (input_capabilities_of_runtime assigned)
+      required_modalities
+  then No_reroute_needed
+  else
+    let eligible =
+      List.filter
+        (fun (runtime : Runtime.t) ->
+          not (String.equal runtime.Runtime.id assigned.Runtime.id))
+        candidates
+    in
+    match
+      List.find_opt
+        (fun (runtime : Runtime.t) ->
+          caps_admit_required_modalities
+            (input_capabilities_of_runtime runtime)
+            required_modalities)
+        eligible
+    with
+    | Some target ->
+        Reroute { target; reason = reroute_reason required_modalities }
+    | None -> No_capable_runtime { required = required_modalities }
 
 let select_agent_result ~checkpoint ~resume ~build =
   match checkpoint with

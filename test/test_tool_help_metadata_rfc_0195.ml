@@ -169,6 +169,50 @@ let test_definition_source_is_none_without_an_asset () =
   | Some rel -> Alcotest.failf "named a file that does not ship: %s" rel
 ;;
 
+(* Canonicalising a schema wants one field. It used to build the whole help
+   entry to reach it, which rendered that tool's when_to_use, its constraint
+   notes and its prompt hints and discarded all three.
+
+   Those renders ran during module initialisation -- [Config.all_tool_schemas]
+   is a top-level binding -- which is before any [main] can pin the prompt
+   directory, so every one of them logged an error it had no way to avoid: 192
+   of them on this catalog, on the operator's terminal, ahead of the TUI's own
+   stderr redirect.
+
+   The field has to keep saying the same thing. Two derivations of one
+   description is how a canonical schema starts disagreeing with the help entry
+   describing the same tool. *)
+let test_the_short_description_is_the_entrys_own () =
+  List.iter
+    (fun (schema : Masc_domain.tool_schema) ->
+      Alcotest.(check string)
+        (Printf.sprintf "%s: canonical description is the entry's" schema.name)
+        (Registry.entry_of_schema schema).short_description
+        (Registry.short_description_of_schema schema))
+    Config.raw_all_tool_schemas
+
+(* And a canonical schema carries it. *)
+let test_canonicalising_carries_that_description () =
+  List.iter2
+    (fun (source : Masc_domain.tool_schema)
+         (canonical : Masc_domain.tool_schema) ->
+      Alcotest.(check string)
+        (Printf.sprintf "%s: canonical schema carries it" source.name)
+        (Registry.short_description_of_schema source)
+        canonical.description)
+    Config.raw_all_tool_schemas
+    (Registry.canonicalize_schemas Config.raw_all_tool_schemas)
+
+(* The descriptions come out the same either way, so no assertion on the output
+   can tell whether the entry is being built and discarded again. The call
+   graph is what says it. *)
+let test_canonicalising_builds_no_help_entry () =
+  Alcotest.(check int)
+    "canonicalising reaches for the description, not the entry" 0
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"lib/tool_surface/tool_help_registry.ml"
+       ~binding_name:"canonicalize_schema" ~callee:"entry_of_schema")
+
 let () =
   Alcotest.run "tool_help_metadata_rfc_0195"
     [
@@ -185,6 +229,12 @@ let () =
         [
           Alcotest.test_case "alternatives names resolve through find_entry"
             `Quick test_alternatives_never_dangling;
+          Alcotest.test_case "the short description is the entry's own"
+            `Quick test_the_short_description_is_the_entrys_own;
+          Alcotest.test_case "canonicalising carries that description"
+            `Quick test_canonicalising_carries_that_description;
+          Alcotest.test_case "canonicalising builds no help entry"
+            `Quick test_canonicalising_builds_no_help_entry;
         ] );
       ( "definition_source",
         [

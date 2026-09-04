@@ -775,59 +775,64 @@ let play_tone freq =
 
 (* Room level, measured rather than assumed.
 
-   The recording threshold used to be the literal 1% that sox's silence filter
-   takes as a fraction of full scale (about -40 dBFS). Measured on this
-   workstation 2026-09-03, the noise floor sat at -37.2 dB on one pass and
-   -26.3 dB on another minutes later, both above that constant: the filter saw
-   sound continuously, so recording started immediately and the trailing-silence
-   condition never came true. Every capture ran to the timeout and handed
-   whisper a room.
+   The recording threshold used to be a fixed 1% of full scale, about -40
+   dBFS. Measured on this workstation 2026-09-03, the noise floor sat at -37.2
+   dB on one pass and -26.3 dB on another minutes later, both above that
+   constant: every capture began at once, never fell quiet again, ran to its
+   timeout and handed whisper a room.
 
    The floor moves by more than 10 dB between passes in one room, which is why
    this is read at each capture rather than configured once. *)
 
-let calibration_seconds = 0.5
-
-(* Speech sat 5.0 dB and 6.1 dB above the floor on the two measured passes --
-   an ordinary sentence at a laptop's built-in microphone, not a quiet one. A
-   margin near that separation swallows the utterance, so the trigger is set
-   just clear of the room and the gate below decides whether anything was said. *)
-let trigger_margin_db = 3.0
-
-(* What a capture must exceed, over its whole length, to be worth transcribing.
-   Below the trigger margin so that a capture which did fire but carries only
-   room tone is still refused. *)
-let speech_margin_db = 2.0
-
-let rms_amplitude_of_file audio_file =
-  match run_voice_status ~timeout_sec:10.0 [ "sox"; audio_file; "-n"; "stat" ] with
-  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-  (* sox reports a level whatever its exit code, and a non-zero exit on a
-     truncated capture still carries the line we read. The parse decides, not
-     the status. *)
-  | _, output ->
-    (* sox writes stat to stderr, which run_voice_status folds into output. The
-       line is "RMS     amplitude:    0.013946". *)
-    let line =
-      String.split_on_char '\n' output
-      |> List.find_opt (fun l ->
-        String_util.string_contains_substring ~needle:"RMS" l
-        && String_util.string_contains_substring ~needle:"amplitude" l)
-    in
-    Option.bind line (fun l ->
-      match List.filter (fun t -> t <> "") (String.split_on_char ' ' l) with
-      | _ :: _ :: value :: _ -> float_of_string_opt value
-      | _ -> None)
+(* Read per capture rather than cached: runtime.toml is hot-reloaded, and an
+   operator turning a knob because captures are not starting wants the next
+   press to use it, not the next restart. [Not_configured] and a broken config
+   both fall back to the measured defaults — a capture is not the place to
+   refuse over a config the endpoint chain will refuse for. *)
+let capture_config () =
+  match Voice_config.load_detailed () with
+  | Ok config -> config.Voice_config.capture
+  | Error _ -> Voice_config.default_capture
 ;;
 
+let calibration_seconds = Voice_config.default_capture.Voice_config.calibration_seconds
+
+(* How far above the room's peak a capture must rise to start recording.
+
+   Measured 2026-09-04 on one workstation: an idle room peaked at 4.48% of
+   full scale and an ordinary spoken sentence clipped at 100%. That is 27 dB
+   apart, so this margin has room on both sides — it only has to clear the
+   room, not approach the voice. A live capture at the derived threshold (8%,
+   the same order as this margin gives) started and ended on speech and
+   transcribed correctly.
+
+   Earlier numbers here were 5-6 dB, taken from RMS separation on the same
+   microphone. They are not comparable: peak and RMS are two decades apart on
+   room tone and about one on speech. The mistake this replaced was using one
+   where the other was meant. *)
+let trigger_margin_db = Voice_config.default_capture.Voice_config.trigger_margin_db
+
+(* What a capture must exceed, over its whole length, to be worth
+   transcribing. Below the trigger so a capture that did fire but carries only
+   room tone is still refused.
+
+   Read as RMS on both sides, unlike the trigger: this compares a whole
+   capture's average against the room's average, where peak would be decided
+   by one transient. The floor is measured as peak for the filter's sake, so
+   this gate reads its own pair of levels rather than reusing it. *)
+let speech_margin_db = Voice_config.default_capture.Voice_config.speech_margin_db
+
+
+(* Every level in the capture path is an RMS amplitude on this scale, and dB
+   here is dBFS. Measured 2026-09-04 on one workstation, an idle room read
+   1.18% and an ordinary sentence 11.9% — 20 dB apart, which is the whole
+   separation the thresholds have to work with. *)
 let db_of_amplitude v = if v > 0.0 then 20.0 *. log10 v else neg_infinity
 let amplitude_of_db d = if d = neg_infinity then 0.0 else 10.0 ** (d /. 20.0)
 
-(* sox's silence filter takes a percentage of full scale. *)
-let percent_of_amplitude v = 100.0 *. v
-
-(* One short capture with no silence filter, so it records the room as it is. *)
-let measure_noise_floor ~agent_id =
+(* One short capture, recording the room as it is. *)
+let measure_noise_floor ?seconds ~agent_id () =
+  let calibration_seconds = Option.value seconds ~default:calibration_seconds in
   let probe =
     Filename.temp_file (Printf.sprintf "masc_nf_%s_" (safe_agent_id agent_id)) ".wav"
   in
@@ -836,61 +841,298 @@ let measure_noise_floor ~agent_id =
        match
          run_voice_status
            ~timeout_sec:(calibration_seconds +. 5.0)
-           [ "rec"; "-q"; "-t"; "wav"; probe
-           ; "rate"; "16k"; "channels"; "1"
+           [ "rec"; "-q"; "-t"; "wav"; "-b"; "16"; "-e"; "signed-integer"; probe
+           ; "rate"; string_of_int Voice_pcm.sample_rate; "channels"; "1"
            ; "trim"; "0"; Printf.sprintf "%.2f" calibration_seconds ]
        with
        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-       | Unix.WEXITED 0, _ -> rms_amplitude_of_file probe
+       | Unix.WEXITED 0, _ -> (
+         (* RMS, and the whole probe rather than its tail: the capture that
+            uses this floor compares RMS against it. They were peak and RMS
+            until 2026-09-04, which made the threshold roughly a decade too
+            high on room tone. *)
+         match
+           Voice_pcm.tail_rms ~window_seconds:calibration_seconds probe
+         with
+         | Ok amplitude -> Some amplitude
+         | Error _ -> None)
        | _ -> None)
 ;;
 
-let record_and_transcribe ~agent_id ?(timeout_sec = 15.0) ?language_code ?noise_floor () =
+(* A copy with the room subtracted, or [None] when either sox step fails —
+   the caller then transcribes what it already had rather than nothing.
+
+   The profile comes from the capture's own leading moment, not a separate
+   recording: sox drops leading silence, so what survives at the start is this
+   room during this capture. A profile taken seconds earlier describes a room
+   that may have changed, and subtracting the wrong profile removes speech. *)
+let noise_reduced_copy ~audio_file =
+  let profile = Filename.temp_file "masc_nr_" ".prof" in
+  let reduced = Filename.temp_file "masc_nr_" ".wav" in
+  let cleanup () = try Sys.remove profile with Sys_error _ -> () in
+  Eio_guard.protect ~finally:cleanup (fun () ->
+    match
+      run_voice_status
+        ~timeout_sec:15.0
+        [ "sox"; audio_file; "-n"; "trim"; "0"; "0.25"; "noiseprof"; profile ]
+    with
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | Unix.WEXITED 0, _ -> (
+      match
+        run_voice_status
+          ~timeout_sec:15.0
+          [ "sox"; audio_file; reduced; "noisered"; profile; "0.21" ]
+      with
+      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+      | Unix.WEXITED 0, _ -> Some reduced
+      | _ ->
+        (try Sys.remove reduced with Sys_error _ -> ());
+        None)
+    | _ ->
+      (try Sys.remove reduced with Sys_error _ -> ());
+      None)
+;;
+
+(* How often the level is re-read while recording. Each read is a seek and a
+   few thousand multiplications rather than a subprocess, so this can be far
+   faster than the half-second the meter used to manage. *)
+let level_poll_seconds = 0.1
+
+(* The span each level is measured over. Shorter reads chatter on the gaps
+   between consonants inside a single word; longer ones smear the end of an
+   utterance into the silence after it and delay the stop by their own width. *)
+let level_window_seconds = 0.3
+
+(* Which of the three ways a recording can end. Only the first is speech; the
+   other two carry no transcript and must not reach the endpoint, because
+   whisper answers silence with a sentence. *)
+(* Where the watcher is in the recording. A variant rather than a pair of
+   flags: "calibrating" and "speaking" carry different fields, and no state
+   outside these three exists. *)
+type level_phase =
+  | Calibrating of { until : float; floor : float option }
+  | Listening of { floor : float }
+  | Speaking of { floor : float; quiet_since : float option }
+
+(* What the operator asked for when they ended a recording early. Two ways to
+   end it, and a single variant rather than two flags: "stop" and "discard"
+   cannot both be true, and a pair of booleans would let them be. *)
+type stop_request =
+  | Keep_what_was_heard
+  | Discard
+
+(* Why a recording is over, which is only ever three things. What is done with
+   it does not depend on this, though -- it depends on whether speech was
+   heard. A capture the operator stopped mid-sentence carries a sentence. *)
+type capture_end =
+  | Ended_after_speech
+  (* Both carry the room the capture measured, when it got that far. An
+     operator whose draft came back empty cannot tell a microphone that heard
+     nothing from a transcriber that failed, and the two levels are the
+     difference: "you were at -38, speech had to clear -32" is a thing to act
+     on, where "nothing was heard" is not. [None] when the recorder never
+     produced a sample to measure. *)
+  | Ended_without_speech of float option
+  | Ended_by_operator of float option
+
+(* Watches the recording as it is written and decides when it is over.
+
+   sox's own [silence] filter used to make this decision. It could not be
+   observed while it was making it: with that filter the output file stays at
+   zero bytes until the trigger fires, so a meter reading the file reported
+   nothing for exactly as long as the operator needed to see something. The
+   decision and the display now read the same number, once per poll. *)
+(* What one reading does to the watcher, with no clock and no file in it. The
+   loop below supplies the time and the level; every choice the capture makes
+   is here, where it can be checked against a table of levels rather than a
+   microphone. *)
+type level_step =
+  | Continue of level_phase
+  | Finish of capture_end
+
+let advance_phase ~(capture : Voice_config.capture_config) ~now ~level phase =
+  let trigger_at floor =
+    db_of_amplitude floor +. capture.Voice_config.trigger_margin_db
+  in
+  let quiet_below floor =
+    db_of_amplitude floor +. capture.Voice_config.speech_margin_db
+  in
+  match level, phase with
+  (* No audio to measure yet. The recorder creates the file before it writes
+     to it, so this is the state every capture starts in. *)
+  | None, phase -> Continue phase
+  (* The room is read from the capture's own opening rather than a probe
+     before it: whatever the recorder hears before speech starts is this room
+     during this recording, and it costs no extra second. The smallest reading
+     wins, so a door closing during calibration does not raise the threshold
+     for the rest of the capture. *)
+  | Some amplitude, Calibrating { until; floor } ->
+    let floor =
+      match floor with
+      | Some previous -> Some (Float.min previous amplitude)
+      | None -> Some amplitude
+    in
+    (match floor with
+     | Some floor when now >= until -> Continue (Listening { floor })
+     | Some _ | None -> Continue (Calibrating { until; floor }))
+  | Some amplitude, Listening { floor } ->
+    if db_of_amplitude amplitude > trigger_at floor
+    then Continue (Speaking { floor; quiet_since = None })
+    else Continue (Listening { floor })
+  | Some amplitude, Speaking { floor; quiet_since } ->
+    if db_of_amplitude amplitude < quiet_below floor
+    then (
+      match quiet_since with
+      | Some since when now -. since >= capture.Voice_config.trailing_silence_seconds
+        -> Finish Ended_after_speech
+      | Some _ -> Continue (Speaking { floor; quiet_since })
+      | None -> Continue (Speaking { floor; quiet_since = Some now }))
+    else
+      (* Speech resumed. The pause was inside the sentence. *)
+      Continue (Speaking { floor; quiet_since = None })
+;;
+
+(* What a deadline means depends on where the watcher got to. A capture cut
+   off mid-sentence still carries speech and is worth transcribing; one that
+   never heard any is a recording of a room, and whisper answers those with a
+   sentence. *)
+let end_at_deadline = function
+  | Speaking _ -> Ended_after_speech
+  | Calibrating { floor; _ } -> Ended_without_speech floor
+  | Listening { floor } -> Ended_without_speech (Some floor)
+;;
+
+(* The same question, asked of the other way a recording ends. The key says
+   "stop", and the reason to press it is usually that the speaker has finished
+   and does not want to sit out the trailing-silence wait; discarding then
+   costs them the sentence again, while transcribing something unwanted costs
+   one deletion in a draft that has not been sent.
+
+   Before any speech it is an abort, and yields nothing -- which is also what
+   keeps a room away from a transcriber that answers silence with a sentence. *)
+let end_at_operator_stop request phase =
+  match request, phase with
+  (* An explicit discard is the operator saying they do not want it, which no
+     amount of speech overrides. Nothing else in the capture path can say
+     that: every other ending is inferred from levels. *)
+  | Discard, Speaking { floor; _ } -> Ended_by_operator (Some floor)
+  | Discard, Calibrating { floor; _ } -> Ended_by_operator floor
+  | Discard, Listening { floor } -> Ended_by_operator (Some floor)
+  | Keep_what_was_heard, Speaking _ -> Ended_after_speech
+  | Keep_what_was_heard, Calibrating { floor; _ } -> Ended_by_operator floor
+  | Keep_what_was_heard, Listening { floor } -> Ended_by_operator (Some floor)
+;;
+
+let watch_capture_level
+      ~clock
+      ~audio_file
+      ~(capture : Voice_config.capture_config)
+      ~noise_floor
+      ~on_level
+      ~should_stop
+      ~deadline
+  =
+  (* Nothing but the clock, the file, and the operator's key is decided here.
+     [advance_phase] holds every threshold. *)
+  let rec step phase =
+    Eio.Time.sleep clock level_poll_seconds;
+    let now = Eio.Time.now clock in
+    match should_stop () with
+    | Some request -> end_at_operator_stop request phase
+    | None ->
+    if now >= deadline
+    then end_at_deadline phase
+    else (
+      let level =
+        match Voice_pcm.tail_rms ~window_seconds:level_window_seconds audio_file with
+        | Ok amplitude -> Some amplitude
+        | Error _ -> None
+      in
+      on_level
+        (match level with
+         | Some amplitude -> db_of_amplitude amplitude
+         | None -> Float.neg_infinity);
+      match advance_phase ~capture ~now ~level phase with
+      | Finish ending -> ending
+      | Continue next ->
+        (* Said once, when the room stops being a guess. *)
+        (match phase, next with
+         | Calibrating _, Listening { floor } ->
+           Log.Transport.debug
+             "voice capture: room %.1f dB, speech above %.1f dB"
+             (db_of_amplitude floor)
+             (db_of_amplitude floor +. capture.Voice_config.trigger_margin_db)
+         | _ -> ());
+        step next)
+  in
+  let start = Eio.Time.now clock in
+  let floor = Option.map (fun f -> f) noise_floor in
+  match floor with
+  (* A caller that has just captured for the same agent already knows the
+     room, and re-measuring it would delay this capture by the calibration
+     window for an answer it has. *)
+  | Some floor -> step (Listening { floor })
+  | None ->
+    step
+      (Calibrating
+          { until = start +. capture.Voice_config.calibration_seconds; floor = None })
+;;
+
+(* What a capture that carries no speech says for itself.
+
+   The levels are in it because without them the answer is not actionable: an
+   empty draft looks the same whether the microphone heard nothing, the room
+   rose over the threshold, or the transcriber failed. With them it is a
+   number and a target, and an operator who reads "-38.2 dB, speech had to
+   clear -32.2 dB" knows both that the capture ran and what to change. *)
+let no_audio ~reason ~floor (capture : Voice_config.capture_config) =
+  let detail =
+    match floor with
+    | Some floor ->
+      Printf.sprintf
+        "%s — room %.1f dB, speech had to clear %.1f dB"
+        reason
+        (db_of_amplitude floor)
+        (db_of_amplitude floor +. capture.Voice_config.trigger_margin_db)
+    (* The recorder produced nothing to measure, which is its own answer and a
+       different one: not a room too loud but a microphone that delivered no
+       samples at all. *)
+    | None -> reason ^ " — the recorder produced no audio to measure"
+  in
+  `Assoc [ "status", `String "no_audio"; "text", `String ""; "message", `String detail ]
+;;
+
+let record_and_transcribe
+      ~agent_id
+      ?(timeout_sec = 15.0)
+      ?language_code
+      ?noise_floor
+      ?(on_level = fun (_ : float) -> ())
+      ?(should_stop = fun () -> None)
+      ()
+  =
   let audio_file =
     Filename.temp_file (Printf.sprintf "masc_stt_%s_" (safe_agent_id agent_id)) ".wav"
   in
-  (* [None] when the probe could not run: the capture then uses the constant
-     this replaced rather than a threshold derived from nothing.
-
-     A caller that captures repeatedly may pass a floor it already measured.
-     The room does not change between two utterances the way it changes across
-     a session, and re-probing costs about 1.15 s of the gap between them. *)
-  let noise_floor =
-    match noise_floor with
-    | Some _ as measured -> measured
-    | None -> measure_noise_floor ~agent_id
-  in
-  let trigger_percent =
-    match noise_floor with
-    | Some floor when floor > 0.0 ->
-      percent_of_amplitude
-        (amplitude_of_db (db_of_amplitude floor +. trigger_margin_db))
-    | Some _ | None -> 1.0
-  in
-  let threshold = Printf.sprintf "%.2f%%" trigger_percent in
-  Log.Transport.debug
-    "voice capture: noise floor %s, trigger %s"
-    (match noise_floor with
-     | Some f -> Printf.sprintf "%.1f dB" (db_of_amplitude f)
-     | None -> "unmeasured")
-    threshold;
+  let capture = capture_config () in
+  (* Pinned rather than left to sox, which chooses 32-bit when it is not told.
+     The reader that measures this file decodes 16-bit, and a mismatch is not
+     an error either side reports: it reads as noise. Measured 2026-09-04, a
+     32-bit capture read 0.41 where sox said 0.011. *)
   let rec_argv =
     [ "rec"
     ; "-q"
     ; "-t"
     ; "wav"
+    ; "-b"
+    ; "16"
+    ; "-e"
+    ; "signed-integer"
     ; audio_file
     ; "rate"
-    ; "16k"
+    ; string_of_int Voice_pcm.sample_rate
     ; "channels"
     ; "1"
-    ; "silence"
-    ; "1"
-    ; "0.5"
-    ; threshold
-    ; "1"
-    ; "2.0"
-    ; threshold
     ]
   in
   let cleanup () =
@@ -898,52 +1140,65 @@ let record_and_transcribe ~agent_id ?(timeout_sec = 15.0) ?language_code ?noise_
     | Sys_error _ -> ()
   in
   Eio_guard.protect ~finally:cleanup (fun () ->
-    play_tone 880.0;
-    let* () =
-      try
-        let status, _output =
-          run_voice_status ~timeout_sec:(timeout_sec +. 5.0) rec_argv
-        in
-        match status with
-        | Unix.WEXITED 0 -> Ok ()
-        | Unix.WEXITED code -> Error (Printf.sprintf "rec exit %d" code)
-        | _ -> Error "rec process failed"
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printf.sprintf "rec exception: %s" (Printexc.to_string exn))
-    in
-    play_tone 440.0;
-    let file_exists =
-      try (Unix.stat audio_file).st_size > 100 with
-      | Unix.Unix_error _ -> false
-    in
-    (* Whisper answers silence with a sentence. Measured 2026-09-03 against the
-       local whisper.cpp endpoint, three captures of an empty room returned
-       "감사합니다.", "감사합니다." and "네" -- fluent text for an operator who
-       said nothing. Byte size cannot tell those apart from speech: a capture
-       that ran to its timeout on room tone is large.
+    match Process_eio.get_clock () with
+    | Error message -> Error (Printf.sprintf "voice capture has no clock: %s" message)
+    | Ok clock ->
+      play_tone 880.0;
+      (* The recorder has no end of its own now that the silence filter is
+         gone, so the watcher is what stops it: when the watcher returns,
+         [Fiber.first] cancels the recording, and the reap sends SIGTERM
+         before SIGKILL. sox closes the file on SIGTERM and writes the length
+         into the header — measured 2026-09-04, a recording killed at two
+         seconds read back as 1.75 s of valid audio.
 
-       So the level decides, and a capture that never rose above the room is
-       not sent. This is the only place that refusal can happen; once the audio
-       reaches the endpoint chain, a hallucinated transcript is indistinguishable
-       from a real one. *)
-    let silent =
-      match noise_floor, if file_exists then rms_amplitude_of_file audio_file else None with
-      | Some floor, Some captured when floor > 0.0 ->
-        db_of_amplitude captured < db_of_amplitude floor +. speech_margin_db
-      | _ -> false
-    in
-    if (not file_exists) || silent
-    then
-      Ok
-        (`Assoc
-            [ "status", `String "no_audio"
-            ; "text", `String ""
-            ; ( "message"
-              , `String
-                  (if file_exists
-                   then "nothing was said above the room level"
-                   else "no speech detected or recording too short") )
-            ])
-    else transcribe_audio ~audio_file ?language_code ())
+         The recorder's own arm carries the same deadline so that a watcher
+         that somehow never returns cannot leave a microphone open. *)
+      let outcome =
+        Eio.Fiber.first
+          (fun () ->
+             match
+               run_voice_status ~timeout_sec:(timeout_sec +. 5.0) rec_argv
+             with
+             | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+             | exception exn ->
+               Error (Printf.sprintf "rec exception: %s" (Printexc.to_string exn))
+             (* The recorder has no end of its own, so reaching one means it
+                stopped on its own arm without the watcher having decided
+                anything. No floor was settled. *)
+             | Unix.WEXITED 0, _ -> Ok (Ended_without_speech None)
+             | Unix.WEXITED code, _ -> Error (Printf.sprintf "rec exit %d" code)
+             | _ -> Error "rec process failed")
+          (fun () ->
+             Ok
+               (watch_capture_level
+                  ~clock
+                  ~audio_file
+                  ~capture
+                  ~noise_floor
+                  ~on_level
+                  ~should_stop
+                  ~deadline:(Eio.Time.now clock +. timeout_sec)))
+      in
+      play_tone 440.0;
+      on_level Float.neg_infinity;
+      (match outcome with
+       | Error message -> Error message
+       | Ok (Ended_by_operator floor) ->
+         (* Stopped before anything was said. Distinct from the message below
+            because nothing waited for speech here -- saying the room was too
+            quiet would blame a microphone that was never given a chance. *)
+         Ok (no_audio ~reason:"stopped before anything was said" ~floor capture)
+       | Ok (Ended_without_speech floor) ->
+         (* The gate that keeps a room away from the transcriber. It used to
+            re-read the finished file and compare its average against its own
+            opening; now the watcher has already compared every tenth of a
+            second against the room and knows no reading cleared it. *)
+         Ok (no_audio ~reason:"nothing rose above the room" ~floor capture)
+       | Ok Ended_after_speech ->
+         let audio_file =
+           if capture.Voice_config.noise_reduction
+           then Option.value (noise_reduced_copy ~audio_file) ~default:audio_file
+           else audio_file
+         in
+         transcribe_audio ~audio_file ?language_code ()))
 ;;

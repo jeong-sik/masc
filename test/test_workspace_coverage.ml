@@ -1320,16 +1320,31 @@ let test_transition_start () =
     | Error _ -> Alcotest.fail "Expected Ok")
 ;;
 
+(* Release from Todo is admitted as a status-preserving no-op
+   (workspace_task_lifecycle.ml), so an unclaimed task answers "task-001
+   already todo (no-op)" — which also contains "todo".  The old check therefore
+   passed whether or not a release happened, and the claim ahead of it was
+   discarded with [let _ =], so a silently refused claim looked like success.
+   Check the claim, then compare the whole transition message. *)
 let test_transition_release () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    (match
+       Workspace.transition_task_r
+         config
+         ~agent_name:"claude"
+         ~task_id:"task-001"
+         ~action:Masc_domain.Claim
+         ()
+     with
+     | Ok _ -> ()
+     | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
     let result =
       Workspace.release_task_r config ~agent_name:"claude" ~task_id:"task-001" ()
     in
     match result with
     | Ok msg ->
-      Alcotest.(check bool) "release via transition" true (str_contains msg "todo")
+      Alcotest.(check string) "release via transition" "task-001 claimed → todo" msg
     | Error _ -> Alcotest.fail "Expected Ok")
 ;;
 

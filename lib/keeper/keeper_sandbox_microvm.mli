@@ -1,36 +1,75 @@
-(** Apple [container] argv for the [Micro_vm] sandbox profile.
+(** microVM argv for the [Micro_vm] sandbox profile.
 
     Command construction only: nothing here starts a VM. Dispatch does --
     [Keeper_turn_sandbox_runtime] boots and adopts the guest, and the remote
-    lane ([Keeper_sandbox_remote]) drives its shim over [container exec].
+    lane ([Keeper_sandbox_remote]) drives its shim over the guest's exec.
     The guest owns its working tree on a per-keeper volume (RFC-0400); the
-    host playground is never mounted into it. See the implementation for the
-    measured cost of the backend and for the two Docker hardening flags
-    [container run] does not accept. *)
+    host playground is never mounted into it.
+
+    Every builder takes the runtime the keeper declared. A surface that took
+    the runtime only on teardown pointed a keeper's boot and its cleanup at
+    two different CLIs, which is #32837. See the implementation for the
+    measured cost of the Apple backend and for the Docker hardening flags
+    each runtime does not accept. *)
 
 val command_argv_for : Keeper_microvm_backend.t -> string list
 (** The CLI prefix for one backend. *)
-
-val command_argv : unit -> string list
-(** {!command_argv_for} [Apple_container]. The spelling every call site had
-    before RFC-0405 introduced the choice. *)
 
 val unsupported_docker_flags : string list
 (** Docker hardening flags [container run] rejects. [container] errors on an
     unknown option rather than ignoring it, so this list is what a reader
     must weigh when choosing the profile, not a runtime fallback. *)
 
-val network_args :
-  dns:string option -> Keeper_types_profile_sandbox.network_mode -> string list
-(** [Network_inherit] uses container's NAT, which routes outside. It needs a
-    nameserver passed in: the guest's resolver points at the gateway and the
-    gateway refuses DNS from inside, so without one the guest routes fine and
-    resolves nothing. *)
+val policy_network_name : string
+(** The host-only network a [Network_policy] guest is attached to. It carries
+    no allowlist of its own: it removes every route except the host gateway,
+    and the keeper's allowlist is judged by the proxy behind that gateway. *)
 
-val image_present : image:string -> timeout_sec:float -> (unit, string) result
-(** Gate the run on the image already being in container's store. container
-    has no [--pull=never]: without this, a missing image is fetched from a
-    registry rather than refused. *)
+val policy_network_create_argv_for : Keeper_microvm_backend.t -> (string list, string) result
+(** Create the host-only network the policy lane attaches to. Only the
+    backend that carries the lane answers; the others refuse, so a backend
+    that gained a policy arm without gaining this fails here rather than
+    booting a guest onto a network nobody created. *)
+
+val policy_network_list_argv_for : Keeper_microvm_backend.t -> (string list, string) result
+(** List networks, to see whether {!policy_network_name} already exists. *)
+
+val policy_network_present : listing:string -> (bool, string) result
+(** Whether [container network list --format json] carries
+    {!policy_network_name}. Compared as a decoded [id], so nothing depends on
+    how the CLI spaces a column, and a network whose name contains this one's
+    cannot answer for it.
+
+    Unparseable output is an error rather than "absent": reading a failed
+    decode as absence would drive a create against a network that may already
+    exist, and the guest would then be refused with a message about creation
+    rather than about the listing that could not be read. *)
+
+val network_args_for :
+  Keeper_microvm_backend.t ->
+  dns:string option ->
+  Keeper_types_profile_sandbox.network_mode ->
+  (string list, string) result
+(** How one runtime is told to close or open the guest's network.
+
+    A closed network is an isolation property, so the spelling is per runtime
+    rather than one grammar sent to all three. [container] and [nerdctl] take
+    Docker's [--network none] and [--dns]; [Network_inherit] there is
+    container's NAT, which routes outside and needs a nameserver passed in
+    (the guest's resolver points at the gateway and the gateway refuses DNS
+    from inside, so without one the guest routes fine and resolves nothing).
+
+    [msb] rejects both Docker spellings and has its own: [Network_none] is
+    [--no-net]. [Network_inherit] is [Error] rather than an empty argv --
+    msb's network with no flag has not been measured, and an omission would
+    be a guess at how open the guest is. *)
+
+val image_present_for :
+  Keeper_microvm_backend.t -> image:string -> timeout_sec:float -> (unit, string) result
+(** Gate the run on the image already being in this runtime's own store.
+    None of the three has a [--pull=never]: without this, a missing image is
+    fetched from a registry rather than refused. The refusal names the CLI
+    that was asked, so an [msb] keeper is not told to install Apple's. *)
 
 type image_probe_phase =
   | Image_inspect
@@ -50,32 +89,71 @@ type image_probe_outcome =
   | Image_cli_unavailable
   | Image_probe_failed of image_probe_failure
 
+type json_shape =
+  | Json_array
+      (** One array of records: [container image list --format json],
+          [container image inspect], [msb image list --format json],
+          [nerdctl image inspect --mode dockercompat]. *)
+  | Json_object
+      (** One bare object: [msb image inspect --format json], which answers a
+          record rather than the array of one Docker's grammar returns. *)
+  | Json_lines
+      (** One JSON object per line: [nerdctl images] with a Go template. *)
+
+val image_listing_shape_for : Keeper_microvm_backend.t -> json_shape
+(** Which shape this runtime's image listing arrives in. Reading a line
+    stream with the array check would call a healthy listing malformed and
+    turn "the image is missing" into "the probe could not say". *)
+
+val image_listing_argv_for : Keeper_microvm_backend.t -> string list
+(** The listing that proves this runtime's image store was readable.
+    [image list --format json] for [container] and [msb]; [images] with a Go
+    template for [nerdctl], which has no [image list] subcommand. *)
+
+val image_inspect_shape_for : Keeper_microvm_backend.t -> json_shape
+(** Which shape this runtime answers a single-image inspect in. [msb] answers
+    an object where the other two answer an array of one; reading its answer
+    with the array check reports [Image_probe_failed] for an image that is
+    present, which is the inverse of what the probe is for. *)
+
+val image_inspect_argv_for : Keeper_microvm_backend.t -> image:string -> string list
+(** The single-image inspect, in the machine form each CLI documents.
+    [container image inspect] answers JSON with no flag; [msb image inspect]
+    answers a human table unless given [--format json]; [nerdctl image
+    inspect] documents [--mode=(dockercompat|native)] and no default, so the
+    mode is named. *)
+
 val classify_image_probe :
+  inspect_shape:json_shape ->
+  listing_shape:json_shape ->
   inspect:Unix.process_status * string * string ->
   listing:(Unix.process_status * string * string) option ->
   image_probe_outcome
-(** Classify [container image inspect] without reading human error prose.
-    Successful inspect output must be a JSON array. Exit 1 is [Image_missing]
-    only when a subsequent [container image list --format json] also succeeds
-    with a JSON array, proving that the service and image store were readable.
-    Every unavailable or malformed observation fails closed. *)
+(** Classify an image inspect without reading human error prose. Successful
+    inspect output must parse in [inspect_shape]. Exit 1 is [Image_missing]
+    only when a subsequent image listing also succeeds in [listing_shape],
+    proving that the runtime and its image store were readable. Every
+    unavailable or malformed observation fails closed. *)
 
-val image_probe : image:string -> timeout_sec:float -> image_probe_outcome
-(** Run the structured probe and retain its typed outcome before the public
-    sandbox boundary renders an operator-facing error. *)
+val image_probe_for :
+  Keeper_microvm_backend.t -> image:string -> timeout_sec:float -> image_probe_outcome
+(** Run the structured probe against one runtime and retain its typed outcome
+    before the public sandbox boundary renders an operator-facing error. *)
 
-(** Guest boot argv. Same lifecycle as the Docker persistent lane: detached
-    guest holding [tail -f /dev/null], commands by [exec], removed on
-    [stop] via [--rm]. Nothing of the host playground is mounted; everything
-    the guest may see arrives through [mount_args], which the caller builds
-    -- config, GitHub identity, the work volume and the shim. The working
-    directory is {!work_volume_guest_root}. Workspace-state mounts and the
-    /etc/passwd identity mounts remain absent.
+type constraint_refusal =
+  { guest_constraint : Keeper_microvm_backend.guest_constraint
+  ; reason : string
+  }
 
-    [mount_args] is passed in Docker's own spelling: measured 2026-08-28,
-    container accepts [-v host:container:ro] and [--env-file] unchanged. *)
+val constraint_refusals_message :
+  Keeper_microvm_backend.t -> constraint_refusal list -> string
+(** One [microvm_constraint_unexpressible:] line naming the runtime and every
+    guarantee it could not spell, with each runtime's own reason. No cap and
+    no "and N more": a boot refusal an operator has to guess the rest of is
+    the reason the guarantee was silently dropped before. *)
 
-val turn_start_argv :
+val turn_start_argv_for :
+  Keeper_microvm_backend.t ->
   container_name:string ->
   label_args:string list ->
   uid:int ->
@@ -85,9 +163,29 @@ val turn_start_argv :
   network_args:string list ->
   mount_args:string list ->
   image:string ->
-  string list
+  constraints:Keeper_microvm_backend.guest_constraint list ->
+  (string list, constraint_refusal list) result
+(** Guest boot argv, or the guarantees this runtime cannot express.
 
-val exec_argv :
+    Same lifecycle as the Docker persistent lane: detached guest holding
+    [tail -f /dev/null], commands by [exec]. Nothing of the host playground
+    is mounted; everything the guest may see arrives through [mount_args],
+    which the caller builds -- config, GitHub identity, the work volume and
+    the shim. The working directory is {!work_volume_guest_root}.
+    Workspace-state mounts and the /etc/passwd identity mounts remain absent.
+
+    [constraints] are asked for by name. An [Isolation] guarantee this
+    runtime has no flag for makes the whole call [Error]: booting without it
+    would hand the keeper a weaker sandbox than the profile it declared, and
+    nothing in the argv would say so. A [Lifecycle] one is recorded on the
+    guest as a [masc.mcp.microvm_dropped] label and the boot continues,
+    because teardown removes the guest explicitly either way.
+
+    The booted guest also carries [masc.mcp.microvm_backend], so a listing
+    can tell which runtime it came from without reading the keeper's TOML. *)
+
+val exec_argv_for :
+  Keeper_microvm_backend.t ->
   container_name:string ->
   uid:int ->
   gid:int ->
@@ -95,13 +193,46 @@ val exec_argv :
   stdin:bool ->
   command_argv:string list ->
   string list
+(** One command inside a running guest. [msb] needs [--] between the guest
+    name and the command and spells stdin [--stream]; the other two take the
+    command bare with [-i]. *)
 
-val stop_argv : container_name:string -> string list
-(** [--rm] makes stop also remove; observed live 2026-08-28. *)
+val shim_exec_prefix_for :
+  Keeper_microvm_backend.t ->
+  container_name:string ->
+  uid:int ->
+  gid:int ->
+  remote_root:string ->
+  shim_config_path:string ->
+  (string list, string) result
+(** The prefix the remote lane delivers a framed request through, ending at
+    the guest name so the caller appends the shim path.
 
-val delete_force_argv : container_name:string -> string list
+    The prefix carries the config location and the identity the shim runs
+    under. All three CLIs document the environment entry the first needs
+    ([msb exec] has [-e, --env]).
+
+    [Error] for [msb]: [container exec --user] documents [name|uid[:gid]] and
+    nerdctl takes Docker's, but [msb exec --user] documents a guest user name
+    and no numeric form (0.6.16), so the mapped [uid:gid] a keeper's commands
+    run as cannot be named. Sending it would either be rejected or resolved
+    as somebody else's user name, writing to the keeper's tree as that user.
+    Naming a guest user for the lane is the change that would settle it,
+    which is a decision about identity rather than a spelling. *)
+
+val stop_argv_for :
+  Keeper_microvm_backend.t -> container_name:string -> string list
+
+val delete_force_argv_for :
+  Keeper_microvm_backend.t -> container_name:string -> string list
 (** For a guest that survived as stopped (e.g. the host rebooted out from
-    under [--rm]); running guests are taken down with {!stop_argv}. *)
+    under a remove-on-exit flag); running guests are taken down with
+    {!stop_argv_for}. *)
+
+val logs_tail_argv_for :
+  Keeper_microvm_backend.t -> tail:int -> container_id:string -> string list
+(** The last [tail] lines of a guest's stdio. [container] takes [-n]; [msb]
+    rejects [-n] and takes [--tail], and [nerdctl] documents both. *)
 
 (** {2 The work volume and the shim (RFC-0400)}
 
@@ -121,7 +252,12 @@ val work_volume_guest_root : string
     anything outside [A-Za-z0-9._-]. *)
 val work_volume_name : keeper_name:string -> (string, string) result
 
-val volume_create_argv : volume_name:string -> size:string -> string list
+val apple_volume_create_argv : volume_name:string -> size:string -> string list
+(** Apple's sized-volume spelling. Named after the runtime rather than left
+    as the lane's default: [msb] rejects [-s] and wants [--kind disk --size],
+    and [nerdctl volume create] documents no size flag at all.
+    {!ensure_work_volume_for} is the entry that answers for all three. *)
+
 val work_volume_mount_args : volume_name:string -> string list
 
 val keeper_work_root : keeper_name:string -> string
@@ -160,26 +296,37 @@ val classify_volume_probe
   -> listing:(Unix.process_status * string * string) option
   -> volume_probe_outcome
 
-val volume_probe : volume_name:string -> timeout_sec:float -> volume_probe_outcome
+val apple_volume_probe :
+  volume_name:string -> timeout_sec:float -> volume_probe_outcome
 
-(** Create the work volume when absent. [container volume create] is not
-    idempotent, so existence is settled by the probe rather than by reading
-    its "already exists" message. Error codes are [microvm_work_volume_*]. *)
-val ensure_work_volume
-  :  volume_name:string
+(** Create the work volume when absent, for whichever runtime the keeper
+    declared. [container volume create] is not idempotent, so existence is
+    settled by the probe rather than by reading its "already exists" message.
+
+    Only Apple's grammar is established. [msb] and [nerdctl] return an
+    [Error] naming what is missing rather than a guess: for [msb] the create
+    is known and the inspect and list that settle existence are not, and
+    creating over a volume that already holds a keeper's tree is exactly what
+    that check exists to prevent; for [nerdctl] there is no size flag to
+    establish. Error codes are [microvm_work_volume_*]. *)
+val ensure_work_volume_for
+  :  Keeper_microvm_backend.t
+  -> volume_name:string
   -> size:string
   -> timeout_sec:float
   -> ([ `Created | `Already_present ], string) result
 
-val keeper_work_root_mkdir_argv : container_name:string -> keeper_name:string -> string list
+val keeper_work_root_mkdir_argv_for :
+  Keeper_microvm_backend.t -> container_name:string -> keeper_name:string -> string list
 (** Create {!keeper_work_root} inside the guest, in one exec. The host
     cannot: the directory lives inside the volume's ext4 image. The volume
     root is initially root-owned and the user namespace refuses a later
     chmod, so creation runs as root with an explicit writable mode that
     applies only to a new directory. Idempotent. *)
 
-val keeper_work_root_write_probe_argv
-  :  container_name:string
+val keeper_work_root_write_probe_argv_for
+  :  Keeper_microvm_backend.t
+  -> container_name:string
   -> uid:int
   -> gid:int
   -> keeper_name:string
@@ -190,6 +337,22 @@ val keeper_work_root_write_probe_argv
     stderr. A root that exists but belongs to another uid -- a tree imported
     from elsewhere -- fails here rather than on the keeper's first Write. *)
 
+val work_volume_mounted_probe_argv_for
+  :  Keeper_microvm_backend.t
+  -> container_name:string
+  -> string list
+(** Boot invariant (RFC-0052): exit 0 only when {!work_volume_guest_root} is a
+    mountpoint inside the guest, read from [/proc/mounts] as root.
+
+    Runs before the mkdir and the write probe above because neither can tell
+    a mounted volume from a writable directory on the guest rootfs: with the
+    mount absent both succeed, and the guest then serves an ephemeral tree
+    whose writes evaporate on the next boot while every log line names the
+    volume. [grep -F] (fixed string) over [/proc/mounts] rather than
+    [mountpoint(1)], which the sandbox image does not ship; the pattern
+    carries the mountpoint field's surrounding spaces so a prefix of the path
+    cannot match. *)
+
 val keeper_vm_container_kind : string
 
 val inspect_argv_for
@@ -198,18 +361,6 @@ val inspect_argv_for
   -> string list
 (** The argv that makes this backend report a guest's state in the shape
     {!running_of_inspect_json_for} parses. *)
-
-val stop_argv_for
-  :  Keeper_microvm_backend.t
-  -> container_name:string
-  -> string list
-
-val delete_force_argv_for
-  :  Keeper_microvm_backend.t
-  -> container_name:string
-  -> string list
-
-val inspect_argv : container_name:string -> string list
 
 val running_of_inspect_json_for
   :  Keeper_microvm_backend.t
@@ -224,25 +375,41 @@ val running_of_inspect_json_for
     unrecognised answer takes a live guest down and boots a second beside
     it. *)
 
-val running_of_inspect_json : string -> (bool, string) result
-(** {!running_of_inspect_json_for} [Apple_container]. *)
-(** [Ok true] iff [.[0].status.state = "running"]. The caller maps a
-    non-zero inspect exit to absent before calling this. *)
-
 val live_containers_of_json :
   base_path:string ->
   keeper_name:string ->
   Yojson.Safe.t ->
   (Keeper_sandbox_runtime.live_container list, string) result
-(** Decode only the Apple Container guests labelled for this base path and
-    keeper. Unrelated host containers are not projected into Keeper status. *)
+(** Decode only the guests labelled for this base path and keeper out of a
+    [Labelled_json_array] listing. Unrelated host containers are not
+    projected into Keeper status. *)
 
-val list_live_containers :
+type container_listing =
+  | Labelled_json_array of string list
+      (** The argv whose output nests [configuration.labels], which is where
+          the base path hash, the keeper name and the owner pid live. *)
+  | Listing_not_established of string
+      (** Why this runtime's listing cannot be scoped to a base path and
+          keeper. Named rather than answered with the Apple argv: read as "no
+          guests", an unscopable listing is the answer that leaves a guest
+          running with nothing able to reap it. *)
+
+val container_listing_for : Keeper_microvm_backend.t -> container_listing
+(** [Labelled_json_array] for [container list -a --format json].
+    [Listing_not_established] for [msb], whose listing rows carry no labels
+    (they live in [msb inspect] under [active_config.labels]), and for
+    [nerdctl], which has no [list] subcommand and no literal [--format
+    json]. *)
+
+val list_live_containers_for :
+  Keeper_microvm_backend.t ->
   base_path:string ->
   keeper_name:string ->
   timeout_sec:float ->
   (Keeper_sandbox_runtime.live_container list, string) result
-(** Read the labelled Apple Container guest inventory for one microvm Keeper. *)
+(** Read the labelled guest inventory for one microvm Keeper.
+    [microvm_container_listing_unsupported] when this runtime's listing
+    cannot be scoped, rather than an empty inventory that reads as "none". *)
 
 type sweep_candidate =
   { container_id : string
@@ -258,9 +425,9 @@ type sweep_outcome =
 val sweep_candidates_of_json :
   base_path:string ->
   is_pid_alive:(int -> bool) -> Yojson.Safe.t -> sweep_candidate list
-(** Guests in a [container list --format json] listing that belong to this
-    base path and whose owning server is gone. A guest whose scope or owner
-    label is missing or unparseable is not a candidate. *)
+(** Guests in a [Labelled_json_array] listing that belong to this base path
+    and whose owning server is gone. A guest whose scope or owner label is
+    missing or unparseable is not a candidate. *)
 
 val sweep_abandoned_guests :
   base_path:string ->
@@ -268,7 +435,14 @@ val sweep_abandoned_guests :
   timeout_sec:float ->
   is_pid_alive:(int -> bool) ->
   run_argv:(timeout_sec:float -> string list -> Unix.process_status * string) ->
-  sweep_outcome option
-(** Remove every abandoned guest, reporting what happened. Return [None]
-    without spawning when the microVM CLI executable is absent. An unreadable
-    listing removes nothing and returns [Some] with an empty outcome. *)
+  (Keeper_microvm_backend.t * sweep_outcome) list
+(** Remove every abandoned guest, per runtime, reporting what happened.
+
+    No keeper is in scope here and none should be: a guest this process did
+    not boot belongs to a keeper this process may not have. What is in scope
+    is the set of runtimes, so each is asked for its own guests with its own
+    argv and removed with its own removal spelling. A runtime whose CLI is
+    absent, or whose listing cannot be scoped to a base path, contributes no
+    row -- so an empty list means nothing was swept, not that nothing was
+    found. An unreadable listing removes nothing and contributes an empty
+    outcome. *)

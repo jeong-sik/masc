@@ -197,7 +197,12 @@ val teardown_keeper_sandbox_by_name :
 (** {!teardown_keeper_sandbox} for callers that hold the keeper's name and
     typed backend -- shutdown finalization, which runs after the registry
     entry is gone. Local and remote-SSH Keepers own no local container;
-    Docker and microVM teardown target only their declared runtime. *)
+    Docker and microVM teardown target only their declared runtime.
+
+    A [Micro_vm] teardown with no [microvm_backend] is
+    [microvm_teardown_backend_unresolved] rather than an assumed runtime:
+    sending [container delete --force] to a guest another runtime booted
+    reports success while the guest keeps running. *)
 
 val teardown_keeper_sandbox :
   ?timeout_sec:float ->

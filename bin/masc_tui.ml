@@ -1103,7 +1103,7 @@ let own_typed_messages (state : state) =
             | Message_user (Sent_by_operator _) -> true
             | Message_user (Sent_by_other _) -> false
             | Message_keeper | Message_autonomous | Message_status
-            | Message_error | Message_tool | Message_skill _
+            | Message_local | Message_error | Message_tool | Message_skill _
             | Message_thinking | Message_memory ->
                 false)
            && String.equal entry.me_keeper_name target
@@ -1218,7 +1218,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     ~(open_named_image : unit -> unit) ~(inspect_context : unit -> unit)
     ~(load_tool_changes : unit -> unit) ~(drain_queue : unit -> unit)
     ~(start_voice : unit -> unit) ~(toggle_voice_continuous : unit -> unit)
-    (key : string) : bool =
+    ~(interrupt_turn : unit -> bool) (key : string) : bool =
   (* y and n answer a held call, and only while one is held -- otherwise they
      are letters someone is typing. The prompt on screen is what makes them
      mean anything, so it is also what decides whether they are taken. *)
@@ -1251,14 +1251,66 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
           true
       | None -> true)
   | _ ->
+  let apply_autocomplete direction =
+    let text = Buffer.contents state.msg_input in
+    let keeper_names =
+      List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers
+    in
+    match Masc_tui_command.autocomplete ~direction ~keeper_names text with
+    | Some completed ->
+        forget_recall state;
+        Buffer.clear state.msg_input;
+        Buffer.add_string state.msg_input completed;
+        true
+    | None -> true
+  in
+  let slash_navigable () =
+    let keeper_names =
+      List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers
+    in
+    Masc_tui_command.is_slash_navigable ~keeper_names
+      (Buffer.contents state.msg_input)
+  in
   match key with
+  (* Esc cancels the innermost thing, and a running capture is inside
+     everything else here: the operator is mid-utterance, not mid-turn. ^Y
+     stops one and keeps what was said, which is the common case; this is the
+     other one, and without it there is no way to abandon a recording that
+     picked up something the operator did not mean to send. *)
+  | "esc" when Option.is_some state.voice_capture ->
+    state.voice_stop_requested <- Some Masc.Voice_bridge.Discard;
+    state.last_action <- Some ("voice: discarding", Unix.gettimeofday ());
+    true
   | "esc" when Option.is_some state.msg_recall_replaces ->
     state.msg_recall_replaces <- None;
     clear_staged_attachments state;
     Buffer.clear state.msg_input;
     drain_queue ();
     true
-  | "esc" ->
+  | "\t" -> apply_autocomplete Masc_tui_command.Next
+  | "shift-tab" -> apply_autocomplete Masc_tui_command.Prev
+  (* The footer and this arm read the same table (Masc_tui_esc_interrupt),
+     so the hint the operator sees is the act the key performs: Esc is the
+     first press of an interrupt, the accidental second press inside the
+     grace window, or a request to leave once the interrupt is stale,
+     declined, or errored. Leaving cancels nothing: the interrupt proceeds
+     server-side and the pane can be reopened. *)
+  | "esc" -> if interrupt_turn () then true else (leave_keeper_message state; true)
+  (* Q is the leave half of Esc with the interrupt half taken out. Esc's
+     first press on a live turn spends itself stopping the turn, so an
+     operator who wants to walk away and let the turn run had no key: the
+     only exit signalled the turn to stop. This arm never consults
+     [interrupt_turn], so the turn keeps streaming while the operator reads
+     something else, and reopening the chat finds it. Empty draft only:
+     mid-sentence Q is the letter someone is typing and falls through to the
+     printable arm below. Esc settles the innermost thing first -- a capture,
+     a half-edited queued line -- and Q must not strand either: with
+     something to settle, this arm declines and Esc is the key that answers
+     it, so Q leaves only when there is nothing mid-flight to abandon. *)
+  | "Q"
+    when Buffer.length state.msg_input = 0
+         && Option.is_none state.msg_recall_replaces
+         && Option.is_none state.voice_capture ->
     leave_keeper_message state;
     true
   | "\r" ->
@@ -1268,7 +1320,11 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          there, and staying scrolled back would hide the send. *)
       set_msg_scroll state 0;
       forget_recall state;
-      submit_message text
+      submit_message text;
+      (* The composer is empty after a submit, so a line held only because the
+         operator was mid-compose ([composing_for_keeper]) can dispatch now. When
+         the submit folded onto that held line, this is what sends the merge. *)
+      drain_queue ()
     end;
     true
   (* The same two keys the composer row binds, because this surface has its own
@@ -1294,6 +1350,8 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   | "down" when state.msg_scroll > 0 ->
     set_msg_scroll state (state.msg_scroll - 1);
     true
+  | "down" when slash_navigable () -> apply_autocomplete Masc_tui_command.Next
+  | "up" when slash_navigable () -> apply_autocomplete Masc_tui_command.Prev
   | "up" ->
     recall_older state;
     true
@@ -1333,6 +1391,9 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     in
     Buffer.clear state.msg_input;
     Buffer.add_string state.msg_input new_content;
+    (* Emptying the composer releases a line held only for this keeper's compose
+       ([composing_for_keeper]); send it now rather than waiting for a settle. *)
+    if Buffer.length state.msg_input = 0 then drain_queue ();
     true
   | "\x17" | "alt-backspace" ->
     (* Ctrl-W, or Alt+Backspace on a terminal that sends ESC DEL: the last
@@ -1344,6 +1405,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     in
     Buffer.clear state.msg_input;
     Buffer.add_string state.msg_input new_content;
+    if Buffer.length state.msg_input = 0 then drain_queue ();
     true
   | s ->
     let c = if String.length s = 1 then Some (Char.code s.[0]) else None in
@@ -1380,6 +1442,9 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
         drain_queue ()
       end;
       Buffer.clear state.msg_input;
+      (* Cleared composer: release any line held only for this keeper's compose
+         ([composing_for_keeper]). *)
+      drain_queue ();
       true
     end else if c = Some 5 then begin
       (* Ctrl-E: back to the newest row. Scrolling down one row at a time from
@@ -1541,6 +1606,7 @@ type async_msg =
      roster cursor moves under a refresh, and a transcript that took several
      seconds would otherwise land on whoever happens to be selected when it
      arrives. *)
+  | Voice_config_loaded of (Yojson.Safe.t, string) result * string option
   | Voice_level of { keeper : string; db : float }
   | Voice_transcribed of { keeper : string; text : string }
   | Voice_silent of { keeper : string; reason : string }
@@ -1594,6 +1660,8 @@ type async_msg =
       result
   | Standalone_lanes_loaded of
       int * (Masc.Tui_decode.standalone_lanes_snapshot, string) result
+  | Clients_loaded of
+      int * (Masc.Tui_decode.clients_snapshot, string) result
   (* Keyed by the lane / run they answer for: an answer that lands after the
      operator left the list or the run is not this view's answer. *)
   | Lane_runs_loaded of
@@ -1851,6 +1919,7 @@ let append_chat_history ?tool_block ?skill_activity ?at ?submitted_at ?turn_phas
           me_operation_seq = operation_seq;
           me_text = text;
           me_memory_summary = None;
+          me_gate = None;
           me_submitted_at = submitted_at;
           me_tool_block = tool_block;
           me_skill_activity = skill_activity;
@@ -2168,6 +2237,48 @@ let launch_keeper_tool_approvals_load state ~mailbox =
   | None ->
       enqueue_async mailbox
         (Keeper_tool_approvals_loaded (Error "Eio switch is unavailable"))
+
+(* What voice actually resolved to, plus the microphone the recorder would
+   open.
+
+   The server's answer is the only surface that separates "voice is not
+   configured" from "a config exists and does not parse". runtime.toml shows
+   the second as though it were fine, which is how a six-day outage stayed
+   invisible.
+
+   The input device is read here rather than asked of the server: no server
+   knows it. sox opens whatever CoreAudio calls default, and captures that come
+   back empty are usually a different microphone than the operator assumes. *)
+let launch_voice_config_load state ~mailbox =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let config =
+      match Masc_tui_http.http_get ~host ~port ~path:"/api/v1/voice/config" with
+      | Ok (200, body) -> (
+        match Yojson.Safe.from_string body with
+        | json -> Ok json
+        | exception _ -> Error "voice config did not parse as JSON")
+      | Ok (code, body) ->
+        Error (Printf.sprintf "voice config HTTP %d: %s" code (String.trim body))
+      | Error message -> Error message
+    in
+    let device =
+      (* AUDIODEV wins when set, the way sox reads it; otherwise CoreAudio's
+         default, which is what an unset AUDIODEV means. *)
+      match Sys.getenv_opt "AUDIODEV" with
+      | Some device when String.trim device <> "" -> Some (String.trim device)
+      | Some _ | None -> Masc_tui_audio_device.default_input ()
+    in
+    enqueue_async mailbox (Voice_config_loaded (config, device))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+  | None ->
+    enqueue_async
+      mailbox
+      (Voice_config_loaded (Error "Eio switch is unavailable", None))
+;;
 
 let launch_keeper_turns_load state ~mailbox =
   let host = server_peer_host in
@@ -4192,6 +4303,25 @@ let launch_lanes_load state ~mailbox =
         (Standalone_lanes_loaded
            (standalone_generation, Error "Eio switch is unavailable"))
 
+let launch_clients_load state ~mailbox =
+  let host = server_peer_host in
+  let port = state.port in
+  state.clients_surface_generation <- state.clients_surface_generation + 1;
+  let generation = state.clients_surface_generation in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_clients ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Clients_loaded (generation, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Clients_loaded (generation, Error "Eio switch is unavailable"))
+
 let launch_lane_runs_load state ~mailbox ~lane_id =
   let host = server_peer_host in
   let port = state.port in
@@ -4276,6 +4406,7 @@ let search_row_cursor state =
   match state.view with
   | Keepers Keeper_list -> Some state.keeper_cursor
   | Lanes -> Some state.lanes_standalone_cursor
+  | Clients -> Some state.clients_surface_cursor
   | Verification ->
       if Option.is_some state.verification_detail_request_id then None
       else Some state.verification_cursor
@@ -4340,6 +4471,9 @@ let search_land state index =
       state.context_inspector_cursor <- index;
       state.context_inspector_detail_scroll <- 0
   | Lanes -> state.lanes_standalone_cursor <- index
+  | Clients ->
+      state.clients_surface_cursor <- index;
+      follow state.clients_surface_scroll (fun s -> state.clients_surface_scroll <- s)
   | Verification ->
       state.verification_cursor <- index;
       follow state.verification_scroll (fun s -> state.verification_scroll <- s)
@@ -4466,6 +4600,7 @@ let goto_surface state ~mailbox (destination : surface) =
     state.lanes_action_error <- None;
   (match destination with
    | Lanes -> launch_lanes_load state ~mailbox
+   | Clients -> launch_clients_load state ~mailbox
    | Keepers Keeper_list -> launch_keeper_lanes_load state ~mailbox
    | Approvals ->
        launch_keeper_tool_approvals_load state ~mailbox;
@@ -4512,6 +4647,7 @@ let goto_surface state ~mailbox (destination : surface) =
        | Config_prompts -> launch_prompts_load state ~mailbox
        | Config_presets -> launch_presets_load state ~mailbox
        | Config_params -> launch_runtime_params_load state ~mailbox
+       | Config_voice -> launch_voice_config_load state ~mailbox
        | Config_runtime | Config_models | Config_themes ->
            launch_runtime_config_load state ~mailbox)
    | Resources -> launch_resources_list state ~mailbox
@@ -4709,6 +4845,7 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
         | Keeper_chat_history.Tool_calls _
         | Keeper_chat_history.Skill_activity _
         | Keeper_chat_history.Reasoning _
+        | Keeper_chat_history.Gate_activity _
         | Keeper_chat_history.Memory_activity _ ->
             None)
       rows
@@ -4725,6 +4862,7 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
         | Keeper_chat_history.Tool_calls _
         | Keeper_chat_history.Skill_activity _
         | Keeper_chat_history.Reasoning _
+        | Keeper_chat_history.Gate_activity _
         | Keeper_chat_history.Memory_activity _ -> None)
       rows
   in
@@ -4734,7 +4872,10 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
         (not (String.equal entry.me_keeper_name keeper_name))
         ||
         match entry.me_role with
-        | Message_status -> true
+        (* Neither is in the transcript a refresh brings back -- the gate rows
+           because the refresh does not carry them, this one because it never
+           went to the server at all -- so both are kept. *)
+        | Message_status | Message_local -> true
         | Message_error ->
             String.equal entry.me_request_id ""
             || not
@@ -4768,17 +4909,32 @@ let locally_submitted_at state keeper_name request_id =
          to here rather than matching that one. *)
       | Message_user (Sent_by_operator _ | Sent_by_other _)
       | Message_keeper | Message_autonomous
-      | Message_status | Message_error | Message_tool | Message_skill _
-      | Message_thinking
+      | Message_status | Message_local | Message_error | Message_tool
+      | Message_skill _ | Message_thinking
       | Message_memory -> None)
     (state.msg_history @ state.msg_loaded)
 ;;
 
 let msg_entry_of_history_row state keeper_name ~operation_seq
     (row : Keeper_chat_history.row) =
+  let gate =
+    match row.Keeper_chat_history.kind with
+    | Keeper_chat_history.Gate_activity { approval_id; phase; tool } ->
+        Some
+          { gs_approval_id = approval_id; gs_phase = phase; gs_tool = tool }
+    | Keeper_chat_history.Memory_activity _
+    | Keeper_chat_history.Addressed_to_keeper _
+    | Keeper_chat_history.Said_by_keeper
+    | Keeper_chat_history.Autonomous_reply
+    | Keeper_chat_history.Delivery_failed _
+    | Keeper_chat_history.Tool_calls _
+    | Keeper_chat_history.Skill_activity _
+    | Keeper_chat_history.Reasoning _ -> None
+  in
   let memory_summary =
     match row.Keeper_chat_history.kind with
     | Keeper_chat_history.Memory_activity { summary } -> summary
+    | Keeper_chat_history.Gate_activity _
     | Keeper_chat_history.Addressed_to_keeper _
     | Keeper_chat_history.Said_by_keeper
     | Keeper_chat_history.Autonomous_reply
@@ -4837,6 +4993,16 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         , Some activity )
     | Keeper_chat_history.Reasoning lines ->
         (Message_thinking, Turn_progress, String.concat "\n" lines, None, None)
+    | Keeper_chat_history.Gate_activity { approval_id = _; phase; tool } ->
+        (* Server-owned gate status, drawn from the phase rather than from
+           the sentence the store composed. It is not Memory: putting it in
+           that lane interleaved approvals with journal commits, and hiding
+           the journal hid the gate with it. *)
+        ( Message_status
+        , Turn_progress
+        , Masc_tui_gate_text.lifecycle_line ~phase ~tool
+        , None
+        , None )
     | Keeper_chat_history.Memory_activity _ ->
         (Message_memory, Turn_progress, row.text, None, None)
   in
@@ -4850,6 +5016,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
       | Keeper_chat_history.Tool_calls _
       | Keeper_chat_history.Skill_activity _
       | Keeper_chat_history.Reasoning _
+      | Keeper_chat_history.Gate_activity _
       | Keeper_chat_history.Memory_activity _), _
     | Keeper_chat_history.Addressed_to_keeper _, None -> None
   in
@@ -4891,6 +5058,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
       Option.map
         (Keeper_chat.terminal_safe_text ~preserve_newlines:false)
         memory_summary
+  ; me_gate = gate
   ; me_submitted_at = submitted_at
   ; me_tool_block = tool_block
   ; me_skill_activity = skill_activity
@@ -5330,9 +5498,9 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                        match entry.me_role with
                        | Message_user (Sent_by_operator _) -> true
                        | Message_user (Sent_by_other _) | Message_keeper
-                       | Message_autonomous | Message_status | Message_error
-                       | Message_tool | Message_skill _ | Message_thinking
-                       | Message_memory -> false
+                       | Message_autonomous | Message_status | Message_local
+                       | Message_error | Message_tool | Message_skill _
+                       | Message_thinking | Message_memory -> false
                      then { entry with me_text = safe_text }
                      else entry)
                    state.msg_history;
@@ -5398,6 +5566,19 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                    blocking.Keeper_chat.request_id waiting))))
 ;;
 
+(* The operator is mid-line for this keeper: the composer holds text and it is
+   aimed here. While that is true, a settle should not dispatch the keeper's
+   waiting line out from under the line being typed -- holding it lets the next
+   Enter fold the two together ([coalesce_queued_input]). Gated on that setting:
+   with coalescing off the operator wants every line its own turn, so the settle
+   dispatches promptly as before. *)
+let composing_for_keeper state keeper_name =
+  state.coalesce_queued_input
+  && Buffer.length state.msg_input > 0
+  && (match state.msg_target_keeper_name with
+      | Some target -> String.equal target keeper_name
+      | None -> false)
+
 let drain_queued_message state ~base_path ~mailbox =
   (* Send everything that can go now, oldest first, skipping lines whose own
      keeper still has a turn running. Sending sets that keeper's in-flight, so
@@ -5414,6 +5595,7 @@ let drain_queued_message state ~base_path ~mailbox =
     match
       Chat_queue.take_first_sendable state.msg_queued ~sendable:(fun keeper_name ->
         Option.is_none (inflight_for state keeper_name)
+        && not (composing_for_keeper state keeper_name)
         &&
         match state.msg_recall_replaces with
         | Some editing ->
@@ -5571,6 +5753,7 @@ let chat_notice state ~keeper_name ~role text =
               me_operation_seq = next_chat_operation_seq state "";
               me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text;
               me_memory_summary = None;
+              me_gate = None;
               me_submitted_at = None;
               me_tool_block = None;
               me_skill_activity = None;
@@ -5626,7 +5809,7 @@ let paste_clipboard_image state =
        in
        if needs_separator then Buffer.add_char state.msg_input ' ';
        Buffer.add_string state.msg_input (Printf.sprintf "[Image #%d] " index);
-       notice ~role:Message_status
+       notice ~role:Message_local
          (Printf.sprintf
             "pasted [Image #%d] (%s, %d bytes) \xe2\x80\x94 %d staged for the next message"
             index
@@ -5776,6 +5959,7 @@ let selected_surface_reference state =
         (fun (keeper : Tui_decode.keeper) -> Link.reference Keeper keeper.k_name)
         (List.nth_opt state.keepers state.keeper_cursor)
   | Lanes -> None
+  | Clients -> None
   | Verification ->
       (* The task, not the request: a verification request is a question about
          a task, and the task is the thing another surface can open. *)
@@ -5864,8 +6048,7 @@ let draw_image state ~refuse ~title data =
         ^ Masc_tui_graphics.place ~data box
         ^ Printf.sprintf "\x1b[%d;1H%s" rows
             (Message_layout.fit_width "  any key: back" (max 1 (columns - 1))));
-      state.image_open <-
-        Some { image_title = title; image_bytes = String.length data }
+      state.image_open <- true
 
 (* Put a picture on the terminal, or say why not. The refusal is text for the
    pane: there is nothing to draw, and taking the screen away from the frame
@@ -5972,7 +6155,7 @@ let open_named_image state =
   | Masc_tui_image_preview.Staged attachment ->
       open_staged_image state ~notice attachment
   | Masc_tui_image_preview.No_image ->
-      notice ~role:Message_status
+      notice ~role:Message_local
         (Printf.sprintf
            "Ctrl-O: this conversation names no %s to look at, and no image is staged for the next message"
            Masc_tui_image_ref.extension)
@@ -5981,9 +6164,9 @@ let open_named_image state =
    its own layer, so clearing the screen is not enough to remove one. *)
 let close_image state =
   match state.image_open with
-  | None -> ()
-  | Some _ ->
-      state.image_open <- None;
+  | false -> ()
+  | true ->
+      state.image_open <- false;
       write_to_terminal Masc_tui_graphics.delete_all
 
 (* [/find] and its arg-less repeat, which differ only in where the walk starts.
@@ -6015,19 +6198,19 @@ let seek_in_chat state ~target ~restart =
       | Some (scroll, anchor) ->
           state.msg_find_at <- Some anchor;
           set_msg_scroll state scroll;
-          notice ~role:Message_status
+          notice ~role:Message_local
             (Printf.sprintf "/find %s \xe2\x80\x94 %d row(s) back (/find repeats)"
                state.msg_find scroll)
       | None ->
           if restart then
-            notice ~role:Message_status
+            notice ~role:Message_local
               (Printf.sprintf "/find %s \xe2\x80\x94 nothing in this conversation"
                  state.msg_find)
           else
             (* The walk is over, not empty. Said apart from the case above
                because starting again is what fixes this one and not that
                one. *)
-            notice ~role:Message_status
+            notice ~role:Message_local
               (Printf.sprintf
                  "/find %s \xe2\x80\x94 no older match; /find %s starts again"
                  state.msg_find state.msg_find))
@@ -6068,7 +6251,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       | Ok attachment ->
           state.msg_attachments <- state.msg_attachments @ [ attachment ];
           note_attachment_staged state;
-          notice ~role:Message_status
+          notice ~role:Message_local
             (Printf.sprintf
                "attached %s (%s, %d bytes) — %d staged for the next message"
                attachment.Masc_tui_keeper_chat_projection.name
@@ -6077,7 +6260,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
                (List.length state.msg_attachments)))
   | Masc_tui_command.Help ->
       Buffer.clear state.msg_input;
-      notice ~role:Message_status
+      notice ~role:Message_local
         (String.concat "\n" Masc_tui_command.help_lines)
   | Masc_tui_command.Open_settings ->
       Buffer.clear state.msg_input;
@@ -6117,11 +6300,11 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
               (Keeper_chat_transcript.request_id live)
           with
           | Some request -> launch_keeper_interrupt state ~mailbox request
-          | None -> notice ~role:Message_status "no turn of this pane's to interrupt")
+          | None -> notice ~role:Message_local "no turn of this pane's to interrupt")
       | Some _ ->
-          notice ~role:Message_status
+          notice ~role:Message_local
             "an interrupt is already outstanding for this turn"
-      | None -> notice ~role:Message_status "no turn is streaming in this pane")
+      | None -> notice ~role:Message_local "no turn is streaming in this pane")
   | Masc_tui_command.Steer_missing_message ->
       notice ~role:Message_error "/steer needs replacement text on the same line"
   | Masc_tui_command.Steer_turn message ->
@@ -6134,7 +6317,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
          | `Folded -> Reasoning_folded
          | `Full -> Reasoning_full
          | `Cycle -> next_reasoning_visibility state.msg_reasoning_visibility);
-      notice ~role:Message_status
+      notice ~role:Message_local
         ("reasoning "
          ^ reasoning_visibility_to_string state.msg_reasoning_visibility)
   | Masc_tui_command.Set_tools mode ->
@@ -6149,13 +6332,13 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            launch_keeper_chat_tool_details_load ~force:true state ~mailbox
              ~keeper_name
        | Tools_compact, _ | Tools_full, None -> ());
-      notice ~role:Message_status
+      notice ~role:Message_local
         ("tool calls " ^ tool_visibility_to_string state.msg_tool_visibility)
   | Masc_tui_command.Cycle_memory ->
       Buffer.clear state.msg_input;
       state.msg_memory_visibility <-
         next_memory_visibility state.msg_memory_visibility;
-      notice ~role:Message_status
+      notice ~role:Message_local
         ("Librarian/Memory timeline: "
          ^ memory_visibility_to_string state.msg_memory_visibility
          ^ " (Ctrl-N or /memory to cycle)")
@@ -6197,7 +6380,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       notice ~role:Message_error "/preset restore needs a name on the same line"
   | Masc_tui_command.Preset_restore name ->
       Buffer.clear state.msg_input;
-      notice ~role:Message_status
+      notice ~role:Message_local
         (Printf.sprintf "restoring preset %s — the live state is autosaved first" name);
       launch_preset_call state ~mailbox
         ~call:(fun ~host ~port -> Masc_tui_loader.restore_preset ~host ~port ~name)
@@ -8266,27 +8449,6 @@ let handle_keeper_action state ~base_path ~mailbox action =
    operator their input device is dead — a dead microphone and a quiet room
    both end as an empty draft. *)
 let launch_voice_capture state ~mailbox ~keeper =
-  let capture_dir = Filename.get_temp_dir_name () in
-  let meter_glob () =
-    (* The capture writes under a name Voice_bridge chooses; the meter finds
-       the newest one rather than being told, so the two do not have to agree
-       on a filename across a library boundary. *)
-    try
-      Sys.readdir capture_dir
-      |> Array.to_list
-      |> List.filter (fun f ->
-        String.length f > 9
-        && String.equal (String.sub f 0 9) "masc_stt_"
-        && Filename.check_suffix f ".wav")
-      |> List.map (fun f -> Filename.concat capture_dir f)
-      |> List.sort (fun a b ->
-        compare (Unix.stat b).Unix.st_mtime (Unix.stat a).Unix.st_mtime)
-      |> function
-      | newest :: _ -> Some newest
-      | [] -> None
-    with
-    | Sys_error _ | Unix.Unix_error _ -> None
-  in
   let run () =
     let result =
       try
@@ -8294,6 +8456,12 @@ let launch_voice_capture state ~mailbox ~keeper =
           (Masc.Voice_bridge.record_and_transcribe
              ~agent_id:keeper
              ?noise_floor:state.voice_floor
+             (* The level the capture makes its own decisions from, so the bar
+                and the trigger cannot disagree. It arrives from the capture's
+                fiber, which is why it goes through the mailbox rather than
+                straight into the field. *)
+             ~on_level:(fun db -> enqueue_async mailbox (Voice_level { keeper; db }))
+             ~should_stop:(fun () -> state.voice_stop_requested)
              ())
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -8324,31 +8492,6 @@ let launch_voice_capture state ~mailbox ~keeper =
     in
     enqueue_async mailbox msg
   in
-  let meter () =
-    (* Stops when the capture posts its result: the level is only meaningful
-       while something is recording. *)
-    let rec tick () =
-      match state.voice_capture with
-      | Some active when String.equal active keeper ->
-        (match Eio_context.get_clock_opt () with
-         | None -> ()
-         | Some clock ->
-           Eio.Time.sleep clock 0.5;
-           (match meter_glob () with
-            | None -> ()
-            | Some file ->
-              (match Masc.Voice_bridge.rms_amplitude_of_file file with
-               | Some amplitude ->
-                 enqueue_async
-                   mailbox
-                   (Voice_level
-                      { keeper; db = Masc.Voice_bridge.db_of_amplitude amplitude })
-               | None -> ()));
-           tick ())
-      | Some _ | None -> ()
-    in
-    tick ()
-  in
   match Eio_context.get_switch_opt () with
   | None ->
     enqueue_async
@@ -8357,8 +8500,8 @@ let launch_voice_capture state ~mailbox ~keeper =
   | Some sw ->
     state.voice_capture <- Some keeper;
     state.voice_level_db <- None;
-    Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon);
-    Eio.Fiber.fork_daemon ~sw (fun () -> meter (); `Stop_daemon)
+    state.voice_stop_requested <- None;
+    Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
 ;;
 
 (* Continuous mode's only moving part: after each capture settles, start the
@@ -8396,17 +8539,22 @@ let handle_composer_key state ~base_path ~mailbox key =
       (* Pressing it while continuous mode is on turns the mode off. That is
          the only way out: a mode that re-arms itself needs a key that stops
          it, and the key that started it is the one the operator will reach
-         for. A capture already running is left to finish — cancelling it
-         would throw away speech that was already said. *)
+         for. *)
       (match state.voice_continuous with
        | Some _ ->
            state.voice_continuous <- None;
            state.last_action <- Some ("voice: continuous off", Unix.gettimeofday ())
        | None ->
       (* One capture at a time: a second microphone would contend for the same
-         input device and the two transcripts would race into one draft. *)
+         input device and the two transcripts would race into one draft.
+
+         The second press stops the running one, which is what the row has
+         been telling the operator it does. It used to start another instead,
+         leaving two recorders on one device with no way to end either. *)
       (match state.voice_capture, composer.Composer.target with
-       | Some _, _ -> ()
+       | Some _, _ ->
+           state.voice_stop_requested <- Some Masc.Voice_bridge.Keep_what_was_heard;
+           state.last_action <- Some ("voice: stopping", Unix.gettimeofday ())
        | None, Composer.Ready keeper_name ->
            launch_voice_capture state ~mailbox ~keeper:keeper_name
        | None, (Composer.No_target | Composer.Unreachable _) -> ()));
@@ -8422,15 +8570,23 @@ let handle_composer_key state ~base_path ~mailbox key =
               across. It is dropped when the mode ends, so a session that moves
               to a different room measures again. *)
            state.voice_continuous <- Some keeper_name;
-           state.voice_floor <- Masc.Voice_bridge.measure_noise_floor ~agent_id:keeper_name;
+           state.voice_floor <- Masc.Voice_bridge.measure_noise_floor ~agent_id:keeper_name ();
            state.last_action <- Some ("voice: continuous on", Unix.gettimeofday ());
            if state.voice_capture = None
            then launch_voice_capture state ~mailbox ~keeper:keeper_name
        | None, (Composer.No_target | Composer.Unreachable _) -> ());
       true
   | Composer.Release_focus ->
-      save_message_draft state;
-      state.composer_focused <- false;
+      (* A running capture is the innermost thing Esc can leave, so it goes
+         first and the row keeps its focus. ^Y stops one and keeps what was
+         said; this abandons it. *)
+      (match state.voice_capture with
+       | Some _ ->
+           state.voice_stop_requested <- Some Masc.Voice_bridge.Discard;
+           state.last_action <- Some ("voice: discarding", Unix.gettimeofday ())
+       | None ->
+           save_message_draft state;
+           state.composer_focused <- false);
       true
   | Composer.Send ->
       state.composer_focused <- false;
@@ -8492,6 +8648,9 @@ let handle_composer_key state ~base_path ~mailbox key =
          failure. *)
       let (_handled : bool) =
         handle_message_key state
+          (* The composer row is not the chat surface: no turn of its own is
+             on screen, so Esc here has nothing to stop. *)
+          ~interrupt_turn:(fun () -> false)
           ~submit_message:(fun _ -> ())
           ~answer_approval:(fun ~tool_call_id:_ ~allow:_ -> ())
           ~load_older:(fun ~before:_ -> ())
@@ -8615,6 +8774,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
      each is dropped unless that capture is still the one in flight. An
      operator who moved the cursor, or pressed the key again, has said the
      first capture no longer belongs to this draft. *)
+  | Voice_config_loaded (result, device) ->
+      state.voice_input_device <- device;
+      (match result with
+       | Ok json ->
+           state.voice_config <- Some json;
+           state.voice_config_error <- None
+       | Error message ->
+           state.voice_config <- None;
+           state.voice_config_error <- Some message)
   | Voice_level { keeper; db } ->
       if state.voice_capture = Some keeper then state.voice_level_db <- Some db
   | Voice_transcribed { keeper; text } ->
@@ -8638,6 +8806,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         (* Silence re-arms too: an operator who paused longer than the
            trailing-silence window has not left the mode. *)
         rearm_continuous_capture state ~mailbox ~keeper;
+        (* In the transcript, not only the footer. A capture that heard
+           nothing leaves the draft exactly as a capture that was never
+           transcribed does, and the footer line saying which is gone by the
+           time an operator looks away and back. The reason carries the room
+           level and the level speech had to clear, so this row answers "is
+           the microphone working" rather than only reporting that it is
+           not. *)
+        chat_notice state ~keeper_name:(Some keeper) ~role:Message_local
+          ("voice: " ^ reason);
         state.last_action <- Some ("voice: " ^ reason, Unix.gettimeofday ()))
   | Voice_failed { keeper; error } ->
       if state.voice_capture = Some keeper then (
@@ -8648,6 +8825,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            it again, and a loop that re-arms on failure spins. *)
         state.voice_continuous <- None;
         state.voice_floor <- None;
+        chat_notice state ~keeper_name:(Some keeper) ~role:Message_error
+          ("voice failed: " ^ error);
         state.last_action <- Some ("voice failed: " ^ error, Unix.gettimeofday ()))
   | Http_refresh_done results ->
       http_refresh_inflight := false;
@@ -9011,7 +9190,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Presets_listed (sink, result) ->
       (match sink, result with
        | Preset_to_chat target, Ok snapshot ->
-           chat_notice state ~keeper_name:target ~role:Message_status
+           chat_notice state ~keeper_name:target ~role:Message_local
              (String.concat "\n" (Masc_tui_preset_text.listing_lines snapshot))
        | Preset_to_chat target, Error detail ->
            chat_notice state ~keeper_name:target ~role:Message_error detail
@@ -9026,7 +9205,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Preset_saved (sink, result) ->
       (match sink, result with
        | Preset_to_chat target, Ok manifest ->
-           chat_notice state ~keeper_name:target ~role:Message_status
+           chat_notice state ~keeper_name:target ~role:Message_local
              (Masc_tui_preset_text.saved_line manifest)
        | Preset_to_chat target, Error detail ->
            chat_notice state ~keeper_name:target ~role:Message_error detail
@@ -9041,7 +9220,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match sink, result with
        | Preset_to_chat target, Ok report ->
            let role =
-             if Masc_tui_preset_text.restore_is_clean report then Message_status
+             if Masc_tui_preset_text.restore_is_clean report then Message_local
              else Message_error
            in
            chat_notice state ~keeper_name:target ~role
@@ -9937,7 +10116,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            let noted =
              match result with
              | Ok (Masc_tui_interrupt_signal.Signalled { turn_id }) ->
-                 Keeper_chat_transcript.Signal_sent { turn_id }
+                 Keeper_chat_transcript.Signal_sent
+                   { turn_id; signalled_at_ns = Mtime_clock.elapsed_ns () }
              | Ok (Masc_tui_interrupt_signal.Not_signalled { reason; detail }) ->
                  Keeper_chat_transcript.Signal_declined
                    (match detail with
@@ -10286,6 +10466,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 (min state.lanes_standalone_cursor
                    (List.length snapshot.Tui_decode.sls_lanes - 1))
         | Error detail -> state.standalone_lanes_error <- Some detail)
+  | Clients_loaded (generation, result) ->
+      if generation = state.clients_surface_generation then (
+        match result with
+        | Ok snapshot ->
+            state.clients_surface <- Some snapshot;
+            state.clients_surface_error <- None;
+            (* A refresh may shrink the roster; the cursor has to stay a
+               valid row of the snapshot now in state. *)
+            state.clients_surface_cursor <-
+              max
+                0
+                (min state.clients_surface_cursor
+                   (List.length snapshot.Masc.Tui_decode.cls_clients - 1))
+        | Error detail -> state.clients_surface_error <- Some detail)
   | Lane_runs_loaded (lane_id, result) ->
       (match state.lanes_mode with
        | Lanes_run_list open_lane when String.equal open_lane lane_id ->
@@ -10463,7 +10657,8 @@ let terminal_title_visible_keeper state =
       Option.map
         (fun (keeper : keeper) -> keeper.k_name)
         (selected_keeper state)
-  | Overview | Acting | Memory | Lanes | Board | Approvals | Planning | Schedules
+  | Overview | Acting | Memory | Lanes | Clients | Board | Approvals
+  | Planning | Schedules
   | Verification | Harness | Fusion | Repositories | Changes | Connectors
   | Runtime | Config | Resources | Tools | System_logs -> None
 ;;
@@ -10908,7 +11103,8 @@ let main () =
   let presented_surface_reference () =
     match state.view with
     | Approvals -> Option.bind !presented_approval approval_row_reference
-    | Overview | Acting | Keepers _ | Lanes | Board | Planning | Schedules
+    | Overview | Acting | Keepers _ | Lanes | Clients | Board | Planning
+    | Schedules
     | Memory | Verification | Harness | Fusion | Repositories | Changes | Connectors
     | Runtime | Config | Resources | Code | Tools | System_logs ->
         selected_surface_reference state
@@ -12204,7 +12400,7 @@ and is loaded on demand through keeper_skill.
          and is not also a keystroke for the surface underneath -- an operator
          pressing j to dismiss a screenshot did not mean to move a cursor. *)
       let dismissed_image =
-        Option.is_some state.image_open && Option.is_some input
+        state.image_open && Option.is_some input
       in
       if dismissed_image then begin
         close_image state;
@@ -12401,7 +12597,8 @@ and is loaded on demand through keeper_skill.
            (* A restore rewrites three surfaces; its arm must not outlive the
               keypress that set it. *)
            if cancelled [ "u"; "U" ] then state.preset_restore_armed <- None
-       | Overview | Acting | Lanes | Harness | Memory | Fusion | Repositories
+       | Overview | Acting | Lanes | Clients | Harness | Memory | Fusion
+       | Repositories
        | Changes | Connectors | Runtime | Resources | Tools
        | System_logs | Code -> ());
       (* Destructive binding removal deliberately requires two consecutive
@@ -13665,10 +13862,10 @@ and is loaded on demand through keeper_skill.
        | Some "?" when message_mode && Buffer.length state.msg_input = 0 ->
            state.help_open <- true;
            state.help_scroll <- 0
-       | Some ("right" | "l" | "esc")
-         when message_mode
-              && state.keeper_message_focus = Left_pane ->
-           state.keeper_message_focus <- Right_pane
+        | Some ("right" | "l" | "esc" | "\t")
+          when message_mode
+               && state.keeper_message_focus = Left_pane ->
+            state.keeper_message_focus <- Right_pane
        | Some "left"
          when message_mode
               && Masc_tui_render.keeper_roster_pane_shown state
@@ -13729,6 +13926,14 @@ and is loaded on demand through keeper_skill.
            if
              keeper_message_input_supported state
              || String.equal k "esc"
+             (* Q reaches the composer handler for the same reason Esc does:
+                the quiet leave must not disappear exactly when the terminal
+                is too small to draw the composer -- a transcript-only
+                viewport is when an operator most needs to step away from a
+                running turn. With text in the draft the handler answers it
+                as an ordinary letter, so this route takes nothing from
+                typing. *)
+             || String.equal k "Q"
              || display_toggle_key
              || switch_key
              || queue_management_key
@@ -13745,6 +13950,42 @@ and is loaded on demand through keeper_skill.
              end else
                let (_handled : bool) =
                  handle_message_key state
+                   ~interrupt_turn:(fun () ->
+                     (* Answers whether the press was spent on the turn. The
+                        keeper the pane is showing is the one Esc can stop:
+                        another keeper's turn is not on screen, and stopping
+                        it from here would be a keypress the reader cannot
+                        see the target of. What the press does is the pure
+                        table in Masc_tui_esc_interrupt: launch on a first
+                        press, swallow an accidental double press inside the
+                        grace window, and leave the view once the signal is
+                        stale, declined, or errored. Leaving cancels nothing
+                        -- the interrupt proceeds server-side, and a turn
+                        parked in an uncancellable section keeps streaming
+                        after its signal (masc #29229), so holding Esc until
+                        the stream settles could hold it forever. *)
+                     match state.msg_live with
+                     | Some live
+                       when state.msg_target_keeper_name
+                            = Some (Keeper_chat_transcript.keeper_name live) ->
+                         (match
+                            Masc_tui_esc_interrupt.action
+                              ~now_ns:(Mtime_clock.elapsed_ns ())
+                              (Keeper_chat_transcript.interrupt live)
+                          with
+                          | Masc_tui_esc_interrupt.Launch_interrupt ->
+                            (match
+                               inflight_by_request_id state
+                                 (Keeper_chat_transcript.request_id live)
+                             with
+                             | Some request ->
+                               launch_keeper_interrupt state
+                                 ~mailbox:async_messages request;
+                               true
+                             | None -> false)
+                          | Masc_tui_esc_interrupt.Swallow -> true
+                          | Masc_tui_esc_interrupt.Leave -> false)
+                     | Some _ | None -> false)
                    ~submit_message:
                      (send_operator_text state ~base_path
                         ~mailbox:async_messages)
@@ -13789,7 +14030,12 @@ and is loaded on demand through keeper_skill.
                      match state.msg_target_keeper_name with
                      | Some keeper when state.voice_capture = None ->
                          launch_voice_capture state ~mailbox:async_messages ~keeper
-                     | Some _ | None -> ())
+                     (* The same toggle the composer row carries. *)
+                     | Some _ ->
+                         state.voice_stop_requested <- Some Masc.Voice_bridge.Keep_what_was_heard;
+                         state.last_action <-
+                           Some ("voice: stopping", Unix.gettimeofday ())
+                     | None -> ())
                    ~toggle_voice_continuous:(fun () ->
                      match state.voice_continuous, state.msg_target_keeper_name with
                      | Some _, _ ->
@@ -13800,7 +14046,7 @@ and is loaded on demand through keeper_skill.
                      | None, Some keeper ->
                          state.voice_continuous <- Some keeper;
                          state.voice_floor <-
-                           Masc.Voice_bridge.measure_noise_floor ~agent_id:keeper;
+                           Masc.Voice_bridge.measure_noise_floor ~agent_id:keeper ();
                          state.last_action <-
                            Some ("voice: continuous on", Unix.gettimeofday ());
                          if state.voice_capture = None
@@ -14063,7 +14309,8 @@ and is loaded on demand through keeper_skill.
                        | Board_read _ -> not state.board_detail_wide
                        | Board_list | Board_compose -> false)
                   | Code -> Option.is_some state.code_file
-                  | Acting | Keepers _ | Lanes | Approvals | Planning
+                  | Acting | Keepers _ | Lanes | Clients | Approvals
+                  | Planning
                   | Schedules | Verification | Harness | Fusion
                   | Memory | Repositories | Changes | Connectors | Runtime | Config
                   | Tools | System_logs -> false) ->
@@ -14080,7 +14327,8 @@ and is loaded on demand through keeper_skill.
               when Option.is_some state.code_file
                    && not state.repository_changes_open ->
                 state.code_focus_file <- focus
-            | Acting | Keepers _ | Lanes | Approvals | Planning | Schedules
+            | Acting | Keepers _ | Lanes | Clients | Approvals | Planning
+            | Schedules
             | Memory | Verification | Harness | Fusion | Repositories | Changes
             | Connectors | Runtime | Config | Code | Tools
             | System_logs -> ())
@@ -14187,7 +14435,8 @@ and is loaded on demand through keeper_skill.
                   state.preset_restore_armed <- None;
                   state.preset_save_draft <- Some ""
                 end
-            | Overview | Acting | Keepers _ | Memory | Lanes | Board | Planning
+            | Overview | Acting | Keepers _ | Memory | Lanes | Clients | Board
+            | Planning
             | Verification | Harness | Fusion | Repositories | Code | Changes
             | Connectors | Runtime | Config | Resources | Tools | System_logs ->
                 if
@@ -14308,7 +14557,15 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_detail ->
                 state.detail_scroll <-
                   max 0 (state.detail_scroll + (direction * page))
-            | Lanes ->
+             | Clients ->
+                 let cursor, scroll =
+                   move_row_cursor state ~delta:(direction * page)
+                     ~cursor:state.clients_surface_cursor
+                     ~scroll:state.clients_surface_scroll
+                 in
+                 state.clients_surface_cursor <- cursor;
+                 state.clients_surface_scroll <- scroll
+             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
                      state.lane_run_detail_scroll <-
@@ -14415,7 +14672,9 @@ and is loaded on demand through keeper_skill.
                  | None -> ())
             | Planning | Verification ->
                 launch_verification_load state ~mailbox:async_messages
-            | Lanes ->
+             | Clients ->
+                 launch_clients_load state ~mailbox:async_messages
+             | Lanes ->
                 launch_lanes_load state ~mailbox:async_messages;
                 (match state.lanes_mode with
                  | Lanes_run_list lane_id ->
@@ -14543,30 +14802,11 @@ and is loaded on demand through keeper_skill.
                 state.keeper_detail_focus <- Right_pane;
                 state.keeper_calls_scroll <- 0;
                 state.detail_scroll <- 0
-            | Keepers Keeper_message ->
-                (* While a turn is streaming, Esc interrupts it instead of
-                   leaving: leaving is one keypress away again once it settles,
-                   and a turn an operator wants stopped is the more urgent of
-                   the two. Asking twice does not stack -- the second press is
-                   ignored while the first is unanswered. *)
-                (match state.msg_live with
-                 | Some live
-                   when state.msg_target_keeper_name
-                        = Some (Keeper_chat_transcript.keeper_name live)
-                        && Keeper_chat_transcript.interrupt live
-                           = Keeper_chat_transcript.Not_requested ->
-                     (match
-                        inflight_by_request_id state
-                          (Keeper_chat_transcript.request_id live)
-                      with
-                      | Some request ->
-                          launch_keeper_interrupt state
-                            ~mailbox:async_messages request
-                      | None -> leave_keeper_message state)
-                 | Some _ ->
-                     (* An interrupt is already outstanding for this turn. *)
-                     ()
-                 | None -> leave_keeper_message state)
+            (* Esc on this surface never arrives here: the composer takes it
+               first ([handle_message_key], which the dispatch above routes
+               every key to while the chat is open) and answers it there,
+               interrupt included. *)
+            | Keepers Keeper_message -> ()
             | Board ->
                 (match state.board_mode with
                  | Board_read _ ->
@@ -14623,7 +14863,11 @@ and is loaded on demand through keeper_skill.
                   (* Off-ring child: the way out of the list is the ring
                      parent, loaded, same as Connectors and Code. *)
                   goto_surface state ~mailbox:async_messages Config
-            | Lanes ->
+             | Clients ->
+                 (* Off-ring child: the way out is the ring parent, loaded,
+                    the same exit Resources takes to Config. *)
+                 goto_surface state ~mailbox:async_messages Runtime
+             | Lanes ->
                 state.lanes_action_error <- None;
                 (match state.lanes_mode with
                  | Lanes_run_detail (lane_id, _) ->
@@ -14821,7 +15065,7 @@ and is loaded on demand through keeper_skill.
                 state.system_logs_detail_scroll <- 0
             | Keepers Keeper_runtime_pick | Keepers Keeper_message
             | Keepers Keeper_list | Acting | Approvals
-            | Memory | Repositories | Connectors | Config | Tools -> ())
+             | Memory | Repositories | Connectors | Config | Tools | Clients -> ())
        | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
             | Code ->
@@ -15038,6 +15282,14 @@ and is loaded on demand through keeper_skill.
                    in
                    state.verification_cursor <- cursor;
                    state.verification_scroll <- scroll)
+            | Clients ->
+                let cursor, scroll =
+                  move_row_cursor state ~delta:1
+                    ~cursor:state.clients_surface_cursor
+                    ~scroll:state.clients_surface_scroll
+                in
+                state.clients_surface_cursor <- cursor;
+                state.clients_surface_scroll <- scroll
             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
@@ -15374,6 +15626,14 @@ and is loaded on demand through keeper_skill.
                    in
                    state.verification_cursor <- cursor;
                    state.verification_scroll <- scroll)
+            | Clients ->
+                let cursor, scroll =
+                  move_row_cursor state ~delta:(-1)
+                    ~cursor:state.clients_surface_cursor
+                    ~scroll:state.clients_surface_scroll
+                in
+                state.clients_surface_cursor <- cursor;
+                state.clients_surface_scroll <- scroll
             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
@@ -15859,7 +16119,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Acting
-            | Connectors | Config | Resources | Tools -> ())
+             | Connectors | Config | Resources | Tools | Clients -> ())
        (* Changes reads one keeper's file writes and already binds to the
           roster cursor on entry, so it opens from a keeper surface rather
           than from the Tab ring. Both of them list [f] in their footer and
@@ -16001,7 +16261,7 @@ and is loaded on demand through keeper_skill.
                  | None -> ())
             | Overview | Acting | Keepers (Keeper_logs | Keeper_calls | Keeper_message)
             | Lanes | Board | Approvals | Planning | Schedules
-            | Memory | Verification | Harness | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
+            | Memory | Verification | Harness | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | Clients
             | System_logs -> ())
        | Some "d" when state.view = Changes ->
            (* The same file, read from the tree instead of from the log. Two
@@ -16238,7 +16498,16 @@ and is loaded on demand through keeper_skill.
                     ~content_height:(keeper_log_content_height state);
                 state.view <- Keepers Keeper_logs
             | None -> ())
-       | Some "m" | Some "M" | Some "c" | Some "C" ->
+| Some "c" | Some "C"
+         when state.view = Runtime
+              && Option.is_none state.runtime_detail_target ->
+            (* The third Runtime reading: not what the lanes call, not what
+               the workspace could call, but who is attached to it — the
+               clients roster, off the ring under Runtime the way Lanes is.
+               This arm sits above the chat arm because that one takes [c]
+               unguarded on every surface that names a Keeper. *)
+            goto_surface state ~mailbox:async_messages Clients
+| Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat from every row that names a Keeper. Standalone Lanes carry
               no Keeper identity; Keeper chat is owned by the Keepers surface.
               [c] is an alias for [m] because the footer names the action rather
@@ -16274,7 +16543,8 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | Clients
+            | System_logs -> ())
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_params ->
            handle_runtime_param_clear ()
@@ -16315,6 +16585,8 @@ and is loaded on demand through keeper_skill.
                 state.runtime_mode <- Masc_tui_types.Runtime_lanes;
                 state.runtime_surface_scroll <- 0;
                 goto_surface state ~mailbox:async_messages Lanes)
+       | Some "p" | Some "P" when state.view = Clients ->
+           goto_surface state ~mailbox:async_messages Runtime
        | Some "p" | Some "P"
          when state.view = Lanes && state.lanes_mode = Lanes_overview ->
            goto_surface state ~mailbox:async_messages Runtime
@@ -16347,7 +16619,8 @@ and is loaded on demand through keeper_skill.
               | Config_params -> Config_prompts
               | Config_prompts -> Config_presets
               | Config_presets -> Config_themes
-              | Config_themes -> Config_runtime);
+              | Config_themes -> Config_voice
+              | Config_voice -> Config_runtime);
            state.prompts_cursor <- 0;
            state.config_scroll <- 0;
            state.runtime_config_cursor <- 0;
@@ -16382,6 +16655,10 @@ and is loaded on demand through keeper_skill.
               then launch_runtime_config_load state ~mailbox:async_messages
             | Config_runtime ->
               set_runtime_config_cursor_near state ~direction:1 ~target:0
+            (* Re-read rather than move a cursor: this pane has no rows, and
+               what an operator wants from it after starting a local server is
+               a fresh answer. *)
+            | Config_voice -> launch_voice_config_load state ~mailbox:async_messages
             | Config_themes -> ())
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
@@ -16406,7 +16683,8 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | Clients
+            | System_logs -> ())
        | Some "s" | Some "S" ->
            (match state.view with
             | Code -> ()
@@ -16449,7 +16727,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Approvals | Schedules | Verification | Harness
-            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+             | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs | Clients -> ())
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,
               "wake up" on a keeper row. The surface decides which one is
@@ -16472,7 +16750,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Approvals | Planning | Schedules | Verification | Harness
-            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs
+             | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs | Clients
             -> ())
        | Some "E"
          when state.view = Config && state.config_pane = Config_params ->
@@ -16533,8 +16811,10 @@ and is loaded on demand through keeper_skill.
                     selected model's [models.NAME] line, where the existing
                     $EDITOR path takes over. One write path, not two. *)
                  | Config_models -> handle_config_models_open_source ()
-                 (* The preset pane writes through s and r, never $EDITOR. *)
-                 | Config_presets | Config_themes -> ())
+                 (* The preset pane writes through s and r, never $EDITOR.
+                    The voice pane is a reading; runtime.toml is edited from
+                    the runtime pane, where the file already is. *)
+                 | Config_presets | Config_themes | Config_voice -> ())
             | Tools -> handle_skill_edit ()
             | Schedules -> handle_schedule_modify ()
             | Approvals ->
@@ -16571,7 +16851,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Board | Planning | Verification | Harness
-            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Resources | System_logs -> ())
+             | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Resources | System_logs | Clients -> ())
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_prompts ->
            if state.prompts_show_runtime_assets
@@ -16632,7 +16912,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Memory | Lanes
             | Board | Planning | Schedules | Harness
-            | Fusion | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Fusion | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs | Clients -> ())
       | _ -> ());
 
       (* Surface navigation asks only for datasets the destination adds. The
@@ -16767,7 +17047,8 @@ and is loaded on demand through keeper_skill.
                 explicit refresh for its child badge, but does not poll a
                 hidden 200-row queue on every cadence tick. *)
              launch_verification_load state ~mailbox:async_messages
-         | Lanes -> launch_lanes_load state ~mailbox:async_messages
+             | Lanes -> launch_lanes_load state ~mailbox:async_messages
+             | Clients -> launch_clients_load state ~mailbox:async_messages
          | Harness -> launch_harness_load state ~mailbox:async_messages
          | Fusion ->
              launch_fusion_runs_load state ~mailbox:async_messages;
@@ -16825,7 +17106,7 @@ and is loaded on demand through keeper_skill.
        with
        (* The terminal belongs to the picture until it is dismissed. A frame
           drawn now would clear the rows it occupies and leave the rest. *)
-       | Render_schedule.Render when Option.is_some state.image_open -> ()
+       | Render_schedule.Render when state.image_open -> ()
        | Render_schedule.Render ->
            let frame, clamped, approval =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
@@ -16864,6 +17145,17 @@ let run_with_eio_context f =
                     Masc_tui_server_lifecycle.stop owned ~grace_sec:2.0
                 | None -> ());
             Fs_compat.set_fs (Eio.Stdenv.fs env);
+            (* Without this, Process_eio falls back to a Unix path that waits on
+               Unix.select. Eio is cooperative, so that blocks the whole domain
+               rather than one fiber: a microphone capture forked to keep the
+               UI responsive froze every key instead, for as long as the
+               recorder ran. The server and fusion_run already init here; the
+               TUI did not, and nothing it spawned had been long enough to
+               notice until a capture ran for 15 s. *)
+            Process_eio.init
+              ~cwd_default:(Eio.Stdenv.cwd env)
+              ~proc_mgr:(Eio.Stdenv.process_mgr env)
+              ~clock:(Eio.Stdenv.clock env);
             Eio_context.set_env env;
             Eio_context.set_switch sw;
             Eio_context.set_net (Eio.Stdenv.net env);

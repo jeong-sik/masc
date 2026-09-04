@@ -716,7 +716,7 @@ let test_unroutable_tool_name_is_refused_not_replayed () =
       bool
       "model is told the call was dropped"
       true
-      (string_contains ~needle:"named no registered tool" body);
+      (string_contains ~needle:"no tool available on that request" body);
     check bool "the refusal names the call it dropped" true (carried_by "user");
     Eio.Switch.fail sw Exit
   with
@@ -779,7 +779,7 @@ let test_mixed_turn_refuses_the_call_it_dropped () =
       bool
       "the model is told about the dropped call"
       true
-      (string_contains ~needle:"named no registered tool" body);
+      (string_contains ~needle:"no tool available on that request" body);
     check bool "the refusal names it" true (carried_by "user");
     (* Position, not just presence: a refusal that landed before the results
        would separate the tool_use blocks from their tool_results. *)
@@ -800,7 +800,7 @@ let test_mixed_turn_refuses_the_call_it_dropped () =
     in
     let refusal_index =
       index_of (fun (role, text) ->
-        String.equal role "user" && string_contains ~needle:"named no registered tool" text)
+        String.equal role "user" && string_contains ~needle:"no tool available on that request" text)
     in
     check bool "a tool result message exists" true (last_tool_index >= 0);
     check bool "the refusal follows the tool results" true (refusal_index > last_tool_index);

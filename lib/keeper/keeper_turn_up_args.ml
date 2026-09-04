@@ -196,11 +196,19 @@ let parse_max_context_override args =
    key would certify exactly the silent drop this gate exists to kill
    (R09: [turn_up_arg_unknown]). Keep exactly in sync with [parse]. *)
 (* Carries a value for each field rather than an empty one: a form whose own
-   defaults are refused teaches its requirements through a rejection. *)
+   defaults are refused teaches its requirements through a rejection.
+
+   [network_mode] is the exception, and carries the empty string. "none"
+   blocks the guest's network and "inherit" opens it; a form that suggests
+   either makes that choice for an operator who is not reading it, which is
+   how a keeper built to search the web was created unable to. The empty
+   string is refused by name, so the form teaches the two spellings through
+   the rejection rather than deciding for the reader. *)
 let creation_stem =
   {json|{
   "name": "new-keeper",
   "sandbox_profile": "docker",
+  "network_mode": "",
   "instructions": "Replace this with what this keeper is for."
 }
 |json}
@@ -458,3 +466,40 @@ let resolve_network_mode ~sandbox_profile ~fallback =
   fallback
   |> Option.value ~default:(default_network_mode_for_profile sandbox_profile)
 
+
+(* Which network mode a keeper lands on, from the caller's raw argument, the
+   keeper TOML declaration, and the profile's own default. One function
+   because create and update disagreed: update read the caller's value, create
+   computed one from [profile_defaults] and dropped the caller's, so the same
+   declaration produced a different keeper depending on whether the name
+   already existed -- and the create side said nothing about the drop. A
+   keeper created for web search landed on "none" and failed inside the guest.
+
+   An unparseable value is an error naming every accepted spelling, rendered
+   from [valid_network_mode_strings] rather than a hand-typed pair, so a third
+   mode reaches the message without an edit here.
+
+   A parseable value the profile cannot hold is an error too. Honouring the
+   caller's mode without that check wrote [remote_ssh] with [network_mode =
+   "none"] into a keeper TOML, which booted from the in-memory meta and
+   reported success -- and was then refused by
+   [Keeper_types_profile_toml_parser] on the next load of that file, leaving a
+   hand edit as the only way out. The rule itself belongs to the type that
+   owns both fields; this reads it. *)
+let resolve_requested_network_mode ~requested ~sandbox_profile ~fallback =
+  let accepted mode =
+    match Keeper_types_profile.network_mode_rejection sandbox_profile mode with
+    | Some message -> Error message
+    | None -> Ok mode
+  in
+  match requested with
+  | None -> accepted (resolve_network_mode ~sandbox_profile ~fallback)
+  | Some raw ->
+    (match network_mode_of_string raw with
+     | Some mode -> accepted mode
+     | None ->
+       Error
+         (Printf.sprintf
+            "invalid network_mode: %S (expected: %s)"
+            raw
+            (String.concat ", " Keeper_types_profile.valid_network_mode_strings)))

@@ -260,3 +260,40 @@ let keeper_max_tool_rounds () : int option =
   | 0 -> None
   | rounds -> Some rounds
 ;;
+
+(* A deferred tool placed with its schema is charged to every request of every
+   later turn, and what earns it that place is having been run. "Ever run" has
+   no upper bound: measured over 19,100 turns 2026-09-01..03 the per-keeper
+   median carried was 32.1 KB of schema and reached 51.9 KB, while the median
+   gap between two uses of the same tool is 2 turns and p90 is 24.
+
+   Counted in tool calls rather than turns, which is the evidence the carry is
+   read from. At the measured 6.7 calls per turn, 300 is about 45 turns --
+   past the p90 re-use gap of 24. The curve is flat from 200 to 500 (17.0 to
+   18.8 KB carried); below 200 the re-asks climb without buying carry, at 100
+   costing 1,121 loads against 958 for 1.6 KB less held.
+
+   0 places every tool the conversation has run, which is what shipped before
+   this. Set it there if the fleet moves to models that all cache prompts: the
+   saving here comes from the 58% of requests on models that cache nothing and
+   so pay full price for every schema byte on every request.
+
+   Sampled, not enforced continuously. The carry is measured against this
+   window only on a call to a tool the carry does not already hold, because
+   that is the call that changes the tool array and forfeits the provider's
+   cache prefix anyway. Between two such calls the carried set is frozen, so a
+   tool can sit further back than this and still be sent, and a Keeper that
+   keeps re-using what it already carries evicts nothing until it reaches for
+   something else. The sizing above comes from a replay of the earlier cut
+   rule (cut at a name's first use in the conversation); the rule that ships
+   cuts strictly more often, so those carried figures are an upper bound. *)
+let keeper_tool_carry_window_rp =
+  _rp_int ~key:"keeper.tool_search.carry_window"
+    ~default:(fun () -> 300)
+    ~min_v:0 ~max_v:100000
+    ~description:
+      "How far back a tool's last call may be and still be sent with its schema, in tool calls, measured when the conversation calls a tool it is not already carrying rather than between those calls (0 = every tool the conversation has run)" ()
+
+let keeper_tool_carry_window () : int =
+  Runtime_params.get keeper_tool_carry_window_rp
+;;

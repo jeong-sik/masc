@@ -766,6 +766,11 @@ type sse_event =
   | Connected
   | Timeout of string
   | StreamIncomplete of { reason : string }
+  | StreamRepeating of
+      { paragraph : string
+      ; occurrences : int
+      ; bytes_seen : int
+      }
   (** The provider signalled the turn was cut off before a natural stop (an
       OpenAI Responses [response.incomplete]). Any in-progress tool call is
       partial, so the accumulator drops tool blocks at finalize rather than
@@ -795,6 +800,15 @@ type stream_error =
   (** The NDJSON parser failed. This remains distinct from an SSE parse
       failure so the HTTP boundary can preserve the declared wire format. *)
   | Stream_incomplete of { reason : string }
+  | Stream_repeating of
+      { paragraph : string
+      ; occurrences : int
+      ; bytes_seen : int
+      }
+      (** The generation started repeating one paragraph and did not stop.
+          Neither a transport fault nor a malformed payload: the bytes parse and
+          the provider is answering. Ended here rather than at the token ceiling
+          so the reason is legible and the output is not paid for in full. *)
   (** The stream ended without its protocol terminal marker.  This is not a
       malformed payload and must remain distinct at the transport boundary. *)
   | Stream_unknown_event of

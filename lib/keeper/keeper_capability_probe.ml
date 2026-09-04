@@ -389,8 +389,16 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
              (* Built from the same fields the keeper path builds it from, and
                 the deadline resolved by the same function, so the probe
                 measures the runtime a real turn would get rather than a
-                lenient stand-in. Only [system_prompt] differs: the probe's
-                prompt is the whole instruction.
+                lenient stand-in. Only [system_prompt] differs, and since
+                #33072 it differs by more than the keeper's text being absent:
+                [None] omits [--system-prompt], so the probe's own prompt sits
+                behind Claude Code's built-in one rather than being the whole
+                instruction. That is deliberate here -- the codex probe already
+                ran on its vendor default ([developer_instructions = None] is
+                omitted by [optional_field]), so this makes the two probes
+                symmetric -- but it does mean the probe measures a client
+                carrying the vendor's per-machine sections, which is what
+                [--exclude-dynamic-system-prompt-sections] names.
 
                 Session mode is left at its default -- a fresh session per
                 probe, abandoned when the turn ends. *)

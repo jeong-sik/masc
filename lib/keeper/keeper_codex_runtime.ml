@@ -435,9 +435,11 @@ let recovery_failure_of_client_error = function
    configuration MASC already chose, not an instruction -- what the keeper does
    about it stays the keeper's.
 
-   Checked against codex-cli 0.149.1 on 2026-08-25. Its app-server schema
-   names [SandboxMode] as [read-only | workspace-write | danger-full-access],
-   and a read-only session refuses a built-in patch with the wording this note
+   Checked against codex-cli 0.149.1 on 2026-08-25, profile ids re-read from
+   0.153.2 on 2026-09-04. MASC reaches the read-only posture through the named
+   permissions profile [:read-only] ([thread/start]'s [permissions]), not
+   through [sandbox] and its [SandboxMode] vocabulary, which this client never
+   sends. Such a session refuses a built-in patch with the wording this note
    contradicts: "patch rejected: writing is blocked by read-only sandbox"
    (openai/codex#30712, #24806).
 
@@ -459,7 +461,8 @@ let native_posture_note = function
 
 let run_without_lifecycle ~runtime_id ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
-    ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
+    ~system_prompt ~tools ~initial_messages ~model_input_projection
+    ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_successful_tool_completion
     ~on_official_client_result_handoff ~on_native_action
@@ -563,6 +566,17 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         ~model_input_projection
         ~hooks:(Some hooks)
     in
+    (* Reported from [prepared.messages], the post-window list, gated on the
+       same [thread_mode] that decides whether [thread/inject_items] runs at
+       all. Only a [Start] injects the history into the new thread; a [Resume]
+       sends the prompt and leaves the conversation in the thread the
+       app-server owns, so on that branch there is nothing here to attribute.
+       The composition line further down states the same split. *)
+    on_transmitted_model_input
+      (match thread_mode with
+       | Runtime_codex_app_server.Start ->
+         Host.Whole_input_transmitted prepared.messages
+       | Runtime_codex_app_server.Resume _ -> Host.Held_by_client_session);
     (* Snap the operator-declared effort into the catalog's accepted set so a
        per-model cap (e.g. [Max] unsupported on a model that tops out at
        [XHigh]) does not fail the turn. The same value feeds the raw_trace
@@ -1092,7 +1106,8 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id
   | Ok _ -> ()
 ;;
 let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
-    ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
+    ~system_prompt ~tools ~initial_messages ~model_input_projection
+    ~on_transmitted_model_input ~hooks
     ~context_injector ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
@@ -1172,6 +1187,13 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
                   ~observed_next_shrink_capacity_bytes
                   ?on_model_input_window_observation
                   model_input_projection))
+          (* Reported inside the attempt rather than from the projection. The
+             projection cannot see [thread_mode], and that is what decides
+             whether its result is injected into the thread or dropped. A lane
+             that reports nothing wrote every Codex turn's input attribution
+             as zero (masc#32995); a lane that reports the projection on a
+             resume attributes history the thread already holds. *)
+          ~on_transmitted_model_input
           ~hooks
           ~context_injector
           ~context

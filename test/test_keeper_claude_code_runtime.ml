@@ -267,7 +267,7 @@ let content_of_wire_message raw =
 let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
     ?event_capture ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
-    ~base_path ~cli_path ~goal () =
+    ?on_request_attribution ~base_path ~cli_path ~goal () =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
@@ -309,6 +309,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                            ?runtime_manifest_append
                            ?raw_trace
                            ?on_official_client_native_action
+                           ?on_request_attribution
                            ~sw
                            ~net:(Eio.Stdenv.net env)
                            ())
@@ -1127,6 +1128,23 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
 let test_keeper_settles_and_resumes () =
   let base_path = temp_workspace () in
   let prompt_marker = Filename.concat base_path "resume-prompt.json" in
+  (* What each turn reported about its own model input. The start/resume split
+     the rest of this test pins on the wire has to be the same split the
+     record carries, or the metrics row describes a request that was not
+     sent. *)
+  let reports = ref [] in
+  let on_request_attribution ~runtime_id:_ ~tools:_ ~transmitted =
+    reports := transmitted :: !reports
+  in
+  let reported_input () =
+    match !reports with
+    | [ latest ] -> latest
+    | other ->
+      fail
+        (Printf.sprintf
+           "expected exactly one input report for the turn, got %d"
+           (List.length other))
+  in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
@@ -1142,6 +1160,7 @@ let test_keeper_settles_and_resumes () =
                ~base_path
                ~cli_path
                ~goal:"FIRST_GOAL"
+               ~on_request_attribution
                ()
            with
            | Error error -> fail (Agent_core.Error.to_string error)
@@ -1151,6 +1170,17 @@ let test_keeper_settles_and_resumes () =
                "MASC_CLAUDE_FIRST"
                (keeper_response_text turn);
              check int "first turn" 1 turn.turns);
+       (* A start renders the whole prepared list into the prompt, so the
+          record may attribute it. *)
+       (match reported_input () with
+        | Keeper_official_client_host.Whole_input_transmitted messages ->
+          check bool
+            "a started conversation reports the history it rendered"
+            true
+            (List.length messages > 0)
+        | Keeper_official_client_host.Held_by_client_session ->
+          fail "a started conversation reported nothing to attribute");
+       reports := [];
        let first = load_state base_path in
        let session_id =
          match first.phase with
@@ -1169,6 +1199,7 @@ let test_keeper_settles_and_resumes () =
                ~base_path
                ~cli_path
                ~goal:"SECOND_GOAL"
+               ~on_request_attribution
                ()
            with
            | Error error -> fail (Agent_core.Error.to_string error)
@@ -1187,6 +1218,18 @@ let test_keeper_settles_and_resumes () =
          "resume sends only current goal"
          "SECOND_GOAL"
          (content_of_wire_message raw);
+       (* And the record says the same thing the wire does. Reporting the
+          prepared list here would attribute "ALREADY_IN_OFFICIAL_SESSION" and
+          the first turn's history to a request that carried neither
+          (masc#32995). *)
+       (match reported_input () with
+        | Keeper_official_client_host.Held_by_client_session -> ()
+        | Keeper_official_client_host.Whole_input_transmitted messages ->
+          fail
+            (Printf.sprintf
+               "a resumed conversation attributed %d messages the wire did not \
+                carry"
+               (List.length messages)));
        let second = load_state base_path in
        check int "durable cumulative turns" 2 second.turn_count;
        match second.phase with
@@ -1361,7 +1404,15 @@ let test_spawn_failure_releases_claim () =
          | _ -> fail "transient release evidence was not persisted"))
 ;;
 
-let run_direct_attempt ?hooks ~base_path ~cli_path ~goal ~tools () =
+let run_direct_attempt
+      ?hooks
+      ?(system_prompt = "pre-dispatch fixture system prompt")
+      ~base_path
+      ~cli_path
+      ~goal
+      ~tools
+      ()
+  =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
@@ -1393,10 +1444,18 @@ let run_direct_attempt ?hooks ~base_path ~cli_path ~goal ~tools () =
                     ~base_path
                     ~goal
                     ~goal_blocks:None
-                    ~system_prompt:""
+                    (* Defaults to non-empty text. The keeper mainline refuses a
+                       composed system prompt that comes out blank rather than
+                       omitting [--system-prompt] and running the turn under
+                       the client's built-in prompt, so [""] would make every
+                       attempt below fail on config instead of reaching the
+                       behaviour each one asserts. The text is a don't-care;
+                       only its non-emptiness is load-bearing. *)
+                    ~system_prompt
                     ~tools
                     ~initial_messages:[]
                     ~model_input_projection:None
+                    ~on_transmitted_model_input:(fun _ -> ())
                     ~hooks
                     ~context_injector:None
                       (* Dynamic tools require the Keeper shared context
@@ -1499,6 +1558,40 @@ let repeated_tool () =
       ]
     (fun _ ->
       Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+;;
+
+(* A blank composition must not reach [Runtime_claude_code.config.system_prompt]
+   as [None]. [None] means "omit --system-prompt", which since #33072 hands the
+   turn Claude Code's built-in coding-agent prompt while masc's tool set and
+   [--permission-mode dontAsk] stay in place. The refusal is checked on the
+   typed [InvalidConfig] field rather than by substring so a reworded detail
+   does not silently stop proving anything. The CLI fixture is deliberately a
+   working one: the refusal has to land before spawn, so reaching a spawn
+   failure here would mean the check ran too late. *)
+let test_blank_system_prompt_is_refused_not_defaulted () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture repeated_tool_fixture (fun cli_path ->
+         let attempt =
+           run_direct_attempt
+             ~system_prompt:"   "
+             ~base_path
+             ~cli_path
+             ~goal:"REPEAT_TOOL"
+             ~tools:[ repeated_tool () ]
+             ()
+         in
+         match attempt.result with
+         | Error
+             (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; _ }))
+           -> check string "refused field" "system_prompt" field
+         | Error error ->
+           fail
+             ("blank system prompt produced the wrong error: "
+              ^ Agent_core.Error.to_string error)
+         | Ok _ -> fail "blank system prompt was sent as the client default"))
 ;;
 
 let test_repeated_tool_stop_records_pre_result_turn_identity () =
@@ -1695,6 +1788,10 @@ let () =
             "unbounded turn keeps subscription probe bounded"
             `Quick
             test_unbounded_turn_keeps_subscription_probe_bounded
+        ; test_case
+            "blank system prompt is refused not defaulted"
+            `Quick
+            test_blank_system_prompt_is_refused_not_defaulted
         ; test_case
             "repeated tool stop records pre-result turn identity"
             `Quick

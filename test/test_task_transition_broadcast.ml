@@ -78,14 +78,21 @@ let contents config ~baseline_seq =
   |> List.map (fun (message : D.message) -> message.content)
 ;;
 
-let transition config ~task_id ~action ?prepare_verification_request ?(reason = "")
+(* Every transition into [AwaitingVerification] persists a request before it
+   commits, and this suite has no verification store. Both obligations stand
+   in for one, so a cancellation reaches the wording under test rather than
+   failing on absent storage. *)
+let stub_verification_request ~task:_ ~assignee:_ ~verification_id:_ ~claim:_ = Ok ()
+
+let transition config ~task_id ~action
+      ?(prepare_verification_request = stub_verification_request) ?(reason = "")
       ?(notes = "") () =
   Workspace.transition_task_r
     config
     ~agent_name:owner
     ~task_id
     ~action
-    ?prepare_verification_request
+    ~prepare_verification_request
     ~notes
     ~reason
     ()
@@ -98,7 +105,11 @@ let check_ok label = function
 
 (* The cancellation reason is the payload an operator or the task's author
    needs; a bare "Cancelled task-1" would leave the message log as useless as
-   the silent activity event it replaced. *)
+   the silent activity event it replaced.
+
+   A producer's stop waits for a verdict, so the row says the stop was asked
+   for. It used to say "Cancelled task-1" for a Task that was still awaiting
+   one — and could still be sent back to the producer. *)
 let test_cancel_broadcasts_reason () =
   with_test_env (fun config ~baseline_seq ->
     seed config
@@ -107,8 +118,22 @@ let test_cancel_broadcasts_reason () =
       (transition config ~task_id:"task-1" ~action:D.Cancel
          ~reason:"BLOCKED: service absent from sandbox" ());
     Alcotest.(check (list string))
-      "cancellation reaches the message log with its reason"
-      [ "Cancelled task-1 - BLOCKED: service absent from sandbox" ]
+      "the requested cancellation reaches the message log with its reason"
+      [ "Cancellation requested for task-1 - BLOCKED: service absent from sandbox" ]
+      (contents config ~baseline_seq))
+;;
+
+(* An unclaimed Task has no producer to judge, so its cancel is terminal on the
+   spot and says so. Same action, two statuses, two sentences. *)
+let test_cancel_of_an_unclaimed_task_is_announced_as_terminal () =
+  with_test_env (fun config ~baseline_seq ->
+    seed config (make_task ~id:"task-13" ~status:D.Todo);
+    check_ok "cancel"
+      (transition config ~task_id:"task-13" ~action:D.Cancel
+         ~reason:"the defect was fixed elsewhere" ());
+    Alcotest.(check (list string))
+      "an unclaimed cancellation is announced as done"
+      [ "Cancelled task-13 - the defect was fixed elsewhere" ]
       (contents config ~baseline_seq))
 ;;
 
@@ -175,8 +200,6 @@ let test_submit_defers_to_board () =
       (make_task ~id:"task-8" ~status:(D.InProgress { assignee = owner; started_at = now }));
     check_ok "submit"
       (transition config ~task_id:"task-8" ~action:D.Submit_for_verification
-         ~prepare_verification_request:
-           (fun ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ -> Ok ())
          ~notes:"evidence at /tmp/proof" ());
     Alcotest.(check (list string))
       "submission does not duplicate its Board post as a message"
@@ -248,6 +271,7 @@ let test_explicit_reason_outranks_handoff_context () =
       (make_task ~id:"task-11" ~status:(D.InProgress { assignee = owner; started_at = now }));
     check_ok "cancel"
       (Workspace.transition_task_r config ~agent_name:owner ~task_id:"task-11"
+         ~prepare_verification_request:stub_verification_request
          ~action:D.Cancel ~notes:""
          ~reason:"superseded by task-12"
          ~handoff_context:
@@ -263,7 +287,7 @@ let test_explicit_reason_outranks_handoff_context () =
          ());
     Alcotest.(check (list string))
       "the stated reason wins"
-      [ "Cancelled task-11 - superseded by task-12" ]
+      [ "Cancellation requested for task-11 - superseded by task-12" ]
       (contents config ~baseline_seq))
 ;;
 
@@ -299,6 +323,8 @@ let () =
     [ ( "committed transitions"
       , [ Alcotest.test_case "cancel carries its reason" `Quick
             test_cancel_broadcasts_reason
+        ; Alcotest.test_case "an unclaimed cancel is terminal" `Quick
+            test_cancel_of_an_unclaimed_task_is_announced_as_terminal
         ; Alcotest.test_case "cancel without reason" `Quick
             test_cancel_without_reason_broadcasts_bare
         ; Alcotest.test_case "release carries its reason" `Quick

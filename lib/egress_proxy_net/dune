@@ -1,0 +1,13 @@
+(include_subdirs no)
+
+; The socket half. Separate from masc.egress_proxy_decision so the allowlist
+; can be exercised without a listener, and so this module's dependencies
+; (eio, unix) do not reach the matcher.
+(library
+ (name masc_egress_proxy_net)
+ (public_name masc.egress_proxy_net)
+ (wrapped false)
+ (flags
+  (:standard -w +4 -w +33))
+ (libraries eio eio.unix unix masc.egress_host masc.egress_proxy_decision)
+ (modules egress_proxy_net))

@@ -65,10 +65,14 @@ describe('keeper prompt byte telemetry', () => {
       metrics_series: [metricPoint({
         ctx_composition: {
           actual_input_tokens: 1000,
-          attributed_bytes: 1160,
-          segments: {
-            'prompt.keeper_instructions': { bytes: 320, fingerprint: null },
-            message_tool_result: { bytes: 840, fingerprint: null },
+          attribution: {
+            status: 'attributed',
+            runtime_profile: 'glm-coding.glm-5',
+            attributed_bytes: 1160,
+            segments: {
+              'prompt.keeper_instructions': { bytes: 320, fingerprint: null },
+              message_tool_result: { bytes: 840, fingerprint: null },
+            },
           },
         },
       })],

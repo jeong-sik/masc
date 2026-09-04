@@ -29,6 +29,7 @@ let stream_error_to_string = function
   | Stream_parse_failed { reason; _ } -> reason
   | Stream_ndjson_parse_failed { reason; _ } -> reason
   | Stream_incomplete { reason } -> reason
+  | Stream_repeating { paragraph; _ } -> paragraph
   | Stream_unknown_event { event_type; _ } -> "unknown_event:" ^ event_type
   | Stream_unsupported_part { part; _ } -> "unsupported_part:" ^ part
   | Stream_unsupported_response { response; _ } -> "unsupported_response:" ^ response

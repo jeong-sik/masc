@@ -46,20 +46,8 @@ type wake_payload_event =
   ; tool_count : int
   }
 
-type handoff_event =
-  { timestamp : float
-  ; keeper_name : string
-  ; trace_id : string
-  ; generation : int
-  ; next_generation : int option
-  ; prev_trace_id : string option
-  ; new_trace_id : string option
-  }
-
-let max_runtime_events = 12
 let max_recent_verdicts = 8
 let max_signal_scan = 500
-let runtime_stale_after_s = 30. *. 60.
 let evaluator_stale_after_s = 12. *. Masc_time_constants.hour
 
 (* Fraction of an evaluator's verdicts that came back Invalid_verdict or
@@ -169,13 +157,6 @@ let read_store_records store ?since ?until ~f () =
       ~until:end_date
       max_signal_scan
       ~f)
-;;
-
-let max_timestamp left right =
-  match left, right with
-  | Some l, Some r -> Some (Float.max l r)
-  | (Some _ as value), None | None, (Some _ as value) -> value
-  | None, None -> None
 ;;
 
 let verdict_item_json (item : harness_verdict_item) =
@@ -463,120 +444,6 @@ let read_wake_payload_events ?since ?until () =
     events
 ;;
 
-let handoff_event_of_metrics_json json =
-  let nonempty_string key source =
-    match Safe_ops.json_string_opt key source with
-    | Some value ->
-        let value = String.trim value in
-        if value = "" then None else Some value
-    | None -> None
-  in
-  match Keeper_metrics_record.kind_of_json json with
-  | Some Keeper_metrics_record.Turn ->
-      (match
-         Safe_ops.json_bool_opt "handoff_performed" json,
-         Json_util.assoc_member_opt "handoff" json
-       with
-       | Some false, _ -> None
-       | Some true, Some (`Assoc _ as handoff) ->
-           (match
-              Safe_ops.json_float_opt "ts_unix" json,
-              nonempty_string "name" json,
-              nonempty_string "trace_id" json,
-              Safe_ops.json_int_opt "generation" json
-            with
-            | Some timestamp, Some keeper_name, Some trace_id, Some generation ->
-                Some
-                  { timestamp
-                  ; keeper_name
-                  ; trace_id
-                  ; generation
-                  ; next_generation =
-                      Safe_ops.json_int_opt "to_generation" handoff
-                  ; prev_trace_id =
-                      nonempty_string "prev_trace_id" handoff
-                  ; new_trace_id =
-                      nonempty_string "new_trace_id" handoff
-                  }
-            | _ -> None)
-       | Some true, _
-       | None, _ -> None)
-  | Some Keeper_metrics_record.Heartbeat
-  | None -> None
-;;
-
-let handoff_event_json (event : handoff_event) =
-  `Assoc
-    [ "timestamp", `Float event.timestamp
-    ; "keeper_name", `String event.keeper_name
-    ; "trace_id", `String event.trace_id
-    ; "generation", `Int event.generation
-    ; "next_generation", Json_util.int_opt_to_json event.next_generation
-    ; "prev_trace_id", Json_util.string_opt_to_json event.prev_trace_id
-    ; "new_trace_id", Json_util.string_opt_to_json event.new_trace_id
-    ]
-;;
-
-let read_keeper_metric_records ?since ?until (config : Workspace.config) keeper_name =
-  let store = Keeper_types_support.keeper_metrics_store config keeper_name in
-  match since, until with
-  | Some _, _ | _, Some _ ->
-    let since, until = date_bounds ?since ?until () in
-    let start_date = if since = "" then "2020-01-01" else since in
-    let end_date = if until = "" then "2099-12-31" else until in
-    (* Same cap as the unfiltered branch below; see [read_store_records]. *)
-    Dated_jsonl.read_range_recent
-      store
-      ~since:start_date
-      ~until:end_date
-      max_signal_scan
-  | None, None -> Dated_jsonl.read_recent store max_signal_scan
-;;
-
-let read_handoff_events ?since ?until (config : Workspace.config) =
-  let events =
-    Keeper_meta_store.keeper_names config
-    |> List.concat_map (fun keeper_name ->
-      read_keeper_metric_records ?since ?until config keeper_name
-      |> List.filter_map handoff_event_of_metrics_json)
-  in
-  List.sort
-    (fun (left : handoff_event) (right : handoff_event) ->
-       Float.compare right.timestamp left.timestamp)
-    events
-;;
-
-let has_any_handoff_events (config : Workspace.config) =
-  Keeper_meta_store.keeper_names config
-  |> List.exists (fun keeper_name ->
-    read_keeper_metric_records config keeper_name
-    |> List.exists (fun json -> Option.is_some (handoff_event_of_metrics_json json)))
-;;
-
-let empty_reason ~has_any ?since ?until () =
-  let since, until = date_bounds ?since ?until () in
-  if has_any && (since <> "" || until <> "")
-  then Some "window_empty"
-  else if has_any
-  then Some "no_recent_events"
-  else Some "no_runtime_activity"
-;;
-
-
-let handoff_status (latest_event : handoff_event option) =
-  match latest_event with
-  | None -> Idle
-  | Some event ->
-    if is_stale ~threshold_s:runtime_stale_after_s event.timestamp
-    then Stale
-    else if
-      Option.is_none event.prev_trace_id
-      || Option.is_none event.new_trace_id
-      || Option.is_none event.next_generation
-    then Warning
-    else Healthy
-;;
-
 let evaluator_status ~calibration latest_timestamp =
   let total_verdicts = Safe_ops.json_int ~default:0 "total_verdicts" calibration in
   let fallback_count = Safe_ops.json_int ~default:0 "fallback_count" calibration in
@@ -599,21 +466,6 @@ let latest_timestamp_of_verdicts (verdicts : harness_verdict_item list) =
   | item :: _ -> Some item.timestamp
   | [] -> None
 ;;
-
-let latest_by_timestamp timestamp_of items =
-  List.fold_left
-    (fun acc item ->
-       match acc with
-       | Some current when timestamp_of current >= timestamp_of item -> acc
-       | _ -> Some item)
-    None
-    items
-;;
-
-let handoff_timestamp (event : handoff_event) = event.timestamp
-let handoff_generation (event : handoff_event) = event.next_generation
-
-
 
 
 let record_wake_payload_at
@@ -678,40 +530,11 @@ let record_wake_payload
 ;;
 
 
-let recent_handoffs_json
-      ?since
-      ?until
-      ~has_any
-      ~(latest : handoff_event option)
-      ~(events : handoff_event list)
-      ()
-  =
-  let status = status_to_string (handoff_status latest) in
-  let recent_events = trim_recent max_runtime_events events in
-  `Assoc
-    [ ( "description"
-      , `String
-          "Shows recent keeper checkpoint rollovers sourced from keeper metrics \
-           snapshots." )
-    ; "status", `String status
-    ; "last_event_at", Json_util.float_opt_to_json (Option.map handoff_timestamp latest)
-    ; ( "empty_reason"
-      , match recent_events with
-        | _ :: _ -> `Null
-        | [] -> Json_util.string_opt_to_json (empty_reason ~has_any ?since ?until ()) )
-    ; "recent_events", `List (List.map handoff_event_json recent_events)
-    ; "total_recent", `Int (List.length events)
-    ]
-;;
-
-
 let overview_json
       ~(calibration : Yojson.Safe.t)
       ~(recent_verdicts : harness_verdict_item list)
-      ~(latest_handoff : handoff_event option)
   =
   let verdict_last = latest_timestamp_of_verdicts recent_verdicts in
-  let handoff_last = Option.map handoff_timestamp latest_handoff in
   let fallback_count = Safe_ops.json_int ~default:0 "fallback_count" calibration in
   let total_verdicts = Safe_ops.json_int ~default:0 "total_verdicts" calibration in
   let fallback_ratio =
@@ -734,20 +557,15 @@ let overview_json
     then 0.0
     else float_of_int cross_model_match /. float_of_int verdicts_with_generator
   in
-  let last_signal_at = max_timestamp verdict_last handoff_last in
   `Assoc
     [ ( "evaluator_status"
       , `String (status_to_string (evaluator_status ~calibration verdict_last)) )
-    ; "handoff_status", `String (status_to_string (handoff_status latest_handoff))
-    ; "last_signal_at", Json_util.float_opt_to_json last_signal_at
+    ; "last_signal_at", Json_util.float_opt_to_json verdict_last
     ; "evaluator_last_event_at", Json_util.float_opt_to_json verdict_last
-    ; "handoff_last_event_at", Json_util.float_opt_to_json handoff_last
     ; "fallback_ratio", `Float fallback_ratio
     ; "cross_model_rate", `Float cross_model_rate
     ; "cross_model_match_count", `Int cross_model_match
     ; "verdicts_with_generator_runtime", `Int verdicts_with_generator
-    ; ( "latest_handoff_generation"
-      , Json_util.int_opt_to_json (Option.bind latest_handoff handoff_generation) )
     ]
 ;;
 
@@ -755,20 +573,9 @@ let reset_runtime_stores_for_testing () =
   Atomic.set wake_payload_store_ref None
 ;;
 
-let json ~(config : Workspace.config) ?since ?until () =
+let json ?since ?until () =
   let calibration = Eval_calibration.calibration_stats ?since ?until () in
   let recent_verdicts = read_recent_verdicts ?since ?until () in
-  let has_window = Option.is_some since || Option.is_some until in
-  let handoff_events = read_handoff_events ?since ?until config in
-  let latest_handoff : handoff_event option =
-    latest_by_timestamp handoff_timestamp handoff_events
-  in
-  let handoff_has_any =
-    match handoff_events with
-    | _ :: _ -> true
-    | [] when has_window -> has_any_handoff_events config
-    | [] -> false
-  in
   `Assoc
     [ "generated_at", `Float (Time_compat.now ())
     ; ( "scope_note"
@@ -776,17 +583,9 @@ let json ~(config : Workspace.config) ?since ?until () =
           "The safety harness tracks supporting evaluator and long-running continuity \
            rails, so these signals are not a direct keep/discard judge for generator \
            iterations." )
-    ; "overview", overview_json ~calibration ~recent_verdicts ~latest_handoff
+    ; "overview", overview_json ~calibration ~recent_verdicts
     ; "calibration", calibration
     ; "recent_verdicts", `List (List.map verdict_item_json recent_verdicts)
-    ; ( "recent_handoffs"
-      , recent_handoffs_json
-          ?since
-          ?until
-          ~has_any:handoff_has_any
-          ~latest:latest_handoff
-          ~events:handoff_events
-          () )
     ]
 ;;
 

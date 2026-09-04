@@ -34,6 +34,7 @@ type stream_protocol_error_kind =
   | Sse_unsupported_part
   | Sse_unsupported_response
   | Sse_stream_incomplete
+  | Sse_stream_repeating
 
 type runtime_attempt_scope_disposition =
   | Preserve_previous_scope
@@ -197,16 +198,54 @@ type keeper_chat_event =
 
 (** {1 Stream operations} *)
 
-(** [create ()] returns a new bounded event stream.
-    Each turn should create its own stream instance. *)
-val create : unit -> keeper_chat_event Eio.Stream.t
+type t
+(** Bounded per-turn event stream plus its optional journal hook (RFC-0412
+    stage 1). *)
 
-(** [publish stream event] adds [event] to the stream.
-    Non-blocking; raises if the stream is full (backpressure). *)
-val publish : keeper_chat_event Eio.Stream.t -> keeper_chat_event -> unit
+(** One event as the bus stamped it: the 0-based publish-order sequence number
+    and the publish-time clock reading. The journal line for this event (via
+    [on_publish]) and every live projection of it carry the same [seq] and
+    [ts], so a journal replay reproduces the live wire bytes. *)
+type published =
+  { seq : int
+  ; ts : float
+  ; event : keeper_chat_event
+  }
 
-(** [subscribe stream] blocks until an event is available, then returns it. *)
-val subscribe : keeper_chat_event Eio.Stream.t -> keeper_chat_event
+(** [create ?now ?on_publish ()] returns a new bounded event stream. Each turn
+    should create its own stream instance. [now] is the clock read once per
+    [publish] (default [Time_compat.now]; injectable for deterministic tests).
+    [on_publish], when given, is invoked synchronously with that seq and ts
+    BEFORE the event enters the bus; hook exceptions are logged and swallowed
+    (except cancellation, which is re-raised) so a journal failure can never
+    break the live turn. *)
+val create :
+  ?now:(unit -> float) ->
+  ?on_publish:(seq:int -> ts:float -> keeper_chat_event -> unit) ->
+  unit ->
+  t
+
+(** [publish t event] runs the journal hook (if any) and adds [event] to the
+    stream. With a journal hook installed, the hook performs brief blocking
+    Unix I/O (fsync + rollback per line); hook-free buses are non-blocking
+    until full. A full stream suspends the writer fiber until a reader frees
+    a slot (Eio backpressure) — the hook has already run by then, so the
+    journal still holds the event. *)
+val publish : t -> keeper_chat_event -> unit
+
+(** [subscribe t] blocks until an event is available, then returns it. *)
+val subscribe : t -> keeper_chat_event
+
+(** [subscribe_published t] blocks until an event is available, then returns
+    it with the seq and ts the bus stamped at publish time. The wire adapter
+    reads through this so the frame id is the journal seq and the projected
+    timestamp is the journaled ts. *)
+val subscribe_published : t -> published
+
+(** [take_nonblocking t] returns the next queued event, or [None] when the
+    bus is empty. Drain/test support: it bypasses the blocking [subscribe]
+    contract and must not sit on a live read path. *)
+val take_nonblocking : t -> keeper_chat_event option
 
 val api_usage_to_json : Agent_core.Types.api_usage -> Yojson.Safe.t
 

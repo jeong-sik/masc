@@ -311,6 +311,106 @@ let test_tool_runtime_zero_event_lane_is_not_observed () =
     (string_member "completeness" json)
 ;;
 
+(* #32971 Root A: the retired "provider" lane demanded
+   provider_attempt_started / provider_attempt_finished, which no code has
+   written since #19536 removed the Cascade driver. Every turn therefore
+   reported turn_terminal_incomplete and no Keeper could reach a lane set
+   without a gap. Two things must hold now: no policy may name an event the
+   tree cannot produce, and the dispatch-closure assertion the provider lane
+   carried must still be asked on the lane that has the rows. *)
+let manifest_row ~event =
+  { Keeper_runtime_manifest.schema_version = 1
+  ; ts = "2026-09-04T00:00:00Z"
+  ; keeper_name = "swimlane-fixture"
+  ; trace_id = "trace/swimlane-fixture"
+  ; keeper_turn_id = Some 1
+  ; agent_core_turn_count = Some 1
+  ; logical_seq = None
+  ; event
+  ; runtime_id = None
+  ; status = "ok"
+  ; decision = `Assoc []
+  ; links =
+      { receipt_path = None; checkpoint_path = None; tool_call_log_path = None }
+  }
+;;
+
+let scan_of_events events =
+  List.fold_left
+    (fun scan event ->
+       Runtime_lens_scan.update_runtime_manifest_scan scan (manifest_row ~event))
+    (Runtime_lens_scan.make_runtime_manifest_scan
+       ~path:"/tmp/swimlane-fixture.jsonl"
+       ~limit:64
+       ~scan_line_limit:64
+       ~scan_scope:"test")
+    events
+;;
+
+let test_manifest_event_vocabulary_is_pinned () =
+  (* The retired pair must not come back by way of a new variant: nothing in
+     the tree appends them, so a policy naming one is unsatisfiable. *)
+  check
+    (list string)
+    "manifest event kinds"
+    [ "turn_started"
+    ; "phase_gate_decided"
+    ; "runtime_routed"
+    ; "runtime_execution_built"
+    ; "runtime_completed"
+    ; "runtime_failed"
+    ; "pre_dispatch_blocked"
+    ; "provider_lane_resolved"
+    ; "context_injected"
+    ; "event_bus_correlated"
+    ; "checkpoint_loaded"
+    ; "checkpoint_saved"
+    ; "receipt_appended"
+    ; "turn_finished"
+    ]
+    (List.map
+       Keeper_runtime_manifest.event_kind_to_string
+       Keeper_runtime_manifest.all_event_kinds)
+;;
+
+let test_runtime_lane_asserts_dispatch_closure () =
+  let open Keeper_runtime_manifest in
+  let routed_only = scan_of_events [ Runtime_routed ] in
+  check
+    string
+    "a dispatch that never terminated is not complete"
+    "mandatory_present"
+    (Runtime_lens_swimlane.runtime_lens_swimlane_completeness
+       routed_only
+       "masc_policy_runtime");
+  let closed = scan_of_events [ Runtime_routed; Runtime_completed ] in
+  check
+    string
+    "a dispatch closed by runtime_completed is complete"
+    "complete"
+    (Runtime_lens_swimlane.runtime_lens_swimlane_completeness
+       closed
+       "masc_policy_runtime");
+  let failed = scan_of_events [ Runtime_routed; Runtime_failed ] in
+  check
+    string
+    "a dispatch closed by runtime_failed is complete"
+    "complete"
+    (Runtime_lens_swimlane.runtime_lens_swimlane_completeness
+       failed
+       "masc_policy_runtime")
+;;
+
+let test_no_lane_policy_names_a_retired_provider_lane () =
+  check
+    (list string)
+    "lane policies"
+    [ "keeper"; "masc_policy_runtime"; "agent_core_agent"; "memory_context" ]
+    (List.map
+       (fun policy -> policy.Runtime_lens_swimlane.lane)
+       Runtime_lens_swimlane.lane_policies)
+;;
+
 let make_checkpoint_inventory_meta ~name ~trace_id =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -584,6 +684,18 @@ let () =
             "tool_runtime zero-event lane is not observed"
             `Quick
             test_tool_runtime_zero_event_lane_is_not_observed
+        ; test_case
+            "manifest event vocabulary is pinned"
+            `Quick
+            test_manifest_event_vocabulary_is_pinned
+        ; test_case
+            "the runtime lane asserts dispatch closure"
+            `Quick
+            test_runtime_lane_asserts_dispatch_closure
+        ; test_case
+            "no lane policy names the retired provider lane"
+            `Quick
+            test_no_lane_policy_names_a_retired_provider_lane
         ] )
     ; ( "runtime_manifest_scan"
       , [ test_case

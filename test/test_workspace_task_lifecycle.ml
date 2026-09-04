@@ -93,6 +93,41 @@ let test_cancel_of_someone_elses_task_is_refused () =
   |> expect_error L.Invalid_transition
 ;;
 
+(* A stop asked for while a submission is pending supersedes it. Ending the
+   Task here would let submit-then-cancel reach a terminal state alone.
+
+   The pending status is built here rather than reusing [awaiting] because the
+   shared fixture carries [started_at = now] and [verification_id = "vrf-1"],
+   which are the same values the transition would produce if it preserved
+   neither: both assertions would hold for code that restated the start time
+   and reused the old id. These two differ from what the transition mints. *)
+let test_cancel_of_a_pending_submission_waits_for_a_verdict () =
+  let began = "2026-07-12T00:00:00Z" in
+  let pending =
+    D.AwaitingVerification
+      { assignee = owner
+      ; started_at = began
+      ; submitted_at = now
+      ; intent = D.Complete_task
+      ; verification_id = "vrf-0"
+      }
+  in
+  match decide ~same_agent:true ~task_status:pending ~action:D.Cancel () with
+  | Ok
+      { L.new_status =
+          D.AwaitingVerification
+            { intent = D.Cancel_task; started_at; verification_id; _ }
+      ; _
+      } ->
+    if not (String.equal started_at began)
+    then failwith "the work began once; a stop must not restate when";
+    if String.equal verification_id "vrf-0"
+    then failwith "a superseding stop must mint its own verification id"
+  | Ok { L.new_status = D.Cancelled _; _ } ->
+    failwith "a pending submission was cancelled without a verdict"
+  | Ok _ | Error _ -> failwith "cancel of a pending submission must wait for a verdict"
+;;
+
 let test_cancel_cannot_undo_a_finished_task () =
   let done_status = D.Done { assignee = owner; completed_at = now; notes = None } in
   decide ~same_agent:true ~task_status:done_status ~action:D.Cancel ()
@@ -366,6 +401,7 @@ let () =
   test_awaiting_is_claimable_by_nobody ();
   test_cancel_waits_for_a_verdict_like_done_does ();
   test_cancel_of_someone_elses_task_is_refused ();
+  test_cancel_of_a_pending_submission_waits_for_a_verdict ();
   test_cancel_cannot_undo_a_finished_task ();
   test_approval_ends_the_task_the_way_it_was_asked ();
   test_a_rejected_cancellation_returns_to_its_producer ();

@@ -38,11 +38,11 @@ let test_source_clock_from_manifest () =
     "extracts monotonic" (Some M.Monotonic) (M.source_clock_from_manifest m);
   let m2 =
     manifest ~event:M.Turn_started
-      ~decision:(clock_refs ~source_clock:"provider" [ ("edge_id", `String "e1") ])
+      ~decision:(clock_refs ~source_clock:"monotonic" [ ("edge_id", `String "e1") ])
       ~links:(links ())
   in
   Alcotest.(check (option source_clock_testable))
-    "extracts provider" (Some M.Provider) (M.source_clock_from_manifest m2)
+    "extracts monotonic clock" (Some M.Monotonic) (M.source_clock_from_manifest m2)
 
 let test_logical_ordering () =
   let m =
@@ -63,17 +63,17 @@ let test_logical_ordering () =
 
 let test_comparable_for_latency_same_clock () =
   let a =
-    manifest ~event:M.Provider_attempt_started
-      ~decision:(clock_refs ~source_clock:"provider" [ ("edge_id", `String "e1") ])
+    manifest ~event:M.Runtime_routed
+      ~decision:(clock_refs ~source_clock:"monotonic" [ ("edge_id", `String "e1") ])
       ~links:(links ())
   in
   let b =
-    manifest ~event:M.Provider_attempt_finished
-      ~decision:(clock_refs ~source_clock:"provider" [ ("edge_id", `String "e2") ])
+    manifest ~event:M.Runtime_completed
+      ~decision:(clock_refs ~source_clock:"monotonic" [ ("edge_id", `String "e2") ])
       ~links:(links ())
   in
   Alcotest.(check (result source_clock_testable string))
-    "same provider clock is comparable" (Ok M.Provider)
+    "same monotonic clock is comparable" (Ok M.Monotonic)
     (M.comparable_for_latency a b)
 
 let test_comparable_for_latency_different_clock () =
@@ -83,15 +83,15 @@ let test_comparable_for_latency_different_clock () =
       ~links:(links ())
   in
   let b =
-    manifest ~event:M.Provider_attempt_started
-      ~decision:(clock_refs ~source_clock:"provider" [ ("edge_id", `String "e2") ])
+    manifest ~event:M.Runtime_routed
+      ~decision:(clock_refs ~source_clock:"monotonic" [ ("edge_id", `String "e2") ])
       ~links:(links ())
   in
   match M.comparable_for_latency a b with
   | Ok _ -> Alcotest.fail "expected failure for different source_clock"
   | Error msg ->
     Alcotest.(check bool) "error mentions mismatch" true
-      (String.equal msg "latency comparison invalid: source_clock mismatch (wall vs provider)")
+      (String.equal msg "latency comparison invalid: source_clock mismatch (wall vs monotonic)")
 
 let () =
   Alcotest.run "keeper_runtime_manifest_clock_separation"

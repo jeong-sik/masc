@@ -214,6 +214,7 @@ export function isDefaultVisibleConversationEntry(entry: KeeperConversationEntry
 }
 
 const APPROVAL_LIFECYCLE_PHASES = new Set<KeeperApprovalLifecyclePhase>([
+  'requested',
   'resolved_approved',
   'resolved_rejected',
   'replay_applied',
@@ -895,10 +896,17 @@ function normalizeHistoryEntry(
   // Accept attachment-only, audio-only, and validated block-only rows. In
   // particular, persisted thinking/trace/fusion blocks may intentionally have
   // no visible `content`; rejecting them here erased completed work on reload.
-  if (!rawText && !attachments?.length && !audio && !hasRenderableBlocks) return null
+  // A Gate lifecycle row's fact is its typed field; the store's prose is a
+  // second telling of it. Read the field before the emptiness guards so a row
+  // whose content is empty still reaches ApprovalLifecycleCard, which composes
+  // its own wording and never reads the text.
+  const approvalLifecycle = normalizeApprovalLifecycle(raw.approval_lifecycle)
+  const carriesOwnRendering =
+    !!attachments?.length || !!audio || hasRenderableBlocks || approvalLifecycle != null
+  if (!rawText && !carriesOwnRendering) return null
   const source = normalizeConversationSource(raw.source, role, rawText, previousSource)
   const text = formatKeeperVisibleReply(rawText)
-  if (!text && !attachments?.length && !audio && !hasRenderableBlocks) return null
+  if (!text && !carriesOwnRendering) return null
   const timestamp = toIsoTimestamp(raw.ts_unix) ?? toIsoTimestamp(raw.timestamp)
   const label = role === 'assistant' && keeperName ? keeperName : roleLabel(role)
   const surface = normalizeSurfaceRef(raw.surface)
@@ -922,7 +930,6 @@ function normalizeHistoryEntry(
     ?? ((role === 'assistant' || role === 'system') && text
       ? parseTextToChatBlocks(text)
       : undefined)
-  const approvalLifecycle = normalizeApprovalLifecycle(raw.approval_lifecycle)
   const streamContract = approvalLifecycle
     ? null
     : deliveryProvenance.status === 'invalid'

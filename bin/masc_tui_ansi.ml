@@ -232,6 +232,10 @@ module Chat_theme = struct
     | Masc_tui_message_layout.Inbound -> Theme.inbound_origin ()
     | Masc_tui_message_layout.Keeper -> Theme.keeper_origin ()
     | Masc_tui_message_layout.Status -> Theme.warn ()
+    (* Quiet, not warn. The pane answering a command is reference, and drawing
+       twenty lines of it in the colour reserved for a turn needing attention
+       is what made [/help] read as an alarm. *)
+    | Masc_tui_message_layout.Local -> Theme.quiet_origin ()
     | Masc_tui_message_layout.Journal -> Theme.info ()
     | Masc_tui_message_layout.Error -> Theme.bad ()
     | Masc_tui_message_layout.Tool -> Theme.tool_origin ()
@@ -249,6 +253,8 @@ module Chat_theme = struct
     | Masc_tui_message_layout.User | Masc_tui_message_layout.Inbound
     | Masc_tui_message_layout.Keeper -> Ansi.reset
     | Masc_tui_message_layout.Status -> Theme.warn ()
+    (* The badge is quiet; the body is not dimmed. A command list is read. *)
+    | Masc_tui_message_layout.Local -> Ansi.reset
     | Masc_tui_message_layout.Journal -> Ansi.reset
     | Masc_tui_message_layout.Error -> Theme.bad ()
     | Masc_tui_message_layout.Tool -> Ansi.reset
@@ -261,8 +267,8 @@ module Chat_theme = struct
     | Masc_tui_message_layout.Error -> Theme.bad ()
     | Masc_tui_message_layout.User | Masc_tui_message_layout.Inbound
     | Masc_tui_message_layout.Keeper | Masc_tui_message_layout.Tool
-    | Masc_tui_message_layout.Journal | Masc_tui_message_layout.Skill _
-    | Masc_tui_message_layout.Thinking ->
+    | Masc_tui_message_layout.Local | Masc_tui_message_layout.Journal
+    | Masc_tui_message_layout.Skill _ | Masc_tui_message_layout.Thinking ->
       Ansi.default_fg
 
   let link_style_restore style =
@@ -319,6 +325,7 @@ module Chat_theme = struct
     | ( Masc_tui_message_layout.Inbound
       | Masc_tui_message_layout.Keeper
       | Masc_tui_message_layout.Status
+      | Masc_tui_message_layout.Local
       | Masc_tui_message_layout.Journal
       | Masc_tui_message_layout.Error
       | Masc_tui_message_layout.Tool

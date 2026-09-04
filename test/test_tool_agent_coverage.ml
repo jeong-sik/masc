@@ -142,38 +142,6 @@ let test_get_metrics_missing_agent_name () =
     (json |> member "message" |> to_string);
   )
 
-let record_completed_metric config ~agent_id ~task_id =
-  let metric = Metrics_store_eio.create_metric ~agent_id ~task_id () in
-  let completed = Metrics_store_eio.complete_metric metric ~success:true () in
-  Metrics_store_eio.record config completed;
-  Metrics_store_eio.flush_pending ()
-
-let test_get_metrics_resolves_keeper_agent_alias () =
-  with_ctx (fun ctx ->
-  record_completed_metric ctx.config
-    ~agent_id:"theta0"
-    ~task_id:"task-alias-metric";
-  let args =
-    `Assoc
-      [ ("agent_name", `String "keeper-theta0-agent")
-      ; ("days", `Int 7)
-      ]
-  in
-  let result = dispatch_exn ctx ~name:"masc_get_metrics" ~args in
-  Alcotest.(check bool) "alias metrics succeeds" true
-    (Tool_result.is_success result);
-  let open Yojson.Safe.Util in
-  let json = Yojson.Safe.from_string (Tool_result.message result) in
-  Alcotest.(check string) "resolved agent id" "theta0"
-    (json |> member "agent_id" |> to_string);
-  Alcotest.(check string) "requested agent name" "keeper-theta0-agent"
-    (json |> member "requested_agent_name" |> to_string);
-  Alcotest.(check string) "resolved agent name" "theta0"
-    (json |> member "resolved_agent_name" |> to_string);
-  Alcotest.(check int) "total tasks" 1
-    (json |> member "total_tasks" |> to_int);
-  )
-
 (* ============================================================
    Handler tests — agent_fitness
    ============================================================ *)
@@ -259,8 +227,6 @@ let () =
     ("get_metrics", [
       Alcotest.test_case "no data returns not_found" `Quick test_get_metrics_no_data;
       Alcotest.test_case "missing agent_name fails" `Quick test_get_metrics_missing_agent_name;
-      Alcotest.test_case "keeper agent alias resolves metric key" `Quick
-        test_get_metrics_resolves_keeper_agent_alias;
     ]);
     ("helpers", [
       Alcotest.test_case "get_string present" `Quick test_get_string_present;

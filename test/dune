@@ -231,6 +231,9 @@
   test_keeper_noop_backoff
   test_keeper_chat_store
   test_keeper_chat_blocks
+  test_keeper_chat_event_log
+  test_keeper_chat_journal_audit
+  test_keeper_chat_replay
   test_keeper_chat_media_store
   test_keeper_external_attention
   test_keeper_waiting_inventory
@@ -577,6 +580,9 @@
   test_keeper_noop_backoff
   test_keeper_chat_store
   test_keeper_chat_blocks
+  test_keeper_chat_event_log
+  test_keeper_chat_journal_audit
+  test_keeper_chat_replay
   test_keeper_chat_media_store
   test_keeper_external_attention
   test_keeper_waiting_inventory
@@ -1399,6 +1405,8 @@
   test_voice_runtime_overlay
   test_voice_bridge_error
   test_voice_capture_thresholds
+  test_voice_pcm
+  test_voice_capture_phases
   test_resilience
   test_common
   test_workspace_messages_raw
@@ -1545,6 +1553,8 @@
   test_voice_runtime_overlay
   test_voice_bridge_error
   test_voice_capture_thresholds
+  test_voice_pcm
+  test_voice_capture_phases
   test_resilience
   test_common
   test_workspace_messages_raw
@@ -3131,6 +3141,36 @@
  (libraries alcotest masc_tui_types))
 
 (test
+ (name test_tui_gate_text)
+ (modules test_tui_gate_text)
+ (libraries alcotest masc_tui_gate_text))
+
+(test
+ (name test_egress_host)
+ (modules test_egress_host)
+ (libraries alcotest masc.egress_host))
+
+(test
+ (name test_egress_proxy_decision)
+ (modules test_egress_proxy_decision)
+ (libraries alcotest masc.egress_host masc.egress_proxy_decision masc.string_util))
+
+(test
+ (name test_egress_allowlist_toml)
+ (modules test_egress_allowlist_toml)
+ (libraries alcotest masc.runtime masc.egress_host masc.string_util))
+
+(test
+ (name test_egress_proxy_net)
+ (modules test_egress_proxy_net)
+ (libraries alcotest eio eio_main masc.egress_host masc.egress_proxy_net))
+
+(test
+ (name test_tui_gate_fold)
+ (modules test_tui_gate_fold)
+ (libraries alcotest masc_tui_types masc_tui_gate_text))
+
+(test
  (name test_tui_server_identity_refresh)
  (modules test_tui_server_identity_refresh)
  (libraries alcotest masc masc_tui_types unix))
@@ -3401,6 +3441,16 @@
  (libraries alcotest unix masc_tui_editor))
 
 (test
+ (name test_masc_cli_keeper_create)
+ (modules test_masc_cli_keeper_create)
+ (libraries
+  alcotest
+  masc
+  masc_cli_keeper_create
+  masc_keeper_types_profile_sandbox
+  yojson))
+
+(test
  (name test_tui_keeper_selection)
  (modules test_tui_keeper_selection)
  (libraries alcotest masc_tui_keeper_selection))
@@ -3444,6 +3494,11 @@
  (name test_tui_context_bars)
  (modules test_tui_context_bars)
  (libraries alcotest masc_tui_context_bars))
+
+(test
+ (name test_tui_esc_interrupt)
+ (modules test_tui_esc_interrupt)
+ (libraries alcotest masc_tui_esc_interrupt masc_tui_keeper_chat_transcript))
 
 (test
  (name test_tui_retained_view)
@@ -3655,9 +3710,10 @@
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-board-json)))
 
-; Python unit suites over the scripts/ tree. Every one of these existed with
-; no rule, no workflow, and no caller -- eleven suites of dead verification
-; (the #32245 review found the pattern; this sweep found the rest). They are
+; Python unit suites over the scripts/ tree. These suites were first wired
+; into runtest after the #32245 review found several of them running with no
+; rule, no workflow, and no caller; a later sweep adopted the rest. Every
+; suite below now runs under the default @test/runtest alias in CI. They are
 ; stdlib-only unittest files whose subjects live under scripts/, so each rule
 ; carries the test file plus the exact script files it loads.
 
@@ -3945,7 +4001,13 @@
  ; masc_tui_message_layout so a column offset is asked in display cells rather
  ; than bytes: the delta column is headed with a two-byte glyph one cell wide,
  ; and a byte offset would report the header and its own cell as misaligned.
- (libraries alcotest masc_tui_message_layout masc_tui_render_schedule))
+ ; masc_tui_table so the gap between columns is asked of the contract that
+ ; sets it, not spelled again here.
+ (libraries
+  alcotest
+  masc_tui_message_layout
+  masc_tui_render_schedule
+  masc_tui_table))
 
 (test
  (name test_tui_terminal_write_repair)

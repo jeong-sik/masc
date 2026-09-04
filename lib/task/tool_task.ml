@@ -274,53 +274,6 @@ and handle_transition ~tool_name ~start_time ctx args =
        verifier. A completion authority is not an agent and never joins it. *)
     collaborators_from_task
   in
-  let prepare_verification_request =
-    match action with
-    | Masc_domain.Submit_for_verification ->
-      Some
-        (fun ~task ~assignee ~verification_id ~evidence_refs ->
-           (Atomic.get Workspace_hooks.verification_submit_request_fn)
-             ctx.config
-             ~task
-             ~assignee
-             ~verification_id
-             ~evidence_refs)
-    | Masc_domain.Claim
-    | Masc_domain.Start
-    | Masc_domain.Done_action
-    | Masc_domain.Cancel
-    | Masc_domain.Release ->
-      None
-  in
-  (* RFC-0221 §3.1: compensation for [Submit_for_verification]. If the status
-     commit fails after [prepare_verification_request] wrote the record,
-     [transition_task_r] calls this to delete the orphaned record so the two
-     stores never disagree. Best-effort: a failure is logged, not propagated —
-     the transition is already failing on its own error. *)
-  let compensate_verification_request =
-    match action with
-    | Masc_domain.Submit_for_verification ->
-      Some
-        (fun ~verification_id ->
-           match
-             (Atomic.get Workspace_hooks.verification_delete_request_fn)
-               ctx.config
-               ~verification_id
-           with
-           | Ok () -> ()
-           | Error e ->
-             task_log_warn
-               ~task_id
-               "[RFC-0221] compensation delete_request failed (vrf=%s): %s"
-               verification_id
-               e)
-    | Masc_domain.Claim
-    | Masc_domain.Start
-    | Masc_domain.Done_action
-    | Masc_domain.Cancel
-    | Masc_domain.Release ->
-      None
-  in
   (* The pre-transition verification_id capture (issue #7543) is gone with the
      approve/reject actions: no agent transition consumes an AwaitingVerification
      state any more, so there is nothing to snapshot before it changes. *)
@@ -334,8 +287,6 @@ and handle_transition ~tool_name ~start_time ctx args =
       ~notes
       ~reason
       ?handoff_context
-      ?prepare_verification_request
-      ?compensate_verification_request
       ()
   in
   Result.iter

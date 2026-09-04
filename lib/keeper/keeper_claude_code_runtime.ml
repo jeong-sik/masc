@@ -421,7 +421,8 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id 
 
 let run_without_lifecycle ~runtime_id ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
-    ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
+    ~tools ~initial_messages ~model_input_projection
+    ~on_transmitted_model_input ~hooks ~context_injector
     ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_disposition
     ~context_overflow_retry_safe
     ~on_official_client_result_handoff ~on_native_action
@@ -534,16 +535,45 @@ let run_without_lifecycle ~runtime_id ~keeper_name
                 })
               images )
     in
+    (* Reported from [prepared.messages], the post-window list, and gated on
+       the same [session_mode] the prompt below is built from -- one match,
+       so the record cannot claim bytes the prompt did not carry. A [Start]
+       renders the whole list; a [Resume] sends the goal alone and leaves the
+       accumulated conversation in the session the CLI owns, which is the fact
+       the composition line at the foot of this function already states. *)
+    on_transmitted_model_input
+      (match session_mode with
+       | Runtime_claude_code.Start -> Host.Whole_input_transmitted prepared.messages
+       | Runtime_claude_code.Resume _ -> Host.Held_by_client_session);
     let prompt =
       match session_mode with
       | Runtime_claude_code.Start -> initial_turn_prompt ~history ~goal
       | Runtime_claude_code.Resume _ -> goal
     in
-    let system_prompt =
-      prepared.system_prompt :: system_messages
-      |> List.filter (fun text -> String.trim text <> "")
-      |> String.concat "\n\n"
-      |> String_util.trim_nonempty
+    (* [None] means "masc named no system prompt, take the client's built-in
+       one" since #33072 stopped passing [--system-prompt ""]. This assembly
+       must therefore not reach [None] by collapsing a blank composition:
+       [String_util.trim_nonempty] returns [None] on an empty string, so a
+       keeper whose composed prompt came out blank would run the turn under
+       Claude Code's built-in coding-agent prompt while masc's tool set and
+       [--permission-mode dontAsk] stayed in place -- a failure that looks like
+       it is working. masc composing nothing is a configuration defect, and it
+       is named here instead. The probe and fusion callers build [None]
+       directly and do not pass through this path. *)
+    let* system_prompt =
+      match
+        prepared.system_prompt :: system_messages
+        |> List.filter (fun text -> String.trim text <> "")
+        |> String.concat "\n\n"
+        |> String_util.trim_nonempty
+      with
+      | Some text -> Ok (Some text)
+      | None ->
+        Error
+          (config_error
+             ~field:"system_prompt"
+             "the composed keeper system prompt is empty; the turn would run \
+              under the client's built-in prompt")
     in
     let client_config : Runtime_claude_code.config =
       { cli_path = config.cli_path
@@ -1090,7 +1120,8 @@ let run_without_lifecycle ~runtime_id ~keeper_name
 ;;
 
 let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
-    ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
+    ~tools ~initial_messages ~model_input_projection
+    ~on_transmitted_model_input ~hooks ~context_injector
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
@@ -1183,6 +1214,14 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
                     ~observed_floor_capacity_bytes
                     ?on_model_input_window_observation
                     model_input_projection))
+            (* Reported inside the attempt rather than from the projection.
+               The projection cannot see [session_mode], and on this lane that
+               is the whole question: it runs on every turn, but only a [Start]
+               puts its result on the wire. A lane that reports nothing wrote
+               every Claude Code turn's input attribution as zero
+               (masc#32995); a lane that reports the projection on a resume
+               attributes history the client already holds. *)
+            ~on_transmitted_model_input
             ~hooks
           ~context_injector
           ~context

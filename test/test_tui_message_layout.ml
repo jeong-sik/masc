@@ -504,12 +504,20 @@ let test_input_cursor_uses_visible_terminal_cells () =
     (supported 13 80 3);
   check bool "status frame keeps three history rows" true
     (supported 14 80 3);
-  check bool "twelve columns cannot preserve a source suffix" false
-    (supported 30 12 0);
-  check bool "thirteen columns preserve a source suffix" true
-    (supported 30 13 0);
-  check int "the minimum terminal leaves nine framed content cells" 9
-    (Frame.inner_width ~cols:13)
+  (* #32984: the width gate derives from a row's fixed chrome -- frame
+     border and padding, body indent, turn rail, the label column floor --
+     plus a readable body floor, and [Layout.chat_min_terminal_cols] carries
+     the result. The thirteen-column contract this replaced was text-only
+     (two indent, four body, three for a shortened source); label-bearing
+     rows shredded mid-word there. *)
+  check bool "one column under the chat minimum is gated out" false
+    (supported 30 (Layout.chat_min_terminal_cols - 1) 0);
+  check bool "the chat minimum is admitted" true
+    (supported 30 Layout.chat_min_terminal_cols 0);
+  (* Frame inner width minus indent (2), rail (2), and the label column
+     floor (10) is the body the gate guarantees. *)
+  check int "the minimum terminal leaves a twenty-cell framed body" 20
+    (Frame.inner_width ~cols:Layout.chat_min_terminal_cols - 2 - 2 - 10)
 
 let test_chat_history_height_uses_the_shared_chrome () =
   check int "46-row pane exposes 38 transcript rows" 38
@@ -1565,7 +1573,7 @@ let test_normal_inline_margin_bytes_stay_stable () =
         (no_rail ^ "12:34 " ^ Layout.speaker_mark Layout.Keeper ^ " …per.one")
         first.Layout.gutter;
       check string "normal continuation bytes"
-        (no_rail ^ "12:35 " ^ Layout.speaker_mark Layout.Keeper
+        (no_rail ^ "12:35 " ^ Layout.continued_mark Layout.Keeper
         ^ String.make 9 ' ')
         second.Layout.gutter;
       check int "normal gutter keeps clock plus mark boundary"
@@ -1635,6 +1643,24 @@ let test_a_second_message_from_one_speaker_stays_blank () =
         (not (String.equal first.Layout.gutter second.Layout.gutter))
   | _ -> failwith "expected two rows"
 
+let test_unowned_entries_at_different_timestamps_do_not_fold () =
+  let entries =
+    [ entry ~timestamp:"11:40:16" Layout.Keeper "keeper.one" "" "first"
+    ; entry ~timestamp:"11:44:20" Layout.Keeper "keeper.one" "" "second"
+    ]
+  in
+  match
+    Layout.visible_rows ~origin:Layout.Origin_bare ~inner_width:40 ~height:20
+      entries
+  with
+  | [ first; second ] ->
+      check bool "first keeps its full speaker label" true
+        (String.contains first.Layout.gutter 'k');
+      check bool "unowned row at later timestamp keeps speaker label" true
+        (String.contains second.Layout.gutter 'k')
+  | _ -> failwith "expected two rows"
+
+
 (* The layout hands the renderer a margin and the offset to cut it at, and the
    renderer draws the two halves back to back so the mark can keep the status
    colour while the kind label recedes. A continuation carries no name, so it
@@ -1666,11 +1692,11 @@ let test_a_continuation_does_not_borrow_the_reasoning_glyph () =
          | None -> trimmed)
     | _ -> failwith "expected two rows"
   in
-  check string "a keeper's continuation keeps the keeper's mark"
-    (Layout.speaker_mark Layout.Keeper)
+  check string "a keeper's continuation draws the continuation rail"
+    (Layout.continued_mark Layout.Keeper)
     (continued Layout.Keeper);
-  check string "a tool block's continuation keeps the tool mark"
-    (Layout.speaker_mark Layout.Tool)
+  check string "a tool block's continuation draws the continuation rail"
+    (Layout.continued_mark Layout.Tool)
     (continued Layout.Tool);
   check bool "and so is not the reasoning mark" true
     (not
@@ -1680,18 +1706,39 @@ let test_a_continuation_does_not_borrow_the_reasoning_glyph () =
   (* Reasoning's own continuation still draws a dot, because that is what it
      is. The glyph is ambiguous only when it is borrowed. *)
   check string "reasoning continues as reasoning"
-    (Layout.speaker_mark Layout.Thinking)
-    (continued Layout.Thinking)
+    (Layout.continued_mark Layout.Thinking)
+    (continued Layout.Thinking);
+  (* Critical alert marks retain high salience on continuation. *)
+  check string "an error continuation keeps the error mark"
+    (Layout.speaker_mark Layout.Error)
+    (continued Layout.Error)
 
 (* Every speaker draws a different mark. A shared glyph is how the pane came to
    say two things with one shape. *)
+(* Reads [Layout.all_styles] rather than a list of its own. The list here
+   named eight styles and had done since before Skill had four tones, so the
+   check passed over every mark it did not mention -- [Local] arrived and was
+   never compared against anything.
+
+   Skill is one speaker in four states, and [Skill_failure] deliberately draws
+   the error mark: a skill that failed is a failure, and the state marks are
+   pinned separately by the test below. So the tones collapse to one entry
+   here, and what is checked is that no two *speakers* look alike. *)
 let test_every_speaker_mark_is_distinct () =
-  let marks =
-    List.map Layout.speaker_mark
-      [ Layout.User; Layout.Inbound; Layout.Keeper; Layout.Status
-      ; Layout.Journal; Layout.Error; Layout.Tool; Layout.Thinking
-      ]
+  let speakers =
+    List.filter
+      (function
+        | Layout.Skill Layout.Skill_live -> true
+        | Layout.Skill
+            (Layout.Skill_used | Layout.Skill_attention | Layout.Skill_failure) ->
+            false
+        | Layout.User | Layout.Inbound | Layout.Keeper | Layout.Status
+        | Layout.Local | Layout.Journal | Layout.Error | Layout.Tool
+        | Layout.Thinking ->
+            true)
+      Layout.all_styles
   in
+  let marks = List.map Layout.speaker_mark speakers in
   check int "no two speakers share a mark" (List.length marks)
     (List.length (List.sort_uniq String.compare marks))
 
@@ -2058,6 +2105,8 @@ let () =
             test_wrapped_rows_indent_under_the_first
         ; test_case "a second message from one speaker stays blank" `Quick
             test_a_second_message_from_one_speaker_stays_blank
+        ; test_case "unowned entries at different timestamps do not fold" `Quick
+            test_unowned_entries_at_different_timestamps_do_not_fold
         ; test_case "a continuation does not borrow the reasoning glyph" `Quick
             test_a_continuation_does_not_borrow_the_reasoning_glyph
         ; test_case "every speaker mark is distinct" `Quick

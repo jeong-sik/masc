@@ -2732,6 +2732,34 @@ let add_routes ~sw ~clock router =
          let json = dashboard_perf_http_json (Mcp_server.workspace_config state) in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/clients" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         (* Everyone attached to this workspace in one reading: directory
+            agents, state-backed sessions, and runtime fibers, merged by
+            [dashboard_agents_safe]. The TUI's Runtime family reads this to
+            answer "who is connected", which no other surface lists — the
+            keeper roster carries keepers only, so a non-keeper MCP client
+            is invisible there. Sorted by name so two readings a refresh
+            apart diff as row changes, not reorderings. Observation-only:
+            joining a session to its task binding is a read, and the
+            backlog stays the authority on ownership. *)
+         let config = Mcp_server.workspace_config state in
+         let agents =
+           List.sort
+             (fun (a : Masc_domain.agent) (b : Masc_domain.agent) ->
+                String.compare a.name b.name)
+             (dashboard_agents_safe config)
+         in
+         let json =
+           `Assoc
+             [ ("schema", `String "masc.dashboard.clients.v1")
+             ; ("generated_at", `String (Masc_domain.now_iso ()))
+             ; ("observation_only", `Bool true)
+             ; ("clients", `List (List.map dashboard_agent_json agents))
+             ]
+         in
+         Http.Response.json_value ~compress:true ~request:req json reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/harness-health" (fun _request reqd ->
        with_public_read (fun state req reqd ->
          let since = Server_utils.query_param req "since" in
@@ -2745,8 +2773,7 @@ let add_routes ~sw ~clock router =
          let json =
            Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
-               Dashboard_harness_health.json ~config:(Mcp_server.workspace_config state)
-                 ?since ?until ()))
+               Dashboard_harness_health.json ?since ?until ()))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) _request reqd)
@@ -2908,7 +2935,7 @@ let add_routes ~sw ~clock router =
        match Keeper_chat_operations.get_route (Http.Request.path request) with
        | Some route ->
          with_token_permission_auth
-           ~permission:Keeper_chat_operations.read_permission
+           ~permission:(Keeper_chat_operations.get_permission route)
            (fun state _agent_name req reqd ->
              Keeper_chat_operations.handle_get state req reqd route)
            request

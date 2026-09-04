@@ -132,6 +132,10 @@ type provider_wire_error_kind =
   | Malformed_payload
   | Unknown_event
   | Incomplete_stream
+  | Repeating_generation
+  (** The generation repeated one paragraph past the threshold and was ended
+        by this client. Bytes and framing are both fine; what ended is the
+        answer, not the transport. *)
   | Oversized_payload
   (** One payload unit — a joined SSE event, or a single line — exceeded the
         byte limit this client reads under. Distinct from
@@ -657,6 +661,25 @@ exception
     }
 (** Raised before an SSE event payload exceeds [max_event_bytes]. *)
 
+(** What the consumer wants after one dispatched event or line.
+
+    [Stop] ends the read loop before its next blocking read. A consumer that
+    has stopped consuming must return it: otherwise the socket keeps
+    delivering a body nobody reads until the provider finishes or a deadline
+    fires, and the caller pays for output it discards while the connection is
+    held for the whole of it. The decision is returned rather than asked for
+    through a predicate so no caller can omit it.
+
+    Both readers return [unit], so a caller cannot tell a [Stop] exit from an
+    end of body. That is only safe while [Stop] means the consumer has already
+    failed the response: a consumer that stopped for a benign reason — a
+    terminal marker it recognised, say — would hand its accumulator a body it
+    truncated on purpose and finalize it as a complete answer. Stop because
+    the answer is void, not because you have enough of it. *)
+type stream_continuation =
+  | Continue
+  | Stop
+
 (** [max_event_bytes] bounds the JOINED payload of a single event, defaulting
     to the shared response-body limit. Per-line size is already bounded by the
     reader's own [max_size]; the multi-line join accumulates outside that
@@ -675,7 +698,7 @@ val read_sse
   -> ?body_timeout:float
   -> ?max_event_bytes:int
   -> reader:Eio.Buf_read.t
-  -> on_data:(event_type:string option -> string -> unit)
+  -> on_data:(event_type:string option -> string -> stream_continuation)
   -> unit
   -> unit
 
@@ -707,7 +730,7 @@ val read_ndjson
   -> ?first_event_timeout:float
   -> ?body_timeout:float
   -> reader:Eio.Buf_read.t
-  -> on_line:(string -> unit)
+  -> on_line:(string -> stream_continuation)
   -> unit
   -> unit
 

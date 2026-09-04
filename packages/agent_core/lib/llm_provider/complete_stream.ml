@@ -26,6 +26,8 @@ let stream_error_event = function
   | Types.Stream_ndjson_parse_failed { reason; raw } ->
     Types.NDJSONParseFailed { reason; raw }
   | Types.Stream_incomplete { reason } -> Types.StreamIncomplete { reason }
+  | Types.Stream_repeating { paragraph; occurrences; bytes_seen } ->
+    Types.StreamRepeating { paragraph; occurrences; bytes_seen }
   | Types.Stream_unknown_event { event_type; raw } ->
     Types.SSEUnknownEventType { event_type; raw }
   | Types.Stream_unsupported_part { provider_kind; part; raw } ->
@@ -41,7 +43,8 @@ let event_carries_stream_failure = function
   | Types.NDJSONParseFailed _
   | Types.SSEUnknownEventType _
   | Types.SSEUnsupportedPart _
-  | Types.SSEUnsupportedResponse _ -> true
+  | Types.SSEUnsupportedResponse _
+  | Types.StreamRepeating _ -> true
   | Types.Connected
   | Types.MessageStart _
   | Types.ContentBlockStart _
@@ -471,7 +474,7 @@ let complete_stream_http
         | Types.NDJSONParseFailed _ -> `Wire_error Http_client.Ndjson
         | Types.Connected -> `Skip
         | Types.Timeout _ -> `Wire_error active_wire_format
-        | Types.StreamIncomplete _ -> `Skip
+        | Types.StreamIncomplete _ | Types.StreamRepeating _ -> `Skip
       in
       let percentiles () =
         match !inter_chunk_samples with
@@ -717,6 +720,26 @@ let complete_stream_http
                 | Some evt -> emit_telemetry evt
                 | None -> ()
               in
+              (* A stream the accumulator has failed will not use another
+                 byte, so the read ends with the judgement rather than after
+                 it. What that buys is the time: before this the loop read on
+                 to the provider's own end or to a deadline, and the socket was
+                 held and the output paid for through all of it.
+
+                 It is the close time that moves, not whether it closes. No
+                 caller wires a [connection_cache] today — [create_cache] has
+                 no user outside [Http_client] and its own test — so
+                 [with_post_stream] already took its no-cache arm and closed.
+                 With one wired it would close here too in the ordinary case,
+                 because a body left unread leaves [eof_seen] false; the
+                 exception is an NDJSON final line with no trailing newline,
+                 where [Buf_read.line] consumes to EOF and parking is then
+                 correct, the body being spent. *)
+              let continue_unless_failed () =
+                if Complete_stream_acc.stream_failed acc
+                then Http_client.Stop
+                else Http_client.Continue
+              in
               let stream_read_result =
                 try
                   (match http_codec with
@@ -729,8 +752,7 @@ let complete_stream_http
                        ~reader
                        ~on_line:(fun line ->
                          observe_wire_chunk line;
-                         if not (Complete_stream_acc.stream_failed acc)
-                         then (
+                         let () =
                            match Streaming.parse_ollama_ndjson_chunk line with
                            | Streaming.Ollama_parse_failed { raw; reason } ->
                              dispatch ([ Types.NDJSONParseFailed { raw; reason } ], None)
@@ -746,7 +768,9 @@ let complete_stream_http
                               | Some _ as u -> ollama_usage := u
                               | None -> ());
                              dispatch
-                               (Streaming.ollama_chunk_to_events (get_state ()) chunk)))
+                               (Streaming.ollama_chunk_to_events (get_state ()) chunk)
+                         in
+                         continue_unless_failed ())
                        ()
                    | _non_ollama_kind ->
                      Http_client.read_sse
@@ -757,8 +781,7 @@ let complete_stream_http
                        ~reader
                        ~on_data:(fun ~event_type data ->
                          observe_wire_chunk data;
-                         if not (Complete_stream_acc.stream_failed acc)
-                         then (
+                         let () =
                            let events =
                              match http_codec with
                              | Provider_http_codec.Anthropic_messages ->
@@ -841,7 +864,9 @@ let complete_stream_http
                              | Provider_http_codec.Ollama_chat ->
                                [], None (* unreachable: handled above *)
                            in
-                           dispatch events))
+                           dispatch events
+                         in
+                         continue_unless_failed ())
                        ());
                   Ok ()
                 with
@@ -874,7 +899,6 @@ let complete_stream_http
                        ~wire_format:active_wire_format
                        ~actual_bytes:None
                        ~limit_bytes:Api_common.max_response_body)
-                | Eio.Time.Timeout when Complete_stream_acc.stream_failed acc -> Ok ()
                 | Eio.Time.Timeout ->
                   let phase =
                     Http_client.timeout_phase_of_stream_idle_state !stream_idle_state
@@ -937,7 +961,8 @@ let complete_stream_http
                              | Types.Stream_parse_failed _
                              | Types.Stream_ndjson_parse_failed _
                              | Types.Stream_unknown_event _
-                             | Types.Stream_incomplete _ ->
+                             | Types.Stream_incomplete _
+                             | Types.Stream_repeating _ ->
                                Complete_stream_error.wire_error_terminal_label
                                  active_wire_format
                              | Types.Stream_unsupported_part _

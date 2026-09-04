@@ -49,7 +49,7 @@ let with_gate f =
       let late = Late.create () in
       let events = Events.create () in
       let gate =
-        Gate.create ~registry ~late_approvals:late
+        Gate.create ~redact_text:Fun.id ~registry ~late_approvals:late
           ~publish:(Events.publish events)
           ~clock ~keeper_name:keeper ~timeout_sec:0.05
       in
@@ -57,7 +57,7 @@ let with_gate f =
 
 (* Drain what the stream holds without blocking on an empty one. *)
 let rec drain events acc =
-  match Eio.Stream.take_nonblocking events with
+  match Events.take_nonblocking events with
   | None -> List.rev acc
   | Some event -> drain events (event :: acc)
 
@@ -210,7 +210,7 @@ let test_a_remembered_answer_does_not_cross_keepers () =
       (* Same store, another keeper's gate: the identity carries the keeper
          name, so the identical call from somebody else is asked about. *)
       let other_gate =
-        Gate.create ~registry:(Registry.create ()) ~late_approvals:late
+        Gate.create ~redact_text:Fun.id ~registry:(Registry.create ()) ~late_approvals:late
           ~publish:(Events.publish (Events.create ()))
           ~clock ~keeper_name:"keeper.two" ~timeout_sec:0.05
       in

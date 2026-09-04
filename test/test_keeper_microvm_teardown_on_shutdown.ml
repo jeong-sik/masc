@@ -28,6 +28,10 @@ let test_removing_an_absent_guest_succeeds () =
            ~config
            ~keeper_name:"microvm-teardown-probe-never-started"
            ~backend:Masc.Keeper_sandbox.Micro_vm
+           (* The runtime is named because teardown refuses an unnamed one:
+              a guest can only be removed with the spelling of the CLI that
+              booted it. *)
+           ~microvm_backend:Masc.Keeper_microvm_backend.Apple_container
            ()
        with
        | Ok () -> ()
@@ -40,6 +44,37 @@ let test_removing_an_absent_guest_succeeds () =
            Alcotest.failf
              "removing a guest that was never started must succeed, got: %s"
              detail)
+
+(* A caller that forgets the runtime gets a refusal, not a guess. Shutdown
+   finalization treats a teardown failure as a warning and finishes, so an
+   assumed runtime would report a removal it did not perform and the guest
+   would stay running with nothing able to reap it. The refusal is what makes
+   that mistake visible in the log instead. *)
+let test_an_unnamed_runtime_is_refused () =
+  let base_path = Filename.temp_file "microvm_teardown_unnamed_" "" in
+  Unix.unlink base_path;
+  Unix.mkdir base_path 0o755;
+  Fun.protect
+    ~finally:(fun () -> try Unix.rmdir base_path with _ -> ())
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       match
+         Runtime.teardown_keeper_sandbox_by_name
+           ~timeout_sec:0.01
+           ~config
+           ~keeper_name:"microvm-teardown-runtime-not-named"
+           ~backend:Masc.Keeper_sandbox.Micro_vm
+           ()
+       with
+       | Ok () ->
+         Alcotest.fail "an unnamed microVM runtime reported a removal"
+       | Error detail ->
+         Alcotest.(check bool)
+           "the refusal names the unresolved runtime"
+           true
+           (Astring.String.is_infix
+              ~affix:"microvm_teardown_backend_unresolved"
+              detail))
 
 let test_local_teardown_skips_container_runtimes () =
   let base_path = Filename.temp_file "local_teardown_" "" in
@@ -67,6 +102,8 @@ let () =
     [ ( "teardown"
       , [ Alcotest.test_case "removing an absent guest succeeds" `Quick
             test_removing_an_absent_guest_succeeds
+        ; Alcotest.test_case "an unnamed microVM runtime is refused" `Quick
+            test_an_unnamed_runtime_is_refused
         ; Alcotest.test_case "Local teardown skips container runtimes" `Quick
             test_local_teardown_skips_container_runtimes
         ] )

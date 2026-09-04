@@ -32,10 +32,14 @@ provided, content is only the Slack notification fallback text."""
 name = "channel_id"
 type = "string"
 description = """
-Bound Discord or Slack channel id, or that channel's name (with or without \
-a leading '#'). A name resolves to the bound channel's id automatically — \
-the channel must be bound and have received at least one message so its \
-name is known. Unresolvable references are rejected."""
+Omit this to reply in the channel the message you are answering came from — it \
+defaults to that channel, which is the usual case for replying to a mention. \
+Set it only to post to a different channel than the one in hand. It names a \
+channel, never the surface: a bound Discord or Slack channel id, or that \
+channel's name (with or without a leading '#') — not the word 'discord' or \
+'slack'. A name resolves to the bound channel's id automatically; the channel \
+must be bound and have received at least one message so its name is known. \
+Unresolvable references are rejected."""
 
 [[params]]
 name = "mention_user_ids"

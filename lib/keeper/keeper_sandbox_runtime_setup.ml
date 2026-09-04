@@ -263,13 +263,25 @@ let docker_label_args
 ;;
 
 let docker_network_args = function
-  | Keeper_types_profile_sandbox.Network_none -> [ "--network"; "none" ], "none"
+  | Keeper_types_profile_sandbox.Network_none -> Ok ([ "--network"; "none" ], "none")
   | Keeper_types_profile_sandbox.Network_inherit ->
     (* Host network — matches the variant name and the docstring on
          [keeper_types_profile.ml:20-24]. Empty args
          (docker default) gives bridge mode rather than the requested host
          network namespace. *)
-    [ "--network"; "host" ], "inherit"
+    Ok ([ "--network"; "host" ], "inherit")
+  | Keeper_types_profile_sandbox.Network_policy ->
+    (* Docker can create an [--internal] network, so the shape is plausible
+       here. It has not been measured, and RFC-0415 turns on exactly that
+       measurement: whether the guest can still reach a public address by raw
+       TCP. Emitting args that might not close would make this mode advice on
+       Docker while it is policy on the microVM backend, and an allowlist that
+       holds on one backend and not another is worse than one that refuses.
+       Measure it, then replace this arm. *)
+    Error
+      "network_mode \"policy\" is not available on sandbox_profile \"docker\": \
+       the Docker egress boundary is unmeasured (RFC-0415). Use \"microvm\" \
+       for a policy lane, or \"none\"/\"inherit\" here."
 ;;
 
 let docker_nofile_args () =

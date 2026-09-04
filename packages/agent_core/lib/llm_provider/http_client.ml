@@ -75,6 +75,7 @@ type provider_wire_error_kind =
   | Malformed_payload
   | Unknown_event
   | Incomplete_stream
+  | Repeating_generation
   | Oversized_payload
 
 let cli_startup_failure_reason_to_string = function
@@ -94,6 +95,7 @@ let provider_wire_error_kind_to_string = function
   | Malformed_payload -> "malformed_payload"
   | Unknown_event -> "unknown_event"
   | Incomplete_stream -> "incomplete_stream"
+  | Repeating_generation -> "repeating_generation"
   | Oversized_payload -> "oversized_payload"
 ;;
 
@@ -2494,6 +2496,16 @@ type sse_line =
   | Sse_data of string
   | Sse_ignored_field
 
+(* What the consumer wants after one dispatched event or line. A consumer that
+   has stopped consuming must also stop the read, or the socket keeps
+   delivering a body nobody reads until the provider finishes or a deadline
+   fires — the caller pays for tokens it discards and the connection is held
+   for the whole of it. Returned rather than asked for through a predicate so
+   no caller can omit the decision. *)
+type stream_continuation =
+  | Continue
+  | Stop
+
 (* WHATWG HTML 9.2.6 joins multiple [data] fields of one event with a single
    LF. Defined once so the size check below charges exactly what the join
    appends. *)
@@ -2789,12 +2801,19 @@ let read_sse
   let data_buffer = Buffer.create 256 in
   let data_seen = ref false in
   let dispatch_event () =
-    if !data_seen
-    then (
-      on_data ~event_type:!current_event_type (Buffer.contents data_buffer);
-      Buffer.clear data_buffer;
-      data_seen := false);
-    current_event_type := None
+    let continuation =
+      if !data_seen
+      then (
+        let continuation =
+          on_data ~event_type:!current_event_type (Buffer.contents data_buffer)
+        in
+        Buffer.clear data_buffer;
+        data_seen := false;
+        continuation)
+      else Continue
+    in
+    current_event_type := None;
+    continuation
   in
   let rec loop () =
     match read_meaningful_line () with
@@ -2803,8 +2822,11 @@ let read_sse
          fields in one event are joined with a single LF; dispatching each
          field independently would hand a JSON-lines fragment to a parser and
          silently violate the SSE contract. *)
-      dispatch_event ();
-      loop ()
+      (* [Stop] ends the read here, before the next blocking read, so the
+         consumer's decision and the socket's lifetime are the same event. *)
+      (match dispatch_event () with
+       | Stop -> ()
+       | Continue -> loop ())
     | Sse_comment ->
       (* Filtered inside [read_meaningful_line]. *)
       loop ()
@@ -2896,8 +2918,9 @@ let read_ndjson
     match read_line () with
     | "" -> loop ()
     | line ->
-      on_line line;
-      loop ()
+      (match on_line line with
+       | Stop -> ()
+       | Continue -> loop ())
     | exception End_of_file -> ()
   in
   loop ()
@@ -3289,7 +3312,9 @@ let%test "read_ndjson: no clock/idle_timeout preserves default behaviour" =
     let flow = Eio.Flow.string_source "{\"a\":1}\n{\"b\":2}\n" in
     let reader = Eio.Buf_read.of_flow ~max_size:1024 flow in
     let lines = ref [] in
-    read_ndjson ~reader ~on_line:(fun l -> lines := l :: !lines) ();
+    read_ndjson ~reader ~on_line:(fun l ->
+      lines := l :: !lines;
+      Continue) ();
     List.rev !lines = [ "{\"a\":1}"; "{\"b\":2}" ])
 ;;
 
@@ -3305,7 +3330,7 @@ let%test "read_ndjson: idle_timeout fires when stream stalls mid-read" =
   Eio.Flow.copy_string "{\"a\":1}\n" sink;
   let reader = Eio.Buf_read.of_flow ~max_size:1024 source in
   try
-    read_ndjson ~clock ~idle_timeout:0.05 ~reader ~on_line:(fun _ -> ()) ();
+    read_ndjson ~clock ~idle_timeout:0.05 ~reader ~on_line:(fun _ -> Continue) ();
     false
   with
   | Eio.Time.Timeout -> true
@@ -3318,7 +3343,9 @@ let%test "read_sse: no clock/idle_timeout preserves default behaviour" =
     let flow = Eio.Flow.string_source "data: hello\n\ndata: world\n\n" in
     let reader = Eio.Buf_read.of_flow ~max_size:1024 flow in
     let payloads = ref [] in
-    read_sse ~reader ~on_data:(fun ~event_type:_ d -> payloads := d :: !payloads) ();
+    read_sse ~reader ~on_data:(fun ~event_type:_ d ->
+      payloads := d :: !payloads;
+      Continue) ();
     List.rev !payloads = [ "hello"; "world" ])
 ;;
 
@@ -3332,7 +3359,7 @@ let%test "read_sse: idle_timeout fires when stream stalls mid-read" =
   Eio.Flow.copy_string "data: hello\n" sink;
   let reader = Eio.Buf_read.of_flow ~max_size:1024 source in
   try
-    read_sse ~clock ~idle_timeout:0.05 ~reader ~on_data:(fun ~event_type:_ _ -> ()) ();
+    read_sse ~clock ~idle_timeout:0.05 ~reader ~on_data:(fun ~event_type:_ _ -> Continue) ();
     false
   with
   | Eio.Time.Timeout -> true
@@ -3367,7 +3394,9 @@ let%test "read_sse: first_event_timeout admits a silent prefill past idle" =
          ~idle_timeout:0.05
          ~first_event_timeout:1.0
          ~reader
-         ~on_data:(fun ~event_type:_ d -> payloads := d :: !payloads)
+         ~on_data:(fun ~event_type:_ d ->
+      payloads := d :: !payloads;
+      Continue)
          ());
   List.rev !payloads = [ "hello" ]
 ;;
@@ -3392,7 +3421,7 @@ let%test "read_sse: first_event_timeout fires when no first event arrives" =
       ~idle_timeout:1.0
       ~first_event_timeout:0.05
       ~reader
-      ~on_data:(fun ~event_type:_ _ -> ())
+      ~on_data:(fun ~event_type:_ _ -> Continue)
       ();
     false
   with
@@ -3419,7 +3448,7 @@ let%test "read_sse: idle_timeout still guards after the first event" =
       ~idle_timeout:0.05
       ~first_event_timeout:1.0
       ~reader
-      ~on_data:(fun ~event_type:_ _ -> ())
+      ~on_data:(fun ~event_type:_ _ -> Continue)
       ();
     false
   with
@@ -3449,7 +3478,9 @@ let%test "read_ndjson: first_event_timeout admits a silent prefill past idle" =
          ~idle_timeout:0.05
          ~first_event_timeout:1.0
          ~reader
-         ~on_line:(fun l -> lines := l :: !lines)
+         ~on_line:(fun l ->
+           lines := l :: !lines;
+           Continue)
          ());
   List.rev !lines = [ "{\"a\":1}" ]
 ;;
@@ -3563,7 +3594,7 @@ let%test "read_sse: body_timeout bounds the first-event wait when first_event is
       ~idle_timeout:1.0
       ~body_timeout:0.05
       ~reader
-      ~on_data:(fun ~event_type:_ _ -> ())
+      ~on_data:(fun ~event_type:_ _ -> Continue)
       ();
     false
   with
@@ -3584,7 +3615,7 @@ let%test "read_ndjson: body_timeout bounds the first-event wait when first_event
       ~idle_timeout:1.0
       ~body_timeout:0.05
       ~reader
-      ~on_line:(fun _ -> ())
+      ~on_line:(fun _ -> Continue)
       ();
     false
   with
@@ -3618,7 +3649,9 @@ let%test "read_sse: a leading blank line does not end the first-event wait" =
          ~idle_timeout:0.05
          ~first_event_timeout:1.0
          ~reader
-         ~on_data:(fun ~event_type:_ d -> payloads := d :: !payloads)
+         ~on_data:(fun ~event_type:_ d ->
+      payloads := d :: !payloads;
+      Continue)
          ());
   List.rev !payloads = [ "hello" ]
 ;;
@@ -3646,7 +3679,9 @@ let%test "read_ndjson: a leading blank line does not end the first-event wait" =
          ~idle_timeout:0.05
          ~first_event_timeout:1.0
          ~reader
-         ~on_line:(fun l -> lines := l :: !lines)
+         ~on_line:(fun l ->
+           lines := l :: !lines;
+           Continue)
          ());
   List.rev !lines = [ "{\"a\":1}" ]
 ;;

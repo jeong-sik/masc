@@ -521,21 +521,25 @@ let lane_modality_reroute_decision ~checkpoint_messages ~initial_messages
     ~initial_messages
     goal_blocks
 
+(* The WARN names the runtime being left and the runtime being taken. It used to
+   print [assignment_id] on the left, which for a keeper whose assignment is a
+   bare runtime id reads as a reroute from a runtime to itself — the "kimi -> kimi"
+   lines that made a working reroute look like a no-op. The assignment is still
+   reported, as the assignment. *)
 let first_runtime_after_modality_reroute ~keeper_name ~assignment_id
     ~first_candidate_id ~first_candidate = function
   | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ ->
     first_candidate_id, first_candidate
-  | Runtime_agent.Reroute { to_runtime_id; reason } ->
-    (match Runtime.get_runtime_by_id to_runtime_id with
-     | None -> first_candidate_id, first_candidate
-     | Some rerouted ->
-       Log.Keeper.warn
-         "%s: RFC-0265 modality reroute %s -> %s (%s)"
-         keeper_name
-         assignment_id
-         to_runtime_id
-         reason;
-       to_runtime_id, rerouted)
+  | Runtime_agent.Reroute { target; reason } ->
+    let to_runtime_id = target.Runtime.id in
+    Log.Keeper.warn
+      "%s: RFC-0265 modality reroute %s -> %s (assignment %s: %s)"
+      keeper_name
+      first_candidate_id
+      to_runtime_id
+      assignment_id
+      reason;
+    to_runtime_id, target
 
 type attempt_inference_policy =
   { attempt_enable_thinking : bool option
@@ -594,6 +598,7 @@ let run_named
     ?event_bus
     ?on_runtime_observation
     ?on_request_wire_observation
+    ?on_request_attribution
     ?on_official_client_result_handoff
     ?on_official_client_native_action
     ?on_model_input_window_observation
@@ -737,16 +742,23 @@ let run_named
     | Some _ -> Ok []
     | None -> resolve_runtime_candidates remaining_candidate_ids
   in
+  (* RFC-0265 media handling applies to deferred lanes too, but only the degrade
+     floor — never a reroute. A deferred lane commits to a single budgeted
+     assignment, so [remaining_runtimes] is already [[]] above and
+     [decide_modality_reroute] cannot pick a [Reroute] target from an empty
+     candidate list: the decision here is only [No_reroute_needed] (the deferred
+     candidate accepts the turn's modality) or [No_capable_runtime] (it does not,
+     so the unsupported media is stripped and the turn runs text-only). The
+     earlier [Some _ -> No_reroute_needed] short-circuit skipped the degrade as
+     well, letting an image-bearing turn dispatch to a text-only deferred
+     candidate and hit the hard multimodal gate instead of degrading (#33034). *)
   let reroute_decision =
-    match deferred_runtime_lane with
-    | Some _ -> Runtime_agent.No_reroute_needed
-    | None ->
-      lane_modality_reroute_decision
-        ~checkpoint_messages
-        ~initial_messages
-        ~goal_blocks:current_goal_blocks
-        ~first_candidate
-        ~remaining_runtimes
+    lane_modality_reroute_decision
+      ~checkpoint_messages
+      ~initial_messages
+      ~goal_blocks:current_goal_blocks
+      ~first_candidate
+      ~remaining_runtimes
   in
   let first_runtime_id, first_runtime =
     first_runtime_after_modality_reroute ~keeper_name ~assignment_id:runtime_id
@@ -792,7 +804,7 @@ let run_named
      later vision-capable runtime still sees the original media. *)
   let goal_blocks, initial_messages, agent_core_checkpoint, replay_prefix_projection =
     match reroute_decision with
-    | Runtime_agent.No_capable_runtime _ ->
+    | Runtime_agent.No_capable_runtime { required } ->
       let caps = Runtime_agent.input_capabilities_of_runtime first_runtime in
       let stripped_goal, goal_dropped =
         Runtime_agent.strip_unsupported_modality_blocks caps current_goal_blocks
@@ -818,8 +830,35 @@ let run_named
       in
       (match Runtime_agent.media_degrade_note ~runtime_id:first_runtime_id dropped with
        | None ->
-         (* Nothing strippable (e.g. only ToolResult-nested media): keep the
-            inputs unchanged so the loud capability floor still applies. *)
+         (* [required] is non-empty — that is why the decision was
+            [No_capable_runtime] — yet nothing was strippable, so there is no
+            text-only turn to offer and the provider capability floor will reject
+            this turn. Say so here. Falling through in silence is what left the
+            operator with a bare provider capability error and no record that
+            RFC-0265 had run and given up. Reachable when the modalities are
+            each supported but the runtime does not accept them bundled: no single
+            media block is individually unsupported, so the strip removes nothing.
+            ToolResult-nested media used to land here too, before the strip
+            learned to descend. *)
+         Log.Keeper.warn
+           "%s: RFC-0265 media degrade unavailable on %s — required %s, nothing \
+            strippable; the capability floor rejects this turn"
+           keeper_name
+           first_runtime_id
+           (String.concat "," required);
+         emit_runtime_manifest
+           ~status:"degrade_unavailable"
+           ~decision:
+             (Keeper_runtime_manifest.with_payload_role
+                ~payload_role:Keeper_runtime_manifest.Operator_evidence
+                (`Assoc
+                  [ ("routing_action", `String "media_degrade_unavailable")
+                  ; ("routing_reason", `String "required_media_not_strippable")
+                  ; ("degraded_runtime_id", `String first_runtime_id)
+                  ; ( "required_modalities"
+                    , `String (String.concat "," required) )
+                  ]))
+           Keeper_runtime_manifest.Runtime_routed;
          goal_blocks, initial_messages, agent_core_checkpoint, Keeper_replay_prefix.unchanged
        | Some note ->
          Log.Keeper.warn
@@ -920,6 +959,12 @@ let run_named
       match runtime.Runtime.execution with
       | Runtime_execution.Codex_app_server config ->
         let run_codex ~initial_messages () =
+          let on_transmitted_model_input transmitted =
+            Option.iter
+              (fun observe ->
+                 observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
+              on_request_attribution
+          in
           Keeper_codex_runtime.run
             ~runtime_id:attempt_runtime_id
             ~keeper_name
@@ -931,6 +976,7 @@ let run_named
             ~tools
             ~initial_messages
             ~model_input_projection
+            ~on_transmitted_model_input
             (* Codex assembles the wire itself, so the shape masc can report
                is the list it handed over. Same reading the Agent Core path
                publishes; without it the turn record has no window. *)
@@ -1039,6 +1085,12 @@ let run_named
         , codex_attempt.effect_disposition )
       | Runtime_execution.Antigravity_cli config ->
         let run_antigravity ~initial_messages () =
+          let on_transmitted_model_input transmitted =
+            Option.iter
+              (fun observe ->
+                 observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
+              on_request_attribution
+          in
           Keeper_antigravity_runtime.run
             ~runtime_id:attempt_runtime_id
             ~keeper_name
@@ -1057,6 +1109,7 @@ let run_named
             ~tools
             ~initial_messages
             ~model_input_projection
+            ~on_transmitted_model_input
             ~hooks
             ~context_injector
             ~context
@@ -1137,6 +1190,12 @@ let run_named
       | Runtime_execution.Claude_code config ->
         let run_claude ~initial_messages () =
           let tools = if runtime.model.tools_support then tools else [] in
+          let on_transmitted_model_input transmitted =
+            Option.iter
+              (fun observe ->
+                 observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
+              on_request_attribution
+          in
           Keeper_claude_code_runtime.run
             ~runtime_id:attempt_runtime_id
             ~keeper_name
@@ -1148,6 +1207,7 @@ let run_named
             ~tools
             ~initial_messages
             ~model_input_projection
+            ~on_transmitted_model_input
             (* [Durable_shape] because that is what was measured: the official
                client assembles the wire itself, so masc can only report the
                list it handed over. The Agent Core path reports [Wire_shape]

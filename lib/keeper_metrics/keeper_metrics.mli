@@ -130,6 +130,7 @@ type t =
   | WriteMetaCycleFailures
   | MetricsSseFailures
   | ChatStoreFailures
+  | ChatJournalAuditMismatches
   | ChatTransportFailures
   | PersonNoteStoreFailures
   | KeeperMaterializationFailures

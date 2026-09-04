@@ -175,6 +175,9 @@ let test_chat_hint_widths_keep_one_row_and_whole_items () =
         (Masc_tui_message_layout.scroll_hint ~scrolled_back:0
            ~older_exist:true)
       ~switch_hint:"" ~escape_hint:"Esc:list"
+      (* The quiet leave shares the row only while the draft is empty, so that
+         is the shape whose width has to fit. *)
+      ~leave_hint:"  Q:leave"
   in
   let render hints max_cells =
     Masc_tui_footer.line ~status ~dim:"\x1b[2m" ~reset:"\x1b[0m"
@@ -213,6 +216,7 @@ let test_chat_hint_widths_keep_one_row_and_whole_items () =
         (Masc_tui_message_layout.scroll_hint ~scrolled_back:999
            ~older_exist:true)
       ~switch_hint:"  Ctrl-G:next Keeper" ~escape_hint:"Esc:interrupt turn"
+      ~leave_hint:"  Q:leave"
   in
   let active = render active_hints 240 in
   check_at_most_cells "worst-case active footer fits 240 cells" 240 active;
@@ -575,6 +579,43 @@ let test_hints_that_fit_are_left_alone () =
 ;;
 
 
+(* The capture bar. It stands in for the hint line while a capture runs, so it
+   answers to the same one-row budget — and it is the only meter that reaches
+   the chat surface, which draws its own input row rather than the composer's. *)
+let test_the_voice_bar_is_the_width_it_claims () =
+  List.iter
+    (fun db ->
+       Alcotest.(check int)
+         "bar occupies the cells it was given"
+         Masc_tui_footer.voice_bar_width
+         (Masc_tui_message_layout.display_width
+            (Masc_tui_footer.voice_bar
+               ~width:Masc_tui_footer.voice_bar_width
+               ~db)))
+    [ None; Some Float.neg_infinity; Some (-60.); Some (-37.); Some (-6.); Some 0. ]
+;;
+
+(* Silence and "nothing reported yet" draw the same empty bar, and both are
+   honest: the operator has not been heard in either case. *)
+let test_silence_draws_an_empty_bar () =
+  Alcotest.(check string)
+    "no reading yet is the same as silence"
+    (Masc_tui_footer.voice_bar ~width:8 ~db:None)
+    (Masc_tui_footer.voice_bar ~width:8 ~db:(Some Float.neg_infinity))
+;;
+
+(* A room reads about -37 dB on this hardware and a voice about -20. Drawing
+   those the same would answer nothing an operator asked the meter. *)
+let test_a_room_and_a_voice_do_not_draw_the_same_bar () =
+  Alcotest.(check bool)
+    "they differ"
+    true
+    (not
+       (String.equal
+          (Masc_tui_footer.voice_bar ~width:16 ~db:(Some (-37.)))
+          (Masc_tui_footer.voice_bar ~width:16 ~db:(Some (-20.)))))
+;;
+
 let tests =
   [ ( "tui-footer-status-items"
     , [ Alcotest.test_case "port closes every footer" `Quick
@@ -630,7 +671,16 @@ let tests =
       ; Alcotest.test_case "hints that fit are left alone" `Quick
           test_hints_that_fit_are_left_alone
       ] )
+  ; ( "voice meter"
+    , [ Alcotest.test_case "the bar is the width it claims" `Quick
+          test_the_voice_bar_is_the_width_it_claims
+      ; Alcotest.test_case "silence draws an empty bar" `Quick
+          test_silence_draws_an_empty_bar
+      ; Alcotest.test_case "a room and a voice differ" `Quick
+          test_a_room_and_a_voice_do_not_draw_the_same_bar
+      ] )
   ]
+
 
 
 let () = Alcotest.run "tui_footer_status_items" tests

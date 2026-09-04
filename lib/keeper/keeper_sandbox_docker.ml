@@ -237,9 +237,24 @@ let cleanup_oneshot_container ~container_name =
 let ensure_shell_image_available ~(meta : keeper_meta) ~image ~timeout_sec =
   match meta.sandbox_profile with
   | Keeper_types_profile_sandbox.Micro_vm ->
-    (match Keeper_sandbox_microvm.image_present ~image ~timeout_sec with
-     | Ok () -> Ok ()
-     | Error detail -> Error ("microvm_shell_failed: " ^ detail))
+    (* Which store to ask is the keeper's declared runtime, not this lane's
+       guess: msb and nerdctl keep their images apart from container's the
+       same way container keeps them apart from Docker's. A keeper that
+       declared none has no store to ask. *)
+    (match meta.microvm_backend with
+     | None ->
+       Error
+         (Printf.sprintf
+            "microvm_shell_failed: microvm_backend_unresolved: keeper %s declares \
+             sandbox_profile=microvm and no microvm_backend, so there is no image \
+             store to check. Next: set microvm_backend in the keeper's TOML to one \
+             of: %s"
+            meta.name
+            (String.concat ", " Keeper_microvm_backend.valid_strings))
+     | Some backend ->
+       (match Keeper_sandbox_microvm.image_present_for backend ~image ~timeout_sec with
+        | Ok () -> Ok ()
+        | Error detail -> Error ("microvm_shell_failed: " ^ detail)))
   (* Fail closed: a remote_ssh keeper has no host-side shell image store,
      and falling through to the docker daemon check would be the silent
      substitution the profile exists to rule out. A remote_ssh keeper
@@ -455,9 +470,9 @@ let run_docker_shell_command_with_status_internal
         let container_name = keeper_sandbox_container_name meta in
               let container_root = keeper_private_container_root meta in
               let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in
-              let network_args, network_label =
-                Keeper_sandbox_runtime.docker_network_args network_mode
-              in
+              match Keeper_sandbox_runtime.docker_network_args network_mode with
+              | Error msg -> sandbox_error msg
+              | Ok (network_args, network_label) ->
               let mount_preflight_error ~reason ~detail_msg mount_path =
                 let details =
                   docker_mount_preflight_details

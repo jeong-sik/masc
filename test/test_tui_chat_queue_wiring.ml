@@ -41,6 +41,7 @@ let entry_at ?(id = "") at : Tui_types.msg_entry =
   ; me_operation_seq = 0
   ; me_text = Printf.sprintf "row at %.0f" at
   ; me_memory_summary = None
+  ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
   ; me_skill_activity = None
@@ -64,6 +65,7 @@ let chat_entry ?turn_phase ?turn_sequence ?(operation_seq = 0) ?memory_summary
   ; me_operation_seq = operation_seq
   ; me_text = text
   ; me_memory_summary = memory_summary
+  ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
   ; me_skill_activity = None
@@ -1235,6 +1237,121 @@ let test_queueing_puts_the_line_in_the_conversation () =
 
 (* Cancel removes the pending row. Edit keeps it and rewrites the exact queued
    request in place, which is what preserves STEER intent and submitted_at. *)
+(* Esc during a turn stops the turn. Two surfaces promise it -- the footer
+   draws "Esc:interrupt turn" while one is live
+   (masc_tui_render.ml escape_hint) and the help row says "back; during a turn,
+   interrupt it" (masc_tui_keys.ml) -- and the key handler did the opposite:
+   [handle_message_key] answered "esc" by leaving unconditionally and returning
+   [true], so the surface-level arm that did interrupt was never reached. The
+   composer takes every key while the chat is open, so the interrupt has to be
+   reachable from inside this binding, not beside it. *)
+let test_escape_reaches_the_interrupt () =
+  let interrupts =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"handle_message_key"
+      ~callee:"interrupt_turn"
+  in
+  if interrupts < 1 then
+    failf
+      "handle_message_key must be able to interrupt the turn; observed %d \
+       call(s) of interrupt_turn"
+      interrupts;
+  let launched =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"main"
+      ~callee:"launch_keeper_interrupt"
+  in
+  if launched < 1 then
+    failf
+      "the interrupt handed to handle_message_key must reach \
+       launch_keeper_interrupt; observed %d call(s)"
+      launched
+;;
+
+(* The Esc-during-a-turn decision lives in Masc_tui_esc_interrupt so the
+   dispatch and the footer read one table (test_tui_esc_interrupt pins it).
+   The day either side re-derives the decision inline, hint and act diverge
+   again -- the footer said "Esc:interrupt sent" while the arm swallowed
+   forever. Both must call the table. *)
+let test_esc_dispatch_and_footer_read_the_interrupt_table () =
+  let dispatch =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"main"
+      ~callee:"Masc_tui_esc_interrupt.action"
+  in
+  if dispatch < 1 then
+    failf
+      "the interrupt_turn closure must read Masc_tui_esc_interrupt.action; \
+       observed %d call(s)"
+      dispatch;
+  let footer =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_keeper_message"
+      ~callee:"Masc_tui_esc_interrupt.action"
+  in
+  if footer < 1 then
+    failf
+      "the escape hint must read Masc_tui_esc_interrupt.action so the footer \
+       cannot diverge from the dispatch; observed %d call(s)"
+      footer
+;;
+
+(* The chat surface had exactly one exit, and on a live turn Esc's first
+   press spends itself stopping the turn -- so leaving with the turn running
+   was not expressible: the only way out signalled the turn to stop. The
+   empty-draft Q arm is the leave half without the interrupt half. Two
+   things keep it honest as the executable evolves: the arm must actually
+   reach [leave_keeper_message], and [interrupt_turn] must stay Esc's alone
+   -- the day a second key consults it, "quiet" stops describing Q. *)
+let test_quiet_leave_leaves_without_touching_the_turn () =
+  let leaves =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"handle_message_key"
+      ~callee:"leave_keeper_message"
+  in
+  (* Once for Esc, once for the empty-draft Q. *)
+  if leaves < 2 then
+    failf
+      "the quiet leave must reach leave_keeper_message beside Esc; observed \
+       %d call(s)"
+      leaves;
+  let interrupts =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"handle_message_key"
+      ~callee:"interrupt_turn"
+  in
+  if interrupts <> 1 then
+    failf
+      "only Esc may spend itself on the turn (interrupt_turn observed %d \
+       time(s); the quiet leave must not consult it)"
+      interrupts
+;;
+
+(* A terminal too small to draw the composer still owes the operator the
+   exit. The dispatch admits Q beside Esc into the composer handler because
+   a transcript-only viewport is when stepping away from a running turn
+   matters most; with text in the draft the handler answers Q as an
+   ordinary letter, so this route takes nothing from typing. *)
+let test_quiet_leave_routes_past_the_composer_gate () =
+  let routed =
+    Ast_grep.count_string_literals_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"main"
+      ~literals:[ "Q" ]
+  in
+  if routed < 1 then
+    failf
+      "the dispatch must hand Q to the composer handler beside Esc; observed \
+       %d occurrence(s)"
+      routed
+;;
+
 let test_cancel_and_edit_take_the_row_with_them () =
   let cancelled =
     Ast_grep.count_calls_in_value_binding
@@ -1422,6 +1539,14 @@ let () =
             test_skill_usage_time_does_not_invent_never
         ; test_case "chat shortcuts reach visibility state" `Quick
             test_chat_shortcuts_reach_visibility_state
+        ; test_case "Esc reaches the interrupt" `Quick
+            test_escape_reaches_the_interrupt
+        ; test_case "Esc dispatch and footer read the interrupt table" `Quick
+            test_esc_dispatch_and_footer_read_the_interrupt_table
+        ; test_case "quiet leave leaves without touching the turn" `Quick
+            test_quiet_leave_leaves_without_touching_the_turn
+        ; test_case "quiet leave routes past the composer gate" `Quick
+            test_quiet_leave_routes_past_the_composer_gate
         ; test_case "the budget and the pane agree about queue rows" `Quick
             test_the_budget_and_the_pane_agree_about_queue_rows
         ; test_case "the budget and the pane agree about the scrollback row"

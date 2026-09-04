@@ -133,6 +133,11 @@ val run_named :
      body_bytes:int ->
      serialized:Llm_provider.Request_wire_observer.observation option ->
      unit) ->
+  ?on_request_attribution:
+    (runtime_id:string ->
+     tools:Agent_core.Tool.t list ->
+     transmitted:Keeper_official_client_host.transmitted_model_input ->
+     unit) ->
   ?on_official_client_result_handoff:
     (runtime_id:string ->
      invocation:Agent_core.Tool_contract.Invocation.t ->
@@ -169,7 +174,22 @@ val run_named :
     [on_runtime_attempt_error] observes every typed candidate failure after
     its runtime manifest row is emitted. It does not change candidate
     selection or the final error; verifier callers use it to aggregate
-    retryability across a bare runtime and its terminal default fallback. *)
+    retryability across a bare runtime and its terminal default fallback.
+
+    [on_request_attribution] reports what an official-client lane could
+    observe of its own model input, together with the tool list that lane
+    sent. It fires once per attempt on the Codex, Antigravity and Claude Code
+    lanes, which assemble the wire inside the client and therefore never reach
+    [on_request_wire_observation]. The Agent Core lane does not use it: its
+    own serializer produced the bytes, so it reports through
+    [on_request_wire_observation] instead.
+
+    [transmitted] carries the history only when the lane started the
+    conversation. On a resume it says the client's session holds the input, so
+    the caller records a gap rather than attributing a local list the client
+    never re-sent. [tools] is the lane's own list, not the one passed to
+    [run_named]: the Claude Code lane sends [[]] to a target that declares no
+    tool support. *)
 
 type attempt_inference_policy =
   { attempt_enable_thinking : bool option
@@ -225,8 +245,13 @@ module For_testing : sig
     assignment_id:string ->
     first_candidate_id:string ->
     first_candidate:Runtime.t ->
-    Runtime_agent.reroute_decision ->
+    Runtime.t Runtime_agent.reroute_decision ->
     string * Runtime.t
+  (** Runtime the turn dispatches to after the RFC-0265 decision. On [Reroute],
+      returns the decision's target and logs a WARN naming the runtime left, the
+      runtime taken and [assignment_id]; on [No_reroute_needed] and
+      [No_capable_runtime], returns [first_candidate_id]/[first_candidate]
+      unchanged and logs nothing (the caller reports the degrade). *)
 
   val lane_modality_reroute_decision :
     checkpoint_messages:Agent_core.Types.message list ->
@@ -234,7 +259,7 @@ module For_testing : sig
     goal_blocks:Agent_core.Types.content_block list ->
     first_candidate:Runtime.t ->
     remaining_runtimes:Runtime.t list ->
-    Runtime_agent.reroute_decision
+    Runtime.t Runtime_agent.reroute_decision
 
   val dedupe_runtimes_preserve_order : Runtime.t list -> Runtime.t list
   val resolve_runtime_candidates :

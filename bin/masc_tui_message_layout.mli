@@ -15,6 +15,10 @@ type style =
           from six senders wearing the reader's own colours. *)
   | Keeper
   | Status
+      (** What the server says happened to a turn. *)
+  | Local
+      (** The pane answering a command typed at it. Never left this machine,
+          and belongs to no turn. *)
   | Journal
       (** Auxiliary Memory/Librarian lane. It has its own mark and rail so a
           recorded memory pass never reads as part of ordinary conversation. *)
@@ -22,6 +26,11 @@ type style =
   | Tool
   | Skill of skill_tone
   | Thinking
+
+val all_styles : style list
+(** Every style, listed beside the type so a new variant is added in sight of
+    it. The mark-distinctness check walks this; nothing in the language forces
+    a variant to appear here. *)
 
 type turn_rail =
   | Rail_opens  (** The turn's first row. *)
@@ -341,6 +350,13 @@ val speaker_mark : style -> string
     NO_COLOR removes colour, so this is what still answers "who said this"
     when there is none. *)
 
+val continued_mark : style -> string
+(** Glyph drawn in the speaker mark position on rows that continue the same
+    speaker. While the turn opens with {!speaker_mark}, continuing rows draw
+    a quiet vertical connection line ("│") rather than repeating the mark
+    over a wide empty gutter. Reasoning keeps its own dot. *)
+
+
 val split_aligned_role_label :
   style:style -> string -> string * string * string
 (** An {!align_role_label} result taken back apart into its mark, the
@@ -356,12 +372,25 @@ val align_role_label : ?column:int -> style:style -> string -> string
     tail: these read [agent · surface] and share long prefixes, so the end is
     what tells two of them apart. Remaining column cells follow the name. *)
 
+val chat_readable_body_cells : int
+(** The body-column floor the chat pane's width gate guarantees: twenty
+    cells, enough for prose to wrap at word boundaries instead of mid-word. *)
+
+val chat_min_terminal_cols : int
+(** The narrowest terminal the keeper chat pane renders at, derived from a
+    row's fixed chrome -- frame border and padding (4), body indent (2),
+    {!turn_rail_cells}, and the {!chat_role_label_column} floor -- plus
+    {!chat_readable_body_cells}. Below it the pane draws the resize notice
+    instead of shredding prose. *)
+
 val message_viewport_supported :
   terminal_rows:int -> terminal_cols:int -> status_rows:int -> bool
 (** Whether the full chat frame plus its final newline fits without terminal
     scrolling. Unsupported viewports render a compact resize gate and suppress
-    message editing. The width gate also reserves enough framed content for a
-    four-cell body and a shortened source with two identifying tail cells. *)
+    message editing. The width gate admits the pane only at
+    {!chat_min_terminal_cols} or wider, where the body column keeps
+    {!chat_readable_body_cells} beside the label column, rail, indent, and
+    frame. *)
 
 val wrap_words : max_cells:int -> string -> string list
 (** Wrap a plain single-line string at spaces using a terminal-cell budget.

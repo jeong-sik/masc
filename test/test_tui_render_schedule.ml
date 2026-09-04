@@ -1075,6 +1075,9 @@ let test_headers_fit_their_columns () =
       ; ( "harness"
         , Schedule.harness_header_row
             ~reason_width:(Schedule.harness_reason_width ~inner_width) )
+      ; ( "board"
+        , Schedule.board_header_row
+            ~title_width:(Schedule.board_title_width ~inner_width) )
       ]
     in
     List.iter
@@ -1306,6 +1309,100 @@ let test_planning_columns_hold_their_offsets () =
     check_left_cell "DUE" "G" ~header ~row ~inner_width
   done
 
+let board_probe =
+  { Schedule.brow_mark = "@"
+  ; brow_id = "A"
+  ; brow_hearth = "B"
+  ; brow_author = "C"
+  ; brow_title = "D"
+  ; brow_age = "E"
+  ; brow_score = "F"
+  ; brow_replies = "G"
+  }
+
+let board_row_of ~title_width values =
+  Schedule.board_row ~styles:Schedule.board_no_styles ~title_width values
+
+let test_board_columns_hold_their_offsets () =
+  for inner_width = 80 to 240 do
+    let title_width = Schedule.board_title_width ~inner_width in
+    let header = Schedule.board_header_row ~title_width in
+    let row = board_row_of ~title_width board_probe in
+    check_left_cell "ID" "A" ~header ~row ~inner_width;
+    check_left_cell "HEARTH" "B" ~header ~row ~inner_width;
+    check_left_cell "AUTHOR" "C" ~header ~row ~inner_width;
+    check_left_cell "TITLE" "D" ~header ~row ~inner_width;
+    check_right_cell "AGE" "E" ~header ~row ~inner_width;
+    check_left_cell "SCORE" "F" ~header ~row ~inner_width;
+    check_left_cell "REPLIES" "G" ~header ~row ~inner_width
+  done
+
+(* The defect this closes. The rows sized the title to the terminal minus a
+   hand-summed constant and the header claimed its own, so at eighty columns
+   the header ran long, pushed SCORE into the frame and REPLIES off it. Both
+   read one description now, so a row is exactly as wide as the header over it
+   whatever any reading measures. *)
+let test_a_board_row_is_as_wide_as_its_header () =
+  List.iter
+    (fun inner_width ->
+      let title_width = Schedule.board_title_width ~inner_width in
+      let header = Schedule.board_header_row ~title_width in
+      let width text = Masc_tui_message_layout.display_width text in
+      List.iter
+        (fun (name, values) ->
+          check int
+            (Printf.sprintf "inner %d: %s stays on the header's width"
+               inner_width name)
+            (width header)
+            (width (board_row_of ~title_width values)))
+        [ ( "empty"
+          , { Schedule.brow_mark = ""
+            ; brow_id = ""
+            ; brow_hearth = ""
+            ; brow_author = ""
+            ; brow_title = ""
+            ; brow_age = ""
+            ; brow_score = ""
+            ; brow_replies = ""
+            } )
+        ; "probe", board_probe
+        ; ( "an id past its column"
+          , { board_probe with Schedule.brow_id = String.make 40 'x' } )
+        ; ( "a title past its column"
+          , { board_probe with Schedule.brow_title = String.make 300 'x' } )
+        ; ( "an author past its column"
+          , { board_probe with Schedule.brow_author = String.make 40 'x' } )
+        ])
+    [ 80; 100; 120; 200 ]
+
+(* The gaps came back to one with the rest of the fleet. Board was spacing its
+   columns two cells apart, which spent six cells of every title on being
+   different from every other table on the screen.
+
+   Measured with every column overfull, so nothing between two readings is a
+   column's own padding: what is left between them is the gap, and one gap is
+   one space. *)
+let test_board_spaces_its_columns_like_every_other_table () =
+  let inner_width = 120 in
+  let title_width = Schedule.board_title_width ~inner_width in
+  let fill char = String.make 60 char in
+  let row =
+    board_row_of ~title_width
+      { Schedule.brow_mark = "@"
+      ; brow_id = fill 'a'
+      ; brow_hearth = fill 'b'
+      ; brow_author = fill 'c'
+      ; brow_title = fill 'd'
+      ; brow_age = fill 'e'
+      ; brow_score = fill 'f'
+      ; brow_replies = fill 'g'
+      }
+  in
+  check int "the contract's gap is what every table spaces by" 1
+    Masc_tui_table.cell_gap;
+  check bool "no two readings are further apart than that" false
+    (index_of row "  " <> None)
+
 (* The defect this closes. A goal with no due date used to pull the age and
    the date ten cells left of the goal above it, because the title was sized
    from what those two happened to measure on that row. *)
@@ -1430,6 +1527,12 @@ let () =
             test_harness_columns_hold_their_offsets
         ; test_case "planning columns hold their offsets" `Quick
             test_planning_columns_hold_their_offsets
+        ; test_case "board columns hold their offsets" `Quick
+            test_board_columns_hold_their_offsets
+        ; test_case "a board row is as wide as its header" `Quick
+            test_a_board_row_is_as_wide_as_its_header
+        ; test_case "board spaces its columns like every other table" `Quick
+            test_board_spaces_its_columns_like_every_other_table
         ; test_case "an absent date does not move the age" `Quick
             test_an_absent_date_does_not_move_the_age
         ; test_case "every header fits its column" `Quick

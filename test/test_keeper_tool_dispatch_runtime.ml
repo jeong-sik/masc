@@ -7103,20 +7103,65 @@ let composable_output_probes =
     ; prepare =
         (fun ~config ~meta:_ ->
            (* A tool that reads durable state needs some, or it fails before
-              it can emit the shape under test. *)
-           ignore
-             (Workspace.add_task
-                config
-                ~created_by:"composable-output-probe"
-                ~title:"composable output probe"
-                ~priority:3
-                ~description:"");
-           `Assoc [])
+              it can emit the shape under test.
+
+              Two rows and a limit of one, not one row and no limit: this
+              producer emits [next_cursor] only when a page is cut short, so
+              an unpaged fixture never reaches that field. One row passed
+              here while production failed on every composition holding a
+              tasks node -- #32488 added the cursor to the response without
+              widening the declared schema, and this probe could not see it
+              (masc #32953). A probe that only meets the shape its fixture
+              happens to produce does not cover the shapes the producer can
+              produce. *)
+           List.iter
+             (fun title ->
+                ignore
+                  (Workspace.add_task
+                     config
+                     ~created_by:"composable-output-probe"
+                     ~title
+                     ~priority:3
+                     ~description:""))
+             [ "composable output probe"; "composable output probe (second page)" ];
+           `Assoc [ "limit", `Int 1 ])
     }
   ; probe "masc_board_stats" (`Assoc [])
   ; probe "masc_board_list" (`Assoc [])
-  ; probe "masc_goal_list" (`Assoc [])
-  ; probe "masc_run_list" (`Assoc [])
+  ; { tool_name = "masc_goal_list"
+    ; prepare =
+        (fun ~config ~meta:_ ->
+           (* An empty list validates the envelope and nothing else. The goal
+              item's own fields -- id, title, priority, phase, timestamps --
+              live inside [goals], so a probe that leaves it empty never puts
+              them in front of the schema. Same shape of blind spot that let
+              the keeper_tasks_list cursor drift through (masc #33000). *)
+           ignore
+             (Goal_store.upsert_goal
+                config
+                ~title:"composable output probe goal"
+                ~metric:"probes covered"
+                ~target_value:"1"
+                ~priority:2
+                ());
+           `Assoc [])
+    }
+  ; { tool_name = "masc_run_list"
+    ; prepare =
+        (fun ~config ~meta:_ ->
+           (* Same reason as the goal probe: the run item's task_id, plan and
+              timestamps are only reachable through a non-empty [runs]. *)
+           let stamp = "2026-01-01T00:00:00Z" in
+           Masc.Run_eio.write_run
+             config
+             { Masc.Run_eio.task_id = "composable-output-probe-run"
+             ; agent_name = None
+             ; plan = "probe plan"
+             ; created_at = stamp
+             ; updated_at = stamp
+             };
+           `Assoc [])
+    }
   ; { tool_name = "masc_get_metrics"
     ; prepare =
         (fun ~config:_ ~meta -> `Assoc [ "agent_name", `String meta.Masc.Keeper_meta_contract.name ])
@@ -7239,33 +7284,66 @@ let test_composable_outputs_satisfy_declared_schema () =
          ; handoff_from = None
          ; handoff_to = None
          };
-       List.iter
-         (fun { tool_name; prepare } ->
-            let input = prepare ~config ~meta in
-            let result =
-              KET.execute_keeper_tool_call_with_outcome
-                ~config
-                ~meta
-                ~publication_recovery
-                ~ctx_work
-                ~name:tool_name
-                ~input
-                ()
-            in
-            if not (String.equal "success" (outcome_label result.KTE.disposition))
-            then
-              failf
-                "%s did not complete, so its output went unobserved: %s"
-                tool_name
-                result.KTE.raw_output;
-            match result.KTE.data with
-            | Some data -> validate_probe_output ~tool_name ~data
-            | None ->
-              failf
-                "%s completed without typed data; a composition node would \
-                 have nothing to validate"
-                tool_name)
-         composable_output_probes)
+       (* Every probe runs, then the failures are reported together.
+
+          Aborting at the first one hides the rest: [Execute] leads this list
+          and needs a sandbox runtime, so on a machine with no container
+          daemon it failed first and the nine probes behind it never ran --
+          the gate reported one problem while saying nothing about the tools
+          it exists to cover. One unavailable runtime is not a reason to stop
+          asking the other producers whether they still match their declared
+          schema. *)
+       let failures =
+         List.filter_map
+           (fun { tool_name; prepare } ->
+              let input = prepare ~config ~meta in
+              let result =
+                KET.execute_keeper_tool_call_with_outcome
+                  ~config
+                  ~meta
+                  ~publication_recovery
+                  ~ctx_work
+                  ~name:tool_name
+                  ~input
+                  ()
+              in
+              if not (String.equal "success" (outcome_label result.KTE.disposition))
+              then
+                Some
+                  (Printf.sprintf
+                     "%s did not complete, so its output went unobserved: %s"
+                     tool_name
+                     result.KTE.raw_output)
+              else (
+                match result.KTE.data with
+                | Some data ->
+                  (* Alcotest's [fail] raises its own exception, not
+                     [Failure], so catching [Failure] alone let a schema
+                     rejection escape and abort the loop again -- the very
+                     thing this collector exists to stop. Catch every
+                     exception a probe can raise and keep its message. *)
+                  (try
+                     validate_probe_output ~tool_name ~data;
+                     None
+                   with
+                   | Failure detail -> Some detail
+                   | exn -> Some (Printexc.to_string exn))
+                | None ->
+                  Some
+                    (Printf.sprintf
+                       "%s completed without typed data; a composition node \
+                        would have nothing to validate"
+                       tool_name)))
+           composable_output_probes
+       in
+       match failures with
+       | [] -> ()
+       | failures ->
+         failf
+           "%d of %d composable-output probes failed:\n%s"
+           (List.length failures)
+           (List.length composable_output_probes)
+           (String.concat "\n" failures))
 
 let () =
   Masc_test_deps.init_unified_tool_registry ();

@@ -78,6 +78,49 @@ type stt_config = {
 
 type session_config = { endpoints : endpoint list }
 
+type capture_config = {
+  calibration_seconds : float;
+      (** How long the room is measured before recording. Longer is steadier
+          against a passing noise; shorter is less delay between the key and
+          the tone. Must be greater than zero — a probe of no length measures
+          nothing, and the threshold would come from an empty file. *)
+  trigger_margin_db : float;
+      (** How far above the room a sound must rise for the capture to count as
+          speech having started. Raise it when captures begin on their own and
+          never end; lower it when speaking does not start one.
+
+          Read as RMS, the same as {!speech_margin_db} and the same as the
+          level the meter draws, so what an operator watches and what the
+          decision uses are one number. They were two until 2026-09-04: this
+          margin was applied to a peak because it was handed to sox's silence
+          filter, which reads peak. Peak on room tone moved 1.9x across five
+          probes a minute apart while RMS moved 1.2x, so the threshold derived
+          from it wandered on a room that had not changed. *)
+  trailing_silence_seconds : float;
+      (** How long the room has to stay quiet after speech before the capture
+          stops. Long enough to sit through the pause inside a sentence, short
+          enough that an operator is not waiting on their own recording.
+
+          Must be greater than zero: a capture that stops the instant a
+          speaker draws breath cuts the sentence in half. *)
+  speech_margin_db : float;
+      (** How far a whole capture must average above the room, read as RMS on
+          both sides, to be transcribed at all. Lower it and whisper starts
+          answering silence with a sentence: three captures of an empty room
+          returned "감사합니다.", "감사합니다." and "네".
+
+          Not comparable to {!trigger_margin_db}, which is a peak margin. *)
+  noise_reduction : bool;
+      (** Subtract the room's profile from a capture before transcribing.
+          Measured on one sample it removed the floor entirely while keeping
+          81% of the speech, and corrected one word.
+
+          Off by default, on a small sample and because it cuts both ways:
+          applied to a capture with no speech it hands whisper a perfect
+          silence, which is what it hallucinates hardest against. It runs only
+          after {!speech_margin_db} has admitted the capture. *)
+}
+
 type local_playback_config = {
   enabled : bool;
   agents : string list;
@@ -91,11 +134,18 @@ type t = {
   tts : tts_config;
   stt : stt_config;
   session : session_config;
+  capture : capture_config;
   local_playback : local_playback_config;
 }
 (** Complete voice configuration. *)
 
 (** {1 Constants (runtime-visible)} *)
+
+val default_capture : capture_config
+(** The values used when [\[voice.capture\]] is absent. Every one was measured
+    on a single workstation, which is the reason the section exists: two
+    earlier margins chosen from one room were both wrong, and an operator
+    whose captures never start needs a knob rather than a release. *)
 
 val default_elevenlabs_base_url : string
 (** [https://api.elevenlabs.io/v1] — pinned as a fallback when

@@ -4907,8 +4907,7 @@ let keeper_message_status_rows (state : state) =
   + (match state.msg_live with
      | None -> 0
      | Some live
-       when state.msg_target_keeper_name
-            <> Some (Masc_tui_keeper_chat_transcript.keeper_name live) ->
+       when state.msg_target_keeper_name <> Some (turn_log_keeper_name live) ->
          (* Another keeper's live turn draws nothing on this screen, so it
             must reserve nothing -- the counter mirrors the pane. *)
          0
@@ -4919,7 +4918,7 @@ let keeper_message_status_rows (state : state) =
             two clock reads cannot disagree on the number. *)
          List.length
            (Masc_tui_keeper_chat_transcript.status_rows
-              ~now:(Unix.gettimeofday ()) live))
+              ~now:(Unix.gettimeofday ()) live.tl_transcript))
   + (match state.msg_target_keeper_name with
      | Some keeper_name
        when Option.is_some (promoted_inflight_for_keeper state keeper_name) ->

@@ -63,13 +63,16 @@ export function isOfflineStatus(status: string): boolean {
 // ':' at line 47, it does not prefix-match -- answers both.
 
 export type HarnessVerdict =
-  | { readonly kind: 'approve' }
+  | { readonly kind: 'approve'; readonly reason: string | null }
   | { readonly kind: 'reject'; readonly reason: string | null }
   | { readonly kind: 'unknown'; readonly raw: string }
 
 export function parseHarnessVerdict(raw: string): HarnessVerdict {
   const [head, ...rest] = raw.split(':')
-  if (head === 'approve' && rest.length === 0) return { kind: 'approve' }
+  if (head === 'approve') {
+    const reason = rest.join(':').trim()
+    return { kind: 'approve', reason: reason === '' ? null : reason }
+  }
   if (head === 'reject') {
     const reason = rest.join(':').trim()
     return { kind: 'reject', reason: reason === '' ? null : reason }
@@ -82,7 +85,7 @@ export function verdictSummaryText(raw: string): string {
   const verdict = parseHarnessVerdict(raw)
   switch (verdict.kind) {
     case 'approve':
-      return 'approve'
+      return verdict.reason ?? 'approve'
     case 'reject':
       return verdict.reason ?? '(no reject reason)'
     case 'unknown':

@@ -10074,11 +10074,11 @@ let render_harness_list (state : state) =
                     (String.sub verdict (at + 1)
                        (String.length verdict - at - 1)) )
           in
-          let line =
-            "  "
-            ^ Render_schedule.harness_row
-                ~verdict_style:(semantic_status_color verdict) ~reason_width
-                { Render_schedule.hrow_time =
+            let line =
+              "  "
+              ^ Render_schedule.harness_row
+                  ~verdict_style:(semantic_status_color ruling) ~reason_width
+                  { Render_schedule.hrow_time =
                     Terminal_text.clock_timestamp
                       (Masc_domain.iso8601_of_unix_seconds v.hv_at)
                 ; hrow_task = Terminal_text.single_line v.hv_task_id
@@ -10214,14 +10214,14 @@ let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
   @ [ field "Agent" verdict.hv_agent
     ; Ansi.dim, ""
     ; Ansi.bold, "  DECISION"
-    ; field ~style:(semantic_status_color verdict.hv_verdict) "Verdict" ruling
+    ; field ~style:(semantic_status_color ruling) "Verdict" ruling
     ; field "Gate" verdict.hv_gate
     ; field "Evaluator" verdict.hv_evaluator
     ; field "Recorded"
         (Masc_domain.iso8601_of_unix_seconds verdict.hv_at)
     ]
-  (* The reason a task was rejected is the sentence the operator came here to
-     read, and it runs long. [field] is one [single_line], so it was cut at
+  (* The reason a task was rejected or approved is the sentence the operator came
+     here to read, and it runs long. [field] is one [single_line], so it was cut at
      the pane's width and the rest existed nowhere on the surface. The title
      above already wraps for the same reason. *)
   @ (if reason = "" then [] else wrapped "Reason" reason)

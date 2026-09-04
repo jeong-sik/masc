@@ -11495,10 +11495,12 @@ let main () =
      the human's; [n] records the opposite side and takes its reason through
      $EDITOR, because the reason is the text the divergence teaches the judge
      as a few-shot example. The machine's side is read off the closed
-     verdict serialization ("approve" | "reject:<reason>"), compared whole,
-     never by substring. *)
+     verdict serialization ("approve" | "approve:<reason>" | "reject:<reason>"). *)
   let harness_machine_approved (row : Masc.Tui_decode.harness_verdict) =
-    String.equal row.Masc.Tui_decode.hv_verdict "approve"
+    let whole = row.Masc.Tui_decode.hv_verdict in
+    match String.index_opt whole ':' with
+    | None -> String.equal whole "approve"
+    | Some at -> String.equal (String.sub whole 0 at) "approve"
   in
   let start_harness_label ~notes_hash ~(verdict : [ `Approve | `Reject ])
       ~reason ~described =

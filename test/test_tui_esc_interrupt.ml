@@ -14,11 +14,21 @@
      server-side and the pane can be reopened;
    - a declined or errored request: nothing is pending, so Esc leaves at
      once. Before the grace window existed, this arm trapped Esc for the
-     rest of the session. *)
+     rest of the session.
+
+   All instants are monotonic nanoseconds ([Mtime_clock.elapsed_ns]), never
+   wall-clock: a backward clock step must not re-arm the guard. *)
 
 open Alcotest
 module Esc = Masc_tui_esc_interrupt
 module Transcript = Masc_tui_keeper_chat_transcript
+
+let ns_per_sec = 1_000_000_000L
+let secs n = Int64.mul n ns_per_sec
+
+(* An arbitrary monotonic instant, far enough from zero that every age in
+   these tests is representable. *)
+let t0 = Int64.mul 1_000L ns_per_sec
 
 let action_to_string = function
   | Esc.Launch_interrupt -> "launch"
@@ -26,45 +36,46 @@ let action_to_string = function
   | Esc.Leave -> "leave"
 ;;
 
-let check_action ~now interrupt expected =
+let check_action ~now_ns interrupt expected =
   check string
-    (Printf.sprintf "now=%.2f -> %s" now (action_to_string expected))
+    (Printf.sprintf "now_ns=%Ld -> %s" now_ns (action_to_string expected))
     (action_to_string expected)
-    (action_to_string (Esc.action ~now interrupt))
+    (action_to_string (Esc.action ~now_ns interrupt))
 ;;
 
-let sent ~signalled_at =
-  Transcript.Signal_sent { turn_id = Some 7; signalled_at }
+let sent ~signalled_at_ns =
+  Transcript.Signal_sent { turn_id = Some 7; signalled_at_ns }
 ;;
 
 let test_first_esc_launches_the_interrupt () =
-  check_action ~now:100.0 Transcript.Not_requested Esc.Launch_interrupt
+  check_action ~now_ns:t0 Transcript.Not_requested Esc.Launch_interrupt
 ;;
 
 let test_double_press_inside_the_grace_window_is_swallowed () =
-  check_action ~now:100.0 (sent ~signalled_at:100.0) Esc.Swallow;
-  check_action ~now:100.9 (sent ~signalled_at:100.0) Esc.Swallow;
+  check_action ~now_ns:t0 (sent ~signalled_at_ns:t0) Esc.Swallow;
+  check_action ~now_ns:t0 (sent ~signalled_at_ns:(Int64.sub t0 (secs 1L)))
+    Esc.Swallow;
   (* The boundary itself is still the guard. *)
-  check_action ~now:102.0 (sent ~signalled_at:100.0) Esc.Swallow
+  check_action ~now_ns:t0
+    (sent ~signalled_at_ns:(Int64.sub t0 Esc.grace_window_ns))
+    Esc.Swallow
 ;;
 
 let test_esc_leaves_once_the_signal_is_older_than_the_grace_window () =
-  check_action ~now:102.1 (sent ~signalled_at:100.0) Esc.Leave;
+  check_action ~now_ns:t0
+    (sent ~signalled_at_ns:(Int64.sub t0 (Int64.succ Esc.grace_window_ns)))
+    Esc.Leave;
   (* The parked-turn case (masc #29229): an hour of streaming after the
      signal must not hold Esc. *)
-  check_action ~now:3700.0 (sent ~signalled_at:100.0) Esc.Leave
-;;
-
-let test_clock_skew_reads_as_a_fresh_signal () =
-  (* A timestamp ahead of now is a signal that has demonstrably just been
-     sent; negative age stays inside the guard rather than leaving. *)
-  check_action ~now:100.0 (sent ~signalled_at:101.0) Esc.Swallow
+  check_action ~now_ns:t0
+    (sent ~signalled_at_ns:(Int64.sub t0 (secs 3_600L)))
+    Esc.Leave
 ;;
 
 let test_declined_or_errored_interrupt_lets_esc_leave_immediately () =
-  check_action ~now:100.0 (Transcript.Signal_declined "no turn in flight")
+  check_action ~now_ns:t0 (Transcript.Signal_declined "no turn in flight")
     Esc.Leave;
-  check_action ~now:100.0 (Transcript.Signal_error "connection refused")
+  check_action ~now_ns:t0 (Transcript.Signal_error "connection refused")
     Esc.Leave
 ;;
 
@@ -78,8 +89,6 @@ let () =
             test_double_press_inside_the_grace_window_is_swallowed
         ; test_case "esc leaves once the grace window has passed" `Quick
             test_esc_leaves_once_the_signal_is_older_than_the_grace_window
-        ; test_case "clock skew reads as a fresh signal" `Quick
-            test_clock_skew_reads_as_a_fresh_signal
         ; test_case "declined or errored interrupt lets esc leave" `Quick
             test_declined_or_errored_interrupt_lets_esc_leave_immediately
         ] )

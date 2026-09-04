@@ -1,7 +1,8 @@
 (** What Esc does while the chat view shows a keeper whose turn is live.
 
-    The dispatch arm in [masc_tui.ml] reads this table instead of carrying
-    the logic inline. [grace_window_sec] is the deliberate protection the
+    The dispatch arm in [masc_tui.ml] and the footer's escape hint in
+    [masc_tui_render.ml] both read this table, so the hint and the act can
+    never diverge. [grace_window_ns] is the deliberate protection the
     swallow was written for: a second Esc right after the first interrupt
     request is an accidental double press, not a request to leave. Past the
     window, a turn that keeps streaming after its signal (masc #29229: a
@@ -16,11 +17,12 @@ type action =
   | Leave  (** the interrupt is stale, declined, or errored; Esc leaves the
                view without cancelling anything *)
 
-val grace_window_sec : float
+val grace_window_ns : int64
 (** How long after the signal a second Esc is still read as the accidental
-    double press. *)
+    double press: 2 s, in nanoseconds. *)
 
-val action : now:float -> Masc_tui_keeper_chat_transcript.interrupt -> action
-(** [now] and the state's [signalled_at] are Unix epoch seconds. A timestamp
-    ahead of [now] reads as a fresh signal: negative age stays inside the
-    guard. *)
+val action :
+  now_ns:int64 -> Masc_tui_keeper_chat_transcript.interrupt -> action
+(** [now_ns] and the state's [signalled_at_ns] are monotonic nanoseconds
+    from [Mtime_clock.elapsed_ns] — never wall-clock values, so a backward
+    clock step cannot re-arm the guard. *)

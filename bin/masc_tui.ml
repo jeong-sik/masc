@@ -1258,12 +1258,12 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     Buffer.clear state.msg_input;
     drain_queue ();
     true
-  (* The footer draws "Esc:interrupt turn" while a turn is live and the help
-     row says "back; during a turn, interrupt it". Esc is the first press of
-     an interrupt, the accidental second press inside the grace window, or a
-     request to leave once the interrupt is stale, declined, or errored --
-     the table lives in Masc_tui_esc_interrupt. Leaving cancels nothing: the
-     interrupt proceeds server-side and the pane can be reopened. *)
+  (* The footer and this arm read the same table (Masc_tui_esc_interrupt),
+     so the hint the operator sees is the act the key performs: Esc is the
+     first press of an interrupt, the accidental second press inside the
+     grace window, or a request to leave once the interrupt is stale,
+     declined, or errored. Leaving cancels nothing: the interrupt proceeds
+     server-side and the pane can be reopened. *)
   | "esc" -> if interrupt_turn () then true else (leave_keeper_message state; true)
   | "\r" ->
     let text = Buffer.contents state.msg_input in
@@ -10056,7 +10056,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              match result with
              | Ok (Masc_tui_interrupt_signal.Signalled { turn_id }) ->
                  Keeper_chat_transcript.Signal_sent
-                   { turn_id; signalled_at = Unix.gettimeofday () }
+                   { turn_id; signalled_at_ns = Mtime_clock.elapsed_ns () }
              | Ok (Masc_tui_interrupt_signal.Not_signalled { reason; detail }) ->
                  Keeper_chat_transcript.Signal_declined
                    (match detail with
@@ -13901,7 +13901,7 @@ and is loaded on demand through keeper_skill.
                             = Some (Keeper_chat_transcript.keeper_name live) ->
                          (match
                             Masc_tui_esc_interrupt.action
-                              ~now:(Unix.gettimeofday ())
+                              ~now_ns:(Mtime_clock.elapsed_ns ())
                               (Keeper_chat_transcript.interrupt live)
                           with
                           | Masc_tui_esc_interrupt.Launch_interrupt ->

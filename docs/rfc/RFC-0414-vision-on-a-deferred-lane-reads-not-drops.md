@@ -45,18 +45,34 @@ dispatched to and what the gate correctly reported as `supported=text`.
 
 ## Fix
 
-**Primary — wire a reachable vision runtime for the read.** Add the local Ollama
-vision models as the `media_failover` fleet:
+**Primary — prioritize a fast cloud vision runtime for the read.** Wire the
+ollama_cloud vision models as the `media_failover` fleet so analyze_image's eager
+read walks a known-fast vision model first:
 
-- `[providers.ollama_local]` → `endpoint = "http://localhost:11434"`, `protocol`
-  matching how masc calls Ollama vision, healthcheck `/api/tags`, no key.
-- `[models.*]` for `Qwen3.8-27B` (and/or `Gemma-4-31B`) with
-  `supports-image-input = true`, bound to a runtime id.
-- `[runtime].media_failover = ["<that runtime id>"]`.
+```toml
+[runtime]
+media_failover = [
+  "ollama_cloud.ollama-cloud-gemma4-31b",
+  "ollama_cloud.ollama-cloud-glm-5-3-flash",
+]
+```
 
-Then the eager read at ingest resolves a runtime that actually reads the image,
-carries its meaning as text (`[image read: … | artifact:…]`), and the text-only
-keeper proceeds with the content instead of a dropped-image notice.
+Both already declare image input. The eager read then resolves a runtime that
+actually reads the image, carries its meaning as text (`[image read: … |
+artifact:…]`), and the text-only keeper proceeds with the content instead of a
+dropped-image notice.
+
+**Why not local.** The operator's machine does serve vision GGUFs (Qwen3.8-27B,
+Gemma-4-31B) on Ollama with the projector present — but a single read measured
+**5+ minutes** under a machine load average of ~190 (the full keeper fleet plus
+containers and microvms). Too slow to be usable, so local vision is not wired.
+
+**Operational note.** The load average is the real drag: even a cloud read runs
+through masc's pipeline on the loaded host. Reducing concurrent keepers /
+containers / microvms is what makes vision (and the fleet) responsive; the
+`media_failover` wiring only ensures a fast model is *tried first*. masc also
+sends images at full resolution (`max_image_bytes` rejects, it does not
+downscale) — a downscale pass is a separate cost/latency win, tracked apart.
 
 **Retained safety floor.** #33037 stays: when *no* vision runtime can read the
 image, the deferred lane degrades (drops with a notice) rather than crashing.

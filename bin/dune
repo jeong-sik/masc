@@ -399,6 +399,7 @@
  (libraries
   masc
   masc_tui_keeper_chat_live
+  masc_tui_keeper_chat_log
   masc_tui_keeper_chat_projection
   masc_tui_message_layout))
 

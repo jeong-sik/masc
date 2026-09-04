@@ -2141,26 +2141,30 @@ let settle_live_turn state (request : Keeper_chat.request) =
   | Some entry
     when Keeper_chat.same_request_identity entry.sent_request request ->
       let live = entry.live in
-      List.iter
-        (function
-          | Keeper_chat_transcript.Trail_skill skill ->
-              append_chat_history ~skill_activity:skill state request
-                (Message_skill skill.state)
-                (String.concat "\n"
-                   (Keeper_chat_transcript.skill_rows ~full:false skill))
-          | Keeper_chat_transcript.Trail_tools block ->
-              let projection =
-                Keeper_chat_transcript.project_tool_block
-                  Keeper_chat_transcript.Full block
-              in
-              (match projection.rows with
-               | [] -> ()
-               | rows ->
-                   append_chat_history ~tool_block:block state request
-                     Message_tool (String.concat "\n" rows))
-          | Keeper_chat_transcript.Trail_thinking _
-          | Keeper_chat_transcript.Trail_text _ -> ())
-        (Keeper_chat_transcript.trail live);
+      let rec commit_item = function
+        | Keeper_chat_transcript.Trail_skill skill ->
+            append_chat_history ~skill_activity:skill state request
+              (Message_skill skill.state)
+              (String.concat "\n"
+                 (Keeper_chat_transcript.skill_rows ~full:false skill))
+        | Keeper_chat_transcript.Trail_tools block ->
+            let projection =
+              Keeper_chat_transcript.project_tool_block
+                Keeper_chat_transcript.Full block
+            in
+            (match projection.rows with
+             | [] -> ()
+             | rows ->
+                 append_chat_history ~tool_block:block state request
+                   Message_tool (String.concat "\n" rows))
+        | Keeper_chat_transcript.Trail_superseded { items; _ } ->
+            (* A retried attempt's tool rows were committed before this
+               variant existed (they sat at the top level); they still are. *)
+            List.iter commit_item items
+        | Keeper_chat_transcript.Trail_thinking _
+        | Keeper_chat_transcript.Trail_text _ -> ()
+      in
+      List.iter commit_item (Keeper_chat_transcript.trail live);
       (match state.msg_live with
        | Some visible
          when String.equal

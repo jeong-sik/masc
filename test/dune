@@ -3098,8 +3098,10 @@
  (libraries
   alcotest
   fmt
+  masc
   masc.string_util
   masc_tui_keeper_chat_live
+  masc_tui_keeper_chat_log
   masc_tui_keeper_chat_transcript))
 
 (test

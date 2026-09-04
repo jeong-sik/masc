@@ -2,6 +2,7 @@ open Alcotest
 
 module Live = Masc_tui_keeper_chat_live
 module Transcript = Masc_tui_keeper_chat_transcript
+module Log = Masc_tui_keeper_chat_log
 
 (* A stated instant rather than the wall clock: the progress row carries the
    turn age, and a test that read the real clock could not name it. *)
@@ -252,13 +253,13 @@ let test_quarantine_freezes_late_args_and_result () =
   | None -> fail "quarantine diagnostics were dropped"
 ;;
 
-(* The attempt boundary discards UNFINISHED narrative. Speech the reader has
-   already read is finished the moment a tool stretch opens after it, and it
-   stays -- otherwise the trail keeps the tool rows and loses the words
-   between them, which is what the operator sees as the conversation
-   rearranging itself. The buffer accessors above cannot catch this: they are
-   cleared either way. Only the trail shows it. *)
-let test_runtime_attempt_reset_keeps_finished_speech_in_the_trail () =
+(* The attempt boundary takes nothing back (RFC-0412 §3.3). Everything the
+   earlier attempt produced -- the finished stretch, the tool rows, and the
+   stretch that was still growing when the runtime turned over -- stays in the
+   trail as one superseded block, and the new attempt's stretches follow it.
+   The buffer accessors cannot show this: they are per-attempt totals and start
+   over either way. Only the trail shows it. *)
+let test_runtime_attempt_keeps_the_earlier_attempt_superseded () =
   let t = fresh () in
   feed t
     [ Live.Run_started
@@ -270,26 +271,32 @@ let test_runtime_attempt_reset_keeps_finished_speech_in_the_trail () =
     ; Live.Runtime_attempt_started
     ; Live.Text "second attempt"
     ];
-  let texts =
-    List.filter_map
-      (function Transcript.Trail_text text -> Some text | _ -> None)
-      (Transcript.trail t)
-  in
-  check bool "the finished stretch survives the attempt boundary" true
-    (List.exists
-       (fun text ->
-         String_util.contains_substring text "finished before the tool")
-       texts);
-  check bool "the stretch that was still growing is dropped" false
-    (List.exists
-       (fun text -> String_util.contains_substring text "still growing") texts);
-  check bool "a tool stretch is still drawn between them" true
-    (List.exists
-       (function Transcript.Trail_tools _ -> true | _ -> false)
-       (Transcript.trail t))
+  check int "one retry" 1 (Transcript.attempt t);
+  match Transcript.trail t with
+  | [ Transcript.Trail_superseded { attempt; items }; Transcript.Trail_text second ] ->
+      check int "the block names the attempt it came from" 0 attempt;
+      check string "the new attempt follows it at the top level" "second attempt" second;
+      let texts =
+        List.filter_map
+          (function Transcript.Trail_text text -> Some text | _ -> None)
+          items
+      in
+      check bool "the finished stretch is kept" true
+        (List.exists
+           (fun text -> String_util.contains_substring text "finished before the tool")
+           texts);
+      check bool "the stretch that was still growing is kept too" true
+        (List.exists
+           (fun text -> String_util.contains_substring text "still growing")
+           texts);
+      check bool "the tool stretch is kept between them" true
+        (List.exists (function Transcript.Trail_tools _ -> true | _ -> false) items)
+  | other ->
+      failf "expected a superseded block then the new attempt, got %d items"
+        (List.length other)
 ;;
 
-let test_runtime_attempt_reset_discards_only_unfinished_narrative () =
+let test_runtime_attempt_restarts_the_per_attempt_totals () =
   let t = fresh () in
   feed t
     [ Live.Run_started
@@ -302,17 +309,61 @@ let test_runtime_attempt_reset_discards_only_unfinished_narrative () =
     ; Live.Thinking "fallback reasoning"
     ; Live.Text "fallback reply"
     ];
-  check string "only fallback text remains" "fallback reply" (Transcript.text t);
-  check string "only fallback thinking remains" "fallback reasoning"
+  check string "text is the current attempt's" "fallback reply" (Transcript.text t);
+  check string "thinking is the current attempt's" "fallback reasoning"
     (Transcript.thinking t);
   (match Transcript.tool_calls t with
    | [ call ] ->
-     check (option string) "execution identity survives attempt reset"
+     check (option string) "execution identity survives the retry"
        (Some "exec-kept") call.execution_id;
-     check string "settled outcome survives attempt reset" "returned"
+     check string "settled outcome survives the retry" "returned"
        (outcome_to_string call.outcome)
-   | calls -> failf "expected one preserved tool call, got %d" (List.length calls))
+   | calls -> failf "expected one preserved tool call, got %d" (List.length calls));
+  (* A second retry folds the first superseded block into the new one: the
+     trail is never nested more than one level. *)
+  feed t [ Live.Runtime_attempt_started; Live.Text "third try" ];
+  check int "two retries" 2 (Transcript.attempt t);
+  match Transcript.trail t with
+  | [ Transcript.Trail_superseded { attempt = 1; items }; Transcript.Trail_text "third try" ] ->
+      check bool "the block holds no nested block" true
+        (List.for_all
+           (function Transcript.Trail_superseded _ -> false | _ -> true)
+           items);
+      check bool "the first attempt's text is still readable" true
+        (List.exists
+           (function
+             | Transcript.Trail_text text ->
+                 String_util.contains_substring text "failed reply"
+             | _ -> false)
+           items)
+  | other -> failf "expected one flat superseded block, got %d items" (List.length other)
 ;;
+
+let reply_details ?(reply = "Let me look.") () =
+  Live.Reply_details
+    { reply; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply; turn_ref = "trace-1#3" }
+;;
+
+(* The reply is recorded, not drawn: the server streams the reply text as
+   deltas (chunked at the end when nothing streamed), so a trail item for it
+   would draw the same words twice. *)
+let test_reply_details_is_recorded_not_drawn () =
+  let t = fresh () in
+  feed t [ Live.Run_started; Live.Text "Let me look." ];
+  let before = Transcript.trail t in
+  check (option (pair string string)) "no reply yet" None
+    (Option.map
+       (fun (reply, outcome) -> (reply, Masc.Keeper_turn_outcome.to_label outcome))
+       (Transcript.reply t));
+  feed t [ reply_details () ];
+  check (option (pair string string)) "the reply and its outcome are recorded"
+    (Some ("Let me look.", "visible_reply"))
+    (Option.map
+       (fun (reply, outcome) -> (reply, Masc.Keeper_turn_outcome.to_label outcome))
+       (Transcript.reply t));
+  check int "the trail did not grow" (List.length before) (List.length (Transcript.trail t))
+;;
+
 
 let test_snapshot_replaces_accumulated_args () =
   let t = fresh () in
@@ -1080,8 +1131,44 @@ let trail_item_to_string : Transcript.trail_item -> string = function
   | Transcript.Trail_tools block ->
       "tools(" ^ String.concat "\\n" (full_tool_rows block) ^ ")"
   | Transcript.Trail_text text -> "text(" ^ text ^ ")"
+  | Transcript.Trail_superseded { attempt; items } ->
+      Printf.sprintf "superseded(%d,[%s])" attempt
+        (String.concat "; " (List.map trail_item_to_string items))
 
 let trail_item = testable (Fmt.of_to_string trail_item_to_string) ( = )
+
+(* [of_log] is the same fold the live path runs delta by delta. *)
+let test_of_log_equals_the_incremental_fold () =
+  let deltas =
+    [ Live.Run_started
+    ; Live.Thinking "find the file"
+    ; tool_started "c1" "read_file"
+    ; tool_args_delta "c1" "{\"file_path\":\"a.ml\"}"
+    ; tool_ended "c1"
+    ; tool_result "c1" "exec-c1"
+    ; Live.Text "half "
+    ; Live.Runtime_attempt_started
+    ; Live.Thinking "again"
+    ; Live.Text "whole reply"
+    ; reply_details ~reply:"whole reply" ()
+    ; Live.Run_finished
+    ]
+  in
+  let incremental = fresh () in
+  feed incremental deltas;
+  let log = Log.create ~keeper_name:"keeper.one" ~request_id:"req-1" ~started_at:origin in
+  List.iteri (fun seq delta -> ignore (Log.add log ~seq:(Some seq) delta : bool)) deltas;
+  let refolded = Transcript.of_log ~now:origin log in
+  check (list trail_item) "same trail" (Transcript.trail incremental) (Transcript.trail refolded);
+  check string "same text" (Transcript.text incremental) (Transcript.text refolded);
+  check string "same thinking" (Transcript.thinking incremental) (Transcript.thinking refolded);
+  check int "same attempt" (Transcript.attempt incremental) (Transcript.attempt refolded);
+  check phase "same phase" (Transcript.phase incremental) (Transcript.phase refolded);
+  check (list string) "same tool rows" (Transcript.tool_rows incremental)
+    (Transcript.tool_rows refolded);
+  check bool "same reply" true (Transcript.reply incremental = Transcript.reply refolded);
+  check string "identity comes from the log" "req-1" (Transcript.request_id refolded)
+;;
 
 let test_trail_keeps_arrival_order () =
   let t = fresh () in
@@ -1296,10 +1383,14 @@ let () =
             test_text_and_thinking_accumulate
         ; test_case "the whole reasoning trail is kept" `Quick
             test_the_whole_reasoning_trail_is_kept
-        ; test_case "runtime attempt resets unfinished narrative" `Quick
-            test_runtime_attempt_reset_discards_only_unfinished_narrative
-        ; test_case "runtime attempt keeps finished speech in the trail" `Quick
-            test_runtime_attempt_reset_keeps_finished_speech_in_the_trail
+        ; test_case "runtime attempt restarts the per-attempt totals" `Quick
+            test_runtime_attempt_restarts_the_per_attempt_totals
+        ; test_case "runtime attempt keeps the earlier attempt superseded" `Quick
+            test_runtime_attempt_keeps_the_earlier_attempt_superseded
+        ; test_case "reply details is recorded, not drawn" `Quick
+            test_reply_details_is_recorded_not_drawn
+        ; test_case "of_log equals the incremental fold" `Quick
+            test_of_log_equals_the_incremental_fold
         ] )
     ; ( "trail"
       , [ test_case "arrival order is kept" `Quick

@@ -243,9 +243,32 @@ type trail_item =
       (** One contiguous run of typed calls. A call keeps updating its facts
           (arguments, outcome) after later stretches open. *)
   | Trail_text of string  (** One contiguous stretch of reply text. *)
+  | Trail_superseded of
+      { attempt : int
+      ; items : trail_item list
+      }
+      (** What runtime attempt [attempt] produced before the next attempt
+          began, in order. Kept rather than wiped (RFC-0412 §3.3) so a retry
+          never takes back what the reader was reading; the pane marks it.
+          Never nested: each attempt boundary folds the whole trail so far,
+          earlier superseded blocks included, into one block. *)
 
 val trail : t -> trail_item list
 (** Empty stretches are dropped, so every item draws at least one row. *)
+
+val attempt : t -> int
+(** 0-based runtime attempt the growing trail belongs to. *)
+
+val reply : t -> (string * Masc.Keeper_turn_outcome.t) option
+(** The recorded reply and its typed outcome (KEEPER_REPLY_DETAILS), once
+    the turn has one. Not a trail item: the server streams the reply text as
+    deltas, chunked at the end when nothing streamed, so it is already in
+    the trail. *)
+
+val of_log : now:float -> Masc_tui_keeper_chat_log.t -> t
+(** The transcript a log projects to: {!create} from the log's identity, then
+    {!apply} over every entry in order. Equal to the transcript that grew with
+    the same deltas. *)
 
 val tool_rows : t -> string list
 

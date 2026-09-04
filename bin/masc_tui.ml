@@ -1296,6 +1296,17 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
      declined, or errored. Leaving cancels nothing: the interrupt proceeds
      server-side and the pane can be reopened. *)
   | "esc" -> if interrupt_turn () then true else (leave_keeper_message state; true)
+  (* Q is the leave half of Esc with the interrupt half taken out. Esc's
+     first press on a live turn spends itself stopping the turn, so an
+     operator who wants to walk away and let the turn run had no key: the
+     only exit signalled the turn to stop. This arm never consults
+     [interrupt_turn], so the turn keeps streaming while the operator reads
+     something else, and reopening the chat finds it. Empty draft only:
+     mid-sentence Q is the letter someone is typing and falls through to the
+     printable arm below. *)
+  | "Q" when Buffer.length state.msg_input = 0 ->
+    leave_keeper_message state;
+    true
   | "\r" ->
     let text = Buffer.contents state.msg_input in
     if String.trim text <> "" then begin
@@ -13909,6 +13920,14 @@ and is loaded on demand through keeper_skill.
            if
              keeper_message_input_supported state
              || String.equal k "esc"
+             (* Q reaches the composer handler for the same reason Esc does:
+                the quiet leave must not disappear exactly when the terminal
+                is too small to draw the composer -- a transcript-only
+                viewport is when an operator most needs to step away from a
+                running turn. With text in the draft the handler answers it
+                as an ordinary letter, so this route takes nothing from
+                typing. *)
+             || String.equal k "Q"
              || display_toggle_key
              || switch_key
              || queue_management_key

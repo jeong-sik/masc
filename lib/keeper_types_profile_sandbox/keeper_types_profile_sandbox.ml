@@ -94,6 +94,35 @@ let default_network_mode_for_profile = function
   | Remote_ssh -> Network_inherit
 ;;
 
+(* Which profile and network mode may be held together, and the refusal for
+   the pair that may not. One function because the rule had two homes and only
+   one of them ran before a write: the keeper TOML loader refused
+   [remote_ssh] with [network_mode = "none"], while the keeper_up resolver
+   never compared the two at all. A create could therefore write a keeper TOML
+   that the next load of the same file rejected, and the only way out was to
+   hand-edit that file.
+
+   Every pair is written out rather than closed with a wildcard: a new profile
+   or a new mode fails to compile here until someone decides its answer. *)
+let network_mode_rejection profile mode =
+  match profile, mode with
+  (* Phase 1 SSH lane, Docker-parity hardening table in
+     docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md section
+     4.2: [remote_ssh] is transport-only, so the container network knobs are
+     not reproduced and the guest cannot be cut off from the network. Refusing
+     is what says so; accepting the knob would ignore it silently. Per-VM
+     egress policy arrives with the Phase 2 microVM backend. *)
+  | Remote_ssh, Network_none ->
+    Some
+      "remote_ssh_no_network_mode: sandbox_profile \"remote_ssh\" does \
+       not support network_mode = \"none\" (only \"inherit\" is \
+       accepted in Phase 1; per-VM egress policy arrives with the \
+       microVM backend)"
+  | Remote_ssh, Network_inherit -> None
+  | Docker, (Network_none | Network_inherit) -> None
+  | Micro_vm, (Network_none | Network_inherit) -> None
+;;
+
 (* The observation-only gate fast path ({!Keeper_gate_readonly}) keys on this
    predicate, so a new profile fails to compile here until a human decides
    whether it is a disposable guest. *)

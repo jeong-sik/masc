@@ -1547,6 +1547,35 @@ let keeper_create_proactive =
               ~doc:"Answer only when addressed." )
         ])
 
+(* This command's own [--host] and [--port], not the server's. The shared
+   terms are [masc serve]'s bind address, and they render in this command's
+   [--help] as "Port to listen on" and "Host/IP to bind" -- true of the
+   server, false of a client, and an operator reading them as the scope of the
+   request is told the wrong thing by the help text itself. The defaults are
+   unchanged: the workspace's own server is the one this command usually
+   means. What decides which server is reached is these two terms alone --
+   [--base-path] only says where to look for the credential, and the manpage
+   now says so. *)
+let keeper_create_host =
+  let doc =
+    "Host of the running masc server this declaration is sent to. Defaults to \
+     loopback. This is a request target, not a bind address."
+  in
+  Arg.(
+    value
+    & opt string (Env_config.masc_host ())
+    & info [ "host" ] ~docv:"HOST" ~doc)
+
+let keeper_create_port =
+  let doc =
+    "Port of the running masc server this declaration is sent to. This is a \
+     request target, not a port to listen on."
+  in
+  Arg.(
+    value
+    & opt int (Env_config_core.masc_http_port_int ())
+    & info [ "p"; "port" ] ~docv:"PORT" ~doc)
+
 let keeper_create_token =
   let doc =
     "Bearer to present instead of the one masc login persisted for --agent."
@@ -1661,10 +1690,12 @@ let keeper_create_declaration_from_editor () =
             (Masc_tui_editor.abort_detail abort))
      | Ok edited -> Masc_cli_keeper_create.declaration_of_form edited)
 
-(* The keeper name becomes a path segment in the request URL. It is checked
-   here rather than percent-encoded because [Keeper_config.validate_name]
-   already admits only [A-Za-z0-9._-], and a name it rejects is one the server
-   would refuse anyway. *)
+(* The keeper name becomes a path segment in the request URL, so it is both
+   checked and encoded. [Keeper_config.validate_name] runs first and admits
+   only [A-Za-z0-9._-], which makes the encoding a no-op today -- and that is
+   the reason to have it rather than to skip it: relying on the two staying in
+   step leaves a widened name grammar to show up as a malformed request line.
+   The TUI's own keeper calls encode the same segment. *)
 let keeper_create_post ~base_path ~host ~port ~agent ~token ~keeper_name
       ~declaration =
   let bearer =
@@ -1679,7 +1710,11 @@ let keeper_create_post ~base_path ~host ~port ~agent ~token ~keeper_name
         | Some value -> [ "authorization", "Bearer " ^ value ])
   in
   let url =
-    Printf.sprintf "http://%s:%d/api/v1/keepers/%s/up" host port keeper_name
+    Printf.sprintf
+      "http://%s:%d/api/v1/keepers/%s/up"
+      host
+      port
+      (Uri.pct_encode keeper_name)
   in
   let body = Yojson.Safe.to_string declaration in
   let outcome =
@@ -1752,16 +1787,30 @@ let keeper_create_cmd =
     ; `P
         "Sends one create-or-update declaration to a running server at \
          --host/--port. The keeper starts immediately: the server boots it \
-         inside the same call, and its first turn is already running when \
-         this command returns."
+         inside the same call, and a create answers only once its keepalive \
+         lane is running."
     ; `P
-        "--network-mode is required. The server's default for docker and \
-         microvm is none, which gives the guest no network at all, so a \
-         keeper whose work is web search or repository traffic has to say \
-         inherit here. This command refuses rather than choosing for you."
+        "--host and --port choose that server, and they are the only things \
+         that do. --base-path does not: it says where to look for the bearer \
+         token masc login persisted for --agent, and a base path with no \
+         running server of its own still sends the declaration to \
+         --host/--port. Scoping a create to a scratch workspace means \
+         pointing --host/--port at that workspace's server."
+    ; `P
+        "--network-mode is required, on the flags and in the --edit form \
+         alike. The server's default for docker and microvm is none, which \
+         gives the guest no network at all, so a keeper whose work is web \
+         search or repository traffic has to say inherit here. This command \
+         refuses rather than choosing for you."
     ; `P
         "Naming a keeper that already exists reconfigures it instead of \
-         making a second one, and this command says so."
+         making a second one, and this command says so. Read what the \
+         required flags do on that path: --sandbox-profile and \
+         --network-mode are sent on every invocation, so they overwrite the \
+         existing keeper's isolation with whatever was typed. --instructions \
+         is the opposite -- left blank it is not sent, and the existing text \
+         stands. To change only the instructions, restate the profile and \
+         the network mode the keeper already has."
     ; `S Manpage.s_examples
     ; `Pre example
     ]
@@ -1772,8 +1821,8 @@ let keeper_create_cmd =
     Term.(
       const keeper_create_cmd_exit
       $ base_path
-      $ host
-      $ port
+      $ keeper_create_host
+      $ keeper_create_port
       $ keeper_create_flags_term
       $ keeper_create_token
       $ login_agent

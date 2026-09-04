@@ -31,17 +31,37 @@ let spellings values = String.concat ", " values
    and stop there: which of the two a keeper wants is the operator's to
    decide, and a command that guessed it from the instructions text would be
    guessing at exactly the field this refusal exists to stop it guessing. *)
+let network_mode_behaviour_lines =
+  [ "  none     the guest has no network. A web search, a git push, or any \
+     HTTP call inside it fails."
+  ; "  inherit  the guest uses the host network."
+  ; "Nothing was created."
+  ]
+;;
+
 let missing_network_mode_message =
   String.concat
     "\n"
-    [ Printf.sprintf
-        "masc keeper-create: --network-mode is required (%s)."
-        (spellings Keeper_types_profile_sandbox.valid_network_mode_strings)
-    ; "  none     the guest has no network. A web search, a git push, or any \
-       HTTP call inside it fails."
-    ; "  inherit  the guest uses the host network."
-    ; "Nothing was created."
-    ]
+    (Printf.sprintf
+       "masc keeper-create: --network-mode is required (%s)."
+       (spellings Keeper_types_profile_sandbox.valid_network_mode_strings)
+     :: network_mode_behaviour_lines)
+;;
+
+(* The same requirement, said about the form. The flags path refuses a missing
+   mode and the manpage says so without qualification, but the form path
+   judged only [name]: an operator who deleted the stem's empty
+   [network_mode] line -- a plain reaction to an empty string -- sent a
+   declaration with the key absent, and the server took the profile default of
+   [none]. That is the incident this command was written to stop, reached
+   through the command itself. *)
+let form_missing_network_mode_message =
+  String.concat
+    "\n"
+    (Printf.sprintf
+       "the form needs a non-blank \"network_mode\" string (%s)."
+       (spellings Keeper_types_profile_sandbox.valid_network_mode_strings)
+     :: network_mode_behaviour_lines)
 ;;
 
 let missing_name_message =
@@ -154,7 +174,16 @@ let declaration_of_form edited =
     (match Option.bind (Json_util.assoc_string_opt "name" declaration) trimmed_nonempty with
      | None ->
        Error "the form needs a non-blank \"name\" string. Nothing was created."
-     | Some name -> Ok (declaration, name))
+     | Some name ->
+       (* [Json_util.assoc_string_opt] answers [None] for a blank string as
+          well as for an absent key, so the stem's own empty [network_mode]
+          and a deleted line are refused by the same branch, with the same
+          sentence, before a socket opens. The spelling itself is the
+          server's to judge; this only holds the operator to making the
+          choice. *)
+       (match Json_util.assoc_string_opt "network_mode" declaration with
+        | None -> Error form_missing_network_mode_message
+        | Some _ -> Ok (declaration, name)))
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
     Error "the form must be a JSON object. Nothing was created."
 ;;
@@ -260,7 +289,11 @@ let render = function
         [ Printf.sprintf "%s: created" name
         ; Printf.sprintf "  sandbox_profile  %s" sandbox_profile
         ; Printf.sprintf "  network_mode     %s" network_mode
-        ; "The keeper is live now and its first turn has already started."
+          (* What the envelope proves and no more. A create answers only
+             after [start_keepalive] returns [Keepalive_started], so the lane
+             is running; whether a turn has begun is not in the answer, and
+             saying it had was reporting a value this command never read. *)
+        ; "Its keepalive lane is running."
         ]
     , 0 )
   | Reconfigured { name } ->

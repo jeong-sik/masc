@@ -155,8 +155,28 @@ let test_declaration_passes_an_unrecognised_sandbox_profile_through () =
      | Some _ | None -> None)
 ;;
 
+(* Built by the producer, not by hand. The create-or-reconfigure reading below
+   probes two untagged keys of this envelope, and a hand-written copy would go
+   on passing after [create_response_json] renamed or dropped one -- at which
+   point a fresh create prints the sentence saying a keeper of that name
+   already existed, exits 0, and reports nothing wrong. *)
 let created_body =
-  {json|{"ok":true,"action":"up","name":"scout","detail":{"name":"scout","sandbox_profile":"docker","network_mode":"inherit"}}|json}
+  Yojson.Safe.to_string
+    (`Assoc
+        [ "ok", `Bool true
+        ; "action", `String "up"
+        ; "name", `String "scout"
+        ; ( "detail"
+          , Masc.Keeper_turn_up_create.create_response_json
+              ~name:"scout"
+              ~trace_id:"trace-fixture"
+              ~instructions:"Search the web."
+              ~proactive_enabled:false
+              ~max_context_override:None
+              ~sandbox_profile:Keeper_types_profile_sandbox.Docker
+              ~network_mode:Keeper_types_profile_sandbox.Network_inherit
+              ~agent_core_env:[] )
+        ])
 ;;
 
 (* Printing an isolation this command did not read is reporting an unmeasured
@@ -244,12 +264,46 @@ let test_render_pairs_text_with_an_exit_code () =
 (* A form with no name has nothing to address the route with, and the route
    puts the name in the path. *)
 let test_form_without_a_name_is_refused () =
-  match C.declaration_of_form {json|{"sandbox_profile":"docker"}|json} with
+  match
+    C.declaration_of_form
+      {json|{"sandbox_profile":"docker","network_mode":"inherit"}|json}
+  with
   | Ok _ -> failf "a form with no name must be refused"
   | Error _ ->
-    (match C.declaration_of_form C.form_stem with
-     | Ok (_, name) -> check string "the stem's own name" "new-keeper" name
-     | Error message -> failf "the stem must be readable as a form: %S" message)
+    (match
+       C.declaration_of_form
+         {json|{"name":"scout","sandbox_profile":"docker","network_mode":"inherit"}|json}
+     with
+     | Ok (_, name) -> check string "a complete form's own name" "scout" name
+     | Error message -> failf "a complete form must be accepted: %S" message)
+;;
+
+(* The hole [--edit] had. The manpage says --network-mode is required and does
+   not qualify it, but only the flags path judged the field: the stem ships
+   the key blank so that the refusal teaches the two spellings, and an
+   operator who deleted that line rather than filling it in sent a declaration
+   with the key absent. The server then took the profile default of "none" --
+   the original incident, reached through the command written to stop it.
+   Both shapes are refused before a socket opens. *)
+let test_form_without_a_network_mode_is_refused () =
+  List.iter
+    (fun (label, form) ->
+       match C.declaration_of_form form with
+       | Ok (declaration, _) ->
+         failf "%s must be refused, got %s" label (Yojson.Safe.to_string declaration)
+       | Error message ->
+         List.iter
+           (fun spelling ->
+              check
+                bool
+                (Printf.sprintf "%s: the refusal names %s" label spelling)
+                true
+                (contains spelling message))
+           Keeper_types_profile_sandbox.valid_network_mode_strings)
+    [ ( "a form whose network_mode line was deleted"
+      , {json|{"name":"scout","sandbox_profile":"docker"}|json} )
+    ; "the stem itself, whose network_mode is blank", C.form_stem
+    ]
 ;;
 
 let () =
@@ -302,6 +356,10 @@ let () =
             "a form without a name is refused"
             `Quick
             test_form_without_a_name_is_refused
+        ; test_case
+            "a form without a network_mode is refused"
+            `Quick
+            test_form_without_a_network_mode_is_refused
         ] )
     ]
 ;;

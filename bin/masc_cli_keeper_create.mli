@@ -73,8 +73,15 @@ val declaration_of_form : string -> (Yojson.Safe.t * string, string) result
 (** The edited form's declaration and the [name] it declares, which is needed
     separately because it addresses the route.
 
-    Rejects text that is not a JSON object and an object with no non-blank
-    [name] string. Nothing else is judged: this is not a second copy of
+    Rejects text that is not a JSON object, an object with no non-blank
+    [name] string, and an object with no non-blank [network_mode] string. The
+    two required keys are the two the flag path requires, so [--edit] cannot
+    reach a state the flags refuse: the form judged only [name], and deleting
+    the stem's empty [network_mode] line sent the key absent and took the
+    profile default of [none] — the incident this command exists to stop.
+
+    The [network_mode] {e spelling} is not judged here, only its presence.
+    Nothing else is judged either: this is not a second copy of
     [Masc.Keeper_turn_up_args.parse]. *)
 
 type outcome =

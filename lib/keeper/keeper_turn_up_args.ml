@@ -477,13 +477,26 @@ let resolve_network_mode ~sandbox_profile ~fallback =
 
    An unparseable value is an error naming every accepted spelling, rendered
    from [valid_network_mode_strings] rather than a hand-typed pair, so a third
-   mode reaches the message without an edit here. *)
+   mode reaches the message without an edit here.
+
+   A parseable value the profile cannot hold is an error too. Honouring the
+   caller's mode without that check wrote [remote_ssh] with [network_mode =
+   "none"] into a keeper TOML, which booted from the in-memory meta and
+   reported success -- and was then refused by
+   [Keeper_types_profile_toml_parser] on the next load of that file, leaving a
+   hand edit as the only way out. The rule itself belongs to the type that
+   owns both fields; this reads it. *)
 let resolve_requested_network_mode ~requested ~sandbox_profile ~fallback =
+  let accepted mode =
+    match Keeper_types_profile.network_mode_rejection sandbox_profile mode with
+    | Some message -> Error message
+    | None -> Ok mode
+  in
   match requested with
-  | None -> Ok (resolve_network_mode ~sandbox_profile ~fallback)
+  | None -> accepted (resolve_network_mode ~sandbox_profile ~fallback)
   | Some raw ->
     (match network_mode_of_string raw with
-     | Some mode -> Ok mode
+     | Some mode -> accepted mode
      | None ->
        Error
          (Printf.sprintf

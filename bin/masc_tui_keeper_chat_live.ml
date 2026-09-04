@@ -289,15 +289,16 @@ let custom_deltas_unvalidated fields =
             ( string_field value "reply"
             , Option.bind (string_field value "turn_outcome")
                 Masc.Keeper_turn_outcome.of_label
-            , string_field value "turn_ref" )
+            , Option.bind (string_field value "turn_ref") Ids.Turn_ref.of_string )
           with
-          | Some reply, Some turn_outcome, Some turn_ref
-            when String.trim turn_ref <> "" ->
-              [ Reply_details { reply; turn_outcome; turn_ref } ]
+          | Some reply, Some turn_outcome, Some turn_ref ->
+              [ Reply_details
+                  { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref }
+              ]
           | _ ->
               [ Undecodable
                   "KEEPER_REPLY_DETAILS needs reply, a known turn_outcome and \
-                   a nonblank turn_ref"
+                   a well-formed turn_ref"
               ]))
   | Some name when List.mem name Projection.known_custom_names -> []
   | Some name -> [ Undecodable ("unknown CUSTOM event name: " ^ name) ]

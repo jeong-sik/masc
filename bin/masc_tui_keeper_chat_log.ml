@@ -98,84 +98,89 @@ let protocol_error_detail (error : E.stream_protocol_error) =
   | Some _ | None -> kind
 ;;
 
-let delta_of_journaled (event : E.keeper_chat_event) : Live.delta list =
+let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
   match event with
-  | E.Run_started _ -> [ Live.Run_started ]
-  | E.Text_message_start _ | E.Text_message_end -> []
-  | E.Text_delta text -> [ Live.Text text ]
-  | E.External_effect_completed _ -> [ Live.External_effect_completed ]
-  | E.Run_finished _ -> [ Live.Run_finished ]
-  | E.Event_error { message } -> [ Live.Run_failed { message } ]
+  | E.Run_started _ -> Some Live.Run_started
+  | E.Text_message_start _ | E.Text_message_end -> None
+  | E.Text_delta text -> Some (Live.Text text)
+  | E.External_effect_completed _ -> Some Live.External_effect_completed
+  | E.Run_finished _ -> Some Live.Run_finished
+  | E.Event_error { message } -> Some (Live.Run_failed { message })
   | E.Reply_details { reply; turn_outcome; turn_ref } ->
-    [ Live.Reply_details
-        { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref }
-    ]
-  | E.Continuation_checkpoint _ -> [ Live.Checkpoint ]
-  | E.Agent_core_stream_connected -> []
-  | E.Agent_core_runtime_attempt_started -> [ Live.Runtime_attempt_started ]
+    Some
+      (Live.Reply_details
+         { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref })
+  | E.Continuation_checkpoint _ -> Some Live.Checkpoint
+  | E.Agent_core_stream_connected -> None
+  | E.Agent_core_runtime_attempt_started -> Some Live.Runtime_attempt_started
   | E.Agent_core_stream_message_start _
   | E.Agent_core_stream_message_delta _
   | E.Agent_core_stream_message_stop
   | E.Agent_core_stream_ping
   | E.Agent_core_content_block_start _
-  | E.Agent_core_content_block_stop _ -> []
-  | E.Agent_core_thinking_delta { delta; _ } -> [ Live.Thinking delta ]
-  | E.Agent_core_thinking_signature_delta _ | E.Agent_core_media_delta _ -> []
+  | E.Agent_core_content_block_stop _ -> None
+  | E.Agent_core_thinking_delta { delta; _ } -> Some (Live.Thinking delta)
+  | E.Agent_core_thinking_signature_delta _ | E.Agent_core_media_delta _ -> None
   | E.Agent_core_stream_protocol_error error ->
-    [ Live.Stream_protocol_error
-        { quarantined_occurrence =
-            Option.map
-              (fun quarantined -> occurrence quarantined ~tool_call_id:None)
-              error.quarantined_occurrence
-        ; detail = protocol_error_detail error
-        }
-    ]
+    Some
+      (Live.Stream_protocol_error
+         { quarantined_occurrence =
+             Option.map
+               (fun quarantined -> occurrence quarantined ~tool_call_id:None)
+               error.quarantined_occurrence
+         ; detail = protocol_error_detail error
+         })
   | E.Tool_call_start { occurrence = o; tool_call_id; tool_call_name } ->
-    [ Live.Tool_started { occurrence = occurrence o ~tool_call_id; tool_name = tool_call_name } ]
+    Some
+      (Live.Tool_started
+         { occurrence = occurrence o ~tool_call_id; tool_name = tool_call_name })
   | E.Tool_call_args { occurrence = o; tool_call_id; delta } ->
-    [ Live.Tool_args { occurrence = occurrence o ~tool_call_id; fragment = Live.Args_delta delta } ]
+    Some
+      (Live.Tool_args
+         { occurrence = occurrence o ~tool_call_id; fragment = Live.Args_delta delta })
   | E.Tool_call_args_snapshot { occurrence = o; tool_call_id; snapshot } ->
-    [ Live.Tool_args
-        { occurrence = occurrence o ~tool_call_id; fragment = Live.Args_snapshot snapshot }
-    ]
+    Some
+      (Live.Tool_args
+         { occurrence = occurrence o ~tool_call_id
+         ; fragment = Live.Args_snapshot snapshot
+         })
   | E.Tool_call_end { occurrence = o; tool_call_id } ->
-    [ Live.Tool_ended { occurrence = occurrence o ~tool_call_id } ]
+    Some (Live.Tool_ended { occurrence = occurrence o ~tool_call_id })
   | E.Tool_approval_requested { tool_call_id; tool_call_name; args; question; because } ->
-    [ Live.Approval_requested
-        { call_id = tool_call_id; tool_name = tool_call_name; args; question; because }
-    ]
+    Some
+      (Live.Approval_requested
+         { call_id = tool_call_id; tool_name = tool_call_name; args; question; because })
   | E.Tool_approval_settled { tool_call_id; outcome } ->
-    [ Live.Approval_settled { call_id = tool_call_id; outcome } ]
+    Some (Live.Approval_settled { call_id = tool_call_id; outcome })
   | E.Tool_result_ready { occurrence = o; tool_call_id; execution_id } ->
-    [ Live.Tool_result
-        { occurrence = occurrence o ~tool_call_id
-        ; execution_id = Ids.Execution_id.to_string execution_id
-        }
-    ]
+    Some
+      (Live.Tool_result
+         { occurrence = occurrence o ~tool_call_id
+         ; execution_id = Ids.Execution_id.to_string execution_id
+         })
   | E.Link_block _ | E.Image_block _ | E.Status_block _ | E.Audio_block _
-  | E.Tool_context_block _ -> []
+  | E.Tool_context_block _ -> None
 ;;
 
 let add_journaled t (lines : Journal.journaled_event list) =
   List.iter
     (fun (line : Journal.journaled_event) ->
        match delta_of_journaled line.event with
-       | [] ->
-         (* Nothing to draw, but the position is held: a later live frame with
-            this seq is the same event and must not be added either. *)
+       | None ->
+         (* Nothing to draw, so no entry and no revision bump; the position is
+            still held so a later live frame with this seq is a duplicate. *)
          if not (Hashtbl.mem t.held_seqs line.seq)
          then begin
            Hashtbl.replace t.held_seqs line.seq ();
-           if line.seq > t.last_seq then t.last_seq <- line.seq;
-           bump t
+           if line.seq > t.last_seq then t.last_seq <- line.seq
          end
-       | deltas ->
-         List.iter (fun delta -> ignore (add t ~seq:(Some line.seq) delta : bool)) deltas)
+       | Some delta -> ignore (add t ~seq:(Some line.seq) delta : bool))
     lines
 ;;
 
 type events_page =
-  { events : Journal.journaled_event list
+  { operation_id : string
+  ; events : Journal.journaled_event list
   ; has_more : bool
   ; next_since_seq : int
   }
@@ -191,6 +196,11 @@ let decode_events_page (json : Yojson.Safe.t) =
       | Some (`String schema) when String.equal schema events_schema -> Ok ()
       | Some (`String schema) -> Error ("unexpected events schema: " ^ schema)
       | Some _ | None -> Error "events body has no schema"
+    in
+    let* operation_id =
+      match List.assoc_opt "operation_id" fields with
+      | Some (`String value) when String.trim value <> "" -> Ok value
+      | Some _ | None -> Error "events body has no operation_id"
     in
     let* has_more =
       match List.assoc_opt "has_more" fields with
@@ -217,7 +227,7 @@ let decode_events_page (json : Yojson.Safe.t) =
         raw_events
       |> Result.map List.rev
     in
-    Ok { events; has_more; next_since_seq }
+    Ok { operation_id; events; has_more; next_since_seq }
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Error "events body is not an object"
 ;;

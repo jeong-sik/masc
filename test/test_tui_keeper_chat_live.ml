@@ -294,6 +294,38 @@ let test_a_whitespace_line_is_not_a_frame_end () =
     [ (Some 7, Live.Text "hello") ]
     (feed_whole_tagged ("id: 7\n   \n" ^ sse (text_content "hello")))
 
+let reply_details_value ?(outcome = "visible_reply") ?(turn_ref = "trace-1#3") () =
+  `Assoc
+    [ "reply", `String "done"
+    ; "turn_outcome", `String outcome
+    ; "turn_ref", `String turn_ref
+    ]
+
+let test_reply_details_is_read_whole () =
+  check (list delta) "the three fields come through"
+    [ Live.Reply_details
+        { reply = "done"
+        ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
+        ; turn_ref = "trace-1#3"
+        }
+    ]
+    (feed_whole (sse (custom "KEEPER_REPLY_DETAILS" (reply_details_value ()))))
+
+let test_reply_details_short_of_a_field_is_reported () =
+  let undecodable body =
+    match feed_whole body with
+    | [ Live.Undecodable _ ] -> true
+    | _ -> false
+  in
+  check bool "a non-object value" true
+    (undecodable (sse (custom "KEEPER_REPLY_DETAILS" (`String "x"))));
+  check bool "an unknown outcome" true
+    (undecodable
+       (sse (custom "KEEPER_REPLY_DETAILS" (reply_details_value ~outcome:"shrug" ()))));
+  check bool "a turn_ref that is not <trace>#<turn>" true
+    (undecodable
+       (sse (custom "KEEPER_REPLY_DETAILS" (reply_details_value ~turn_ref:"nope" ()))))
+
 (* Two data lines in one frame share the frame's id: the seq is cleared at
    the frame end, not at the first data line. *)
 let test_two_data_lines_in_one_frame_share_the_seq () =
@@ -639,6 +671,9 @@ let () =
             test_a_whitespace_line_is_not_a_frame_end
         ; test_case "two data lines in one frame share the seq" `Quick
             test_two_data_lines_in_one_frame_share_the_seq
+        ; test_case "reply details is read whole" `Quick test_reply_details_is_read_whole
+        ; test_case "reply details short of a field is reported" `Quick
+            test_reply_details_short_of_a_field_is_reported
         ; test_case "unknown custom event is reported" `Quick
             test_unknown_custom_event_is_reported
         ] )

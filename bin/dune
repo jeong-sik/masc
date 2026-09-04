@@ -329,7 +329,7 @@
  (name masc_tui_keeper_chat_live)
  (wrapped false)
  (modules masc_tui_keeper_chat_live)
- (libraries masc masc_tui_keeper_chat_projection yojson))
+ (libraries masc masc.masc_types masc_tui_keeper_chat_projection yojson))
 
 (library
  (name masc_tui_keeper_chat_log)

@@ -122,6 +122,7 @@ let test_decode_events_page () =
   in
   (match Log.decode_events_page (page_json ~has_more:true ~next_since_seq:1 lines) with
    | Ok page ->
+       check string "operation id" "tui-req-1" page.operation_id;
        check int "two events" 2 (List.length page.events);
        check bool "has_more" true page.has_more;
        check int "cursor" 1 page.next_since_seq
@@ -154,19 +155,49 @@ let test_add_journaled_holds_undrawn_positions () =
     (List.map (fun (entry : Log.entry) -> (entry.seq, entry.delta)) (Log.entries t));
   check int "the undrawn seq still counts as held" 2 (Log.last_seq t);
   check bool "a live frame for the undrawn seq is a duplicate" false
-    (Log.add t ~seq:(Some 1) (Live.Text "late"))
+    (Log.add t ~seq:(Some 1) (Live.Text "late"));
+  let before = Log.revision t in
+  Log.add_journaled t [ line 3 1.3 E.Agent_core_stream_ping ];
+  check int "an undrawn line moves last_seq" 3 (Log.last_seq t);
+  check int "but not the revision: nothing to redraw" before (Log.revision t)
 
 (* ── Golden: journal vs wire ──────────────────────────────────────── *)
 
 let occurrence : E.tool_stream_occurrence =
   { stream_scope = 0; provider_message_id = Some "pm-1"; block_index = 2 }
 
+(* No provider correlation at all: the wire omits both optional keys and the
+   live decoder reads their absence as None. *)
+let occurrence_anon : E.tool_stream_occurrence =
+  { stream_scope = 1; provider_message_id = None; block_index = 0 }
+
+(* Every constructor the server projects to a frame the live view ignores, or
+   to no frame at all, plus a tool trio without provider ids. Absent here:
+   [Agent_core_media_delta] (its source kind lives in agent_core, which this
+   test does not link) and [Event_error] (terminal; see [failed_turn]). *)
 let golden : E.keeper_chat_event list =
   [ E.Run_started { run_id = "run-golden"; thread_id = "keeper:keeper.one" }
   ; E.Agent_core_stream_connected
+  ; E.Agent_core_stream_message_start
+      { provider_message_id = "pm-1"; model = "kimi-for-coding"; usage = None }
+  ; E.Agent_core_content_block_start
+      { index = 0; content_type = "thinking"; tool_call_id = None; tool_call_name = None }
   ; E.Text_message_start { message_id = "msg-1"; role = E.Assistant }
   ; E.Agent_core_thinking_delta { index = 0; delta = "weighing it" }
+  ; E.Agent_core_thinking_signature_delta { index = 0; signature_bytes = 42 }
+  ; E.Agent_core_content_block_stop { index = 0 }
+  ; E.Agent_core_stream_ping
   ; E.Text_delta "Let me "
+  ; E.Tool_call_start
+      { occurrence = occurrence_anon; tool_call_id = None; tool_call_name = "grep" }
+  ; E.Tool_call_args { occurrence = occurrence_anon; tool_call_id = None; delta = "{\"pat\":\"x\"}" }
+  ; E.Tool_call_end { occurrence = occurrence_anon; tool_call_id = None }
+  ; E.Link_block
+      { url = "https://example.com"; title = "Example"; description = Some "desc"; image = None }
+  ; E.Image_block { url = "https://example.com/i.png"; caption = None }
+  ; E.Audio_block { token = "aud-1"; mime = "audio/ogg"; message_text = "hi"; duration_sec = None }
+  ; E.Tool_context_block
+      { tool_call_id = "tc-3"; name = "grep"; args_summary = "pat x"; result_summary = None }
   ; E.Tool_call_start { occurrence; tool_call_id = Some "tc-1"; tool_call_name = "read_file" }
   ; E.Tool_call_args { occurrence; tool_call_id = Some "tc-1"; delta = "{\"path\":" }
   ; E.Tool_call_args_snapshot { occurrence; tool_call_id = Some "tc-1"; snapshot = "{\"path\":\"a.ml\"}" }
@@ -198,7 +229,18 @@ let golden : E.keeper_chat_event list =
       ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:3
       }
   ; E.Text_message_end
+  ; E.Agent_core_stream_message_delta { stop_reason = None; usage = None }
+  ; E.Agent_core_stream_message_stop
   ; E.Run_finished { run_id = "run-golden" }
+  ]
+
+(* A turn the server ended with an error frame. *)
+let failed_turn : E.keeper_chat_event list =
+  [ E.Run_started { run_id = "run-failed"; thread_id = "keeper:keeper.one" }
+  ; E.Text_message_start { message_id = "msg-2"; role = E.Assistant }
+  ; E.Text_delta "partial"
+  ; E.Text_message_end
+  ; E.Event_error { message = "boom" }
   ]
 
 let wire_tagged_deltas events =
@@ -220,8 +262,8 @@ let wire_tagged_deltas events =
   Live.feed decoder body
 
 let journal_tagged_deltas events =
-  List.concat_map
-    (fun (seq, event) -> List.map (fun d -> (Some seq, d)) (Log.delta_of_journaled event))
+  List.filter_map
+    (fun (seq, event) -> Option.map (fun d -> (Some seq, d)) (Log.delta_of_journaled event))
     events
 
 let test_golden_journal_equals_wire () =
@@ -229,7 +271,14 @@ let test_golden_journal_equals_wire () =
   let wire = wire_tagged_deltas events in
   let journal = journal_tagged_deltas events in
   check bool "the fixture exercises the log" true (List.length journal > 10);
-  check (list tagged) "journal decode equals the live wire decode" wire journal
+  check (list tagged) "journal decode equals the live wire decode" wire journal;
+  let failed = List.mapi (fun seq event -> (seq, event)) failed_turn in
+  check (list tagged) "a failed turn decodes the same on both sides"
+    (wire_tagged_deltas failed) (journal_tagged_deltas failed);
+  check bool "the failed turn ends in run_failed" true
+    (match List.rev (journal_tagged_deltas failed) with
+     | (Some 4, Live.Run_failed { message = "boom" }) :: _ -> true
+     | _ -> false)
 
 let test_golden_journal_equals_wire_in_chunks () =
   let events = List.mapi (fun seq event -> (seq, event)) golden in
@@ -277,7 +326,23 @@ let test_a_journal_page_fills_the_log_like_the_wire_does () =
     (List.map (fun (seq, event) -> line seq (1000.0 +. float_of_int seq) event) events);
   let view t = List.map (fun (entry : Log.entry) -> (entry.seq, entry.delta)) (Log.entries t) in
   check (list tagged) "same entries" (view from_wire) (view from_journal);
-  check int "same last seq" (Log.last_seq from_wire) (Log.last_seq from_journal);
+  (* The journal holds every line's seq; the wire holds only the seqs of
+     frames that drew something. The fixture ends with two undrawn
+     bookkeeping events and then Run_finished, so the two agree here; a turn
+     whose last frames draw nothing would leave the journal-fed log ahead. *)
+  check int "same last seq when the turn ends in a drawn event"
+    (Log.last_seq from_wire) (Log.last_seq from_journal);
+  let trailing_undrawn = golden @ [ E.Agent_core_stream_ping; E.Agent_core_stream_ping ] in
+  let events = List.mapi (fun seq event -> (seq, event)) trailing_undrawn in
+  let from_journal = log () in
+  Log.add_journaled from_journal
+    (List.map (fun (seq, event) -> line seq (1000.0 +. float_of_int seq) event) events);
+  let from_wire = log () in
+  List.iter (fun (seq, d) -> ignore (Log.add from_wire ~seq d : bool)) (wire_tagged_deltas events);
+  check int "the journal-fed log is ahead by the trailing undrawn frames"
+    (List.length golden + 1) (Log.last_seq from_journal);
+  check int "the wire-fed log stops at the last drawn frame"
+    (List.length golden - 1) (Log.last_seq from_wire);
   check int "same attempt" (Log.attempt from_wire) (Log.attempt from_journal);
   check bool "the wire's attempt advanced past the retry" true (Log.attempt from_wire = 1)
 

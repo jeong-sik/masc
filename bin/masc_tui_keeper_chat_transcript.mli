@@ -262,14 +262,26 @@ val attempt : t -> int
 
 val reply : t -> (string * Masc.Keeper_turn_outcome.t) option
 (** The recorded reply and its typed outcome (KEEPER_REPLY_DETAILS), once
-    the turn has one. Not a trail item: the server streams the reply text as
-    deltas, chunked at the end when nothing streamed, so it is already in
-    the trail. *)
+    the turn has one. Not a trail item. For [Visible_reply] the text is
+    already in the trail: the server streams it as deltas and, when nothing
+    streamed, chunks the reply at the end. For the four control outcomes
+    ([Continuation_checkpoint], [Terminal_effect_settled],
+    [Awaiting_gate_approval], [No_visible_reply]) nothing is chunked, so the
+    reply text lives only here; the pane draws those turns' status row from
+    this accessor (today via the strict decode in [apply_keeper_chat_result];
+    from the log once settle commits the log). A streamed [Visible_reply] can
+    also differ from the trail's text when the server stripped control tokens
+    from the visible reply; the same projection step reconciles that. *)
 
 val of_log : now:float -> Masc_tui_keeper_chat_log.t -> t
 (** The transcript a log projects to: {!create} from the log's identity, then
-    {!apply} over every entry in order. Equal to the transcript that grew with
-    the same deltas. *)
+    {!apply} over every entry in order with the one [now] given. Equal to the
+    transcript that grew with the same deltas in trail, text, thinking,
+    attempt, phase, tool rows and reply. Not in the status rows: a tool call's
+    [started_at] is the [now] of its [apply], so a re-fold dates every call to
+    the re-fold and the progress row's ages and oldest-open-call choice can
+    differ. Log entries carry no arrival time yet; the reload task adds one
+    before it draws a re-folded turn's status row. *)
 
 val tool_rows : t -> string list
 

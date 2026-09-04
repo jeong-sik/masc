@@ -10758,6 +10758,91 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
               ]
               @ fusion_wrapped_block ~width ~indent:"    " failure.fj_error
         in
+        (* RFC-0284 judge nodes. The canonical [Judge] row above is the final
+           synthesis; this block is the topology it came through -- first the
+           observed shape as one line, then one card per first-pass lens.
+           Meta/stage/final nodes stay in the shape line only: their output
+           is intermediate synthesis, and printing it next to the final one
+           would render the same deliberation twice. Pre-RFC posts decode
+           with no nodes and draw none of this. *)
+        let judges_lines =
+          match evidence.fe_judges with
+          | [] -> []
+          | nodes ->
+              let count_role wanted =
+                List.fold_left
+                  (fun n node ->
+                    if node.fjn_role = wanted then n + 1 else n)
+                  0 nodes
+              in
+              let firsts = count_role Judge_first in
+              let metas = count_role Judge_meta in
+              let stage_metas = count_role Judge_stage_meta in
+              let final_metas = count_role Judge_final_meta in
+              let refines = count_role Judge_refine in
+              let singles = count_role Judge_single in
+              let shape =
+                (* Same reading the dashboard's shape classifier makes: a
+                   first-pass judge only exists in a judge-of-judges run,
+                   and stage/final metas only in the staged one. *)
+                if stage_metas > 0 || final_metas > 0 then "staged judge-of-judges"
+                else if firsts > 0 then "judge-of-judges"
+                else if refines > 0 then "refine"
+                else "single"
+              in
+              let counts =
+                List.filter_map
+                  (fun (label, n) ->
+                    if n > 0 then Some (Printf.sprintf "%s \xc3\x97%d" label n) else None)
+                  [ ("first", firsts); ("meta", metas); ("stage-meta", stage_metas)
+                  ; ("final-meta", final_metas); ("refine", refines)
+                  ; ("single", singles) ]
+              in
+              let first_cards =
+                nodes
+                |> List.filter (fun node -> node.fjn_role = Judge_first)
+                |> List.mapi (fun index node ->
+                       match node.fjn_outcome with
+                       | Judge_node_synthesized synthesized ->
+                           [ ( Ansi.magenta
+                             , Printf.sprintf
+                                 "  First %d [synthesized] %s  (%d in / %d out)"
+                                 (index + 1)
+                                 (Terminal_text.single_line node.fjn_identity)
+                                 synthesized.fjno_input_tokens
+                                 synthesized.fjno_output_tokens )
+                           ]
+                           @ fusion_labeled_markdown ~width
+                               ~label:
+                                 (Printf.sprintf "First %d %s" (index + 1)
+                                    (Terminal_text.single_line node.fjn_identity))
+                               synthesized.fjno_resolved_answer
+                       | Judge_node_failed failed ->
+                           let clock =
+                             match (failed.fjno_timed_out, failed.fjno_elapsed_s) with
+                             | true, _ -> "  (timed out)"
+                             | false, Some seconds ->
+                                 Printf.sprintf "  (%.0fs)" seconds
+                             | false, None -> ""
+                           in
+                           [ ( (Theme.bad ())
+                             , Printf.sprintf
+                                 "  First %d [failed] %s  [%s]%s"
+                                 (index + 1)
+                                 (Terminal_text.single_line node.fjn_identity)
+                                 (Terminal_text.single_line failed.fjno_failure_code)
+                                 clock )
+                           ]
+                           @ fusion_wrapped_block ~width ~indent:"    "
+                               failed.fjno_error)
+                |> List.concat
+              in
+              [ Ansi.dim, "" ]
+              @ ( Ansi.dim
+                , Printf.sprintf "  Judge topology: %s  \xc2\xb7  %s" shape
+                    (String.concat "  \xc2\xb7  " counts) )
+              :: first_cards
+        in
         let tool_lines =
           fusion_tool_trace_lines ~width evidence.fe_tool_trace
         in
@@ -10779,6 +10864,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
           ; Ansi.magenta, "  3  JUDGE"
           ]
         @ judge_lines
+        @ judges_lines
         @ [ Ansi.dim, ""
           ; Ansi.bold, "  4  TOOL EXECUTIONS"
           ]

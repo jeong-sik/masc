@@ -10501,6 +10501,53 @@ def fusion_detail_response(run: dict[str, object], judge_reason: str) -> HttpRes
                             "resolved_answer": "judge-resolved-501",
                             "synthesis": judge_reason,
                         },
+                        # RFC-0284 judge nodes: a judge-of-judges run's
+                        # first-pass lenses and the meta above them. The
+                        # canonical single judge stays -- the array is the
+                        # additive observation the TUI detail renders.
+                        "judges": [
+                            {
+                                "role": "first",
+                                "identity": "ollama_cloud.minimax-m3",
+                                "status": "synthesized",
+                                "decision": "answer",
+                                "resolved_answer": "first-evidence-resolved-501",
+                                "synthesis": "first-evidence-synthesis-501",
+                                "input_tokens": 30,
+                                "output_tokens": 40,
+                            },
+                            {
+                                "role": "first",
+                                "identity": "ollama_cloud.deepseek-v4-pro",
+                                "status": "failed",
+                                "error": "first judge body timed out",
+                                "failure_code": "timeout",
+                                "input_tokens": 50,
+                                "output_tokens": 0,
+                                "elapsed_s": None,
+                                "timed_out": True,
+                            },
+                            {
+                                "role": "meta",
+                                "identity": "meta",
+                                "status": "synthesized",
+                                "decision": "answer",
+                                "resolved_answer": "meta-evidence-resolved-501",
+                                "synthesis": "meta-evidence-synthesis-501",
+                                "input_tokens": 60,
+                                "output_tokens": 70,
+                            },
+                        ],
+                        # Required since #32512: the wire always carries the
+                        # tool trace, and an empty ledger says "complete with
+                        # nothing observed" without dropping the field.
+                        "tool_trace": {
+                            "status": "complete",
+                            "observed_actors": [],
+                            "dropped_events": 0,
+                            "gaps": [],
+                            "events": [],
+                        },
                     },
                 },
             },
@@ -10828,12 +10875,28 @@ def fusion_list_detail_interaction(
         if (
             b"3  JUDGE" not in panel_plain
             or b"judge-proof-501" not in panel_plain
-            or b"4  EVIDENCE RECORDED" not in panel_plain
-            or b"masc://board/post-fusion-target-501" not in panel_plain
+            or b"Judge topology: judge-of-judges" not in panel_plain
+            or b"First 1 [synthesized] ollama_cloud.minimax-m3" not in panel_plain
+            or b"First 2 [failed] ollama_cloud.deepseek-v4-pro" not in panel_plain
         ):
             raise AssertionError(
-                f"Fusion flow did not end with Judge then Evidence: {panel_plain!r}"
+                f"Fusion detail lost its judge section or lenses: {panel_plain!r}"
             )
+        # The lens cards grew the detail past one page: the flow now ends on
+        # the page after the panel one.
+        tail = send_and_wait(
+            process, master_fd, output, b"\x1b[6~", b"5  EVIDENCE RECORDED"
+        )
+        tail_plain = CSI_RE.sub(b"", tail)
+        for needle in (
+            b"4  TOOL EXECUTIONS",
+            b"5  EVIDENCE RECORDED",
+            b"masc://board/post-fusion-target-501",
+        ):
+            if needle not in tail_plain:
+                raise AssertionError(
+                    f"Fusion flow did not end with Tool then Evidence: {tail_plain!r}"
+                )
         if (
             b"wrong-alpha-judge-501" in detail_plain
             or b"wrong-new-judge-501" in detail_plain

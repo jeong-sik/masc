@@ -1221,6 +1221,41 @@ type fusion_judge =
       fj_error : string;
     }
 
+(** RFC-0284 judge-node roles, as the server's judge_role_projection writes
+    them. Closed on purpose: an untaught role fails its node's decode. *)
+type fusion_judge_role =
+  | Judge_single
+  | Judge_refine
+  | Judge_first
+  | Judge_meta
+  | Judge_stage_meta
+  | Judge_final_meta
+
+type fusion_judge_node_outcome =
+  | Judge_node_synthesized of {
+      fjno_decision : string;
+      fjno_resolved_answer : string;
+      fjno_synthesis : string;
+      fjno_input_tokens : int;
+      fjno_output_tokens : int;
+    }
+  | Judge_node_failed of {
+      fjno_failure_code : string;
+      fjno_error : string;
+      fjno_input_tokens : int;
+      fjno_output_tokens : int;
+      fjno_elapsed_s : float option;
+      fjno_timed_out : bool;
+    }
+
+(** One executed judge of the deliberation: role is the topology position,
+    identity names the lens (a first-pass judge) or the stage. *)
+type fusion_judge_node = {
+  fjn_role : fusion_judge_role;
+  fjn_identity : string;
+  fjn_outcome : fusion_judge_node_outcome;
+}
+
 type fusion_tool_phase =
   | Fusion_tool_panel
   | Fusion_tool_judge of string
@@ -1283,6 +1318,7 @@ type fusion_evidence = {
   fe_question : string;
   fe_panel : fusion_panel_result list;
   fe_judge : fusion_judge;
+  fe_judges : fusion_judge_node list;
   fe_tool_trace : fusion_tool_trace;
 }
 

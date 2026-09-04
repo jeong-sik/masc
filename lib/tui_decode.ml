@@ -266,6 +266,45 @@ type fusion_judge =
       fj_error : string;
     }
 
+(* RFC-0284 judge-node roles. The server's judge_role_projection is the only
+   producer of this vocabulary, so the decode is closed: a role this build
+   was not taught fails the node instead of drawing it as something it is
+   not. [Judge_stage_meta] carries no number on purpose -- the identity
+   string ("stage-1") is what the server projects and what a row prints. *)
+type fusion_judge_role =
+  | Judge_single
+  | Judge_refine
+  | Judge_first
+  | Judge_meta
+  | Judge_stage_meta
+  | Judge_final_meta
+
+type fusion_judge_node_outcome =
+  | Judge_node_synthesized of {
+      fjno_decision : string;
+      fjno_resolved_answer : string;
+      fjno_synthesis : string;
+      fjno_input_tokens : int;
+      fjno_output_tokens : int;
+    }
+  | Judge_node_failed of {
+      fjno_failure_code : string;
+      fjno_error : string;
+      fjno_input_tokens : int;
+      fjno_output_tokens : int;
+      fjno_elapsed_s : float option;
+      fjno_timed_out : bool;
+    }
+
+(* One executed judge of the deliberation, panel-shaped: the role says where
+   the node sits in the topology, the identity names the lens (a first-pass
+   judge) or the stage, and the outcome is the synthesis or the failure. *)
+type fusion_judge_node = {
+  fjn_role : fusion_judge_role;
+  fjn_identity : string;
+  fjn_outcome : fusion_judge_node_outcome;
+}
+
 type fusion_tool_phase =
   | Fusion_tool_panel
   | Fusion_tool_judge of string
@@ -328,6 +367,10 @@ type fusion_evidence = {
   fe_question : string;
   fe_panel : fusion_panel_result list;
   fe_judge : fusion_judge;
+  (* The executed judge nodes (RFC-0284). Absent on posts recorded before
+     that RFC, so the decode answers [] there; the canonical single [judge]
+     above is what both eras carry. *)
+  fe_judges : fusion_judge_node list;
   fe_tool_trace : fusion_tool_trace;
 }
 
@@ -5469,6 +5512,61 @@ let decode_fusion_judge json =
       Ok (Fusion_judge_failed { fj_failure_code; fj_error })
   | other -> Error (Printf.sprintf "unknown fusion judge status %S" other)
 
+let decode_fusion_judge_role json =
+  let* role = required_string_field json "role" in
+  match role with
+  | "single" -> Ok Judge_single
+  | "refine" -> Ok Judge_refine
+  | "first" -> Ok Judge_first
+  | "meta" -> Ok Judge_meta
+  | "stage_meta" -> Ok Judge_stage_meta
+  | "final_meta" -> Ok Judge_final_meta
+  | other -> Error (Printf.sprintf "unknown fusion judge role %S" other)
+
+let decode_fusion_judge_node json =
+  let* fjn_role = decode_fusion_judge_role json in
+  let* fjn_identity = required_string_field json "identity" in
+  let* status = required_string_field json "status" in
+  let* fjn_outcome =
+    match status with
+    | "synthesized" ->
+        let* fjno_decision = required_string_field json "decision" in
+        let* fjno_resolved_answer =
+          required_string_field json "resolved_answer"
+        in
+        let* fjno_synthesis = required_string_field json "synthesis" in
+        let* fjno_input_tokens = required_int_field json "input_tokens" in
+        let* fjno_output_tokens = required_int_field json "output_tokens" in
+        Ok
+          (Judge_node_synthesized
+             { fjno_decision
+             ; fjno_resolved_answer
+             ; fjno_synthesis
+             ; fjno_input_tokens
+             ; fjno_output_tokens
+             })
+    | "failed" ->
+        let* fjno_failure_code = required_string_field json "failure_code" in
+        let* fjno_error = required_string_field json "error" in
+        let* fjno_input_tokens = required_int_field json "input_tokens" in
+        let* fjno_output_tokens = required_int_field json "output_tokens" in
+        (* [elapsed_s] is `Null` when the failure left no clock reading, and
+           [timed_out] is derived server-side from the failure itself. *)
+        let fjno_elapsed_s = optional_float_field json "elapsed_s" in
+        let* fjno_timed_out = required_bool_field json "timed_out" in
+        Ok
+          (Judge_node_failed
+             { fjno_failure_code
+             ; fjno_error
+             ; fjno_input_tokens
+             ; fjno_output_tokens
+             ; fjno_elapsed_s
+             ; fjno_timed_out
+             })
+    | other -> Error (Printf.sprintf "unknown fusion judge node status %S" other)
+  in
+  Ok { fjn_role; fjn_identity; fjn_outcome }
+
 let decode_fusion_tool_actor json =
   let* phase = required_string_field json "phase" in
   let* fta_identity = required_string_field json "actor" in
@@ -5642,6 +5740,14 @@ let decode_fusion_evidence ~run_id json =
   let* fe_panel = decode_list "panel" decode_fusion_panel_result panel_json in
   let* judge_json = required_object_field meta "judge" in
   let* fe_judge = decode_fusion_judge judge_json in
+  let* fe_judges =
+    (* Additive RFC-0284 key: a post recorded before it carries no array,
+       and the empty answer keeps such evidence rendering exactly as it
+       already did. *)
+    match optional_list_field meta "judges" with
+    | None -> Ok []
+    | Some nodes -> decode_list "judges" decode_fusion_judge_node nodes
+  in
   let* tool_trace_json = required_object_field meta "tool_trace" in
   let* fe_tool_trace = decode_fusion_tool_trace tool_trace_json in
   Ok
@@ -5650,6 +5756,7 @@ let decode_fusion_evidence ~run_id json =
     ; fe_question
     ; fe_panel
     ; fe_judge
+    ; fe_judges
     ; fe_tool_trace
     }
 

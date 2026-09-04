@@ -252,7 +252,10 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0409 | vendor 하네스를 타는 runtime — 도구를 싣지 않는 변종을 한 줄로 고른다 | Draft | - |
 | 0410 | 설치 마법사가 샌드박스를 정하게 하기 — 전역 surface 없이 | Draft | - |
 | 0411 | Skill 카탈로그가 참조 대신 이름을 싣는다 | Draft | - |
+| 0412 | 키퍼 채팅은 하나의 정준 이벤트 로그와 그 projection이다 | Draft | - |
 | 0413 | 넓힐 수 없는 레인은 프로필이 지명한 것만 싣는다 | Draft | - |
+| 0414 | A text-only keeper reads its image because a vision runtime is wired | Draft | - |
+| 0416 | 중단 요청은 이미 기록된다 — 새 상태 대신 그 기록을 보여준다 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |

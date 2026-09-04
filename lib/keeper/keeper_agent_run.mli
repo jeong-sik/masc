@@ -122,6 +122,19 @@ module For_testing : sig
     -> tool_call_detail list
     -> (string * int) option
 
+  (** Newest-first tool calls; [Some (tool, streak)] when the last [threshold]+
+      calls share a tool name and input fingerprint, whatever their outputs did.
+
+      The axis {!repeated_exact_tool_call} cannot answer for a tool whose
+      result is a clock: its output moves on every call while nothing advances,
+      so the output fingerprint it uses as no-progress proof never matches.
+      This one drops the output and requires the repeats to be adjacent
+      instead. *)
+  val repeated_tool_call_input
+    :  threshold:int
+    -> tool_call_detail list
+    -> (string * int) option
+
   (** Newest-first per-turn assistant texts; [Some streak] when the last
       [threshold]+ consecutive turns carry the same non-blank text. *)
   val repeated_assistant_text

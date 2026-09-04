@@ -118,6 +118,29 @@ let render key vars =
   | Error detail -> Error (sprintf "prompt %s: %s" key detail)
 ;;
 
+(* Which question the completion authority is being asked, and the material
+    that question needs. The Task's [verification_intent] chooses it.
+
+    One value rather than two optional arguments because the two prompts want
+    opposite things from the same contract: the completion block demands
+    evidence for every item, the cancellation block offers the items as
+    context for a producer asking not to do them. Passed separately, a
+    cancellation could be rendered through the completion prompt with its
+    contract attached — which is what happened, and refused every cancellation
+    of a contracted Task for not finishing the work it asks not to finish
+    (#33052). *)
+type verdict_question =
+  | Completion of
+      { completion_contract : string list option
+      ; required_evidence : string list
+      }
+  | Cancellation of
+      { reason : string
+            (** The producer's stated why. The whole of what is judged: a stop
+                submits no artifacts and is not refused for having none. *)
+      ; contract_context : string list
+      }
+
 let contract_section = function
   | None | Some [] -> Ok ""
   | Some items ->
@@ -172,38 +195,32 @@ let tool_names schemas =
   |> String.concat ", "
 ;;
 
-let lookup_section = function
-  | No_lookup_surface -> render Prompt_names.verification_lookup_none []
+(* The lookup surface is described to the judge in the terms of the question it
+   is answering. The completion wording tells it that checkable evidence lives
+   in the submitted snapshot and that a build claim needs an execution receipt;
+   spliced into a cancellation prompt it contradicts that prompt eighty lines
+   up ("증거 스냅샷이 비어 있다는 사실은 기각 사유가 아닙니다") and points at a
+   [completion_notes] block the cancellation branch does not send. Same tools,
+   same root, different thing to do with them. *)
+let lookup_section ~(question : verdict_question) lookup =
+  let none, producer_tree =
+    match question with
+    | Completion _ ->
+      ( Prompt_names.verification_lookup_none
+      , Prompt_names.verification_lookup_producer_tree )
+    | Cancellation _ ->
+      ( Prompt_names.verification_lookup_none_cancellation
+      , Prompt_names.verification_lookup_producer_tree_cancellation )
+  in
+  match lookup with
+  | No_lookup_surface -> render none []
   | Lookup_tools { schemas; dispatch = _; root_layout } ->
     let ( let* ) = Result.bind in
     let* lookup_root_layout = root_layout_lines root_layout in
     render
-      Prompt_names.verification_lookup_producer_tree
+      producer_tree
       [ "lookup_tools", tool_names schemas; "lookup_root_layout", lookup_root_layout ]
 ;;
-
-(* Which question the completion authority is being asked, and the material
-    that question needs. The Task's [verification_intent] chooses it.
-
-    One value rather than two optional arguments because the two prompts want
-    opposite things from the same contract: the completion block demands
-    evidence for every item, the cancellation block offers the items as
-    context for a producer asking not to do them. Passed separately, a
-    cancellation could be rendered through the completion prompt with its
-    contract attached — which is what happened, and refused every cancellation
-    of a contracted Task for not finishing the work it asks not to finish
-    (#33052). *)
-type verdict_question =
-  | Completion of
-      { completion_contract : string list option
-      ; required_evidence : string list
-      }
-  | Cancellation of
-      { reason : string
-            (** The producer's stated why. The whole of what is judged: a stop
-                submits no artifacts and is not refused for having none. *)
-      ; contract_context : string list
-      }
 
 (* What the Task was for, offered to a cancellation as context. The completion
    block's job is to demand evidence for each item; this one's is to say what
@@ -226,7 +243,7 @@ let build_prompt
   let calibration_section =
     if few_shot_block = "" then "" else "\n" ^ few_shot_block ^ "\n"
   in
-  let* lookup_section = lookup_section lookup in
+  let* lookup_section = lookup_section ~question lookup in
   match question with
   | Completion { completion_contract; required_evidence } ->
     let* verification_contract_section = contract_section completion_contract in
@@ -253,6 +270,11 @@ let build_prompt
        no artifacts, and the completion prompt reads their absence as a reason
        to refuse — which is how every cancellation of a contracted Task came to
        be refused for not finishing the work it asks not to finish (#33052). *)
+    (* No calibration block. Every recorded divergence is a completion
+       judgement — the row carries no intent, so the selector cannot tell them
+       apart — and feeding "the evaluator wrongly approved this completion"
+       into a stop's prompt teaches it the shape this branch exists to
+       unlearn. *)
     let* contract_context_section = contract_context_section contract_context in
     Prompt_registry.render_prompt_template
       Prompt_names.verification_cancellation
@@ -262,7 +284,6 @@ let build_prompt
       ; "cancel_reason", reason
       ; "contract_context_section", contract_context_section
       ; "lookup_section", lookup_section
-      ; "calibration_section", calibration_section
       ]
 ;;
 

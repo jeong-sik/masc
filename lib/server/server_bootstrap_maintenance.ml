@@ -840,6 +840,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~on_error:(log_server_fiber_crash "maintenance_cleanup")
     (fun () ->
     let last_prune = ref (Unix.gettimeofday ()) in
+    let last_chat_journal_audit = ref (Unix.gettimeofday ()) in
     let transition_projection_cursor =
       ref Keeper_event_queue_recovery.initial_sweep_cursor
     in
@@ -1014,7 +1015,48 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
-             Log.Server.error "periodic JSONL prune failed: %s" (Printexc.to_string exn))
+             Log.Server.error "periodic JSONL prune failed: %s" (Printexc.to_string exn));
+         (* RFC-0412 stage 2: dual-write consistency audit of the chat event
+            journal against keeper_chat_store. Runs hourly — far more often
+            than the 30d journal retention prune, so the audit window is never
+            silently clipped. Mismatches are metrics + logs; nothing here
+            raises. The stage-2 read-path cutover is gated on this reporting a
+            clean soak. *)
+         if now -. !last_chat_journal_audit >= Masc_time_constants.hour
+         then begin
+           last_chat_journal_audit := now;
+           (try
+              let results =
+                Keeper_chat_journal_audit.sweep
+                  ~base_dir:(Mcp_server.workspace_config state).base_path
+                  ~window_sec:(2. *. Masc_time_constants.hour)
+                  ()
+              in
+              List.iter
+                (fun (keeper, operation_id, verdict) ->
+                   match verdict with
+                   | Keeper_chat_journal_audit.Match -> ()
+                   | verdict ->
+                     Otel_metric_store.inc_counter
+                       Keeper_metrics.(to_string ChatJournalAuditMismatches)
+                       ~labels:
+                         [ "keeper", keeper
+                         ; "verdict", Keeper_chat_journal_audit.show_verdict verdict
+                         ]
+                       ();
+                     Log.Keeper.error
+                       "chat-journal-audit keeper=%s op=%s verdict=%s"
+                       keeper
+                       operation_id
+                       (Keeper_chat_journal_audit.show_verdict verdict))
+                results
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+              Log.Server.warn
+                "chat journal audit sweep failed: %s"
+                (Printexc.to_string exn))
+         end
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->

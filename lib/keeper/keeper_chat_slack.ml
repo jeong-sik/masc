@@ -524,7 +524,7 @@ let delete_message ?clock
 let add_block acc block = block :: acc
 
 let adapter_loop_with_transport
-    ~(events : Keeper_chat_events.keeper_chat_event Eio.Stream.t)
+    ~(events : Keeper_chat_events.t)
     ?post_stream
     ?edit_stream
     ?edit_blocks

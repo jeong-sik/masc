@@ -73,7 +73,7 @@ val adapter_loop :
   token:string ->
   channel:string ->
   ?thread_ts:string ->
-  events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
+  events:Keeper_chat_events.t ->
   ?base_url:string ->
   ?on_send_result:((unit, error) result -> unit) ->
   unit ->
@@ -156,7 +156,7 @@ module For_testing : sig
   (** Pure [assistant.threads.setStatus] JSON builder. *)
 
   val adapter_loop :
-    events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
+    events:Keeper_chat_events.t ->
     ?post_stream:(content:string -> (string, error) result) ->
     ?edit_stream:(message_id:string -> content:string -> (unit, error) result) ->
     ?edit_blocks:

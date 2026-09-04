@@ -198,16 +198,25 @@ type keeper_chat_event =
 
 (** {1 Stream operations} *)
 
-(** [create ()] returns a new bounded event stream.
-    Each turn should create its own stream instance. *)
-val create : unit -> keeper_chat_event Eio.Stream.t
+type t
+(** Bounded per-turn event stream plus its optional journal hook (RFC-0412
+    stage 1). *)
 
-(** [publish stream event] adds [event] to the stream.
-    Non-blocking; raises if the stream is full (backpressure). *)
-val publish : keeper_chat_event Eio.Stream.t -> keeper_chat_event -> unit
+(** [create ?on_publish ()] returns a new bounded event stream. Each turn
+    should create its own stream instance. [on_publish], when given, is
+    invoked synchronously with a 0-based per-stream sequence number BEFORE the
+    event enters the bus; hook exceptions are logged and swallowed (except
+    cancellation, which is re-raised) so a journal failure can never break the
+    live turn. *)
+val create : ?on_publish:(seq:int -> keeper_chat_event -> unit) -> unit -> t
 
-(** [subscribe stream] blocks until an event is available, then returns it. *)
-val subscribe : keeper_chat_event Eio.Stream.t -> keeper_chat_event
+(** [publish t event] runs the journal hook (if any) and adds [event] to the
+    stream. Non-blocking; raises if the stream is full (backpressure) — the
+    hook has already run by then, so the journal still holds the event. *)
+val publish : t -> keeper_chat_event -> unit
+
+(** [subscribe t] blocks until an event is available, then returns it. *)
+val subscribe : t -> keeper_chat_event
 
 val api_usage_to_json : Agent_core.Types.api_usage -> Yojson.Safe.t
 

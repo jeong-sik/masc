@@ -334,6 +334,36 @@ let test_journal_path_sanitizes_segments () =
        "keeper_chat_events")
     (Filename.dirname (Filename.dirname path))
 
+let test_on_publish_hook_receives_monotonic_seq () =
+  let seen = ref [] in
+  let bus =
+    Masc.Keeper_chat_events.create
+      ~on_publish:(fun ~seq event -> seen := (seq, event) :: !seen)
+      ()
+  in
+  List.iter
+    (Masc.Keeper_chat_events.publish bus)
+    [ E.Text_delta "a"; E.Text_delta "b"; E.Text_message_end ];
+  Alcotest.(check (list int))
+    "seq is 0-based and monotonic"
+    [ 0; 1; 2 ]
+    (List.rev_map fst !seen);
+  (* publish order == subscribe order, hook or no hook *)
+  (match Masc.Keeper_chat_events.subscribe bus with
+   | E.Text_delta "a" -> ()
+   | _ -> Alcotest.fail "first subscribed event mismatch")
+
+let test_on_publish_hook_failure_does_not_break_publish () =
+  let bus =
+    Masc.Keeper_chat_events.create
+      ~on_publish:(fun ~seq:_ _ -> failwith "journal exploded")
+      ()
+  in
+  Masc.Keeper_chat_events.publish bus (E.Text_delta "still delivered");
+  match Masc.Keeper_chat_events.subscribe bus with
+  | E.Text_delta "still delivered" -> ()
+  | _ -> Alcotest.fail "event lost after hook failure"
+
 let () =
   Alcotest.run
     "keeper_chat_event_log"
@@ -366,5 +396,15 @@ let () =
             "path sanitizes both segments"
             `Quick
             test_journal_path_sanitizes_segments
+        ] )
+    ; ( "bus hook"
+      , [ Alcotest.test_case
+            "hook receives monotonic seq"
+            `Quick
+            test_on_publish_hook_receives_monotonic_seq
+        ; Alcotest.test_case
+            "hook failure does not break publish"
+            `Quick
+            test_on_publish_hook_failure_does_not_break_publish
         ] )
     ]

@@ -157,11 +157,40 @@ type keeper_chat_event =
       ; result_summary : string option
       }
 
-let create () = Eio.Stream.create 512
+type t =
+  { stream : keeper_chat_event Eio.Stream.t
+  ; on_publish : (seq:int -> keeper_chat_event -> unit) option
+  ; mutable next_seq : int
+  }
 
-let publish stream event = Eio.Stream.add stream event
+let create ?on_publish () =
+  { stream = Eio.Stream.create 512; on_publish; next_seq = 0 }
+;;
 
-let subscribe stream = Eio.Stream.take stream
+(* [publish] is the single choke point every turn event passes through — route
+   lifecycle, bridge-translated deltas, and terminal paths all call it. The
+   hook runs BEFORE the bus add so the canonical journal records what the turn
+   produced even when a full bus raises on add. [publish] performs only
+   blocking Unix I/O inside the hook (which suspends the whole domain briefly
+   but never interleaves fibers in it), so seq assignment → hook → bus add is
+   effectively atomic and journal order == seq order == bus order. *)
+let publish t event =
+  (match t.on_publish with
+   | None -> ()
+   | Some hook ->
+     let seq = t.next_seq in
+     t.next_seq <- seq + 1;
+     (try hook ~seq event with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Log.Keeper.error
+          "keeper_chat_events: on_publish hook failed seq=%d: %s"
+          seq
+          (Printexc.to_string exn)));
+  Eio.Stream.add t.stream event
+;;
+
+let subscribe t = Eio.Stream.take t.stream
 
 let json_opt key value =
   match value with

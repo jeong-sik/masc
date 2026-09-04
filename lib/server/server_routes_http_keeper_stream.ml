@@ -1539,7 +1539,7 @@ let process_single_turn ~user_row_origin ~submission
     ~state ~clock ~auth_token ~thread_id ~continuation_channel ~closed
     ~client_disconnects
     ~payload ~run_id ~message_id ~agent_name
-    ~(events : Keeper_chat_events.keeper_chat_event Eio.Stream.t) =
+    ~(events : Keeper_chat_events.t) =
   let base_path = (Mcp_server.workspace_config state).base_path in
   let redaction =
     Keeper_secret_redaction.snapshot ~base_path ~keeper_name:payload.name

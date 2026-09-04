@@ -47,7 +47,11 @@ let visible filter (event : Observer.event) =
          state rather than something a keeper did. Both belong with the
          heartbeat: shown under [Everything], never counted as an action. *)
       | Observer.Keeper_chat_stream_frame _
-      | Observer.Keeper_waiting_inventory_changed _ ->
+      | Observer.Keeper_waiting_inventory_changed _
+      (* Server push, same verdict as the whole-projection snapshots: a
+         deliberation changing stage is something the server reports, not
+         something a keeper did. *)
+      | Observer.Fusion_run_status _ ->
           false
       | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
       | Observer.Keeper_chat_appended _ | Observer.Other _ ->
@@ -201,7 +205,8 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Keeper_composite_changed { keeper; _ }
   | Observer.Keeper_chat_appended { keeper; _ }
   | Observer.Keeper_chat_stream_frame { keeper; _ }
-  | Observer.Keeper_waiting_inventory_changed { keeper; _ } ->
+  | Observer.Keeper_waiting_inventory_changed { keeper; _ }
+  | Observer.Fusion_run_status { keeper; _ } ->
       keeper
   | Observer.Snapshot _ | Observer.Other _ -> "server"
 
@@ -281,6 +286,17 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       ; glyph = Quiet
       ; label = "waiting queue"
       ; detail = Option.value ~default:"" queue_kind
+      }
+  | Observer.Fusion_run_status { keeper; run_id; status } ->
+      (* Quiet: the Fusion surface is where a run is read, and it reloads
+         itself on this same event. This row is the Everything-feed trace
+         that a deliberation moved. The run id keeps its kmsg- prefix --
+         it is what Ctrl-] would jump on. *)
+      { at
+      ; keeper
+      ; glyph = Quiet
+      ; label = "fusion"
+      ; detail = status ^ " \xc2\xb7 " ^ run_id
       }
   | Observer.Snapshot name ->
       { at; keeper = "server"; glyph = Quiet; label = "snapshot"; detail = name }
@@ -391,7 +407,7 @@ let member_of_event (event : Observer.event) =
   | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _
   | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Snapshot _
-  | Observer.Other _ ->
+  | Observer.Fusion_run_status _ | Observer.Other _ ->
       None
 
 let empty_chunk ~keeper ~turn ~at =
@@ -643,6 +659,7 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
           | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
           | Observer.Keeper_chat_stream_frame _
           | Observer.Keeper_waiting_inventory_changed _
+          | Observer.Fusion_run_status _
           | Observer.Snapshot _ | Observer.Other _ ->
               None)
         before

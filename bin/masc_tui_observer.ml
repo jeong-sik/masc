@@ -99,6 +99,14 @@ type event =
       { keeper : string; frame : string option; at : float }
   | Keeper_waiting_inventory_changed of
       { keeper : string; queue_kind : string option; at : float }
+  (* Server push, not a keeper act: a fusion deliberation changed stage or
+     settled. The Fusion surface treats it as a reload trigger the way the
+     dashboard does (sse-store: event = trigger, HTTP = SSOT); the payload
+     is not the data. Only the three strings the Acting row wants are read
+     here -- the run itself is re-fetched, so unlike the keeper events this
+     carries no [at]: nothing computes a duration from it. *)
+  | Fusion_run_status of
+      { keeper : string; run_id : string; status : string }
   | Snapshot of string
   | Other of string
 
@@ -116,7 +124,7 @@ let chat_appended_keeper = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _ | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _
-  | Snapshot _ | Other _ ->
+  | Fusion_run_status _ | Snapshot _ | Other _ ->
       None
 
 (* Field readers over one object's assoc list. Each answers [None] for an
@@ -298,6 +306,27 @@ let event_of_json (json : Yojson.Safe.t) =
           decode_keeper_chat_operation_event fields
       | Some "keeper_waiting_inventory_changed" ->
           decode_keeper_waiting_inventory_changed fields
+      | Some "fusion_run_status" -> (
+          (* The frame carries no [ts_unix]; reception time is the timestamp
+             the Acting row wants. The run object is the same shape the HTTP
+             list serves, but only its identity strings are read -- the Fusion
+             surface re-fetches on this trigger instead of trusting the
+             payload as data. *)
+          match assoc_field fields "run" with
+          | Some run_fields -> (
+              match
+                ( required string_field run_fields "run_id"
+                    ~event:"fusion_run_status"
+                , required string_field run_fields "keeper"
+                    ~event:"fusion_run_status"
+                , required string_field run_fields "status"
+                    ~event:"fusion_run_status" )
+              with
+              | Ok run_id, Ok keeper, Ok status ->
+                  Ok (Fusion_run_status { keeper; run_id; status })
+              | Error detail, _, _ | _, Error detail, _ | _, _, Error detail ->
+                  Error detail)
+          | None -> Error "fusion_run_status carries no run object")
       | Some ("keeper_chat_appended" as event) ->
           decode_named_keeper_event ~event fields (fun ~keeper ~at ->
               Keeper_chat_appended

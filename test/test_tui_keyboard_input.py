@@ -10848,6 +10848,88 @@ def fusion_list_detail_interaction(
     return interact
 
 
+def fusion_live_reload_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
+    """The feed initialize is held at the gate so the frame lands while the
+    operator is already on the Fusion surface.
+
+    Releasing the gate is what makes the causality readable: with the cadence
+    at its 60-second default, the only things that can fetch the run list are
+    the surface entry and the status frame the stream then pushes. The list
+    answer changes between the two fetches -- the second run appears -- so the
+    reload draws a row that was not on the first screen.
+    """
+    alpha = fusion_run("fusion-alpha-601", keeper="alpha", status="running")
+    target = fusion_run("fusion-target-601", keeper="beta")
+    fixtures = overview_event_http_fixtures()
+    mcp_initialize = GatedHttpResponse(
+        RawHttpResponse(
+            200,
+            json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}).encode(),
+            content_type="application/json",
+            headers=(("Mcp-Session-Id", "mcp_fixture_session"),),
+        )
+    )
+    fixtures["/mcp"] = mcp_initialize
+    fixtures["/mcp?sse_kind=observer"] = RawHttpResponse(
+        200,
+        (
+            b'event: message\n'
+            b'data: {"type":"fusion_run_status","run":{"run_id":"fusion-target-601",'
+            b'"keeper":"beta","preset":"trio","topology":"simple",'
+            b'"started_at":1787557669.7,"status":"completed"}}\n\n'
+        ),
+        content_type="text/event-stream",
+    )
+    fixtures[FUSION_RUNS_PATH] = SequencedHttpResponse(
+        [
+            fusion_runs_response([alpha]),
+            fusion_runs_response([alpha, target]),
+        ]
+    )
+    return fixtures, mcp_initialize
+
+
+def fusion_live_reload_interaction(
+    requests: HttpRequests, mcp_initialize: GatedHttpResponse
+) -> Interaction:
+    """Tab lands on Fusion (the ring stop this scenario exists to prove), one
+    status frame on the observer feed refetches the list, and the new run
+    draws. Exactly two list loads in total -- the entry and the trigger."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        def list_loads() -> int:
+            return sum(1 for path, _ in requests if path == FUSION_RUNS_PATH)
+
+        landed = tab_until(process, master_fd, output, b"fusion-alpha")
+        if list_loads() != 1:
+            raise AssertionError(
+                f"surface entry alone should load the list once, saw {list_loads()}"
+            )
+        mcp_initialize.release.set()
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"fusion-target",
+            start=len(landed),
+            timeout=10.0,
+        )
+        if list_loads() != 2:
+            raise AssertionError(
+                f"the status frame should reload the list exactly once, "
+                f"saw {list_loads()} loads"
+            )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 OBSERVER_TOOL_CALLED_FRAME = (
     b"id: 1\n"
     b"event: message\n"
@@ -11510,6 +11592,15 @@ def run_keyboard_regression(executable: str) -> None:
         # that task and the goal it serves is what lets the detail say what the
         # verdict was aiming at, rather than naming a task and stopping.
         prepare_workspace=seed_goal_linked_task,
+    )
+    fusion_live_requests: HttpRequests = []
+    fusion_live_fixtures, fusion_mcp_gate = fusion_live_reload_http_fixtures()
+    run_terminal_scenario(
+        executable,
+        description="Fusion live reload on an observer status push",
+        interact=fusion_live_reload_interaction(fusion_live_requests, fusion_mcp_gate),
+        http_fixtures=fusion_live_fixtures,
+        http_requests=fusion_live_requests,
     )
     run_terminal_scenario(
         executable,

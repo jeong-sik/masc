@@ -12,10 +12,10 @@ type runtime_manifest_scan =
   { path : string
   ; limit : int
   ; returned_rows : Keeper_runtime_manifest.t Queue.t
-  ; provider_attempt_rows : Keeper_runtime_manifest.t Queue.t
   ; event_counts : (string, int) Hashtbl.t
   ; total_rows : int
   ; has_terminal : bool
+  ; terminal_row : Keeper_runtime_manifest.t option
   ; terminal_keeper_turn_ids : int list
   ; max_agent_core_turn_count : int option
   ; keeper_turn_ids : int list
@@ -28,9 +28,6 @@ type runtime_manifest_scan =
   ; payload_role_counts : (string, int) Hashtbl.t
   ; source_clock_counts : (string, int) Hashtbl.t
   ; context_injected_count : int
-  ; provider_started_count : int
-  ; provider_finished_count : int
-  ; provider_terminal_row : Keeper_runtime_manifest.t option
   ; latest_context_injected_row : Keeper_runtime_manifest.t option
   ; dag_edges : (string * string) list
   ; scanned_lines : int

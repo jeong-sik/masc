@@ -53,12 +53,6 @@ let fallback_tool_batch_id (row : manifest_row) =
     (turn_label row)
     (agent_core_turn_label row)
 
-let fallback_provider_attempt_id (row : manifest_row) attempt_index =
-  Printf.sprintf "%s:keeper-%s:provider-attempt-%d"
-    row.Keeper_runtime_manifest.trace_id
-    (turn_label row)
-    attempt_index
-
 let fallback_checkpoint_id (row : manifest_row) =
   let decision = row.Keeper_runtime_manifest.decision in
   first_string_opt
@@ -80,14 +74,12 @@ let event_started_at (row : manifest_row) =
   | Keeper_runtime_manifest.Runtime_routed
   | Keeper_runtime_manifest.Runtime_execution_built
   | Keeper_runtime_manifest.Provider_lane_resolved
-  | Keeper_runtime_manifest.Provider_attempt_started
   | Keeper_runtime_manifest.Context_injected
   | Keeper_runtime_manifest.Event_bus_correlated
   | Keeper_runtime_manifest.Checkpoint_loaded ->
     Some row.Keeper_runtime_manifest.ts
   | Keeper_runtime_manifest.Runtime_completed
   | Keeper_runtime_manifest.Runtime_failed
-  | Keeper_runtime_manifest.Provider_attempt_finished
   | Keeper_runtime_manifest.Checkpoint_saved
   | Keeper_runtime_manifest.Pre_dispatch_blocked
   | Keeper_runtime_manifest.Receipt_appended
@@ -98,7 +90,6 @@ let event_finished_at (row : manifest_row) =
   match row.Keeper_runtime_manifest.event with
   | Keeper_runtime_manifest.Runtime_completed
   | Keeper_runtime_manifest.Runtime_failed
-  | Keeper_runtime_manifest.Provider_attempt_finished
   | Keeper_runtime_manifest.Checkpoint_saved
   | Keeper_runtime_manifest.Pre_dispatch_blocked
   | Keeper_runtime_manifest.Receipt_appended
@@ -109,7 +100,6 @@ let event_finished_at (row : manifest_row) =
   | Keeper_runtime_manifest.Runtime_routed
   | Keeper_runtime_manifest.Runtime_execution_built
   | Keeper_runtime_manifest.Provider_lane_resolved
-  | Keeper_runtime_manifest.Provider_attempt_started
   | Keeper_runtime_manifest.Context_injected
   | Keeper_runtime_manifest.Event_bus_correlated
   | Keeper_runtime_manifest.Checkpoint_loaded ->
@@ -120,21 +110,9 @@ let event_source_clock = function
     Keeper_runtime_manifest.source_clock_of_event event
     |> Keeper_runtime_manifest.source_clock_to_string
 
-let clock_edge_json ~idx ~provider_attempt_index (row : manifest_row) =
+let clock_edge_json ~idx (row : manifest_row) =
   let event = row.Keeper_runtime_manifest.event in
   let decision = row.Keeper_runtime_manifest.decision in
-  let explicit_provider_attempt_id = clock_string row "provider_attempt_id" in
-  let provider_attempt_id =
-    match event with
-    | Keeper_runtime_manifest.Provider_attempt_started
-    | Keeper_runtime_manifest.Provider_attempt_finished ->
-      first_string_opt
-        [
-          explicit_provider_attempt_id;
-          Some (fallback_provider_attempt_id row provider_attempt_index);
-        ]
-    | _ -> explicit_provider_attempt_id
-  in
   let tool_batch_id =
     match event with
     | Keeper_runtime_manifest.Provider_lane_resolved ->
@@ -213,7 +191,6 @@ let clock_edge_json ~idx ~provider_attempt_index (row : manifest_row) =
       ("trace_id", `String row.Keeper_runtime_manifest.trace_id);
       ("keeper_turn_id", Json_util.int_opt_to_json row.Keeper_runtime_manifest.keeper_turn_id);
       ("agent_core_turn_count", Json_util.int_opt_to_json row.Keeper_runtime_manifest.agent_core_turn_count);
-      ("provider_attempt_id", Json_util.string_opt_to_json provider_attempt_id);
       ("tool_batch_id", Json_util.string_opt_to_json tool_batch_id);
       ("checkpoint_id", Json_util.string_opt_to_json checkpoint_id);
       ("event_bus_correlation_id", Json_util.string_opt_to_json event_bus_correlation_id);
@@ -234,21 +211,10 @@ let clock_edge_json ~idx ~provider_attempt_index (row : manifest_row) =
 
 let edge_string key edge = Json_util.get_string edge key
 let clock_edge_jsons scan =
-  let provider_attempt_index = ref 0 in
   let edges =
     scan.returned_rows
     |> queue_to_list
-    |> List.mapi (fun idx row ->
-      let provider_index =
-        match row.Keeper_runtime_manifest.event with
-        | Keeper_runtime_manifest.Provider_attempt_started ->
-          incr provider_attempt_index;
-          !provider_attempt_index
-        | Keeper_runtime_manifest.Provider_attempt_finished ->
-          max 1 !provider_attempt_index
-        | _ -> max 1 !provider_attempt_index
-      in
-      clock_edge_json ~idx ~provider_attempt_index:provider_index row)
+    |> List.mapi (fun idx row -> clock_edge_json ~idx row)
   in
   (* F7: DAG causality — build edge_id set once, then verify each edge's parent. *)
   let edge_id_set =

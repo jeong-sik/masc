@@ -616,30 +616,13 @@ describe('keeper runtime trace', () => {
         manifest_keeper_turn_ids: [7],
         receipt_turn_counts: [7],
         max_agent_core_turn_count: 3,
-        provider_attempt_started_count: 1,
-        provider_attempt_finished_count: 1,
+        runtime_completed_count: 1,
+        runtime_failed_count: 0,
         event_bus_correlated_count: 1,
         memory_injected_count: 1,
         memory_flushed_count: 1,
         receipt_appended_count: 1,
         turn_finished_count: 1,
-	      },
-	      provider_attempts: {
-	        started_count: 1,
-	        finished_count: 1,
-	        terminal_status: 'timeout',
-	        terminal_error: 'Timeout after 120.0s',
-	        terminal_exception_kind: 'outer_agent_core_timeout',
-	        attempts: [
-	          {
-	            ts: '2026-05-12T00:00:00Z',
-	            event: 'provider_attempt_finished',
-	            runtime_id: 'glm-coding-with-spark',
-	            status: 'timeout',
-	            error: 'Timeout after 120.0s',
-	            exception_kind: 'outer_agent_core_timeout',
-	          },
-	        ],
 	      },
 	      event_bus: {
         event_bus_correlated_count: 1,
@@ -678,9 +661,8 @@ describe('keeper runtime trace', () => {
 
     expect(result.keeper).toBe('sangsu')
 	    expect(result.turn_identity.provider_lane_resolved_count).toBe(0)
-	    expect(result.turn_identity.provider_attempt_started_count).toBe(1)
-	    expect(result.provider_attempts.terminal_status).toBe('timeout')
-	    expect(result.provider_attempts.attempts[0]?.exception_kind).toBe('outer_agent_core_timeout')
+	    expect(result.turn_identity.runtime_completed_count).toBe(1)
+	    expect(result.turn_identity.runtime_failed_count).toBe(0)
 	    expect(result.event_bus.correlation_ids).toEqual(['corr-1'])
     expect(result.memory.memory_flushed_count).toBe(0)
     expect(result.memory.episodes_flushed).toBe(2)
@@ -720,7 +702,6 @@ describe('keeper runtime trace', () => {
       manifest_returned_rows: 4,
       receipt_returned_rows: 0,
       turn_identity: {},
-      provider_attempts: {},
       event_bus: {},
       memory: {},
       runtime_lens: {
@@ -730,21 +711,16 @@ describe('keeper runtime trace', () => {
             status: 'error',
             resolved_lane: 'inline',
           },
-          provider_attempt: {
-            started_count: 1,
-            finished_count: 1,
-            terminal_status: 'timeout',
-          },
         },
         swimlanes: {
-          provider: {
-            lane: 'provider',
-            label: 'Provider',
+          masc_policy_runtime: {
+            lane: 'masc_policy_runtime',
+            label: 'MASC Runtime',
             event_count: 2,
-            terminal_status: 'timeout',
+            terminal_status: 'resolved',
             completeness: 'complete',
             gap_codes: [],
-            events: [{ event: 'provider_attempt_finished', count: 1 }],
+            events: [{ event: 'runtime_completed', count: 1 }],
           },
           tool_runtime: {
             lane: 'tool_runtime',
@@ -757,16 +733,15 @@ describe('keeper runtime trace', () => {
         },
         clock_edges: [
           {
-            edge_id: 'edge-provider-start',
-            lane: 'provider',
-            event: 'provider_attempt_started',
-            status: 'started',
+            edge_id: 'edge-runtime-routed',
+            lane: 'masc_policy_runtime',
+            event: 'runtime_routed',
+            status: 'attempt',
             observed_at: '2026-05-13T00:00:03Z',
             source_clock: 'wall',
             started_at: '2026-05-13T00:00:03Z',
             trace_id: 'trace-lens',
             keeper_turn_id: 9,
-            provider_attempt_id: 'trace-lens:keeper-9:provider-attempt-1',
             event_bus_correlation_id: 'corr-1',
             event_bus_event_count: 2,
             event_bus_payload_kinds: ['tool_called', 'tool_completed'],
@@ -777,17 +752,17 @@ describe('keeper runtime trace', () => {
         ],
         clock_groups: [
           {
-            group_type: 'provider_attempt',
-            group_id: 'trace-lens:keeper-9:provider-attempt-1',
+            group_type: 'turn',
+            group_id: 'trace-lens:keeper-9',
             edge_count: 2,
-            edge_ids: ['edge-provider-start', 'edge-provider-finish'],
-            lanes: ['provider'],
-            events: ['provider_attempt_started', 'provider_attempt_finished'],
-            statuses: ['started', 'provider_returned'],
+            edge_ids: ['edge-runtime-routed', 'edge-runtime-completed'],
+            lanes: ['masc_policy_runtime'],
+            events: ['runtime_routed', 'runtime_completed'],
+            statuses: ['attempt', 'completed'],
             first_observed_at: '2026-05-13T00:00:03Z',
             last_observed_at: '2026-05-13T00:00:08Z',
             closed: true,
-            terminal_events: ['provider_attempt_finished'],
+            terminal_events: ['runtime_completed'],
             parent_event_ids: [],
             caused_by: [],
             event_bus_event_count: 0,
@@ -796,10 +771,10 @@ describe('keeper runtime trace', () => {
         ],
         gaps: [
           {
-            code: 'clock_provider_attempt_unfinished',
+            code: 'clock_context_injection_missing',
             severity: 'warn',
-            lane: 'provider',
-            detail: 'provider attempts started=1 finished=0',
+            lane: 'memory_context',
+            detail: 'turn finished without a context_injected clock edge',
           },
         ],
       },
@@ -809,20 +784,18 @@ describe('keeper runtime trace', () => {
     expect(result.runtime_lens.turn_clock.trace_id).toBe('trace-lens')
     expect(result.runtime_lens.turn_clock.terminal_event_present).toBe(false)
     expect(result.runtime_lens.axes.provider_lane.resolved).toBe(false)
-    expect(result.runtime_lens.axes.provider_attempt.terminal_status).toBe('timeout')
-    expect(result.runtime_lens.swimlanes.provider.terminal_status).toBe('timeout')
     expect(result.runtime_lens.swimlanes.memory_context.terminal_status).toBe('unknown')
-    expect(result.runtime_lens.clock_edges[0]?.edge_id).toBe('edge-provider-start')
+    expect(result.runtime_lens.clock_edges[0]?.edge_id).toBe('edge-runtime-routed')
     expect(result.runtime_lens.swimlanes.tool_runtime.completeness).toBe('complete')
-    expect(result.runtime_lens.clock_edges[0]?.provider_attempt_id).toBe('trace-lens:keeper-9:provider-attempt-1')
+    expect(result.runtime_lens.clock_edges[0]?.event).toBe('runtime_routed')
     expect(result.runtime_lens.clock_edges[0]?.event_bus_event_count).toBe(2)
     expect(result.runtime_lens.clock_edges[0]?.event_bus_payload_kinds).toEqual(['tool_called', 'tool_completed'])
     expect(result.runtime_lens.clock_edges[0]?.links.tool_call_log_path).toBe('/tmp/tool-calls.jsonl')
-    expect(result.runtime_lens.clock_groups[0]?.group_type).toBe('provider_attempt')
+    expect(result.runtime_lens.clock_groups[0]?.group_type).toBe('turn')
     expect(result.runtime_lens.clock_groups[0]?.closed).toBe(true)
-    expect(result.runtime_lens.clock_groups[0]?.terminal_events).toEqual(['provider_attempt_finished'])
+    expect(result.runtime_lens.clock_groups[0]?.terminal_events).toEqual(['runtime_completed'])
     expect(result.runtime_lens.gaps.map(gap => gap.code)).toEqual([
-      'clock_provider_attempt_unfinished',
+      'clock_context_injection_missing',
     ])
   })
 
@@ -842,19 +815,13 @@ describe('keeper runtime trace', () => {
           manifest_keeper_turn_ids: [7],
           max_agent_core_turn_count: 4,
           provider_lane_resolved_count: 1,
-          provider_attempt_started_count: 1,
-          provider_attempt_finished_count: 1,
+          runtime_completed_count: 1,
+          runtime_failed_count: 0,
           event_bus_correlated_count: 1,
           memory_injected_count: 1,
           memory_flushed_count: 1,
           receipt_appended_count: 1,
           turn_finished_count: 1,
-	        },
-	        provider_attempts: {
-	          started_count: 1,
-	          finished_count: 1,
-	          terminal_status: 'provider_returned',
-	          attempts: [],
 	        },
 	        event_bus: {
           event_bus_correlated_count: 1,
@@ -882,7 +849,7 @@ describe('keeper runtime trace', () => {
     expect(url).toBe('/api/v1/keepers/keeper%20sangsu/runtime-trace?trace_id=trace+1&turn_id=7&limit=50')
     expect(init.method).toBeUndefined()
 	    expect(result.turn_identity.max_agent_core_turn_count).toBe(4)
-	    expect(result.provider_attempts.terminal_status).toBe('provider_returned')
+	    expect(result.turn_identity.runtime_completed_count).toBe(1)
 	    expect(result.memory.memory_injected_count).toBe(1)
     expect(result.runtime_lens.turn_clock.trace_id).toBe('trace 1')
   })

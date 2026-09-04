@@ -24,12 +24,10 @@ let test_mandatory_clock_refs () =
   let keys = M.mandatory_clock_refs_for_event M.Turn_started in
   Alcotest.(check (list string))
     "Turn_started mandatory keys" [ "edge_id"; "lane" ] keys;
-  let keys2 =
-    M.mandatory_clock_refs_for_event M.Provider_attempt_finished
-  in
+  let keys2 = M.mandatory_clock_refs_for_event M.Checkpoint_saved in
   Alcotest.(check (list string))
-    "Provider_attempt_finished mandatory keys"
-    [ "edge_id"; "lane"; "provider_attempt_id"; "elapsed_ms" ]
+    "Checkpoint_saved mandatory keys"
+    [ "edge_id"; "lane"; "checkpoint_id" ]
     keys2
 
 let test_validate_completeness_pass () =
@@ -43,15 +41,15 @@ let test_validate_completeness_pass () =
 
 let test_validate_completeness_fail_missing_key () =
   let m =
-    manifest ~event:M.Provider_attempt_finished
+    manifest ~event:M.Checkpoint_saved
       ~decision:(clock_refs [ ("edge_id", `String "e1"); ("lane", `String "L1") ])
       ~links:(links ())
   in
   match M.validate_manifest_completeness m with
-  | Ok () -> Alcotest.fail "expected failure for missing provider_attempt_id"
+  | Ok () -> Alcotest.fail "expected failure for missing checkpoint_id"
   | Error msg ->
     Alcotest.(check string) "error mentions missing keys"
-      "manifest for provider_attempt_finished missing mandatory clock_refs keys: [provider_attempt_id, elapsed_ms]"
+      "manifest for checkpoint_saved missing mandatory clock_refs keys: [checkpoint_id]"
       msg
 
 let test_is_finished_turn () =

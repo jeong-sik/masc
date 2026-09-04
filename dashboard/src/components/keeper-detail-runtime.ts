@@ -981,14 +981,6 @@ function formatSourceClock(axis: KeeperRuntimeLensSourceClockAxis): string {
   return entries.map(([clock, count]) => `${clock}:${count}`).join(' · ')
 }
 
-function runtimeTraceProviderTerminal(trace: KeeperRuntimeTraceResponse): string {
-  const provider = trace.provider_attempts
-  const status = compactToken(provider.terminal_status, 'unknown')
-  return provider.terminal_exception_kind
-    ? `${status} / ${provider.terminal_exception_kind}`
-    : status
-}
-
 function runtimeTraceEventIds(trace: KeeperRuntimeTraceResponse): string {
   const eventBus = trace.event_bus
   return [
@@ -1094,7 +1086,6 @@ function clockEdgeTitle(edge: KeeperRuntimeLensClockEdge): string {
     `trace ${edge.trace_id || '-'}`,
     `keeper ${edge.keeper_turn_id ?? '-'}`,
     `agentCore ${edge.agent_core_turn_count ?? '-'}`,
-    edge.provider_attempt_id ? `provider ${edge.provider_attempt_id}` : null,
     edge.tool_batch_id ? `tool ${edge.tool_batch_id}` : null,
     edge.checkpoint_id ? `checkpoint ${edge.checkpoint_id}` : null,
     edge.event_bus_correlation_id ? `corr ${edge.event_bus_correlation_id}` : null,
@@ -1332,7 +1323,6 @@ export function RuntimeLensSection({
     lens.swimlanes.keeper,
     lens.swimlanes.masc_policy_runtime,
     lens.swimlanes.agent_core_agent,
-    lens.swimlanes.provider,
     lens.swimlanes.tool_runtime,
     lens.swimlanes.memory_context,
   ]
@@ -1378,8 +1368,10 @@ export function RuntimeLensSection({
           value=${artifactEvidenceLabel(artifacts.tool_call_logs)}
           title=${artifactEvidenceTitle(artifacts.tool_call_logs)}
         />
-        <${SignalRow} label="provider attempts" value=${`${trace.provider_attempts.started_count}/${trace.provider_attempts.finished_count}`} />
-        <${SignalRow} label="provider terminal" value=${runtimeTraceProviderTerminal(trace)} />
+        <${SignalRow}
+          label="runtime dispatch"
+          value=${`completed ${trace.turn_identity.runtime_completed_count} / failed ${trace.turn_identity.runtime_failed_count}`}
+        />
         <${SignalRow} label="clock edges" value=${clockEdges.length} />
         <${SignalRow} label="clock groups" value=${clockGroups.length} />
         <${SignalRow} label="event ids" value=${runtimeTraceEventIds(trace)} />

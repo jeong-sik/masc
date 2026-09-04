@@ -255,46 +255,20 @@ let unique_present_paths paths =
        | _ -> None)
   |> Json_util.dedupe_keep_order
 
-let provider_attempt_row_json (row : Keeper_runtime_manifest.t) =
-  let decision_string key = Json_util.get_string row.decision key in
-  `Assoc
-    [
-      ("ts", `String row.ts);
-      ("event", `String (Keeper_runtime_manifest.event_kind_to_string row.event));
-      ("runtime_id", Json_util.string_opt_to_json row.runtime_id);
-      ("model_source", Json_util.string_opt_to_json (decision_string "model_source"));
-      ( "resolved_model_source",
-        Json_util.string_opt_to_json (decision_string "resolved_model_source") );
-      ("capability_source", Json_util.string_opt_to_json (decision_string "capability_source"));
-      ("fallback_authority", Json_util.string_opt_to_json (decision_string "fallback_authority"));
-      ( "provider_source_runtime",
-        Json_util.string_opt_to_json (decision_string "provider_source_runtime") );
-      ("status", `String row.status);
-      ("error", Json_util.string_opt_to_json (decision_string "error"));
-      ( "exception_kind",
-        Json_util.string_opt_to_json (decision_string "exception_kind") );
-    ]
-
 let string_contains_substring = String_util.contains_substring
 
-let runtime_trace_keeps_provider_attempt_provenance_key = function
+let runtime_trace_keeps_provider_provenance_key = function
   | "model_source"
   | "resolved_model_source"
   | "capability_source"
   | "fallback_authority"
-  | "provider_source_runtime"
-  | "terminal_model_source"
-  | "terminal_resolved_model_source"
-  | "terminal_capability_source"
-  | "terminal_fallback_authority"
-  | "terminal_provider_source_runtime"
-  ->
+  | "provider_source_runtime" ->
     true
   | _ -> false
 
 let runtime_trace_redacts_provider_model_key key =
   let key = String.lowercase_ascii key in
-  (not (runtime_trace_keeps_provider_attempt_provenance_key key))
+  (not (runtime_trace_keeps_provider_provenance_key key))
   &&
   (string_contains_substring key "provider"
    || string_contains_substring key "model")

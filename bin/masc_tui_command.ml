@@ -352,3 +352,118 @@ let resolve_keeper_name ~names typed =
 let task_message ~task_id ~title ~body =
   if String.equal (String.trim body) "" then Printf.sprintf "[%s] %s" task_id title
   else Printf.sprintf "[%s] %s\n%s" task_id title body
+
+let rec make_valid_utf_8 s =
+  if String.equal s "" || String.is_valid_utf_8 s then s
+  else make_valid_utf_8 (String.sub s 0 (String.length s - 1))
+
+let longest_common_prefix = function
+  | [] -> ""
+  | [ s ] -> s
+  | s :: rest ->
+      let common_prefix a b =
+        let max_len = min (String.length a) (String.length b) in
+        let rec loop i =
+          if i < max_len && a.[i] = b.[i] then loop (i + 1) else i
+        in
+        make_valid_utf_8 (String.sub a 0 (loop 0))
+      in
+      List.fold_left common_prefix s rest
+
+let cycle_next ~items current =
+  match items with
+  | [] -> None
+  | [ single ] -> Some single
+  | _ -> (
+      match List.find_index (fun s -> String.equal s current) items with
+      | Some idx ->
+          let next_idx = (idx + 1) mod List.length items in
+          Some (List.nth items next_idx)
+      | None -> Some (List.hd items))
+
+let known_sub_arguments ~keeper_names word =
+  match word with
+  | "thinking" -> [ "hidden"; "folded"; "full" ]
+  | "tools" -> [ "compact"; "full" ]
+  | "preset" -> [ "save"; "restore" ]
+  | "keeper" -> keeper_names
+  | _ -> []
+
+let with_body body text =
+  if String.equal body "" then text else text ^ "\n" ^ body
+
+let autocomplete ?(keeper_names = []) text =
+  if String.length text = 0 || text.[0] <> slash then None
+  else
+    let first, body = split_first_line text in
+    let line = String.sub first 1 (String.length first - 1) in
+    if not (String.contains line ' ') then begin
+      (* Command word completion *)
+      let candidates =
+        if String.equal line "" then catalog
+        else
+          List.filter
+            (fun entry -> String.starts_with ~prefix:line entry.word)
+            catalog
+      in
+      match candidates with
+      | [] -> None
+      | [ single ] ->
+          if String.equal line single.word then
+            let suffix = if String.equal single.args "" then "" else " " in
+            if String.equal suffix "" then None
+            else Some (with_body body ("/" ^ single.word ^ suffix))
+          else
+            let suffix = if String.equal single.args "" then "" else " " in
+            Some (with_body body ("/" ^ single.word ^ suffix))
+      | entries ->
+          let words = List.map (fun e -> e.word) entries in
+          let lcp = longest_common_prefix words in
+          if String.length lcp > String.length line then
+            Some (with_body body ("/" ^ lcp))
+          else
+            (match cycle_next ~items:words line with
+             | Some next_word ->
+                 let next_entry =
+                   List.find (fun e -> String.equal e.word next_word) entries
+                 in
+                 let suffix = if String.equal next_entry.args "" then "" else " " in
+                 Some (with_body body ("/" ^ next_word ^ suffix))
+             | None -> None)
+    end else begin
+      (* Sub-argument completion on first line *)
+      let word_len = String.index line ' ' in
+      let word = String.sub line 0 word_len in
+      let after_space =
+        String.sub line (word_len + 1) (String.length line - word_len - 1)
+      in
+      let options = known_sub_arguments ~keeper_names word in
+      if options = [] then None
+      else if String.equal (String.trim after_space) "" then
+        Some (with_body body ("/" ^ word ^ " " ^ List.hd options))
+      else if String.ends_with ~suffix:" " after_space then
+        None
+      else
+        let rest = String.trim after_space in
+        let matches =
+          List.filter
+            (fun opt -> String.starts_with ~prefix:rest opt)
+            options
+        in
+        match matches with
+        | [] -> None
+        | [ single ] when not (String.equal rest single) ->
+            Some (with_body body ("/" ^ word ^ " " ^ single))
+        | [ single ] ->
+            (match cycle_next ~items:options single with
+             | Some next_opt -> Some (with_body body ("/" ^ word ^ " " ^ next_opt))
+             | None -> None)
+        | many ->
+            let lcp = longest_common_prefix many in
+            if String.length lcp > String.length rest then
+              Some (with_body body ("/" ^ word ^ " " ^ lcp))
+            else
+              (match cycle_next ~items:many rest with
+               | Some next_opt -> Some (with_body body ("/" ^ word ^ " " ^ next_opt))
+               | None -> None)
+    end

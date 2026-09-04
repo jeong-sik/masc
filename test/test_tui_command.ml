@@ -521,6 +521,74 @@ let test_the_line_is_the_spans_joined () =
         joined)
     [ ""; "hello"; "/"; "/t"; "/th"; "/thinking"; "/task a b"; "/zork" ]
 
+let test_autocomplete_plain_text_is_ignored () =
+  check (option string) "plain text" None (Command.autocomplete "hello");
+  check (option string) "empty string" None (Command.autocomplete "");
+  check (option string) "slash mid sentence" None (Command.autocomplete "look at a/b")
+
+let test_autocomplete_unique_prefix () =
+  check (option string) "/th -> /thinking " (Some "/thinking ") (Command.autocomplete "/th");
+  check (option string) "/ta -> /task " (Some "/task ") (Command.autocomplete "/ta");
+  check (option string) "/se -> /settings" (Some "/settings") (Command.autocomplete "/se");
+  check (option string) "/m -> /memory" (Some "/memory") (Command.autocomplete "/m");
+  check (option string) "/c -> /context" (Some "/context") (Command.autocomplete "/c");
+  check (option string) "/h -> /help" (Some "/help") (Command.autocomplete "/h");
+  check (option string) "/zork -> None" None (Command.autocomplete "/zork")
+
+let test_autocomplete_cycles_ambiguous_prefix () =
+  check (option string) "/t first candidate" (Some "/task ") (Command.autocomplete "/t");
+  check (option string) "/to -> /tools " (Some "/tools ") (Command.autocomplete "/to");
+  check (option string) "/st -> /steer " (Some "/steer ") (Command.autocomplete "/st")
+
+let test_autocomplete_exact_command_is_stable () =
+  check (option string) "/settings stays" None (Command.autocomplete "/settings");
+  check (option string) "/help stays" None (Command.autocomplete "/help");
+  check (option string) "/memory stays" None (Command.autocomplete "/memory");
+  check (option string) "/task adds space" (Some "/task ") (Command.autocomplete "/task");
+  check (option string) "/task with space stays" None (Command.autocomplete "/task ")
+
+let test_autocomplete_preserves_multiline_body () =
+  check (option string) "multiline body preserved on command"
+    (Some "/task \nfirst line of body\nsecond line of body")
+    (Command.autocomplete "/ta\nfirst line of body\nsecond line of body");
+  check (option string) "multiline body preserved on subargument"
+    (Some "/thinking hidden\nnotes here")
+    (Command.autocomplete "/thinking h\nnotes here")
+
+let test_autocomplete_utf8_lcp_safety () =
+  let keeper_names = [ "가"; "각"; "가나다"; "가나락" ] in
+  (match Command.autocomplete ~keeper_names "/keeper " with
+   | Some res -> check bool "result is valid utf-8" true (String.is_valid_utf_8 res)
+   | None -> ());
+  (match Command.autocomplete ~keeper_names "/keeper 가" with
+   | Some res -> check bool "completed hangul prefix is valid utf-8" true (String.is_valid_utf_8 res)
+   | None -> ());
+  let keepers_shared = [ "가나다"; "가나락" ] in
+  check (option string) "LCP stops at valid utf8 character boundary"
+    (Some "/keeper 가나")
+    (Command.autocomplete ~keeper_names:keepers_shared "/keeper 가")
+
+let test_autocomplete_trailing_space_subargument_not_mutated () =
+  check (option string) "trailing space on finished arg is preserved"
+    None (Command.autocomplete "/preset save ")
+
+let test_autocomplete_sub_arguments () =
+  check (option string) "/thinking h -> hidden" (Some "/thinking hidden")
+    (Command.autocomplete "/thinking h");
+  check (option string) "/thinking folded -> full" (Some "/thinking full")
+    (Command.autocomplete "/thinking folded");
+  check (option string) "/tools c -> compact" (Some "/tools compact")
+    (Command.autocomplete "/tools c");
+  check (option string) "/preset s -> save" (Some "/preset save")
+    (Command.autocomplete "/preset s");
+  let keeper_names = [ "sol-xhigh"; "roger"; "librarian" ] in
+  check (option string) "/keeper s -> sol-xhigh" (Some "/keeper sol-xhigh")
+    (Command.autocomplete ~keeper_names "/keeper s");
+  check (option string) "/keeper r -> roger" (Some "/keeper roger")
+    (Command.autocomplete ~keeper_names "/keeper r");
+  check (option string) "empty keeper list yields none" None
+    (Command.autocomplete ~keeper_names:[] "/keeper s")
+
 (* The cancel contract: exit-class on masc_transition, so the one typed
    reason must arrive as both [reason] and the required non-empty
    [handoff_context.summary]. A builder that dropped the summary would pass
@@ -607,6 +675,22 @@ let () =
             test_the_bare_slash_row_is_bounded_by_its_width
         ; test_case "the line is the spans joined" `Quick
             test_the_line_is_the_spans_joined
+        ; test_case "plain text is ignored by autocomplete" `Quick
+            test_autocomplete_plain_text_is_ignored
+        ; test_case "autocomplete unique prefix" `Quick
+            test_autocomplete_unique_prefix
+        ; test_case "autocomplete cycles ambiguous prefix" `Quick
+            test_autocomplete_cycles_ambiguous_prefix
+        ; test_case "autocomplete exact command is stable" `Quick
+            test_autocomplete_exact_command_is_stable
+        ; test_case "autocomplete preserves multiline body" `Quick
+            test_autocomplete_preserves_multiline_body
+        ; test_case "autocomplete utf8 lcp safety" `Quick
+            test_autocomplete_utf8_lcp_safety
+        ; test_case "autocomplete trailing space subargument not mutated" `Quick
+            test_autocomplete_trailing_space_subargument_not_mutated
+        ; test_case "autocomplete sub arguments" `Quick
+            test_autocomplete_sub_arguments
         ] )
     ; ( "tools/call"
       , [ test_case "cancel arguments carry the reason as summary" `Quick

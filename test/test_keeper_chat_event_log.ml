@@ -335,6 +335,40 @@ let test_journal_path_sanitizes_segments () =
        "keeper_chat_events")
     (Filename.dirname (Filename.dirname path))
 
+(* RFC-0412 stage 1 journals hold full reasoning text, so they age out with
+   the shared JSONL prune: flat <operation_id>.jsonl under
+   keeper_chat_events/<keeper>/, pruned by mtime like trajectories/. *)
+let test_journal_files_age_out_with_shared_prune () =
+  let base_dir = temp_base_path "keeper-chat-event-log-prune" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let masc_root = Common.masc_dir_from_base_path ~base_path:base_dir in
+       let keeper_dir =
+         Filename.concat (Filename.concat masc_root "keeper_chat_events") "keeper-a"
+       in
+       Fs_compat.mkdir_p keeper_dir;
+       let write path =
+         let oc = open_out path in
+         output_string oc "{\"v\":1}\n";
+         close_out oc
+       in
+       let old_file = Filename.concat keeper_dir "old-op.jsonl" in
+       let fresh_file = Filename.concat keeper_dir "fresh-op.jsonl" in
+       write old_file;
+       write fresh_file;
+       let old_ts = Unix.gettimeofday () -. (40. *. 86400.) in
+       Unix.utimes old_file old_ts old_ts;
+       let n =
+         Server_runtime_startup_maintenance.prune_shared_jsonl_stores
+           ~prune_dir:(fun _ -> 0)
+           ~days:30
+           ~masc_root
+       in
+       Alcotest.(check bool) "old journal pruned" false (Sys.file_exists old_file);
+       Alcotest.(check bool) "fresh journal kept" true (Sys.file_exists fresh_file);
+       Alcotest.(check int) "prune count includes the old journal" 1 n)
+
 let test_on_publish_hook_receives_monotonic_seq () =
   let seen = ref [] in
   let bus =
@@ -654,6 +688,12 @@ let () =
             "path sanitizes both segments"
             `Quick
             test_journal_path_sanitizes_segments
+        ] )
+    ; ( "retention"
+      , [ Alcotest.test_case
+            "journals age out with the shared prune"
+            `Quick
+            test_journal_files_age_out_with_shared_prune
         ] )
     ; ( "bus hook"
       , [ Alcotest.test_case

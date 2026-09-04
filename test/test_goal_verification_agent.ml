@@ -77,7 +77,7 @@ let with_verification_persistence f =
   let previous = Atomic.get Workspace_hooks.verification_submit_request_fn in
   Atomic.set
     Workspace_hooks.verification_submit_request_fn
-    (fun _config ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ -> Ok ());
+    (fun _config ~task:_ ~assignee:_ ~verification_id:_ ~claim:_ -> Ok ());
   Fun.protect
     ~finally:(fun () ->
       Atomic.set Workspace_hooks.verification_submit_request_fn previous)

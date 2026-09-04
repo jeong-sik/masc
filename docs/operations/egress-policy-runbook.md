@@ -57,11 +57,34 @@ it is worse than no allowlist, because it reads as protection.
 
 ### What a rule admits
 
+A rule is a host and the port it may be reached on. An unqualified rule
+means port 443, so an allowlist of ordinary web hosts needs no `:443` after
+each entry; a service on another port says so.
+
 | Rule | Admits | Refuses |
 |---|---|---|
-| `github.com` | `github.com`, `GitHub.COM`, `github.com.` | `api.github.com` |
-| `*.github.com` | `api.github.com`, `a.b.github.com` | `github.com`, `notgithub.com` |
-| `140.82.121.6` | that address | any name |
+| `github.com` | `github.com:443`, `GitHub.COM:443`, `github.com.:443` | `api.github.com`, `github.com:80` |
+| `*.github.com` | `api.github.com:443`, `a.b.github.com:443` | `github.com:443`, `notgithub.com:443` |
+| `registry.internal:8443` | that host on 8443 | the same host on 443 |
+| `140.82.121.6` | that address on 443 | any name |
+
+A host may be named twice to permit two ports:
+
+```toml
+allow = ["registry.internal", "registry.internal:8443"]
+```
+
+A host the allowlist names, reached on a port it does not, is reported as
+that and not as an unlisted host, and the refusal says which ports would
+have worked:
+
+```
+registry.internal is allowed on 8443, not on port 443
+```
+
+The two are different mistakes fixed in different places, and reporting the
+first as the second sends an operator looking for a rule they already
+wrote.
 
 A wildcard is strictly below its apex, and matching is on parsed labels, so
 `notgithub.com` cannot ride `*.github.com` the way a string-suffix check
@@ -125,10 +148,11 @@ A keeper's own account of where it went is not evidence. These events are.
 
 ## Limits worth stating
 
-- **CONNECT and port 443 only.** A proxy that also spoke plain HTTP would
-  have to parse a body to say honestly what it forwarded, and an arbitrary
-  port turns the lane into a generic tunnel that an allowlist of hostnames
-  does not describe. Another port is a decision to take deliberately.
+- **CONNECT only.** A proxy that also spoke plain HTTP would have to parse a
+  body to say honestly what it forwarded; this one records an authority,
+  which is the whole of what it can truthfully claim to know. The port is not
+  fixed, but it is permitted per rule rather than left open, so the lane
+  never becomes a generic tunnel by omission.
 - **The proxy sees the name, not the payload.** TLS is tunnelled, not
   terminated. What a keeper sent to an allowed host is not recorded here.
 - **The allowlist is fixed for the life of a listener.** A tunnel outliving

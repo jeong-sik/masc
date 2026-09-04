@@ -13,10 +13,18 @@ type refusal =
       (** The authority is not a host this proxy will resolve. A destination
           a resolver could read differently than the matcher does is refused
           here rather than admitted and resolved later. *)
-  | Port_not_allowed of int
-      (** The port is outside the set this lane carries. *)
+  | Port_not_allowed of
+      { host : string
+      ; port : int
+      ; allowed : int list
+      }
+      (** The host is in the allowlist and this port is not. Kept apart from
+          {!Not_in_allowlist} and carrying the ports that are permitted,
+          because this refusal is an operator's rule missing a port and
+          reporting it as an unlisted host sends them looking for the wrong
+          mistake. *)
   | Not_in_allowlist of { host : string }
-      (** The destination parsed and no rule admits it. [host] is the
+      (** The destination parsed and no rule names it at all. [host] is the
           normalized spelling, safe to record. *)
 
 val refusal_to_string : refusal -> string
@@ -30,21 +38,19 @@ type decision =
       }
   | Refused of refusal
 
-val allowed_ports : int list
-(** The ports a CONNECT may name: 443 only.
-
-    CONNECT to port 80 would carry plaintext HTTP the proxy would have to
-    parse to stay honest about what it forwarded, and CONNECT to an
-    arbitrary port turns the lane into a generic tunnel that an allowlist of
-    hostnames does not describe. A keeper that needs another port is a
-    decision to take deliberately, not a default. *)
-
 val decide : rules:Egress_host.rule list -> request_line:string -> decision
 (** Judge one request line, e.g. [{|CONNECT api.github.com:443 HTTP/1.1|}].
 
-    The authority is split on the last colon so that a host containing one
-    cannot smuggle a port past the split -- though such a host is refused by
-    {!Egress_host.parse} anyway, which is the point of doing both. *)
+    The port is judged by the rule that names the host rather than against a
+    constant. An allowlist of destinations has to be able to say which port
+    a destination is reached on: pinning one meant an operator with a service
+    on 8443 could not use the lane at all, and the refusal read as permanent
+    policy rather than as a missing feature.
+
+    The authority is split by {!Egress_host.rule_of_string}'s own splitter,
+    so one place decides which bytes are the host. A second splitter here
+    could disagree with that one, and a disagreement about that boundary is
+    what an allowlist bypass is. *)
 
 val response_of_decision : decision -> string
 (** The bytes written back: [200 Connection Established] for an admitted

@@ -1314,10 +1314,12 @@ let test_quiet_leave_leaves_without_touching_the_turn () =
       ~binding_name:"handle_message_key"
       ~callee:"leave_keeper_message"
   in
-  (* Once for Esc, once for the empty-draft Q. *)
-  if leaves < 2 then
+  (* Exactly once for Esc, exactly once for the empty-draft Q: the count is
+     the invariant, so a third leave path inside this binding fails the pin
+     rather than passing under the stated pair. *)
+  if leaves <> 2 then
     failf
-      "the quiet leave must reach leave_keeper_message beside Esc; observed \
+      "Esc and the quiet Q are the two leaves of the chat surface; observed \
        %d call(s)"
       leaves;
   let interrupts =

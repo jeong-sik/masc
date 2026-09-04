@@ -1074,11 +1074,7 @@ let apply_tool_result t ~(occurrence : Live.tool_occurrence) ~execution_id =
             "KEEPER_TOOL_RESULT_READY occurrence conflicted during update"))
 ;;
 
-let rec apply ~now t (delta : Live.delta) =
-  bump t;
-  apply_delta ~now t delta
-
-and apply_delta ~now t (delta : Live.delta) =
+let apply_delta ~now t (delta : Live.delta) =
   match delta with
   | Live.Run_started -> (
       match t.phase with
@@ -1263,6 +1259,10 @@ and apply_delta ~now t (delta : Live.delta) =
         Some { reply_text = reply; reply_outcome = turn_outcome; reply_turn_ref = turn_ref }
   | Live.Undecodable detail ->
       note_unreadable t detail
+
+let apply ~now t delta =
+  bump t;
+  apply_delta ~now t delta
 
 (* The same fold the live path runs one delta at a time, over a whole log. A
    transcript rebuilt from a log is equal to one that grew with it -- pinned

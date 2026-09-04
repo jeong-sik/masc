@@ -105,6 +105,8 @@ let unavailable code message =
   { status = `Service_unavailable; code; message }
 ;;
 
+let gone code message = { status = `Gone; code; message }
+
 let api_error_of_command_error error =
   let message = Registry.command_error_to_string error in
   match error with
@@ -189,7 +191,24 @@ let rec take_at_most n acc = function
   | entry :: rest -> take_at_most (n - 1) (entry :: acc) rest
 ;;
 
-let chat_events_page ~operation_id ~since_seq ~limit entries =
+(* What a missing journal means depends on what the store holds for the
+   operation. Queued or Running: nothing journaled yet, so an empty page is
+   the truth. Terminal: the journal was written and the retention sweep has
+   since removed it (terminal rows themselves are never deleted), so an empty
+   page would draw an empty conversation with no error; the caller is told
+   the log is gone instead. No row at all: an operation nobody submitted. *)
+type missing_journal =
+  | Nothing_journaled_yet
+  | Journal_pruned
+  | Unknown_operation
+
+let classify_missing_journal = function
+  | None -> Unknown_operation
+  | Some state ->
+    if Operation.is_terminal state then Journal_pruned else Nothing_journaled_yet
+;;
+
+let chat_events_page ~operation_id ~since_seq ~limit ~redact_json entries =
   let page, rest =
     entries
     |> List.filter (fun (entry : Keeper_chat_event_log.journaled_event) ->
@@ -204,7 +223,11 @@ let chat_events_page ~operation_id ~since_seq ~limit entries =
   `Assoc
     [ "schema", `String "masc.keeper_chat_events.v2"
     ; "operation_id", `String operation_id
-    ; "events", `List (List.map Keeper_chat_event_log.journaled_event_to_json page)
+    ; ( "events"
+      , `List
+          (List.map
+             (fun entry -> redact_json (Keeper_chat_event_log.journaled_event_to_json entry))
+             page) )
     ; "has_more", `Bool (not (List.is_empty rest))
     ; "next_since_seq", `Int next_since_seq
     ]
@@ -237,25 +260,45 @@ let handle_get state request reqd = function
            since_seq
            limit
            (List.length entries);
+         (* Same second redaction layer the SSE projection and the reconnect
+            replay apply: the journal is redacted at publish, this covers
+            lines written before that held. *)
+         let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
          Server_auth.respond_json_value_with_cors
            request
            reqd
-           (chat_events_page ~operation_id:operation_id_text ~since_seq ~limit entries)
+           (chat_events_page
+              ~operation_id:operation_id_text
+              ~since_seq
+              ~limit
+              ~redact_json:(Keeper_secret_redaction.redact_json redaction)
+              entries)
        in
        (match Keeper_chat_event_log.read_journal_path_result path with
         | Ok entries -> respond entries
         | Error Keeper_chat_event_log.Journal_missing ->
-          (* No journal is the normal state of a queued operation, so the
-             store decides: an operation it holds has an empty log for now;
-             one it has never seen is unknown. *)
           (match Registry.exact_operation ~base_path ~keeper_name operation_id with
-           | Ok (Some _) -> respond []
-           | Ok None ->
-             respond_error
-               request
-               reqd
-               (unknown_operation
-                  ("unknown Keeper chat operation: " ^ operation_id_text))
+           | Ok operation ->
+             (match
+                classify_missing_journal
+                  (Option.map (fun (operation : Operation.t) -> operation.state) operation)
+              with
+              | Nothing_journaled_yet -> respond []
+              | Journal_pruned ->
+                respond_error
+                  request
+                  reqd
+                  (gone
+                     "journal_pruned"
+                     ("the event journal of Keeper chat operation "
+                      ^ operation_id_text
+                      ^ " has aged out of retention"))
+              | Unknown_operation ->
+                respond_error
+                  request
+                  reqd
+                  (unknown_operation
+                     ("unknown Keeper chat operation: " ^ operation_id_text)))
            | Error error -> respond_error request reqd (api_error_of_command_error error))
         | Error (Journal_unreadable detail) ->
           (* This endpoint exists to serve the log, so the log's failure is

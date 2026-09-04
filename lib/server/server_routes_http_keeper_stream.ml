@@ -1889,6 +1889,7 @@ let process_single_turn ~user_row_origin ~submission
       ~registry:(Keeper_tool_approval_registry.shared ())
       ~late_approvals:(Keeper_late_approval.shared ())
       ~publish:(fun event -> push_worker_event (Stream_chat_event event))
+      ~redact_text
       ~clock
       ~keeper_name:payload.name
       ~timeout_sec:keeper_tool_approval_timeout_sec
@@ -3133,9 +3134,8 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
            the frames the client missed. The sink is already registered, so
            events published meanwhile sit in [buffered] and flush below,
            where [send_live] drops the seqs the replay already wrote. *)
-        (match payload.since_seq with
-         | None -> ()
-         | Some since_seq ->
+        (match payload.since_seq, acceptance.Keeper_owner.existing with
+         | Some since_seq, true ->
            journal_replay_frames
              ~base_path
              ~keeper_name:payload.name
@@ -3143,7 +3143,16 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
              ~since_seq
            |> List.iter (fun (seq, event) ->
              Hashtbl.replace replayed seq ();
-             send_event ~seq:(Some seq) event));
+             send_event ~seq:(Some seq) event)
+         | Some since_seq, false ->
+           (* The owner has never seen this operation, so there is no turn
+              to catch up on. Replaying here would read whatever a previous
+              life of this operation_id left in the journal file. *)
+           Log.Keeper.warn
+             "keeper chat since_seq=%d ignored: operation=%s is a first submit"
+             since_seq
+             operation_id
+         | None, (true | false) -> ());
         let pending =
           Stdlib.Mutex.protect buffered_mu (fun () ->
             accepted := true;

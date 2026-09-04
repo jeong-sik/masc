@@ -9,7 +9,7 @@ type t =
   ; composition_plan_index : Keeper_tool_composition_plan_index.t
   }
 
-let create ~registry ~late_approvals ~publish ~clock ~keeper_name ~timeout_sec =
+let create ~registry ~late_approvals ~publish ~redact_text ~clock ~keeper_name ~timeout_sec =
   let composition_plan_index = Keeper_tool_composition_plan_index.create () in
   let pre_tool_use (event : Agent_core.Hooks.hook_event) =
     match event with
@@ -48,13 +48,17 @@ let create ~registry ~late_approvals ~publish ~clock ~keeper_name ~timeout_sec =
     let tool_call_id =
       Agent_core.Tool_contract.Invocation.tool_use_id request.invocation
     in
+    (* The arguments as sent, so the operator can judge the call -- but
+       redacted first: every other text on this bus was redacted by the
+       stream bridge before publish, and the journal keeps what the bus
+       carries, so a raw secret here would be a raw secret at rest. *)
     publish
       (Keeper_chat_events.Tool_approval_requested
          { tool_call_id
          ; tool_call_name = request.tool_name
-         ; args = Yojson.Safe.to_string request.input
-         ; question = request.prompt.question
-         ; because = request.prompt.because
+         ; args = redact_text (Yojson.Safe.to_string request.input)
+         ; question = redact_text request.prompt.question
+         ; because = redact_text request.prompt.because
          });
     let decision, label =
       (* A remembered late answer settles this call before anyone is asked:

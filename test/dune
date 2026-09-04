@@ -1401,6 +1401,8 @@
   test_voice_runtime_overlay
   test_voice_bridge_error
   test_voice_capture_thresholds
+  test_voice_pcm
+  test_voice_capture_phases
   test_resilience
   test_common
   test_workspace_messages_raw
@@ -1547,6 +1549,8 @@
   test_voice_runtime_overlay
   test_voice_bridge_error
   test_voice_capture_thresholds
+  test_voice_pcm
+  test_voice_capture_phases
   test_resilience
   test_common
   test_workspace_messages_raw

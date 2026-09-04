@@ -88,25 +88,54 @@ speech is infrequent.
 
 ## Capture thresholds
 
-`record_and_transcribe` measures the room at each capture rather than using a
-constant, because a constant was wrong:
+`record_and_transcribe` decides where a recording starts and ends itself. sox
+records; it no longer judges.
+
+It used to. The recorder ran with sox's `silence` filter, which took a fixed
+1% of full scale — about −40 dBFS. Measured on one workstation 2026-09-03:
 
 | | |
 |---|---|
 | Noise floor, pass one | −37.2 dB |
 | Noise floor, pass two, minutes later, same room | −26.3 dB |
-| The constant that used to be the threshold | −40.0 dB (1% of full scale) |
+| The constant that was the threshold | −40.0 dB |
 
-Both floors are above it, so sox's silence filter saw sound continuously:
-recording started at once and the trailing-silence condition never came true.
-Every capture ran to its timeout and handed the transcriber a room.
+Both floors sit above it, so the filter heard sound continuously: recording
+began at once, the trailing-silence condition never came true, and every
+capture ran to its timeout and handed the transcriber a room.
 
-- **Trigger**: floor + 3 dB. Speech sat only 5.0 dB and 6.1 dB above the floor
-  on those two passes — an ordinary sentence at a built-in microphone — so a
-  wider margin swallows the utterance.
-- **Gate**: floor + 2 dB over the whole capture. Below the trigger, so a
-  capture that started on a transient and carries nothing is still refused.
-- Both fall back to the old constant when the calibration probe cannot run.
+Making the threshold follow the room fixed that and exposed the next problem.
+The filter compares **peak**, and peak is an unstable basis — across five
+probes of the same idle room a minute apart it moved 1.9x while RMS moved
+1.2x. A threshold derived from it wandered on a room that had not changed.
+
+And nothing could watch it happen. **With the `silence` filter the output file
+stays at zero bytes until the trigger fires** — not even a WAV header, so
+`sox stat` on it fails with "RIFF header not found". A level meter reading
+that file reported nothing for exactly as long as the operator needed to see
+something.
+
+So the decision moved (2026-09-04). The recorder writes continuously, the
+level is read straight from the growing file ten times a second, and one
+number drives the trigger, the end, and the bar the operator watches.
+
+| | |
+|---|---|
+| Level basis | RMS, over the newest 0.3 s |
+| Poll interval | 0.1 s |
+| Recorded format | 16 kHz, mono, **16-bit signed** — pinned, because sox picks 32-bit when it is not told |
+| Room | the quietest reading during `calibration_seconds`, taken from the capture's own opening |
+
+- **Trigger**: room + `trigger_margin_db`. Speech read 20 dB above the room on
+  the same microphone, so this only has to clear the room.
+- **End**: the level falls back under room + `speech_margin_db` and stays
+  there for `trailing_silence_seconds`. A shorter pause is inside a sentence.
+- **Gate**: a capture in which no reading ever cleared the trigger is not sent.
+- All four are `[voice.capture]` keys in `runtime.toml`.
+
+Stopping the recording is a cancel, and the reap sends `SIGTERM` before
+`SIGKILL`. sox closes the file on `SIGTERM` and writes the length into the
+header — a recording killed at two seconds read back as 1.75 s of valid audio.
 
 ### Why the gate exists
 
@@ -129,13 +158,16 @@ endpoint, a hallucinated transcript is indistinguishable from a real one.
 | Local transcription | 0.85 s |
 
 A level meter therefore reads the recording as it grows rather than opening a
-second capture device. `Voice_bridge.rms_amplitude_of_file` is safe to call on
-a file still being written; sox reports the level of what is there.
+second capture device. `Voice_pcm.tail_rms` reads the samples directly — sox
+cannot answer this, because `stat` on a file whose header carries no length
+fails and `trim -0.4` needs a length that header does not yet have. Reading
+the bytes also keeps a subprocess out of a loop that runs ten times a second;
+it agrees with sox to six decimal places on a finished file.
 
 ## TUI
 
-`Ctrl-Y` in a focused composer row starts a capture; the transcript is appended
-to the draft, not sent. A meter runs in the prompt while it records, because a
+`Ctrl-Y` in a focused composer row starts a capture, and pressing it again
+stops one; the transcript is appended to the draft, not sent. A meter runs in the prompt while it records, because a
 dead input device and a quiet room both end as an empty draft and nothing else
 separates them.
 

@@ -8373,6 +8373,7 @@ let handle_keeper_action state ~base_path ~mailbox action =
    both end as an empty draft. *)
 let launch_voice_capture state ~mailbox ~keeper =
   let capture_dir = Filename.get_temp_dir_name () in
+  let started_at = Unix.gettimeofday () -. 1.0 in
   let meter_glob () =
     (* The capture writes under a name Voice_bridge chooses; the meter finds
        the newest one rather than being told, so the two do not have to agree
@@ -8388,8 +8389,11 @@ let launch_voice_capture state ~mailbox ~keeper =
       |> List.sort (fun a b ->
         compare (Unix.stat b).Unix.st_mtime (Unix.stat a).Unix.st_mtime)
       |> function
-      | newest :: _ -> Some newest
-      | [] -> None
+      (* Only a file this capture could have written. A previous capture's
+         leftovers would otherwise be metered as though they were live, and a
+         microphone that is recording nothing would show a bar. *)
+      | newest :: _ when (Unix.stat newest).Unix.st_mtime >= started_at -> Some newest
+      | _ -> None
     with
     | Sys_error _ | Unix.Unix_error _ -> None
   in
@@ -8433,25 +8437,35 @@ let launch_voice_capture state ~mailbox ~keeper =
   let meter () =
     (* Stops when the capture posts its result: the level is only meaningful
        while something is recording. *)
+    (* Every step but the sleep keeps ticking on failure. The recording does
+       not exist for the first moments — sox has not opened the file, and with
+       a trigger the operator never crosses it may never write one — so a
+       first look that finds nothing is the normal case, not a reason to stop
+       metering for the rest of the capture. Reporting silence then is also
+       the honest answer: nothing has been heard.
+
+       Only a missing clock ends it, because without one there is nothing to
+       wait on and the loop would spin. *)
     let rec tick () =
-      match state.voice_capture with
-      | Some active when String.equal active keeper ->
-        (match Eio_context.get_clock_opt () with
-         | None -> ()
-         | Some clock ->
-           Eio.Time.sleep clock 0.5;
-           (match meter_glob () with
-            | None -> ()
-            | Some file ->
-              (match Masc.Voice_bridge.rms_amplitude_of_file file with
-               | Some amplitude ->
-                 enqueue_async
-                   mailbox
-                   (Voice_level
-                      { keeper; db = Masc.Voice_bridge.db_of_amplitude amplitude })
-               | None -> ()));
-           tick ())
-      | Some _ | None -> ()
+      match state.voice_capture, Eio_context.get_clock_opt () with
+      | Some active, Some clock when String.equal active keeper ->
+        Eio.Time.sleep clock 0.5;
+        let level =
+          match meter_glob () with
+          | None -> None
+          | Some file -> Masc.Voice_bridge.rms_amplitude_of_file file
+        in
+        enqueue_async
+          mailbox
+          (Voice_level
+             { keeper
+             ; db =
+                 (match level with
+                  | Some amplitude -> Masc.Voice_bridge.db_of_amplitude amplitude
+                  | None -> Float.neg_infinity)
+             });
+        tick ()
+      | (Some _ | None), _ -> ()
     in
     tick ()
   in

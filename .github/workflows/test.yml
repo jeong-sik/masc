@@ -17,6 +17,12 @@ name: Test
 # future proposal to move tests into the PR gate; until that proposal
 # exists, the gate is unchanged by design.
 #
+# Known gap: a red scheduled run is silent. GitHub emails only the last
+# editor of the cron line, and a dispatched run notifies only the
+# dispatcher. Until a notification step or tracking automation exists,
+# someone has to look at the Actions tab; that follow-up is tracked under
+# #33008.
+#
 # See: https://github.com/jeong-sik/masc/issues/33008
 
 on:
@@ -38,10 +44,13 @@ jobs:
   test:
     name: dune test
     runs-on: ubuntu-latest
-    # Linking and running the full suite is far slower than @check; the
-    # ci-run-tests observer fails closed at CI_TEST_TIMEOUT_SEC (100 min)
-    # first, so this cap only catches a hung runner.
-    timeout-minutes: 120
+    # This cap counts from job start, not from the Test step. On an opam
+    # cache miss the setup steps can consume 40-75 minutes (compiler
+    # bootstrap plus up to three 20-minute install attempts), so 180 =
+    # worst-case setup (~75 min) + the full 100-minute test budget with
+    # margin. Warm runs are far under it: the cache key is shared with
+    # pr-check.yml, which runs on every PR push and keeps it hot.
+    timeout-minutes: 180
     steps:
       - name: Free disk space
         # Same cleanup as ci.yml: linking the test executables is
@@ -92,13 +101,24 @@ jobs:
           # Public runners give four CPUs; use all four for the build
           # and the suite.
           DUNE_JOBS: "4"
-          # Fail closed at 100 minutes: a suite that cannot finish in
-          # that window is itself a finding, not a hang to wait out.
+          # Three nested deadlines, innermost first:
+          # 1. MASC_TEST_SUITE_DEADLINE (90 min) bounds the suite itself;
+          #    on expiry ci-run-test-suite.sh prints its diagnostics and a
+          #    log tail before failing, so a hang leaves evidence.
+          # 2. CI_TEST_TIMEOUT_SEC (100 min) is the observer's fail-closed
+          #    backstop -- reached only if the suite script cannot enforce
+          #    its own deadline.
+          # 3. timeout-minutes (180, from job start) is the last boundary;
+          #    see the comment above it for the cold-cache arithmetic.
+          MASC_TEST_SUITE_DEADLINE: "5400"
           CI_TEST_TIMEOUT_SEC: "6000"
           CI_TEST_HEARTBEAT_SEC: "30"
-        # scripts/ci-run-tests.sh heartbeats while the suite runs and
-        # exits 124 on timeout, so a hung test fails the job instead of
-        # burning the 120-minute cap.
+        # The runner is scripts/ci-run-test-suite.sh, NOT raw dune test:
+        # nine suites in test/ci-known-failures.txt fail today, so plain
+        # dune test exits 1 on every run -- permanently red, zero signal.
+        # The suite runner compares what fails against that list and fails
+        # only on the delta: an unlisted suite breaking, or a listed suite
+        # newly passing. ci-run-tests.sh wraps it as the heartbeat observer.
         run: |
           set -euo pipefail
-          scripts/ci-run-tests.sh "opam exec -- dune test --root ."
+          scripts/ci-run-tests.sh "scripts/ci-run-test-suite.sh"

@@ -1404,7 +1404,15 @@ let test_spawn_failure_releases_claim () =
          | _ -> fail "transient release evidence was not persisted"))
 ;;
 
-let run_direct_attempt ?hooks ~base_path ~cli_path ~goal ~tools () =
+let run_direct_attempt
+      ?hooks
+      ?(system_prompt = "pre-dispatch fixture system prompt")
+      ~base_path
+      ~cli_path
+      ~goal
+      ~tools
+      ()
+  =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
@@ -1436,7 +1444,14 @@ let run_direct_attempt ?hooks ~base_path ~cli_path ~goal ~tools () =
                     ~base_path
                     ~goal
                     ~goal_blocks:None
-                    ~system_prompt:""
+                    (* Defaults to non-empty text. The keeper mainline refuses a
+                       composed system prompt that comes out blank rather than
+                       omitting [--system-prompt] and running the turn under
+                       the client's built-in prompt, so [""] would make every
+                       attempt below fail on config instead of reaching the
+                       behaviour each one asserts. The text is a don't-care;
+                       only its non-emptiness is load-bearing. *)
+                    ~system_prompt
                     ~tools
                     ~initial_messages:[]
                     ~model_input_projection:None
@@ -1505,7 +1520,6 @@ let test_turn_spawn_failure_is_pre_dispatch_with_tools () =
            ()
          |> check_pre_dispatch_attempt "turn process spawn failure"))
 ;;
-
 let test_unbounded_turn_keeps_subscription_probe_bounded () =
   let turn_config =
     { (Runtime_claude_code.default_config ~cwd:"/tmp") with timeout_s = None }
@@ -1543,6 +1557,41 @@ let repeated_tool () =
       ]
     (fun _ ->
       Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+;;
+
+
+(* A blank composition must not reach [Runtime_claude_code.config.system_prompt]
+   as [None]. [None] means "omit --system-prompt", which since #33072 hands the
+   turn Claude Code's built-in coding-agent prompt while masc's tool set and
+   [--permission-mode dontAsk] stay in place. The refusal is checked on the
+   typed [InvalidConfig] field rather than by substring so a reworded detail
+   does not silently stop proving anything. The CLI fixture is deliberately a
+   working one: the refusal has to land before spawn, so reaching a spawn
+   failure here would mean the check ran too late. *)
+let test_blank_system_prompt_is_refused_not_defaulted () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture repeated_tool_fixture (fun cli_path ->
+         let attempt =
+           run_direct_attempt
+             ~system_prompt:"   "
+             ~base_path
+             ~cli_path
+             ~goal:"REPEAT_TOOL"
+             ~tools:[ repeated_tool () ]
+             ()
+         in
+         match attempt.result with
+         | Error
+             (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; _ }))
+           -> check string "refused field" "system_prompt" field
+         | Error error ->
+           fail
+             ("blank system prompt produced the wrong error: "
+              ^ Agent_core.Error.to_string error)
+         | Ok _ -> fail "blank system prompt was sent as the client default"))
 ;;
 
 let test_repeated_tool_stop_records_pre_result_turn_identity () =
@@ -1739,6 +1788,10 @@ let () =
             "unbounded turn keeps subscription probe bounded"
             `Quick
             test_unbounded_turn_keeps_subscription_probe_bounded
+        ; test_case
+            "blank system prompt is refused not defaulted"
+            `Quick
+            test_blank_system_prompt_is_refused_not_defaulted
         ; test_case
             "repeated tool stop records pre-result turn identity"
             `Quick

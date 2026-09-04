@@ -234,6 +234,8 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
         { keeper = "test-keeper"; frame = Some "TEXT_MESSAGE_CONTENT"; at = 100. }
     ; Observer.Keeper_waiting_inventory_changed
         { keeper = "lane-smith"; queue_kind = Some "board"; at = 100. }
+    ; Observer.Fusion_run_status
+        { keeper = "polisher"; run_id = "kmsg-f04701e2"; status = "running" }
     ]
   in
   let under filter =
@@ -241,7 +243,7 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
   in
   check int "actions keeps the call, the settlement, the chat, and the unknown" 4
     (under Acting.Actions);
-  check int "everything keeps all ten" 10 (under Acting.Everything);
+  check int "everything keeps all eleven" 11 (under Acting.Everything);
   check bool "an event this build was not taught always draws" true
     (Acting.visible Acting.Actions (Observer.Other "brand_new"))
 
@@ -281,6 +283,21 @@ let test_a_stream_frame_draws_its_keeper_and_what_it_was () =
     (Float.equal row.Acting.at 100.);
   check string "detail names the frame" "CUSTOM KEEPER_TOOL_RESULT_READY"
     row.Acting.detail
+
+(* The Fusion surface reloads on this event; the row is only the Everything
+   trace that a deliberation moved. It answers the owning keeper -- not the
+   "server" placeholder -- and the run id keeps its kmsg- prefix, which is
+   what a Ctrl-] jump would look for. *)
+let test_a_fusion_status_row_names_the_owning_keeper () =
+  let row =
+    Acting.row_of_event ~at:100. ~duration_ms:None
+      (Observer.Fusion_run_status
+         { keeper = "polisher"; run_id = "kmsg-f04701e2"; status = "completed" })
+  in
+  check string "keeper" "polisher" row.Acting.keeper;
+  check string "label" "fusion" row.Acting.label;
+  check string "detail carries status and run id"
+    "completed \xc2\xb7 kmsg-f04701e2" row.Acting.detail
 
 (* A type this build was not taught puts its name in the Event column and its
    tool in Detail. [masc:audit_event] carries no tool, and the cell drew the
@@ -525,6 +542,8 @@ let () =
             test_one_reply_does_not_bury_the_actions_it_sits_between
         ; test_case "a stream frame draws its keeper and what it was" `Quick
             test_a_stream_frame_draws_its_keeper_and_what_it_was
+        ; test_case "a fusion status row names the owning keeper" `Quick
+            test_a_fusion_status_row_names_the_owning_keeper
         ; test_case "an untaught event without a tool says only its name" `Quick
             test_an_untaught_event_without_a_tool_says_only_its_name
         ; test_case "an untaught event with a tool still names it" `Quick

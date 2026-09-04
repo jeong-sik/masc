@@ -1969,7 +1969,10 @@ type surface =
    API and permission boundary, but neither is a second top-level
    destination. Verdicts is the far half of Task Review -- one lists what is
    waiting for a ruling and the other what was ruled -- and a top-level tab
-   called "Harness" said neither. *)
+   called "Harness" said neither. Fusion is a ring stop because a
+   deliberation is a destination of its own: the run list is where fusion
+   results are read, and before this stop it was reachable only through the
+   palette or a deep link, so the surface existed but could not be found. *)
 let surface_ring : (surface * string) list =
   [ (Overview, "Overview");
     (Acting, "Activity");
@@ -1978,6 +1981,7 @@ let surface_ring : (surface * string) list =
     (Approvals, "Approvals");
     (Board, "Board");
     (Planning, "Planning");
+    (Fusion, "Fusion");
     (Repositories, "Workspace");
     (Runtime, "Runtime");
     (Config, "Config");
@@ -2000,7 +2004,7 @@ let surface_ring_index (view : surface) =
     match view with
     | Keepers _ -> Keepers Keeper_list
     | Verification | Harness -> Planning
-    | Changes | Connectors | Schedules | Fusion -> Keepers Keeper_list
+    | Changes | Connectors | Schedules -> Keepers Keeper_list
     | Lanes -> Runtime
     | Clients -> Runtime
     | Code -> Repositories
@@ -4947,7 +4951,6 @@ let palette_entries (state : state) =
   @ [ "go Lanes", Palette_goto Lanes ]
   @ [ "go Clients", Palette_goto Clients ]
   @ [ "go Schedules", Palette_goto Schedules ]
-  @ [ "go Fusion", Palette_goto Fusion ]
   @ [ "go Code", Palette_goto Code ]
   @ [ "go Resources", Palette_goto Resources ]
   @ [ "go Tools", Palette_goto Tools ]

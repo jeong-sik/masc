@@ -8862,6 +8862,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          shows the whole history anyway, and the loader is generation-
          guarded, so the flag only remembers that a reload is due. *)
       let open_chat_gained_turn = ref false in
+      (* Same shape as [open_chat_gained_turn]: remember that a fusion run
+         pushed a status, decide once per batch after the loop. The run id
+         rides along so an open detail only refetches when it is the run
+         that moved. *)
+      let fusion_status_seen = ref None in
       List.iter
         (fun item ->
           match item with
@@ -8877,6 +8882,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                       && state.msg_target_keeper_name = Some appended_keeper ->
                    open_chat_gained_turn := true
                | Some _ | None -> ());
+              (match event with
+               | Masc_tui_observer.Fusion_run_status { run_id; _ } ->
+                   fusion_status_seen := Some run_id
+               | _ -> ());
               state.acting <-
                 { Masc_tui_acting.ae_at = received; ae_event = event }
                 :: state.acting;
@@ -8916,7 +8925,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          | Some keeper_name ->
              launch_keeper_history_load ~load_file_changes:false state ~mailbox
                ~keeper_name
-         | None -> ())
+         | None -> ());
+      (* A fusion push reloads only the surface that shows it. The event
+         says a run moved; HTTP says what it is now -- the same
+         trigger/SSOT split the dashboard applies (sse-store). Both loaders
+         are inflight-guarded, so a run that pushes several stage frames
+         collapses to one fetch, and a missed frame is healed by the
+         cadence reload the Fusion view already runs. *)
+      (match (!fusion_status_seen, state.view) with
+       | Some run_id, Fusion ->
+           launch_fusion_runs_load state ~mailbox;
+           (match state.fusion_mode with
+            | Fusion_detail open_id when String.equal run_id open_id ->
+                launch_fusion_detail_load state ~mailbox ~run_id
+            | _ -> ())
+       | _ -> ())
   | Task_dispatched { keeper; task_id; title; body } ->
       add_event state "task" (Printf.sprintf "%s created for %s" task_id keeper);
       (* The jump lands on a clean screen: a modal or roster search opened
@@ -14831,7 +14854,7 @@ and is loaded on demand through keeper_skill.
                      state.fusion_detail_generation <-
                        state.fusion_detail_generation + 1
                  | Fusion_list ->
-                     goto_surface state ~mailbox:async_messages Planning)
+                     goto_surface state ~mailbox:async_messages Overview)
             | Overview ->
                 (* Back out one level: an open task detail closes to the panel,
                    a focused task panel hands j/k back to the event log. *)

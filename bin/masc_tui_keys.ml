@@ -278,7 +278,7 @@ let for_surface = function
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "Y" "copy" ~help:"copy the selected Fusion run reference"
-      ; b Act "Esc" "back" ~help:"leave detail, or return to Planning"
+      ; b Act "Esc" "back" ~help:"leave detail, or return to Overview"
       ]
       @ listing_meta
   | Memory ->
@@ -650,8 +650,8 @@ let help_surfaces : (string * surface) list =
   ; "Planning / Goals", Planning
   ; "Planning / Task Review", Verification
   ; "Planning / Verdicts", Harness
+  ; "Fusion", Fusion
   ; "Keeper detail / Automation", Schedules
-  ; "Keeper detail / Runs", Fusion
   ; "Memory", Memory
   ; "Workspace", Repositories
   ; "Workspace / Code", Code

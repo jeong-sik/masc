@@ -47,18 +47,22 @@ describe('isOfflineStatus', () => {
 
 describe('parseHarnessVerdict', () => {
   // 생산자는 lib/eval_calibration.ml:42 의 verdict_to_string 하나뿐이고,
-  // Approve | Reject of string 을 아래 세 모양으로만 내보낸다.
-  it('생산자가 내보내는 세 모양을 그대로 읽는다', () => {
-    expect(parseHarnessVerdict('approve')).toEqual({ kind: 'approve' })
+  // Approve | Reject of string 을 내보낸다.
+  it('생산자가 내보내는 모양을 그대로 읽는다', () => {
+    expect(parseHarnessVerdict('approve')).toEqual({ kind: 'approve', reason: null })
+    expect(parseHarnessVerdict('approve:good code')).toEqual({ kind: 'approve', reason: 'good code' })
     expect(parseHarnessVerdict('reject')).toEqual({ kind: 'reject', reason: null })
     expect(parseHarnessVerdict('reject:bad code')).toEqual({ kind: 'reject', reason: 'bad code' })
   })
 
   it('사유에 콜론이 들어가도 잘리지 않는다', () => {
+    expect(parseHarnessVerdict('approve:a:b')).toEqual({ kind: 'approve', reason: 'a:b' })
     expect(parseHarnessVerdict('reject:a:b')).toEqual({ kind: 'reject', reason: 'a:b' })
   })
 
   it('빈 사유는 없는 사유다', () => {
+    expect(parseHarnessVerdict('approve:')).toEqual({ kind: 'approve', reason: null })
+    expect(parseHarnessVerdict('approve:   ')).toEqual({ kind: 'approve', reason: null })
     expect(parseHarnessVerdict('reject:')).toEqual({ kind: 'reject', reason: null })
     expect(parseHarnessVerdict('reject:   ')).toEqual({ kind: 'reject', reason: null })
   })
@@ -74,6 +78,11 @@ describe('parseHarnessVerdict', () => {
 })
 
 describe('verdictSummaryText', () => {
+  it('승인 사유가 있으면 사유를, 없으면 approve를 보여준다', () => {
+    expect(verdictSummaryText('approve:good code')).toBe('good code')
+    expect(verdictSummaryText('approve')).toBe('approve')
+  })
+
   it('거절 사유를 보여준다', () => {
     expect(verdictSummaryText('reject:bad code')).toBe('bad code')
   })

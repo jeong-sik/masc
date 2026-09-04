@@ -221,6 +221,11 @@ val publish : t -> keeper_chat_event -> unit
 (** [subscribe t] blocks until an event is available, then returns it. *)
 val subscribe : t -> keeper_chat_event
 
+(** [take_nonblocking t] returns the next queued event, or [None] when the
+    bus is empty. Drain/test support: it bypasses the blocking [subscribe]
+    contract and must not sit on a live read path. *)
+val take_nonblocking : t -> keeper_chat_event option
+
 val api_usage_to_json : Agent_core.Types.api_usage -> Yojson.Safe.t
 
 (** JSON for cumulative mid-stream counters: only reported fields appear,

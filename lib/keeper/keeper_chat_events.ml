@@ -198,6 +198,8 @@ let publish t event =
 
 let subscribe t = Eio.Stream.take t.stream
 
+let take_nonblocking t = Eio.Stream.take_nonblocking t.stream
+
 let json_opt key value =
   match value with
   | None -> []

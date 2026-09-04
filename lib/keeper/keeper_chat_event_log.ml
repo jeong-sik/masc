@@ -583,6 +583,7 @@ let journal_path ~base_dir ~keeper_name ~operation_id =
 let open_journal ?(now = Time_compat.now) ~base_dir ~keeper_name ~operation_id () =
   let path = journal_path ~base_dir ~keeper_name ~operation_id in
   (try Fs_compat.mkdir_p (Filename.dirname path) with
+   | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
    | exn ->
      Log.Keeper.error
        "keeper_chat_event_log: journal directory creation failed path=%s: %s"

@@ -9,4 +9,9 @@
   (setenv MASC_BASE_PATH /tmp/test-tool-help-metadata-rfc-0195
    (setenv MASC_BASE_PATH_INPUT /tmp/test-tool-help-metadata-rfc-0195
     (run %{test}))))
- (libraries masc_test_deps))
+ ; ast_grep and the lib tree so the guard below can read the source: the
+ ; discarded render is invisible from behaviour -- the descriptions come out
+ ; the same either way -- so only the call graph says it stayed gone.
+ (deps
+  (source_tree ../lib))
+ (libraries ast_grep masc_test_deps))

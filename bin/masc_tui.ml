@@ -8789,6 +8789,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         (* Silence re-arms too: an operator who paused longer than the
            trailing-silence window has not left the mode. *)
         rearm_continuous_capture state ~mailbox ~keeper;
+        (* In the transcript, not only the footer. A capture that heard
+           nothing leaves the draft exactly as a capture that was never
+           transcribed does, and the footer line saying which is gone by the
+           time an operator looks away and back. The reason carries the room
+           level and the level speech had to clear, so this row answers "is
+           the microphone working" rather than only reporting that it is
+           not. *)
+        chat_notice state ~keeper_name:(Some keeper) ~role:Message_local
+          ("voice: " ^ reason);
         state.last_action <- Some ("voice: " ^ reason, Unix.gettimeofday ()))
   | Voice_failed { keeper; error } ->
       if state.voice_capture = Some keeper then (
@@ -8799,6 +8808,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            it again, and a loop that re-arms on failure spins. *)
         state.voice_continuous <- None;
         state.voice_floor <- None;
+        chat_notice state ~keeper_name:(Some keeper) ~role:Message_error
+          ("voice failed: " ^ error);
         state.last_action <- Some ("voice failed: " ^ error, Unix.gettimeofday ()))
   | Http_refresh_done results ->
       http_refresh_inflight := false;

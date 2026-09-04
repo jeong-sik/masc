@@ -157,8 +157,16 @@ type stop_request =
 
 type capture_end =
   | Ended_after_speech
-  | Ended_without_speech
-  | Ended_by_operator
+  | Ended_without_speech of float option
+  | Ended_by_operator of float option
+      (** Both carry the room level the capture settled on, as a linear RMS
+          amplitude, or [None] when the recorder never produced a sample to
+          measure.
+
+          It is carried because an empty draft is the same sight whether the
+          microphone heard nothing, the room sat above the threshold, or the
+          transcriber failed. The two levels separate those: "room -38.2 dB,
+          speech had to clear -32.2 dB" is a thing to act on. *)
 
 type level_step =
   | Continue of level_phase

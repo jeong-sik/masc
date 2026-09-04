@@ -1545,6 +1545,7 @@ type async_msg =
      roster cursor moves under a refresh, and a transcript that took several
      seconds would otherwise land on whoever happens to be selected when it
      arrives. *)
+  | Voice_config_loaded of (Yojson.Safe.t, string) result * string option
   | Voice_level of { keeper : string; db : float }
   | Voice_transcribed of { keeper : string; text : string }
   | Voice_silent of { keeper : string; reason : string }
@@ -2175,6 +2176,48 @@ let launch_keeper_tool_approvals_load state ~mailbox =
   | None ->
       enqueue_async mailbox
         (Keeper_tool_approvals_loaded (Error "Eio switch is unavailable"))
+
+(* What voice actually resolved to, plus the microphone the recorder would
+   open.
+
+   The server's answer is the only surface that separates "voice is not
+   configured" from "a config exists and does not parse". runtime.toml shows
+   the second as though it were fine, which is how a six-day outage stayed
+   invisible.
+
+   The input device is read here rather than asked of the server: no server
+   knows it. sox opens whatever CoreAudio calls default, and captures that come
+   back empty are usually a different microphone than the operator assumes. *)
+let launch_voice_config_load state ~mailbox =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let config =
+      match Masc_tui_http.http_get ~host ~port ~path:"/api/v1/voice/config" with
+      | Ok (200, body) -> (
+        match Yojson.Safe.from_string body with
+        | json -> Ok json
+        | exception _ -> Error "voice config did not parse as JSON")
+      | Ok (code, body) ->
+        Error (Printf.sprintf "voice config HTTP %d: %s" code (String.trim body))
+      | Error message -> Error message
+    in
+    let device =
+      (* AUDIODEV wins when set, the way sox reads it; otherwise CoreAudio's
+         default, which is what an unset AUDIODEV means. *)
+      match Sys.getenv_opt "AUDIODEV" with
+      | Some device when String.trim device <> "" -> Some (String.trim device)
+      | Some _ | None -> Masc_tui_audio_device.default_input ()
+    in
+    enqueue_async mailbox (Voice_config_loaded (config, device))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+  | None ->
+    enqueue_async
+      mailbox
+      (Voice_config_loaded (Error "Eio switch is unavailable", None))
+;;
 
 let launch_keeper_turns_load state ~mailbox =
   let host = server_peer_host in
@@ -4543,6 +4586,7 @@ let goto_surface state ~mailbox (destination : surface) =
        | Config_prompts -> launch_prompts_load state ~mailbox
        | Config_presets -> launch_presets_load state ~mailbox
        | Config_params -> launch_runtime_params_load state ~mailbox
+       | Config_voice -> launch_voice_config_load state ~mailbox
        | Config_runtime | Config_models | Config_themes ->
            launch_runtime_config_load state ~mailbox)
    | Resources -> launch_resources_list state ~mailbox
@@ -8680,6 +8724,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
      each is dropped unless that capture is still the one in flight. An
      operator who moved the cursor, or pressed the key again, has said the
      first capture no longer belongs to this draft. *)
+  | Voice_config_loaded (result, device) ->
+      state.voice_input_device <- device;
+      (match result with
+       | Ok json ->
+           state.voice_config <- Some json;
+           state.voice_config_error <- None
+       | Error message ->
+           state.voice_config <- None;
+           state.voice_config_error <- Some message)
   | Voice_level { keeper; db } ->
       if state.voice_capture = Some keeper then state.voice_level_db <- Some db
   | Voice_transcribed { keeper; text } ->
@@ -16484,7 +16537,8 @@ and is loaded on demand through keeper_skill.
               | Config_params -> Config_prompts
               | Config_prompts -> Config_presets
               | Config_presets -> Config_themes
-              | Config_themes -> Config_runtime);
+              | Config_themes -> Config_voice
+              | Config_voice -> Config_runtime);
            state.prompts_cursor <- 0;
            state.config_scroll <- 0;
            state.runtime_config_cursor <- 0;
@@ -16519,6 +16573,10 @@ and is loaded on demand through keeper_skill.
               then launch_runtime_config_load state ~mailbox:async_messages
             | Config_runtime ->
               set_runtime_config_cursor_near state ~direction:1 ~target:0
+            (* Re-read rather than move a cursor: this pane has no rows, and
+               what an operator wants from it after starting a local server is
+               a fresh answer. *)
+            | Config_voice -> launch_voice_config_load state ~mailbox:async_messages
             | Config_themes -> ())
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
@@ -16671,8 +16729,10 @@ and is loaded on demand through keeper_skill.
                     selected model's [models.NAME] line, where the existing
                     $EDITOR path takes over. One write path, not two. *)
                  | Config_models -> handle_config_models_open_source ()
-                 (* The preset pane writes through s and r, never $EDITOR. *)
-                 | Config_presets | Config_themes -> ())
+                 (* The preset pane writes through s and r, never $EDITOR.
+                    The voice pane is a reading; runtime.toml is edited from
+                    the runtime pane, where the file already is. *)
+                 | Config_presets | Config_themes | Config_voice -> ())
             | Tools -> handle_skill_edit ()
             | Schedules -> handle_schedule_modify ()
             | Approvals ->

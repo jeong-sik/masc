@@ -2935,7 +2935,7 @@ let add_routes ~sw ~clock router =
        match Keeper_chat_operations.get_route (Http.Request.path request) with
        | Some route ->
          with_token_permission_auth
-           ~permission:Keeper_chat_operations.read_permission
+           ~permission:(Keeper_chat_operations.get_permission route)
            (fun state _agent_name req reqd ->
              Keeper_chat_operations.handle_get state req reqd route)
            request

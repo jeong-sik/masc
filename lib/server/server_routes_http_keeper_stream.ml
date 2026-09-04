@@ -157,6 +157,11 @@ type keeper_chat_stream_request = {
   channel_workspace_id : string;
   attachments : Keeper_chat_store.attachment list;
   direct_message : Keeper_invocation_contract.direct_message;
+  since_seq : int option;
+      (** A reconnecting client re-POSTs the same [request_id] with the last
+          journal seq it received; the handler replays the journaled suffix
+          before the live sink attaches (RFC-0412 §3.2). [-1] asks for the
+          whole turn. Absent on a first submit. *)
 }
 
 let keeper_chat_stream_error_json message =
@@ -714,6 +719,7 @@ let parse_keeper_chat_stream_request body_str =
           ; "channel_user_name"
           ; "channel_workspace_id"
           ; "attachments"
+          ; "since_seq"
           ]
         in
         let keys = List.map fst fields in
@@ -769,6 +775,15 @@ let parse_keeper_chat_stream_request body_str =
       | None | Some `Null -> Ok None
       | Some (`Assoc _ as context) -> Ok (Some context)
       | Some _ -> Error "surface_context must be an object"
+    in
+    let* since_seq =
+      match List.assoc_opt "since_seq" fields with
+      | None -> Ok None
+      | Some (`Int seq) when seq >= -1 -> Ok (Some seq)
+      | Some _ ->
+        Error
+          "since_seq must be an integer >= -1: the last journal seq already \
+           received, or -1 for the whole turn"
     in
     let* attachments = Keeper_multimodal_input.parse_attachments json in
     let* user_blocks = Keeper_multimodal_input.parse_user_blocks json in
@@ -830,6 +845,7 @@ let parse_keeper_chat_stream_request body_str =
         ; channel_workspace_id
         ; attachments
         ; direct_message
+        ; since_seq
         }
   with Yojson.Json_error e ->
     Error ("invalid json: " ^ e)
@@ -931,6 +947,9 @@ let operation_payload_of_json ~keeper_name ~operation_id ~source ~input =
     ; channel_workspace_id = source.channel_workspace_id
     ; attachments = input.attachments
     ; direct_message
+      (* Rebuilt from the durable operation for execution, not received from
+         a client: there is no reconnect and nothing to replay. *)
+    ; since_seq = None
     }
   in
   Ok { payload; source }
@@ -1870,6 +1889,7 @@ let process_single_turn ~user_row_origin ~submission
       ~registry:(Keeper_tool_approval_registry.shared ())
       ~late_approvals:(Keeper_late_approval.shared ())
       ~publish:(fun event -> push_worker_event (Stream_chat_event event))
+      ~redact_text
       ~clock
       ~keeper_name:payload.name
       ~timeout_sec:keeper_tool_approval_timeout_sec
@@ -2663,10 +2683,15 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                  let redact_text = Keeper_secret_redaction.redact_text redaction in
                  let redact_json = Keeper_secret_redaction.redact_json redaction in
                  let rec loop projection =
-                   let seq, event = Keeper_chat_events.subscribe_with_seq events in
+                   let { Keeper_chat_events.seq; ts; event } =
+                     Keeper_chat_events.subscribe_published events
+                   in
+                   (* The bus stamped [ts] once at publish; the journal line
+                      carries the same value, so a since_seq replay of this
+                      event reproduces this frame byte for byte. *)
                    let projection, projected =
                      Server_keeper_chat_agui_projection.project
-                       ~timestamp:(Time_compat.now ())
+                       ~timestamp:ts
                        ~redact_text
                        ~redact_json
                        projection
@@ -2961,6 +2986,56 @@ let operation_submit_error_code = function
     "store_unavailable"
 ;;
 
+(* Reconnect dedup (RFC-0412 §3.2): a live or buffered event is dropped only
+   when the replay already wrote that exact seq. A "highest seq written" mark
+   would also drop an event whose journal append failed (stage-1 fail-open):
+   with seq 4 absent from the journal and 5 replayed, a mark of 5 loses 4,
+   which only the live sink still holds. Membership loses nothing; such an
+   event may then arrive after a higher replayed seq, which is the price of
+   the fail-open journal, not of the reconnect. Events without a seq never
+   went through the bus and always pass. *)
+let live_event_is_new ~replayed = function
+  | None -> true
+  | Some seq -> not (Hashtbl.mem replayed seq)
+;;
+
+(* Everything a reconnect replays, or nothing. Reads the journal, projects it
+   with the keeper's current redaction snapshot, and keeps every failure
+   inside this function — missing, unreadable, corrupt, or a journaled event
+   the projection refuses (Ag_ui.make_event rejects an empty run_error
+   message) — because the caller runs on the server-lifetime switch, where an
+   escaped exception would take the server down. A missing journal is a
+   queued operation with nothing journaled yet, so it is silent; the rest
+   warn and the stream continues live-only, as before this feature. *)
+let journal_replay_frames ~base_path ~keeper_name ~operation_id ~since_seq =
+  let path =
+    Keeper_chat_event_log.journal_path ~base_dir:base_path ~keeper_name ~operation_id
+  in
+  let skipped detail =
+    Log.Keeper.warn
+      "keeper chat replay skipped operation=%s since_seq=%d: %s"
+      operation_id
+      since_seq
+      detail;
+    []
+  in
+  match Keeper_chat_event_log.read_journal_path_result path with
+  | Error Keeper_chat_event_log.Journal_missing -> []
+  | Error (Journal_unreadable detail | Journal_corrupt detail) -> skipped detail
+  | Ok entries ->
+    (match
+       let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+       Server_keeper_chat_replay.replay
+         ~redact_text:(Keeper_secret_redaction.redact_text redaction)
+         ~redact_json:(Keeper_secret_redaction.redact_json redaction)
+         ~since_seq
+         entries
+     with
+     | frames -> frames
+     | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+     | exception exn -> skipped (Printexc.to_string exn))
+;;
+
 let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payload =
   let origin = get_origin request in
   let headers = keeper_chat_stream_headers origin in
@@ -2999,6 +3074,11 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
       let accepted = ref false in
       let buffered = ref [] in
       let buffered_mu = Stdlib.Mutex.create () in
+      let base_path = (Mcp_server.workspace_config state).base_path in
+      (* Seqs the reconnect replay wrote to this stream. Filled by the handler
+         fiber before [accepted] flips (under [buffered_mu]), read by the live
+         sink only after it observes the flip, so the mutex orders the two. *)
+      let replayed : (int, unit) Hashtbl.t = Hashtbl.create 64 in
       let send_event ~seq event =
         let sent = keeper_stream_send_event ?seq writer mutex closed event in
         if
@@ -3011,6 +3091,9 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
              | Custom -> false
         then finish ()
       in
+      let send_live ~seq event =
+        if live_event_is_new ~replayed seq then send_event ~seq event
+      in
       let sink ~seq event =
         let send_now =
           Stdlib.Mutex.protect buffered_mu (fun () ->
@@ -3020,7 +3103,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
               buffered := (seq, event) :: !buffered;
               false))
         in
-        if send_now then send_event ~seq event
+        if send_now then send_live ~seq event
       in
       let unregister = register_operation_live_sink ~operation_id sink in
       Eio.Switch.on_release stream_sw unregister;
@@ -3045,6 +3128,31 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
         in
         (* See durable acceptance: a closed SSE stream cannot roll back the operation. *)
         ignore (keeper_stream_send_event writer mutex closed event);
+        (* Replay before live attach (RFC-0412 §3.2): the journaled suffix
+           above [since_seq] goes out through the same pure projection the
+           live adapter uses, with the ts the bus stamped, so the bytes equal
+           the frames the client missed. The sink is already registered, so
+           events published meanwhile sit in [buffered] and flush below,
+           where [send_live] drops the seqs the replay already wrote. *)
+        (match payload.since_seq, acceptance.Keeper_owner.existing with
+         | Some since_seq, true ->
+           journal_replay_frames
+             ~base_path
+             ~keeper_name:payload.name
+             ~operation_id
+             ~since_seq
+           |> List.iter (fun (seq, event) ->
+             Hashtbl.replace replayed seq ();
+             send_event ~seq:(Some seq) event)
+         | Some since_seq, false ->
+           (* The owner has never seen this operation, so there is no turn
+              to catch up on. Replaying here would read whatever a previous
+              life of this operation_id left in the journal file. *)
+           Log.Keeper.warn
+             "keeper chat since_seq=%d ignored: operation=%s is a first submit"
+             since_seq
+             operation_id
+         | None, (true | false) -> ());
         let pending =
           Stdlib.Mutex.protect buffered_mu (fun () ->
             accepted := true;
@@ -3052,7 +3160,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
             buffered := [];
             pending)
         in
-        List.iter (fun (seq, event) -> send_event ~seq event) pending;
+        List.iter (fun (seq, event) -> send_live ~seq event) pending;
         if Keeper_owner.Chat_operation.is_terminal operation.state then finish ()
       in
       let submit_result =
@@ -3066,7 +3174,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
           |> Result.map_error (fun detail -> `Input detail)
         in
         Keeper_owner_registry.submit_operation
-          ~base_path:(Mcp_server.workspace_config state).base_path
+          ~base_path
           ~keeper_name:payload.name
           ~operation_id:payload.request_id
           ~source
@@ -3103,6 +3211,8 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
 
 module For_testing = struct
   let parse_request = parse_keeper_chat_stream_request
+  let live_event_is_new = live_event_is_new
+  let journal_replay_frames = journal_replay_frames
   let has_connector_context = has_connector_context
   let has_external_speaker = has_external_speaker
   let message_for_request = message_for_request

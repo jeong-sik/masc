@@ -253,19 +253,12 @@ let rec remove_tree path =
     end
     else Sys.remove path
 
-let scripted_clock timestamps =
-  let remaining = ref timestamps in
-  fun () ->
-    match !remaining with
-    | ts :: rest ->
-      remaining := rest;
-      ts
-    | [] -> failwith "scripted clock exhausted"
-
 let write_journal ~base_dir ~keeper_name ~operation_id events =
-  let clock = scripted_clock (List.mapi (fun i _ -> 100.0 +. (Float.of_int i *. 0.1)) events) in
-  let journal = L.open_journal ~now:clock ~base_dir ~keeper_name ~operation_id () in
-  List.iteri (fun seq event -> L.append journal ~seq event) events
+  let journal = L.open_journal ~base_dir ~keeper_name ~operation_id () in
+  List.iteri
+    (fun seq event ->
+       L.append journal ~seq ~ts:(100.0 +. (Float.of_int seq *. 0.1)) event)
+    events
 
 let write_store_rows ~base_dir ~keeper_name ~delivery_key =
   let require = function

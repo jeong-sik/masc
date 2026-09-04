@@ -157,15 +157,21 @@ type keeper_chat_event =
       ; result_summary : string option
       }
 
-type t =
-  { stream : keeper_chat_event Eio.Stream.t
-  ; on_publish : (seq:int -> keeper_chat_event -> unit) option
-  ; mutable next_seq : int
-  ; read_seq : int ref
+type published =
+  { seq : int
+  ; ts : float
+  ; event : keeper_chat_event
   }
 
-let create ?on_publish () =
-  { stream = Eio.Stream.create 512; on_publish; next_seq = 0; read_seq = ref 0 }
+type t =
+  { stream : published Eio.Stream.t
+  ; on_publish : (seq:int -> ts:float -> keeper_chat_event -> unit) option
+  ; now : unit -> float
+  ; mutable next_seq : int
+  }
+
+let create ?(now = Time_compat.now) ?on_publish () =
+  { stream = Eio.Stream.create 512; on_publish; now; next_seq = 0 }
 ;;
 
 (* [publish] is the single choke point every turn event passes through — route
@@ -182,39 +188,41 @@ let create ?on_publish () =
    only the calling fiber — that keeps sibling fibers responsive but is not
    what makes the ordering safe. *)
 let publish t event =
+  let seq = t.next_seq in
+  t.next_seq <- seq + 1;
+  (* One clock reading per event. The journal line and every live projection
+     of this event carry this same [ts], which is what lets a replay from the
+     journal reproduce the live frames byte for byte. A raising clock falls
+     back to the real one rather than breaking the turn. *)
+  let ts =
+    try t.now () with
+    | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+    | exn ->
+      Log.Keeper.error
+        "keeper_chat_events: clock raised seq=%d: %s; falling back to Time_compat.now"
+        seq
+        (Printexc.to_string exn);
+      Time_compat.now ()
+  in
   (match t.on_publish with
    | None -> ()
    | Some hook ->
-     let seq = t.next_seq in
-     t.next_seq <- seq + 1;
-     (try hook ~seq event with
+     (try hook ~seq ~ts event with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
         Log.Keeper.error
           "keeper_chat_events: on_publish hook failed seq=%d: %s"
           seq
           (Printexc.to_string exn)));
-  Eio.Stream.add t.stream event
+  Eio.Stream.add t.stream { seq; ts; event }
 ;;
 
-let subscribe t = Eio.Stream.take t.stream
+let subscribe t = (Eio.Stream.take t.stream).event
+let subscribe_published t = Eio.Stream.take t.stream
 
-(* [subscribe_with_seq] returns the bus read cursor alongside the event. The
-   cursor is per-bus and advances on every [subscribe_with_seq] call, so it
-   matches the 0-based publish-order seq exactly when exactly one fiber drains
-   the bus through it (the single-consumer contract [subscribe] already
-   assumes). Mixing with [subscribe] or [take_nonblocking] forfeits seq
-   accuracy: events taken through those paths never advance [read_seq], so
-   later [subscribe_with_seq] results under-count by the number of skipped
-   events. *)
-let subscribe_with_seq t =
-  let event = Eio.Stream.take t.stream in
-  let seq = !(t.read_seq) in
-  t.read_seq := seq + 1;
-  (seq, event)
+let take_nonblocking t =
+  Option.map (fun published -> published.event) (Eio.Stream.take_nonblocking t.stream)
 ;;
-
-let take_nonblocking t = Eio.Stream.take_nonblocking t.stream
 
 let json_opt key value =
   match value with

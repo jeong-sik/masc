@@ -230,12 +230,15 @@ let test_journal_round_trip () =
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
-       let clock = scripted_clock [ 1_762_300_000.0; 1_762_300_000.25 ] in
        let journal =
-         L.open_journal ~now:clock ~base_dir ~keeper_name:"golden-keeper" ~operation_id:"op-1" ()
+         L.open_journal ~base_dir ~keeper_name:"golden-keeper" ~operation_id:"op-1" ()
        in
-       L.append journal ~seq:0 (E.Text_delta "hello");
-       L.append journal ~seq:1 (E.Agent_core_thinking_delta { index = 0; delta = "hmm" });
+       L.append journal ~seq:0 ~ts:1_762_300_000.0 (E.Text_delta "hello");
+       L.append
+         journal
+         ~seq:1
+         ~ts:1_762_300_000.25
+         (E.Agent_core_thinking_delta { index = 0; delta = "hmm" });
        let journaled = L.read_journal journal in
        Alcotest.(check int) "two lines" 2 (List.length journaled);
        List.iteri
@@ -268,7 +271,11 @@ let test_journal_append_is_fail_open () =
            ~operation_id:"op"
            ()
        in
-       L.append journal ~seq:0 (E.Text_delta "dropped, logged, live path unaffected");
+       L.append
+         journal
+         ~seq:0
+         ~ts:1_762_300_000.0
+         (E.Text_delta "dropped, logged, live path unaffected");
        Alcotest.(check bool) "append did not raise" true true)
 
 let test_journal_skips_non_finite_floats () =
@@ -276,30 +283,28 @@ let test_journal_skips_non_finite_floats () =
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
-       let clock =
-         scripted_clock
-           [ Float.nan; 1_762_300_000.0; 1_762_300_000.25; 1_762_300_000.5 ]
-       in
        let journal =
-         L.open_journal ~now:clock ~base_dir ~keeper_name:"k" ~operation_id:"op" ()
+         L.open_journal ~base_dir ~keeper_name:"k" ~operation_id:"op" ()
        in
        (* NaN [ts]: skipped. *)
-       L.append journal ~seq:0 (E.Text_delta "nan ts");
+       L.append journal ~seq:0 ~ts:Float.nan (E.Text_delta "nan ts");
        (* NaN [cost_usd]: skipped. *)
        L.append
          journal
          ~seq:1
+         ~ts:1_762_300_000.0
          (E.Agent_core_stream_message_start
             { provider_message_id = "pm-1"
             ; model = "m"
             ; usage = Some { usage_full with Agent_core.Types.cost_usd = Some Float.nan }
             });
        (* Finite everywhere: journaled. *)
-       L.append journal ~seq:2 (E.Text_delta "fine");
+       L.append journal ~seq:2 ~ts:1_762_300_000.25 (E.Text_delta "fine");
        (* NaN [duration_sec]: skipped. *)
        L.append
          journal
          ~seq:3
+         ~ts:1_762_300_000.5
          (E.Audio_block
             { token = "aud-1"
             ; mime = "audio/ogg"
@@ -373,7 +378,7 @@ let test_on_publish_hook_receives_monotonic_seq () =
   let seen = ref [] in
   let bus =
     Masc.Keeper_chat_events.create
-      ~on_publish:(fun ~seq event -> seen := (seq, event) :: !seen)
+      ~on_publish:(fun ~seq ~ts:_ event -> seen := (seq, event) :: !seen)
       ()
   in
   List.iter
@@ -388,20 +393,26 @@ let test_on_publish_hook_receives_monotonic_seq () =
    | E.Text_delta "a" -> ()
    | _ -> Alcotest.fail "first subscribed event mismatch")
 
-let test_subscribe_with_seq_returns_publish_order_seqs () =
-  let bus = Masc.Keeper_chat_events.create () in
+let test_subscribe_published_returns_seq_and_publish_ts () =
+  let bus =
+    Masc.Keeper_chat_events.create ~now:(scripted_clock [ 10.0; 10.5 ]) ()
+  in
   Masc.Keeper_chat_events.publish
     bus
     (E.Run_started { run_id = "run-seq"; thread_id = "keeper:seq" });
   Masc.Keeper_chat_events.publish bus E.Text_message_end;
-  let s0, e0 = Masc.Keeper_chat_events.subscribe_with_seq bus in
-  let s1, e1 = Masc.Keeper_chat_events.subscribe_with_seq bus in
-  Alcotest.(check int) "first seq" 0 s0;
-  Alcotest.(check int) "second seq" 1 s1;
-  (match e0 with
+  let p0 = Masc.Keeper_chat_events.subscribe_published bus in
+  let p1 = Masc.Keeper_chat_events.subscribe_published bus in
+  Alcotest.(check int) "first seq" 0 p0.seq;
+  Alcotest.(check int) "second seq" 1 p1.seq;
+  (* The clock is read once per publish, so the subscriber sees exactly the
+     value the journal hook was given. *)
+  Alcotest.(check (float 0.0)) "first ts is the publish-time reading" 10.0 p0.ts;
+  Alcotest.(check (float 0.0)) "second ts is the next reading" 10.5 p1.ts;
+  (match p0.event with
    | E.Run_started { run_id = "run-seq"; _ } -> ()
    | _ -> Alcotest.fail "first event mismatch");
-  (match e1 with
+  (match p1.event with
    | E.Text_message_end -> ()
    | _ -> Alcotest.fail "second event mismatch")
 
@@ -425,7 +436,7 @@ let test_event_to_sse_frame_carries_journal_seq () =
 let test_on_publish_hook_failure_does_not_break_publish () =
   let bus =
     Masc.Keeper_chat_events.create
-      ~on_publish:(fun ~seq:_ _ -> failwith "journal exploded")
+      ~on_publish:(fun ~seq:_ ~ts:_ _ -> failwith "journal exploded")
       ()
   in
   Masc.Keeper_chat_events.publish bus (E.Text_delta "still delivered");
@@ -438,7 +449,7 @@ let test_full_bus_hook_runs_before_add () =
   let last_seq = ref (-1) in
   let bus =
     Masc.Keeper_chat_events.create
-      ~on_publish:(fun ~seq _ ->
+      ~on_publish:(fun ~seq ~ts:_ _ ->
         incr hook_calls;
         last_seq := seq)
       ()
@@ -634,12 +645,14 @@ let test_golden_replay_matches_live_stream_bytes () =
        (* Live path: fold the in-memory events with scripted injected time. *)
        let live_bytes = projected_sse_bytes (List.combine timestamps golden_events) in
        (* Journal the whole turn through the real bus with a scripted clock. *)
-       let clock = scripted_clock timestamps in
        let journal =
-         L.open_journal ~now:clock ~base_dir ~keeper_name:"golden" ~operation_id:"op-golden" ()
+         L.open_journal ~base_dir ~keeper_name:"golden" ~operation_id:"op-golden" ()
        in
        let bus =
-         Masc.Keeper_chat_events.create ~on_publish:(L.append journal) ()
+         Masc.Keeper_chat_events.create
+           ~now:(scripted_clock timestamps)
+           ~on_publish:(L.append journal)
+           ()
        in
        List.iter (Masc.Keeper_chat_events.publish bus) golden_events;
        (* Replay: decode the journal, re-fold from [initial] with the
@@ -735,9 +748,9 @@ let () =
             `Quick
             test_on_publish_hook_receives_monotonic_seq
         ; Alcotest.test_case
-            "subscribe_with_seq returns publish-order seqs"
+            "subscribe_published returns seq and publish ts"
             `Quick
-            test_subscribe_with_seq_returns_publish_order_seqs
+            test_subscribe_published_returns_seq_and_publish_ts
         ; Alcotest.test_case
             "SSE frame carries the journal seq as id"
             `Quick

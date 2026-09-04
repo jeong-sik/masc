@@ -779,6 +779,49 @@ let test_the_reply_row_defers_to_a_log_that_holds_the_turn () =
       n
 ;;
 
+(* The reconnect resumes from the log, not from the decoder: the watcher
+   opens a fresh decoder per (re)connect and re-POSTs with the log's last
+   seq, so the server replays only what the pane missed. *)
+let test_a_reconnect_resumes_from_the_logs_last_seq () =
+  let resumes =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"post_keeper_chat_watching"
+      ~callee:"Keeper_chat_log.last_seq"
+  in
+  let decoders =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"post_keeper_chat_watching"
+      ~callee:"Keeper_chat_live.create"
+  in
+  if resumes < 1 || decoders < 1 then
+    failf
+      "post_keeper_chat_watching must re-POST from the log's last seq with a \
+       fresh decoder: last_seq reads=%d decoders=%d"
+      resumes decoders
+;;
+
+(* What the server replays after since_seq overlaps what the cut stream had
+   already delivered; the log's seq dedup is what absorbs it. *)
+let test_replayed_frames_up_to_the_last_seq_are_not_added_twice () =
+  let log =
+    Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"req-1"
+      ~started_at:10.0
+  in
+  let add seq delta = Tui_types.turn_log_add ~now:11.0 log ~seq:(Some seq) delta in
+  add 0 Live.Run_started;
+  List.iteri (fun i word -> add (i + 1) (Live.Text word)) [ "a"; "b"; "c"; "d"; "e" ];
+  check int "the cut stream left the log at seq 5" 5 (Log.last_seq log.Tui_types.tl_log);
+  (* The server replays from 3 (a generous since_seq) and continues live. *)
+  List.iter
+    (fun (seq, word) -> add seq (Live.Text word))
+    [ (3, "c"); (4, "d"); (5, "e"); (6, "f"); (7, "g") ];
+  check string "only the frames past the last seq are folded" "abcdefg"
+    (Keeper_chat_transcript.text log.Tui_types.tl_transcript);
+  check int "the log moved to the newest seq" 7 (Log.last_seq log.Tui_types.tl_log)
+;;
+
 let settled_log ~request_id deltas =
   let log =
     Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at:100.0
@@ -1733,6 +1776,10 @@ let () =
             test_live_transcripts_are_kept_per_keeper
         ; test_case "a turn log folds each accepted delta once" `Quick
             test_a_turn_log_folds_each_accepted_delta_once
+        ; test_case "a reconnect resumes from the log's last seq" `Quick
+            test_a_reconnect_resumes_from_the_logs_last_seq
+        ; test_case "replayed frames up to the last seq are not added twice" `Quick
+            test_replayed_frames_up_to_the_last_seq_are_not_added_twice
         ; test_case "settle commits the log instead of copying rows" `Quick
             test_settle_commits_the_log_instead_of_copying_rows
         ; test_case "the reply row defers to a log that holds the turn" `Quick

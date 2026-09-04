@@ -2076,7 +2076,13 @@ let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
    clock costs the live view and nothing else. It is said out loud rather than
    passed over: a pane that quietly stops drawing looks like a keeper that
    stopped working. *)
-let post_keeper_chat_watching ~mailbox ~port request =
+(* [log] is the request's event log: what carries across a reconnect. The
+   decoder does not -- a stream cut right after an [id:] line leaves the seq
+   armed and half a frame buffered, and the next stream opens with the
+   id-less acceptance, which would inherit that seq while the leftover bytes
+   glued onto the next chunk -- so each (re)connect starts a fresh one and
+   asks the server to resume from the log's last seq instead. *)
+let post_keeper_chat_watching ~mailbox ~port ~log request =
   let host = server_peer_host in
   match Eio_context.get_clock_opt () with
   | None ->
@@ -2086,14 +2092,15 @@ let post_keeper_chat_watching ~mailbox ~port request =
            , "sending without a live view: no Eio clock to bound the stream" ));
       Masc_tui_http.post_keeper_chat ~host ~port request
   | Some clock ->
-      let rec watch was_unverified =
+      let rec watch ~since_seq was_unverified =
         let decoder = Keeper_chat_live.create () in
         (* Each idempotent re-subscribe has its own SSE grammar state. The
            visible transcript remains request-owned, but an acceptance event
            at the head of the new stream is not a duplicate in that stream. *)
         let on_chunk chunk =
           (* Each delta travels with the journal seq of the frame that carried
-             it; the request's log deduplicates on it. *)
+             it; the request's log deduplicates on it, which is what absorbs
+             the overlap between the server's replay and its live window. *)
           match Keeper_chat_live.feed decoder chunk with
           | [] -> ()
           | deltas ->
@@ -2102,7 +2109,7 @@ let post_keeper_chat_watching ~mailbox ~port request =
         in
         let result =
           Masc_tui_http.post_keeper_chat_streaming ~clock ~host ~port ~on_chunk
-            request
+            ~since_seq request
         in
         match result with
         | Error error
@@ -2119,12 +2126,14 @@ let post_keeper_chat_watching ~mailbox ~port request =
             (* Re-POSTing the same operation id is the server's idempotent
                subscribe/reconcile path. The in-flight owner stays held until
                one watcher observes terminal truth, so NEXT cannot overlap a
-               turn whose first stream merely disappeared. *)
+               turn whose first stream merely disappeared. The position is
+               read when the re-POST goes out, after the mailbox has folded
+               every frame the cut stream delivered. *)
             Eio.Time.sleep clock 0.5;
-            watch true
+            watch ~since_seq:(Some (Keeper_chat_log.last_seq log)) true
         | (Ok _ | Error _) as terminal -> terminal
       in
-      watch false
+      watch ~since_seq:None false
 
 let inflight_entry_by_request_id state request_id =
   List.find_opt
@@ -5356,7 +5365,10 @@ let launch_keeper_request ?promoted state ~mailbox request =
     if enqueue_dispatch_start mailbox request false
     then begin
       let result =
-        try post_keeper_chat_watching ~mailbox ~port:state.port request with
+        try
+          post_keeper_chat_watching ~mailbox ~port:state.port ~log:log.tl_log
+            request
+        with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Keeper_chat.Transport_error (Printexc.to_string exn))
       in

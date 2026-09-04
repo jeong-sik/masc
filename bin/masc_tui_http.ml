@@ -219,7 +219,10 @@ let post_keeper_chat ~(host : string) ~(port : int)
     json_headers
       (("Accept", "text/event-stream") :: auth_headers ())
   in
-  let body = Masc_tui_keeper_chat_projection.request_body request in
+  (* Whole body, no live view, no position to resume from. *)
+  let body =
+    Masc_tui_keeper_chat_projection.request_body ~since_seq:None request
+  in
   match
     Masc_http_client.post_sync ?clock:(request_clock ())
       ~timeout_sec:keeper_chat_timeout_sec ~url ~headers ~body ()
@@ -249,8 +252,11 @@ let post_keeper_chat ~(host : string) ~(port : int)
     cap. That is strictly more room than the buffered send had: a turn that
     keeps emitting is no longer cut off at all, and one that goes quiet is
     still bounded by the same number. *)
+(* [since_seq] is [None] on the first POST and the log's last seq on a
+   re-POST after the stream was cut, so the server replays only what the pane
+   missed before switching to live frames. *)
 let post_keeper_chat_streaming ~clock ~(host : string) ~(port : int)
-    ~(on_chunk : string -> unit)
+    ~(on_chunk : string -> unit) ~(since_seq : int option)
     (request : Masc_tui_keeper_chat_projection.request) :
     ( Masc_tui_keeper_chat_projection.response
     , Masc_tui_keeper_chat_projection.error )
@@ -259,7 +265,9 @@ let post_keeper_chat_streaming ~clock ~(host : string) ~(port : int)
   let headers =
     json_headers (("Accept", "text/event-stream") :: auth_headers ())
   in
-  let body = Masc_tui_keeper_chat_projection.request_body request in
+  let body =
+    Masc_tui_keeper_chat_projection.request_body ~since_seq request
+  in
   match
     Masc_http_client.post_stream ~clock
       ~idle_timeout_sec:keeper_chat_timeout_sec ~url ~headers ~body ~on_chunk ()

@@ -247,6 +247,23 @@ let test_an_id_held_across_a_chunk_boundary () =
     [ (Some 7, Live.Text "hello") ]
     (Live.feed decoder (sse (text_content "hello")))
 
+(* A stream cut right after an [id:] line leaves that decoder armed with the
+   seq and half a frame buffered. The reconnect opens a fresh decoder, so the
+   new stream's id-less acceptance is tagged [None] and nothing from the cut
+   stream glues onto it; the position the cut decoder held is the log's to
+   remember, not the decoder's. *)
+let test_a_fresh_decoder_starts_without_a_seq () =
+  let cut = Live.create () in
+  check (list tagged) "the cut stream ends armed" []
+    (Live.feed cut "id: 9\ndata: {\"type\":\"TEXT_MESSAGE_CON");
+  let fresh = Live.create () in
+  check (list tagged) "the new stream's acceptance carries no seq"
+    [ (None, Live.Accepted { admission = Live.Running; queue_length = 0 }) ]
+    (Live.feed fresh (sse (accepted ~state:"Running" ~queued_count:0 ())));
+  check (list tagged) "the cut decoder's seq never reaches the new stream"
+    [ (Some 10, Live.Text "b") ]
+    (Live.feed fresh (with_id 10 (sse (text_content "b"))))
+
 let test_an_id_less_frame_does_not_inherit_the_previous_seq () =
   let body =
     with_id 3 (sse (text_content "a"))
@@ -663,6 +680,8 @@ let () =
         ; test_case "a frame id tags its deltas" `Quick test_a_frame_id_tags_its_deltas
         ; test_case "an id held across a chunk boundary" `Quick
             test_an_id_held_across_a_chunk_boundary
+        ; test_case "a fresh decoder starts without a seq" `Quick
+            test_a_fresh_decoder_starts_without_a_seq
         ; test_case "an id-less frame does not inherit the previous seq" `Quick
             test_an_id_less_frame_does_not_inherit_the_previous_seq
         ; test_case "a non-integer id is no seq" `Quick test_a_non_integer_id_is_no_seq

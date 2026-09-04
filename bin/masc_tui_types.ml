@@ -1916,17 +1916,6 @@ type changes_return =
   | Changes_return_detail
 
 (** Top-level TUI surface. *)
-(* A picture currently on the terminal. Only the drawn case: a refusal has
-   nothing to draw, and putting one here would take the screen away from the
-   frame to show a message the frame is the only thing that can show. Refusals
-   go to the pane as text, like every other thing that did not happen.
-   [image_title] is the line drawn above the picture: a path when the
-   conversation named one, the attachment's name when a staged image is shown
-   -- a staged image has no path, so the field is not called one. *)
-type image_shown = {
-  image_title : string;
-  image_bytes : int;
-}
 
 type surface =
   | Overview
@@ -2418,8 +2407,12 @@ type state = {
      it in its own layer, and the frame presenter redraws only the rows that
      changed, so a frame drawn on top would clear part of the picture and
      leave the rest. While this is set the loop draws no frames at all, and
-     the next key takes the picture away and repaints everything. *)
-  mutable image_open: image_shown option;
+     the next key takes the picture away and repaints everything. A refusal
+     has nothing to draw, so it never sets this: refusals go to the pane as
+     text, like every other thing that did not happen. A plain flag, not a
+     record of what was drawn -- the title line above the picture is drawn by
+     [draw_image] from its own parameter, and nothing reads the rest. *)
+  mutable image_open: bool;
   (* The [:] command palette: a typed filter over jump targets. Query and
      cursor live only while it is open. *)
   mutable palette_open: bool;
@@ -3441,7 +3434,7 @@ let create_state
      then Workspace_identity_match
      else Workspace_identity_unread);
   help_scroll = 0;
-  image_open = None;
+  image_open = false;
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;

@@ -331,7 +331,7 @@ let test_journal_path_sanitizes_segments () =
   Alcotest.(check string)
     "journal root is <base>/.masc/keeper_chat_events"
     (Filename.concat
-       (Masc.Common.masc_dir_from_base_path ~base_path:"/tmp/base")
+       (Common.masc_dir_from_base_path ~base_path:"/tmp/base")
        "keeper_chat_events")
     (Filename.dirname (Filename.dirname path))
 
@@ -593,6 +593,10 @@ let test_golden_replay_matches_live_stream_bytes () =
          projected_sse_bytes
            (List.map (fun (entry : L.journaled_event) -> entry.ts, entry.event) journaled)
        in
+       (* this check pins replay-consistency only: the journaled turn
+          re-folded from [initial] must produce the same bytes as the live
+          fold. drift in projection/serializer output is pinned by other
+          tests, not this one. *)
        Alcotest.(check string)
          "replay reproduces the live SSE byte stream"
          live_bytes

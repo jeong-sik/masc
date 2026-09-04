@@ -159,6 +159,19 @@ let rule_of_string raw =
     | Ok host -> Ok (Exact host)
 ;;
 
+let equal_rule left right =
+  match left, right with
+  | Exact left, Exact right ->
+    (match left, right with
+     | Name left, Name right -> List.equal String.equal left right
+     | Ip_literal left, Ip_literal right -> String.equal left right
+     | Name _, Ip_literal _ | Ip_literal _, Name _ -> false)
+  | Subdomains_of left, Subdomains_of right -> List.equal String.equal left right
+  | Exact _, Subdomains_of _ | Subdomains_of _, Exact _ -> false
+;;
+
+let pp_rule formatter rule = Format.pp_print_string formatter (rule_to_string rule)
+
 (* Suffix comparison on labels, not on the string. [notexample.com] shares no
    label boundary with [example.com], so it cannot be admitted here the way
    an [endsWith] check would admit it. *)

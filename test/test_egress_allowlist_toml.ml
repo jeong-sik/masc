@@ -1,0 +1,124 @@
+(* The allowlist registry as runtime.toml declares it. A rule that a resolver
+   could read differently than the matcher does has to fail the load, because
+   the alternative is a live allowlist with a hole in it. *)
+
+open Alcotest
+
+let parse content = Runtime_toml.parse_string content
+
+let config content =
+  match parse content with
+  | Ok config -> config
+  | Error errors ->
+    failf "expected the config to load, got: %s"
+      (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors))
+;;
+
+let load_errors content =
+  match parse content with
+  | Error errors -> String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors)
+  | Ok _ -> failf "expected the config to be refused, it loaded"
+;;
+
+(* Enough of a runtime.toml to load, so each case adds only its own table. *)
+let base =
+  {|
+[providers.p]
+protocol = "openai-compatible-http"
+endpoint = "https://example.invalid/v1"
+
+[models.p.m]
+id = "m"
+
+[runtime]
+default = "p.m"
+|}
+;;
+
+let allow_of config ~keeper_name =
+  match
+    Egress_allowlist.for_keeper config.Runtime_schema.egress_allowlists ~keeper_name
+  with
+  | Some entry -> Egress_allowlist.allow_strings entry
+  | None -> failf "no allowlist entry for %s" keeper_name
+;;
+
+let test_an_allowlist_loads_and_normalizes () =
+  let config =
+    config
+      (base
+       ^ {|
+[egress.keepers.rondo]
+allow = ["GitHub.COM", "*.GithubUserContent.com", "example.com."]
+|})
+  in
+  check (list string) "rules are stored normalized"
+    [ "github.com"; "*.githubusercontent.com"; "example.com" ]
+    (allow_of config ~keeper_name:"rondo")
+;;
+
+let test_a_keeper_with_no_entry_has_none () =
+  let config = config base in
+  check bool "the registry is empty" true
+    (Egress_allowlist.for_keeper config.Runtime_schema.egress_allowlists ~keeper_name:"rondo"
+     = None);
+  check int "and carries no entries" 0
+    (List.length config.Runtime_schema.egress_allowlists)
+;;
+
+(* The load is where a bad rule has to die. *)
+let test_a_rule_a_resolver_could_reread_fails_the_load () =
+  let errors =
+    load_errors (base ^ "\n[egress.keepers.rondo]\nallow = [\"evil\\u0000.example.com\"]\n")
+  in
+  check bool "the refusal names the offending byte" true
+    (String_util.contains_substring errors "\\x00");
+  check bool "and the path" true
+    (String_util.contains_substring errors "egress.keepers.rondo.allow")
+;;
+
+let test_an_unknown_key_fails_the_load () =
+  let errors =
+    load_errors (base ^ {|
+[egress.keepers.rondo]
+allow = ["github.com"]
+deny = ["evil.com"]
+|})
+  in
+  check bool "the unknown key is named" true (String_util.contains_substring errors "deny")
+;;
+
+let test_a_table_without_allow_fails_the_load () =
+  let errors = load_errors (base ^ "\n[egress.keepers.rondo]\n") in
+  check bool "the missing array is named" true
+    (String_util.contains_substring errors "allow")
+;;
+
+let test_an_unknown_egress_child_fails_the_load () =
+  let errors = load_errors (base ^ {|
+[egress.hosts]
+allow = ["github.com"]
+|}) in
+  check bool "only [egress.keepers] is accepted" true
+    (String_util.contains_substring errors "egress")
+;;
+
+let () =
+  run "egress_allowlist_toml"
+    [ ( "load"
+      , [ test_case "an allowlist loads and normalizes" `Quick
+            test_an_allowlist_loads_and_normalizes
+        ; test_case "a keeper with no entry has none" `Quick
+            test_a_keeper_with_no_entry_has_none
+        ] )
+    ; ( "refusals"
+      , [ test_case "a rule a resolver could reread fails the load" `Quick
+            test_a_rule_a_resolver_could_reread_fails_the_load
+        ; test_case "an unknown key fails the load" `Quick
+            test_an_unknown_key_fails_the_load
+        ; test_case "a table without allow fails the load" `Quick
+            test_a_table_without_allow_fails_the_load
+        ; test_case "an unknown egress child fails the load" `Quick
+            test_an_unknown_egress_child_fails_the_load
+        ] )
+    ]

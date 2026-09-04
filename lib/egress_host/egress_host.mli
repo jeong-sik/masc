@@ -67,6 +67,15 @@ val rule_of_string : string -> (rule, parse_error) result
 val rule_to_string : rule -> string
 (** The normalized spelling of the rule. *)
 
+val equal_rule : rule -> rule -> bool
+(** Structural equality on the parsed form, so two spellings of the same
+    rule compare equal. *)
+
+val pp_rule : Format.formatter -> rule -> unit
+(** Prints {!rule_to_string}. Present so a rule can sit in a config record
+    that derives [show] and [eq] without the record having to hold raw
+    strings beside the parsed form. *)
+
 val matches : rule -> t -> bool
 (** Whether this rule admits this destination.
 

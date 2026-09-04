@@ -415,6 +415,16 @@ Keeper may add `microvm_backend = "apple_container" | "microsandbox" |
 Keeper must add `remote_endpoint = "<name>"` naming a table under
 `[exec.ssh.endpoints]` in `runtime.toml`.
 
+`network_mode` accepts `none`, `inherit`, or `policy`. `policy` is the mode
+between the other two: the guest reaches an allowlist proxy this server owns
+and nothing else, so a Keeper that needs one host stops being given every
+host. What it may reach is declared under `[egress.keepers.<name>]` in
+`runtime.toml` and parsed when that file is read, so a rule the matcher and a
+resolver could read differently fails the load rather than sitting in a live
+allowlist. The lane is carried today only by the `apple_container` microVM
+backend; every other backend refuses it and names what has to be measured
+first. See the [egress runbook](docs/operations/egress-policy-runbook.md).
+
 ### Keeper event-driven lifecycle
 
 When a Keeper runs in the background, it follows an event-driven reactive loop:
@@ -542,6 +552,7 @@ masc/
 | [`docs/ENV-CONTRACT.md`](docs/ENV-CONTRACT.md) | Environment variables the runtime reads |
 | [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | Local bearer and dashboard write access |
 | [`docs/operations/ssh-endpoints-runbook.md`](docs/operations/ssh-endpoints-runbook.md) | Provisioning a `remote_ssh` endpoint with `masc-exec-ssh-bootstrap`, migrating a Keeper onto it, and every preflight failure code |
+| [`docs/operations/egress-policy-runbook.md`](docs/operations/egress-policy-runbook.md) | Declaring what a Keeper in `network_mode = "policy"` may reach, which backends carry the lane, and reading the egress events |
 | [`docs/AGENT-CORE-BOUNDARY.md`](docs/AGENT-CORE-BOUNDARY.md) | Responsibility split between MASC and embedded Agent Core |
 | [`docs/spec/SPEC-INDEX.md`](docs/spec/SPEC-INDEX.md) | Specification index; inventory counts inside it are historical unless marked current |
 | [`docs/RELEASE-EVIDENCE.md`](docs/RELEASE-EVIDENCE.md) | Release evidence format; verify its version header before reuse |

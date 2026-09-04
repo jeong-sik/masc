@@ -1258,6 +1258,18 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     Buffer.clear state.msg_input;
     drain_queue ();
     true
+  | "\t" ->
+      let text = Buffer.contents state.msg_input in
+      let keeper_names =
+        List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers
+      in
+      (match Masc_tui_command.autocomplete ~keeper_names text with
+       | Some completed ->
+           forget_recall state;
+           Buffer.clear state.msg_input;
+           Buffer.add_string state.msg_input completed;
+           true
+       | None -> true)
   (* The footer and this arm read the same table (Masc_tui_esc_interrupt),
      so the hint the operator sees is the act the key performs: Esc is the
      first press of an interrupt, the accidental second press inside the
@@ -13790,10 +13802,10 @@ and is loaded on demand through keeper_skill.
        | Some "?" when message_mode && Buffer.length state.msg_input = 0 ->
            state.help_open <- true;
            state.help_scroll <- 0
-       | Some ("right" | "l" | "esc")
-         when message_mode
-              && state.keeper_message_focus = Left_pane ->
-           state.keeper_message_focus <- Right_pane
+        | Some ("right" | "l" | "esc" | "\t")
+          when message_mode
+               && state.keeper_message_focus = Left_pane ->
+            state.keeper_message_focus <- Right_pane
        | Some "left"
          when message_mode
               && Masc_tui_render.keeper_roster_pane_shown state

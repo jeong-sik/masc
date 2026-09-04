@@ -155,3 +155,11 @@ val task_message : task_id:string -> title:string -> body:string -> string
 (** The message handed to the keeper once its task exists: the task id in
     front of what the operator wrote, so the keeper can claim the exact task
     and the operator's own words carry the request. *)
+
+val autocomplete : ?keeper_names:string list -> string -> string option
+(** [autocomplete ?keeper_names text] computes the tab-completed command line.
+    Returns [None] if [text] is not a slash command. For command words,
+    completes prefixes (e.g. "/th" -> "/thinking") or cycles candidate commands
+    sharing the same prefix. For commands with enumerated arguments
+    (such as "/thinking ", "/tools ", "/preset ", or "/keeper "), completes
+    matching argument options. *)

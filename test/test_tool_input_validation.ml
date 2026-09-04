@@ -1594,8 +1594,30 @@ let test_validate_args_tool_execute_rejects_bad_argv_type () =
       ()
   with
   | Error result ->
-    let msg = Yojson.Safe.to_string (Tool_result.data result) in
-    Alcotest.(check bool) "mentions argv" true (string_contains msg "argv");
+    (* Whole-message compare, not a needle on the payload.  Every tool_execute
+       rejection echoes schema_shape.properties, and that list always contains
+       "argv" (config/tools/tool_execute.toml), so the old substring check was
+       satisfied by the unsupported-field and empty-args refusals too and could
+       not tell them from the type error it is named for.
+
+       The sentence itself belongs to [format_errors_inline] in
+       packages/agent_core/lib/tool_input_validation.ml, shared by every tool
+       in the fleet, so a wording change there fails this test rather than
+       anything in tool_execute — look at the formatter first.  This call
+       reaches the params branch of [validate], not [validate_authoritative]:
+       lib/tool_input_validation.ml builds the agent-core schema with
+       [Types.tool_schema_of_params], which leaves [input_schema = None]. *)
+    let expected =
+      "Your call to \"tool_execute\":\n"
+      ^ "{\"argv\":\"rg --files lib\"}\n"
+      ^ "\n"
+      ^ "Errors (fix these and call again):\n"
+      ^ "  \"argv\": wrong type — expected: array, got: string(\"rg --files lib\")"
+    in
+    Alcotest.(check string)
+      "argv string is refused as a type error naming the expected type"
+      expected
+      (Tool_result.message result);
     assert_schema_shape_has_execute_alternatives ~label:"bad argv type" result
   | Ok forwarded ->
     Alcotest.failf
@@ -1718,6 +1740,15 @@ let test_validation_telemetry_records_pass_and_fail_counters () =
               "expected empty schema no-arg pass, got %s"
               (Yojson.Safe.to_string (Tool_result.data result))))
 
+(* One binding for the two tests below, which reach the same producer by
+   different routes (validate_args directly, and the registered pre-hook).
+   Hand-copying the sentence into both would make a wording change at
+   lib/tool_input_validation.ml:966-975 a two-site edit in one file. *)
+let retired_alias_rejection_message =
+  "Tool 'masc_transition' received retired transition alias field(s): note, \
+   to; use action and notes"
+;;
+
 let test_validation_telemetry_rejects_retired_transition_aliases () =
   check_validation_metric_increment
     ~tool:"masc_transition"
@@ -1739,9 +1770,16 @@ let test_validation_telemetry_rejects_retired_transition_aliases () =
            ()
        with
        | Error result ->
-         let msg = Yojson.Safe.to_string (Tool_result.data result) in
-         Alcotest.(check bool) "mentions retired to" true (string_contains msg "to");
-         Alcotest.(check bool) "mentions retired note" true (string_contains msg "note")
+         (* Whole-message compare.  The substring pair it replaces could not
+            fail: the rejection payload always carries
+            "agent_core_tool_middleware", which contains "to", and
+            schema_shape.properties always lists "notes", which contains
+            "note".  Both needles held for every masc_transition refusal,
+            including ones that never looked at a retired alias. *)
+         Alcotest.(check string)
+           "names both retired aliases and their replacements"
+           retired_alias_rejection_message
+           (Tool_result.message result)
        | Ok forwarded ->
          Alcotest.fail
            (Printf.sprintf
@@ -1807,9 +1845,14 @@ let test_registered_hook_transition_rejects_to_and_note () =
   in
   match blocked with
   | Some result ->
-    let msg = Yojson.Safe.to_string (Tool_result.data result) in
-    Alcotest.(check bool) "mentions to" true (string_contains msg "to");
-    Alcotest.(check bool) "mentions note" true (string_contains msg "note")
+    (* Same defeat as the telemetry test above: "to" is satisfied by
+       "agent_core_tool_middleware" and "note" by the "notes" entry in
+       schema_shape.properties, so both needles held on every refusal this
+       hook can emit.  Compare the message the hook actually produced. *)
+    Alcotest.(check string)
+      "names both retired aliases and their replacements"
+      retired_alias_rejection_message
+      (Tool_result.message result)
   | None ->
     Alcotest.failf
       "expected transition aliases to be rejected, got forwarded=%s"

@@ -220,6 +220,99 @@ let test_task_snapshot_names_actor_and_handoff () =
     (field "summary" event)
 ;;
 
+(* {1 Task severity} *)
+
+(* [build_goal_timeline] picks a task's severity by matching [task_status].
+   Exhaustiveness is what a seventh constructor runs into, and it says nothing
+   about which of the three answers each of the six existing constructors gets:
+   editing [Cancelled] to "ok" compiles, and until this test the whole suite
+   stayed green while cancelled tasks rendered as healthy on the goal timeline.
+   The only other caller of [build_goal_timeline] in this file asserts
+   [summary], so [severity] had no assertion anywhere. *)
+
+let task_with_status task_status : Masc_domain.task =
+  { id = "task-severity"
+  ; title = "Severity fixture"
+  ; description = ""
+  ; task_status
+  ; priority = 1
+  ; files = []
+  ; created_at = "2026-08-21T01:00:00Z"
+  ; created_by = Some "planner"
+  ; predecessor_task_id = None
+  ; contract = None
+  ; execution_links = Masc_domain.no_execution_links
+  ; handoff_context = None
+  ; cycle_count = 1
+  ; reclaim_policy = None
+  ; do_not_reclaim_reason = None
+  ; skills = []
+  }
+;;
+
+let test_task_severity_follows_the_status () =
+  let severity_of task_status =
+    let timeline_node : DGT.tree_node =
+      { goal
+      ; children = []
+      ; tasks = [ task_with_status task_status ]
+      ; last_activity_at = "2026-08-21T04:00:00Z"
+      ; stagnation_seconds = Some 0
+      ; linked_keeper_names = []
+      ; pending_approval_count = 0
+      ; latest_keeper_ref = None
+      ; latest_turn_ref = None
+      ; activity_observation = "task_status"
+      }
+    in
+    match DGT.build_goal_timeline timeline_node [] [] [] with
+    | [ event ] -> field "severity" event
+    | events -> failf "expected one task event, got %d" (List.length events)
+  in
+  check (option string) "todo" (Some "ok") (severity_of Masc_domain.Todo);
+  check
+    (option string)
+    "done"
+    (Some "ok")
+    (severity_of
+       (Masc_domain.Done
+          { assignee = "beta"; completed_at = "2026-08-21T04:00:00Z"; notes = None }));
+  check
+    (option string)
+    "claimed"
+    (Some "warn")
+    (severity_of
+       (Masc_domain.Claimed { assignee = "beta"; claimed_at = "2026-08-21T02:00:00Z" }));
+  check
+    (option string)
+    "in_progress"
+    (Some "warn")
+    (severity_of
+       (Masc_domain.InProgress { assignee = "beta"; started_at = "2026-08-21T02:00:00Z" }));
+  check
+    (option string)
+    "awaiting_verification"
+    (Some "warn")
+    (severity_of
+       (Masc_domain.AwaitingVerification
+          { assignee = "beta"
+          ; started_at = "2026-08-21T02:00:00Z"
+          ; submitted_at = "2026-08-21T03:00:00Z"
+          ; intent = Masc_domain.Complete_task
+          ; verification_id = "verification-1"
+          }));
+  check
+    (option string)
+    "cancelled"
+    (Some "bad")
+    (severity_of
+       (Masc_domain.Cancelled
+          { cancelled_by = "beta"
+          ; cancelled_at = "2026-08-21T04:00:00Z"
+          ; reason = None
+          }))
+;;
+
 let timeline_events_of json =
   match Yojson.Safe.Util.member "timeline_events" json with
   | `List items -> items
@@ -270,6 +363,10 @@ let () =
             test_unknown_event_type_keeps_its_token
         ; test_case "task snapshot names actor and handoff" `Quick
             test_task_snapshot_names_actor_and_handoff
+        ; test_case
+            "task severity follows the status"
+            `Quick
+            test_task_severity_follows_the_status
         ] )
     ; ( "tree field"
       , [ test_case "timeline_events is normalized" `Quick test_tree_field_is_normalized

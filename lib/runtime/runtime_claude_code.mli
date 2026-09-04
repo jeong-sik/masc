@@ -15,6 +15,13 @@ type config =
   ; cwd : string
   ; model : string option
   ; system_prompt : string option
+    (** [None] omits [--system-prompt], which is what leaves the CLI's
+        built-in prompt in place; [Some text] passes the flag and replaces
+        that prompt entirely. "" is not a way to spell [None]: the client
+        reads any string as the prompt, so an empty one replaces the built-in
+        prompt with nothing rather than keeping it. A caller that wants the
+        built-in prompt plus its own text needs a different flag
+        ([--append-system-prompt]), which this client does not send. *)
   ; admission_timeout_s : float
     (** Finite bound for the post-spawn initialize exchange and callbacks
         before the user turn is written. *)

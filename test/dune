@@ -231,6 +231,7 @@
   test_keeper_noop_backoff
   test_keeper_chat_store
   test_keeper_chat_blocks
+  test_keeper_chat_event_log
   test_keeper_chat_media_store
   test_keeper_external_attention
   test_keeper_waiting_inventory
@@ -577,6 +578,7 @@
   test_keeper_noop_backoff
   test_keeper_chat_store
   test_keeper_chat_blocks
+  test_keeper_chat_event_log
   test_keeper_chat_media_store
   test_keeper_external_attention
   test_keeper_waiting_inventory
@@ -1399,6 +1401,8 @@
   test_voice_runtime_overlay
   test_voice_bridge_error
   test_voice_capture_thresholds
+  test_voice_pcm
+  test_voice_capture_phases
   test_resilience
   test_common
   test_workspace_messages_raw
@@ -1545,6 +1549,8 @@
   test_voice_runtime_overlay
   test_voice_bridge_error
   test_voice_capture_thresholds
+  test_voice_pcm
+  test_voice_capture_phases
   test_resilience
   test_common
   test_workspace_messages_raw
@@ -3411,6 +3417,16 @@
  (libraries alcotest unix masc_tui_editor))
 
 (test
+ (name test_masc_cli_keeper_create)
+ (modules test_masc_cli_keeper_create)
+ (libraries
+  alcotest
+  masc
+  masc_cli_keeper_create
+  masc_keeper_types_profile_sandbox
+  yojson))
+
+(test
  (name test_tui_keeper_selection)
  (modules test_tui_keeper_selection)
  (libraries alcotest masc_tui_keeper_selection))
@@ -3454,6 +3470,11 @@
  (name test_tui_context_bars)
  (modules test_tui_context_bars)
  (libraries alcotest masc_tui_context_bars))
+
+(test
+ (name test_tui_esc_interrupt)
+ (modules test_tui_esc_interrupt)
+ (libraries alcotest masc_tui_esc_interrupt masc_tui_keeper_chat_transcript))
 
 (test
  (name test_tui_retained_view)
@@ -3665,9 +3686,10 @@
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-board-json)))
 
-; Python unit suites over the scripts/ tree. Every one of these existed with
-; no rule, no workflow, and no caller -- eleven suites of dead verification
-; (the #32245 review found the pattern; this sweep found the rest). They are
+; Python unit suites over the scripts/ tree. These suites were first wired
+; into runtest after the #32245 review found several of them running with no
+; rule, no workflow, and no caller; a later sweep adopted the rest. Every
+; suite below now runs under the default @test/runtest alias in CI. They are
 ; stdlib-only unittest files whose subjects live under scripts/, so each rule
 ; carries the test file plus the exact script files it loads.
 

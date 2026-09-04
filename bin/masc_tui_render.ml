@@ -9123,18 +9123,27 @@ let render_keeper_message (state : state) =
       Message_layout.scroll_hint ~scrolled_back:scroll
         ~older_exist:state.msg_older_exist
     in
+    let return_hint () =
+      match state.msg_return with
+      | Keeper_chat_return_list -> "Esc:list"
+      | Keeper_chat_return_detail -> "Esc:detail"
+      | Keeper_chat_return_lanes -> "Esc:Lanes"
+    in
+    (* The hint is the dispatch's own table, not a retelling of it: both read
+       Masc_tui_esc_interrupt.action, so the footer cannot advertise an
+       interrupt Esc will not spend itself on, nor say "interrupt sent" after
+       the grace window when Esc would leave. *)
     let escape_hint =
       match state.msg_live with
-      | Some live
-        when Keeper_chat_transcript.interrupt live
-             = Keeper_chat_transcript.Not_requested ->
-          "Esc:interrupt turn"
-      | Some _ -> "Esc:interrupt sent"
-      | None ->
-          (match state.msg_return with
-           | Keeper_chat_return_list -> "Esc:list"
-           | Keeper_chat_return_detail -> "Esc:detail"
-           | Keeper_chat_return_lanes -> "Esc:Lanes")
+      | Some live ->
+          (match
+             Masc_tui_esc_interrupt.action ~now_ns:(Mtime_clock.elapsed_ns ())
+               (Keeper_chat_transcript.interrupt live)
+           with
+           | Masc_tui_esc_interrupt.Launch_interrupt -> "Esc:interrupt turn"
+           | Masc_tui_esc_interrupt.Swallow -> "Esc:interrupt sent"
+           | Masc_tui_esc_interrupt.Leave -> return_hint ())
+      | None -> return_hint ()
     in
     let switch_hint =
       match next_keeper_message_target state with
@@ -9168,6 +9177,44 @@ let render_keeper_message (state : state) =
     let footer_hints =
       match slash_hint with
       | Some line -> line
+      (* A capture takes the hint line for as long as it runs. The chat surface
+         draws its own input row rather than the composer, so the meter that
+         row carries never reaches here — and this is the one screen an
+         operator speaks from. Nothing else distinguishes a microphone that is
+         hearing them from one that is not: both end as an empty draft.
+
+         It replaces the hints rather than crowding in beside them because the
+         keys they name are the ones a capture is not waiting for. *)
+      | None when state.voice_capture <> None ->
+        let bar =
+          match state.voice_level_db with
+          | None -> Printf.sprintf "%s듣는 중…%s" Ansi.dim Ansi.reset
+          | Some db ->
+            Printf.sprintf
+              "%s%s%s  %s%.0f dB%s"
+              (Masc_tui_theme.tone Masc_tui_theme.Accent)
+              (Masc_tui_footer.voice_bar
+                 ~width:Masc_tui_footer.voice_bar_width
+                 ~db:(Some db))
+              Ansi.reset
+              Ansi.dim
+              db
+              Ansi.reset
+        in
+        (* Both endings, because they are not the same and the difference is
+           what the operator loses. ^Y keeps the sentence; Esc abandons it. *)
+        Printf.sprintf
+          "%s  %s^Y send · Esc discard%s"
+          bar
+          Ansi.dim
+          Ansi.reset
+      (* Between utterances in continuous mode: on, but nothing recording. A
+         mode that is idle looks exactly like one that is off without this. *)
+      | None when state.voice_continuous <> None ->
+        Printf.sprintf
+          "%s대기 중 — 말하면 잡습니다 · ^A to stop%s"
+          Ansi.dim
+          Ansi.reset
       | None ->
       if state.keeper_message_focus = Left_pane then
         "j/k or Up/Down:move  Enter:open  Right/l/Esc:chat"
@@ -14146,6 +14193,7 @@ let config_pane_strip (state : state) =
     ; name Config_prompts "prompts"
     ; name Config_presets "presets"
     ; name Config_themes "themes"
+    ; name Config_voice "voice"
     ]
   ^ Ansi.dim ^ "  p:next" ^ Ansi.reset
 
@@ -14885,6 +14933,85 @@ let config_content_height (state : state) =
   let terminal_rows, _ = get_terminal_size () in
   max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 7)
 
+(* What voice resolved to, and on which microphone.
+
+   Three facts an operator cannot get from runtime.toml. Whether the config
+   loaded at all: a section that does not parse reads the same as one that was
+   never written, and telling those apart took six days once. Which STT
+   endpoint answers first, since a local server that is down falls back to a
+   paid one silently. And the input device, because a capture that comes back
+   empty is more often the wrong microphone than a threshold. *)
+let render_voice (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let buf = Buffer.create 2048 in
+  let field name value =
+    box_line buf cols
+      (Printf.sprintf "  %s%-18s%s %s" Ansi.dim name Ansi.reset value)
+  in
+  let member path json =
+    List.fold_left
+      (fun acc key ->
+        match acc with
+        | Some (`Assoc fields) -> List.assoc_opt key fields
+        | Some _ | None -> None)
+      (Some json) path
+  in
+  let string_of path json =
+    match member path json with
+    | Some (`String v) -> Some v
+    | Some (`Bool b) -> Some (if b then "yes" else "no")
+    | Some (`Int i) -> Some (string_of_int i)
+    | Some _ | None -> None
+  in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s  %s  %s"
+       (screen_title " MASC Voice")
+       (config_pane_strip state)
+       (connection_badge state));
+  box_line buf cols "";
+  (match (state.voice_config, state.voice_config_error) with
+   | _, Some message ->
+       (* The distinction the pane exists for, said in words rather than drawn
+          as an empty section. *)
+       box_line_styled buf cols ~style:(Theme.warn ()) "  voice did not load";
+       box_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim message Ansi.reset)
+   | None, None ->
+       box_line buf cols (Printf.sprintf "  %sreading…%s" Ansi.dim Ansi.reset)
+   | Some json, None ->
+       field "status" (Option.value (string_of [ "status" ] json) ~default:"?");
+       box_line buf cols "";
+       box_line buf cols (Printf.sprintf "  %sTTS%s" Ansi.bold Ansi.reset);
+       field "model"
+         (Option.value (string_of [ "tts"; "default_model" ] json) ~default:"—");
+       field "voice"
+         (Option.value (string_of [ "tts"; "default_voice" ] json) ~default:"—");
+       box_line buf cols "";
+       box_line buf cols (Printf.sprintf "  %sSTT%s" Ansi.bold Ansi.reset);
+       field "model"
+         (Option.value (string_of [ "stt"; "default_model" ] json) ~default:"—");
+       field "endpoint"
+         (Option.value
+            (string_of [ "stt"; "active_endpoint"; "enabled" ] json)
+            ~default:"—");
+       field "fallback"
+         (Option.value
+            (string_of [ "stt"; "active_endpoint"; "fallback_configured" ] json)
+            ~default:"—"));
+  box_line buf cols "";
+  box_line buf cols (Printf.sprintf "  %sInput%s" Ansi.bold Ansi.reset);
+  field "device" (Option.value state.voice_input_device ~default:"unknown");
+  box_line buf cols "";
+  box_line buf cols
+    (Printf.sprintf
+       "  %sruntime.toml [voice] declares this; the server says what loaded%s"
+       Ansi.dim Ansi.reset);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols ~hints:"p:next pane  r:refresh");
+  finish_surface state ~surface_key:"voice" ~rows:terminal_rows ~cols buf
+;;
+
 let render_config (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
@@ -15031,7 +15158,8 @@ let render_surface (state : state) =
     | Config_themes -> render_themes state
     | Config_runtime -> render_config state
     | Config_models -> render_config_models state
-    | Config_params -> render_runtime_params state)
+    | Config_params -> render_runtime_params state
+    | Config_voice -> render_voice state)
   | Resources -> render_resources state
   | Code ->
       if state.repository_changes_open then render_repository_changes state

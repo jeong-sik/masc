@@ -36,7 +36,9 @@ val prune_shared_jsonl_stores :
   prune_dir:(string -> int) -> days:int -> masc_root:string -> int
 (** Prune every shared retention-covered JSONL store in one fold:
     [top_level_dated_stores], flat [logs/] day files, keeper-scoped
-    trajectories, [resilience_audit], [keeper_scoped_dated_stores] and
+    trajectories and [keeper_chat_events], [resilience_audit],
+    [decision_audit], flat [messages/] JSON files,
+    [keeper_scoped_dated_stores], [keeper_scoped_versioned_stores] and
     [keeper_scoped_flat_stores]. Both the startup pass and the 24h periodic
     pass call exactly this function so the covered-store set cannot drift.
     Returns the number of files removed. Exposed for unit tests. *)

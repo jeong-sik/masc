@@ -316,17 +316,24 @@ let build_goal_timeline node linked_keepers approvals goal_events =
   let task_events =
     node.tasks
     |> List.map (fun (task : Masc_domain.task) ->
-           let status = Masc_domain.task_status_to_string task.task_status in
            timeline_event_json ~ts:(task_updated_at task) ~kind:"task"
              ~lane:("task:" ^ task.id)
              ~title:task.title
              ~summary:(task_timeline_summary task)
+             (* Exhaustive on [task_status], the same way [task_status_color]
+                above is.  Rendering the status to a string and re-matching it
+                put this decision past the compiler: a seventh constructor
+                would break that colour match at build time and fall through to
+                "ok" here, so the two answers for one value could drift apart.
+                No such constructor has been added; the six arms below are
+                today's whole type. *)
              ~severity:
-               (match status with
-                | "cancelled" -> "bad"
-                | "awaiting_verification" | "claimed" | "in_progress" ->
-                    "warn"
-                | _ -> "ok"))
+               (match task.task_status with
+                | Masc_domain.Cancelled _ -> "bad"
+                | Masc_domain.AwaitingVerification _
+                | Masc_domain.Claimed _
+                | Masc_domain.InProgress _ -> "warn"
+                | Masc_domain.Todo | Masc_domain.Done _ -> "ok"))
   in
   let approval_events =
     approvals

@@ -28,6 +28,7 @@
     "keeper_spawn_wait.toml",
     "keeper_surface_post.toml",
     "keeper_surface_read.toml",
+    "keeper_task_cancel.toml",
     "keeper_task_claim.toml",
     "keeper_task_create.toml",
     "keeper_task_done.toml",

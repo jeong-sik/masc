@@ -1916,17 +1916,6 @@ type changes_return =
   | Changes_return_detail
 
 (** Top-level TUI surface. *)
-(* A picture currently on the terminal. Only the drawn case: a refusal has
-   nothing to draw, and putting one here would take the screen away from the
-   frame to show a message the frame is the only thing that can show. Refusals
-   go to the pane as text, like every other thing that did not happen.
-   [image_title] is the line drawn above the picture: a path when the
-   conversation named one, the attachment's name when a staged image is shown
-   -- a staged image has no path, so the field is not called one. *)
-type image_shown = {
-  image_title : string;
-  image_bytes : int;
-}
 
 type surface =
   | Overview
@@ -2217,6 +2206,12 @@ type config_pane =
   | Config_prompts
   | Config_presets
   | Config_themes
+  | Config_voice
+      (** What voice is actually doing, which runtime.toml alone does not say.
+          The [voice] section is 60 lines into a 1,600-line file, and reading
+          it answers what is declared rather than what loaded — a config that
+          fails to parse looks identical to one that was never written. That
+          distinction cost six days once. *)
 
 (* Which section the Tools surface is showing. They used to be one scrolling
    list: five sections concatenated, and the first of them is the effective
@@ -2412,8 +2407,12 @@ type state = {
      it in its own layer, and the frame presenter redraws only the rows that
      changed, so a frame drawn on top would clear part of the picture and
      leave the rest. While this is set the loop draws no frames at all, and
-     the next key takes the picture away and repaints everything. *)
-  mutable image_open: image_shown option;
+     the next key takes the picture away and repaints everything. A refusal
+     has nothing to draw, so it never sets this: refusals go to the pane as
+     text, like every other thing that did not happen. A plain flag, not a
+     record of what was drawn -- the title line above the picture is drawn by
+     [draw_image] from its own parameter, and nothing reads the rest. *)
+  mutable image_open: bool;
   (* The [:] command palette: a typed filter over jump targets. Query and
      cursor live only while it is open. *)
   mutable palette_open: bool;
@@ -2434,6 +2433,14 @@ type state = {
   (* The Resources surface: the MCP resource inventory, and the one read
      the content pane shows, stamped with its uri. [resource_pending_uri]
      rejects a slow reply after the operator has stepped to another row. *)
+  (* The Config surface's voice pane: the server's own answer about what
+     loaded, and which input device the recorder would use. The device is read
+     locally because no server knows it — sox takes whatever macOS calls
+     default, and an operator whose captures come back empty is usually
+     looking at the wrong microphone. *)
+  mutable voice_config: Yojson.Safe.t option;
+  mutable voice_config_error: string option;
+  mutable voice_input_device: string option;
   mutable resources_list: Masc_tui_mcp.resource list option;
   mutable resources_error: string option;
   mutable resources_cursor: int;
@@ -2574,6 +2581,11 @@ type state = {
      device and a quiet room look identical — both end as an empty draft. *)
   mutable voice_capture: string option;
   mutable voice_level_db: float option;
+  (* What a second ^Y or an Esc asked of the running capture, read by it ten
+     times a second. A request rather than a cancellation because the recording
+     has to close its file on the way out: killed outright it would leave a
+     header with no length in it. *)
+  mutable voice_stop_requested: Masc.Voice_bridge.stop_request option;
   (* Continuous mode: the keeper whose row re-arms a capture after each
      transcript, until the operator turns it off. Separate from
      [voice_capture], which is the capture running right now — between two
@@ -2775,7 +2787,7 @@ type state = {
      names what a sent draft answers -- [None] publishes a new post,
      [Some post_id] adds a comment to that post -- so one pane covers both
      writes and the payload alone decides which. *)
-  mutable board_draft: Buffer.t;
+  board_draft: Buffer.t;
   mutable board_compose_armed: bool;
   mutable board_compose_reply_to: string option;
   (* One send at a time: the gate a slow server needs so s-s cannot post
@@ -3082,7 +3094,7 @@ type state = {
   mutable system_logs_category: string option;
   mutable system_logs_detail_seq: int option;
   mutable system_logs_detail_scroll: int;
-  mutable msg_input: Buffer.t;
+  msg_input: Buffer.t;
   (* Images staged with :attach, sent with the next message and cleared by the
      send. Held next to the draft because they are part of the same unsent
      message: switching keepers or abandoning the draft must not leave an image
@@ -3099,10 +3111,6 @@ type state = {
   mutable msg_return: keeper_chat_return;
   mutable msg_drafts: (string * string) list;
   mutable msg_history: msg_entry list;
-  (* The first local submission clock for each request. A queued row keeps this
-     clock when it becomes active and when a transcript refresh replaces the
-     session copy. It is presentation metadata, never an ordering key. *)
-  mutable msg_submission_times: (string * float) list;
   (* How far back the arrows have walked through what this pane sent, and the
      draft they set aside to do it. [None] means the composer holds the
      operator's own text, so pressing down has nothing to give back. *)
@@ -3295,6 +3303,14 @@ let send_disposition state ~keeper_name : send_disposition =
       (Option.map
          (fun entry -> entry.sent_request)
          (inflight_for_keeper state keeper_name))
+    ~waiting:
+      (* The line a new one for this keeper would join (last waiting [Next], never
+         a steer). Present it as "the keeper is spoken for" so Enter queues onto
+         it instead of dispatching past a line the operator has not finished. *)
+      (Option.map
+         (fun (item : Masc_tui_keeper_chat_queue.item) ->
+           item.Masc_tui_keeper_chat_queue.request)
+         (Masc_tui_keeper_chat_queue.join_target state.msg_queued ~keeper_name))
 
 (** One keeper as the Keepers surface reads it: durable pause from the
     metadata row, live runtime from the roster. *)
@@ -3414,12 +3430,15 @@ let create_state
      then Workspace_identity_match
      else Workspace_identity_unread);
   help_scroll = 0;
-  image_open = None;
+  image_open = false;
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;
   search = None;
   search_last = "";
+  voice_config = None;
+  voice_config_error = None;
+  voice_input_device = None;
   resources_list = None;
   resources_error = None;
   resources_cursor = 0;
@@ -3489,6 +3508,7 @@ let create_state
   composer_focused = false;
   voice_capture = None;
   voice_level_db = None;
+  voice_stop_requested = None;
   voice_continuous = None;
   voice_floor = None;
   quit_armed = false;
@@ -3757,7 +3777,6 @@ let create_state
   msg_return = Keeper_chat_return_detail;
   msg_drafts = [];
   msg_history = [];
-  msg_submission_times = [];
   msg_recall_at = None;
   msg_recall_draft = "";
   msg_recall_replaces = None;
@@ -4409,8 +4428,11 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
            (match state.runtime_config_view with
             | None -> 0
             | Some _ -> List.length state.config_models_rows + 1)
+         (* The voice pane draws its own short block rather than the config
+            file, so it scrolls with the same rule as the rest: whatever the
+            renderer laid out. *)
          | Config_runtime | Config_params | Config_prompts | Config_presets
-         | Config_themes ->
+         | Config_themes | Config_voice ->
            (match state.runtime_config_view with
             | None -> 0
             | Some (_, rows) -> List.length rows))

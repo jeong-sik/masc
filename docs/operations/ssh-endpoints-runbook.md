@@ -205,3 +205,51 @@ sentence saying so is not.
 
 When reporting an incident, include timestamp, endpoint, keeper, exact error,
 MASC source revision, shim probe/version, retryability, and observed recovery.
+
+## Appendix: a local microVM as the endpoint
+
+The lane does not care whether the remote host is another machine. A local
+hypervisor guest that answers SSH is an endpoint like any other, and that is one
+way to get microVM isolation from a runtime MASC has no backend for.
+
+Measured 2026-09-04 with gondolin 0.12.0 (earendil-works, QEMU-backed, so no KVM
+is needed) on macOS 26.6.1. RFC-0405 turned gondolin down as a `microvm_backend`
+because nothing in its CLI puts a command into an existing session — `exec
+--sock` takes write EPIPE against the interactive bash holding the channel, and
+`attach` answers `session connection closed`. That verdict stands. It says
+nothing about this lane, which needs only sshd.
+
+```
+gondolin bash --ssh --ssh-port 22222 --ssh-user root \
+  --allow-host github.com --allow-host api.github.com \
+  --allow-host dl-cdn.alpinelinux.org \
+  --mount-hostfs "$HOME/me/.masc/gondolin-work:/opt/masc-playground-gondolin" \
+  < /dev/null
+```
+
+Stdin closed, no TTY, and the session persists: `gondolin list` reports it ALIVE,
+and a file written over one SSH connection is read back over the next. It prints
+the exact `ssh` line and the generated key path; copy that key to
+`.masc/ssh/<name>.key` at 0600 and pin the host key before declaring the
+endpoint. A `remote_ssh` Keeper then drives it with no backend code at all.
+
+Four things this costs, none of them obvious from the CLI's help:
+
+- **The network has two modes, and the safe one is not the default.** With no
+  `--allow-host`, GET reaches the internet and POST answers `502` — measured on
+  one host and path, `GET api.github.com/zen` 200 against `POST` 502. That alone
+  fails `gh auth login`, whose device flow is a POST. Naming any host switches
+  the gateway to a strict allowlist, so the Alpine mirror has to be named too or
+  `apk` takes `403`. A Keeper writes through `gh api` and `git push`, so the
+  allowlist has to be decided up front.
+- **The guest root filesystem is new on every boot.** The shim,
+  `/etc/masc-exec-shim.conf`, `git`, `rg` and `gh` are gone after a restart and
+  have to be installed again. This is not Apple's `container`, where the image
+  carries them.
+- **The stock rootfs is 262 MB against the lane's 1 GB floor.** `--rootfs-size`
+  needs `resize2fs`, which the stock image does not ship. Mount the playground
+  from the host instead: it clears the floor and survives restarts, which is also
+  what keeps the `gh` login alive across them.
+- **The session belongs to the host process that started it.** When that process
+  exits the guest goes with it. Decide who owns the session before running
+  anything durable on it.

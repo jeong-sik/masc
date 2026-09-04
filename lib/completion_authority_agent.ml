@@ -213,24 +213,57 @@ let required_string_list_field ~context name fields =
     Error (Printf.sprintf "%s has no %s" context name)
 ;;
 
-let completion_contract_of_request
+(* The producer's stated why, written into the request by the transition that
+   created the obligation. Absent, there is nothing to judge — a cancellation
+   is only its reason — so this is an error rather than an empty string that
+   would reach the judge as a case with no argument. *)
+let cancel_reason_of_output fields =
+  match List.assoc_opt "cancel_reason" fields with
+  | Some (`String reason) when String.trim reason <> "" -> Ok (String.trim reason)
+  | Some (`String _) ->
+    Error "verification request output cancel_reason is blank"
+  | Some other ->
+    Error
+      (Printf.sprintf
+         "verification request output cancel_reason must be a string, got %s"
+         (Json_util.excerpt other))
+  | None -> Error "verification request output has no cancel_reason"
+;;
+
+(* Which question to put, and the material it needs. The Task's intent picks
+   the branch; the request supplies the rest. A completion is weighed against
+   its contract and artifacts, a stop against its reason with the contract
+   alongside as context. *)
+let verdict_question_of_request
+      ~(intent : Masc_domain.verification_intent)
       (request : Verification.verification_request)
   =
-  let completion_contract = request.criteria in
-  let completion_contract =
-    match completion_contract with
-    | [] -> None
-    | descriptions -> Some descriptions
-  in
   match request.output with
   | `Assoc fields ->
-    let* required_artifacts =
-      required_string_list_field
-        ~context:"verification request output"
-        "required_artifacts"
-        fields
-    in
-    Ok (completion_contract, required_artifacts)
+    (match intent with
+     | Masc_domain.Complete_task ->
+       let* required_evidence =
+         required_string_list_field
+           ~context:"verification request output"
+           "required_artifacts"
+           fields
+       in
+       Ok
+         (Task.Anti_rationalization.Completion
+            { completion_contract =
+                (match request.criteria with
+                 | [] -> None
+                 | descriptions -> Some descriptions)
+            ; required_evidence
+              (* Filled at the review site, where the ledger is read. This
+                 function maps an intent to a question and reads no store. *)
+            ; few_shot_block = ""
+            })
+     | Masc_domain.Cancel_task ->
+       let* reason = cancel_reason_of_output fields in
+       Ok
+         (Task.Anti_rationalization.Cancellation
+            { reason; contract_context = request.criteria }))
   | other ->
     Error
       (Printf.sprintf
@@ -242,8 +275,7 @@ type prepared_review =
   { request : Verification.verification_request
   ; evidence_access : Workspace_verification_store.submitted_evidence_access
   ; review_request : Task.Anti_rationalization.review_request
-  ; completion_contract : string list option
-  ; required_artifacts : string list
+  ; question : Task.Anti_rationalization.verdict_question
   }
 
 (* Artifact references the store looked for and did not find. The snapshot layer
@@ -268,6 +300,24 @@ let prepare_review
       ~(authority : Masc_domain.completion_authority)
   : (prepared_review, string) result
   =
+  (* Which question was asked lives on the Task, put there by the transition
+     that created the obligation. It is not copied into the request record:
+     one field, one owner, and a record that repeated it could disagree with
+     the status the verdict is applied to. *)
+  let* intent =
+    match task.task_status with
+    | Masc_domain.AwaitingVerification { intent; _ } -> Ok intent
+    | Masc_domain.Todo
+    | Masc_domain.Claimed _
+    | Masc_domain.InProgress _
+    | Masc_domain.Done _
+    | Masc_domain.Cancelled _ ->
+      Error
+        (Printf.sprintf
+           "task %s is not awaiting a verdict (status=%s)"
+           task.id
+           (Masc_domain.task_status_to_string task.task_status))
+  in
   let* request = Verification.load_request config.base_path verification_id in
   if not (String.equal request.id verification_id)
   then
@@ -331,9 +381,7 @@ let prepare_review
              header.worker)
       else
         let* evidence_refs = evidence_refs_of_output request.output in
-        let* completion_contract, required_artifacts =
-          completion_contract_of_request request
-        in
+        let* question = verdict_question_of_request ~intent request in
         (* An artifact reference the store could not read is carried here,
            not refused here.
 
@@ -384,8 +432,7 @@ let prepare_review
               ; task_id = task.id
               ; evidence_refs
               }
-          ; completion_contract
-          ; required_artifacts
+          ; question
           }
 ;;
 
@@ -627,23 +674,31 @@ let process_task_once
             in
             (* Human labels close the judge's own loop: where an operator
                disagreed with a past verdict, the divergence returns to the
-               judge as a few-shot example, false positives first. The prompt
-               slot has existed since the calibration design; this passes it.
-               With no labels recorded the block is empty and the prompt is
-               byte-identical to before. *)
-            let few_shot_block =
-              Eval_calibration.format_few_shot_block
-                (Eval_calibration.select_examples
-                   ~max_examples:judge_few_shot_examples)
+               judge as a few-shot example, false positives first.
+
+               Only a completion asks for them. Every row in the ledger is a
+               completion judgement, and the cancellation prompt has no slot to
+               put one in, so on a stop this read is answered by a file nobody
+               will look at. The block rides inside [Completion] for that
+               reason: the arm that has the slot is the arm that fills it. *)
+            let question =
+              match prepared.question with
+              | Task.Anti_rationalization.Completion completion ->
+                Task.Anti_rationalization.Completion
+                  { completion with
+                    few_shot_block =
+                      Eval_calibration.format_few_shot_block
+                        (Eval_calibration.select_examples
+                           ~max_examples:judge_few_shot_examples)
+                  }
+              | Task.Anti_rationalization.Cancellation _ as stop -> stop
             in
             let result =
               Task.Anti_rationalization.review
                 ~base_path:runtime.config.base_path
                 ~sw:(Some runtime.sw)
                 ~lookup
-                ~few_shot_block
-                ?completion_contract:prepared.completion_contract
-                ~required_evidence:prepared.required_artifacts
+                ~question
                 ~on_tool_result
                 prepared.review_request
             in
@@ -947,6 +1002,7 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
 module For_testing = struct
   let authority_actor = authority_actor
   let evidence_refs_of_output = evidence_refs_of_output
+  let verdict_question_of_request = verdict_question_of_request
   let completion_verdict_of_review = completion_verdict_of_review
   let review_notes = review_notes
 

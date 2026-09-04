@@ -28,12 +28,27 @@ type submit_request_spec =
   }
 
 let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
-    ~assignee ~evidence_refs =
+    ~assignee ~(claim : Masc_domain.verification_claim) =
   let board_type = "verification_request" in
-  let board_title = Printf.sprintf "Verify: %s" task.title in
-  let board_content =
-    Printf.sprintf "Verification requested for task %s (%s) by %s"
-      task.id task.title assignee
+  (* The Board post and the record name what was asked. A stop carries the
+     producer's reason where a completion carries its evidence references;
+     the judge reads [cancel_reason] from the request output, not from the
+     task contract, which describes work the producer says should not be
+     finished. *)
+  let board_title, board_content, evidence_refs, claim_fields =
+    match claim with
+    | Masc_domain.Completion_evidence { evidence_refs } ->
+      ( Printf.sprintf "Verify: %s" task.title
+      , Printf.sprintf "Verification requested for task %s (%s) by %s"
+          task.id task.title assignee
+      , evidence_refs
+      , [] )
+    | Masc_domain.Cancellation_reason { reason } ->
+      ( Printf.sprintf "Cancel: %s" task.title
+      , Printf.sprintf "Cancellation requested for task %s (%s) by %s: %s"
+          task.id task.title assignee reason
+      , []
+      , [ ("cancel_reason", `String reason) ] )
   in
   let criteria =
     match task.contract with
@@ -66,6 +81,7 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
       ([ ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
          ("task_title", `String task.title);
        ]
+       @ claim_fields
        @ evidence_fields)
   in
   { criteria
@@ -122,10 +138,13 @@ let warn_oversized_evidence ~(task : Masc_domain.task) ~(snapshot : Yojson.Safe.
     (Workspace_verification_store.truncated_snapshot_items snapshot)
 
 let create_submit_request ~(config : Workspace.config)
-    ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs =
+    ~(task : Masc_domain.task) ~assignee ~verification_id
+    ~(claim : Masc_domain.verification_claim) =
   let base_path = config.Workspace.base_path in
-  warn_contract_gap task;
-  let spec = submit_request_spec ~config ~task ~assignee ~evidence_refs in
+  (match claim with
+   | Masc_domain.Completion_evidence _ -> warn_contract_gap task
+   | Masc_domain.Cancellation_reason _ -> ());
+  let spec = submit_request_spec ~config ~task ~assignee ~claim in
   let evidence_snapshot =
     Workspace_verification_store.snapshot_submitted_evidence_json
       ~base_path
@@ -176,8 +195,14 @@ let delete_verification_request ~(config : Workspace.config) ~verification_id =
     Error e
 
 let notify_submit_for_verification ~(config : Workspace.config)
-    ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs =
-  let spec = submit_request_spec ~config ~task ~assignee ~evidence_refs in
+    ~(task : Masc_domain.task) ~assignee ~verification_id
+    ~(claim : Masc_domain.verification_claim) =
+  let spec = submit_request_spec ~config ~task ~assignee ~claim in
+  let evidence_refs =
+    match claim with
+    | Masc_domain.Completion_evidence { evidence_refs } -> evidence_refs
+    | Masc_domain.Cancellation_reason _ -> []
+  in
   let meta_json = `Assoc ([
     ("type", `String spec.board_type);
     ("task_id", `String task.id);

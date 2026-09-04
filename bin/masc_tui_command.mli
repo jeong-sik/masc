@@ -155,3 +155,21 @@ val task_message : task_id:string -> title:string -> body:string -> string
 (** The message handed to the keeper once its task exists: the task id in
     front of what the operator wrote, so the keeper can claim the exact task
     and the operator's own words carry the request. *)
+
+type direction = Next | Prev
+(** Direction to step when cycling autocomplete candidates. *)
+
+val autocomplete :
+  ?direction:direction ->
+  ?keeper_names:string list ->
+  string ->
+  string option
+(** [autocomplete ?direction ?keeper_names text] computes the completed command line.
+    [direction] defaults to [Next] (e.g. for Tab or ArrowDown). [Prev] moves backward
+    through candidate commands and argument options (e.g. for ArrowUp or Shift-Tab).
+    Returns [None] if [text] is not a slash command. *)
+
+val is_slash_navigable : ?keeper_names:string list -> string -> bool
+(** [is_slash_navigable ?keeper_names text] determines if the composer input currently
+    holds an active slash command prefix or enumerated sub-arguments that should be
+    navigated by ArrowUp/ArrowDown instead of message history recall. *)

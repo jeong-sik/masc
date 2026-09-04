@@ -9,6 +9,9 @@
  (libraries
   masc
   masc.auth
+  masc.http_client
+  masc_cli_keeper_create
+  masc_tui_editor
   masc.crypto_rng
   masc.dashboard
   masc.operator
@@ -206,6 +209,7 @@
  (package masc)
  (libraries
   masc
+  masc.masc_process
   masc.prompt_registry
   masc.server
   masc.runtime
@@ -430,6 +434,12 @@
  (name masc_tui_mode)
  (wrapped false)
  (modules masc_tui_mode))
+
+(library
+ (name masc_tui_esc_interrupt)
+ (wrapped false)
+ (modules masc_tui_esc_interrupt)
+ (libraries masc_tui_keeper_chat_transcript))
 
 (library
  (name masc_tui_file_icon)
@@ -750,6 +760,12 @@
  (libraries masc_tui_render_schedule))
 
 (library
+ (name masc_tui_audio_device)
+ (wrapped false)
+ (modules masc_tui_audio_device)
+ (libraries unix))
+
+(library
  (name masc_tui_keeper_control)
  (wrapped false)
  (modules masc_tui_keeper_control)
@@ -793,6 +809,18 @@
  (wrapped false)
  (modules masc_tui_editor)
  (libraries unix))
+
+;; The declaration [masc keeper-create] sends and the answer it reads, both
+;; pure, so the flag surface is a test rather than a running server.
+(library
+ (name masc_cli_keeper_create)
+ (wrapped false)
+ (modules masc_cli_keeper_create)
+ (libraries
+  masc
+  masc_core
+  masc_keeper_types_profile_sandbox
+  yojson))
 
 (library
  (name masc_tui_keeper_config)
@@ -838,6 +866,7 @@
   masc.time_codec
   masc_tui_acting
   masc_tui_composer
+  masc_tui_audio_device
   masc_tui_agenda
   masc_tui_ask_layout
   masc_tui_ask_projection
@@ -987,6 +1016,7 @@
   masc_tui_terminal_title
   masc_tui_runtime_config_receipt
   masc_tui_interrupt_signal
+  masc_tui_esc_interrupt
   masc.runtime
   masc.keeper_registry
   masc_skill_reference
@@ -1021,6 +1051,7 @@
   masc_tui_mcp
   masc_tui_keeper_chat_transcript
   masc_tui_composer
+  masc_tui_audio_device
   masc_tui_composer_projection
   masc_tui_keeper_control
   masc_tui_keeper_config

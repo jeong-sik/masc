@@ -2,6 +2,49 @@
 
 ## Unreleased
 
+## [0.31.0] - 2026-09-04
+
+- **Voice input, end to end.** A Keeper chat can be dictated: the capture decides
+  where speech starts and ends and the meter watches it (#33062), thresholds and
+  noise reduction move into `runtime.toml` (#33036, #33020), a Config pane shows
+  what voice resolved to and on which microphone (#33032), Esc abandons a
+  recording (#33088), and a stop keeps the sentence it interrupted (#33079). The
+  capture meter reaches the chat surface and keeps reading (#33035, #33045).
+- **The composer completes and holds.** Tab autocompletes slash commands and
+  their arguments (#33068), arrow keys and Shift-Tab walk the completions
+  (#33071), and a line typed while a Keeper is still being composed for is held
+  rather than sent past the one in progress (#33047). A lone continuation bullet
+  is now a quiet vertical rail (#33060).
+- **An image a text-only Keeper cannot read is read for it.** A deferred runtime
+  lane degrades an image turn to text instead of crashing on a text-only model
+  (#33037, RFC-0414 #33054), and the cloud vision models are wired as the
+  `media_failover` read fleet so `analyze_image`'s eager read lands on a fast one
+  (#33074).
+- **Chat is one canonical event log.** A per-turn chat event journal records the
+  stream once and projects it (RFC-0412 stage 1, #33053, #33002), with a
+  retention sweep and a repeating-SSE decode fix (#33056).
+- **A stop is judged on its reason.** Verification reads why a turn stopped
+  rather than what it did not build (#33059), the cancellation lookup describes
+  tools instead of ordering a rejection (#33080, #33066), five vacuous checks now
+  fail on the value they check (#33050), and a stop waits on a record the
+  authority can read (#33046).
+- **Interrupts do what the screen says.** Esc during a turn stops the turn
+  (#33025) and leaves the chat once the interrupt is stale, declined, or errored
+  (#33049); a spawned process no longer freezes the UI (#33023); Gate steps fold
+  into the one approval they describe and draw from their typed phase (#33024,
+  #33001).
+- **Keeper hygiene.** `masc keeper-create` lands a Keeper on the network mode it
+  was given (#33084); a moving-result loop is still caught as a loop (#33033);
+  the carried tool set is bounded at its growth boundary (#32988); paste delivery
+  is verified by read-back before it is logged delivered (#33042); a microVM
+  guest whose work volume is not mounted is refused (#33026); the official-client
+  codex profile id is corrected and an unset system prompt omitted (#33072,
+  #33009).
+- **Tool schema and streams.** Canonicalizing a schema derives its description
+  without rendering the prose it discards (#33003, #33013), the cancel tool joins
+  the embedded-tools manifest (#33081), and a consumer that stops reading stops
+  the socket (#33048, #33055). Nightly CI now runs the full test suite (#33070).
+
 ## [0.30.0] - 2026-09-04
 
 - **The install wizard detects what is ready before it asks.** The setup

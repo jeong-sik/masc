@@ -4,9 +4,9 @@
     {2 Why a late answer is preserved}
 
     The decision an operator makes is about the call, and the call outlives
-    the turn that first made it: a wait that times out leaves the ask
-    unanswered, the next turn retries the same call under a fresh tool call
-    id, and the gate asks again. Without this module the
+    the wait that first asked about it: a wait that times out blocks that one
+    call and the Keeper carries on, the identical call comes back under a
+    fresh tool call id, and the gate asks again. Without this module the
     operator's first answer is dropped and they answer the same question
     twice.
 

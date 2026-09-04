@@ -22,7 +22,9 @@ val attachments_to_yojson : Keeper_chat_store.attachment list -> Yojson.Safe.t
 val parse_attachments :
   Yojson.Safe.t -> (Keeper_chat_store.attachment list, string) result
 (** Parse optional [attachments] from a request object. Duplicate or undeclared
-    fields, wrong types, and missing [id]/[data] are request errors. *)
+    fields, wrong types, missing [id]/[data], and a duplicated [id] are request
+    errors.  A duplicate id would parse twice while a user_blocks reference
+    reaches only the first entry, silently shadowing the other. *)
 
 val user_blocks_to_yojson : user_input_block list -> Yojson.Safe.t
 

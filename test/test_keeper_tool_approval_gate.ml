@@ -56,7 +56,7 @@ let with_gate ~timeout_sec f =
 
 (* Drain what the stream holds without blocking on an empty one. *)
 let rec drain events acc =
-  match Eio.Stream.take_nonblocking events with
+  match Events.take_nonblocking events with
   | None -> List.rev acc
   | Some event -> drain events (event :: acc)
 

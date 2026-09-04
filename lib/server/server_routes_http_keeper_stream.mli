@@ -252,7 +252,7 @@ val process_single_turn :
   run_id:string ->
   message_id:string ->
   agent_name:string ->
-  events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
+  events:Keeper_chat_events.t ->
   queued_turn_outcome option
 (** Execute one already-claimed Owner operation and publish its live turn
     events. The operation owns transcript provenance, admission, cancellation,

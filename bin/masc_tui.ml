@@ -1251,19 +1251,50 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
           true
       | None -> true)
   | _ ->
+  let apply_autocomplete direction =
+    let text = Buffer.contents state.msg_input in
+    let keeper_names =
+      List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers
+    in
+    match Masc_tui_command.autocomplete ~direction ~keeper_names text with
+    | Some completed ->
+        forget_recall state;
+        Buffer.clear state.msg_input;
+        Buffer.add_string state.msg_input completed;
+        true
+    | None -> true
+  in
+  let slash_navigable () =
+    let keeper_names =
+      List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers
+    in
+    Masc_tui_command.is_slash_navigable ~keeper_names
+      (Buffer.contents state.msg_input)
+  in
   match key with
+  (* Esc cancels the innermost thing, and a running capture is inside
+     everything else here: the operator is mid-utterance, not mid-turn. ^Y
+     stops one and keeps what was said, which is the common case; this is the
+     other one, and without it there is no way to abandon a recording that
+     picked up something the operator did not mean to send. *)
+  | "esc" when Option.is_some state.voice_capture ->
+    state.voice_stop_requested <- Some Masc.Voice_bridge.Discard;
+    state.last_action <- Some ("voice: discarding", Unix.gettimeofday ());
+    true
   | "esc" when Option.is_some state.msg_recall_replaces ->
     state.msg_recall_replaces <- None;
     clear_staged_attachments state;
     Buffer.clear state.msg_input;
     drain_queue ();
     true
-  (* The footer draws "Esc:interrupt turn" while a turn is live and the help
-     row says "back; during a turn, interrupt it". Both were promises this arm
-     did not keep: it left unconditionally and answered [true], so the
-     surface-level Esc handling that does interrupt was never reached. Leaving
-     is one keypress away again once the turn settles; a turn the operator
-     wants stopped is the more urgent of the two. *)
+  | "\t" -> apply_autocomplete Masc_tui_command.Next
+  | "shift-tab" -> apply_autocomplete Masc_tui_command.Prev
+  (* The footer and this arm read the same table (Masc_tui_esc_interrupt),
+     so the hint the operator sees is the act the key performs: Esc is the
+     first press of an interrupt, the accidental second press inside the
+     grace window, or a request to leave once the interrupt is stale,
+     declined, or errored. Leaving cancels nothing: the interrupt proceeds
+     server-side and the pane can be reopened. *)
   | "esc" -> if interrupt_turn () then true else (leave_keeper_message state; true)
   | "\r" ->
     let text = Buffer.contents state.msg_input in
@@ -1272,7 +1303,11 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          there, and staying scrolled back would hide the send. *)
       set_msg_scroll state 0;
       forget_recall state;
-      submit_message text
+      submit_message text;
+      (* The composer is empty after a submit, so a line held only because the
+         operator was mid-compose ([composing_for_keeper]) can dispatch now. When
+         the submit folded onto that held line, this is what sends the merge. *)
+      drain_queue ()
     end;
     true
   (* The same two keys the composer row binds, because this surface has its own
@@ -1298,6 +1333,8 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   | "down" when state.msg_scroll > 0 ->
     set_msg_scroll state (state.msg_scroll - 1);
     true
+  | "down" when slash_navigable () -> apply_autocomplete Masc_tui_command.Next
+  | "up" when slash_navigable () -> apply_autocomplete Masc_tui_command.Prev
   | "up" ->
     recall_older state;
     true
@@ -1337,6 +1374,9 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     in
     Buffer.clear state.msg_input;
     Buffer.add_string state.msg_input new_content;
+    (* Emptying the composer releases a line held only for this keeper's compose
+       ([composing_for_keeper]); send it now rather than waiting for a settle. *)
+    if Buffer.length state.msg_input = 0 then drain_queue ();
     true
   | "\x17" | "alt-backspace" ->
     (* Ctrl-W, or Alt+Backspace on a terminal that sends ESC DEL: the last
@@ -1348,6 +1388,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     in
     Buffer.clear state.msg_input;
     Buffer.add_string state.msg_input new_content;
+    if Buffer.length state.msg_input = 0 then drain_queue ();
     true
   | s ->
     let c = if String.length s = 1 then Some (Char.code s.[0]) else None in
@@ -1384,6 +1425,9 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
         drain_queue ()
       end;
       Buffer.clear state.msg_input;
+      (* Cleared composer: release any line held only for this keeper's compose
+         ([composing_for_keeper]). *)
+      drain_queue ();
       true
     end else if c = Some 5 then begin
       (* Ctrl-E: back to the newest row. Scrolling down one row at a time from
@@ -1545,6 +1589,7 @@ type async_msg =
      roster cursor moves under a refresh, and a transcript that took several
      seconds would otherwise land on whoever happens to be selected when it
      arrives. *)
+  | Voice_config_loaded of (Yojson.Safe.t, string) result * string option
   | Voice_level of { keeper : string; db : float }
   | Voice_transcribed of { keeper : string; text : string }
   | Voice_silent of { keeper : string; reason : string }
@@ -2175,6 +2220,48 @@ let launch_keeper_tool_approvals_load state ~mailbox =
   | None ->
       enqueue_async mailbox
         (Keeper_tool_approvals_loaded (Error "Eio switch is unavailable"))
+
+(* What voice actually resolved to, plus the microphone the recorder would
+   open.
+
+   The server's answer is the only surface that separates "voice is not
+   configured" from "a config exists and does not parse". runtime.toml shows
+   the second as though it were fine, which is how a six-day outage stayed
+   invisible.
+
+   The input device is read here rather than asked of the server: no server
+   knows it. sox opens whatever CoreAudio calls default, and captures that come
+   back empty are usually a different microphone than the operator assumes. *)
+let launch_voice_config_load state ~mailbox =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let config =
+      match Masc_tui_http.http_get ~host ~port ~path:"/api/v1/voice/config" with
+      | Ok (200, body) -> (
+        match Yojson.Safe.from_string body with
+        | json -> Ok json
+        | exception _ -> Error "voice config did not parse as JSON")
+      | Ok (code, body) ->
+        Error (Printf.sprintf "voice config HTTP %d: %s" code (String.trim body))
+      | Error message -> Error message
+    in
+    let device =
+      (* AUDIODEV wins when set, the way sox reads it; otherwise CoreAudio's
+         default, which is what an unset AUDIODEV means. *)
+      match Sys.getenv_opt "AUDIODEV" with
+      | Some device when String.trim device <> "" -> Some (String.trim device)
+      | Some _ | None -> Masc_tui_audio_device.default_input ()
+    in
+    enqueue_async mailbox (Voice_config_loaded (config, device))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+  | None ->
+    enqueue_async
+      mailbox
+      (Voice_config_loaded (Error "Eio switch is unavailable", None))
+;;
 
 let launch_keeper_turns_load state ~mailbox =
   let host = server_peer_host in
@@ -4543,6 +4630,7 @@ let goto_surface state ~mailbox (destination : surface) =
        | Config_prompts -> launch_prompts_load state ~mailbox
        | Config_presets -> launch_presets_load state ~mailbox
        | Config_params -> launch_runtime_params_load state ~mailbox
+       | Config_voice -> launch_voice_config_load state ~mailbox
        | Config_runtime | Config_models | Config_themes ->
            launch_runtime_config_load state ~mailbox)
    | Resources -> launch_resources_list state ~mailbox
@@ -5458,6 +5546,19 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                    blocking.Keeper_chat.request_id waiting))))
 ;;
 
+(* The operator is mid-line for this keeper: the composer holds text and it is
+   aimed here. While that is true, a settle should not dispatch the keeper's
+   waiting line out from under the line being typed -- holding it lets the next
+   Enter fold the two together ([coalesce_queued_input]). Gated on that setting:
+   with coalescing off the operator wants every line its own turn, so the settle
+   dispatches promptly as before. *)
+let composing_for_keeper state keeper_name =
+  state.coalesce_queued_input
+  && Buffer.length state.msg_input > 0
+  && (match state.msg_target_keeper_name with
+      | Some target -> String.equal target keeper_name
+      | None -> false)
+
 let drain_queued_message state ~base_path ~mailbox =
   (* Send everything that can go now, oldest first, skipping lines whose own
      keeper still has a turn running. Sending sets that keeper's in-flight, so
@@ -5474,6 +5575,7 @@ let drain_queued_message state ~base_path ~mailbox =
     match
       Chat_queue.take_first_sendable state.msg_queued ~sendable:(fun keeper_name ->
         Option.is_none (inflight_for state keeper_name)
+        && not (composing_for_keeper state keeper_name)
         &&
         match state.msg_recall_replaces with
         | Some editing ->
@@ -5926,8 +6028,7 @@ let draw_image state ~refuse ~title data =
         ^ Masc_tui_graphics.place ~data box
         ^ Printf.sprintf "\x1b[%d;1H%s" rows
             (Message_layout.fit_width "  any key: back" (max 1 (columns - 1))));
-      state.image_open <-
-        Some { image_title = title; image_bytes = String.length data }
+      state.image_open <- true
 
 (* Put a picture on the terminal, or say why not. The refusal is text for the
    pane: there is nothing to draw, and taking the screen away from the frame
@@ -6043,9 +6144,9 @@ let open_named_image state =
    its own layer, so clearing the screen is not enough to remove one. *)
 let close_image state =
   match state.image_open with
-  | None -> ()
-  | Some _ ->
-      state.image_open <- None;
+  | false -> ()
+  | true ->
+      state.image_open <- false;
       write_to_terminal Masc_tui_graphics.delete_all
 
 (* [/find] and its arg-less repeat, which differ only in where the walk starts.
@@ -8328,27 +8429,6 @@ let handle_keeper_action state ~base_path ~mailbox action =
    operator their input device is dead — a dead microphone and a quiet room
    both end as an empty draft. *)
 let launch_voice_capture state ~mailbox ~keeper =
-  let capture_dir = Filename.get_temp_dir_name () in
-  let meter_glob () =
-    (* The capture writes under a name Voice_bridge chooses; the meter finds
-       the newest one rather than being told, so the two do not have to agree
-       on a filename across a library boundary. *)
-    try
-      Sys.readdir capture_dir
-      |> Array.to_list
-      |> List.filter (fun f ->
-        String.length f > 9
-        && String.equal (String.sub f 0 9) "masc_stt_"
-        && Filename.check_suffix f ".wav")
-      |> List.map (fun f -> Filename.concat capture_dir f)
-      |> List.sort (fun a b ->
-        compare (Unix.stat b).Unix.st_mtime (Unix.stat a).Unix.st_mtime)
-      |> function
-      | newest :: _ -> Some newest
-      | [] -> None
-    with
-    | Sys_error _ | Unix.Unix_error _ -> None
-  in
   let run () =
     let result =
       try
@@ -8356,6 +8436,12 @@ let launch_voice_capture state ~mailbox ~keeper =
           (Masc.Voice_bridge.record_and_transcribe
              ~agent_id:keeper
              ?noise_floor:state.voice_floor
+             (* The level the capture makes its own decisions from, so the bar
+                and the trigger cannot disagree. It arrives from the capture's
+                fiber, which is why it goes through the mailbox rather than
+                straight into the field. *)
+             ~on_level:(fun db -> enqueue_async mailbox (Voice_level { keeper; db }))
+             ~should_stop:(fun () -> state.voice_stop_requested)
              ())
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -8386,31 +8472,6 @@ let launch_voice_capture state ~mailbox ~keeper =
     in
     enqueue_async mailbox msg
   in
-  let meter () =
-    (* Stops when the capture posts its result: the level is only meaningful
-       while something is recording. *)
-    let rec tick () =
-      match state.voice_capture with
-      | Some active when String.equal active keeper ->
-        (match Eio_context.get_clock_opt () with
-         | None -> ()
-         | Some clock ->
-           Eio.Time.sleep clock 0.5;
-           (match meter_glob () with
-            | None -> ()
-            | Some file ->
-              (match Masc.Voice_bridge.rms_amplitude_of_file file with
-               | Some amplitude ->
-                 enqueue_async
-                   mailbox
-                   (Voice_level
-                      { keeper; db = Masc.Voice_bridge.db_of_amplitude amplitude })
-               | None -> ()));
-           tick ())
-      | Some _ | None -> ()
-    in
-    tick ()
-  in
   match Eio_context.get_switch_opt () with
   | None ->
     enqueue_async
@@ -8419,8 +8480,8 @@ let launch_voice_capture state ~mailbox ~keeper =
   | Some sw ->
     state.voice_capture <- Some keeper;
     state.voice_level_db <- None;
-    Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon);
-    Eio.Fiber.fork_daemon ~sw (fun () -> meter (); `Stop_daemon)
+    state.voice_stop_requested <- None;
+    Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
 ;;
 
 (* Continuous mode's only moving part: after each capture settles, start the
@@ -8458,17 +8519,22 @@ let handle_composer_key state ~base_path ~mailbox key =
       (* Pressing it while continuous mode is on turns the mode off. That is
          the only way out: a mode that re-arms itself needs a key that stops
          it, and the key that started it is the one the operator will reach
-         for. A capture already running is left to finish — cancelling it
-         would throw away speech that was already said. *)
+         for. *)
       (match state.voice_continuous with
        | Some _ ->
            state.voice_continuous <- None;
            state.last_action <- Some ("voice: continuous off", Unix.gettimeofday ())
        | None ->
       (* One capture at a time: a second microphone would contend for the same
-         input device and the two transcripts would race into one draft. *)
+         input device and the two transcripts would race into one draft.
+
+         The second press stops the running one, which is what the row has
+         been telling the operator it does. It used to start another instead,
+         leaving two recorders on one device with no way to end either. *)
       (match state.voice_capture, composer.Composer.target with
-       | Some _, _ -> ()
+       | Some _, _ ->
+           state.voice_stop_requested <- Some Masc.Voice_bridge.Keep_what_was_heard;
+           state.last_action <- Some ("voice: stopping", Unix.gettimeofday ())
        | None, Composer.Ready keeper_name ->
            launch_voice_capture state ~mailbox ~keeper:keeper_name
        | None, (Composer.No_target | Composer.Unreachable _) -> ()));
@@ -8484,15 +8550,23 @@ let handle_composer_key state ~base_path ~mailbox key =
               across. It is dropped when the mode ends, so a session that moves
               to a different room measures again. *)
            state.voice_continuous <- Some keeper_name;
-           state.voice_floor <- Masc.Voice_bridge.measure_noise_floor ~agent_id:keeper_name;
+           state.voice_floor <- Masc.Voice_bridge.measure_noise_floor ~agent_id:keeper_name ();
            state.last_action <- Some ("voice: continuous on", Unix.gettimeofday ());
            if state.voice_capture = None
            then launch_voice_capture state ~mailbox ~keeper:keeper_name
        | None, (Composer.No_target | Composer.Unreachable _) -> ());
       true
   | Composer.Release_focus ->
-      save_message_draft state;
-      state.composer_focused <- false;
+      (* A running capture is the innermost thing Esc can leave, so it goes
+         first and the row keeps its focus. ^Y stops one and keeps what was
+         said; this abandons it. *)
+      (match state.voice_capture with
+       | Some _ ->
+           state.voice_stop_requested <- Some Masc.Voice_bridge.Discard;
+           state.last_action <- Some ("voice: discarding", Unix.gettimeofday ())
+       | None ->
+           save_message_draft state;
+           state.composer_focused <- false);
       true
   | Composer.Send ->
       state.composer_focused <- false;
@@ -8680,6 +8754,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
      each is dropped unless that capture is still the one in flight. An
      operator who moved the cursor, or pressed the key again, has said the
      first capture no longer belongs to this draft. *)
+  | Voice_config_loaded (result, device) ->
+      state.voice_input_device <- device;
+      (match result with
+       | Ok json ->
+           state.voice_config <- Some json;
+           state.voice_config_error <- None
+       | Error message ->
+           state.voice_config <- None;
+           state.voice_config_error <- Some message)
   | Voice_level { keeper; db } ->
       if state.voice_capture = Some keeper then state.voice_level_db <- Some db
   | Voice_transcribed { keeper; text } ->
@@ -10002,7 +10085,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            let noted =
              match result with
              | Ok (Masc_tui_interrupt_signal.Signalled { turn_id }) ->
-                 Keeper_chat_transcript.Signal_sent { turn_id }
+                 Keeper_chat_transcript.Signal_sent
+                   { turn_id; signalled_at_ns = Mtime_clock.elapsed_ns () }
              | Ok (Masc_tui_interrupt_signal.Not_signalled { reason; detail }) ->
                  Keeper_chat_transcript.Signal_declined
                    (match detail with
@@ -12285,7 +12369,7 @@ and is loaded on demand through keeper_skill.
          and is not also a keystroke for the surface underneath -- an operator
          pressing j to dismiss a screenshot did not mean to move a cursor. *)
       let dismissed_image =
-        Option.is_some state.image_open && Option.is_some input
+        state.image_open && Option.is_some input
       in
       if dismissed_image then begin
         close_image state;
@@ -13747,10 +13831,10 @@ and is loaded on demand through keeper_skill.
        | Some "?" when message_mode && Buffer.length state.msg_input = 0 ->
            state.help_open <- true;
            state.help_scroll <- 0
-       | Some ("right" | "l" | "esc")
-         when message_mode
-              && state.keeper_message_focus = Left_pane ->
-           state.keeper_message_focus <- Right_pane
+        | Some ("right" | "l" | "esc" | "\t")
+          when message_mode
+               && state.keeper_message_focus = Left_pane ->
+            state.keeper_message_focus <- Right_pane
        | Some "left"
          when message_mode
               && Masc_tui_render.keeper_roster_pane_shown state
@@ -13832,29 +13916,36 @@ and is loaded on demand through keeper_skill.
                         keeper the pane is showing is the one Esc can stop:
                         another keeper's turn is not on screen, and stopping
                         it from here would be a keypress the reader cannot
-                        see the target of. A second press while the first is
-                        unanswered is not a second interrupt -- it reports
-                        [true] so it does not fall through to leaving, which
-                        is not what the reader asked for either. *)
+                        see the target of. What the press does is the pure
+                        table in Masc_tui_esc_interrupt: launch on a first
+                        press, swallow an accidental double press inside the
+                        grace window, and leave the view once the signal is
+                        stale, declined, or errored. Leaving cancels nothing
+                        -- the interrupt proceeds server-side, and a turn
+                        parked in an uncancellable section keeps streaming
+                        after its signal (masc #29229), so holding Esc until
+                        the stream settles could hold it forever. *)
                      match state.msg_live with
                      | Some live
                        when state.msg_target_keeper_name
-                            = Some (Keeper_chat_transcript.keeper_name live)
-                            && Keeper_chat_transcript.interrupt live
-                               = Keeper_chat_transcript.Not_requested ->
-                         (match
-                            inflight_by_request_id state
-                              (Keeper_chat_transcript.request_id live)
-                          with
-                          | Some request ->
-                              launch_keeper_interrupt state
-                                ~mailbox:async_messages request;
-                              true
-                          | None -> false)
-                     | Some live
-                       when state.msg_target_keeper_name
                             = Some (Keeper_chat_transcript.keeper_name live) ->
-                         true
+                         (match
+                            Masc_tui_esc_interrupt.action
+                              ~now_ns:(Mtime_clock.elapsed_ns ())
+                              (Keeper_chat_transcript.interrupt live)
+                          with
+                          | Masc_tui_esc_interrupt.Launch_interrupt ->
+                            (match
+                               inflight_by_request_id state
+                                 (Keeper_chat_transcript.request_id live)
+                             with
+                             | Some request ->
+                               launch_keeper_interrupt state
+                                 ~mailbox:async_messages request;
+                               true
+                             | None -> false)
+                          | Masc_tui_esc_interrupt.Swallow -> true
+                          | Masc_tui_esc_interrupt.Leave -> false)
                      | Some _ | None -> false)
                    ~submit_message:
                      (send_operator_text state ~base_path
@@ -13900,7 +13991,12 @@ and is loaded on demand through keeper_skill.
                      match state.msg_target_keeper_name with
                      | Some keeper when state.voice_capture = None ->
                          launch_voice_capture state ~mailbox:async_messages ~keeper
-                     | Some _ | None -> ())
+                     (* The same toggle the composer row carries. *)
+                     | Some _ ->
+                         state.voice_stop_requested <- Some Masc.Voice_bridge.Keep_what_was_heard;
+                         state.last_action <-
+                           Some ("voice: stopping", Unix.gettimeofday ())
+                     | None -> ())
                    ~toggle_voice_continuous:(fun () ->
                      match state.voice_continuous, state.msg_target_keeper_name with
                      | Some _, _ ->
@@ -13911,7 +14007,7 @@ and is loaded on demand through keeper_skill.
                      | None, Some keeper ->
                          state.voice_continuous <- Some keeper;
                          state.voice_floor <-
-                           Masc.Voice_bridge.measure_noise_floor ~agent_id:keeper;
+                           Masc.Voice_bridge.measure_noise_floor ~agent_id:keeper ();
                          state.last_action <-
                            Some ("voice: continuous on", Unix.gettimeofday ());
                          if state.voice_capture = None
@@ -16484,7 +16580,8 @@ and is loaded on demand through keeper_skill.
               | Config_params -> Config_prompts
               | Config_prompts -> Config_presets
               | Config_presets -> Config_themes
-              | Config_themes -> Config_runtime);
+              | Config_themes -> Config_voice
+              | Config_voice -> Config_runtime);
            state.prompts_cursor <- 0;
            state.config_scroll <- 0;
            state.runtime_config_cursor <- 0;
@@ -16519,6 +16616,10 @@ and is loaded on demand through keeper_skill.
               then launch_runtime_config_load state ~mailbox:async_messages
             | Config_runtime ->
               set_runtime_config_cursor_near state ~direction:1 ~target:0
+            (* Re-read rather than move a cursor: this pane has no rows, and
+               what an operator wants from it after starting a local server is
+               a fresh answer. *)
+            | Config_voice -> launch_voice_config_load state ~mailbox:async_messages
             | Config_themes -> ())
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
@@ -16671,8 +16772,10 @@ and is loaded on demand through keeper_skill.
                     selected model's [models.NAME] line, where the existing
                     $EDITOR path takes over. One write path, not two. *)
                  | Config_models -> handle_config_models_open_source ()
-                 (* The preset pane writes through s and r, never $EDITOR. *)
-                 | Config_presets | Config_themes -> ())
+                 (* The preset pane writes through s and r, never $EDITOR.
+                    The voice pane is a reading; runtime.toml is edited from
+                    the runtime pane, where the file already is. *)
+                 | Config_presets | Config_themes | Config_voice -> ())
             | Tools -> handle_skill_edit ()
             | Schedules -> handle_schedule_modify ()
             | Approvals ->
@@ -16964,7 +17067,7 @@ and is loaded on demand through keeper_skill.
        with
        (* The terminal belongs to the picture until it is dismissed. A frame
           drawn now would clear the rows it occupies and leave the rest. *)
-       | Render_schedule.Render when Option.is_some state.image_open -> ()
+       | Render_schedule.Render when state.image_open -> ()
        | Render_schedule.Render ->
            let frame, clamped, approval =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build

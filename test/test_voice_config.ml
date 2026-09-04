@@ -383,9 +383,117 @@ let test_an_unknown_endpoint_field_is_rejected_by_name () =
       (String_util.string_contains_substring ~needle:"max_retries" message)
 ;;
 
+
+(* The capture section. It exists because every default in it was measured on
+   one workstation, and two margins picked that way were both wrong before an
+   operator could do anything about it. *)
+let test_capture_defaults_when_the_section_is_absent () =
+  match Vc.parse_json (`Assoc []) with
+  | Error message -> fail ("an absent capture section must parse: " ^ message)
+  | Ok config ->
+    check
+      bool
+      "absent means the measured defaults"
+      true
+      (config.Vc.capture = Vc.default_capture)
+;;
+
+let test_capture_values_are_read () =
+  let json =
+    `Assoc
+      [ ( "capture"
+        , `Assoc
+            [ "calibration_seconds", `Float 1.25
+            ; "trigger_margin_db", `Float 9.0
+            ; "trailing_silence_seconds", `Float 1.5
+            ; "speech_margin_db", `Int 3
+            ; "noise_reduction", `Bool true
+            ] )
+      ]
+  in
+  match Vc.parse_json json with
+  | Error message -> fail message
+  | Ok config ->
+    let capture = config.Vc.capture in
+    check (float 0.001) "calibration" 1.25 capture.Vc.calibration_seconds;
+    check (float 0.001) "trigger" 9.0 capture.Vc.trigger_margin_db;
+    check (float 0.001) "trailing silence" 1.5 capture.Vc.trailing_silence_seconds;
+    (* An int where a float is meant is what an operator types. Rejecting it
+       would fail the config over a decimal point. *)
+    check (float 0.001) "speech, given as an int" 3.0 capture.Vc.speech_margin_db;
+    check bool "noise reduction" true capture.Vc.noise_reduction
+;;
+
+(* A partial section keeps the defaults for what it does not say, so tuning one
+   value does not silently reset the others. *)
+let test_a_partial_capture_section_keeps_the_rest () =
+  match Vc.parse_json (`Assoc [ "capture", `Assoc [ "trigger_margin_db", `Float 2.0 ] ]) with
+  | Error message -> fail message
+  | Ok config ->
+    check (float 0.001) "the one given" 2.0 config.Vc.capture.Vc.trigger_margin_db;
+    check
+      (float 0.001)
+      "the rest default"
+      Vc.default_capture.Vc.speech_margin_db
+      config.Vc.capture.Vc.speech_margin_db
+;;
+
+(* A probe of no length measures nothing, and the threshold would then come
+   from an empty file rather than a room. *)
+(* Zero would end the capture on the first gap between two words, which is
+   most sentences.
+
+   Built on the full fixture rather than a bare capture section: the parser
+   requires tts before it reaches capture, so a partial document is refused
+   for the wrong reason and the test would pass without proving anything. *)
+let test_a_zero_trailing_silence_is_refused () =
+  let json =
+    Yojson.Safe.from_string (minimal_config_json ~session_endpoints:"[]")
+  in
+  let json =
+    match json with
+    | `Assoc fields ->
+      `Assoc
+        (fields @ [ "capture", `Assoc [ "trailing_silence_seconds", `Float 0.0 ] ])
+    | other -> other
+  in
+  match Vc.parse_json json with
+  | Ok _ -> fail "a zero trailing-silence window must be refused"
+  | Error message ->
+    check
+      bool
+      "the rejection names the field"
+      true
+      (String_util.string_contains_substring ~needle:"trailing_silence_seconds" message)
+;;
+
+let test_a_zero_calibration_is_refused () =
+  match Vc.parse_json (`Assoc [ "capture", `Assoc [ "calibration_seconds", `Float 0.0 ] ]) with
+  | Ok _ -> fail "a zero-length calibration probe must be refused"
+  | Error message ->
+    check
+      bool
+      "the rejection names the field"
+      true
+      (String_util.string_contains_substring ~needle:"calibration_seconds" message)
+;;
+
 let () =
   Alcotest.run "voice_config"
     [
+      ( "capture",
+        [
+          test_case "defaults when the section is absent"
+            `Quick test_capture_defaults_when_the_section_is_absent;
+          test_case "values are read"
+            `Quick test_capture_values_are_read;
+          test_case "a zero trailing silence is refused."
+            `Quick test_a_zero_trailing_silence_is_refused;
+          test_case "a partial section keeps the rest"
+            `Quick test_a_partial_capture_section_keeps_the_rest;
+          test_case "a zero calibration is refused"
+            `Quick test_a_zero_calibration_is_refused;
+        ] );
       ( "live_shape",
         [
           test_case "a live-shaped endpoint parses"

@@ -1,0 +1,104 @@
+name: Test
+
+# The PR gate (pr-check.yml) and the manual CI lane (ci.yml) both stop at
+# `dune build @check`: they type-check test/ but link and run nothing. That
+# is an explicit owner decision (2026-09-02, see the ci.yml header) — linking
+# the ~296 test executables is this repo's slow step, so the gate stays fast.
+#
+# The hole that leaves: a test-only BEHAVIORAL regression — code that
+# compiles fine but fails at runtime — reaches main silently. It happened
+# with the test_keeper_owner actor-38 incident; nothing ran the suite before
+# the breakage landed.
+#
+# This lane closes that hole on a schedule instead of in the PR gate. It
+# runs the full behavioral suite nightly (02:43 KST, off-peak) and on
+# manual dispatch, so a test-only regression surfaces within ~24h instead
+# of never. The measured runtime of this lane is the evidence for any
+# future proposal to move tests into the PR gate; until that proposal
+# exists, the gate is unchanged by design.
+#
+# See: https://github.com/jeong-sik/masc/issues/33008
+
+on:
+  schedule:
+    # 17:43 UTC = 02:43 KST, off-peak for both GitHub runners and the team.
+    - cron: "43 17 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# One run at a time for the whole repo: a new run cancels the one in
+# flight instead of stacking a second one.
+concurrency:
+  group: test
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: dune test
+    runs-on: ubuntu-latest
+    # Linking and running the full suite is far slower than @check; the
+    # ci-run-tests observer fails closed at CI_TEST_TIMEOUT_SEC (100 min)
+    # first, so this cap only catches a hung runner.
+    timeout-minutes: 120
+    steps:
+      - name: Free disk space
+        # Same cleanup as ci.yml: linking the test executables is
+        # disk-heavy, and ubuntu-latest preinstalls the Android SDK,
+        # .NET, GHC and the CodeQL bundle this build never uses.
+        # See: https://github.com/jeong-sik/masc/issues/22954
+        run: |
+          set -euo pipefail
+          echo "Disk before cleanup:"
+          df -h /
+          cleanup_pids=()
+          sudo rm -rf /usr/local/lib/android & cleanup_pids+=("$!")
+          sudo rm -rf /usr/share/dotnet & cleanup_pids+=("$!")
+          sudo rm -rf /opt/ghc /usr/local/.ghcup & cleanup_pids+=("$!")
+          sudo rm -rf /opt/hostedtoolcache/CodeQL & cleanup_pids+=("$!")
+          sudo docker image prune --all --force & cleanup_pids+=("$!")
+          for cleanup_pid in "${cleanup_pids[@]}"; do
+            wait "${cleanup_pid}" || true
+          done
+          echo "Disk after cleanup:"
+          df -h /
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check source text integrity
+        run: scripts/ci/check-source-text-integrity.sh
+
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+        with:
+          pin-flags: --with-bisect
+
+      - name: Install system and OCaml dependencies
+        uses: ./.github/actions/install-ocaml-deps
+        with:
+          # --with-test is what ci.yml already passes, and it is what
+          # running the suite needs: dune-project gates alcotest,
+          # qcheck-core, qcheck-alcotest and bisect_ppx behind :with-test.
+          install-flags: --with-test
+          os-packages: jq ripgrep
+
+      - name: Test
+        env:
+          # Public runners give four CPUs; use all four for the build
+          # and the suite.
+          DUNE_JOBS: "4"
+          # Fail closed at 100 minutes: a suite that cannot finish in
+          # that window is itself a finding, not a hang to wait out.
+          CI_TEST_TIMEOUT_SEC: "6000"
+          CI_TEST_HEARTBEAT_SEC: "30"
+        # scripts/ci-run-tests.sh heartbeats while the suite runs and
+        # exits 124 on timeout, so a hung test fails the job instead of
+        # burning the 120-minute cap.
+        run: |
+          set -euo pipefail
+          scripts/ci-run-tests.sh "opam exec -- dune test --root ."

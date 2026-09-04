@@ -299,10 +299,10 @@ let verification_submit_request_fn
      task:Masc_domain.task ->
      assignee:string ->
      verification_id:string ->
-     evidence_refs:string list ->
+     claim:Masc_domain.verification_claim ->
      (unit, string) result) Atomic.t
   = Atomic.make
-      (fun _config ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs:_ ->
+      (fun _config ~(task : Masc_domain.task) ~assignee ~verification_id ~claim:_ ->
          Error
            (Printf.sprintf
               "verification request persistence hook is not installed (task=%s assignee=%s verification_id=%s)"
@@ -329,10 +329,10 @@ let verification_notify_submit_fn
      task:Masc_domain.task ->
      assignee:string ->
      verification_id:string ->
-     evidence_refs:string list ->
+     claim:Masc_domain.verification_claim ->
      unit) Atomic.t
   = Atomic.make
-      (fun _config ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs:_ ->
+      (fun _config ~(task : Masc_domain.task) ~assignee ~verification_id ~claim:_ ->
          Log.Misc.warn
            "verification request notification hook is not installed task_id=%s verification_id=%s producer=%s"
            task.id

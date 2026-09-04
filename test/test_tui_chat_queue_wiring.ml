@@ -1270,6 +1270,36 @@ let test_escape_reaches_the_interrupt () =
       launched
 ;;
 
+(* The Esc-during-a-turn decision lives in Masc_tui_esc_interrupt so the
+   dispatch and the footer read one table (test_tui_esc_interrupt pins it).
+   The day either side re-derives the decision inline, hint and act diverge
+   again -- the footer said "Esc:interrupt sent" while the arm swallowed
+   forever. Both must call the table. *)
+let test_esc_dispatch_and_footer_read_the_interrupt_table () =
+  let dispatch =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"main"
+      ~callee:"Masc_tui_esc_interrupt.action"
+  in
+  if dispatch < 1 then
+    failf
+      "the interrupt_turn closure must read Masc_tui_esc_interrupt.action; \
+       observed %d call(s)"
+      dispatch;
+  let footer =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_keeper_message"
+      ~callee:"Masc_tui_esc_interrupt.action"
+  in
+  if footer < 1 then
+    failf
+      "the escape hint must read Masc_tui_esc_interrupt.action so the footer \
+       cannot diverge from the dispatch; observed %d call(s)"
+      footer
+;;
+
 let test_cancel_and_edit_take_the_row_with_them () =
   let cancelled =
     Ast_grep.count_calls_in_value_binding
@@ -1459,6 +1489,8 @@ let () =
             test_chat_shortcuts_reach_visibility_state
         ; test_case "Esc reaches the interrupt" `Quick
             test_escape_reaches_the_interrupt
+        ; test_case "Esc dispatch and footer read the interrupt table" `Quick
+            test_esc_dispatch_and_footer_read_the_interrupt_table
         ; test_case "the budget and the pane agree about queue rows" `Quick
             test_the_budget_and_the_pane_agree_about_queue_rows
         ; test_case "the budget and the pane agree about the scrollback row"

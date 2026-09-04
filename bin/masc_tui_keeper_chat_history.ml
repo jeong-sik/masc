@@ -954,7 +954,12 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id at summary =
   let withheld_note =
     if summary.withheld = 0 then []
     else
-      [ Printf.sprintf "(%s, content withheld)"
+      (* "content withheld" read as "someone is holding it back", and the
+         reader then looked for a way to see it. There is none: RFC-0358 s2
+         admits a reasoning step and its timestamp, and [Trajectory
+         .withheld_thinking_entry] cannot carry text at all -- both producers
+         of [Trace_think] hardcode an empty one. The count is the whole fact. *)
+      [ Printf.sprintf "%s · text not recorded"
           (plural summary.withheld "reasoning step")
       ]
   in

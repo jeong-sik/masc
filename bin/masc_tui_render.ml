@@ -502,8 +502,8 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
              (Printf.sprintf "[%s]  %s  %s" timestamp
                 (String.trim role_label) request_label)
        | Message_layout.User | Message_layout.Inbound | Message_layout.Keeper
-       | Message_layout.Status | Message_layout.Journal | Message_layout.Error
-       | Message_layout.Skill _ ->
+       | Message_layout.Status | Message_layout.Local | Message_layout.Journal
+       | Message_layout.Error | Message_layout.Skill _ ->
            (* [role_label] arrives in a fixed fourteen-to-eighteen cell column
               so the request column stays put down the pane. The label sits
               beside its mark and the remaining padding follows the badge;
@@ -7701,7 +7701,8 @@ let turn_rail_of ~(edge : Masc_tui_types.turn_edge)
         ->
           Message_layout.Rail_does
       | Message_layout.User | Message_layout.Inbound | Message_layout.Keeper
-      | Message_layout.Status | Message_layout.Journal | Message_layout.Error ->
+      | Message_layout.Status | Message_layout.Local | Message_layout.Journal
+      | Message_layout.Error ->
           Message_layout.Rail_says)
 
 let compute_keeper_message_layout_entries (state : state) ~keeper_name
@@ -7720,6 +7721,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
     | Message_keeper -> Keeper_chat.terminal_safe_text message.me_keeper_name
     | Message_autonomous -> Keeper_chat.terminal_safe_text message.me_keeper_name
     | Message_status -> "STATUS"
+    | Message_local -> "LOCAL"
     | Message_error -> "ERROR"
     | Message_tool -> "TOOLS"
     | Message_skill _ -> "SKILL"
@@ -7775,7 +7777,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                     (Keeper_chat_transcript.project_tool_block
                        (tool_projection_mode state) block))
           | Message_user _ | Message_keeper | Message_autonomous
-          | Message_status | Message_memory | Message_error
+          | Message_status | Message_local | Message_memory | Message_error
           | Message_skill _ | Message_thinking ->
               None
         in
@@ -7785,6 +7787,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
           | Message_user (Sent_by_other _) -> Message_layout.Inbound
           | Message_keeper | Message_autonomous -> Message_layout.Keeper
           | Message_status -> Message_layout.Status
+          | Message_local -> Message_layout.Local
           | Message_memory -> Message_layout.Journal
           | Message_error -> Message_layout.Error
           | Message_tool -> (
@@ -7844,7 +7847,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                   | None -> message.me_text))
           | Message_thinking | Message_user _ | Message_keeper
           | Message_autonomous
-          | Message_status | Message_error ->
+          | Message_status | Message_local | Message_error ->
               message.me_text
         in
         (* What the links in this message point at, on rows of their own
@@ -7863,8 +7866,8 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
           match message.me_role with
           | Message_tool | Message_skill _ -> body
           | Message_thinking | Message_user _ | Message_keeper
-          | Message_autonomous | Message_status | Message_error
-          | Message_memory -> (
+          | Message_autonomous | Message_status | Message_local
+          | Message_error | Message_memory -> (
               let seen = Hashtbl.create 4 in
               let labels =
                 Message_layout.bare_urls body

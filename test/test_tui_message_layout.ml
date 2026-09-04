@@ -1707,13 +1707,30 @@ let test_a_continuation_does_not_borrow_the_reasoning_glyph () =
 
 (* Every speaker draws a different mark. A shared glyph is how the pane came to
    say two things with one shape. *)
+(* Reads [Layout.all_styles] rather than a list of its own. The list here
+   named eight styles and had done since before Skill had four tones, so the
+   check passed over every mark it did not mention -- [Local] arrived and was
+   never compared against anything.
+
+   Skill is one speaker in four states, and [Skill_failure] deliberately draws
+   the error mark: a skill that failed is a failure, and the state marks are
+   pinned separately by the test below. So the tones collapse to one entry
+   here, and what is checked is that no two *speakers* look alike. *)
 let test_every_speaker_mark_is_distinct () =
-  let marks =
-    List.map Layout.speaker_mark
-      [ Layout.User; Layout.Inbound; Layout.Keeper; Layout.Status
-      ; Layout.Journal; Layout.Error; Layout.Tool; Layout.Thinking
-      ]
+  let speakers =
+    List.filter
+      (function
+        | Layout.Skill Layout.Skill_live -> true
+        | Layout.Skill
+            (Layout.Skill_used | Layout.Skill_attention | Layout.Skill_failure) ->
+            false
+        | Layout.User | Layout.Inbound | Layout.Keeper | Layout.Status
+        | Layout.Local | Layout.Journal | Layout.Error | Layout.Tool
+        | Layout.Thinking ->
+            true)
+      Layout.all_styles
   in
+  let marks = List.map Layout.speaker_mark speakers in
   check int "no two speakers share a mark" (List.length marks)
     (List.length (List.sort_uniq String.compare marks))
 

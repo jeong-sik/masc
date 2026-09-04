@@ -123,6 +123,19 @@ type msg_role =
       (** A keeper reply produced by an autonomous turn rather than a message
           sent from this chat. *)
   | Message_status
+      (** What the server says happened to this turn: an approval moving
+          through its phases, a delivery that failed and recovered. Transcript,
+          and it belongs to a request. *)
+  | Message_local
+      (** The pane answering something the operator typed at it -- the command
+          list, a [/find] that matched nothing, a [/interrupt] with no turn to
+          interrupt. It never left this machine and belongs to no request.
+
+          Separate from {!Message_status} because the two read as one lane
+          otherwise, and they are not: twenty lines of [/help] landed between
+          two approval phases under the same badge. The gate rows were moved
+          once before for the same reason, out of the journal lane where they
+          interleaved with memory commits. *)
   | Message_error
   | Message_tool
       (** The tool calls of one finished turn, as the row block the live pane
@@ -378,7 +391,8 @@ let fold_memory_summary_runs ~visibility entries =
         match entry.me_role with
         | Message_memory -> go acc (row :: run) rest
         | Message_user _ | Message_keeper | Message_autonomous | Message_status
-        | Message_error | Message_tool | Message_skill _ | Message_thinking -> (
+        | Message_local | Message_error | Message_tool | Message_skill _
+        | Message_thinking -> (
           match run with
           | [] -> go (row :: acc) [] rest
           | newest :: older ->
@@ -541,6 +555,9 @@ let chat_turn_phase_of_role = function
   | Message_user _ -> Turn_input
   | Message_status | Message_thinking | Message_memory | Message_skill _ ->
       Turn_progress
+  (* A row the pane wrote in answer to a command. It is in no turn, and
+     Turn_output is the phase that sorts it where it was typed. *)
+  | Message_local -> Turn_output
   | Message_tool -> Turn_tool
   | Message_keeper | Message_autonomous | Message_error -> Turn_output
 ;;
@@ -593,8 +610,9 @@ type chat_timeline_slot =
 let is_user_row row =
   match row.me_role with
   | Message_user _ -> true
-  | Message_keeper | Message_autonomous | Message_status | Message_error
-  | Message_tool | Message_thinking | Message_memory | Message_skill _ ->
+  | Message_keeper | Message_autonomous | Message_status | Message_local
+  | Message_error | Message_tool | Message_thinking | Message_memory
+  | Message_skill _ ->
       false
 ;;
 
@@ -929,8 +947,9 @@ let msg_anchor entry =
            Some (request_id, turn_phase, operation_seq)
        | (Persisted_row _ | Persisted_legacy_row _), Message_user _ -> None
        | (Persisted_row _ | Persisted_legacy_row _ | Session_row _),
-         (Message_keeper | Message_autonomous | Message_status | Message_error
-         | Message_tool | Message_skill _ | Message_thinking | Message_memory) ->
+         (Message_keeper | Message_autonomous | Message_status | Message_local
+         | Message_error | Message_tool | Message_skill _ | Message_thinking
+         | Message_memory) ->
            None)
   }
 
@@ -943,8 +962,9 @@ let same_msg_anchor anchor entry =
       && turn_phase = entry.me_turn_phase
       && Int.equal operation_seq entry.me_operation_seq
   | Some _,
-    (Message_keeper | Message_autonomous | Message_status | Message_error
-    | Message_tool | Message_skill _ | Message_thinking | Message_memory)
+    (Message_keeper | Message_autonomous | Message_status | Message_local
+    | Message_error | Message_tool | Message_skill _ | Message_thinking
+    | Message_memory)
   | None, _ ->
       false
 

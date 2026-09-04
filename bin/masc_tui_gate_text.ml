@@ -27,29 +27,45 @@ let lifecycle_line ~phase ~tool =
 
    The phases are a sequence, not independent facts -- "적용 완료" already
    implies the call was requested and approved -- so the run collapses to the
-   furthest one it reached. Problems win over plain success, because an
-   operator scanning the pane needs to see a failed or unproven effect even
-   when a later step recorded that the turn carried on.
+   furthest stage it reached: a replay outcome if one landed, else how the
+   Gate resolved, else that it is still waiting.
 
-   [continuation_recorded] is the exception: it says the turn resumed, which
-   the outcome does not, so it rides along as a suffix instead of replacing
-   the outcome. *)
-let outcome_order =
-  [ "replay_failed"
-  ; "replay_indeterminate"
-  ; "replay_applied_with_warning"
-  ; "replay_applied"
-  ; "resolved_rejected"
-  ; "resolved_approved"
-  ; "requested"
-  ]
+   Within a stage the latest step wins, because a replay correction is a
+   second row for the same approval carrying the canonical phase. Ranking by
+   severity instead would have kept showing the phase the correction exists to
+   overturn.
+
+   [continuation_recorded] is the exception to all of it: it says the turn
+   resumed, which no outcome says, so it rides along as a suffix instead of
+   replacing the outcome. *)
+let stage_of_phase = function
+  | "replay_applied" | "replay_applied_with_warning" | "replay_failed"
+  | "replay_indeterminate" -> Some 3
+  | "resolved_approved" | "resolved_rejected" -> Some 2
+  | "requested" -> Some 1
+  | _ -> None
 ;;
 
 let fold_line ~phases ~tool =
   let has phase = List.exists (String.equal phase) phases in
   let outcome =
-    match List.find_opt has outcome_order with
-    | Some phase -> Some phase
+    List.fold_left
+      (fun best phase ->
+        match stage_of_phase phase with
+        | None -> best
+        | Some stage -> (
+          match best with
+          (* [>=] and not [>]: within one stage the later step is the one that
+             stands, which is how a correction row supersedes the row it
+             corrects. *)
+          | Some (best_stage, _) when stage >= best_stage -> Some (stage, phase)
+          | Some _ -> best
+          | None -> Some (stage, phase)))
+      None phases
+  in
+  let outcome =
+    match outcome with
+    | Some (_, phase) -> Some phase
     (* A run of phases this build does not know still has to draw something,
        and the last one is the furthest the approval got. *)
     | None -> List.nth_opt (List.rev phases) 0

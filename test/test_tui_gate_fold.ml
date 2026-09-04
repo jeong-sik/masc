@@ -51,6 +51,20 @@ let test_one_approval_is_one_row () =
        ; step "continuation_recorded"
        ])
 
+let test_a_correction_supersedes_the_row_it_corrects () =
+  (* A replay correction is a second row for the same approval carrying the
+     canonical phase. Ranking by severity kept showing the phase the
+     correction exists to overturn. *)
+  check (list string) "the canonical phase is the one drawn"
+    [ "Execute 적용 완료" ]
+    (fold
+       [ step "resolved_approved"; step "replay_failed"; step "replay_applied" ])
+
+let test_a_replay_outranks_the_resolution_before_it () =
+  check (list string) "the outcome, not how the Gate answered"
+    [ "Execute 적용 여부 불명 · 대상을 직접 확인하세요" ]
+    (fold [ step "requested"; step "resolved_approved"; step "replay_indeterminate" ])
+
 let test_a_problem_outranks_a_later_step () =
   (* continuation_recorded is the newest row, but an operator scanning the pane
      has to see that the effect never landed. The turn did carry on, so that
@@ -94,6 +108,10 @@ let () =
       , [ test_case "one approval is one row" `Quick test_one_approval_is_one_row
         ; test_case "a problem outranks a later step" `Quick
             test_a_problem_outranks_a_later_step
+        ; test_case "a correction supersedes the row it corrects" `Quick
+            test_a_correction_supersedes_the_row_it_corrects
+        ; test_case "a replay outranks the resolution before it" `Quick
+            test_a_replay_outranks_the_resolution_before_it
         ; test_case "a waiting request keeps its own row" `Quick
             test_a_waiting_request_keeps_its_own_row
         ; test_case "two approvals stay two rows" `Quick

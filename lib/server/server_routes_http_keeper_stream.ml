@@ -67,7 +67,7 @@ let take_operation_wire_stream ~operation_id =
     Hashtbl.remove operation_wire_streams operation_id;
     state)
 
-type operation_live_sink = Ag_ui.event -> unit
+type operation_live_sink = seq:int option -> Ag_ui.event -> unit
 
 let operation_live_sinks :
   (string, (int * operation_live_sink) list) Hashtbl.t =
@@ -106,7 +106,7 @@ let register_operation_live_sink ~operation_id sink =
         else Hashtbl.replace operation_live_sinks operation_id remaining)
 ;;
 
-let publish_operation_live_event ~operation_id event =
+let publish_operation_live_event ~operation_id ?seq event =
   let sinks =
     Stdlib.Mutex.protect operation_live_sinks_mu (fun () ->
       match Hashtbl.find_opt operation_live_sinks operation_id with
@@ -115,7 +115,7 @@ let publish_operation_live_event ~operation_id event =
   in
   List.iter
     (fun (_, sink) ->
-       try sink event with
+       try sink ~seq event with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
          Log.Keeper.warn
@@ -1014,8 +1014,8 @@ let keeper_stream_send_raw ?on_closed writer mutex closed data =
       mark_closed ?on_closed closed;
       false
 
-let keeper_stream_send_event ?on_closed writer mutex closed event =
-  keeper_stream_send_raw ?on_closed writer mutex closed (Ag_ui.event_to_sse event)
+let keeper_stream_send_event ?seq ?on_closed writer mutex closed event =
+  keeper_stream_send_raw ?on_closed writer mutex closed (Ag_ui.event_to_sse ?id:seq event)
 
 (** Execute keeper dispatch with real-time streaming.
     Calls the private direct-delivery stream which forwards MODEL text deltas to [on_text_delta].
@@ -2663,7 +2663,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                  let redact_text = Keeper_secret_redaction.redact_text redaction in
                  let redact_json = Keeper_secret_redaction.redact_json redaction in
                  let rec loop projection =
-                   let event = Keeper_chat_events.subscribe events in
+                   let seq, event = Keeper_chat_events.subscribe_with_seq events in
                    let projection, projected =
                      Server_keeper_chat_agui_projection.project
                        ~timestamp:(Time_compat.now ())
@@ -2678,8 +2678,9 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                         Keeper_chat_broadcast.operation_event
                           ~keeper_name
                           ~operation_id
+                          ~seq
                           ~event;
-                        publish_operation_live_event ~operation_id event)
+                        publish_operation_live_event ~operation_id ~seq event)
                      projected;
                    if Server_keeper_chat_agui_projection.is_terminal event
                    then settle_delivery (Ok ())
@@ -2998,8 +2999,8 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
       let accepted = ref false in
       let buffered = ref [] in
       let buffered_mu = Stdlib.Mutex.create () in
-      let send_event event =
-        let sent = keeper_stream_send_event writer mutex closed event in
+      let send_event ~seq event =
+        let sent = keeper_stream_send_event ?seq writer mutex closed event in
         if
           (not sent)
           || match event.Ag_ui.event_type with
@@ -3010,16 +3011,16 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
              | Custom -> false
         then finish ()
       in
-      let sink event =
+      let sink ~seq event =
         let send_now =
           Stdlib.Mutex.protect buffered_mu (fun () ->
             if !accepted
             then true
             else (
-              buffered := event :: !buffered;
+              buffered := (seq, event) :: !buffered;
               false))
         in
-        if send_now then send_event event
+        if send_now then send_event ~seq event
       in
       let unregister = register_operation_live_sink ~operation_id sink in
       Eio.Switch.on_release stream_sw unregister;
@@ -3051,7 +3052,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
             buffered := [];
             pending)
         in
-        List.iter send_event pending;
+        List.iter (fun (seq, event) -> send_event ~seq event) pending;
         if Keeper_owner.Chat_operation.is_terminal operation.state then finish ()
       in
       let submit_result =

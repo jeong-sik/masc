@@ -43,7 +43,7 @@ let test_note_marks_started_then_terminal () =
 
 let collect_sink () =
   let events = ref [] in
-  let sink event = events := event :: !events in
+  let sink ~seq:_ event = events := event :: !events in
   (events, sink)
 
 let test_settle_synthesizes_run_error_for_open_stream () =

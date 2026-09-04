@@ -150,11 +150,35 @@ let test_tool_result_ready_projection_has_exact_identity () =
      |> Yojson.Safe.Util.member "toolStreamScope"
      |> Yojson.Safe.Util.to_int_option)
 
+let test_operation_event_carries_seq_when_given () =
+  let event =
+    Ag_ui.make_event
+      ~timestamp:13.0
+      ~thread_id:"keeper:fixture-keeper"
+      ~delta:(Some "live")
+      Ag_ui.Text_message_content
+  in
+  let fields =
+    B.operation_event_to_json
+      ~keeper_name:"fixture-keeper"
+      ~operation_id:"kmsg-operation-1"
+      ~seq:7
+      ~event
+    |> fields_without_ts_unix
+  in
+  Alcotest.(check (option yojson_testable))
+    "journal seq rides the broadcast payload"
+    (Some (`Int 7))
+    (List.assoc_opt "seq" fields)
+;;
+
 let () =
   Alcotest.run "keeper_chat_broadcast"
     [ ( "turn_event"
       , [ Alcotest.test_case "operation event uses singular identity" `Quick
             test_operation_event_has_singular_identity
+        ; Alcotest.test_case "operation event carries seq when given" `Quick
+            test_operation_event_carries_seq_when_given
         ; Alcotest.test_case "projection preserves stream identity" `Quick
             test_projection_preserves_stream_identity
         ; Alcotest.test_case "projection covers thinking and tool args" `Quick

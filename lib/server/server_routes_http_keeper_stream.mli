@@ -387,7 +387,10 @@ module For_testing : sig
     execution:Keeper_owner.operation_execution ->
     unit
   val register_operation_live_sink :
-    operation_id:string -> (Ag_ui.event -> unit) -> unit -> unit
+    operation_id:string ->
+    (seq:int option -> Ag_ui.event -> unit) ->
+    unit ->
+    unit
 end
 
 val handle_keeper_ask_answer :

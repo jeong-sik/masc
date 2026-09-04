@@ -221,6 +221,15 @@ val publish : t -> keeper_chat_event -> unit
 (** [subscribe t] blocks until an event is available, then returns it. *)
 val subscribe : t -> keeper_chat_event
 
+(** [subscribe_with_seq t] blocks until an event is available, then returns
+    it with its 0-based publish-order sequence number. Same single-consumer
+    contract as [subscribe] — the seq is the bus read cursor, valid because
+    exactly one fiber drains the bus. Mixing with [subscribe] or
+    [take_nonblocking] forfeits seq accuracy for the events those calls
+    skip: they never advance the cursor, so later [subscribe_with_seq]
+    results under-count by the number of skipped events. *)
+val subscribe_with_seq : t -> int * keeper_chat_event
+
 (** [take_nonblocking t] returns the next queued event, or [None] when the
     bus is empty. Drain/test support: it bypasses the blocking [subscribe]
     contract and must not sit on a live read path. *)

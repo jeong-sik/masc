@@ -107,21 +107,27 @@ let chat_appended_with_audio ~keeper_name ~source ~audio ?content () =
   do_broadcast ~keeper_name ~source ~audio:(Some audio) ?content ()
 
 
-let operation_event_to_json ~keeper_name ~operation_id ~event =
+let operation_event_to_json ~keeper_name ~operation_id ?seq ~event =
+  let seq_fields =
+    match seq with
+    | None -> []
+    | Some seq -> [ "seq", `Int seq ]
+  in
   `Assoc
-    [ "type", `String "keeper_chat_operation_event"
-    ; "name", `String keeper_name
-    ; "operation_id", `String operation_id
-    ; "ag_ui_event", Ag_ui.event_to_json event
-    ; "ts_unix", `Float (Time_compat.now ())
-    ]
+    ([ "type", `String "keeper_chat_operation_event"
+     ; "name", `String keeper_name
+     ; "operation_id", `String operation_id
+     ; "ag_ui_event", Ag_ui.event_to_json event
+     ; "ts_unix", `Float (Time_compat.now ())
+     ]
+     @ seq_fields)
 ;;
 
-let operation_event ~keeper_name ~operation_id ~event =
+let operation_event ~keeper_name ~operation_id ?seq ~event =
   try
     Sse.broadcast_to
       Sse.Observers
-      (operation_event_to_json ~keeper_name ~operation_id ~event)
+      (operation_event_to_json ~keeper_name ~operation_id ?seq ~event)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->

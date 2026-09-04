@@ -132,8 +132,26 @@ let network_mode_rejection profile mode =
        accepted in Phase 1; per-VM egress policy arrives with the \
        microVM backend)"
   | Remote_ssh, Network_inherit -> None
+  (* Same reason as [none], and it does not soften with RFC-0415: an
+     endpoint's network is its own host's policy, so masc has no boundary
+     there to point at a proxy. *)
+  | Remote_ssh, Network_policy ->
+    Some
+      "remote_ssh_no_network_mode: sandbox_profile \"remote_ssh\" does not \
+       support network_mode = \"policy\" (an endpoint's network is its host's \
+       policy, not something masc sets; only \"inherit\" is accepted)"
   | Docker, (Network_none | Network_inherit) -> None
-  | Micro_vm, (Network_none | Network_inherit) -> None
+  (* Refused at create as well as at boot. Docker can express an internal
+     network, so the shape is plausible and the boundary is unmeasured
+     (RFC-0415); saying so while the keeper TOML is being written beats
+     saying it when the keeper first tries to start. *)
+  | Docker, Network_policy ->
+    Some
+      "docker_no_network_policy: sandbox_profile \"docker\" does not support \
+       network_mode = \"policy\" because the Docker egress boundary is \
+       unmeasured (RFC-0415). Use \"microvm\" for a policy lane, or \"none\" / \
+       \"inherit\" here."
+  | Micro_vm, (Network_none | Network_inherit | Network_policy) -> None
 ;;
 
 (* The observation-only gate fast path ({!Keeper_gate_readonly}) keys on this

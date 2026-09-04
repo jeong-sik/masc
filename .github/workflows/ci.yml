@@ -83,6 +83,16 @@ jobs:
           install-flags: --with-test
           os-packages: jq ripgrep
 
+      # CONTRIBUTING names this gate and nothing ran it, so the version headers
+      # drifted: the 0.30.0 release updated ROADMAP and left
+      # docs/PRODUCT-OPERATING-PLAN.md and docs/spec/SPEC-INDEX.md on 0.29.1 for
+      # a day. It reads checked-in text only, so it runs before the build and
+      # after the step that installs the rg and jq it calls. This workflow is
+      # dispatch-only, so pr-check.yml carries the same step -- that is the one
+      # a pull request gets an answer from.
+      - name: Check doc truth
+        run: scripts/check-doc-truth.sh
+
       - name: Build
         env:
           # Public runners give four CPUs; use all four for the

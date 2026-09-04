@@ -494,52 +494,139 @@ let freshness_row_of_inspection (inspection : checkout_inspection) =
   ; row_freshness = inspection.freshness
   }
 
+let checkout_inspection_of_remote ~catalog (ic : Keeper_sandbox_remote_checkouts.inspected_checkout) : checkout_inspection =
+  let origin =
+    match ic.origin_url with
+    | Some o -> Ok o
+    | None -> Error "remote origin URL unavailable"
+  in
+  let catalog_resolution =
+    match origin with
+    | Ok origin -> resolve_catalog ~catalog ~origin
+    | Error error -> Origin_unavailable error
+  in
+  let freshness =
+    match catalog_resolution with
+    | Registered _ ->
+      (match ic.target_ref with
+       | None -> Freshness_unavailable "target_ref unavailable"
+       | Some target_ref ->
+         (match ic.upstream_head with
+          | None ->
+            Freshness_unavailable
+              (Printf.sprintf "remote target_ref %s not found" target_ref)
+          | Some upstream_head ->
+            (match ic.ahead, ic.behind with
+             | Some 0, Some 0 -> Current { target_ref; upstream_head }
+             | Some ahead, Some 0 -> Ahead { target_ref; upstream_head; ahead }
+             | Some 0, Some behind -> Behind { target_ref; upstream_head; behind }
+             | Some ahead, Some behind ->
+               Diverged { target_ref; upstream_head; ahead; behind }
+             | _ -> Freshness_unavailable "ahead/behind counts unavailable")))
+    | Unregistered ->
+      Freshness_unavailable "checkout is not registered in the repository catalog"
+    | Ambiguous ids ->
+      Freshness_unavailable
+        (Printf.sprintf "checkout origin matches multiple repository ids: %s"
+           (String.concat ", " ids))
+    | Catalog_unavailable error ->
+      Freshness_unavailable ("repository catalog unavailable: " ^ error)
+    | Origin_unavailable error -> Freshness_unavailable error
+  in
+  { inspected = ic.checkout
+  ; catalog_resolution
+  ; branch = ic.branch
+  ; head = ic.head
+  ; dirty = ic.dirty
+  ; freshness
+  }
+;;
+
 let repository_checkouts_json_with_budget_impl
     ~before_git_inspection
     ~inspection_budget_sec
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
   =
-  let sandbox_abs =
-    Keeper_sandbox.host_root_abs_of_meta ~config meta
-    |> normalize_path
-  in
   let observed_at_unix = Time_compat.now () in
   let catalog = Repo_store.load_all ~base_path:config.base_path in
-  let scan = Keeper_playground_checkouts.discover ~root:sandbox_abs in
-  before_git_inspection ();
-  (* The budget bounds the per-checkout Git inspections below, so it starts
-     after [load_all] and [discover]. Opening it first let a large catalog or a
-     slow filesystem walk exhaust it before any Git subprocess ran, and every
-     checkout then reported branch/head/status as unavailable. *)
-  let inspection_budget =
-    Repo_git.Inspection_budget.create ~timeout_sec:inspection_budget_sec ()
-  in
-  let entries =
-    match scan with
-    | Ok discovery ->
-      Keeper_playground_checkouts.found discovery
-      |> List.map (fun checkout ->
-        checkout_json (inspect_checkout ~budget:inspection_budget ~catalog checkout))
-    | Error _ -> []
-  in
-  `Assoc
-    [ ( "state"
-      , `String
-          (match catalog, scan with
-           | Ok _, Ok _ when Repo_git.Inspection_budget.is_exhausted inspection_budget ->
-             "inspection_budget_exhausted"
-           | Ok _, Ok _ -> "available"
-           | Error _, _ -> "catalog_unavailable"
-           (* A failed scan and an empty playground used to be the same empty
-              list. They are different answers and now say so. *)
-           | Ok _, Error _ -> "filesystem_unavailable") )
-    ; "scan", Keeper_playground_checkouts.scan_json scan
-    ; "observed_at", `String (Masc_domain.iso8601_of_unix_seconds observed_at_unix)
-    ; "observed_at_unix", `Float observed_at_unix
-    ; "entries", `List entries
-    ; "error", (match catalog with Ok _ -> `Null | Error error -> `String error)
-    ]
+  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
+  | Shared_mount ->
+    let sandbox_abs =
+      Keeper_sandbox.host_root_abs_of_meta ~config meta
+      |> normalize_path
+    in
+    let scan = Keeper_playground_checkouts.discover ~root:sandbox_abs in
+    before_git_inspection ();
+    (* The budget bounds the per-checkout Git inspections below, so it starts
+       after [load_all] and [discover]. Opening it first let a large catalog or a
+       slow filesystem walk exhaust it before any Git subprocess ran, and every
+       checkout then reported branch/head/status as unavailable. *)
+    let inspection_budget =
+      Repo_git.Inspection_budget.create ~timeout_sec:inspection_budget_sec ()
+    in
+    let entries =
+      match scan with
+      | Ok discovery ->
+        Keeper_playground_checkouts.found discovery
+        |> List.map (fun checkout ->
+          checkout_json (inspect_checkout ~budget:inspection_budget ~catalog checkout))
+      | Error _ -> []
+    in
+    `Assoc
+      [ ( "state"
+        , `String
+            (match catalog, scan with
+             | Ok _, Ok _ when Repo_git.Inspection_budget.is_exhausted inspection_budget ->
+               "inspection_budget_exhausted"
+             | Ok _, Ok _ -> "available"
+             | Error _, _ -> "catalog_unavailable"
+             (* A failed scan and an empty playground used to be the same empty
+                list. They are different answers and now say so. *)
+             | Ok _, Error _ -> "filesystem_unavailable") )
+      ; "scan", Keeper_playground_checkouts.scan_json scan
+      ; "observed_at", `String (Masc_domain.iso8601_of_unix_seconds observed_at_unix)
+      ; "observed_at_unix", `Float observed_at_unix
+      ; "entries", `List entries
+      ; "error", (match catalog with Ok _ -> `Null | Error error -> `String error)
+      ]
+  | Endpoint_owned ->
+    let remote_result =
+      Keeper_sandbox_remote_checkouts.discover_and_inspect
+        ~timeout_sec:inspection_budget_sec
+        ~config
+        ~meta
+        ~catalog
+        ()
+    in
+    before_git_inspection ();
+    let scan, entries =
+      match remote_result with
+      | Ok (scan_res, remote_inspections) ->
+        let inspections =
+          List.map (checkout_inspection_of_remote ~catalog) remote_inspections
+        in
+        let entries = List.map checkout_json inspections in
+        (scan_res, entries)
+      | Error scan_err ->
+        (Error scan_err, [])
+    in
+    `Assoc
+      [ ( "state"
+        , `String
+            (match catalog, scan with
+             | Ok _, Ok (Keeper_playground_checkouts.Partial { limit = Checkout_budget_exhausted _; _ }) ->
+               "inspection_budget_exhausted"
+             | Ok _, Ok _ -> "available"
+             | Error _, _ -> "catalog_unavailable"
+             | Ok _, Error _ -> "filesystem_unavailable") )
+      ; "scan", Keeper_playground_checkouts.scan_json scan
+      ; "observed_at", `String (Masc_domain.iso8601_of_unix_seconds observed_at_unix)
+      ; "observed_at_unix", `Float observed_at_unix
+      ; "entries", `List entries
+      ; "error", (match catalog with Ok _ -> `Null | Error error -> `String error)
+      ]
+;;
 
 let repository_checkouts_json_with_budget ~inspection_budget_sec ~config ~meta =
   repository_checkouts_json_with_budget_impl
@@ -562,20 +649,40 @@ let checkout_freshness_rows
     ~(meta : keeper_meta)
     ()
   =
-  let sandbox_abs =
-    Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize_path
-  in
   let catalog = Repo_store.load_all ~base_path:config.base_path in
-  match Keeper_playground_checkouts.discover ~root:sandbox_abs with
-  | Error scan_error -> Error scan_error
-  | Ok discovery ->
-    let budget =
-      Repo_git.Inspection_budget.create ~timeout_sec:inspection_budget_sec ()
+  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
+  | Shared_mount ->
+    let sandbox_abs =
+      Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize_path
     in
-    Ok
-      (Keeper_playground_checkouts.found discovery
-       |> List.map (fun checkout ->
-         freshness_row_of_inspection (inspect_checkout ~budget ~catalog checkout)))
+    (match Keeper_playground_checkouts.discover ~root:sandbox_abs with
+     | Error scan_error -> Error scan_error
+     | Ok discovery ->
+       let budget =
+         Repo_git.Inspection_budget.create ~timeout_sec:inspection_budget_sec ()
+       in
+       Ok
+         (Keeper_playground_checkouts.found discovery
+          |> List.map (fun checkout ->
+            freshness_row_of_inspection (inspect_checkout ~budget ~catalog checkout))))
+  | Endpoint_owned ->
+    match
+      Keeper_sandbox_remote_checkouts.discover_and_inspect
+        ~timeout_sec:inspection_budget_sec
+        ~config
+        ~meta
+        ~catalog
+        ()
+    with
+    | Error scan_err -> Error scan_err
+    | Ok (scan_res, remote_inspections) ->
+      (match scan_res with
+       | Error scan_err -> Error scan_err
+       | Ok _ ->
+         let inspections =
+           List.map (checkout_inspection_of_remote ~catalog) remote_inspections
+         in
+         Ok (List.map freshness_row_of_inspection inspections))
 ;;
 
 module For_testing = struct

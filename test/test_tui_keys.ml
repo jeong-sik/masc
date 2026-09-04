@@ -347,7 +347,7 @@ let test_memory_category_cycle_returns_to_all () =
 
 let test_git_changes_footer_names_only_changed_file_actions () =
   check str "Git changes has one shared row footer"
-    "j/k:move  Enter:open file  Left / Esc:back  r:refresh  Tab:next  q:quit"
+    "j/k:move  Right / d / Enter:diff  v:open in code  Left / Esc:back  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_git_changes
 
 let test_verification_footer_carries_the_verdict_keys () =

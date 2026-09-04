@@ -255,6 +255,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0412 | 키퍼 채팅은 하나의 정준 이벤트 로그와 그 projection이다 | Draft | - |
 | 0413 | 넓힐 수 없는 레인은 프로필이 지명한 것만 싣는다 | Draft | - |
 | 0414 | A text-only keeper reads its image because a vision runtime is wired | Draft | - |
+| 0415 | keeper egress 에 none 과 inherit 사이를 만든다 | Draft | - |
 | 0416 | 중단 요청은 이미 기록된다 — 새 상태 대신 그 기록을 배포하고 보여준다 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |

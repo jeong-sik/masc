@@ -232,6 +232,8 @@
   test_keeper_chat_store
   test_keeper_chat_blocks
   test_keeper_chat_event_log
+  test_keeper_chat_journal_audit
+  test_keeper_chat_replay
   test_keeper_chat_media_store
   test_keeper_external_attention
   test_keeper_waiting_inventory
@@ -481,7 +483,6 @@
   test_operator_control_confirm
   test_operator_control_snapshot_state
   test_operator_control_judgment
-  test_operator_control_support
   test_with_cleanups_on_release
   test_auth_login
   test_dashboard_dev_token_host_gate
@@ -579,6 +580,8 @@
   test_keeper_chat_store
   test_keeper_chat_blocks
   test_keeper_chat_event_log
+  test_keeper_chat_journal_audit
+  test_keeper_chat_replay
   test_keeper_chat_media_store
   test_keeper_external_attention
   test_keeper_waiting_inventory
@@ -780,7 +783,8 @@
   masc.skill_config masc.skill_reference masc.skill_snapshot masc.config
   ;; The fake ssh shim renders its result trailer with the same function
   ;; the real shim uses, so the wire version cannot be typed in by hand.
- exec_ssh_protocol))
+ exec_ssh_protocol
+ test_operator_control_support))
 
 (test
  (name test_connector_attention_delivery_wiring)
@@ -958,8 +962,22 @@
 ; hatch rather than migrating the fixture to docker (no daemon here).
 (test
  (name test_operator_control_snapshot)
- (modules test_operator_control_snapshot test_operator_control_support)
- (libraries masc_test_deps masc.keeper_identity))
+ (modules test_operator_control_snapshot)
+ (libraries masc_test_deps masc.keeper_identity test_operator_control_support))
+
+; The operator-control helper is shared by four executables in two different
+; stanzas (the big tests group and the snapshot extraction), so it owns a
+; dedicated library here instead of being attributed to any single stanza.
+; The libraries list mirrors the big tests group this module historically
+; compiled under.
+(library
+ (name test_operator_control_support)
+ (modules test_operator_control_support)
+ (libraries
+  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
+  masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
+  masc.skill_config masc.skill_reference masc.skill_snapshot masc.config
+  exec_ssh_protocol))
 
 ; Extracted from the big (tests ...) group above: the cases pass
 ; sandbox_profile = "local" explicitly to exercise admission fencing around
@@ -1348,6 +1366,14 @@
  (name test_masc_test_runtime)
  (modules test_masc_test_runtime)
  (libraries alcotest fs_compat masc_test_runtime unix))
+
+; task-1310: this test rewrites PATH and TMPDIR and inspects what a stub sox
+; left in TMPDIR; run it with --sandbox none (dune's action sandbox remaps
+; TMPDIR into a private overlay that vanishes with the action).
+(test
+ (name test_voice_noise_reduction_cleanup)
+ (modules test_voice_noise_reduction_cleanup)
+ (libraries alcotest masc_test_deps unix))
 
 ; Group 3: Eio-native tests (single-module, standard deps)
 ; Merged from ~100 individual (test ...) stanzas.
@@ -4439,3 +4465,8 @@
  (name test_keeper_ssh_integration)
  (modules test_keeper_ssh_integration)
  (libraries masc_test_deps exec_ssh_protocol))
+
+(test
+ (name test_keeper_sandbox_remote_checkouts)
+ (modules test_keeper_sandbox_remote_checkouts)
+ (libraries alcotest masc yojson))

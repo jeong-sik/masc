@@ -9,6 +9,8 @@ let describe = function
   | Command.Task_missing_title -> "task-missing-title"
   | Command.Help -> "help"
   | Command.Open_settings -> "open-settings"
+  | Command.Open_diff -> "open-diff"
+  | Command.Open_changes -> "open-changes"
   | Command.Switch_keeper name -> "keeper:" ^ name
   | Command.Switch_keeper_missing_name -> "keeper-missing-name"
   | Command.Interrupt_turn -> "interrupt"
@@ -70,6 +72,8 @@ let test_pane_commands_parse_by_word () =
   check (list string) "pane commands"
     [ "help"
     ; "open-settings"
+    ; "open-diff"
+    ; "open-changes"
     ; "keeper:orbiter"
     ; "keeper-missing-name"
     ; "interrupt"
@@ -95,6 +99,8 @@ let test_pane_commands_parse_by_word () =
        (fun text -> describe (Command.parse text))
        [ "/help"
        ; "/settings"
+       ; "/diff"
+       ; "/changes"
        ; "/keeper orbiter"
        ; "/keeper   "
        ; "/interrupt"

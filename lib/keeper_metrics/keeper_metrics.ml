@@ -139,6 +139,7 @@ type t =
   | WriteMetaCycleFailures
   | MetricsSseFailures
   | ChatStoreFailures
+  | ChatJournalAuditMismatches
   | ChatTransportFailures
   | PersonNoteStoreFailures
   | KeeperMaterializationFailures
@@ -344,6 +345,8 @@ let to_string = function
   | WriteMetaCycleFailures -> "masc_keeper_write_meta_cycle_failures_total"
   | MetricsSseFailures -> "masc_keeper_metrics_sse_failures_total"
   | ChatStoreFailures -> "masc_keeper_chat_store_failures_total"
+  | ChatJournalAuditMismatches ->
+    "masc_keeper_chat_journal_audit_mismatches_total"
   | ChatTransportFailures -> "masc_keeper_chat_transport_failures_total"
   | PersonNoteStoreFailures -> "masc_keeper_person_note_store_failures_total"
   | KeeperMaterializationFailures -> "masc_keeper_materialization_failures_total"

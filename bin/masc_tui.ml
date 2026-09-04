@@ -11520,9 +11520,14 @@ let main () =
      as a few-shot example. The machine's side is read off the closed
      verdict serialization ("approve" | "approve:<reason>" | "reject:<reason>"). *)
   let harness_machine_approved (row : Masc.Tui_decode.harness_verdict) =
-    match Eval_calibration.verdict_of_string row.Masc.Tui_decode.hv_verdict with
-    | Some (Task.Anti_rationalization.Approve _) -> Some true
-    | Some (Task.Anti_rationalization.Reject _) -> Some false
+    (* [Task] and [Eval_calibration] live in the masc library, which the
+       executable reaches through [Masc] -- the mli spells them the library's
+       way because it sits inside it (#33116 built red on the bare names). *)
+    match Masc.Eval_calibration.verdict_of_string
+            row.Masc.Tui_decode.hv_verdict
+    with
+    | Some (Masc.Task.Anti_rationalization.Approve _) -> Some true
+    | Some (Masc.Task.Anti_rationalization.Reject _) -> Some false
     | None -> None
   in
   let start_harness_label ~notes_hash ~(verdict : [ `Approve | `Reject ])

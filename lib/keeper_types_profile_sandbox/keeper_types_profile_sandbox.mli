@@ -15,6 +15,13 @@ end
 type network_mode =
   | Network_none [@tla.symbol "Network_none"]
   | Network_inherit [@tla.symbol "Network_inherit"]
+  | Network_policy [@tla.symbol "Network_policy"]
+      (** Outbound traffic reaches a proxy the MASC server owns and nothing
+          else; the proxy judges each destination against the keeper's
+          allowlist (RFC-0415). The enforcement point is the backend's own
+          network boundary rather than an environment variable, because
+          [HTTPS_PROXY] is advice and a subprocess carrying its own socket
+          ignores advice. *)
 [@@deriving tla]
 
 val sandbox_profile_to_string : sandbox_profile -> string

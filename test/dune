@@ -3142,6 +3142,26 @@
  (libraries alcotest masc_tui_gate_text))
 
 (test
+ (name test_egress_host)
+ (modules test_egress_host)
+ (libraries alcotest masc.egress_host))
+
+(test
+ (name test_egress_proxy_decision)
+ (modules test_egress_proxy_decision)
+ (libraries alcotest masc.egress_host masc.egress_proxy_decision masc.string_util))
+
+(test
+ (name test_egress_allowlist_toml)
+ (modules test_egress_allowlist_toml)
+ (libraries alcotest masc.runtime masc.egress_host masc.string_util))
+
+(test
+ (name test_egress_proxy_net)
+ (modules test_egress_proxy_net)
+ (libraries alcotest eio eio_main masc.egress_host masc.egress_proxy_net))
+
+(test
  (name test_tui_gate_fold)
  (modules test_tui_gate_fold)
  (libraries alcotest masc_tui_types masc_tui_gate_text))

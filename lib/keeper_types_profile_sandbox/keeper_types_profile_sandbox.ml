@@ -37,6 +37,17 @@ end
 type network_mode =
   | Network_none [@tla.symbol "Network_none"]
   | Network_inherit [@tla.symbol "Network_inherit"]
+  | Network_policy [@tla.symbol "Network_policy"]
+      (** Outbound traffic reaches a proxy the MASC server owns and nothing
+          else, and the proxy judges each destination against the keeper's
+          allowlist (RFC-0415).
+
+          The enforcement point is the backend's own network boundary, not an
+          environment variable: [HTTPS_PROXY] is advice, and a subprocess
+          carrying its own socket ignores advice. Measured 2026-09-04 on
+          Apple [container] 1.3.1, a guest on an [--internal] network cannot
+          reach 1.1.1.1:443 or a public address by raw TCP, and can reach a
+          listener on the host gateway. *)
 [@@deriving tla]
 
 let sandbox_profile_to_config = function
@@ -73,17 +84,19 @@ let valid_sandbox_profile_strings = Keeper_sandbox_config.valid_sandbox_profile_
 let network_mode_to_string = function
   | Network_none -> "none"
   | Network_inherit -> "inherit"
+  | Network_policy -> "policy"
 ;;
 
 let network_mode_of_string raw =
   match String.trim (String.lowercase_ascii raw) with
   | "none" -> Some Network_none
   | "inherit" -> Some Network_inherit
+  | "policy" -> Some Network_policy
   | _ -> None
 ;;
 
 (* Issue #8467: Variant SSOT for [network_mode]. *)
-let all_network_modes = [ Network_none; Network_inherit ]
+let all_network_modes = [ Network_none; Network_inherit; Network_policy ]
 let valid_network_mode_strings = List.map network_mode_to_string all_network_modes
 
 let default_network_mode_for_profile = function

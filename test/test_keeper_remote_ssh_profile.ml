@@ -37,7 +37,8 @@ let test_default_network_mode_is_inherit () =
     (match Keeper_types_profile_sandbox.default_network_mode_for_profile
              Keeper_types_profile_sandbox.Remote_ssh with
      | Keeper_types_profile_sandbox.Network_inherit -> "inherit"
-     | Keeper_types_profile_sandbox.Network_none -> "none")
+     | Keeper_types_profile_sandbox.Network_none -> "none"
+     | Keeper_types_profile_sandbox.Network_policy -> "policy")
 
 let test_network_mode_none_rejected () =
   let doc =

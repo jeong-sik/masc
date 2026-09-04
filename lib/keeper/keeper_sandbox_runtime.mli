@@ -188,7 +188,8 @@ val docker_mount_failure_details :
     particular, [Network_inherit] maps to [--network host] so the
     container shares the host network namespace. The MASC label remains
     ["inherit"]. *)
-val docker_network_args : Keeper_types_profile_sandbox.network_mode -> string list * string
+val docker_network_args :
+  Keeper_types_profile_sandbox.network_mode -> (string list * string, string) result
 
 (** Docker [--ulimit nofile=<soft>:<hard>] argv fragment for keeper
     sandbox containers. *)

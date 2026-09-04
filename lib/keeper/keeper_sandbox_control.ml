@@ -109,9 +109,9 @@ let start_managed_container
     Error "keeper sandbox start requires sandbox_profile=docker"
   else
     let network_mode = configured_effective_network network_mode in
-    let network_args, network_label =
-      Keeper_sandbox_runtime.docker_network_args network_mode
-    in
+    match Keeper_sandbox_runtime.docker_network_args network_mode with
+    | Error detail -> Error detail
+    | Ok (network_args, network_label) ->
     let probe_timeout = timeout_sec in
     match live_containers ~config ~meta ~timeout_sec:probe_timeout with
     | Ok containers -> (
@@ -626,7 +626,11 @@ let container_mode (meta : keeper_meta) containers =
     else (
       match meta.network_mode with
       | Network_none -> "turn_scoped_or_managed_none"
-      | Network_inherit -> "oneshot_or_managed_inherit")
+      | Network_inherit -> "oneshot_or_managed_inherit"
+      (* Unreachable for Docker: [docker_network_args] refuses this mode, so
+         a Docker keeper never starts with it. Named rather than folded into
+         a neighbour so the label does not lie if that refusal is lifted. *)
+      | Network_policy -> "policy_unavailable_on_docker")
   | Remote_ssh -> "remote_ssh"
 
 let why_no_container (meta : keeper_meta) ~preflight containers =
@@ -657,7 +661,10 @@ let why_no_container (meta : keeper_meta) ~preflight containers =
                 "no visible managed sandbox container; network_mode=inherit uses one-shot Docker containers on sandboxed tool calls, and those containers still mount the keeper playground"
           | Network_none ->
               Some
-                "no active turn or visible managed sandbox container; Docker containers start on sandboxed tool calls or via masc_keeper_sandbox_start, with the keeper playground mounted"))
+                "no active turn or visible managed sandbox container; Docker containers start on sandboxed tool calls or via masc_keeper_sandbox_start, with the keeper playground mounted"
+          | Network_policy ->
+              Some
+                "no container: network_mode=policy is not available on sandbox_profile=docker, because the Docker egress boundary is unmeasured (RFC-0415). Set network_mode to none or inherit here, or move this keeper to microvm"))
 
 let sandbox_resource_config_json (meta : keeper_meta) =
   match meta.sandbox_profile with

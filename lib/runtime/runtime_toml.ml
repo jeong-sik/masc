@@ -251,6 +251,7 @@ let active_top_level_namespaces =
   ; "runtime"
   ; "web_search"
   ; "exec"
+  ; "egress"
   ; Skill_source_config.top_level_namespace
   ]
 ;;
@@ -1420,6 +1421,92 @@ let exec_single_child ~(path : string) ~(child_key : string) (value : Otoml.t)
 (** Walk [\[exec.ssh.endpoints.*\]] tables into the endpoint registry. Each
     endpoint name passes {!validate_runtime_id_component} dot-free, matching
     provider ids. Absent [\[exec\]] section yields an empty registry. *)
+(* [\[egress.keepers.<name>\]] — one keeper's allowlist (RFC-0415).
+
+   Every rule is parsed here, at config load, rather than when a request
+   arrives. A rule a resolver could read differently than [Egress_host] does
+   is an operator mistake, and finding it while the file is being read is the
+   difference between refusing to boot and serving a live allowlist with a
+   hole in it. *)
+let egress_keeper_keys = [ "allow" ]
+
+let parse_egress_keeper ~(name : string) (tbl : Otoml.t)
+  : (Egress_allowlist.t, parse_error list) result
+  =
+  let path = "egress.keepers." ^ name in
+  let unknown_key_errors =
+    match tbl with
+    | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+      List.concat_map
+        (fun (key, _) ->
+           if List.mem key egress_keeper_keys
+           then []
+           else
+             error
+               (path ^ "." ^ key)
+               (Printf.sprintf
+                  "unknown egress keeper key %S; expected %s"
+                  key
+                  (String.concat ", " egress_keeper_keys)))
+        entries
+    | _ -> error path "expected a table"
+  in
+  match unknown_key_errors with
+  | _ :: _ as errors -> Error errors
+  | [] ->
+    (match Otoml.find_opt tbl (Otoml.get_array Otoml.get_string) [ "allow" ] with
+     | None ->
+       (* An entry that declares no [allow] is almost certainly a mistake, and
+          the safe reading of it -- an allowlist that admits nothing -- is
+          already what omitting the whole table gives. Refusing says which of
+          the two the operator meant. *)
+       error path "egress keeper table has no 'allow' array"
+       |> fun errors -> Error errors
+     | Some raws ->
+       let parsed =
+         List.map
+           (fun raw ->
+              match Egress_host.rule_of_string raw with
+              | Ok rule -> Ok rule
+              | Error parse_error ->
+                Error
+                  (error
+                     (path ^ ".allow")
+                     (Printf.sprintf
+                        "%S is not a host this lane will match: %s"
+                        raw
+                        (Egress_host.parse_error_to_string parse_error))))
+           raws
+       in
+       let errors = List.concat_map (function Error e -> e | Ok _ -> []) parsed in
+       (match errors with
+        | _ :: _ -> Error errors
+        | [] ->
+          Ok
+            { Egress_allowlist.keeper_name = name
+            ; allow = List.filter_map (function Ok rule -> Some rule | Error _ -> None) parsed
+            }))
+;;
+
+(** Walk [\[egress.keepers.*\]] into the allowlist registry. An absent
+    [\[egress\]] section yields an empty registry, which is not permission:
+    a keeper in the policy lane with no entry reaches nothing. *)
+let parse_egress_allowlists (toml : Otoml.t)
+  : (Egress_allowlist.t list, parse_error list) result
+  =
+  match Otoml.find_opt toml Fun.id [ "egress" ] with
+  | None -> Ok []
+  | Some egress_value ->
+    (match exec_single_child ~path:"egress" ~child_key:"keepers" egress_value with
+     | Error _ as error -> error
+     | Ok None -> Ok []
+     | Ok (Some keepers_value) ->
+       (match keepers_value with
+        | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+          partition_results (List.map (fun (name, tbl) -> parse_egress_keeper ~name tbl) entries)
+        | _ -> Error (error "egress.keepers" "expected a table")))
+;;
+
 let parse_exec_endpoints (toml : Otoml.t)
   : (Exec_ssh_endpoint.t list, parse_error list) result
   =
@@ -2111,6 +2198,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   let lanes_result = parse_lanes toml in
   let exact_output_lanes_result = parse_exact_output_lanes toml in
   let exec_ssh_endpoints_result = parse_exec_endpoints toml in
+  let egress_allowlists_result = parse_egress_allowlists toml in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let all_errors =
     errs obsolete_namespaces_result
@@ -2122,6 +2210,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     @ errs lanes_result
     @ errs exact_output_lanes_result
     @ errs exec_ssh_endpoints_result
+    @ errs egress_allowlists_result
   in
   if all_errors <> []
   then Error all_errors
@@ -2152,6 +2241,9 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
         ~label:"exec_ssh_endpoints"
         exec_ssh_endpoints_result
     in
+    let egress_allowlists =
+      extract_after_all_errors_guard ~label:"egress_allowlists" egress_allowlists_result
+    in
     (* Cross-table Gate: a binding field only reaches the wire through its
        provider's request builder, so whether it is carriable is a fact about
        the provider, not about the binding table it was written in. *)
@@ -2168,6 +2260,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
         ; lane_decls
         ; exact_output_lane_decls
         ; exec_ssh_endpoints
+        ; egress_allowlists
         })
 ;;
 

@@ -18,3 +18,63 @@ let lifecycle_line ~phase ~tool =
   | "continuation_recorded" -> tool ^ " 승인 후 이어서 진행"
   | other -> Printf.sprintf "%s · 알 수 없는 승인 단계 %s" tool other
 ;;
+
+(* One approval's steps as one line.
+
+   The store records a step per phase, which is right: each is a durable fact
+   about an external effect. Drawn one row per step, a single approval took
+   four rows of the conversation pane and said the same tool name four times.
+
+   The phases are a sequence, not independent facts -- "적용 완료" already
+   implies the call was requested and approved -- so the run collapses to the
+   furthest stage it reached: a replay outcome if one landed, else how the
+   Gate resolved, else that it is still waiting.
+
+   Within a stage the latest step wins, because a replay correction is a
+   second row for the same approval carrying the canonical phase. Ranking by
+   severity instead would have kept showing the phase the correction exists to
+   overturn.
+
+   [continuation_recorded] is the exception to all of it: it says the turn
+   resumed, which no outcome says, so it rides along as a suffix instead of
+   replacing the outcome. *)
+let stage_of_phase = function
+  | "replay_applied" | "replay_applied_with_warning" | "replay_failed"
+  | "replay_indeterminate" -> Some 3
+  | "resolved_approved" | "resolved_rejected" -> Some 2
+  | "requested" -> Some 1
+  | _ -> None
+;;
+
+let fold_line ~phases ~tool =
+  let has phase = List.exists (String.equal phase) phases in
+  let outcome =
+    List.fold_left
+      (fun best phase ->
+        match stage_of_phase phase with
+        | None -> best
+        | Some stage -> (
+          match best with
+          (* [>=] and not [>]: within one stage the later step is the one that
+             stands, which is how a correction row supersedes the row it
+             corrects. *)
+          | Some (best_stage, _) when stage >= best_stage -> Some (stage, phase)
+          | Some _ -> best
+          | None -> Some (stage, phase)))
+      None phases
+  in
+  let outcome =
+    match outcome with
+    | Some (_, phase) -> Some phase
+    (* A run of phases this build does not know still has to draw something,
+       and the last one is the furthest the approval got. *)
+    | None -> List.nth_opt (List.rev phases) 0
+  in
+  match outcome with
+  | None -> None
+  | Some phase ->
+    let line = lifecycle_line ~phase ~tool in
+    if has "continuation_recorded" && not (String.equal phase "continuation_recorded")
+    then Some (line ^ " · 이어서 진행")
+    else Some line
+;;

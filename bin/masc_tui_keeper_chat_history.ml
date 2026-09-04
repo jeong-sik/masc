@@ -66,7 +66,8 @@ type kind =
   | Skill_activity of Transcript.skill_activity
   | Reasoning of string list
   | Gate_activity of
-      { phase : string
+      { approval_id : string
+      ; phase : string
       ; tool : string option
       }
   | Memory_activity of { summary : string option }
@@ -1181,7 +1182,18 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
             match List.assoc_opt "approval_lifecycle" fields with
             | Some (`Assoc lifecycle) -> (
               match string_field lifecycle "phase" with
-              | Some phase -> Gate_activity { phase; tool = string_field lifecycle "tool_name" }
+              | Some phase -> (
+                (* The approval id groups a run of steps back into the one
+                   approval they describe. Without it a run reads as four
+                   separate events. *)
+                match string_field lifecycle "approval_id" with
+                | Some approval_id when String.trim approval_id <> "" ->
+                  Gate_activity
+                    { approval_id
+                    ; phase
+                    ; tool = string_field lifecycle "tool_name"
+                    }
+                | Some _ | None -> Memory_activity { summary = None })
               | None -> Memory_activity { summary = None })
             | Some _ | None -> Memory_activity { summary = None }
           in

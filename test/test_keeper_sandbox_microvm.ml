@@ -1177,6 +1177,73 @@ let test_keeper_work_root_is_created_as_root_with_a_mode () =
   Alcotest.(check bool) "creates the keeper root" true (contains "/masc-work/lane-smith" argv)
 ;;
 
+(* Boot invariant (RFC-0052): the mkdir and the write probe above both pass
+   against a writable rootfs directory, so they cannot catch a guest whose
+   work volume is not mounted. Only /proc/mounts can. *)
+let mounted_probe_pattern () =
+  let argv =
+    M.work_volume_mounted_probe_argv_for
+      Backend.Apple_container
+      ~container_name:"masc-keeper-vm-x"
+  in
+  match List.rev argv with
+  | "/proc/mounts" :: pattern :: "-qF" :: "grep" :: _ -> argv, pattern
+  | _ -> Alcotest.fail "probe is not grep -qF <pattern> /proc/mounts"
+;;
+
+let test_work_volume_mounted_probe_reads_proc_mounts () =
+  let argv, pattern = mounted_probe_pattern () in
+  Alcotest.(check bool) "execs into the guest" true
+    (adjacent ~flag:"exec" ~value:"--user" argv && contains "masc-keeper-vm-x" argv);
+  Alcotest.(check bool) "runs as root" true (adjacent ~flag:"--user" ~value:"0:0" argv);
+  (* The workdir is /, not the path under test: a probe that starts inside
+     the would-be mountpoint would fail to exec on a guest missing the
+     directory, reading as "not mounted" for the wrong reason. *)
+  Alcotest.(check bool) "runs at the guest root" true (adjacent ~flag:"-w" ~value:"/" argv);
+  (* The mountpoint field with its surrounding spaces, matched as a fixed
+     string: an exact field match, so a prefix like /masc-work-stale cannot
+     pass for the volume. *)
+  Alcotest.(check string)
+    "the pattern is the work root as a /proc/mounts mountpoint field"
+    (Printf.sprintf " %s " M.work_volume_guest_root)
+    pattern
+;;
+
+(* The probe's grep runs on the host against fixture /proc/mounts contents:
+   the exit codes the guest will answer with, without needing a guest. grep
+   -qF is POSIX-spelled the same by the guest's GNU grep and the host's. *)
+let test_work_volume_mounted_probe_grep_against_fixture_mounts () =
+  let _argv, pattern = mounted_probe_pattern () in
+  let dir = temp_dir "microvm_mounts_fixture_" in
+  let check_fixture name contents expected_exit =
+    let file = Filename.concat dir name in
+    let oc = open_out file in
+    output_string oc contents;
+    close_out oc;
+    let exit_code =
+      Sys.command
+        (Printf.sprintf "grep -qF %s %s" (Filename.quote pattern) (Filename.quote file))
+    in
+    Alcotest.(check int) name expected_exit exit_code
+  in
+  check_fixture
+    "the volume mounted is accepted"
+    "/dev/vda / ext4 rw,relatime 0 0\nmasc-keeper-work-x /masc-work ext4 rw,relatime 0 0\n"
+    0;
+  check_fixture
+    "no mount is refused"
+    "/dev/vda / ext4 rw,relatime 0 0\n"
+    1;
+  check_fixture
+    "a path prefix is not the mountpoint"
+    "/dev/vdb /masc-workfoo ext4 rw,relatime 0 0\n"
+    1;
+  check_fixture
+    "a submount alone is not the volume"
+    "/dev/vdb /masc-work/lane-smith ext4 rw,relatime 0 0\n"
+    1
+;;
+
 (* The running guest as a remote endpoint: the argv the remote runner spawns
    is [container exec] into this guest, the shim it names is the mounted one,
    and the identity it injects is the snapshot the guest already mounts. *)
@@ -1414,6 +1481,10 @@ let () =
             test_shim_travels_read_only_with_its_config
         ; Alcotest.test_case "keeper work root is created as root with a mode" `Quick
             test_keeper_work_root_is_created_as_root_with_a_mode
+        ; Alcotest.test_case "work volume mounted probe reads /proc/mounts" `Quick
+            test_work_volume_mounted_probe_reads_proc_mounts
+        ; Alcotest.test_case "work volume mounted probe grep against fixture mounts" `Quick
+            test_work_volume_mounted_probe_grep_against_fixture_mounts
         ; Alcotest.test_case "keeper work root write probe runs as the keeper" `Quick
             test_keeper_work_root_write_probe_runs_as_the_keeper
         ; Alcotest.test_case "running guest is a remote endpoint" `Quick

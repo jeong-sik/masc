@@ -880,6 +880,10 @@ let continues_previous ~(previous : entry option) (entry : entry) =
       previous.style = entry.style
       && String.equal previous.role_label entry.role_label
       && String.equal previous.request_label entry.request_label
+      && (if String.equal entry.request_label "" then
+            String.equal previous.timestamp entry.timestamp
+          else true)
+
 
 let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
   let metadata =
@@ -1015,18 +1019,17 @@ let short_clock timestamp =
    the body still reads as a block. [Origin_bare] drops the clock and keeps
    the speaker, never the other way round -- losing track of who is talking
    costs more than losing track of when. *)
-(* A continuation keeps its own speaker's mark, drawn in the quiet tone the
-   renderer gives the whole gutter here.
+(* A continuation draws a quiet vertical rail ("│") for conversational prose
+   and tool blocks to visually connect subsequent speech rows to the speaker above it,
+   rather than leaving a lone disconnected bullet over a wide empty gutter.
+   Reasoning keeps its dot ("·"), and high-salience alert marks (Error, Journal,
+   Skill, Status) retain their distinct glyphs. *)
+let continued_mark : style -> string = function
+  | User | Inbound | Keeper | Tool -> "\xe2\x94\x82"
+  | Thinking -> "\xc2\xb7"
+  | style -> speaker_mark style
 
-   It used to borrow [Thinking]'s dot, on the argument that reusing a glyph
-   keeps the column's alphabet closed. It did the opposite: the dot then meant
-   two things, and a second AUTO message in the same second read as a block of
-   reasoning -- same glyph, same grey, no name, because a continuation drops
-   the name as well. The alphabet is closed when each mark means one thing.
-   Bright against quiet is what separates a new speaker from the same one
-   still talking, and a Thinking continuation still draws a dot because that
-   is what it is. *)
-let continued_mark style = speaker_mark style
+
 
 (* A tool's output and a recalled memory arrive as text the Keeper did not
    write, so they are quoted rather than said. Everything else the pane draws

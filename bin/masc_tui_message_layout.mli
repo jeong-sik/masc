@@ -341,6 +341,13 @@ val speaker_mark : style -> string
     NO_COLOR removes colour, so this is what still answers "who said this"
     when there is none. *)
 
+val continued_mark : style -> string
+(** Glyph drawn in the speaker mark position on rows that continue the same
+    speaker. While the turn opens with {!speaker_mark}, continuing rows draw
+    a quiet vertical connection line ("│") rather than repeating the mark
+    over a wide empty gutter. Reasoning keeps its own dot. *)
+
+
 val split_aligned_role_label :
   style:style -> string -> string * string * string
 (** An {!align_role_label} result taken back apart into its mark, the

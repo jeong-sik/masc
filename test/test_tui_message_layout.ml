@@ -1565,7 +1565,7 @@ let test_normal_inline_margin_bytes_stay_stable () =
         (no_rail ^ "12:34 " ^ Layout.speaker_mark Layout.Keeper ^ " …per.one")
         first.Layout.gutter;
       check string "normal continuation bytes"
-        (no_rail ^ "12:35 " ^ Layout.speaker_mark Layout.Keeper
+        (no_rail ^ "12:35 " ^ Layout.continued_mark Layout.Keeper
         ^ String.make 9 ' ')
         second.Layout.gutter;
       check int "normal gutter keeps clock plus mark boundary"
@@ -1635,6 +1635,24 @@ let test_a_second_message_from_one_speaker_stays_blank () =
         (not (String.equal first.Layout.gutter second.Layout.gutter))
   | _ -> failwith "expected two rows"
 
+let test_unowned_entries_at_different_timestamps_do_not_fold () =
+  let entries =
+    [ entry ~timestamp:"11:40:16" Layout.Keeper "keeper.one" "" "first"
+    ; entry ~timestamp:"11:44:20" Layout.Keeper "keeper.one" "" "second"
+    ]
+  in
+  match
+    Layout.visible_rows ~origin:Layout.Origin_bare ~inner_width:40 ~height:20
+      entries
+  with
+  | [ first; second ] ->
+      check bool "first keeps its full speaker label" true
+        (String.contains first.Layout.gutter 'k');
+      check bool "unowned row at later timestamp keeps speaker label" true
+        (String.contains second.Layout.gutter 'k')
+  | _ -> failwith "expected two rows"
+
+
 (* The layout hands the renderer a margin and the offset to cut it at, and the
    renderer draws the two halves back to back so the mark can keep the status
    colour while the kind label recedes. A continuation carries no name, so it
@@ -1666,11 +1684,11 @@ let test_a_continuation_does_not_borrow_the_reasoning_glyph () =
          | None -> trimmed)
     | _ -> failwith "expected two rows"
   in
-  check string "a keeper's continuation keeps the keeper's mark"
-    (Layout.speaker_mark Layout.Keeper)
+  check string "a keeper's continuation draws the continuation rail"
+    (Layout.continued_mark Layout.Keeper)
     (continued Layout.Keeper);
-  check string "a tool block's continuation keeps the tool mark"
-    (Layout.speaker_mark Layout.Tool)
+  check string "a tool block's continuation draws the continuation rail"
+    (Layout.continued_mark Layout.Tool)
     (continued Layout.Tool);
   check bool "and so is not the reasoning mark" true
     (not
@@ -1680,8 +1698,12 @@ let test_a_continuation_does_not_borrow_the_reasoning_glyph () =
   (* Reasoning's own continuation still draws a dot, because that is what it
      is. The glyph is ambiguous only when it is borrowed. *)
   check string "reasoning continues as reasoning"
-    (Layout.speaker_mark Layout.Thinking)
-    (continued Layout.Thinking)
+    (Layout.continued_mark Layout.Thinking)
+    (continued Layout.Thinking);
+  (* Critical alert marks retain high salience on continuation. *)
+  check string "an error continuation keeps the error mark"
+    (Layout.speaker_mark Layout.Error)
+    (continued Layout.Error)
 
 (* Every speaker draws a different mark. A shared glyph is how the pane came to
    say two things with one shape. *)
@@ -2058,6 +2080,8 @@ let () =
             test_wrapped_rows_indent_under_the_first
         ; test_case "a second message from one speaker stays blank" `Quick
             test_a_second_message_from_one_speaker_stays_blank
+        ; test_case "unowned entries at different timestamps do not fold" `Quick
+            test_unowned_entries_at_different_timestamps_do_not_fold
         ; test_case "a continuation does not borrow the reasoning glyph" `Quick
             test_a_continuation_does_not_borrow_the_reasoning_glyph
         ; test_case "every speaker mark is distinct" `Quick

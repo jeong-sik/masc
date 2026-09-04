@@ -947,6 +947,9 @@ let operation_payload_of_json ~keeper_name ~operation_id ~source ~input =
     ; channel_workspace_id = source.channel_workspace_id
     ; attachments = input.attachments
     ; direct_message
+      (* Rebuilt from the durable operation for execution, not received from
+         a client: there is no reconnect and nothing to replay. *)
+    ; since_seq = None
     }
   in
   Ok { payload; source }

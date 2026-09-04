@@ -29,7 +29,9 @@ let host raw =
   | Error error -> failf "host %S did not parse: %s" raw (H.parse_error_to_string error)
 ;;
 
-let admits rules raw = H.admits (List.map rule rules) (host raw)
+let admits ?(port = H.default_rule_port) rules raw =
+  H.admits (List.map rule rules) (host raw) ~port
+;;
 
 (* The bypass this module exists for. sandbox-runtime <= 0.0.42 compared the
    whole byte string with endsWith, so this passed a *.google.com allowlist
@@ -81,6 +83,55 @@ let test_a_wildcard_is_strictly_below_its_apex () =
   check bool "deep.api.example.com is admitted" true
     (admits [ "*.example.com" ] "deep.api.example.com");
   check bool "the apex itself is not" false (admits [ "*.example.com" ] "example.com")
+;;
+
+(* A destination is a host and a port, so a rule has to be able to say the
+   port. Pinning one meant an operator with a service on 8443 could not use
+   the lane at all. *)
+let test_a_rule_carries_its_port () =
+  check int "an unqualified rule means 443" 443 (H.rule_port (rule "example.com"));
+  check int "and a qualified one means what it says" 8443
+    (H.rule_port (rule "example.com:8443"));
+  check bool "the qualified rule admits its own port" true
+    (admits ~port:8443 [ "example.com:8443" ] "example.com");
+  check bool "and refuses 443" false (admits ~port:443 [ "example.com:8443" ] "example.com");
+  check bool "an unqualified rule refuses another port" false
+    (admits ~port:8443 [ "example.com" ] "example.com");
+  check bool "a wildcard carries a port too" true
+    (admits ~port:8443 [ "*.example.com:8443" ] "api.example.com")
+;;
+
+let test_a_host_can_be_named_on_two_ports () =
+  let rules = [ "example.com"; "example.com:8443" ] in
+  check bool "443 is admitted" true (admits ~port:443 rules "example.com");
+  check bool "8443 is admitted" true (admits ~port:8443 rules "example.com");
+  check bool "9443 is not" false (admits ~port:9443 rules "example.com");
+  check (list int) "and the permitted ports can be named" [ 443; 8443 ]
+    (H.ports_for_host (List.map rule rules) (host "example.com"))
+;;
+
+(* So a refusal can tell "not permitted" from "permitted on another port".
+   The two are different operator mistakes. *)
+let test_a_host_is_recognized_apart_from_its_port () =
+  let rules = List.map rule [ "example.com:8443" ] in
+  check bool "the host is recognized" true (H.admits_host rules (host "example.com"));
+  check bool "an unnamed host is not" false (H.admits_host rules (host "evil.com"));
+  check (list int) "and its port is reported" [ 8443 ]
+    (H.ports_for_host rules (host "example.com"))
+;;
+
+(* A colon that is not a port leaves the host holding one, and a host with a
+   colon is refused -- which is where that refusal belongs. The byte named is
+   whichever the scan reaches first, so the assertion is that the rule is
+   refused as an unusable host, not which byte did it. *)
+let test_a_colon_that_is_not_a_port_still_refuses () =
+  List.iter
+    (fun raw ->
+      check bool (raw ^ " is refused") true
+        (match H.rule_of_string raw with
+         | Error (H.Forbidden_byte _) -> true
+         | Error _ | Ok _ -> false))
+    [ "example.com:https"; "example.com:0"; "example.com:70000"; "[::1]:443" ]
 ;;
 
 let test_an_exact_rule_is_exact () =
@@ -188,6 +239,13 @@ let () =
       , [ test_case "a wildcard is strictly below its apex" `Quick
             test_a_wildcard_is_strictly_below_its_apex
         ; test_case "an exact rule is exact" `Quick test_an_exact_rule_is_exact
+        ; test_case "a rule carries its port" `Quick test_a_rule_carries_its_port
+        ; test_case "a host can be named on two ports" `Quick
+            test_a_host_can_be_named_on_two_ports
+        ; test_case "a host is recognized apart from its port" `Quick
+            test_a_host_is_recognized_apart_from_its_port
+        ; test_case "a colon that is not a port still refuses" `Quick
+            test_a_colon_that_is_not_a_port_still_refuses
         ; test_case "a name rule never admits an address" `Quick
             test_a_name_rule_never_admits_an_address
         ; test_case "an address rule never admits a name" `Quick

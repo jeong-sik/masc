@@ -49,7 +49,13 @@ work="$(mktemp -d)"
 PID=""
 cleanup() {
   [ -n "$PID" ] && kill "$PID" 2>/dev/null || true
-  rm -rf "$work"
+  # Let the killed server finish exiting before removing its tree, so a
+  # background tool-asset write does not race the rm.
+  [ -n "$PID" ] && wait "$PID" 2>/dev/null || true
+  # Best-effort: even after the wait a late write can leave
+  # $work/.masc/config/tools non-empty as rm walks it. A teardown race must not
+  # fail a smoke that already answered /health.
+  rm -rf "$work" 2>/dev/null || true
 }
 trap cleanup EXIT
 

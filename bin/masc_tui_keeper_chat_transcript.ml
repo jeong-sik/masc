@@ -1274,7 +1274,9 @@ let turn_status_text ~reply ~turn_ref (outcome : Masc.Keeper_turn_outcome.t) =
   | Masc.Keeper_turn_outcome.Terminal_effect_settled ->
       Printf.sprintf "Reply delivered by a terminal tool (turn %s)" turn_ref
   | Masc.Keeper_turn_outcome.Awaiting_gate_approval ->
-      Printf.sprintf "Waiting for Gate approval (turn %s)" turn_ref
+      (* Deferred, not stalled: the turn continues once the gate answers
+         (#33126). *)
+      Printf.sprintf "승인 후 턴을 이어서 진행합니다 (turn %s)" turn_ref
   | Masc.Keeper_turn_outcome.No_visible_reply ->
       Printf.sprintf "Turn completed without a visible reply (turn %s)" turn_ref
 ;;

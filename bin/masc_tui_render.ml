@@ -10782,6 +10782,91 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
               ]
               @ fusion_wrapped_block ~width ~indent:"    " failure.fj_error
         in
+        (* RFC-0284 judge nodes. The canonical [Judge] row above is the final
+           synthesis; this block is the topology it came through -- first the
+           observed shape as one line, then one card per first-pass lens.
+           Meta/stage/final nodes stay in the shape line only: their output
+           is intermediate synthesis, and printing it next to the final one
+           would render the same deliberation twice. Pre-RFC posts decode
+           with no nodes and draw none of this. *)
+        let judges_lines =
+          match evidence.fe_judges with
+          | [] -> []
+          | nodes ->
+              let count_role wanted =
+                List.fold_left
+                  (fun n node ->
+                    if node.fjn_role = wanted then n + 1 else n)
+                  0 nodes
+              in
+              let firsts = count_role Judge_first in
+              let metas = count_role Judge_meta in
+              let stage_metas = count_role Judge_stage_meta in
+              let final_metas = count_role Judge_final_meta in
+              let refines = count_role Judge_refine in
+              let singles = count_role Judge_single in
+              let shape =
+                (* Same reading the dashboard's shape classifier makes: a
+                   first-pass judge only exists in a judge-of-judges run,
+                   and stage/final metas only in the staged one. *)
+                if stage_metas > 0 || final_metas > 0 then "staged judge-of-judges"
+                else if firsts > 0 then "judge-of-judges"
+                else if refines > 0 then "refine"
+                else "single"
+              in
+              let counts =
+                List.filter_map
+                  (fun (label, n) ->
+                    if n > 0 then Some (Printf.sprintf "%s \xc3\x97%d" label n) else None)
+                  [ ("first", firsts); ("meta", metas); ("stage-meta", stage_metas)
+                  ; ("final-meta", final_metas); ("refine", refines)
+                  ; ("single", singles) ]
+              in
+              let first_cards =
+                nodes
+                |> List.filter (fun node -> node.fjn_role = Judge_first)
+                |> List.mapi (fun index node ->
+                       match node.fjn_outcome with
+                       | Judge_node_synthesized synthesized ->
+                           [ ( Ansi.magenta
+                             , Printf.sprintf
+                                 "  First %d [synthesized] %s  (%d in / %d out)"
+                                 (index + 1)
+                                 (Terminal_text.single_line node.fjn_identity)
+                                 synthesized.fjno_input_tokens
+                                 synthesized.fjno_output_tokens )
+                           ]
+                           @ fusion_labeled_markdown ~width
+                               ~label:
+                                 (Printf.sprintf "First %d %s" (index + 1)
+                                    (Terminal_text.single_line node.fjn_identity))
+                               synthesized.fjno_resolved_answer
+                       | Judge_node_failed failed ->
+                           let clock =
+                             match (failed.fjno_timed_out, failed.fjno_elapsed_s) with
+                             | true, _ -> "  (timed out)"
+                             | false, Some seconds ->
+                                 Printf.sprintf "  (%.0fs)" seconds
+                             | false, None -> ""
+                           in
+                           [ ( (Theme.bad ())
+                             , Printf.sprintf
+                                 "  First %d [failed] %s  [%s]%s"
+                                 (index + 1)
+                                 (Terminal_text.single_line node.fjn_identity)
+                                 (Terminal_text.single_line failed.fjno_failure_code)
+                                 clock )
+                           ]
+                           @ fusion_wrapped_block ~width ~indent:"    "
+                               failed.fjno_error)
+                |> List.concat
+              in
+              [ Ansi.dim, "" ]
+              @ ( Ansi.dim
+                , Printf.sprintf "  Judge topology: %s  \xc2\xb7  %s" shape
+                    (String.concat "  \xc2\xb7  " counts) )
+              :: first_cards
+        in
         let tool_lines =
           fusion_tool_trace_lines ~width evidence.fe_tool_trace
         in
@@ -10803,6 +10888,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
           ; Ansi.magenta, "  3  JUDGE"
           ]
         @ judge_lines
+        @ judges_lines
         @ [ Ansi.dim, ""
           ; Ansi.bold, "  4  TOOL EXECUTIONS"
           ]
@@ -11052,9 +11138,12 @@ type change_context = {
   ctx_keeper : string option;
   ctx_task_id : string option;
   ctx_task_title : string option;
+  ctx_task_description : string option;
   ctx_goal_id : string option;
   ctx_goal_title : string option;
   ctx_turn : int option;
+  ctx_comment : string option;
+  ctx_pr_number : string option;
 }
 
 let file_change_matches_path (path : string) (fc : Masc.Tui_decode.file_change) =
@@ -11063,6 +11152,42 @@ let file_change_matches_path (path : string) (fc : Masc.Tui_decode.file_change) 
   | Masc.Tui_decode.Fc_in_bundle { bundle_path } -> String.equal bundle_path path
   | Masc.Tui_decode.Fc_at_absolute_path { path = p } ->
       String.equal p path || String.equal (Filename.basename p) (Filename.basename path)
+
+let extract_pr_number (s : string) : string option =
+  let n = String.length s in
+  let rec scan i =
+    if i >= n then None
+    else if s.[i] = '#' && i + 1 < n && s.[i + 1] >= '0' && s.[i + 1] <= '9' then
+      let start_digits = i + 1 in
+      let rec digits j =
+        if j < n && s.[j] >= '0' && s.[j] <= '9' then digits (j + 1)
+        else j
+      in
+      let end_digits = digits start_digits in
+      Some (String.sub s start_digits (end_digits - start_digits))
+    else if (i + 3 <= n && (String.sub s i 3 = "PR-" || String.sub s i 3 = "pr-"))
+            && i + 3 < n && s.[i + 3] >= '0' && s.[i + 3] <= '9' then
+      let start_digits = i + 3 in
+      let rec digits j =
+        if j < n && s.[j] >= '0' && s.[j] <= '9' then digits (j + 1)
+        else j
+      in
+      let end_digits = digits start_digits in
+      Some (String.sub s start_digits (end_digits - start_digits))
+    else scan (i + 1)
+  in
+  scan 0
+
+let first_line_summary ?(max_len = 34) (s : string) : string =
+  let lines = String.split_on_char '\n' s in
+  let rec find_first = function
+    | [] -> ""
+    | l :: rest ->
+        let tr = String.trim l in
+        if String.length tr > 0 then tr else find_first rest
+  in
+  let line = find_first lines in
+  Terminal_text.single_line (Message_layout.fit_middle max_len line)
 
 let resolve_change_context (state : state) ~(path_opt : string option) : change_context =
   let matched_change =
@@ -11107,7 +11232,28 @@ let resolve_change_context (state : state) ~(path_opt : string option) : change_
           state.tasks
     | None -> None
   in
-  let task_title = Option.map (fun (t : Masc.Tui_decode.task) -> t.Masc.Tui_decode.title) task in
+  let domain_task =
+    match task_id with
+    | Some tid ->
+        List.find_opt
+          (fun (t : Masc_domain.task) -> String.equal t.id tid)
+          state.tasks_domain
+    | None -> None
+  in
+  let task_title =
+    match task with
+    | Some t -> Some t.Masc.Tui_decode.title
+    | None ->
+        (match domain_task with
+         | Some dt -> Some dt.title
+         | None -> None)
+  in
+  let task_description =
+    match domain_task with
+    | Some dt when not (String.equal (String.trim dt.description) "") ->
+        Some dt.description
+    | _ -> None
+  in
   let goal_id =
     match task with
     | Some t -> List.nth_opt t.Masc.Tui_decode.goal_ids 0
@@ -11125,13 +11271,96 @@ let resolve_change_context (state : state) ~(path_opt : string option) : change_
          | None -> None)
     | _ -> None
   in
+  let comment =
+    match turn with
+    | Some turn_seq ->
+        let rec find_msg = function
+          | [] -> None
+          | (me : msg_entry) :: rest ->
+              if me.me_turn_sequence = Some turn_seq
+                 && not (String.equal (String.trim me.me_text) "") then
+                Some me.me_text
+              else
+                find_msg rest
+        in
+        find_msg (List.rev state.msg_history)
+    | None -> None
+  in
+  let effective_comment =
+    match comment with
+    | Some c -> Some c
+    | None -> task_description
+  in
+  let pr_number =
+    match Option.bind task_title extract_pr_number with
+    | Some _ as p -> p
+    | None ->
+        (match Option.bind task_description extract_pr_number with
+         | Some _ as p -> p
+         | None -> Option.bind comment extract_pr_number)
+  in
   { ctx_keeper = keeper
   ; ctx_task_id = task_id
   ; ctx_task_title = task_title
+  ; ctx_task_description = task_description
   ; ctx_goal_id = goal_id
   ; ctx_goal_title = goal_title
   ; ctx_turn = turn
+  ; ctx_comment = effective_comment
+  ; ctx_pr_number = pr_number
   }
+
+let build_change_context_lines (change_ctx : change_context) : string list =
+  let line1_items = [] in
+  let line1_items =
+    match change_ctx.ctx_goal_id, change_ctx.ctx_goal_title with
+    | Some gid, Some title ->
+        Printf.sprintf "Goal: %s (%s)" gid (Message_layout.fit_middle 24 title) :: line1_items
+    | Some gid, None -> ("Goal: " ^ gid) :: line1_items
+    | None, _ -> line1_items
+  in
+  let line1_items =
+    match change_ctx.ctx_task_id, change_ctx.ctx_task_title with
+    | Some tid, Some title ->
+        Printf.sprintf "Task: %s (%s)" tid (Message_layout.fit_middle 26 title) :: line1_items
+    | Some tid, None -> ("Task: " ^ tid) :: line1_items
+    | None, _ -> line1_items
+  in
+  let line1_items =
+    match change_ctx.ctx_keeper with
+    | Some k -> ("Keeper: " ^ k) :: line1_items
+    | None -> line1_items
+  in
+  let line2_items = [] in
+  let line2_items =
+    match change_ctx.ctx_pr_number with
+    | Some pr -> ("PR: #" ^ pr) :: line2_items
+    | None -> line2_items
+  in
+  let line2_items =
+    match change_ctx.ctx_turn with
+    | Some turn -> Printf.sprintf "Turn #%d" turn :: line2_items
+    | None -> line2_items
+  in
+  let line2_items =
+    match change_ctx.ctx_comment with
+    | Some c when String.trim c <> "" ->
+        ("Note: " ^ first_line_summary ~max_len:34 c) :: line2_items
+    | _ -> line2_items
+  in
+  let l1_opt =
+    if line1_items = [] then None
+    else Some ("  " ^ String.concat "  |  " (List.rev line1_items))
+  in
+  let l2_opt =
+    if line2_items = [] then None
+    else Some ("  " ^ String.concat "  |  " (List.rev line2_items))
+  in
+  match l1_opt, l2_opt with
+  | Some l1, Some l2 -> [ l1; l2 ]
+  | Some l1, None -> [ l1 ]
+  | None, Some l2 -> [ l2 ]
+  | None, None -> []
 
 let tree_diff_row_span ~width (row : Masc.Tui_decode.git_diff_row) =
   let background, marker =
@@ -11177,43 +11406,15 @@ let render_repository_changes_diff (state : state) ~path =
       (connection_badge state)
   in
   let change_ctx = resolve_change_context state ~path_opt:(Some path) in
-  let context_line_opt =
-    let items = [] in
-    let items =
-      match change_ctx.ctx_goal_id, change_ctx.ctx_goal_title with
-      | Some gid, Some title ->
-          Printf.sprintf "Goal: %s (%s)" gid (Message_layout.fit_middle 24 title) :: items
-      | Some gid, None -> ("Goal: " ^ gid) :: items
-      | None, _ -> items
-    in
-    let items =
-      match change_ctx.ctx_task_id, change_ctx.ctx_task_title with
-      | Some tid, Some title ->
-          Printf.sprintf "Task: %s (%s)" tid (Message_layout.fit_middle 26 title) :: items
-      | Some tid, None -> ("Task: " ^ tid) :: items
-      | None, _ -> items
-    in
-    let items =
-      match change_ctx.ctx_turn with
-      | Some turn -> Printf.sprintf "Turn #%d" turn :: items
-      | None -> items
-    in
-    let items =
-      match change_ctx.ctx_keeper with
-      | Some k -> ("Keeper: " ^ k) :: items
-      | None -> items
-    in
-    if items = [] then None
-    else Some ("  " ^ String.concat "  |  " (List.rev items))
-  in
+  let context_lines = build_change_context_lines change_ctx in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  (match context_line_opt with
-   | Some ctx_line ->
-       box_line buf cols ctx_line;
-       box_divider buf cols
-   | None -> ());
+  List.iter
+    (fun ctx_line ->
+      box_line buf cols ctx_line;
+      box_divider buf cols)
+    context_lines;
   box_line_styled buf cols ~style:(Theme.recede ())
     "  old   new     what the working tree holds, against its last commit";
   box_divider buf cols;
@@ -11225,7 +11426,7 @@ let render_repository_changes_diff (state : state) ~path =
        box_divider buf cols);
   let chrome_rows =
     7
-    + (if Option.is_some context_line_opt then 2 else 0)
+    + (List.length context_lines * 2)
     + if Option.is_some state.repository_changes_diff_error then 2 else 0
   in
   let content_height = max 1 (rows - chrome_rows) in
@@ -11293,39 +11494,21 @@ let render_repository_changes (state : state) =
           (Terminal_text.single_line scope_name) (List.length changes)
           (connection_badge state)
       in
-      let change_ctx = resolve_change_context state ~path_opt:None in
-      let context_line_opt =
-        let items = [] in
-        let items =
-          match change_ctx.ctx_goal_id, change_ctx.ctx_goal_title with
-          | Some gid, Some title ->
-              Printf.sprintf "Goal: %s (%s)" gid (Message_layout.fit_middle 24 title) :: items
-          | Some gid, None -> ("Goal: " ^ gid) :: items
-          | None, _ -> items
-        in
-        let items =
-          match change_ctx.ctx_task_id, change_ctx.ctx_task_title with
-          | Some tid, Some title ->
-              Printf.sprintf "Task: %s (%s)" tid (Message_layout.fit_middle 26 title) :: items
-          | Some tid, None -> ("Task: " ^ tid) :: items
-          | None, _ -> items
-        in
-        let items =
-          match change_ctx.ctx_keeper with
-          | Some k -> ("Keeper: " ^ k) :: items
-          | None -> items
-        in
-        if items = [] then None
-        else Some ("  " ^ String.concat "  |  " (List.rev items))
+      let selected_path =
+        match List.nth_opt changes state.repository_changes_cursor with
+        | Some row -> Some row.rc_path
+        | None -> None
       in
+      let change_ctx = resolve_change_context state ~path_opt:selected_path in
+      let context_lines = build_change_context_lines change_ctx in
       surface_chrome state ~terminal_rows ~cols ~surface_key:"repository-changes"
         ~title ~hints:Masc_tui_keys.footer_hints_git_changes
         ~body:(fun ~budget c ->
-          (match context_line_opt with
-           | Some ctx_line ->
-               c.push ctx_line;
-               c.push_divider ()
-           | None -> ());
+          List.iter
+            (fun ctx_line ->
+              c.push ctx_line;
+              c.push_divider ())
+            context_lines;
           c.push_styled ~style:(Theme.recede ())
             (Printf.sprintf "  %-18s %s" "State" "Path");
           c.push_divider ();
@@ -11337,7 +11520,7 @@ let render_repository_changes (state : state) =
                c.push_divider ());
           let fixed =
             2
-            + (if Option.is_some context_line_opt then 2 else 0)
+            + (List.length context_lines * 2)
             + if Option.is_some state.repository_changes_error then 2 else 0
           in
           let room = max 1 (budget - fixed) in
@@ -13394,6 +13577,7 @@ let render_acting (state : state) =
       | Masc_tui_observer.Keeper_chat_appended _
       | Masc_tui_observer.Keeper_chat_stream_frame _
       | Masc_tui_observer.Keeper_waiting_inventory_changed _
+      | Masc_tui_observer.Fusion_run_status _
       | Masc_tui_observer.Snapshot _
       | Masc_tui_observer.Other _ ->
           None

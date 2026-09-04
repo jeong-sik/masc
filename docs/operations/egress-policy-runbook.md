@@ -57,11 +57,34 @@ it is worse than no allowlist, because it reads as protection.
 
 ### What a rule admits
 
+A rule is a host and the port it may be reached on. An unqualified rule
+means port 443, so an allowlist of ordinary web hosts needs no `:443` after
+each entry; a service on another port says so.
+
 | Rule | Admits | Refuses |
 |---|---|---|
-| `github.com` | `github.com`, `GitHub.COM`, `github.com.` | `api.github.com` |
-| `*.github.com` | `api.github.com`, `a.b.github.com` | `github.com`, `notgithub.com` |
-| `140.82.121.6` | that address | any name |
+| `github.com` | `github.com:443`, `GitHub.COM:443`, `github.com.:443` | `api.github.com`, `github.com:80` |
+| `*.github.com` | `api.github.com:443`, `a.b.github.com:443` | `github.com:443`, `notgithub.com:443` |
+| `registry.internal:8443` | that host on 8443 | the same host on 443 |
+| `140.82.121.6` | that address on 443 | any name |
+
+A host may be named twice to permit two ports:
+
+```toml
+allow = ["registry.internal", "registry.internal:8443"]
+```
+
+A host the allowlist names, reached on a port it does not, is reported as
+that and not as an unlisted host, and the refusal says which ports would
+have worked:
+
+```
+registry.internal is allowed on 8443, not on port 443
+```
+
+The two are different mistakes fixed in different places, and reporting the
+first as the second sends an operator looking for a rule they already
+wrote.
 
 A wildcard is strictly below its apex, and matching is on parsed labels, so
 `notgithub.com` cannot ride `*.github.com` the way a string-suffix check
@@ -100,9 +123,27 @@ Two flags, and both are the policy rather than a default:
   name, after the allowlist has judged it. One resolver, downstream of the
   matcher.
 
-The guest is told where the proxy is through the usual proxy environment
-variables. That is convenience, not enforcement: a client that ignores them
-finds no route rather than a way around.
+The guest is told where the proxy is through four environment variables set
+on its boot — `http_proxy`, `https_proxy`, and both upper-case spellings.
+All four, because the common clients do not agree on which they read: curl
+and wget take the lower-case names, many Go and Java clients take the
+upper-case ones, and `gh` inherits whichever its libc build honours. Setting
+one and not the other is how a keeper reaches the proxy for `git` and
+silently finds no route for `gh`.
+
+The value is an address, not a name, because the guest has no resolver. The
+address is the policy network's own gateway, read from the network at boot:
+container assigns the subnet, so a fixed address would be right only until a
+host had a network on that one already.
+
+`NO_PROXY` is deliberately absent. An exception list there would be a second
+allowlist, one the proxy never sees and cannot record.
+
+This is convenience, not enforcement. A client that ignores these finds no
+route rather than a way around — the enforcement point is the host-only
+network, not this list. A guest that is never handed them is merely stuck,
+so a boot that does not know the proxy's address is refused rather than
+started.
 
 ## 4. Reading what a keeper reached
 
@@ -125,10 +166,11 @@ A keeper's own account of where it went is not evidence. These events are.
 
 ## Limits worth stating
 
-- **CONNECT and port 443 only.** A proxy that also spoke plain HTTP would
-  have to parse a body to say honestly what it forwarded, and an arbitrary
-  port turns the lane into a generic tunnel that an allowlist of hostnames
-  does not describe. Another port is a decision to take deliberately.
+- **CONNECT only.** A proxy that also spoke plain HTTP would have to parse a
+  body to say honestly what it forwarded; this one records an authority,
+  which is the whole of what it can truthfully claim to know. The port is not
+  fixed, but it is permitted per rule rather than left open, so the lane
+  never becomes a generic tunnel by omission.
 - **The proxy sees the name, not the payload.** TLS is tunnelled, not
   terminated. What a keeper sent to an allowed host is not recorded here.
 - **The allowlist is fixed for the life of a listener.** A tunnel outliving

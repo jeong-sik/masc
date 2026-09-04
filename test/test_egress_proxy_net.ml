@@ -60,6 +60,89 @@ let one_request ~allow ~line =
   !status, List.rev !collected
 ;;
 
+(* An admitted request has to actually carry bytes, and nothing pinned that
+   until a rule could name a port: a stub upstream binds an ephemeral one, so
+   with the port fixed at 443 there was no destination a test could both
+   allow and reach. Splicing two flows is exactly the part a refusal test
+   cannot check.
+
+   The stub greets, then echoes one line, so a one-way copy is
+   distinguishable from a real splice. *)
+let admitted_tunnel_exchange ~request =
+  let events = ref [] in
+  let greeting = "UPSTREAM-HELLO" in
+  let transcript = ref [] in
+  (try
+     Eio_main.run (fun env ->
+       Eio.Switch.run (fun sw ->
+         let net = Eio.Stdenv.net env in
+         let clock = Eio.Stdenv.clock env in
+         let upstream =
+           Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:4
+             (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+         in
+         let upstream_port = port_of upstream in
+         Eio.Fiber.fork ~sw (fun () ->
+           try
+             Eio.Net.accept_fork ~sw upstream ~on_error:(fun _ -> ()) (fun flow _ ->
+               Eio.Flow.copy_string (greeting ^ "\n") flow;
+               let reader = Eio.Buf_read.of_flow flow ~max_size:4096 in
+               match Eio.Buf_read.line reader with
+               | line -> Eio.Flow.copy_string ("echo:" ^ line ^ "\n") flow
+               | exception End_of_file -> ())
+           with _ -> ());
+         let proxy =
+           Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:4
+             (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+         in
+         let proxy_port = port_of proxy in
+         Eio.Fiber.fork ~sw (fun () ->
+           try
+             Egress_proxy_net.serve
+               ~sw
+               ~net
+               ~clock
+               ~keeper_name:"tunnel"
+               ~rules:(rules [ Printf.sprintf "127.0.0.1:%d" upstream_port ])
+               ~on_event:(fun event -> events := event :: !events)
+               ~socket:proxy
+               ~read_timeout_s:5.0
+           with _ -> ());
+         let flow = Eio.Net.connect ~sw net (`Tcp (Eio.Net.Ipaddr.V4.loopback, proxy_port)) in
+         Eio.Flow.copy_string
+           (Printf.sprintf "CONNECT 127.0.0.1:%d HTTP/1.1\r\n\r\n" upstream_port)
+           flow;
+         let reader = Eio.Buf_read.of_flow flow ~max_size:65536 in
+         let read_line () = try Some (Eio.Buf_read.line reader) with End_of_file -> None in
+         (* Status line, then the blank line ending the proxy's headers, then
+            the upstream's own greeting -- which only arrives if the splice
+            runs. *)
+         let lines = List.filter_map (fun () -> read_line ()) [ (); (); () ] in
+         Eio.Flow.copy_string (request ^ "\n") flow;
+         let echoed = read_line () in
+         transcript := lines @ (match echoed with None -> [] | Some line -> [ line ]);
+         raise Exit))
+   with
+   | Exit -> ());
+  !transcript, List.rev !events
+;;
+
+let test_an_admitted_request_tunnels_both_ways () =
+  let transcript, events = admitted_tunnel_exchange ~request:"PING" in
+  check bool "the tunnel is opened with a 200" true
+    (match transcript with
+     | status :: _ -> String_util.contains_substring status "200"
+     | [] -> false);
+  check bool "the upstream's own greeting arrives through it" true
+    (List.exists (fun line -> String_util.contains_substring line "UPSTREAM-HELLO") transcript);
+  check bool "and what the client sent came back, so both directions carry" true
+    (List.exists (fun line -> String_util.contains_substring line "echo:PING") transcript);
+  check bool "recorded as admitted, not as an upstream failure" true
+    (match events with
+     | [ { Egress_proxy_net.outcome = Egress_proxy_net.Admitted _; _ } ] -> true
+     | _ -> false)
+;;
+
 let is_403 status =
   String.length status >= 12 && String.equal (String.sub status 0 12) "HTTP/1.1 403"
 ;;
@@ -127,6 +210,10 @@ let () =
             test_a_nul_authority_never_opens_a_tunnel
         ; test_case "a port outside the lane is refused" `Quick
             test_a_port_outside_the_lane_is_refused
+        ] )
+    ; ( "tunnel"
+      , [ test_case "an admitted request tunnels both ways" `Quick
+            test_an_admitted_request_tunnels_both_ways
         ] )
     ; ( "evidence"
       , [ test_case "every request produces one event naming its keeper" `Quick

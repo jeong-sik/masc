@@ -4990,9 +4990,13 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     (row : Keeper_chat_history.row) =
   let gate =
     match row.Keeper_chat_history.kind with
-    | Keeper_chat_history.Gate_activity { approval_id; phase; tool } ->
+    | Keeper_chat_history.Gate_activity { approval_id; phase; tool; summary } ->
         Some
-          { gs_approval_id = approval_id; gs_phase = phase; gs_tool = tool }
+          { gs_approval_id = approval_id
+          ; gs_phase = phase
+          ; gs_tool = tool
+          ; gs_summary = summary
+          }
     | Keeper_chat_history.Memory_activity _
     | Keeper_chat_history.Addressed_to_keeper _
     | Keeper_chat_history.Said_by_keeper
@@ -5064,14 +5068,14 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         , Some activity )
     | Keeper_chat_history.Reasoning lines ->
         (Message_thinking, Turn_progress, String.concat "\n" lines, None, None)
-    | Keeper_chat_history.Gate_activity { approval_id = _; phase; tool } ->
+    | Keeper_chat_history.Gate_activity { approval_id = _; phase; tool; summary } ->
         (* Server-owned gate status, drawn from the phase rather than from
            the sentence the store composed. It is not Memory: putting it in
            that lane interleaved approvals with journal commits, and hiding
            the journal hid the gate with it. *)
         ( Message_status
         , Turn_progress
-        , Masc_tui_gate_text.lifecycle_line ~phase ~tool
+        , Masc_tui_gate_text.lifecycle_line ~phase ~tool ~summary
         , None
         , None )
     | Keeper_chat_history.Memory_activity _ ->
@@ -8938,6 +8942,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          shows the whole history anyway, and the loader is generation-
          guarded, so the flag only remembers that a reload is due. *)
       let open_chat_gained_turn = ref false in
+      (* Same shape as [open_chat_gained_turn]: remember that a fusion run
+         pushed a status, decide once per batch after the loop. The run id
+         rides along so an open detail only refetches when it is the run
+         that moved. *)
+      let fusion_status_seen = ref None in
       List.iter
         (fun item ->
           match item with
@@ -8953,6 +8962,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                       && state.msg_target_keeper_name = Some appended_keeper ->
                    open_chat_gained_turn := true
                | Some _ | None -> ());
+              (match event with
+               | Masc_tui_observer.Fusion_run_status { run_id; _ } ->
+                   fusion_status_seen := Some run_id
+               | _ -> ());
               state.acting <-
                 { Masc_tui_acting.ae_at = received; ae_event = event }
                 :: state.acting;
@@ -8992,7 +9005,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          | Some keeper_name ->
              launch_keeper_history_load ~load_file_changes:false state ~mailbox
                ~keeper_name
-         | None -> ())
+         | None -> ());
+      (* A fusion push reloads only the surface that shows it. The event
+         says a run moved; HTTP says what it is now -- the same
+         trigger/SSOT split the dashboard applies (sse-store). Both loaders
+         are inflight-guarded, so a run that pushes several stage frames
+         collapses to one fetch, and a missed frame is healed by the
+         cadence reload the Fusion view already runs. *)
+      (match (!fusion_status_seen, state.view) with
+       | Some run_id, Fusion ->
+           launch_fusion_runs_load state ~mailbox;
+           (match state.fusion_mode with
+            | Fusion_detail open_id when String.equal run_id open_id ->
+                launch_fusion_detail_load state ~mailbox ~run_id
+            | _ -> ())
+       | _ -> ())
   | Task_dispatched { keeper; task_id; title; body } ->
       add_event state "task" (Printf.sprintf "%s created for %s" task_id keeper);
       (* The jump lands on a clean screen: a modal or roster search opened
@@ -14949,7 +14976,7 @@ and is loaded on demand through keeper_skill.
                      state.fusion_detail_generation <-
                        state.fusion_detail_generation + 1
                  | Fusion_list ->
-                     goto_surface state ~mailbox:async_messages Planning)
+                     goto_surface state ~mailbox:async_messages Overview)
             | Overview ->
                 (* Back out one level: an open task detail closes to the panel,
                    a focused task panel hands j/k back to the event log. *)
@@ -16330,11 +16357,46 @@ and is loaded on demand through keeper_skill.
              ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight
              ~scoped_refresh_followup ~mailbox:async_messages
-       | Some "f" | Some "F" when state.view = Planning ->
-           (* Client-side over the loaded goals: no refetch. *)
-           state.planning_filter <- next_planning_filter state.planning_filter;
-           clamp_planning_cursor state
-       | Some "g" when state.view = Acting ->
+        | Some "f" | Some "F" when state.view = Planning ->
+            (* Client-side over the loaded goals: no refetch. *)
+            state.planning_filter <- next_planning_filter state.planning_filter;
+            clamp_planning_cursor state
+        | Some "g" | Some "G" when state.repository_changes_open ->
+            let path_opt =
+              match state.repository_changes_diff_path with
+              | Some path -> Some path
+              | None -> (
+                  match state.repository_changes with
+                  | Some snapshot ->
+                      Option.map
+                        (fun (c : Tui_decode.repository_change) -> c.rc_path)
+                        (List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
+                           state.repository_changes_cursor)
+                  | None -> None)
+            in
+            let change_ctx =
+              Masc_tui_render.resolve_change_context state ~path_opt
+            in
+            close_repository_changes state;
+            goto_surface state ~mailbox:async_messages Planning;
+            state.planning_mode <- Planning_list;
+            (match change_ctx.Masc_tui_render.ctx_goal_id with
+             | Some gid ->
+                 (match state.planning with
+                  | Some snap ->
+                      let rec find_idx i = function
+                        | [] -> ()
+                        | (g : planning_goal) :: rest ->
+                            if String.equal g.pg_id gid then
+                              state.planning_cursor <- i
+                            else find_idx (i + 1) rest
+                      in
+                      find_idx 0 snap.pl_goals
+                  | None -> ());
+                 clamp_planning_cursor state
+             | None ->
+                 state.planning_cursor <- 0)
+        | Some "g" when state.view = Acting ->
            state.acting_scroll <- 0;
            state.acting_unseen <- 0
        | Some "g"
@@ -16419,12 +16481,52 @@ and is loaded on demand through keeper_skill.
                          ~scope:
                            (Tui_decode.Repository_change_repository
                               repository_id)))
-       | Some "G" when state.view = Acting ->
-           (* Past the end on purpose; the frame clamps it to the last page.
-              The held count rather than max_int, because an event arriving
-              before that frame adds one to it. *)
-           state.acting_scroll <- List.length state.acting
-       | Some "t" | Some "T" ->
+        | Some "G" when state.view = Acting ->
+            (* Past the end on purpose; the frame clamps it to the last page.
+               The held count rather than max_int, because an event arriving
+               before that frame adds one to it. *)
+            state.acting_scroll <- List.length state.acting
+        | Some "t" | Some "T" when state.repository_changes_open ->
+            let path_opt =
+              match state.repository_changes_diff_path with
+              | Some path -> Some path
+              | None -> (
+                  match state.repository_changes with
+                  | Some snapshot ->
+                      Option.map
+                        (fun (c : Tui_decode.repository_change) -> c.rc_path)
+                        (List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
+                           state.repository_changes_cursor)
+                  | None -> None)
+            in
+            let change_ctx =
+              Masc_tui_render.resolve_change_context state ~path_opt
+            in
+            close_repository_changes state;
+            goto_surface state ~mailbox:async_messages Overview;
+            (match change_ctx.Masc_tui_render.ctx_task_id with
+             | Some tid ->
+                 state.task_detail_id <- Some tid;
+                 state.task_detail_scroll <- 0;
+                 state.task_history <- None;
+                 launch_task_history_load state ~mailbox:async_messages tid;
+                 let rec index_of i = function
+                   | [] -> None
+                   | (t : Masc_tui_types.task) :: rest ->
+                       if String.equal t.id tid then Some i
+                       else index_of (i + 1) rest
+                 in
+                 (match index_of 0 state.tasks with
+                  | Some idx ->
+                      state.task_cursor <- idx;
+                      state.task_focus <- Right_pane
+                  | None ->
+                      state.task_focus <- Right_pane)
+             | None ->
+                 state.task_detail_id <- None;
+                 state.task_focus <- Right_pane;
+                 state.task_cursor <- 0)
+        | Some "t" | Some "T" ->
            (* Focus the Overview task panel. The list is always on screen, but
               j/k belong to the event log until the operator asks for tasks. *)
            (match state.view with
@@ -16775,6 +16877,72 @@ and is loaded on demand through keeper_skill.
            if state.prompts_show_runtime_assets
            then add_event state "system" "런타임 프롬프트 자산에는 기록된 모델 입력이 없습니다"
            else handle_librarian_input_read ()
+       | Some "p" | Some "P" when state.repository_changes_open ->
+           let path_opt =
+             match state.repository_changes_diff_path with
+             | Some path -> Some path
+             | None -> (
+                 match state.repository_changes with
+                 | Some snapshot ->
+                     Option.map
+                       (fun (c : Tui_decode.repository_change) -> c.rc_path)
+                       (List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
+                          state.repository_changes_cursor)
+                 | None -> None)
+           in
+           let change_ctx =
+             Masc_tui_render.resolve_change_context state ~path_opt
+           in
+           let pr_number_opt =
+             match change_ctx.Masc_tui_render.ctx_pr_number with
+             | Some s -> int_of_string_opt s
+             | None -> None
+           in
+           let remote_opt =
+             match state.repository_changes_scope with
+             | Some (Tui_decode.Repository_change_repository repo_id) -> (
+                 match state.repositories with
+                 | Some snapshot ->
+                     Option.map
+                       (fun (r : Masc.Tui_decode.repository) -> r.rp_url)
+                       (List.find_opt
+                          (fun (r : Masc.Tui_decode.repository) ->
+                            String.equal r.rp_id repo_id)
+                          snapshot.rs_repositories)
+                 | None -> None)
+             | _ -> (
+                 match state.repositories with
+                 | Some snapshot ->
+                     (match snapshot.rs_repositories with
+                      | r :: _ -> Some r.rp_url
+                      | [] -> None)
+                 | None -> None)
+           in
+           let opened =
+             match pr_number_opt, remote_opt with
+             | Some number, Some remote -> (
+                 match github_pr_url ~remote ~number with
+                 | Some url -> (
+                     match Masc_tui_browser.open_url url with
+                     | Ok _ ->
+                         add_event state "git"
+                           (Printf.sprintf "opening PR #%d in browser..." number);
+                         true
+                     | Error _ -> false)
+                 | None -> false)
+             | _ -> false
+           in
+           if not opened then
+             (match pr_number_opt with
+              | Some number ->
+                  add_event state "git"
+                    (Printf.sprintf "opening PR #%d via gh..." number);
+                  ignore
+                    (Unix.system
+                       (Printf.sprintf "gh pr view %d --web 2>/dev/null &" number))
+              | None ->
+                  add_event state "git" "opening branch PR via gh...";
+                  ignore (Unix.system "gh pr view --web 2>/dev/null &"))
        | Some "p" | Some "P"
          when state.view = Runtime
               && Option.is_none state.runtime_detail_target ->

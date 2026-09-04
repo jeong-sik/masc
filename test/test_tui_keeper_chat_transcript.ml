@@ -475,7 +475,7 @@ let test_drawn_ends_each_control_outcome_with_its_status_row () =
     ; ( Masc.Keeper_turn_outcome.Terminal_effect_settled
       , "Reply delivered by a terminal tool (turn trace-1#3)" )
     ; ( Masc.Keeper_turn_outcome.Awaiting_gate_approval
-      , "Waiting for Gate approval (turn trace-1#3)" )
+      , "승인 후 턴을 이어서 진행합니다 (turn trace-1#3)" )
     ; ( Masc.Keeper_turn_outcome.No_visible_reply
       , "Turn completed without a visible reply (turn trace-1#3)" )
     ]

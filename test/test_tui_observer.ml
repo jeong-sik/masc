@@ -96,6 +96,8 @@ let summary = function
   | Observer.Event (Observer.Keeper_waiting_inventory_changed { keeper; queue_kind; _ })
     ->
       Printf.sprintf "waiting(%s,%s)" keeper (Option.value ~default:"-" queue_kind)
+  | Observer.Event (Observer.Fusion_run_status { keeper; run_id; status }) ->
+      Printf.sprintf "fusion(%s,%s,%s)" keeper status run_id
   | Observer.Event (Observer.Snapshot name) -> "snapshot:" ^ name
   | Observer.Event (Observer.Other name) -> "other:" ^ name
   | Observer.Undecodable detail -> "undecodable:" ^ detail
@@ -263,6 +265,18 @@ let chat_appended_frame =
    over every sample frame in this file: only the appended frame names
    a keeper, so a new variant cannot start reloading the pane by
    arriving, and the appended frame cannot silently stop. *)
+(* The same run shape the HTTP list serves, and no ts_unix: the frame is a
+   trigger, and only its identity strings are read here. *)
+let fusion_run_status_frame =
+  {|data: {"type":"fusion_run_status","run":{"run_id":"kmsg-f04701e2","keeper":"polisher","preset":"quorum","topology":"judge_of_judges","started_at":1788516104.9,"status":"running","stage":"panel"}}
+
+|}
+
+let fusion_run_status_without_run_frame =
+  {|data: {"type":"fusion_run_status"}
+
+|}
+
 let test_only_a_chat_appended_event_names_a_reload_keeper () =
   check (list string) "the appended frame decodes with keeper and connector"
     [ "chat(lane-smith,api)" ]
@@ -279,10 +293,20 @@ let test_only_a_chat_appended_event_names_a_reload_keeper () =
        ; heartbeat_frame; turn_complete_frame; keeper_tool_call_frame
        ; composite_frame; chat_stream_delta_frame; chat_stream_custom_frame
        ; waiting_inventory_frame; operator_digest_frame
-       ; transport_health_frame
+       ; transport_health_frame; fusion_run_status_frame
        ]);
   check (list string) "the appended frame answers its keeper" [ "lane-smith" ]
     (reload_keepers [ chat_appended_frame ])
+
+let test_a_fusion_status_frame_decodes_its_identity_strings () =
+  check (list string) "the three identity strings survive the decode"
+    [ "fusion(polisher,running,kmsg-f04701e2)" ]
+    (List.map summary (decode_all [ fusion_run_status_frame ]));
+  check bool "a frame with no run object says why it was not read" true
+    (match decode_all [ fusion_run_status_without_run_frame ] with
+     | [ Observer.Undecodable reason ] ->
+         String.starts_with ~prefix:"fusion_run_status" reason
+     | _ -> false)
 
 let test_a_line_cut_by_the_chunk_boundary_is_held () =
   let at = String.index tool_called_frame '{' + 40 in
@@ -376,6 +400,8 @@ let () =
             test_a_delta_with_a_slice_is_not_a_snapshot
         ; test_case "only a chat-appended event names a reload keeper" `Quick
             test_only_a_chat_appended_event_names_a_reload_keeper
+        ; test_case "a fusion status frame decodes its identity strings" `Quick
+            test_a_fusion_status_frame_decodes_its_identity_strings
         ; test_case "a line cut by the chunk boundary is held" `Quick
             test_a_line_cut_by_the_chunk_boundary_is_held
         ; test_case "what this build was not taught keeps its name" `Quick

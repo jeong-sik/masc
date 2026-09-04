@@ -129,7 +129,7 @@ let boot ?(network = Profile.Network_none) ?(constraints = Backend.all_guest_con
       backend
   : (string list, boot_refusal) result
   =
-  match Microvm.network_args_for backend ~dns:(Some "1.1.1.1") network with
+  match Microvm.network_args_for backend ~dns:(Some "1.1.1.1") ~policy_proxy:None network with
   | Error detail -> Error (Network_refused detail)
   | Ok network_args ->
     (match
@@ -393,7 +393,7 @@ let test_the_shim_prefix_refuses_where_the_identity_cannot_be_named () =
    would run open while the profile reported "none". *)
 let test_the_network_policy_is_spelled_per_runtime () =
   let ok label backend network =
-    match Microvm.network_args_for backend ~dns:(Some "1.1.1.1") network with
+    match Microvm.network_args_for backend ~dns:(Some "1.1.1.1") ~policy_proxy:None network with
     | Ok args -> args
     | Error detail -> fail (label ^ ": " ^ detail)
   in
@@ -422,6 +422,7 @@ let test_the_network_policy_is_spelled_per_runtime () =
     Microvm.network_args_for
       Backend.Microsandbox
       ~dns:(Some "1.1.1.1")
+      ~policy_proxy:None
       Profile.Network_inherit
   with
   | Ok args ->
@@ -441,7 +442,7 @@ let test_the_network_policy_is_spelled_per_runtime () =
    is checked to be spelled differently rather than merely non-empty. *)
 let test_no_runtime_borrows_anothers_network_spelling () =
   let closed backend =
-    match Microvm.network_args_for backend ~dns:None Profile.Network_none with
+    match Microvm.network_args_for backend ~dns:None ~policy_proxy:None Profile.Network_none with
     | Ok args -> args
     | Error detail ->
       fail (Backend.to_string backend ^ " cannot close its network: " ^ detail)

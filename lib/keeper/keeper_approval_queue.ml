@@ -1992,6 +1992,50 @@ let append_chat_projection ~base_path ~keeper_name lifecycle =
   |> publish_chat_projection_append ~keeper_name
 ;;
 
+(* A STATUS row answers "what was deferred", not only "which tool asked".
+   The argv join keeps the operator-facing command in the operator's own
+   words; an identity call names its provider surface. The cap is a rendering
+   budget: the pane wraps, and a summary is a pointer, not the payload. *)
+let call_summary_max_length = 80
+
+let call_summary_of_input (input : Yojson.Safe.t) : string option =
+  let member name = match input with
+    | `Assoc fields -> List.assoc_opt name fields
+    | _ -> None
+  in
+  let of_argv argv =
+    let joined = String.concat " " argv in
+    let first_line = match String.index_opt joined '\n' with
+      | None -> joined
+      | Some cut -> String.sub joined 0 cut
+    in
+    let trimmed = String.trim first_line in
+    if trimmed = "" then None
+    else if String.length trimmed <= call_summary_max_length then Some trimmed
+    else
+      (* A byte cut can split a multibyte char and persist a broken string;
+         the boundary index keeps the cap without doing so. *)
+      Some
+        (String.sub trimmed 0
+           (String_util.utf8_char_boundary trimmed call_summary_max_length))
+  in
+  let string_argv = function
+    | `List items when List.for_all (function `String _ -> true | _ -> false) items ->
+      Some (List.filter_map (function `String item -> Some item | _ -> None) items)
+    | _ -> None
+  in
+  match member "input" with
+  | Some (`Assoc inner) ->
+    (match List.assoc_opt "argv" inner with
+     | Some argv -> Option.bind (string_argv argv) of_argv
+     | None -> None)
+  | _ ->
+    (match member "provider_id", member "remote_name" with
+     | Some (`String provider), Some (`String remote) ->
+       Some (provider ^ "/" ^ remote)
+     | _ -> None)
+;;
+
 let record_pending (entry : pending_approval) =
   Log.Keeper.info
     "HITL_APPROVAL_PENDING: id=%s sequence=%d keeper=%s tool=%s"
@@ -2024,6 +2068,7 @@ let record_pending (entry : pending_approval) =
        ; tool_name = Some entry.tool_name
        ; phase = Keeper_chat_store.Approval_requested
        ; artifact_ref = None
+       ; call_summary = call_summary_of_input entry.input
        }
    with
    | Ok () -> ()
@@ -3032,6 +3077,7 @@ let ensure_resolution_chat_projection
       ~keeper_name
       ~approval_id
       ~tool_name
+      ~call_summary
       ~decision
   =
   let phase =
@@ -3046,6 +3092,7 @@ let ensure_resolution_chat_projection
     ; tool_name
     ; phase
     ; artifact_ref = None
+    ; call_summary
     }
 ;;
 
@@ -3054,6 +3101,7 @@ let ensure_replay_chat_projection
       ~keeper_name
       ~approval_id
       ~tool_name
+      ~call_summary
       ~outcome
   =
   let phase, artifact_ref =
@@ -3075,6 +3123,7 @@ let ensure_replay_chat_projection
       ; tool_name
       ; phase
       ; artifact_ref = Some artifact_ref
+      ; call_summary
       }
   |> publish_chat_projection_append ~keeper_name
 ;;
@@ -3084,6 +3133,7 @@ let ensure_continuation_chat_projection
       ~keeper_name
       ~approval_id
       ~tool_name
+      ~call_summary
   =
   append_chat_projection
     ~base_path
@@ -3092,6 +3142,7 @@ let ensure_continuation_chat_projection
     ; tool_name
     ; phase = Keeper_chat_store.Approval_continuation_recorded
     ; artifact_ref = None
+    ; call_summary
     }
 ;;
 
@@ -3117,9 +3168,9 @@ let ensure_settled_continuation_chat_projection
       ~(resolution : Keeper_event_queue.hitl_resolution)
   =
   let approval_id = resolution.approval_id in
-  let ready_tool_name =
+  let ready_projection =
     match resolution.decision with
-    | Keeper_event_queue.Hitl_rejected _ -> Ok (Some None)
+    | Keeper_event_queue.Hitl_rejected _ -> Ok (Some (None, None))
     | Keeper_event_queue.Hitl_approved ->
       (match approved_resolution_delivery ~base_path ~id:approval_id with
        | Ok
@@ -3127,7 +3178,9 @@ let ensure_settled_continuation_chat_projection
            ; state = Resolution_consumed
            ; replay_outcome = Some _
            } ->
-         Ok (Some (Some request.tool_name))
+         Ok
+           (Some
+              (Some request.tool_name, call_summary_of_input request.input))
        | Ok
            { state = (Resolution_unconsumed | Resolution_consumed)
            ; replay_outcome = None
@@ -3141,17 +3194,18 @@ let ensure_settled_continuation_chat_projection
          Ok None
        | Error error -> Error (grant_error_to_string error))
   in
-  match ready_tool_name with
+  match ready_projection with
   | Error _ as error -> error
   | Ok None -> Ok Continuation_projection_not_ready
-  | Ok (Some tool_name) ->
+  | Ok (Some (tool_name, call_summary)) ->
     Result.map
       (fun () -> Continuation_projection_recorded)
       (ensure_continuation_chat_projection
          ~base_path
          ~keeper_name
          ~approval_id
-         ~tool_name)
+         ~tool_name
+         ~call_summary)
 ;;
 
 let resolve_entry
@@ -3195,6 +3249,7 @@ let resolve_entry
          ~keeper_name:entry.keeper_name
          ~approval_id:entry.id
          ~tool_name:(Some entry.tool_name)
+         ~call_summary:(call_summary_of_input entry.input)
          ~decision
      with
      | Ok () -> ()

@@ -152,6 +152,7 @@ type approval_lifecycle =
   ; tool_name : string option
   ; phase : approval_lifecycle_phase
   ; artifact_ref : Tool_output.artifact_ref option
+  ; call_summary : string option
   }
 
 type append_once_result =
@@ -514,6 +515,7 @@ let redact_approval_lifecycle redaction lifecycle =
   in
   { lifecycle with
     tool_name = Option.map (redact_string redaction) lifecycle.tool_name
+  ; call_summary = Option.map (redact_string redaction) lifecycle.call_summary
   ; artifact_ref
   }
 
@@ -597,6 +599,7 @@ let approval_lifecycle_to_json lifecycle =
      ; "phase", `String (approval_lifecycle_phase_to_label lifecycle.phase)
      ]
      @ Json_util.string_field_if_present "tool_name" lifecycle.tool_name
+     @ Json_util.string_field_if_present "call_summary" lifecycle.call_summary
      @ (match lifecycle.artifact_ref with
         | None -> []
         | Some artifact_ref ->
@@ -676,7 +679,14 @@ let parse_approval_lifecycle ~path = function
              in
              if phase_requires_artifact <> Option.is_some artifact_ref
              then invalid "approval lifecycle artifact_ref does not match its phase"
-             else Some { approval_id; tool_name; phase; artifact_ref }))
+             else
+               Some
+                 { approval_id
+                 ; tool_name
+                 ; phase
+                 ; artifact_ref
+                 ; call_summary = string_field "call_summary"
+                 }))
      | None, _ | _, None ->
        invalid "approval lifecycle is missing approval_id or phase")
   | _ ->

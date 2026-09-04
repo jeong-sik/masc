@@ -278,7 +278,7 @@ let for_surface = function
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "Y" "copy" ~help:"copy the selected Fusion run reference"
-      ; b Act "Esc" "back" ~help:"leave detail, or return to Planning"
+      ; b Act "Esc" "back" ~help:"leave detail, or return to Overview"
       ]
       @ listing_meta
   | Memory ->
@@ -618,6 +618,8 @@ let footer_hints_git_changes =
     ([ b Navigate "j/k" "move"
      ; b Act "Right / d / Enter" "diff"
      ; b Act "v" "open in code"
+     ; b Act "p" "open PR"
+     ; b Act "t/g" "task / goal"
      ; b Act "Left / Esc" "back"
      ]
      @ listing_meta)
@@ -626,6 +628,8 @@ let footer_hints_git_diff =
   hints_of_bindings
     ([ b Navigate "j/k" "scroll"
      ; b Act "v" "open in code"
+     ; b Act "p" "open PR"
+     ; b Act "t/g" "task / goal"
      ; b Act "Left / Esc" "back to files"
      ]
      @ listing_meta)
@@ -659,8 +663,8 @@ let help_surfaces : (string * surface) list =
   ; "Planning / Goals", Planning
   ; "Planning / Task Review", Verification
   ; "Planning / Verdicts", Harness
+  ; "Fusion", Fusion
   ; "Keeper detail / Automation", Schedules
-  ; "Keeper detail / Runs", Fusion
   ; "Memory", Memory
   ; "Workspace", Repositories
   ; "Workspace / Code", Code

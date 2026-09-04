@@ -452,6 +452,7 @@ let fork_board_attention_worker
 let fork_egress_proxy
       ~(sw : Eio.Switch.t)
       ~(ctx : _ context)
+      ~(reg : Keeper_registry_types.registry_entry)
       ~(keeper_name : string)
       ~(network_mode : Keeper_types_profile_sandbox.network_mode)
       ~(stop : unit Eio.Promise.t)
@@ -498,6 +499,10 @@ let fork_egress_proxy
                | `Tcp (_, port) -> port
                | `Unix _ -> 0
              in
+             (* The turn boot reads this to build the guest's proxy
+                environment. Recorded before serving so a guest that boots
+                while the first request is in flight still finds it. *)
+             Atomic.set reg.egress_proxy_port (Some port);
              Log.Keeper.info
                "egress proxy listening keeper=%s port=%d rules=%d"
                keeper_name
@@ -1389,6 +1394,7 @@ let start_keepalive
         fork_egress_proxy
           ~sw:lane_sw
           ~ctx
+          ~reg
           ~keeper_name:live_meta.name
           ~network_mode:live_meta.network_mode
           ~stop:board_stop;

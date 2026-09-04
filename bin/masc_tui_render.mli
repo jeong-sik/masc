@@ -154,6 +154,19 @@ val render_tools :
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
 val code_pane_content_height : Masc_tui_types.state -> int
 val config_content_height : Masc_tui_types.state -> int
+type change_context = {
+  ctx_keeper : string option;
+  ctx_task_id : string option;
+  ctx_task_title : string option;
+  ctx_task_description : string option;
+  ctx_goal_id : string option;
+  ctx_goal_title : string option;
+  ctx_turn : int option;
+  ctx_comment : string option;
+  ctx_pr_number : string option;
+}
+val resolve_change_context :
+  Masc_tui_types.state -> path_opt:string option -> change_context
 module Context_bars = Masc_tui_context_bars
 type context_pane_body =
     Plain of string list * int option

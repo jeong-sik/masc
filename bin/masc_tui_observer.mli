@@ -122,6 +122,11 @@ type event =
       { keeper : string; queue_kind : string option; at : float }
       (** The keeper's waiting queue changed. Names the keeper in
           [keeper_name], not [name]. *)
+  | Fusion_run_status of { keeper : string; run_id : string; status : string }
+      (** A fusion deliberation changed stage or settled. A server push, not
+          a keeper act: the Fusion surface re-fetches the run on it instead of
+          reading the payload as data, so only the identity strings are kept
+          and, unlike the keeper events, it carries no [at]. *)
   | Snapshot of string
       (** A whole-projection push; the name is kept, the payload is not. Which
           types these are comes from the wire's own routing table

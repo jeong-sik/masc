@@ -87,7 +87,14 @@ stop_server() {
 
 cleanup() {
   stop_server
-  rm -rf "$tmp"
+  # Best-effort teardown. The server can write tool assets under
+  # $tmp/.masc/config/tools from a background fiber that outlives the main PID
+  # stop_server waited on, so a concurrent write can leave a directory non-empty
+  # as rm walks it -- "rm: cannot remove ...: Directory not empty", seen on the
+  # slower arm64 runner while linux-x64 passed the same script. A teardown race
+  # must not fail an evidence run that already verified; the CI runner reclaims
+  # the temp dir regardless.
+  rm -rf "$tmp" 2>/dev/null || true
 }
 trap cleanup EXIT
 

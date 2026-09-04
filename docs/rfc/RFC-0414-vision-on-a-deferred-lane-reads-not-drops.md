@@ -1,0 +1,75 @@
+# RFC-0414: Vision on a deferred lane reads the image, it does not drop it
+
+Status: Draft
+Relates to: RFC-0265 (graceful media degrade), RFC-keeper-vision-delegation, #33037 (deferred-lane degrade floor), #33034 (the failing cycle)
+
+## Problem
+
+An analyst keeper cycle with an attached image failed:
+
+```
+keeper cycle FAILED runtime=kimi_coding.kimi-k3-256k
+error=Invalid config 'multimodal_input': provider glm:glm-5.3 cannot accept
+requested multimodal input: unsupported image input (required=image supported=text)
+```
+
+#33037 stopped the crash: a deferred lane now runs the RFC-0265 degrade floor, so the image is **stripped and the turn runs text-only**. That removes the crash but **drops the image** — vision does not "work", it is silently discarded (with a notice). The operator's question stands: the image was requested from a text-only model, and now it is thrown away.
+
+## Root cause (cross-stage timing)
+
+The evict-vs-keep decision for an attached image is made at **turn assembly (ingest)**, before dispatch:
+
+- `lib/keeper/keeper_turn.ml:461` calls `Keeper_vision_ingest.evict_blocks ~mode:Eager ~delegate:(delegates_media ~runtime_id:(runtime_id_of_meta meta))`.
+- `delegates_media ~runtime_id` (`keeper_vision_ingest.ml:253`) resolves the *lane* and evicts only when **no** candidate takes images. If any candidate is image-capable it keeps the image, on the assumption "dispatch's RFC-0265 reroute will route to that candidate and the model sees pixels" (`keeper_turn.ml:453-458`).
+
+Dispatch then breaks that assumption for a **deferred lane**: `keeper_turn_driver.ml` forces the modality decision to the degrade floor (deferred lanes commit to one runtime and cannot reroute — `remaining_runtimes = []`, see #33037). So a deferred-committed **text-only** runtime whose lane *did* contain an image-capable sibling gets:
+
+- ingest: keeps the image (a sibling could take it), and
+- dispatch: cannot reroute to that sibling, so it strips the image.
+
+Neither the eager read nor the reroute runs. `meta` carries no deferred field (`runtime_id_of_meta : keeper_meta -> string`), so ingest cannot tell it is on a deferred lane and cannot make the right call there.
+
+## What already exists (measured)
+
+The read path is built and, with an image-capable runtime configured, works:
+
+- `Keeper_vision_tool.vision_runtime_candidates ()` selects image-capable runtimes with the **same predicate the dispatch gate uses** (`caps_admit_required_modalities`), so a vision pick never lands on a runtime the gate rejects (`keeper_vision_tool.ml:78-115`). `first_vision_runtime_id ()` returns `Error "no image-capable runtime configured"` only when there is none.
+- `analyze_image` (`Tool_analyze_image`, `keeper_tool_in_process_runtime.ml:2068`) delegates to `lib/multimodal/vision_analyze`.
+- Ingest eager read: `evict_blocks ~mode:Eager`, capped `max_eager_reads_per_turn = 1`, produces `"[image read: … | artifact:…]"`; on no read, `"[image artifact:… - …; call analyze_image to read it]"`.
+- `config/runtime.toml` declares image-capable runtimes (lines 578, 599, 717, 750, 774, 803, 912, 998, 1052).
+
+So the meaning of an image can be carried as text without any new subsystem.
+
+## Options
+
+**A — modality-aware assignment.** Make the runtime assignment (where the deferred lane is budgeted) prefer an image-capable runtime when the turn's input contains an image, so the committed runtime sees the pixels. Best result (pixels beat a reading) but changes an earlier stage than ingest and must thread the turn's modality into the assignment decision.
+
+**B — read at the deferred floor.** At the deferred `No_capable_runtime` floor (where #33037 strips the image), instead of dropping it, carry its meaning as text — either eager-read it there (reuse `evict_blocks ~mode:Eager`) or leave the `image_unread_placeholder` so the keeper calls `analyze_image` itself. Localized to the floor, reuses the existing read path, and does not touch the non-deferred reroute.
+
+**C — ingest evicts on the first candidate only (rejected).** Make `delegates_media` evict whenever the first/committed candidate cannot take images. This **regresses** non-deferred lanes: a text-first, vision-second lane would read the image instead of rerouting to see the pixels. Not acceptable.
+
+## Recommendation
+
+Ship **B** first, keep **A** as a follow-up.
+
+- B is localized, reuses a measured read path, and cannot regress non-deferred vision.
+- Minimal B (**B2**): at the deferred floor, replace the strip-drop with the `image_unread_placeholder` and confirm `analyze_image` is in the keeper's tool surface, so the keeper reads on demand. No net/clock plumbing at the dispatch seam.
+- Fuller B (**B1**): eager-read at the floor for a one-call reading in the same turn — needs the vision tool's `sw`/`clock`/`net` context available at the dispatch seam; do it only if that context is already threaded there.
+- A later, when the assignment can be made modality-aware, so an image turn commits to a vision runtime and sees pixels.
+
+## Implementation sketch (B2)
+
+- At the deferred branch that reaches the degrade floor (`keeper_turn_driver.ml`, the path added in #33037), when the dropped modality is `image` and a vision runtime exists (`first_vision_runtime_id` is `Ok`), replace the stripped block with `image_unread_placeholder` instead of removing it, and keep the degrade manifest row (the drop is still non-silent).
+- Verify the analyst keeper's tool surface includes `analyze_image`; if a text-only keeper does not surface it, surface it whenever the turn carried image input.
+
+## Verification (measured, not asserted)
+
+1. A deferred-lane keeper with an attached image runs without the multimodal crash **and** without silently dropping the image: the turn text contains the reading or the `call analyze_image` placeholder, and a follow-up `analyze_image` returns `Vo_ok` (not `Vo_no_runtime`).
+2. Non-deferred image turns are unchanged: a text-first/vision-second lane still reroutes and the model sees pixels (no reading substituted).
+3. With no image-capable runtime configured, the floor still degrades (drops) rather than looping on a read that cannot resolve.
+
+## Boundaries
+
+- Do not change the ingest `delegates_media` decision for non-deferred lanes.
+- Do not add a deferred field to `meta` solely to move this decision to ingest; the floor already knows it is deferred.
+- No new "vision runtime" selection logic — reuse `vision_runtime_candidates` / `first_vision_runtime_id`.

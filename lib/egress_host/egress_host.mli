@@ -55,14 +55,30 @@ val is_ip_literal : t -> bool
 (** {1 Rules} *)
 
 type rule
-(** One allowlist entry. Either an exact host, or a wildcard [*.example.com]
-    that admits subdomains and not the apex. *)
+(** One allowlist entry: a host and the port it may be reached on. Either an
+    exact host, or a wildcard [*.example.com] that admits subdomains and not
+    the apex. *)
+
+val default_rule_port : int
+(** 443, the port a rule means when it names none.
+
+    A destination is a host and a port, and the port is part of what is
+    permitted rather than a global constant: an operator with a service on
+    8443 has to be able to say so, and one who writes only hostnames should
+    not have to write [:443] after each. *)
 
 val rule_of_string : string -> (rule, parse_error) result
-(** Parse one allowlist entry. [*.example.com] is a wildcard; every other
-    spelling is exact, and is parsed by the same rules as a destination, so
-    an entry a resolver could read differently is refused at config load
-    rather than at match time. *)
+(** Parse one allowlist entry, as [host] or [host:port].
+
+    [*.example.com] is a wildcard; every other spelling is exact. The host
+    half is parsed by the same rules as a destination, so an entry a resolver
+    could read differently is refused at config load rather than at match
+    time. An absent port means {!default_rule_port}.
+
+    The port is split off before the host is parsed, and it is split at the
+    last colon, so this module is the one place that decides which bytes are
+    the host -- a second splitter elsewhere could disagree with this one, and
+    a disagreement about that boundary is what an allowlist bypass is. *)
 
 val rule_to_string : rule -> string
 (** The normalized spelling of the rule. *)
@@ -76,8 +92,11 @@ val pp_rule : Format.formatter -> rule -> unit
     that derives [show] and [eq] without the record having to hold raw
     strings beside the parsed form. *)
 
-val matches : rule -> t -> bool
-(** Whether this rule admits this destination.
+val rule_port : rule -> int
+(** The port this rule permits. *)
+
+val matches : rule -> t -> port:int -> bool
+(** Whether this rule admits this destination on this port.
 
     An exact rule admits only the identical normalized name, or the
     identical IP literal. A wildcard admits a strict subdomain and refuses
@@ -88,7 +107,18 @@ val matches : rule -> t -> bool
     cannot be admitted by [*.example.com] the way an [endsWith] check would
     admit it. *)
 
-val admits : rule list -> t -> bool
-(** Whether any rule admits the destination. An empty list admits nothing:
-    a keeper whose allowlist parsed to nothing reaches nothing, rather than
-    reaching everything. *)
+val admits : rule list -> t -> port:int -> bool
+(** Whether any rule admits the destination on the port. An empty list
+    admits nothing: a keeper whose allowlist parsed to nothing reaches
+    nothing, rather than reaching everything. *)
+
+val admits_host : rule list -> t -> bool
+(** Whether any rule names this host, on any port.
+
+    Exposed so a refusal can tell "this host is not permitted" from "this
+    host is permitted on another port". The second is an operator's rule
+    missing a port; reporting it as the first sends them looking for the
+    wrong mistake. *)
+
+val ports_for_host : rule list -> t -> int list
+(** The ports the rules permit for this host, so a refusal can name them. *)

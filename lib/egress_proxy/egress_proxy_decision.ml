@@ -1,21 +1,24 @@
 type refusal =
   | Malformed_request of string
   | Unparsable_host of Egress_host.parse_error
-  | Port_not_allowed of int
+  | Port_not_allowed of
+      { host : string
+      ; port : int
+      ; allowed : int list
+      }
   | Not_in_allowlist of { host : string }
-
-let allowed_ports = [ 443 ]
 
 let refusal_to_string = function
   | Malformed_request detail -> "malformed CONNECT request: " ^ detail
   | Unparsable_host error ->
     "destination is not a host this lane will resolve: "
     ^ Egress_host.parse_error_to_string error
-  | Port_not_allowed port ->
+  | Port_not_allowed { host; port; allowed } ->
     Printf.sprintf
-      "port %d is not carried by this lane (allowed: %s)"
+      "%s is allowed on %s, not on port %d"
+      host
+      (String.concat ", " (List.map string_of_int allowed))
       port
-      (String.concat ", " (List.map string_of_int allowed_ports))
   | Not_in_allowlist { host } -> Printf.sprintf "%s is not in this keeper's allowlist" host
 ;;
 
@@ -60,10 +63,9 @@ let split_request_line line =
   | _ -> Error (Malformed_request "expected three space-separated fields")
 ;;
 
-(* Split on the last colon. A host that itself contains a colon is refused
-   by the host parser, so this split cannot be used to smuggle one past the
-   allowlist -- but splitting from the right is what keeps the two checks
-   from disagreeing about which bytes are the host. *)
+(* A CONNECT authority always names a port, unlike a rule, so the absent-port
+   case is a malformed request here rather than a default. Whether the port
+   is permitted is then the allowlist's answer, not this function's. *)
 let split_authority authority =
   match String.rindex_opt authority ':' with
   | None -> Error (Malformed_request "authority carries no port")
@@ -89,9 +91,15 @@ let decide ~rules ~request_line =
        (match Egress_host.parse host_text with
         | Error error -> Refused (Unparsable_host error)
         | Ok host ->
-          if not (List.mem port allowed_ports) then Refused (Port_not_allowed port)
-          else if Egress_host.admits rules host then Admitted { host; port }
-          else Refused (Not_in_allowlist { host = Egress_host.to_string host })))
+          if Egress_host.admits rules host ~port then Admitted { host; port }
+          else (
+            let host_text = Egress_host.to_string host in
+            (* A host the allowlist names, on a port it does not, is a
+               different mistake than a host it does not name, and the
+               operator fixes it in a different place. *)
+            match Egress_host.ports_for_host rules host with
+            | [] -> Refused (Not_in_allowlist { host = host_text })
+            | allowed -> Refused (Port_not_allowed { host = host_text; port; allowed }))))
 ;;
 
 let response_of_decision = function

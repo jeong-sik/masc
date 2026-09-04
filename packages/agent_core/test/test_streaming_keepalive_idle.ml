@@ -25,7 +25,10 @@ let collect_sse_events payload =
   let flow = Eio.Flow.string_source payload in
   let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
   let calls = ref [] in
-  let on_data ~event_type data = calls := (event_type, data) :: !calls in
+  let on_data ~event_type data =
+    calls := (event_type, data) :: !calls;
+    Http_client.Continue
+  in
   Http_client.read_sse ~reader ~on_data ();
   List.rev !calls
 ;;

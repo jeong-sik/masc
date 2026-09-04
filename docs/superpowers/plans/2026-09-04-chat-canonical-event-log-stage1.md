@@ -107,16 +107,20 @@
    `Keeper_chat_events` free of a clock dependency and makes the golden test
    deterministic.
 4. **Ordering: journal before bus add.** The hook runs before
-   `Eio.Stream.add`, so if a full bus raises (pre-existing backpressure
-   behavior), the canonical log still holds the event.
+   `Eio.Stream.add`, so even when a full bus suspends the writer fiber
+   waiting for a free slot (Eio backpressure — `add` blocks, it does not
+   raise), the canonical log already holds the event.
 5. **Backpressure.** The append is synchronous blocking Unix I/O inside
    `publish` (fsync + truncate-rollback via
    `Fs_compat.append_private_jsonl_durable_locked_result`,
    `lib/fs_compat/fs_compat.ml:3439`). On a local disk this is sub-ms to a
    few ms per line; provider delta rates (tens to low hundreds per second)
-   are far below that, and the 512-slot bus absorbs bursts. Blocking I/O
-   suspends the whole Eio domain briefly but never interleaves fibers, which
-   is also why the seq-assign → append → add sequence needs no extra lock.
+   are far below that, and the 512-slot bus absorbs bursts. The blocking I/O
+   is offloaded via `Fs_compat.run_blocking_private_file_transaction`
+   (`Eio_unix.run_in_systhread` when called from an Eio fiber), which
+   suspends only the calling fiber; the seq-assign → append → add sequence
+   needs no extra lock because every `publish` for a given bus runs in the
+   single publisher fiber.
    Failure policy is fail-open at two layers: `Keeper_chat_event_log.append`
    matches every `private_file_transaction_outcome` arm and only logs;
    `Keeper_chat_events.publish` additionally catches any hook exception
@@ -1508,10 +1512,15 @@ let create ?on_publish () =
 (* [publish] is the single choke point every turn event passes through — route
    lifecycle, bridge-translated deltas, and terminal paths all call it. The
    hook runs BEFORE the bus add so the canonical journal records what the turn
-   produced even when a full bus raises on add. [publish] performs only
-   blocking Unix I/O inside the hook (which suspends the whole domain briefly
-   but never interleaves fibers in it), so seq assignment → hook → bus add is
-   effectively atomic and journal order == seq order == bus order. *)
+   produced even when a full bus suspends the add. The ordering guarantee
+   rests on one invariant: every [publish] for a given bus runs in the single
+   publisher fiber, so seq assignment → hook → bus add executes sequentially
+   within that fiber and journal order == seq order == bus order with no extra
+   lock. The journal hook's blocking Unix I/O is offloaded via
+   Fs_compat.run_blocking_private_file_transaction
+   (Eio_unix.run_in_systhread when called from an Eio fiber), which suspends
+   only the calling fiber — that keeps sibling fibers responsive but is not
+   what makes the ordering safe. *)
 let publish t event =
   (match t.on_publish with
    | None -> ()
@@ -1567,12 +1576,20 @@ type t
 val create : ?on_publish:(seq:int -> keeper_chat_event -> unit) -> unit -> t
 
 (** [publish t event] runs the journal hook (if any) and adds [event] to the
-    stream. Non-blocking; raises if the stream is full (backpressure) — the
-    hook has already run by then, so the journal still holds the event. *)
+    stream. With a journal hook installed, the hook performs brief blocking
+    Unix I/O (fsync + rollback per line); hook-free buses are non-blocking
+    until full. A full stream suspends the writer fiber until a reader frees
+    a slot (Eio backpressure) — the hook has already run by then, so the
+    journal still holds the event. *)
 val publish : t -> keeper_chat_event -> unit
 
 (** [subscribe t] blocks until an event is available, then returns it. *)
 val subscribe : t -> keeper_chat_event
+
+(** [take_nonblocking t] returns the next queued event, or [None] when the
+    bus is empty. Drain/test support: it bypasses the blocking [subscribe]
+    contract and must not sit on a live read path. *)
+val take_nonblocking : t -> keeper_chat_event option
 ```
 
 Update the five signature/annotation sites that name the old concrete type —

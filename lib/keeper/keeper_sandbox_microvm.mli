@@ -323,9 +323,10 @@ val work_volume_mounted_probe_argv_for
     a mounted volume from a writable directory on the guest rootfs: with the
     mount absent both succeed, and the guest then serves an ephemeral tree
     whose writes evaporate on the next boot while every log line names the
-    volume. [grep] over [/proc/mounts] rather than [mountpoint(1)], which the
-    sandbox image does not ship; the pattern carries the mountpoint field's
-    surrounding spaces so a prefix of the path cannot match. *)
+    volume. [grep -F] (fixed string) over [/proc/mounts] rather than
+    [mountpoint(1)], which the sandbox image does not ship; the pattern
+    carries the mountpoint field's surrounding spaces so a prefix of the path
+    cannot match. *)
 
 val keeper_vm_container_kind : string
 

@@ -856,7 +856,9 @@ let keeper_work_root_mkdir_argv_for backend ~container_name ~keeper_name =
     analyst guest served a turn off a stale rootfs tree). [/proc/mounts] is
     the kernel's own answer and the pattern names the mountpoint field with
     its surrounding spaces, so a prefix like [/masc-work-stale] cannot match.
-    [grep] over [/proc/mounts] rather than [mountpoint(1)]: the image
+    [-F] makes the match a fixed string structurally rather than by the
+    pattern happening to carry no regex metacharacters. [grep] over
+    [/proc/mounts] rather than [mountpoint(1)]: the image
     (Dockerfile.keeper-sandbox, ubuntu-24.04) ships grep as essential and
     util-linux's mountpoint is not in the apt list. Runs as root from [/] so
     the answer does not depend on the keeper's uid or a workdir that is the
@@ -870,7 +872,7 @@ let work_volume_mounted_probe_argv_for backend ~container_name =
     ~container_cwd:"/"
     ~stdin:false
     ~command_argv:
-      [ "grep"; "-q"; Printf.sprintf " %s " work_volume_guest_root; "/proc/mounts" ]
+      [ "grep"; "-qF"; Printf.sprintf " %s " work_volume_guest_root; "/proc/mounts" ]
 ;;
 
 (** The write that follows the mkdir, as the uid the keeper's commands run

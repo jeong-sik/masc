@@ -365,6 +365,46 @@ let run_argv_with_status ?timeout_sec argv =
       argv)
 ;;
 
+(* The policy lane attaches a guest to a host-only network, and [container
+   run] fails rather than falling back when that network is absent. Creating
+   it here rather than at server boot keeps the failure next to the keeper
+   that needed it, and keeps a server with no policy keeper from creating a
+   network nothing uses.
+
+   Idempotent by listing first: a create against an existing name is an
+   error on this CLI, and swallowing that error would also swallow the real
+   ones. *)
+let ensure_policy_network backend (mode : Keeper_types_profile_sandbox.network_mode) =
+  match mode with
+  | Keeper_types_profile_sandbox.Network_none | Keeper_types_profile_sandbox.Network_inherit
+    -> Ok ()
+  | Keeper_types_profile_sandbox.Network_policy ->
+    (match Keeper_sandbox_microvm.policy_network_list_argv_for backend with
+     | Error _ as error -> error
+     | Ok list_argv ->
+       (match run_argv_with_status ~timeout_sec:30.0 list_argv with
+        | Unix.WEXITED 0, listing
+          when Keeper_sandbox_microvm.policy_network_present ~listing -> Ok ()
+        | Unix.WEXITED 0, _ ->
+          (match Keeper_sandbox_microvm.policy_network_create_argv_for backend with
+           | Error _ as error -> error
+           | Ok create_argv ->
+             (match run_argv_with_status ~timeout_sec:60.0 create_argv with
+              | Unix.WEXITED 0, _ -> Ok ()
+              | _, output ->
+                Error
+                  (Printf.sprintf
+                     "microvm_policy_network_uncreatable: %s: %s"
+                     (String.concat " " create_argv)
+                     (String.trim output))))
+        | _, listing ->
+          Error
+            (Printf.sprintf
+               "microvm_policy_network_unreadable: %s: %s"
+               (String.concat " " list_argv)
+               (String.trim listing))))
+;;
+
 let output_for_status ~(stdout : string) ~(stderr : string) =
   match stdout, stderr with
   | "", err -> err
@@ -931,6 +971,9 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
             rather than handing msb Docker's flags, which it rejects at
             argument parsing with no statement of what the guest's network
             would have been. *)
+         (match ensure_policy_network backend t.network_mode with
+          | Error detail -> Error ("microvm_start_failed: " ^ detail)
+          | Ok () ->
          (match Keeper_sandbox_microvm.network_args_for backend ~dns t.network_mode with
           | Error detail -> Error ("microvm_start_failed: " ^ detail)
           | Ok network_args ->
@@ -1105,7 +1148,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                Error
                  (Printf.sprintf
                     "microvm_start_failed: %s"
-                    (Keeper_sandbox_runtime.docker_failure_output_for_log out)))))))))
+                    (Keeper_sandbox_runtime.docker_failure_output_for_log out))))))))))
 ;;
 
 let start_microvm_container ?timeout_sec t =

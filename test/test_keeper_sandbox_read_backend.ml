@@ -1170,6 +1170,41 @@ let test_docker_network_args_follow_masc_policy () =
     [ "--network"; "host" ] args_inherit;
   Alcotest.(check string) "network inherit label" "inherit" label_inherit
 
+(* The listing is parsed by column, not by substring: a network whose name
+   contains the policy network's must not read as it already existing, or a
+   policy guest boots onto a network nobody created. *)
+let test_the_policy_network_is_matched_by_name_not_substring () =
+  let name = Masc.Keeper_sandbox_microvm.policy_network_name in
+  Alcotest.(check bool) "an exact row matches" true
+    (Masc.Keeper_sandbox_microvm.policy_network_present
+       ~listing:(Printf.sprintf "NETWORK  SUBNET\n%s  192.168.128.0/24\n" name));
+  Alcotest.(check bool) "a longer name does not" false
+    (Masc.Keeper_sandbox_microvm.policy_network_present
+       ~listing:(Printf.sprintf "NETWORK  SUBNET\n%s-staging  192.168.130.0/24\n" name));
+  Alcotest.(check bool) "a name it is a suffix of does not" false
+    (Masc.Keeper_sandbox_microvm.policy_network_present
+       ~listing:(Printf.sprintf "NETWORK  SUBNET\nold-%s  192.168.131.0/24\n" name));
+  Alcotest.(check bool) "and neither does the header alone" false
+    (Masc.Keeper_sandbox_microvm.policy_network_present ~listing:"NETWORK  SUBNET\n")
+
+(* Only the backend that carries the lane has a network to create. *)
+let test_only_the_policy_backend_has_a_policy_network () =
+  Alcotest.(check bool) "apple_container answers" true
+    (match
+       Masc.Keeper_sandbox_microvm.policy_network_create_argv_for
+         Masc.Keeper_microvm_backend.Apple_container
+     with
+     | Ok argv -> List.mem "--internal" argv
+     | Error _ -> false);
+  List.iter
+    (fun backend ->
+      Alcotest.(check bool)
+        (Masc.Keeper_microvm_backend.to_string backend ^ " refuses") true
+        (match Masc.Keeper_sandbox_microvm.policy_network_create_argv_for backend with
+         | Error _ -> true
+         | Ok _ -> false))
+    [ Masc.Keeper_microvm_backend.Microsandbox; Masc.Keeper_microvm_backend.Nerdctl_kata ]
+
 (* Docker's egress boundary is unmeasured, so the policy lane refuses there
    rather than emitting args that might not close (RFC-0415). A silent
    fallback to inherit is the failure this pins. *)
@@ -2259,6 +2294,10 @@ let run_tests ~clock () =
             test_docker_network_args_follow_masc_policy;
           Alcotest.test_case "docker refuses the policy lane" `Quick
             test_docker_refuses_the_policy_lane;
+          Alcotest.test_case "the policy network is matched by name not substring" `Quick
+            test_the_policy_network_is_matched_by_name_not_substring;
+          Alcotest.test_case "only the policy backend has a policy network" `Quick
+            test_only_the_policy_backend_has_a_policy_network;
           Alcotest.test_case "docker nofile args follow config" `Quick
             test_docker_nofile_args_follow_config;
           Alcotest.test_case "docker MASC config binding pins paths" `Quick

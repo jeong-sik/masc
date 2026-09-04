@@ -635,6 +635,52 @@ let shim_exec_prefix_for backend ~container_name ~uid ~gid ~remote_root ~shim_co
    against [msb remove --force] -- and stop the same way. Measured against
    msb 0.6.16 on 2026-09-03; a spelling this file guesses at would fail every
    call rather than fail once, so each is written from that CLI's own help. *)
+(* Creating and checking the host-only network the policy lane attaches to.
+
+   Only Apple's runtime answers these, because it is the only backend whose
+   policy arm exists; the other two refuse the mode before anything asks for
+   a network. Returning an error rather than an empty argv keeps that
+   agreement visible: a backend that gained a policy arm without gaining
+   these would fail here rather than boot a guest onto a network nobody
+   created. *)
+let policy_network_create_argv_for backend =
+  match (backend : Backend.t) with
+  | Backend.Apple_container ->
+    Ok
+      (command_argv_for backend
+       @ [ "network"; "create"; "--internal"; policy_network_name ])
+  | Backend.Microsandbox | Backend.Nerdctl_kata ->
+    Error
+      (Printf.sprintf
+         "microvm_policy_network_unsupported: %s has no policy lane, so it has no \
+          host-only network to create"
+         (Backend.to_string backend))
+;;
+
+let policy_network_list_argv_for backend =
+  match (backend : Backend.t) with
+  | Backend.Apple_container ->
+    Ok (command_argv_for backend @ [ "network"; "list" ])
+  | Backend.Microsandbox | Backend.Nerdctl_kata ->
+    Error
+      (Printf.sprintf
+         "microvm_policy_network_unsupported: %s has no policy lane, so it has no \
+          host-only network to list"
+         (Backend.to_string backend))
+;;
+
+(* container's [network list] is a plain table whose first column is the
+   name. Parsed by column rather than by substring so a network whose name
+   contains this one's does not read as a match. *)
+let policy_network_present ~listing =
+  listing
+  |> String.split_on_char '\n'
+  |> List.exists (fun line ->
+       match String.split_on_char ' ' (String.trim line) with
+       | name :: _ -> String.equal name policy_network_name
+       | [] -> false)
+;;
+
 let stop_argv_for backend ~container_name =
   command_argv_for backend @ [ "stop"; container_name ]
 ;;

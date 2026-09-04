@@ -129,6 +129,26 @@ The floor/ingest edits (A'/B-store) are moot until a **read actually succeeds**.
 
 C stays rejected. B2 (placeholder → keeper calls analyze_image) is **withdrawn** — the tool is not model-invocable.
 
+### Root is runtime, not routing (measured)
+
+The eager read fails over through **every** candidate: `keeper_vision_tool.ml:436`
+runs `run_candidates_outcome … (vision_runtime_candidates ())` over the whole
+list, not just the first. So "vision read 실패" means **all** candidates failed —
+this deployment has **no reachable, working vision runtime**. `config/runtime.toml`
+declares `supports-image-input = true` on 14 models (gemma4-*, minimax-m3-*,
+ollama-cloud-*), but several are plainly text/coding models (`kimi-for-coding`,
+`kimi-k2-7-code`, `ollama-cloud-mistral-large-3-675b`, `ollama-cloud-qwen3-5-397b`)
+whose caps are likely **over-declared** — and even the plausibly-real ones
+(gemma4, minimax) are not reading an image here (unreachable, no creds, or the
+provider endpoint rejects image input).
+
+So the routing fixes (A'/B) are downstream of the real gate: **stand up one
+reachable, cap-accurate vision runtime.** Verifying which model actually reads an
+image needs a probe (a test read per candidate) or the live read-failure reason —
+the caps cannot be corrected by guessing (that is the over-declaration that
+polluted the pool in the first place). Once one runtime truly reads, the eager
+read carries the image as text and A' handles the deferred-lane routing on top.
+
 ## Boundaries
 
 - Do not change the ingest `delegates_media` decision for non-deferred lanes.

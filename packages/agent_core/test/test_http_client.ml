@@ -83,7 +83,9 @@ let test_read_sse_basic () =
   let events = ref [] in
   Http_client.read_sse
     ~reader
-    ~on_data:(fun ~event_type data -> events := (event_type, data) :: !events)
+    ~on_data:(fun ~event_type data ->
+      events := (event_type, data) :: !events;
+      Http_client.Continue)
     ();
   let events = List.rev !events in
   Alcotest.(check int) "2 events" 2 (List.length events);
@@ -104,7 +106,9 @@ let test_read_sse_joins_multiple_data_fields () =
   let events = ref [] in
   Http_client.read_sse
     ~reader
-    ~on_data:(fun ~event_type data -> events := (event_type, data) :: !events)
+    ~on_data:(fun ~event_type data ->
+      events := (event_type, data) :: !events;
+      Http_client.Continue)
     ();
   match List.rev !events with
   | [ (Some "message", "first\nsecond"); (None, "next") ] -> ()
@@ -121,7 +125,7 @@ let test_read_sse_bounds_accumulated_event_payload () =
     Http_client.read_sse
       ~max_event_bytes:10
       ~reader
-      ~on_data:(fun ~event_type:_ _ -> ())
+      ~on_data:(fun ~event_type:_ _ -> Http_client.Continue)
       ()
   with
   | exception Http_client.Sse_event_too_large { actual_bytes = 11; limit_bytes = 10 } ->
@@ -143,7 +147,9 @@ let test_read_sse_accepts_event_exactly_at_the_bound () =
   Http_client.read_sse
     ~max_event_bytes:10 (* exactly "12345\n6789" *)
     ~reader
-    ~on_data:(fun ~event_type data -> events := (event_type, data) :: !events)
+    ~on_data:(fun ~event_type data ->
+      events := (event_type, data) :: !events;
+      Http_client.Continue)
     ();
   match List.rev !events with
   | [ (None, "12345\n6789") ] -> ()
@@ -174,7 +180,7 @@ let test_read_sse_ignored_fields_do_not_extend_first_event_deadline () =
            ~idle_timeout:1.0
            ~first_event_timeout:0.05
            ~reader
-           ~on_data:(fun ~event_type:_ _ -> ())
+           ~on_data:(fun ~event_type:_ _ -> Http_client.Continue)
            ());
     Alcotest.fail "ignored SSE fields must not refresh the first-event deadline"
   with
@@ -190,7 +196,9 @@ let test_read_sse_empty_lines () =
   let events = ref [] in
   Http_client.read_sse
     ~reader
-    ~on_data:(fun ~event_type data -> events := (event_type, data) :: !events)
+    ~on_data:(fun ~event_type data ->
+      events := (event_type, data) :: !events;
+      Http_client.Continue)
     ();
   Alcotest.(check int) "1 event" 1 (List.length !events)
 ;;
@@ -204,7 +212,9 @@ let test_read_sse_done_marker () =
   let events = ref [] in
   Http_client.read_sse
     ~reader
-    ~on_data:(fun ~event_type data -> events := (event_type, data) :: !events)
+    ~on_data:(fun ~event_type data ->
+      events := (event_type, data) :: !events;
+      Http_client.Continue)
     ();
   Alcotest.(check int) "1 event (DONE)" 1 (List.length !events);
   Alcotest.(check string) "data is DONE" "[DONE]" (snd (List.hd !events))
@@ -222,7 +232,9 @@ let test_read_sse_no_space_after_colon () =
   let events = ref [] in
   Http_client.read_sse
     ~reader
-    ~on_data:(fun ~event_type data -> events := (event_type, data) :: !events)
+    ~on_data:(fun ~event_type data ->
+      events := (event_type, data) :: !events;
+      Http_client.Continue)
     ();
   Alcotest.(check int) "1 event" 1 (List.length !events);
   let ev = List.hd !events in
@@ -239,7 +251,9 @@ let test_read_sse_eventsource_line_boundaries () =
   let events = ref [] in
   Http_client.read_sse
     ~reader
-    ~on_data:(fun ~event_type data -> events := (event_type, data) :: !events)
+    ~on_data:(fun ~event_type data ->
+      events := (event_type, data) :: !events;
+      Http_client.Continue)
     ();
   match List.rev !events with
   | [ (Some "message", "hello"); (None, "next") ] -> ()
@@ -255,7 +269,9 @@ let test_read_sse_empty_event_type_restores_default () =
   let events = ref [] in
   Http_client.read_sse
     ~reader
-    ~on_data:(fun ~event_type data -> events := (event_type, data) :: !events)
+    ~on_data:(fun ~event_type data ->
+      events := (event_type, data) :: !events;
+      Http_client.Continue)
     ();
   match List.rev !events with
   | [ (None, "payload") ] -> ()
@@ -271,7 +287,9 @@ let test_read_sse_does_not_dispatch_unterminated_event () =
   let events = ref [] in
   Http_client.read_sse
     ~reader
-    ~on_data:(fun ~event_type data -> events := (event_type, data) :: !events)
+    ~on_data:(fun ~event_type data ->
+      events := (event_type, data) :: !events;
+      Http_client.Continue)
     ();
   Alcotest.(check int) "unterminated event is discarded" 0 (List.length !events)
 ;;
@@ -285,7 +303,9 @@ let test_read_sse_ignores_id_and_retry_fields () =
   let events = ref [] in
   Http_client.read_sse
     ~reader
-    ~on_data:(fun ~event_type data -> events := (event_type, data) :: !events)
+    ~on_data:(fun ~event_type data ->
+      events := (event_type, data) :: !events;
+      Http_client.Continue)
     ();
   Alcotest.(check int) "only the data field dispatches" 1 (List.length !events);
   Alcotest.(check string) "payload intact" "payload" (snd (List.hd !events))
@@ -300,10 +320,100 @@ let test_read_sse_comment_lines_skipped () =
   let events = ref [] in
   Http_client.read_sse
     ~reader
-    ~on_data:(fun ~event_type data -> events := (event_type, data) :: !events)
+    ~on_data:(fun ~event_type data ->
+      events := (event_type, data) :: !events;
+      Http_client.Continue)
     ();
   Alcotest.(check int) "comments are not events" 1 (List.length !events);
   Alcotest.(check string) "real payload" "real" (snd (List.hd !events))
+;;
+
+(* ── consumer-driven stop ─────────────────────────────────── *)
+
+(* A consumer that has stopped consuming stops the read with it. Without this
+   the loop read the body to the provider's own end or to a deadline, and the
+   caller paid for output it was already discarding. *)
+let test_read_sse_stop_leaves_the_rest_of_the_body_unread () =
+  Eio_main.run
+  @@ fun _env ->
+  let flow = Eio.Flow.string_source "data: first\n\ndata: second\n\ndata: third\n\n" in
+  let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
+  let events = ref [] in
+  Http_client.read_sse
+    ~reader
+    ~on_data:(fun ~event_type:_ data ->
+      events := data :: !events;
+      Http_client.Stop)
+    ();
+  Alcotest.(check (list string)) "only the event that stopped it" [ "first" ] !events;
+  (* The proof that the socket was not drained: what the provider sent next is
+     still sitting in the reader. A loop that stopped one iteration late would
+     have consumed it. *)
+  Alcotest.(check bool)
+    "the rest of the body is still unread"
+    false
+    (Eio.Buf_read.at_end_of_input reader)
+;;
+
+(* The stop must land BEFORE the next blocking read, not at the top of the
+   next iteration: a provider that has gone quiet would otherwise hold the
+   caller for the whole idle budget after it had already stopped reading.
+
+   The assertion is the elapsed time, not the absence of an exception. Today
+   the pre-change loop raises [Eio.Time.Timeout] here and the test would fail
+   on that alone — but a later [read_sse] that swallowed its own timeout and
+   returned normally would spend the whole budget and still look like a pass.
+   Reading the clock pins the sentence in the name. *)
+let test_read_sse_stop_does_not_wait_on_a_quiet_provider () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run
+  @@ fun sw ->
+  let source, sink = Eio_unix.pipe sw in
+  let reader = Eio.Buf_read.of_flow ~max_size:1024 source in
+  let idle_budget = 0.05 in
+  let elapsed = ref infinity in
+  Eio.Fiber.both
+    (fun () ->
+       Eio.Flow.copy_string "data: only\n\n" sink;
+       (* Never writes again and never closes: a provider still generating.
+          Outlives the idle budget so the read has something to wait on. *)
+       Eio.Time.sleep clock (idle_budget *. 4.))
+    (fun () ->
+       let started = Eio.Time.now clock in
+       Http_client.read_sse
+         ~clock
+         ~idle_timeout:idle_budget
+         ~reader
+         ~on_data:(fun ~event_type:_ _ -> Http_client.Stop)
+         ();
+       elapsed := Eio.Time.now clock -. started);
+  if !elapsed >= idle_budget
+  then
+    Alcotest.failf
+      "the read waited %.3fs on a provider it had stopped reading (budget %.3fs)"
+      !elapsed
+      idle_budget
+;;
+
+let test_read_ndjson_stop_leaves_the_rest_of_the_body_unread () =
+  Eio_main.run
+  @@ fun _env ->
+  let flow = Eio.Flow.string_source "{\"a\":1}\n{\"b\":2}\n{\"c\":3}\n" in
+  let reader = Eio.Buf_read.of_flow ~max_size:1024 flow in
+  let lines = ref [] in
+  Http_client.read_ndjson
+    ~reader
+    ~on_line:(fun line ->
+      lines := line :: !lines;
+      Http_client.Stop)
+    ();
+  Alcotest.(check (list string)) "only the line that stopped it" [ "{\"a\":1}" ] !lines;
+  Alcotest.(check bool)
+    "the rest of the body is still unread"
+    false
+    (Eio.Buf_read.at_end_of_input reader)
 ;;
 
 (* idle_timeout without clock used to silently disarm the deadline (a
@@ -314,7 +424,7 @@ let test_read_sse_idle_without_clock_raises () =
   let flow = Eio.Flow.string_source "data: x\n\n" in
   let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
   match
-    Http_client.read_sse ~idle_timeout:1.0 ~reader ~on_data:(fun ~event_type:_ _ -> ()) ()
+    Http_client.read_sse ~idle_timeout:1.0 ~reader ~on_data:(fun ~event_type:_ _ -> Http_client.Continue) ()
   with
   | () -> Alcotest.fail "expected Invalid_argument for idle_timeout without clock"
   | exception Invalid_argument msg ->
@@ -333,7 +443,7 @@ let test_read_ndjson_idle_without_clock_raises () =
 |}
   in
   let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
-  match Http_client.read_ndjson ~idle_timeout:1.0 ~reader ~on_line:ignore () with
+  match Http_client.read_ndjson ~idle_timeout:1.0 ~reader ~on_line:(fun _ -> Http_client.Continue) () with
   | () -> Alcotest.fail "expected Invalid_argument for idle_timeout without clock"
   | exception Invalid_argument msg ->
     Alcotest.(check bool)
@@ -800,6 +910,14 @@ let () =
             `Quick
             test_read_sse_comment_lines_skipped
         ; Alcotest.test_case
+            "Stop leaves the rest of the body unread"
+            `Quick
+            test_read_sse_stop_leaves_the_rest_of_the_body_unread
+        ; Alcotest.test_case
+            "Stop does not wait on a quiet provider"
+            `Quick
+            test_read_sse_stop_does_not_wait_on_a_quiet_provider
+        ; Alcotest.test_case
             "idle_timeout without clock raises"
             `Quick
             test_read_sse_idle_without_clock_raises
@@ -813,6 +931,10 @@ let () =
             "idle_timeout without clock raises"
             `Quick
             test_read_ndjson_idle_without_clock_raises
+        ; Alcotest.test_case
+            "Stop leaves the rest of the body unread"
+            `Quick
+            test_read_ndjson_stop_leaves_the_rest_of_the_body_unread
         ] )
     ; ( "timeout_phase"
       , [ Alcotest.test_case "policy labels" `Quick test_timeout_phase_policy_labels

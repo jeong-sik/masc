@@ -157,6 +157,55 @@ into the binary"), 2026-09-04 기준 두 트리는 파일 하나 차이가 났�
 
 남은 빈자리는 하나다: **Keeper 별 × 내장 도구**. 이 축은 지금 존재하지 않는다.
 
+### 3.3 고정은 MCP 가 만든 것이 아니다
+
+masc#33065 감사는 §3.1 의 "넓히지 못한다"가 masc 스스로 만든 제약 아니냐고 물었다.
+근거는 `runtime_official_client_mcp.ml:289` 가 MCP capability 를
+``"tools", `Assoc []`` 로 내면서 `listChanged` 를 선언하지 않는다는 점이다. 확인해 보니 **아니다.** 그
+capability 를 켜도 도는 세션의 도구 집합은 바뀌지 않는다. 네 가지가 각각 독립적으로
+막는다.
+
+**하나, 보낼 통로가 없다.** `Runtime_official_client_mcp.handle_message` 는
+`(dispatch, error) result` 를 돌려주고 `dispatch` 는 `{ response : Yojson.Safe.t
+option; tool_called : bool }` 이다. 이 모듈은 답만 하고 먼저 말하지 못한다. HTTP 쪽은
+`runtime_official_client_mcp_http.ml:389` 의 `` `GET `` 가지가 405 `"SSE is not
+enabled for this endpoint"` 를 돌려주므로 서버발 알림을 실을 스트림 자체가 열리지 않고,
+Claude Code 쪽 통로는 control_response 만 되돌린다.
+
+**둘, 바뀔 목록이 아니다.** `tool_specs` 는 thunk 지만 턴 시작 때 묶인 불변 리스트를
+닫는다(`runtime_claude_code.ml:494`,
+`keeper_antigravity_runtime.ml:830`). 두 번 불러도 같은 값이다. 지연 계산이지 동적이
+아니다.
+
+**셋, 선언은 지킬 수 없는 약속이 된다.** MCP 2025-11-25 `server/tools` 는
+`listChanged` 를 선언한 서버가 `notifications/tools/list_changed` 를 보내야 한다고
+(SHOULD) 적는다. 위 둘 때문에 masc 는 그 알림을 보낼 수 없으므로, 선언하는 순간 매
+세션 SHOULD 를 어기는 쪽으로 넘어간다. 반대 방향은 MUST 다 —— lifecycle 의 "Only use
+capabilities that were successfully negotiated".
+
+**넷, 유일하게 그 선언을 읽는 클라이언트가 읽고도 아무것도 안 한다.** claude 2.1.260
+은 `_setupListChangedHandlers` 를 서버의 `listChanged` 선언에 걸어 두지만, CLI 가
+클라이언트를 만들 때 넘기는 값이 `listChanged:{tools:{autoRefresh:!1,debounceMs:0,
+onChanged:()=>{}}}` 이고 핸들러 본체는 `if(!d){_(null,null);return}` 로 빠진다.
+`autoRefresh` 가 꺼져 있고 `onChanged` 가 빈 함수라 `tools/list` 재조회를 하지 않는다.
+바이너리 안 `onChanged:` 여덟 자리가 전부 `()=>{}` 다.
+
+그래서 §3.1 의 문장은 유지되지만 **근거로 MCP capability 를 들 필요는 없다.** 실제
+고정 지점은 레인마다 따로 있고, 셋 다 `listChanged` 로는 풀리지 않는다.
+
+| 레인 | 무엇이 고정하나 | 어디 |
+|---|---|---|
+| claude_code | argv. `--allowedTools` 가 execve 시점에 이름을 못 박고 `--strict-mcp-config` 가 설정을 잠근다. 목록에 없는 이름은 MCP 로 노출돼도 호출되지 않는다 | `runtime_claude_code.ml:1265`, `:1275`, `mcp_config` `:1188` |
+| codex | MCP 를 아예 쓰지 않는다. 도구는 `thread/start`·`thread/resume` 의 `dynamicTools` 파라미터로 간다 | `runtime_codex_app_server.ml` (파일 전체에 `mcp` 문자열 0건) |
+| antigravity | 턴의 `Eio.Switch.run` 안에서 브리지를 새로 띄우고 릴리스 때 config 를 지운다. MCP 세션 수명이 곧 한 턴이다 | `keeper_antigravity_runtime.ml:815-860` |
+
+RFC-0409 §2 가 같은 결론에 다른 경로로 닿아 있다(그 문서는 `mcp_server.ml:143` 이
+`listChanged: true` 를 선언하고도 쏘는 코드가 없다는 점을 짚는다). 이 절은 그 관찰을
+공식 클라이언트 세 레인 쪽에서 확인한 것이다.
+
+따라서 이 RFC 의 전제는 그대로 선다. 바뀐 것은 근거뿐이고, 코드 변경은 없다 ——
+`runtime_official_client_mcp.ml` 에는 왜 선언하지 않는지를 적은 주석만 들어갔다.
+
 ## 4. 제약
 
 ### 4.1 세션 재개 —— #27992 의 "출구 없음" 은 이미 닫혔다

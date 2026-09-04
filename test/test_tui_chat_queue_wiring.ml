@@ -822,17 +822,6 @@ let test_replayed_frames_up_to_the_last_seq_are_not_added_twice () =
   check int "the log moved to the newest seq" 7 (Log.last_seq log.Tui_types.tl_log)
 ;;
 
-let settled_log ~request_id deltas =
-  let log =
-    Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at:100.0
-  in
-  List.iteri
-    (fun seq delta -> Tui_types.turn_log_add ~now:101.0 log ~seq:(Some seq) delta)
-    deltas;
-  Log.commit log.Tui_types.tl_log;
-  log
-;;
-
 let loaded_turn ~request_id =
   [ chat_entry ~request_id
       ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you"))
@@ -849,6 +838,144 @@ let loaded_turn ~request_id =
       ~at:105. ()
   ]
 ;;
+
+module E = Masc.Keeper_chat_events
+module Journal = Masc.Keeper_chat_event_log
+
+let line seq ts event : Journal.journaled_event = { Journal.seq; ts; event }
+
+(* Which loaded turns a refresh asks the journal for: each operation once,
+   newest first by its earliest row, minus what the session already holds or
+   the server has refused, at most the cap. *)
+let test_journal_fetch_targets_choose_the_newest_unheld_turns () =
+  let candidates =
+    [ ("op-old", 10.); ("op-old", 12.); ("op-held", 20.); ("op-gone", 30.)
+    ; ("op-new", 40.); ("op-new", 39.); ("op-mid", 25.) ]
+  in
+  check (list (pair string (float 0.001))) "once each, newest first, by the earliest row"
+    [ ("op-new", 39.); ("op-mid", 25.); ("op-old", 10.) ]
+    (Tui_types.journal_fetch_targets ~cap:10 ~held:[ "op-held" ]
+       ~unavailable:[ "op-gone" ] candidates);
+  check (list (pair string (float 0.001))) "the cap keeps the newest"
+    [ ("op-new", 39.); ("op-mid", 25.) ]
+    (Tui_types.journal_fetch_targets ~cap:2 ~held:[ "op-held" ]
+       ~unavailable:[ "op-gone" ] candidates);
+  check (list (pair string (float 0.001))) "nothing named, nothing asked" []
+    (Tui_types.journal_fetch_targets ~cap:10 ~held:[] ~unavailable:[] [])
+;;
+
+(* A journal page fills a turn log the way the wire does, at the lines' own
+   times; a line that draws nothing still holds its position. *)
+let test_a_journal_fills_a_turn_log_at_the_lines_own_times () =
+  let log =
+    Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"op-1" ~started_at:100.
+  in
+  Tui_types.turn_log_add_journaled log
+    [ line 0 100.5 (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" })
+    ; line 1 100.6 (E.Text_message_start { message_id = "m"; role = E.Assistant })
+    ; line 2 100.7 (E.Text_delta "hel")
+    ; line 3 100.8 (E.Text_delta "lo")
+    ; line 4 100.9 (E.Run_finished { run_id = "r" })
+    ];
+  check string "the text is the fold of the drawn lines" "hello"
+    (Keeper_chat_transcript.text log.Tui_types.tl_transcript);
+  check int "the undrawn line still counts" 4 (Log.last_seq log.Tui_types.tl_log);
+  check int "one entry per drawn line" 4 (List.length (Log.entries log.Tui_types.tl_log));
+  check bool "the turn ended, so the log stands for it once committed" true
+    (Log.commit log.Tui_types.tl_log;
+     Tui_types.turn_log_holds_the_turn log)
+;;
+
+let journal_log ~request_id ~started_at ?(finished = true) () =
+  let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at in
+  Tui_types.turn_log_add_journaled log
+    ([ line 0 started_at (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" })
+     ; line 1 (started_at +. 0.1) (E.Text_delta "said") ]
+    @ if finished then [ line 2 (started_at +. 0.2) (E.Run_finished { run_id = "r" }) ] else []);
+  Log.commit log.Tui_types.tl_log;
+  log
+;;
+
+(* A rebuilt turn takes its place by when it started; a turn the session
+   already holds whole is not held twice, and a cut stream's partial log gives
+   way to the journal's whole one. *)
+let test_hold_settled_log_orders_by_start_and_replaces_only_partial_logs () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let ids () = List.map Tui_types.turn_log_request_id state.msg_settled_logs in
+  Tui_types.hold_settled_log state (journal_log ~request_id:"op-20" ~started_at:20. ());
+  Tui_types.hold_settled_log state (journal_log ~request_id:"op-10" ~started_at:10. ());
+  Tui_types.hold_settled_log state (journal_log ~request_id:"op-30" ~started_at:30. ());
+  check (list string) "ordered by start" [ "op-10"; "op-20"; "op-30" ] (ids ());
+  let whole = List.nth state.msg_settled_logs 1 in
+  Tui_types.hold_settled_log state (journal_log ~request_id:"op-20" ~started_at:21. ());
+  check bool "a whole log is kept as it was" true (List.memq whole state.msg_settled_logs);
+  let partial = journal_log ~request_id:"op-15" ~started_at:15. ~finished:false () in
+  Tui_types.hold_settled_log state partial;
+  check bool "a partial log is held for now" true (List.memq partial state.msg_settled_logs);
+  Tui_types.hold_settled_log state (journal_log ~request_id:"op-15" ~started_at:15. ());
+  check bool "and gives way to the whole one" false (List.memq partial state.msg_settled_logs);
+  check (list string) "still one log per turn, in order"
+    [ "op-10"; "op-15"; "op-20"; "op-30" ] (ids ());
+  Tui_types.remember_journal_unavailable state "op-x";
+  Tui_types.remember_journal_unavailable state "op-x";
+  check (list string) "an unavailable journal is remembered once" [ "op-x" ]
+    state.msg_journal_unavailable
+;;
+
+(* A turn rebuilt from its journal holds its turn in the timeline like one
+   that settled live: the loaded rows the log draws leave. *)
+let test_a_journal_built_log_holds_its_turn_in_the_timeline () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  state.msg_target_keeper_name <- Some "alpha";
+  state.msg_loaded_keeper <- Some "alpha";
+  state.msg_loaded <- loaded_turn ~request_id:"op-1";
+  Tui_types.hold_settled_log state (journal_log ~request_id:"op-1" ~started_at:100. ());
+  check (list string) "the keeper's words, tools and reasoning are the log's now"
+    [ "asked"; "Gate approved read_file"; "delivery failed" ]
+    (Tui_types.chat_rows_for state "alpha"
+     |> List.map (fun (row : Tui_types.msg_entry) -> row.me_text))
+;;
+
+(* The reload is wired: a history page names its targets, one fiber per
+   target reads the journal, and the handler builds and holds the log. *)
+let test_the_reload_rebuilds_loaded_turns_from_their_journals () =
+  let in_binding ~binding_name ~callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+      ~binding_name ~callee
+  in
+  let targets = in_binding ~binding_name:"apply_async_message" ~callee:"journal_fetch_targets" in
+  let launches =
+    in_binding ~binding_name:"apply_async_message"
+      ~callee:"launch_keeper_chat_journal_loads"
+  in
+  let fetches =
+    in_binding ~binding_name:"fetch_whole_journal"
+      ~callee:"Masc_tui_http.fetch_keeper_chat_events"
+  in
+  let folds = in_binding ~binding_name:"apply_async_message" ~callee:"turn_log_add_journaled" in
+  let holds = in_binding ~binding_name:"apply_async_message" ~callee:"hold_settled_log" in
+  if targets < 1 || launches < 1 || fetches < 1 || folds < 1 || holds < 1 then
+    failf
+      "the journal reload must be wired end to end: targets=%d launches=%d \
+       fetches=%d folds=%d holds=%d"
+      targets launches fetches folds holds
+;;
+
+let settled_log ~request_id deltas =
+  let log =
+    Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at:100.0
+  in
+  List.iteri
+    (fun seq delta -> Tui_types.turn_log_add ~now:101.0 log ~seq:(Some seq) delta)
+    deltas;
+  Log.commit log.Tui_types.tl_log;
+  log
+;;
+
 
 (* A turn the settled log holds has one source. The loaded transcript's rows
    the log draws itself -- the keeper's words, tools, reasoning -- leave the
@@ -1790,6 +1917,16 @@ let () =
             test_an_unfinished_settled_log_suppresses_nothing
         ; test_case "settled logs are read per keeper" `Quick
             test_settled_logs_are_read_per_keeper
+        ; test_case "journal fetch targets choose the newest unheld turns" `Quick
+            test_journal_fetch_targets_choose_the_newest_unheld_turns
+        ; test_case "a journal fills a turn log at the lines' own times" `Quick
+            test_a_journal_fills_a_turn_log_at_the_lines_own_times
+        ; test_case "hold_settled_log orders by start and replaces only partial logs"
+            `Quick test_hold_settled_log_orders_by_start_and_replaces_only_partial_logs
+        ; test_case "a journal-built log holds its turn in the timeline" `Quick
+            test_a_journal_built_log_holds_its_turn_in_the_timeline
+        ; test_case "the reload rebuilds loaded turns from their journals" `Quick
+            test_the_reload_rebuilds_loaded_turns_from_their_journals
         ; test_case "promoted queue request owns a typed slot" `Quick
             test_promoted_queue_request_owns_a_typed_slot_outside_transcript
         ; test_case "message scroll accepts the rendered clamp" `Quick

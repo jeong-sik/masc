@@ -2216,8 +2216,56 @@ let turn_log_add ~now turn_log ~seq delta =
   then Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
 ;;
 
+(* A v2 journal page, line by line: a line that draws is added to the log and
+   folded at the line's own journal time, so a tool call in a reloaded turn
+   keeps the start time it really had; a line that draws nothing still holds
+   its position. The same fold {!turn_log_add} runs for a live frame, with the
+   arrival clock in place of the journal's. *)
+let turn_log_add_journaled turn_log
+    (lines : Masc.Keeper_chat_event_log.journaled_event list) =
+  List.iter
+    (fun (line : Masc.Keeper_chat_event_log.journaled_event) ->
+      match Masc_tui_keeper_chat_log.delta_of_journaled line.event with
+      | None -> Masc_tui_keeper_chat_log.hold_seq turn_log.tl_log line.seq
+      | Some delta -> turn_log_add ~now:line.ts turn_log ~seq:(Some line.seq) delta)
+    lines
+;;
+
 let turn_log_keeper_name turn_log = Masc_tui_keeper_chat_log.keeper_name turn_log.tl_log
 let turn_log_request_id turn_log = Masc_tui_keeper_chat_log.request_id turn_log.tl_log
+let turn_log_started_at turn_log = Masc_tui_keeper_chat_log.started_at turn_log.tl_log
+
+(* How many loaded turns one history refresh asks the journal for. A refresh
+   arrives every tick; the turns behind the newest twenty are the ones the
+   operator scrolls back to, and each of those is fetched when its page loads
+   rather than all of them on every tick. *)
+let reload_journal_fetch_cap = 20
+
+(* Which loaded turns a refresh fetches journals for: every operation the
+   rows name, once, newest first by the earliest row of that operation, minus
+   the turns this session already holds as logs (settled, or still streaming)
+   and the ones the server has said it cannot serve, at most [cap]. Pure, so
+   the choice is testable without a server. *)
+let journal_fetch_targets ~cap ~held ~unavailable
+    (candidates : (string * float) list) =
+  let earliest = Hashtbl.create 16 in
+  List.iter
+    (fun (operation_id, at) ->
+      match Hashtbl.find_opt earliest operation_id with
+      | Some seen when seen <= at -> ()
+      | Some _ | None -> Hashtbl.replace earliest operation_id at)
+    candidates;
+  Hashtbl.fold (fun operation_id at acc -> (operation_id, at) :: acc) earliest []
+  |> List.filter (fun (operation_id, _) ->
+         not
+           (List.exists (String.equal operation_id) held
+           || List.exists (String.equal operation_id) unavailable))
+  |> List.stable_sort (fun (id_a, at_a) (id_b, at_b) ->
+         match Float.compare at_b at_a with
+         | 0 -> String.compare id_a id_b
+         | order -> order)
+  |> List.filteri (fun index _ -> index < cap)
+;;
 
 (* A committed log stands for its turn once the stream told it how the turn
    ended. A log that never heard the end -- the request went without a live
@@ -3296,6 +3344,11 @@ type state = {
      turn a log holds are left out of the timeline ([chat_rows_for]). Never
      pruned within a session: a reload replaces [msg_loaded], not these. *)
   mutable msg_settled_logs: turn_log list;
+  (* Operations whose journal the server said it cannot serve -- unknown,
+     pruned, or unreadable -- so a refresh does not ask for them again this
+     session. A request that never got an answer is not here: the next
+     refresh asks again. *)
+  mutable msg_journal_unavailable: string list;
   mutable detail_scroll: int;
   workspace: string;
   port: int;
@@ -3395,6 +3448,40 @@ let settled_logs_for_keeper state keeper_name =
   List.filter
     (fun turn_log -> String.equal (turn_log_keeper_name turn_log) keeper_name)
     state.msg_settled_logs
+;;
+
+(* A settled log takes its place among the others by when its turn started,
+   so a turn rebuilt from its journal sits where a turn settled live would
+   have. A request already held by a log that stands for its turn is not
+   added twice; a log that never heard the turn's end gives way to one that
+   did, which is how a cut stream's turn gets its whole record back from the
+   journal on the next refresh. *)
+let hold_settled_log state turn_log =
+  let request_id = turn_log_request_id turn_log in
+  let replaceable =
+    match settled_log_for_request state request_id with
+    | Some existing -> not (turn_log_holds_the_turn existing)
+    | None -> true
+  in
+  if replaceable then begin
+    let started_at = turn_log_started_at turn_log in
+    let rec insert = function
+      | [] -> [ turn_log ]
+      | held :: rest when turn_log_started_at held <= started_at ->
+          held :: insert rest
+      | later -> turn_log :: later
+    in
+    state.msg_settled_logs <-
+      insert
+        (List.filter
+           (fun held -> not (String.equal (turn_log_request_id held) request_id))
+           state.msg_settled_logs)
+  end
+;;
+
+let remember_journal_unavailable state operation_id =
+  if not (List.exists (String.equal operation_id) state.msg_journal_unavailable)
+  then state.msg_journal_unavailable <- operation_id :: state.msg_journal_unavailable
 ;;
 
 (* Whether a reasoning row is drawn at all under this visibility. The
@@ -3960,6 +4047,7 @@ let create_state
   msg_queued = Masc_tui_keeper_chat_queue.empty;
   msg_inflight = [];
   msg_settled_logs = [];
+  msg_journal_unavailable = [];
   detail_scroll = 0;
   workspace;
   port;

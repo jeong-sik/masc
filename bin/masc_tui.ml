@@ -1657,6 +1657,15 @@ type async_msg =
       * string
       * (Keeper_chat_history.decoded, string) result
       * (Keeper_chat_history.decoded, string) result
+  | Keeper_chat_journal_loaded of
+      { keeper_name : string
+      ; operation_id : string
+      ; started_at : float
+      ; journal :
+          ( Masc.Keeper_chat_event_log.journaled_event list
+          , Keeper_chat_log.events_error )
+          result
+      }
   | Context_inspector_loaded of
       int * string * Masc_tui_context_inspector.reading
   | Keeper_chat_older_loaded of
@@ -4811,6 +4820,55 @@ let launch_keeper_history_load ?(load_file_changes = true) state ~mailbox
      network-compatible; repeated history refreshes reuse this separate cache. *)
   if load_file_changes then
     launch_keeper_chat_tool_details_load state ~mailbox ~keeper_name
+
+(* The journal endpoint's page ceiling ([chat_events_max_limit] on the
+   server); a turn longer than one page is read page by page. *)
+let journal_reload_page_limit = 2000
+
+let fetch_whole_journal ~host ~port ~keeper_name ~operation_id =
+  let rec page since_seq acc =
+    match
+      Masc_tui_http.fetch_keeper_chat_events ~host ~port ~keeper_name
+        ~operation_id ~since_seq ~limit:journal_reload_page_limit
+    with
+    | Error _ as error -> error
+    | Ok { Keeper_chat_log.events; has_more; next_since_seq; _ } ->
+        let acc = List.rev_append events acc in
+        (* A page that claims more but does not advance would be read
+           forever; the record so far is what there is. *)
+        if has_more && next_since_seq > since_seq
+        then page next_since_seq acc
+        else Ok (List.rev acc)
+  in
+  page (-1) []
+
+(* One fiber per turn, each reading the whole journal and handing it to the
+   mailbox; the handler builds the log. Failures are typed by the fetch and
+   decided there, not here. *)
+let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
+  let host = server_peer_host in
+  let port = state.port in
+  List.iter
+    (fun (operation_id, started_at) ->
+      let run () =
+        let journal =
+          try fetch_whole_journal ~host ~port ~keeper_name ~operation_id with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Keeper_chat_log.Events_transport (Printexc.to_string exn))
+        in
+        enqueue_async mailbox
+          (Keeper_chat_journal_loaded { keeper_name; operation_id; started_at; journal })
+      in
+      match Eio_context.get_switch_opt () with
+      | Some sw ->
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+              run ();
+              `Stop_daemon)
+      | None ->
+          (* No switch, no fetch: the v1 rows stay, and nothing is
+             remembered, so a later refresh with a switch asks. *)
+          ())
+    targets
 
 let launch_context_inspector_load state ~mailbox ~keeper_name =
   let host = server_peer_host in
@@ -10285,11 +10343,31 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             (fun entry -> entry.me_role <> Message_memory)
             prior_loaded
         in
+        let journal_targets = ref [] in
         let history_entries =
           match history_result with
           | Ok { Keeper_chat_history.rows; dropped } ->
              state.msg_loaded_error <- None;
              state.msg_loaded_dropped <- dropped;
+             (* The turns this page names that the session does not hold as
+                logs are rebuilt from their journals, reasoning included
+                (RFC-0412 §3.3): the v1 rows carry trace reasoning
+                content-withheld by design. *)
+             journal_targets :=
+               journal_fetch_targets ~cap:reload_journal_fetch_cap
+                 ~held:
+                   (List.map turn_log_request_id
+                      (List.filter turn_log_holds_the_turn state.msg_settled_logs)
+                   @ List.map
+                       (fun entry -> entry.sent_request.Keeper_chat.request_id)
+                       state.msg_inflight)
+                 ~unavailable:state.msg_journal_unavailable
+                 (List.filter_map
+                    (fun (row : Keeper_chat_history.row) ->
+                      Option.map
+                        (fun operation_id -> (operation_id, row.at))
+                        row.operation_id)
+                    rows);
              let fresh = msg_entries_of_history_rows state keeper_name rows in
              let kept = merge_paged_history ~paged:prior_history ~fresh in
              let cursor = oldest_at kept in
@@ -10321,7 +10399,38 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               prior_memory
         in
         state.msg_loaded <- history_entries @ memory_entries;
-        state.msg_loaded_keeper <- Some keeper_name
+        state.msg_loaded_keeper <- Some keeper_name;
+        launch_keeper_chat_journal_loads state ~mailbox ~keeper_name
+          !journal_targets
+  | Keeper_chat_journal_loaded { keeper_name; operation_id; started_at; journal } -> (
+      (* Not generation-guarded: a journal is the turn's record whichever
+         keeper the pane shows now, and the log is kept per keeper. *)
+      match journal with
+      | Ok lines ->
+          let log = turn_log_create ~keeper_name ~request_id:operation_id ~started_at in
+          turn_log_add_journaled log lines;
+          Keeper_chat_log.commit log.tl_log;
+          (* A journal of a turn still running holds part of it. It is not
+             kept and not remembered, so the next refresh asks again. *)
+          if turn_log_holds_the_turn log then hold_settled_log state log
+      | Error (Keeper_chat_log.Unknown_operation | Keeper_chat_log.Journal_pruned) ->
+          (* Nothing to reload, now or later this session: the v1 rows are
+             the turn. *)
+          remember_journal_unavailable state operation_id
+      | Error (Keeper_chat_log.Journal_unavailable detail) ->
+          remember_journal_unavailable state operation_id;
+          add_event state "error"
+            (Printf.sprintf "journal for %s unavailable: %s"
+               (Keeper_chat.compact_request_id operation_id)
+               (Keeper_chat.terminal_safe_text detail))
+      | Error
+          ( Keeper_chat_log.Events_undecodable detail
+          | Keeper_chat_log.Events_transport detail ) ->
+          (* Not remembered: the next refresh asks again. *)
+          add_event state "error"
+            (Printf.sprintf "journal for %s not loaded: %s"
+               (Keeper_chat.compact_request_id operation_id)
+               (Keeper_chat.terminal_safe_text detail)))
   | Tools_loaded result -> (
       match result with
       | Ok snapshot ->

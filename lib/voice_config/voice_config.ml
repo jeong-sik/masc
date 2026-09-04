@@ -40,6 +40,7 @@ type session_config = { endpoints : endpoint list }
 type capture_config = {
   calibration_seconds : float;
   trigger_margin_db : float;
+  trailing_silence_seconds : float;
   speech_margin_db : float;
   noise_reduction : bool;
 }
@@ -344,6 +345,7 @@ let parse_session json =
 let default_capture =
   { calibration_seconds = 0.5
   ; trigger_margin_db = 6.0
+  ; trailing_silence_seconds = 2.0
   ; speech_margin_db = 4.0
   ; noise_reduction = false
   }
@@ -363,11 +365,20 @@ let parse_capture json =
       in
       (* A probe of zero length measures nothing and would hand the filter a
          threshold derived from an empty file. *)
+      let trailing_silence_seconds =
+        number
+          "trailing_silence_seconds"
+          ~default:default_capture.trailing_silence_seconds
+      in
       if calibration_seconds <= 0.0 then
         Error "root.capture.calibration_seconds must be greater than zero"
+      else if trailing_silence_seconds <= 0.0 then
+        (* Zero would stop the capture on the first gap between two words. *)
+        Error "root.capture.trailing_silence_seconds must be greater than zero"
       else
         Ok
           { calibration_seconds
+          ; trailing_silence_seconds
           ; trigger_margin_db =
               number "trigger_margin_db" ~default:default_capture.trigger_margin_db
           ; speech_margin_db =

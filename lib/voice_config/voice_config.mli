@@ -85,14 +85,24 @@ type capture_config = {
           the tone. Must be greater than zero — a probe of no length measures
           nothing, and the threshold would come from an empty file. *)
   trigger_margin_db : float;
-      (** How far above the room's {e peak} a sound must rise to start
-          recording. Raise it when captures start on their own and never end;
-          lower it when speaking does not start one.
+      (** How far above the room a sound must rise for the capture to count as
+          speech having started. Raise it when captures begin on their own and
+          never end; lower it when speaking does not start one.
 
-          Peak, not RMS: sox's silence filter reads peak, and the two are two
-          decades apart on room tone. Measured 2026-09-04 on one workstation,
-          an idle room peaked at 4.48% of full scale and ordinary speech
-          clipped at 100% — 27 dB apart, so this only has to clear the room. *)
+          Read as RMS, the same as {!speech_margin_db} and the same as the
+          level the meter draws, so what an operator watches and what the
+          decision uses are one number. They were two until 2026-09-04: this
+          margin was applied to a peak because it was handed to sox's silence
+          filter, which reads peak. Peak on room tone moved 1.9x across five
+          probes a minute apart while RMS moved 1.2x, so the threshold derived
+          from it wandered on a room that had not changed. *)
+  trailing_silence_seconds : float;
+      (** How long the room has to stay quiet after speech before the capture
+          stops. Long enough to sit through the pause inside a sentence, short
+          enough that an operator is not waiting on their own recording.
+
+          Must be greater than zero: a capture that stops the instant a
+          speaker draws breath cuts the sentence in half. *)
   speech_margin_db : float;
       (** How far a whole capture must average above the room, read as RMS on
           both sides, to be transcribed at all. Lower it and whisper starts

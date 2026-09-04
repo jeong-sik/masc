@@ -90,59 +90,35 @@ val transcribe_audio :
 
 (** {1 Microphone capture thresholds} *)
 
-(** The room is measured at each capture rather than assumed. The recording
-    threshold was a literal 1% of full scale (about -40 dBFS); measured on one
-    workstation 2026-09-03 the noise floor sat at -37.2 dB on one pass and
-    -26.3 dB on another minutes later, both above it. The silence filter then
-    saw sound continuously, so every capture ran to its timeout and handed the
-    transcriber a room. A floor that moves 10 dB between passes in one room is
-    why this is read per capture. *)
+(** The room is measured at each capture rather than assumed. Measured on one
+    workstation 2026-09-03, the noise floor sat at -37.2 dB on one pass and
+    -26.3 dB on another minutes later — 10 dB apart in one room, against a
+    threshold that was then a fixed 1% of full scale. Every capture ran to its
+    timeout and handed the transcriber a room. *)
 
 val trigger_margin_db : float
-(** How far above the room's {e peak} a capture must rise to start recording.
+(** How far above the room a sound must rise for the capture to treat it as
+    speech having started, read as RMS on both sides.
 
-    sox's silence filter takes a percentage of full scale measured as peak,
-    not RMS, and on room tone the two are far apart: 4.48% peak against 1.18%
-    RMS on one workstation. A trigger computed from RMS sat below the room's
-    peak, so the filter saw sound continuously — it started at once and never
-    satisfied its trailing-silence condition, running every capture to the
-    timeout with no closing tone.
-
-    Speech clipped at 100% peak on the same microphone, 27 dB clear of the
-    room, so this margin only has to leave the room behind. *)
+    It was a peak margin until 2026-09-04, because the threshold was handed to
+    sox's silence filter and that filter reads peak. Peak turned out to be an
+    unstable basis: on one workstation it moved 1.9x across five probes of the
+    same idle room a minute apart, while RMS moved 1.2x. The capture now makes
+    this decision itself, so the margin, the gate below, and the level the
+    meter draws are one number. *)
 
 val speech_margin_db : float
-(** How far a whole capture must average above the room to be transcribed at
-    all, read as RMS on both sides.
+(** How far the room has to fall back below a speaker for the capture to count
+    as over, read as RMS.
 
-    Not comparable to {!trigger_margin_db}, which is a peak margin: an average
-    compared against a peak calls every quiet capture loud. The room is read
-    again as an average for this, from the capture's own leading moment.
-
-    This exists because whisper answers silence with a sentence: three captures
-    of an empty room returned "감사합니다.", "감사합니다." and "네". Byte size
-    cannot separate those from speech, since a capture that ran to its timeout
-    on room tone is large. Once audio reaches the endpoint chain a hallucinated
-    transcript is indistinguishable from a real one, so the refusal has to
-    happen here. *)
-
-val peak_amplitude_of_file : string -> float option
-(** Peak linear amplitude of an audio file, read through [sox stat] --
-    the level sox's own silence filter compares its threshold against.
-
-    Not interchangeable with {!rms_amplitude_of_file}: room tone read 4.48%
-    here and 1.18% there on one measurement. Using one where the other was
-    meant is the defect {!trigger_margin_db} describes. *)
-
-val rms_amplitude_of_file : string -> float option
-(** Linear RMS amplitude of an audio file, read through [sox stat].
-    [None] when sox does not run or its output carries no level line.
-
-    Safe to call on a file still being written: sox reports the level of what
-    is there. That is what a level meter reads, because opening a second
-    capture device costs about 2.5 s — longer than most utterances — while the
-    recording in progress is already a continuous record of what the
-    microphone hears. *)
+    This is also what keeps a room away from the transcriber, because whisper
+    answers silence with a sentence: three captures of an empty room returned
+    "감사합니다.", "감사합니다." and "네". Byte size cannot separate those from
+    speech, since a capture that ran to its timeout on room tone is large.
+    Once audio reaches the endpoint chain a hallucinated transcript is
+    indistinguishable from a real one, so the refusal has to happen before
+    that. A capture in which no reading ever cleared {!trigger_margin_db} is
+    never sent. *)
 
 val db_of_amplitude : float -> float
 (** dBFS for a linear RMS amplitude; [neg_infinity] at zero. *)
@@ -153,21 +129,77 @@ val amplitude_of_db : float -> float
 (** {1 Microphone record + transcribe} *)
 
 val measure_noise_floor : ?seconds:float -> agent_id:string -> unit -> float option
-(** One short capture with no silence filter, returning the room's RMS
-    amplitude. [None] when the recorder could not run.
+(** One short capture, returning the room's RMS amplitude. [None] when the
+    recorder could not run.
 
     Exposed for a caller that captures repeatedly: the room does not change
     between two utterances the way it changes across a session, and re-probing
     costs about 1.15 s of the gap between them. *)
+
+(** How far a capture has got. Exposed so the decision that ends a recording
+    can be checked against a table of levels rather than a microphone. *)
+type level_phase =
+  | Calibrating of { until : float; floor : float option }
+  | Listening of { floor : float }
+  | Speaking of { floor : float; quiet_since : float option }
+
+type capture_end =
+  | Ended_after_speech
+  | Ended_without_speech
+  | Ended_by_operator
+
+type level_step =
+  | Continue of level_phase
+  | Finish of capture_end
+
+val advance_phase :
+  capture:Voice_config.capture_config ->
+  now:float ->
+  level:float option ->
+  level_phase ->
+  level_step
+(** What one level reading does to a capture in progress.
+
+    [level] is a linear RMS amplitude, or [None] when the recorder has not
+    written anything to measure yet — the state every capture starts in, since
+    the file is created before the first sample reaches it.
+
+    Every threshold the capture applies is here. The loop around it supplies
+    the clock and the file and nothing else. *)
+
+val end_at_deadline : level_phase -> capture_end
+(** What running out of time means, which depends on what was heard. A capture
+    cut off mid-sentence still carries speech; one that never rose above the
+    room is a recording of a room, and must not be transcribed. *)
 
 val record_and_transcribe :
   agent_id:string ->
   ?timeout_sec:float ->
   ?language_code:string ->
   ?noise_floor:float ->
+  ?on_level:(float -> unit) ->
+  ?should_stop:(unit -> bool) ->
   unit ->
   (Yojson.Safe.t, string) result
-(** Record from microphone (with beep tones), transcribe via STT.
-    [noise_floor] reuses a level already measured; omitted, the room is
-    probed before recording.
-    Returns transcription JSON on success. *)
+(** Record from the microphone (with beep tones) and transcribe via STT.
+
+    Where the recording ends is decided here rather than by sox: the level is
+    re-read ten times a second while the file is being written, speech starts
+    when it clears the room by {!Voice_config.trigger_margin_db}, and the
+    recording stops once the room has been quiet again for
+    {!Voice_config.trailing_silence_seconds}.
+
+    [on_level] receives each of those readings in dBFS, so a caller can draw
+    the same number the decision is made from. It receives
+    [Float.neg_infinity] while there is no audio to measure and once more when
+    the capture ends.
+
+    [should_stop] is polled at the same rate; returning [true] ends the
+    recording and yields no transcript.
+
+    [noise_floor] reuses an RMS level already measured, skipping calibration.
+    Omitted, the room is read from the capture's own opening.
+
+    Returns transcription JSON on success, or a [no_audio] status when nothing
+    rose above the room — a recording of a room must not reach the endpoint,
+    which answers it with a fluent sentence. *)

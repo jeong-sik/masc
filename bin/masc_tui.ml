@@ -8397,31 +8397,6 @@ let handle_keeper_action state ~base_path ~mailbox action =
    operator their input device is dead — a dead microphone and a quiet room
    both end as an empty draft. *)
 let launch_voice_capture state ~mailbox ~keeper =
-  let capture_dir = Filename.get_temp_dir_name () in
-  let started_at = Unix.gettimeofday () -. 1.0 in
-  let meter_glob () =
-    (* The capture writes under a name Voice_bridge chooses; the meter finds
-       the newest one rather than being told, so the two do not have to agree
-       on a filename across a library boundary. *)
-    try
-      Sys.readdir capture_dir
-      |> Array.to_list
-      |> List.filter (fun f ->
-        String.length f > 9
-        && String.equal (String.sub f 0 9) "masc_stt_"
-        && Filename.check_suffix f ".wav")
-      |> List.map (fun f -> Filename.concat capture_dir f)
-      |> List.sort (fun a b ->
-        compare (Unix.stat b).Unix.st_mtime (Unix.stat a).Unix.st_mtime)
-      |> function
-      (* Only a file this capture could have written. A previous capture's
-         leftovers would otherwise be metered as though they were live, and a
-         microphone that is recording nothing would show a bar. *)
-      | newest :: _ when (Unix.stat newest).Unix.st_mtime >= started_at -> Some newest
-      | _ -> None
-    with
-    | Sys_error _ | Unix.Unix_error _ -> None
-  in
   let run () =
     let result =
       try
@@ -8429,6 +8404,12 @@ let launch_voice_capture state ~mailbox ~keeper =
           (Masc.Voice_bridge.record_and_transcribe
              ~agent_id:keeper
              ?noise_floor:state.voice_floor
+             (* The level the capture makes its own decisions from, so the bar
+                and the trigger cannot disagree. It arrives from the capture's
+                fiber, which is why it goes through the mailbox rather than
+                straight into the field. *)
+             ~on_level:(fun db -> enqueue_async mailbox (Voice_level { keeper; db }))
+             ~should_stop:(fun () -> state.voice_stop_requested)
              ())
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -8459,41 +8440,6 @@ let launch_voice_capture state ~mailbox ~keeper =
     in
     enqueue_async mailbox msg
   in
-  let meter () =
-    (* Stops when the capture posts its result: the level is only meaningful
-       while something is recording. *)
-    (* Every step but the sleep keeps ticking on failure. The recording does
-       not exist for the first moments — sox has not opened the file, and with
-       a trigger the operator never crosses it may never write one — so a
-       first look that finds nothing is the normal case, not a reason to stop
-       metering for the rest of the capture. Reporting silence then is also
-       the honest answer: nothing has been heard.
-
-       Only a missing clock ends it, because without one there is nothing to
-       wait on and the loop would spin. *)
-    let rec tick () =
-      match state.voice_capture, Eio_context.get_clock_opt () with
-      | Some active, Some clock when String.equal active keeper ->
-        Eio.Time.sleep clock 0.5;
-        let level =
-          match meter_glob () with
-          | None -> None
-          | Some file -> Masc.Voice_bridge.rms_amplitude_of_file file
-        in
-        enqueue_async
-          mailbox
-          (Voice_level
-             { keeper
-             ; db =
-                 (match level with
-                  | Some amplitude -> Masc.Voice_bridge.db_of_amplitude amplitude
-                  | None -> Float.neg_infinity)
-             });
-        tick ()
-      | (Some _ | None), _ -> ()
-    in
-    tick ()
-  in
   match Eio_context.get_switch_opt () with
   | None ->
     enqueue_async
@@ -8502,8 +8448,8 @@ let launch_voice_capture state ~mailbox ~keeper =
   | Some sw ->
     state.voice_capture <- Some keeper;
     state.voice_level_db <- None;
-    Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon);
-    Eio.Fiber.fork_daemon ~sw (fun () -> meter (); `Stop_daemon)
+    state.voice_stop_requested <- false;
+    Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
 ;;
 
 (* Continuous mode's only moving part: after each capture settles, start the
@@ -8541,17 +8487,22 @@ let handle_composer_key state ~base_path ~mailbox key =
       (* Pressing it while continuous mode is on turns the mode off. That is
          the only way out: a mode that re-arms itself needs a key that stops
          it, and the key that started it is the one the operator will reach
-         for. A capture already running is left to finish — cancelling it
-         would throw away speech that was already said. *)
+         for. *)
       (match state.voice_continuous with
        | Some _ ->
            state.voice_continuous <- None;
            state.last_action <- Some ("voice: continuous off", Unix.gettimeofday ())
        | None ->
       (* One capture at a time: a second microphone would contend for the same
-         input device and the two transcripts would race into one draft. *)
+         input device and the two transcripts would race into one draft.
+
+         The second press stops the running one, which is what the row has
+         been telling the operator it does. It used to start another instead,
+         leaving two recorders on one device with no way to end either. *)
       (match state.voice_capture, composer.Composer.target with
-       | Some _, _ -> ()
+       | Some _, _ ->
+           state.voice_stop_requested <- true;
+           state.last_action <- Some ("voice: stopping", Unix.gettimeofday ())
        | None, Composer.Ready keeper_name ->
            launch_voice_capture state ~mailbox ~keeper:keeper_name
        | None, (Composer.No_target | Composer.Unreachable _) -> ()));
@@ -14000,7 +13951,12 @@ and is loaded on demand through keeper_skill.
                      match state.msg_target_keeper_name with
                      | Some keeper when state.voice_capture = None ->
                          launch_voice_capture state ~mailbox:async_messages ~keeper
-                     | Some _ | None -> ())
+                     (* The same toggle the composer row carries. *)
+                     | Some _ ->
+                         state.voice_stop_requested <- true;
+                         state.last_action <-
+                           Some ("voice: stopping", Unix.gettimeofday ())
+                     | None -> ())
                    ~toggle_voice_continuous:(fun () ->
                      match state.voice_continuous, state.msg_target_keeper_name with
                      | Some _, _ ->

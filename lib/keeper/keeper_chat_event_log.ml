@@ -700,3 +700,24 @@ let read_journal journal =
    effect of reading, so they hold no [open_journal] handle. *)
 let read_journal_path path = read_journal { path; now = Time_compat.now }
 
+
+type read_failure =
+  | Journal_missing
+  | Journal_unreadable of string
+  | Journal_corrupt of string
+
+(* Serving readers (stream replay, the v2 events endpoint) need the three
+   failure shapes apart: a missing journal is the normal state of a queued
+   operation, an unreadable one is an operator problem, a corrupt one is a
+   codec problem. [Sys_error] alone conflates the first two, so the path is
+   re-checked before naming the failure. *)
+let read_journal_path_result path =
+  match read_journal_path path with
+  | entries -> Ok entries
+  | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+  | exception Sys_error detail ->
+    if Sys.file_exists path
+    then Error (Journal_unreadable detail)
+    else Error Journal_missing
+  | exception Invalid_argument detail -> Error (Journal_corrupt detail)
+;;

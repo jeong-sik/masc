@@ -76,3 +76,17 @@ val read_journal_path : string -> journaled_event list
     unlike {!open_journal}, which mkdirs the parent. For read-only consumers
     (the stage-2 consistency audit). Same strictness: [Invalid_argument] on a
     corrupt line, [Sys_error] when the file does not exist. *)
+
+(** Why a serving read of a journal produced no entries. *)
+type read_failure =
+  | Journal_missing  (** No file at the path: nothing journaled yet, or pruned. *)
+  | Journal_unreadable of string
+      (** The file exists but could not be opened or read ([Sys_error] text). *)
+  | Journal_corrupt of string  (** A line failed the strict decode. *)
+
+val read_journal_path_result : string -> (journaled_event list, read_failure) result
+(** {!read_journal_path} with its two exceptions turned into {!read_failure},
+    for production readers that must degrade rather than raise. Reads without
+    the writer's lock, like every other reader of these stores: a line is
+    appended by one [write] and lines are small, so a torn tail is not
+    expected; if one is ever observed it surfaces as [Journal_corrupt]. *)

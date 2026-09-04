@@ -157,6 +157,11 @@ type keeper_chat_stream_request = {
   channel_workspace_id : string;
   attachments : Keeper_chat_store.attachment list;
   direct_message : Keeper_invocation_contract.direct_message;
+  since_seq : int option;
+      (** A reconnecting client re-POSTs the same [request_id] with the last
+          journal seq it received; the handler replays the journaled suffix
+          before the live sink attaches (RFC-0412 §3.2). [-1] asks for the
+          whole turn. Absent on a first submit. *)
 }
 
 let keeper_chat_stream_error_json message =
@@ -714,6 +719,7 @@ let parse_keeper_chat_stream_request body_str =
           ; "channel_user_name"
           ; "channel_workspace_id"
           ; "attachments"
+          ; "since_seq"
           ]
         in
         let keys = List.map fst fields in
@@ -769,6 +775,15 @@ let parse_keeper_chat_stream_request body_str =
       | None | Some `Null -> Ok None
       | Some (`Assoc _ as context) -> Ok (Some context)
       | Some _ -> Error "surface_context must be an object"
+    in
+    let* since_seq =
+      match List.assoc_opt "since_seq" fields with
+      | None -> Ok None
+      | Some (`Int seq) when seq >= -1 -> Ok (Some seq)
+      | Some _ ->
+        Error
+          "since_seq must be an integer >= -1: the last journal seq already \
+           received, or -1 for the whole turn"
     in
     let* attachments = Keeper_multimodal_input.parse_attachments json in
     let* user_blocks = Keeper_multimodal_input.parse_user_blocks json in
@@ -830,6 +845,7 @@ let parse_keeper_chat_stream_request body_str =
         ; channel_workspace_id
         ; attachments
         ; direct_message
+        ; since_seq
         }
   with Yojson.Json_error e ->
     Error ("invalid json: " ^ e)
@@ -2999,17 +3015,38 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
       let accepted = ref false in
       let buffered = ref [] in
       let buffered_mu = Stdlib.Mutex.create () in
+      let base_path = (Mcp_server.workspace_config state).base_path in
+      (* Highest journal seq already written to this stream. A reconnect
+         replays the journaled suffix first and the live sink attaches after,
+         so a live or buffered event at or below this mark is a duplicate of a
+         replayed frame and is dropped. Events without a journal seq (the
+         settle glue's synthesized run_error never went through the bus) have
+         no mark and always pass. Guarded by [buffered_mu]: it orders the
+         same stream, and sinks run on the Owner's fiber. *)
+      let last_sent_seq = ref (-1) in
+      let claim_seq seq =
+        Stdlib.Mutex.protect buffered_mu (fun () ->
+          match seq with
+          | None -> true
+          | Some seq when seq <= !last_sent_seq -> false
+          | Some seq ->
+            last_sent_seq := seq;
+            true)
+      in
       let send_event ~seq event =
-        let sent = keeper_stream_send_event ?seq writer mutex closed event in
-        if
-          (not sent)
-          || match event.Ag_ui.event_type with
-             | Ag_ui.Run_finished | Ag_ui.Run_error -> true
-             | Run_started | Step_started | Step_finished | Text_message_start
-             | Text_message_content | Text_message_end | Tool_call_start
-             | Tool_call_args | Tool_call_end | State_snapshot | State_delta
-             | Custom -> false
-        then finish ()
+        if claim_seq seq
+        then begin
+          let sent = keeper_stream_send_event ?seq writer mutex closed event in
+          if
+            (not sent)
+            || match event.Ag_ui.event_type with
+               | Ag_ui.Run_finished | Ag_ui.Run_error -> true
+               | Run_started | Step_started | Step_finished | Text_message_start
+               | Text_message_content | Text_message_end | Tool_call_start
+               | Tool_call_args | Tool_call_end | State_snapshot | State_delta
+               | Custom -> false
+          then finish ()
+        end
       in
       let sink ~seq event =
         let send_now =
@@ -3045,6 +3082,41 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
         in
         (* See durable acceptance: a closed SSE stream cannot roll back the operation. *)
         ignore (keeper_stream_send_event writer mutex closed event);
+        (* Replay before live attach (RFC-0412 §3.2): the journaled suffix
+           above [since_seq] goes out through the same pure projection the
+           live adapter uses, so the bytes equal the frames the client
+           missed. A missing journal is a queued operation with nothing
+           journaled yet; unreadable or corrupt degrades to today's
+           live-only stream with a warning. The sink is already registered,
+           so events published meanwhile sit in [buffered] and flush below,
+           where [claim_seq] drops the ones the replay already wrote. *)
+        (match payload.since_seq with
+         | None -> ()
+         | Some since_seq ->
+           let path =
+             Keeper_chat_event_log.journal_path
+               ~base_dir:base_path
+               ~keeper_name:payload.name
+               ~operation_id
+           in
+           (match Keeper_chat_event_log.read_journal_path_result path with
+            | Error Keeper_chat_event_log.Journal_missing -> ()
+            | Error (Journal_unreadable detail | Journal_corrupt detail) ->
+              Log.Keeper.warn
+                "keeper chat replay skipped operation=%s since_seq=%d: %s"
+                operation_id
+                since_seq
+                detail
+            | Ok entries ->
+              let redaction =
+                Keeper_secret_redaction.snapshot ~base_path ~keeper_name:payload.name
+              in
+              Server_keeper_chat_replay.replay
+                ~redact_text:(Keeper_secret_redaction.redact_text redaction)
+                ~redact_json:(Keeper_secret_redaction.redact_json redaction)
+                ~since_seq
+                entries
+              |> List.iter (fun (seq, event) -> send_event ~seq:(Some seq) event)));
         let pending =
           Stdlib.Mutex.protect buffered_mu (fun () ->
             accepted := true;
@@ -3066,7 +3138,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
           |> Result.map_error (fun detail -> `Input detail)
         in
         Keeper_owner_registry.submit_operation
-          ~base_path:(Mcp_server.workspace_config state).base_path
+          ~base_path
           ~keeper_name:payload.name
           ~operation_id:payload.request_id
           ~source

@@ -91,6 +91,11 @@ type keeper_chat_stream_request = {
   channel_workspace_id : string;
   attachments : Keeper_chat_store.attachment list;
   direct_message : Keeper_invocation_contract.direct_message;
+  since_seq : int option;
+      (** A reconnecting client re-POSTs the same [request_id] with the last
+          journal seq it received; the handler replays the journaled suffix
+          before the live sink attaches (RFC-0412 §3.2). [-1] asks for the
+          whole turn. Absent on a first submit. *)
 }
 (** Parsed payload of a keeper chat-stream HTTP request.
     [message] is the text fallback used by the existing direct keeper

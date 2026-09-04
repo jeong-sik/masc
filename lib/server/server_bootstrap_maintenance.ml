@@ -1041,7 +1041,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                        Keeper_metrics.(to_string ChatJournalAuditMismatches)
                        ~labels:
                          [ "keeper", keeper
-                         ; "verdict", Keeper_chat_journal_audit.show_verdict verdict
+                         ; "verdict", Keeper_chat_journal_audit.verdict_label verdict
                          ]
                        ();
                      Log.Keeper.error

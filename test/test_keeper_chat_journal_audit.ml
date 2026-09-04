@@ -1,6 +1,7 @@
 (* RFC-0412 stage 2 — dual-write consistency auditor: every verdict class of
-   the pure comparison core, plus the IO shell over a real journal file and
-   real keeper_chat_store rows. *)
+   the pure comparison core, the IO shell over a real journal file and real
+   keeper_chat_store rows, and the sweep's grace-window / canonical-stem
+   gating. *)
 
 module Audit = Masc.Keeper_chat_journal_audit
 module E = Masc.Keeper_chat_events
@@ -159,6 +160,20 @@ let test_tool_row_missing () =
   in
   Alcotest.(check verdict)
     "tool row missing"
+    (Audit.Mismatch [ Audit.Tool_rows ])
+    (Audit.compare match_entries rows)
+
+let test_tool_rows_duplicate_execution_id () =
+  (* Two store tool rows carrying the same execution_id: subset-both-ways
+     passed this silently; the sorted-multiset equality must not. *)
+  let rows =
+    match match_rows with
+    | [ user; assistant; tool ] ->
+      [ user; assistant; tool; { tool with Store.id = "m-tool-2" } ]
+    | _ -> Alcotest.fail "match_rows shape"
+  in
+  Alcotest.(check verdict)
+    "duplicate execution_id on the store side"
     (Audit.Mismatch [ Audit.Tool_rows ])
     (Audit.compare match_entries rows)
 
@@ -325,6 +340,35 @@ let test_audit_operation_corrupt_journal () =
        | other ->
          Alcotest.failf "expected Journal_corrupt, got %s" (Audit.show_verdict other))
 
+let test_audit_operation_store_unreadable () =
+  let base_dir = temp_base_path "keeper-chat-journal-audit-store" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let keeper_name = "store-keeper" in
+       let operation_id = "op-store" in
+       write_journal ~base_dir ~keeper_name ~operation_id match_events;
+       let store_path = Store.chat_path ~base_dir ~keeper_name in
+       Fs_compat.mkdir_p (Filename.dirname store_path);
+       let oc = open_out store_path in
+       output_string oc "{\"not\":\"a chat row\"}\n";
+       close_out oc;
+       (* [load_all] converts the EACCES read failure into []; the non-empty
+          file on disk must surface as [Store_unreadable], not
+          [Missing_terminal_row]. *)
+       Unix.chmod store_path 0o000;
+       Fun.protect
+         ~finally:(fun () -> try Unix.chmod store_path 0o600 with _ -> ())
+         (fun () ->
+            match
+              Audit.audit_operation ~base_dir ~keeper_name ~operation_id
+            with
+            | Audit.Store_unreadable _ -> ()
+            | other ->
+              Alcotest.failf
+                "expected Store_unreadable, got %s"
+                (Audit.show_verdict other)))
+
 let test_journal_path_round_trips_operation_ids () =
   (* The sweep recovers operation_id from the journal filename stem; the ids
      the TUI and dashboard actually mint survive sanitization unchanged. *)
@@ -340,6 +384,76 @@ let test_journal_path_round_trips_operation_ids () =
     ; "kmsg-3f8a1c2e9b0d4e7fa5b6c7d8e9f0a1b2"
     ]
 
+let sorted_dir_entries dir = Sys.readdir dir |> Array.to_list |> List.sort String.compare
+
+(* No terminal event: the shape of a turn still streaming (or already
+   crashed). The grace bound is what separates the two. *)
+let in_flight_events =
+  [ E.Run_started { run_id = "run-1"; thread_id = "thread-1" }
+  ; E.Text_delta "half-finis"
+  ]
+
+let test_sweep_skips_in_flight_journal () =
+  let base_dir = temp_base_path "keeper-chat-journal-audit-grace" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let keeper_name = "sweep-keeper" in
+       let operation_id = "op-live" in
+       write_journal ~base_dir ~keeper_name ~operation_id in_flight_events;
+       let sweep_now () = Audit.sweep ~base_dir ~window_sec:3600. () in
+       Alcotest.(check int)
+         "a journal younger than grace_sec is in flight, not truncated"
+         0
+         (List.length (sweep_now ()));
+       let path = L.journal_path ~base_dir ~keeper_name ~operation_id in
+       let cold = Unix.gettimeofday () -. 900. in
+       Unix.utimes path cold cold;
+       match sweep_now () with
+       | [ (keeper, op, Audit.Journal_truncated) ] ->
+         Alcotest.(check string) "keeper" keeper_name keeper;
+         Alcotest.(check string) "operation id" operation_id op
+       | other ->
+         Alcotest.failf
+           "expected one Journal_truncated, got %d verdicts"
+           (List.length other))
+
+let test_sweep_skips_non_canonical_stem () =
+  let base_dir = temp_base_path "keeper-chat-journal-audit-noncanonical" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let keeper_name = "nc-keeper" in
+       let dir =
+         Filename.dirname
+           (L.journal_path ~base_dir ~keeper_name ~operation_id:"placeholder")
+       in
+       Fs_compat.mkdir_p dir;
+       let path = Filename.concat dir "Op-ABC.jsonl" in
+       let oc = open_out path in
+       List.iteri
+         (fun seq event ->
+            output_string
+              oc
+              (L.journaled_event_to_string
+                 (journaled ~seq ~ts:(100.0 +. (Float.of_int seq *. 0.1)) event));
+            output_char oc '\n')
+         match_events;
+       close_out oc;
+       (* Inside the audit window, past the grace bound: only the
+          non-canonical stem can keep it out of the verdicts. *)
+       let cold = Unix.gettimeofday () -. 900. in
+       Unix.utimes path cold cold;
+       let before = sorted_dir_entries dir in
+       Alcotest.(check int)
+         "a non-canonical stem is outside the audit"
+         0
+         (List.length (Audit.sweep ~base_dir ~window_sec:3600. ()));
+       Alcotest.(check (list string))
+         "the sweep created no junk directory or file"
+         before
+         (sorted_dir_entries dir))
+
 let () =
   Alcotest.run
     "keeper_chat_journal_audit"
@@ -354,6 +468,10 @@ let () =
             `Quick
             test_assistant_text_mismatch
         ; Alcotest.test_case "tool row missing" `Quick test_tool_row_missing
+        ; Alcotest.test_case
+            "duplicate execution_id is a tool-rows mismatch"
+            `Quick
+            test_tool_rows_duplicate_execution_id
         ; Alcotest.test_case "seq gap" `Quick test_seq_gap
         ; Alcotest.test_case "truncated journal" `Quick test_truncated
         ; Alcotest.test_case "missing terminal row" `Quick test_missing_terminal_row
@@ -376,8 +494,22 @@ let () =
             `Quick
             test_audit_operation_corrupt_journal
         ; Alcotest.test_case
+            "unreadable store is Store_unreadable"
+            `Quick
+            test_audit_operation_store_unreadable
+        ; Alcotest.test_case
             "operation ids round-trip through journal_path"
             `Quick
             test_journal_path_round_trips_operation_ids
+        ] )
+    ; ( "sweep"
+      , [ Alcotest.test_case
+            "in-flight journals are skipped by the grace bound"
+            `Quick
+            test_sweep_skips_in_flight_journal
+        ; Alcotest.test_case
+            "non-canonical stems are skipped without side effects"
+            `Quick
+            test_sweep_skips_non_canonical_stem
         ] )
     ]

@@ -38,7 +38,21 @@ type verdict =
   | Journal_corrupt of string
       (** {!Keeper_chat_event_log.read_journal} raised [Invalid_argument], or
           the sweep hit an unexpected per-file failure. *)
+  | Store_unreadable of string
+      (** The journal carries terminal events but
+          {!Keeper_chat_store.load_all} yielded zero rows while [Unix.stat]
+          shows a non-empty store file: [load_all] converts read failures
+          (and all-lines-unparseable reads) into [[]], so the stat-size
+          heuristic is the only signal that separates a store read failure
+          from a genuinely empty store. *)
 [@@deriving show, eq]
+
+(** Bounded constructor name of a verdict, for metric labels:
+    ["match" | "mismatch" | "journal_missing" | "journal_truncated" |
+    "journal_corrupt" | "store_unreadable"]. {!show_verdict} embeds exception
+    strings (paths, [Unix_error]s) and must stay out of metric labels — it
+    belongs in the log line. *)
+val verdict_label : verdict -> string
 
 (** The exclusion class: assistant rows written mid-turn by the surface-post
     tool carry neither [turn_ref] nor delivery provenance
@@ -59,20 +73,49 @@ val compare :
   Keeper_chat_store.chat_message list ->
   verdict
 
+(** Shared core of the IO shell: journal entries already read, store rows
+    already loaded. Joins the rows by [turn_ref] and by the [Operation]
+    delivery key derived from [operation_id] (via
+    {!Keeper_chat_store.transcript_of_messages}) and compares. {!sweep} calls
+    this per journal file against a row list loaded once per keeper. *)
+val audit_entries :
+  operation_id:string ->
+  entries:Keeper_chat_event_log.journaled_event list ->
+  rows:Keeper_chat_store.chat_message list ->
+  verdict
+
 (** IO shell: audit one operation. Reads the journal ([Journal_missing] /
-    [Journal_corrupt] come from here), [Keeper_chat_store.load_all]s the
-    store, joins rows by [turn_ref] and by the [Operation] delivery key
-    derived from [operation_id], and compares. *)
+    [Journal_corrupt] come from here) via
+    {!Keeper_chat_event_log.journal_path} +
+    {!Keeper_chat_event_log.read_journal_path} — never
+    {!Keeper_chat_event_log.open_journal}, whose mkdir would mint junk
+    directories for a non-canonical [operation_id] whose sanitized path does
+    not exist — [Keeper_chat_store.load_all]s the store, and compares. A
+    non-empty store file that loads zero rows against a terminal-event journal
+    is [Store_unreadable], not [Missing_terminal_row]. *)
 val audit_operation :
   base_dir:string -> keeper_name:string -> operation_id:string -> verdict
 
-(** Sweep every journal file under [<base>/.masc/keeper_chat_events/] modified
-    in the last [window_sec] seconds (mtime), audit each, and return
-    [(keeper, operation_id, verdict)] triples. Never raises except
-    [Eio.Cancel.Cancelled]: per-file failures become [Journal_corrupt]
-    verdicts. *)
+(** Sweep every journal file under [<base>/.masc/keeper_chat_events/], audit
+    each, and return [(keeper, operation_id, verdict)] triples. One
+    {!Keeper_chat_store.load_all} per keeper per pass, shared across that
+    keeper's journal files.
+
+    Only files whose mtime age satisfies [grace_sec <= age <= window_sec] are
+    audited (default [grace_sec] is 600s): journals younger than the grace
+    bound may still be appended by a live turn — live turns are never
+    half-read — while crashed turns are caught once cold, inside the window.
+    Journals whose filename stem is not canonical
+    ({!Workspace_utils_backend_setup.sanitize_namespace_segment} is not
+    idempotent for e.g. uppercase stems, so the stem cannot round-trip through
+    {!Keeper_chat_event_log.journal_path}) are outside the audit and skipped,
+    as are journals that vanish between readdir and read.
+
+    Never raises except [Eio.Cancel.Cancelled]: per-file failures become
+    [Journal_corrupt] verdicts. *)
 val sweep :
   base_dir:string ->
   window_sec:float ->
+  ?grace_sec:float ->
   unit ->
   (string * string * verdict) list

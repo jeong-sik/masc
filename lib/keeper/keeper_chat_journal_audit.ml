@@ -21,7 +21,20 @@ type verdict =
   | Journal_missing
   | Journal_truncated
   | Journal_corrupt of string
+  | Store_unreadable of string
 [@@deriving show, eq]
+
+(* Bounded constructor name for metric labels: [show_verdict] embeds exception
+   strings (paths, Unix_errors), which would make the label cardinality
+   unbounded. The full detail stays in the log line. *)
+let verdict_label = function
+  | Match -> "match"
+  | Mismatch _ -> "mismatch"
+  | Journal_missing -> "journal_missing"
+  | Journal_truncated -> "journal_truncated"
+  | Journal_corrupt _ -> "journal_corrupt"
+  | Store_unreadable _ -> "store_unreadable"
+;;
 
 let is_surface_post_row ~first_ts ~last_ts (row : Store.chat_message) =
   Store.Role.equal row.role Store.Role.Assistant
@@ -143,9 +156,14 @@ let assistant_text_mismatch ~reply_details rows =
      | None -> String.equal (String.trim details.reply) "" |> not)
 ;;
 
-(* Rule 4: bijection on execution_id between Tool_result_ready events and
-   joined tool rows. *)
+(* Rule 4: the sorted execution_id multisets of Tool_result_ready events and
+   joined tool rows must be equal. A multiset, not subset-both-ways: a
+   duplicated execution_id (the dual-write bug class this auditor exists to
+   catch) must not pass silently. *)
 let tool_rows_mismatch entries rows =
+  let sorted_execution_ids ids =
+    ids |> List.map Ids.Execution_id.to_string |> List.sort String.compare
+  in
   let journal_ids =
     List.filter_map
       (fun (entry : Journal.journaled_event) ->
@@ -153,23 +171,13 @@ let tool_rows_mismatch entries rows =
          | Events.Tool_result_ready { execution_id; _ } -> Some execution_id
          | _ -> None)
       entries
+    |> sorted_execution_ids
   in
   let store_ids =
     List.filter_map (fun (row : Store.chat_message) -> row.execution_id) rows
+    |> sorted_execution_ids
   in
-  let missing_from_store =
-    List.exists
-      (fun id ->
-         not (List.exists (fun row_id -> Ids.Execution_id.equal row_id id) store_ids))
-      journal_ids
-  in
-  let missing_from_journal =
-    List.exists
-      (fun row_id ->
-         not (List.exists (fun id -> Ids.Execution_id.equal row_id id) journal_ids))
-      store_ids
-  in
-  missing_from_store || missing_from_journal
+  not (List.equal String.equal journal_ids store_ids)
 ;;
 
 let compare entries rows =
@@ -209,8 +217,11 @@ let compare entries rows =
 
 (** {1 IO shell} *)
 
-let read_journal_entries journal =
-  try `Entries (Journal.read_journal journal) with
+(* Read-only: [read_journal_path] creates nothing on disk, unlike
+   [Journal.open_journal] whose mkdir would mint junk directories for ids
+   whose sanitized path does not exist. *)
+let read_journal_entries path =
+  try `Entries (Journal.read_journal_path path) with
   | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
   | Sys_error _ -> `Missing
   | Invalid_argument detail -> `Corrupt detail
@@ -280,17 +291,61 @@ let join_rows ~operation_id entries all =
   dedupe_by_id (transcript_rows @ key_or_ref_rows @ window_rows)
 ;;
 
+(* Shared core: journal entries already read, store rows already loaded. The
+   sweep calls this once per journal file against a per-keeper row list loaded
+   once per pass. *)
+let audit_entries ~operation_id ~entries ~rows =
+  compare entries (join_rows ~operation_id entries rows)
+;;
+
+(* [Store.load_all] converts a read failure into [[]] after reporting it, so
+   an empty load is ambiguous with a genuinely empty store. The stat heuristic
+   separates them: a store file that exists with content yet loaded zero rows
+   is unreadable for audit purposes (read error, or every line unparseable),
+   not missing. *)
+let store_unreadable_detail ~base_dir ~keeper_name =
+  let path = Store.chat_path ~base_dir ~keeper_name in
+  try
+    let stats = Unix.stat path in
+    if stats.st_size > 0
+    then
+      Some
+        (Printf.sprintf
+           "store file %s holds %d bytes but load_all returned zero rows"
+           path
+           stats.st_size)
+    else None
+  with
+  | Unix.Unix_error _ -> None
+;;
+
+(* A terminal-event journal against an empty store load reports
+   [Store_unreadable] when the store file is visibly non-empty; without a
+   terminal event the [Journal_truncated] verdict stands on its own. *)
+let audit_loaded ~base_dir ~keeper_name ~operation_id ~rows entries =
+  match last_terminal_event entries, rows with
+  | Some _, [] ->
+    (match store_unreadable_detail ~base_dir ~keeper_name with
+     | Some detail -> Store_unreadable detail
+     | None -> audit_entries ~operation_id ~entries ~rows)
+  | _ -> audit_entries ~operation_id ~entries ~rows
+;;
+
 let audit_operation ~base_dir ~keeper_name ~operation_id =
-  let journal = Journal.open_journal ~base_dir ~keeper_name ~operation_id () in
-  match read_journal_entries journal with
+  let path = Journal.journal_path ~base_dir ~keeper_name ~operation_id in
+  match read_journal_entries path with
   | `Missing -> Journal_missing
   | `Corrupt detail -> Journal_corrupt detail
   | `Entries entries ->
-    let all = Store.load_all ~base_dir ~keeper_name in
-    compare entries (join_rows ~operation_id entries all)
+    let rows = Store.load_all ~base_dir ~keeper_name in
+    audit_loaded ~base_dir ~keeper_name ~operation_id ~rows entries
 ;;
 
-let sweep ~base_dir ~window_sec () =
+let stem_is_canonical stem =
+  String.equal (Workspace_utils_backend_setup.sanitize_namespace_segment stem) stem
+;;
+
+let sweep ~base_dir ~window_sec ?(grace_sec = 600.) () =
   let root =
     Filename.concat
       (Common.masc_dir_from_base_path ~base_path:base_dir)
@@ -317,29 +372,62 @@ let sweep ~base_dir ~window_sec () =
            try Array.to_list (Sys.readdir dir) with
            | Sys_error _ -> []
          in
+         (* One store load per keeper per pass, and only when that keeper has
+            an auditable journal; auditing each file against its own load was
+            O(files x store size). *)
+         let rows = lazy (Store.load_all ~base_dir ~keeper_name) in
          List.filter_map
            (fun file ->
               if not (Filename.check_suffix file ".jsonl")
               then None
               else begin
-                let path = Filename.concat dir file in
-                let fresh =
-                  try
-                    let stats = Unix.stat path in
-                    now -. stats.st_mtime <= window_sec
-                  with
-                  | Unix.Unix_error _ -> false
-                in
-                if not fresh
+                let operation_id = Filename.remove_extension file in
+                (* [sanitize_namespace_segment] is not idempotent for
+                   non-canonical stems (a second pass appends another digest),
+                   so the filename stem cannot be re-derived into a path.
+                   Non-canonical ids are outside the audit. *)
+                if not (stem_is_canonical operation_id)
                 then None
                 else begin
-                  let operation_id = Filename.remove_extension file in
-                  let verdict =
-                    try audit_operation ~base_dir ~keeper_name ~operation_id with
-                    | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
-                    | exn -> Journal_corrupt (Printexc.to_string exn)
+                  let path = Filename.concat dir file in
+                  let auditable =
+                    try
+                      let stats = Unix.stat path in
+                      let age = now -. stats.st_mtime in
+                      grace_sec <= age && age <= window_sec
+                    with
+                    | Unix.Unix_error _ -> false
                   in
-                  Some (keeper_name, operation_id, verdict)
+                  if not auditable
+                  then None
+                  else begin
+                    try
+                      match read_journal_entries path with
+                      | `Missing ->
+                        (* Vanished between readdir and read (the retention
+                           sweep raced us): never report [Journal_missing] for
+                           a file that was visible on disk. *)
+                        None
+                      | `Corrupt detail ->
+                        Some (keeper_name, operation_id, Journal_corrupt detail)
+                      | `Entries entries ->
+                        let verdict =
+                          audit_loaded
+                            ~base_dir
+                            ~keeper_name
+                            ~operation_id
+                            ~rows:(Lazy.force rows)
+                            entries
+                        in
+                        Some (keeper_name, operation_id, verdict)
+                    with
+                    | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+                    | exn ->
+                      Some
+                        ( keeper_name
+                        , operation_id
+                        , Journal_corrupt (Printexc.to_string exn) )
+                  end
                 end
               end)
            files)

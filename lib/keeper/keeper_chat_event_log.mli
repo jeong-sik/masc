@@ -70,3 +70,9 @@ val read_journal : journal -> journaled_event list
 (** Reads and strictly decodes every line. Raises [Invalid_argument] on a
     corrupt line and [Sys_error] if the journal file does not exist. Test
     support in stage 1. *)
+
+val read_journal_path : string -> journaled_event list
+(** {!read_journal} over an already-resolved path, creating nothing on disk —
+    unlike {!open_journal}, which mkdirs the parent. For read-only consumers
+    (the stage-2 consistency audit). Same strictness: [Invalid_argument] on a
+    corrupt line, [Sys_error] when the file does not exist. *)

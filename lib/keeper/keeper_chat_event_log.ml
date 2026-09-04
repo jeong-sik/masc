@@ -695,3 +695,8 @@ let read_journal journal =
        in
        loop [])
 ;;
+
+(* Read-only consumers (the consistency audit) must not mkdir as a side
+   effect of reading, so they hold no [open_journal] handle. *)
+let read_journal_path path = read_journal { path; now = Time_compat.now }
+

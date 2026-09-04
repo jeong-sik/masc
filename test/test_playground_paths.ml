@@ -73,40 +73,46 @@ let test_no_path_escape () =
     ".masc/playground/_/"
     (PP.bundle_root "")
 
-(* Canonical/short name normalization — keeper-X-agent strips to X *)
+(* RFC-0393: keeper name is the only spelling (sanitize_keeper_name is a no-op identity wrapper). *)
 
 let test_strip_canonical_to_short () =
-  check string "canonical stripped to short"
-    "omicron-improver"
+  check string "canonical stays canonical"
+    "keeper-omicron-improver-agent"
     (PP.sanitize_keeper_name "keeper-omicron-improver-agent");
   check string "short stays short"
     "omicron-improver"
     (PP.sanitize_keeper_name "omicron-improver");
-  check string "beta canonical"
-    "beta"
+  check string "beta canonical stays canonical"
+    "keeper-beta-agent"
     (PP.sanitize_keeper_name "keeper-beta-agent");
-  check string "alpha canonical"
-    "alpha"
+  check string "alpha canonical stays canonical"
+    "keeper-alpha-agent"
     (PP.sanitize_keeper_name "keeper-alpha-agent")
 
 let test_canonical_short_path_identity () =
-  check string "bundle_root identity"
+  check string "bundle_root keeps short name as suffix"
     (PP.bundle_root "beta")
+    (PP.bundle_root "beta");
+  check string "bundle_root keeps canonical name as suffix"
     (PP.bundle_root "keeper-beta-agent")
+    (PP.bundle_root "keeper-beta-agent");
+  check bool "bundle_root maps distinct names to distinct paths"
+    false
+    (PP.bundle_root "beta" = PP.bundle_root "keeper-beta-agent")
 
 let test_strip_edge_cases () =
   check string "keeper-agent not stripped (inner would be empty)"
     "keeper-agent"
     (PP.sanitize_keeper_name "keeper-agent");
   check string "single-char inner name"
-    "x"
+    "keeper-x-agent"
     (PP.sanitize_keeper_name "keeper-x-agent");
   check string "idempotent"
-    (PP.sanitize_keeper_name "omicron-improver")
+    (PP.sanitize_keeper_name "keeper-omicron-improver-agent")
     (PP.sanitize_keeper_name
        (PP.sanitize_keeper_name "keeper-omicron-improver-agent"));
   check string "different keepers stay different"
-    "alpha"
+    "keeper-alpha-agent"
     (PP.sanitize_keeper_name "keeper-alpha-agent");
   check bool "alpha != beta after normalize"
     true

@@ -35,10 +35,14 @@ sedi -E "s/^\(version [^)]+\)$/\(version $NEW_VERSION\)/" \
   "$ROOT_DIR/dune-project"
 echo "  dune-project updated"
 
-# 2) README badge
-sedi -E "s/version-[0-9]+\.[0-9]+\.[0-9]+-blue/version-$NEW_VERSION-blue/" \
-  "$ROOT_DIR/README.md"
-echo "  README.md badge updated"
+# 2) README badge, if the README still carries one
+if grep -Eq 'version-[0-9]+\.[0-9]+\.[0-9]+-blue' "$ROOT_DIR/README.md"; then
+  sedi -E "s/version-[0-9]+\.[0-9]+\.[0-9]+-blue/version-$NEW_VERSION-blue/" \
+    "$ROOT_DIR/README.md"
+  echo "  README.md badge updated"
+else
+  echo "  README.md has no version badge — nothing to update"
+fi
 
 # 3) opam metadata (if tracked)
 if [ -f "$ROOT_DIR/masc.opam" ]; then

@@ -859,17 +859,23 @@ let measure_noise_floor ?seconds ~agent_id () =
        | _ -> None)
 ;;
 
-(* A copy with the room subtracted, or [None] when either sox step fails —
-   the caller then transcribes what it already had rather than nothing.
+(* Run [f] on a copy with the room subtracted; when either sox step fails,
+   [f] runs on what the caller already had rather than on nothing.
 
    The profile comes from the capture's own leading moment, not a separate
    recording: sox drops leading silence, so what survives at the start is this
    room during this capture. A profile taken seconds earlier describes a room
    that may have changed, and subtracting the wrong profile removes speech. *)
-let noise_reduced_copy ~audio_file =
+let with_noise_reduced_audio ~audio_file ~f =
+  (* The copy belongs to this scope, not its caller: both temporaries are
+     removed when [f] returns, whatever it returns. The old shape handed the
+     reduced file to its caller and nobody removed it — every noise-reduced
+     capture left a masc_nr_*.wav behind forever. *)
   let profile = Filename.temp_file "masc_nr_" ".prof" in
   let reduced = Filename.temp_file "masc_nr_" ".wav" in
-  let cleanup () = try Sys.remove profile with Sys_error _ -> () in
+  let cleanup () =
+    List.iter (fun p -> try Sys.remove p with Sys_error _ -> ()) [ profile; reduced ]
+  in
   Eio_guard.protect ~finally:cleanup (fun () ->
     match
       run_voice_status
@@ -884,13 +890,9 @@ let noise_reduced_copy ~audio_file =
           [ "sox"; audio_file; reduced; "noisered"; profile; "0.21" ]
       with
       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-      | Unix.WEXITED 0, _ -> Some reduced
-      | _ ->
-        (try Sys.remove reduced with Sys_error _ -> ());
-        None)
-    | _ ->
-      (try Sys.remove reduced with Sys_error _ -> ());
-      None)
+      | Unix.WEXITED 0, _ -> f reduced
+      | _ -> f audio_file)
+    | _ -> f audio_file)
 ;;
 
 (* How often the level is re-read while recording. Each read is a seek and a
@@ -1195,10 +1197,9 @@ let record_and_transcribe
             second against the room and knows no reading cleared it. *)
          Ok (no_audio ~reason:"nothing rose above the room" ~floor capture)
        | Ok Ended_after_speech ->
-         let audio_file =
-           if capture.Voice_config.noise_reduction
-           then Option.value (noise_reduced_copy ~audio_file) ~default:audio_file
-           else audio_file
-         in
-         transcribe_audio ~audio_file ?language_code ()))
+         if capture.Voice_config.noise_reduction
+         then
+           with_noise_reduced_audio ~audio_file ~f:(fun audio_file ->
+               transcribe_audio ~audio_file ?language_code ())
+         else transcribe_audio ~audio_file ?language_code ()))
 ;;

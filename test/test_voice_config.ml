@@ -56,6 +56,24 @@ let parse json_str =
   let json = Yojson.Safe.from_string json_str in
   Vc.parse_json json
 
+(* A document carrying every section the parser requires, with the sections a
+   test is about replaced in it.
+
+   [tts], [stt] and [session] are required -- the live config carries all
+   three -- so a fixture that leaves one out is refused for that and never
+   reaches the thing the test is checking. Four capture tests and two
+   endpoint-shape tests were passing on the wrong rejection: one of them
+   asserted that a zero-length calibration is refused and was reading a
+   complaint about a missing [tts]. The check would have gone on passing with
+   that validation deleted. *)
+let config_with sections =
+  match Yojson.Safe.from_string (minimal_config_json ~session_endpoints:"[]") with
+  | `Assoc fields ->
+      `Assoc
+        (List.filter (fun (key, _) -> not (List.mem_assoc key sections)) fields
+        @ sections)
+  | other -> other
+
 let rec mkdir_p path =
   if path <> "" && not (Sys.file_exists path) then begin
     mkdir_p (Filename.dirname path);
@@ -330,7 +348,7 @@ let test_a_live_shaped_endpoint_parses () =
       ]
   in
   let json =
-    `Assoc
+    config_with
       [ ( "tts"
         , `Assoc
             [ "default_model", `String "eleven_multilingual_v2"
@@ -357,10 +375,11 @@ let test_a_live_shaped_endpoint_parses () =
    anything that notices, so this pins that the rejection names the field. *)
 let test_an_unknown_endpoint_field_is_rejected_by_name () =
   let json =
-    `Assoc
+    config_with
       [ ( "tts"
         , `Assoc
-            [ "default_voice", `String "SAz9YHcvj6GT2YYXdXww"
+            [ "default_model", `String "eleven_multilingual_v2"
+            ; "default_voice", `String "SAz9YHcvj6GT2YYXdXww"
             ; ( "endpoints"
               , `List
                   [ `Assoc
@@ -388,7 +407,7 @@ let test_an_unknown_endpoint_field_is_rejected_by_name () =
    one workstation, and two margins picked that way were both wrong before an
    operator could do anything about it. *)
 let test_capture_defaults_when_the_section_is_absent () =
-  match Vc.parse_json (`Assoc []) with
+  match Vc.parse_json (config_with []) with
   | Error message -> fail ("an absent capture section must parse: " ^ message)
   | Ok config ->
     check
@@ -400,7 +419,7 @@ let test_capture_defaults_when_the_section_is_absent () =
 
 let test_capture_values_are_read () =
   let json =
-    `Assoc
+    config_with
       [ ( "capture"
         , `Assoc
             [ "calibration_seconds", `Float 1.25
@@ -427,7 +446,9 @@ let test_capture_values_are_read () =
 (* A partial section keeps the defaults for what it does not say, so tuning one
    value does not silently reset the others. *)
 let test_a_partial_capture_section_keeps_the_rest () =
-  match Vc.parse_json (`Assoc [ "capture", `Assoc [ "trigger_margin_db", `Float 2.0 ] ]) with
+  match
+    Vc.parse_json (config_with [ "capture", `Assoc [ "trigger_margin_db", `Float 2.0 ] ])
+  with
   | Error message -> fail message
   | Ok config ->
     check (float 0.001) "the one given" 2.0 config.Vc.capture.Vc.trigger_margin_db;
@@ -468,7 +489,10 @@ let test_a_zero_trailing_silence_is_refused () =
 ;;
 
 let test_a_zero_calibration_is_refused () =
-  match Vc.parse_json (`Assoc [ "capture", `Assoc [ "calibration_seconds", `Float 0.0 ] ]) with
+  match
+    Vc.parse_json
+      (config_with [ "capture", `Assoc [ "calibration_seconds", `Float 0.0 ] ])
+  with
   | Ok _ -> fail "a zero-length calibration probe must be refused"
   | Error message ->
     check

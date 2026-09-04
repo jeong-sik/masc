@@ -95,7 +95,9 @@ require_not_contains docs/MCP-TEMPLATE.md '"command": "masc-stdio"'
 require_contains quickstart.sh 'TEAM="none"'
 require_contains quickstart.sh 'mcp-client.env'
 require_contains quickstart.sh '--client-env MASC_TOKEN'
-require_contains .github/workflows/ci.yml 'run: scripts/quickstart-smoke.sh'
+# ci.yml ran this until #32511 collapsed the nine-job lane into one build.
+# release.yml still runs it, and that is the assertion below. Asserting it
+# of ci.yml too would ask for a job someone deliberately removed.
 require_contains .github/workflows/release.yml 'run: scripts/quickstart-smoke.sh'
 require_contains docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md "jq '{status,auth_change,agent_name,role,raw_token_file,dashboard_url,mcp_url,mcp_client}'"
 require_not_contains docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md '.codex_mcp'

@@ -802,8 +802,6 @@ let get_or_compute_unbounded_payload key ~ttl compute =
   let entry = get_or_compute_entry key ~ttl compute in
   payload_of_entry entry
 
-let get_or_compute_unbounded key ~ttl compute =
-  (get_or_compute_unbounded_payload key ~ttl compute).json
 
 let get_or_compute_payload key ~ttl compute =
   match Atomic.get default_clock with

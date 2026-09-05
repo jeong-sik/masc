@@ -1457,9 +1457,16 @@ let fetch_board_hearths ~(host : string) ~(port : int) :
     only. The response is the tools envelope [{ok, message}]; interpreting it
     stays with the caller. *)
 let post_board_new ~(host : string) ~(port : int) ~(title : string)
-    ~(body : string) : (Yojson.Safe.t, string) result =
+    ~(body : string) ?hearth () : (Yojson.Safe.t, string) result =
+  let hearth_field =
+    match hearth with
+    | Some h when String.trim h <> "" -> [ ("hearth", `String (String.trim h)) ]
+    | _ -> []
+  in
   let payload =
-    `Assoc [ ("title", `String title); ("body", `String body) ]
+    `Assoc
+      ([ ("title", `String title); ("body", `String body) ]
+      @ hearth_field)
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_post"
     ~body:(Yojson.Safe.to_string payload)

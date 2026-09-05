@@ -192,8 +192,12 @@ Linux 가 아니거나 Landlock 을 못 만들면(`landlock_create_ruleset` 이 
 1. `Exec_ssh_protocol` v3: `mode`. shim: Landlock·seccomp C stub, `Observe`/`Guest_local`
    분기, `observe_unsupported`. `test_exec_shim`. Linux 컨테이너에서의 실측을 PR 코멘트에.
 2. microvm 기동에 `--tmpfs /tmp`. Apple 과 nerdctl 은 같은 Docker 문법으로 표현하고, msb 는 `Not_expressible` 로 기록.
-3. 게이트(`Keeper_gate`)에 Observe 단계와 결과 분기, replay 는 `Effect`. 프로필 설정
-   `observation_run`. audit 행 `observation_run` 추가.
+3. 게이트(`Keeper_gate`)에 Observe 단계. 둘로 나눈다.
+   - 3a: `decide ?observe` 콜백, exit 0 이면 새 출처 `observed_in_box` 로 allow, 그 외는
+     지금과 같은 defer. 상자가 있는지는 shim 의 `--probe` `capabilities` 로 판단하고
+     엔드포인트마다 한 번 기억한다. replay 는 `Effect`.
+   - 3b: 거부된 실행의 종료 코드·stderr 를 approval 행(`request_context`)에 붙여 judge 가
+     본다. 프로필 설정 `observation_run`(`guest_local` 스위치).
 4. 재생 측정(§4-2)과 canary(keeper 하나, 하루) 뒤 기본 켬.
 
 ## 8. 고치는 것

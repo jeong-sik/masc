@@ -78,8 +78,13 @@ val max_reported_checkouts : int
     costs six bounded git subprocesses in
     {!Keeper_sandbox_control.checkout_json}. Live maximum is 12.
 
-    Exposed because a test builds one checkout past it; the entry budget is a
-    pure safety stop with no such handle and stays internal. *)
+    Exposed because a test builds one checkout past it and because the
+    endpoint probe in {!Keeper_sandbox_remote_checkouts} receives it as an
+    argument. *)
+
+val max_scanned_entries : int
+(** The safety stop on directory entries one discovery walk reads. Exposed
+    only so the endpoint probe stops at the same number as the host walk. *)
 
 val discover : root:string -> (discovery, scan_error) result
 (** [discover ~root] walks [root] and reports the git checkouts under it,

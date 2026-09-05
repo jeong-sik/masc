@@ -28,7 +28,9 @@ val parse_probe_json :
     * inspected_checkout list
   , string ) result
 (** Parse the raw JSON output produced by the remote discovery and inspection
-    script. Exposed for unit testing. *)
+    script. Every field is read by shape: a row, a limit or a [git_link] value
+    that does not decode is an [Error] naming the field, never a default.
+    Exposed for unit testing. *)
 
 val discover_and_inspect :
   timeout_sec:float ->

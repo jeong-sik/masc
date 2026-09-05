@@ -135,6 +135,70 @@ let test_parse_probe_json_invalid () =
   | Ok _ -> fail "expected json parse error"
 ;;
 
+(* A row the probe did not print as promised is an error naming the field,
+   not an exception and not a default. *)
+let expect_error what expected raw =
+  match R.parse_probe_json ~root:"/root" raw with
+  | Error detail -> check string what expected detail
+  | Ok _ -> failf "%s: decoded" what
+;;
+
+let row_with fields =
+  Printf.sprintf
+    {|{"checkouts": [{"relative_path": "c1", "name": "c1", %s
+       "origin": null, "branch": null, "head": null, "dirty": null,
+       "changed_files": null, "target_ref": null, "upstream_head": null,
+       "ahead": null, "behind": null}], "scanned": 1, "limit": null}|}
+    fields
+;;
+
+let test_an_unknown_git_link_is_an_error () =
+  expect_error
+    "git_link"
+    {|checkouts[0]: git_link: unknown value "symlink"|}
+    (row_with {|"git_link": "symlink",|})
+;;
+
+let test_a_missing_field_is_an_error_not_an_exception () =
+  expect_error
+    "git_link absent"
+    "checkouts[0]: git_link: expected a string, got null"
+    (row_with "");
+  expect_error
+    "relative_path wrong shape"
+    "checkouts[0]: relative_path: expected a string, got an integer"
+    {|{"checkouts": [{"relative_path": 3}], "scanned": 1, "limit": null}|}
+;;
+
+let test_half_a_status_is_an_error () =
+  expect_error
+    "dirty without changed_files"
+    "checkouts[0]: dirty and changed_files come from one status read; only one is present"
+    {|{"checkouts": [{"relative_path": "c1", "name": "c1", "git_link": "directory",
+       "origin": null, "branch": null, "head": null, "dirty": true,
+       "changed_files": null, "target_ref": null, "upstream_head": null,
+       "ahead": null, "behind": null}], "scanned": 1, "limit": null}|}
+;;
+
+let test_an_unknown_limit_is_an_error () =
+  expect_error
+    "unknown kind"
+    {|limit: unknown kind "time_budget_exhausted"|}
+    {|{"checkouts": [], "scanned": 1, "limit": {"kind": "time_budget_exhausted"}}|};
+  expect_error
+    "budget absent"
+    "budget: expected an integer, got null"
+    {|{"checkouts": [], "scanned": 1, "limit": {"kind": "checkout_budget_exhausted"}}|}
+;;
+
+let test_the_wrong_top_level_shapes_are_errors () =
+  expect_error "not an object" "probe output: expected an object, got a list" "[]";
+  expect_error
+    "checkouts not a list"
+    "checkouts: expected a list, got an object"
+    {|{"checkouts": {}, "scanned": 1, "limit": null}|}
+;;
+
 let () =
   run
     "Keeper_sandbox_remote_checkouts"
@@ -143,6 +207,16 @@ let () =
         ; test_case "checkout budget limit" `Quick test_parse_probe_json_limit_checkout_budget
         ; test_case "entry budget limit" `Quick test_parse_probe_json_limit_entry_budget
         ; test_case "invalid json" `Quick test_parse_probe_json_invalid
+        ] )
+    ; ( "a row that does not decode is an error"
+      , [ test_case "unknown git_link" `Quick test_an_unknown_git_link_is_an_error
+        ; test_case
+            "missing or wrongly shaped field"
+            `Quick
+            test_a_missing_field_is_an_error_not_an_exception
+        ; test_case "half a status" `Quick test_half_a_status_is_an_error
+        ; test_case "unknown limit" `Quick test_an_unknown_limit_is_an_error
+        ; test_case "wrong top-level shapes" `Quick test_the_wrong_top_level_shapes_are_errors
         ] )
     ]
 ;;

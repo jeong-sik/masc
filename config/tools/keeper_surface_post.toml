@@ -9,7 +9,10 @@ reply inside an existing thread (thread_ts) or carry Block Kit blocks; see \
 those parameters. Posting to an unbound surface is an error. These endpoints \
 are read by a person, so an unchanged status reposted every cycle crowds \
 their view and says nothing the previous one did not; when there is nothing \
-new, the turn ends without a post."""
+new, the turn ends without a post. This is a terminal-contract tool: when it \
+succeeds, the turn ends. The runtime rejects any batch that places it \
+alongside another tool call — call it alone in its own turn, never batched \
+with reads, writes, or shell execution."""
 
 [[params]]
 name = "surface"

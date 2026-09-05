@@ -398,7 +398,12 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
             | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
             | exception exn ->
               { status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
-            | status, stdout, stderr ->
+            | Sandbox_target.Transport_failed { reason = _; stdout; stderr } ->
+              (* The lane never delivered a command result; surface it the way
+                 an exception is -- a failed status with the error already in
+                 stderr -- so a boxed command is not read as a clean run. *)
+              { status = Unix.WEXITED 1; stdout; stderr }
+            | Sandbox_target.Ran { status; stdout; stderr } ->
               (match
                  ( deliver_capture attachments.stdout_to stdout
                  , deliver_capture attachments.stderr_to stderr )
@@ -502,7 +507,8 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
               , Some (fun chunk -> on_chunk (`Stderr chunk)) )
         in
         (match
-           runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd
+           Sandbox_target.status_tuple
+             (runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd)
          with
          | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
          | exception exn ->
@@ -642,7 +648,8 @@ let rec dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
                        , Some (fun chunk -> on_chunk (`Stderr chunk)) )
                  in
                  let status, stdout, stderr =
-                   runner ~on_stdout_chunk ~on_stderr_chunk ~stages:specs
+                   Sandbox_target.status_tuple
+                     (runner ~on_stdout_chunk ~on_stderr_chunk ~stages:specs)
                  in
                  { status; stdout; stderr }
              | None ->

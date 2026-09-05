@@ -176,10 +176,9 @@ Keeper 는 MASC 가 직접 돌리는 에이전트입니다. 설치가 끝나도 
 이 변수는 **서버를 띄운 그 환경**에서 읽습니다. 설정 파일이 아닙니다. MASC 는 키를
 묻지 않고 디스크에 쓰지도 않습니다.
 
-카탈로그에는 제공자·모델 바인딩 31개가 예시를 겸해 들어 있습니다. 그중
-`max-request-body-bytes` 를 선언한 **13개만 Keeper 턴을 받습니다.** 나머지는 부팅
-경고가 어느 키를 넣어야 하는지 이름까지 찍어 줍니다. `[runtime].default` 는 13개
-안에 있으니, 키만 있으면 기본값은 바로 돕니다.
+카탈로그에는 제공자·모델 바인딩 31개가 예시를 겸해 들어 있습니다. 31개 모두
+`max-request-body-bytes` 가 선언되어 부팅 경고 없이 Keeper 턴을 받을 수 있습니다.
+`[runtime].default` 가 바로 돌 수 있도록 준비되어 있습니다.
 
 **샌드박스 이미지.** Keeper 는 매 턴을 이미지 안에서 돌리는데, MASC 는 이미지를
 같이 배송하지 않습니다.
@@ -209,10 +208,28 @@ Keeper 가 hover 나 정의로 가려면 샌드박스 `PATH` 에 언어 서버�
 | 언어 | 프로그램 |
 | --- | --- |
 | OCaml | `ocamllsp` |
-| TypeScript, JavaScript | `typescript-language-server` |
-| Python | `pylsp` |
+| TypeScript | `typescript-language-server` |
+| JavaScript | `typescript-language-server` |
+| Python | `pyright-langserver` |
 | Rust | `rust-analyzer` |
 | Go | `gopls` |
+| C | `clangd` |
+| C++ | `clangd` |
+| Swift | `sourcekit-lsp` |
+| Java | `jdtls` |
+| Kotlin | `kotlin-language-server` |
+| Ruby | `ruby-lsp` |
+| PHP | `intelephense` |
+| Lua | `lua-language-server` |
+| Bash | `bash-language-server` |
+| JSON | `vscode-json-language-server` |
+| YAML | `yaml-language-server` |
+| Zig | `zls` |
+| Haskell | `haskell-language-server-wrapper` |
+| Elixir | `elixir-ls` |
+| Dart | `dart` |
+| Scala | `metals` |
+| C# | `csharp-ls` |
 
 ## 잘 안 될 때
 

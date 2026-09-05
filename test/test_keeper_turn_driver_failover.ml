@@ -892,15 +892,49 @@ let test_run_named_media_degrade_emits_typed_manifest () =
          ()
        : (Driver.named_run_result, Agent_core.Error.t) result);
     let degraded =
+      (* Manifest rows arrive newest-first here; [List.rev] puts them back in
+         emission order so the walk takes the first row the run emitted, not
+         the last. #33165 decides the degrade per lane candidate, so a turn
+         that degrades on the head and falls through to the next candidate
+         emits one degraded row per attempt, and the operator-facing account
+         starts where the turn actually started. *)
       List.find_opt
         (fun (manifest : Runtime_manifest.t) ->
            manifest.event = Runtime_manifest.Runtime_routed
            && String.equal manifest.status "degraded")
-        !manifests
+        (List.rev !manifests)
     in
     match degraded with
     | None -> Alcotest.fail "run_named omitted the media degradation manifest"
     | Some manifest ->
+      (* #33165 decides the degrade per lane candidate, so this turn degrades
+         on both candidates: the head run first, then the fallback. Assert the
+         full row set rather than the head alone, so this test cannot pass by
+         accidentally reading whichever row happens to sit at the head of the
+         collected list. *)
+      let degraded_rows =
+        List.rev
+          (List.filter
+             (fun (row : Runtime_manifest.t) ->
+                row.event = Runtime_manifest.Runtime_routed
+                && String.equal row.status "degraded")
+             !manifests)
+      in
+      Alcotest.(check int)
+        "degraded rows: one per lane candidate" 2
+        (List.length degraded_rows);
+      Alcotest.(check string)
+        "first degraded row names the head runtime"
+        "primary.test_model"
+        (string_member "degraded_runtime_id"
+           (Runtime_manifest.public_projection_of_decision
+              (List.nth degraded_rows 0).decision));
+      Alcotest.(check string)
+        "second degraded row names the fallback runtime"
+        "fallback.test_model"
+        (string_member "degraded_runtime_id"
+           (Runtime_manifest.public_projection_of_decision
+              (List.nth degraded_rows 1).decision));
       let decision = Runtime_manifest.public_projection_of_decision manifest.decision in
       Alcotest.(check string)
         "typed routing action"

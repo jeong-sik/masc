@@ -125,6 +125,44 @@ let container_name_of meta =
    [endpoint], which may start the guest it owns; a caller with no turn hands
    in [attached_guest_endpoint], which cannot. Path translation and status
    handling are the same either way, so they live here once. *)
+(* The read backend's translation of a [run_outcome] into a read result.
+   [Transport_failed] is always an error -- this is what stops a down lane
+   from reading as an empty [Ok] on the Grep lane, whose [ok_exit_codes]
+   accepts exit 1. Pure and exported so the distinction is tested directly
+   (test_keeper_sandbox_read_backend, the differential test). *)
+let classify_read_outcome ~lane ~endpoint_name ~ok_exit_codes ~max_bytes outcome =
+  match (outcome : Masc_exec.Sandbox_target.run_outcome) with
+  | Transport_failed { reason; stderr; _ } ->
+    Error
+      (Printf.sprintf
+         "%s_read_transport_failed: endpoint=%s reason=%s stderr=%s"
+         lane endpoint_name reason (Exec_policy.truncate_for_log stderr))
+  | Ran { status; stdout; stderr } ->
+    (match status with
+     | Unix.WEXITED code
+       when List.exists (fun allowed -> allowed = code) ok_exit_codes ->
+       let output =
+         if String.length stdout > max_bytes then String.sub stdout 0 max_bytes
+         else stdout
+       in
+       Ok (status, output)
+     | Unix.WEXITED code ->
+       Error
+         (Printf.sprintf
+            "%s_read_failed: endpoint=%s exit=%d stderr=%s"
+            lane endpoint_name code (Exec_policy.truncate_for_log stderr))
+     | Unix.WSIGNALED signal ->
+       Error
+         (Printf.sprintf
+            "%s_read_signaled: endpoint=%s signal=%d stderr=%s"
+            lane endpoint_name signal (Exec_policy.truncate_for_log stderr))
+     | Unix.WSTOPPED signal ->
+       Error
+         (Printf.sprintf
+            "%s_read_stopped: endpoint=%s signal=%d"
+            lane endpoint_name signal))
+;;
+
 let run_endpoint_command_with_status
     ~acquire_endpoint
     ?(ok_exit_codes = [ 0 ])
@@ -144,7 +182,7 @@ let run_endpoint_command_with_status
       host_root
   in
   let runner = Keeper_sandbox_remote.runner ~timeout_sec endpoint in
-  let status, stdout, stderr =
+  let outcome =
     runner ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
       ~argv:command_argv ~env:[||] ~cwd:(Some cwd)
   in
@@ -152,29 +190,7 @@ let run_endpoint_command_with_status
     Keeper_sandbox_remote.lane_prefix (Keeper_sandbox_remote.transport endpoint)
   in
   let endpoint_name = Keeper_sandbox_remote.name endpoint in
-  match status with
-  | Unix.WEXITED code
-    when List.exists (fun allowed -> allowed = code) ok_exit_codes ->
-    let output =
-      if String.length stdout > max_bytes then String.sub stdout 0 max_bytes
-      else stdout
-    in
-    Ok (status, output)
-  | Unix.WEXITED code ->
-    Error
-      (Printf.sprintf
-         "%s_read_failed: endpoint=%s exit=%d stderr=%s"
-         lane endpoint_name code (Exec_policy.truncate_for_log stderr))
-  | Unix.WSIGNALED signal ->
-    Error
-      (Printf.sprintf
-         "%s_read_signaled: endpoint=%s signal=%d stderr=%s"
-         lane endpoint_name signal (Exec_policy.truncate_for_log stderr))
-  | Unix.WSTOPPED signal ->
-    Error
-      (Printf.sprintf
-         "%s_read_stopped: endpoint=%s signal=%d"
-         lane endpoint_name signal)
+  classify_read_outcome ~lane ~endpoint_name ~ok_exit_codes ~max_bytes outcome
 ;;
 
 type read_dispatch =

@@ -29,10 +29,6 @@ val ollama_api_ps_path : string
     probe path that exercises a model end-to-end. *)
 val ollama_api_generate_path : string
 
-(** Permissive substring check against {!ollama_port_needle}. Works
-    for [http://], [https://], [127.0.0.1], [localhost], or bare
-    [host:port]. *)
-val is_ollama_url : string -> bool
 
 (** {1 OpenAI-compatible API paths} *)
 
@@ -46,8 +42,6 @@ val chat_completions_path : string
 
 (** {1 CLI transport discriminator} *)
 
-(** Strict prefix match for {!cli_transport_prefix}. *)
-val is_cli_transport_url : string -> bool
 
 (** {1 Local LLM URL} *)
 

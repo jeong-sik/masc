@@ -20,7 +20,8 @@ let recording_caller ?(status = Unix.WEXITED 0) ?(prefix = "") () =
       (match on_stdout_chunk with
        | Some emit -> emit (String.concat " " argv ^ "\n")
        | None -> ());
-      (status, prefix ^ String.concat " " argv, "")
+      Sandbox_target.Ran
+        { status; stdout = prefix ^ String.concat " " argv; stderr = "" }
   in
   (runner, calls)
 

@@ -47,8 +47,6 @@ export interface KeeperMemoryHealthAlert {
   target: KeeperMemoryHealthAlertTarget
   label: string
   message: string
-  value: number
-  threshold: number
 }
 
 export interface KeeperMemoryHealthVisionErrorReason {
@@ -141,8 +139,6 @@ function decodeKeeperMemoryHealthAlert(raw: unknown): KeeperMemoryHealthAlert | 
     'target',
     'label',
     'message',
-    'value',
-    'threshold',
   ])) return null
   const code =
     raw.code === 'snapshot_read_error'
@@ -164,8 +160,6 @@ function decodeKeeperMemoryHealthAlert(raw: unknown): KeeperMemoryHealthAlert | 
       : null
   const label = nonEmptyString(raw.label)
   const message = nonEmptyString(raw.message)
-  const value = finiteNumber(raw.value)
-  const threshold = finiteNumber(raw.threshold)
   if (
     code === null
     || target === null
@@ -173,8 +167,6 @@ function decodeKeeperMemoryHealthAlert(raw: unknown): KeeperMemoryHealthAlert | 
     || raw.severity !== KEEPER_MEMORY_HEALTH_ALERT_SEVERITY[code]
     || label === null
     || message === null
-    || value === null
-    || threshold === null
   ) return null
   return {
     code,
@@ -182,8 +174,6 @@ function decodeKeeperMemoryHealthAlert(raw: unknown): KeeperMemoryHealthAlert | 
     target,
     label,
     message,
-    value,
-    threshold,
   }
 }
 

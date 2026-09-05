@@ -223,6 +223,5 @@ let default_http_post ~url ~headers ~body =
 
 module For_testing = struct
   let jwt_rs256 = jwt_rs256
-  let hosts_yml ~login ~token = hosts_yml ~login ~token
   let parse_mint_response = parse_mint_response
 end

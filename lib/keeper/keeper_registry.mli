@@ -586,15 +586,6 @@ val dispatch_event_unit :
   base_path:string ->
   ?origin:lifecycle_event_origin ->
   string -> Keeper_state_machine.event -> unit
-(** Like [dispatch_event_with_audit], but logs and emits a Otel_metric_store
-    counter on [Error]. *)
-val dispatch_event_with_audit_and_log :
-  base_path:string ->
-  ?origin:lifecycle_event_origin ->
-  ?events_fired:Keeper_state_machine.event list ->
-  ?selected_event:Keeper_state_machine.event ->
-  string -> Keeper_state_machine.event ->
-  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
 (** Get the fine-grained phase of a keeper. *)
 val get_phase : base_path:string -> string -> Keeper_state_machine.phase option

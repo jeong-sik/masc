@@ -139,6 +139,12 @@ type standalone_lane_status =
   | Standalone_no_retained_observation
   | Standalone_unavailable
 
+type standalone_lane_configuration =
+  | Lane_ready
+  | Lane_slotless
+  | Lane_unconfigured
+  | Lane_registry_unavailable
+
 type standalone_lane_slot_count = {
   slsc_slot_id : string;
   slsc_count : int;
@@ -150,7 +156,7 @@ type standalone_lane = {
   sl_purpose : string option;
   sl_required : bool;
   sl_status : standalone_lane_status;
-  sl_configuration_state : string;
+  sl_configuration_state : standalone_lane_configuration;
   sl_admitted_slots : string list;
   sl_cli_slots : string list;
   sl_dropped_slots : string list;
@@ -807,6 +813,38 @@ let sanitize_terminal_text text =
   in
   append 0;
   Buffer.contents output
+;;
+
+(* One row of a text that has rows. The terminal boundary escapes control
+   bytes because an external value may carry them by mistake or on purpose;
+   a file's newline is neither, it is the text's own shape, and a list cell
+   that prints it as [\x0A] reads as damage. So a break becomes a one-cell
+   return mark, a tab a space, and the rest goes through the same escape as
+   every other external value. The mark is neutral-width (U+23CE), so a
+   preview grows by one cell per line, never by six. *)
+let preview_line text =
+  let return_mark = "\xe2\x8f\x8e" in
+  let output = Buffer.create (String.length text) in
+  let length = String.length text in
+  let rec walk index =
+    if index < length
+    then (
+      match text.[index] with
+      | '\r' when index + 1 < length && text.[index + 1] = '\n' ->
+        Buffer.add_string output return_mark;
+        walk (index + 2)
+      | '\n' | '\r' ->
+        Buffer.add_string output return_mark;
+        walk (index + 1)
+      | '\t' ->
+        Buffer.add_char output ' ';
+        walk (index + 1)
+      | byte ->
+        Buffer.add_char output byte;
+        walk (index + 1))
+  in
+  walk 0;
+  sanitize_terminal_text (Buffer.contents output)
 ;;
 
 let short_timestamp_for_terminal text =
@@ -4302,7 +4340,7 @@ let decode_memory_alert json =
   let* () =
     require_exact_object_fields
       "memory alert"
-      [ "code"; "severity"; "target"; "label"; "message"; "value"; "threshold" ]
+      [ "code"; "severity"; "target"; "label"; "message" ]
       json
   in
   let* code = required_string_field json "code" in
@@ -4310,19 +4348,12 @@ let decode_memory_alert json =
   let* target = required_string_field json "target" in
   let* ma_label = required_string_field json "label" in
   let* ma_message = required_string_field json "message" in
-  (* [value] and [threshold] are read to hold the server to the contract and
-     then dropped: the count is already drawn from the health record, and the
-     server sends 0.0 for every threshold. *)
-  let* value = require_float_field json "value" in
-  let* threshold = require_float_field json "threshold" in
   (match memory_alert_code_of_wire code with
    | Some ma_code
      when String.equal code target
           && String.equal severity (memory_alert_severity_wire ma_code)
           && not (String.equal ma_label "")
-          && not (String.equal ma_message "")
-          && Float.is_finite value
-          && Float.is_finite threshold -> Ok { ma_code; ma_label; ma_message }
+          && not (String.equal ma_message "") -> Ok { ma_code; ma_label; ma_message }
    | Some _ | None -> Error "memory alert has an invalid typed code contract")
 
 let decode_memory_keeper_health json =
@@ -5264,6 +5295,22 @@ let decode_keeper_lanes_snapshot json =
   let* kls_lanes = decode_list "snapshots" decode_keeper_lane items in
   Ok { kls_generated_at; kls_count; kls_lanes }
 
+let standalone_lane_configuration_of_string = function
+  | "ready" -> Ok Lane_ready
+  (* The server calls this one "degraded": configured, but nothing admitted.
+     The word it shares with the status axis means something else there, so
+     the type says what the state is rather than how bad it is. *)
+  | "degraded" -> Ok Lane_slotless
+  | "unconfigured" -> Ok Lane_unconfigured
+  | "unavailable" -> Ok Lane_registry_unavailable
+  | other -> Error ("standalone lane configuration: unknown value " ^ other)
+
+let standalone_lane_configuration_to_string = function
+  | Lane_ready -> "ready"
+  | Lane_slotless -> "no slot admitted"
+  | Lane_unconfigured -> "not configured"
+  | Lane_registry_unavailable -> "registry unreadable"
+
 let standalone_lane_status_of_string = function
   | "running" -> Ok Standalone_running
   | "idle" -> Ok Standalone_idle
@@ -5300,7 +5347,10 @@ let decode_standalone_lane json =
     else Error "standalone lane row is not observation-only"
   in
   let* _configured = required_nullable_bool_field json "configured" in
-  let* sl_configuration_state = required_string_field json "configuration_state" in
+  let* configuration_state = required_string_field json "configuration_state" in
+  let* sl_configuration_state =
+    standalone_lane_configuration_of_string configuration_state
+  in
   let* admitted_slots = required_list_field json "admitted_slots" in
   let* sl_admitted_slots =
     decode_list

@@ -26,10 +26,6 @@ val strip_suffix : suffix:string -> string -> string
 val is_loopback_host : string -> bool
 val is_unspecified_host : string -> bool
 
-val base_url_has_non_loopback_host : unit -> bool
-(** [true] when the configured base URL points outside loopback;
-    governs whether strict auth must be enabled. *)
-
 val http_auth_strict_enabled : unit -> bool
 (** [true] when strict HTTP token auth is enabled by config. *)
 
@@ -57,10 +53,6 @@ val observer_sse_auth_token_from_request : Httpun.Request.t -> string option
 
 val agent_from_request : Httpun.Request.t -> string option
 (** Caller-declared agent name from the request (header / query). *)
-
-val internal_keeper_agent_from_request : Httpun.Request.t -> string option
-(** Agent name when the request is recognised as an internal keeper
-    subprocess via the dedicated header. *)
 
 (** {1 MCP / observer / operator verification} *)
 
@@ -300,12 +292,6 @@ val agent_rl_key_of_request : Httpun.Request.t -> string option
 val is_public_read_path : String.t -> bool
 (** [true] when [path] is on the public-read allowlist. *)
 
-val authorize_permission_request :
-  base_path:string ->
-  permission:Masc_domain.permission ->
-  Httpun.Request.t -> (unit, Masc_domain.masc_error) result
-(** Check that the request carries [permission]. *)
-
 val authorize_read_request :
   base_path:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
 (** Check read-tier auth. *)
@@ -330,8 +316,8 @@ val authorize_token_bound_permission_request :
   base_path:string ->
   permission:Masc_domain.permission ->
   Httpun.Request.t -> (string, Masc_domain.masc_error) result
-(** Like [authorize_permission_request] but returns the credential's canonical
-    agent name for actor-bound operations. *)
+(** Check that the request carries [permission] and return the credential's
+    canonical agent name, for operations that must be bound to an actor. *)
 
 val authorize_optional_token_bound_permission_request :
   base_path:string ->
@@ -391,6 +377,5 @@ val with_token_permission_auth :
 module For_testing : sig
   val snapshot_server_state : unit -> Mcp_server.server_state option
   val restore_server_state : Mcp_server.server_state option -> unit
-  val snapshot_auth_config : unit -> Server_auth_config.t option
   val restore_auth_config : Server_auth_config.t option -> unit
 end

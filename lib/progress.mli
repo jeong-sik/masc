@@ -40,12 +40,6 @@ module Tracker : sig
     start_time : float;
   }
 
-  val notify_ref :
-    (task_id:string -> progress:float -> ?message:string ->
-     ?estimated_remaining:float -> unit -> unit) ref
-
-  val assert_wired : unit -> unit
-
   val create : task_id:string -> ?total_steps:int -> unit -> t
   val update : t -> progress:float -> ?message:string -> unit -> unit
   val step : t -> ?message:string -> unit -> unit

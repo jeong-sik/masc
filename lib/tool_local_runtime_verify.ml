@@ -120,9 +120,6 @@ let probe_chat_completion_compatible
       | Ok (Error http_error) ->
           (Some false, Some (error_message_of_http_error http_error))
 
-let provider_health_reachable ~status =
-  Option.equal Int.equal status (Some 200)
-
 let classify_runtime_blocker ~provider_reachable ~slot_reachable
     ~chat_contract_status ~expected_model ~actual_model_id ~expected_slots
     ~actual_slots_total ~expected_ctx ~actual_ctx ~chat_completion_compatible

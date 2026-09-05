@@ -1163,38 +1163,6 @@ let dispatch_event_unit ~base_path ?(origin = Generic_dispatch) name event =
       (Printf.sprintf "%s: dispatch_event failed: %s" name error_str)
 ;;
 
-let dispatch_event_with_audit_and_log
-      ~base_path
-      ?(origin = Generic_dispatch)
-      ?events_fired
-      ?selected_event
-      name
-      event
-  =
-  match
-    dispatch_event_with_audit
-      ~base_path
-      ~origin
-      ?events_fired
-      ?selected_event
-      name
-      event
-  with
-  | Ok tr -> Ok tr
-  | Error e ->
-    let reason_label =
-      match e with
-      | Keeper_state_machine.Terminal_state _ -> "terminal_state"
-      | Keeper_state_machine.Invalid_transition _ -> "invalid_transition"
-      | Keeper_state_machine.Precondition_violation _ -> "precondition_violation"
-    in
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string DispatchEventFailures)
-      ~labels:[ "keeper", name; "reason", reason_label ]
-      ();
-    Error e
-;;
-
 let prepare_fiber_launch ~base_path name =
   (match get ~base_path name with
    | Some entry ->

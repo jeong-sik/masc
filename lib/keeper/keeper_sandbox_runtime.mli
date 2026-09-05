@@ -90,10 +90,6 @@ val docker_run_pull_never_args : unit -> string list
 (** Generic next action when Docker image inspection fails. *)
 val docker_image_inspect_next_action : string
 
-(** [docker_image_present ~image ~timeout_sec] checks whether the configured
-    keeper sandbox image can be inspected locally. [Error message] includes
-    daemon/socket access failures as well as missing-image failures. *)
-val docker_image_present : image:string -> timeout_sec:float -> (unit, string) result
 (** Docker [--label] argv fragment for containers owned by the keeper
     sandbox runtime. *)
 val docker_label_args
@@ -353,7 +349,7 @@ val remove_persistent_containers
 (** Global keeper sandbox preflight used by sandbox diagnostics.
     Returns [None] when
     [MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false]. *)
-val docker_preflight : timeout_sec:float -> unit -> docker_preflight option
+val docker_preflight : ?image:string -> timeout_sec:float -> unit -> docker_preflight option
 
 val docker_preflight_to_yojson : docker_preflight -> Yojson.Safe.t
 

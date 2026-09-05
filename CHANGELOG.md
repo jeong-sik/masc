@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.32.0] - 2026-09-05
+
 - **A context overflow walks the history down to its floor.** The same-run
   shrink retry no longer stops after three halvings; it goes on while the
   runtime can name a strictly smaller view and ends where none exists, so
@@ -43,6 +45,25 @@
   fails; and a deadline expiry lists the executables still running under dune,
   found through parent links since dune starts each one in its own process
   group, instead of only a log tail.
+- **A keeper's `sandbox_image` reaches the docker preflight.** The keeper
+  TOML `sandbox_image` is passed through to the docker preflight (#33434,
+  #33455): a custom tag is trimmed before it is used, and the rejection
+  wording when a stated image cannot be used matches what actually happens.
+- **A cross-domain lane start or restart delegates to the owning domain.**
+  (#33368, #33447) The three wildcard catches the delegation needs are
+  justified with cancel-guard marker comments (#33494).
+- **The microsandbox shim probe fires without `--stream`.** (#33431, #33464)
+- **TUI: web link previews and a six-slot categorical theme.** Web link
+  preview, OpenGraph extraction, rich embed cards and a 3D preview modal
+  (#33478); a categorical six-slot theme applied to the file listing
+  (#33471); smart declutter approvals, a refine HUD, an interactive diff
+  review modal and tool-row readability (#33448); a theme test that could
+  not reach the lane decoder is fixed (#33469).
+- **`keeper_lane_status`, the lane's account of itself.** (#33472)
+- **Dashboard: a per-keeper fusion review list.** (#33452)
+- **.mli exposure cleanup.** Unused .mli exposures are closed and what the
+  compiler already reported dead is removed (#33474); the research record
+  tree grows the index it lacked (#33336).
 
 ## [0.31.0] - 2026-09-04
 

@@ -182,8 +182,8 @@ let test_docker_keeper_blocks_rg_outside () =
   Alcotest.(check bool) "rg outside playground blocked" true
     (blocked_by_sandbox_boundary raw)
 
-let test_local_keeper_rg_file_path_uses_parent_workdir () =
-  setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
+let test_docker_keeper_rg_file_path_uses_parent_workdir () =
+  setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   if not (Keeper_tool_execute_path.shell_command_available "rg") then ()
   else (
@@ -219,8 +219,8 @@ let test_local_keeper_rg_file_path_uses_parent_workdir () =
    (transport-aware) assertion: handle_tool_search_files is the function
    keeper_tool_runtime.ml returns verbatim to the keeper, so what we
    assert here is exactly what the keeper receives — no producer-only gap. *)
-let test_local_keeper_rg_invalid_type_surfaces_stderr () =
-  setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
+let test_docker_keeper_rg_invalid_type_surfaces_stderr () =
+  setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   if not (Keeper_tool_execute_path.shell_command_available "rg") then ()
   else (
@@ -459,6 +459,9 @@ let test_docker_other_container_root_stays_blocked () =
     Alcotest.(check bool) "outside allowed roots" true
       (String_util.contains_substring e "path_outside_sandbox")
 
+(* A remote_ssh keeper's tree is on the endpoint, so its omitted cwd resolves
+   to the root in host form without the host being asked whether that
+   directory exists, and without creating it (RFC-0427 A-1). *)
 let test_readonly_execute_omitted_cwd_does_not_create_write_root () =
   setup ~keeper_name:"readonly-exec" ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
   @@ fun ~base:_ ~config ~meta ~playground ->
@@ -471,16 +474,43 @@ let test_readonly_execute_omitted_cwd_does_not_create_write_root () =
       ~write_enabled:false
       ~args
   with
-  | Ok cwd -> Alcotest.fail ("read-only execute should not create cwd: " ^ cwd)
-  | Error e ->
-    Alcotest.(check bool)
-      "missing cwd reported"
-      true
-      (String_util.contains_substring e "cwd_not_directory");
+  | Error e -> Alcotest.fail ("an endpoint-owned tree's root was refused on the host: " ^ e)
+  | Ok cwd ->
+    Alcotest.(check string) "the root in host form" playground cwd;
     Alcotest.(check bool)
       "read-only execute did not create write root"
       false
       (Sys.file_exists playground)
+
+(* The polisher case of 2026-09-05: a microvm keeper names a worktree that
+   exists only in its guest volume. The host has no such directory (its
+   playground holds the bookkeeping bundle), and that used to be refused 38
+   times a day as cwd_not_directory. The resolver now returns the confined
+   host-form path for the remote lane to map, and a docker keeper -- whose
+   tree really is this host's -- still hears that the directory is missing. *)
+let test_a_guest_only_cwd_is_the_endpoints_to_check () =
+  (setup ~keeper_name:"polisher" ~sandbox:Keeper_types_profile_sandbox.Micro_vm
+   @@ fun ~base:_ ~config ~meta ~playground ->
+   let guest_only = Filename.concat playground "masc-t1348" in
+   Alcotest.(check bool) "absent on the host" false (Sys.file_exists guest_only);
+   let args = `Assoc [ ("cwd", `String "masc-t1348") ] in
+   match
+     Keeper_tool_execute_path.resolve_tool_execute_cwd ~config ~meta ~write_enabled:true ~args
+   with
+   | Error e -> Alcotest.fail ("guest-only cwd refused on the host: " ^ e)
+   | Ok cwd ->
+     Alcotest.(check string) "host-form path for the remote lane" guest_only cwd;
+     Alcotest.(check bool) "nothing was created" false (Sys.file_exists guest_only));
+  setup ~keeper_name:"omega" ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~base:_ ~config ~meta ~playground:_ ->
+  let args = `Assoc [ ("cwd", `String "masc-t1348") ] in
+  match
+    Keeper_tool_execute_path.resolve_tool_execute_cwd ~config ~meta ~write_enabled:true ~args
+  with
+  | Ok cwd -> Alcotest.fail ("a shared-mount tree's missing cwd resolved: " ^ cwd)
+  | Error e ->
+    Alcotest.(check bool) "the host still answers for its own tree" true
+      (String_util.contains_substring e "cwd_not_directory")
 
 
 (* Containment held for the read tools and did not hold for spawn: it ran
@@ -533,11 +563,11 @@ let () =
             `Quick test_shell_command_available_rejects_empty_path_segment_cwd;
           Alcotest.test_case "docker keeper blocks rg outside" `Quick
             test_docker_keeper_blocks_rg_outside;
-          Alcotest.test_case "local keeper rg file path uses parent workdir"
-            `Quick test_local_keeper_rg_file_path_uses_parent_workdir;
+          Alcotest.test_case "docker keeper rg file path uses parent workdir"
+            `Quick test_docker_keeper_rg_file_path_uses_parent_workdir;
           Alcotest.test_case
-            "local keeper rg invalid type surfaces stderr to keeper"
-            `Quick test_local_keeper_rg_invalid_type_surfaces_stderr;
+            "docker keeper rg invalid type surfaces stderr to keeper"
+            `Quick test_docker_keeper_rg_invalid_type_surfaces_stderr;
           Alcotest.test_case "docker keeper invalid type rejects before docker spawn"
             `Quick test_docker_keeper_invalid_type_rejects_before_docker_spawn;
           Alcotest.test_case "docker keeper blocks second rg outside" `Quick
@@ -564,5 +594,8 @@ let () =
             "read-only Execute omitted cwd does not create write root"
             `Quick
             test_readonly_execute_omitted_cwd_does_not_create_write_root;
+          Alcotest.test_case
+            "a guest-only cwd is the endpoint's to check"
+            `Quick test_a_guest_only_cwd_is_the_endpoints_to_check;
         ] );
     ]

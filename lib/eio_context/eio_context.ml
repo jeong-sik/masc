@@ -11,6 +11,7 @@ type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
 type root_switch_binding =
   { switch : Eio.Switch.t
   ; owner_domain : Domain.id
+  ; dispatch_stream : (unit -> unit) Eio.Stream.t
   }
 
 type state_snapshot = {
@@ -78,9 +79,27 @@ let get_mono_clock_opt () =
   Atomic.get current_mono_clock
 
 let set_switch sw =
-  Atomic.set
-    current_sw
-    (Some { switch = sw; owner_domain = Domain.self () })
+  let owner_domain = Domain.self () in
+  let dispatch_stream = Eio.Stream.create 512 in
+  let binding = { switch = sw; owner_domain; dispatch_stream } in
+  Atomic.set current_sw (Some binding);
+  Eio.Switch.on_release sw (fun () ->
+    let _ = Atomic.compare_and_set current_sw (Some binding) None in
+    let rec drain () =
+      match Eio.Stream.take_nonblocking dispatch_stream with
+      | Some task ->
+        (try task () with _ -> ());  (* cancel-guard-ok: release-time drain; Cancelled is the expected teardown signal here and must not abort the drain *)
+        drain ()
+      | None -> ()
+    in
+    drain ());
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    while true do
+      let task = Eio.Stream.take dispatch_stream in
+      Eio.Fiber.fork ~sw (fun () ->
+        try task () with _ -> ())  (* cancel-guard-ok: daemon safety net; a task's own catch resolves its promise first, so this arm only sees fork-teardown noise the daemon must survive *)
+    done;
+    `Stop_daemon)
 
 let get_root_switch_opt () =
   Option.map (fun binding -> binding.switch) (Atomic.get current_sw)
@@ -89,6 +108,25 @@ let root_switch_on_current_domain () =
   match Atomic.get current_sw with
   | Some binding -> binding.owner_domain = Domain.self ()
   | None -> false
+
+let run_on_owner_domain (type a) (f : unit -> a) : a =
+  match Atomic.get current_sw with
+  | None -> f ()
+  | Some binding when binding.owner_domain = Domain.self () -> f ()
+  | Some binding ->
+    let p, r = Eio.Promise.create () in
+    let task () =
+      try
+        let res = f () in
+        Eio.Promise.resolve_ok r res
+      with exn ->  (* cancel-guard-ok: not a swallow — the exception, Cancelled included, is re-delivered to the awaiting domain via the promise *)
+        let bt = Printexc.get_raw_backtrace () in
+        Eio.Promise.resolve_error r (exn, bt)
+    in
+    Eio.Stream.add binding.dispatch_stream task;
+    match Eio.Promise.await p with
+    | Ok res -> res
+    | Error (exn, bt) -> Printexc.raise_with_backtrace exn bt
 
 let set_env env =
   Atomic.set current_env (Some env)

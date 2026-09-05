@@ -361,13 +361,14 @@ let discover_and_inspect
       ]
     in
     let status, stdout, stderr =
-      runner
-        ~on_stdout_chunk:None
-        ~on_stderr_chunk:None
-        ~stdin_content:None
-        ~argv
-        ~env:[||]
-        ~cwd:(Some root)
+      Masc_exec.Sandbox_target.status_tuple
+        (runner
+           ~on_stdout_chunk:None
+           ~on_stderr_chunk:None
+           ~stdin_content:None
+           ~argv
+           ~env:[||]
+           ~cwd:(Some root))
     in
     match status with
     | Unix.WEXITED 0 ->

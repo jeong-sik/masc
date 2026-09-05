@@ -100,10 +100,6 @@ val append_entry :
   masc_root:string -> keeper_name:string -> trace_id:string ->
   tool_call_entry -> unit
 
-val append_summary :
-  masc_root:string -> keeper_name:string -> trace_id:string ->
-  trajectory -> unit
-
 val append_withheld_thinking :
   masc_root:string -> keeper_name:string -> trace_id:string ->
   withheld_thinking_entry -> unit

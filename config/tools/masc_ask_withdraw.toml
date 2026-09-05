@@ -1,19 +1,10 @@
 name = "masc_ask_withdraw"
 description = """
-Take back a question you asked and no longer need answered.
+Withdraw an open question you asked that is no longer needed.
 
-Use this the moment the answer stops mattering: the work moved on, you found \
-the answer yourself, the task was dropped. A question left standing costs an \
-operator the attention of reading it and deciding, for a choice that no \
-longer changes anything.
-
-Only you can withdraw your own question. Nothing withdraws one on your behalf \
-after some interval -- a question you asked stays open until you answer it \
-yourself this way or a human answers it.
-
-Withdrawing is final and it is not an answer. A question already answered \
-cannot be withdrawn: the operator already spent the attention, and the answer \
-stands whether or not you still want it. Read it with masc_ask_status."""
+Use this when an answer stops mattering (work moved on, answered independently, \
+or task dropped). Only the asking keeper may withdraw their question. \
+Withdrawing is final; questions already answered cannot be withdrawn."""
 additional_properties = false
 # RFC-0403 후속. 이 셋은 2026-08-03 ~ 09-02 31일간 fleet 전체에서 호출 0회이고,
 # 그 사이 agent-core keeper 4곳의 요청마다 5,498 B 를 싣고 있었다. 지연의
@@ -30,12 +21,10 @@ defer_loading = true
 name = "ask_id"
 type = "string"
 required = true
-description = "The question to take back, as returned by masc_ask."
+description = "The ask ID to take back, as returned by masc_ask."
 
 [[params]]
 name = "reason"
 type = "string"
 required = true
-description = """
-Why it no longer needs answering, in your own words. An operator who saw the \
-question appear and then vanish has no other way to know what happened to it."""
+description = "Why the question no longer needs answering."

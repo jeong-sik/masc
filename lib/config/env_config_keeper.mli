@@ -67,11 +67,6 @@ module KeeperAutonomous : sig
   (** Wording used when the fleet does not configure one. Single definition;
       {!Keeper_unified_prompt.autonomous_wake_marker} aliases it. *)
 
-  val wake_prompt_opt : unit -> string option
-  (** Fleet wake prompt, [None] when unset. Raises
-      {!Env_config_core.Config_error} on a set-but-invalid value rather than
-      falling back, so a typo surfaces at read time instead of silently
-      restoring the default. *)
 
   val wake_prompt : unit -> string
   (** Fleet value else {!default_wake_prompt} -- what a keeper with no override
@@ -98,15 +93,8 @@ module KeeperMemoryOs : sig
       reference these constants rather than re-spelling the literals, so a
       knob rename breaks compilation instead of silently drifting. *)
 
-  val recall_env_key : string
   val librarian_env_key : string
-  val librarian_cadence_turns_env_key : string
-  val librarian_max_messages_env_key : string
 
-  val recall_enabled_default : bool
-  val librarian_enabled_default : bool
-  val librarian_cadence_turns_default : int
-  val librarian_max_messages_default : int
 
   val librarian_config_state : unit -> librarian_config_state
   (** Typed projection of the effective librarian toggle. Blank or absent
@@ -196,9 +184,6 @@ module KeeperKeepalive : sig
       absent. Kept here so runtime execution and operator projection share one
       value. *)
 
-  val parse_stream_idle_timeout_sec : string -> (float, string) result
-  (** Parse the operator-supplied seconds value. This schema parser performs
-      no clamping and accepts only finite, strictly positive values. *)
 
   val stream_idle_timeout_sec : unit -> float option
   (** Explicit streaming-provider idle-gap timeout. [None] means disabled;

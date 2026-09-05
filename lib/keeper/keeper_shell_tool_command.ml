@@ -117,25 +117,30 @@ let caller ~(dispatch : dispatch) ~(descriptor : Keeper_tool_descriptor.t)
  fun ~on_stdout_chunk ~on_stderr_chunk ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ->
   match dispatch ~descriptor ~args:args_json with
   | None ->
-    ( Unix.WEXITED 1
-    , ""
-    , "shell command: the tool runtime returned no execution" )
+    Sandbox_target.Transport_failed
+      { reason = "shell command: the tool runtime returned no execution"
+      ; stdout = ""
+      ; stderr = "shell command: the tool runtime returned no execution"
+      }
   | Some execution -> (
     match execution.Keeper_tool_execution.disposition with
     | Tool_result.Completed _ ->
       let stdout = execution.Keeper_tool_execution.raw_output in
       (match on_stdout_chunk with Some emit -> emit stdout | None -> ());
-      (Unix.WEXITED 0, stdout, "")
+      Sandbox_target.Ran { status = Unix.WEXITED 0; stdout; stderr = "" }
     | Tool_result.Failed _ ->
       let stderr = execution.Keeper_tool_execution.raw_output in
       (match on_stderr_chunk with Some emit -> emit stderr | None -> ());
-      (Unix.WEXITED 1, "", stderr)
+      Sandbox_target.Ran { status = Unix.WEXITED 1; stdout = ""; stderr }
     | Tool_result.Deferred _ ->
-      ( Unix.WEXITED 1
-      , ""
-      , Printf.sprintf
-          "shell command: %s defers; call the tool directly to await it"
-          descriptor.Keeper_tool_descriptor.public_name ))
+      Sandbox_target.Ran
+        { status = Unix.WEXITED 1
+        ; stdout = ""
+        ; stderr =
+            Printf.sprintf
+              "shell command: %s defers; call the tool directly to await it"
+              descriptor.Keeper_tool_descriptor.public_name
+        })
 
 (* {1 The rewrite} *)
 

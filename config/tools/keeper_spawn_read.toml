@@ -1,5 +1,8 @@
 name = "keeper_spawn_read"
-description = "Read what a spawned process has written so far. Returns the bytes after the given offset and the offset to continue from, so reading twice sees each byte once. If the buffer bound discarded bytes before the requested offset, the answer says how many rather than closing the gap silently."
+description = """
+Read output stream bytes from a spawned process starting at an offset.
+
+Returns newly produced bytes and the next offset to continue reading from."""
 additional_properties = false
 
 [[params]]
@@ -12,9 +15,9 @@ description = "Handle returned by keeper_spawn."
 name = "stream"
 type = "string"
 enum = ["stdout", "stderr"]
-description = "Which stream to read. Defaults to stdout."
+description = "Stream to read (stdout or stderr). Defaults to stdout."
 
 [[params]]
 name = "from"
 type = "integer"
-description = "Offset to read from, as returned by a previous read. Defaults to the start of the stream."
+description = "Byte offset to read from. Defaults to start of stream."

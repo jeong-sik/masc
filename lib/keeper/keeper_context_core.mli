@@ -103,21 +103,6 @@ val save_agent_core_checkpoint :
     has [expected_source_ref]. Equal-turn content changes are rejected by the
     checkpoint store's exact byte-identity CAS. *)
 
-module For_testing : sig
-  val save_agent_core_checkpoint_if_source_with_history :
-    save_agent_core_history:
-      (session_dir:string -> Agent_core.Checkpoint.t -> unit) ->
-    runtime_id:string ->
-    keeper_name:string ->
-    session:session_context ->
-    agent_name:string ->
-    ctx:working_context ->
-    expected_source_ref:Keeper_checkpoint_ref.t ->
-    ( Agent_core.Checkpoint.t * Keeper_checkpoint_store.checkpoint_installation
-    , Keeper_checkpoint_store.checkpoint_cas_error checkpoint_write_error )
-    result
-end
-
 (** {1 AGENT_CORE checkpoint inspection} *)
 
 

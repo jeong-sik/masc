@@ -67,26 +67,3 @@ val run_named_with_masc_tools :
     compatibility for non-Keeper callers. [on_runtime_attempt_error] forwards
     the typed per-candidate observation from {!Keeper_turn_driver.run_named}
     without changing its terminal result. *)
-
-val run_model_with_masc_tools :
-  model_label:string ->
-  goal:string ->
-  ?system_prompt:string ->
-  masc_tools:Masc_domain.tool_schema list ->
-  dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
-  ?stream_idle_timeout_s:float ->
-  ?temperature:float ->
-  ?max_tokens:int ->
-  ?hooks:Agent_core.Hooks.hooks ->
-  ?enable_thinking:bool ->
-  ?provider_config_transform:
-    (Llm_provider.Provider_config.t ->
-    (Llm_provider.Provider_config.t, Agent_core.Error.t) result) ->
-  ?raw_trace:Agent_core.Raw_trace.t ->
-  ?on_event:(Agent_core.Types.sse_event -> unit) ->
-  ?transport:Masc_grpc_transport.t ->
-  ?sw:Eio.Switch.t ->
-  ?net:Eio_context.eio_net ->
-  unit ->
-  (Runtime_agent.run_result, Agent_core.Error.t) result
-(** [run_model_by_label] variant that bridges MASC tool schemas into AGENT_CORE tools. *)

@@ -264,9 +264,3 @@ val handle_keeper_get_subroutes :
     (status / tools / checkpoints listing / etc.). *)
 
 (** {1 Memory-OS dashboard JSON} *)
-
-val memory_os_fact_json :
-  current:bool -> Keeper_memory_os_types.fact -> Yojson.Safe.t
-(** One current fact's read-only dashboard projection. [current] is derived
-    from snapshot membership; no retention, score, or legacy kind field is
-    serialized. *)

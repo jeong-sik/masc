@@ -145,8 +145,10 @@ type tool_projection = private
             be coloured, and the row's own style is the only channel a reading
             of state has. Folding is what makes that channel matter: [Full]
             gives every call a row and a glyph of its own, while a fold puts
-            six calls behind one line where "1 failed" sits mid-sentence in
-            the same colour as "5 returned".
+            six calls behind a summary. The failed and still-open calls now sit
+            on a row of their own under their own mark, so the trouble is a
+            line rather than a clause mid-sentence; that row still carries the
+            block's single colour, which is what this field is about.
 
             Same precedence as the summary glyph, from the same function, so
             the mark and the colour cannot disagree about one block. *)
@@ -168,9 +170,12 @@ val tool_block : ?omitted_steps:int -> tool_activity list -> tool_block
 
 val project_tool_block : tool_projection_mode -> tool_block -> tool_projection
 (** The only tool-row formatter. [Full] preserves the existing one-row-per-call
-    output. [Compact] folds two or more calls into one outcome summary and
-    states the exact number of hidden detail rows. Neither mode fabricates
-    missing identity, duration, outcome, or omitted transcript steps. *)
+    output. [Compact] folds two or more calls into an inventory row -- what
+    ran, and what returned -- and, when any call failed or is still open, one
+    further row naming those under their own mark. A block whose calls all
+    returned keeps a single row. Both modes state the exact number of hidden
+    detail rows, and neither fabricates missing identity, duration, outcome, or
+    omitted transcript steps. *)
 
 (** Live stream diagnostics, including lines the reader could not read and
     typed server protocol errors. Kept because dropping either makes a failed

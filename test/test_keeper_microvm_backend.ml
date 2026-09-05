@@ -408,20 +408,22 @@ let test_the_shim_prefix_refuses_where_the_identity_cannot_be_named () =
     (match shim_prefix Backend.Nerdctl_kata with
      | Ok argv -> argv
      | Error detail -> fail detail);
-  match shim_prefix Backend.Microsandbox with
-  | Error detail ->
-    (* The refusal has to name the identity, not the environment: msb has
-       -e/--env, and a reason that says otherwise sends the next reader to
-       read a help page that contradicts it. *)
-    check
-      Alcotest.bool
-      "the refusal names the identity it cannot express"
-      true
-      (Astring.String.is_infix ~affix:"--user" detail)
-  | Ok argv ->
-    Alcotest.failf
-      "msb was handed a --user value its help does not carry: %s"
-      (String.concat " " argv)
+  check
+    (Alcotest.list Alcotest.string)
+    "microsandbox carries it without --user"
+    [ "msb"
+    ; "exec"
+    ; "--stream"
+    ; "-w"
+    ; "/masc-work"
+    ; "--env"
+    ; "MASC_EXEC_SHIM_CONFIG=/opt/masc-exec-shim/masc-exec-shim.conf"
+    ; "g"
+    ; "--"
+    ]
+    (match shim_prefix Backend.Microsandbox with
+     | Ok argv -> argv
+     | Error detail -> fail detail);
 ;;
 
 (* A closed network is an isolation property that is not a

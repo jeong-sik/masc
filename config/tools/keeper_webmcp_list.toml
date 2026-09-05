@@ -1,12 +1,8 @@
 name = "keeper_webmcp_list"
 description = """
-List the WebMCP tools a browser page has registered on document.modelContext.
+List WebMCP tools registered on document.modelContext in an open browser page.
 
-\
-Requires an operator-run headed Chrome with --enable-features=WebMCP and \
---remote-debugging-port, and the target page already open; when either is \
-missing the call fails immediately with the reason instead of retrying. \
-Returns JSON {surface, tools:[{name, description, origin}]}."""
+Requires Chrome started with --enable-features=WebMCP and --remote-debugging-port."""
 additional_properties = false
 
 # Held back from the request until the model asks for it by name.
@@ -19,9 +15,9 @@ defer_loading = true
 name = "page"
 type = "string"
 required = true
-description = "Substring matched against open page URLs to pick the target page, for example 8935/dashboard."
+description = "Substring matched against open page URLs to select the target page."
 
 [[params]]
 name = "cdp_port"
 type = "integer"
-description = "Chrome DevTools port on 127.0.0.1. Defaults to 9222."
+description = "Chrome DevTools remote debugging port. Defaults to 9222."

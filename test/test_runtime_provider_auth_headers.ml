@@ -969,6 +969,7 @@ let test_runtime_adapter_keeps_auth_out_of_headers () =
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []
     ; egress_allowlists = []
+    ; lsp_servers = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -1003,6 +1004,7 @@ let test_runtime_adapter_filters_toml_auth_headers () =
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []
     ; egress_allowlists = []
+    ; lsp_servers = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -1038,6 +1040,7 @@ let provider_cfg () =
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []
     ; egress_allowlists = []
+    ; lsp_servers = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -1139,6 +1142,7 @@ thinking_control_format = "ollama_think"
          ; exact_output_lane_decls = []
          ; exec_ssh_endpoints = []
          ; egress_allowlists = []
+         ; lsp_servers = []
          }
        in
        let provider_cfg =
@@ -1232,6 +1236,7 @@ let runtime_or_fail ?(provider = runpod_provider) () =
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []
     ; egress_allowlists = []
+    ; lsp_servers = []
     }
   in
   match Runtime.of_binding cfg runpod_binding with
@@ -1340,6 +1345,7 @@ let test_runtime_of_binding_preserves_failure_reason () =
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []
     ; egress_allowlists = []
+    ; lsp_servers = []
     }
   in
   match Runtime.of_binding cfg { runpod_binding with enabled = false } with
@@ -1487,6 +1493,7 @@ let test_dashboard_runtime_probe_groups_models_by_provider () =
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []
     ; egress_allowlists = []
+    ; lsp_servers = []
     }
   in
   let runtime binding =

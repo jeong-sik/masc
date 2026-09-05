@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.31.0)
+(version 0.32.0)
 
 ; Format OCaml, and only OCaml. Nothing enforces formatting today:
 ; ocamlformat is disabled repo-wide (.ocamlformat, RFC-0010) and the

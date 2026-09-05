@@ -21,6 +21,19 @@ module Palette = Masc_tui_terminal_palette
 
 module Catalog = Masc_tui_theme_catalog
 
+(* [Catalog.all] reads config/themes relative to the process cwd, and a dune
+   test runs in _build/default/test, where that directory does not exist: the
+   list would quietly narrow to the bundled themes and every contrast below
+   would measure a copy instead of the shipped ones. The prompt gate
+   (test_prompt_templates_render) reads its directory through
+   DUNE_SOURCEROOT; this stanza deps (source_tree config/themes) the same
+   directory, so the two halves agree here. *)
+let themes_base_path () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> Filename.concat root "config/themes"
+  | None -> Filename.concat (Sys.getcwd ()) "config/themes"
+;;
+
 (* The schemes are the ones masc ships, not a copy of them. A number here is
    what a reader who picks that theme sees. *)
 type scheme =
@@ -42,7 +55,7 @@ let schemes =
       | Some palette -> { name = Catalog.name shipped; palette }
       | None ->
         Alcotest.failf "shipped scheme %s has malformed hex" (Catalog.name shipped))
-    (Catalog.all ())
+    (Catalog.all ~base_path:(themes_base_path ()) ())
 ;;
 
 
@@ -426,6 +439,97 @@ let test_keeper_action_colours_stay_apart_without_red_and_green () =
     schemes
 ;;
 
+(* The slot hues, measured on all 43 shipped schemes -- 37 bundled and the
+   six under config/themes.
+
+   The worst pair in full colour vision is 0.023960: horizon-dark's yellow
+   against its green, base0A EFB993 against base0B EFAF8E. The floor is
+   0.023, which leaves about the same margin under the observation that the
+   keeper action floor leaves under its own. It is a ratchet: a scheme added
+   below it fails here rather than in a reader's terminal.
+
+   Not comparable to that floor, though the two numbers look alike. The
+   keeper action test measures only under simulated deficiency and never in
+   full colour vision; this one is the other way round. Measured the same
+   way, these five hues come to 0.003345 under deuteranopia (ayu-dark) and
+   0.003246 under protanopia (ayu-light) -- both the yellow-green pair
+   again, and both about seven times under 0.025.
+
+   So colour does not carry this axis and is not asked to. The file list
+   separates its kinds by glyph; test_tui_file_icon's [glyphs_distinct]
+   checks those are distinct strings, which is byte distinctness and not a
+   measurement of how far apart they read. Any axis moved onto these slots
+   needs a second channel of its own. *)
+let categorical_separation_floor = 0.023
+
+let labelled_categories =
+  List.map
+    (fun slot ->
+      ( (match slot with
+         | Masc_tui_ansi.Theme.Slot_1 -> "Slot_1"
+         | Masc_tui_ansi.Theme.Slot_2 -> "Slot_2"
+         | Masc_tui_ansi.Theme.Slot_3 -> "Slot_3"
+         | Masc_tui_ansi.Theme.Slot_4 -> "Slot_4"
+         | Masc_tui_ansi.Theme.Slot_5 -> "Slot_5")
+      , slot ))
+    Masc_tui_ansi.Theme.all_categories
+;;
+
+let categorical_slot_colours =
+  List.map
+    (fun (label, slot) -> (label, Masc_tui_ansi.Theme.category_colour slot))
+    labelled_categories
+;;
+
+(* A slot is the same bytes as some status token by construction: the theme
+   names seven hues and status_ansi_color claims five of them. What must not
+   happen is a slot aliasing a token drawn on the same terminal row, and the
+   file list is where that bit: it draws Theme.bad () eight times and
+   Theme.ok () once across the two panes write_two_panes joins, and for one
+   commit its media mark was Bright_red -- Theme.bad () to the byte.
+
+   So this holds the slot set clear of those two. Info and warn are still
+   aliased, and are safe only because that surface draws neither; a surface
+   reaching for slot 1 or 2 owes the same check this test makes here. *)
+let test_no_categorical_slot_aliases_a_drawn_status_token () =
+  let drawn = [ "bad", Masc_tui_ansi.Theme.bad; "ok", Masc_tui_ansi.Theme.ok ] in
+  List.iter
+    (fun (slot_label, _) ->
+      List.iter
+        (fun (status_label, token) ->
+          check bool
+            (Printf.sprintf "%s does not draw the same escape as %s" slot_label
+               status_label)
+            false
+            (String.equal
+               (Masc_tui_ansi.Theme.category
+                  (List.assoc slot_label labelled_categories))
+               (token ())))
+        drawn)
+    categorical_slot_colours
+;;
+
+let test_categorical_slots_hold_their_measured_floor () =
+  List.iter
+    (fun scheme ->
+      List.iter
+        (fun ((left_label, left), (right_label, right)) ->
+          let separation =
+            oklab_distance
+              (ansi scheme (Masc_tui_theme.For_testing.ansi_color_index left))
+              (ansi scheme (Masc_tui_theme.For_testing.ansi_color_index right))
+          in
+          check bool
+            (* Six places, so a failure cannot print the same number it is
+               being compared against. *)
+            (Printf.sprintf "%s: %s and %s stay %.6f apart" scheme.name
+               left_label right_label separation)
+            true
+            (separation >= categorical_separation_floor))
+        (pairs categorical_slot_colours))
+    schemes
+;;
+
 (* [tui] lift_colours off. The lift exists for schemes whose colours fall
    under the floor; a reader who picked a high-contrast scheme already solved
    that, and for them the lift is not a rescue but a change to colours they
@@ -582,7 +686,7 @@ base00 = "000000"
 let test_load_retro_themes_toml () =
   List.iter
     (fun name ->
-      let scheme_opt = Catalog.find name in
+      let scheme_opt = Catalog.find ~base_path:(themes_base_path ()) name in
       check bool (name ^ " is discovered from config/themes") true (Option.is_some scheme_opt);
       match scheme_opt with
       | None -> ()
@@ -631,6 +735,45 @@ base0f = "0f0f0f"
   | Error _ -> ()
 ;;
 
+(* The four presets the task names are bundled under exactly those names.
+   [schemes] comes from [Catalog.all], so the contracts above measure every
+   bundled scheme including these four; a name missing from [bundled] fails
+   here instead of quietly shipping. *)
+let retro_preset_names =
+  [ "norton-commander"; "msx-retro"; "pc-tools-vintage"; "cga-classic" ]
+;;
+
+let test_bundled_retro_presets_carry_the_task_names () =
+  List.iter
+    (fun name ->
+      match Catalog.find name with
+      | None -> Alcotest.fail (name ^ " is not bundled")
+      | Some scheme ->
+        check bool (name ^ " is dark") false (Catalog.light scheme);
+        check bool (name ^ " builds a palette") true
+          (Option.is_some (Catalog.to_palette scheme)))
+    retro_preset_names
+;;
+
+let test_contracts_cover_the_bundled_retro_presets () =
+  let measured = List.map (fun s -> s.name) schemes in
+  List.iter
+    (fun name ->
+      check bool (name ^ " is under the readability contracts") true
+        (List.mem name measured))
+    retro_preset_names
+;;
+
+(* AC: :theme <name> switches immediately. [apply] is the same entry the TUI
+   command goes through, so accepting a bundled name and rejecting one no
+   scheme carries is the whole contract of the switch. *)
+let test_theme_command_applies_a_retro_preset_by_name () =
+  check bool "apply accepts a bundled preset" true
+    (Masc_tui_theme_choice.apply "norton-commander");
+  check bool "apply rejects a name no scheme carries" false
+    (Masc_tui_theme_choice.apply "no-such-retro-preset")
+;;
+
 let () =
   Alcotest.run "masc-tui-theme-contrast"
     [ ( "lift_colours"
@@ -662,6 +805,11 @@ let () =
         ; Alcotest.test_case
             "keeper action colours stay apart without red and green" `Quick
             test_keeper_action_colours_stay_apart_without_red_and_green
+        ; Alcotest.test_case "no categorical slot aliases a drawn status token"
+            `Quick test_no_categorical_slot_aliases_a_drawn_status_token
+        ; Alcotest.test_case "categorical slots hold their measured floor"
+            `Quick test_categorical_slots_hold_their_measured_floor
+
         ] )
     ; ( "toml theme loading"
       , [ Alcotest.test_case "of_toml_content parses valid theme" `Quick
@@ -674,6 +822,12 @@ let () =
             test_load_retro_themes_toml
         ; Alcotest.test_case "readability contracts cover the toml themes" `Quick
             test_contracts_cover_the_toml_themes
+        ; Alcotest.test_case "bundled retro presets carry the task's names" `Quick
+            test_bundled_retro_presets_carry_the_task_names
+        ; Alcotest.test_case "contracts cover the bundled retro presets" `Quick
+            test_contracts_cover_the_bundled_retro_presets
+        ; Alcotest.test_case "the theme command applies a preset by name" `Quick
+            test_theme_command_applies_a_retro_preset_by_name
         ] )
     ]
 ;;

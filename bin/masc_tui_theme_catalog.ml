@@ -391,6 +391,42 @@ let bundled =
        ; "96d0ff"; "539bf5"; "e275ad"; "ae5622"
       |]
   }
+  ; { name = "norton-commander"
+  ; light = false
+  ; palette =
+      [| "000080"; "1a1a94"; "2d2da8"; "8b8bd0"
+       ; "b8b8e8"; "ffffff"; "e6f2ff"; "ffffff"
+       ; "ff6060"; "ffb266"; "ffe066"; "66ff66"
+       ; "66ffff"; "7a7aff"; "e07aff"; "c08040"
+      |]
+  }
+  ; { name = "msx-retro"
+  ; light = false
+  ; palette =
+      [| "1a1a2e"; "24243e"; "32325d"; "4a4a55"
+       ; "b4b4c4"; "ffffff"; "f6ecde"; "ffffff"
+       ; "ff6b5e"; "f58124"; "ffd23e"; "4fd06a"
+       ; "52e9e0"; "6a79ff"; "ff6bd6"; "b979ff"
+      |]
+  }
+  ; { name = "pc-tools-vintage"
+  ; light = false
+  ; palette =
+      [| "0e2424"; "163838"; "225050"; "4a7070"
+       ; "a0bcbc"; "e6e6e6"; "f0f4f4"; "ffffff"
+       ; "ff6e60"; "f5b04a"; "e8c34a"; "66c866"
+       ; "5bc0de"; "5a94e0"; "c472d0"; "cf9a4a"
+      |]
+  }
+  ; { name = "cga-classic"
+  ; light = false
+  ; palette =
+      [| "000000"; "151515"; "2a2a2a"; "555555"
+       ; "aaaaaa"; "ffffff"; "d4d4d4"; "ffffff"
+       ; "ff5555"; "aa5500"; "ffff55"; "55ff55"
+       ; "55ffff"; "6262ff"; "ff55ff"; "aa0000"
+      |]
+  }
   ; { name = "atelier-heath-light"
   ; light = true
   ; palette =

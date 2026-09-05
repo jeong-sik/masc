@@ -1197,19 +1197,30 @@ let test_compact_and_full_keep_the_same_typed_facts () =
   check int "full has three details plus the transcript omission" 4
     (List.length full.rows);
   check int "full hides no detail row" 0 full.hidden_activity_rows;
-  check int "compact keeps its summary and the transcript omission" 2
+  check int "compact keeps inventory, trouble and the transcript omission" 3
     (List.length compact.rows);
   check int "compact states exactly how many rows it hid" 3
     compact.hidden_activity_rows;
-  let summary = List.hd compact.rows in
-  check bool "the compact row does not hide the failure" true
-    (contains ~needle:"1 failed" summary);
-  check bool "the compact row reads as one activity summary" true
-    (String.starts_with ~prefix:"✗ Tools 3" summary);
-  check bool "the compact row carries the exact folded count" true
-    (contains ~needle:"3 details folded" summary);
+  let inventory = List.hd compact.rows in
+  let trouble = List.nth compact.rows 1 in
+  check bool "the inventory row reads as one activity summary" true
+    (String.starts_with ~prefix:"✗ Tools 3" inventory);
+  check bool "the inventory row carries the exact folded count" true
+    (contains ~needle:"3 details folded" inventory);
+  check bool "the inventory row keeps what returned" true
+    (contains ~needle:"1 returned" inventory);
+  check bool "the inventory row leaves the failure to the row below" false
+    (contains ~needle:"1 failed" inventory);
+  check bool "the trouble row names the failure" true
+    (contains ~needle:"1 failed" trouble);
+  check bool "an unrecorded outcome is bookkeeping, so it stays above" true
+    (contains ~needle:"1 outcome unrecorded" inventory);
+  check bool "and does not reach the trouble row" false
+    (contains ~needle:"unrecorded" trouble);
+  check bool "the trouble row carries its own mark" true
+    (String.starts_with ~prefix:"✗ " trouble);
   check string "compact does not count the visible omission as hidden"
-    (List.nth full.rows 3) (List.nth compact.rows 1)
+    (List.nth full.rows 3) (List.nth compact.rows 2)
 
 let test_compact_summary_counts_registered_public_names () =
   let activity name =
@@ -1228,7 +1239,7 @@ let test_compact_summary_counts_registered_public_names () =
           check bool ("summary contains " ^ expected) true
             (contains ~needle:expected summary))
         [ "Tools 4"; "Read 2"; "Edit 1"; "Execute 1" ]
-  | rows -> failf "expected one compact row, got %d" (List.length rows)
+  | rows -> failf "every call returned, so one compact row was expected, got %d" (List.length rows)
 
 let test_compact_summary_keeps_operational_tool_kinds () =
   let activity name =
@@ -1251,7 +1262,7 @@ let test_compact_summary_keeps_operational_tool_kinds () =
           check bool ("summary keeps " ^ expected) true
             (contains ~needle:expected summary))
         [ "Skill 1"; "Keeper 1"; "Fusion 1" ]
-  | rows -> failf "expected one compact row, got %d" (List.length rows)
+  | rows -> failf "every call returned, so one compact row was expected, got %d" (List.length rows)
 
 let full_tool_rows block =
   (Transcript.project_tool_block Transcript.Full block).Transcript.rows
@@ -1310,7 +1321,7 @@ let test_compact_mix_caps_a_degenerate_tool_name () =
          (not (contains ~needle:"150151152" summary));
        check bool "the summary row stays on one line of a pane" true
          (String.length summary < 200)
-   | rows -> failf "expected one compact row, got %d" (List.length rows))
+   | rows -> failf "every call returned, so one compact row was expected, got %d" (List.length rows))
 
 let test_a_registered_length_name_passes_through_whole () =
   let longest = "masc_operator_board_attention_quarantine_requeue" in
@@ -1522,6 +1533,20 @@ let summary_row mode activities =
   | [] -> Alcotest.fail "a projected block has at least its summary row"
 ;;
 
+(* The row the outcome clauses moved to. Asserting them on the inventory row
+   would pass off [compact_tool_mix], which lists every tool name whatever its
+   outcome -- deleting [tools_for_outcome] entirely would leave such a check
+   green. *)
+let trouble_row mode activities =
+  match
+    (Transcript.project_tool_block mode
+       (Transcript.tool_block ~omitted_steps:0 activities))
+      .Transcript.rows
+  with
+  | _ :: trouble :: _ -> trouble
+  | _ -> Alcotest.fail "this block was expected to split off a trouble row"
+;;
+
 let contains_substring haystack needle =
   let n = String.length needle and h = String.length haystack in
   let rec at i = i + n <= h && (String.sub haystack i n = needle || at (i + 1)) in
@@ -1529,18 +1554,23 @@ let contains_substring haystack needle =
 ;;
 
 let test_a_fold_names_the_tool_that_failed () =
-  let row =
-    summary_row Transcript.Compact
-      [ activity ~name:"read_file" ~outcome:Transcript.Returned
-      ; activity ~name:"glob" ~outcome:Transcript.Returned
-      ; activity ~name:"web_fetch" ~outcome:Transcript.Failed
-      ]
+  let calls =
+    [ activity ~name:"read_file" ~outcome:Transcript.Returned
+    ; activity ~name:"glob" ~outcome:Transcript.Returned
+    ; activity ~name:"web_fetch" ~outcome:Transcript.Failed
+    ]
   in
-  check bool "the failure count survives" true (contains_substring row "1 failed");
-  check bool "and now says which tool" true (contains_substring row "web_fetch");
-  (* The successes stay counted, not listed: a reader chasing a failure does
-     not need the other two named twice on one line. *)
-  check bool "successes stay a count" true (contains_substring row "2 returned")
+  let trouble = trouble_row Transcript.Compact calls in
+  check bool "the failure count survives" true
+    (contains_substring trouble "1 failed");
+  (* Inside the clause, not merely somewhere on the row: the mix names every
+     tool anyway, so a bare "web_fetch" would pass without the pairing. *)
+  check bool "and says which tool, next to the count" true
+    (contains_substring trouble "1 failed: web_fetch");
+  (* The successes stay counted, not listed, and stay on the inventory row a
+     reader chasing a failure can skip. *)
+  check bool "successes stay a count on the inventory row" true
+    (contains_substring (summary_row Transcript.Compact calls) "2 returned")
 ;;
 
 let test_a_fold_names_calls_still_out_and_never_returned () =
@@ -1569,15 +1599,79 @@ let test_a_fold_names_calls_still_out_and_never_returned () =
     (contains_substring never "web_fetch")
 ;;
 
+(* Two calls is where the split stops paying: it would draw the two rows Full
+   draws, and Full's rows carry each call's subject and duration. *)
+let test_two_calls_do_not_buy_a_second_row () =
+  let rows mode activities =
+    (Transcript.project_tool_block mode
+       (Transcript.tool_block ~omitted_steps:0 activities))
+      .Transcript.rows
+  in
+  let two =
+    [ activity ~name:"read_file" ~outcome:Transcript.Returned
+    ; activity ~name:"web_fetch" ~outcome:Transcript.Failed
+    ]
+  in
+  check int "a failing two-call block stays one row" 1
+    (List.length (rows Transcript.Compact two));
+  check bool "and still names the failure on it" true
+    (contains_substring (summary_row Transcript.Compact two) "1 failed: web_fetch");
+  check int "a third call is what buys the split" 2
+    (List.length
+       (rows Transcript.Compact
+          (activity ~name:"glob" ~outcome:Transcript.Returned :: two)))
+;;
+
+(* The trouble row's mark is the block's own. compact_outcome tests exactly
+   the four outcomes the trouble list can hold, so the two calls agree
+   whenever the row exists; this pins that so a precedence change cannot
+   split them without a test saying so. *)
+let test_the_trouble_row_carries_the_block_mark () =
+  List.iter
+    (fun outcome ->
+      let calls =
+        [ activity ~name:"read_file" ~outcome:Transcript.Returned
+        ; activity ~name:"glob" ~outcome:Transcript.Returned
+        ; activity ~name:"web_fetch" ~outcome
+        ]
+      in
+      let inventory = summary_row Transcript.Compact calls in
+      let trouble = trouble_row Transcript.Compact calls in
+      let mark row = List.hd (String.split_on_char ' ' row) in
+      check string "the trouble row opens with the block's mark" (mark inventory)
+        (mark trouble))
+    [ Transcript.Failed
+    ; Transcript.Started
+    ; Transcript.Awaiting_result
+    ; Transcript.Never_returned
+    ]
+;;
+
+(* Nothing returned, so the inventory row has no outcome clause at all. It
+   still has to read as a sentence rather than trail into a stray separator. *)
+let test_an_all_failed_block_keeps_a_readable_inventory_row () =
+  let calls =
+    List.init 3 (fun _ -> activity ~name:"search" ~outcome:Transcript.Failed)
+  in
+  let inventory = summary_row Transcript.Compact calls in
+  check bool "no outcome clause is claimed" false
+    (contains_substring inventory "returned");
+  check bool "the fold count still closes the row" true
+    (contains_substring inventory "3 details folded");
+  check bool "and the failures are on the row below" true
+    (contains_substring (trouble_row Transcript.Compact calls) "3 failed")
+;;
+
 let test_a_repeated_failing_tool_is_counted_once_with_its_count () =
   (* 21 calls to one tool must not print its name 21 times. *)
-  let row =
-    summary_row Transcript.Compact
-      (activity ~name:"read_file" ~outcome:Transcript.Returned
-       :: List.init 3 (fun _ -> activity ~name:"search" ~outcome:Transcript.Failed))
+  let calls =
+    activity ~name:"read_file" ~outcome:Transcript.Returned
+    :: List.init 3 (fun _ -> activity ~name:"search" ~outcome:Transcript.Failed)
   in
-  check bool "the name appears with a count" true (contains_substring row "search 3");
-  check bool "and the outcome count agrees" true (contains_substring row "3 failed")
+  check bool "the name appears with a count" true
+    (contains_substring (summary_row Transcript.Compact calls) "search 3");
+  check bool "and the outcome count agrees, naming it once" true
+    (contains_substring (trouble_row Transcript.Compact calls) "3 failed: search 3")
 ;;
 
 
@@ -1663,6 +1757,12 @@ let () =
             test_a_fold_names_calls_still_out_and_never_returned
         ; test_case "a repeated failing tool carries its count" `Quick
             test_a_repeated_failing_tool_is_counted_once_with_its_count
+        ; test_case "two calls do not buy a second row" `Quick
+            test_two_calls_do_not_buy_a_second_row
+        ; test_case "the trouble row carries the block mark" `Quick
+            test_the_trouble_row_carries_the_block_mark
+        ; test_case "an all-failed block keeps a readable inventory row" `Quick
+            test_an_all_failed_block_keeps_a_readable_inventory_row
         ] )
     ; ( "terminal safety"
       , [ test_case "control bytes never reach the pane" `Quick

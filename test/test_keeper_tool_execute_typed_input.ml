@@ -791,7 +791,7 @@ let docker_test_sandbox () =
   Masc_exec.Sandbox_target.docker
     ~image:"typed-docker"
     ~runner:(fun ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ->
-      Unix.WEXITED 0, "", "")
+      Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout = ""; stderr = "" })
     ()
 ;;
 

@@ -1744,35 +1744,46 @@ let microvm_remote_endpoint_of_running (t : t) ~container_name =
     in
     (* The exec prefix is the declaring runtime's, built here because this is
        where the runtime, the work root and the shim config path are all in
-       hand -- and because one runtime cannot express it, which the transport
-       (returning an argv, not a result) has no way to say. *)
+       hand. *)
     Result.bind (microvm_backend_of t) (fun backend ->
-      Result.map
-        (fun prefix ->
-          Keeper_sandbox_remote.of_container_exec
-            ~base_path:t.config.base_path
-            ~keeper_name:t.meta.name
-            ~remote_root:Keeper_sandbox_microvm.work_volume_guest_root
-            ~gh_config_dir
-            ~injected_env:
-              (Keeper_sandbox_runtime.docker_config_env
-                 ~base_path:t.config.base_path
-                 ~container_root:t.container_root)
-            ~env_allowlist:Keeper_sandbox_microvm.remote_env_allowlist
-            ~connect_timeout_sec:Keeper_sandbox_microvm.remote_connect_timeout_sec
-            ~max_concurrent_sessions:
-              Keeper_sandbox_microvm.remote_max_concurrent_sessions
-            { prefix
-            ; container_name
-            ; shim_path = Keeper_sandbox_microvm.shim_guest_path
-            })
+      Result.bind
         (Keeper_sandbox_microvm.shim_exec_prefix_for
+           ~stdin:true
            backend
            ~container_name
            ~uid:t.uid
            ~gid:t.gid
            ~remote_root:Keeper_sandbox_microvm.work_volume_guest_root
-           ~shim_config_path:Keeper_sandbox_microvm.shim_config_guest_path))
+           ~shim_config_path:Keeper_sandbox_microvm.shim_config_guest_path)
+        (fun prefix ->
+          Result.map
+            (fun probe_prefix ->
+              Keeper_sandbox_remote.of_container_exec
+                ~base_path:t.config.base_path
+                ~keeper_name:t.meta.name
+                ~remote_root:Keeper_sandbox_microvm.work_volume_guest_root
+                ~gh_config_dir
+                ~injected_env:
+                  (Keeper_sandbox_runtime.docker_config_env
+                     ~base_path:t.config.base_path
+                     ~container_root:t.container_root)
+                ~env_allowlist:Keeper_sandbox_microvm.remote_env_allowlist
+                ~connect_timeout_sec:Keeper_sandbox_microvm.remote_connect_timeout_sec
+                ~max_concurrent_sessions:
+                  Keeper_sandbox_microvm.remote_max_concurrent_sessions
+                { prefix
+                ; probe_prefix = Some probe_prefix
+                ; container_name
+                ; shim_path = Keeper_sandbox_microvm.shim_guest_path
+                })
+            (Keeper_sandbox_microvm.shim_exec_prefix_for
+               ~stdin:false
+               backend
+               ~container_name
+               ~uid:t.uid
+               ~gid:t.gid
+               ~remote_root:Keeper_sandbox_microvm.work_volume_guest_root
+               ~shim_config_path:Keeper_sandbox_microvm.shim_config_guest_path)))
 ;;
 
 (* The keeper's root on the volume is made at boot, so a guest this process

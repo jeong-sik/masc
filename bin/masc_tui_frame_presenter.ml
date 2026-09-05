@@ -29,6 +29,7 @@ type snapshot = {
 
 type t = {
   synchronized_output : bool;
+  output_buffer : Buffer.t;
   mutable invalidated : bool;
   mutable previous : snapshot option;
 }
@@ -86,7 +87,11 @@ let hide_cursor = "\027[?25l"
 let show_cursor = "\027[?25h"
 
 let create ~synchronized_output () =
-  { synchronized_output; invalidated = true; previous = None }
+  { synchronized_output;
+    output_buffer = Buffer.create 4096;
+    invalidated = true;
+    previous = None;
+  }
 
 let invalidate presenter = presenter.invalidated <- true
 
@@ -157,19 +162,31 @@ let same_geometry (previous : snapshot) (frame : frame) =
   && previous.terminal_cols = max 1 frame.terminal_cols
   && same_cursor_mode previous.cursor frame.cursor
 
-let changed_rows ~full_redraw ~(previous : snapshot option) screen =
-  let rows = Array.length screen in
-  List.init rows Fun.id
-  |> List.filter (fun row ->
-       full_redraw
-       ||
-       match previous with
-       | None -> true
-       | Some previous -> not (String.equal previous.screen.(row) screen.(row)))
+let row_prefix_cache_size = 256
+
+let row_prefixes =
+  Array.init row_prefix_cache_size (fun row ->
+    Printf.sprintf "\027[%d;1H\027[0m\027[2K" (row + 1))
 
 let append_row buffer row line =
-  Printf.bprintf buffer "\027[%d;1H%s%s%s%s" (row + 1) reset_style erase_line
-    line reset_style
+  if row < row_prefix_cache_size then
+    Buffer.add_string buffer row_prefixes.(row)
+  else
+    Printf.bprintf buffer "\027[%d;1H\027[0m\027[2K" (row + 1);
+  Buffer.add_string buffer line;
+  Buffer.add_string buffer reset_style
+
+let changed_rows ~full_redraw ~(previous : snapshot option) screen =
+  let rows = Array.length screen in
+  let acc = ref [] in
+  for row = rows - 1 downto 0 do
+    if full_redraw
+       || match previous with
+          | None -> true
+          | Some prev -> not (String.equal prev.screen.(row) screen.(row))
+    then acc := row :: !acc
+  done;
+  !acc
 
 let append_cursor buffer ~terminal_rows ~terminal_cols = function
   | Hidden -> Buffer.add_string buffer hide_cursor
@@ -195,38 +212,65 @@ let present presenter ~invalidate_before ~write ~flush (frame : frame) =
     | None -> true
     | Some previous -> not (same_geometry previous frame)
   in
-  let rows =
-    changed_rows ~full_redraw ~previous:presenter.previous screen
+  let prev_screen =
+    match presenter.previous with
+    | Some previous -> Some previous.screen
+    | None -> None
   in
-  match rows, cursor_changed with
-  | [], false -> Unchanged
-  | _ ->
-      let buffer = Buffer.create 4096 in
-      if presenter.synchronized_output then
-        Buffer.add_string buffer begin_synchronized_output;
-      Buffer.add_string buffer disable_autowrap;
-      if full_redraw then Buffer.add_string buffer clear_screen;
-      List.iter (fun row -> append_row buffer row screen.(row)) rows;
-      append_cursor buffer ~terminal_rows ~terminal_cols frame.cursor;
-      Buffer.add_string buffer enable_autowrap;
-      if presenter.synchronized_output then
-        Buffer.add_string buffer end_synchronized_output;
-      let output = Buffer.contents buffer in
-      let snapshot =
-        { surface_key = frame.surface_key;
-          compact_frame = frame.compact_frame;
-          terminal_rows;
-          terminal_cols;
-          cursor = frame.cursor;
-          screen;
-        }
-      in
-      (try
-         write output;
-         flush ();
-         presenter.previous <- Some snapshot;
-         presenter.invalidated <- false;
-         Presented
-       with exn ->
-         presenter.invalidated <- true;
-         raise exn)
+  let has_changed_row =
+    if full_redraw then true
+    else
+      match prev_screen with
+      | None -> true
+      | Some prev ->
+          let changed = ref false in
+          let r = ref 0 in
+          while (!r < terminal_rows && not !changed) do
+            if not (String.equal prev.(!r) screen.(!r)) then changed := true;
+            incr r
+          done;
+          !changed
+  in
+  if (not has_changed_row) && (not cursor_changed) then
+    Unchanged
+  else begin
+    let buffer = presenter.output_buffer in
+    Buffer.clear buffer;
+    if presenter.synchronized_output then
+      Buffer.add_string buffer begin_synchronized_output;
+    Buffer.add_string buffer disable_autowrap;
+    if full_redraw then Buffer.add_string buffer clear_screen;
+    (match prev_screen with
+     | Some prev when not full_redraw ->
+         for row = 0 to terminal_rows - 1 do
+           if not (String.equal prev.(row) screen.(row)) then
+             append_row buffer row screen.(row)
+         done
+     | _ ->
+         for row = 0 to terminal_rows - 1 do
+           append_row buffer row screen.(row)
+         done);
+    append_cursor buffer ~terminal_rows ~terminal_cols frame.cursor;
+    Buffer.add_string buffer enable_autowrap;
+    if presenter.synchronized_output then
+      Buffer.add_string buffer end_synchronized_output;
+    let output = Buffer.contents buffer in
+    let snapshot =
+      { surface_key = frame.surface_key;
+        compact_frame = frame.compact_frame;
+        terminal_rows;
+        terminal_cols;
+        cursor = frame.cursor;
+        screen;
+      }
+    in
+    (try
+       write output;
+       flush ();
+       presenter.previous <- Some snapshot;
+       presenter.invalidated <- false;
+       Presented
+     with exn ->
+       presenter.invalidated <- true;
+       raise exn)
+  end

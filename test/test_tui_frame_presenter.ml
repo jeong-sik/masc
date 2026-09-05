@@ -356,11 +356,43 @@ let test_alternate_screen_is_taken_and_given_back () =
     (contains (output captured) "\027[2J")
 ;;
 
+let test_repeated_identical_frames_retain_zero_alloc_unchanged () =
+  let presenter = Presenter.create ~synchronized_output:true () in
+  let captured = sink () in
+  let f = frame ~rows:300 [ "row 1"; "row 2"; "row 3" ] in
+  (match present_result presenter captured f with
+   | Presenter.Presented -> ()
+   | Presenter.Unchanged -> fail "first frame must be presented");
+  check int "first frame writes once" 1 (List.length captured.writes);
+  for _ = 1 to 10 do
+    reset_sink captured;
+    (match present_result presenter captured f with
+     | Presenter.Unchanged -> ()
+     | Presenter.Presented -> fail "identical frame must return Unchanged");
+    check int "repeated frame writes 0" 0 (List.length captured.writes);
+    check int "repeated frame flushes 0" 0 captured.flushes
+  done;
+  (* Change row 280 (exceeding row_prefix_cache_size 256) to test fallback *)
+  let changed_rows =
+    List.init 285 (fun r -> if r = 280 then "row 280 changed" else Printf.sprintf "row %d" (r + 1))
+  in
+  reset_sink captured;
+  let f_large = frame ~rows:300 changed_rows in
+  (match present_result presenter captured f_large with
+   | Presenter.Presented -> ()
+   | Presenter.Unchanged -> fail "changed large frame must be presented");
+  let out = output captured in
+  check bool "large row index uses absolute addressing" true
+    (contains out "\027[281;1H")
+;;
+
 let () =
   run "tui_frame_presenter"
     [ ( "differential output"
       , [ test_case "first and identical frames" `Quick
             test_first_frame_and_identical_frame
+        ; test_case "repeated identical frames zero-alloc" `Quick
+            test_repeated_identical_frames_retain_zero_alloc_unchanged
         ; test_case "one changed row" `Quick test_only_changed_row_is_written
         ; test_case "input follows the presented frame" `Quick
             test_input_gate_follows_the_last_presented_frame

@@ -14368,17 +14368,24 @@ let render_code (state : state) =
               if selected then glyph ^ " "
               else
                 let colour =
-                  (* bright_ variants for the data/prose marks: the plain
-                     red/yellow/green are reserved for semantic status tokens
-                     (test_tui_http_ast guards render.ml against using them
-                     raw), and a file's type is not a status. *)
+                  (* Six kinds, six categorical slots (RFC-0427). These were
+                     constant SGR codes, so a file list was one of the places
+                     a theme could not reach: everything around it moved when
+                     the terminal answered with its palette and these did not.
+
+                     Script and Media used to be magenta and bright magenta,
+                     one hue apart in a column where telling them apart is
+                     the whole job. They are now two slots apart.
+
+                     Plain keeps [dim] rather than a slot. It is the member
+                     that recedes, which is a weight and not a kind. *)
                   match kind with
-                  | File_icon.Code -> (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                  | File_icon.Data -> Ansi.bright_yellow
-                  | File_icon.Prose -> Ansi.bright_green
-                  | File_icon.Script -> Ansi.magenta
-                  | File_icon.Web -> Ansi.blue
-                  | File_icon.Media -> Ansi.bright_magenta
+                  | File_icon.Code -> Theme.category Theme.Slot_1
+                  | File_icon.Data -> Theme.category Theme.Slot_2
+                  | File_icon.Prose -> Theme.category Theme.Slot_3
+                  | File_icon.Script -> Theme.category Theme.Slot_4
+                  | File_icon.Web -> Theme.category Theme.Slot_5
+                  | File_icon.Media -> Theme.category Theme.Slot_6
                   | File_icon.Plain -> Ansi.dim
                 in
                 colour ^ glyph ^ Ansi.reset ^ " "

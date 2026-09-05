@@ -603,7 +603,7 @@ let test_load_retro_themes_toml () =
         check string ("name matches " ^ name) name (Catalog.name scheme);
         check bool "is dark theme" false (Catalog.light scheme);
         check bool "to_palette produces palette" true (Option.is_some (Catalog.to_palette scheme)))
-    [ "dungeon-gold"; "norton"; "msx"; "pc-tools"; "msc"; "cyber"; "cga" ]
+    [ "dungeon-gold"; "norton"; "msx"; "pc-tools"; "msc"; "cyber" ]
 ;;
 
 (* The schemes above are found by name; this says they are also *measured*.
@@ -615,7 +615,7 @@ let test_contracts_cover_the_toml_themes () =
     (fun name ->
       check bool (name ^ " is under the readability contracts") true
         (List.mem name measured))
-    [ "dungeon-gold"; "norton"; "msx"; "pc-tools"; "msc"; "cyber"; "cga" ]
+    [ "dungeon-gold"; "norton"; "msx"; "pc-tools"; "msc"; "cyber" ]
 ;;
 
 let test_clean_hex_rejects_underscores () =
@@ -642,6 +642,45 @@ base0f = "0f0f0f"
   match Catalog.of_toml_content content with
   | Ok _ -> Alcotest.fail "Expected clean_hex to reject underscores"
   | Error _ -> ()
+;;
+
+(* The four presets the task names are bundled under exactly those names.
+   [schemes] comes from [Catalog.all], so the contracts above measure every
+   bundled scheme including these four; a name missing from [bundled] fails
+   here instead of quietly shipping. *)
+let retro_preset_names =
+  [ "norton-commander"; "msx-retro"; "pc-tools-vintage"; "cga-classic" ]
+;;
+
+let test_bundled_retro_presets_carry_the_task_names () =
+  List.iter
+    (fun name ->
+      match Catalog.find name with
+      | None -> Alcotest.fail (name ^ " is not bundled")
+      | Some scheme ->
+        check bool (name ^ " is dark") false (Catalog.light scheme);
+        check bool (name ^ " builds a palette") true
+          (Option.is_some (Catalog.to_palette scheme)))
+    retro_preset_names
+;;
+
+let test_contracts_cover_the_bundled_retro_presets () =
+  let measured = List.map (fun s -> s.name) schemes in
+  List.iter
+    (fun name ->
+      check bool (name ^ " is under the readability contracts") true
+        (List.mem name measured))
+    retro_preset_names
+;;
+
+(* AC: :theme <name> switches immediately. [apply] is the same entry the TUI
+   command goes through, so accepting a bundled name and rejecting one no
+   scheme carries is the whole contract of the switch. *)
+let test_theme_command_applies_a_retro_preset_by_name () =
+  check bool "apply accepts a bundled preset" true
+    (Masc_tui_theme_choice.apply "norton-commander");
+  check bool "apply rejects a name no scheme carries" false
+    (Masc_tui_theme_choice.apply "no-such-retro-preset")
 ;;
 
 let () =
@@ -687,6 +726,12 @@ let () =
             test_load_retro_themes_toml
         ; Alcotest.test_case "readability contracts cover the toml themes" `Quick
             test_contracts_cover_the_toml_themes
+        ; Alcotest.test_case "bundled retro presets carry the task's names" `Quick
+            test_bundled_retro_presets_carry_the_task_names
+        ; Alcotest.test_case "contracts cover the bundled retro presets" `Quick
+            test_contracts_cover_the_bundled_retro_presets
+        ; Alcotest.test_case "the theme command applies a preset by name" `Quick
+            test_theme_command_applies_a_retro_preset_by_name
         ] )
     ]
 ;;

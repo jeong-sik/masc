@@ -10,7 +10,7 @@ open Masc_board_handlers
     {!Board_tool_post}, sub-board handlers in {!Board_tool_sub_board},
     curation handlers in {!Board_tool_curation}.
 
-    Stage 10 split of lib/board_tool.ml. *)
+    Stage 10 split of lib/board_tool_adapter/board_tool.ml. *)
 
 open Tool_args
 

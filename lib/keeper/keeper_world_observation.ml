@@ -607,7 +607,7 @@ let fusion_result_preview_max_len = 480
    creation time: the row carries finished text, so the template must render
    here rather than at prompt assembly. The condition (which row, which
    outcome) stays in this module; only the wording lives in
-   config/prompts/keeper.world.event_rows.md. A render failure logs and falls
+   config/prompts/keeper.md. A render failure logs and falls
    back to the bare data — the held-task-skills precedent: losing the wording
    is recoverable, losing the fact is not. *)
 let event_row_text key vars ~fallback =

@@ -4,7 +4,7 @@ open Masc_board_handlers
 (** Board_tool_post — post-lifecycle handlers (create / list / get /
     comment_add).
 
-    Stage 10 split of lib/board_tool.ml — sub-domain split out of
+    Stage 10 split of lib/board_tool_adapter/board_tool.ml — sub-domain split out of
     [Board_tool_handlers] so both files stay under the godfile new-file
     cap. *)
 

@@ -8,9 +8,7 @@
     + Runtime enumeration for operators
     + Consistency verification (CI lint: [check-feature-flag-consistency.sh])
     + Current lifecycle classification: Active or Experimental
-    + Machine-readable flag catalog
-
-    @see <docs/design/inventory-gap-analysis-rfc.md> H5 Feature Flags *)
+    + Machine-readable flag catalog *)
 
 (** {1 Types} *)
 

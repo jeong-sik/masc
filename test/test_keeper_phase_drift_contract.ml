@@ -7,7 +7,7 @@
 
    Also checks that agent_core Runtime.phase yojson variants are recognized
    by the masc bridge layer (cross-repo drift detection).
-   Reference: specs/AgentLifecycle.tla, specs/AgentCancellation.tla
+   Reference: specs/keeper-state-machine/KeeperStateMachine.tla
 *)
 
 module KSM = Keeper_state_machine

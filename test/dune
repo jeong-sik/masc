@@ -2610,7 +2610,7 @@
 
 ; RFC-0084 §6.1 — pinned-fail tests for keeper→tool dispatch unification.
 ; PR-1 establishes 3 evidence tests for the current telemetry/surface/prehook
-; gaps in lib/tool_dispatch.ml and
+; gaps in lib/tool/tool_dispatch.ml and
 ; lib/keeper/keeper_tool_descriptor_resolution.ml. PR-5/7/9
 ; update each pinned constant alongside the code fix in the same PR so that
 ; drift between code state and pinned evidence is caught by single-PR diff.

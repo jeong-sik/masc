@@ -3238,6 +3238,11 @@
  (libraries alcotest masc.runtime masc.string_util))
 
 (test
+ (name test_egress_lane_config_pinning)
+ (modules test_egress_lane_config_pinning)
+ (libraries alcotest masc masc.config_dir_resolver masc.egress_host unix))
+
+(test
  (name test_egress_allowlist_toml)
  (modules test_egress_allowlist_toml)
  (libraries alcotest masc.runtime masc.egress_host masc.string_util))

@@ -357,7 +357,7 @@ dashboard operations are covered by
 | Gate and HITL | Apply Always Allow, model judgment, or human approval to supported external effects | Authorization workflow, not a sandbox or credential boundary |
 | Runtime routing | Assign a provider/model runtime to each Keeper and define ordered runtime lanes | A valid catalog and provider credentials are still required |
 | Fusion | Run panel and judge workflows through `masc_fusion` | Presets and judge runtimes must be configured before use |
-| Connectors | Connect workspace activity to supported external channels, including Discord and Slack | Tokens and channel-to-Keeper bindings are explicit operator configuration |
+| Connectors | Connect workspace activity to Discord, iMessage, Slack and Telegram. Discord, iMessage and Slack run in-process; Telegram still goes through a sidecar | Tokens and channel-to-Keeper bindings are explicit operator configuration |
 | Sandboxes | Run Keeper shell work under `docker`, `microvm` (the guest owns its working tree; `microvm_backend` names the runtime), or `remote_ssh` | A Keeper with no accepted profile does not run; none of the three is a complete security boundary. Of the three microVM backends only `apple_container` is known to boot — see the table under First-run setup |
 | IDE | Inspect the experimental in-dashboard collaboration shell | Not the supported front door for normal work |
 

@@ -13,7 +13,7 @@
     [Send_ack of {envelope_id}] or Slack will retransmit and eventually drop the
     connection.
 
-    See: docs/rfc/RFC-0xxx-slack-builtin-gateway.md (and RFC-0203 for the
+    See: docs/rfc/RFC-0317-slack-builtin-gateway.md (and RFC-0203 for the
     Discord original this is modeled on). *)
 
 (** {1 Envelope — what comes off the wire} *)

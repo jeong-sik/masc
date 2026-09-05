@@ -6,7 +6,7 @@
     parse envelopes, feed them to {!Slack_gateway_state.step}, and run the
     returned effects (ack each envelope, emit events, reconnect on backoff).
 
-    See: docs/rfc/RFC-0xxx-slack-builtin-gateway.md *)
+    See: docs/rfc/RFC-0317-slack-builtin-gateway.md *)
 
 (** Re-export the caller-facing types so callers don't reach into the state
     machine module directly. *)

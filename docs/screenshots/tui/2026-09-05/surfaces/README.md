@@ -3,10 +3,10 @@
 Captured from the live loopback runtime with `masc-tui` connected to the running
 server on port `8935`.
 
-- Captured: `2026-09-05T15:41:49Z`
+- Captured: `2026-09-05T16:16:28Z`
 - Runtime: MASC `8a068e17a6` on port `8935`
-- Terminal: `133 × 28`
-- Reproduce: `python3 scripts/capture-tui-screenshots.py --out docs/screenshots/tui/2026-09-05/surfaces`
+- Terminal: `100 × 30`
+- Reproduce: `python3 scripts/capture-tui-screenshots.py --cols 100 --out docs/screenshots/tui/2026-09-05/surfaces`
 
 | # | Surface | Screenshot |
 |---:|---|---|
@@ -48,3 +48,11 @@ The capture now stops the terminal's input for the length of one frame, and
 then checks the drawn text for every name it was asked to hide. If one survived,
 the run stops with `REFUSED` rather than writing a PNG. A leaked frame looks
 exactly like a good one, so this is checked rather than assumed.
+
+## Why 100 columns
+
+The docs render these in a prose column about 780 px wide. At 133 columns a
+character lands on five pixels there, which is not small text but unreadable
+text, and a 2242 px source into 1440 device pixels is a 1.56x downscale that
+mushes the one-pixel strokes as well. At 100 the character is near eight pixels
+and the source lands near 1:1 on a 2x screen.

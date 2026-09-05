@@ -17,8 +17,8 @@
 #   ./quickstart.sh --no-start            # seed only; do not start the server
 #
 # Env:
-#   OLLAMA_CLOUD_API_KEY  Required only when --team selects Keepers that use the
-#                         default flash model. Prompted if a TTY and unset.
+#   OLLAMA_CLOUD_API_KEY  Read from your shell when a seeded Keeper needs it.
+#                         Never prompted for, and never written to disk.
 #   MASC_QUICKSTART_HOME  Default base path when --base-path is omitted.
 
 set -euo pipefail
@@ -55,22 +55,16 @@ done
 DASHBOARD_URL="http://127.0.0.1:${PORT}/dashboard"
 
 # ---- provider key ------------------------------------------------------------
-ensure_api_key() {
+# There is no prompt and no file. A provider key is read from the environment
+# the server is started in, which is the one place the running server looks --
+# writing a copy to .masc/config/.env.local only created a second source of
+# truth that had to be kept in step and chmod'd by hand.
+report_api_key() {
   if [ -n "${OLLAMA_CLOUD_API_KEY:-}" ]; then
     log "OLLAMA_CLOUD_API_KEY found in environment (len ${#OLLAMA_CLOUD_API_KEY})"
-    return 0
-  fi
-  if [ -t 0 ]; then
-    printf '%s?%s Enter OLLAMA_CLOUD_API_KEY (from https://ollama.com/settings/keys): ' "$c_cya" "$c_off"
-    stty -echo 2>/dev/null || true
-    read -r OLLAMA_CLOUD_API_KEY || true
-    stty echo 2>/dev/null || true
-    echo
-    [ -n "$OLLAMA_CLOUD_API_KEY" ] || die "no API key provided"
-    export OLLAMA_CLOUD_API_KEY
   else
-    die "OLLAMA_CLOUD_API_KEY is unset. Export it or run in a terminal:
-      export OLLAMA_CLOUD_API_KEY=... && ./quickstart.sh"
+    log "OLLAMA_CLOUD_API_KEY is unset; a seeded Keeper on the default flash"
+    log "  model will have no runtime until you export it and restart the server"
   fi
 }
 
@@ -88,20 +82,6 @@ seed_catalogs() {
   if [ ! -d "$cfg/prompts" ] && [ -d "config/prompts" ]; then
     cp -R "config/prompts" "$cfg/prompts"; log "seeded config/prompts/"
   fi
-}
-
-write_env_local() {
-  local base="$1"
-  local env_file="$base/.masc/config/.env.local"
-  mkdir -p "$(dirname "$env_file")"
-  # Preserve any existing non-key lines; rewrite the key line idempotently.
-  if [ -f "$env_file" ]; then
-    grep -v '^export OLLAMA_CLOUD_API_KEY=' "$env_file" > "$env_file.tmp" 2>/dev/null || true
-    mv "$env_file.tmp" "$env_file"
-  fi
-  printf 'export OLLAMA_CLOUD_API_KEY=%q\n' "$OLLAMA_CLOUD_API_KEY" >> "$env_file"
-  chmod 600 "$env_file" 2>/dev/null || true
-  log "wrote provider key to $env_file"
 }
 
 write_mcp_client_env() {
@@ -181,11 +161,9 @@ run_quickstart() {
   seed_catalogs "$BASE_PATH"
 
   if [ "$TEAM" != "none" ]; then
-    ensure_api_key
+    report_api_key
     step "Seed Keeper team ('$TEAM')"
     bash scripts/seed-team.sh --preset "$TEAM" --base-path "$BASE_PATH"
-    step "Write provider key"
-    write_env_local "$BASE_PATH"
   else
     log "no Keeper preset requested"
   fi
@@ -193,7 +171,7 @@ run_quickstart() {
   if [ "$START_SERVER" -eq 0 ]; then
     log "seed complete; skipping server start (--no-start)"
     if [ "$TEAM" != "none" ]; then
-      log "start later with: source '$BASE_PATH/.masc/config/.env.local' && ./start-masc.sh --http --base-path '$BASE_PATH' --port $PORT"
+      log "start later with: ./start-masc.sh --http --base-path '$BASE_PATH' --port $PORT"
     else
       log "start later with: ./start-masc.sh --http --base-path '$BASE_PATH' --port $PORT"
     fi

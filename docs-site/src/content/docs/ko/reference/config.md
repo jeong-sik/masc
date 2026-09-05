@@ -10,20 +10,45 @@ description: .masc/config/*.toml 파일의 스키마와 예시입니다.
 ## 디렉터리 구조
 
 ```text
-.masc/config/
-├── runtime.toml    # provider 목록, model 바인딩, [runtime].default, lane
-├── .env.local      # provider API 키. quickstart.sh 가 쓰고 start-masc.sh 가
-│                   # 읽는 소스 체크아웃 짝입니다. 바이너리 설치에는 둘 다
-│                   # 없으니 셸에서 export 하세요.
-└── keepers/        # Keeper 별 프로필, 하나에 <name>.toml
-    └── reviewer.toml
+.masc/config/                     # `masc init` 이 쓰는 파일 271개
+├── runtime.toml                  # provider 카탈로그, 모델 바인딩, [runtime].default, lane
+├── agent-core-models-overlay.toml
+├── prompts/                      # 25 — 역할마다 주는 글
+├── tools/                        # 146 — 도구 하나당 선언 하나
+├── identity/                     # 89
+├── themes/                       # 6 — masc 자체 색 스킴
+├── mcp/                          # 3
+└── keepers/                      # 갓 설치하면 비어 있음. 일부러 그렇습니다
 ```
 
-Discord·Slack 같은 커넥터 설정은 별도 파일이 아니라 `runtime.toml` 안의
-테이블(`[discord]` 등)로 씁니다. `repositories.toml` 과
-`keeper_repo_mappings.toml` 은 해당 기능을 쓰기 시작하면 생깁니다.
+명단은 작업 공간마다 다르니 `masc init` 은 `keepers/` 를 만들기만 하고 아무것도 넣지
+않습니다. 커넥터 설정(Discord, Slack)도 별도 파일이 아니라 `runtime.toml` 안의
+테이블입니다(`[discord]` 등). `repositories.toml` 과 `keeper_repo_mappings.toml` 은
+그 기능을 쓰기 시작하면 생깁니다.
 
----
+`.env.local` 은 없습니다. 설정은 TOML 에, 자격증명은 **서버를 띄운 환경**에
+있습니다 — [환경 변수](/ko/reference/env-contract/) 참고.
+
+## 카탈로그에 처음 들어 있는 것
+
+`runtime.toml` 은 provider 다섯을 심습니다. 넷은 서버 환경에 변수가 있어야 하고,
+다섯째는 로컬입니다.
+
+| Provider | 주소 | 변수 |
+| --- | --- | --- |
+| `ollama_cloud` | `ollama.com/v1` | `OLLAMA_CLOUD_API_KEY` |
+| `deepseek` | `api.deepseek.com` | `DEEPSEEK_API_KEY` |
+| `glm-coding` | `api.z.ai/api/coding/paas/v4` | `ZAI_API_KEY_SB` |
+| `kimi_coding` | `api.kimi.com/coding/v1` | `KIMI_API_KEY` |
+| `ollama` | `localhost:11434` | 없음 |
+
+`llama_server`·`vllm`·`mlx_server` 는 주석 상태로 들어 있습니다 —
+[로컬 AI 모델 연결](/ko/runbooks/llama-server/) 참고.
+
+**시드된 바인딩 대부분은 턴을 못 받습니다.** 카탈로그에는 예시를 겸해 provider·모델
+쌍 31개가 있고, 그중 `max-request-body-bytes` 를 선언한 **13개만** 디스패치됩니다.
+나머지 18개는 부팅 경고가 어느 키를 넣어야 하는지 이름까지 찍어 줍니다.
+`[runtime].default` 는 13개 안에 있습니다.
 
 ## runtime.toml
 

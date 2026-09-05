@@ -5543,6 +5543,13 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                         "first_seen": 1787340000.0,
                         "last_seen": 1787347000.0,
                         "memory_id": "mem-1",
+                        "events": {
+                            "retrieved_count": 3,
+                            "retrieved_distinct_days": 2,
+                            "last_retrieved_at": 1787347500.0,
+                            "cited_count": 0,
+                            "revised_from": [],
+                        },
                     },
                     {
                         "claim": "port 8935 is already claimed",
@@ -5551,6 +5558,13 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                         "first_seen": 1787341000.0,
                         "last_seen": 1787346000.0,
                         "memory_id": "mem-2",
+                        "events": {
+                            "retrieved_count": 0,
+                            "retrieved_distinct_days": 0,
+                            "last_retrieved_at": None,
+                            "cited_count": 0,
+                            "revised_from": [],
+                        },
                     },
                 ],
             },

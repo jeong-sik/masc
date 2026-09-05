@@ -25,7 +25,7 @@ keeper 가 도구를 마음껏 쓰려면 두 가지가 먼저 있어야 한다. 
 | Execute 호출 | 1,820 | 같은 줄 |
 | tool_execute 승인 경로 | readonly_sandbox 841 · keeper_always_allow 552 · **judge(one_shot_resolution) 319** · observed_in_box 32 | `operation=tool_execute source=` |
 | Execute 오류 중 cwd 없음 | 38 (`cwd_missing`/`cwd_not_directory`) | `tool=Execute outcome=error` |
-| Grep 오류 중 원격 rg 에 호스트 경로가 감 | 11 (`remote_ssh_read_failed … rg: /Users/dancer/me/.masc/playground/rondo/…`) | `tool=Grep outcome=error` |
+| Grep 오류 중 원격 rg 에 호스트 경로가 감 | 14, 전부 15:57Z 재시작 전 (`remote_ssh_read_failed … rg: /Users/dancer/me/.masc/playground/rondo/…`). 재시작 뒤 rondo 의 Grep 19건은 모두 성공 | `tool=Grep outcome=error` |
 | Read 오류 | 109 (그중 `path_outside_sandbox` 12) | `tool=Read outcome=error` |
 | 실행 레인 전멸 시간 | 13:39Z ~ 15:57Z, keeper 8명 | 보드 p-d5ed6f05, #33425 |
 
@@ -35,12 +35,17 @@ keeper 가 도구를 마음껏 쓰려면 두 가지가 먼저 있어야 한다. 
 microvm keeper 의 트리는 게스트 볼륨(`/masc-work/<keeper>`)에 있고, remote_ssh
 keeper 의 트리는 원격 계정 안(`/opt/masc-playground`)에 있다. 그런데 오늘
 `Execute` 는 `cwd_not_directory: /Users/dancer/me/.masc/playground/polisher/masc-t1348`
-로 38번 거절됐고(`Keeper_tool_execute_path.resolve_missing_cwd` 가 호스트 경로의
-존재를 본다), rondo 의 `Grep` 은 원격 rg 에 `/Users/dancer/me/.masc/playground/rondo/…`
-를 넘겨 11번 exit 2 를 받았다. polisher 가 보드에서 여덟 번 넘게 재현한
-"있는 패턴인데 `ok:true, matches:[]`" 는 같은 뿌리로 보인다. rg 가 빈 디렉터리나
-없는 경로를 뒤지면 exit 1(매치 없음)이고, 도구는 그것을 사실로 돌려준다.
-0 매치를 못 믿는 도구는 없는 도구다.
+로 38번 거절됐다(`Keeper_tool_execute_path.resolve_missing_cwd` 가 호스트 경로의
+존재를 본다; #33461 이 고쳤다). rondo 의 `Grep` 이 원격 rg 에
+`/Users/dancer/me/.masc/playground/rondo/…` 를 넘겨 exit 2 를 받은 14건과, polisher 가
+보드에서 여덟 번 넘게 재현한 "있는 패턴인데 `ok:true, matches:[]`" 는 모두 15:57Z
+재시작 전의 일이다. 읽기 경로의 호스트→원격 변환(`Keeper_remote_path.host_to_remote`,
+`Keeper_sandbox_read_backend.container_path_of_host`)은 08-29 와 09-02 에 main 에 들어갔고,
+재시작 뒤에는 rondo 19건·polisher 3건·sangsu 7건의 Grep 이 모두 성공했다. 재시작 전
+서버가 그 변환보다 오래된 빌드였다고 보는 것이 가장 단순한 설명이지만, 그 빌드의
+버전을 적은 로그 줄이 없어 확인 필요로 남긴다. 그래서 A 의 나머지(A-2, A-3)는
+관측된 결함이 아니라 재발 방지의 타입 경계다. 0 매치를 못 믿는 도구는 없는
+도구이므로 경계는 세우되, B 와 C 뒤에 둔다.
 
 **(B) shim 은 손으로 배포되고, 서버는 그 사실을 모른다.** shim 은 운영자가
 `build-shim.sh` 로 만들어 `~/me/.masc/microvm/shim/` 과 원격 호스트
@@ -156,15 +161,15 @@ capabilities)와 첫 디스패치 여부를 가진다. 여기에 마지막 디�
 
 | 단계 | 내용 | 크기 | 선행 |
 |---|---|---|---|
-| A-1 | `Endpoint_owned` 프로필의 cwd 해석에서 호스트 존재 확인 제거, 논리 경로 검증만 | 2~3 파일 | 없음 |
-| A-2 | 원격 argv 가 `Remote_path.t` 만 받도록 타입 경계, rg 인자 변환 | 3~4 파일 | A-1 |
-| A-3 | Grep 0 매치 판정에 exit 2 + stderr 조건, 알려진-매치 테스트 | 2 파일 | A-2 |
-| D-1 | `shared_state` 에 마지막 디스패치 분류, `keeper_lane_status` 도구 | 3~4 파일 | 없음 |
+| A-1 | `Endpoint_owned` 프로필의 cwd 해석에서 호스트 존재 확인 제거, 논리 경로 검증만 | 3 파일 (#33461, 머지) | 없음 |
+| D-1 | `shared_state` 에 마지막 디스패치 분류, `keeper_lane_status` 도구 | 12 파일 (#33472, 머지) | 없음 |
 | B-1 | 릴리즈 워크플로에 shim 두 아키텍처 빌드와 자산 업로드 | 1~2 파일 | 없음 |
 | B-2 | 서버가 아는 릴리즈 shim 해시, 부팅 시 게스트 shim 자동 배치 | 3 파일 | B-1 |
 | B-3 | probe 에 sha256, preflight WARN, `masc shim install` | 4 파일 | B-1 |
 | C-1 | 이틀 측정표, 카나리 결정 | 문서 | 16:20Z + 48h |
 | C-2 | 카나리와 표 후보 | 설정 + 표 | C-1 |
+| A-2 | 원격 argv 가 `Remote_path.t` 만 받도록 타입 경계 (관측 결함 없음, 재발 방지) | 3~4 파일 | B, C 뒤 |
+| A-3 | Grep 0 매치 판정에 exit 2 + stderr 조건, 알려진-매치 테스트 | 2 파일 | A-2 |
 
 한 단계가 한 Draft PR 이다. A 와 D 는 서로 독립이라 병렬로 간다. B-1 은 CI 러너
 확정이 먼저다.
@@ -173,7 +178,7 @@ capabilities)와 첫 디스패치 여부를 가진다. 여기에 마지막 디�
 
 | 날짜 | tool_execute | judge | observed_in_box | refused | cwd 오류 | rg 호스트 경로 | 비고 |
 |---|---|---|---|---|---|---|---|
-| 2026-09-05 | 1,742 | 319 (18%) | 32 | 2 | 38 | 11 | 상자는 16:20Z 부터 전 레인 |
+| 2026-09-05 | 1,742 | 319 (18%) | 32 | 2 | 38 | 14 (모두 재시작 전) | 상자는 16:20Z 부터 전 레인. A-1·D-1 은 09-06 머지 |
 
 ## 6. 하지 않는 것
 

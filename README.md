@@ -251,11 +251,10 @@ Export it in the shell you start `masc` from. On the TUI path this is easy to
 miss, because the server the TUI starts inherits the TUI's environment: export
 it before launching, not after.
 
-**Most of the seeded model catalog is not dispatchable.** The catalog ships 31
-provider/model bindings as documented examples; the 13 that declare
-`max-request-body-bytes` can take a Keeper turn and the rest are named in a
-startup warning that says exactly which key to add. `[runtime].default` is one
-of the 13.
+**The seeded model catalog is keeper-dispatchable.** The catalog ships 31
+provider/model bindings as documented examples, each declaring
+`max-request-body-bytes` so that any configured model can take a Keeper turn
+without startup warnings. `[runtime].default` is one of them.
 
 ### What a Keeper may do on its first day
 

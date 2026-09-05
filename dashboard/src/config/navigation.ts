@@ -62,7 +62,8 @@ type SurfaceSectionId =
   | 'skills' // SKILL.md catalog keepers load at turn start, with usage (RFC skills-as-tools §2.6).
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + Gate + inspector (Phase 7: connectors split out)
-  // connectors (Phase 7: top-level surface — sidecar-driven channel bridges)
+  // connectors (Phase 7: top-level surface — channel bridges; discord,
+  // imessage and slack run in-process, telegram still via a sidecar)
   // Per-connector sub-tabs (discord/imessage/slack/telegram) were merged into
   // connector-status on 2026-04-30; selection happens inside the page via
   // ConnectorOverviewStrip rather than top-level navigation.
@@ -245,7 +246,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'connectors',
     label: 'Connectors',
     icon: 'connectors',
-    description: 'Channel sidecars and keeper bindings',
+    description: 'Channel bridges and keeper bindings',
     defaultTab: 'connectors',
     defaultParams: { section: 'connector-status' },
     tabs: ['connectors'],
@@ -406,7 +407,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'connector-status',
       label: 'All',
-      description: 'Discord, iMessage, Slack, and Telegram sidecars in one surface.',
+      description: 'Discord, iMessage, Slack, and Telegram channels in one surface.',
       params: { section: 'connector-status' },
     },
   ],

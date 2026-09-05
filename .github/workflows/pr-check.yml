@@ -26,6 +26,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The lint suite is one job on purpose. It used to be ~30 GitHub Actions
+  # jobs, each paying its own checkout and apt setup, which queued whole PRs
+  # for tens of minutes; scripts/ci/run-lint-suite.sh was written to collapse
+  # them into a single sequential run that still reports every failure rather
+  # than stopping at the first. That driver then ran nowhere: the 2026-09-02
+  # collapse of the 9-job lane dropped lint along with the jobs, and the
+  # driver was never re-attached (#33211).
+  #
+  # It is a job of its own rather than a step in `check` because it needs no
+  # OCaml toolchain -- checkout, ripgrep, jq and python3 are the whole
+  # dependency -- so it answers in about a minute instead of waiting behind
+  # the opam switch, and a lint failure and a compile failure are reported
+  # independently.
+  #
+  # Mode is `blocking`: 37 lints, measured green on ff7ff135bd. The six extra
+  # `blocking-pr` diff guards are NOT wired here yet, because one of them
+  # (lint-cancel-guard.sh) reports five hits on main -- one of which is the
+  # lint reading a code span inside a comment. Wiring them before that is
+  # settled would red-wall every PR. Tracked in #33211.
+  lint:
+    name: lint suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install the tools the lints call
+        # 29 of the 40 lints call rg or jq, and yaml-syntax.sh imports PyYAML.
+        # apt-refresh.sh bounds a hung mirror at 90s and fails open, the same
+        # way release.yml uses it.
+        run: |
+          set -euo pipefail
+          bash scripts/ci/apt-refresh.sh
+          sudo apt-get install -y --no-install-recommends ripgrep jq python3-yaml
+
+      - name: Blocking lints
+        run: bash scripts/ci/run-lint-suite.sh blocking
+
+      - name: Advisory lints
+        # Recorded, not enforced -- the driver's own contract for this mode.
+        continue-on-error: true
+        run: bash scripts/ci/run-lint-suite.sh advisory
+
   check:
     name: dune build @check
     runs-on: ubuntu-latest

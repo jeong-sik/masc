@@ -8367,36 +8367,6 @@ let blame_block_at blocks line =
   in
   find blocks
 
-(* ── IDE annotations: notes anchored to lines of a codebase ────────── *)
-
-type ide_annotation = {
-  ia_line_start : int;
-  ia_line_end : int;
-  ia_keeper : string;
-  (* The server's kind vocabulary (comment / decision / question /
-     bookmark), carried as its own word: the TUI only prints it, so an
-     added kind shows itself instead of killing the listing. *)
-  ia_kind : string;
-  ia_content : string;
-  ia_task : string option;
-}
-
-let decode_ide_annotation json =
-  let* ia_line_start = required_int_field json "line_start" in
-  let* ia_line_end = required_int_field json "line_end" in
-  let* ia_keeper = required_string_field json "keeper_id" in
-  let* ia_kind = required_string_field json "kind" in
-  let* ia_content = required_string_field json "content" in
-  let* ia_task = optional_string_field json "task_id" in
-  Ok { ia_line_start; ia_line_end; ia_keeper; ia_kind; ia_content; ia_task }
-
-let decode_ide_annotations json =
-  let* ok = required_bool_field json "ok" in
-  if not ok then Error "annotations answered ok=false"
-  else
-    let* rows_json = required_list_field json "data" in
-    decode_list "data" decode_ide_annotation rows_json
-
 (* ── the /api/v1/lsp/question answer ───────────────────────────────── *)
 
 type lsp_location = {

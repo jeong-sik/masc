@@ -14713,60 +14713,54 @@ let render_code (state : state) =
     box_divider pane_buf pane_cols;
     let content_height = code_pane_content_height state in
     (if notes_showing then
-       (* "(loading notes)" used to be what an unasked overlay said as well
-          as a reading one. Now it is only the reading one. *)
-       match Masc_tui_fetched.current state.code_notes with
-       | Some (_, Masc_tui_fetched.Failed detail) ->
+       (* The memos are the file's own comments, so the overlay lists what
+          the lexed rows hold and has no reading state of its own. *)
+       let memos =
+         match Masc_tui_fetched.current state.code_file with
+         | Some (_, Masc_tui_fetched.Ready rows) -> Masc_tui_memo.of_rows rows
+         | Some
+             ( _
+             , ( Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+               | Masc_tui_fetched.Failed _ ) )
+         | None -> []
+       in
+       match memos with
+       | [] ->
            box_line pane_buf pane_cols
-             ((Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail
+             (Ansi.dim
+             ^ "  (no memo in this file: a comment on its own row reading \
+                masc(name): text)"
              ^ Ansi.reset);
            for _ = 2 to content_height do
              box_empty pane_buf pane_cols
            done
-       | Some (_, Masc_tui_fetched.Loading) ->
-           box_line pane_buf pane_cols
-             (Ansi.dim ^ "  (loading notes)" ^ Ansi.reset);
-           for _ = 2 to content_height do
-             box_empty pane_buf pane_cols
-           done
-       | Some (_, Masc_tui_fetched.Absent) | None ->
-           for _ = 1 to content_height do
-             box_empty pane_buf pane_cols
-           done
-       | Some (_, Masc_tui_fetched.Ready []) ->
-           box_line pane_buf pane_cols
-             (Ansi.dim ^ "  (no note anchors to this file)" ^ Ansi.reset);
-           for _ = 2 to content_height do
-             box_empty pane_buf pane_cols
-           done
-       | Some (_, Masc_tui_fetched.Ready notes) ->
-           let total = List.length notes in
+       | _ :: _ ->
+           let total = List.length memos in
            let max_scroll = max 0 (total - content_height) in
            let scroll = max 0 (min state.code_notes_scroll max_scroll) in
            for i = 0 to content_height - 1 do
-             match List.nth_opt notes (scroll + i) with
-             | Some note ->
-                 let open Masc.Tui_decode in
-                 let anchor =
-                   if note.ia_line_start = note.ia_line_end then
-                     Printf.sprintf "L%d" note.ia_line_start
-                   else
-                     Printf.sprintf "L%d-%d" note.ia_line_start
-                       note.ia_line_end
-                 in
-                 let task =
-                   match note.ia_task with
-                   | Some t -> "  [" ^ t ^ "]"
+             match List.nth_opt memos (scroll + i) with
+             | Some (Masc_tui_memo.Memo_at (line, memo)) ->
+                 let kind =
+                   match Ide_memo.kind_word memo.Ide_memo.kind with
                    | None -> ""
+                   | Some word -> " (" ^ word ^ ")"
                  in
                  box_line pane_buf pane_cols
-                   (Printf.sprintf "  %s%-9s%s %s%s (%s)%s%s  %s" Ansi.dim
-                      anchor Ansi.reset
+                   (Printf.sprintf "  %s%-6s%s %s%s%s%s  %s" Ansi.dim
+                      (Printf.sprintf "L%d" line)
+                      Ansi.reset
                       (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                      (Terminal_text.single_line note.ia_keeper)
-                      note.ia_kind Ansi.reset
-                      (Ansi.dim ^ task ^ Ansi.reset)
-                      (Terminal_text.single_line note.ia_content))
+                      (Terminal_text.single_line memo.Ide_memo.author)
+                      kind Ansi.reset
+                      (Terminal_text.single_line memo.Ide_memo.text))
+             | Some (Masc_tui_memo.Broken_at (line, why)) ->
+                 box_line pane_buf pane_cols
+                   (Printf.sprintf "  %s%-6s%s %smemo unreadable: %s%s" Ansi.dim
+                      (Printf.sprintf "L%d" line)
+                      Ansi.reset (Theme.bad ())
+                      (Terminal_text.single_line why)
+                      Ansi.reset)
              | None -> box_empty pane_buf pane_cols
            done
      else if diff_showing then
@@ -14999,14 +14993,11 @@ let render_code (state : state) =
              | None -> false
            in
            let note_spans =
-             match Masc_tui_fetched.current state.code_notes with
-             | Some (loaded_path, Masc_tui_fetched.Ready notes)
-               when matches_open_file loaded_path ->
-                 List.map
-                   (fun (n : Masc.Tui_decode.ide_annotation) ->
-                     (n.ia_line_start, n.ia_line_end))
-                   notes
-             | _ -> []
+             List.map
+               (fun found ->
+                 let line = Masc_tui_memo.line_of found in
+                 (line, line))
+               (Masc_tui_memo.of_rows file_rows)
            in
            let keeper_spans =
              match Masc_tui_fetched.current state.code_history with

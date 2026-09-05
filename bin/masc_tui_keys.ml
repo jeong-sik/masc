@@ -445,11 +445,9 @@ let for_surface = function
           ~help:"who last touched each run of lines, in the margin; b again \
                  drops it"
       ; b Act "m" "notes"
-          ~help:"the notes anchored to the open file (repository scope)"
-      ; b Act "w" "add note"
-          ~help:"in the notes view: add one through the $EDITOR form, \
-                 anchored to the line the cursor was on when the view opened \
-                 (kind: Comment / Decision / Question / Bookmark)"
+          ~help:"the memos in the open file: comments on their own row \
+                 reading masc(name): text, or masc(name) question: text; m \
+                 again closes the list"
       ; b Act "d" "diff"
           ~help:"on the project tree, list every working-tree change; on an \
                  open file, show that file's diff against HEAD"
@@ -541,12 +539,11 @@ let footer_hints_code ~pane =
   let file_keys =
     [ "Shift-Left / Shift-Right"; "K"; "D"; "R"; "B"; "b"; "d"; "H"; "m" ]
   in
-  (* Two keys belong to one pane each and were showing on all three. [w]
-     writes a note and only the notes view takes it; [Enter (history)] opens
-     a commit's pull request and only the history view has commits. Named
-     apart from [file_keys] because they are the overlay's own, not the
-     file's. *)
-  let overlay_keys = [ "w"; "Enter (history)" ] in
+  (* One key belongs to one pane and was showing on all three: [Enter
+     (history)] opens a commit's pull request and only the history view has
+     commits. Named apart from [file_keys] because it is the overlay's own,
+     not the file's. *)
+  let overlay_keys = [ "Enter (history)" ] in
   let dead =
     match pane with
     | Code_tree -> overlay_keys @ file_keys

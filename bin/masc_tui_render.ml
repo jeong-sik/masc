@@ -5986,7 +5986,7 @@ let standalone_lane_row ~now ~frame width (lane : Tui_decode.standalone_lane) =
    clipping. Keep those facts in a wrapped selected-row block underneath the
    four-row matrix. The order is the execution contract: admitted catalog
    slots first, official-client runtimes only after catalog exhaustion. *)
-let standalone_lane_detail_lines ~width (lane : Tui_decode.standalone_lane) =
+let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane) =
   let ordered values =
     match values with
     | [] -> "(none)"
@@ -6025,9 +6025,48 @@ let standalone_lane_detail_lines ~width (lane : Tui_decode.standalone_lane) =
       ( "Output meaning: open a retained run for its exact result."
       , "Evidence: this server did not report a known standalone-lane evidence contract." )
   in
+  (* Three facts the server has always sent and nothing drew.
+
+     [required] is the one that changes what an operator does about a lane
+     that cannot run: an optional lane nobody configured is a choice, and a
+     required one is a hole.
+
+     [configuration_state] separates "nobody configured this" from "the
+     registry could not be read", which the status word beside the lane
+     collapses into one "unavailable" and which the row only hinted at
+     through the prose of an admission error.
+
+     The last terminal run is what the totals cannot say. [ok/fail/cancel
+     962/133/0] reads the same whether the failures were this morning or
+     last quarter, and an idle lane says nothing at all about when it last
+     did work. *)
+  let obligation = if lane.sl_required then "Required" else "Optional" in
+  let configuration =
+    Tui_decode.standalone_lane_configuration_to_string
+      lane.sl_configuration_state
+  in
+  let last_run =
+    match lane.sl_last_outcome, lane.sl_last_terminal_at with
+    | None, _ -> "no run has finished"
+    | Some outcome, None -> "last run " ^ Terminal_text.single_line outcome
+    | Some outcome, Some at ->
+      Printf.sprintf "last run %s %s ago"
+        (Terminal_text.single_line outcome)
+        (Masc_tui_answering.elapsed_text ~now at)
+  in
+  let state_style =
+    match lane.sl_configuration_state with
+    | Tui_decode.Lane_ready -> Ansi.reset
+    | Tui_decode.Lane_slotless | Tui_decode.Lane_unconfigured ->
+      if lane.sl_required then Theme.bad () else Theme.warn ()
+    | Tui_decode.Lane_registry_unavailable -> Theme.bad ()
+  in
   wrap Ansi.bold
     (Printf.sprintf "%s · %s" (Terminal_text.single_line lane.sl_label)
        (Terminal_text.single_line purpose))
+  @ wrap state_style
+      (Printf.sprintf "%s lane · configuration %s · %s" obligation
+         configuration last_run)
   @ wrap Ansi.dim
       (Printf.sprintf "Config: [runtime.exact_output_lanes.%s]"
          (Terminal_text.single_line lane.sl_lane_id))
@@ -6143,7 +6182,10 @@ let render_lanes_overview (state : state) =
        in
        if available > 0 then begin
          box_divider buf cols;
-         let detail = standalone_lane_detail_lines ~width:inner lane in
+         let detail =
+           standalone_lane_detail_lines ~now:(Unix.gettimeofday ())
+             ~width:inner lane
+         in
          let shown = take_rows available [] detail in
          let shown =
            if List.length detail <= available then shown

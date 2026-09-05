@@ -1867,7 +1867,8 @@ type async_msg =
   | Runtime_config_view_loaded of (string * string list, string) result
   | Runtime_params_loaded of
       (Tui_decode.runtime_param_row list, string) result
-  | Prompts_loaded of (Tui_decode.prompts_snapshot, string) result
+  | Prompts_loaded of
+      unit Masc_tui_fetched.request * (Tui_decode.prompts_snapshot, string) result
   (* Where a preset answer goes: the chat pane that typed the command, or
      the Config pane that pressed the key. *)
   | Presets_listed of preset_sink * (Tui_decode.presets_snapshot, string) result
@@ -3495,6 +3496,10 @@ let launch_runtime_params_load state ~mailbox =
         (Runtime_params_loaded (Error "Eio switch is unavailable"))
 
 let launch_prompts_load state ~mailbox =
+  match Masc_tui_fetched.start ~equal:Unit.equal state.prompts ~key:() with
+  | Masc_tui_fetched.Already_loading -> ()
+  | Masc_tui_fetched.Started (next, request) ->
+  state.prompts <- next;
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -3503,7 +3508,7 @@ let launch_prompts_load state ~mailbox =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Prompts_loaded result)
+    enqueue_async mailbox (Prompts_loaded (request, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -3511,7 +3516,8 @@ let launch_prompts_load state ~mailbox =
           run ();
           `Stop_daemon)
   | None ->
-      enqueue_async mailbox (Prompts_loaded (Error "Eio switch is unavailable"))
+      enqueue_async mailbox
+        (Prompts_loaded (request, Error "Eio switch is unavailable"))
 
 (* A /preset call runs off the input loop like the prompt catalog load; its
    answer comes back as a chat notice for the pane that asked, so [wrap]
@@ -3570,18 +3576,24 @@ let ensure_preset_detail state ~mailbox =
          ~wrap:(fun result -> Preset_detail_loaded (request, result)))
 ;;
 
+(* The catalog if one has landed. Waiting and failed both have no rows, and
+   the pane says which below the list rather than here. *)
+let prompts_view state =
+  Masc_tui_fetched.view_for ~equal:Unit.equal state.prompts ~key:()
+;;
+
 let prompt_rows_for_state state =
-  match state.prompts_snapshot with
-  | None -> []
-  | Some snapshot ->
-      Tui_decode.prompt_rows_for_operator
-        ~show_fragments:state.prompts_show_fragments snapshot
+  match prompts_view state with
+  | Masc_tui_fetched.Ready snapshot ->
+    Tui_decode.prompt_rows_for_operator
+      ~show_fragments:state.prompts_show_fragments snapshot
+  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> []
 ;;
 
 let runtime_prompt_assets_for_state state =
-  match state.prompts_snapshot with
-  | None -> []
-  | Some snapshot -> snapshot.Tui_decode.ps_runtime_assets
+  match prompts_view state with
+  | Masc_tui_fetched.Ready snapshot -> snapshot.Tui_decode.ps_runtime_assets
+  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> []
 ;;
 
 let prompt_catalog_count_for_state state =
@@ -9545,16 +9557,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Error detail ->
           state.keeper_sandbox_logs_error <- Some (keeper_name, detail)
       end)
-  | Prompts_loaded result ->
-      (match result with
-       | Ok snapshot ->
-           state.prompts_snapshot <- Some snapshot;
-           state.prompts_cursor <-
-             max 0
-               (min state.prompts_cursor
-                  (prompt_catalog_count_for_state state - 1));
-           state.prompts_error <- None
-       | Error detail -> state.prompts_error <- Some detail)
+  | Prompts_loaded (request, result) ->
+      state.prompts <-
+        Masc_tui_fetched.complete ~equal:Unit.equal state.prompts request result;
+      state.prompts_cursor <-
+        max 0 (min state.prompts_cursor (prompt_catalog_count_for_state state - 1))
   | Presets_listed (sink, result) ->
       (match sink, result with
        | Preset_to_chat target, Ok snapshot ->
@@ -17538,8 +17545,9 @@ and is loaded on demand through keeper_skill.
            cancel_theme_preview ();
            (match state.config_pane with
             | Config_prompts ->
-              if state.prompts_snapshot = None
-              then launch_prompts_load state ~mailbox:async_messages
+              (* [start] answers Already_loading for a read in flight, so the
+                 launcher is the one that decides whether to ask. *)
+              launch_prompts_load state ~mailbox:async_messages
             | Config_presets ->
               state.presets_cursor <- 0;
               state.preset_save_draft <- None;

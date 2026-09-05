@@ -14918,17 +14918,19 @@ let render_prompt_registry (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 8192 in
+  let prompts = Masc_tui_fetched.view_for ~equal:Unit.equal state.prompts ~key:() in
   let prompt_rows =
-    match state.prompts_snapshot with
-    | Some snapshot ->
+    match prompts with
+    | Masc_tui_fetched.Ready snapshot ->
         Tui_decode.prompt_rows_for_operator
           ~show_fragments:state.prompts_show_fragments snapshot
-    | None -> []
+    | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ ->
+        []
   in
   let all_prompt_count =
-    match state.prompts_snapshot with
-    | Some snapshot -> List.length snapshot.Tui_decode.ps_rows
-    | None -> 0
+    match prompts with
+    | Masc_tui_fetched.Ready snapshot -> List.length snapshot.Tui_decode.ps_rows
+    | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> 0
   in
   let total = List.length prompt_rows in
   let cursor = max 0 (min state.prompts_cursor (total - 1)) in
@@ -14943,16 +14945,24 @@ let render_prompt_registry (state : state) =
        (config_pane_strip state)
        (connection_badge state));
   box_divider buf cols;
-  let error_rows = if Option.is_some state.prompts_error then 1 else 0 in
+  (* One row that says where the catalog is. An empty list used to mean both
+     "still reading" and "nothing here". *)
+  let status_row =
+    match prompts with
+    | Masc_tui_fetched.Ready _ -> None
+    | Masc_tui_fetched.Absent -> None
+    | Masc_tui_fetched.Loading -> Some ((Theme.recede ()), "프롬프트 목록을 읽는 중…")
+    | Masc_tui_fetched.Failed detail ->
+      Some ((Theme.bad ()), Terminal_text.single_line detail)
+  in
+  let error_rows = if Option.is_some status_row then 1 else 0 in
   let combined_height = max 2 (rows - 9 - error_rows) in
   let list_height = min 8 (max 1 (combined_height / 3)) in
   let detail_height = max 1 (combined_height - list_height) in
   let first = if cursor < list_height then 0 else cursor - list_height + 1 in
-  (match state.prompts_error with
-   | Some detail ->
-     box_line buf cols
-       ((Theme.bad ()) ^ "  " ^ fit_width (Terminal_text.single_line detail) (cols - 6)
-        ^ Ansi.reset)
+  (match status_row with
+   | Some (style, text) ->
+     box_line buf cols (style ^ "  " ^ fit_width text (cols - 6) ^ Ansi.reset)
    | None -> ());
   let drawn = ref 0 in
   List.iteri
@@ -15081,10 +15091,12 @@ let render_runtime_prompt_assets (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 8192 in
+  let prompts = Masc_tui_fetched.view_for ~equal:Unit.equal state.prompts ~key:() in
   let assets =
-    match state.prompts_snapshot with
-    | None -> []
-    | Some snapshot -> snapshot.Tui_decode.ps_runtime_assets
+    match prompts with
+    | Masc_tui_fetched.Ready snapshot -> snapshot.Tui_decode.ps_runtime_assets
+    | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ ->
+        []
   in
   let total = List.length assets in
   let cursor = max 0 (min state.prompts_cursor (total - 1)) in
@@ -15099,16 +15111,23 @@ let render_runtime_prompt_assets (state : state) =
   box_line_styled buf cols ~style:(Theme.recede ())
     "  배포된 .txt 지시문 · registry override 대상이 아님";
   box_divider buf cols;
-  let error_rows = if Option.is_some state.prompts_error then 1 else 0 in
+  (* One row that says where the catalog is. An empty list used to mean both
+     "still reading" and "nothing here". *)
+  let status_row =
+    match prompts with
+    | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent -> None
+    | Masc_tui_fetched.Loading -> Some ((Theme.recede ()), "프롬프트 목록을 읽는 중…")
+    | Masc_tui_fetched.Failed detail ->
+      Some ((Theme.bad ()), Terminal_text.single_line detail)
+  in
+  let error_rows = if Option.is_some status_row then 1 else 0 in
   let combined_height = max 2 (rows - 10 - error_rows) in
   let list_height = min 8 (max 1 (combined_height / 3)) in
   let detail_height = max 1 (combined_height - list_height) in
   let first = if cursor < list_height then 0 else cursor - list_height + 1 in
-  (match state.prompts_error with
-   | Some detail ->
-     box_line buf cols
-       ((Theme.bad ()) ^ "  " ^ fit_width (Terminal_text.single_line detail) (cols - 6)
-        ^ Ansi.reset)
+  (match status_row with
+   | Some (style, text) ->
+     box_line buf cols (style ^ "  " ^ fit_width text (cols - 6) ^ Ansi.reset)
    | None -> ());
   let drawn = ref 0 in
   List.iteri

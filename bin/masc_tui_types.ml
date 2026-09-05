@@ -2713,8 +2713,10 @@ type state = {
      terminal -- which is why this is an option of an option: the outer one
      says whether a preview is running at all. *)
   mutable theme_before_preview: string option option;
-  mutable prompts_snapshot: Tui_decode.prompts_snapshot option;
-  mutable prompts_error: string option;
+  (* The prompt catalog. One value rather than a snapshot option beside an
+     error option: the pair could not say "asked, waiting", so this pane drew
+     an empty catalog while its first read was in flight. *)
+  mutable prompts: (unit, Tui_decode.prompts_snapshot) Masc_tui_fetched.t;
   mutable prompts_cursor: int;
   mutable prompts_show_fragments: bool;
   mutable prompts_show_runtime_assets: bool;
@@ -3988,8 +3990,7 @@ let create_state
   theme_choice = None;
   theme_cursor = 0;
   theme_before_preview = None;
-  prompts_snapshot = None;
-  prompts_error = None;
+  prompts = Masc_tui_fetched.initial;
   prompts_cursor = 0;
   presets_snapshot = None;
   presets_error = None;

@@ -297,6 +297,40 @@ let test_keeper_calls_decode_exact_execution_schedule () =
             | None -> Alcotest.fail "schedule was dropped")
        | _ -> Alcotest.fail "expected one call")
 
+(* The header draws the verdict and, since the gap case, the reason beside
+   it. Four of this route's words come with a reason restating themselves --
+   "empty" with "no_entries" -- but "coverage_gap" carries the gap record's
+   own message, and no other field on that header can supply it. The decode
+   has to keep it for the header to have anything to draw. *)
+let test_keeper_calls_keep_the_reason_beside_the_verdict () =
+  let snapshot ?stale_reason health =
+    Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
+      (`Assoc
+         ([ "keeper", `String "largo"
+          ; "count", `Int 0
+          ; "health", `String health
+          ; "entries", `List []
+          ]
+          @
+          match stale_reason with
+          | None -> []
+          | Some reason -> [ "stale_reason", `String reason ]))
+  in
+  (match snapshot ~stale_reason:"telemetry gap at 2026-09-06T02:00Z" "coverage_gap" with
+   | Error detail -> Alcotest.failf "a gap snapshot must decode: %s" detail
+   | Ok decoded ->
+       Alcotest.(check (option string))
+         "the gap's own message survives"
+         (Some "telemetry gap at 2026-09-06T02:00Z")
+         decoded.Tui_decode.kcs_stale_reason;
+       Alcotest.(check string) "and the verdict beside it" "coverage_gap"
+         decoded.Tui_decode.kcs_health);
+  match snapshot "ok" with
+  | Error detail -> Alcotest.failf "an ok snapshot must decode: %s" detail
+  | Ok decoded ->
+      Alcotest.(check (option string)) "a healthy log claims no reason" None
+        decoded.Tui_decode.kcs_stale_reason
+
 let test_keeper_calls_reject_partial_or_unknown_schedule () =
   let decode row =
     Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
@@ -7967,6 +8001,8 @@ let () =
           test_keeper_calls_decode_exact_execution_schedule
       ; Alcotest.test_case "rejects partial or unknown schedule" `Quick
           test_keeper_calls_reject_partial_or_unknown_schedule
+      ; Alcotest.test_case "keeps the reason beside the verdict" `Quick
+          test_keeper_calls_keep_the_reason_beside_the_verdict
       ; Alcotest.test_case "rejects rows naming another keeper" `Quick
           test_keeper_calls_reject_rows_naming_another_keeper
       ; Alcotest.test_case "requires the envelope" `Quick

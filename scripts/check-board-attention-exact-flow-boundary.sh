@@ -42,7 +42,7 @@ import pathlib
 import re
 import sys
 
-source = pathlib.Path(sys.argv[1]).read_text()
+source = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
 output = []
 index = 0
 comment_depth = 0
@@ -115,7 +115,7 @@ import re
 import sys
 
 target = pathlib.Path(sys.argv[1])
-source = target.read_text()
+source = target.read_text(encoding="utf-8")
 tokens = []
 index = 0
 quoted_re = re.compile(r"\{([a-z_][A-Za-z0-9_']*)?\|")
@@ -249,9 +249,9 @@ cache_dir = pathlib.Path(sys.argv[1])
 targets = sys.argv[2:]
 quoted_re = re.compile(r"\{([a-z_][A-Za-z0-9_']*)?\|")
 
-for target_str in targets:
+for idx, target_str in enumerate(targets):
     target_path = pathlib.Path(target_str)
-    source = target_path.read_text()
+    source = target_path.read_text(encoding="utf-8")
     output = []
     index = 0
     comment_depth = 0
@@ -311,23 +311,16 @@ for target_str in targets:
                 output.append(char)
                 index += 1
 
-    (cache_dir / target_path.name).write_text("".join(output))
+    (cache_dir / f"{idx}.stripped").write_text("".join(output), encoding="utf-8")
 PY
 }
 
 count_fixed() {
   local token="$1"
   local target="$2"
-  local cached="${STRIPPED_CACHE_DIR:-}/$(basename "${target}")"
-  if [[ -n "${STRIPPED_CACHE_DIR:-}" && -f "${cached}" ]]; then
-    rg -o --fixed-strings "${token}" "${cached}" 2>/dev/null \
-      | wc -l \
-      | tr -d ' '
-  else
-    { ocaml_code "${target}" | rg -o --fixed-strings "${token}" 2>/dev/null || true; } \
-      | wc -l \
-      | tr -d ' '
-  fi
+  { rg -o --fixed-strings "${token}" "${target}" 2>/dev/null || true; } \
+    | wc -l \
+    | tr -d ' '
 }
 
 require_once() {
@@ -351,36 +344,22 @@ require_present() {
 matches_pattern() {
   local pattern="$1"
   shift
-  if [[ -n "${STRIPPED_CACHE_DIR:-}" && "$#" -eq "${#TARGETS[@]}" ]]; then
-    rg -q --multiline -- "${pattern}" "${CACHED_TARGETS[@]}"
-    return $?
+  local status
+  if rg -q --multiline -- "${pattern}" "$@"; then
+    return 0
+  else
+    status=$?
   fi
-  local target status
-  for target in "$@"; do
-    local cached="${STRIPPED_CACHE_DIR:-}/$(basename "${target}")"
-    if [[ -n "${STRIPPED_CACHE_DIR:-}" && -f "${cached}" ]]; then
-      if rg -q --multiline -- "${pattern}" "${cached}"; then
-        return 0
-      fi
-    else
-      if ocaml_code "${target}" | rg --multiline -- "${pattern}" >/dev/null; then
-        return 0
-      else
-        status=$?
-      fi
-      if [[ ${status} -eq 1 ]]; then
-        continue
-      fi
-      fail "rg failed while checking: ${target}"
-    fi
-  done
-  return 1
+  if [[ ${status} -eq 1 ]]; then
+    return 1
+  fi
+  fail "rg failed while checking targets with pattern: ${pattern}"
 }
 
 forbid_pattern() {
   local pattern="$1"
   local detail="$2"
-  if matches_pattern "${pattern}" "${TARGETS[@]}"; then
+  if matches_pattern "${pattern}" "${CACHED_TARGETS[@]}"; then
     rg -n --multiline -- "${pattern}" "${TARGETS[@]}" >&2 || true
     fail "${detail}"
   fi
@@ -391,13 +370,7 @@ check_repo_retired_symbols() {
   local pattern='(Keeper_board_attention_failure|keeper_board_attention_failure|drain_pending_on_owner_lane|drain_board_attention_candidates_on_owner_lane|keeper\.board_attention_judgment([^_[:alnum:]-]|$))'
   found=0
   while IFS= read -r -d '' target; do
-    local cached="${STRIPPED_CACHE_DIR:-}/$(basename "${target}")"
-    if [[ -n "${STRIPPED_CACHE_DIR:-}" && -f "${cached}" ]]; then
-      if matches="$(rg -n -- "${pattern}" "${cached}")"; then
-        printf '%s\n%s\n' "${target}" "${matches}" >&2
-        found=1
-      fi
-    elif matches="$(ocaml_code "${target}" | rg -n -- "${pattern}")"; then
+    if matches="$(ocaml_code "${target}" | rg -n -- "${pattern}")"; then
       printf '%s\n%s\n' "${target}" "${matches}" >&2
       found=1
     else
@@ -460,30 +433,30 @@ check_boundary() {
 
   local cache_dir
   cache_dir="$(mktemp -d "${TMPDIR:-/tmp}/board-attention-cache.XXXXXX")"
-  trap 'rm -rf "${cache_dir}"' EXIT
+  trap 'rm -rf "${cache_dir}"' EXIT INT TERM HUP
   strip_targets_to_cache "${cache_dir}" "${TARGETS[@]}"
-  local STRIPPED_CACHE_DIR="${cache_dir}"
-  local CACHED_TARGETS=()
-  for target in "${TARGETS[@]}"; do
-    CACHED_TARGETS+=("${cache_dir}/$(basename "${target}")")
-  done
+  local cached_flow_ml="${cache_dir}/0.stripped"
+  local cached_worker_ml="${cache_dir}/4.stripped"
+  local cached_partition_ml="${cache_dir}/6.stripped"
+  local cached_partition_mli="${cache_dir}/7.stripped"
+  local CACHED_TARGETS=("${cache_dir}"/*.stripped)
 
   check_lane_binding "${FLOW_ML}" \
     || fail "Board attention exact lane binding contract failed"
-  require_once "Exact_output.make_flow_candidate" "${FLOW_ML}"
-  require_once "Exact_output.snapshot_flow" "${FLOW_ML}"
-  require_once "Exact_output.start_flow" "${FLOW_ML}"
-  require_once "Exact_output.execute_flow_once" "${FLOW_ML}"
-  require_present "~validate" "${FLOW_ML}"
-  require_once "Exact_flow.prepare" "${WORKER_ML}"
-  require_once "Exact_flow.execute" "${WORKER_ML}"
-  require_once "Partition.bind_before_dispatch" "${WORKER_ML}"
-  require_once "Partition.record_before_advance" "${WORKER_ML}"
-  require_present "Partition.Fsync_completed" "${WORKER_ML}"
-  require_once "let bind_before_dispatch" "${PARTITION_ML}"
-  require_once "let record_before_advance" "${PARTITION_ML}"
-  require_once "val bind_before_dispatch" "${PARTITION_MLI}"
-  require_once "val record_before_advance" "${PARTITION_MLI}"
+  require_once "Exact_output.make_flow_candidate" "${cached_flow_ml}"
+  require_once "Exact_output.snapshot_flow" "${cached_flow_ml}"
+  require_once "Exact_output.start_flow" "${cached_flow_ml}"
+  require_once "Exact_output.execute_flow_once" "${cached_flow_ml}"
+  require_present "~validate" "${cached_flow_ml}"
+  require_once "Exact_flow.prepare" "${cached_worker_ml}"
+  require_once "Exact_flow.execute" "${cached_worker_ml}"
+  require_once "Partition.bind_before_dispatch" "${cached_worker_ml}"
+  require_once "Partition.record_before_advance" "${cached_worker_ml}"
+  require_present "Partition.Fsync_completed" "${cached_worker_ml}"
+  require_once "let bind_before_dispatch" "${cached_partition_ml}"
+  require_once "let record_before_advance" "${cached_partition_ml}"
+  require_once "val bind_before_dispatch" "${cached_partition_mli}"
+  require_once "val record_before_advance" "${cached_partition_mli}"
   check_lane_declaration \
     || fail "Board attention lane declaration contract failed"
 
@@ -521,7 +494,7 @@ check_boundary() {
   done
 
   rm -rf "${cache_dir}"
-  trap - EXIT
+  trap - EXIT INT TERM HUP
   printf '[board-attention-exact-flow-boundary] OK\n'
 }
 

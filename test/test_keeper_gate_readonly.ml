@@ -387,7 +387,7 @@ let test_script_classification_unit () =
   observation "a tab is a word boundary, like the shell reads it" "ls\t-la";
   observation "quoted argument" "grep 'x y' f";
   observation "double-quoted argument" "grep -n \"a b\" notes.txt";
-  observation "pipeline of reads" "git show HEAD:f | sed -n '10,20p'";
+  judged "pipeline of reads" "git show HEAD:f | sed -n '10,20p'";
   observation "pipeline with head" "ls repos | head -5";
   observation "cd before observing" "cd repos/masc && git log --oneline -3";
   observation "sequence of reads" "pwd; ls -la; echo ---";

@@ -135,7 +135,9 @@ exit 0 만 관측으로 친다. 상자 안에서 쓰기나 연결을 시도한 �
 안 쓰면 judge 없이 돈다. 이틀치로 401건(microvm judge 의 56%)이다. 잃는 것은 keeper
 가 자기 작업 트리를 스스로 망가뜨릴 때 judge 가 그것을 막아 줄 기회다. 그 손실은 다시
 clone 하면 복구된다. 이 스위치를 켤지는 운영자가 프로필마다 정한다. remote_ssh 는
-계정의 홈이 그 계정만의 것이라고 운영자가 선언할 때만 `guest_local` 을 받는다.
+계정의 홈이 그 계정만의 것이라고 운영자가 선언할 때만 `guest_local` 을 받는다. 그 선언은
+runtime.toml 의 해당 `[exec.ssh.endpoints.<name>]` 에 `private_home = true` 로 쓴다(기본 false).
+선언이 없는 엔드포인트에서 `guest_local` 요청은 상자를 만들지 않고 judge 로 간다.
 
 ### 3.5 shim 이 못 하는 곳
 

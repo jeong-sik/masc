@@ -146,6 +146,17 @@ val ack_pending_result :
   unit ->
   (unit, string) result
 
+val note_checkpoint_retention_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  selection:Keeper_event_queue_state.pending_selection ->
+  unit ->
+  (Keeper_event_queue_state.pending_selection * int, string) result
+(** Durably count one checkpoint-yield retention of the selection and return
+    the updated selection with its new count. *)
+
+
 type snapshot_read_error_kind =
   | Invalid_path
   | Read_failed

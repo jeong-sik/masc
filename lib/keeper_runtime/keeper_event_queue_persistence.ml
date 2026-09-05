@@ -87,11 +87,13 @@ type transfer_projection_result = State.transfer_projection_result =
   | Transfer_already_projected
 
 
-(* v18 stores all displaced projected history as compact replay witnesses.
-   The transition WAL carries a full pre-state, so both files hard-cut
-   together; there is no compatibility decoder. *)
-let snapshot_filename = "event-queue-v18.json"
-let transition_wal_filename = "event-queue-transitions-v7.jsonl"
+(* v19 adds [checkpoint_retentions] to every pending entry: a checkpoint-yield
+   turn's retention of a Connector_attention wake is durable delivery bookkeeping
+   (see [note_checkpoint_retention_result]), so a restart must not reset it and
+   v18 snapshots cannot supply it. The transition WAL carries a full pre-state,
+   so both files hard-cut together; there is no compatibility decoder. *)
+let snapshot_filename = "event-queue-v19.json"
+let transition_wal_filename = "event-queue-transitions-v8.jsonl"
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string
 
@@ -363,7 +365,7 @@ let bump_revision state =
   else Ok (State.with_revision (Int64.succ (State.revision state)) state)
 ;;
 
-let transition_wal_schema = "masc.keeper_event_queue.transition.v7"
+let transition_wal_schema = "masc.keeper_event_queue.transition.v8"
 
 type transition_wal_row =
   { pre_state : State.t
@@ -1097,6 +1099,19 @@ let ack_pending_result
     match State.ack_pending ~selection state with
     | Error _ as error -> error
     | Ok state -> Ok (state, ()))
+;;
+
+let note_checkpoint_retention_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~selection
+      ()
+  =
+  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+    match State.note_checkpoint_retention ~selection state with
+    | Error _ as error -> error
+    | Ok (state, payload) -> Ok (state, payload))
 ;;
 
 let commit_transition_unlocked_with

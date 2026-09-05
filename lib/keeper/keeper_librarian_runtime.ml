@@ -841,6 +841,27 @@ let run_best_effort
              |> Result.map_error (fun detail ->
                Memory_snapshot_write_failed { detail; selected_slot })
              in
+             (* The snapshot is committed; each supersede the answer stated is
+                now a Revised event on the old id (RFC-0418). A sidecar that
+                cannot be written is said here and does not undo the pass. *)
+             Keeper_memory_os_events.append_all
+               ~keepers_dir
+               ~keeper_id
+               (List.map
+                  (fun (revision : Keeper_librarian.revision) : Keeper_memory_os_events.event ->
+                     { recorded_at = snapshot.updated_at
+                     ; memory_id = revision.superseded
+                     ; trace_id = input_trace_id inp
+                     ; kind =
+                         Keeper_memory_os_events.Revised
+                           { superseded_by = revision.superseded_by }
+                     })
+                  selection.revisions)
+             |> List.iter (fun error ->
+               Log.Keeper.warn
+                 ~keeper_name:keeper_id
+                 "%s"
+                 (Keeper_memory_os_events.append_error_to_string error));
              snapshot, exact_output, selected_slot
            in
            match result with

@@ -37,15 +37,18 @@ let category_tokens =
 ;;
 
 (* The claim carries where it was read: a Board post id, optionally a
-   comment id, or null for the keeper's own transcript. Both are answered on
-   every claim so strict schema modes accept the shape; the decoder treats
-   null as absent. The field list is the same closed set the parser allows. *)
+   comment id, or null for the keeper's own transcript; and, when it continues
+   a dropped memory, that memory's short id in [supersedes], null otherwise.
+   All are answered on every claim so strict schema modes accept the shape;
+   the decoder treats null as absent. The field list is the same closed set
+   the parser allows. *)
 let librarian_claim_schema =
   let fields =
     [ Keeper_librarian.wire_field_claim, string_schema
     ; Keeper_librarian.wire_field_category, enum_schema category_tokens
     ; Keeper_memory_os_types.wire_field_board_post_id, nullable_string_schema
     ; Keeper_memory_os_types.wire_field_board_comment_id, nullable_string_schema
+    ; Keeper_memory_os_types.wire_field_supersedes, nullable_string_schema
     ]
   in
   object_schema ~required:(List.map fst fields) fields

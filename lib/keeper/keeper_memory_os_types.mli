@@ -9,6 +9,10 @@ val wire_field_category : string
 val wire_field_memory_id : string
 val wire_field_reason : string
 
+(** On a librarian claim: the short id of the dropped memory this claim
+    continues (RFC-0418). *)
+val wire_field_supersedes : string
+
 (** Claim-object fields accepted from the librarian and rendered in retry
     prompts. *)
 val wire_librarian_claim_fields : string list

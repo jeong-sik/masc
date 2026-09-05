@@ -66,6 +66,10 @@ val append_error_to_string : append_error -> string
     results, and says so in its log. *)
 val append : keepers_dir:string -> keeper_id:string -> event -> (unit, append_error) result
 
+(** Append each event in order. Only the failures come back; a caller on a
+    path that must not fail logs them and goes on. *)
+val append_all : keepers_dir:string -> keeper_id:string -> event list -> append_error list
+
 type read_error =
   | Not_json of string
   | Malformed of Keeper_memory_os_types.wire_error

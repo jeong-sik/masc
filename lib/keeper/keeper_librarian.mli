@@ -46,6 +46,15 @@ type input =
         direct turns on runtimes that return no AGENT_CORE checkpoint. *)
   }
 
+(** A new claim that continues a dropped memory, both by exact memory id.
+    The librarian named the old one with [supersedes]; the parser checked
+    that it exists and is in [dropped]. Recorded as a [Revised] event on the
+    old id after the snapshot commits (RFC-0418). *)
+type revision =
+  { superseded : string
+  ; superseded_by : string
+  }
+
 type selection =
   { retained_memory_ids : string list
   ; new_claims : Keeper_memory_os_types.fact list
@@ -54,6 +63,7 @@ type selection =
         every current identity appears in [retained_memory_ids] or here,
         so [Missing_disposition] replaces silent forgetting. *)
   ; facts : Keeper_memory_os_types.fact list
+  ; revisions : revision list
   }
 
 val wire_field_retained_memory_ids : string
@@ -63,6 +73,7 @@ val wire_field_claim : string
 val wire_field_category : string
 val wire_field_memory_id : string
 val wire_field_reason : string
+val wire_field_supersedes : string
 val wire_current_fields : string list
 val wire_claim_fields : string list
 val wire_dropped_fields : string list
@@ -83,6 +94,11 @@ type parse_error =
   | Duplicate_dropped_memory_id of string
   | Dropped_memory_id_also_retained of string
   | Missing_disposition of string
+  | Supersedes_unknown_memory_id of string
+      (** [supersedes] named a short id the answer's current set does not have. *)
+  | Supersedes_not_dropped of string
+      (** [supersedes] named a memory that is retained in the same answer; a
+          revision drops what it continues. *)
 
 val parse_error_to_string : parse_error -> string
 

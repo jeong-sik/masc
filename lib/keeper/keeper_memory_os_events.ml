@@ -139,6 +139,18 @@ let append ~keepers_dir ~keeper_id (e : event) : (unit, append_error) result =
      | exn -> Error (Write_failed { path; message = Printexc.to_string exn }))
 ;;
 
+(* Append in order and hand back only what failed. A producer on a path that
+   must not fail (a search returning its results, a librarian pass that has
+   committed) reports these in its log and goes on. *)
+let append_all ~keepers_dir ~keeper_id (events : event list) : append_error list =
+  List.filter_map
+    (fun event ->
+       match append ~keepers_dir ~keeper_id event with
+       | Ok () -> None
+       | Error error -> Some error)
+    events
+;;
+
 type read_error =
   | Not_json of string
   | Malformed of W.wire_error

@@ -45,10 +45,16 @@ let observation_commands =
   ; "cmp"; "column"; "nl"; "tac"; "cut"; "tr"; "grep"
   ]
 
-(* git subcommands that read only, in every argument shape they accept. *)
+(* git subcommands that read only, in every argument shape they accept.
+   [merge-base], [rev-list] and [cherry] were added 2026-09-05: over the two
+   days before, 21 judged requests carried one of them as a stage, and
+   [git -C clone-probe rev-list --count HEAD..origin/main] was the first call
+   a microvm keeper sent to the judge after the RFC-0421 restart. None of the
+   three has a flag that writes. *)
 let git_read_subcommands =
   [ "status"; "diff"; "log"; "show"; "blame"; "annotate"; "reflog"
-  ; "describe"; "shortlog"; "rev-parse"; "ls-files"; "ls-remote"; "ls-tree"
+  ; "describe"; "shortlog"; "rev-parse"; "rev-list"; "merge-base"; "cherry"
+  ; "ls-files"; "ls-remote"; "ls-tree"
   ; "whatchanged"; "cat-file"; "name-rev"; "grep"
   ]
 

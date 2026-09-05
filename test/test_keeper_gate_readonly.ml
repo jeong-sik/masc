@@ -47,6 +47,10 @@ let test_observation_table_is_fully_read () =
   passes "git log" [ "git"; "log"; "--oneline"; "-5" ];
   passes "git diff with global -c" [ "git"; "-c"; "core.pager=cat"; "diff" ];
   passes "git branch listing" [ "git"; "branch"; "-a" ];
+  passes "git rev-list count against upstream"
+    [ "git"; "-C"; "clone-probe"; "rev-list"; "--count"; "HEAD..origin/main" ];
+  passes "git merge-base" [ "git"; "merge-base"; "origin/main"; "HEAD" ];
+  passes "git cherry" [ "git"; "cherry"; "-v"; "origin/main" ];
   passes "git tag bare list" [ "git"; "tag" ];
   passes "git remote -v" [ "git"; "remote"; "-v" ];
   passes "git ls-tree recursive" [ "git"; "ls-tree"; "-r"; "origin/main"; "--name-only" ];

@@ -107,6 +107,47 @@ let default_network_mode_for_profile = function
   | Remote_ssh -> Network_inherit
 ;;
 
+(* ── the box (RFC-0422 §3.4) ─────────────────────────────────────────── *)
+
+type observation_run =
+  | Observe
+  | Guest_local
+
+let observation_run_to_string = function
+  | Observe -> "observe"
+  | Guest_local -> "guest_local"
+;;
+
+let observation_run_of_string raw =
+  match String.trim (String.lowercase_ascii raw) with
+  | "observe" -> Some Observe
+  | "guest_local" -> Some Guest_local
+  | _ -> None
+;;
+
+let all_observation_runs = [ Observe; Guest_local ]
+let valid_observation_run_strings = List.map observation_run_to_string all_observation_runs
+let default_observation_run = Observe
+
+(* Every pair written out, as for [network_mode_rejection]: a new profile or
+   a new box fails to compile here until someone decides its answer. *)
+let observation_run_rejection profile run =
+  match profile, run with
+  (* A Docker guest runs no masc-exec-shim, and the box is the shim's. The
+     key names a choice nothing would read, so it is refused rather than
+     carried. *)
+  | Docker, (Observe | Guest_local) ->
+    Some
+      "docker_no_observation_run: sandbox_profile \"docker\" runs no \
+       masc-exec-shim, so there is no box to choose; remove observation_run \
+       or move the keeper to \"microvm\" or \"remote_ssh\""
+  | Micro_vm, (Observe | Guest_local) -> None
+  | Remote_ssh, Observe -> None
+  (* Allowed by profile; whether this endpoint's account home is private is
+     the endpoint's declaration, read where the route is built. *)
+  | Remote_ssh, Guest_local -> None
+;;
+
 (* Which profile and network mode may be held together, and the refusal for
    the pair that may not. One function because the rule had two homes and only
    one of them ran before a write: the keeper TOML loader refused

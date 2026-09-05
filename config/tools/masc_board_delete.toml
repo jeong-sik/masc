@@ -1,6 +1,8 @@
 name = "masc_board_delete"
 description = """
-Delete a board post and its associated comments and votes. Use for cleanup \
+Delete a board post and its associated comments and votes.
+
+Use for cleanup \
 of stale, test, or expired posts."""
 
 # Held back from the request until the model asks for it by name.

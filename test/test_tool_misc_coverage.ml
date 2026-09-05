@@ -815,6 +815,7 @@ let connector_selection ~event_id ~arrived_at =
           Keeper_event_queue.Connector_attention { event_id; channel }
       }
   ; admitted_revision = 1L
+  ; checkpoint_retentions = 0
   }
 
 let () =
@@ -827,6 +828,7 @@ let () =
           ; payload = Keeper_event_queue.Bootstrap
           }
       ; admitted_revision = 1L
+      ; checkpoint_retentions = 0
       }
     in
     let rows =

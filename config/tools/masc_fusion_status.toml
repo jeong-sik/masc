@@ -1,6 +1,8 @@
 name = "masc_fusion_status"
 description = """
-Read the status of out-of-band fusion deliberations started by masc_fusion. \
+Read the status of out-of-band fusion deliberations started by masc_fusion.
+
+\
 With no argument, lists tracked runs (in-progress and recently completed); \
 with a run_id, returns that single run. Each run reports keeper, preset, \
 started_at (unix seconds), and status (running | completed | failed); failed \

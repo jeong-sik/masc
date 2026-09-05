@@ -14,8 +14,27 @@ type target_error =
     guest, which may boot it, and that is spent only when the gate has
     declined every cheaper authority and would otherwise pay the judge. *)
 type observe_route =
-  | Boxed of Masc_exec.Sandbox_target.t
+  | Boxed of
+      { target : Masc_exec.Sandbox_target.t
+      ; run : Keeper_types_profile_sandbox.observation_run
+      }
   | No_box of string
+
+val protocol_mode_of_run :
+  Keeper_types_profile_sandbox.observation_run -> Exec_ssh_protocol.mode
+(** The box the keeper TOML names, in the words the shim's request takes:
+    [Observe] asks for the shim's observe box, [Guest_local] for the one that
+    lets writes land inside the guest. *)
+
+val observation_run_for :
+  base_path:string ->
+  keeper_name:string ->
+  (Keeper_types_profile_sandbox.observation_run, string) result
+(** Which box this keeper's operator chose (RFC-0422 §3.4), read from the
+    keeper TOML when the route is resolved — as [remote_endpoint] is — and
+    {!Keeper_types_profile_sandbox.default_observation_run} when the TOML
+    says nothing. A TOML that fails to load is the [Error], and the route
+    that asked becomes [No_box] with that reason. *)
 
 type guest_dispatch =
   { target : Masc_exec.Sandbox_target.t
@@ -54,6 +73,7 @@ val guest_target
   -> meta:Keeper_meta_contract.keeper_meta
   -> cwd:string
   -> timeout_sec:float
+  -> base_path:string
   -> unit
   -> (guest_dispatch, target_error) result
 

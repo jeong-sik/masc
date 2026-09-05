@@ -56,12 +56,21 @@ let stub_main () =
       write_all Unix.stderr "connection refused";
       exit 255
     | "skew" ->
+      (* One major behind whatever the host speaks: the skew is the fact
+         under test, not the number. *)
       write_all Unix.stdout
-        {|{"name":"masc-exec-shim","version":"1.0.0","capabilities":[]}|};
+        (Printf.sprintf
+           {|{"name":"masc-exec-shim","version":"%d.0.0","capabilities":[]}|}
+           (Exec_ssh_protocol.protocol_version - 1));
       exit 0
     | _ ->
+      (* The host's own major, read from the protocol rather than typed:
+         #33372 moved it from 2 to 3 and a literal here turned every good
+         probe into a skew. *)
       write_all Unix.stdout
-        {|{"name":"masc-exec-shim","version":"2.0.0","capabilities":[]}|};
+        (Printf.sprintf
+           {|{"name":"masc-exec-shim","version":"%d.0.0","capabilities":[]}|}
+           Exec_ssh_protocol.protocol_version);
       exit 0)
   else (
     let header = read_exact Unix.stdin 8 in
@@ -152,6 +161,7 @@ let endpoint : Exec_ssh_endpoint.t =
   ; max_concurrent_sessions = 2
   ; env_allowlist = []
   ; capabilities = []
+  ; private_home = false
   }
 ;;
 

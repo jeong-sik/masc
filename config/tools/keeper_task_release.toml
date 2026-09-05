@@ -1,6 +1,8 @@
 name = "keeper_task_release"
 description = """
-Hand your claimed task back to the backlog so another Keeper can take it. \
+Hand your claimed task back to the backlog so another Keeper can take it.
+
+\
 Use this when you cannot finish the task and it should not sit with you: the \
 work is blocked on something outside your reach, it needs a checkout or a \
 tool you do not have, or your verification keeps coming back rejected. The \

@@ -12,6 +12,9 @@ type keeper_profile_defaults = {
   network_mode : Keeper_types_profile_sandbox.network_mode option;
   remote_endpoint : string option;
   microvm_backend : Keeper_microvm_backend.t option;
+  observation_run : Keeper_types_profile_sandbox.observation_run option;
+      (** RFC-0422 §3.4: which box a tool_execute runs in before the judge is
+          asked. [None] is [Observe]; read where the route is built. *)
   max_context_override : int option;
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;

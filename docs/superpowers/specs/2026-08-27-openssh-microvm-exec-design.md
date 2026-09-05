@@ -341,6 +341,7 @@ mid-session fails the tool call with a named error.
 | `max_concurrent_sessions` | 8 | sessions multiplex onto one ControlMaster connection; sshd `MaxSessions` defaults to 10, so the ceiling must be explicit |
 | `env_allowlist` | `[]` | request env names allowed to cross the wire |
 | `capabilities` | `[]` | reserved: `kvm`, `firecracker` (Phase 2); unknown values warn-and-ignore |
+| `private_home` | `false` | the operator declares this account's home is the keeper's alone. Required before a keeper on this endpoint may set `observation_run = "guest_local"` (RFC-0422 §3.4); without it a guest_local request keeps the judge |
 
 Unknown registry keys and unknown `remote_endpoint` names in keeper TOML are
 config-load errors (fail-closed).

@@ -76,13 +76,16 @@ type authorization_source =
       (** The request is a closed-set observation-only argv inside a
           per-keeper disposable guest — docker container or microvm
           ({!Keeper_gate_readonly}); allowed without judgment. *)
-  | Observed_in_box
-      (** The request ran once inside the executor's box — no file write
-          outside a scratch, no socket, enforced by the guest kernel through
-          Landlock and seccomp (RFC-0422) — and exited 0. Nothing it did
-          could have left an effect, so its output is returned and no judge
-          is asked. A run that exited otherwise is not this: it goes to the
-          judge as before. *)
+  | Observed_in_box of Keeper_types_profile_sandbox.observation_run
+      (** The request ran once inside the executor's box and exited 0. Under
+          [Observe] the guest kernel refused every file write outside a
+          scratch and every socket (Landlock and seccomp, RFC-0422), so
+          nothing it did could have left an effect; under [Guest_local] the
+          writes it made landed inside the guest, on the keeper's own tree,
+          and the operator chose to let those pass without judgment
+          (RFC-0422 §3.4). Either way its output is returned and no judge is
+          asked; the audit row names which box it was. A run that exited
+          otherwise is not this: it goes to the judge as before. *)
 
 type authorization =
   { source : authorization_source
@@ -161,10 +164,12 @@ val cycle_grant_of_resolution :
     (RFC-0422). The caller that owns the sandbox runs it; the Gate only
     decides when to ask, and what each answer means. *)
 type observation =
-  | Observed_clean
-      (** Exit 0 inside the box. The kernel refused every write outside the
-          scratch and every socket, so nothing this run did is an effect;
-          the caller holds its output and returns it as the result. *)
+  | Observed_clean of { run : Keeper_types_profile_sandbox.observation_run }
+      (** Exit 0 inside the box named by [run]. Under [Observe] the kernel
+          refused every write outside the scratch and every socket, so
+          nothing this run did is an effect; under [Guest_local] its writes
+          stayed inside the guest. The caller holds its output and returns
+          it as the result. *)
   | Observed_refused of
       { status : Unix.process_status
       ; stderr : string

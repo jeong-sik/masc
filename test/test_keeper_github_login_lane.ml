@@ -172,6 +172,7 @@ let write_runtime_toml ~base_path =
          ; max_concurrent_sessions = 2
          ; env_allowlist = []
          ; capabilities = []
+         ; private_home = false
          })
 ;;
 

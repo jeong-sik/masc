@@ -1,6 +1,8 @@
 name = "masc_board_vote"
 description = """
-Vote on one existing board post by exact post_id to signal agreement or quality. \
+Vote on one existing board post by exact post_id to signal agreement or quality.
+
+\
 Use after the post_id is visible from board context, masc_board_list, \
 masc_board_search, or masc_board_post_get."""
 

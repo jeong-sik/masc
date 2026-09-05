@@ -1,6 +1,8 @@
 name = "masc_run_list"
 description = """
-List all task runs with their status (active/completed) and plan presence. \
+List all task runs with their status (active/completed) and plan presence.
+
+\
 \\nUse when starting a session to find abandoned work or review completed \
 runs. \\nAfter finding a run, call masc_run_get for full details or \
 masc_run_init to start a new one."""

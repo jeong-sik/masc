@@ -1378,7 +1378,7 @@ let test_keeper_wake_durable_state_failure_retries_same_occurrence () =
       "schedule-keeper"
   in
   mkdir_p keeper_owner_path;
-  let queue_path = Filename.concat keeper_owner_path "event-queue-v18.json" in
+  let queue_path = Filename.concat keeper_owner_path "event-queue-v19.json" in
   mkdir_p queue_path;
   let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
@@ -1500,7 +1500,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
           (Filename.concat
              (Common.keepers_runtime_dir_of_base ~base_path)
              keeper_name)
-          "event-queue-transitions-v7.jsonl"
+          "event-queue-transitions-v8.jsonl"
       in
       check bool "cancellation WAL survives until projection" true
         (Sys.file_exists transition_wal_path

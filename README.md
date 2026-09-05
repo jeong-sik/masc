@@ -198,6 +198,43 @@ provider/model bindings as documented examples; the 13 that declare
 startup warning that says exactly which key to add. `[runtime].default` is one
 of the 13.
 
+### What a Keeper may do on its first day
+
+Everything a new Keeper reaches for starts closed, and the four defaults below
+are the ones people meet first.
+
+**Two approval lanes, in different positions.** The workspace lane starts in
+`auto_judge`: a model reads each gated call and decides. The external-services
+lane — anything leaving for an attached service such as Jira, GitHub or Slack —
+starts in `manual`, so a person answers every one. The split is deliberate: on
+2026-08-27, 374 of 379 Gate decisions rode workspace `always_allow`, and a lane
+that inherited that switch would have let an incident's Jira writes through with
+only an audit row.
+
+**`auto_judge` needs a model of its own**, and it is not the fleet default. The
+judgement runs on the `hitl_auto_judge` exact-output lane, whose slots name
+`glm-coding` and `ollama_cloud` — so an install carrying one provider key
+usually cannot reach it. A call it cannot judge is neither allowed nor refused:
+it is deferred to the Approvals queue for a person, the same place `manual`
+sends one. A Keeper that looks stuck on its first task is often waiting there.
+
+**The sandbox has no network.** `docker` and `microvm` guests start on
+`network_mode = "none"`, so a web search, a `git push`, or any HTTP call inside
+one fails until that Keeper's TOML says `inherit` (the host's network) or
+`policy` (only the destinations its `egress_allow` list names, through a proxy
+this server owns). `remote_ssh` starts on `inherit`, because the endpoint is
+already a machine with its own network. `masc keeper-create` refuses to pick for
+you and requires `--network-mode`.
+
+**No connector is connected.** The declarations under `config/identity/` are
+provider descriptions, not connections:
+`GET /api/v1/keepers/oauth/providers` answers `has_client: false` for every one
+of them on a fresh install. Attaching one needs a client first. A provider that
+publishes a registration endpoint gets one on the spot, and the rest — GitHub
+among them — need an app you make by hand, whose id and secret go in through the
+Connectors surface (`A`) or `POST /api/v1/keepers/oauth/client`. Only then does
+a Keeper attach its own credential.
+
 ## Terminal UI
 
 A release install puts `masc-tui` on `PATH` next to `masc`; from a source

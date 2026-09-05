@@ -175,6 +175,40 @@ provider/model 바인딩 31개가 들어 있고, 그중 `max-request-body-bytes`
 13개만 Keeper 턴을 받습니다. 나머지는 부팅 경고에 어떤 키를 넣어야 하는지까지
 같이 찍힙니다. `[runtime].default`는 13개 안에 있습니다.
 
+### 갓 만든 Keeper가 할 수 있는 일
+
+새 Keeper가 손을 뻗는 곳은 전부 닫힌 채로 시작합니다. 그중 처음 마주치는 네 가지입니다.
+
+**승인 레인이 둘이고, 시작 위치가 다릅니다.** 워크스페이스 레인은 `auto_judge`로
+시작합니다 — 모델이 각 호출을 읽고 판단합니다. 외부 서비스 레인, 그러니까 Jira나
+GitHub나 Slack처럼 붙여 둔 바깥으로 나가는 호출은 `manual`로 시작해서 사람이 하나씩
+답합니다. 일부러 갈라 둔 것입니다. 2026-08-27 측정에서 Gate 판정 379건 중 374건이
+워크스페이스 `always_allow`를 타고 지나갔고, 그 스위치를 같이 물려받는 레인이었다면
+그날 사고의 Jira 쓰기가 감사 기록만 남긴 채 통과했을 겁니다.
+
+**`auto_judge`는 자기 모델이 따로 필요하고, 그게 fleet 기본값이 아닙니다.** 판정은
+`hitl_auto_judge` exact-output 레인에서 돌고, 그 슬롯은 `glm-coding`과
+`ollama_cloud`를 가리킵니다. 그래서 키를 하나만 넣은 설치는 대개 그 레인에 못
+닿습니다. 판정을 못 한 호출은 허용도 거부도 아니고 Approvals 대기열로 넘어갑니다 —
+`manual`이 보내는 곳과 같습니다. 첫 작업에서 Keeper가 멈춘 것처럼 보이면 대개 거기
+있습니다.
+
+**샌드박스에 네트워크가 없습니다.** `docker`와 `microvm` 게스트는
+`network_mode = "none"`으로 시작합니다. 그 안에서 웹 검색도, `git push`도, HTTP
+호출도 실패합니다. 그 Keeper의 TOML이 `inherit`(호스트 네트워크) 또는
+`policy`(서버가 소유한 프록시를 거쳐 `egress_allow`에 적힌 목적지만)라고 말해야
+열립니다. `remote_ssh`는 `inherit`으로 시작합니다 — endpoint 자체가 이미 자기
+네트워크를 가진 기계이기 때문입니다. `masc keeper-create`는 대신 골라 주지 않고
+`--network-mode`를 반드시 받습니다.
+
+**연결된 커넥터가 하나도 없습니다.** `config/identity/` 아래 선언들은 연결이 아니라
+제공자 설명입니다. 갓 설치한 상태에서 `GET /api/v1/keepers/oauth/providers`는 전부
+`has_client: false`로 답합니다. 붙이려면 클라이언트가 먼저 있어야 합니다. 등록
+endpoint를 공개하는 제공자는 그 자리에서 클라이언트를 받고, 그렇지 않은 쪽은 —
+GitHub이 그렇습니다 — 앱을 직접 만들어 그 id와 secret을 Connectors 화면에서 `A`로
+넣거나 `POST /api/v1/keepers/oauth/client`로 보냅니다. 그다음에야 Keeper가 자기
+자격증명을 붙입니다.
+
 ## MCP 클라이언트 설정
 
 한 번에 끝내는 길은 `masc mcp-config`입니다. bearer를 발급하고 클라이언트용

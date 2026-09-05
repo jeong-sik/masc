@@ -1180,7 +1180,7 @@ let add_routes router =
             | `Failed message -> bad message
             | `Ask (question, language, workspace_root, path, line_index,
                     character) ->
-              Lsp_turn_pool.with_turn_pool (fun () ->
+              Lsp_turn_pool.with_turn_pool ~servers:(Runtime.lsp_servers ()) (fun () ->
                 match Lsp_turn_pool.get_opt () with
                 | None ->
                   json_response ~status:`Service_unavailable request reqd

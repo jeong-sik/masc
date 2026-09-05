@@ -279,7 +279,12 @@ module For_testing : sig
     after_load:(unit -> unit) ->
     (install_report, install_error) result
   val pending_store_path : base_path:string -> string
+  val pending_log_path : base_path:string -> string
   val replay_results_store_path : base_path:string -> string
+
+  val durable_snapshot_json : base_path:string -> (Yojson.Safe.t, string) result
+  (** What a restart would load: the snapshot plus the log rows after it,
+      in the snapshot's JSON shape. Reads only. *)
   val always_allowed_store_path : base_path:string -> string
 
   val bind_summary_exact_attempt_with_writer :

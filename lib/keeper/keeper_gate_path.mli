@@ -10,6 +10,11 @@ val external_mode : base_path:string -> string
     the workspace lane gets opened for internal velocity, and that gesture
     must not silently open writes to somebody else's service. *)
 val pending : base_path:string -> string
+val pending_log : base_path:string -> string
+(** Rows appended after the last write of {!pending}: one row per pending
+    entry or delivery that changed. The snapshot is rewritten, and this log
+    emptied, only when the rows outnumber the entries they describe (see
+    [Keeper_approval_queue]). *)
 val replay_results : base_path:string -> string
 (** Derived host-replay result references live beside [pending.json].
     Source: one consumed approval plus its exact effect result. Purpose: recover

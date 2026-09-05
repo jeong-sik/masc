@@ -587,6 +587,21 @@ let test_load_retro_themes_toml () =
     [ "dungeon-gold"; "norton"; "msx"; "pc-tools" ]
 ;;
 
+let test_alias_resolution () =
+  check bool "pctools alias resolves to pc-tools" true
+    (match Catalog.find "pctools" with
+     | Some s -> Catalog.name s = "pc-tools"
+     | None -> false);
+  check bool "mc alias resolves to msc" true
+    (match Catalog.find "mc" with
+     | Some s -> Catalog.name s = "msc"
+     | None -> false);
+  check bool "midnight-commander alias resolves to msc" true
+    (match Catalog.find "midnight-commander" with
+     | Some s -> Catalog.name s = "msc"
+     | None -> false)
+;;
+
 let test_clean_hex_rejects_underscores () =
   let content = {|
 name = "bad-hex"
@@ -654,6 +669,8 @@ let () =
             test_clean_hex_rejects_underscores
         ; Alcotest.test_case "official toml themes discovered from config/themes" `Quick
             test_load_retro_themes_toml
+        ; Alcotest.test_case "alias resolution for pctools and mc" `Quick
+            test_alias_resolution
         ] )
     ]
 ;;

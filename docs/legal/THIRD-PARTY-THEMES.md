@@ -111,6 +111,9 @@ Pro 의 라이선스 문구도 `Monokai Pro extensions` 로 범위가 그쪽에 
 | `msc` | — | masc | 이 저장소의 MIT |
 | `pc-tools` | — | masc | 이 저장소의 MIT |
 | `cyber` | — | masc | 이 저장소의 MIT |
+| `dungeon-gold` | — | masc | 이 저장소의 MIT |
+| `norton` | — | masc | 이 저장소의 MIT |
+| `msx` | — | masc | 이 저장소의 MIT |
 
 ## 여기 없는 것
 

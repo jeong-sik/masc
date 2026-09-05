@@ -153,6 +153,112 @@ let test_root_switch_ownership_is_domain_local () =
     false
     worker_saw_ownership
 
+let test_run_on_owner_domain_inline_when_uninitialized () =
+  let ran = Eio_context.run_on_owner_domain (fun () -> 42) in
+  Alcotest.(check int) "inline without root switch returns value" 42 ran;
+  let raised =
+    try
+      Eio_context.run_on_owner_domain (fun () -> failwith "uninitialized error");
+      false
+    with
+    | Failure msg when String.equal msg "uninitialized error" -> true
+    | _ -> false
+  in
+  Alcotest.(check bool) "inline without root switch raises exception" true raised
+
+let test_run_on_owner_domain_inline_on_owner_domain () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun root_sw ->
+  Eio_context.set_switch root_sw;
+  let ran = Eio_context.run_on_owner_domain (fun () -> 123) in
+  Alcotest.(check int) "inline on owner domain returns value" 123 ran;
+  let raised =
+    try
+      Eio_context.run_on_owner_domain (fun () -> failwith "owner error");
+      false
+    with
+    | Failure msg when String.equal msg "owner error" -> true
+    | _ -> false
+  in
+  Alcotest.(check bool) "inline on owner domain raises exception" true raised
+
+let test_run_on_owner_domain_cross_domain_dispatch () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun root_sw ->
+  Eio_context.set_switch root_sw;
+  let owner_domain = Domain.self () in
+  Eio.Domain_manager.run (Eio.Stdenv.domain_mgr env) (fun () ->
+    let worker_domain = Domain.self () in
+    Alcotest.(check bool)
+      "worker domain is distinct from owner domain"
+      true
+      (worker_domain <> owner_domain);
+    (* 1. Verify direct fork on root_sw from worker domain raises Switch accessed from wrong domain *)
+    let direct_fork_raised_wrong_domain =
+      try
+        Eio.Fiber.fork ~sw:root_sw (fun () -> ());
+        false
+      with
+      | Invalid_argument msg when String.equal msg "Switch accessed from wrong domain!" -> true
+      | _ -> false
+    in
+    Alcotest.(check bool)
+      "direct fork on root_sw from worker domain raises Switch accessed from wrong domain!"
+      true
+      direct_fork_raised_wrong_domain;
+    (* 2. Verify run_on_owner_domain executes on owner domain and allows forking on root_sw *)
+    let forked_child_ran = Atomic.make false in
+    let executed_domain =
+      Eio_context.run_on_owner_domain (fun () ->
+        Eio.Fiber.fork ~sw:root_sw (fun () ->
+          Atomic.set forked_child_ran true);
+        Domain.self ())
+    in
+    Alcotest.(check bool)
+      "task executed on owner domain, not worker domain"
+      true
+      (executed_domain = owner_domain);
+    Alcotest.(check bool)
+      "forked child on root_sw executed successfully"
+      true
+      (Atomic.get forked_child_ran);
+    (* 3. Verify exception propagation across domains *)
+    let cross_domain_exception_propagated =
+      try
+        Eio_context.run_on_owner_domain (fun () ->
+          failwith "cross-domain error payload");
+        false
+      with
+      | Failure msg when String.equal msg "cross-domain error payload" -> true
+      | _ -> false
+    in
+    Alcotest.(check bool)
+      "exception on owner domain re-raised on worker domain"
+      true
+      cross_domain_exception_propagated;
+    (* 4. Verify Cancelled exception propagation does NOT crash or cancel root_sw *)
+    let cancelled_propagated =
+      try
+        Eio_context.run_on_owner_domain (fun () ->
+          raise (Eio.Cancel.Cancelled (Failure "simulated cancel")));
+        false
+      with
+      | Eio.Cancel.Cancelled (Failure msg) when String.equal msg "simulated cancel" -> true
+      | _ -> false
+    in
+    Alcotest.(check bool)
+      "Cancelled exception propagated to worker domain"
+      true
+      cancelled_propagated;
+    (* Verify root_sw is still healthy and accepting work *)
+    let post_cancel_ran =
+      Eio_context.run_on_owner_domain (fun () -> 999)
+    in
+    Alcotest.(check int)
+      "root_sw still alive and operational after inner Cancelled"
+      999
+      post_cancel_ran)
+
 let () =
   Alcotest.run "eio_context_fiber_local"
     [
@@ -191,5 +297,14 @@ let () =
           Alcotest.test_case "owner true, worker false"
             `Quick
             test_root_switch_ownership_is_domain_local;
+          Alcotest.test_case "run_on_owner_domain uninitialized inline"
+            `Quick
+            test_run_on_owner_domain_inline_when_uninitialized;
+          Alcotest.test_case "run_on_owner_domain owner inline"
+            `Quick
+            test_run_on_owner_domain_inline_on_owner_domain;
+          Alcotest.test_case "run_on_owner_domain cross-domain dispatch"
+            `Quick
+            test_run_on_owner_domain_cross_domain_dispatch;
         ] );
     ]

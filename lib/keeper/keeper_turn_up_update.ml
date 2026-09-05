@@ -100,7 +100,13 @@ let turn_in_flight_rejection ~keeper_name
      launch-conflict arm. *)
 let swap_keepalive_lane_fenced (ctx : _ context) (updated : keeper_meta)
   : (joined_stop_result * start_keepalive_outcome, tool_result) result =
-  let base_path = ctx.config.base_path in
+  if not (Eio_context.root_switch_on_current_domain ())
+     && Option.is_some (Eio_context.get_root_switch_opt ())
+  then
+    Eio_context.run_on_owner_domain (fun () ->
+      swap_keepalive_lane_fenced ctx updated)
+  else
+    let base_path = ctx.config.base_path in
   let keeper_name = updated.name in
   let rollback ~operation_id =
     match

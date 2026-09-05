@@ -1,18 +1,11 @@
 name = "masc_ask_status"
 description = """
-Read the questions you asked and whatever came back.
+Read the questions you asked and their responses or status.
 
-An answer does not interrupt you. It lands in the durable log whenever the \
-operator gets to it, from whichever surface they were at, and this is how you \
-find it.
-
-A question you asked and never read is worse than not asking: the operator \
-spent attention on a decision that went nowhere. Read this when you return to \
-work that was waiting on a choice.
-
-Each row says whether the question is still open, was answered, or was \
-withdrawn. An answered row carries the choice ids that were picked -- match \
-them against the choices you offered, not against their labels."""
+Answers arrive as separate wakes and are recorded in the durable log. Read \
+this when returning to work that was waiting on an operator choice. Each row \
+indicates whether a question is open, answered, or withdrawn, including choice \
+ids."""
 additional_properties = false
 # RFC-0403 후속. 이 셋은 2026-08-03 ~ 09-02 31일간 fleet 전체에서 호출 0회이고,
 # 그 사이 agent-core keeper 4곳의 요청마다 5,498 B 를 싣고 있었다. 지연의
@@ -28,12 +21,9 @@ defer_loading = true
 [[params]]
 name = "ask_id"
 type = "string"
-description = """
-One ask by id. Omit this to get every question of yours that is still open."""
+description = "Specific ask ID to inspect. Omit to list all open questions."
 
 [[params]]
 name = "include_resolved"
 type = "boolean"
-description = """
-Also return questions already answered or withdrawn. Defaults to false, which \
-returns only what is still waiting on the operator."""
+description = "Whether to include answered or withdrawn questions. Defaults to false."

@@ -121,7 +121,7 @@ interface FusionRunParams {
   maxTokens: number | null
 }
 
-interface FusionRunView {
+export interface FusionRunView {
   runId: string
   boardPostId: string
   keeperName: string
@@ -390,7 +390,9 @@ function fusionRunFromPost(post: BoardPost): FusionRunView | null {
 // No sort here: ordering is owned exclusively by buildMergedRuns (durable
 // start axis). A second, different sort key at this layer is exactly the
 // mixed-axis bug this file just removed.
-function buildFusionRuns(posts: readonly BoardPost[]): FusionRunView[] {
+// Exported for the keeper detail view: it filters these runs per keeper, and
+// duplicating the post→run vocabulary there would drift from this decoder.
+export function buildFusionRuns(posts: readonly BoardPost[]): FusionRunView[] {
   return posts.flatMap(post => {
     const run = fusionRunFromPost(post)
     return run ? [run] : []

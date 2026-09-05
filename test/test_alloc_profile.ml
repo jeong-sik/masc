@@ -80,6 +80,24 @@ let test_sites_past_the_bound_fold_into_one () =
     (keys report.allocated)
 ;;
 
+(* A key built here has this test's own frames in it, so it is attributed and
+   must not carry the marker. A window with nothing but skipped frames still
+   produces a key -- it names the top library frames -- but it says up front
+   that it found no caller, because those frames name how the bytes were built
+   and not who asked for them. *)
+let test_a_key_says_when_it_found_no_caller () =
+  let attributed = P.key_of_callstack (Printexc.get_callstack 64) in
+  check bool
+    "a stack with masc frames is not marked"
+    false
+    (String.starts_with ~prefix:P.unattributed_marker attributed);
+  let empty = P.key_of_callstack (Printexc.get_callstack 0) in
+  check bool
+    "a window with no caller is marked"
+    true
+    (String.starts_with ~prefix:P.unattributed_marker empty)
+;;
+
 let test_callstack_key_is_bounded_text () =
   let key = P.key_of_callstack (Printexc.get_callstack 64) in
   let lines = List.filter (fun line -> line <> "") (String.split_on_char '\n' key) in
@@ -137,6 +155,7 @@ let () =
         ; test_case "no rate" `Quick test_no_rate_means_no_word_estimate
         ; test_case "site bound" `Quick test_sites_past_the_bound_fold_into_one
         ; test_case "callstack key" `Quick test_callstack_key_is_bounded_text
+        ; test_case "key says when unattributed" `Quick test_a_key_says_when_it_found_no_caller
         ; test_case "wire" `Quick test_wire_shape
         ] )
     ; "profile", [ test_case "report under sampling" `Quick test_report_under_a_live_profile_does_not_raise ]

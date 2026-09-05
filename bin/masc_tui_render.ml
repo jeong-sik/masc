@@ -1111,6 +1111,90 @@ let agenda_line agenda ~cols =
    mark and a tone here, the feed's status becomes its four words here, and
    the agent-core correlation ids resolve through the same trace table the
    Activity surface uses. *)
+(* The address a change is listed under and the range label it carries.
+   Read here, ahead of every surface, because the Activity pane lists the
+   selected keeper's changes the same way the Changes surface does. *)
+let change_row_address (change : Masc.Tui_decode.file_change) =
+  match change.Masc.Tui_decode.fc_location with
+  | Masc.Tui_decode.Fc_in_repo { repo_id; relative_path } ->
+      Printf.sprintf "%s:%s" repo_id relative_path
+  | Masc.Tui_decode.Fc_in_bundle { bundle_path } -> bundle_path
+  | Masc.Tui_decode.Fc_at_absolute_path { path } -> path
+
+let file_change_range_label
+      (range : Masc.Keeper_file_change_evidence.line_range)
+  =
+  if range.start_line = range.end_line
+  then Printf.sprintf "L%d" range.start_line
+  else Printf.sprintf "L%d-%d" range.start_line range.end_line
+
+let file_change_evidence_label = function
+  | None -> None
+  | Some (Masc.Keeper_file_change_evidence.Written { new_range = None }) ->
+    Some "empty file"
+  | Some (Masc.Keeper_file_change_evidence.Written { new_range = Some range }) ->
+    Some (file_change_range_label range)
+  | Some
+      (Masc.Keeper_file_change_evidence.Edited
+        { occurrence_count; occurrences = None }) ->
+    Some (Printf.sprintf "%d matches; ranges omitted" occurrence_count)
+  | Some
+      (Masc.Keeper_file_change_evidence.Edited
+        { occurrence_count; occurrences = Some occurrences }) ->
+    (match occurrences with
+     | [] -> Some (Printf.sprintf "%d matches" occurrence_count)
+     | first :: _ ->
+       let old_range = file_change_range_label first.old_range in
+       let changed =
+         match first.new_range with
+         | Some new_range -> old_range ^ "→" ^ file_change_range_label new_range
+         | None -> old_range ^ "→deleted"
+       in
+       if occurrence_count = 1
+       then Some changed
+       else Some (Printf.sprintf "%s (+%d)" changed (occurrence_count - 1)))
+
+(* The selected keeper's file changes as the pane's Changes tab draws
+   them: the fetch helper's four states named one by one, each change
+   read to the address, the kind, whether it landed, and its range. *)
+let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
+  let module Pane = Masc_tui_acting_pane in
+  match selected_keeper state with
+  | None -> Pane.Changes_absent
+  | Some (keeper : keeper) -> (
+      match
+        Masc_tui_fetched.view_for ~equal:String.equal state.acting_pane_changes
+          ~key:keeper.k_name
+      with
+      | Masc_tui_fetched.Absent -> Pane.Changes_absent
+      | Masc_tui_fetched.Loading -> Pane.Changes_loading
+      | Masc_tui_fetched.Failed detail -> Pane.Changes_failed detail
+      | Masc_tui_fetched.Ready (snapshot : Masc.Tui_decode.file_change_snapshot) ->
+          let file (change : Masc.Tui_decode.file_change) =
+            { Pane.file_path = change_row_address change
+            ; file_kind =
+                (match change.fc_kind with
+                 | Masc.Tui_decode.Fc_edited _ -> Pane.File_edited
+                 | Masc.Tui_decode.Fc_written _ -> Pane.File_written)
+            ; file_succeeded = change.fc_succeeded
+            ; file_at = change.fc_at
+            ; file_where = file_change_evidence_label change.fc_line_evidence
+            }
+          in
+          Pane.Changes_ready
+            { keeper = snapshot.fcs_keeper
+            ; files = List.map file snapshot.fcs_changes
+            ; fetched_at =
+                (* [Ready] is only ever set beside the stamp; a missing
+                   stamp reads as an answer from this instant. *)
+                Option.value state.acting_pane_changes_at
+                  ~default:(Unix.gettimeofday ())
+            ; window_hours = snapshot.fcs_window_hours
+            ; calls = snapshot.fcs_calls_in_window
+            ; over_budget = snapshot.fcs_over_budget
+            ; malformed = snapshot.fcs_malformed
+            })
+
 let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
   let module Pane = Masc_tui_acting_pane in
   let keepers =
@@ -1145,6 +1229,7 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
     | Observer_closed { reason; _ } -> Pane.Feed_closed reason
   in
   { Pane.now = Unix.gettimeofday ()
+  ; tab = state.acting_pane_tab
   ; feed
   ; keepers
   ; selected =
@@ -1167,6 +1252,7 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
               })
         (Masc_tui_types.approval_items state)
   ; entries = state.acting
+  ; changes = acting_pane_changes state
   }
 
 (* A pane tone is a reading; the theme answers with the colour. *)
@@ -5900,7 +5986,7 @@ let standalone_lane_row ~now ~frame width (lane : Tui_decode.standalone_lane) =
    clipping. Keep those facts in a wrapped selected-row block underneath the
    four-row matrix. The order is the execution contract: admitted catalog
    slots first, official-client runtimes only after catalog exhaustion. *)
-let standalone_lane_detail_lines ~width (lane : Tui_decode.standalone_lane) =
+let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane) =
   let ordered values =
     match values with
     | [] -> "(none)"
@@ -5939,9 +6025,48 @@ let standalone_lane_detail_lines ~width (lane : Tui_decode.standalone_lane) =
       ( "Output meaning: open a retained run for its exact result."
       , "Evidence: this server did not report a known standalone-lane evidence contract." )
   in
+  (* Three facts the server has always sent and nothing drew.
+
+     [required] is the one that changes what an operator does about a lane
+     that cannot run: an optional lane nobody configured is a choice, and a
+     required one is a hole.
+
+     [configuration_state] separates "nobody configured this" from "the
+     registry could not be read", which the status word beside the lane
+     collapses into one "unavailable" and which the row only hinted at
+     through the prose of an admission error.
+
+     The last terminal run is what the totals cannot say. [ok/fail/cancel
+     962/133/0] reads the same whether the failures were this morning or
+     last quarter, and an idle lane says nothing at all about when it last
+     did work. *)
+  let obligation = if lane.sl_required then "Required" else "Optional" in
+  let configuration =
+    Tui_decode.standalone_lane_configuration_to_string
+      lane.sl_configuration_state
+  in
+  let last_run =
+    match lane.sl_last_outcome, lane.sl_last_terminal_at with
+    | None, _ -> "no run has finished"
+    | Some outcome, None -> "last run " ^ Terminal_text.single_line outcome
+    | Some outcome, Some at ->
+      Printf.sprintf "last run %s %s ago"
+        (Terminal_text.single_line outcome)
+        (Masc_tui_answering.elapsed_text ~now at)
+  in
+  let state_style =
+    match lane.sl_configuration_state with
+    | Tui_decode.Lane_ready -> Ansi.reset
+    | Tui_decode.Lane_slotless | Tui_decode.Lane_unconfigured ->
+      if lane.sl_required then Theme.bad () else Theme.warn ()
+    | Tui_decode.Lane_registry_unavailable -> Theme.bad ()
+  in
   wrap Ansi.bold
     (Printf.sprintf "%s · %s" (Terminal_text.single_line lane.sl_label)
        (Terminal_text.single_line purpose))
+  @ wrap state_style
+      (Printf.sprintf "%s lane · configuration %s · %s" obligation
+         configuration last_run)
   @ wrap Ansi.dim
       (Printf.sprintf "Config: [runtime.exact_output_lanes.%s]"
          (Terminal_text.single_line lane.sl_lane_id))
@@ -6057,7 +6182,10 @@ let render_lanes_overview (state : state) =
        in
        if available > 0 then begin
          box_divider buf cols;
-         let detail = standalone_lane_detail_lines ~width:inner lane in
+         let detail =
+           standalone_lane_detail_lines ~now:(Unix.gettimeofday ())
+             ~width:inner lane
+         in
          let shown = take_rows available [] detail in
          let shown =
            if List.length detail <= available then shown
@@ -12476,46 +12604,6 @@ let render_repositories (state : state) =
   if state.repository_changes_open then render_repository_changes state
   else render_repository_list state
 
-let change_row_address (change : Masc.Tui_decode.file_change) =
-  match change.Masc.Tui_decode.fc_location with
-  | Masc.Tui_decode.Fc_in_repo { repo_id; relative_path } ->
-      Printf.sprintf "%s:%s" repo_id relative_path
-  | Masc.Tui_decode.Fc_in_bundle { bundle_path } -> bundle_path
-  | Masc.Tui_decode.Fc_at_absolute_path { path } -> path
-
-let file_change_range_label
-      (range : Masc.Keeper_file_change_evidence.line_range)
-  =
-  if range.start_line = range.end_line
-  then Printf.sprintf "L%d" range.start_line
-  else Printf.sprintf "L%d-%d" range.start_line range.end_line
-
-let file_change_evidence_label = function
-  | None -> None
-  | Some (Masc.Keeper_file_change_evidence.Written { new_range = None }) ->
-    Some "empty file"
-  | Some (Masc.Keeper_file_change_evidence.Written { new_range = Some range }) ->
-    Some (file_change_range_label range)
-  | Some
-      (Masc.Keeper_file_change_evidence.Edited
-        { occurrence_count; occurrences = None }) ->
-    Some (Printf.sprintf "%d matches; ranges omitted" occurrence_count)
-  | Some
-      (Masc.Keeper_file_change_evidence.Edited
-        { occurrence_count; occurrences = Some occurrences }) ->
-    (match occurrences with
-     | [] -> Some (Printf.sprintf "%d matches" occurrence_count)
-     | first :: _ ->
-       let old_range = file_change_range_label first.old_range in
-       let changed =
-         match first.new_range with
-         | Some new_range -> old_range ^ "→" ^ file_change_range_label new_range
-         | None -> old_range ^ "→deleted"
-       in
-       if occurrence_count = 1
-       then Some changed
-       else Some (Printf.sprintf "%s (+%d)" changed (occurrence_count - 1)))
-
 let file_change_ranges (change : Masc.Tui_decode.file_change) =
   match change.fc_line_evidence with
   | Some (Masc.Keeper_file_change_evidence.Written { new_range = Some range }) ->
@@ -14280,17 +14368,24 @@ let render_code (state : state) =
               if selected then glyph ^ " "
               else
                 let colour =
-                  (* bright_ variants for the data/prose marks: the plain
-                     red/yellow/green are reserved for semantic status tokens
-                     (test_tui_http_ast guards render.ml against using them
-                     raw), and a file's type is not a status. *)
+                  (* Six kinds, six categorical slots (RFC-0427). These were
+                     constant SGR codes, so a file list was one of the places
+                     a theme could not reach: everything around it moved when
+                     the terminal answered with its palette and these did not.
+
+                     Script and Media used to be magenta and bright magenta,
+                     one hue apart in a column where telling them apart is
+                     the whole job. They are now two slots apart.
+
+                     Plain keeps [dim] rather than a slot. It is the member
+                     that recedes, which is a weight and not a kind. *)
                   match kind with
-                  | File_icon.Code -> (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                  | File_icon.Data -> Ansi.bright_yellow
-                  | File_icon.Prose -> Ansi.bright_green
-                  | File_icon.Script -> Ansi.magenta
-                  | File_icon.Web -> Ansi.blue
-                  | File_icon.Media -> Ansi.bright_magenta
+                  | File_icon.Code -> Theme.category Theme.Slot_1
+                  | File_icon.Data -> Theme.category Theme.Slot_2
+                  | File_icon.Prose -> Theme.category Theme.Slot_3
+                  | File_icon.Script -> Theme.category Theme.Slot_4
+                  | File_icon.Web -> Theme.category Theme.Slot_5
+                  | File_icon.Media -> Theme.category Theme.Slot_6
                   | File_icon.Plain -> Ansi.dim
                 in
                 colour ^ glyph ^ Ansi.reset ^ " "

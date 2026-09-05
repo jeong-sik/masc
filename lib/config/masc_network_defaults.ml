@@ -36,12 +36,6 @@ let chat_completions_path = "/chat/completions"
 let ollama_default_url =
   Printf.sprintf "http://127.0.0.1:%d" ollama_default_port
 
-(** Substring used by Ollama URL heuristics: [":<port>"].  Keeps the
-    heuristic anchored to {!ollama_default_port} so changing the port
-    updates every classifier in one place. *)
-let ollama_port_needle =
-  Printf.sprintf ":%d" ollama_default_port
-
 (** Ollama native API path for the running-models ("process status")
     endpoint.  Used by both {!Runtime_http_probe} (runtime-level
     capacity probe) and {!Tool_local_runtime_probe} (tool-level KV
@@ -52,36 +46,6 @@ let ollama_api_ps_path = "/api/ps"
 (** Ollama native API path for text generation.  Used by the
     tool-level probe path that exercises a model end-to-end. *)
 let ollama_api_generate_path = "/api/generate"
-
-(** [is_ollama_url url] returns [true] when [url] contains
-    {!ollama_port_needle}.  Permissive on scheme/host so it works for
-    [http://], [https://], [127.0.0.1], [localhost], or a bare
-    [host:port]. *)
-let is_ollama_url url =
-  let hlen = String.length url in
-  let nlen = String.length ollama_port_needle in
-  if nlen = 0 || nlen > hlen then false
-  else
-    let rec loop i =
-      if i + nlen > hlen then false
-      else if String.sub url i nlen = ollama_port_needle then true
-      else loop (i + 1)
-    in
-    loop 0
-
-(** Transport prefix marking a CLI-backed endpoint (e.g. [cli:codex]).
-    Used by capacity classifiers to distinguish CLI endpoints from HTTP
-    ones. *)
-let cli_transport_prefix = "cli:"
-
-(** [is_cli_transport_url url] returns [true] when [url] starts with
-    {!cli_transport_prefix}.  The check is a strict prefix match rather
-    than a substring scan because [cli:] is meaningful only at the
-    start of the transport string. *)
-let is_cli_transport_url url =
-  let plen = String.length cli_transport_prefix in
-  String.length url > plen
-  && String.sub url 0 plen = cli_transport_prefix
 
 (** Default URL for the local OpenAI-compatible runtime.
     Override order: AGENT_CORE_LOCAL_LLM_URL -> local runtime. *)

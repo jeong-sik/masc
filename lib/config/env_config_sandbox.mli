@@ -152,18 +152,11 @@ module Shell_timeout : sig
   val bucket_key : bucket -> string
   (** Lowercase token used in env var names. *)
 
-  val known_buckets : unit -> bucket list
-  (** Typed table for default-pinning tests. *)
 
-  val known_default_sec : bucket -> float option
-  (** Hardcoded default seconds for [bucket]. [None] for [Unknown _]. *)
 
   val per_bucket_env_var : bucket:bucket -> string
   (** [MASC_KEEPER_SHELL_TIMEOUT_<BUCKET>_SEC]. *)
 
-  val global_env_var : string
-  (** [MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC] — only consulted for
-      [Unknown _]. *)
 
   val global_default_sec : float
   (** Final fallback (30.0s). *)

@@ -267,6 +267,7 @@ only operations the session does not already hold.
 
 - CI `@check` per task (`ci.yml`); `test.yml` at the end of each task that touches `bin/masc_tui.ml` (the behavioural suite is the only lane that runs Alcotest).
 - PTY: `test/test_capture_tui_keeper_chat.py` / `test_tui_keyboard_input.py` scenarios that touch settle (`reasoning`, `THINKING`, `Ctrl-R` needles) — rewrite per Appendix B; confirm their lane is wired in `test/dune` before claiming them verified.
+  - Done 2026-09-05 (branch `fix/tui-chat-capture-meta-fields`, script at `12607064d4`): the ttyd/Chromium proof `scripts/capture-tui-keeper-chat.py` had been failing on main since 2026-09-02 for reasons outside this stage (keeper meta v2 fields, the `(sending …)` row folded into the ACTIVE TURN line by #32957, eight read routes a refresh polls, the observer feed's MCP initialize). Brought current; both scenarios pass on this stage's head and on the head just before #33133, with the same settled order. 10 frames, `status: passed`.
 - Manual on the live server after merge: send a turn with a reasoning-capable Agent_core runtime, watch settle keep the THINKING block; kill the TUI's connection mid-turn (`kill -STOP` the server for 3 s) and confirm resume without duplicate rows; restart the TUI and confirm the last turns show reasoning.
 
 ## Appendix A: RFC §3.3 bullets → sub-stage

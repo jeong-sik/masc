@@ -81,6 +81,12 @@ let acting_pane_target_at ~line =
   if line >= 0 && line < Array.length targets then targets.(line)
   else Masc_tui_acting_pane.Target_none
 
+(* The input layer reads the last frame's pane through these, never the
+   cells themselves: what it needs is the answer, and the cells stay this
+   module's to set once per frame. *)
+let acting_pane_drawn_cols () = !acting_pane_reserved_cols
+let acting_pane_scroll_limit () = !acting_pane_scroll_max
+
 let get_terminal_size () =
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
   (max 1 (rows - 1), max 1 (cols - !acting_pane_reserved_cols))

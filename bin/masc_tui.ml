@@ -6604,7 +6604,7 @@ type acting_pane_hit =
   | Pane_row of int  (** 0-based line within the pane *)
 
 let acting_pane_hit (state : state) ~row ~column =
-  let pane_cols = !acting_pane_reserved_cols in
+  let pane_cols = Masc_tui_render.acting_pane_drawn_cols () in
   if pane_cols <= 0 then Pane_miss
   else
     let _terminal_rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in
@@ -6619,7 +6619,10 @@ let acting_pane_hit (state : state) ~row ~column =
 
 let scroll_acting_pane (state : state) ~delta =
   state.acting_pane_scroll
-  <- max 0 (min !acting_pane_scroll_max (state.acting_pane_scroll + delta))
+  <- max 0
+       (min
+          (Masc_tui_render.acting_pane_scroll_limit ())
+          (state.acting_pane_scroll + delta))
 
 (* A press on the pane is the roster's cursor by another hand: a fleet row
    lands the selection on that keeper, and a press on the keeper already

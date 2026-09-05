@@ -3224,7 +3224,7 @@ let render_approvals (state : state) =
             Ansi.reset
         , Printf.sprintf "  %sargs=%s%s" Ansi.dim
             (fit_width
-               (Terminal_text.single_line held.kta_args)
+               (Terminal_text.preview_line held.kta_args)
                (max 8 (cols - 9)))
             Ansi.reset )
     | Some (Gate_row pending) ->
@@ -12835,7 +12835,7 @@ let file_change_ranges (change : Masc.Tui_decode.file_change) =
 let change_row_summary (change : Masc.Tui_decode.file_change) =
   let content =
     match change.Masc.Tui_decode.fc_kind with
-    | Masc.Tui_decode.Fc_edited { after; _ } -> Terminal_text.single_line after
+    | Masc.Tui_decode.Fc_edited { after; _ } -> Terminal_text.preview_line after
     | Masc.Tui_decode.Fc_written { content } ->
       Printf.sprintf "(wrote %d bytes)" (String.length content)
   in

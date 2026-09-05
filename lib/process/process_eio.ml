@@ -207,6 +207,76 @@ let create_process_env prog argv env stdin_fd stdout_fd stderr_fd =
       [Sys.chdir] race documented in the adversarial audit (P0). *)
   Unix.create_process_env prog (Array.of_list argv) env stdin_fd stdout_fd stderr_fd
 
+(* Everything the two spawn paths can raise before a child process exists,
+   read from the sources rather than guessed:
+
+   Eio path ([Eio.Process.spawn], eio 1.3):
+   - [Eio_unix.Process.get_executable] (lib_eio/unix/process.ml:58-66) raises
+     [Invalid_argument] for an empty argv and
+     [Eio.Io (Process.E (Executable_not_found argv0))] when PATH has no file.
+   - [Low_level.pipe] on both backends is [Unix.pipe] (posix low_level.ml:497,
+     linux low_level.ml:544) and the fork stub raises [uerror "fork"]
+     (eio_posix_stubs.c:416, eio_stubs.c:199): both are [Unix.Unix_error].
+   - Fork actions (fchdir, dup2, execve) run in the child after fork and
+     report "<action>: <strerror(errno)>" over a pipe
+     (lib_eio/unix/fork_action.c, [eio_unix_fork_error]); the parent raises
+     [Failure] with that text (posix low_level.ml:585, linux
+     low_level.ml:628). The errno is already text there, so
+     [Child_setup_failed] carries the text as data and nothing here parses it.
+   [Eio.Process.Child_error] is raised by [run]/[parse_out] after the child
+   exits, never by [spawn].
+
+   Unix fallback ([Unix.create_process_env], OCaml 5.5 otherlibs/unix/spawn.c):
+   - with [posix_spawnp] (macOS, glibc) every failure is
+     [Unix_error (errno, "create_process", executable)] (spawn.c:80);
+     [ENOENT] is the program not found, anything else ([EACCES], [E2BIG],
+     [ENOEXEC], [ENOMEM], ...) is [Spawn_failed] with that errno.
+   - the pipe and stderr capture file are [Unix.pipe] / [Unix.openfile];
+     a [Unix_error] there before the spawn is [Spawn_failed] too.
+   Without [posix_spawn] the fallback's child exits 127 (spawn.c:91); no
+   target of this repo builds that way. *)
+type spawn_refusal =
+  | Empty_argv
+  | Executable_not_found of string
+  | Spawn_failed of
+      { executable : string
+      ; error : Unix.error
+      }
+  | Child_setup_failed of
+      { executable : string
+      ; detail : string
+      }
+
+let spawn_refusal_to_string = function
+  | Empty_argv -> "argv is empty"
+  | Executable_not_found program ->
+      Printf.sprintf "executable %S not found on PATH" program
+  | Spawn_failed { executable; error } ->
+      Printf.sprintf "spawn of %S failed: %s" executable (Unix.error_message error)
+  | Child_setup_failed { executable; detail } ->
+      Printf.sprintf "child for %S could not start: %s" executable detail
+
+(* True while the child does not exist yet. [phase_ref] moves to [Command]
+   right after [Eio.Process.spawn] returns, so an exception seen in [Spawn]
+   came from creating the pipes, forking, or the child's own setup. *)
+let in_spawn_phase phase_ref =
+  match !phase_ref with
+  | Timeout_origin.Spawn -> true
+  | Timeout_origin.Slot_wait
+  | Timeout_origin.Command
+  | Timeout_origin.Llm_response
+  | Timeout_origin.Dashboard_refresh
+  | Timeout_origin.Health_probe
+  | Timeout_origin.Other _ -> false
+
+let empty_argv_exn = Invalid_argument "Process_eio: argv is empty"
+
+(* Raised at the one [create_process_env] call in [with_unix_capture] so the
+   handler at its bottom can route the refusal without inspecting the
+   [Unix_error] function-name string. The original exception rides along for
+   the callers that still render it as text. *)
+exception Refused_at_spawn of spawn_refusal * exn
+
 let output_for_status = Process_eio_stderr.output_for_status
 let process_error_output = Process_eio_stderr.process_error_output
 let reason_of_exn_for_output = Process_eio_stderr.reason_of_exn_for_output
@@ -214,16 +284,27 @@ let create_stderr_tempfile = Process_eio_stderr.create_stderr_tempfile
 let remove_temp_file_quietly = Process_eio_stderr.remove_temp_file_quietly
 let captured_stderr_or_empty = Process_eio_stderr.captured_stderr_or_empty
 
+(* [on_refusal], when given, receives every failure that happens before a
+   child exists ({!spawn_refusal}) together with the exception that reported
+   it; nothing ran. When absent those cases go through [on_error] rendered as
+   text, which is what the tuple-returning runners do. *)
 let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
-    ?timeout_sec
+    ?timeout_sec ?on_refusal
     (argv : string list)
     ~(on_error : string -> string -> 'a)
     ~(on_success : Unix.process_status -> string -> string -> 'a) : 'a =
   let timeout_sec = validate_timeout_sec timeout_sec in
   let started_at = Unix.gettimeofday () in
   match argv with
-  | [] -> on_error "empty argv" ""
+  | [] ->
+    (match on_refusal with
+     | Some refuse -> refuse Empty_argv empty_argv_exn
+     | None -> on_error "empty argv" "")
   | prog :: _ ->
+    (* Set once [create_process_env] has returned a pid. A [Unix_error]
+       before that is a refusal; after it the child is running and the error
+       is the capture's. *)
+    let spawned = ref false in
     let stdout_r_ref = ref None in
     let stdout_w_ref = ref None in
     let stderr_fd_ref = ref None in
@@ -279,8 +360,11 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
          | None -> Unix.stdin
        in
        let pid =
-         create_process_env prog argv env stdin_fd stdout_w stderr_fd
+         try create_process_env prog argv env stdin_fd stdout_w stderr_fd with
+         | Unix.Unix_error (Unix.ENOENT, _, _) as exn ->
+             raise (Refused_at_spawn (Executable_not_found prog, exn))
        in
+       spawned := true;
        Option.iter close_quietly !stdin_r_ref;
        stdin_r_ref := None;
        Option.iter close_quietly !stdout_w_ref;
@@ -476,6 +560,18 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
      | Eio.Cancel.Cancelled _ as exn ->
          cleanup ();
          raise exn
+     | Refused_at_spawn (refusal, exn) ->
+         let stderr = captured_stderr_or_empty !stderr_path_ref in
+         cleanup ();
+         (match on_refusal with
+          | Some refuse -> refuse refusal exn
+          | None -> on_error (reason_of_exn_for_output exn) stderr)
+     | Unix.Unix_error (error, _, _) as exn when not !spawned ->
+         let stderr = captured_stderr_or_empty !stderr_path_ref in
+         cleanup ();
+         (match on_refusal with
+          | Some refuse -> refuse (Spawn_failed { executable = prog; error }) exn
+          | None -> on_error (reason_of_exn_for_output exn) stderr)
      | exn ->
          let stderr = captured_stderr_or_empty !stderr_path_ref in
          cleanup ();
@@ -499,6 +595,20 @@ let run_unix_argv_with_status_split_fallback ?timeout_sec ?env ?cwd (argv : stri
       (Unix.WEXITED 127, "", process_error_output ~label ~reason ~stderr ()))
     ~on_success:(fun status stdout stderr ->
       (status, stdout, stderr))
+
+(* Same as [run_unix_argv_with_status_split_fallback] except that a failure
+   before the child exists comes back as [Error (refusal, exn)] instead of
+   the 127 tuple, and is not logged here: the caller asked for it as a value. *)
+let run_unix_argv_with_status_split_fallback_resolving ?timeout_sec ?env ?cwd
+    (argv : string list) :
+    (Unix.process_status * string * string, spawn_refusal * exn) result =
+  let label = String.concat " " (List.map Filename.quote argv) in
+  with_unix_capture ?env ?cwd ?timeout_sec ~capture_stderr:true argv
+    ~on_refusal:(fun refusal exn -> Error (refusal, exn))
+    ~on_error:(fun reason stderr ->
+      Log.Misc.error "[Process_eio] Unix fallback error: %s — %s" label reason;
+      Ok (Unix.WEXITED 127, "", process_error_output ~label ~reason ~stderr ()))
+    ~on_success:(fun status stdout stderr -> Ok (status, stdout, stderr))
 
 let run_unix_argv_with_stdin_fallback ?timeout_sec ?env ~(stdin_content : string)
     (argv : string list) : string =
@@ -1386,17 +1496,28 @@ let run_argv_with_redirects ?timeout_sec ?env ?cwd ~stdin ~stdout ~stderr
        | exn -> Error (Printf.sprintf "%s: %s" label (Printexc.to_string exn))))
 ;;
 
-let run_argv_with_status_split ?timeout_sec ?env ?cwd
-    (argv : string list) : Unix.process_status * string * string =
+(* Shared body of [run_argv_with_status_split] and
+   [run_argv_with_status_split_or_refusal]. [Error (refusal, exn)] is a
+   failure that precedes the process ({!spawn_refusal}); the Unix fallback
+   reports the same set through [with_unix_capture]. Nothing is logged for it
+   here because the two callers disagree on what it is: the tuple runner
+   renders it as the 127 status it always has, the typed runner hands it
+   back. *)
+let run_argv_with_status_split_resolving ?timeout_sec ?env ?cwd
+    (argv : string list) :
+    (Unix.process_status * string * string, spawn_refusal * exn) result =
   let timeout_sec = validate_timeout_sec timeout_sec in
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_status ~argv ?env ?cwd ();
   with_spawn_guard (fun () ->
+      match argv with
+      | [] -> Error (Empty_argv, empty_argv_exn)
+      | executable :: _ ->
       if not (is_initialized ()) then
-        run_unix_argv_with_status_split_fallback ?timeout_sec ?env ?cwd argv
+        run_unix_argv_with_status_split_fallback_resolving ?timeout_sec ?env ?cwd argv
       else
         match get_proc_mgr (), get_clock (), get_cwd_default () with
         | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
-            run_unix_argv_with_status_split_fallback ?timeout_sec ?env ?cwd
+            run_unix_argv_with_status_split_fallback_resolving ?timeout_sec ?env ?cwd
               argv
         | Ok pm, Ok clk, Ok default_cwd ->
             let effective_cwd =
@@ -1407,15 +1528,16 @@ let run_argv_with_status_split ?timeout_sec ?env ?cwd
             let label = String.concat " " (List.map Filename.quote argv) in
             let phase_ref = ref Timeout_origin.Spawn in
             try
-              Eio.Switch.run (fun sw ->
-                  let unix_status =
-                    with_explicit_timeout_exn clk timeout_sec (fun () ->
-                        spawn_and_drain_both ~phase_ref ~sw pm ~cwd:effective_cwd ?env
-                          ~clock:clk argv stdout_buf stderr_buf)
-                  in
-                  ( unix_status,
-                    Exec_buffer.render stdout_buf,
-                    Exec_buffer.render stderr_buf ))
+              Ok
+                (Eio.Switch.run (fun sw ->
+                     let unix_status =
+                       with_explicit_timeout_exn clk timeout_sec (fun () ->
+                           spawn_and_drain_both ~phase_ref ~sw pm ~cwd:effective_cwd ?env
+                             ~clock:clk argv stdout_buf stderr_buf)
+                     in
+                     ( unix_status,
+                       Exec_buffer.render stdout_buf,
+                       Exec_buffer.render stderr_buf )))
             with
             | Explicit_process_timeout timeout_sec ->
                 Log.Misc.warn "[Process_eio] Timeout after %.2fs (%s): %s"
@@ -1430,14 +1552,21 @@ let run_argv_with_status_split ?timeout_sec ?env ?cwd
                       ~reason:(Printf.sprintf "timeout after %.2fs" timeout_sec) ()
                   else stderr
                 in
-                (timeout_status, stdout, stderr)
+                Ok (timeout_status, stdout, stderr)
             | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | Eio.Io (Eio.Process.E (Eio.Process.Executable_not_found program), _) as exn ->
+                Error (Executable_not_found program, exn)
+            | Failure detail as exn when in_spawn_phase phase_ref ->
+                Error (Child_setup_failed { executable; detail }, exn)
+            | Unix.Unix_error (error, _, _) as exn
+              when in_spawn_phase phase_ref && not (should_retry_unix_fallback exn) ->
+                Error (Spawn_failed { executable; error }, exn)
             | exn ->
                 if should_retry_unix_fallback exn then (
                   Log.Misc.warn
                     "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
                     label (Printexc.to_string exn);
-                  run_unix_argv_with_status_split_fallback ?timeout_sec ?env
+                  run_unix_argv_with_status_split_fallback_resolving ?timeout_sec ?env
                     ?cwd argv
                 ) else if is_downstream_pipe_closed exn then (
                   (* Downstream reader closed the pipe (head/tail/grep -m
@@ -1452,17 +1581,38 @@ let run_argv_with_status_split ?timeout_sec ?env ?cwd
                   Log.Misc.debug
                     "[Process_eio] argv pipe closed by reader: %s — %s"
                     label (Printexc.to_string exn);
-                  ( Unix.WEXITED 127,
-                    "",
-                    process_error_output ~label
-                      ~reason:"pipe closed by reader" () )
+                  Ok
+                    ( Unix.WEXITED 127,
+                      "",
+                      process_error_output ~label
+                        ~reason:"pipe closed by reader" () )
                 ) else (
                   Log.Misc.error "[Process_eio] argv error: %s — %s" label
                     (Printexc.to_string exn);
-                  ( Unix.WEXITED 127,
-                    "",
-                    process_error_output ~label
-                      ~reason:(reason_of_exn_for_output exn) () )))
+                  Ok
+                    ( Unix.WEXITED 127,
+                      "",
+                      process_error_output ~label
+                        ~reason:(reason_of_exn_for_output exn) () )))
+
+let run_argv_with_status_split ?timeout_sec ?env ?cwd
+    (argv : string list) : Unix.process_status * string * string =
+  match run_argv_with_status_split_resolving ?timeout_sec ?env ?cwd argv with
+  | Ok outcome -> outcome
+  | Error (_refusal, exn) ->
+      let label = String.concat " " (List.map Filename.quote argv) in
+      Log.Misc.error "[Process_eio] argv error: %s — %s" label
+        (Printexc.to_string exn);
+      ( Unix.WEXITED 127,
+        "",
+        process_error_output ~label ~reason:(reason_of_exn_for_output exn) () )
+
+let run_argv_with_status_split_or_refusal ?timeout_sec ?env ?cwd
+    (argv : string list) :
+    (Unix.process_status * string * string, spawn_refusal) result =
+  Result.map_error
+    (fun (refusal, _exn) -> refusal)
+    (run_argv_with_status_split_resolving ?timeout_sec ?env ?cwd argv)
 
 let run_argv_with_status_split_streaming
     ?timeout_sec

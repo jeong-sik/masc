@@ -5,10 +5,58 @@ let default_max_dimension = 1568
 
 let max_dimension () = Env_config_keeper.KeeperVision.max_dimension ()
 
+(* Wall-clock budget for one scaler process.
+
+   The input is bounded by [Env_config_keeper.KeeperVision.max_image_bytes]
+   (10 MiB ceiling). Resizing a 4000x4000 RGB PNG (3.2 MB) to 1568 px took
+   0.17 s with sips, 0.10 s with magick and 0.09 s with convert on an M3 Max
+   on 2026-09-05, so this budget is about sixty times the work and fires only
+   on a scaler that hangs. Process_eio reports the kill as [Timed_out] and the
+   chain moves to the next scaler, so the longest wait before the original
+   bytes go out is this value times the number of scalers in
+   [scaler_plans]. It is a module constant, not a keeper runtime setting,
+   because no operator has needed to move it; if one does, it belongs in
+   [Keeper_runtime_setting_registry] next to [vision.max_dimension]. *)
+let scaler_timeout_sec = 10.0
+
 type dimensions =
   { width : int
   ; height : int
   }
+
+(* Exactly the formats [detect_dimensions] can read. A media type outside this
+   set is refused before any process is spawned: the scalers would be handed
+   bytes whose result this module cannot check against the bound. *)
+type media_type =
+  | Png
+  | Jpeg
+  | Gif
+  | Webp
+
+let all_media_types = [ Png; Jpeg; Gif; Webp ]
+
+let media_type_to_string = function
+  | Png -> "image/png"
+  | Jpeg -> "image/jpeg"
+  | Gif -> "image/gif"
+  | Webp -> "image/webp"
+;;
+
+(* The inverse is derived from [media_type_to_string] over [all_media_types]
+   so there is one spelling of each name; the string side of the boundary is
+   open and anything not in the closed set is [None]. *)
+let media_type_of_string name =
+  List.find_opt
+    (fun media_type -> String.equal (media_type_to_string media_type) name)
+    all_media_types
+;;
+
+let file_extension_of_media_type = function
+  | Png -> ".png"
+  | Jpeg -> ".jpg"
+  | Gif -> ".gif"
+  | Webp -> ".webp"
+;;
 
 type scaler =
   | Sips
@@ -21,12 +69,93 @@ let scaler_to_string = function
   | Convert -> "convert"
 ;;
 
+type scaler_plan =
+  { scaler : scaler
+  ; argv : string list
+  ; output_media_type : media_type
+  }
+
+type captured_output =
+  { stdout : string
+  ; stderr : string
+  }
+
+type attempt_failure =
+  | Spawn_refused of Process_eio.spawn_refusal
+  | Exited_nonzero of
+      { code : int
+      ; output : captured_output
+      }
+  | Timed_out of captured_output
+  | Signaled of
+      { signal : int
+      ; output : captured_output
+      }
+  | Stopped of
+      { signal : int
+      ; output : captured_output
+      }
+  | No_output_written of captured_output
+  | Output_dimensions_unknown of captured_output
+  | Output_still_too_large of
+      { dims : dimensions
+      ; output : captured_output
+      }
+
+type attempt =
+  { attempted : scaler_plan
+  ; failure : attempt_failure
+  }
+
 type failure_reason =
-  | Scalers_exhausted
+  | Unsupported_media_type of string
+  | Scalers_exhausted of attempt list
   | Scaler_exception of string
 
+let captured_output_to_string { stdout; stderr } =
+  Printf.sprintf "stdout=%S stderr=%S" (String.trim stdout) (String.trim stderr)
+;;
+
+let attempt_failure_to_string = function
+  | Spawn_refused refusal -> Process_eio.spawn_refusal_to_string refusal
+  | Exited_nonzero { code; output } ->
+    Printf.sprintf "exited %d (%s)" code (captured_output_to_string output)
+  | Timed_out output ->
+    Printf.sprintf
+      "timed out after %.1fs (%s)"
+      scaler_timeout_sec
+      (captured_output_to_string output)
+  | Signaled { signal; output } ->
+    Printf.sprintf "killed by signal %d (%s)" signal (captured_output_to_string output)
+  | Stopped { signal; output } ->
+    Printf.sprintf "stopped by signal %d (%s)" signal (captured_output_to_string output)
+  | No_output_written output ->
+    Printf.sprintf "exited 0 but wrote no output file (%s)" (captured_output_to_string output)
+  | Output_dimensions_unknown output ->
+    Printf.sprintf
+      "exited 0 but the output header has no readable dimensions (%s)"
+      (captured_output_to_string output)
+  | Output_still_too_large { dims; output } ->
+    Printf.sprintf
+      "exited 0 but the output is %dx%d, still over the bound (%s)"
+      dims.width
+      dims.height
+      (captured_output_to_string output)
+;;
+
+let attempt_to_string { attempted; failure } =
+  Printf.sprintf
+    "%s [%s]: %s"
+    (scaler_to_string attempted.scaler)
+    (String.concat " " (List.map Filename.quote attempted.argv))
+    (attempt_failure_to_string failure)
+;;
+
 let failure_reason_to_string = function
-  | Scalers_exhausted -> "scalers_exhausted"
+  | Unsupported_media_type media_type -> "unsupported_media_type:" ^ media_type
+  | Scalers_exhausted [] -> "scalers_exhausted: no scaler was planned"
+  | Scalers_exhausted attempts ->
+    "scalers_exhausted: " ^ String.concat "; " (List.map attempt_to_string attempts)
   | Scaler_exception msg -> "exception:" ^ msg
 ;;
 
@@ -35,8 +164,9 @@ type downscale_status =
   | Unchanged_unknown_dimensions
   | Downscaled of
       { original_dims : dimensions
-      ; scaled_dims : dimensions option
+      ; scaled_dims : dimensions
       ; scaler : scaler
+      ; failed_before : attempt list
       }
   | Downscale_fallback_error of failure_reason
 
@@ -50,6 +180,7 @@ type metric_reason =
   | Reason_unknown_dims
   | Reason_downscaled
   | Reason_downscale_failed
+  | Reason_unsupported_media_type
 
 let string_of_metric_result = function
   | Metric_ok -> "ok"
@@ -62,6 +193,12 @@ let string_of_metric_reason = function
   | Reason_unknown_dims -> "unknown_dims"
   | Reason_downscaled -> "downscaled"
   | Reason_downscale_failed -> "downscale_failed"
+  | Reason_unsupported_media_type -> "unsupported_media_type"
+;;
+
+let metric_reason_of_failure = function
+  | Unsupported_media_type _ -> Reason_unsupported_media_type
+  | Scalers_exhausted _ | Scaler_exception _ -> Reason_downscale_failed
 ;;
 
 let le16 bytes offset =
@@ -128,70 +265,40 @@ let needs_downscale ?max_dimension:max_dim_opt bytes =
   | None -> false
 ;;
 
-let ext_of_media_type = function
-  | "image/png" -> ".png"
-  | "image/jpeg" -> ".jpg"
-  | "image/gif" -> ".gif"
-  | "image/webp" -> ".webp"
-  | _ -> ".img"
-;;
-
-let split_path_env value =
-  String.split_on_char ':' value
-  |> List.filter (fun entry -> String.trim entry <> "")
-;;
-
-let find_executable_in_path ?path_value executable =
-  let path_value =
-    match path_value with
-    | Some value -> value
-    | None -> Option.value (Sys.getenv_opt "PATH") ~default:""
+(* argv[0] is the bare program name: Process_eio's spawner resolves it on
+   PATH and reports a program it cannot find, or cannot start, as a
+   [Process_eio.spawn_refusal], which [attempt_plan] records as that
+   attempt's outcome. *)
+let scaler_plans ~max_dim ~in_file ~out_file media_type =
+  let bound = string_of_int max_dim in
+  let sips =
+    match media_type with
+    | Webp ->
+      (* macOS sips cannot write WebP, but can convert WebP to PNG *)
+      { scaler = Sips
+      ; argv =
+          [ scaler_to_string Sips; "-s"; "format"; "png"; "-Z"; bound; in_file; "--out"; out_file ]
+      ; output_media_type = Png
+      }
+    | Png | Jpeg | Gif ->
+      { scaler = Sips
+      ; argv = [ scaler_to_string Sips; "-Z"; bound; in_file; "--out"; out_file ]
+      ; output_media_type = media_type
+      }
   in
-  let candidates =
-    split_path_env path_value
-    |> List.map (fun dir -> Filename.concat dir executable)
+  let imagemagick scaler =
+    { scaler
+    ; argv =
+        [ scaler_to_string scaler
+        ; in_file
+        ; "-resize"
+        ; Printf.sprintf "%dx%d>" max_dim max_dim
+        ; out_file
+        ]
+    ; output_media_type = media_type
+    }
   in
-  List.find_opt (fun path -> Sys.file_exists path && not (Sys.is_directory path)) candidates
-;;
-
-let scaler_candidates ~max_dim ~in_file ~out_file ~media_type =
-  let is_webp = String.equal media_type "image/webp" in
-  let sips_cmd =
-    match find_executable_in_path "sips" with
-    | Some prog ->
-      if is_webp
-      then
-        (* macOS sips cannot write WebP, but can convert WebP to PNG *)
-        Some
-          ( Sips
-          , [ prog; "-s"; "format"; "png"; "-Z"; string_of_int max_dim; in_file; "--out"; out_file ]
-          , "image/png" )
-      else
-        Some
-          ( Sips
-          , [ prog; "-Z"; string_of_int max_dim; in_file; "--out"; out_file ]
-          , media_type )
-    | None -> None
-  in
-  let magick_cmd =
-    match find_executable_in_path "magick" with
-    | Some prog ->
-      Some
-        ( Magick
-        , [ prog; in_file; "-resize"; Printf.sprintf "%dx%d>" max_dim max_dim; out_file ]
-        , media_type )
-    | None -> None
-  in
-  let convert_cmd =
-    match find_executable_in_path "convert" with
-    | Some prog ->
-      Some
-        ( Convert
-        , [ prog; in_file; "-resize"; Printf.sprintf "%dx%d>" max_dim max_dim; out_file ]
-        , media_type )
-    | None -> None
-  in
-  List.filter_map Fun.id [ sips_cmd; magick_cmd; convert_cmd ]
+  [ sips; imagemagick Magick; imagemagick Convert ]
 ;;
 
 let read_file_binary path =
@@ -203,10 +310,41 @@ let read_file_binary path =
       really_input_string ic len)
 ;;
 
-let execute_downscale ~max_dim ~media_type ~bytes =
-  let in_ext = ext_of_media_type media_type in
+(* One scaler run, every way it can fall short named. [out_file] is removed
+   first so a file left by an earlier plan cannot pass for this one's. *)
+let attempt_plan ~max_dim ~out_file (plan : scaler_plan) =
+  (try Sys.remove out_file with Sys_error _ -> ());
+  match
+    Process_eio.run_argv_with_status_split_or_refusal
+      ~timeout_sec:scaler_timeout_sec
+      plan.argv
+  with
+  | Error refusal -> Error (Spawn_refused refusal)
+  | Ok (status, stdout, stderr) ->
+    let output = { stdout; stderr } in
+    (match Process_eio.exit_reason_of_status status with
+     | Process_eio.Completed 0 ->
+       if Sys.file_exists out_file && (Unix.stat out_file).st_size > 0
+       then (
+         let scaled_bytes = read_file_binary out_file in
+         match detect_dimensions scaled_bytes with
+         | None -> Error (Output_dimensions_unknown output)
+         | Some dims when max dims.width dims.height <= max_dim ->
+           Ok (plan.output_media_type, scaled_bytes, dims, plan.scaler)
+         | Some dims -> Error (Output_still_too_large { dims; output }))
+       else Error (No_output_written output)
+     | Process_eio.Completed code -> Error (Exited_nonzero { code; output })
+     | Process_eio.Timed_out -> Error (Timed_out output)
+     | Process_eio.Signaled signal -> Error (Signaled { signal; output })
+     | Process_eio.Stopped signal -> Error (Stopped { signal; output }))
+;;
+
+let execute_downscale ~plans ~max_dim ~media_type ~bytes =
   let in_file, in_oc =
-    Filename.open_temp_file ~mode:[ Open_binary ] "masc_scale_in_" in_ext
+    Filename.open_temp_file
+      ~mode:[ Open_binary ]
+      "masc_scale_in_"
+      (file_extension_of_media_type media_type)
   in
   let out_file = Filename.temp_file "masc_scale_out_" ".tmp" in
   Fun.protect
@@ -221,28 +359,17 @@ let execute_downscale ~max_dim ~media_type ~bytes =
     (fun () ->
       output_string in_oc bytes;
       close_out_noerr in_oc;
-      let candidates = scaler_candidates ~max_dim ~in_file ~out_file ~media_type in
-      let rec try_candidates = function
-        | [] -> Error Scalers_exhausted
-        | (scaler, argv, expected_mt) :: rest ->
-          (try Sys.remove out_file with Sys_error _ -> ());
-          let status, _stdout, _stderr =
-            Process_eio.run_argv_with_status_split ~timeout_sec:10.0 argv
-          in
-          (match status with
-           | Unix.WEXITED 0 ->
-             if Sys.file_exists out_file && (Unix.stat out_file).st_size > 0
-             then
-               let scaled_bytes = read_file_binary out_file in
-               let scaled_dims = detect_dimensions scaled_bytes in
-               (match scaled_dims with
-                | Some dims when max dims.width dims.height <= max_dim ->
-                  Ok (expected_mt, scaled_bytes, Some dims, scaler)
-                | _ -> try_candidates rest)
-             else try_candidates rest
-           | _ -> try_candidates rest)
+      (* [attempted] is newest-first while the chain runs; both exits put it
+         back in the order the scalers ran. *)
+      let rec try_plans attempted = function
+        | [] -> Error (Scalers_exhausted (List.rev attempted))
+        | plan :: rest ->
+          (match attempt_plan ~max_dim ~out_file plan with
+           | Ok (out_media_type, scaled_bytes, dims, scaler) ->
+             Ok (out_media_type, scaled_bytes, dims, scaler, List.rev attempted)
+           | Error failure -> try_plans ({ attempted = plan; failure } :: attempted) rest)
       in
-      try_candidates candidates)
+      try_plans [] (plans ~max_dim ~in_file ~out_file media_type))
 ;;
 
 let record_downscale ~result ~reason =
@@ -255,41 +382,62 @@ let record_downscale ~result ~reason =
     ()
 ;;
 
-(* The trailing unit is what lets [?max_dimension] be erased. Without it every
+(* The boundary log: the whole chain, one attempt after another, in the order
+   it ran. An operator whose image went out at full size reads here why each
+   scaler refused. *)
+let fall_back ~media_type ~bytes reason =
+  Log.Misc.warn
+    "[Keeper_vision_downscale] Downscale failed (%s); using original bytes"
+    (failure_reason_to_string reason);
+  record_downscale ~result:Metric_error ~reason:(metric_reason_of_failure reason);
+  ((media_type, bytes), Downscale_fallback_error reason)
+;;
+
+(* The trailing unit is what lets the optionals be erased. Without it every
    remaining parameter is labelled, so the compiler cannot tell a partial
    application from a complete one and warning 16 fires -- at the definition
-   and again at each call that omits the optional. *)
-let downscale_with_status ?max_dimension:max_dim_opt ~media_type ~bytes () =
+   and again at each call that omits them. *)
+let downscale_with_status
+    ?max_dimension:max_dim_opt
+    ?(plans = scaler_plans)
+    ~media_type
+    ~bytes
+    ()
+  =
   try
     let max_dim = Option.value max_dim_opt ~default:(max_dimension ()) in
-    match detect_dimensions bytes with
-    | None ->
-      record_downscale ~result:Metric_unchanged ~reason:Reason_unknown_dims;
-      ((media_type, bytes), Unchanged_unknown_dimensions)
-    | Some dims when max dims.width dims.height <= max_dim ->
-      record_downscale ~result:Metric_unchanged ~reason:Reason_within_bounds;
-      ((media_type, bytes), Unchanged_within_bounds dims)
-    | Some dims ->
-      (match execute_downscale ~max_dim ~media_type ~bytes with
-       | Ok (out_mt, out_bytes, scaled_dims, scaler) ->
-         record_downscale ~result:Metric_ok ~reason:Reason_downscaled;
-         ( (out_mt, out_bytes)
-         , Downscaled { original_dims = dims; scaled_dims; scaler } )
-       | Error reason ->
-         Log.Misc.warn
-           "[Keeper_vision_downscale] Downscale failed (%s); using original bytes"
-           (failure_reason_to_string reason);
-         record_downscale ~result:Metric_error ~reason:Reason_downscale_failed;
-         ((media_type, bytes), Downscale_fallback_error reason))
+    match media_type_of_string media_type with
+    | None -> fall_back ~media_type ~bytes (Unsupported_media_type media_type)
+    | Some parsed_media_type ->
+      (match detect_dimensions bytes with
+       | None ->
+         record_downscale ~result:Metric_unchanged ~reason:Reason_unknown_dims;
+         ((media_type, bytes), Unchanged_unknown_dimensions)
+       | Some dims when max dims.width dims.height <= max_dim ->
+         record_downscale ~result:Metric_unchanged ~reason:Reason_within_bounds;
+         ((media_type, bytes), Unchanged_within_bounds dims)
+       | Some dims ->
+         (match
+            execute_downscale ~plans ~max_dim ~media_type:parsed_media_type ~bytes
+          with
+          | Ok (out_media_type, out_bytes, scaled_dims, scaler, failed_before) ->
+            (* Scalers that fell short before one succeeded are kept on the
+               status and logged at debug: on a host without sips every call
+               would otherwise warn about the same absent program. *)
+            (match failed_before with
+             | [] -> ()
+             | _ :: _ ->
+               Log.Misc.debug
+                 "[Keeper_vision_downscale] Downscaled with %s after: %s"
+                 (scaler_to_string scaler)
+                 (String.concat "; " (List.map attempt_to_string failed_before)));
+            record_downscale ~result:Metric_ok ~reason:Reason_downscaled;
+            ( (media_type_to_string out_media_type, out_bytes)
+            , Downscaled { original_dims = dims; scaled_dims; scaler; failed_before } )
+          | Error reason -> fall_back ~media_type ~bytes reason))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    let msg = Printexc.to_string exn in
-    Log.Misc.warn
-      "[Keeper_vision_downscale] Downscale exception (%s); using original bytes"
-      msg;
-    record_downscale ~result:Metric_error ~reason:Reason_downscale_failed;
-    ((media_type, bytes), Downscale_fallback_error (Scaler_exception msg))
+  | exn -> fall_back ~media_type ~bytes (Scaler_exception (Printexc.to_string exn))
 ;;
 
 let downscale_if_needed ?max_dimension ~media_type ~bytes () =

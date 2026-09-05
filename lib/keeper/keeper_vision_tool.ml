@@ -179,8 +179,12 @@ let string_member key json =
 let normalize_media_type value =
   String.trim value |> String.lowercase_ascii
 
+(* The downscaler's closed type is the one list of what a vision call may
+   carry: a type it cannot read would go to the provider at full size. *)
 let supported_image_media_types =
-  [ "image/png"; "image/jpeg"; "image/gif"; "image/webp" ]
+  List.map
+    Keeper_vision_downscale.media_type_to_string
+    Keeper_vision_downscale.all_media_types
 
 let supported_image_media_type media_type =
   List.mem media_type supported_image_media_types
@@ -222,14 +226,15 @@ let sniff_image_media_type bytes =
     let lp = String.length prefix in
     String.length bytes >= lp && String.equal (String.sub bytes 0 lp) prefix
   in
-  if starts "\x89PNG" then Ok "image/png"
-  else if starts "\xff\xd8\xff" then Ok "image/jpeg"
-  else if starts "GIF8" then Ok "image/gif"
+  let named media_type = Ok (Keeper_vision_downscale.media_type_to_string media_type) in
+  if starts "\x89PNG" then named Keeper_vision_downscale.Png
+  else if starts "\xff\xd8\xff" then named Keeper_vision_downscale.Jpeg
+  else if starts "GIF8" then named Keeper_vision_downscale.Gif
   else if
     String.length bytes >= 12
     && String.equal (String.sub bytes 0 4) "RIFF"
     && String.equal (String.sub bytes 8 4) "WEBP"
-  then Ok "image/webp"
+  then named Keeper_vision_downscale.Webp
   else
     Error
       (Printf.sprintf

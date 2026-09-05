@@ -3023,7 +3023,7 @@
 (test
  (name test_keeper_vision_downscale)
  (modules test_keeper_vision_downscale)
- (libraries alcotest masc base64))
+ (libraries alcotest masc masc.masc_process eio eio_main unix base64))
 
 (test
  (name test_keeper_vision_ingest)

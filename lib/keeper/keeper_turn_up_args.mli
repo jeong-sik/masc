@@ -62,7 +62,7 @@ val parse_max_context_override :
     is unreachable is refused the same way a new one is. The test suite has
     no daemon and passes its own probe. *)
 val parse :
-  ?docker_preflight:(timeout_sec:float -> Keeper_sandbox_runtime.docker_preflight option) ->
+  ?docker_preflight:(?image:string -> timeout_sec:float -> Keeper_sandbox_runtime.docker_preflight option) ->
   _ context ->
   Yojson.Safe.t ->
   (parsed_args, tool_result) result

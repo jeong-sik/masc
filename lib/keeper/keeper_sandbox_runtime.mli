@@ -353,7 +353,7 @@ val remove_persistent_containers
 (** Global keeper sandbox preflight used by sandbox diagnostics.
     Returns [None] when
     [MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false]. *)
-val docker_preflight : timeout_sec:float -> unit -> docker_preflight option
+val docker_preflight : ?image:string -> timeout_sec:float -> unit -> docker_preflight option
 
 val docker_preflight_to_yojson : docker_preflight -> Yojson.Safe.t
 

@@ -806,6 +806,203 @@ let test_a_header_without_the_parameter_is_not_a_location () =
         (Keeper_oauth_discovery.error_to_string other)
   | Ok _ -> Alcotest.fail "a header with no location was read as one"
 
+(* The header is read by RFC 9110's grammar, so where the value sits and how
+   it is written are the grammar's business, not a search for its letters.
+   Each case below is one thing a search got wrong. *)
+
+let computed_url = "https://mcp.example.com/.well-known/oauth-protected-resource/mcp"
+
+let discover_with ~ask =
+  Keeper_oauth_discovery.discover ~get:origin_only_get ~ask
+    ~mcp_url:"https://mcp.example.com/mcp" ()
+
+let the_named_location_is_read ~header ~ask =
+  match discover_with ~ask with
+  | Ok found ->
+      check str "the resource it named" "https://mcp.example.com"
+        found.Keeper_oauth_discovery.resource
+  | Error err ->
+      Alcotest.failf "the location in %S was not read: %s" header
+        (Keeper_oauth_discovery.error_to_string err)
+
+let the_computed_url_stands ~header ~ask =
+  match discover_with ~ask with
+  | Error (Keeper_oauth_discovery.Not_published { url; _ }) ->
+      check str "the computed URL was used instead" computed_url url
+  | Error other ->
+      Alcotest.failf "wrong refusal for %S: %s" header
+        (Keeper_oauth_discovery.error_to_string other)
+  | Ok _ -> Alcotest.failf "a location was read out of %S" header
+
+let named header = the_named_location_is_read ~header ~ask:(says ~header)
+let computed header = the_computed_url_stands ~header ~ask:(says ~header)
+
+let test_a_token_value_is_read_as_a_token () =
+  (* auth-param allows a value as a bare token; error carries one here and
+     the location beside it is still found. *)
+  named
+    (Printf.sprintf {|Bearer error=invalid_token, resource_metadata="%s"|}
+       origin_only_metadata)
+
+let test_an_unquoted_url_is_not_a_token () =
+  (* RFC 9110 5.6.2: a token is 1*tchar, and neither the colon nor the slash
+     is a tchar, so a URL can only travel quoted. Unquoted, the header is
+     not one the grammar covers, and the computed URL stands. *)
+  let header = Printf.sprintf "Bearer resource_metadata=%s" origin_only_metadata in
+  (match Masc_http_client.Www_authenticate.parse header with
+  | Error (Masc_http_client.Www_authenticate.Expected_delimiter at) ->
+      Alcotest.(check int) "stops at the colon after the scheme"
+        (String.length "Bearer resource_metadata=https") at
+  | Error other ->
+      Alcotest.failf "stopped for another reason: %s"
+        (Masc_http_client.Www_authenticate.fault_to_string other)
+  | Ok _ -> Alcotest.fail "an unquoted URL was read as a token");
+  computed header
+
+let test_a_quoted_pair_in_the_location_is_unescaped () =
+  (* RFC 9110 5.6.4: a recipient handles a quoted-pair as the octet it
+     escapes. *)
+  named
+    {|Bearer resource_metadata="https://mcp.example.com/.well-known/oauth\-protected\-resource"|}
+
+let test_the_same_letters_inside_another_value_are_not_the_location () =
+  (* The text of the parameter sits inside error_description's quoted
+     value. A search found it there; the grammar keeps it there. *)
+  computed
+    (Printf.sprintf
+       {|Bearer error="invalid_token", error_description="see resource_metadata=\"%s\""|}
+       origin_only_metadata)
+
+let test_a_decoy_before_the_parameter_does_not_shadow_it () =
+  named
+    (Printf.sprintf
+       {|Bearer error_description="resource_metadata=\"https://evil.example.com/\"", resource_metadata="%s"|}
+       origin_only_metadata)
+
+let test_a_location_under_another_scheme_is_not_read () =
+  (* This client presents a bearer token, so the Bearer challenge is the
+     one answering it. *)
+  computed (Printf.sprintf {|DPoP resource_metadata="%s"|} origin_only_metadata)
+
+let test_the_bearer_challenge_may_come_second () =
+  named
+    (Printf.sprintf {|Basic realm="ops", Bearer resource_metadata="%s"|}
+       origin_only_metadata)
+
+let test_scheme_and_parameter_name_carry_no_case () =
+  (* RFC 9110 11.1: both are case-insensitive. *)
+  named (Printf.sprintf {|bearer RESOURCE_METADATA="%s"|} origin_only_metadata)
+
+let test_a_later_header_may_carry_the_location () =
+  (* Each WWW-Authenticate header is its own challenge list; the first
+     Bearer challenge naming the location wins, whichever header it is in. *)
+  let second = Printf.sprintf {|Bearer resource_metadata="%s"|} origin_only_metadata in
+  the_named_location_is_read ~header:second ~ask:(fun ~url:_ ->
+      Some [ ("WWW-Authenticate", {|Basic realm="ops"|}); ("www-authenticate", second) ])
+
+let test_a_malformed_header_names_nothing () =
+  (* An unterminated quote is not a header the grammar covers. The parser
+     says where it stopped; discovery treats the header as naming nothing
+     and the computed URL stands. *)
+  let header = Printf.sprintf {|Bearer resource_metadata="%s|} origin_only_metadata in
+  (match Masc_http_client.Www_authenticate.parse header with
+  | Error (Masc_http_client.Www_authenticate.Unterminated_quoted_string _) -> ()
+  | Error other ->
+      Alcotest.failf "stopped for another reason: %s"
+        (Masc_http_client.Www_authenticate.fault_to_string other)
+  | Ok _ -> Alcotest.fail "an unterminated quote was read as a header");
+  computed header
+
+(* ── the challenge grammar itself ────────────────────────────────────── *)
+
+module Www = Masc_http_client.Www_authenticate
+
+let challenge_to_string (challenge : Www.challenge) =
+  match challenge.Www.credentials with
+  | Www.Token68 text -> Printf.sprintf "%s token68=%S" challenge.Www.scheme text
+  | Www.Params params ->
+      Printf.sprintf "%s [%s]" challenge.Www.scheme
+        (String.concat "; "
+           (List.map (fun (key, text) -> Printf.sprintf "%s=%S" key text) params))
+
+let challenges =
+  Alcotest.testable
+    (fun fmt found ->
+      Format.pp_print_string fmt
+        (String.concat " | " (List.map challenge_to_string found)))
+    (List.equal (fun (a : Www.challenge) b -> a = b))
+
+let fault =
+  Alcotest.testable
+    (fun fmt found -> Format.pp_print_string fmt (Www.fault_to_string found))
+    (fun (a : Www.fault) b -> a = b)
+
+let parsed = Alcotest.result challenges fault
+
+let rfc_9728_location =
+  "https://resource.example.com/.well-known/oauth-protected-resource"
+
+let test_the_rfc_9728_example_is_one_bearer_challenge () =
+  (* RFC 9728 5.1, the example response, with its line folding undone. *)
+  let header = Printf.sprintf {|Bearer resource_metadata="%s"|} rfc_9728_location in
+  check parsed "one challenge, one parameter"
+    (Ok
+       [ { Www.scheme = "Bearer";
+           credentials = Www.Params [ ("resource_metadata", rfc_9728_location) ] } ])
+    (Www.parse header);
+  check (Alcotest.option str) "and it is the location" (Some rfc_9728_location)
+    (Www.resource_metadata_of_headers [ ("WWW-Authenticate", header) ])
+
+let test_the_rfc_9110_example_is_two_challenges () =
+  (* RFC 9110 11.6.1's own example: a quoted-pair inside a value, and a
+     second challenge that begins where a bare token follows a comma. *)
+  check parsed "Newauth then Basic"
+    (Ok
+       [ { Www.scheme = "Newauth";
+           credentials =
+             Www.Params
+               [ ("realm", "apps"); ("type", "1"); ("title", {|Login to "apps"|}) ] };
+         { Www.scheme = "Basic"; credentials = Www.Params [ ("realm", "simple") ] } ])
+    (Www.parse {|Newauth realm="apps", type=1, title="Login to \"apps\"", Basic realm="simple"|})
+
+let test_a_token68_fills_its_challenge () =
+  check parsed "token68 with padding, then a second challenge"
+    (Ok
+       [ { Www.scheme = "Negotiate"; credentials = Www.Token68 "YWJj==" };
+         { Www.scheme = "Bearer"; credentials = Www.Params [ ("realm", "x") ] } ])
+    (Www.parse {|Negotiate YWJj==, Bearer realm=x|});
+  (* A lone name with one equals sign is a token68 with its padding; only a
+     value after the sign makes it a parameter. *)
+  check parsed "a name and an equals sign alone"
+    (Ok [ { Www.scheme = "Bearer"; credentials = Www.Token68 "realm=" } ])
+    (Www.parse {|Bearer realm=|})
+
+let test_empty_elements_and_whitespace_are_passed_over () =
+  (* RFC 9110 5.6.1.2: a recipient accepts empty list elements and OWS
+     around the commas; BWS around the equals sign is 11.2. *)
+  check parsed "the recipient list rule"
+    (Ok
+       [ { Www.scheme = "Bearer"; credentials = Www.Params [ ("realm", "x") ] };
+         { Www.scheme = "Basic"; credentials = Www.Params [] } ])
+    (Www.parse {| , Bearer realm = "x" ,, Basic , |})
+
+let test_where_the_grammar_stops_is_named () =
+  List.iter
+    (fun (value, stop) -> check parsed value (Error stop) (Www.parse value))
+    [ ("", Www.No_challenge);
+      (" , ", Www.No_challenge);
+      ({|realm="x"|}, Www.Param_before_scheme 0);
+      ({|Bearer realm="x|}, Www.Unterminated_quoted_string 13);
+      ({|Bearer realm=x, other=|}, Www.Expected_value 22);
+      ({|Bearer realm=x y|}, Www.Expected_delimiter 15);
+      ({|Bearer realm=x Basic realm=y|}, Www.Expected_delimiter 15);
+      ({|Bearer abc, realm=x|}, Www.Param_after_token68 12);
+      ({|Bearer realm="a\|}, Www.Bad_quoted_pair 15);
+      ("Bearer realm=\"a\001b\"", Www.Bad_quoted_character 15);
+      ({|="x"|}, Www.Expected_token 0);
+      ({|Bearer/|}, Www.Expected_delimiter 6);
+      ("Bearer\trealm=x", Www.Expected_delimiter 7) ]
+
 let test_a_terminating_slash_in_the_issuer_is_removed () =
   (* RFC 8414 3.1. Every Google Workspace MCP server names its authorization
      server as "https://accounts.google.com/", and measured 2026-08-27 the
@@ -1468,8 +1665,40 @@ let () =
             test_a_plaintext_location_is_not_followed;
           Alcotest.test_case "a header without the parameter is not a location"
             `Quick test_a_header_without_the_parameter_is_not_a_location;
+          Alcotest.test_case "a token value is read as a token" `Quick
+            test_a_token_value_is_read_as_a_token;
+          Alcotest.test_case "an unquoted URL is not a token" `Quick
+            test_an_unquoted_url_is_not_a_token;
+          Alcotest.test_case "a quoted-pair in the location is unescaped" `Quick
+            test_a_quoted_pair_in_the_location_is_unescaped;
+          Alcotest.test_case "the same letters inside another value are not the location"
+            `Quick test_the_same_letters_inside_another_value_are_not_the_location;
+          Alcotest.test_case "a decoy before the parameter does not shadow it"
+            `Quick test_a_decoy_before_the_parameter_does_not_shadow_it;
+          Alcotest.test_case "a location under another scheme is not read" `Quick
+            test_a_location_under_another_scheme_is_not_read;
+          Alcotest.test_case "the Bearer challenge may come second" `Quick
+            test_the_bearer_challenge_may_come_second;
+          Alcotest.test_case "scheme and parameter name carry no case" `Quick
+            test_scheme_and_parameter_name_carry_no_case;
+          Alcotest.test_case "a later header may carry the location" `Quick
+            test_a_later_header_may_carry_the_location;
+          Alcotest.test_case "a malformed header names nothing" `Quick
+            test_a_malformed_header_names_nothing;
           Alcotest.test_case "falls back to root when path-scoped endpoint is 404"
             `Quick test_discovery_falls_back_to_root_when_path_scoped_404;
+        ] );
+      ( "www-authenticate grammar",
+        [ Alcotest.test_case "the RFC 9728 example is one Bearer challenge" `Quick
+            test_the_rfc_9728_example_is_one_bearer_challenge;
+          Alcotest.test_case "the RFC 9110 example is two challenges" `Quick
+            test_the_rfc_9110_example_is_two_challenges;
+          Alcotest.test_case "a token68 fills its challenge" `Quick
+            test_a_token68_fills_its_challenge;
+          Alcotest.test_case "empty elements and whitespace are passed over" `Quick
+            test_empty_elements_and_whitespace_are_passed_over;
+          Alcotest.test_case "where the grammar stops is named" `Quick
+            test_where_the_grammar_stops_is_named;
         ] );
       ( "registration",
         [ Alcotest.test_case "asks as a public client" `Quick

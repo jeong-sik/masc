@@ -211,3 +211,4 @@ let all_domain_pools () : (int * Pool.t) list =
   pools
 
 module Pool = Pool
+module Www_authenticate = Www_authenticate

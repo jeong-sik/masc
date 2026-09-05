@@ -161,6 +161,31 @@ let test_a_refused_token_carries_where_to_get_one () =
       Alcotest.failf "read a 401 as something else: %s"
         (Mcp_client.error_to_string err)
 
+let test_a_pointer_inside_another_parameter_is_not_one () =
+  (* The same letters, inside error_description's quoted value. The header
+     is read by its grammar, which keeps them there. *)
+  let challenge =
+    {|Bearer error="invalid_token", error_description="see resource_metadata=\"https://mcp.atlassian.com/.well-known/oauth-protected-resource\""|}
+  in
+  let refusing ~url:_ ~headers:_ ~body:_ =
+    Ok
+      (response ~status:401
+         ~headers:
+           [ ("content-type", "application/json");
+             ("www-authenticate", challenge) ]
+         {|{"error":"invalid_token"}|})
+  in
+  match
+    Mcp_client.connect ~post:refusing ~url:"https://mcp.atlassian.com/v1/mcp/authv2"
+      ~access_token:"stale" ()
+  with
+  | Ok _ -> Alcotest.fail "accepted a refused token"
+  | Error (Mcp_client.Unauthorized { resource_metadata }) ->
+      check (Alcotest.option str) "no pointer was read" None resource_metadata
+  | Error err ->
+      Alcotest.failf "read a 401 as something else: %s"
+        (Mcp_client.error_to_string err)
+
 (* ── the tools ───────────────────────────────────────────────────────── *)
 
 let tools_answer =
@@ -305,6 +330,8 @@ let () =
             `Quick test_a_version_this_build_does_not_speak_is_refused;
           Alcotest.test_case "a refused token carries where to get one" `Quick
             test_a_refused_token_carries_where_to_get_one;
+          Alcotest.test_case "a pointer inside another parameter is not one" `Quick
+            test_a_pointer_inside_another_parameter_is_not_one;
         ] );
       ( "tools",
         [ Alcotest.test_case "tools come back with their schemas" `Quick

@@ -80,39 +80,22 @@ let root_well_known_url ~segment url =
 
      Bearer resource_metadata="https://host/.well-known/...", error="..."
 
-   Only the quoted form is read. The grammar allows a bare token and no
-   server measured uses one; reading it would mean guessing where the value
-   ends among the other parameters, which is a worse failure than not
-   reading it at all.
+   The header is read by its grammar (RFC 9110 11.6.1), so the value comes
+   from the resource_metadata parameter of a Bearer challenge, wherever it
+   sits among the other parameters, and not from the same letters inside
+   another parameter's quoted value. A header the grammar rejects names
+   nothing, and the computed URL stands.
 
    A plaintext location is dropped rather than followed: the answer decides
    where a token comes from, and one fetched over http could be replaced on
    the way. *)
-let extract_resource_metadata value =
-  let key = "resource_metadata=\"" in
-  let rec after at =
-    if at + String.length key > String.length value then None
-    else if String.equal (String.sub value at (String.length key)) key
-    then Some (at + String.length key)
-    else after (at + 1)
-  in
-  match after 0 with
-  | None -> None
-  | Some start ->
-    (match String.index_from_opt value start '"' with
-     | None -> None
-     | Some stop ->
-       let found = String.sub value start (stop - start) in
-       if String.starts_with ~prefix:"https://" found then Some found
-       else None)
-
 let resource_metadata_of_headers headers =
-  List.find_map
-    (fun (name, value) ->
-      if String.equal (String.lowercase_ascii name) "www-authenticate"
-      then extract_resource_metadata value
-      else None)
-    headers
+  match Masc_http_client.Www_authenticate.resource_metadata_of_headers headers with
+  | None -> None
+  | Some location ->
+    let scheme = Uri.scheme (Uri.of_string location) in
+    if Option.equal String.equal scheme (Some "https") then Some location
+    else None
 
 (* RFC 8414 3.1: a terminating "/" in the issuer is removed before the
    well-known segment goes in. Every Google Workspace MCP server names its

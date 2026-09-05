@@ -151,6 +151,13 @@ val get_stream :
     with header maps or non-default config. *)
 module Pool : module type of Pool
 
+(** {1 WWW-Authenticate}
+
+    Re-exports [Www_authenticate] (lib/masc_http_client/www_authenticate.mli):
+    a 401's challenges read by the RFC 9110 grammar, for the callers that
+    act on what such an answer names. *)
+module Www_authenticate : module type of Www_authenticate
+
 val all_domain_pools : unit -> (int * Pool.t) list
 (** [all_domain_pools ()] returns all domain-local pools as
     [(domain_id, pool)] pairs.  Used by [Pool_metrics] to aggregate

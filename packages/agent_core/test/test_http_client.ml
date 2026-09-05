@@ -846,6 +846,169 @@ let test_error_domain_context () =
      | Not_found -> false)
 ;;
 
+let test_safe_cohttp_response_flow_guarantees_min_read_buffer () =
+  Eio_main.run
+  @@ fun _env ->
+  let observed_buffer_sizes = ref [] in
+  let module Mock_flow = struct
+    type t = { mutable calls : int }
+
+    let read_methods = []
+
+    let single_read t dst =
+      observed_buffer_sizes := Cstruct.length dst :: !observed_buffer_sizes;
+      if t.calls >= 3
+      then raise End_of_file
+      else (
+        t.calls <- t.calls + 1;
+        let chunk = "test chunk " ^ string_of_int t.calls ^ "\n" in
+        let len = min (String.length chunk) (Cstruct.length dst) in
+        Cstruct.blit_from_string chunk 0 dst 0 len;
+        len)
+    ;;
+  end
+  in
+  let mock_source =
+    let operations =
+      Eio.Resource.handler
+        (Eio.Resource.bindings (Eio.Flow.Pi.source (module Mock_flow)))
+    in
+    Eio.Resource.T ({ Mock_flow.calls = 0 }, operations)
+  in
+  let safe_flow = Http_client.safe_cohttp_response_flow mock_source in
+  let small_dst = Cstruct.create 10 in
+  let total_read = ref 0 in
+  (try
+     while true do
+       let n = Eio.Flow.single_read safe_flow small_dst in
+       total_read := !total_read + n
+     done
+   with
+   | End_of_file -> ());
+  Alcotest.(check bool) "read some bytes" true (!total_read > 0);
+  List.iter
+    (fun sz ->
+       Alcotest.(check bool) "buffer passed to underlying flow >= 65536" true (sz >= 65_536))
+    !observed_buffer_sizes
+;;
+
+let test_safe_cohttp_response_flow_fixes_cohttp_eio_splicing () =
+  Eio_main.run
+  @@ fun _env ->
+  let total_len = 10_000 in
+  let original_data =
+    let buf = Buffer.create total_len in
+    for i = 0 to total_len - 1 do
+      Buffer.add_char buf (Char.chr (32 + (i mod 95)))
+    done;
+    Buffer.contents buf
+  in
+  let module Buggy_cohttp_flow = struct
+    type t =
+      { data : string
+      ; mutable buffered : (string * int) option
+      ; mutable emitted : bool
+      }
+
+    let read_methods = []
+
+    let single_read t output =
+      let output_length = Cstruct.length output in
+      let send buffer pos =
+        let available = String.length buffer - pos in
+        if output_length >= available
+        then (
+          Cstruct.blit_from_string buffer pos output 0 available;
+          t.buffered <- None;
+          available)
+        else (
+          (* Exact reproduction of the cohttp-eio line 22 bug:
+             blit from 0 instead of pos! *)
+          Cstruct.blit_from_string buffer 0 output 0 output_length;
+          t.buffered <- Some (buffer, pos + output_length);
+          output_length)
+      in
+      match t.buffered with
+      | Some (buffer, pos) -> send buffer pos
+      | None ->
+        if t.emitted
+        then raise End_of_file
+        else (
+          t.emitted <- true;
+          send t.data 0)
+    ;;
+  end
+  in
+  (* 1. Verify that reading Buggy_cohttp_flow directly with small buffer reads corrupts *)
+  let buggy_source_direct =
+    let operations =
+      Eio.Resource.handler
+        (Eio.Resource.bindings (Eio.Flow.Pi.source (module Buggy_cohttp_flow)))
+    in
+    Eio.Resource.T
+      ({ Buggy_cohttp_flow.data = original_data; buffered = None; emitted = false }
+      , operations)
+  in
+  let direct_result =
+    let buf = Buffer.create total_len in
+    let dst = Cstruct.create 50 in
+    (try
+       while true do
+         let n = Eio.Flow.single_read buggy_source_direct dst in
+         Buffer.add_string buf (Cstruct.to_string (Cstruct.sub dst 0 n))
+       done
+     with
+     | End_of_file -> ());
+    Buffer.contents buf
+  in
+  Alcotest.(check bool)
+    "unwrapped buggy flow produces corrupted data"
+    false
+    (String.equal direct_result original_data);
+  (* 2. Verify that safe_cohttp_response_flow protects and completely prevents corruption *)
+  let buggy_source =
+    let operations =
+      Eio.Resource.handler
+        (Eio.Resource.bindings (Eio.Flow.Pi.source (module Buggy_cohttp_flow)))
+    in
+    Eio.Resource.T
+      ({ Buggy_cohttp_flow.data = original_data; buffered = None; emitted = false }
+      , operations)
+  in
+  let safe_flow = Http_client.safe_cohttp_response_flow buggy_source in
+  let safe_result =
+    let buf = Buffer.create total_len in
+    let dst = Cstruct.create 50 in
+    (try
+       while true do
+         let n = Eio.Flow.single_read safe_flow dst in
+         Buffer.add_string buf (Cstruct.to_string (Cstruct.sub dst 0 n))
+       done
+     with
+     | End_of_file -> ());
+    Buffer.contents buf
+  in
+  Alcotest.(check bool)
+    "safe_cohttp_response_flow completely prevents corruption"
+    true
+    (String.equal safe_result original_data)
+;;
+
+let test_safe_cohttp_response_flow_eof_on_empty () =
+  Eio_main.run
+  @@ fun _env ->
+  let empty_source = Eio.Flow.string_source "" in
+  let safe_flow = Http_client.safe_cohttp_response_flow empty_source in
+  let dst = Cstruct.create 100 in
+  let raised_eof = ref false in
+  (try
+     let _ = Eio.Flow.single_read safe_flow dst in
+     ()
+   with
+   | End_of_file -> raised_eof := true);
+  Alcotest.(check bool) "empty flow raises End_of_file" true !raised_eof
+;;
+
 (* ── Test runner ────────────────────────────────── *)
 
 let () =
@@ -968,6 +1131,20 @@ let () =
             "content_block roundtrip"
             `Quick
             test_api_common_content_block_roundtrip
+        ] )
+    ; ( "safe_cohttp_response_flow"
+      , [ Alcotest.test_case
+            "guarantees min read buffer >= 65536"
+            `Quick
+            test_safe_cohttp_response_flow_guarantees_min_read_buffer
+        ; Alcotest.test_case
+            "fixes cohttp-eio buffer splicing bug"
+            `Quick
+            test_safe_cohttp_response_flow_fixes_cohttp_eio_splicing
+        ; Alcotest.test_case
+            "eof on empty"
+            `Quick
+            test_safe_cohttp_response_flow_eof_on_empty
         ] )
     ; ( "error_domain"
       , [ Alcotest.test_case "full roundtrip" `Quick test_error_domain_full_roundtrip

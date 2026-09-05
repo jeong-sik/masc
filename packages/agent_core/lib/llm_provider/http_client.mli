@@ -775,3 +775,12 @@ val inject_stream_options_include_usage : string -> string
     providers (Anthropic, Ollama, Gemini) should keep using
     [inject_stream_param] (stream only). *)
 val inject_stream_and_options : string -> string
+
+(** [safe_cohttp_response_flow source] wraps a [cohttp-eio] response body flow
+    to ensure that reads from the underlying flow are always performed with
+    buffers of at least 64KB. This guarantees that [cohttp-eio]'s internal
+    [Reader_flow] never takes its buggy partial-read branch (which slices from
+    offset 0 of the chunk buffer instead of the current position, corrupting
+    chunked or streaming HTTP payloads). *)
+val safe_cohttp_response_flow :
+  [> Eio.Flow.source_ty ] Eio.Resource.t -> [> Eio.Flow.source_ty ] Eio.Resource.t

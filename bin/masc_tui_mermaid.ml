@@ -606,18 +606,23 @@ let render_graph ~cols graph =
       in
       let items = ref [] in
       let item_count = ref 0 in
-      let add_item item ~layer ~cross_extent ~flow_extent =
-        let index = !item_count in
+      let push_item item ~layer ~cross_extent ~flow_extent =
         items :=
           { item; layer; cross_extent; flow_extent; cross_start = 0; flow_start = 0 } :: !items;
-        incr item_count;
-        index
+        incr item_count
       in
       Array.iteri
         (fun i node ->
           let cross_extent, flow_extent = extents node in
-          ignore (add_item (Real node) ~layer:layer.(i) ~cross_extent ~flow_extent : int))
+          push_item (Real node) ~layer:layer.(i) ~cross_extent ~flow_extent)
         nodes;
+      (* A dummy's index is the count before it is pushed: the real nodes
+         took 0 .. n-1 in source order, dummies follow in creation order. *)
+      let add_dummy ~layer =
+        let index = !item_count in
+        push_item Dummy ~layer ~cross_extent:1 ~flow_extent:0;
+        index
+      in
       (* Segments, with dummies for the layers an edge crosses. *)
       let segments = ref [] in
       List.iteri
@@ -629,8 +634,7 @@ let render_graph ~cols graph =
           let chain =
             (* the item indices from s to t through the dummies *)
             let dummies =
-              List.init (max 0 (span - 1)) (fun k ->
-                  add_item Dummy ~layer:(layer.(s) + k + 1) ~cross_extent:1 ~flow_extent:0)
+              List.init (max 0 (span - 1)) (fun k -> add_dummy ~layer:(layer.(s) + k + 1))
             in
             (s :: dummies) @ [ t ]
           in
@@ -699,14 +703,12 @@ let render_graph ~cols graph =
       in
       let widest = Array.fold_left max 0 (Array.init layer_count layer_width) in
       for l = 0 to layer_count - 1 do
-        let offset = (widest - layer_width l) / 2 in
-        ignore
-          (List.fold_left
-             (fun cursor i ->
-               items.(i).cross_start <- cursor;
-               cursor + items.(i).cross_extent + item_gap)
-             offset layers.(l)
-            : int)
+        let cursor = ref ((widest - layer_width l) / 2) in
+        List.iter
+          (fun i ->
+            items.(i).cross_start <- !cursor;
+            cursor := !cursor + items.(i).cross_extent + item_gap)
+          layers.(l)
       done;
       let centre i = items.(i).cross_start + (items.(i).cross_extent / 2) in
       (* Flow coordinates: a band per layer, a channel between bands sized

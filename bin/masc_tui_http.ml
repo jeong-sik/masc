@@ -2210,6 +2210,15 @@ let post_prompt_clear ~(host : string) ~(port : int) ~(key : string)
 let fetch_presets ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/presets"
 
+(** GET /api/v1/presets/show — everything the named preset would change: the
+    override text, the keeper instructions, the assignments and the lanes.
+    The listing counts and names; this is what the preset actually holds. *)
+let fetch_preset_detail ~(host : string) ~(port : int) ~(name : string)
+  : (Yojson.Safe.t, string) result
+  =
+  get_json ~host ~port
+    ~path:("/api/v1/presets/show?name=" ^ Uri.pct_encode ~component:`Query_value name)
+
 (** POST /api/v1/presets — body {name, description}: snapshot the live
     prompt overrides, keeper instructions and runtime routing under [name]. *)
 let post_preset_save ~(host : string) ~(port : int) ~(name : string)

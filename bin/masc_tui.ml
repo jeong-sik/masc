@@ -1859,6 +1859,7 @@ type async_msg =
   (* Where a preset answer goes: the chat pane that typed the command, or
      the Config pane that pressed the key. *)
   | Presets_listed of preset_sink * (Tui_decode.presets_snapshot, string) result
+  | Preset_detail_loaded of string * (Tui_decode.preset_detail, string) result
   | Preset_saved of preset_sink * (Tui_decode.preset_manifest, string) result
   | Preset_restored of preset_sink * (Tui_decode.preset_restore_report, string) result
   | Librarian_input_loaded of string * (string list, string) result
@@ -3534,6 +3535,22 @@ let preset_rows_for_state state =
 let selected_preset_for_state state =
   let rows = preset_rows_for_state state in
   List.nth_opt rows (max 0 (min state.presets_cursor (List.length rows - 1)))
+
+(* The selected preset's contents, fetched once per selection. The pane
+   redraws on every key, so the guard is the name it was last fetched for. *)
+let ensure_preset_detail state ~mailbox =
+  match selected_preset_for_state state with
+  | None -> ()
+  | Some (m : Tui_decode.preset_manifest) ->
+    let name = m.Tui_decode.pm_name in
+    if state.preset_detail_for <> Some name
+    then (
+      state.preset_detail_for <- Some name;
+      state.preset_detail <- None;
+      launch_preset_call state ~mailbox
+        ~call:(fun ~host ~port -> Masc_tui_loader.load_preset_detail ~host ~port ~name)
+        ~wrap:(fun result -> Preset_detail_loaded (name, result)))
+;;
 
 let prompt_rows_for_state state =
   match state.prompts_snapshot with
@@ -9485,8 +9502,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.presets_cursor <-
              max 0
                (min state.presets_cursor
-                  (List.length snapshot.Tui_decode.pss_presets - 1))
+                  (List.length snapshot.Tui_decode.pss_presets - 1));
+           (* The listing just changed, so whatever the cursor now points at
+              is a fresh question. *)
+           state.preset_detail_for <- None;
+           ensure_preset_detail state ~mailbox
        | Preset_to_pane, Error detail -> state.presets_error <- Some detail)
+  | Preset_detail_loaded (name, result) ->
+      (* A late answer for a preset the cursor has already left is dropped:
+         showing it beside a different name would be worse than showing
+         nothing. *)
+      if state.preset_detail_for = Some name
+      then (
+        match result with
+        | Ok detail -> state.preset_detail <- Some detail
+        | Error _ -> state.preset_detail <- None)
   | Preset_saved (sink, result) ->
       (match sink, result with
        | Preset_to_chat target, Ok manifest ->
@@ -15748,7 +15778,8 @@ and is loaded on demand through keeper_skill.
                 if state.presets_cursor < count - 1 then begin
                   state.presets_cursor <- state.presets_cursor + 1;
                   state.config_scroll <- 0;
-                  state.preset_restore_armed <- None
+                  state.preset_restore_armed <- None;
+                  ensure_preset_detail state ~mailbox:async_messages
                 end
             | Config when state.config_pane = Config_prompts ->
                 let count = prompt_catalog_count_for_state state in
@@ -16121,7 +16152,8 @@ and is loaded on demand through keeper_skill.
                 if next <> state.presets_cursor then begin
                   state.presets_cursor <- next;
                   state.config_scroll <- 0;
-                  state.preset_restore_armed <- None
+                  state.preset_restore_armed <- None;
+                  ensure_preset_detail state ~mailbox:async_messages
                 end
             | Config when state.config_pane = Config_prompts ->
                 let next = max 0 (state.prompts_cursor - 1) in

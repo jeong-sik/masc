@@ -6665,6 +6665,10 @@ type preset_manifest =
   ; pm_description : string
   ; pm_created_at : string
   ; pm_override_count : int
+  ; pm_override_keys : string list option
+        (** Which prompts the preset overrides. [None] on a manifest written
+            before the server named them, which is not the same as [Some []]:
+            unknown against none. *)
   ; pm_keepers : string list
   ; pm_assignment_count : int
   ; pm_lane_count : int
@@ -6673,6 +6677,17 @@ type preset_manifest =
 type presets_snapshot =
   { pss_presets : preset_manifest list
   ; pss_unreadable : (string * string) list
+  }
+
+(* What a preset holds, from /api/v1/presets/show. Sizes rather than bodies:
+   the pane is for deciding whether to apply, and a 4 KB prompt does not fit
+   in it. The bodies are on the wire for a caller that wants them. *)
+type preset_detail =
+  { pd_name : string
+  ; pd_overrides : (string * int) list  (** prompt key, bytes *)
+  ; pd_instructions : (string * int) list  (** keeper TOML file name, bytes *)
+  ; pd_assignments : (string * string) list  (** keeper, runtime id *)
+  ; pd_lanes : string list
   }
 
 type preset_part =
@@ -6737,6 +6752,17 @@ let decode_preset_manifest json =
   let* pm_description = required_string_field json "description" in
   let* pm_created_at = required_string_field json "created_at" in
   let* pm_override_count = required_int_field json "override_count" in
+  let pm_override_keys =
+    match Yojson.Safe.Util.member "override_keys" json with
+    | `List items ->
+      Some
+        (List.filter_map
+           (function
+             | `String key -> Some key
+             | _ -> None)
+           items)
+    | `Null | _ -> None
+  in
   let* pm_keepers = decode_string_list json "keepers" in
   let* pm_assignment_count = required_int_field json "assignment_count" in
   let* pm_lane_count = required_int_field json "lane_count" in
@@ -6745,10 +6771,59 @@ let decode_preset_manifest json =
     ; pm_description
     ; pm_created_at
     ; pm_override_count
+    ; pm_override_keys
     ; pm_keepers
     ; pm_assignment_count
     ; pm_lane_count
     }
+;;
+
+let decode_preset_detail json =
+  let* preset = required_object_field json "preset" in
+  let* pd_name = required_string_field preset "name" in
+  let pairs key name_field size_of =
+    match Yojson.Safe.Util.member key preset with
+    | `List items ->
+      List.filter_map
+        (fun item ->
+          match
+            ( Yojson.Safe.Util.member name_field item
+            , Yojson.Safe.Util.member "bytes" item )
+          with
+          | `String name, `Int bytes -> Some (name, bytes)
+          | `String name, _ -> Some (name, size_of item)
+          | _ -> None)
+        items
+    | _ -> []
+  in
+  let pd_overrides = pairs "prompt_overrides" "key" (fun _ -> 0) in
+  let pd_instructions = pairs "instructions" "keeper_file" (fun _ -> 0) in
+  let pd_assignments =
+    match Yojson.Safe.Util.member "assignments" preset with
+    | `List items ->
+      List.filter_map
+        (fun item ->
+          match
+            ( Yojson.Safe.Util.member "keeper" item
+            , Yojson.Safe.Util.member "runtime" item )
+          with
+          | `String keeper, `String runtime -> Some (keeper, runtime)
+          | _ -> None)
+        items
+    | _ -> []
+  in
+  let pd_lanes =
+    match Yojson.Safe.Util.member "lanes" preset with
+    | `List items ->
+      List.filter_map
+        (fun item ->
+          match Yojson.Safe.Util.member "id" item with
+          | `String id -> Some id
+          | _ -> None)
+        items
+    | _ -> []
+  in
+  Ok { pd_name; pd_overrides; pd_instructions; pd_assignments; pd_lanes }
 ;;
 
 let decode_name_reason_list json key ~name_key ~reason_key =

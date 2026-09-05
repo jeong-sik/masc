@@ -1,0 +1,302 @@
+/* ══════════════════════════════════════════════════════════════════
+   MASC Cockpit Design System — Documentation Theme
+   ──────────────────────────────────────────────────────────────────
+   • Typography: Pretendard Variable (Multilingual) + JetBrains Mono
+   • Palette: Warm Near-Black Surfaces + Authentic MASC Brass (#d4a14a)
+   • Principles: High density, Hairline borders, Tabular numbers, Zero glare
+   ══════════════════════════════════════════════════════════════════ */
+
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+
+:root,
+:root[data-theme='dark'],
+:root[data-theme='light'] {
+	/* ── Fonts ── */
+	--sl-font: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+	--sl-font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+	/* ── MASC Cockpit Official Color Palette ── */
+	/* Core Surfaces */
+	--sl-color-bg: #0c0b08;          /* Page background (Warm near-black) */
+	--sl-color-bg-nav: #141210;      /* Topbar / Header surface */
+	--sl-color-bg-sidebar: #100f0c;  /* Sidebar surface */
+	--sl-color-bg-inline-code: #1a1815; /* Inline code background */
+
+	/* Hairline Borders */
+	--sl-color-hairline: #2a2520;       /* Standard hairline border */
+	--sl-color-hairline-light: #3a332c; /* Active / Focused border */
+
+	/* Typography Layers */
+	--sl-color-white: #f0e9dc;       /* Primary text (Warm off-white) */
+	--sl-color-gray-1: #dfd6c7;      /* High-contrast body */
+	--sl-color-gray-2: #b8ad9a;      /* Secondary text */
+	--sl-color-gray-3: #7a7065;      /* Tertiary / Labels / Captions */
+	--sl-color-gray-4: #4a453e;      /* Muted / Inactive */
+	--sl-color-gray-5: #2a2621;      /* Elevated surface / hover */
+	--sl-color-gray-6: #1a1815;      /* Panel surface */
+	--sl-color-black: #0c0b08;
+
+	/* MASC Signature Brass (#d4a14a) */
+	--sl-color-accent-low: #241a0d;  /* Brass glow / subtle backplate */
+	--sl-color-accent: #d4a14a;      /* Canonical MASC Brass */
+	--sl-color-accent-high: #ebd29f; /* Highlighted brass */
+
+	color-scheme: dark !important;
+}
+
+/* Base Document Reset */
+html {
+	font-family: var(--sl-font);
+	background-color: #0c0b08 !important;
+	color: #f0e9dc !important;
+	color-scheme: dark !important;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	font-feature-settings: 'cv08', 'ss01';
+	text-rendering: optimizeLegibility;
+}
+
+body {
+	background-color: #0c0b08 !important;
+	color: #f0e9dc !important;
+}
+
+/* ── Typography Refinement ── */
+h1, h2, h3, h4, h5, h6 {
+	font-family: var(--sl-font);
+	color: #f0e9dc !important;
+	letter-spacing: -0.02em;
+	font-weight: 600;
+}
+
+h1 {
+	font-size: 2.25rem;
+	letter-spacing: -0.03em;
+}
+
+h2 {
+	font-size: 1.5rem;
+	border-bottom: 1px solid #2a2520 !important;
+	padding-bottom: 0.5rem;
+	margin-top: 2rem;
+}
+
+h3 {
+	font-size: 1.2rem;
+}
+
+p, li, td, th {
+	color: #dfd6c7;
+	line-height: 1.7;
+	font-size: 0.95rem;
+}
+
+/* Monospace & Tabular numbers */
+code, kbd, samp, pre {
+	font-family: var(--sl-font-mono) !important;
+	font-variant-numeric: tabular-nums;
+}
+
+/* Inline Code Pill */
+:not(pre) > code {
+	background-color: #1a1815 !important;
+	color: #ebd29f !important;
+	border: 1px solid #2a2520 !important;
+	padding: 0.15em 0.4em;
+	border-radius: 4px;
+	font-size: 0.86em;
+}
+
+/* ── Header / Top Navigation ── */
+header.header {
+	background-color: rgba(20, 18, 16, 0.92) !important;
+	backdrop-filter: blur(12px);
+	border-bottom: 1px solid #2a2520 !important;
+}
+
+/* Site Title / Logo */
+.site-title {
+	font-family: var(--sl-font-mono) !important;
+	font-weight: 700 !important;
+	letter-spacing: 0.05em;
+	color: #f0e9dc !important;
+	text-transform: uppercase;
+}
+
+.site-title:hover {
+	color: #d4a14a !important;
+}
+
+/* ── Sidebar Navigation ── */
+nav.sidebar {
+	background-color: #100f0c !important;
+	border-right: 1px solid #2a2520 !important;
+}
+
+/* Sidebar Links */
+.sidebar-content a {
+	color: #b8ad9a;
+	font-size: 0.88rem;
+	transition: color 120ms ease, background-color 120ms ease;
+	border-radius: 4px;
+}
+
+.sidebar-content a:hover {
+	color: #f0e9dc;
+	background-color: #1a1815;
+}
+
+.sidebar-content a[aria-current='page'] {
+	color: #d4a14a !important;
+	background-color: rgba(212, 161, 74, 0.08) !important;
+	border-left: 2px solid #d4a14a;
+	font-weight: 600;
+	border-radius: 0 4px 4px 0;
+}
+
+/* Sidebar Section Headers */
+.sidebar-content .top-level > li > details > summary span,
+.sidebar-content h2 {
+	font-family: var(--sl-font-mono);
+	font-size: 0.72rem !important;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	color: #7a7065 !important;
+}
+
+/* ── Cards & Interactive Components ── */
+.card {
+	background: #141210 !important;
+	border: 1px solid #2a2520 !important;
+	border-radius: 6px !important;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4) !important;
+	transition: border-color 150ms ease, transform 150ms ease;
+}
+
+.card:hover {
+	border-color: #3a332c !important;
+	transform: translateY(-1px);
+}
+
+.card .title {
+	font-family: var(--sl-font);
+	font-weight: 600;
+	color: #f0e9dc !important;
+	font-size: 1.05rem;
+}
+
+.card .body {
+	color: #b8ad9a !important;
+	font-size: 0.9rem;
+	line-height: 1.6;
+}
+
+/* ── Tables & Data Grids ── */
+table {
+	border-collapse: collapse;
+	width: 100%;
+	border: 1px solid #2a2520;
+	border-radius: 4px;
+	overflow: hidden;
+	margin: 1.5rem 0;
+	background-color: #100f0c;
+}
+
+th {
+	background-color: #141210;
+	color: #b8ad9a;
+	font-family: var(--sl-font-mono);
+	font-size: 0.75rem;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	padding: 0.6rem 0.9rem;
+	border-bottom: 1px solid #2a2520;
+	text-align: left;
+}
+
+td {
+	padding: 0.65rem 0.9rem;
+	border-bottom: 1px solid #1a1815;
+	color: #dfd6c7;
+	font-size: 0.88rem;
+}
+
+tr:hover td {
+	background-color: #141210;
+}
+
+/* ── Blockquotes / Callouts ── */
+blockquote {
+	border-left: 2px solid #d4a14a !important;
+	background: rgba(212, 161, 74, 0.04) !important;
+	padding: 0.8rem 1.2rem !important;
+	border-radius: 0 6px 6px 0;
+	color: #dfd6c7 !important;
+	margin: 1.5rem 0;
+}
+
+blockquote p {
+	color: #dfd6c7 !important;
+}
+
+/* ── Action Buttons ── */
+.hero a.action.primary {
+	background-color: #d4a14a !important;
+	color: #0c0b08 !important;
+	font-family: var(--sl-font-mono);
+	font-weight: 700;
+	border-radius: 4px !important;
+	border: 1px solid #d4a14a !important;
+	transition: background-color 150ms ease, opacity 150ms ease;
+}
+
+.hero a.action.primary:hover {
+	background-color: #ebd29f !important;
+}
+
+.hero a.action.minimal {
+	border: 1px solid #2a2520 !important;
+	color: #dfd6c7 !important;
+	border-radius: 4px !important;
+	background-color: #141210 !important;
+	font-family: var(--sl-font-mono);
+}
+
+.hero a.action.minimal:hover {
+	border-color: #3a332c !important;
+	color: #f0e9dc !important;
+}
+
+/* ── Search Dialog (Pagefind) ── */
+dialog {
+	background-color: #141210 !important;
+	border: 1px solid #3a332c !important;
+	border-radius: 8px !important;
+	box-shadow: 0 12px 40px rgba(0, 0, 0, 0.8) !important;
+}
+
+/* ── Mermaid Diagram Rendering ── */
+.mermaid,
+pre.mermaid,
+.mermaid-chart {
+	background-color: #100f0c !important;
+	border: 1px solid #2a2520 !important;
+	border-radius: 6px !important;
+	padding: 1.25rem !important;
+	margin: 1.5rem 0 !important;
+	display: flex !important;
+	justify-content: center !important;
+	align-items: center !important;
+	overflow-x: auto !important;
+}
+
+.mermaid svg,
+pre.mermaid svg,
+.mermaid-chart svg {
+	max-width: 100% !important;
+	height: auto !important;
+	display: block !important;
+	font-family: var(--sl-font) !important;
+}
+

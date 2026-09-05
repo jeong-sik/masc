@@ -597,30 +597,19 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     in
     (* [None] here means "send no developerInstructions": [optional_field]
        omits the member and the app-server runs the thread on Codex's own
-       default instructions. The composition must therefore not reach [None]
-       by collapsing a blank result -- [String_util.trim_nonempty] returns
-       [None] on an empty string -- or a keeper whose composed prompt came out
-       blank would run every turn under the vendor default with masc's tool
-       surface still attached, a failure that looks like it is working. Same
-       refusal as the Claude Code lane (#33086): masc composing nothing is a
-       configuration defect and is named before the thread is started. The
-       probe and fusion callers build [None] on purpose and do not pass
-       through here. *)
-    let* developer_instructions =
-      match
-        (prepared.system_prompt :: native_posture_note native_posture)
-        @ developer_messages
-        |> List.filter (fun text -> String.trim text <> "")
-        |> String.concat "\n\n"
-        |> String_util.trim_nonempty
-      with
-      | Some text -> Ok (Some text)
-      | None ->
-        Error
-          (config_error
-             ~field:"system_prompt"
-             "the composed keeper system prompt is empty; the turn would run \
-              under the client's built-in instructions")
+       default instructions. The probe and fusion callers build [None] on
+       purpose and do not pass through here. This composition always carries
+       [prepared.system_prompt], which [Host.prepare_turn] refused when blank,
+       so the joined text is never empty. A check on the joined text could
+       not see a blank keeper prompt behind the posture note this lane
+       appends (#33165). *)
+    let developer_instructions =
+      Some
+        ((prepared.system_prompt :: native_posture_note native_posture)
+         @ developer_messages
+         |> List.filter (fun text -> String.trim text <> "")
+         |> String.concat "\n\n"
+         |> String.trim)
     in
     (* Reported from [prepared.messages], the post-window list, gated on the
        same [thread_mode] that decides whether [thread/inject_items] runs at

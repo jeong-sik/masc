@@ -31,7 +31,6 @@ let test_fact_row_line () =
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
-    ; mf_reinforcement = 3
     ; mf_memory_id = "mem-1"
     }
   in
@@ -73,7 +72,6 @@ let test_detail_lines () =
     ; mf_origin = "docs/constitution.xml"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
-    ; mf_reinforcement = 5
     ; mf_memory_id = "mem-rule-1"
     }
   in
@@ -246,7 +244,6 @@ let test_render_memory_facts_body () =
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
-    ; mf_reinforcement = 4
     ; mf_memory_id = "mem-fact-1"
     }
   in

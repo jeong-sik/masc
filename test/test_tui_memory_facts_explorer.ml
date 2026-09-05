@@ -3,13 +3,12 @@ module Types = Masc_tui_types
 module Decode = Masc.Tui_decode
 
 let make_fact ?(category = "general") ?(origin = "chat") ?(first = 100.0)
-    ?(last = 200.0) ?(reinf = 1) ~claim id : Decode.memory_fact =
+    ?(last = 200.0) ~claim id : Decode.memory_fact =
   { mf_claim = claim
   ; mf_category = category
   ; mf_origin = origin
   ; mf_first_seen = first
   ; mf_last_seen = last
-  ; mf_reinforcement = reinf
   ; mf_memory_id = id
   }
 
@@ -137,43 +136,38 @@ let test_category_filtering_isolation () =
 
 let test_sorting_orders () =
   let state = make_state () in
-  let f_low_reinf = make_fact ~category:"rule" ~reinf:1 ~last:100.0 ~claim:"C_low" "1" in
-  let f_high_reinf = make_fact ~category:"persona" ~reinf:15 ~last:50.0 ~claim:"A_high" "2" in
-  let f_newest = make_fact ~category:"config" ~reinf:3 ~last:500.0 ~claim:"B_newest" "3" in
+  let f_low = make_fact ~category:"rule" ~last:100.0 ~claim:"C_low" "1" in
+  let f_high = make_fact ~category:"persona" ~last:50.0 ~claim:"A_high" "2" in
+  let f_newest = make_fact ~category:"config" ~last:500.0 ~claim:"B_newest" "3" in
   state.memory_facts <-
-    Some (make_snapshot ~ordinary_facts:[ f_low_reinf; f_high_reinf; f_newest ] ~source_facts:[] ~invalidations:[]);
-  (* 1. Sort by Reinforcement (highest first) *)
-  state.memory_facts_sort <- Types.Sort_reinforcement;
-  let rows_reinf = Types.memory_fact_rows state in
-  let claims_reinf =
-    List.map (function Types.Memory_row_fact f -> f.mf_claim | _ -> "") rows_reinf
-  in
-  check (list string) "reinforcement sort" [ "A_high"; "B_newest"; "C_low" ] claims_reinf;
-  (* 2. Sort by Recency (newest last_seen first) *)
+    Some (make_snapshot ~ordinary_facts:[ f_low; f_high; f_newest ] ~source_facts:[] ~invalidations:[]);
+  (* 1. Sort by Recency (newest last_seen first) *)
   state.memory_facts_sort <- Types.Sort_recency;
   let rows_recency = Types.memory_fact_rows state in
   let claims_recency =
     List.map (function Types.Memory_row_fact f -> f.mf_claim | _ -> "") rows_recency
   in
   check (list string) "recency sort" [ "B_newest"; "C_low"; "A_high" ] claims_recency;
-  (* 3. Sort by Category (A-Z) *)
+  (* 2. Sort by Category (A-Z) *)
   state.memory_facts_sort <- Types.Sort_category;
   let rows_cat = Types.memory_fact_rows state in
   let cats_sorted =
     List.map (function Types.Memory_row_fact f -> f.mf_category | _ -> "") rows_cat
   in
   check (list string) "category sort" [ "config"; "persona"; "rule" ] cats_sorted;
-  (* 4. Sort by Claim (A-Z) *)
+  (* 3. Sort by Claim (A-Z) *)
   state.memory_facts_sort <- Types.Sort_claim;
   let rows_claim = Types.memory_fact_rows state in
   let claims_sorted =
     List.map (function Types.Memory_row_fact f -> f.mf_claim | _ -> "") rows_claim
   in
   check (list string) "claim sort" [ "A_high"; "B_newest"; "C_low" ] claims_sorted;
-  (* 5. Cycle sort order *)
-  check string "order label reinforcement" "Reinforcement (\xc3\x97N)" (Types.memory_sort_order_label Types.Sort_reinforcement);
-  let next = Types.next_memory_sort Types.Sort_reinforcement in
-  check string "order label recency" "Recency (Newest)" (Types.memory_sort_order_label next)
+  (* 4. Cycle sort order: recency -> category -> claim -> recency *)
+  check string "order label recency" "Recency (Newest)" (Types.memory_sort_order_label Types.Sort_recency);
+  let next = Types.next_memory_sort Types.Sort_recency in
+  check string "order label category" "Category (A-Z)" (Types.memory_sort_order_label next);
+  check string "cycle wraps to recency" "Recency (Newest)"
+    (Types.memory_sort_order_label (Types.next_memory_sort (Types.next_memory_sort next)))
 ;;
 
 let test_search_filtering () =

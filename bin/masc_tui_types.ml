@@ -2497,22 +2497,19 @@ let runtime_param_edit_value edit =
      | _ -> parse_json ())
 
 type memory_sort_order =
-  | Sort_reinforcement
   | Sort_recency
   | Sort_category
   | Sort_claim
 
 let memory_sort_order_label = function
-  | Sort_reinforcement -> "Reinforcement (\xc3\x97N)"
   | Sort_recency -> "Recency (Newest)"
   | Sort_category -> "Category (A-Z)"
   | Sort_claim -> "Claim (A-Z)"
 
 let next_memory_sort = function
-  | Sort_reinforcement -> Sort_recency
   | Sort_recency -> Sort_category
   | Sort_category -> Sort_claim
-  | Sort_claim -> Sort_reinforcement
+  | Sort_claim -> Sort_recency
 
 type memory_category_filter =
   | Category_all
@@ -4202,7 +4199,7 @@ let create_state
   memory_facts_cursor = 0;
   memory_facts_scroll = 0;
   memory_facts_category = Category_all;
-  memory_facts_sort = Sort_reinforcement;
+  memory_facts_sort = Sort_recency;
   repository_changes_open = false;
   repository_changes_scope = None;
   repository_changes = None;
@@ -4882,22 +4879,6 @@ let memory_fact_rows (state : state) : memory_fact_row list =
             all_rows
       in
       (match state.memory_facts_sort with
-       | Sort_reinforcement ->
-           List.sort
-             (fun a b ->
-               let score = function
-                 | Memory_row_fact f ->
-                     (f.Tui_decode.mf_reinforcement, f.Tui_decode.mf_last_seen)
-                 | Memory_row_source_fact f ->
-                     (1, f.Tui_decode.msf_first_seen)
-                 | Memory_row_invalidation f ->
-                     (0, f.Tui_decode.mi_invalidated_at)
-               in
-               let r_a, t_a = score a in
-               let r_b, t_b = score b in
-               if r_a <> r_b then Stdlib.compare r_b r_a
-               else Stdlib.compare t_b t_a)
-             filtered_rows
        | Sort_recency ->
            List.sort
              (fun a b ->

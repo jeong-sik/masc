@@ -272,7 +272,6 @@ let sample_memory_fact ~category ~claim : Tui_decode.memory_fact =
   ; mf_origin = "authored"
   ; mf_first_seen = 0.
   ; mf_last_seen = 0.
-  ; mf_reinforcement = 1
   ; mf_memory_id = claim
   }
 

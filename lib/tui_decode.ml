@@ -2246,7 +2246,6 @@ type memory_fact = {
   mf_origin : string;
   mf_first_seen : float;
   mf_last_seen : float;
-  mf_reinforcement : int;
   mf_memory_id : string;
 }
 
@@ -4541,7 +4540,6 @@ let decode_memory_fact json =
   let* mf_origin = required_string_field json "origin" in
   let* mf_first_seen = require_float_field json "first_seen" in
   let* mf_last_seen = require_float_field json "last_seen" in
-  let* mf_reinforcement = required_int_field json "reinforcement" in
   let* mf_memory_id = required_string_field json "memory_id" in
   Ok
     { mf_claim
@@ -4549,7 +4547,6 @@ let decode_memory_fact json =
     ; mf_origin
     ; mf_first_seen
     ; mf_last_seen
-    ; mf_reinforcement
     ; mf_memory_id
     }
 

@@ -652,7 +652,7 @@ let footer_hints_memory_facts =
   hints_of_bindings
     ([ b Navigate "j/k" "move"
      ; b Act "c / C" "category" ~help:"cycle category filter (forward / backward)"
-     ; b Act "s" "sort" ~help:"cycle sort (reinforcement, recency, category, claim)"
+     ; b Act "s" "sort" ~help:"cycle sort (recency, category, claim)"
      ; b Search "/" "filter" ~help:"live text filter / search"
      ; b Search "n / N" "next / previous match"
      ; b Act "Esc" "close / clear" ~help:"clear filter or exit to health table"

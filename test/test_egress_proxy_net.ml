@@ -16,6 +16,16 @@ let rules raws =
     raws
 ;;
 
+(* Most of these describe a lane whose file reads fine; the stale case says
+   so explicitly where it is the subject. *)
+let fresh rules = { Egress_proxy_net.rules; freshness = Egress_proxy_net.Fresh }
+
+let generation_of (event : Egress_proxy_net.event) =
+  Option.map
+    (fun (in_force : Egress_proxy_net.rules_in_force) -> in_force.generation)
+    event.Egress_proxy_net.rules_in_force
+;;
+
 let port_of socket =
   match Eio.Net.listening_addr socket with
   | `Tcp (_, port) -> port
@@ -45,7 +55,7 @@ let one_request ~allow ~line =
                ~net
                ~clock
                ~keeper_name:"probe"
-               ~rules:(fun () -> rules allow)
+               ~rules:(fun () -> fresh (rules allow))
                ~on_event:(fun event -> collected := event :: !collected)
                ~socket
                ~read_timeout_s:5.0
@@ -103,7 +113,7 @@ let admitted_tunnel_exchange ~request =
                ~net
                ~clock
                ~keeper_name:"tunnel"
-               ~rules:(fun () -> rules [ Printf.sprintf "127.0.0.1:%d" upstream_port ])
+               ~rules:(fun () -> fresh (rules [ Printf.sprintf "127.0.0.1:%d" upstream_port ]))
                ~on_event:(fun event -> events := event :: !events)
                ~socket:proxy
                ~read_timeout_s:5.0
@@ -169,7 +179,7 @@ let test_a_changed_allowlist_applies_to_the_next_request () =
                ~rules:(fun () ->
                  (* First request: example.com is allowed. Second: it is not. *)
                  incr generation;
-                 if !generation = 1 then rules [ "example.com" ] else rules [ "other.test" ])
+                 fresh (if !generation = 1 then rules [ "example.com" ] else rules [ "other.test" ]))
                ~on_event:(fun _ -> ())
                ~socket
                ~read_timeout_s:5.0
@@ -269,7 +279,7 @@ let test_an_event_names_the_rules_that_judged_it () =
       (option string)
       "the generation is the one those rules hash to"
       (Some (Egress_host.generation (rules allow)))
-      event.Egress_proxy_net.rule_generation;
+      (generation_of event);
     (* A refusal is a decision too, and tracing one back to its rules is how
        an operator tells "I never allowed that" from "I allowed it and then
        stopped". *)
@@ -280,7 +290,7 @@ let test_an_event_names_the_rules_that_judged_it () =
          (option string)
          "a refusal carries it too"
          (Some (Egress_host.generation (rules allow)))
-         refusal.Egress_proxy_net.rule_generation
+         (generation_of refusal)
      | other -> failf "expected one refusal event, got %d" (List.length other))
   | other -> failf "expected one event, got %d" (List.length other)
 ;;
@@ -288,7 +298,7 @@ let test_an_event_names_the_rules_that_judged_it () =
 let test_an_edited_allowlist_shows_as_a_new_generation () =
   let before =
     match snd (one_request ~allow:[ "github.com" ] ~line:"CONNECT github.com:443 HTTP/1.1") with
-    | [ event ] -> event.Egress_proxy_net.rule_generation
+    | [ event ] -> generation_of event
     | other -> failf "expected one event, got %d" (List.length other)
   in
   let after =
@@ -298,7 +308,7 @@ let test_an_edited_allowlist_shows_as_a_new_generation () =
            ~allow:[ "github.com"; "pypi.org" ]
            ~line:"CONNECT github.com:443 HTTP/1.1")
     with
-    | [ event ] -> event.Egress_proxy_net.rule_generation
+    | [ event ] -> generation_of event
     | other -> failf "expected one event, got %d" (List.length other)
   in
   check bool "the same request under different rules reads differently" true
@@ -368,7 +378,7 @@ let stop_latency_with_a_tunnel_open ~give_serve_its_own_switch =
                            ~clock
                            ~keeper_name:"stoplatency"
                            ~rules:(fun () ->
-                             rules [ Printf.sprintf "127.0.0.1:%d" upstream_port ])
+                             fresh (rules [ Printf.sprintf "127.0.0.1:%d" upstream_port ]))
                            ~on_event:(fun _ -> ())
                            ~socket
                            ~read_timeout_s:5.0
@@ -424,6 +434,92 @@ let test_a_stop_does_not_wait_on_an_open_tunnel () =
       (stop_latency_with_a_tunnel_open ~give_serve_its_own_switch:false)
 ;;
 
+(* A list of addresses only helps if a failure on one moves to the next, and
+   which failures those are is not obvious: [Eio.Net.connect] wraps the
+   connect but creates the socket outside that wrapping, so the case this
+   list exists for -- an AAAA record leading on a machine with IPv6 off --
+   arrives as a bare [Unix.Unix_error]. *)
+let test_which_connect_failures_earn_the_next_address () =
+  let earns = Egress_proxy_net.For_testing.address_failed_to_answer in
+  check bool "a kernel that will not serve the family" true
+    (earns (Unix.Unix_error (Unix.EAFNOSUPPORT, "socket", "")));
+  check bool "running out of descriptors" true
+    (earns (Unix.Unix_error (Unix.EMFILE, "socket", "")));
+  (* A real one rather than a hand-built value: what eio actually raises for
+     a refused connect is the thing this has to classify, and constructing
+     something that merely looks like it would test the construction. *)
+  let refused =
+    let caught = ref None in
+    (try
+       Eio_main.run (fun env ->
+         Eio.Switch.run (fun sw ->
+           let net = Eio.Stdenv.net env in
+           (* Bind and close, so the port is one nothing is listening on. *)
+           let port =
+             let socket =
+               Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:1
+                 (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+             in
+             let p = port_of socket in
+             Eio.Resource.close socket;
+             p
+           in
+           match
+             Eio.Net.connect ~sw net (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+           with
+           | _ -> ()
+           | exception exn ->
+             caught := Some exn;
+             raise Exit))
+     with
+     | Exit -> ());
+    !caught
+  in
+  (match refused with
+   | None -> failf "expected a connect to a closed port to fail"
+   | Some exn ->
+     check bool "an ordinary refusal, as eio actually raises it" true (earns exn));
+  (* A defect in this file is not an unreachable destination. Moving on from
+     it would bury the report under "no address answered". *)
+  check bool "a malformed address" false (earns (Invalid_argument "addr"));
+  check bool "the lane going away" false
+    (earns (Eio.Cancel.Cancelled (Failure "stop")))
+;;
+
+(* A read that fails serves the rules that last parsed. Those rules are real,
+   so they hash to an ordinary generation -- and a record that says only that
+   answers "when did this reach change" with the file's last good state
+   rather than with the fact that the file cannot be read at all. *)
+let test_a_stale_ruleset_says_so_in_the_record () =
+  let allow = [ "github.com" ] in
+  let stale =
+    { Egress_proxy_net.rules = rules allow
+    ; freshness = Egress_proxy_net.Serving_last_good
+    }
+  in
+  let generation = Egress_host.generation (rules allow) in
+  check string "a fresh set renders as its generation"
+    generation
+    (Egress_proxy_net.rules_in_force_to_string
+       { Egress_proxy_net.generation; freshness = Egress_proxy_net.Fresh });
+  check string "a stale one carries the mark, and keeps the generation greppable"
+    (generation ^ "-stale")
+    (Egress_proxy_net.rules_in_force_to_string
+       { Egress_proxy_net.generation; freshness = Egress_proxy_net.Serving_last_good });
+  (* And the two are different strings, so a log cannot read one as the
+     other. *)
+  check bool "the two do not render alike" true
+    (not
+       (String.equal
+          (Egress_proxy_net.rules_in_force_to_string
+             { Egress_proxy_net.generation; freshness = Egress_proxy_net.Fresh })
+          (Egress_proxy_net.rules_in_force_to_string
+             { Egress_proxy_net.generation
+             ; freshness = Egress_proxy_net.Serving_last_good
+             })));
+  ignore stale
+;;
+
 let () =
   run "egress_proxy_net"
     [ ( "refusals"
@@ -453,5 +549,9 @@ let () =
             test_an_edited_allowlist_shows_as_a_new_generation
         ; test_case "a stop does not wait on an open tunnel" `Quick
             test_a_stop_does_not_wait_on_an_open_tunnel
+        ; test_case "which connect failures earn the next address" `Quick
+            test_which_connect_failures_earn_the_next_address
+        ; test_case "a stale ruleset says so in the record" `Quick
+            test_a_stale_ruleset_says_so_in_the_record
         ] )
     ]

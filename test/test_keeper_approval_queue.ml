@@ -5146,7 +5146,54 @@ let test_call_summary_of_input () =
     (`Assoc [ "input", `Assoc [ "argv", `List [ `Int 1 ] ] ]);
   check_summary "an input naming neither argv nor a provider is no summary" None
     (`Assoc [ "input", `Assoc [ "cwd", `String "/tmp" ] ]);
-  check_summary "a non-object input is no summary" None (`String "tool_execute")
+  check_summary "a non-object input is no summary" None (`String "tool_execute");
+  check_summary "top-level argv is extracted"
+    (Some "git status")
+    (`Assoc [ "argv", `List [ `String "git"; `String "status" ] ]);
+  check_summary "top-level script is extracted"
+    (Some "dune build")
+    (`Assoc [ "script", `String "dune build" ]);
+  check_summary "top-level command is extracted"
+    (Some "echo hello")
+    (`Assoc [ "command", `String "echo hello" ]);
+  check_summary "nested args with script is extracted"
+    (Some "pytest -v")
+    (`Assoc [ "args", `Assoc [ "script", `String "pytest -v" ] ]);
+  check_summary "top-level file_path is extracted"
+    (Some "lib/keeper.ml")
+    (`Assoc [ "file_path", `String "lib/keeper.ml" ]);
+  check_summary "null argv falls through to script"
+    (Some "npm test")
+    (`Assoc [ "argv", `Null; "script", `String "npm test" ]);
+  check_summary "null script falls through to command"
+    (Some "make check")
+    (`Assoc [ "script", `Null; "command", `String "make check" ]);
+  check_summary "leading blank lines in script are skipped to first non-empty line"
+    (Some "pytest -v")
+    (`Assoc [ "script", `String "\n\n  pytest -v\n" ]);
+  check_summary "production gate request envelope extracts script"
+    (Some "python -m unittest")
+    (`Assoc
+       [ "schema", `String "masc.keeper_gate.request.v1"
+       ; "input", `Assoc [ "script", `String "python -m unittest"; "cwd", `String "." ]
+       ; "cwd", `String "."
+       ]);
+  check_summary "nested arguments with query is extracted"
+    (Some "masc architecture")
+    (`Assoc [ "arguments", `Assoc [ "query", `String "masc architecture" ] ]);
+  check_summary "excessive recursion depth returns None safely"
+    None
+    (`Assoc
+       [ "input"
+       , `Assoc
+           [ "args"
+           , `Assoc
+               [ "arguments"
+               , `Assoc
+                   [ "input"
+                   , `Assoc
+                       [ "args"
+                       , `Assoc [ "script", `String "too deep" ] ] ] ] ] ])
 ;;
 
 let () =

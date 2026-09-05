@@ -131,6 +131,20 @@ val commit_keeper_assignment :
     the transaction. [None] clears it. An unchanged assignment returns
     [Assignment_unchanged] without rewriting [runtime.toml]. *)
 
+val commit_keeper_egress_allow :
+  keeper_assignment_transaction ->
+  allow:string list option ->
+  (keeper_assignment_write, string) result
+(** Write this keeper's [\[egress.keepers.<name>\]] allowlist from the exact
+    source bytes the transaction captured (RFC-0415). [None] removes the
+    table, which leaves the keeper reaching nothing rather than everything.
+
+    Inside the same transaction as {!commit_keeper_assignment} on purpose:
+    one lock, one file. A second transaction would let another admitted
+    writer land between a keeper entering the policy lane and being told what
+    it may reach, and a keeper in that gap reaches nothing while its config
+    says otherwise. *)
+
 val restore_keeper_assignment_transaction :
   keeper_assignment_transaction -> (keeper_assignment_write, string) result
 (** Restore the exact [runtime.toml] source bytes captured when the
@@ -678,6 +692,18 @@ val update_runtime_assignment_text :
 
 val remove_runtime_assignment_text : string -> keeper_name:string -> string
 (** runtime.toml text without [keeper_name]'s row. Pure. *)
+
+val update_egress_allow_text : string -> keeper_name:string -> allow:string list -> string
+(** runtime.toml text with [keeper_name]'s [\[egress.keepers.<name>\]] table
+    holding exactly [allow] (RFC-0415). The table is replaced or appended,
+    every other line is kept, and the replacement is wholesale rather than a
+    merge: an allowlist is the complete statement of what a keeper may reach,
+    so a write that kept unnamed entries would leave an operator unable to
+    remove one. Pure; the commit is the caller's. *)
+
+val remove_egress_allow_text : string -> keeper_name:string -> string
+(** runtime.toml text without [keeper_name]'s egress table. The keeper then
+    has no allowlist, which admits nothing rather than everything. Pure. *)
 
 val save_config_text :
   ?runtime_config_path:string -> string -> (config_commit_receipt, string) result

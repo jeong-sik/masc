@@ -1684,7 +1684,8 @@ let test_parse_rejects_unknown_keys () =
     (List.sort String.compare
        [ "name"; "runtime_id"; "autoboot_enabled"; "mention_targets"
        ; "max_context_override"; "proactive_enabled"; "sandbox_profile"
-       ; "remote_endpoint"; "network_mode"; "tools"; "skills"; "instructions"
+       ; "remote_endpoint"; "network_mode"; "egress_allow"; "tools"; "skills"
+       ; "instructions"
        ])
     (List.sort String.compare Keeper_turn_up_args.known_turn_up_args);
   (match

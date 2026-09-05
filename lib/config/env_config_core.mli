@@ -214,7 +214,6 @@ val admin_token_opt : unit -> string option
 
 (** {1 Git} *)
 
-val git_fetch_timeout_sec_env_key : string
 val git_fetch_timeout_sec : unit -> float
 
 (** {1 Logging / telemetry} *)

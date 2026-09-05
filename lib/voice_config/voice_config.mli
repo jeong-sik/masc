@@ -99,7 +99,13 @@ type capture_config = {
           margin was applied to a peak because it was handed to sox's silence
           filter, which reads peak. Peak on room tone moved 1.9x across five
           probes a minute apart while RMS moved 1.2x, so the threshold derived
-          from it wandered on a room that had not changed. *)
+          from it wandered on a room that had not changed.
+
+          A capture in which no reading ever clears this is not sent at all.
+          Whisper answers a room with a sentence: three captures of an empty
+          room returned "감사합니다.", "감사합니다." and "네", and once audio
+          reaches the endpoint a hallucinated transcript is indistinguishable
+          from a real one, so the refusal has to happen before that. *)
   trailing_silence_seconds : float;
       (** How long the room has to stay quiet after speech before the capture
           stops. Long enough to sit through the pause inside a sentence, short
@@ -108,12 +114,15 @@ type capture_config = {
           Must be greater than zero: a capture that stops the instant a
           speaker draws breath cuts the sentence in half. *)
   speech_margin_db : float;
-      (** How far a whole capture must average above the room, read as RMS on
-          both sides, to be transcribed at all. Lower it and whisper starts
-          answering silence with a sentence: three captures of an empty room
-          returned "감사합니다.", "감사합니다." and "네".
+      (** How far above the room the level may still sit, once speech has
+          started, and count as quiet: under room + this margin for
+          {!trailing_silence_seconds}, the recording ends. Raise it when a
+          capture runs on after the speaker has stopped; lower it when one
+          ends inside a sentence.
 
-          Not comparable to {!trigger_margin_db}, which is a peak margin. *)
+          Read as RMS, the same basis as {!trigger_margin_db}, and kept below
+          it so the two thresholds do not sit on one line, where a level
+          hovering at it would start and end speech on every reading. *)
   noise_reduction : bool;
       (** Subtract the room's profile from a capture before transcribing.
           Measured on one sample it removed the floor entirely while keeping

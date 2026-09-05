@@ -827,32 +827,6 @@ let capture_config () =
 
 let calibration_seconds = Voice_config.default_capture.Voice_config.calibration_seconds
 
-(* How far above the room's peak a capture must rise to start recording.
-
-   Measured 2026-09-04 on one workstation: an idle room peaked at 4.48% of
-   full scale and an ordinary spoken sentence clipped at 100%. That is 27 dB
-   apart, so this margin has room on both sides — it only has to clear the
-   room, not approach the voice. A live capture at the derived threshold (8%,
-   the same order as this margin gives) started and ended on speech and
-   transcribed correctly.
-
-   Earlier numbers here were 5-6 dB, taken from RMS separation on the same
-   microphone. They are not comparable: peak and RMS are two decades apart on
-   room tone and about one on speech. The mistake this replaced was using one
-   where the other was meant. *)
-let trigger_margin_db = Voice_config.default_capture.Voice_config.trigger_margin_db
-
-(* What a capture must exceed, over its whole length, to be worth
-   transcribing. Below the trigger so a capture that did fire but carries only
-   room tone is still refused.
-
-   Read as RMS on both sides, unlike the trigger: this compares a whole
-   capture's average against the room's average, where peak would be decided
-   by one transient. The floor is measured as peak for the filter's sake, so
-   this gate reads its own pair of levels rather than reusing it. *)
-let speech_margin_db = Voice_config.default_capture.Voice_config.speech_margin_db
-
-
 (* Every level in the capture path is an RMS amplitude on this scale, and dB
    here is dBFS. Measured 2026-09-04 on one workstation, an idle room read
    1.18% and an ordinary sentence 11.9% — 20 dB apart, which is the whole

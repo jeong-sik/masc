@@ -106,37 +106,13 @@ val transcribe_audio :
     If every enabled endpoint fails, the returned error names each
     attempted endpoint and its failure. *)
 
-(** {1 Microphone capture thresholds} *)
+(** {1 Microphone capture thresholds}
 
-(** The room is measured at each capture rather than assumed. Measured on one
-    workstation 2026-09-03, the noise floor sat at -37.2 dB on one pass and
-    -26.3 dB on another minutes later — 10 dB apart in one room, against a
-    threshold that was then a fixed 1% of full scale. Every capture ran to its
-    timeout and handed the transcriber a room. *)
-
-val trigger_margin_db : float
-(** How far above the room a sound must rise for the capture to treat it as
-    speech having started, read as RMS on both sides.
-
-    It was a peak margin until 2026-09-04, because the threshold was handed to
-    sox's silence filter and that filter reads peak. Peak turned out to be an
-    unstable basis: on one workstation it moved 1.9x across five probes of the
-    same idle room a minute apart, while RMS moved 1.2x. The capture now makes
-    this decision itself, so the margin, the gate below, and the level the
-    meter draws are one number. *)
-
-val speech_margin_db : float
-(** How far the room has to fall back below a speaker for the capture to count
-    as over, read as RMS.
-
-    This is also what keeps a room away from the transcriber, because whisper
-    answers silence with a sentence: three captures of an empty room returned
-    "감사합니다.", "감사합니다." and "네". Byte size cannot separate those from
-    speech, since a capture that ran to its timeout on room tone is large.
-    Once audio reaches the endpoint chain a hallucinated transcript is
-    indistinguishable from a real one, so the refusal has to happen before
-    that. A capture in which no reading ever cleared {!trigger_margin_db} is
-    never sent. *)
+    The margins a capture decides by are {!Voice_config.capture_config},
+    read from [\[voice.capture\]] at each capture, with the measured defaults
+    in {!Voice_config.default_capture}. They are not duplicated here: a copy
+    of {!Voice_config.trigger_margin_db} exported from this module went on
+    describing it as a peak margin after the capture had moved to RMS. *)
 
 val db_of_amplitude : float -> float
 (** dBFS for a linear RMS amplitude; [neg_infinity] at zero. *)

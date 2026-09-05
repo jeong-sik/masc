@@ -6,6 +6,7 @@ type t =
     }
   | Task_missing_title
   | Help
+  | About
   | Open_settings
   | Open_diff
   | Open_changes
@@ -105,6 +106,14 @@ let catalog =
     ; summary = "list prompt presets; save the live state; restore one (autosaves first)"
     }
   ; { word = "help"; args = ""; summary = "this list" }
+  ; { word = "about"
+    ; args = ""
+    ; summary = "display MASC Horned Reaper ASCII emblem and system telemetry"
+    }
+  ; { word = "splash"
+    ; args = ""
+    ; summary = "display MASC Horned Reaper ASCII emblem and system telemetry"
+    }
   ]
 
 let usage entry =
@@ -155,6 +164,7 @@ let parse text =
     | "task", "" -> Task_missing_title
     | "task", title -> Task_for_keeper { title; body }
     | "help", _ -> Help
+    | "about", _ | "splash", _ -> About
     | "settings", _ -> Open_settings
     | "diff", _ -> Open_diff
     | "changes", _ -> Open_changes
@@ -576,3 +586,18 @@ let is_slash_navigable ?(keeper_names = []) text =
       else
         let rest = String.trim after_space in
         List.exists (fun opt -> String.starts_with ~prefix:rest opt) options
+
+let about_banner ?(theme_name = "default") ?(active_keepers = 0) () =
+  String.concat "\n"
+    [ "   ___  ___  ___  _____ _____ "
+    ; "  |   \\/   |/ _ \\/  ___/  __ \\"
+    ; "  | /\\  / / /_\\ \\ `--.| /  \\/"
+    ; "  | | \\/| |  _  | `--. \\ |    "
+    ; "  | |   | | | | /\\__/ / \\__/\\"
+    ; "  \\_|   |_|_| |_\\____/ \\____/"
+    ; " ╭────────────────────────────────────────────────────────╮"
+    ; " │  HORNED REAPER CORE · Multi-Agent Supervised Control   │"
+    ; Printf.sprintf " │  Theme: %-22s  Keepers: %-13d │" theme_name active_keepers
+    ; " │  Treasury: 24K Gold Dungeon · Gates: All Secure        │"
+    ; " ╰────────────────────────────────────────────────────────╯"
+    ]

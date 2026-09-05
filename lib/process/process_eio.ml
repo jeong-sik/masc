@@ -633,12 +633,19 @@ let wait_for_child_to_let_go ~clock sources =
    blocked on its input sees EOF before it is asked to stop. [sources] are the
    read ends; on the cancellation path they are what the grace is waited out
    on, so they close last there. *)
-let finalize_spawned_proc ~clock proc status ~sinks ~sources =
-  (* The spawned process handle owns a daemon that resolves [await]. Once the
-     owning switch is cancelled that daemon is cancelled too, so awaiting it
-     here would deadlock the switch before its release hook can reap the child.
-     Record that state before entering the protected cleanup context. *)
-  let owning_switch_cancelled = Eio.Fiber.is_cancelled () in
+let finalize_spawned_proc ~sw ~clock proc status ~sinks ~sources =
+  (* Two ways to get here with no status. This fiber was cancelled while [sw]
+     lives on: the timeout race in [with_explicit_timeout_exn], where the
+     daemon that resolves [await] is a fiber of [sw] and still running, so
+     the child is reaped the ordinary way. Or [sw] itself is off: a stop
+     request, where that daemon is gone, awaiting it would deadlock the switch
+     before its release hook can reap the child, and the child releasing its
+     pipes is the only exit observation left. Reading this fiber's own
+     cancellation as the switch's sent every exec timeout down the second
+     path, and a 0.2s budget returned when the child's orphaned grandchild
+     closed the pipe two seconds later (#33182). Record the switch's state
+     before entering the protected cleanup context. *)
+  let owning_switch_cancelled = Option.is_some (Eio.Switch.get_error sw) in
   let close_all flows =
     List.iter (fun (label, flow) -> close_flow_best_effort label flow) flows
   in
@@ -723,7 +730,7 @@ let spawn_and_drain_stdout ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv
      the owning Eio process hook performs the protected reap. *)
   Fun.protect
     ~finally:(fun () ->
-      finalize_spawned_proc ~clock proc status ~sinks:[] ~sources:[ "stdout", stdout_r ])
+      finalize_spawned_proc ~sw ~clock proc status ~sinks:[] ~sources:[ "stdout", stdout_r ])
     (fun () ->
       drain_to_eof stdout_r stdout_buf ~on_chunk:ignore_chunk;
       let s = Eio.Process.await proc in
@@ -756,7 +763,7 @@ let spawn_and_drain_both ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv s
   (* Cancellation-protected yielding cleanup; see [spawn_and_drain_stdout]. *)
   Fun.protect
     ~finally:(fun () ->
-      finalize_spawned_proc ~clock proc status ~sinks:[]
+      finalize_spawned_proc ~sw ~clock proc status ~sinks:[]
         ~sources:[ "stdout", stdout_r; "stderr", stderr_r ])
     (fun () ->
       Eio.Fiber.both
@@ -785,7 +792,7 @@ let spawn_and_drain_both_streaming ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~cl
   (* Cancellation-protected yielding cleanup; see [spawn_and_drain_stdout]. *)
   Fun.protect
     ~finally:(fun () ->
-      finalize_spawned_proc ~clock proc status ~sinks:[]
+      finalize_spawned_proc ~sw ~clock proc status ~sinks:[]
         ~sources:[ "stdout", stdout_r; "stderr", stderr_r ])
     (fun () ->
       Eio.Fiber.both
@@ -830,7 +837,7 @@ let spawn_and_drain_both_with_stdin_held_open
   let status = ref None in
   Fun.protect
     ~finally:(fun () ->
-      finalize_spawned_proc ~clock proc status
+      finalize_spawned_proc ~sw ~clock proc status
         ~sinks:[ "stdin", stdin_w ]
         ~sources:[ "stdout", stdout_r; "stderr", stderr_r ])
     (fun () ->
@@ -930,8 +937,8 @@ let run_argv ?timeout_sec ?env (argv : string list) : string =
             let label = String.concat " " (List.map Filename.quote argv) in
             let phase_ref = ref Timeout_origin.Spawn in
             try
-              with_explicit_timeout_exn clk timeout_sec (fun () ->
-                  Eio.Switch.run (fun sw ->
+              Eio.Switch.run (fun sw ->
+                  with_explicit_timeout_exn clk timeout_sec (fun () ->
                       let status = spawn_and_drain_stdout ~phase_ref ~sw pm ~cwd ?env ~clock:clk argv buf in
                       output_for_status ~status ~stdout:(Exec_buffer.render buf) ~stderr:""))
             with
@@ -982,8 +989,8 @@ let run_argv_with_stdin ?timeout_sec ?env ~(stdin_content : string) (argv : stri
             let stdin_source = Eio.Flow.string_source stdin_content in
             let phase_ref = ref Timeout_origin.Spawn in
             try
-              with_explicit_timeout_exn clk timeout_sec (fun () ->
-                  Eio.Switch.run (fun sw ->
+              Eio.Switch.run (fun sw ->
+                  with_explicit_timeout_exn clk timeout_sec (fun () ->
                       let status =
                         spawn_and_drain_stdout ~phase_ref ~sw pm ~cwd ?env ~stdin_source ~clock:clk argv buf
                       in
@@ -1060,9 +1067,9 @@ let run_argv_with_stdin_and_status_split
             let stdin_source = Eio.Flow.string_source stdin_content in
             let phase_ref = ref Timeout_origin.Spawn in
             try
-              with_explicit_timeout_exn clk timeout_sec (fun () ->
+              Eio.Switch.run (fun sw ->
                   let unix_status =
-                    Eio.Switch.run (fun sw ->
+                    with_explicit_timeout_exn clk timeout_sec (fun () ->
                         match on_stdout_chunk, on_stderr_chunk with
                         | None, None ->
                             spawn_and_drain_both ~phase_ref ~sw pm
@@ -1171,9 +1178,9 @@ let run_argv_with_stdin_held_open_and_status_split
       let on_stdout_chunk = Option.value on_stdout_chunk ~default:ignore_chunk in
       let on_stderr_chunk = Option.value on_stderr_chunk ~default:ignore_chunk in
       try
-        with_explicit_timeout_exn clk timeout_sec (fun () ->
+        Eio.Switch.run (fun sw ->
           let unix_status =
-            Eio.Switch.run (fun sw ->
+            with_explicit_timeout_exn clk timeout_sec (fun () ->
               spawn_and_drain_both_with_stdin_held_open
                 ~phase_ref ~sw pm ~cwd:effective_cwd ?env ~stdin_content
                 ~clock:clk argv ~on_stdout_chunk ~on_stderr_chunk stdout_buf
@@ -1312,7 +1319,7 @@ let run_argv_with_redirects ?timeout_sec ?env ?cwd ~stdin ~stdout ~stderr
              let status = ref None in
              Fun.protect
                ~finally:(fun () ->
-                 finalize_spawned_proc ~clock:clk proc status ~sinks:[]
+                 finalize_spawned_proc ~sw ~clock:clk proc status ~sinks:[]
                    ~sources:
                      (List.filter_map
                         (fun (name, plumbing) ->
@@ -1367,9 +1374,9 @@ let run_argv_with_status_split ?timeout_sec ?env ?cwd
             let label = String.concat " " (List.map Filename.quote argv) in
             let phase_ref = ref Timeout_origin.Spawn in
             try
-              with_explicit_timeout_exn clk timeout_sec (fun () ->
+              Eio.Switch.run (fun sw ->
                   let unix_status =
-                    Eio.Switch.run (fun sw ->
+                    with_explicit_timeout_exn clk timeout_sec (fun () ->
                         spawn_and_drain_both ~phase_ref ~sw pm ~cwd:effective_cwd ?env
                           ~clock:clk argv stdout_buf stderr_buf)
                   in
@@ -1461,9 +1468,9 @@ let run_argv_with_status_split_streaming
           let label = String.concat " " (List.map Filename.quote argv) in
           let phase_ref = ref Timeout_origin.Spawn in
           try
-            with_explicit_timeout_exn clk timeout_sec (fun () ->
+            Eio.Switch.run (fun sw ->
                 let unix_status =
-                  Eio.Switch.run (fun sw ->
+                  with_explicit_timeout_exn clk timeout_sec (fun () ->
                       spawn_and_drain_both_streaming
                         ~phase_ref
                         ~sw

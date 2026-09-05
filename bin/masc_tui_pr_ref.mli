@@ -14,14 +14,17 @@ type t =
   | Pr_token of int
 
 val find : string -> t option
-(** The first explicit reference in the text, scanning left to right. *)
+(** The first explicit reference in the text, scanning left to right. A
+    reference is bounded on both sides: [SUPR-42] and [PR-2026-09-05] are not
+    tokens, [pull/12abc] is not a link, and [notgithub.com/] is not the host. *)
 
 val number : t -> int
 
 val github_slug_of_remote : string -> string option
 (** [owner/repo] from a registered remote, for GitHub only: other forges
     spell the path differently, and guessing would link to a 404. Accepts
-    [git@github.com:owner/repo(.git)] and [https://github.com/owner/repo(.git)]. *)
+    [git@github.com:owner/repo(.git)], [ssh://git@github.com/owner/repo(.git)]
+    and [https://github.com/owner/repo(.git)]. *)
 
 val pull_url : slug:string -> number:int -> string
 

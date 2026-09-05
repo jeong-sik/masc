@@ -928,6 +928,7 @@
  (modules masc_tui_types)
  (libraries
   masc
+  masc_tui_acting_pane
   masc_tui_gate_text
   masc_tui_model_runtime_table
   masc_tui_mcp

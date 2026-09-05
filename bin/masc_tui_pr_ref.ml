@@ -28,11 +28,16 @@ let run_end s ok i =
   let rec go j = if j < n && ok s.[j] then go (j + 1) else j in
   go i
 
-(* A digit run that is a whole number: bounded on the right by a non-digit
-   or the end, and small enough to be an [int]. *)
+(* A digit run that is a whole number: bounded on the right by the end or by
+   a character that is neither a word character nor [-] -- [pull/12abc]
+   names nothing and [PR-2026-09-05] is a date -- and small enough to be an
+   [int]. *)
 let number_at s i =
   let stop = run_end s is_digit i in
-  if stop = i then None
+  let bounded =
+    stop = String.length s || not (is_word_char s.[stop] || s.[stop] = '-')
+  in
+  if stop = i || not bounded then None
   else int_of_string_opt (String.sub s i (stop - i))
 
 let starts_at s i prefix =
@@ -61,14 +66,19 @@ let pr_token_at s i =
     Option.map (fun number -> Pr_token number) (number_at s (i + 3))
   else None
 
+(* [github.com/] as the whole host: glued to slug characters before it, as in
+   [notgithub.com/] or [www.github.com/], it is some other host. A pasted
+   GitHub link always spells the bare host after [https://]. *)
+let host_at s i =
+  starts_at s i github_host && (i = 0 || not (is_slug_char s.[i - 1]))
+
 let find s =
   let n = String.length s in
   let rec scan i =
     if i >= n then None
     else
       let found =
-        if starts_at s i github_host then
-          pull_url_at s (i + String.length github_host)
+        if host_at s i then pull_url_at s (i + String.length github_host)
         else pr_token_at s i
       in
       match found with
@@ -82,17 +92,21 @@ let strip_suffix ~suffix s =
     String.sub s 0 (String.length s - String.length suffix)
   else s
 
+(* The three spellings git accepts for a GitHub remote. *)
+let github_remote_prefixes =
+  [ "git@github.com:"; "ssh://git@github.com/"; "https://github.com/" ]
+
 let github_slug_of_remote remote =
   let remote = String.trim remote in
   let path =
-    let ssh = "git@github.com:" and https = "https://github.com/" in
-    if String.starts_with ~prefix:ssh remote then
-      Some (String.sub remote (String.length ssh) (String.length remote - String.length ssh))
-    else if String.starts_with ~prefix:https remote then
-      Some
-        (String.sub remote (String.length https)
-           (String.length remote - String.length https))
-    else None
+    List.find_map
+      (fun prefix ->
+        if String.starts_with ~prefix remote then
+          Some
+            (String.sub remote (String.length prefix)
+               (String.length remote - String.length prefix))
+        else None)
+      github_remote_prefixes
   in
   Option.bind path (fun path ->
       let slug = path |> strip_suffix ~suffix:"/" |> strip_suffix ~suffix:".git" in

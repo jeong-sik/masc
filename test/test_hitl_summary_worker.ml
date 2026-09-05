@@ -238,14 +238,23 @@ let check_backtrace_starts_at_origin label expected observed =
   check bool label true (Astring.String.is_prefix ~affix:expected observed)
 ;;
 
-let rec await_condition ~clock ~remaining ~failure predicate =
+(* [await_condition] polls every [await_condition_poll_interval_s] for at
+   most [await_condition_poll_rounds] rounds: about one second per wait. *)
+let await_condition_poll_interval_s = 0.01
+let await_condition_poll_rounds = 100
+
+let rec poll_condition ~clock ~remaining ~failure predicate =
   if predicate ()
   then ()
   else if remaining = 0
   then fail failure
   else (
-    Eio.Time.sleep clock 0.01;
-    await_condition ~clock ~remaining:(remaining - 1) ~failure predicate)
+    Eio.Time.sleep clock await_condition_poll_interval_s;
+    poll_condition ~clock ~remaining:(remaining - 1) ~failure predicate)
+;;
+
+let await_condition ~clock ~failure predicate =
+  poll_condition ~clock ~remaining:await_condition_poll_rounds ~failure predicate
 ;;
 
 let select_auto_judge_mode base_path =
@@ -1467,7 +1476,7 @@ let test_flow_execution_failure_quarantines_and_allows_successor () =
          "quarantined entry does not stall a later owner entry"
          [ successor.id ]
          resumed.started_ids;
-       Eio.Promise.await successor_server.first_request_arrived;
+       F.await_first_request successor_server;
        check int "failed entry dispatched once" 1 (F.post_count failed);
        check int
          "successor dispatches once"
@@ -1528,7 +1537,6 @@ let test_manual_resolution_race_is_conclusive () =
         | Error detail -> fail detail);
        await_condition
          ~clock
-         ~remaining:100
          ~failure:"manual resolution race did not finish"
          (fun () -> Option.is_some !finish_outcome);
        check int "in-flight request dispatched exactly once" 1 (F.post_count server);
@@ -2064,7 +2072,10 @@ let test_visible_uncertainty_withholds_production_drain () =
             | Ok true -> ()
             | Ok false -> fail "production Gate chain did not claim oldest work"
             | Error detail -> fail detail);
-           Eio.Promise.await writer_reached;
+           F.await_within_fixture_budget
+             ~clock
+             ~failure:"visible completion writer was not reached"
+             writer_reached;
            false
          with
          | exception Worker.Exact_terminalization_persistence_failed _ -> true
@@ -2154,7 +2165,6 @@ let test_same_owner_workers_run_in_parallel_with_bound () =
          concurrent.started_ids;
        await_condition
          ~clock
-         ~remaining:100
          ~failure:"second same-owner worker did not reach the provider concurrently"
          (fun () -> F.post_count server = 2);
        check int
@@ -2171,7 +2181,6 @@ let test_same_owner_workers_run_in_parallel_with_bound () =
        ignore (Eio.Promise.try_resolve resolve_release_first ());
        await_condition
          ~clock
-         ~remaining:100
          ~failure:"parallel same-owner workers did not complete"
          (fun () ->
             Option.is_none (Q.For_testing.get_pending_entry_unchecked ~id:first.id)
@@ -2219,12 +2228,10 @@ let test_require_human_head_does_not_stop_owner_drain () =
          recovery.started_ids;
        await_condition
          ~clock
-         ~remaining:100
          ~failure:"same-owner judgments did not both reach the provider"
          (fun () -> F.post_count server = 2);
        await_condition
          ~clock
-         ~remaining:100
          ~failure:"successor did not complete after Require_human head"
          (fun () ->
             Option.is_none
@@ -2302,12 +2309,10 @@ let test_orphaned_start_reservation_recovers_a_worker () =
          resumed.started_ids;
        await_condition
          ~clock
-         ~remaining:100
          ~failure:"reclaimed reservation did not reach the provider"
          (fun () -> F.post_count server = 1);
        await_condition
          ~clock
-         ~remaining:100
          ~failure:"reclaimed reservation did not complete"
          (fun () ->
             Option.is_none

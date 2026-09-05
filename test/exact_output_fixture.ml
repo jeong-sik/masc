@@ -2,6 +2,22 @@ open Masc
 
 module EO = Agent_core.Exact_output
 
+(* Every wait a case makes on the fixture is bounded by this budget. A
+   loopback POST from a forked worker (connect, accept, read) takes well
+   under a second on an idle machine. The nightly runner has 4 CPUs and runs
+   several suites at once, where 50ms sleeps are known to miss, so the budget
+   is generous. It is still 20x shorter than the 600s per-suite deadline, so
+   a wait that never ends fails the case by name instead of holding the suite
+   until the runner kills it (#33200). *)
+let fixture_wait_seconds = 30.0
+
+(* Default [connect_timeout_s] for every fixture target. The exact-output
+   HTTP client puts no deadline on the request-to-response-headers phase
+   unless the target sets one, so a worker whose POST never gets its headers
+   answered would wait forever. This bounds the worker's side of the socket;
+   [fixture_wait_seconds] bounds the test's side. *)
+let fixture_post_connect_timeout_seconds = 30.0
+
 type server_behavior =
   | Reply of string
   | Replies of string list
@@ -13,6 +29,7 @@ type test_server =
   ; posts : int Atomic.t
   ; requests : string list Atomic.t
   ; first_request_arrived : unit Eio.Promise.t
+  ; clock : float Eio.Time.clock_ty Eio.Resource.t
   }
 
 type target_fixture =
@@ -72,11 +89,12 @@ let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
   ; posts
   ; requests
   ; first_request_arrived
+  ; clock
   }
 ;;
 
 let target_fixture_toml
-      ?connect_timeout_s
+      ~connect_timeout_s
       ?max_request_body_bytes
       ~supports_response_format_json
       ~supports_structured_output
@@ -86,12 +104,7 @@ let target_fixture_toml
   =
   let provider_id = Printf.sprintf "masc-exact-fixture-provider-%d" index in
   let model_id = Printf.sprintf "masc-exact-fixture-model-%d" index in
-  let timeout =
-    Option.fold
-      ~none:""
-      ~some:(fun value -> Printf.sprintf "connect_timeout_s = %.6g\n" value)
-      connect_timeout_s
-  in
+  let timeout = Printf.sprintf "connect_timeout_s = %.6g\n" connect_timeout_s in
   let request_body_limit =
     Option.fold
       ~none:""
@@ -142,7 +155,10 @@ let resolver_snapshot
       ~source
       fixtures
   =
-  let timeout_for id = List.assoc_opt id connect_timeouts in
+  let timeout_for id =
+    List.assoc_opt id connect_timeouts
+    |> Option.value ~default:fixture_post_connect_timeout_seconds
+  in
   let request_body_limit_for id = List.assoc_opt id request_body_limits in
   let api_key_env_for id =
     List.assoc_opt id api_key_envs |> Option.value ~default:api_key_env
@@ -153,7 +169,7 @@ let resolver_snapshot
         fixtures
         |> List.mapi (fun index fixture ->
             target_fixture_toml
-              ?connect_timeout_s:(timeout_for fixture.id)
+              ~connect_timeout_s:(timeout_for fixture.id)
               ?max_request_body_bytes:(request_body_limit_for fixture.id)
               ~supports_response_format_json
               ~supports_structured_output
@@ -269,4 +285,22 @@ let openai_response output =
 
 let post_count server = Atomic.get server.posts
 let request_bodies server = Atomic.get server.requests |> List.rev
-let await_first_request server = Eio.Promise.await server.first_request_arrived
+
+(* Waits for [promise] at most [fixture_wait_seconds]. Past that the case
+   fails with [failure] instead of holding the suite until the runner
+   deadline (#33200). *)
+let await_within_fixture_budget ~clock ~failure promise =
+  match
+    Eio.Time.with_timeout clock fixture_wait_seconds (fun () ->
+      Ok (Eio.Promise.await promise))
+  with
+  | Ok value -> value
+  | Error `Timeout -> Alcotest.failf "%s within %gs" failure fixture_wait_seconds
+;;
+
+let await_first_request server =
+  await_within_fixture_budget
+    ~clock:server.clock
+    ~failure:(Printf.sprintf "fixture server %s received no request" server.base_url)
+    server.first_request_arrived
+;;

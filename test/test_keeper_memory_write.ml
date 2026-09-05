@@ -1251,6 +1251,145 @@ let test_unreadable_source_path_is_the_callers_to_fix () =
     (write "../../outside.txt")
 ;;
 
+module Events = Masc.Keeper_memory_os_events
+
+let events_for ~keepers_dir ~keeper_id =
+  Events.read ~keepers_dir ~keeper_id
+  |> List.map (fun (index, row) ->
+    match row with
+    | Ok event -> event
+    | Error error ->
+      Alcotest.failf
+        "events line %d unreadable: %s"
+        index
+        (Events.read_error_to_string error))
+;;
+
+let string_list_field key json =
+  match json_field key json with
+  | `List items ->
+    List.map
+      (function
+        | `String s -> s
+        | _ -> Alcotest.failf "%s holds a non-string" key)
+      items
+  | _ -> Alcotest.failf "expected list field: %s" key
+;;
+
+(* RFC-0418: every ordinary fact a search returns is a retrieval of that fact,
+   recorded with the query and the turn. A miss records nothing. The
+   decision-log line names the same ids, so the two records agree. *)
+let test_search_records_a_retrieval_per_ordinary_match () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "search-events" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let hit_a = fact "alpha beta first" in
+  let hit_b = fact "second alpha beta" in
+  let miss = fact "gamma only" in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ hit_a; miss; hit_b ];
+  let search query =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+      ~args:
+        (`Assoc
+           [ "query", `String query; "source", `String "memory"; "limit", `Int 10 ])
+    |> Yojson.Safe.from_string
+  in
+  let response = search "alpha beta" in
+  Alcotest.(check int) "two matches" 2 (int_field "match_count" response);
+  let id = Masc.Keeper_memory_os_types.memory_id in
+  let events = events_for ~keepers_dir ~keeper_id:meta.name in
+  Alcotest.(check (list string))
+    "one retrieval per matched fact, in result order"
+    [ id hit_a; id hit_b ]
+    (List.map (fun (e : Events.event) -> e.memory_id) events);
+  List.iter
+    (fun (e : Events.event) ->
+       (match e.kind with
+        | Events.Retrieved { query } ->
+          Alcotest.(check string) "the query is recorded" "alpha beta" query
+        | Events.Cited _ | Events.Revised _ ->
+          Alcotest.fail "a search records retrievals only");
+       Alcotest.(check string)
+         "the turn is recorded"
+         (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+         e.trace_id)
+    events;
+  ignore (search "nothing here");
+  Alcotest.(check int)
+    "a miss records nothing"
+    2
+    (List.length (events_for ~keepers_dir ~keeper_id:meta.name));
+  let log_lines =
+    Fs_compat.load_jsonl
+      (Masc.Keeper_types_support.keeper_decision_log_path config meta.name)
+  in
+  match List.rev log_lines with
+  | miss_line :: hit_line :: _ ->
+    Alcotest.(check (list string))
+      "the hit line names the retrieved ids"
+      [ id hit_a; id hit_b ]
+      (string_list_field "matched_memory_ids" hit_line);
+    Alcotest.(check (list string))
+      "the miss line names none"
+      []
+      (string_list_field "matched_memory_ids" miss_line)
+  | _ -> Alcotest.fail "expected one decision-log line per search"
+;;
+
+(* RFC-0418: a retract names the fact by id and the store found it, so the id
+   was cited; the event outlives the fact. A retract of an id no fact has
+   records nothing. *)
+let test_retract_records_a_citation () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "retract-events" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let written =
+    Runtime.keeper_memory_write_with_outcome
+      ~config
+      ~meta
+      ~args:(make_args ~title:"" ~content:"the deploy needs assets")
+  in
+  let written_id =
+    string_field
+      "memory_id"
+      (Yojson.Safe.from_string written.Masc.Keeper_tool_execution.raw_output)
+  in
+  let retract id =
+    Runtime.keeper_memory_retract_with_outcome
+      ~config
+      ~meta
+      ~args:(make_retract_args ~memory_id:id ~reason:"superseded by the runbook")
+  in
+  let response =
+    Yojson.Safe.from_string (retract written_id).Masc.Keeper_tool_execution.raw_output
+  in
+  Alcotest.(check bool) "retraction succeeds" true (json_field "ok" response = `Bool true);
+  (match events_for ~keepers_dir ~keeper_id:meta.name with
+   | [ e ] ->
+     Alcotest.(check string) "the retracted id is the cited one" written_id e.memory_id;
+     (match e.kind with
+      | Events.Cited { tool } ->
+        Alcotest.(check string) "cited through the retract tool" "keeper_memory_retract" tool
+      | Events.Retrieved _ | Events.Revised _ -> Alcotest.fail "a retract records a citation")
+   | events -> Alcotest.failf "expected one event, got %d" (List.length events));
+  ignore (retract (memory_id 'f'));
+  Alcotest.(check int)
+    "a retract of an unknown id records nothing"
+    1
+    (List.length (events_for ~keepers_dir ~keeper_id:meta.name))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_write"
@@ -1314,6 +1453,14 @@ let () =
             "search filters exact substring without ranking"
             `Quick
             test_search_filters_exact_substring_without_ranking
+        ; Alcotest.test_case
+            "search records a retrieval per ordinary match"
+            `Quick
+            test_search_records_a_retrieval_per_ordinary_match
+        ; Alcotest.test_case
+            "retract records a citation"
+            `Quick
+            test_retract_records_a_citation
         ; Alcotest.test_case
             "source parser accepts every supported value"
             `Quick

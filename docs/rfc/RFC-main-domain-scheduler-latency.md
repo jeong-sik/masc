@@ -187,13 +187,49 @@ Phase 0c 가 머지된 빌드를 재기동하고 2분 뒤와 6분 뒤에 `GET /a
 
 각 단계는 같은 하네스로 전후를 잰다. P4a 뒤 할당 −20% 이상, P4b 뒤 −25% 이상, P4c 뒤 live −500MB 이상이 기대치이고, 못 미치면 그 단계는 되돌린다.
 
-### 8.6 상태 (2026-09-05)
+### 8.6 상태와 재측정 (2026-09-05)
 
-| 단계 | PR | 상태 | 재측정 |
-|---|---|---|---|
-| P4d Memprof 키 | #33305 | merged | 재기동 뒤 `sites`·overflow 몫 |
-| P4a 원장 append | #33312 | merged | `update_ledger_many`·`rewrite_private_file_durable_locked_result` 몫 (기대 −4.5GB/4분) |
-| P4b 요약 캐시 | #33319 | Draft | `load_canonical_bytes_strict`·`read_fd` 몫 (기대 −5.2GB/4분) |
-| P4c 본문 디스크 | — | 설계만 | live −545MB |
+| 단계 | PR | 상태 |
+|---|---|---|
+| P4d Memprof 키 | #33305 | merged |
+| P4a 원장 append | #33312 | merged |
+| P4b 요약 캐시 | #33319 | merged |
+| P4c 본문 디스크 | — | 설계만 (8.5) |
 
-재측정은 P4b 머지 뒤 한 번의 재기동으로 P4a·P4b·P4d 를 같이 잰다. `scripts/harness/perf/scheduler_lag_probe.sh` 로 할당률·major/분, `/api/v1/diagnostics/memprof` 로 사이트 몫. 기대치에 못 미치는 단계는 되돌린다(8.5).
+#### 재측정 — 11:10Z 재기동, 세 PR 이 든 빌드
+
+부팅: 11:08:30Z 포트 응답(ready 아님) → 11:10:15Z 이전 ready. 측정 토큰은 `~/me/.masc/auth/admin.token`(환경의 `MASC_OPERATOR_TOKEN` 은 401).
+
+| 읽기 | ready+36초 | ready+6분 |
+|---|---|---|
+| `/health` p50 / p90 / max | 17 / 88 / 388 ms | 2 / 49 / 561 ms |
+| lag p50 / p95 / p99 / max | 3.3 / 106 / 411 / 762 ms | 1.2 / 66 / 163 / 291 ms, stall 0 |
+| alloc (10초 창) | 460 MB/s | 804 MB/s |
+| major/분 | 11.9 | 5.9 |
+| heap / live | 2,898 / 2,797 MB | 4,182 / 3,933 MB |
+
+memprof, ready+3분 → +7분(240초): 누적 150.5 → 353.9 GB = **848 MB/s**(기준선 440). sites 8,031 → 11,962(상한 50,000; 기준선은 20,001 로 상한 초과). dropped 0. 같은 5분의 `/health` 차: alloc 678 MB/s, promoted 45 MB/s, minor 5,978/분, major 13.8/분(기준선 17.8).
+
+작업량은 같지 않다. 시스템 로그 `agent_core:agent_started` 가 이 4분에 27건, 기준선 창(10:17~10:21Z)에 20건. 턴당 할당은 7.5 GB 대 5.3 GB. 원격 lane 키퍼 둘(lane-smith·rondo)이 이 창에서 가장 시끄러웠다.
+
+**P4a·P4b 의 표적은 사라졌다.** `update_ledger_many`·`rewrite_private_file_durable_locked_result`·`read_fd_chunks`·`parse_rows`·`load_canonical_bytes_strict` 어느 것도 상위 30 에 없다. 30위가 부팅 포함 누적 1.63 GB 이므로 각각 전체 1.6 GB 미만이고, 전에는 4분에 5.2 GB·4.5 GB 였다. 이 창의 상위(4분 차, masc 호출자):
+
+| 할당 지점 | 4분간 | 뜻 |
+|---|---|---|
+| `Agent_core.Checkpoint_codec.content_block_of_json_strict` ← `Llm_provider.try_parse_json` | 8.2 GB | 턴 시작마다 체크포인트를 디코드한다 |
+| masc 프레임 없음(`<unknown>` 7.6, Eio sched 4.8, `Format.make_formatter` 3.9, Buffer 2.7) | 19 GB | 라이브러리 프레임이 16 프레임 창을 다 쓴다 → #33332 |
+| `Yojson.Safe.write_string` 계열 (Buffer.resize) | 11 GB | 체크포인트 저장 + 측정용 직렬화 |
+| `Keeper_turn_driver_try_provider.measure_message_bytes` (+ `project_with_drop` 경유) | 5.0 GB | 메시지 바이트를 재려고 턴마다 다시 직렬화. 메모는 턴 안에서만 산다 |
+| `Keeper_remote_path.consume` ← `flush_stream` | 4.5 GB | 바이트마다 `String.sub` — 2차식 → #33329 |
+| `Fs_compat.with_io` (Cstruct create + copy_to_string) | 3.8 GB | 턴 시작 체크포인트 읽기 (20 MB × 2) |
+| `Keeper_event_queue_persistence.read_json_if_present` ← `load_state_unlocked_with_primary_detail` | 3.3 GB | 이벤트 큐 스냅샷을 통째로 다시 읽는다 |
+| `Dated_jsonl.iter_all_entries_result` ← `Keeper_reaction_ledger` (:1160, :1223) | 2.1 GB | 반응 원장을 월·일 파일 전부 다시 훑는다 |
+
+live 3.59 → 4.06 GB(4분에 +0.47 GB). 힙 루트: `exact_lane_runs` 564 MB(불변), `keeper_owner_pools` 67 → 74 MB(기준선 3.8 MB), `board_attention_partition_caches` 21 MB, `activity_graph_caches` 49 MB. live 표 상위: `try_parse_json` 0.42 GB, `Run_registry_core.parse_event_line` 0.32 GB(= exact-lane), `Checkpoint_codec.of_string` 0.22 GB, `Keeper_board_attention_candidate.parse_rows` 0.14 + 0.12 GB(P4a 가 상주시킨 최신 집합, 4분간 변화 0).
+
+#### 판정
+
+- 8.5 의 "P4a 뒤 −20%, P4b 뒤 −25%" 는 같은 작업량을 가정한 기대치였고, 이 창으로는 판정할 수 없다. 사이트 단위 효과는 확인됐고 되돌릴 근거는 없다.
+- 총량은 줄지 않았다. 나머지가 크고, 그 가운데 가장 큰 덩어리는 **턴 시작 재로드**다: 디코드 8.2 + 읽기 3.8 + 측정용 재직렬화 5.0 = 17 GB/4분. 메시지 레코드가 턴마다 디스크에서 다시 태어나므로 물리 동일성 메모도 턴을 넘겨 살 수 없다. P4b 2단계(마지막으로 쓴 값을 identity 가 같으면 재사용)가 이 셋을 한꺼번에 없앤다. 그 전제인 코덱 왕복 동일성은 실제 체크포인트로 시험한다.
+- 그다음: remote-path 2차식(#33329), 이벤트 큐 스냅샷 재읽기(3.3 GB — `snapshot_result` 가 registry 에 없는 키퍼마다·`durable_state_result` 가 매번 파일을 읽는다), 반응 원장 전체 스캔(2.1 GB), 귀속 안 된 19 GB(#33332 뒤 다시 읽는다).
+- live 가 기준선보다 1.2 GB 크고 4분에 0.47 GB 늘었다. 부팅 뒤 키퍼가 한 번씩 돌며 컨텍스트가 상주하는 예열인지, 누수인지는 10분 뒤 세 번째 읽기로 가른다.

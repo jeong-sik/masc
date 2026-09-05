@@ -455,7 +455,7 @@ let () =
           test_case "prompt_source reports file" `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               check string "file source" "file"
-                (Prompt_registry.prompt_source "keeper.reply_guidelines"));
+                (Prompt_registry.prompt_source_to_string @@ Prompt_registry.prompt_source "keeper.reply_guidelines"));
         ] );
       ( "rendering",
         [
@@ -488,7 +488,8 @@ let () =
                   ]
               with
               | Ok (resolution, rendered) ->
-                  check string "source" "file" resolution.source;
+                  check string "source" "file"
+                    (Prompt_registry.prompt_source_to_string resolution.source);
                   check string "rendered from returned template"
                     rendered
                     (match
@@ -585,7 +586,7 @@ let () =
               check string "override value" override_text
                 (Prompt_registry.get_prompt "keeper");
               check string "override source" "override"
-                (Prompt_registry.prompt_source "keeper"));
+                (Prompt_registry.prompt_source_to_string @@ Prompt_registry.prompt_source "keeper"));
           test_case "clear_override reverts to file" `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               (match
@@ -598,7 +599,7 @@ let () =
               check string "back to file baseline" (fixture "keeper.reply_guidelines")
                 (Prompt_registry.get_prompt "keeper.reply_guidelines");
               check string "source is file" "file"
-                (Prompt_registry.prompt_source "keeper.reply_guidelines"));
+                (Prompt_registry.prompt_source_to_string @@ Prompt_registry.prompt_source "keeper.reply_guidelines"));
           test_case "set_override rejects unknown key" `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               match Prompt_registry.set_override "unknown.prompt" "x" with
@@ -661,7 +662,7 @@ let () =
               check string "matching override restored" override_text
                 (Prompt_registry.get_prompt "keeper");
               check string "matching override source" "override"
-                (Prompt_registry.prompt_source "keeper"));
+                (Prompt_registry.prompt_source_to_string @@ Prompt_registry.prompt_source "keeper"));
           test_case "contract revision canonicalizes variable ordering" `Quick
             (fun () ->
               let left =
@@ -697,7 +698,7 @@ let () =
               check string "body drift falls back to changed file" changed_body
                 (Prompt_registry.get_prompt "keeper.reply_guidelines");
               check string "body drift source" "file"
-                (Prompt_registry.prompt_source "keeper.reply_guidelines"));
+                (Prompt_registry.prompt_source_to_string @@ Prompt_registry.prompt_source "keeper.reply_guidelines"));
           test_case
             "template-variable drift invalidates persisted override"
             `Quick (fun () ->
@@ -730,7 +731,7 @@ let () =
               check string "variable drift falls back to file" body
                 (Prompt_registry.get_prompt "test.templated");
               check string "variable drift source" "file"
-                (Prompt_registry.prompt_source "test.templated"));
+                (Prompt_registry.prompt_source_to_string @@ Prompt_registry.prompt_source "test.templated"));
           (* Refusing an override is not the same as discarding it. It used
              to be: the save path read only the live table, so the next write
              of any key rewrote the file without the refused entry, and an
@@ -753,7 +754,7 @@ let () =
               reload_registry prompts_dir;
               Prompt_registry.restore_overrides dir;
               check string "the refused override is not in force" "file"
-                (Prompt_registry.prompt_source "keeper.reply_guidelines");
+                (Prompt_registry.prompt_source_to_string @@ Prompt_registry.prompt_source "keeper.reply_guidelines");
               check int "but it is still what the operator has saved" 1
                 (List.length (Prompt_registry.quarantined_entries ()));
               (* Now touch some entirely unrelated prompt. *)
@@ -909,7 +910,7 @@ let () =
                 (fixture "keeper")
                 (Prompt_registry.get_prompt "keeper");
               check string "source falls back to file" "file"
-                (Prompt_registry.prompt_source "keeper"));
+                (Prompt_registry.prompt_source_to_string @@ Prompt_registry.prompt_source "keeper"));
         ] );
       ( "integration",
         [

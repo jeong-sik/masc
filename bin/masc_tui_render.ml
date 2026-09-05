@@ -15349,44 +15349,74 @@ let render_themes (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  let entries = Theme_choice.entries () in
+  let all_entries = Theme_choice.entries () in
+  let dark_count =
+    List.fold_left
+      (fun count (entry : Theme_choice.entry) ->
+        if not entry.light then count + 1 else count)
+      0 all_entries
+  in
+  let light_count = List.length all_entries - dark_count in
+  let entries =
+    match state.theme_filter with
+    | `All -> all_entries
+    | `Dark ->
+        List.filter
+          (fun (entry : Theme_choice.entry) -> not entry.light)
+          all_entries
+    | `Light ->
+        List.filter
+          (fun (entry : Theme_choice.entry) -> entry.light)
+          all_entries
+  in
   let native_count =
     List.fold_left
       (fun count (entry : Theme_choice.entry) ->
         if entry.lifted = 0 then count + 1 else count)
       0 entries
   in
+  let show_sample = rows >= 20 in
+  let chrome_rows = if show_sample then 11 else 8 in
+  let content_height = max 1 (rows - chrome_rows) in
+  let cursor =
+    max 0 (min state.theme_cursor (max 0 (List.length entries - 1)))
+  in
+  let scroll = max 0 (cursor - content_height + 1) in
+  let lift_on = Masc_tui_theme.lift_is_enabled () in
+  let name_width = theme_name_width ~cols in
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s  %s"
        (screen_title
-          (Printf.sprintf " MASC Themes · %d bundled · %d native-pass"
+          (Printf.sprintf " MASC Themes · %d themes · %d native-pass"
              (List.length entries) native_count))
        (config_pane_strip state)
        (connection_badge state));
   box_divider buf cols;
-  let chosen = state.theme_choice in
-  let content_height = max 1 (rows - 7) in
-  let cursor = max 0 (min state.theme_cursor (List.length entries - 1)) in
-  let scroll = max 0 (cursor - content_height + 1) in
-  (* The count in the last column is the number of measured colours that sit
-     under the readable floor. What happens to them depends on [tui]
-     lift_colours: with the lift on they are raised, with it off they are
-     drawn as the scheme's author published them. The same number means two
-     different things, so the heading has to say which one, or a reader with
-     the lift off reads "3 lifted" about three colours nothing lifted. *)
-  let lift_on = Masc_tui_theme.lift_is_enabled () in
-  let name_width = theme_name_width ~cols in
   box_line_styled buf cols ~style:Ansi.dim
     ("  " ^ fit_width "theme" (name_width + 2) ^ " "
      ^ fit_width "colours" 16 ^ "  " ^ fit_width "page" 9 ^ " "
      ^ fit_width "contrast" 12)
   ;
-  box_line_styled buf cols ~style:Ansi.dim
-    (if lift_on then
-       "  order: least assistance, then name · native 7/7=no lift · lift N/7=N raised"
-     else
-       "  order: fewest low colours, then name · native 7/7=all pass · N/7 low=below 4.5:1");
+  let filter_tag =
+    let chip label active count =
+      if active then "[" ^ label ^ " " ^ string_of_int count ^ "]"
+      else label ^ " " ^ string_of_int count
+    in
+    Printf.sprintf "Filter: [f] %s · %s · %s"
+      (chip "All" (state.theme_filter = `All) (List.length all_entries))
+      (chip "Dark" (state.theme_filter = `Dark) dark_count)
+      (chip "Light" (state.theme_filter = `Light) light_count)
+  in
+  let explanation =
+    if cols >= 92 then
+      "  ·  "
+      ^ (if lift_on then "native 7/7=no lift · lift N/7=N raised"
+         else "native 7/7=all pass · N/7 low=below 4.5:1")
+    else ""
+  in
+  box_line_styled buf cols ~style:Ansi.dim ("  " ^ filter_tag ^ explanation);
+  let chosen = state.theme_choice in
   List.iteri
     (fun index (entry : Theme_choice.entry) ->
       if index >= scroll && index < scroll + content_height then begin
@@ -15395,26 +15425,13 @@ let render_themes (state : state) =
           | Some name -> String.equal name entry.name
           | None -> false
         in
-        (* The scheme drawn in its own colours. A name and the word "dark"
-           say almost nothing about whether a reader will like a palette; two
-           dozen cells of it say most of what they need. Each block is painted
-           as background so the colour fills the cell rather than being a
-           glyph's worth of it. *)
         let swatch =
           entry.Theme_choice.swatch
           |> List.map (fun rgb ->
-               (* SSOT-R10: the theme owns projected-background bytes. The
-                  projection also folds the terminal's capability in, which
-                  the raw truecolor sprintf this replaces never did. *)
                Masc_tui_theme.Sgr.background (Masc_tui_terminal_palette.best_color rgb)
                ^ "  \027[49m")
           |> String.concat ""
         in
-        (* Built in two halves with the swatch spliced between them. The name
-           is fitted before the ANSI swatch is attached: printf pads bytes,
-           not terminal cells, while [fit_width] keeps the following columns
-           fixed even for a long or wide name. The swatch itself must never
-           pass through a printf width because it is mostly escape bytes. *)
         let row =
           Printf.sprintf "  %s %s " (if picked then chosen_mark else " ")
             (fit_width (Terminal_text.single_line entry.name) name_width)
@@ -15432,12 +15449,30 @@ let render_themes (state : state) =
   for _ = drawn to content_height - 1 do
     box_empty buf cols
   done;
+  if show_sample then begin
+    box_divider buf cols;
+    box_line buf cols
+      (Printf.sprintf "  Sample: %s[● Ok]%s  %s[▲ Warn]%s  %s[× Bad]%s  %s[◆ Info]%s  %s[@keeper]%s  %s[⚡ tool]%s"
+         (Theme.ok ()) Ansi.reset
+         (Theme.warn ()) Ansi.reset
+         (Theme.bad ()) Ansi.reset
+         (Theme.info ()) Ansi.reset
+         (Theme.keeper_origin ()) Ansi.reset
+         (Theme.tool_origin ()) Ansi.reset);
+    box_line buf cols
+      (Printf.sprintf "  Syntax: %slet%s x = %s\"val\"%s in %s123%s  %s(+gain)%s  %s(-loss)%s"
+         Theme.Syntax.keyword Ansi.reset
+         Theme.Syntax.string Ansi.reset
+         Theme.Syntax.code_number Ansi.reset
+         Theme.Syntax.diff_added Ansi.reset
+         Theme.Syntax.diff_removed Ansi.reset);
+  end;
   box_line_styled buf cols ~style:Ansi.dim
     (match chosen with
      | None ->
-       "  following the terminal's own colours \xe2\x80\x94 Enter picks a theme"
+       "  following the terminal's own colours \xe2\x80\x94 Enter picks a theme, f filters"
      | Some name ->
-       Printf.sprintf "  %s \xe2\x80\x94 Enter picks another, x follows the terminal again"
+       Printf.sprintf "  %s \xe2\x80\x94 Enter picks another, x follows terminal, f filters"
          (Terminal_text.single_line name));
   box_bottom buf cols;
   Buffer.add_string buf

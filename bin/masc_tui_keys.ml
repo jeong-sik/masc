@@ -377,6 +377,8 @@ let for_surface = function
           ~help:"edit the selected param; on themes, use that colour scheme"
       ; b Act "x" "default / clear"
           ~help:"params return to default; prompts clear override; themes follow terminal colours"
+      ; b Act "f" "filter"
+          ~help:"on themes, cycle All / Dark / Light schemes"
       ; b Act "Esc" "overview"
       ; b Meta "r" "reload"
       ; b Meta "Tab" "next"

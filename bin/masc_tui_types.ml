@@ -2718,6 +2718,7 @@ type state = {
      terminal -- which is why this is an option of an option: the outer one
      says whether a preview is running at all. *)
   mutable theme_before_preview: string option option;
+  mutable theme_filter: [ `All | `Dark | `Light ];
   (* The prompt catalog. One value rather than a snapshot option beside an
      error option: the pair could not say "asked, waiting", so this pane drew
      an empty catalog while its first read was in flight. *)
@@ -4005,6 +4006,7 @@ let create_state
   theme_choice = None;
   theme_cursor = 0;
   theme_before_preview = None;
+  theme_filter = `All;
   prompts = Masc_tui_fetched.initial;
   prompts_cursor = 0;
   presets_snapshot = None;

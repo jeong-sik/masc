@@ -3,6 +3,7 @@ type invalid =
   | Verification_pending_verdict
   | Verdict_authority_identity_required
   | Verdict_rejection_reason_required
+  | Verdict_cancel_requires_operator
   | Verification_id_mismatch of { expected : string; actual : string }
   | Invalid_transition
 
@@ -261,18 +262,32 @@ let decide_verdict
       (match verdict with
        (* One verdict, two terminals. The obligation records which question
           was asked, so an approval ends the Task the way the producer asked
-          rather than the way this branch used to assume. *)
+          rather than the way this branch used to assume. RFC-0415 §4.4: a
+          cancellation is a permission, not a judgment — the terminal
+          [Cancelled] record of a cancel claim may carry only an operator's
+          signature, so the system lane's approval of a cancel claim is
+          refused here at the commit funnel, where every caller converges. *)
        | Masc_domain.Verdict_approved ->
-         let new_status =
-           match intent with
-           | Masc_domain.Complete_task -> done_status ~assignee ~now ~notes
-           | Masc_domain.Cancel_task ->
-             cancelled_status ~agent_name:assignee ~now ~reason:notes
-         in
-         provenance
-           ~producer:assignee
-           ~verification_id:actual_verification_id
-           { new_status; set_current = None }
+         (match intent with
+          | Masc_domain.Complete_task ->
+            provenance
+              ~producer:assignee
+              ~verification_id:actual_verification_id
+              { new_status = done_status ~assignee ~now ~notes
+              ; set_current = None
+              }
+          | Masc_domain.Cancel_task ->
+            (match authority with
+             | Masc_domain.Human_operator _ ->
+               provenance
+                 ~producer:assignee
+                 ~verification_id:actual_verification_id
+                 { new_status =
+                     cancelled_status ~agent_name:assignee ~now ~reason:notes
+                 ; set_current = None
+                 }
+             | Masc_domain.System_llm_agent _ ->
+               Error Verdict_cancel_requires_operator))
        | Masc_domain.Verdict_rejected { reason } ->
          if String.equal (String.trim reason) ""
          then Error Verdict_rejection_reason_required

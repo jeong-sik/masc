@@ -56,7 +56,7 @@ let rendered_with_lookup () =
   in
   match
     AR.build_prompt
-      ~question:(AR.Completion { completion_contract = None; required_evidence = []; few_shot_block = "" })
+      ~question:(AR.Completion { completion_contract = None; required_evidence = []; evidence_posture = AR.Note_only; few_shot_block = "" })
       ~lookup
       request
   with
@@ -106,6 +106,7 @@ let test_every_section_template_renders () =
              (AR.Completion
                 { completion_contract = Some [ marker "contract_item" ]
                 ; required_evidence = [ marker "evidence_item" ]
+                ; evidence_posture = AR.Usable_artifacts 2
                 ; few_shot_block = marker "few_shot_block"
                 })
            request
@@ -122,7 +123,11 @@ let test_every_section_template_renders () =
             pinned that it landed; a template that stopped naming the variable
             would have dropped it in silence. *)
          check bool (label ^ ": the calibration block rendered") true
-           (Astring.String.is_infix ~affix:(marker "few_shot_block") text))
+           (Astring.String.is_infix ~affix:(marker "few_shot_block") text);
+         check bool (label ^ ": the evidence posture tag rendered") true
+           (Astring.String.is_infix ~affix:"<evidence_posture>" text);
+         check bool (label ^ ": the evidence posture count reached the model")
+           true (Astring.String.is_infix ~affix:"2개" text))
     cases
 ;;
 
@@ -233,6 +238,7 @@ let completion_prompt () =
         (AR.Completion
            { completion_contract = Some [ marker "contract_item" ]
            ; required_evidence = [ marker "evidence_item" ]
+           ; evidence_posture = AR.Note_only
            ; few_shot_block = ""
            })
       ~lookup:AR.No_lookup_surface
@@ -272,6 +278,7 @@ let test_the_cancellation_prompt_does_not_demand_completion_evidence () =
        were split by question. *)
     ; "the completion notes identifier", "completion_notes"
     ; "avoidance as a rejection signal", "회피 패턴"
+    ; "the evidence posture clause", "<evidence_posture>"
     ]
 ;;
 
@@ -412,7 +419,7 @@ let test_the_completion_lookup_still_asks_for_evidence () =
     match
       AR.build_prompt
         ~question:
-          (AR.Completion { completion_contract = None; required_evidence = []; few_shot_block = "" })
+          (AR.Completion { completion_contract = None; required_evidence = []; evidence_posture = AR.Note_only; few_shot_block = "" })
         ~lookup:
           (AR.Lookup_tools { schemas; dispatch; root_layout = [ marker "root_layout" ] })
         request

@@ -33,6 +33,14 @@ let verification_cancellation_contract_context =
 let verification_contract = "verification.contract"
 let verification_required_evidence = "verification.required_evidence"
 
+let verification_evidence_posture_note_only =
+  "verification.evidence_posture.note_only"
+;;
+
+let verification_evidence_posture_usable =
+  "verification.evidence_posture.usable"
+;;
+
 (* One key per typed degraded-observation state. Each names what the Keeper may
    and may not conclude from that state, which is prose about a data condition
    and belongs beside the other prompt text rather than inside the projection

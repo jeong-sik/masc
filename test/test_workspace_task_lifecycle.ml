@@ -257,6 +257,56 @@ let test_verdict_is_not_an_agent_action () =
     [ "approve"; "reject" ]
 ;;
 
+(* RFC-0415 §4.4: a cancel claim's terminal [Cancelled] record may carry only
+   an operator's signature. The system lane's approval of a cancel claim is
+   refused at the commit funnel itself, not merely at the review entrance. *)
+let awaiting_cancel =
+  D.AwaitingVerification
+    { assignee = owner
+    ; started_at = now
+    ; submitted_at = now
+    ; intent = Cancel_task
+    ; verification_id = "vrf-1"
+    }
+;;
+
+let test_system_approval_of_cancel_claim_is_refused () =
+  match
+    L.decide_verdict
+      ~authority:(D.System_llm_agent { agent_run_id = "fusion-run-9" })
+      ~verdict:D.Verdict_approved
+      ~task_id:"task-1"
+      ~verification_id:"vrf-1"
+      ~task_status:awaiting_cancel
+      ~now
+      ~notes:"the upstream schema landed instead"
+  with
+  | Error L.Verdict_cancel_requires_operator -> ()
+  | Ok _ | Error _ ->
+    failwith "a system signature must not end a cancel claim as Cancelled"
+;;
+
+let test_operator_approval_still_cancels_a_cancel_claim () =
+  match
+    L.decide_verdict
+      ~authority:(D.Human_operator { operator_id = "op-1" })
+      ~verdict:D.Verdict_approved
+      ~task_id:"task-1"
+      ~verification_id:"vrf-1"
+      ~task_status:awaiting_cancel
+      ~now
+      ~notes:"the upstream schema landed instead"
+  with
+  | Ok
+      { decision = { new_status = D.Cancelled { cancelled_by; _ }; _ }
+      ; authority = D.Human_operator { operator_id }
+      ; _ }
+    when String.equal cancelled_by owner && String.equal operator_id "op-1" ->
+    ()
+  | Ok _ | Error _ ->
+    failwith "operator approval must still end a cancel claim as Cancelled"
+;;
+
 (* The verdict path is separate from agent actions. The producer boundary owns
    authentication; the leaf still refuses empty provenance so audit identity
    cannot disappear. *)
@@ -405,4 +455,6 @@ let () =
   test_cancel_cannot_undo_a_finished_task ();
   test_approval_ends_the_task_the_way_it_was_asked ();
   test_a_rejected_cancellation_returns_to_its_producer ();
+  test_system_approval_of_cancel_claim_is_refused ();
+  test_operator_approval_still_cancels_a_cancel_claim ();
   Printf.printf "workspace_task_lifecycle: all tests passed\n%!"

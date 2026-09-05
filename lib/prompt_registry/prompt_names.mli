@@ -35,6 +35,14 @@ val verification_cancellation : string
 val verification_cancellation_contract_context : string
 val verification_contract : string
 val verification_required_evidence : string
+val verification_evidence_posture_note_only : string
+(** Rendered into a completion question whose fixed snapshot holds zero
+    artifacts the judge can open — every item a note or an unusable
+    reference. The clause that keeps note-only silence from reading as
+    assent (task-785, RFC-0415 §4.3). *)
+val verification_evidence_posture_usable : string
+(** Rendered into a completion question whose snapshot holds [n] readable,
+    untruncated artifacts. Variable: [usable_artifact_count]. *)
 val keeper_observation_recovered_current_task : string
 val keeper_observation_current_task_absent : string
 val keeper_observation_current_task_absent_in_recovery : string

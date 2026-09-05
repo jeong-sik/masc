@@ -11177,6 +11177,11 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
     [ Ansi.bold, "  RUN"
     ; (Masc_tui_theme.tone Masc_tui_theme.Accent), "  Flow: Question \xe2\x86\x92 Panel \xe2\x86\x92 Judge \xe2\x86\x92 Evidence"
     ; Ansi.reset, "  Pipeline: " ^ pipeline
+    ; ( Ansi.reset
+      , Printf.sprintf "  Actions: %s[Y]%s Copy Link   %s[PgUp/PgDn]%s Page   %s[Esc]%s Back to Runs"
+          (Theme.info ()) Ansi.reset
+          (Theme.info ()) Ansi.reset
+          (Theme.info ()) Ansi.reset )
     ; ( Ansi.dim
       , "  Link: "
         ^ Link.reference Fusion_run
@@ -15741,23 +15746,105 @@ let render_surface (state : state) =
        | Some seq -> render_system_log_detail state seq)
   | Schedules -> render_schedules state
 
+let help_surface_name (surface : surface) =
+  match surface with
+  | Overview -> "Overview"
+  | Acting -> "Activity"
+  | Metrics -> "Metrics"
+  | Keepers _ -> "Keepers"
+  | Memory -> "Memory"
+  | Approvals -> "Approvals"
+  | Board -> "Board"
+  | Planning | Verification | Harness -> "Planning"
+  | Fusion -> "Fusion"
+  | Repositories | Code | Changes -> "Workspace"
+  | Runtime | Lanes | Clients -> "Runtime"
+  | Config | Resources | Tools -> "Config"
+  | Connectors | Schedules -> "Keepers"
+  | System_logs -> "Activity"
+
+let help_ascii_banner ~cols (state : state) =
+  let inner_width = max 1 (framed_inner_width cols) in
+  let surface_label = help_surface_name state.view in
+  let hints_status = if state.hints_visible then "on" else "off" in
+  let bar_char = "\xe2\x94\x80" in
+  let repeat_utf8 str count =
+    let buf = Buffer.create (String.length str * count) in
+    for _ = 1 to count do Buffer.add_string buf str done;
+    Buffer.contents buf
+  in
+  if inner_width >= 72 then
+    [ "  " ^ (Theme.info ()) ^ "\xe2\x95\x94\xe2\x95\xa6\xe2\x95\x97\xe2\x95\x94\xe2\x95\x90\xe2\x95\x97\xe2\x95\x94\xe2\x95\x90\xe2\x95\x97\xe2\x95\x94\xe2\x95\x90\xe2\x95\x97" ^ Ansi.reset
+      ^ "  " ^ Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "M A S C" ^ Ansi.reset
+      ^ "  \xc2\xb7  " ^ Ansi.bold ^ "Multi-Agent System Coordinator" ^ Ansi.reset
+    ; "  " ^ (Theme.info ()) ^ "\xe2\x95\x91\xe2\x95\x91\xe2\x95\x91\xe2\x95\xa0\xe2\x95\x90\xe2\x95\xa3\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x97\xe2\x95\x91    " ^ Ansi.reset
+      ^ Ansi.dim ^ "Interactive Autonomous Fleet Workspace & Operations" ^ Ansi.reset
+    ; "  " ^ (Theme.info ()) ^ "\xe2\x95\x9a \xe2\x95\xa9\xe2\x95\x9a \xe2\x95\xa9\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d" ^ Ansi.reset
+      ^ "  Active: " ^ (Theme.warn ()) ^ "[ " ^ surface_label ^ " ]" ^ Ansi.reset
+      ^ Ansi.dim ^ "  \xc2\xb7  [?] / [Esc] Close  \xc2\xb7  [h] Hints (" ^ hints_status ^ ")" ^ Ansi.reset
+    ; "  " ^ (Theme.recede ()) ^ repeat_utf8 bar_char (min 72 (inner_width - 4)) ^ Ansi.reset
+    ; ""
+    ]
+  else
+    [ "  " ^ Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "[ MASC · Multi-Agent System Coordinator ]" ^ Ansi.reset
+    ; "  Active: " ^ (Theme.warn ()) ^ "[ " ^ surface_label ^ " ]" ^ Ansi.reset
+      ^ Ansi.dim ^ " · [?] Close · [h] Hints (" ^ hints_status ^ ")" ^ Ansi.reset
+    ; "  " ^ (Theme.recede ()) ^ repeat_utf8 bar_char (max 10 (inner_width - 4)) ^ Ansi.reset
+    ; ""
+    ]
+
 (* The [?] help screen: every binding, grouped by the surface that answers
    it. The rows come from Masc_tui_keys -- the same table the footers read --
    so the two displays cannot drift apart. A key added to the dispatch gets
    its row there, once. *)
 let help_lines (state : state) =
+  let format_key key =
+    let trimmed = String.trim key in
+    if String.starts_with ~prefix:"[" trimmed || String.starts_with ~prefix:"/" trimmed then
+      trimmed
+    else
+      "[" ^ trimmed ^ "]"
+  in
   let section (title, entries) =
-    (Ansi.bold ^ title ^ Ansi.reset)
+    let is_current = String.ends_with ~suffix:" (here)" title in
+    let header_line =
+      if is_current then
+        let base_title = String.sub title 0 (String.length title - 7) in
+        (Theme.warn ()) ^ "\xe2\x97\x88 " ^ Ansi.bold ^ (Theme.info ())
+        ^ "ACTIVE: " ^ String.uppercase_ascii base_title ^ Ansi.reset
+      else if String.equal title "Global" then
+        (Theme.info ()) ^ "\xe2\x97\x88 " ^ Ansi.bold
+        ^ "GLOBAL NAVIGATION" ^ Ansi.reset
+      else
+        Ansi.dim ^ "\xe2\x97\x87 " ^ Ansi.reset ^ Ansi.bold ^ title ^ Ansi.reset
+    in
+    header_line
     :: List.map
          (fun (key, action) ->
-           Printf.sprintf "  %s%-18s%s %s" (Masc_tui_theme.tone Masc_tui_theme.Accent) key Ansi.reset action)
+           Printf.sprintf "  %s%-16s%s %s"
+             (Masc_tui_theme.tone Masc_tui_theme.Accent)
+             (format_key key)
+             Ansi.reset
+             action)
          entries
     @ [ "" ]
   in
   let slash_commands =
-    (Ansi.bold ^ "Slash commands" ^ Ansi.reset)
+    ((Theme.warn ()) ^ "\xe2\x9a\xa1 " ^ Ansi.bold ^ "SLASH COMMANDS" ^ Ansi.reset)
     :: List.map
-         (fun line -> "  " ^ (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ line ^ Ansi.reset)
+         (fun line ->
+           let line = String.trim line in
+           let word, desc =
+             match String.index_opt line ' ' with
+             | Some idx ->
+                 (String.sub line 0 idx, String.sub line idx (String.length line - idx))
+             | None -> (line, "")
+           in
+           Printf.sprintf "  %s%-16s%s%s"
+             (Theme.warn ())
+             word
+             Ansi.reset
+             desc)
          Masc_tui_command.help_lines
     @ [ "" ]
   in
@@ -17040,7 +17127,8 @@ let render_context_inspector state =
 let help_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  ( List.length (Masc_tui_help.sheet ~cols (help_lines state))
+  let header = help_ascii_banner ~cols state in
+  ( List.length (Masc_tui_help.sheet ~header ~cols (help_lines state))
   , framed_content_height ~rows )
 
 (* The [:] palette: a typed filter over every jump the strip and roster
@@ -17095,13 +17183,14 @@ let render_help (state : state) =
   let buf = Buffer.create 4096 in
   framed_top buf cols;
   framed_line buf cols
-    (screen_title " Help" ^ "  " ^ Ansi.dim
+    (screen_title " MASC Cheat Sheet" ^ "  " ^ Ansi.dim
     ^ "hints "
     ^ (if state.hints_visible then "on" else "off")
-    ^ " \xc2\xb7 persist: [tui] hints_visible in runtime.toml" ^ Ansi.reset);
+    ^ " \xc2\xb7 [h] toggle \xc2\xb7 [Esc] close" ^ Ansi.reset);
   framed_divider buf cols;
+  let header = help_ascii_banner ~cols state in
   let lines = help_lines state in
-  let rendered_rows = Masc_tui_help.sheet ~cols lines in
+  let rendered_rows = Masc_tui_help.sheet ~header ~cols lines in
   let content_height = framed_content_height ~rows in
   let scroll =
     Masc_tui_scroll.normalize

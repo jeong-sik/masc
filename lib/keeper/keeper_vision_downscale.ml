@@ -1,8 +1,6 @@
 (** Image downscaling boundary for keeper vision calls.
     RFC-0414 follow-up / Issue #33075. *)
 
-let default_max_dimension = 1568
-
 let max_dimension () = Env_config_keeper.KeeperVision.max_dimension ()
 
 (* Wall-clock budget for one scaler process.

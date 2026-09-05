@@ -24,7 +24,7 @@
     onto a lock-free stack and returns. The reader drains the stack under a
     lock only it takes, and folds the events into the site table there.
 
-    The stack is bounded. When {!max_pending_events} events wait undrained,
+    The stack is bounded. When [max_pending_events] events wait undrained,
     new allocations stop being tracked and {!report} counts them in
     [dropped_samples]; blocks already tracked always report their promotion
     and deallocation, so the live table never inflates. Read the report at
@@ -40,7 +40,6 @@
     before the domain pool exists covers the pool. *)
 
 val default_sampling_rate : float
-val max_pending_events : int
 val max_sites : int
 val overflow_site_key : string
 
@@ -52,8 +51,6 @@ val start : sampling_rate:float -> unit
 val stop : unit -> unit
 (** Stop the profile started by {!start}, in every domain sharing it, and
     discard it. Does nothing when none was started. *)
-
-val is_sampling : unit -> bool
 
 type site_totals =
   { key : string  (** the call stack, top frame first, one frame per line *)
@@ -86,7 +83,7 @@ val report : top:int -> report
 val report_to_yojson : report -> Yojson.Safe.t
 
 val key_of_callstack : Printexc.raw_backtrace -> string
-(** The site key for a call stack: of the top {!callstack_frames} frames,
+(** The site key for a call stack: of the top [callstack_frames] frames,
     the first {!frames_per_key} that are not Stdlib or Yojson frames, each
     formatted as [Printexc.Slot.format] does, one per line. Those two
     libraries are skipped because their frames say how a value was built
@@ -101,8 +98,6 @@ val unattributed_marker : string
 (** First line of a key whose sampled window held no masc frame. *)
 
 val frames_per_key : int
-
-val callstack_frames : int
 
 module For_testing : sig
   type block

@@ -433,18 +433,6 @@ let report_persistence_read_drop_counted ~surface ~reason ~path ~detail =
         ())
     ~surface ~reason ~path ~detail
 
-let result_to_option_logged ~on_drop ~surface ~reason ~path = function
-  | Ok value -> Some value
-  | Error detail ->
-    report_persistence_read_drop ~on_drop ~surface ~reason ~path ~detail;
-    None
-
-(** Read JSON file via Eio-native I/O (Fs_compat).
-    Drop-in replacement for [Yojson.Safe.from_file] in Eio fiber contexts.
-    Falls back to blocking I/O when Eio fs is not set.
-
-    Uses [parse_json_safe] so we skip the UTF-8 repair pass on the common
-    path where the file is already valid UTF-8. *)
 let read_json_eio (path : string) : Yojson.Safe.t =
   let content = Fs_compat.load_file path in
   match parse_json_safe ~context:path content with

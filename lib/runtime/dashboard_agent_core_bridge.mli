@@ -181,9 +181,6 @@ val status_to_yojson : status -> Yojson.Safe.t
 val sample_to_yojson : sample -> Yojson.Safe.t
 (** JSON projection of the twelve-signal sample fields. *)
 
-val sample_entry_to_yojson : sample * float -> Yojson.Safe.t
-(** JSON projection of [(sample, recorded_at)]. *)
-
 val recent_json : ?provider:string -> ?limit:int -> unit -> Yojson.Safe.t
 (** Dashboard payload for
     [GET /api/v1/dashboard/agent_core/telemetry/recent?provider=P&limit=N].

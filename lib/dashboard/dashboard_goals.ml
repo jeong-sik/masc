@@ -313,8 +313,3 @@ let dashboard_goals_tree_json ~(config : Workspace.config) =
     ~read_pending:
       Keeper_approval_queue.list_pending_dashboard_json_for_workspace
     ~config
-
-module For_testing = struct
-  let dashboard_goals_tree_json_with_pending_reader =
-    dashboard_goals_tree_json_with_pending_reader
-end

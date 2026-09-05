@@ -11,9 +11,6 @@ type journaled_event =
   ; event : Keeper_chat_events.keeper_chat_event
   }
 
-val codec_version : int
-(** Current envelope version. Written as ["v"]; decode rejects any other. *)
-
 val page_default_limit : int
 (** How many lines one read of the journal returns when the reader names no
     count (RFC-0412 §3.2, the v2 events endpoint). *)

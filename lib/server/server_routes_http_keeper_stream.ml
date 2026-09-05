@@ -3245,7 +3245,6 @@ module For_testing = struct
   let control_turn_delivery = control_turn_delivery
   let surface_context_to_instructions = surface_context_to_instructions
   let keeper_tool_failure_log_details = keeper_tool_failure_log_details
-  let keeper_chat_stream_headers = keeper_chat_stream_headers
   let note_operation_wire_event = note_operation_wire_event
   let take_operation_wire_stream = take_operation_wire_stream
   let synthesize_wire_terminal_on_settle = synthesize_wire_terminal_on_settle

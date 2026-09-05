@@ -690,5 +690,4 @@ module For_testing = struct
     | Committed
     | Deferred of string
 
-  let group_pending_by_goal = group_pending_by_goal
 end

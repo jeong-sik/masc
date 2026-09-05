@@ -73,11 +73,6 @@ type event =
     being unobserved, and an allowlist that only records its refusals still
     cannot answer "where did this keeper go". *)
 
-val request_line_max_bytes : int
-(** 8 KiB. A CONNECT authority that needs more than this is not a hostname,
-    and the cap is what keeps a client from holding a fiber open by never
-    sending a newline. *)
-
 module For_testing : sig
   val address_failed_to_answer : exn -> bool
   (** Whether a failed connect earns trying the next address.

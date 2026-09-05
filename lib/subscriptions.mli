@@ -49,7 +49,6 @@ module SubscriptionStore : sig
   val get : string -> subscription option
   val find_matching :
     resource:resource_type -> resource_id:string -> subscription list
-  val get_for_subscriber : string -> subscription list
   val queue_notification : string -> notification -> unit
   val pop_notifications : string -> notification list
   val list_all : unit -> subscription list

@@ -225,7 +225,6 @@ module For_testing : sig
     Agent_core.Checkpoint.t -> Agent_core.Checkpoint.t option
 
   val max_tokens_truncation_error : Agent_core.Error.t -> bool
-  val thinking_was_enabled : bool option -> bool
 
   (** What a max-tokens rejection owes the checkpoint. Retrying without
       thinking is a remedy for a budget spent thinking and applies only when

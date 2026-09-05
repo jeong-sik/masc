@@ -192,10 +192,6 @@ val repositories_toml_path : base_path:string -> string
 (** [<base_path>/.masc/config/repositories.toml]. Direct derivation from
     [base_path]. *)
 
-val config_signature_exists : string -> bool
-(** [config_signature_exists dir] checks whether [dir] looks like a valid
-    MASC config directory (has runtime.toml, prompts/, or keepers/). *)
-
 (** {1 Env introspection}
 
     Sanitized env var readers that strip inherited test values when running

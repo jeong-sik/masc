@@ -77,8 +77,6 @@ val resolve_overrides :
 
 (** {1 Typed Keeper setting schema and validation} *)
 
-val current_schema_version : int
-
 type validation_severity =
   | Error
   | Warning

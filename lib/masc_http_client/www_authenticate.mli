@@ -57,12 +57,6 @@ val parse : string -> (challenge list, fault) result
     they were written. Nothing is guessed: a value the grammar does not
     cover is an [Error] naming where it stopped, never a shorter list. *)
 
-val find_param : challenge list -> scheme:string -> name:string -> string option
-(** [find_param challenges ~scheme ~name] is the value of [name] in the
-    first challenge under [scheme] that carries it, both compared without
-    regard to case. A challenge under [scheme] that lacks the parameter is
-    passed over; the next one may carry it. *)
-
 val resource_metadata_of_headers : (string * string) list -> string option
 (** RFC 9728 5.1: where a protected resource says its metadata is. The
     value of [resource_metadata] in the first Bearer challenge that names

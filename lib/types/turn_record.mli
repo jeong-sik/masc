@@ -252,7 +252,6 @@ val tool_surface_of_json :
 val prompt_block_to_json : prompt_block -> Yojson.Safe.t
 val input_component_id_to_string : input_component_id -> string
 val turn_kind_to_string : turn_kind -> string
-val raw_trace_run_ref_to_json : raw_trace_run_ref -> Yojson.Safe.t
 
 val to_json : t -> Yojson.Safe.t
 

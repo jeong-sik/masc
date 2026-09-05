@@ -43,8 +43,6 @@ type event =
    that needs more than this is not a hostname, and the cap is what keeps a
    client from holding a fiber open by never sending the blank line. *)
 let request_head_max_bytes = 8 * 1024
-let request_line_max_bytes = request_head_max_bytes
-
 (* Every address the name resolves to, in the order the resolver gave them.
    Taking the first alone meant a host whose first record was unreachable --
    an IPv6 address on a host with no IPv6 route, a machine that is down in a

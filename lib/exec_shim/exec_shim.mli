@@ -223,12 +223,6 @@ val observe_supported : unit -> bool
     seccomp filtering, read through the syscalls themselves. Always [false]
     off Linux. *)
 
-val observe_unsupported_code : string
-(** ["observe_unsupported"]: the [shim_error] prefix when a request asks for
-    a box this host cannot build. The shim refuses; it never runs unboxed. *)
-
-val observe_scratch_code : string
-
 type execution_plan =
   | Run_effect  (** unrestricted, as before v3 *)
   | Run_boxed of

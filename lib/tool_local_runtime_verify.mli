@@ -16,13 +16,6 @@ module For_testing : sig
   (** Regression seam for the fail-closed explicit-pool selector. *)
 end
 
-val provider_health_reachable : status:int option -> bool
-(** [provider_health_reachable ~status] is [true] iff
-    [status = Some 200].  The health endpoint is a status-code-only
-    check. Drift to body-content validation would change "what counts
-    as reachable" and need a synchronized update with the health-check
-    probe. *)
-
 val runtime_verify_json :
   ?runtime_pool:string ->
   ?expected_slots:int ->

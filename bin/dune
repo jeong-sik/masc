@@ -286,6 +286,12 @@
  (libraries masc_tui_theme))
 
 (library
+ (name masc_tui_chart)
+ (wrapped false)
+ (modules masc_tui_chart)
+ (libraries masc_tui_theme masc_tui_message_layout))
+
+(library
  (name masc_tui_ask_projection)
  (wrapped false)
  (modules masc_tui_ask_projection)
@@ -1104,6 +1110,7 @@
   masc_tui_json
   masc_tui_render_tools
   masc_tui_context_bars
+  masc_tui_chart
   masc_tui_tool_tree
   masc_tui_tool_detail
   masc_tui_terminal_write_repair

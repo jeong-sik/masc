@@ -571,13 +571,29 @@ let test_auto_judge_allows_a_clean_observe_run () =
    not an answer either: the request keeps the judge it would have had. *)
 let test_auto_judge_defers_a_refused_observe_run () =
   with_auto_judge @@ fun base_path ->
-  Keeper_gate.decide
-    ~keeper_always_allow:false
-    ~observe:(fun () ->
-      Keeper_gate.Observed_refused
-        { status = Unix.WEXITED 2; stderr = "sh: 1: cannot create w: Permission denied" })
-    (boxed_request base_path)
-  |> deferred_to_the_judge "a refused observe run"
+  let stderr = "sh: 1: cannot create w: Permission denied" in
+  let decision =
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      ~observe:(fun () ->
+        Keeper_gate.Observed_refused { status = Unix.WEXITED 2; stderr })
+      (boxed_request base_path)
+  in
+  deferred_to_the_judge "a refused observe run" decision;
+  (* And the judge is shown what the box refused: the row the deferral wrote
+     carries the status and the program's own stderr (RFC-0422 §3.3). *)
+  match decision with
+  | Keeper_gate.Deferred { approval_id; _ } ->
+    (match Keeper_approval_queue.get_pending_entry_for_workspace ~base_path ~id:approval_id with
+     | Ok (Some { observation = Some refusal; _ }) ->
+       check bool "exit 2 on the row" true
+         (refusal.observed_status = Keeper_approval_queue_rules_types.Observed_exit 2);
+       check string "the program's stderr on the row" stderr refusal.observed_stderr;
+       check int "nothing cut at this size" 0 refusal.observed_stderr_omitted_bytes
+     | Ok (Some { observation = None; _ }) -> fail "the row carries no observation"
+     | Ok None -> fail "the deferral wrote no row"
+     | Error error -> fail (Keeper_approval_queue.storage_error_to_string error))
+  | Keeper_gate.Allow _ | Keeper_gate.Unavailable _ -> ()
 ;;
 
 (* No box -- a Docker guest, a shim that predates it -- is the world before

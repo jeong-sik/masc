@@ -93,8 +93,39 @@ type summary_attempt_disposition =
       summary_attempt_pre_worker_unavailable
   | Summary_attempt_settled
 
+(** How a request ended when the executor ran it boxed (RFC-0422): the box
+    refused every write outside a scratch and every socket, and the program
+    ended with this status. *)
+type observed_status =
+  | Observed_exit of int
+  | Observed_signal of int
+  | Observed_stopped of int
+
+(** What the judge is shown of a refused observe run: the status and the
+    tail of what the program wrote to stderr. [observed_stderr_omitted_bytes]
+    is how many leading bytes the bound cut, so a reader can tell a short
+    stderr from a clipped one. *)
+type observed_refusal =
+  { observed_status : observed_status
+  ; observed_stderr : string
+  ; observed_stderr_omitted_bytes : int
+  }
+
+val observed_refusal :
+  max_stderr_bytes:int -> status:observed_status -> stderr:string -> observed_refusal
+(** The refusal with [stderr] bounded to its last [max_stderr_bytes], cut at a
+    UTF-8 character boundary. The tail rather than the head: the refused write
+    or socket is the last thing a program reports. *)
+
+val observed_refusal_to_yojson : observed_refusal -> Yojson.Safe.t
+val observed_refusal_of_yojson : Yojson.Safe.t -> (observed_refusal, string) result
+(** Closed decoder: [status.kind] must be [exit], [signal] or [stopped], and
+    every field is required. *)
+
 (** A pending request never owns or suspends a Keeper lane. [sequence] is the
-    durable queue-issued order identity; [requested_at] is observation only. *)
+    durable queue-issued order identity; [requested_at] is observation only.
+    [observation] is present when the Gate ran the request boxed before
+    deferring it (RFC-0422) and carries what the box refused. *)
 type pending_approval =
   { id : string
   ; keeper_name : string
@@ -105,6 +136,7 @@ type pending_approval =
   ; requested_at : float
   ; turn_id : int option
   ; request_context : Yojson.Safe.t option
+  ; observation : observed_refusal option
   ; task_id : string option
   ; goal_id : string option
   ; continuation_channel : Keeper_continuation_channel.t

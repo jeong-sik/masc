@@ -311,6 +311,49 @@ type skill_catalog_rejection = {
   scr_reason : skill_rejection_reason;
 }
 
+(** Where a configured Skill source stood when the catalog was built.
+
+    A source that is not [Skill_source_ready] contributes nothing, which is
+    the fact an operator asking "why is my Skill not loaded" needs first and
+    the one the screen could not answer: the catalog surfaces name skills,
+    never the roots they were looked for under. *)
+type skill_source_observation =
+  | Skill_source_ready of int
+      (** Candidate directories under the source root. Each is one Skill:
+          the scan is one level deep and reads that directory's SKILL.md. *)
+  | Skill_source_missing
+  | Skill_source_not_directory of string  (** The file kind found instead. *)
+  | Skill_source_unavailable of string  (** The operation that failed. *)
+  | Skill_source_unresolved
+      (** The configured anchor or path was refused, so no root was tried. *)
+
+type skill_catalog_source = {
+  scso_id : string;
+  scso_anchor : string;
+  scso_path : string option;
+      (** Configured path under the anchor. [None] for an absolute source,
+          whose location the server deliberately does not publish. *)
+  scso_access : string;
+  scso_observation : skill_source_observation;
+}
+(** One entry of the ordered discovery list, in the order it is consulted.
+    Earlier sources win, so the order is what decides which copy of a name
+    is effective. *)
+
+(** The [runtime.toml] Skill section as the catalog read it. *)
+type skill_catalog_config =
+  | Skill_config_configured of
+      { revision : string
+      ; resource_read_max_bytes : int option
+      }
+  | Skill_config_rejected of
+      { source_revision : string
+      ; diagnostics : string list
+      }
+      (** The section did not parse. The catalog still stands, on whatever
+          the defaults give, and nothing on screen used to say so. *)
+  | Skill_config_unreadable
+
 type skills_catalog_state =
   | Skills_ready
   | Skills_not_registered
@@ -319,6 +362,10 @@ type skills_catalog_state =
 
 type skills_catalog = {
   sc_state : skills_catalog_state;
+  sc_config : skill_catalog_config option;
+      (** [None] for every state but [Skills_ready], which is the only one
+          that carries a snapshot. *)
+  sc_sources : skill_catalog_source list;
   sc_surfaces : skills_catalog_surface list;
   sc_rejections : skill_catalog_rejection list;
 }

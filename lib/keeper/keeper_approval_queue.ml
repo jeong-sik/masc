@@ -531,6 +531,10 @@ let pending_entry_to_yojson
       , match request_context with
         | Some _ -> `Int exact_request_context_version
         | None -> `Null )
+    ; ( "observation"
+      , match entry.observation with
+        | Some refusal -> observed_refusal_to_yojson refusal
+        | None -> `Null )
     ; "task_id", Json_util.string_opt_to_json entry.task_id
     ; "goal_id", Json_util.string_opt_to_json entry.goal_id
       ; "continuation_channel", Keeper_continuation_channel.to_yojson entry.continuation_channel
@@ -1177,6 +1181,7 @@ let pending_entry_of_yojson ~base_path json =
           ; "turn_id"
           ; "request_context"
           ; "request_context_version"
+          ; "observation"
           ; "task_id"
           ; "goal_id"
           ; "continuation_channel"
@@ -1229,6 +1234,14 @@ let pending_entry_of_yojson ~base_path json =
              "%s.request_context_version must be an integer or null"
              surface)
     in
+    let* observation =
+      match List.assoc_opt "observation" fields with
+      | None | Some `Null -> Ok None
+      | Some json ->
+        (match observed_refusal_of_yojson json with
+         | Ok refusal -> Ok (Some refusal)
+         | Error detail -> Error (Printf.sprintf "%s.%s" surface detail))
+    in
     let* task_id = optional_string ~surface "task_id" fields in
     let* goal_id = optional_string ~surface "goal_id" fields in
     let* continuation_json = required_member ~surface "continuation_channel" fields in
@@ -1263,6 +1276,7 @@ let pending_entry_of_yojson ~base_path json =
       ; requested_at
       ; turn_id
       ; request_context
+      ; observation
       ; task_id
       ; goal_id
       ; continuation_channel
@@ -2424,6 +2438,7 @@ let create_entry
       ~input
       ?turn_id
       ?request_context
+      ?observation
       ?task_id
       ?goal_id
       ~continuation_channel
@@ -2440,6 +2455,7 @@ let create_entry
   ; requested_at = Unix.gettimeofday ()
   ; turn_id
   ; request_context
+  ; observation
   ; task_id
   ; goal_id
     ; continuation_channel
@@ -3912,6 +3928,7 @@ let submit_pending
       ~base_path
       ?turn_id
       ?request_context
+      ?observation
       ?task_id
       ?goal_id
       ?continuation_channel
@@ -3977,6 +3994,7 @@ let submit_pending
                  ~input
                  ?turn_id
               ?request_context
+              ?observation
               ?task_id
               ?goal_id
               ~continuation_channel

@@ -2667,8 +2667,36 @@ type skills_catalog_state =
   | Skills_uninitialized
   | Skills_invalid_workspace
 
+type skill_source_observation =
+  | Skill_source_ready of int
+  | Skill_source_missing
+  | Skill_source_not_directory of string
+  | Skill_source_unavailable of string
+  | Skill_source_unresolved
+
+type skill_catalog_source =
+  { scso_id : string
+  ; scso_anchor : string
+  ; scso_path : string option
+  ; scso_access : string
+  ; scso_observation : skill_source_observation
+  }
+
+type skill_catalog_config =
+  | Skill_config_configured of
+      { revision : string
+      ; resource_read_max_bytes : int option
+      }
+  | Skill_config_rejected of
+      { source_revision : string
+      ; diagnostics : string list
+      }
+  | Skill_config_unreadable
+
 type skills_catalog =
   { sc_state : skills_catalog_state
+  ; sc_config : skill_catalog_config option
+  ; sc_sources : skill_catalog_source list
   ; sc_surfaces : skills_catalog_surface list
   ; sc_rejections : skill_catalog_rejection list
   }
@@ -3035,6 +3063,92 @@ let decode_skill_snapshot_rejections json =
     decode_skill_catalog_rejection
     rejections_json
 
+(* One discovery source, as [/api/v1/skills] publishes it. The endpoint that
+   the Skill editor calls answers a different question -- it filters to the
+   read-write sources that resolved, because it is picking somewhere to write
+   -- so a source that is missing, read-only, or refused can only be read
+   here. *)
+let decode_skill_catalog_source json =
+  let* () =
+    validate_closed_object
+      ~label:"skill snapshot source"
+      ~allowed:[ "id"; "anchor"; "path"; "access"; "observation" ]
+      json
+  in
+  let* scso_id = required_nonempty_string_field json "id" in
+  let* scso_anchor = required_nonempty_string_field json "anchor" in
+  let* scso_path = optional_string_field json "path" in
+  let* scso_access = required_nonempty_string_field json "access" in
+  let* observation = required_object_field json "observation" in
+  let* kind = required_string_field observation "kind" in
+  let* scso_observation =
+    match kind with
+    | "ready" ->
+      let* candidates = required_nonnegative_int_field observation "candidates" in
+      Ok (Skill_source_ready candidates)
+    | "missing" -> Ok Skill_source_missing
+    | "not_directory" ->
+      let* file_kind = required_nonempty_string_field observation "file_kind" in
+      Ok (Skill_source_not_directory file_kind)
+    | "unavailable" ->
+      let* operation = required_nonempty_string_field observation "operation" in
+      Ok (Skill_source_unavailable operation)
+    | "unresolved" -> Ok Skill_source_unresolved
+    | unknown ->
+      Error
+        (Printf.sprintf "skill source observation has unknown kind %S" unknown)
+  in
+  Ok { scso_id; scso_anchor; scso_path; scso_access; scso_observation }
+
+(* The Skill section of runtime.toml as the catalog read it. A rejected
+   section still leaves a working catalog, which is why it has to be said:
+   nothing else on the screen changes when the operator's configuration stops
+   parsing. *)
+let decode_skill_catalog_config json =
+  let* kind = required_string_field json "kind" in
+  match kind with
+  | "configured" ->
+    let* () =
+      validate_closed_object
+        ~label:"skill snapshot config"
+        ~allowed:[ "kind"; "revision"; "resource_read_max_bytes" ]
+        json
+    in
+    let* revision = required_nonempty_string_field json "revision" in
+    let* resource_read_max_bytes =
+      optional_int_field json "resource_read_max_bytes"
+    in
+    Ok (Skill_config_configured { revision; resource_read_max_bytes })
+  | "rejected" ->
+    let* () =
+      validate_closed_object
+        ~label:"skill snapshot config"
+        ~allowed:[ "kind"; "source_revision"; "diagnostics" ]
+        json
+    in
+    let* source_revision = required_nonempty_string_field json "source_revision" in
+    let* diagnostics_json = optional_list_field json "diagnostics" in
+    let* diagnostics =
+      decode_list
+        "snapshot.config.diagnostics"
+        (fun item ->
+           match item with
+           | `String text -> Ok text
+           | bad -> field_type_error "snapshot.config.diagnostics" "a string" bad)
+        diagnostics_json
+    in
+    Ok (Skill_config_rejected { source_revision; diagnostics })
+  | "unreadable" ->
+    let* () =
+      validate_closed_object
+        ~label:"skill snapshot config"
+        ~allowed:[ "kind" ]
+        json
+    in
+    Ok Skill_config_unreadable
+  | unknown ->
+    Error (Printf.sprintf "skill snapshot config has unknown kind %S" unknown)
+
 let decode_skills_catalog json =
   let* schema = required_string_field json "schema" in
   if not (String.equal schema "masc.skill-snapshot/v1")
@@ -3051,11 +3165,23 @@ let decode_skills_catalog json =
       in
       let* snapshot = required_object_field json "snapshot" in
       let* sc_rejections = decode_skill_snapshot_rejections snapshot in
+      let* config_json = required_object_field snapshot "config" in
+      let* config = decode_skill_catalog_config config_json in
+      let* sources_json = optional_list_field snapshot "sources" in
+      let* sc_sources =
+        decode_list "snapshot.sources" decode_skill_catalog_source sources_json
+      in
       let* surfaces_json = required_list_field json "surfaces" in
       let* sc_surfaces =
         decode_list "surfaces" decode_skills_catalog_surface surfaces_json
       in
-      Ok { sc_state = Skills_ready; sc_surfaces; sc_rejections }
+      Ok
+        { sc_state = Skills_ready
+        ; sc_config = Some config
+        ; sc_sources
+        ; sc_surfaces
+        ; sc_rejections
+        }
     | "not_registered" ->
       let* () =
         validate_closed_object
@@ -3065,6 +3191,8 @@ let decode_skills_catalog json =
       in
       Ok
         { sc_state = Skills_not_registered
+        ; sc_config = None
+        ; sc_sources = []
         ; sc_surfaces = []
         ; sc_rejections = []
         }
@@ -3077,6 +3205,8 @@ let decode_skills_catalog json =
       in
       Ok
         { sc_state = Skills_uninitialized
+        ; sc_config = None
+        ; sc_sources = []
         ; sc_surfaces = []
         ; sc_rejections = []
         }
@@ -3100,6 +3230,8 @@ let decode_skills_catalog json =
       else
         Ok
           { sc_state = Skills_invalid_workspace
+          ; sc_config = None
+          ; sc_sources = []
           ; sc_surfaces = []
           ; sc_rejections = []
           }

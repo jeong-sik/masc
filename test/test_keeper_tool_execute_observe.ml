@@ -45,6 +45,11 @@ let test_a_non_zero_run_is_refused_with_its_stderr () =
     (Gate.Observed_refused { status = Unix.WEXITED 2; stderr = "err" })
     (Stage.observe stage ());
   check bool "nothing kept" true (Option.is_none (Stage.observed_result stage));
+  (* The refusal is readable afterwards, so the deferred receipt can tell the
+     keeper what the box refused. *)
+  check (option observation) "the outcome is remembered"
+    (Some (Gate.Observed_refused { status = Unix.WEXITED 2; stderr = "err" }))
+    (Stage.outcome stage);
   let signalled = Stage.create ~route:boxed ~dispatch:(fun _ -> result (Unix.WSIGNALED 15)) in
   check observation "a signal is refused too"
     (Gate.Observed_refused { status = Unix.WSIGNALED 15; stderr = "err" })

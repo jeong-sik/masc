@@ -179,6 +179,16 @@ type observation =
           the request keeps the judge exactly as before this stage existed.
           Never read as clean. *)
 
+val observed_refusal :
+  status:Unix.process_status ->
+  stderr:string ->
+  Keeper_approval_queue_rules_types.observed_refusal
+(** What a refused observe run becomes on the approval row and in the
+    keeper's deferred receipt: the status, and the stderr tail bounded by
+    [keeper.hitl.observation_stderr_bytes]. The Gate applies it when it
+    defers on {!Observed_refused}; the tool_execute runtime applies the same
+    function so the keeper reads the same bytes the judge does. *)
+
 (** Evaluate one exact external-effect request. [keeper_always_allow] is the
     explicit Keeper profile switch; it carries no inferred semantics. Manual,
     Auto Judge, and invalid-mode outcomes enqueue durably and return without

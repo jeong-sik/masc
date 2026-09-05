@@ -208,6 +208,19 @@ let test_wrong_turn_is_not_substituted () =
     | Ok _ -> fail "a different turn snapshot was substituted")
 ;;
 
+let test_message_payload_matches_the_serialised_message () =
+  let bytes =
+    Keeper_context_core_message_json.message_to_json message |> Yojson.Safe.to_string
+  in
+  let payload = Snapshot.message_payload message in
+  check string "bytes are the serialised message" bytes payload.Snapshot.payload_bytes;
+  check
+    string
+    "digest is the sha256 of those bytes"
+    Digestif.SHA256.(digest_string bytes |> to_hex)
+    payload.Snapshot.payload_sha256
+;;
+
 let () =
   Random.self_init ();
   Alcotest.run
@@ -222,6 +235,10 @@ let () =
             "malformed latest snapshot is not reused"
             `Quick
             test_malformed_latest_snapshot_is_not_used_for_reuse
+        ; test_case
+            "a message payload is the serialised message and its digest"
+            `Quick
+            test_message_payload_matches_the_serialised_message
         ] )
     ; ( "turn boundary"
       , [ test_case

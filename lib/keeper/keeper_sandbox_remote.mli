@@ -19,10 +19,11 @@ type container_exec =
         declaring runtime ({!Keeper_sandbox_microvm.shim_exec_prefix_for}).
         It is prebuilt rather than assembled here because the three runtimes
         disagree on more than the executable -- the stdin flag, whether a
-        separator precedes the command, and whether the identity the shim
-        runs as can be given as [uid:gid] at all -- and one of them cannot
-        express that last one, which a function returning an argv could not
-        say. *)
+        separator precedes the command, and how the identity the shim
+        runs as is mapped. *)
+  ; probe_prefix : string list option
+    (** The exec argv without stdin-streaming flags for probe executions.
+        When [None], falls back to [prefix]. *)
   ; container_name : string  (** The running guest. *)
   ; shim_path : string  (** Absolute guest path of [masc-exec-shim]. *)
   }

@@ -157,14 +157,14 @@ let exec_prefix ~cli =
   ; "--env"; "MASC_EXEC_SHIM_CONFIG=" ^ shim_config_path; guest_name ]
 ;;
 
-let guest ~cli : Keeper_sandbox_remote.container_exec =
-  { prefix = exec_prefix ~cli; container_name = guest_name; shim_path }
+let guest ~cli ?probe_prefix () : Keeper_sandbox_remote.container_exec =
+  { prefix = exec_prefix ~cli; probe_prefix; container_name = guest_name; shim_path }
 ;;
 
 let make_state ~base_path ~cli =
   Keeper_sandbox_remote.of_container_exec ~base_path ~keeper_name:"keeper-a"
     ~remote_root ~gh_config_dir ~injected_env:[] ~env_allowlist:[ "LANG" ]
-    ~connect_timeout_sec:1 ~max_concurrent_sessions:2 (guest ~cli)
+    ~connect_timeout_sec:1 ~max_concurrent_sessions:2 (guest ~cli ())
 ;;
 
 let contains needle haystack =
@@ -213,6 +213,25 @@ let test_transport_and_probe_argv () =
     (Keeper_sandbox_remote.remote_keeper_root state);
   check string "lane prefix" "microvm_remote"
     (Keeper_sandbox_remote.lane_prefix (Keeper_sandbox_remote.transport state))
+;;
+
+let test_container_exec_probe_argv_prefers_probe_prefix () =
+  let prefix = [ "container"; "exec"; "-i"; "guest" ] in
+  let probe_prefix = [ "container"; "exec"; "guest" ] in
+  let custom_guest : Keeper_sandbox_remote.container_exec =
+    { prefix; probe_prefix = Some probe_prefix; container_name = guest_name; shim_path }
+  in
+  let state =
+    Keeper_sandbox_remote.of_container_exec ~base_path:"/workspace" ~keeper_name:"keeper-a"
+      ~remote_root ~gh_config_dir ~injected_env:[] ~env_allowlist:[ "LANG" ]
+      ~connect_timeout_sec:1 ~max_concurrent_sessions:2 custom_guest
+  in
+  check (list string) "transport argv uses prefix"
+    (prefix @ [ shim_path ])
+    (Keeper_sandbox_remote.transport_argv state);
+  check (list string) "probe argv uses probe_prefix without -i"
+    (probe_prefix @ [ shim_path; "--probe" ])
+    (Keeper_sandbox_remote.probe_argv state)
 ;;
 
 (* The OpenSSH probe stays one shell word, because sshd hands the remote
@@ -461,6 +480,8 @@ let () =
     run "keeper_sandbox_remote"
       [ ( "container_exec"
         , [ test_case "transport + probe argv" `Quick test_transport_and_probe_argv
+          ; test_case "probe prefers probe_prefix when present" `Quick
+              test_container_exec_probe_argv_prefers_probe_prefix
           ; test_case "openssh probe stays one word" `Quick
               test_openssh_probe_stays_one_word
           ; test_case "frame, exit and injected env" `Quick

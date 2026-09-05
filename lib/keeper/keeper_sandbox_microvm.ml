@@ -668,24 +668,20 @@ let exec_argv_for backend ~container_name ~uid ~gid ~container_cwd ~stdin ~comma
     environment entry on the exec. All three CLIs document that entry --
     [msb exec] has [-e, --env <ENV>] the same as the other two.
 
-    What [msb] does not document is the identity the shim runs under.
+    What [msb] does not document is numeric [uid:gid] under [--user].
     [container exec --user] documents [name|uid[:gid]] and nerdctl takes
     Docker's, so the mapped [uid:gid] this lane runs the keeper's commands as
     is a value those CLIs accept. [msb exec -u, --user <USER>] documents
     "Run the command as the specified guest user" and no numeric form
-    (0.6.16, 2026-09-04). Sending [501:20] there would be a value read from
-    no help output, and if msb resolved it as a user name the shim would run
-    as somebody else on a tree owned by that uid -- a silent wrong-identity
-    write, not a failed call. So this refuses. Settling it means either msb
-    documenting the numeric form or the lane naming a guest user, which is a
-    decision about identity rather than a spelling. *)
-let shim_exec_prefix_for backend ~container_name ~uid ~gid ~remote_root ~shim_config_path =
+    (0.6.16, 2026-09-04). For msb, [--user] is omitted; the work volume's
+    [uid=,gid=] mount places writes at the right host uid. *)
+let shim_exec_prefix_for ?(stdin = true) backend ~container_name ~uid ~gid ~remote_root ~shim_config_path =
   match (backend : Backend.t) with
   | Backend.Apple_container | Backend.Nerdctl_kata ->
     Ok
       (command_argv_for backend
        @ [ "exec" ]
-       @ Backend.exec_stdin_args backend
+       @ (if stdin then Backend.exec_stdin_args backend else [])
        @ [ "--user"
          ; Printf.sprintf "%d:%d" uid gid
          ; "-w"
@@ -704,7 +700,7 @@ let shim_exec_prefix_for backend ~container_name ~uid ~gid ~remote_root ~shim_co
     Ok
       (command_argv_for backend
        @ [ "exec" ]
-       @ Backend.exec_stdin_args backend
+       @ (if stdin then Backend.exec_stdin_args backend else [])
        @ [ "-w"
          ; remote_root
          ; "--env"

@@ -37,6 +37,7 @@ type openssh =
 
 type container_exec =
   { prefix : string list
+  ; probe_prefix : string list option
   ; container_name : string
   ; shim_path : string
   }
@@ -270,7 +271,9 @@ let transport_argv t =
 let probe_argv t =
   match t.transport with
   | Openssh o -> openssh_prefix o @ [ shim_command ^ " " ^ probe_flag ]
-  | Container_exec c -> c.prefix @ [ c.shim_path; probe_flag ]
+  | Container_exec c ->
+    let prefix = Option.value c.probe_prefix ~default:c.prefix in
+    prefix @ [ c.shim_path; probe_flag ]
 ;;
 
 let host_label t =
@@ -470,9 +473,10 @@ let preflight_timeout_sec t = float_of_int t.connect_timeout_sec +. 5.0
 
 let run_probe t =
   let status, stdout, stderr =
-    Process_eio.run_argv_with_status_split
+    Process_eio.run_argv_with_stdin_and_status_split
       ~timeout_sec:(preflight_timeout_sec t)
       ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+      ~stdin_content:""
       (probe_argv t)
   in
   let outcome =

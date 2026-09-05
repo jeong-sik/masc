@@ -7535,10 +7535,14 @@ def planning_review_hierarchy_interaction() -> Interaction:
                     f"Task Verdicts did not explain itself ({needle!r}): "
                     f"{verdicts_plain!r}"
                 )
-        # The walk continues through the two children that keep their own
-        # headers, then wraps back round to Goals.
-        send_and_wait(process, master_fd, output, b"v", b"MASC Schedules")
-        send_and_wait(process, master_fd, output, b"v", b"MASC Fusion")
+        # Planning's [v] strip has exactly three stops — Goals, Task Review,
+        # Task Verdicts — and wraps back round to Goals. The walk used to
+        # keep two extra children, Schedules and Fusion, but Schedules was
+        # promoted to its own top-level surface (palette: "go Schedules";
+        # the wake-schedule scenario asserts that entry point) and Fusion
+        # became a tab of the selected Keeper (RFC-tui-operator-ia 3.1).
+        # Waiting for their boxed titles here starved with the strip
+        # redrawn every stop but theirs never drawn.
         goals_again = send_and_wait(
             process, master_fd, output, b"v", b"\xe2\x96\xb8Goals"
         )
@@ -7547,7 +7551,10 @@ def planning_review_hierarchy_interaction() -> Interaction:
                 f"Goals did not retain the Task Review sibling: {goals_again!r}"
             )
         # The children are [v] stops, not the next top-level Tab destination.
-        send_and_wait(process, master_fd, output, b"\t", b"MASC Workspace")
+        # From Planning, the ring's next stop is Fusion (surface_ring:
+        # ... Planning; Fusion; Workspace/Repositories; ...), so one Tab
+        # lands on Fusion's boxed title, not on Workspace two stops later.
+        send_and_wait(process, master_fd, output, b"\t", b"MASC Fusion")
         os.write(master_fd, b"q")
 
     return interact

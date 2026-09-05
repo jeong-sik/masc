@@ -303,6 +303,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   let name = schema.name in
   match name with
   | "keeper_time_now"
+  | "keeper_lane_status"
   | "keeper_context_status"
   | "keeper_tools_list"
   | "keeper_tasks_audit"

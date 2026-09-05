@@ -8486,11 +8486,14 @@ let open_board_composer_editor state ~restore ~reenter =
 ;;
 
 let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : bool =
-  if
-    state.board_compose_armed
-    && not
-         (List.mem key [ "s"; "S"; "d"; "D"; "e"; "E"; "h"; "H"; "esc" ])
-  then state.board_compose_armed <- false;
+  let armed_allowed =
+    if Option.is_none state.board_compose_reply_to then
+      [ "s"; "S"; "d"; "D"; "e"; "E"; "h"; "H"; "esc" ]
+    else
+      [ "s"; "S"; "d"; "D"; "e"; "E"; "esc" ]
+  in
+  if state.board_compose_armed && not (List.mem key armed_allowed) then
+    state.board_compose_armed <- false;
   match key with
   | "\005" -> (
       match restore, reenter with
@@ -8512,7 +8515,7 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
       state.board_compose_hearth <-
         Board_hearth.next ~current:state.board_compose_hearth
           ~census:state.board_hearths;
-      state.board_compose_armed <- false;
+      (* Keep armed so the operator can continue cycling hearths or press 's' to send *)
       add_event state "system"
         (match state.board_compose_hearth with
          | Some h -> "Board target hearth set to #" ^ h

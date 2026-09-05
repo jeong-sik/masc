@@ -17,8 +17,10 @@ let strip_markdown_title_prefix raw =
     else i
   in
   let i = skip_hash 0 in
-  if i > 0 && i < len && t.[i] = ' ' then
+  if i > 0 && i < len && (t.[i] = ' ' || t.[i] = '\t') then
     String.trim (String.sub t i (len - i))
+  else if i > 0 && i = len then
+    ""
   else
     t
 ;;
@@ -64,9 +66,25 @@ let format_addressing_hint ~max_cells kind =
         Ansi.reset
   | Mentions targets ->
       let target_str = String.concat ", @" targets in
+      let max_target_len = max 10 (max_cells - 45) in
+      let truncated_targets =
+        if Masc_tui_message_layout.display_width target_str > max_target_len then
+          let rec fit len =
+            if len <= 0 then "..."
+            else
+              let sub = String.sub target_str 0 len in
+              if Masc_tui_message_layout.display_width (sub ^ "...") <= max_target_len then
+                sub ^ "..."
+              else
+                fit (len - 1)
+          in
+          fit (String.length target_str)
+        else
+          target_str
+      in
       Printf.sprintf "  %s[Mentions: @%s -> notifies targeted keepers]%s"
         (Masc_tui_theme.tone Masc_tui_theme.Accent)
-        (fit_width target_str (max 10 (max_cells - 20)))
+        truncated_targets
         Ansi.reset
   | Unsupported_broadcast selectors ->
       Printf.sprintf "  %s[Warning: unsupported broadcast @@%s (use @@all)]%s"

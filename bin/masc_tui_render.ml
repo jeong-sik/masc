@@ -2177,7 +2177,18 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
              (Terminal_text.single_line choice.Masc.Tui_decode.ac_id)
              Ansi.reset)
         ~style:(if picked then Ansi.bold else Ansi.dim)
-        choice.Masc.Tui_decode.ac_label)
+        choice.Masc.Tui_decode.ac_label;
+      (* What picking this commits to. The wire carries it, the dashboard
+         draws it under the label, and this pane dropped it -- so the operator
+         answering from the terminal weighed a label where the one answering
+         from a browser weighed a label and its consequence. *)
+      match choice.Masc.Tui_decode.ac_description with
+      | None -> ()
+      | Some description ->
+        box_wrapped_field buf cols
+          ~head:"          "
+          ~style:Ansi.dim
+          (Terminal_text.single_line description))
     question.Masc.Tui_decode.aq_choices;
   (* What the operator has put down so far, in the two shapes a list of
      choices cannot show. *)

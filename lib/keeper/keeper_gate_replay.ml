@@ -409,7 +409,6 @@ let project_replay_outcome_to_chat ~base_path ~approval_id replay_outcome =
          ~keeper_name:request.keeper_name
          ~approval_id
          ~tool_name:(Some request.tool_name)
-         ~call_summary:(Keeper_approval_queue.call_summary_of_input request.input)
          ~outcome:replay_outcome
      with
      | Ok () -> ()

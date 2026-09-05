@@ -15,6 +15,15 @@ type request =
   { keeper_name : string
   ; operation : string
   ; input : Yojson.Safe.t
+  ; call_summary : string option
+      (** The one line this call is about, stated by the producer from its
+          typed input through that tool's declared summary function (a shell
+          tool its command line, a file tool its path, a network tool its
+          URL). The Gate does not read it: it travels to the chat row the
+          queue writes when the call is deferred, so the operator sees what
+          was parked and not only which tool asked. [None] when the tool
+          declares no summary or its statement is blank; a summary is never
+          derived here from the [input] fields. *)
   ; base_path : string
   ; causal_context : causal_context option
   ; task_id : string option

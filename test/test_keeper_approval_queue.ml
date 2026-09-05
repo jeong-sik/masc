@@ -160,6 +160,7 @@ let submit_submission_with_context
     AQ.submit_pending
       ~keeper_name
       ~tool_name:"external-effect"
+      ~call_summary:None
       ~input
       ~base_path
       ?turn_id
@@ -328,6 +329,73 @@ let test_dedup_never_merges_distinct_origins () =
        Alcotest.(check bool) "distinct origin has its own request" true
          (not (String.equal first another_channel));
        List.iter (reject_and_cleanup ~base_path) [ first; another_channel ])
+;;
+
+(* The producer's line arrives with the submission and is written on the
+   request row; every later row of the approval copies it from there. A
+   producer that states nothing leaves every row without one, whatever the
+   input holds: the queue never reads the input for a summary. *)
+let test_call_summary_is_stated_once_and_copied () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-call-summary-copy" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       ensure_keeper_exists ~base_path ~keeper_name;
+       let submit_exn ~call_summary ~input =
+         match
+           AQ.submit_pending
+             ~keeper_name
+             ~tool_name:"tool_execute"
+             ~input
+             ~call_summary
+             ~base_path
+             ()
+         with
+         | Ok submission -> submission.AQ.approval_id
+         | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
+       in
+       let stated =
+         submit_exn
+           ~call_summary:(Some "git status")
+           ~input:
+             (`Assoc
+               [ "input", `Assoc [ "argv", `List [ `String "git"; `String "status" ] ] ])
+       in
+       let unstated =
+         submit_exn
+           ~call_summary:None
+           ~input:(`Assoc [ "command", `String "echo not-a-summary" ])
+       in
+       List.iter (reject_and_cleanup ~base_path) [ stated; unstated ];
+       let rows_of approval_id =
+         Chat_store.load_all ~base_dir:base_path ~keeper_name
+         |> List.filter_map (fun (message : Chat_store.chat_message) ->
+           Option.bind message.approval_lifecycle (fun lifecycle ->
+             if String.equal lifecycle.Chat_store.approval_id approval_id
+             then
+               Some
+                 ( Chat_store.approval_lifecycle_phase_to_label
+                     lifecycle.Chat_store.phase
+                 , lifecycle.Chat_store.call_summary )
+             else None))
+       in
+       let requested =
+         Chat_store.approval_lifecycle_phase_to_label Chat_store.Approval_requested
+       in
+       let rejected =
+         Chat_store.approval_lifecycle_phase_to_label
+           Chat_store.Approval_resolved_rejected
+       in
+       Alcotest.(check (list (pair string (option string))))
+         "the stated line is on the request row and copied onto the resolution row"
+         [ requested, Some "git status"; rejected, Some "git status" ]
+         (rows_of stated);
+       Alcotest.(check (list (pair string (option string))))
+         "a producer that states nothing leaves every row without a line"
+         [ requested, None; rejected, None ]
+         (rows_of unstated))
 ;;
 
 let test_multiple_resolution_projections_keep_fifo_order () =
@@ -1805,6 +1873,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
        let request ~input ~task_id ~goal_ids : Gate.request =
          { keeper_name
          ; operation = "external-effect"
+         ; call_summary = None
          ; input
          ; base_path
          ; sandbox_profile = None
@@ -2619,6 +2688,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
               ~base_path
               ~keeper_name:"queue-exact-staged-before-rename"
               ~tool_name:"fs_write"
+              ~call_summary:None
               ~input:(`Assoc [ "request", `String "before-rename" ])
               ()
           with
@@ -3623,6 +3693,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
           AQ.submit_pending
             ~keeper_name:"queue-invalid-store"
             ~tool_name:"external-effect"
+            ~call_summary:None
             ~input:(`Assoc [ "target", `String "must-not-overwrite" ])
             ~base_path
             ()
@@ -3701,6 +3772,7 @@ let test_partial_pending_snapshot_preserves_readable_entries () =
           AQ.submit_pending
             ~keeper_name:"queue-partial-read"
             ~tool_name:"external-effect"
+            ~call_summary:None
             ~input:(`Assoc [ "target", `String "must-not-overwrite" ])
             ~base_path
             ()
@@ -4330,6 +4402,7 @@ let test_submit_surfaces_storage_failure () =
          AQ.submit_pending
            ~keeper_name:"queue-storage-error"
            ~tool_name:"external-effect"
+           ~call_summary:None
            ~input:(`Assoc [ "target", `String "x" ])
            ~base_path
            ()
@@ -4356,6 +4429,7 @@ let test_default_auto_judge_defers_without_blocking () =
        let request : Gate.request =
          { keeper_name
          ; operation = "external-effect"
+         ; call_summary = None
          ; input = `Assoc [ "target", `String "auto-judge" ]
          ; base_path
          ; sandbox_profile = None
@@ -4429,6 +4503,7 @@ let test_unavailable_cycle_grant_never_falls_through () =
        let request : Gate.request =
          { keeper_name
          ; operation = "external-effect"
+         ; call_summary = None
          ; input
          ; base_path
          ; sandbox_profile = None
@@ -4587,7 +4662,6 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
             ~keeper_name
             ~approval_id
             ~tool_name:(Some "external-effect")
-            ~call_summary:None
             ~outcome:canonical_outcome
         with
         | Ok () -> ()
@@ -4598,7 +4672,6 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
             ~keeper_name
             ~approval_id
             ~tool_name:(Some "external-effect")
-            ~call_summary:None
             ~outcome:canonical_outcome
         with
         | Ok () -> ()
@@ -4609,7 +4682,6 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
             ~keeper_name
             ~approval_id
             ~tool_name:(Some "external-effect")
-            ~call_summary:None
             ~outcome:(AQ.Replay_failed stale_ref)
         with
         | Error _ -> ()
@@ -4659,6 +4731,7 @@ let test_audit_store_failure_keeps_defer_committed_and_visible () =
        let request : Gate.request =
          { keeper_name
          ; operation = "external-effect"
+         ; call_summary = None
          ; input = `Assoc [ "target", `String "store-create" ]
          ; base_path
          ; sandbox_profile = None
@@ -4798,6 +4871,7 @@ let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
        let request : Gate.request =
          { keeper_name
          ; operation = "external-effect"
+         ; call_summary = None
          ; input
          ; base_path
          ; sandbox_profile = None
@@ -4910,6 +4984,7 @@ let test_cancelled_audit_observation_preserves_committed_allow () =
        let request : Gate.request =
          { keeper_name
          ; operation = "external-effect"
+         ; call_summary = None
          ; input = `Assoc [ "target", `String "cancelled-observer" ]
          ; base_path
          ; sandbox_profile = None
@@ -5115,92 +5190,15 @@ let test_resolved_audit_event_carries_judge_evidence () =
            (row |> member "exact_attempt"))
 ;;
 
-(* The summary is derived from the persisted input. Every shape the fleet
-   sends has to land on one line or in [None] -- never in a guess -- and the
-   cap may not split a multibyte char. *)
-let test_call_summary_of_input () =
-  let check_summary label expected input =
-    Alcotest.(check (option string)) label expected (AQ.call_summary_of_input input)
-  in
-  let argv text =
-    `Assoc [ "input", `Assoc [ "argv", `List [ `String "bash"; `String "-lc"; `String text ] ] ]
-  in
-  check_summary "argv is joined onto one line"
-    (Some "bash -lc cd repos/masc && git log --oneline -8 -- test/dune")
-    (argv "cd repos/masc && git log --oneline -8 -- test/dune");
-  check_summary "a newline ends the summary" (Some "first line")
-    (argv "first line\nsecond line");
-  check_summary "an identity call names its provider surface"
-    (Some "github/issue_write")
-    (`Assoc [ "provider_id", `String "github"; "remote_name", `String "issue_write" ]);
-  check_summary "an ascii cap cuts at the budget"
-    (Some ("bash -lc " ^ String.make 71 'a'))
-    (argv (String.make 120 'a'));
-  (* The join starts with "bash -lc " (9 bytes), so the budget lands inside the
-     24th Korean char: the boundary backs up to 78 bytes, whole chars only. *)
-  check_summary "the cap does not split a multibyte char"
-    (Some ("bash -lc " ^ String.concat "" (List.init 23 (fun _ -> "가"))))
-    (argv (String.concat "" (List.init 40 (fun _ -> "가"))));
-  check_summary "a blank argv is no summary" None (argv "   ");
-  check_summary "a non-string argv is no summary" None
-    (`Assoc [ "input", `Assoc [ "argv", `List [ `Int 1 ] ] ]);
-  check_summary "an input naming neither argv nor a provider is no summary" None
-    (`Assoc [ "input", `Assoc [ "cwd", `String "/tmp" ] ]);
-  check_summary "a non-object input is no summary" None (`String "tool_execute");
-  check_summary "top-level argv is extracted"
-    (Some "git status")
-    (`Assoc [ "argv", `List [ `String "git"; `String "status" ] ]);
-  check_summary "top-level script is extracted"
-    (Some "dune build")
-    (`Assoc [ "script", `String "dune build" ]);
-  check_summary "top-level command is extracted"
-    (Some "echo hello")
-    (`Assoc [ "command", `String "echo hello" ]);
-  check_summary "nested args with script is extracted"
-    (Some "pytest -v")
-    (`Assoc [ "args", `Assoc [ "script", `String "pytest -v" ] ]);
-  check_summary "top-level file_path is extracted"
-    (Some "lib/keeper.ml")
-    (`Assoc [ "file_path", `String "lib/keeper.ml" ]);
-  check_summary "null argv falls through to script"
-    (Some "npm test")
-    (`Assoc [ "argv", `Null; "script", `String "npm test" ]);
-  check_summary "null script falls through to command"
-    (Some "make check")
-    (`Assoc [ "script", `Null; "command", `String "make check" ]);
-  check_summary "leading blank lines in script are skipped to first non-empty line"
-    (Some "pytest -v")
-    (`Assoc [ "script", `String "\n\n  pytest -v\n" ]);
-  check_summary "production gate request envelope extracts script"
-    (Some "python -m unittest")
-    (`Assoc
-       [ "schema", `String "masc.keeper_gate.request.v1"
-       ; "input", `Assoc [ "script", `String "python -m unittest"; "cwd", `String "." ]
-       ; "cwd", `String "."
-       ]);
-  check_summary "nested arguments with query is extracted"
-    (Some "masc architecture")
-    (`Assoc [ "arguments", `Assoc [ "query", `String "masc architecture" ] ]);
-  check_summary "excessive recursion depth returns None safely"
-    None
-    (`Assoc
-       [ "input"
-       , `Assoc
-           [ "args"
-           , `Assoc
-               [ "arguments"
-               , `Assoc
-                   [ "input"
-                   , `Assoc
-                       [ "args"
-                       , `Assoc [ "script", `String "too deep" ] ] ] ] ] ])
-;;
-
 let () =
   Alcotest.run
     "Keeper_approval_queue"
     [ ( "call summary"
-      , [ Alcotest.test_case "of input" `Quick test_call_summary_of_input ] )
+      , [ Alcotest.test_case
+            "stated once on submission and copied onto every later row"
+            `Quick
+            test_call_summary_is_stated_once_and_copied
+        ] )
     ; ( "nonhierarchical queue"
       , [ Alcotest.test_case
             "durable lock serializes Eio fibers"

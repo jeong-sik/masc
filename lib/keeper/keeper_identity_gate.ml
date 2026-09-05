@@ -71,13 +71,21 @@ let replay_of_gate_input input =
   | _ -> Error "approved identity_call input must be an object"
 ;;
 
+(* What an identity_call approval is about, in one line: the provider surface
+   it would reach, [provider/remote]. The arguments are the provider's own
+   payload and are not read; a field in them named like a command is the
+   remote tool's business, not this call's summary. *)
+let call_summary (call : replay_call) =
+  String_util.first_nonblank_line (call.provider_id ^ "/" ^ call.remote_name)
+;;
+
 let decide
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ?continuation_channel
       ?gate_context
       ?gate_grant
-      ~input
+      ~(call : replay_call)
       ()
   =
   Keeper_gate.decide_external_service
@@ -85,7 +93,8 @@ let decide
     ~keeper_always_allow:(Option.value ~default:false meta.always_allow)
     { keeper_name = meta.name
     ; operation = gate_operation
-    ; input
+    ; input = call.input
+    ; call_summary = call_summary call
     ; sandbox_profile = None
     ; base_path = config.Workspace.base_path
     ; causal_context = Option.map (fun current -> current ()) gate_context
@@ -130,11 +139,14 @@ let agent_tool
        permission, and the durable Gate is where the rest gets decided. *)
     | Some true -> run_raw arguments
     | Some false | None ->
-      let input =
-        gate_input
-          ~provider_id:offered.Keeper_identity_tools.provider.Provider.id
-          ~remote_name:offered.Keeper_identity_tools.remote_name
-          ~arguments
+      let provider_id = offered.Keeper_identity_tools.provider.Provider.id in
+      let remote_name = offered.Keeper_identity_tools.remote_name in
+      let call =
+        { input = gate_input ~provider_id ~remote_name ~arguments
+        ; provider_id
+        ; remote_name
+        ; arguments
+        }
       in
       (match
          decide
@@ -143,7 +155,7 @@ let agent_tool
            ?continuation_channel
            ?gate_context
            ?gate_grant
-           ~input
+           ~call
            ()
        with
        | Keeper_gate.Deferred { approval_id; reason; audit_receipts } ->
@@ -289,7 +301,7 @@ let replay_call_with_outcome
          ?continuation_channel
          ?gate_context
          ~gate_grant
-         ~input:call.input
+         ~call
          ()
      with
      | Keeper_gate.Deferred { approval_id; reason; audit_receipts } ->

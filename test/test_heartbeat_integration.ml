@@ -3538,6 +3538,7 @@ let install_pending_summary ~base_path ~keeper_name ~bind_exact =
       Approval_queue.submit_pending
         ~keeper_name
         ~tool_name:"shutdown-fixture"
+        ~call_summary:None
         ~input:(`String "effect")
         ~base_path
         ()

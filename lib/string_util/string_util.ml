@@ -311,6 +311,9 @@ let first_line text =
   | Some i -> String.sub text 0 i
   | None -> text
 
+let first_nonblank_line text =
+  String.split_on_char '\n' text |> List.find_map trim_nonempty
+
 (* XML 1.0 entity escape.  Order matters: [&] first so that the
    ampersands introduced by the other replacements are not
    double-escaped. *)

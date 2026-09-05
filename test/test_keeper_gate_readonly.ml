@@ -158,6 +158,7 @@ let executes_script ~operation ~sandbox_profile script =
 let script_gate_request ?profile ?target ~sandbox_profile base_path script =
   { Keeper_gate.keeper_name = "alpha"
   ; operation = "tool_execute"
+  ; call_summary = None
   ; input = script_gate_input ?profile ?target script
   ; base_path
   ; sandbox_profile
@@ -294,6 +295,7 @@ let rec remove_tree path =
 let gate_request ?profile ?target ~sandbox_profile base_path argv =
   { Keeper_gate.keeper_name = "alpha"
   ; operation = "tool_execute"
+  ; call_summary = None
   ; input = gate_input ?profile ?target argv
   ; base_path
   ; sandbox_profile
@@ -307,6 +309,7 @@ let gate_request ?profile ?target ~sandbox_profile base_path argv =
 let network_gate_request base_path ~capability =
   { Keeper_gate.keeper_name = "alpha"
   ; operation = "network_read"
+  ; call_summary = None
   ; input =
       `Assoc
         [ "capability", `String capability

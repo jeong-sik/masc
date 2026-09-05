@@ -7,6 +7,7 @@ type request =
   { keeper_name : string
   ; operation : string
   ; input : Yojson.Safe.t
+  ; call_summary : string option
   ; base_path : string
   ; causal_context : causal_context option
   ; task_id : string option
@@ -474,6 +475,7 @@ let submit request =
     ~keeper_name:request.keeper_name
     ~tool_name:request.operation
     ~input:request.input
+    ~call_summary:request.call_summary
     ~base_path:request.base_path
     ?turn_id:(request_turn_id request)
     ?request_context:(Option.map (fun context -> context.snapshot) request.causal_context)

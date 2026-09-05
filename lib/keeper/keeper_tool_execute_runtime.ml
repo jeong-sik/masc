@@ -461,6 +461,7 @@ let handle_tool_execute_typed
           { keeper_name = meta.name
           ; operation = gate_operation
           ; input = gate_input
+          ; call_summary = Keeper_tool_execute_input.typed_input_call_summary input
           ; base_path = config.base_path
           ; causal_context = Option.map (fun current -> current ()) gate_context
           ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id

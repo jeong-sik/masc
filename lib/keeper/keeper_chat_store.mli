@@ -114,11 +114,14 @@ type approval_lifecycle =
   ; phase : approval_lifecycle_phase
   ; artifact_ref : Tool_output.artifact_ref option
   ; call_summary : string option
-        (** One-line rendering of what the gated call asked for. A fact about
-            the approval, not the phase, so every phase row carries it and a
-            row stays readable on its own when the pane loads a history window
-            that does not include the request. [None] when the writer had no
-            call to summarise. *)
+        (** The one line the producing tool stated for its call, from its
+            typed input ({!Keeper_gate.request.call_summary}), whole: fitting
+            it to a pane is the renderer's decision. About the approval, not
+            the phase, so the request row carries the statement and every
+            later phase row copies it ({!approval_request_call_summary}); a
+            row then reads on its own when the pane loads a history window
+            that does not include the request. [None] when the tool stated
+            nothing or no request row exists to copy from. *)
   }
 
 val approval_lifecycle_phase_to_label : approval_lifecycle_phase -> string
@@ -298,6 +301,17 @@ val approval_lifecycle_phase_present :
   approval_id:string ->
   phase:approval_lifecycle_phase ->
   bool
+
+val approval_request_call_summary :
+  base_dir:string ->
+  keeper_name:string ->
+  approval_id:string ->
+  string option
+(** The [call_summary] the approval's request row carries, as stored
+    (redacted). The request row is the one row written with the producer's
+    statement in hand; every later phase row of the same approval copies
+    this so each reads the same line on its own. [None] when no request row
+    exists for the approval or the producer stated nothing. *)
 
 (** {1 I/O} *)
 

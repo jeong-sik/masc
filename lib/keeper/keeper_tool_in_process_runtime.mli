@@ -50,6 +50,13 @@ val network_read_replay_of_gate_input :
 (** Decode the exact producer-owned Gate envelope for WebSearch/WebFetch.
     Replay never reconstructs arguments or guesses a capability. *)
 
+val network_read_call_summary : network_read_replay -> string option
+(** The one line a network_read approval is about: WebSearch states its
+    [query], WebFetch its [url], each read as that leaf's own argument. This
+    is the network_read tool's declared call summary; the submitting handler
+    and the replay engine both state it through this function. [None] when
+    the leaf's argument is absent, not a string, or blank. *)
+
 val connector_post_gate_operation : string
 
 type connector_post_replay =
@@ -81,6 +88,13 @@ val connector_post_replay_target :
 (** Recover the exact terminal surface target carried by the durable request.
     Host replay uses this receipt to settle the enclosing turn as an external
     effect instead of delivering a second assistant reply. *)
+
+val connector_post_call_summary : connector_post_replay -> string option
+(** The one line a connector_post approval is about: the connector, the
+    channel, and the first non-blank line of the content, all from the typed
+    request. This is the connector_post tool's declared call summary; the
+    submitting handler and the replay engine both state it through this
+    function. [None] when the content is blank. *)
 
 val replay_connector_post_with_outcome :
   config:Workspace.config ->

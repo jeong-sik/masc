@@ -1992,82 +1992,7 @@ let append_chat_projection ~base_path ~keeper_name lifecycle =
   |> publish_chat_projection_append ~keeper_name
 ;;
 
-(* A STATUS row answers "what was deferred", not only "which tool asked".
-   The argv join keeps the operator-facing command in the operator's own
-   words; an identity call names its provider surface. The cap is a rendering
-   budget: the pane wraps, and a summary is a pointer, not the payload. *)
-let call_summary_max_length = 80
-
-let call_summary_of_input (input : Yojson.Safe.t) : string option =
-  let of_text text =
-    let lines = String.split_on_char '\n' text in
-    let rec first_non_empty = function
-      | [] -> None
-      | line :: rest ->
-        let trimmed = String.trim line in
-        if trimmed = "" then first_non_empty rest
-        else if String.length trimmed <= call_summary_max_length then Some trimmed
-        else
-          Some
-            (String.sub trimmed 0
-               (String_util.utf8_char_boundary trimmed call_summary_max_length))
-    in
-    first_non_empty lines
-  in
-  let of_argv argv = of_text (String.concat " " argv) in
-  let string_argv = function
-    | `List items when List.for_all (function `String _ -> true | _ -> false) items ->
-      Some (List.filter_map (function `String item -> Some item | _ -> None) items)
-    | _ -> None
-  in
-  let rec extract_from_fields ~depth fields =
-    if depth > 4 then None
-    else
-      (* 1. Try argv *)
-      let from_argv =
-        match List.assoc_opt "argv" fields with
-        | Some argv -> Option.bind (string_argv argv) of_argv
-        | None -> None
-      in
-      match from_argv with
-      | Some summary -> Some summary
-      | None ->
-        (* 2. Try direct string candidate fields *)
-        let from_string =
-          List.find_map
-            (fun k ->
-              match List.assoc_opt k fields with
-              | Some (`String s) -> of_text s
-              | _ -> None)
-            [ "script"; "command"; "cmd"; "file_path"; "path"; "url"; "title"; "query" ]
-        in
-        match from_string with
-        | Some summary -> Some summary
-        | None ->
-          (* 3. Try nested objects *)
-          let from_nested =
-            List.find_map
-              (fun k ->
-                match List.assoc_opt k fields with
-                | Some (`Assoc inner) -> extract_from_fields ~depth:(depth + 1) inner
-                | _ -> None)
-              [ "input"; "args"; "arguments" ]
-          in
-          match from_nested with
-          | Some summary -> Some summary
-          | None ->
-            (* 4. Try provider_id / remote_name *)
-            (match List.assoc_opt "provider_id" fields, List.assoc_opt "remote_name" fields with
-             | Some (`String provider), Some (`String remote) ->
-               Some (provider ^ "/" ^ remote)
-             | _ -> None)
-  in
-  match input with
-  | `Assoc fields -> extract_from_fields ~depth:0 fields
-  | _ -> None
-;;
-
-let record_pending (entry : pending_approval) =
+let record_pending ~call_summary (entry : pending_approval) =
   Log.Keeper.info
     "HITL_APPROVAL_PENDING: id=%s sequence=%d keeper=%s tool=%s"
     entry.id
@@ -2090,7 +2015,10 @@ let record_pending (entry : pending_approval) =
   (* The parked call becomes visible before its answer does. The turn that
      asked keeps running, so without this row the operator sees a tool call
      and then nothing at all until the resolution lands. A projection failure
-     is logged and dropped: it must not stop the approval from being queued. *)
+     is logged and dropped: it must not stop the approval from being queued.
+     [call_summary] is the producer's own one-line statement of the call,
+     carried on the Gate request; this queue never derives one from the
+     input. *)
   (match
      append_chat_projection
        ~base_path:entry.audit_base_path
@@ -2099,7 +2027,7 @@ let record_pending (entry : pending_approval) =
        ; tool_name = Some entry.tool_name
        ; phase = Keeper_chat_store.Approval_requested
        ; artifact_ref = None
-       ; call_summary = call_summary_of_input entry.input
+       ; call_summary
        }
    with
    | Ok () -> ()
@@ -3103,12 +3031,24 @@ let deliver_resolution ~base_path (entry : pending_approval) decision =
     ~channel:entry.continuation_channel
 ;;
 
+(* Every phase row after the request copies the request row's line. The
+   producer stated it once, on the Gate request, and only [record_pending] had
+   it in hand; a resolution, replay, or continuation writer has the approval id
+   and nothing of the producer, so it reads the stored statement back rather
+   than deriving one from the input. [None] when the request row is absent or
+   carried none. *)
+let requested_call_summary ~base_path ~keeper_name ~approval_id =
+  Keeper_chat_store.approval_request_call_summary
+    ~base_dir:base_path
+    ~keeper_name
+    ~approval_id
+;;
+
 let ensure_resolution_chat_projection
       ~base_path
       ~keeper_name
       ~approval_id
       ~tool_name
-      ~call_summary
       ~decision
   =
   let phase =
@@ -3123,7 +3063,7 @@ let ensure_resolution_chat_projection
     ; tool_name
     ; phase
     ; artifact_ref = None
-    ; call_summary
+    ; call_summary = requested_call_summary ~base_path ~keeper_name ~approval_id
     }
 ;;
 
@@ -3132,9 +3072,9 @@ let ensure_replay_chat_projection
       ~keeper_name
       ~approval_id
       ~tool_name
-      ~call_summary
       ~outcome
   =
+  let call_summary = requested_call_summary ~base_path ~keeper_name ~approval_id in
   let phase, artifact_ref =
     match outcome with
     | Replay_applied artifact_ref ->
@@ -3164,7 +3104,6 @@ let ensure_continuation_chat_projection
       ~keeper_name
       ~approval_id
       ~tool_name
-      ~call_summary
   =
   append_chat_projection
     ~base_path
@@ -3173,7 +3112,7 @@ let ensure_continuation_chat_projection
     ; tool_name
     ; phase = Keeper_chat_store.Approval_continuation_recorded
     ; artifact_ref = None
-    ; call_summary
+    ; call_summary = requested_call_summary ~base_path ~keeper_name ~approval_id
     }
 ;;
 
@@ -3201,7 +3140,7 @@ let ensure_settled_continuation_chat_projection
   let approval_id = resolution.approval_id in
   let ready_projection =
     match resolution.decision with
-    | Keeper_event_queue.Hitl_rejected _ -> Ok (Some (None, None))
+    | Keeper_event_queue.Hitl_rejected _ -> Ok (Some None)
     | Keeper_event_queue.Hitl_approved ->
       (match approved_resolution_delivery ~base_path ~id:approval_id with
        | Ok
@@ -3209,9 +3148,7 @@ let ensure_settled_continuation_chat_projection
            ; state = Resolution_consumed
            ; replay_outcome = Some _
            } ->
-         Ok
-           (Some
-              (Some request.tool_name, call_summary_of_input request.input))
+         Ok (Some (Some request.tool_name))
        | Ok
            { state = (Resolution_unconsumed | Resolution_consumed)
            ; replay_outcome = None
@@ -3228,15 +3165,14 @@ let ensure_settled_continuation_chat_projection
   match ready_projection with
   | Error _ as error -> error
   | Ok None -> Ok Continuation_projection_not_ready
-  | Ok (Some (tool_name, call_summary)) ->
+  | Ok (Some tool_name) ->
     Result.map
       (fun () -> Continuation_projection_recorded)
       (ensure_continuation_chat_projection
          ~base_path
          ~keeper_name
          ~approval_id
-         ~tool_name
-         ~call_summary)
+         ~tool_name)
 ;;
 
 let resolve_entry
@@ -3280,7 +3216,6 @@ let resolve_entry
          ~keeper_name:entry.keeper_name
          ~approval_id:entry.id
          ~tool_name:(Some entry.tool_name)
-         ~call_summary:(call_summary_of_input entry.input)
          ~decision
      with
      | Ok () -> ()
@@ -3422,6 +3357,7 @@ let submit_pending
       ~keeper_name
       ~tool_name
       ~input
+      ~call_summary
       ~base_path
       ?turn_id
       ?request_context
@@ -3520,7 +3456,7 @@ let submit_pending
   | Ok (`Folded_onto_unconsumed_grant approval_id) ->
     Ok { approval_id; disposition = Folded_onto_unconsumed_grant }
   | Ok (`Created entry) ->
-    let audit_receipt = record_pending entry in
+    let audit_receipt = record_pending ~call_summary entry in
     Ok
       { approval_id = entry.id
       ; disposition = Pending_created audit_receipt

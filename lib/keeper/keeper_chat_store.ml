@@ -2483,15 +2483,15 @@ let load_all ~base_dir ~keeper_name : chat_message list =
    and which tool when both sides know it.
 
    [call_summary] is deliberately not compared. It is a rendering, not a
-   fact: [Keeper_approval_queue.call_summary_of_input] derives it from the
-   approval's persisted request input (first argv line, capped at 80 bytes)
-   and the store redacts it before writing. The same approval_id therefore
-   never carries two different facts under it, and two rows for the same
-   slot differ in it for exactly two reasons that are not conflicts: a
-   writer without the request in hand writes [None] (the rejection and the
-   unreadable-delivery paths in keeper_heartbeat_stimulus_intake do), and the
-   cap, the first-line rule or the redaction snapshot changed between the
-   two writes. Comparing it would turn either into
+   fact: the producing tool states it once from its typed input, on the Gate
+   request ([Keeper_gate.request.call_summary]); the request row is written
+   with that statement, the store redacts it before writing, and every later
+   phase row copies the stored line back ([approval_request_call_summary]).
+   The same approval_id therefore never carries two different facts under it,
+   and two rows for the same slot differ in it for exactly two reasons that
+   are not conflicts: a request row that was never written or carried no
+   statement leaves every later copy [None], and the redaction snapshot
+   changed between the two writes. Comparing it would turn either into
    "conflicting content" on the append path and into a spurious correction
    row on the replay path. The consequence accepted: a slot first written
    without a summary is not backfilled by a later writer that has one, the
@@ -2707,6 +2707,20 @@ let approval_lifecycle_phase_present
     | Some lifecycle ->
       String.equal lifecycle.approval_id approval_id && lifecycle.phase = phase
     | None -> false)
+;;
+
+(* The request row is written by the queue with the producer's statement in
+   hand ([Keeper_gate.request.call_summary]); no later writer has the
+   producer, so every later phase row copies the line from here. Read from the
+   stored row, so the copy carries the redaction the store applied. *)
+let approval_request_call_summary ~base_dir ~keeper_name ~approval_id =
+  Option.bind
+    (existing_approval_lifecycle_at_slot
+       ~base_dir
+       ~keeper_name
+       ~approval_id
+       ~transcript_slot:Keeper_chat_delivery_identity.Approval_request)
+    (fun (_row_id, lifecycle) -> lifecycle.call_summary)
 ;;
 
 (* RFC-0235 P3: the history endpoint can tell the dashboard that a clip

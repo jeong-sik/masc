@@ -1942,7 +1942,17 @@ type async_msg =
       original : string;
     }
 
-let enqueue_async mailbox msg = Eio.Stream.add mailbox msg
+(* Every async result carries the instant it was ready, so the loop can say
+   how long it sat in the mailbox. A result that arrived in a second and was
+   applied ten seconds later names the loop, not the request (RFC-0429
+   §3.0). *)
+type 'a mailed = {
+  ready_at : float;
+  message : 'a;
+}
+
+let enqueue_async mailbox msg =
+  Eio.Stream.add mailbox { ready_at = Unix.gettimeofday (); message = msg }
 
 let current_clock_text () =
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -11628,7 +11638,12 @@ let drain_async_messages state ~base_path ~http_refresh_inflight
   let rec loop changed =
     match Eio.Stream.take_nonblocking mailbox with
     | None -> changed
-    | Some msg ->
+    | Some { ready_at; message = msg } ->
+        let waited = Unix.gettimeofday () -. ready_at in
+        if waited >= Masc_tui_http.slow_report_sec then
+          Log.Transport.info
+            "async result waited %.0f ms in the mailbox before the loop applied it"
+            (waited *. 1000.);
         apply_async_message state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox msg;
         loop true
@@ -12140,6 +12155,7 @@ let main () =
   let http_scoped_refresh_inflight = ref false in
   let scoped_refresh_followup = ref No_scoped_followup in
   let async_messages = Eio.Stream.create 32 in
+  let last_loop_at = ref (Unix.gettimeofday ()) in
   let presented_surface_reference () =
     match state.view with
     | Approvals -> Option.bind !presented_approval approval_row_reference
@@ -13677,6 +13693,12 @@ and is loaded on demand through keeper_skill.
        | Some (Mouse_left_press _) | Some (Mouse_wheel _) | None -> ());
       if Option.is_some input then
         Render_schedule.request render_schedule Render_schedule.Input;
+      (let now = Unix.gettimeofday () in
+       let gap = now -. !last_loop_at in
+       if gap >= Masc_tui_http.slow_report_sec then
+         Log.Transport.info "main loop: %.0f ms between two iterations"
+           (gap *. 1000.);
+       last_loop_at := now);
       ensure_acting_pane_changes state ~mailbox:async_messages;
       let _terminal_rows, terminal_columns = get_terminal_size () in
       let message_mode =

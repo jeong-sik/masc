@@ -4193,6 +4193,7 @@
 (include stanzas/test_keeper_turn_attempt_observer.inc)
 (include stanzas/test_keeper_gate_effect_coverage.inc)
 (include stanzas/test_keeper_gate_replay.inc)
+(include stanzas/test_keeper_chat_store_approval_summary.inc)
 (include stanzas/test_keeper_gate_readonly.inc)
 (include stanzas/test_keeper_github_app_broker.inc)
 (include stanzas/test_keeper_hitl_resolution_prompt.inc)

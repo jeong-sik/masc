@@ -32,6 +32,7 @@ let global =
   ; b Meta "?" "this help"
   ; b Meta "Ctrl-B" "show or hide a visible keeper roster pane"
   ; b Meta "Ctrl-L" "show or hide the Activity pane: what every keeper is doing right now"
+      ~help:"the wheel over it scrolls the full list; a press picks a keeper, a second press opens its chat"
   ; b Meta "Ctrl-T" "release the mouse so you can drag-select and copy"
   ; b Navigate "Ctrl-]" "follow the reference under the cursor"
       ~help:"and Esc on the surface it opens comes back here"

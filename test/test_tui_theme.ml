@@ -223,6 +223,23 @@ let test_user_message_background_blend () =
     (blend (rgb 200 100 50))
 ;;
 
+(* The pane's ground and the reader's own rows step off the page by the same
+   amount, whatever the palette: one grey for everything set apart, not two
+   the eye has to rank. *)
+let test_side_pane_background_shares_the_user_row_ground () =
+  List.iter
+    (fun background ->
+       let palette = Some (palette background) in
+       Alcotest.(check string)
+         "same ground"
+         (Masc_tui_theme.user_message_background palette)
+         (Masc_tui_theme.side_pane_background palette))
+    [ rgb 0 0 0; rgb 255 255 255; rgb 30 30 46; rgb 253 246 227 ];
+  Alcotest.(check string)
+    "no palette, no ground"
+    "" (Masc_tui_theme.side_pane_background None)
+;;
+
 let test_user_message_background_fallbacks () =
   check str "truecolor keeps the blended RGB" "\027[48;2;30;30;30m"
     (user_background ~colors_enabled:true
@@ -398,6 +415,8 @@ let () =
             test_glyphs_hold_their_bytes
         ; Alcotest.test_case "user background uses the low-contrast blend"
             `Quick test_user_message_background_blend
+        ; Alcotest.test_case "side pane background shares the user row ground"
+            `Quick test_side_pane_background_shares_the_user_row_ground
         ; Alcotest.test_case "strip_sgr removes only styles" `Quick
             test_strip_sgr_removes_only_styles
         ; Alcotest.test_case "recede moves toward the background" `Quick

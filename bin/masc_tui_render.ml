@@ -69,6 +69,18 @@ let json_assoc_member_opt = Masc_tui_json.member_opt
    Activity feed itself. *)
 let acting_pane_reserved_cols = ref 0
 
+(* What each drawn pane row acts on, and how far the pane can scroll, as of
+   the last frame. A press or a wheel notch between frames is answered from
+   what was on screen, which is these, not from what the next frame would
+   draw. Empty when no pane was drawn, so a stale row cannot answer. *)
+let acting_pane_row_targets : Masc_tui_acting_pane.row_target array ref = ref [||]
+let acting_pane_scroll_max = ref 0
+
+let acting_pane_target_at ~line =
+  let targets = !acting_pane_row_targets in
+  if line >= 0 && line < Array.length targets then targets.(line)
+  else Masc_tui_acting_pane.Target_none
+
 let get_terminal_size () =
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
   (max 1 (rows - 1), max 1 (cols - !acting_pane_reserved_cols))
@@ -1162,14 +1174,22 @@ let acting_pane_sgr (tone : Masc_tui_acting_pane.tone) =
   | Masc_tui_acting_pane.Bad -> Theme.bad ()
   | Masc_tui_acting_pane.Info -> Theme.info ()
 
-let paint_acting_pane_line (line : Masc_tui_acting_pane.line) =
-  String.concat ""
-    (List.map
-       (fun (span : Masc_tui_acting_pane.span) ->
-         match acting_pane_sgr span.tone with
-         | "" -> span.text
-         | sgr -> sgr ^ span.text ^ Ansi.reset)
-       line)
+(* The pane sits on its own ground. Every span's reset would drop the row
+   back to the page's ground mid-row, so the ground is re-opened after each
+   one; the row ends on a full reset so the surface's next row starts on the
+   page. Without a palette the ground is [""] and the row draws as before. *)
+let paint_acting_pane_line ~ground (line : Masc_tui_acting_pane.line) =
+  let restore = if String.equal ground "" then "" else Ansi.reset ^ ground in
+  let close = if String.equal ground "" then "" else Ansi.reset in
+  ground
+  ^ String.concat ""
+      (List.map
+         (fun (span : Masc_tui_acting_pane.span) ->
+           match acting_pane_sgr span.tone with
+           | "" -> span.text
+           | sgr -> sgr ^ span.text ^ Ansi.reset ^ restore)
+         line)
+  ^ close
 
 let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
   (* [surface_body_rows] removes the strip before either the frame or the
@@ -1202,21 +1222,30 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
           Buffer.add_string left (Message_layout.fit_width line cols);
           Buffer.add_char left '\n')
        body;
+     let rendering =
+       Masc_tui_acting_pane.lines ~rows:body_rows ~cols:pane_cols
+         ~scroll:state.acting_pane_scroll (acting_pane_input state)
+     in
+     acting_pane_row_targets := Array.of_list rendering.Masc_tui_acting_pane.targets;
+     acting_pane_scroll_max := rendering.Masc_tui_acting_pane.scroll_max;
+     let ground = Theme.side_pane_background () in
      let right = Buffer.create 4096 in
      List.iter
        (fun line ->
-          Buffer.add_string right (paint_acting_pane_line line);
+          Buffer.add_string right (paint_acting_pane_line ~ground line);
           Buffer.add_char right '\n')
-       (Masc_tui_acting_pane.lines ~rows:body_rows ~cols:pane_cols
-          (acting_pane_input state));
+       rendering.Masc_tui_acting_pane.rows;
      write_two_panes framed ~left_cols:cols ~left ~right
    end
-   else
+   else begin
+     acting_pane_row_targets := [||];
+     acting_pane_scroll_max := 0;
      List.iter
        (fun line ->
           Buffer.add_string framed line;
           Buffer.add_char framed '\n')
-       body);
+       body
+   end);
   (if agenda_rows > 0 then
      match agenda_line (Masc_tui_types.agenda state) ~cols:full_cols with
      | Some line -> Buffer.add_string framed (line ^ "\n")

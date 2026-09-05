@@ -200,6 +200,14 @@ let user_message_background palette =
     ~project:Terminal_palette.best_color palette
 ;;
 
+(* One distance off the page for everything that sits apart from it. A pane
+   receding by a different amount than the reader's own rows would put three
+   greys on one screen and ask the eye to rank them. *)
+let side_pane_background palette =
+  user_message_background_for ~colors_enabled
+    ~project:Terminal_palette.best_color palette
+;;
+
 let recede ~theme_mode palette =
   recede_for ~colors_enabled ~dim:Sgr.dim ~gray:Sgr.gray ~theme_mode
     ~project:Terminal_palette.best_color palette

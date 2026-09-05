@@ -1936,16 +1936,9 @@ let runtime_string_array_line = Toml_line_editor.string_array_line
 
 let split_lines = Toml_line_editor.split_lines
 let join_lines = Toml_line_editor.join_lines
-let strip_toml_comment = Toml_line_editor.strip_comment
 let is_toml_table_header = Toml_line_editor.is_table_header
-
-let is_runtime_assignments_header line =
-  String.equal (line |> strip_toml_comment |> String.trim) "[runtime.assignments]"
-;;
-
-let is_runtime_header line =
-  String.equal (line |> strip_toml_comment |> String.trim) "[runtime]"
-;;
+let is_runtime_assignments_header = Toml_line_editor.is_table ~path:"runtime.assignments"
+let is_runtime_header = Toml_line_editor.is_table ~path:"runtime"
 
 let split_at = Toml_line_editor.split_at
 let find_index = Toml_line_editor.find_index
@@ -2069,12 +2062,17 @@ let update_runtime_assignment_text content ~keeper_name ~runtime_id =
    The table is replaced wholesale rather than merged: an allowlist is the
    complete statement of what a keeper may reach, so a write that kept
    unnamed entries would mean an operator could not remove one. *)
+let egress_keepers_table = [ "egress"; "keepers" ]
+
 (* Quoted, like an assignment row's key: a keeper name carries dots
    (edgar.a.poe is live), and [egress.keepers.edgar.a.poe] would be a path
    into nested tables rather than one keeper. Unquoted, the loader reads
    "a" as an unknown key under keeper "edgar" and refuses the file. *)
 let egress_keepers_header keeper_name =
-  Printf.sprintf "[egress.keepers.\"%s\"]" (toml_escape_string keeper_name)
+  Printf.sprintf
+    "[%s.\"%s\"]"
+    (String.concat "." egress_keepers_table)
+    (toml_escape_string keeper_name)
 ;;
 
 let egress_allow_line allow =
@@ -2085,17 +2083,19 @@ let egress_allow_line allow =
      |> String.concat ", ")
 ;;
 
-(* Both spellings, because the file has two authors. This writer always
-   quotes; an operator writing [egress.keepers.alder] by hand does not, and
-   a matcher that only knew its own spelling would append a second table for
-   a keeper that already had one -- two tables for one keeper, with the
-   loader taking whichever it saw first. *)
+(* The file has two authors, so the header is recognised by what the TOML
+   grammar reads out of it rather than by its spelling: this writer quotes
+   the key; an operator's hand may not, may space the brackets, may
+   single-quote, may leave a note on the line. The loader reads every one of
+   those as the path egress, keepers, name, and so does this, which is what
+   keeps one keeper at one table. [\[\[egress.keepers.<name>\]\]] is not the
+   keeper's table: the loader refuses an array of tables as a keeper, so the
+   writer leaves it as the table boundary it is. *)
 let is_egress_keeper_header ~keeper_name line =
-  let trimmed = String.trim line in
-  String.equal trimmed (egress_keepers_header keeper_name)
-  || String.equal
-       trimmed
-       (Printf.sprintf "[egress.keepers.%s]" (toml_escape_string keeper_name))
+  match Toml_line_editor.header_of_line line with
+  | Some (Toml_line_editor.Table path) ->
+    List.equal String.equal path (egress_keepers_table @ [ keeper_name ])
+  | Some (Toml_line_editor.Table_array _) | None -> false
 ;;
 
 let update_egress_allow_text content ~keeper_name ~allow =
@@ -2835,11 +2835,11 @@ let set_runtime_media_failover ?runtime_config_path ~runtime_ids () =
 (* [\[runtime.lanes."<id>"\]] is written by table path, not by the [\[runtime\]]
    array writer above: the candidates live in their own table, one per lane.
 
-   The header must match the file byte for byte ([Toml_line_editor.is_table]
-   compares the whole line), so the id is quoted exactly when TOML requires it
-   — a bare key is [A-Za-z0-9_-] and every runtime id carries a dot, so in
-   practice this quotes. Writing the other form would append a second table
-   for the same key and the post-write validation would reject the file. *)
+   The id is quoted exactly when TOML requires it: a bare key is
+   [A-Za-z0-9_-] and every runtime id carries a dot, so in practice this
+   quotes. Either spelling names the same table to [Toml_line_editor.is_table],
+   which compares the key path the grammar reads, so the choice is only what
+   the operator sees in the file. *)
 let lane_table_path lane_id =
   let bare =
     String.for_all

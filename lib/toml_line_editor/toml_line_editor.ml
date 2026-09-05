@@ -81,16 +81,83 @@ let strip_comment line =
   | Some index -> String.sub line 0 index
 ;;
 
-let is_table_header line =
-  let s = line |> strip_comment |> String.trim in
-  let len = String.length s in
-  len >= 2 && Char.equal s.[0] '[' && Char.equal s.[len - 1] ']'
+(* ── table headers ─────────────────────────────────────────────────────── *)
+
+(* A table header by the key path the TOML grammar reads out of it. [\[a.b\]]
+   and [\[\[a.b\]\]] carry the same path and mean different things to a
+   loader, so they are kept apart. *)
+type header =
+  | Table of string list
+  | Table_array of string list
+
+let equal_header a b =
+  match a, b with
+  | Table x, Table y | Table_array x, Table_array y -> List.equal String.equal x y
+  | Table _, Table_array _ | Table_array _, Table _ -> false
 ;;
 
-(* [is_table ~path line] matches the standard table header [\[path\]] exactly
-   (comments/whitespace ignored). *)
+(* A line is a table header when it parses on its own as a TOML document
+   whose only content is one empty table. [\[egress.keepers.alder\]],
+   [\[ egress . keepers . "alder" \]] and [\[egress.keepers.'alder'\] # note]
+   all read as the path egress, keepers, alder and nothing else; the spelling
+   (whitespace inside the brackets or around the dots, quoted or bare keys, a
+   trailing comment) is the grammar's to decide, which is what keeps this
+   editor and the loader agreeing on which table a line opens.
+
+   A line that does not parse alone is not a header. Headers are one line in
+   TOML, so a continuation line of a multi-line array or string cannot be one,
+   and the parser's message has nothing to add to that. *)
+let header_of_line line =
+  let rec walk acc = function
+    | Otoml.TomlTable [ (key, child) ] ->
+      (match child with
+       | Otoml.TomlTable [] -> Some (Table (List.rev (key :: acc)))
+       | Otoml.TomlTableArray [] -> Some (Table_array (List.rev (key :: acc)))
+       | Otoml.TomlTable (_ :: _) -> walk (key :: acc) child
+       | Otoml.TomlTableArray (_ :: _)
+       | Otoml.TomlInlineTable _
+       | Otoml.TomlArray _
+       | Otoml.TomlString _
+       | Otoml.TomlInteger _
+       | Otoml.TomlFloat _
+       | Otoml.TomlBoolean _
+       | Otoml.TomlOffsetDateTime _
+       | Otoml.TomlLocalDateTime _
+       | Otoml.TomlLocalDate _
+       | Otoml.TomlLocalTime _ -> None)
+    | Otoml.TomlTable ([] | _ :: _ :: _)
+    | Otoml.TomlInlineTable _
+    | Otoml.TomlTableArray _
+    | Otoml.TomlArray _
+    | Otoml.TomlString _
+    | Otoml.TomlInteger _
+    | Otoml.TomlFloat _
+    | Otoml.TomlBoolean _
+    | Otoml.TomlOffsetDateTime _
+    | Otoml.TomlLocalDateTime _
+    | Otoml.TomlLocalDate _
+    | Otoml.TomlLocalTime _ -> None
+  in
+  match Otoml.Parser.from_string_result line with
+  | Ok document -> walk [] document
+  | Error _not_a_document_on_its_own -> None
+;;
+
+let is_table_header line =
+  match header_of_line line with
+  | Some (Table _ | Table_array _) -> true
+  | None -> false
+;;
+
+(* [is_table ~path line]: [line] opens the standard table [\[path\]]. [path] is
+   the text between the brackets as a writer emits it, so the grammar reads it
+   the way it reads the line: a quoted segment is one key and a bare dotted
+   one is a nested path, in both. A [path] that is not itself a header opens
+   no line, and the table a writer then appends carries that same text. *)
 let is_table ~path line =
-  String.equal (line |> strip_comment |> String.trim) (Printf.sprintf "[%s]" path)
+  match header_of_line (Printf.sprintf "[%s]" path), header_of_line line with
+  | Some expected, Some found -> equal_header expected found
+  | Some _, None | None, Some _ | None, None -> false
 ;;
 
 let rec split_at n xs =

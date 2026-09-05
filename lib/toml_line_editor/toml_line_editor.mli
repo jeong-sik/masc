@@ -22,8 +22,23 @@ val join_lines : string list -> trailing_newline:bool -> string
 val strip_comment : string -> string
 (** Remove the first TOML line comment from [line]. *)
 
+type header =
+  | Table of string list
+  | Table_array of string list
+(** A table header by the key path the TOML grammar reads out of it: [Table]
+    for [[a.b]], [Table_array] for [[[a.b]]]. Keys are unescaped. *)
+
+val header_of_line : string -> header option
+(** The header [line] opens, when the line parses on its own as one empty
+    table and nothing else. Whitespace, quoting and a trailing comment are
+    the grammar's to read; a line that does not parse alone is [None]. *)
+
 val is_table_header : string -> bool
-(** Return [true] when [line] is a TOML table header after trimming comments. *)
+(** Return [true] when [header_of_line line] is a header of either kind. *)
+
+val is_table : path:string -> string -> bool
+(** Return [true] when [line] opens the standard table [[path]], compared by
+    the key path the grammar reads from each. *)
 
 val split_at : int -> 'a list -> 'a list * 'a list
 (** Split a list at [n], returning [(prefix, suffix)]. *)

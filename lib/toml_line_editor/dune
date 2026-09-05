@@ -1,10 +1,12 @@
-; Comment-preserving line-based TOML editing (RFC-0306 §3.2). Pure stdlib; the
-; single home for editing runtime.toml keys/tables without dropping comments.
-; Runtime and the fusion settings writer both delegate here.
+; Comment-preserving line-based TOML editing (RFC-0306 §3.2); the single home
+; for editing runtime.toml keys/tables without dropping comments. Runtime and
+; the fusion settings writer both delegate here. Otoml is used to read a
+; header line, never to print the file: printing would drop the comments.
 
 (include_subdirs no)
 
 (library
  (name toml_line_editor)
  (public_name masc.toml_line_editor)
- (wrapped false))
+ (wrapped false)
+ (libraries otoml))

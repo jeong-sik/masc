@@ -3237,7 +3237,7 @@
 (test
  (name test_egress_allow_text)
  (modules test_egress_allow_text)
- (libraries alcotest masc.runtime masc.string_util))
+ (libraries alcotest masc.runtime masc.string_util masc.toml_line_editor))
 
 (test
  (name test_egress_lane_config_pinning)

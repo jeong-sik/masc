@@ -27,12 +27,14 @@ let fsync_path_with ~allow_unsupported path =
 let fsync_path = fsync_path_with ~allow_unsupported:true
 let fsync_path_strict = fsync_path_with ~allow_unsupported:false
 
-(* The commit of an atomic replacement is three blocking syscalls: fsync of
-   the payload, rename over the target, fsync of the parent directory. Inside
-   an Eio fiber they run as one systhread job so the domain keeps scheduling
-   other fibers while the kernel works; a single rename held the main domain
-   for 486 ms in the 2026-09-05 stack sample (RFC
-   main-domain-scheduler-latency §8.8). Outside Eio they run inline.
+(* An atomic replacement blocks in the kernel twice: creating the temp file
+   (an O_EXCL open per name tried) and committing it (fsync of the payload,
+   rename over the target, fsync of the parent directory). Inside an Eio
+   fiber each of the two runs as one systhread job so the domain keeps
+   scheduling other fibers while the kernel works; a single rename held the
+   main domain for 486 ms and temp-file creation was 3.7% of its busy time
+   in the 2026-09-05 stack samples (RFC main-domain-scheduler-latency §8.8).
+   Outside Eio they run inline.
    [Eio_unix.run_in_systhread] re-raises the job's exception in the fiber
    with the backtrace captured in the thread (eio/unix/thread_pool.ml), so
    the failure stage and cancellation reporting below are unchanged. *)
@@ -2631,19 +2633,20 @@ let save_file_atomic_with_parent_sync
     Error { path; stage = !stage; exception_; backtrace }
   in
   match
-    try
-      Ok
-        (Stdlib.Filename.temp_file
-           ~temp_dir:dir
-           atomic_tmp_prefix
-           atomic_tmp_suffix)
-    with
-    (* Filename.temp_file's only documented failure is Sys_error; anything
-       else (Out_of_memory, Assert_failure, ...) is fatal and must stay loud
-       rather than collapse into the staged error channel. *)
-    | Sys_error _ as exception_ ->
-      let backtrace = Printexc.get_raw_backtrace () in
-      failure ~backtrace exception_
+    blocking_syscalls ~label:"fs-compat-atomic-temp-file" (fun () ->
+      try
+        Ok
+          (Stdlib.Filename.temp_file
+             ~temp_dir:dir
+             atomic_tmp_prefix
+             atomic_tmp_suffix)
+      with
+      (* Filename.temp_file's only documented failure is Sys_error; anything
+         else (Out_of_memory, Assert_failure, ...) is fatal and must stay loud
+         rather than collapse into the staged error channel. *)
+      | Sys_error _ as exception_ ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        failure ~backtrace exception_)
   with
   | Error _ as error -> error
   | Ok tmp ->

@@ -1,6 +1,6 @@
 ---
 rfc: "0419"
-title: 열여덟 세계는 지금 상태로 비교할 수 없다 — 재화 열셋이 존재하지 않고, 그보다 센 교란이 셋 있다
+title: 열여덟 세계는 지금 상태로 비교할 수 없다 — 재화 열이 존재하지 않고, 그보다 센 교란이 셋 있다
 status: Draft
 created: 2026-09-05
 author: vincent + claude
@@ -12,7 +12,7 @@ related: []
 ## 0. 한 줄 요약
 
 `presets/world-*` 열여덟 개는 **재화 규칙이 keeper 행동을 바꾸는가**를 보려고 만들었는데, 그
-재화 중 **열셋이 실재하지 않는다.** keeper 는 `world-capital` 의 돈을 벌 수도 쓸 수도 조회할
+재화 중 **열이 실재하지 않는다.** keeper 는 `world-capital` 의 돈을 벌 수도 쓸 수도 조회할
 수도 없다(§3.1). 그리고 바깥 문헌이 재화보다 센 변수 셋을 이미 이름 붙여 놓았다 — 모델
 정체성, persona 프레이밍, 초기 난수. 셋 다 통제되지 않는다(§2, §3).
 
@@ -169,25 +169,43 @@ keeper 에게 "네 발화량이 관측 대상"이라고 알려 주고 있었고,
 #33174 에서 Mann 과 Müller 로 갈라졌다. 짝의 차이가 규칙 하나에서 **규칙 + 문체 둘**로
 늘었다. 통제 하나를 세우면서 더 큰 통제를 깼다.
 
-### 3.1 그리고 재화 열여덟 중 열셋은 존재하지 않는다
+### 3.1 그리고 재화 열여덟 중 열이 존재하지 않는다
 
 위 표보다 이쪽이 크다. keeper 가 그 재화를 **벌 수도 쓸 수도 조회할 수도 없다.**
 
-| 실재하는 것 | 어디에 남나 |
-|---|---|
-| 받은 표 | `board_votes.jsonl` `target` |
-| 준 표 | 같은 파일 `voter` |
-| 끝낸 태스크 | `tasks-archive.json` `status`, `created_by`, `assignee` |
-| 증명된 골 | `goal_verifications.json` `records[].completion.state` |
-| 운영자에게 물은 것 | `.masc/keeper_ask/` — `asked_at`, `answered_at` |
+세계마다 하나씩 확인했다. "실측 경로"는 keeper 가 실제로 부를 수 있는 도구이거나 store 파일을
+말한다.
 
-없는 것: **돈**(capital·scarcity), 약속 장부(honor), 준수 계수기(doctrine), 통설 기록(heresy),
-되풀이 계수기(ascension), 되돌림 여지(custody), 형태 합의(aesthetic), 그리고 구조형 셋의
-의리·빚·소출 잔고.
+| 세계 | 재화 | 실측 경로 | 판정 |
+|---|---|---|---|
+| `approval` | 받은 표 | `board_votes.jsonl` `target` | **실재** |
+| `tribute` | 준 표 | 같은 파일 `voter` | **실재** |
+| `merit` | 증명된 골 | `goal_verifications.json` `completion.state` | **실재** |
+| `veritas` | 확인·반증 | 같은 파일 | **실재** |
+| `surveillance` | 흔적 | `.masc/tool_calls` + `masc_agent_timeline` | **실재** |
+| `chattel` | 소출 | `tasks-archive.json` `created_by` / `assignee` | 양은 실재. **귀속 기전은 없음** |
+| `emulation` | 시간 | `masc_agent_card` 가 노출하는지 미확인 | **확인 필요** |
+| `capital` | 돈 | 없음 | 없음 |
+| `scarcity` | 돈 | 없음 | 없음 |
+| `honor` | 지킨 약속 | 없음 | 없음 |
+| `doctrine` | 지킨 조문 | 없음 | 없음 |
+| `heresy` | 깬 통설 | 없음 | 없음 |
+| `ascension` | 없앤 되풀이 | 없음 | 없음 |
+| `custody` | 되돌릴 여지 | 없음 | 없음 |
+| `aesthetic` | 합의된 형태 | 없음 | 없음 |
+| `fief` | 의리 | 없음 | 구조형(§3.2) |
+| `clientage` | 빚 | 없음 | 구조형(§3.2) |
+| `nihil` | — | — | 설계상 없음 |
+
+**열이 없고, 다섯이 실재하고, 하나는 절반이고, 하나는 미확인이고, 하나는 설계상 없다.**
 
 `world-capital` 은 keeper 에게 "돈이 쌓인다"고 적어 두었지만 잔고를 조회하는 도구가 없다.
 `world-scarcity` 는 "잔량이 준다"고 하지만 잔량을 볼 수 없다. **이 문서의 첫 판이 파일럿
 쌍으로 고른 것이 하필 그 둘이다.** 그대로 돌렸으면 없는 예산에 대한 태도를 측정했을 것이다.
+
+`chattel` 은 절반만 없다. 끝낸 태스크는 `created_by` 와 `assignee` 로 세지만, 그 값이 만든
+자리가 아니라 arbiter 에게 간다는 규칙을 강제하는 것은 아무 데도 없다. 세계 규칙이 프롬프트
+안에만 있다.
 
 ### 3.2 재화형과 구조형이 한 틀에 섞여 있다
 

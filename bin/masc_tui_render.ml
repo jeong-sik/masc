@@ -3672,31 +3672,58 @@ let render_planning_list (state : state) =
          box_empty buf cols
        done
    | Some p ->
-       let rollup =
+       let total_goals =
+         p.pl_rollup.pr_active + p.pl_rollup.pr_verifying + p.pl_rollup.pr_done
+         + p.pl_rollup.pr_dropped
+       in
+       let progress_pct =
+         if total_goals > 0 then p.pl_rollup.pr_done * 100 / total_goals else 0
+       in
+       let bar_width = if cols < 90 then 8 else 12 in
+       let progress_bar =
+         if total_goals > 0 then
+           Printf.sprintf "[%s] %2d%% (%d/%d)"
+             (Masc_tui_context_bars.ratio_bar ~width:bar_width
+                ~numerator:p.pl_rollup.pr_done ~denominator:total_goals)
+             progress_pct p.pl_rollup.pr_done total_goals
+         else "no goals"
+       in
+       let phase_counters =
          Printf.sprintf
-           "  Executing: %d  Verifying: %d  Done: %d  Dropped: %d"
-           p.pl_rollup.pr_active
-           p.pl_rollup.pr_verifying p.pl_rollup.pr_done
-           p.pl_rollup.pr_dropped
+           "%s● Exec: %d%s  %s◆ Ver: %d%s  %s✓ Done: %d%s  %s✕ Drop: %d%s"
+           (Theme.info ()) p.pl_rollup.pr_active Ansi.reset
+           Ansi.magenta p.pl_rollup.pr_verifying Ansi.reset
+           (Theme.ok ()) p.pl_rollup.pr_done Ansi.reset
+           (Theme.muted ()) p.pl_rollup.pr_dropped Ansi.reset
        in
-       (* The five statuses partition one backlog, and every one of them was
-          drawn in the same dim: 486 todo against 9 running read alike until
-          the digits were compared. Each keeps its own count beside it, so a
-          terminal without colour loses the emphasis and no fact. *)
+       let rollup =
+         Printf.sprintf "  Goals: %s%s%s %s  %s│%s  %s"
+           Ansi.bold (string_of_int total_goals) Ansi.reset
+           progress_bar (Theme.recede ()) Ansi.reset phase_counters
+       in
+       let backlog_sep =
+         Printf.sprintf " %s%s%s " (Theme.recede ())
+           Masc_tui_theme.Glyph.breadcrumb_sep Ansi.reset
+       in
        let backlog =
-         [ "todo", p.pl_backlog.pb_todo
-         ; "claimed", p.pl_backlog.pb_claimed
-         ; "running", p.pl_backlog.pb_running
-         ; "done", p.pl_backlog.pb_done
-         ; "cancelled", p.pl_backlog.pb_cancelled
-         ]
-         |> Magnitude.of_counts
-         |> List.map (fun (label, value, band) ->
-                Printf.sprintf "%s%s=%d%s" (magnitude_tone band) label value
-                  Ansi.reset)
-         |> String.concat "  "
+         let items =
+           [ ("todo", p.pl_backlog.pb_todo, Masc_tui_theme.Glyph.task_todo ^ " todo")
+           ; ("claimed", p.pl_backlog.pb_claimed, "claimed")
+           ; ("running", p.pl_backlog.pb_running, Masc_tui_theme.Glyph.task_active ^ " running")
+           ; ("done", p.pl_backlog.pb_done, Masc_tui_theme.Glyph.task_done ^ " done")
+           ; ("cancelled", p.pl_backlog.pb_cancelled, Masc_tui_theme.Glyph.task_cancelled ^ " cancelled")
+           ]
+         in
+         let counts = List.map (fun (k, v, _) -> k, v) items in
+         let bands = Magnitude.of_counts counts in
+         List.map2
+           (fun (_, _, label) (_, value, band) ->
+              Printf.sprintf "%s%s=%d%s" (magnitude_tone band) label value
+                Ansi.reset)
+           items bands
+         |> String.concat backlog_sep
        in
-       box_line buf cols (Ansi.bold ^ rollup ^ Ansi.reset);
+       box_line buf cols rollup;
        box_line buf cols
          (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog);
        box_divider buf cols;
@@ -3765,41 +3792,49 @@ let render_planning_list (state : state) =
                 One signal, not three: verification is the one that means
                 something is not moving, so it wins the cell when both are
                 present. *)
-             let open_note =
-               let linked =
-                 List.filter
-                   (fun (t : Tui_decode.task) -> List.mem g.pg_id t.goal_ids)
-                   state.tasks
-               in
-               match linked with
-               | [] -> ""
-               | _ ->
-                   let tally predicate =
-                     List.length (List.filter predicate linked)
-                   in
-                   let awaiting =
-                     tally (fun (t : Tui_decode.task) ->
-                         match t.status with
-                         | Masc_domain.AwaitingVerification _ -> true
-                         | _ -> false)
-                   in
-                   let running =
-                     tally (fun (t : Tui_decode.task) ->
-                         match t.status with
-                         | Masc_domain.InProgress _ -> true
-                         | _ -> false)
-                   in
-                   let total = List.length linked in
-                   if awaiting > 0 then
-                     Printf.sprintf "%d open %d ver" total awaiting
-                   else if running > 0 then
-                     Printf.sprintf "%d open %d run" total running
-                   else Printf.sprintf "%d open" total
+             let open_note, open_style =
+                let linked =
+                  List.filter
+                    (fun (t : Tui_decode.task) -> List.mem g.pg_id t.goal_ids)
+                    state.tasks
+                in
+                match linked with
+                | [] -> "", ""
+                | _ ->
+                    let tally predicate =
+                      List.length (List.filter predicate linked)
+                    in
+                    let awaiting =
+                      tally (fun (t : Tui_decode.task) ->
+                          match t.status with
+                          | Masc_domain.AwaitingVerification _ -> true
+                          | _ -> false)
+                    in
+                    let running =
+                      tally (fun (t : Tui_decode.task) ->
+                          match t.status with
+                          | Masc_domain.InProgress _ -> true
+                          | _ -> false)
+                    in
+                    let total = List.length linked in
+                    if awaiting > 0 then
+                      Printf.sprintf "%d open %d ver" total awaiting, (Theme.warn ())
+                    else if running > 0 then
+                      Printf.sprintf "%d open %d run" total running, (Theme.info ())
+                    else Printf.sprintf "%d open" total, Ansi.dim
              in
+             let priority_style =
+               match g.pg_priority with
+               | 1 -> (Theme.bad ()) ^ Ansi.bold
+               | 2 -> (Theme.warn ())
+               | 3 -> Ansi.reset
+               | _ -> Ansi.dim
+             in
+             let lead = if is_selected then "> " else "  " in
              let line =
-               "  "
+               lead
                ^ Render_schedule.planning_row ~phase_style:status_color
-                   ~phase_width ~title_width
+                   ~priority_style ~open_style ~phase_width ~title_width
                    { Render_schedule.prow_phase = "[" ^ status_label ^ "]"
                    ; prow_proof = planning_proof_mark g.pg_proof
                    ; prow_priority = Printf.sprintf "P%d" g.pg_priority
@@ -3809,13 +3844,10 @@ let render_planning_list (state : state) =
                    ; prow_due = due
                    }
              in
-             let content =
-               if is_selected then
-                 Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
-               else
-                 "  " ^ line
-             in
-             box_line buf cols content
+             if is_selected then
+               box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
+             else
+               box_line buf cols line
            end else
              box_empty buf cols
          done;
@@ -3872,23 +3904,42 @@ let planning_detail_pane (state : state)
     Ansi.bold
     (fit_width (Terminal_text.single_line goal.pg_title) (cols - 6))
     Ansi.reset);
-  box_line buf cols (Printf.sprintf "  Phase: %s  Priority: P%d"
-    (fit_width (planning_phase_label goal.pg_phase) 14) goal.pg_priority);
-  (match Terminal_text.optional_single_line goal.pg_due_date with
-   | Some d ->
-       box_line buf cols
-         (Printf.sprintf "  Due: %s" d)
-   | None -> box_empty buf cols);
-  (match Terminal_text.optional_single_line goal.pg_metric with
-   | Some m ->
-       let target =
-         match Terminal_text.optional_single_line goal.pg_target_value with
-         | Some t -> " = " ^ t
-         | None -> ""
-       in
-       box_line buf cols
-         (Printf.sprintf "  Metric: %s%s" m target)
-   | None -> box_empty buf cols);
+  let prio_color =
+    match goal.pg_priority with
+    | 1 -> (Theme.bad ()) ^ Ansi.bold
+    | 2 -> (Theme.warn ())
+    | 3 -> Ansi.reset
+    | _ -> Ansi.dim
+  in
+  let proof_glyph = planning_proof_mark goal.pg_proof in
+  box_line buf cols
+    (Printf.sprintf "  Phase: %s[%s]%s   Priority: %sP%d%s   Proof: %s"
+       status_color status_label Ansi.reset
+       prio_color goal.pg_priority Ansi.reset
+       proof_glyph);
+  let due_text =
+    match Terminal_text.optional_single_line goal.pg_due_date with
+    | Some d -> d
+    | None -> "\xe2\x80\x94"
+  in
+  let metric_text =
+    match Terminal_text.optional_single_line goal.pg_metric with
+    | Some m ->
+        let target =
+          match Terminal_text.optional_single_line goal.pg_target_value with
+          | Some t -> " = " ^ t
+          | None -> ""
+        in
+        m ^ target
+    | None -> "\xe2\x80\x94"
+  in
+  box_line buf cols
+    (Printf.sprintf "  Due: %s   Metric: %s" due_text metric_text);
+  box_line buf cols
+    (Printf.sprintf "  Actions:  %s[c]%s Complete   %s[x]%s Drop   %s[o]%s Reopen"
+       (Theme.ok ()) Ansi.reset
+       (Theme.bad ()) Ansi.reset
+       (Theme.info ()) Ansi.reset);
   (* The goal's own timeline, dim like the Board read pane's timestamps:
      when it was opened, when it last moved, when it was last reviewed. *)
   let timestamp_lines =
@@ -3917,18 +3968,19 @@ let planning_detail_pane (state : state)
   (match armed with
    | Some armed_action ->
        box_line buf cols
-         ((Theme.warn ()) ^ Printf.sprintf "  armed: %s -- same key again to send"
-            (match armed_action with
-             | Goal_phase.Public_action.Request_complete -> "request completion"
-             | Goal_phase.Public_action.Drop -> "drop"
-             | Goal_phase.Public_action.Reopen -> "reopen")
-         ^ Ansi.reset)
+         ((Theme.warn ()) ^ Ansi.bold
+          ^ Printf.sprintf "  ARMED: %s -- press same key again to submit, any other key to cancel"
+             (match armed_action with
+              | Goal_phase.Public_action.Request_complete -> "Request Completion [c]"
+              | Goal_phase.Public_action.Drop -> "Drop Goal [x]"
+              | Goal_phase.Public_action.Reopen -> "Reopen Goal [o]")
+          ^ Ansi.reset)
    | None -> ());
   (match state.goal_action_error with
    | Some err ->
        box_line buf cols
-         ((Theme.bad ()) ^ "  "
-         ^ fit_width (Terminal_text.single_line err) (cols - 8)
+         ((Theme.bad ()) ^ "  Error: "
+         ^ fit_width (Terminal_text.single_line err) (cols - 12)
          ^ Ansi.reset)
    | None -> ());
   box_divider buf cols;
@@ -4046,9 +4098,20 @@ let render_planning_detail (state : state)
       in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
+      let format_sidebar_goal (row : planning_goal) =
+        let phase_badge =
+          match row.pg_phase with
+          | Goal_phase.Executing -> "[exec]"
+          | Goal_phase.Verifying -> "[ver ]"
+          | Goal_phase.Completed -> "[done]"
+          | Goal_phase.Dropped -> "[drop]"
+        in
+        Printf.sprintf "%s P%d %s" phase_badge row.pg_priority
+          (Terminal_text.single_line row.pg_title)
+      in
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Planning"
         ~focused:false
-        ~labels:(List.map (fun (row : planning_goal) -> row.pg_title) goals)
+        ~labels:(List.map format_sidebar_goal goals)
         ~selected;
       let scroll =
         planning_detail_pane state ~armed ~rows ~cols:(cols - left_cols) goal

@@ -136,7 +136,6 @@ let bootstrap_runtime ~workspace_path ~base_path =
   let signature = (workspace_path, prompt_markdown_dir) in
   if !bootstrapped_signature <> Some signature then (
     Prompt_registry.set_markdown_dir prompt_markdown_dir;
-    Prompt_registry.load_prompts_from_directory prompt_markdown_dir;
     (try Prompt_registry.restore_overrides workspace_path
      with
      | Eio.Cancel.Cancelled _ as e -> raise e

@@ -55,11 +55,11 @@ dune build bin/masc_tui.exe
 ## 4. 자율 Keeper 켜기 (선택)
 
 미리 빌드된 설치와 마찬가지로, Keeper 는 모델 소스와 명령 격리가 필요합니다.
-프로바이더 키를 넣거나(또는 로컬 모델을 연결하고) 전체 supervisor 를 띄웁니다.
+프로바이더 키를 넣거나(또는 로컬 모델을 연결하고) 서버를 띄웁니다. `--base-path`는 필수입니다.
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
-./start-masc.sh
+./start-masc.sh --http --base-path ~/masc
 ```
 
 키 없이 쓰는 방법은 [로컬 AI 모델 연결](/ko/runbooks/llama-server/)을, 격리

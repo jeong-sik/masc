@@ -28,10 +28,4 @@ No. MASC stores all coordination state, logs, and artifacts exclusively inside t
 
 ### Q. What is the Gate?
 
-The **Gate** is MASC's Human-In-The-Loop (HITL) approval boundary. When an agent attempts sensitive shell commands or file operations, execution pauses until an operator explicitly approves (`a`) or denies (`d`) the action in the TUI.
-
----
-
-### Q. Why is the agent called a "Keeper"?
-
-The name originates from the 1997 strategy game *Dungeon Keeper*. Adversarial review agent profiles (such as Horned Reaper) similarly borrow unit designations from the game.
+The **Gate** is MASC's Human-In-The-Loop (HITL) approval boundary. When an agent attempts sensitive shell commands or file operations, execution pauses until an operator explicitly approves (`y`) or denies (`n`) the action in the TUI.

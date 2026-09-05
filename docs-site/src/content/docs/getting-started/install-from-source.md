@@ -55,11 +55,11 @@ The keys and surfaces match the prebuilt binary — see the
 ## 4. Enable autonomous Keepers (optional)
 
 As with the prebuilt install, Keepers need a model source and a command sandbox.
-Export a provider key (or wire a local model) and start the full supervisor:
+Export a provider key (or wire a local model) and start the server. `--base-path` is required:
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
-./start-masc.sh
+./start-masc.sh --http --base-path ~/masc
 ```
 
 See [Local Models](/runbooks/llama-server/) for the no-key option and

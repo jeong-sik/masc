@@ -1,2 +1,0 @@
-755 999:999 /app/data
-755 999:999 /app/data/tool-metrics

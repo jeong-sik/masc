@@ -1,1 +1,0 @@
-[runtime-deployment-preflight] OK: base_path=/app schedule_ledgers=0 signal_files=0 signal_rows=0 current_owners=0 keeper_meta=0 in_progress=0 helper=/app/masc-deployment-preflight-helper helper_commit=unstamped

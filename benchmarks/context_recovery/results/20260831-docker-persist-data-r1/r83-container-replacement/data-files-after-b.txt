@@ -1,2 +1,0 @@
-/app/data/tool-metrics/2026-08/30.jsonl
-644 999:999 221 /app/data/tool-metrics/2026-08/30.jsonl

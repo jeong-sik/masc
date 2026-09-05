@@ -1,4 +1,0 @@
-[2026-08-30 18:05:45] [DEBUG] [Dashboard] full_health_snapshot warm cache delayed 0s
-[2026-08-30 18:05:45] [INFO] [Dashboard] starting full_health_snapshot refresh loop
-[2026-08-30 18:05:45] [INFO] [Dashboard] full_health_snapshot warm cache done (0.1s)
-[2026-08-30 18:06:20] [DEBUG] [Dashboard] full_health_snapshot refreshed (0.1s)

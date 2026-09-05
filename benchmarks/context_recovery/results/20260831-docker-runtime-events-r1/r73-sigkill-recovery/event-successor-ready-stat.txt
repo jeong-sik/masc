@@ -1,1 +1,0 @@
-/app/.masc/runtime/events/7.events inode=2729538 size=68167744 mtime=1788115729 mode=600 uid=999 gid=999

@@ -1,2 +1,0 @@
-/app/.masc/runtime/events/7.events
-600 999:999 68167744 /app/.masc/runtime/events/7.events

@@ -1,8 +1,8 @@
 (** Visual charting and graphing primitives for the MASC TUI.
 
-    Provides UTF-8 block sparklines, context and resource gauges, latency
-    waterfall breakdowns, activity heatmaps, tool distribution bars, and
-    high-resolution 2x4 Braille time-series plots.
+    Provides UTF-8 block sparklines, context and resource gauges, activity
+    heatmaps, tool distribution bars, and high-resolution 2x4 Braille
+    time-series plots.
 
     Pure by construction: no terminal I/O, no mutation, no unhandled exceptions.
     Safe across wide/narrow widths, non-ASCII multi-byte text, and empty/negative inputs. *)
@@ -44,22 +44,6 @@ val gauge :
     bounded strictly within [width] display cells. The bar carries no level
     colouring: fill and remainder differ by glyph and dimming only. A domain
     that defines a warning or critical level draws it beside the bar. *)
-
-(** {1 Waterfall Charts} *)
-
-type waterfall_step = {
-  label : string;
-  duration_ms : int;
-  style : style option;
-}
-
-val waterfall :
-  width:int ->
-  ?total_ms:int ->
-  waterfall_step list ->
-  string list
-(** [waterfall ~width ?total_ms steps] renders a tree-structured latency breakdown.
-    Guaranteed not to exceed [width] display cells. *)
 
 (** {1 Activity Heatmaps} *)
 

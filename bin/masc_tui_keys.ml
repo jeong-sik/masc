@@ -74,8 +74,8 @@ let for_surface = function
       ]
   | Metrics ->
       [ b Navigate "j/k" "scroll"
-      ; b Navigate "1-4" "section"
-          ~help:"1: Fleet Pulse & Activity · 2: Keeper Memory Resources · 3: Tool Distribution · 4: Latency Waterfall"
+      ; b Navigate "1-3" "section"
+          ~help:"1: Fleet Pulse & Activity · 2: Keeper Memory Resources · 3: Gate Queue"
       ; b Navigate "s" "cycle" ~help:"cycle telemetry section"
       ; b Act "Esc" "overview"
       ; b Meta "r" "refresh"

@@ -14469,7 +14469,7 @@ and is loaded on demand through keeper_skill.
        | Some ("l" | "L") when state.view = Acting ->
            goto_surface state ~mailbox:async_messages System_logs
         (* Metrics shortcuts: 'm' from Overview navigates to visual telemetry,
-           1-4 switch sections, s/S cycles through sections. *)
+           1-3 switch sections, s/S cycles through sections. *)
         | Some ("m" | "M") when state.view = Overview ->
             goto_surface state ~mailbox:async_messages Metrics
         | Some "1" when state.view = Metrics ->
@@ -14480,9 +14480,6 @@ and is loaded on demand through keeper_skill.
             state.metrics_scroll <- 0
         | Some "3" when state.view = Metrics ->
             state.metrics_section <- Section_tools;
-            state.metrics_scroll <- 0
-        | Some "4" when state.view = Metrics ->
-            state.metrics_section <- Section_latency;
             state.metrics_scroll <- 0
         | Some ("s" | "S") when state.view = Metrics ->
             state.metrics_section <- Masc_tui_types.next_metrics_section state.metrics_section;

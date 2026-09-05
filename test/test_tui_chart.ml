@@ -76,26 +76,6 @@ let test_compact_number () =
   check string "min_int safe" "-4.6M" (Chart.format_compact_num min_int)
 ;;
 
-let test_waterfall_chart () =
-  let steps : Chart.waterfall_step list =
-    [ { label = "Provider TTFT"; duration_ms = 300; style = Some (Chart.Status Masc_tui_theme.Info) }
-    ; { label = "Stream Gen"; duration_ms = 700; style = Some (Chart.Tone Masc_tui_theme.Accent) }
-    ]
-  in
-  let rows = Chart.waterfall ~width:60 steps in
-  check int "two waterfall rows" 2 (List.length rows);
-  List.iter
-    (fun row ->
-      check bool "waterfall row bounded by width" true (Layout.display_width row <= 60))
-    rows;
-  (* narrow width test *)
-  let narrow_rows = Chart.waterfall ~width:25 steps in
-  List.iter
-    (fun row ->
-      check bool "narrow waterfall row bounded by 25" true (Layout.display_width row <= 25))
-    narrow_rows
-;;
-
 let test_heatmap_24h_normalization () =
   (* Morning peak: 2, Afternoon peak: 1000. Shared normalization must not show morning 2 as peak *)
   let hours = List.init 24 (fun i -> if i = 5 then 2 else if i = 18 then 1000 else 0) in
@@ -153,8 +133,6 @@ let () =
         ; Alcotest.test_case "proportions" `Quick test_gauge_proportions
         ; Alcotest.test_case "compact_number" `Quick test_compact_number
         ] )
-    ; ( "waterfall"
-      , [ Alcotest.test_case "breakdown" `Quick test_waterfall_chart ] )
     ; ( "heatmap"
       , [ Alcotest.test_case "24h_normalization" `Quick test_heatmap_24h_normalization ] )
     ; ( "distribution"

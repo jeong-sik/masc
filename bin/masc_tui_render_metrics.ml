@@ -119,10 +119,9 @@ let section_pills_line ~cols ~(active : metrics_section) : string =
   in
   let p1 = pill Section_fleet 1 "Fleet & Velocity" in
   let p2 = pill Section_resources 2 "Keeper Resources" in
-  let p3 = pill Section_tools 3 "Tool Invocations" in
-  let p4 = pill Section_latency 4 "Latency Waterfall" in
-  let line = Printf.sprintf "  %sSections [1-4 / s]:%s  %s  %s  %s  %s"
-    Ansi.bold Ansi.reset p1 p2 p3 p4
+  let p3 = pill Section_tools 3 "Gate Queue" in
+  let line = Printf.sprintf "  %sSections [1-3 / s]:%s  %s  %s  %s"
+    Ansi.bold Ansi.reset p1 p2 p3
   in
   if Layout.display_width line > inner_width then
     Layout.take_cells line inner_width ^ Ansi.reset
@@ -369,23 +368,6 @@ let render_section_tools ~cols (state : state) : string list =
     in
     title :: bar_lines
 
-let render_section_latency ~cols (_state : state) : string list =
-  let inner_width = max 20 (framed_inner_width cols) in
-  let clip line =
-    if Layout.display_width line > inner_width then
-      Layout.take_cells line inner_width ^ Ansi.reset
-    else line
-  in
-  let title =
-    clip
-      (Printf.sprintf "  %s%sTurn Execution Latency Waterfall%s  %s(telemetry tracer)%s"
-         Ansi.bold (Theme.info ()) Ansi.reset (Theme.recede ()) Ansi.reset)
-  in
-  [ title
-  ; clip "  (turn execution timing waterfall breakdown unavailable — requires backend latency tracer)"
-  ; clip "  (individual keeper turn latency samples are recorded in Keeper details)"
-  ]
-
 let render_metrics_body ~cols ~budget (state : state)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
@@ -404,7 +386,6 @@ let render_metrics_body ~cols ~budget (state : state)
     | Section_fleet -> render_section_fleet ~cols state
     | Section_resources -> render_section_resources ~cols state
     | Section_tools -> render_section_tools ~cols state
-    | Section_latency -> render_section_latency ~cols state
   in
   let fixed_rows = 1 + 1 + List.length card_lines + 1 in
   let room = max 0 (budget - fixed_rows) in
@@ -422,4 +403,4 @@ let render_metrics_body ~cols ~budget (state : state)
   done;
   if hint_rows > 0 then
     push_styled ~style:(Theme.recede ())
-      (Printf.sprintf "  [%d rows, scroll %d · j/k to scroll · 1-4 to switch section]" total_lines scroll)
+      (Printf.sprintf "  [%d rows, scroll %d · j/k to scroll · 1-3 to switch section]" total_lines scroll)

@@ -2551,25 +2551,21 @@ type metrics_section =
   | Section_fleet
   | Section_resources
   | Section_tools
-  | Section_latency
 
 let next_metrics_section = function
   | Section_fleet -> Section_resources
   | Section_resources -> Section_tools
-  | Section_tools -> Section_latency
-  | Section_latency -> Section_fleet
+  | Section_tools -> Section_fleet
 
 let prev_metrics_section = function
-  | Section_fleet -> Section_latency
+  | Section_fleet -> Section_tools
   | Section_resources -> Section_fleet
   | Section_tools -> Section_resources
-  | Section_latency -> Section_tools
 
 let metrics_section_label = function
   | Section_fleet -> "Fleet & Velocity"
   | Section_resources -> "Keeper Resources"
-  | Section_tools -> "Tool Invocations"
-  | Section_latency -> "Latency Waterfall"
+  | Section_tools -> "Gate Queue"
 
 type state = {
   mutable metrics_scroll: int;

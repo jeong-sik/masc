@@ -263,6 +263,79 @@ let test_next_shrink_rejects_larger_framed_retry () =
       capacity_bytes
 ;;
 
+(* #33217: a one-line user message as the oldest atom. Dropping it alone
+   saves fewer bytes than the preamble the cut adds, so the first boundary
+   at or below the target frames larger than the rejected window; the next
+   boundary frames smaller and is the answer. Answering [None] here stopped
+   the shrink walk on both official-client lanes before any smaller view was
+   tried. *)
+let test_next_shrink_walks_past_a_boundary_that_frames_larger () =
+  let one_line = message ~role:Types.User "a" in
+  let middle = padded ~role:Types.User ~tag:"middle|" 5_000 in
+  let newest = padded ~role:Types.Assistant ~tag:"newest|" 5_000 in
+  let history = [ one_line; middle; newest ] in
+  let rejected_window_bytes = total_bytes history in
+  (* The target sits above the whole history: that is the shape in which the
+     first boundary (everything but the one-line atom) is at or below the
+     target, and the only shape in which it can frame larger. It is the
+     bounded retry of a lane whose history is under half its capacity. *)
+  match
+    Window.next_shrink_capacity_bytes
+      ~measure_message_bytes
+      ~target_capacity_bytes:(2 * rejected_window_bytes)
+      history
+  with
+  | None ->
+    Alcotest.fail
+      "the boundary after the one-line atom frames smaller and must be named"
+  | Some capacity_bytes ->
+    Alcotest.(check bool)
+      "the named view is strictly smaller than the rejected window"
+      true
+      (capacity_bytes < rejected_window_bytes);
+    let projected =
+      ok_exn ~what:"walk past the first boundary" (project ~capacity_bytes history)
+    in
+    Alcotest.(check int) "only the newest atom remains" 1 (count_atoms projected);
+    Alcotest.(check bool)
+      "the newest atom survived"
+      true
+      (List.exists (fun m -> m == newest) projected);
+    Alcotest.(check bool) "the cut is framed" true (List.exists is_preamble projected);
+    fits_budget ~capacity_bytes ~reserved_bytes:0 projected
+;;
+
+(* When even the newest atom alone frames larger than the rejected window,
+   the empty history is the next smaller view for a caller that allows it.
+   The one-candidate answer stopped at the newest atom and said there was
+   none. *)
+let test_next_shrink_reaches_the_empty_history_past_a_larger_clamp () =
+  let one_line = message ~role:Types.User "a" in
+  let newest = padded ~role:Types.Assistant ~tag:"newest|" 5_000 in
+  let history = [ one_line; newest ] in
+  let rejected_window_bytes = total_bytes history in
+  match
+    Window.next_shrink_capacity_bytes
+      ~allow_empty_history:true
+      ~measure_message_bytes
+      ~target_capacity_bytes:(2 * rejected_window_bytes)
+      history
+  with
+  | None -> Alcotest.fail "the empty history is a smaller view and must be named"
+  | Some capacity_bytes ->
+    Alcotest.(check bool)
+      "the named view is strictly smaller than the rejected window"
+      true
+      (capacity_bytes < rejected_window_bytes);
+    let projected =
+      ok_exn
+        ~what:"empty-history view past a larger clamp"
+        (project ~allow_empty_history:true ~capacity_bytes history)
+    in
+    Alcotest.(check int) "no organic atom remains" 0 (count_atoms projected);
+    Alcotest.(check bool) "the floor is framed" true (List.exists is_preamble projected)
+;;
+
 let test_bootstrap_floor_drops_the_only_prior_atom () =
   let pinned =
     message
@@ -790,6 +863,14 @@ let () =
             "next shrink rejects larger framed retry"
             `Quick
             test_next_shrink_rejects_larger_framed_retry
+        ; Alcotest.test_case
+            "next shrink walks past a boundary that frames larger"
+            `Quick
+            test_next_shrink_walks_past_a_boundary_that_frames_larger
+        ; Alcotest.test_case
+            "next shrink reaches the empty history past a larger clamp"
+            `Quick
+            test_next_shrink_reaches_the_empty_history_past_a_larger_clamp
         ; Alcotest.test_case
             "bootstrap floor drops the only prior atom"
             `Quick

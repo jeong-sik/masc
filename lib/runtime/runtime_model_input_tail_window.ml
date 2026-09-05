@@ -202,38 +202,47 @@ let next_shrink_capacity_bytes
     let full_atom_bytes = suffix.(0) in
     let target_atom_bytes = target_capacity_bytes - undroppable_bytes in
     let required_atom_capacity bytes = max 1 bytes in
-    let rec first_boundary_at_or_below_target drop =
+    let rec boundaries_at_or_below_target drop =
       if drop >= atom_count
-      then None
+      then []
       else (
         let retained = required_atom_capacity suffix.(drop) in
+        let rest = boundaries_at_or_below_target (drop + 1) in
         if retained < full_atom_bytes && retained <= target_atom_bytes
-        then Some retained
-        else first_boundary_at_or_below_target (drop + 1))
+        then retained :: rest
+        else rest)
     in
     let newest_atom_bytes =
       required_atom_capacity suffix.(atom_count - 1)
     in
-    let retained_atom_bytes =
-      match first_boundary_at_or_below_target 1 with
-      | Some bytes -> Some bytes
-      | None when newest_atom_bytes < full_atom_bytes ->
-        (* The policy target may be below the indivisible newest atom. Clamp
-           upward to that atom's boundary rather than returning a capacity
-           that the projection must reject locally. *)
-        Some newest_atom_bytes
-      | None when allow_empty_history -> Some 0
-      | None -> None
+    (* Candidate views, largest first: every atom boundary at or below the
+       target, then the newest atom alone when the target sits below that
+       indivisible atom (clamping upward rather than returning a capacity the
+       projection must reject locally), then the empty history where the
+       caller allows it. Removing an atom is not sufficient when the retained
+       suffix starts with Assistant/Tool: [project] then adds the synthetic
+       User preamble, so a candidate is only an answer when its framed size
+       is strictly smaller than the exact window the provider already
+       rejected. A boundary can fail that test while a deeper one passes:
+       dropping only the oldest atom saves less than the preamble the cut
+       adds whenever that atom is shorter than the preamble encoding, which
+       is any one-line user message (#33217); answering [None] there ended
+       the shrink walk on both official-client lanes before any deeper view
+       was asked. The same order also reaches the empty history when the
+       newest atom alone frames larger and the caller allows it, which the
+       one-candidate answer never did. *)
+    let candidates =
+      boundaries_at_or_below_target 1
+      @ (if newest_atom_bytes < full_atom_bytes then [ newest_atom_bytes ] else [])
+      @ if allow_empty_history then [ 0 ] else []
     in
-    Option.bind retained_atom_bytes (fun retained ->
-      let framed_capacity = undroppable_bytes + retained in
-      (* Removing an atom is not sufficient when the retained suffix starts
-         with Assistant/Tool: [project] then adds the synthetic User preamble.
-         Never retry a size-driven refusal with framing that is equal to or
-         larger than the exact window the provider already rejected. *)
-      if framed_capacity < rejected_window_bytes
-      then Some framed_capacity
-      else None))
+    List.find_map
+      (fun retained ->
+         let framed_capacity = undroppable_bytes + retained in
+         if framed_capacity < rejected_window_bytes
+         then Some framed_capacity
+         else None)
+      candidates)
 ;;
 
 let minimum_capacity_bytes ~measure_message_bytes messages =

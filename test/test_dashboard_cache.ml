@@ -190,8 +190,8 @@ let test_peek_payload () =
     Alcotest.(check string) "peeked etag" p.etag peeked.etag
 
 let test_server_dashboard_cached_surface_payload () =
-  let surface = Server_dashboard_http_cache.create_cached_surface () in
-  Server_dashboard_http_cache.update_cached_surface surface (`Assoc [ ("metric", `Int 42) ]);
+  let surface = Server_dashboard_http_cache.create_cached_surface (`Assoc []) in
+  Server_dashboard_http_cache.mark_cached_surface_success surface (`Assoc [ ("metric", `Int 42) ]);
   let p1 = Server_dashboard_http_cache.cached_surface_payload surface in
   Alcotest.(check bool) "payload has etag" true (String.length p1.etag > 0);
   let p2 = Server_dashboard_http_cache.cached_surface_payload surface in

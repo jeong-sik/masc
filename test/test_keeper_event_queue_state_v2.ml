@@ -1222,12 +1222,64 @@ let test_owner_terminalizes_consecutive_turns_without_projection_gap () =
       (List.length (State.transition_outbox settled)))
 ;;
 
+(* The snapshot is rewritten whole rather than appended to, so an unchanged
+   file is the same bytes and the decoded state can stand. Re-reading it was
+   282 MB of allocation every thirty seconds on an idle fleet, done holding
+   the owner's lock (measured 2026-09-05). *)
+let test_unchanged_snapshot_is_not_reparsed () =
+  with_temp_dir "queue_snapshot_cache_" (fun base_path ->
+    let keeper_name = "cached" in
+    Persistence.For_testing.reset_snapshot_cache_for_testing ();
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending (stimulus "p-1" 1.0))
+    |> require_ok "seed the queue";
+    let read () =
+      Persistence.load_state_result ~base_path ~keeper_name |> require_ok "load"
+    in
+    let first = read () in
+    let hits_after_first = Persistence.For_testing.snapshot_cache_hits () in
+    let second = read () in
+    Alcotest.(check bool)
+      "the second read is a hit"
+      true
+      (Persistence.For_testing.snapshot_cache_hits () > hits_after_first);
+    Alcotest.(check bool)
+      "and it is the same state"
+      true
+      (post_ids (State.pending first) = post_ids (State.pending second));
+    (* A write moves the file, and the state that comes back after it is the
+       written one -- not the one the cache was holding. *)
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending (stimulus "p-2" 2.0))
+    |> require_ok "write again";
+    let reads_before = Persistence.For_testing.snapshot_cache_reads () in
+    let hits_before = Persistence.For_testing.snapshot_cache_hits () in
+    let third = read () in
+    Alcotest.(check bool)
+      "a write is visible through the cache"
+      true
+      (post_ids (State.pending third) <> post_ids (State.pending second));
+    (* And it is visible without paying for the parse: the writer holds the
+       state it wrote, so the read after a write is a hit rather than a
+       decode of bytes this process just produced. *)
+    Alcotest.(check int)
+      "the read after a write is a hit"
+      (hits_before + 1)
+      (Persistence.For_testing.snapshot_cache_hits ());
+    Alcotest.(check int)
+      "and it was one read"
+      (reads_before + 1)
+      (Persistence.For_testing.snapshot_cache_reads ()))
+;;
+
 let () =
   Alcotest.run
     "keeper pending queue current schema"
     [ ( "state"
       , [ Alcotest.test_case "peek keeps pending authoritative" `Quick test_peek_keeps_pending_authoritative
         ; Alcotest.test_case "exact ack preserves distinct source" `Quick test_exact_ack_removes_only_selected_identity
+        ; Alcotest.test_case "an unchanged snapshot is not reparsed" `Quick
+            test_unchanged_snapshot_is_not_reparsed
         ; Alcotest.test_case
             "unaged Low still loses to fresh Normal"
             `Quick

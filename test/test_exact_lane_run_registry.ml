@@ -766,6 +766,14 @@ let test_projected_runs_omit_payload_in_memory () =
     ~actor:"keeper-a"
     ~started_at:10.0
     ~input:(R.Exact_input (`Assoc [ "prompt", `String (String.make 1000 'A') ]));
+  (* Verify an active Running run has stripped input in projection *)
+  let running_listed = List.hd (R.list_runs registry) in
+  check bool "running listed run input is stripped" true
+    (match running_listed.R.input with R.Exact_input `Null -> true | _ -> false);
+  check bool "running get preserves full input" true
+    (match (R.get registry ~run_id:"run-large" |> Option.get).R.input with
+     | R.Exact_input (`Assoc [ "prompt", `String s ]) -> String.length s = 1000
+     | _ -> false);
   mark_completed_exn
     registry
     ~run_id:"run-large"
@@ -780,6 +788,11 @@ let test_projected_runs_omit_payload_in_memory () =
   let paged_run = List.hd (R.recent_runs registry ~limit:1 ~before:None).runs in
   check bool "paged run input is stripped" true
     (match paged_run.R.input with R.Exact_input `Null -> true | _ -> false);
+  check bool "paged run output is stripped" true
+    (match paged_run.R.status with R.Completed { output = `Null; _ } -> true | _ -> false);
+  (* Non-existent run fast-rejects to None *)
+  check bool "non-existent run returns None" true
+    (Option.is_none (R.get registry ~run_id:"run-nonexistent"));
   let detail_run = R.get registry ~run_id:"run-large" |> Option.get in
   check bool "get run detail preserves full input from disk" true
     (match detail_run.R.input with

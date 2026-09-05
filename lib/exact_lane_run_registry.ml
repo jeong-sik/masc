@@ -537,14 +537,14 @@ let parse_disk_event_line line =
   | Yojson.Json_error _ -> None
 ;;
 
-let load_run_from_disk ~path ~run_id =
+let load_payloads_from_disk ~path ~run_id =
   if not (Fs_compat.file_exists path)
   then None
   else (
     let id_pattern = Printf.sprintf "\"id\":\"%s\"" run_id in
     let id_pattern_spaced = Printf.sprintf "\"id\": \"%s\"" run_id in
-    let register_event = ref None in
-    let complete_event = ref None in
+    let disk_input = ref None in
+    let disk_output = ref None in
     let matches_id line =
       String_util.contains_substring line id_pattern
       || String_util.contains_substring line id_pattern_spaced
@@ -559,34 +559,13 @@ let load_run_from_disk ~path ~run_id =
             if matches_id line
             then (
               match parse_disk_event_line line with
-              | Some (`Register (id, started_at, reg)) when String.equal id run_id ->
-                register_event := Some (started_at, reg)
+              | Some (`Register (id, _started_at, reg)) when String.equal id run_id ->
+                disk_input := Some reg.input
               | Some (`Complete (id, comp)) when String.equal id run_id ->
-                complete_event := Some comp
+                disk_output := Some comp.output
               | _ -> ()))
       in
-      match !register_event with
-      | None -> None
-      | Some (started_at, registration) ->
-        let status =
-          match !complete_event with
-          | None -> Running
-          | Some completion ->
-            Completed
-              { outcome = completion.outcome
-              ; elapsed_s = completion.elapsed_s
-              ; output = completion.output
-              ; selected_slot = completion.selected_slot
-              }
-        in
-        Some
-          { run_id
-          ; lane = registration.lane
-          ; actor = registration.actor
-          ; started_at
-          ; input = registration.input
-          ; status
-          }
+      Some (!disk_input, !disk_output)
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn ->
@@ -598,33 +577,34 @@ let load_run_from_disk ~path ~run_id =
 ;;
 
 let get t ~run_id =
-  let from_disk =
-    match t.path with
-    | Some path -> load_run_from_disk ~path ~run_id
-    | None -> None
-  in
-  let failed_completions = Atomic.get t.failed_completions in
-  let overlay_failed run =
-    match List.assoc_opt run.run_id failed_completions with
-    | Some failed when run.status = Running ->
-      { run with
-        status =
-          Completion_persistence_failed
-            { intended_outcome = failed.intended_outcome
-            ; elapsed_s = failed.elapsed_s
-            ; output = failed.output
-            ; selected_slot = failed.selected_slot
-            ; failure = failed.failure
-            }
-      }
-    | _ -> run
-  in
-  match from_disk with
-  | Some run -> Some (overlay_failed run)
-  | None ->
-    (match Store.get t.store ~id:run_id with
-     | Some entry -> Some (full_run_of_entry failed_completions entry)
-     | None -> None)
+  match Store.get t.store ~id:run_id with
+  | None -> None
+  | Some entry ->
+    let failed_completions = Atomic.get t.failed_completions in
+    let base_run = full_run_of_entry failed_completions entry in
+    (match t.path with
+     | None -> Some base_run
+     | Some path ->
+       (match load_payloads_from_disk ~path ~run_id with
+        | None -> Some base_run
+        | Some (disk_input, disk_output) ->
+          let input =
+            match disk_input with
+            | Some inp -> inp
+            | None -> base_run.input
+          in
+          let status =
+            match base_run.status with
+            | Completed comp ->
+              let output =
+                match disk_output with
+                | Some out -> out
+                | None -> comp.output
+              in
+              Completed { comp with output }
+            | other -> other
+          in
+          Some { base_run with input; status }))
 ;;
 
 let status_label = function

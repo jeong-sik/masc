@@ -353,7 +353,7 @@ let render_section_tools ~cols (state : state) : string list =
       Hashtbl.replace counts tool (current + 1))
     state.keeper_tool_approvals;
   if Hashtbl.length counts = 0 then
-    [ title; "  (no active gate tool operations recorded in fleet state)" ]
+    [ title; clip "  (no active gate tool operations recorded in fleet state)" ]
   else
     let items =
       Hashtbl.fold
@@ -382,8 +382,8 @@ let render_section_latency ~cols (_state : state) : string list =
          Ansi.bold (Theme.info ()) Ansi.reset (Theme.recede ()) Ansi.reset)
   in
   [ title
-  ; "  (turn execution timing waterfall breakdown unavailable — requires backend latency tracer)"
-  ; "  (individual keeper turn latency samples are recorded in Keeper details)"
+  ; clip "  (turn execution timing waterfall breakdown unavailable — requires backend latency tracer)"
+  ; clip "  (individual keeper turn latency samples are recorded in Keeper details)"
   ]
 
 let render_metrics_body ~cols ~budget (state : state)

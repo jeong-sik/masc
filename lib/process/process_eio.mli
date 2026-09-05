@@ -61,7 +61,13 @@ val child_exit_grace_seconds : float
     this side holds, since its exit status cannot be awaited there; a child
     that hands a pipe to a grandchild is waited on until the grandchild lets
     go too, or the grace runs out. A child given no pipe at all -- both
-    streams redirected to files -- gets no wait on that path. *)
+    streams redirected to files -- gets no wait on that path.
+
+    On the other path, once the grace has run out and the [SIGKILL] is sent,
+    the wait for the exit status is bounded by the same number, and only
+    happens while the owning switch is still on; a switch that was cancelled
+    during the grace gets no wait, its release hook reaps the child. Every
+    way out of a stopped spawn is therefore bounded by two of these. *)
 
 (** {1 Observability hook (#9632)} *)
 

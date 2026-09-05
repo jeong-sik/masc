@@ -77,6 +77,32 @@ let test_detail_lines () =
     lines
 ;;
 
+let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_health =
+  { mkh_keeper_id = keeper_id
+  ; mkh_revision = 1
+  ; mkh_facts = facts
+  ; mkh_observed_facts = facts
+  ; mkh_derived_facts = 0
+  ; mkh_support_invalidations = 0
+  ; mkh_snapshot_bytes = snapshot_bytes
+  ; mkh_added = facts
+  ; mkh_removed = 0
+  ; mkh_snapshot_present = true
+  ; mkh_librarian_lane_busy = 0
+  ; mkh_librarian_failures = 0
+  ; mkh_vision_ingest_errors = 0
+  ; mkh_vision_ingest_error_reasons = []
+  ; mkh_read_error = None
+  ; mkh_source_revision = 0
+  ; mkh_source_facts = 0
+  ; mkh_source_invalidations = 0
+  ; mkh_source_snapshot_bytes = 0
+  ; mkh_source_snapshot_present = false
+  ; mkh_source_read_error = None
+  ; mkh_alerts = []
+  }
+;;
+
 let test_render_memory_body () =
   let state = make_state () in
   let count = ref 0 in
@@ -92,6 +118,87 @@ let test_render_memory_body () =
   check bool "memory body rendered" true (!count > 0 && !count <= 20)
 ;;
 
+let test_render_memory_body_with_keepers () =
+  let state = make_state () in
+  let keeper = make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024 in
+  let health : Decode.memory_health_snapshot =
+    { mhs_generated_at = 1000.0
+    ; mhs_keepers = [ keeper ]
+    ; mhs_total_facts = 10
+    ; mhs_total_observed_facts = 10
+    ; mhs_total_derived_facts = 0
+    ; mhs_total_support_invalidations = 0
+    ; mhs_total_snapshot_bytes = 1024
+    ; mhs_total_source_facts = 0
+    ; mhs_total_source_invalidations = 0
+    ; mhs_total_source_snapshot_bytes = 0
+    ; mhs_total_librarian_failures = 0
+    ; mhs_total_vision_ingest_errors = 0
+    ; mhs_total_read_errors = 0
+    ; mhs_total_source_read_errors = 0
+    ; mhs_warn_alerts = 0
+    ; mhs_error_alerts = 0
+    ; mhs_starving_keepers = 0
+    }
+  in
+  state.memory_health <- Some health;
+  state.memory_health_cursor <- 0;
+  let selected_called = ref false in
+  let count = ref 0 in
+  Render_memory.render_memory_body
+    ~cols:100
+    ~budget:20
+    state
+    ~push:(fun _ -> incr count)
+    ~push_styled:(fun ~style:_ _ -> incr count)
+    ~push_selected:(fun _ -> selected_called := true; incr count)
+    ~push_divider:(fun () -> incr count)
+    ~push_empty:(fun () -> incr count);
+  check bool "selected row was called" true !selected_called;
+  check bool "rows rendered" true (!count > 0 && !count <= 20)
+;;
+
+let test_render_memory_facts_body () =
+  let state = make_state () in
+  let fact : Decode.memory_fact =
+    { mf_claim = "Architecture uses modular TUI components"
+    ; mf_category = "architecture"
+    ; mf_origin = "manual"
+    ; mf_first_seen = 100.0
+    ; mf_last_seen = 200.0
+    ; mf_reinforcement = 4
+    ; mf_memory_id = "mem-fact-1"
+    }
+  in
+  let store : Decode.memory_ordinary_store =
+    { mos_revision = 1
+    ; mos_updated_at = 1000.0
+    ; mos_facts = [ fact ]
+    }
+  in
+  let snapshot : Decode.memory_fact_snapshot =
+    { mfs_keeper = "alpha"
+    ; mfs_ordinary = Decode.Memory_store_present store
+    ; mfs_source = Decode.Memory_store_absent
+    }
+  in
+  state.memory_facts <- Some snapshot;
+  state.memory_facts_cursor <- 0;
+  let selected_called = ref false in
+  let count = ref 0 in
+  Render_memory.render_memory_facts_body
+    ~cols:100
+    ~budget:20
+    state
+    ~push:(fun _ -> incr count)
+    ~push_styled:(fun ~style:_ _ -> incr count)
+    ~push_selected:(fun _ -> selected_called := true; incr count)
+    ~push_divider:(fun () -> incr count)
+    ~push_empty:(fun () -> incr count);
+  check bool "selected fact row was called" true !selected_called;
+  check bool "facts body rendered" true (!count > 0 && !count <= 20)
+;;
+
 let () =
   run "tui_render_memory"
     [ ( "age_label"
@@ -104,6 +211,9 @@ let () =
     ; ( "detail_lines"
       , [ test_case "detail_lines_bounded" `Quick test_detail_lines ] )
     ; ( "render_body"
-      , [ test_case "memory_body_budget" `Quick test_render_memory_body ] )
+      , [ test_case "memory_body_budget" `Quick test_render_memory_body
+        ; test_case "memory_body_with_keepers" `Quick test_render_memory_body_with_keepers
+        ; test_case "memory_facts_body" `Quick test_render_memory_facts_body
+        ] )
     ]
 ;;

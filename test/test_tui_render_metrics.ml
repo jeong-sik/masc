@@ -46,6 +46,15 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
   ; mkh_librarian_lane_busy = 0
   ; mkh_librarian_failures = 0
   ; mkh_vision_ingest_errors = 0
+  ; mkh_vision_ingest_error_reasons = []
+  ; mkh_read_error = None
+  ; mkh_source_revision = 0
+  ; mkh_source_facts = 0
+  ; mkh_source_invalidations = 0
+  ; mkh_source_snapshot_bytes = 0
+  ; mkh_source_snapshot_present = false
+  ; mkh_source_read_error = None
+  ; mkh_alerts = []
   }
 ;;
 
@@ -63,6 +72,10 @@ let make_memory_health ~total_facts ~source_facts ~keepers : Decode.memory_healt
   ; mhs_total_librarian_failures = 0
   ; mhs_total_vision_ingest_errors = 0
   ; mhs_total_read_errors = 0
+  ; mhs_total_source_read_errors = 0
+  ; mhs_warn_alerts = 0
+  ; mhs_error_alerts = 0
+  ; mhs_starving_keepers = 0
   }
 ;;
 
@@ -74,6 +87,10 @@ let make_gate_pending ~id ~keeper : Decode.gate_pending =
   ; gp_input_preview = Some "echo test"
   ; gp_execution_cwd = None
   ; gp_execution_sandbox = None
+  ; gp_waiting_s = Some 10.0
+  ; gp_phase = Decode.Gate_queued
+  ; gp_auto_judge_detail = None
+  ; gp_retry_request = None
   }
 ;;
 

@@ -60,15 +60,22 @@ on:
 permissions:
   contents: read
 
-# Two lanes. Every dispatch shares one, where a new dispatch cancels the
-# run in flight instead of stacking a second 180-minute job, as before;
-# the scheduled run has a lane of its own that no dispatch can reach. One
-# group for the whole repo did reach it: on 2026-09-04 the scheduled run
-# (17:43:56Z, 7aed1b696f) was cancelled within two seconds by a branch
-# dispatch created the same second, and of this lane's first 13 runs none
-# completed successfully.
+# Two lanes plus one per targeted run. Every full dispatch shares one
+# lane, where a new dispatch cancels the run in flight instead of stacking
+# a second 180-minute job, as before; the scheduled run has a lane of its
+# own that no dispatch can reach. One group for the whole repo did reach
+# it: on 2026-09-04 the scheduled run (17:43:56Z, 7aed1b696f) was
+# cancelled within two seconds by a branch dispatch created the same
+# second, and of this lane's first 13 runs none completed successfully.
+# A dispatch that names suites runs beside the full lane, not instead of
+# it, so it gets a group of its own keyed by run id: the first targeted
+# dispatch (33951571973, 2026-09-05 07:05:06Z) shared the dispatch lane
+# and cancelled a full run 82 minutes in (33947949528). On the schedule
+# there are no inputs, and `inputs.suite` is null; GitHub compares a null
+# with '' by coercing both to 0, so the test below is false and the
+# scheduled run keeps its lane.
 concurrency:
-  group: test-${{ github.event_name }}
+  group: ${{ inputs.suite != '' && format('test-targeted-{0}', github.run_id) || format('test-{0}', github.event_name) }}
   cancel-in-progress: true
 
 jobs:

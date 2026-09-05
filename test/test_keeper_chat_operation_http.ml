@@ -160,7 +160,7 @@ let test_chat_events_page_walks_by_seq () =
 (* The response is the journal as written: each element is the stage-1
    envelope, reasoning delta included -- which is why the route is CanAdmin. *)
 let test_chat_events_are_the_journal_lines () =
-  let body = page ~since_seq:(-1) ~limit:Api.chat_events_default_limit () in
+  let body = page ~since_seq:(-1) ~limit:Keeper_chat_event_log.page_default_limit () in
   (match field "events" body with
    | `List events ->
      check int "every entry served" (List.length journal) (List.length events);
@@ -189,7 +189,7 @@ let test_chat_events_are_the_journal_lines () =
   check bool
     "limit ceiling is above the default"
     true
-    (Api.chat_events_max_limit > Api.chat_events_default_limit)
+    (Keeper_chat_event_log.page_max_limit > Keeper_chat_event_log.page_default_limit)
 ;;
 
 (* The served lines pass through the caller's redaction; the journal line
@@ -203,7 +203,7 @@ let rec mask_private = function
 
 let test_chat_events_are_redacted_per_line () =
   let body =
-    page ~redact_json:mask_private ~since_seq:(-1) ~limit:Api.chat_events_default_limit ()
+    page ~redact_json:mask_private ~since_seq:(-1) ~limit:Keeper_chat_event_log.page_default_limit ()
   in
   match field "events" body with
   | `List events ->

@@ -14,6 +14,16 @@ type journaled_event =
 val codec_version : int
 (** Current envelope version. Written as ["v"]; decode rejects any other. *)
 
+val page_default_limit : int
+(** How many lines one read of the journal returns when the reader names no
+    count (RFC-0412 §3.2, the v2 events endpoint). *)
+
+val page_max_limit : int
+(** The most lines one read may ask for. Defined once, here, for both sides
+    of the wire: the endpoint admits [1..page_max_limit], and a client that
+    pages at the ceiling reads this same value, so its ask can never exceed
+    what the endpoint admits. *)
+
 val keeper_chat_event_to_json : Keeper_chat_events.keeper_chat_event -> Yojson.Safe.t
 (** Tagged-object encoding: [{"type": <snake_case tag>, ...payload}]. *)
 

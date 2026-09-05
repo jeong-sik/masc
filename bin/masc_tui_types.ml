@@ -2211,7 +2211,8 @@ let system_log_listing_chrome ~error = listing_chrome ~error + 1
 (* One turn as its event log and the transcript that follows it (RFC-0412
    §3.3, stage 3a). The log is the record: every delta the stream or the
    journal delivered, keyed by journal seq. The transcript is its projection,
-   kept in step by the one writer, [turn_log_add], which folds a delta into
+   kept in step by the two entry points, [turn_log_add] for a live frame and
+   [turn_log_add_journaled] for a journal page, each folding a delta into
    the transcript exactly when the log accepted it -- so the transcript is
    always the fold of the log ([Masc_tui_keeper_chat_transcript.of_log], pinned
    by test), each delta folded at its arrival time rather than re-folded at
@@ -2254,19 +2255,18 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
       then Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
 ;;
 
-(* A v2 journal page, line by line: a line that draws is added to the log and
-   folded at the line's own journal time, so a tool call in a reloaded turn
-   keeps the start time it really had; a line that draws nothing still holds
-   its position. The same fold {!turn_log_add} runs for a live frame, with the
-   arrival clock in place of the journal's. *)
+(* A v2 journal page: the log's own fold ({!Masc_tui_keeper_chat_log.add_journaled})
+   decides which lines are entries -- seq dedup, undrawn positions held --
+   and the transcript follows exactly those, each at the line's own journal
+   time, so a tool call in a reloaded turn keeps the start time it really
+   had. A live frame goes through {!turn_log_add} instead, with the arrival
+   clock in place of the journal's. *)
 let turn_log_add_journaled turn_log
     (lines : Masc.Keeper_chat_event_log.journaled_event list) =
   List.iter
-    (fun (line : Masc.Keeper_chat_event_log.journaled_event) ->
-      match Masc_tui_keeper_chat_log.delta_of_journaled line.event with
-      | None -> Masc_tui_keeper_chat_log.hold_seq turn_log.tl_log line.seq
-      | Some delta -> turn_log_add ~now:line.ts turn_log ~seq:(Some line.seq) delta)
-    lines
+    (fun ((line : Masc.Keeper_chat_event_log.journaled_event), delta) ->
+      Masc_tui_keeper_chat_transcript.apply ~now:line.ts turn_log.tl_transcript delta)
+    (Masc_tui_keeper_chat_log.add_journaled turn_log.tl_log lines)
 ;;
 
 let turn_log_keeper_name turn_log = Masc_tui_keeper_chat_log.keeper_name turn_log.tl_log
@@ -3513,13 +3513,18 @@ let settled_logs_for_keeper state keeper_name =
    have. A request already held by a log that stands for its turn is not
    added twice; a log that never heard the turn's end gives way to one that
    did, which is how a cut stream's turn gets its whole record back from the
-   journal on the next refresh. *)
+   journal on the next refresh. The held log itself, fed more lines in place
+   (a journal read joining a cut stream's partial log), takes its place
+   again: [chat_rows_for] keys its memo on the identity of this list, so a
+   log that came to stand for its turn in place has to arrive as a new list
+   value, or the memo keeps answering with the loaded rows the log now
+   draws. *)
 let hold_settled_log state turn_log =
   let request_id = turn_log_request_id turn_log in
   let keeper_name = turn_log_keeper_name turn_log in
   let replaceable =
     match settled_log_for_request state ~keeper_name request_id with
-    | Some existing -> not (turn_log_holds_the_turn existing)
+    | Some existing -> existing == turn_log || not (turn_log_holds_the_turn existing)
     | None -> true
   in
   if replaceable then begin
@@ -3786,6 +3791,28 @@ let keeper_available_for_new_message (state : state) keeper_name =
   && List.exists
        (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
        state.keepers
+
+(* The composer is where the operator's keys go: the chat pane, whichever
+   half of it has the cursor, or the composer row on another surface once it
+   has taken focus. A draft put away by leaving the pane or releasing the
+   row is text nobody is typing. *)
+let composer_is_live (state : state) =
+  state.view = Keepers Keeper_message || state.composer_focused
+
+(* The operator is mid-line for this keeper: the composer is live, holds
+   text, and is aimed here. While that is true, a settle should not dispatch
+   the keeper's waiting line out from under the line being typed -- holding
+   it lets the next Enter fold the two together. The hold ends with the
+   compose: the composer emptied or sent, aimed at another keeper, or put
+   away (the pane left, the row released), and each of those drains the
+   queue so the released line goes then, not at some later settle. Gated on
+   the setting: with coalescing off the operator wants every line its own
+   turn, so the settle dispatches promptly. *)
+let composing_for_keeper (state : state) keeper_name =
+  state.coalesce_queued_input
+  && composer_is_live state
+  && Buffer.length state.msg_input > 0
+  && Option.exists (String.equal keeper_name) state.msg_target_keeper_name
 
 (** The next target both the input path and footer agree is safe to select.
     A pending request or live transcript stays pinned to its Keeper until that

@@ -32,10 +32,16 @@ val hold_seq : t -> int -> unit
 (** Holds a journal position without an entry: a line the pane draws nothing
     for still counts for {!last_seq} and for deduplication. *)
 
-val add_journaled : t -> Masc.Keeper_chat_event_log.journaled_event list -> unit
+val add_journaled :
+  t ->
+  Masc.Keeper_chat_event_log.journaled_event list ->
+  (Masc.Keeper_chat_event_log.journaled_event * Masc_tui_keeper_chat_live.delta) list
 (** Every line of a v2 page, in journal order, through {!delta_of_journaled};
     lines already held by seq are skipped. A line that maps to no delta still
-    holds its seq ({!hold_seq}). *)
+    holds its seq ({!hold_seq}). Returns the lines whose delta the log took,
+    each with that delta, in journal order: the one fold of a page, so a
+    projection kept as the fold of the log applies exactly these, at each
+    line's own [ts]. *)
 
 val delta_of_journaled :
   Masc.Keeper_chat_events.keeper_chat_event -> Masc_tui_keeper_chat_live.delta option
@@ -93,8 +99,9 @@ type events_error =
       (** 401/403: this client's credential, not the journal. One sentence
           for the operator; the pane stops asking for journals this session. *)
   | Events_undecodable of string
-      (** A body this build cannot read, or an error with no known code; the
-          status and what came back. *)
+      (** A body this build cannot read, an error with no known code (the
+          status and what came back), or a page that claimed more without
+          advancing ({!read_whole_journal}). *)
   | Events_transport of string  (** The request never got an answer. *)
 
 val events_error_to_string : events_error -> string
@@ -110,5 +117,6 @@ val read_whole_journal :
   since_seq:int ->
   (Masc.Keeper_chat_event_log.journaled_event list, events_error) result
 (** Every line after [since_seq], page by page through [fetch], following
-    [has_more] only while [next_since_seq] advances. The first error ends the
-    read. *)
+    [has_more] while [next_since_seq] advances. The first error ends the
+    read; a page that claims more without advancing is
+    {!Events_undecodable}, naming the position, never a shorter [Ok]. *)

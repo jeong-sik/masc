@@ -433,6 +433,25 @@ let test_gate_history_short_history_is_whole () =
   check int "every message is kept" (List.length messages) (List.length kept)
 ;;
 
+let test_gate_history_encodes_only_the_window () =
+  let messages = List.init 200 bulky_message in
+  let measured = ref 0 in
+  let measure message =
+    incr measured;
+    Setup.measure_gate_history_message message
+  in
+  let kept, omitted = Setup.gate_history_slice_measured ~measure messages in
+  check int "every message is either kept or counted" 200 (List.length kept + omitted);
+  (* The walk encodes the kept messages and the first one that did not fit;
+     nothing older is touched. *)
+  check int "only the window and its boundary are encoded" (List.length kept + 1) !measured;
+  let short = List.init 3 bulky_message in
+  measured := 0;
+  let kept, _ = Setup.gate_history_slice_measured ~measure short in
+  check int "a history that fits is encoded once through" 3 !measured;
+  check int "and kept whole" 3 (List.length kept)
+;;
+
 let test_gate_history_drops_orphan_tool_result () =
   (* The call is the oldest message and falls outside the window; its result is
      the newest. A retained result with no visible call reads as evidence of
@@ -1355,6 +1374,8 @@ let () =
             test_gate_history_keeps_newest_within_budget
         ; test_case "short history is passed through whole" `Quick
             test_gate_history_short_history_is_whole
+        ; test_case "encodes only the window and its boundary" `Quick
+            test_gate_history_encodes_only_the_window
         ; test_case "drops a tool result whose call fell outside" `Quick
             test_gate_history_drops_orphan_tool_result
         ] )

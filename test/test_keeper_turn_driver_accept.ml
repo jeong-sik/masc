@@ -1703,8 +1703,8 @@ let test_max_tokens_text_is_rejected_for_checkpoint_continuation () =
     (Some "truncated_no_progress")
     (accept_no_progress_retry_kind_string err);
   Alcotest.(check bool)
-    "truncation is handled by same-runtime continuation, not lane rotation"
-    false
+    "truncation keeps the rotation hint for when the continuation fails"
+    true
     (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next err);
   Alcotest.(check bool)
     "provider helper recognizes the continuation trigger"

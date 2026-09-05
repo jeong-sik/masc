@@ -79,8 +79,8 @@ type config = {
           stream-field injection and after the serialized-body admission check.
           This is the only reading of the byte quantity admitted against
           [max_request_body_bytes]:
-          [Keeper_context_core_accessors.serialize_context] covers
-          [{system_prompt, messages}] and excludes tool schemas, and only a
+          the canonical checkpoint's bytes cover
+          [{system_prompt, messages}] and exclude tool schemas, and only a
           refused request reports its size today. Diagnostic and
           non-authoritative — a rejection or raised callback becomes typed
           failure evidence and does not rewrite the provider result. *)

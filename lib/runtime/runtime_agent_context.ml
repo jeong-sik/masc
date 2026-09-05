@@ -90,8 +90,8 @@ type config =
         AGENT_CORE after every stream-field injection and after the serialized-body
         admission check. This is the only place MASC can read the byte quantity
         the provider actually admits against [max_request_body_bytes]:
-        [Keeper_context_core_accessors.serialize_context] measures
-        [{system_prompt, messages}] and excludes tool schemas, and a failed
+        the canonical checkpoint's bytes measure
+        [{system_prompt, messages}] and exclude tool schemas, and a failed
         request is the only path that reports a size today. The observation is
         diagnostic and non-authoritative — AGENT_CORE reports a rejection or a raised
         callback as typed failure evidence without rewriting the result. *)

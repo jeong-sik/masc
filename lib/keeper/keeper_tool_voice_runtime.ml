@@ -81,6 +81,7 @@ let handle_speak_with_outcome
       , Eio_context.get_clock_opt ()
       , Eio_context.get_net_opt () )
     with
+    | Some sw, Some clock, Some net ->
       let run_speak () =
         match
           Voice_bridge.agent_speak

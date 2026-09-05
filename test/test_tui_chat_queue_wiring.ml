@@ -975,7 +975,9 @@ let journal_reply reply =
 
 (* Which loaded turns a refresh asks the journal for: each operation once,
    newest first by its earliest row, minus what the session already holds or
-   the server has refused, at most the cap. *)
+   the server has refused -- and every one of those. The rows are one page
+   the server already cut, so how many are asked for follows the operations
+   the rows name, not a number of this client's. *)
 let test_journal_fetch_targets_choose_the_newest_unheld_turns () =
   let candidates =
     [ ("op-old", 10.); ("op-old", 12.); ("op-held", 20.); ("op-gone", 30.)
@@ -983,19 +985,30 @@ let test_journal_fetch_targets_choose_the_newest_unheld_turns () =
   in
   check (list (pair string (float 0.001))) "once each, newest first, by the earliest row"
     [ ("op-new", 39.); ("op-mid", 25.); ("op-old", 10.) ]
-    (Tui_types.journal_fetch_targets ~cap:10 ~held:[ "op-held" ]
-       ~unavailable:[ "op-gone" ] candidates);
-  check (list (pair string (float 0.001))) "the cap keeps the newest"
-    [ ("op-new", 39.); ("op-mid", 25.) ]
-    (Tui_types.journal_fetch_targets ~cap:2 ~held:[ "op-held" ]
-       ~unavailable:[ "op-gone" ] candidates);
+    (Tui_types.journal_fetch_targets ~held:[ "op-held" ] ~unavailable:[ "op-gone" ]
+       candidates);
   check (list (pair string (float 0.001))) "nothing named, nothing asked" []
-    (Tui_types.journal_fetch_targets ~cap:10 ~held:[] ~unavailable:[] []);
-  (* Same instant: the order is the id's, and the cap cuts on that order. *)
-  check (list (pair string (float 0.001))) "a tie is broken by id, and the cap honours it"
-    [ ("op-a", 5.); ("op-b", 5.) ]
-    (Tui_types.journal_fetch_targets ~cap:2 ~held:[] ~unavailable:[]
-       [ ("op-c", 5.); ("op-a", 5.); ("op-b", 5.) ])
+    (Tui_types.journal_fetch_targets ~held:[] ~unavailable:[] []);
+  (* Same instant: the order is the id's. *)
+  check (list (pair string (float 0.001))) "a tie is broken by id"
+    [ ("op-a", 5.); ("op-b", 5.); ("op-c", 5.) ]
+    (Tui_types.journal_fetch_targets ~held:[] ~unavailable:[]
+       [ ("op-c", 5.); ("op-a", 5.); ("op-b", 5.) ]);
+  (* A page of many operations, each named by two rows, a third of them held
+     and a third refused: one target per operation that is neither, none
+     skipped. The expectation is derived from the same input, so it holds
+     for any page the server chooses to send. *)
+  let named = List.init 64 (fun index -> Printf.sprintf "op-%03d" index) in
+  let held = List.filteri (fun index _ -> index mod 3 = 0) named in
+  let unavailable = List.filteri (fun index _ -> index mod 3 = 1) named in
+  let rows = List.concat_map (fun id -> [ (id, 1.); (id, 2.) ]) named in
+  let targets = Tui_types.journal_fetch_targets ~held ~unavailable rows in
+  let expected = List.filteri (fun index _ -> index mod 3 = 2) named in
+  check int "one target per named operation not held and not refused"
+    (List.length expected) (List.length targets);
+  check (list string) "and each of them"
+    (List.sort String.compare expected)
+    (List.sort String.compare (List.map fst targets))
 ;;
 
 (* The acceptance is the server taking the POST, not a fact about the turn:
@@ -1208,8 +1221,8 @@ let test_loaded_tool_facts_are_folded_into_the_held_log () =
   | other -> failf "expected one call, got %d" (List.length other)
 ;;
 
-(* The reload is wired: a history page names its targets, one fiber per
-   target reads the journal, and the handler builds and holds the log. *)
+(* The reload is wired: a history page names its targets, one fiber per load
+   reads their journals in turn, and the handler builds and holds the log. *)
 let test_the_reload_rebuilds_loaded_turns_from_their_journals () =
   let in_binding ~binding_name ~callee =
     Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"

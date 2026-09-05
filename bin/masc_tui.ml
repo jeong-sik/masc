@@ -4902,45 +4902,54 @@ let launch_keeper_history_load ?(load_file_changes = true) state ~mailbox
   if load_file_changes then
     launch_keeper_chat_tool_details_load state ~mailbox ~keeper_name
 
-(* One fiber per turn, each reading the journal from where the session's
-   record of it ends and handing the lines to the mailbox; the handler folds
-   them. The operation is marked in flight until its result is handled, so a
-   load that arrives meanwhile does not start a second read. Failures are
-   typed by the fetch and decided in the handler, not here. *)
+(* One fiber per load, reading the journals one after another in the order
+   the targets came -- newest turn first -- each from where the session's
+   record of it ends, and handing each turn's lines to the mailbox as they
+   land; the handler folds them. Reading them in turn rather than all at once
+   is what bounds the requests in flight: a load holds one read open whatever
+   the page named, so a history window full of turns the session does not
+   hold is not a burst of connections to the server. Every target is marked
+   in flight before the fiber starts, so a load that arrives meanwhile does
+   not queue a second read of a turn this one has not reached yet; the mark
+   clears as each result is handled. A read that starts late may find its
+   turn grown since the targets were chosen: the position it resumes from was
+   taken then, and the log's seq dedup drops what the live stream has
+   meanwhile added. Failures are typed by the fetch and decided in the
+   handler, not here. *)
 let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
   let host = server_peer_host in
   let port = state.port in
-  List.iter
-    (fun (operation_id, started_at, since_seq) ->
-      let run () =
-        let journal =
-          try
-            Keeper_chat_log.read_whole_journal ~since_seq
-              ~fetch:(fun ~since_seq ->
-                (* Pages at the journal's own ceiling: one definition, the
-                   server's and this client's, so the ask can never exceed
-                   what the endpoint admits. *)
-                Masc_tui_http.fetch_keeper_chat_events ~host ~port ~keeper_name
-                  ~operation_id ~since_seq
-                  ~limit:Masc.Keeper_chat_event_log.page_max_limit)
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Keeper_chat_log.Events_transport (Printexc.to_string exn))
-        in
-        enqueue_async mailbox
-          (Keeper_chat_journal_loaded { keeper_name; operation_id; started_at; journal })
-      in
-      match Eio_context.get_switch_opt () with
-      | Some sw ->
-          journal_read_started state operation_id;
-          Eio.Fiber.fork_daemon ~sw (fun () ->
-              run ();
-              `Stop_daemon)
-      | None ->
-          (* No switch, no fetch: the v1 rows stay, and nothing is
-             remembered, so a later load with a switch asks. *)
-          ())
-    targets
+  let run (operation_id, started_at, since_seq) =
+    let journal =
+      try
+        Keeper_chat_log.read_whole_journal ~since_seq
+          ~fetch:(fun ~since_seq ->
+            (* Pages at the journal's own ceiling: one definition, the
+               server's and this client's, so the ask can never exceed
+               what the endpoint admits. *)
+            Masc_tui_http.fetch_keeper_chat_events ~host ~port ~keeper_name
+              ~operation_id ~since_seq
+              ~limit:Masc.Keeper_chat_event_log.page_max_limit)
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Keeper_chat_log.Events_transport (Printexc.to_string exn))
+    in
+    enqueue_async mailbox
+      (Keeper_chat_journal_loaded { keeper_name; operation_id; started_at; journal })
+  in
+  match targets, Eio_context.get_switch_opt () with
+  | [], Some _ | [], None -> ()
+  | _ :: _, Some sw ->
+      List.iter
+        (fun (operation_id, _, _) -> journal_read_started state operation_id)
+        targets;
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          List.iter run targets;
+          `Stop_daemon)
+  | _ :: _, None ->
+      (* No switch, no fetch: the v1 rows stay, and nothing is
+         remembered, so a later load with a switch asks. *)
+      ()
 
 let launch_context_inspector_load state ~mailbox ~keeper_name =
   let host = server_peer_host in
@@ -10575,7 +10584,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 content-withheld by design. *)
              if not state.msg_journal_reads_refused then
                journal_targets :=
-                 journal_fetch_targets ~cap:reload_journal_fetch_cap
+                 journal_fetch_targets
                    ~held:
                      (List.map turn_log_request_id
                         (List.filter turn_log_holds_the_turn

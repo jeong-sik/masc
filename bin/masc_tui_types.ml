@@ -2294,19 +2294,23 @@ let turn_log_keeper_name turn_log = Masc_tui_keeper_chat_log.keeper_name turn_lo
 let turn_log_request_id turn_log = Masc_tui_keeper_chat_log.request_id turn_log.tl_log
 let turn_log_started_at turn_log = Masc_tui_keeper_chat_log.started_at turn_log.tl_log
 
-(* How many loaded turns one history load asks the journal for. A load runs
-   when the chat opens, on a refresh key, when the keeper appends a turn and
-   when one settles; the turns behind the newest twenty are the ones the
-   operator scrolls back to, and each of those is asked for when its page
-   loads rather than all of them on every load. *)
-let reload_journal_fetch_cap = 20
-
 (* Which loaded turns a refresh fetches journals for: every operation the
    rows name, once, newest first by the earliest row of that operation, minus
    the turns this session already holds as logs (settled, or still streaming)
-   and the ones the server has said it cannot serve, at most [cap]. Pure, so
-   the choice is testable without a server. *)
-let journal_fetch_targets ~cap ~held ~unavailable
+   and the ones the server has said it cannot serve. The rows are the bound:
+   they are one /chat/history body, which the server cuts at the chat store's
+   tail window ([Keeper_chat_store.load]), and only direct turns carry an
+   [operation_id], so only they are candidates. Each turn is asked for on the
+   load that names it -- a load runs when the chat opens, on a refresh key,
+   when the keeper appends a turn and when one settles -- and once held it is
+   not asked for again, so every load after the first asks only for what is
+   new. The older-page path issues no journal reads, so a turn a load does
+   not ask for is not rebuilt by anything else; that is why nothing here is
+   cut short of the rows. The order is the order the reads run in (the
+   launcher reads the targets one after another), so the turns nearest the
+   bottom of the pane fill first. Pure, so the choice is testable without a
+   server. *)
+let journal_fetch_targets ~held ~unavailable
     (candidates : (string * float) list) =
   let earliest = Hashtbl.create 16 in
   List.iter
@@ -2324,7 +2328,6 @@ let journal_fetch_targets ~cap ~held ~unavailable
          match Float.compare at_b at_a with
          | 0 -> String.compare id_a id_b
          | order -> order)
-  |> List.filteri (fun index _ -> index < cap)
 ;;
 
 (* A committed log stands for its turn once the stream told it how the turn

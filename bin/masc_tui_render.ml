@@ -5447,8 +5447,17 @@ let keeper_runtime_cell ~width (runtime : keeper_runtime option) =
       (* Running is the normal lifecycle and stays silent — eleven rows all
          reading "running" said nothing any row could act on; the cells go to
          the runtime identity instead. Every other phase keeps its word. *)
+      (* A paused keeper says so instead of saying its phase. [kr_paused] is
+         a separate reading from [kr_phase] and the two disagree in practice:
+         on the live gate, two of sixteen keepers report phase offline with
+         paused true, and a third reports offline with paused false. The word
+         "offline" drew all three the same, and the difference is the one an
+         operator acts on -- a person stopped that one, so nothing is wrong
+         with it. The phase this replaces is still on the chat header, which
+         draws [kr_phase] unconditionally. *)
       let phase =
-        if Tui_decode.keeper_phase_is_running row.kr_phase then ""
+        if row.kr_paused then "paused "
+        else if Tui_decode.keeper_phase_is_running row.kr_phase then ""
         else Tui_decode.keeper_phase_to_string row.kr_phase ^ " "
       in
       let runtime_id = Terminal_text.single_line row.kr_runtime_id in

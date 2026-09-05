@@ -526,6 +526,35 @@ let test_roster_decode_reads_the_sandbox_profile () =
         [ "docker"; "local" ]
         (List.map (fun (r : Decode.keeper_runtime) -> r.kr_sandbox_profile) rows)
 
+(* Paused and phase are two readings, not one word said twice, and the roster
+   cell now draws the first in place of the second. On the live gate two of
+   sixteen keepers report phase offline with paused true while a third
+   reports offline with paused false -- the difference between a keeper a
+   person stopped and one that fell over, which "offline" alone cannot say.
+   The decode has to keep them apart for the cell to have anything to draw. *)
+let test_roster_decode_keeps_paused_apart_from_phase () =
+  let json =
+    Yojson.Safe.from_string
+      (Printf.sprintf
+         {|{"count":2,"total":2,"truncated":false,"keepers":[%s,%s]}|}
+         (gate_row ~paused:true ~phase:"offline" "stopped-by-a-person")
+         (gate_row ~paused:false ~phase:"offline" "fell-over"))
+  in
+  match Decode.decode_keeper_runtime_list json with
+  | Error detail -> Alcotest.failf "roster must decode: %s" detail
+  | Ok (rows, _, _) ->
+      Alcotest.(check (list bool))
+        "the pause reading is per row"
+        [ true; false ]
+        (List.map (fun (r : Decode.keeper_runtime) -> r.kr_paused) rows);
+      Alcotest.(check (list string))
+        "and the phase agrees on both, which is the point"
+        [ "offline"; "offline" ]
+        (List.map
+           (fun (r : Decode.keeper_runtime) ->
+             Decode.keeper_phase_to_string r.kr_phase)
+           rows)
+
 (* A row without the field is a server that stopped sending it, which is worth
    a loud decode failure rather than a row that silently reads as local. The
    boundary is the thing being reported; guessing it defeats the report. *)
@@ -818,6 +847,8 @@ let () =
     ; ( "roster"
       , [ Alcotest.test_case "the sandbox profile survives the decode" `Quick
             test_roster_decode_reads_the_sandbox_profile
+        ; Alcotest.test_case "paused stays apart from phase" `Quick
+            test_roster_decode_keeps_paused_apart_from_phase
         ; Alcotest.test_case "a row without a sandbox profile is rejected" `Quick
             test_a_row_without_a_sandbox_profile_is_rejected
         ; Alcotest.test_case "rows decode in order" `Quick

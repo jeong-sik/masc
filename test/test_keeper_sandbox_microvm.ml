@@ -1358,6 +1358,11 @@ let test_running_guest_is_a_remote_endpoint () =
        Alcotest.(check (list string)) "the transport appends only the shim"
          (guest.prefix @ [ guest.shim_path ])
          argv;
+       let probe_argv = Masc.Keeper_sandbox_remote.probe_argv endpoint in
+       Alcotest.(check bool) "probe argv does not pass -i (#33431)" false
+         (List.mem "-i" probe_argv);
+       Alcotest.(check bool) "probe argv ends with --probe" true
+         (List.ends_with ~suffix:[ "--probe" ] probe_argv);
        (* [create_minimal] runs as 0:0, so this is the runtime's own pair
           reaching the exec rather than a value the prefix invented. *)
        Alcotest.(check bool) "execs as the runtime's uid:gid" true
@@ -1375,6 +1380,62 @@ let test_running_guest_is_a_remote_endpoint () =
      | Error message ->
        Alcotest.(check bool) "refusal is named" true
          (String.starts_with ~prefix:"microvm_remote_endpoint_requires_microvm:" message))
+;;
+
+let test_shim_exec_prefix_for_microsandbox_probe_omits_stream () =
+  let container_name = "masc-keeper-vm-msb-probe" in
+  let remote_root = "/masc-work" in
+  let shim_config_path = "/opt/masc-exec-shim/masc-exec-shim.conf" in
+  (match
+     Masc.Keeper_sandbox_microvm.shim_exec_prefix_for
+       ~stdin:true
+       Masc.Keeper_microvm_backend.Microsandbox
+       ~container_name
+       ~uid:501
+       ~gid:20
+       ~remote_root
+       ~shim_config_path
+   with
+   | Error err -> Alcotest.fail err
+   | Ok prefix ->
+     Alcotest.(check bool) "stdin prefix includes --stream" true
+       (List.mem "--stream" prefix);
+     Alcotest.(check bool) "stdin prefix includes command separator --" true
+       (List.mem "--" prefix));
+  (match
+     Masc.Keeper_sandbox_microvm.shim_exec_prefix_for
+       ~stdin:false
+       Masc.Keeper_microvm_backend.Microsandbox
+       ~container_name
+       ~uid:501
+       ~gid:20
+       ~remote_root
+       ~shim_config_path
+   with
+   | Error err -> Alcotest.fail err
+   | Ok probe_prefix ->
+     Alcotest.(check bool) "probe prefix omits --stream (#33431)" false
+       (List.mem "--stream" probe_prefix);
+     Alcotest.(check bool) "probe prefix still ends with command separator --" true
+       (List.ends_with ~suffix:[ "--" ] probe_prefix);
+     Alcotest.(check bool) "probe prefix retains remote_root" true
+       (contains remote_root probe_prefix);
+     Alcotest.(check bool) "probe prefix retains shim config env" true
+       (contains ("MASC_EXEC_SHIM_CONFIG=" ^ shim_config_path) probe_prefix));
+  (match
+     Masc.Keeper_sandbox_microvm.shim_exec_prefix_for
+       ~stdin:false
+       Masc.Keeper_microvm_backend.Apple_container
+       ~container_name
+       ~uid:501
+       ~gid:20
+       ~remote_root
+       ~shim_config_path
+   with
+   | Error err -> Alcotest.fail err
+   | Ok apple_probe_prefix ->
+     Alcotest.(check bool) "apple probe prefix omits -i" false
+       (List.mem "-i" apple_probe_prefix))
 ;;
 
 (* The volume probe's ambiguity: [container volume inspect] exits 1 for an
@@ -1849,6 +1910,10 @@ let () =
             test_keeper_work_root_write_probe_runs_as_the_keeper
         ; Alcotest.test_case "running guest is a remote endpoint" `Quick
             test_running_guest_is_a_remote_endpoint
+        ; Alcotest.test_case
+            "shim exec prefix for microsandbox probe omits stream"
+            `Quick
+            test_shim_exec_prefix_for_microsandbox_probe_omits_stream
         ] )
     ; ( "work volume provisioning"
       , [ Alcotest.test_case "volume names parse from the listing" `Quick

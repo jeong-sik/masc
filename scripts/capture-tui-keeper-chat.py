@@ -53,6 +53,7 @@ LONG_TAIL = ("❤️" * 10) + "-TAIL"
 LONG_DRAFT = "prefix-" + ("x" * 100) + LONG_TAIL
 CHAT_POST = "/api/v1/keepers/chat/stream"
 INTERRUPT_POST = "/api/v1/keepers/turn/interrupt"
+MCP_POST = "/mcp"
 CHAT_HISTORY_GET = f"/api/v1/keepers/{KEEPER}/chat/history"
 MEMORY_JOURNAL_GET = f"/api/v1/keepers/{KEEPER}/memory-journal?limit=20"
 OPERATOR_GET = "/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
@@ -97,7 +98,7 @@ def require(condition: bool, detail: str) -> None:
 
 def current_keeper_meta() -> dict[str, object]:
     meta: dict[str, object] = {
-        "schema": "masc.keeper_meta.v1",
+        "schema": "masc.keeper_meta.v2",
         "name": KEEPER,
         "instructions": "Runtime evidence fixture for Keeper chat recovery.",
         "trace_id": "trace-capture-v3",
@@ -114,6 +115,8 @@ def current_keeper_meta() -> dict[str, object]:
         "current_task_id": None,
         "keeper_id": None,
         "agent_core_env": {},
+        "usage_cursor": None,
+        "last_usage_resolution": None,
     }
     for key in (
         "last_handoff_ts",
@@ -401,8 +404,13 @@ class Fixture:
             posts = sum(r["method"] == "POST" and r["path"] == CHAT_POST for r in records)
             interrupts = sum(r["method"] == "POST" and r["path"] == INTERRUPT_POST for r in records)
             gets = sum(r["operation_ordinal"] is not None for r in records)
+            mcp_initializes = sum(r["method"] == "POST" and r["path"] == MCP_POST
+                                  and r.get("mcp_method") == "initialize"
+                                  for r in records)
             other_posts = sum(r["method"] == "POST"
                               and r["path"] not in (CHAT_POST, INTERRUPT_POST)
+                              and not (r["path"] == MCP_POST
+                                       and r.get("mcp_method") == "initialize")
                               for r in records)
             unexpected_chat = sum("/chat/" in urlsplit(r["path"]).path
                                   and not (r["method"] == "POST" and r["path"] == CHAT_POST)
@@ -413,6 +421,7 @@ class Fixture:
             "interrupt_post_count": interrupts,
             "chat_operation_get_count": gets,
             "other_post_count": other_posts,
+            "mcp_initialize_count": mcp_initializes,
             "unexpected_chat_route_count": unexpected_chat,
             "request": request,
             "requests": requests,
@@ -544,6 +553,37 @@ def fixture_static_response(state: Fixture, path: str) -> object | None:
         "/api/v1/board?sort_by=hot": {"posts": []},
         "/api/v1/dashboard/planning": PLANNING,
         "/api/v1/gate/keepers?detailed=true": roster,
+        # Read-only surfaces every refresh asks for whichever pane is showing.
+        # Empty readings, in the shape the TUI decoders take (the same ones
+        # the PTY suite's fake server answers with).
+        "/api/v1/dashboard/gate": {
+            "approval_queue": [],
+            "approval_queue_state": None,
+            "hitl": {
+                "gate_mode": {"mode": "auto_judge"},
+                "external_gate_mode": {"mode": "manual"},
+            },
+            "approval_rules": None,
+            "approval_rules_state": None,
+        },
+        "/api/v1/dashboard/gate/keeper-settings": {"modes": [], "judges": []},
+        "/api/v1/keepers/tool-approval-mode": {"overrides": []},
+        "/api/v1/keepers/tool-approvals": {"pending": []},
+        "/api/v1/keepers/turns": {"schema": "masc.keeper_turns.v1", "keepers": []},
+        "/api/v1/keepers/asks": {"keeper": None, "open_count": 0, "asks": []},
+        "/api/v1/dashboard/scheduled-automation": {
+            "status": "ok",
+            "schedule_store_read_error": None,
+            "request_count": 0,
+            "truncated": False,
+            "fsm": {"next_due_at_iso": None},
+            "requests": [],
+        },
+        "/api/v1/keepers/composite": {
+            "generated_at": 1787557669.715736,
+            "count": 0,
+            "snapshots": [],
+        },
         MEMORY_JOURNAL_GET: {
             "keeper": KEEPER,
             "returned": 0,
@@ -649,6 +689,26 @@ def fixture_server(state: Fixture) -> Iterator[int]:
                         "request_body_utf8": body.decode("utf-8"),
                     }
                 )
+            if self.path == MCP_POST:
+                # The TUI opens one MCP session for its observer feed, whichever
+                # pane is showing; the handshake is a read-side session open,
+                # not a write the chat turn caused. This fixture serves no
+                # observer feed, so it answers the JSON-RPC way a server says
+                # so, and the summary counts the handshake on its own row.
+                try:
+                    rpc = json.loads(body)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    rpc = {}
+                method = rpc.get("method") if isinstance(rpc, dict) else None
+                with state.lock:
+                    record["mcp_method"] = method
+                if method == "initialize":
+                    self.reply_json(record, 200, {
+                        "jsonrpc": "2.0", "id": rpc.get("id"),
+                        "error": {"code": -32601,
+                                  "message": "this fixture serves no observer feed"},
+                    })
+                    return
             if self.path == INTERRUPT_POST and state.mode == "steer":
                 try:
                     target = json.loads(body)
@@ -1352,7 +1412,8 @@ def success_scenario(
                 )
                 request = request_identity(state, SUCCESS_MESSAGE)
                 request_label = compact_request_label(request)
-                wait_text(page, f"(sending {request_label}")
+                wait_text(page, "ACTIVE TURN")
+                wait_text(page, request_label)
                 measurements["enter_to_sending_ui_ms"] = round(
                     (time.monotonic() - started) * 1000, 3
                 )
@@ -1429,7 +1490,7 @@ def success_scenario(
                 )
                 # fmt: off
                 shots.append(capture(page, output, prefix + "05-chat-next-separated.png",
-                                  SUCCESS_MESSAGE, f"(sending {request_label}",
+                                  SUCCESS_MESSAGE, "ACTIVE TURN",
                                   "NEXT 1", "draft-during-send", "Enter:queue(1)",
                                   absent_markers=("QUEUED",)))
                 # fmt: on
@@ -1451,8 +1512,9 @@ def success_scenario(
                 )
                 queued_request = request_identity(state, "draft-during-send")
                 queued_request_label = compact_request_label(queued_request)
-                wait_text(page, f"(sending {queued_request_label}")
+                wait_text(page, f"reply-{SUCCESS_MESSAGE}")
                 wait_text(page, "NEXT 1", present=False)
+                wait_text(page, queued_request_label)
                 queue_active_at = time.monotonic()
                 active_text = screen_text(page)
                 queued_user_row, queued_user_line = unique_screen_line(
@@ -1489,7 +1551,7 @@ def success_scenario(
                 )
                 # fmt: off
                 shots.append(capture(page, output, prefix + "06-chat-next-active-same-slot.png",
-                                  f"(sending {queued_request_label}", queued_request_label,
+                                  "ACTIVE TURN", queued_request_label,
                                   "draft-during-send", queued_clock, "Enter:queue(0)",
                                   absent_markers=("NEXT 1",)))
                 # fmt: on
@@ -1501,7 +1563,7 @@ def success_scenario(
                     latency, 3
                 )
                 require(latency <= 2500, f"reply latency {latency:.3f}ms")
-                wait_text(page, "(sending ", present=False)
+                wait_text(page, "ACTIVE TURN", present=False)
                 # The 30-row viewport is the physical-slot proof above. The
                 # settled transcript contains two full turns plus a tool block;
                 # widen only this final evidence frame so an older causal row
@@ -1922,7 +1984,8 @@ def steer_scenario(
                 await_event(state.post_seen, "steer original POST")
                 original = request_identity(state, "original-course")
                 original_label = compact_request_label(original)
-                wait_text(page, f"(sending {original_label}")
+                wait_text(page, "ACTIVE TURN")
+                wait_text(page, original_label)
 
                 type_text(page, "ordinary-next")
                 state.note_submission("ordinary-next", time.time())
@@ -1969,7 +2032,7 @@ def steer_scenario(
                 )
                 # fmt: off
                 shots.append(capture(page, output, prefix + "14-chat-steer-distinct.png",
-                                     f"(sending {original_label}",
+                                     "ACTIVE TURN",
                                      "STEER 1", "corrected-course",
                                      "NEXT 2", "ordinary-next", "Enter:queue(2)"))
                 # fmt: on
@@ -1982,8 +2045,8 @@ def steer_scenario(
                 )
                 corrected = request_identity(state, "corrected-course")
                 corrected_label = compact_request_label(corrected)
-                wait_text(page, f"(sending {corrected_label}")
                 wait_text(page, "STEER 1", present=False)
+                wait_text(page, corrected_label)
                 active_text = screen_text(page)
                 _, _ = unique_screen_line(active_text, corrected_label, "YOU")
                 next_row, _ = unique_screen_line(active_text, "NEXT 1")
@@ -1998,7 +2061,7 @@ def steer_scenario(
                 )
                 # fmt: off
                 shots.append(capture(page, output, prefix + "15-chat-steer-active-before-next.png",
-                                     f"(sending {corrected_label}", corrected_label,
+                                     "ACTIVE TURN", corrected_label,
                                      "corrected-course", "NEXT 1", "ordinary-next",
                                      absent_markers=("STEER 1",)))
                 # fmt: on
@@ -2011,7 +2074,7 @@ def steer_scenario(
                 ordinary = request_identity(state, "ordinary-next")
                 ordinary_label = compact_request_label(ordinary)
                 wait_text(page, "reply-ordinary-next")
-                wait_text(page, "(sending ", present=False)
+                wait_text(page, "ACTIVE TURN", present=False)
                 wait_text(page, "Enter:send")
                 messages = [
                     request["message"] for request in state.summary()["requests"]

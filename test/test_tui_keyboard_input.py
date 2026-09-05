@@ -7852,9 +7852,29 @@ def project_changes_interaction(
     send_and_wait(process, master_fd, output, b"\x1b", b"MASC Workspace")
     palette_go(process, master_fd, output, b"go code", b"README.md")
     send_and_wait(process, master_fd, output, b"d", b"lib/a.ml")
-    opened = send_and_wait(
-        process, master_fd, output, b"\r", b"lib/a.ml  [j/k]"
+    # The diff view's header now reads "MASC Git Diff lib/a.ml vs HEAD
+    # [connected]" -- no "[j/k]" scroll hint survives in this frame (that
+    # was the Git Changes list's own footer hint, from before this Enter).
+    # "MASC Git Diff" and " lib/a.ml" sit either side of an SGR reset
+    # (bold-off after the title), so the needle must stay inside the one
+    # plain run that follows it. The header paints instantly but the diff
+    # body ("(reading the tree)" -> the actual lines) loads afterward, so
+    # send_and_wait's single returned frame is the loading placeholder --
+    # wait for the body separately and grab the frame that contains it.
+    diff_start = len(output)
+    os.write(master_fd, b"\r")
+    wait_for_output(
+        process, master_fd, output, b"lib/a.ml  vs HEAD", start=diff_start, timeout=3.0
     )
+    wait_for_output(
+        process, master_fd, output, b"let x = 1", start=diff_start, timeout=5.0
+    )
+    loaded_end = output.find(b"let x = 1", diff_start) + len(b"let x = 1")
+    wait_for_output(
+        process, master_fd, output, FRAME_END, start=loaded_end, timeout=3.0
+    )
+    frame_end = output.find(FRAME_END, loaded_end) + len(FRAME_END)
+    opened = frame_containing(bytes(output[diff_start:frame_end]), b"let x = 1")
     opened_plain = CSI_RE.sub(b"", opened).decode("utf-8")
     if "let x = 1" not in opened_plain:
         raise AssertionError(

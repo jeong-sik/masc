@@ -78,6 +78,44 @@ let test_snapshot_redacts_env_and_file_values () =
   not_contains "file exact value hidden" redacted file_secret;
   contains "redaction marker present" redacted "[REDACTED]"
 
+(* The snapshot is memoised per domain on the identity of its source files.
+   Unchanged files serve the same compiled patterns; a changed file rebuilds. *)
+let test_snapshot_is_reused_until_a_source_changes () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let keeper_name = "memo-keeper" in
+  let root = secret_root_default ~base ~keeper_name in
+  let env_file = Filename.concat (Filename.concat root "env") "GH_TOKEN" in
+  let first_secret = "first.secret.value" in
+  let second_secret = "second.secret.value" in
+  write_file env_file (first_secret ^ "\n");
+  let first = R.snapshot ~base_path:base ~keeper_name in
+  let again = R.snapshot ~base_path:base ~keeper_name in
+  Alcotest.(check bool) "unchanged sources share the compiled patterns" true
+    (R.For_testing.shares_compiled_patterns first again);
+  (* A different request key is a different entry even over the same files. *)
+  let scalars_off =
+    R.snapshot_with_additional_secret_files
+      ~redact_identity_scalars:false
+      ~additional_secret_files:[]
+      ~base_path:base
+      ~keeper_name
+  in
+  Alcotest.(check bool) "another request key does not share" false
+    (R.For_testing.shares_compiled_patterns first scalars_off);
+  (* Appending a value changes the file's size, so the next call rebuilds. *)
+  write_file env_file (first_secret ^ "\n" ^ second_secret ^ "\n");
+  let rebuilt = R.snapshot ~base_path:base ~keeper_name in
+  Alcotest.(check bool) "a changed source rebuilds the snapshot" false
+    (R.For_testing.shares_compiled_patterns first rebuilt);
+  let redacted = R.redact_text rebuilt ("a=" ^ first_secret ^ " b=" ^ second_secret) in
+  not_contains "old value still hidden" redacted first_secret;
+  not_contains "new value hidden after rebuild" redacted second_secret;
+  (* The stale snapshot keeps redacting what it knew; it never learns more. *)
+  contains "stale snapshot does not know the new value"
+    (R.redact_text first ("b=" ^ second_secret)) second_secret
+
 let test_short_values_are_not_exact_redacted () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -386,6 +424,8 @@ let () =
             test_snapshot_redacts_remote_token_without_projecting_it;
           Alcotest.test_case "redacts json while preserving shape" `Quick
             test_json_redaction_preserves_shape;
+          Alcotest.test_case "reuses the snapshot until a source changes" `Quick
+            test_snapshot_is_reused_until_a_source_changes;
           Alcotest.test_case "redacts json object keys" `Quick
             test_json_redaction_covers_object_keys;
           Alcotest.test_case "redacts Execute stdout stderr and combined output" `Quick

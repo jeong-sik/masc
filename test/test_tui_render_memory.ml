@@ -77,6 +77,36 @@ let test_detail_lines () =
     lines
 ;;
 
+let test_detail_lines_source_and_invalidation () =
+  let sfact : Decode.memory_source_fact =
+    { msf_claim = "Config specifies runtime ports"
+    ; msf_first_seen = 100.0
+    ; msf_path = "config/runtime.toml"
+    ; msf_sha256 = "abc123sha"
+    }
+  in
+  let row_src = Types.Memory_row_source_fact sfact in
+  let lines_src = Render_memory.memory_fact_detail_lines ~cols:80 row_src in
+  check bool "source detail lines non-empty" true (List.length lines_src > 0);
+  List.iter
+    (fun line ->
+      check bool "source detail line bounded" true (Layout.display_width line <= 80))
+    lines_src;
+  let inv : Decode.memory_invalidation =
+    { mi_source_path = "config/old.toml"
+    ; mi_invalidated_at = 200.0
+    ; mi_reason = "deprecated"
+    }
+  in
+  let row_inv = Types.Memory_row_invalidation inv in
+  let lines_inv = Render_memory.memory_fact_detail_lines ~cols:80 row_inv in
+  check bool "invalidation detail lines non-empty" true (List.length lines_inv > 0);
+  List.iter
+    (fun line ->
+      check bool "invalidation detail line bounded" true (Layout.display_width line <= 80))
+    lines_inv
+;;
+
 let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_health =
   { mkh_keeper_id = keeper_id
   ; mkh_revision = 1
@@ -144,6 +174,48 @@ let test_render_memory_body_with_keepers () =
   state.memory_health <- Some health;
   state.memory_health_cursor <- 0;
   let selected_called = ref false in
+  let selected_str = ref "" in
+  let count = ref 0 in
+  Render_memory.render_memory_body
+    ~cols:100
+    ~budget:20
+    state
+    ~push:(fun _ -> incr count)
+    ~push_styled:(fun ~style:_ _ -> incr count)
+    ~push_selected:(fun s -> selected_called := true; selected_str := s; incr count)
+    ~push_divider:(fun () -> incr count)
+    ~push_empty:(fun () -> incr count);
+  check bool "selected row was called" true !selected_called;
+  check string "push_selected received stripped string" (Masc_tui_theme.strip_sgr !selected_str) !selected_str;
+  check bool "rows rendered" true (!count > 0 && !count <= 20)
+;;
+
+let test_render_memory_body_cursor_clamping () =
+  let state = make_state () in
+  let keeper = make_keeper_health ~keeper_id:"alpha" ~facts:5 ~snapshot_bytes:512 in
+  let health : Decode.memory_health_snapshot =
+    { mhs_generated_at = 1000.0
+    ; mhs_keepers = [ keeper ]
+    ; mhs_total_facts = 5
+    ; mhs_total_observed_facts = 5
+    ; mhs_total_derived_facts = 0
+    ; mhs_total_support_invalidations = 0
+    ; mhs_total_snapshot_bytes = 512
+    ; mhs_total_source_facts = 0
+    ; mhs_total_source_invalidations = 0
+    ; mhs_total_source_snapshot_bytes = 0
+    ; mhs_total_librarian_failures = 0
+    ; mhs_total_vision_ingest_errors = 0
+    ; mhs_total_read_errors = 0
+    ; mhs_total_source_read_errors = 0
+    ; mhs_warn_alerts = 0
+    ; mhs_error_alerts = 0
+    ; mhs_starving_keepers = 0
+    }
+  in
+  state.memory_health <- Some health;
+  state.memory_health_cursor <- 999;
+  let selected_called = ref false in
   let count = ref 0 in
   Render_memory.render_memory_body
     ~cols:100
@@ -154,8 +226,7 @@ let test_render_memory_body_with_keepers () =
     ~push_selected:(fun _ -> selected_called := true; incr count)
     ~push_divider:(fun () -> incr count)
     ~push_empty:(fun () -> incr count);
-  check bool "selected row was called" true !selected_called;
-  check bool "rows rendered" true (!count > 0 && !count <= 20)
+  check bool "selected row was clamped and called" true !selected_called
 ;;
 
 let test_render_memory_facts_body () =
@@ -209,10 +280,13 @@ let () =
         ; test_case "invalidation_row" `Quick test_invalidation_row_line
         ] )
     ; ( "detail_lines"
-      , [ test_case "detail_lines_bounded" `Quick test_detail_lines ] )
+      , [ test_case "detail_lines_bounded" `Quick test_detail_lines
+        ; test_case "detail_lines_source_and_invalidation" `Quick test_detail_lines_source_and_invalidation
+        ] )
     ; ( "render_body"
       , [ test_case "memory_body_budget" `Quick test_render_memory_body
         ; test_case "memory_body_with_keepers" `Quick test_render_memory_body_with_keepers
+        ; test_case "memory_body_cursor_clamping" `Quick test_render_memory_body_cursor_clamping
         ; test_case "memory_facts_body" `Quick test_render_memory_facts_body
         ] )
     ]

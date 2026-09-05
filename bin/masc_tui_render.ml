@@ -1376,7 +1376,7 @@ let render_overview (state : state) =
           if cols >= 92 then
             let activity_samples =
               match state.keeper_turn_finishes with
-              | [] -> [ 1; 2; 3; 5; 8; 4; 2; 1 ]
+              | [] -> [ 0; 0; 0; 0; 0; 0; 0; 0 ]
               | finishes ->
                   let now = Unix.gettimeofday () in
                   let buckets = Array.make 8 0 in

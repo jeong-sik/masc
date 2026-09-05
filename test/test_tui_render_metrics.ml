@@ -199,6 +199,61 @@ let test_section_latency_lines () =
     lines
 ;;
 
+let test_narrow_and_wide_terminals () =
+  let state = make_state () in
+  let widths = [ 40; 55; 65; 80; 100; 120 ] in
+  List.iter
+    (fun cols ->
+      let pulse = Render_metrics.overview_pulse_line ~cols state in
+      check bool "pulse bounded" true (Layout.display_width pulse <= cols);
+      let pills = Render_metrics.section_pills_line ~cols ~active:Types.Section_fleet in
+      check bool "pills bounded" true (Layout.display_width pills <= cols);
+      let fleet = Render_metrics.render_section_fleet ~cols state in
+      List.iter (fun l -> check bool "fleet line bounded" true (Layout.display_width l <= cols)) fleet;
+      let res = Render_metrics.render_section_resources ~cols state in
+      List.iter (fun l -> check bool "res line bounded" true (Layout.display_width l <= cols)) res;
+      let tools = Render_metrics.render_section_tools ~cols state in
+      List.iter (fun l -> check bool "tools line bounded" true (Layout.display_width l <= cols)) tools;
+      let lat = Render_metrics.render_section_latency ~cols state in
+      List.iter (fun l -> check bool "lat line bounded" true (Layout.display_width l <= cols)) lat)
+    widths
+;;
+
+let test_section_fleet_populated () =
+  let state = make_state () in
+  let now = Unix.gettimeofday () in
+  state.keeper_turn_finishes <-
+    [ ("keeper-alpha", now -. 30.0)
+    ; ("keeper-alpha", now -. 90.0)
+    ; ("keeper-beta", now -. 300.0)
+    ; ("keeper-beta", now -. 3600.0)
+    ];
+  let lines = Render_metrics.render_section_fleet ~cols:90 state in
+  check bool "fleet section produces lines with activity" true (List.length lines > 0);
+  let pulse = Render_metrics.overview_pulse_line ~cols:100 state in
+  check bool "pulse non-empty" true (String.length pulse > 0)
+;;
+
+let test_section_resources_populated () =
+  let state = make_state () in
+  let kh1 = make_keeper_health ~keeper_id:"alpha" ~facts:25 ~snapshot_bytes:4096 in
+  let kh2 = make_keeper_health ~keeper_id:"beta" ~facts:50 ~snapshot_bytes:8192 in
+  let mhs = make_memory_health ~total_facts:75 ~source_facts:10 ~keepers:[ kh1; kh2 ] in
+  state.memory_health <- Some mhs;
+  let lines = Render_metrics.render_section_resources ~cols:90 state in
+  check bool "resources populated produces lines" true (List.length lines > 0);
+  List.iter (fun l -> check bool "resource line bounded" true (Layout.display_width l <= 90)) lines
+;;
+
+let test_section_tools_populated () =
+  let state = make_state () in
+  let gp = make_gate_pending ~id:"gp1" ~keeper:"alpha" in
+  state.gate_pending <- [ gp ];
+  let lines = Render_metrics.render_section_tools ~cols:90 state in
+  check bool "tools populated produces lines" true (List.length lines > 0);
+  List.iter (fun l -> check bool "tool line bounded" true (Layout.display_width l <= 90)) lines
+;;
+
 let test_render_metrics_body_budget () =
   let state = make_state () in
   let count = ref 0 in
@@ -212,6 +267,27 @@ let test_render_metrics_body_budget () =
     ~push_divider:(fun () -> incr count)
     ~push_empty:(fun () -> incr count);
   check bool "lines within budget" true (!count <= 15)
+;;
+
+let test_render_metrics_body_all_sections () =
+  let state = make_state () in
+  let sections = [ Types.Section_fleet; Types.Section_resources; Types.Section_tools; Types.Section_latency ] in
+  List.iter
+    (fun sec ->
+      state.metrics_section <- sec;
+      state.metrics_scroll <- 2;
+      let count = ref 0 in
+      Render_metrics.render_metrics_body
+        ~cols:85
+        ~budget:20
+        state
+        ~push:(fun _ -> incr count)
+        ~push_styled:(fun ~style:_ _ -> incr count)
+        ~push_selected:(fun _ -> incr count)
+        ~push_divider:(fun () -> incr count)
+        ~push_empty:(fun () -> incr count);
+      check bool "section rendered within budget" true (!count <= 20))
+    sections
 ;;
 
 let () =
@@ -229,8 +305,15 @@ let () =
         ; test_case "resources" `Quick test_section_resources_lines
         ; test_case "tools" `Quick test_section_tools_lines
         ; test_case "latency" `Quick test_section_latency_lines
+        ; test_case "fleet_populated" `Quick test_section_fleet_populated
+        ; test_case "resources_populated" `Quick test_section_resources_populated
+        ; test_case "tools_populated" `Quick test_section_tools_populated
         ] )
+    ; ( "responsiveness"
+      , [ test_case "narrow_and_wide" `Quick test_narrow_and_wide_terminals ] )
     ; ( "render_body"
-      , [ test_case "budget" `Quick test_render_metrics_body_budget ] )
+      , [ test_case "budget" `Quick test_render_metrics_body_budget
+        ; test_case "all_sections" `Quick test_render_metrics_body_all_sections
+        ] )
     ]
 ;;

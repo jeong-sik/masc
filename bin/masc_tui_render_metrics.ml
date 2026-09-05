@@ -76,7 +76,7 @@ let overview_pulse_line ~cols (state : state) : string =
   let inner_width = max 10 (framed_inner_width cols) in
   let activity_samples =
     match state.keeper_turn_finishes with
-    | [] -> [ 1; 3; 2; 5; 8; 6; 4; 2; 1 ]
+    | [] -> [ 0; 0; 0; 0; 0; 0; 0; 0 ]
     | finishes ->
         let now = Unix.gettimeofday () in
         let buckets = Array.make 8 0 in
@@ -200,145 +200,198 @@ let render_kpi_cards ~cols (kpis : metrics_kpis) : string list =
 
 let render_section_fleet ~cols (state : state) : string list =
   let inner_width = max 20 (framed_inner_width cols) in
-  let hourly_activity =
-    let hours = Array.make 24 0 in
-    List.iter
-      (fun (_, ts) ->
-        let h = (int_of_float ts / 3600) mod 24 in
-        if h >= 0 && h < 24 then hours.(h) <- hours.(h) + 1)
-      state.keeper_turn_finishes;
-    Array.to_list hours
+  let clip line =
+    if Layout.display_width line > inner_width then
+      Layout.take_cells line inner_width ^ Ansi.reset
+    else line
   in
-  let heatmap_lines =
-    Chart.heatmap_24h ~label:"Fleet 24h Activity" hourly_activity
-    |> List.map (fun l -> "  " ^ l)
+  let finishes = state.keeper_turn_finishes in
+  let fleet_lines =
+    if finishes = [] then
+      [ "  (no turn finish activity recorded in fleet state)" ]
+    else
+      let hours = Array.make 24 0 in
+      List.iter
+        (fun (_, ts) ->
+          let h = (int_of_float ts / 3600) mod 24 in
+          if h >= 0 && h < 24 then hours.(h) <- hours.(h) + 1)
+        finishes;
+      let hourly_activity = Array.to_list hours in
+      Chart.heatmap_24h ~label:"Fleet 24h Activity" hourly_activity
+      |> List.map (fun l -> "  " ^ l)
   in
-  let trend_points =
-    let count = 28 in
-    List.init count (fun i ->
-      let x = float_of_int i /. 28.0 in
-      15.0 +. (10.0 *. sin (x *. 6.28)) +. float_of_int (i mod 5))
-  in
-  let braille_lines =
-    let bw = min 60 (max 20 (inner_width - 8)) in
-    Chart.braille_plot ~width:bw ~height:4 trend_points
-    |> List.map (fun l -> "    " ^ l)
-  in
-  let spark_samples =
-    match state.keeper_turn_finishes with
-    | [] -> [ 2; 4; 6; 8; 12; 15; 10; 8; 14; 18; 12; 6; 4 ]
-    | f -> List.map (fun (_, ts) -> (int_of_float ts) mod 20) f
+  let trend_lines =
+    if finishes = [] then
+      [ "    (no turn cadence curve recorded)" ]
+    else
+      let count = min 28 (List.length finishes) in
+      let sorted_ts = List.map snd finishes |> List.sort Float.compare in
+      let deltas =
+        let rec diffs acc = function
+          | [] | [ _ ] -> List.rev acc
+          | t1 :: (t2 :: _ as rest) -> diffs (max 0.0 (t2 -. t1) :: acc) rest
+        in
+        diffs [] sorted_ts
+      in
+      let points =
+        match deltas with
+        | [] -> List.init count (fun _ -> 0.0)
+        | d -> d
+      in
+      let bw = min 60 (max 20 (inner_width - 8)) in
+      Chart.braille_plot ~width:bw ~height:4 points
+      |> List.map (fun l -> "    " ^ l)
   in
   let spark_str =
-    Chart.sparkline_colored
-      ~style_of_level:(fun lvl ->
-        if lvl >= 6 then Chart.Status Masc_tui_theme.Bad
-        else if lvl >= 3 then Chart.Status Masc_tui_theme.Warn
-        else Chart.Status Masc_tui_theme.Ok)
-      spark_samples
+    match finishes with
+    | [] -> "(idle)"
+    | f ->
+        let now = Unix.gettimeofday () in
+        let buckets = Array.make 12 0 in
+        List.iter
+          (fun (_, ts) ->
+            let delta = max 0.0 (now -. ts) in
+            if delta < 3600.0 then
+              let idx = min 11 (int_of_float (delta /. 300.0)) in
+              let slot = 11 - idx in
+              buckets.(slot) <- buckets.(slot) + 1)
+          f;
+        let samples = Array.to_list buckets in
+        Chart.sparkline_colored
+          ~style_of_level:(fun lvl ->
+            if lvl >= 6 then Chart.Status Masc_tui_theme.Bad
+            else if lvl >= 3 then Chart.Status Masc_tui_theme.Warn
+            else Chart.Status Masc_tui_theme.Ok)
+          samples
   in
-  [ Printf.sprintf "  %s%s24-Hour Fleet Activity Heatmap%s  %s(00:00 .. 23:00 UTC)%s"
+  let title1 =
+    Printf.sprintf "  %s%s24-Hour Fleet Activity Heatmap%s  %s(00:00 .. 23:00 UTC)%s"
       Ansi.bold (Theme.info ()) Ansi.reset (Theme.recede ()) Ansi.reset
-  ]
-  @ heatmap_lines
+  in
+  let title2 =
+    Printf.sprintf "  %s%sTurn Cadence & Execution Trend (Braille 2x4 Curve)%s  %sVelocity: %s%s"
+      Ansi.bold (Theme.ok ()) Ansi.reset (Theme.recede ()) spark_str Ansi.reset
+  in
+  [ clip title1 ]
+  @ List.map clip fleet_lines
   @ [ ""
-    ; Printf.sprintf "  %s%sTurn Velocity & Execution Trend (Braille 2x4 Curve)%s  %sTrend: %s%s"
-        Ansi.bold (Theme.ok ()) Ansi.reset (Theme.recede ()) spark_str Ansi.reset
+    ; clip title2
     ]
-  @ braille_lines
+  @ List.map clip trend_lines
 
 let render_section_resources ~cols (state : state) : string list =
   let inner_width = max 20 (framed_inner_width cols) in
+  let clip line =
+    if Layout.display_width line > inner_width then
+      Layout.take_cells line inner_width ^ Ansi.reset
+    else line
+  in
   let gauge_w = max 15 (min 26 (max 15 ((inner_width - 36) / 2))) in
-  let keeper_rows =
+  let header =
+    [ clip
+        (Printf.sprintf "  %s%sKeeper Memory & Context Capacity Gauges%s"
+           Ansi.bold (Theme.info ()) Ansi.reset)
+    ; clip
+        (Printf.sprintf "  %-16s  %-*s  %-*s  %s"
+           "KEEPER" gauge_w "FACT CAPACITY" gauge_w "SNAPSHOT BYTES" "METRICS")
+    ]
+  in
+  let rows =
     match state.memory_health with
     | None ->
-        List.map
-          (fun (k : keeper) ->
-            let g = Chart.gauge ~width:gauge_w ~value:20 ~max_value:100 ~label:"Facts" () in
-            let status_str = if k.k_paused then "paused" else "active" in
-            Printf.sprintf "  %s  %s  %s(status: %s)%s"
-              (Layout.fit_width k.k_name 16)
-              g
-              (Theme.recede ()) status_str Ansi.reset)
-          state.keepers
+        if state.keepers = [] then
+          [ "  (no keepers registered in fleet)" ]
+        else
+          List.map
+            (fun (k : keeper) ->
+              Printf.sprintf "  %s  %s(memory telemetry not loaded — press m in Memory to load)%s"
+                (Layout.fit_width k.k_name 16)
+                (Theme.recede ()) Ansi.reset)
+            state.keepers
     | Some mhs ->
-        List.map
-          (fun (k : Masc.Tui_decode.memory_keeper_health) ->
-            let max_f = max 50 (k.mkh_facts * 2) in
-            let fact_g =
-              Chart.gauge ~width:gauge_w ~value:k.mkh_facts ~max_value:max_f ~label:"Facts" ()
-            in
-            let max_b = 200 * 1024 in
-            let byte_g =
-              Chart.gauge ~width:gauge_w ~value:k.mkh_snapshot_bytes ~max_value:max_b ~label:"Bytes" ()
-            in
-            Printf.sprintf "  %s  %s  %s  %s%4d ord · %s%s"
-              (Layout.fit_width k.mkh_keeper_id 16)
-              fact_g
-              byte_g
-              (Theme.recede ()) k.mkh_facts
-              (Masc_tui_context_inspector.format_bytes k.mkh_snapshot_bytes)
-              Ansi.reset)
-          mhs.mhs_keepers
+        if mhs.mhs_keepers = [] then
+          [ "  (no keepers with a memory config or snapshot)" ]
+        else
+          List.map
+            (fun (k : Masc.Tui_decode.memory_keeper_health) ->
+              let max_f = max 50 (k.mkh_facts * 2) in
+              let fact_g =
+                Chart.gauge ~width:gauge_w ~value:k.mkh_facts ~max_value:max_f ~label:"Facts" ()
+              in
+              let max_b = 200 * 1024 in
+              let byte_g =
+                Chart.gauge ~width:gauge_w ~value:k.mkh_snapshot_bytes ~max_value:max_b ~label:"Bytes" ()
+              in
+              Printf.sprintf "  %s  %s  %s  %s%4d ord · %s%s"
+                (Layout.fit_width k.mkh_keeper_id 16)
+                fact_g
+                byte_g
+                (Theme.recede ()) k.mkh_facts
+                (Masc_tui_context_inspector.format_bytes k.mkh_snapshot_bytes)
+                Ansi.reset)
+            mhs.mhs_keepers
   in
-  let header =
-    [ Printf.sprintf "  %s%sKeeper Memory & Context Capacity Gauges%s"
-        Ansi.bold (Theme.info ()) Ansi.reset
-    ; Printf.sprintf "  %-16s  %-*s  %-*s  %s"
-        "KEEPER" gauge_w "FACT CAPACITY" gauge_w "SNAPSHOT BYTES" "METRICS"
-    ]
-  in
-  List.map
-    (fun line ->
-      if Layout.display_width line > inner_width then
-        Layout.take_cells line inner_width ^ Ansi.reset
-      else line)
-    (header @ keeper_rows)
+  header @ List.map clip rows
 
-let render_section_tools ~cols (_state : state) : string list =
+let render_section_tools ~cols (state : state) : string list =
   let inner_width = max 20 (framed_inner_width cols) in
+  let clip line =
+    if Layout.display_width line > inner_width then
+      Layout.take_cells line inner_width ^ Ansi.reset
+    else line
+  in
   let bar_w = min 65 (max 20 (inner_width - 6)) in
-  let items : Chart.bar_item list =
-    [ { Chart.name = "read_file"; count = 142; style = Some (Chart.Status Masc_tui_theme.Ok) }
-    ; { Chart.name = "replace_file_content"; count = 98; style = Some (Chart.Status Masc_tui_theme.Ok) }
-    ; { Chart.name = "run_command (bash)"; count = 76; style = Some (Chart.Status Masc_tui_theme.Warn) }
-    ; { Chart.name = "grep_search (rg)"; count = 64; style = Some (Chart.Status Masc_tui_theme.Ok) }
-    ; { Chart.name = "write_to_file"; count = 35; style = Some (Chart.Status Masc_tui_theme.Warn) }
-    ; { Chart.name = "view_file"; count = 28; style = Some (Chart.Status Masc_tui_theme.Ok) }
-    ; { Chart.name = "git_commit"; count = 14; style = Some (Chart.Status Masc_tui_theme.Info) }
-    ; { Chart.name = "gate_evaluate"; count = 9; style = Some (Chart.Status Masc_tui_theme.Bad) }
-    ]
+  let title =
+    clip
+      (Printf.sprintf "  %s%sGate Tool Operation Frequency%s  %s(pending & approval queue)%s"
+         Ansi.bold (Theme.info ()) Ansi.reset (Theme.recede ()) Ansi.reset)
   in
-  let bar_lines =
-    Chart.distribution_bars ~width:bar_w items
-    |> List.map (fun l -> "  " ^ l)
-  in
-  [ Printf.sprintf "  %s%sTool Invocation Frequency Distribution%s  %s(ranked by total calls)%s"
-      Ansi.bold (Theme.info ()) Ansi.reset (Theme.recede ()) Ansi.reset
-  ]
-  @ bar_lines
+  let counts = Hashtbl.create 16 in
+  List.iter
+    (fun (gp : Decode.gate_pending) ->
+      let tool = gp.gp_display_tool in
+      let current = Option.value (Hashtbl.find_opt counts tool) ~default:0 in
+      Hashtbl.replace counts tool (current + 1))
+    state.gate_pending;
+  List.iter
+    (fun (kta : Decode.keeper_tool_approval) ->
+      let tool = kta.kta_tool in
+      let current = Option.value (Hashtbl.find_opt counts tool) ~default:0 in
+      Hashtbl.replace counts tool (current + 1))
+    state.keeper_tool_approvals;
+  if Hashtbl.length counts = 0 then
+    [ title; "  (no active gate tool operations recorded in fleet state)" ]
+  else
+    let items =
+      Hashtbl.fold
+        (fun name count acc ->
+          { Chart.name; count; style = Some (Chart.Status Masc_tui_theme.Ok) } :: acc)
+        counts []
+      |> List.sort (fun (a : Chart.bar_item) (b : Chart.bar_item) ->
+             Int.compare b.count a.count)
+    in
+    let bar_lines =
+      Chart.distribution_bars ~width:bar_w items
+      |> List.map (fun l -> clip ("  " ^ l))
+    in
+    title :: bar_lines
 
 let render_section_latency ~cols (_state : state) : string list =
   let inner_width = max 20 (framed_inner_width cols) in
-  let wf_w = min 70 (max 20 (inner_width - 6)) in
-  let steps : Chart.waterfall_step list =
-    [ { Chart.label = "Context Assembly"; duration_ms = 35; style = Some (Chart.Status Masc_tui_theme.Info) }
-    ; { Chart.label = "Provider TTFT"; duration_ms = 280; style = Some (Chart.Tone Masc_tui_theme.Accent) }
-    ; { Chart.label = "Model Generation"; duration_ms = 450; style = Some (Chart.Status Masc_tui_theme.Ok) }
-    ; { Chart.label = "Tool Sandbox Exec"; duration_ms = 120; style = Some (Chart.Status Masc_tui_theme.Warn) }
-    ; { Chart.label = "Gate Security Audit"; duration_ms = 25; style = Some (Chart.Status Masc_tui_theme.Info) }
-    ; { Chart.label = "State Commit / Settle"; duration_ms = 12; style = Some (Chart.Status Masc_tui_theme.Ok) }
-    ]
+  let clip line =
+    if Layout.display_width line > inner_width then
+      Layout.take_cells line inner_width ^ Ansi.reset
+    else line
   in
-  let wf_lines =
-    Chart.waterfall ~width:wf_w steps
-    |> List.map (fun l -> "  " ^ l)
+  let title =
+    clip
+      (Printf.sprintf "  %s%sTurn Execution Latency Waterfall%s  %s(telemetry tracer)%s"
+         Ansi.bold (Theme.info ()) Ansi.reset (Theme.recede ()) Ansi.reset)
   in
-  [ Printf.sprintf "  %s%sTurn Execution Latency Waterfall Breakdown%s  %s(total: 922ms)%s"
-      Ansi.bold (Theme.info ()) Ansi.reset (Theme.recede ()) Ansi.reset
+  [ title
+  ; "  (turn execution timing waterfall breakdown unavailable — requires backend latency tracer)"
+  ; "  (individual keeper turn latency samples are recorded in Keeper details)"
   ]
-  @ wf_lines
 
 let render_metrics_body ~cols ~budget (state : state)
     ~(push : string -> unit)

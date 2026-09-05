@@ -330,8 +330,11 @@ let render_memory_body ~cols ~budget (state : state)
        push_styled ~style:(Theme.bad ())
          ("  " ^ Terminal_text.single_line detail);
        push_divider ());
+  let cursor =
+    if shown = 0 then 0 else max 0 (min state.memory_health_cursor (shown - 1))
+  in
   let context_lines =
-    match List.nth_opt keepers state.memory_health_cursor with
+    match List.nth_opt keepers cursor with
     | None -> []
     | Some k -> memory_context_lines k
   in
@@ -363,8 +366,8 @@ let render_memory_body ~cols ~budget (state : state)
       match List.nth_opt keepers idx with
       | None -> push_empty ()
       | Some k ->
-          if idx = state.memory_health_cursor then
-            push_selected (memory_row_line columns k)
+          if idx = cursor then
+            push_selected (Masc_tui_theme.strip_sgr (memory_row_line columns k))
           else push (memory_row_line columns k)
     done;
     if overflowing then

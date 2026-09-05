@@ -4752,7 +4752,8 @@ let goto_surface state ~mailbox (destination : surface) =
            launch_runtime_config_load state ~mailbox)
    | Resources -> launch_resources_list state ~mailbox
    | Code -> launch_code_entries_load state ~mailbox
-   | Overview | Acting | Metrics | Keepers _ | Board | System_logs -> ());
+   | Metrics -> launch_memory_health_load state ~mailbox
+   | Overview | Acting | Keepers _ | Board | System_logs -> ());
   (* Leaving Approvals drops a half-armed decision, exactly as the old Tab
      arm did on the Approvals -> Board step. *)
   (match state.view with
@@ -15107,7 +15108,9 @@ and is loaded on demand through keeper_skill.
             | Schedules -> launch_schedules_load state ~mailbox:async_messages
             | Keepers Keeper_runtime_pick ->
                 launch_runtime_catalog_load state ~mailbox:async_messages
-            | Overview | Acting | Metrics | Approvals | System_logs -> ());
+            | Metrics ->
+                launch_memory_health_load state ~mailbox:async_messages
+            | Overview | Acting | Approvals | System_logs -> ());
            add_event state "system" "Manual refresh"
        | Some "\t" | Some "shift-tab" ->
            cycle_surface state ~mailbox:async_messages

@@ -108,7 +108,11 @@ let make_meta
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> if always_allow then { meta with always_allow = Some true } else meta
+  | Ok meta ->
+    let meta =
+      if always_allow then { meta with always_allow = Some true } else meta
+    in
+    { meta with Masc.Keeper_meta_contract.sandbox_profile = sandbox }
   | Error e -> Alcotest.fail e
 ;;
 

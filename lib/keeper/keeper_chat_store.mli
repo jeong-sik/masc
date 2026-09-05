@@ -117,8 +117,8 @@ type approval_lifecycle =
         (** One-line rendering of what the gated call asked for. A fact about
             the approval, not the phase, so every phase row carries it and a
             row stays readable on its own when the pane loads a history window
-            that does not include the request. Absent on rows written before
-            the field existed. *)
+            that does not include the request. [None] when the writer had no
+            call to summarise. *)
   }
 
 val approval_lifecycle_phase_to_label : approval_lifecycle_phase -> string

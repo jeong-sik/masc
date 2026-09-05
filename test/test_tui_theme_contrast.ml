@@ -55,7 +55,7 @@ let schemes =
       | Some palette -> { name = Catalog.name shipped; palette }
       | None ->
         Alcotest.failf "shipped scheme %s has malformed hex" (Catalog.name shipped))
-    (Catalog.all ~base_path:(themes_base_path ()))
+    (Catalog.all ~base_path:(themes_base_path ()) ())
 ;;
 
 

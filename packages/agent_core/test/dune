@@ -835,3 +835,11 @@
  (name test_media_document_admission)
  (modules test_media_document_admission)
  (libraries agent_core_test_deps agent_core llm_provider alcotest fmt yojson))
+
+; Contract of the response body flow cohttp-eio returns: a chunk read in
+; several pieces arrives intact. Runs entirely on Eio_mock (no real IO).
+
+(test
+ (name test_cohttp_eio_body_flow)
+ (modules test_cohttp_eio_body_flow)
+ (libraries alcotest eio eio.mock cohttp-eio cstruct uri))

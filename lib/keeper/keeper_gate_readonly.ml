@@ -62,6 +62,9 @@ let git_read_subcommands =
    the web_fetch capability are already admitted here, and they carry the same
    identity to the same kind of endpoint. What the judge answers is whether an
    effect lands, and a listed verb lands none. *)
+(** The gh verbs that only read, keyed by family. Closed on purpose: a verb
+    that is not listed goes to the judge, and admitting one is a reviewed
+    change here rather than a configuration knob. *)
 let gh_read_verbs_by_family =
   [ "pr", [ "list"; "view"; "diff"; "checks"; "status" ]
   ; "issue", [ "list"; "view"; "status" ]

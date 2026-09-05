@@ -66,6 +66,7 @@ let rec note (cell : string list Atomic.t) name =
 ;;
 
 let tool_name = "keeper_tool_search"
+(** The argument that names tools exactly. *)
 let names_param = "names"
 
 (* One line per tool, shown in the answer when the tool is loaded. A line

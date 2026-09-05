@@ -53,14 +53,6 @@ type outcome =
   | Delivered of { file_name : string; bytes : int }
   | Retained of retained_paste
 
-val retain_reason_to_string : retain_reason -> string
-
-val staged_file_names : staging_dir:string -> string list
-(** Basenames of the regular files sitting directly under [staging_dir] that
-    parse as spilled-paste names ([Keeper_paste_naming]), sorted. A missing
-    or unreadable staging directory means nothing was ever staged, not an
-    error. *)
-
 val deliver_staged_pastes :
   write:(file_name:string -> content:string -> (unit, retain_reason) result) ->
   staging_dir:string ->

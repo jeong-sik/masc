@@ -3237,8 +3237,11 @@ type state = {
      commits and durable Keeper file changes over that repository address,
      newest first. Keyed by the path they were fetched for so opening another
      file drops a stale listing rather than captioning it. *)
-  mutable code_history: (string * code_history_listing) option;
-  mutable code_history_error: string option;
+  (* The open file's history, keyed by the scope and the path together: two
+     repositories can carry the same relative path, and a slow answer for one
+     must not caption the other. *)
+  mutable code_history:
+    (code_workspace_scope * string, code_history_listing) Masc_tui_fetched.t;
   mutable code_history_open: bool;
   mutable code_history_scroll: int;
   (* The file pane's diff view: d on an open file swaps the content for what
@@ -4263,8 +4266,7 @@ let create_state
   code_file_hscroll = 0;
   code_file_max_width = 0;
   code_focus_file = Left_pane;
-  code_history = None;
-  code_history_error = None;
+  code_history = Masc_tui_fetched.initial;
   code_history_open = false;
   code_history_scroll = 0;
   code_diff = Masc_tui_fetched.initial;

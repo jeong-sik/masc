@@ -1882,8 +1882,7 @@ type async_msg =
       string * (Masc.Tui_decode.workspace_tree_node list, string) result
   | Code_file_loaded of string Masc_tui_fetched.request * (string, string) result
   | Code_history_loaded of
-      code_workspace_scope
-      * string
+      (code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc_tui_types.code_history_listing, string) result
   | Code_diff_loaded of
       string Masc_tui_fetched.request * (Masc.Tui_decode.git_diff, string) result
@@ -3118,10 +3117,23 @@ let code_history_entry_at_ms = function
   | Hist_keeper_change (change : Masc.Tui_decode.file_change) ->
     change.fc_at *. 1000.
 
+(* Scope and path together: the same relative path in two repositories is
+   two different histories. *)
+let code_history_key_equal (left_scope, left_path) (right_scope, right_path) =
+  left_scope = right_scope && String.equal left_path right_path
+;;
+
 let launch_code_history_load state ~mailbox ~path =
+  let scope = state.code_scope in
+  match
+    Masc_tui_fetched.start ~equal:code_history_key_equal state.code_history
+      ~key:(scope, path)
+  with
+  | Masc_tui_fetched.Already_loading -> ()
+  | Masc_tui_fetched.Started (next, request) ->
+  state.code_history <- next;
   let host = server_peer_host in
   let port = state.port in
-  let scope = state.code_scope in
   let activity_address = code_file_activity_address scope path in
   let run () =
     let result =
@@ -3194,7 +3206,7 @@ let launch_code_history_load state ~mailbox ~path =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Code_history_loaded (scope, path, result))
+    enqueue_async mailbox (Code_history_loaded (request, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -3203,8 +3215,7 @@ let launch_code_history_load state ~mailbox ~path =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Code_history_loaded
-           (scope, path, Error "Eio switch is unavailable"))
+        (Code_history_loaded (request, Error "Eio switch is unavailable"))
 
 let launch_code_diff_load state ~mailbox ~path =
   match Masc_tui_fetched.start ~equal:String.equal state.code_diff ~key:path with
@@ -9776,8 +9787,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.code_focus_file <- Right_pane;
           (* A new file starts on its content; the old file's history or
              diff would caption the wrong bytes. *)
-          state.code_history <- None;
-          state.code_history_error <- None;
+          state.code_history <- Masc_tui_fetched.clear state.code_history;
           state.code_history_open <- false;
           state.code_history_scroll <- 0;
           state.code_diff <- Masc_tui_fetched.clear state.code_diff;
@@ -9896,23 +9906,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       state.code_diff <-
         Masc_tui_fetched.complete ~equal:String.equal state.code_diff request result;
       if landed then state.code_diff_scroll <- 0
-  | Code_history_loaded (scope, path, result) ->
-      (* Keyed to the scope and file still open: two repositories can carry
-         the same relative path, so path alone would let a slow old response
-         put the wrong Keeper activity under the new file. *)
-      let still_current =
-        state.code_scope = scope
-        && match Masc_tui_fetched.current_key state.code_file with
-        | Some open_path -> String.equal open_path path
-        | None -> false
+  | Code_history_loaded (request, result) ->
+      (* The scope travels in the key, so a slow answer from a repository the
+         operator has left cannot caption the file now open at the same
+         relative path. *)
+      let landed =
+        Masc_tui_fetched.is_current ~equal:code_history_key_equal state.code_history
+          request
+        && Result.is_ok result
       in
-      if still_current then (
-        match result with
-        | Ok rows ->
-            state.code_history <- Some (path, rows);
-            state.code_history_error <- None;
-            state.code_history_scroll <- 0
-        | Error detail -> state.code_history_error <- Some detail)
+      state.code_history <-
+        Masc_tui_fetched.complete ~equal:code_history_key_equal state.code_history
+          request result;
+      if landed then state.code_history_scroll <- 0
   | Resources_listed result -> (
       match result with
       | Ok rows ->
@@ -14898,13 +14904,13 @@ and is loaded on demand through keeper_skill.
                   state.code_history_open <- true;
                   state.code_diff_open <- false;
                   state.code_notes_open <- false;
-                  (match state.code_history with
-                   | Some (loaded_path, _)
-                     when String.equal loaded_path path ->
-                       ()
+                  (* Already about this file in this scope -- loaded,
+                     reading, or failed -- so opening the overlay shows what
+                     there is rather than asking again. *)
+                  (match Masc_tui_fetched.current_key state.code_history with
+                   | Some key when code_history_key_equal key (state.code_scope, path)
+                     -> ()
                    | Some _ | None ->
-                       state.code_history <- None;
-                       state.code_history_error <- None;
                        launch_code_history_load state
                          ~mailbox:async_messages ~path)
                 end)
@@ -15792,13 +15798,14 @@ and is loaded on demand through keeper_skill.
                             (state.code_diff_scroll + 1)
                     | Some (_, _) | None -> ())
                   else if state.code_history_open then (
-                    match state.code_history with
-                    | Some (_, listing) ->
+                    match Masc_tui_fetched.current state.code_history with
+                    | Some (_, Masc_tui_fetched.Ready listing) ->
                         state.code_history_scroll <-
                           min
                             (max 0 (List.length listing.chl_entries - 1))
                             (state.code_history_scroll + 1)
-                    | None -> ())
+                    (* No listing to move a cursor through. *)
+                    | Some (_, _) | None -> ())
                   else
                     match Masc_tui_fetched.current state.code_file with
                     | Some (_, Masc_tui_fetched.Ready rows) ->
@@ -16550,9 +16557,8 @@ and is loaded on demand through keeper_skill.
                      its PR; a durable Keeper change jumps to its
                      producer-recorded line without claiming it was
                      committed. *)
-                  match state.code_history with
-                  | None -> ()
-                  | Some (_, listing) -> (
+                  match Masc_tui_fetched.current state.code_history with
+                  | Some (_, Masc_tui_fetched.Ready listing) -> (
                       match
                         List.nth_opt listing.chl_entries
                           state.code_history_scroll
@@ -16621,7 +16627,9 @@ and is loaded on demand through keeper_skill.
                                              "#%d -- the remote is not \
                                               GitHub, so the link shape is \
                                               unknown"
-                                             number)))))
+                                             number))))
+                  (* Nothing listed to jump from. *)
+                  | Some (_, _) | None -> ())
                 else if state.code_focus_file = Right_pane then ()
                 else
                   match List.nth_opt state.code_entries state.code_cursor with

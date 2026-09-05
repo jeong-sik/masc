@@ -3731,7 +3731,7 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
   | Error detail ->
     Alcotest.(check bool) "the configuration reader is what refused it" true
       (String.starts_with
-         ~prefix:"standalone lane configuration: unknown value" detail)
+         ~prefix:"lanes[0]: standalone lane configuration: unknown value" detail)
 
 (* The start of the newest run. The fixture has carried it since this suite
    was written and the decoder read it into an underscore, so the field

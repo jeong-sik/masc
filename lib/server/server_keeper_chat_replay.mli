@@ -4,12 +4,13 @@
 val replay :
   redact_text:(string -> string) ->
   redact_json:(Yojson.Safe.t -> Yojson.Safe.t) ->
-  since_seq:int ->
+  since_seq:Keeper_chat_event_log.replay_position ->
   Keeper_chat_event_log.journaled_event list ->
   (int * Ag_ui.event) list
 (** [replay ~since_seq entries] folds every entry from
     {!Server_keeper_chat_agui_projection.initial} and returns the projected
-    events of the entries whose [seq] is strictly greater than [since_seq],
+    events of the entries past [since_seq] ({!Keeper_chat_event_log.seq_is_after}:
+    every entry for [Whole_turn], those with [seq > held] for [After_seq held]),
     each paired with that seq. The fold always starts at the beginning
     because projection state is cumulative: a text delta after the cut
     carries the message and run identity established before it. Entries

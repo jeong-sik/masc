@@ -157,11 +157,12 @@ type keeper_chat_stream_request = {
   channel_workspace_id : string;
   attachments : Keeper_chat_store.attachment list;
   direct_message : Keeper_invocation_contract.direct_message;
-  since_seq : int option;
-      (** A reconnecting client re-POSTs the same [request_id] with the last
-          journal seq it received; the handler replays the journaled suffix
-          before the live sink attaches (RFC-0412 §3.2). [-1] asks for the
-          whole turn. Absent on a first submit. *)
+  since_seq : Keeper_chat_event_log.replay_position;
+      (** Where a re-POST of the same [request_id] asks the replay to start:
+          after the last journal seq the client received, or the whole turn
+          — which is also what an absent field, a first submit, says. When
+          the owner already holds the operation the handler replays the
+          journaled suffix before the live sink attaches (RFC-0412 §3.2). *)
 }
 
 let keeper_chat_stream_error_json message =
@@ -777,13 +778,24 @@ let parse_keeper_chat_stream_request body_str =
       | Some _ -> Error "surface_context must be an object"
     in
     let* since_seq =
-      match List.assoc_opt "since_seq" fields with
-      | None -> Ok None
-      | Some (`Int seq) when seq >= -1 -> Ok (Some seq)
-      | Some _ ->
+      (* The wire's absence rule lives in
+         [Keeper_chat_event_log.replay_position_of_wire]: no [since_seq] is
+         the whole turn, [n >= 0] is the last journal seq already received.
+         Anything else, [null] included, is not a position. *)
+      let rejected =
         Error
-          "since_seq must be an integer >= -1: the last journal seq already \
-           received, or -1 for the whole turn"
+          "since_seq must be an integer >= 0, the last journal seq already \
+           received; omit it for the whole turn"
+      in
+      let* raw =
+        match List.assoc_opt "since_seq" fields with
+        | None -> Ok None
+        | Some (`Int raw) -> Ok (Some raw)
+        | Some _ -> rejected
+      in
+      match Keeper_chat_event_log.replay_position_of_wire raw with
+      | Some position -> Ok position
+      | None -> rejected
     in
     let* attachments = Keeper_multimodal_input.parse_attachments json in
     let* user_blocks = Keeper_multimodal_input.parse_user_blocks json in
@@ -948,8 +960,9 @@ let operation_payload_of_json ~keeper_name ~operation_id ~source ~input =
     ; attachments = input.attachments
     ; direct_message
       (* Rebuilt from the durable operation for execution, not received from
-         a client: there is no reconnect and nothing to replay. *)
-    ; since_seq = None
+         a client: there is no reconnect, so the position is the one an
+         absent field means. *)
+    ; since_seq = Keeper_chat_event_log.Whole_turn
     }
   in
   Ok { payload; source }
@@ -3013,9 +3026,9 @@ let journal_replay_frames ~base_path ~keeper_name ~operation_id ~since_seq =
   in
   let skipped detail =
     Log.Keeper.warn
-      "keeper chat replay skipped operation=%s since_seq=%d: %s"
+      "keeper chat replay skipped operation=%s since_seq=%s: %s"
       operation_id
-      since_seq
+      (Keeper_chat_event_log.replay_position_to_string since_seq)
       detail;
     []
   in
@@ -3134,8 +3147,8 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
            the frames the client missed. The sink is already registered, so
            events published meanwhile sit in [buffered] and flush below,
            where [send_live] drops the seqs the replay already wrote. *)
-        (match payload.since_seq, acceptance.Keeper_owner.existing with
-         | Some since_seq, true ->
+        (match acceptance.Keeper_owner.existing, payload.since_seq with
+         | true, since_seq ->
            journal_replay_frames
              ~base_path
              ~keeper_name:payload.name
@@ -3144,15 +3157,17 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
            |> List.iter (fun (seq, event) ->
              Hashtbl.replace replayed seq ();
              send_event ~seq:(Some seq) event)
-         | Some since_seq, false ->
+         | false, Keeper_chat_event_log.After_seq _ ->
            (* The owner has never seen this operation, so there is no turn
               to catch up on. Replaying here would read whatever a previous
               life of this operation_id left in the journal file. *)
            Log.Keeper.warn
-             "keeper chat since_seq=%d ignored: operation=%s is a first submit"
-             since_seq
+             "keeper chat since_seq=%s ignored: operation=%s is a first submit"
+             (Keeper_chat_event_log.replay_position_to_string payload.since_seq)
              operation_id
-         | None, (true | false) -> ());
+         | false, Keeper_chat_event_log.Whole_turn ->
+           (* A first submit: nothing journaled, nothing asked for. *)
+           ());
         let pending =
           Stdlib.Mutex.protect buffered_mu (fun () ->
             accepted := true;

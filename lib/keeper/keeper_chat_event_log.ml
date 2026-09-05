@@ -736,4 +736,52 @@ let read_journal_path_result path =
 
 let read_journal journal = read_journal_path_result journal.path
 
+(** {1 Replay position} *)
+
+type replay_position =
+  | Whole_turn
+  | After_seq of int
+
+(* The wire spells the position as an optional non-negative integer: absent
+   is the whole turn, [n >= 0] is the last seq held. A negative integer is no
+   position at all. Decoded here once; the handlers and the fold see only the
+   sum type. *)
+let replay_position_of_wire = function
+  | None -> Some Whole_turn
+  | Some raw -> if raw >= 0 then Some (After_seq raw) else None
+;;
+
+let replay_position_to_wire = function
+  | Whole_turn -> None
+  | After_seq seq -> Some seq
+;;
+
+let replay_position_to_string = function
+  | Whole_turn -> "whole_turn"
+  | After_seq seq -> string_of_int seq
+;;
+
+(* A response field cannot be absent the way a request field can, so a
+   response spells the whole turn as [null]. *)
+let replay_position_to_yojson position : Yojson.Safe.t =
+  match replay_position_to_wire position with
+  | None -> `Null
+  | Some seq -> `Int seq
+;;
+
+let replay_position_of_yojson (json : Yojson.Safe.t) =
+  match json with
+  | `Null -> replay_position_of_wire None
+  | `Int raw -> replay_position_of_wire (Some raw)
+  | `Assoc _ | `Bool _ | `Float _ | `Intlit _ | `List _ | `String _ -> None
+;;
+
+let seq_is_after position seq =
+  match position with
+  | Whole_turn -> true
+  | After_seq held -> seq > held
+;;
+
+let replay_position_advance position seq =
+  if seq_is_after position seq then After_seq seq else position
 ;;

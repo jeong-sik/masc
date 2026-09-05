@@ -109,3 +109,44 @@ val read_journal_path_result : string -> (journaled_event list, read_failure) re
 val read_journal : journal -> (journaled_event list, read_failure) result
 (** {!read_journal_path_result} over an open journal's path. *)
 
+(** {1 Replay position} *)
+
+(** Where a client wants a journal read to start: the whole turn, or only the
+    entries after the seq it already holds. On the wire ([since_seq] on the
+    chat-stream POST body and the v2 events query) the field is absent for
+    the whole turn and a non-negative integer otherwise; a negative integer
+    is rejected at the boundary. Decoded once there, at the boundary, and
+    passed through replay as this type. *)
+type replay_position =
+  | Whole_turn
+  | After_seq of int
+
+val replay_position_of_wire : int option -> replay_position option
+(** The request-side spelling: an absent field is [Whole_turn], [n >= 0] is
+    [After_seq n], a negative integer is [None]. The only place the wire's
+    absence rule is read. *)
+
+val replay_position_to_wire : replay_position -> int option
+(** Inverse of {!replay_position_of_wire}: the field to write, or nothing. *)
+
+val replay_position_to_string : replay_position -> string
+(** For log lines: ["whole_turn"], or the held seq. *)
+
+val replay_position_to_yojson : replay_position -> Yojson.Safe.t
+(** The response-side spelling ([next_since_seq] on the v2 events page): a
+    response field cannot be absent the way a request field can, so
+    [Whole_turn] is [`Null] and [After_seq n] is [`Int n]. *)
+
+val replay_position_of_yojson : Yojson.Safe.t -> replay_position option
+(** Inverse of {!replay_position_to_yojson}, for a client reading a page:
+    [`Null] is [Whole_turn], [`Int n] with [n >= 0] is [After_seq n], anything
+    else is [None]. *)
+
+val seq_is_after : replay_position -> int -> bool
+(** Whether an entry with this seq lies past the position: every seq for
+    [Whole_turn], [seq > held] for [After_seq held]. *)
+
+val replay_position_advance : replay_position -> int -> replay_position
+(** The position after an entry with this seq was received: [After_seq seq]
+    when it lies past the position ({!seq_is_after}), the position unchanged
+    otherwise. *)

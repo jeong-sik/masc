@@ -15,5 +15,5 @@ mcp_url = "https://mcp.flagsmith.com/mcp"
 
 access_token_env = "FLAGSMITH_ACCESS_TOKEN"
 expires_at_env = "FLAGSMITH_EXPIRES_AT"
-refresh_token_file = "flagsmith_refresh_token"
+refresh_token_file = "/home/keeper/.flagsmith/refresh_token"
 renew_before_sec = 300

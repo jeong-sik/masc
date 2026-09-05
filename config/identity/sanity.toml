@@ -15,5 +15,5 @@ mcp_url = "https://mcp.sanity.io/mcp"
 
 access_token_env = "SANITY_ACCESS_TOKEN"
 expires_at_env = "SANITY_EXPIRES_AT"
-refresh_token_file = "sanity_refresh_token"
+refresh_token_file = "/home/keeper/.sanity/refresh_token"
 renew_before_sec = 300

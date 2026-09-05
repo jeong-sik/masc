@@ -15,5 +15,5 @@ mcp_url = "https://mcp.circleci.com/mcp"
 
 access_token_env = "CIRCLECI_ACCESS_TOKEN"
 expires_at_env = "CIRCLECI_EXPIRES_AT"
-refresh_token_file = "circleci_refresh_token"
+refresh_token_file = "/home/keeper/.circleci/refresh_token"
 renew_before_sec = 300

@@ -346,52 +346,61 @@ let with_auto_judge f =
   f base_path
 ;;
 
-(* ── script→argv equivalence (RFC-0404) ─────────────────────────────── *)
+(* ── script classification through the shell IR (RFC-0421) ─────────── *)
 
-let equivalent label script argv =
-  check (list string) label argv (Option.get (Readonly.script_argv_equivalent script))
+let observation label script =
+  check bool (label ^ " is observation") true (Readonly.classify_script script)
 ;;
 
-let not_equivalent label script =
-  check bool (label ^ " is not equivalent") true
-    (Option.is_none (Readonly.script_argv_equivalent script))
+let judged label script =
+  check bool (label ^ " keeps the judge") false (Readonly.classify_script script)
 ;;
 
-let test_script_equivalence_unit () =
-  equivalent "bare ls" "ls" [ "ls" ];
-  equivalent "ls with flags" "ls -la /tmp" [ "ls"; "-la"; "/tmp" ];
-  equivalent "git status through -C" "git -C repos/masc status"
-    [ "git"; "-C"; "repos/masc"; "status" ];
-  equivalent "repeated spaces collapse to the same argv" "uname  -a" [ "uname"; "-a" ];
-  (* A tab is not quoting but the shell splits on it, so a tab can split a
-     guarded flag out of a token we classified whole — "sed -e\t-i" reads
-     as one harmless token here and as ["-e"; "-i"] in-place edit in the
-     shell. Every tab moves the line to the judge. *)
-  not_equivalent "tab field-splits past the sed in-place guard" "sed -e\t-i s/a/b/ f";
-  not_equivalent "tab field-splits past the rg preprocessor guard" "rg --pre\trm x";
-  not_equivalent "tab field-splits past the sort output guard" "sort -o\tout f";
-  not_equivalent "tab field-splits past the uniq operand guard" "uniq -c\ta b";
-  not_equivalent "bare tab" "ls\t-la";
-  not_equivalent "bracket glob" "ls [a-z]*";
-  not_equivalent "newline carries a second command" "ls\nrm -rf /";
-  not_equivalent "carriage return" "ls -la\r";
-  not_equivalent "command separator" "ls; rm -rf /";
-  not_equivalent "pipe" "cat a | wc -l";
-  not_equivalent "logical and" "git log && git diff";
-  not_equivalent "redirect out" "cat f > out";
-  not_equivalent "redirect in" "wc -l < f";
-  not_equivalent "command substitution" "echo $(whoami)";
-  not_equivalent "variable expansion" "echo $HOME";
-  not_equivalent "backtick" "echo `whoami`";
-  not_equivalent "single quote" "grep 'x y' f";
-  not_equivalent "double quote" "echo \"hello world\"";
-  not_equivalent "glob" "ls *.ml";
-  not_equivalent "brace expansion" "cat {a,b}";
-  not_equivalent "subshell parens" "(ls)";
-  not_equivalent "comment" "ls -la # listing";
-  not_equivalent "tilde expansion" "cat ~/notes";
-  not_equivalent "whitespace only" "   ";
-  not_equivalent "empty" ""
+let test_script_classification_unit () =
+  (* Every command the IR shows is judged by the argv tables. *)
+  observation "bare ls" "ls";
+  observation "ls with flags" "ls -la /tmp";
+  observation "git status through -C" "git -C repos/masc status";
+  observation "repeated spaces" "uname  -a";
+  observation "a tab is a word boundary, like the shell reads it" "ls\t-la";
+  observation "quoted argument" "grep 'x y' f";
+  observation "double-quoted argument" "grep -n \"a b\" notes.txt";
+  observation "pipeline of reads" "git show HEAD:f | sed -n '10,20p'";
+  observation "pipeline with head" "ls repos | head -5";
+  observation "cd before observing" "cd repos/masc && git log --oneline -3";
+  observation "sequence of reads" "pwd; ls -la; echo ---";
+  observation "newline-separated reads" "cat a\ncat b";
+  observation "or-connector of reads" "ls /masc-work || echo none";
+  observation "stderr joined to stdout" "ls x 2>&1 | head";
+  observation "stderr discarded" "ls repos/_build 2>/dev/null | head -5";
+  observation "stdin from a file" "wc -l < f";
+  observation "tilde is a path the read resolves" "cat ~/notes";
+  (* The tab cases RFC-0404 refused by character: the parser splits the
+     flag out, so the guards see it. *)
+  judged "tab splits the sed in-place flag out" "sed -e\t-i s/a/b/ f";
+  judged "tab splits the rg preprocessor flag out" "rg --pre\trm x";
+  judged "tab splits the sort output flag out" "sort -o\tout f";
+  judged "tab splits the uniq second operand out" "uniq -c\ta b";
+  (* Where the argv depends on the guest at run time. *)
+  judged "glob" "ls *.ml";
+  judged "bracket glob" "ls [a-z]*";
+  judged "brace expansion" "cat {a,b}";
+  judged "variable" "echo $HOME";
+  judged "command substitution" "echo $(whoami)";
+  judged "backtick" "echo `whoami`";
+  judged "subshell" "(ls)";
+  judged "environment prefix" "PAGER=cat git log";
+  (* Effects, wherever they sit on the line. *)
+  judged "write redirect" "cat f > out";
+  judged "append redirect" "cat f >> out";
+  judged "a write after a read" "ls; rm -rf /";
+  judged "a write inside a pipeline" "cat f | tee out";
+  judged "fetch behind cd" "cd repos/masc && git fetch origin main";
+  judged "export then read" "export X=1; ls";
+  judged "a command outside the table" "curl https://example.com";
+  judged "a shell inside the script" "bash -c ls";
+  judged "whitespace only" "   ";
+  judged "empty" ""
 ;;
 
 let test_observation_scripts_pass_the_table () =
@@ -416,9 +425,21 @@ let test_observation_scripts_pass_the_table () =
     false
     (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "curl https://example.com");
   check bool
-    "quoted observation still faces the judge"
-    false
+    "quoted observation reads without judgment"
+    true
     (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "grep 'pattern' notes.txt");
+  check bool
+    "argv costume of an observation reads without judgment"
+    true
+    (executes ~operation:"tool_execute" ~sandbox_profile:microvm [ "bash"; "-lc"; "ls -la repos" ]);
+  check bool
+    "argv costume of a write still faces the judge"
+    false
+    (executes ~operation:"tool_execute" ~sandbox_profile:microvm [ "bash"; "-c"; "ls && rm -rf repos" ]);
+  check bool
+    "pipeline script under remote_ssh still faces the judge"
+    false
+    (executes_script ~operation:"tool_execute" ~sandbox_profile:remote_ssh "cd repos && git log | head");
   check bool
     "empty script never matches"
     false
@@ -576,8 +597,8 @@ let () =
             `Quick
             test_network_observation_capabilities
         ] )
-    ; ( "script equivalence"
-      , [ test_case "equivalence unit" `Quick test_script_equivalence_unit
+    ; ( "script classification"
+      , [ test_case "classification unit" `Quick test_script_classification_unit
         ; test_case
             "observation scripts pass the table"
             `Quick

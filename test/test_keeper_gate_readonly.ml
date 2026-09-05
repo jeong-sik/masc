@@ -151,7 +151,14 @@ let test_write_shapes_stay_blocked () =
   blocked "git tag create" [ "git"; "tag"; "v1.0.0" ];
   blocked "git remote add" [ "git"; "remote"; "add"; "origin"; "x" ];
   blocked "git remote remove" [ "git"; "remote"; "remove"; "origin" ];
-  blocked "git with no subcommand" [ "git" ]
+  blocked "git with no subcommand" [ "git" ];
+  (* Script-form inert prefixes are stripped; the argv form has no script
+     to be equivalent to, so argv[0] stays unregistered. *)
+  blocked "env assignment as argv form" [ "NO_COLOR=1"; "gh"; "pr"; "list" ];
+  (* Read-only graphql queries ride a field flag, which flips the method
+     to POST; the query text itself is never parsed for read-ness. *)
+  blocked "graphql via field flag"
+    [ "gh"; "api"; "graphql"; "-f"; "query={viewer{login}}" ]
 ;;
 
 
@@ -409,7 +416,26 @@ let test_script_classification_unit () =
   judged "a command outside the table" "curl https://example.com";
   judged "a shell inside the script" "bash -c ls";
   judged "whitespace only" "   ";
-  judged "empty" ""
+  judged "empty" "";
+  (* Leading environment assignments the IR separates into simple.Ir.env:
+     the closed inert list decides which ones keep the observation fast
+     path, every other name keeps its judge turn (task-1348). *)
+  observation "inert NO_COLOR prefix" "NO_COLOR=1 gh pr list";
+  observation "stacked inert prefixes" "TZ=UTC LANG=C git log";
+  observation "inert prefix keeps flags" "NO_COLOR=1 CLICOLOR=0 gh run list";
+  observation "assignment-looking argument is not a prefix" "echo NO_COLOR=1";
+  judged "unknown assignment name" "FOO=1 gh pr list";
+  judged "PATH assignment" "PATH=. ls";
+  judged "git external diff assignment" "GIT_EXTERNAL_DIFF=cat git diff";
+  judged "inert assignments alone are not a command" "NO_COLOR=1";
+  (* [TZ] whose value could name a tzfile is not inert: glibc opens a
+     value starting with [:] (or containing [/]) as a timezone file, so
+     [TZ=:/etc/passwd git log] would be a file-existence oracle riding
+     the observation fast path. The value guard sends it to the judge
+     (code-reviewer HOLD, 2026-09-05). *)
+  judged "TZ tzfile reference via colon" "TZ=:/etc/passwd git log";
+  judged "TZ tzfile reference via slash" "TZ=/etc/localtime git log";
+  observation "TZ zone abbreviation stays inert" "TZ=UTC git log"
 ;;
 
 let test_observation_scripts_pass_the_table () =
@@ -456,7 +482,17 @@ let test_observation_scripts_pass_the_table () =
   check bool
     "empty script never matches"
     false
-    (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "  ")
+    (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "  ");
+  check bool
+    "inert env prefix keeps an observation script judgment-free"
+    true
+    (executes_script ~operation:"tool_execute" ~sandbox_profile:docker
+       "NO_COLOR=1 gh pr list");
+  check bool
+    "non-inert env prefix still faces the judge"
+    false
+    (executes_script ~operation:"tool_execute" ~sandbox_profile:docker
+       "FOO=1 gh pr list")
 ;;
 
 let test_auto_judge_allows_script_observation_without_queueing () =

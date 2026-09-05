@@ -912,7 +912,7 @@ let test_run_named_media_degrade_emits_typed_manifest () =
         (string_member "routing_reason" decision);
       Alcotest.(check string)
         "degraded runtime identity"
-        "primary.test_model"
+        "fallback.test_model"
         (string_member "degraded_runtime_id" decision))
 
 let routed_rows_with_status status manifests =

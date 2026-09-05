@@ -4,4 +4,4 @@
  (name test_sandbox_image_recipe)
  (modules test_sandbox_image_recipe)
  (action (run %{test}))
- (libraries alcotest masc.keeper_sandbox_image))
+ (libraries alcotest masc.keeper_sandbox_image masc.config))

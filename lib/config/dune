@@ -36,4 +36,13 @@
  ; 4 ignores it.
  (flags
   (:standard -w +4 -w +33 -w +37))
- (libraries masc_core masc_log embedded_config yojson otoml uri ipaddr unix))
+ (libraries
+  masc_core
+  masc_log
+  embedded_config
+  keeper_sandbox_image
+  yojson
+  otoml
+  uri
+  ipaddr
+  unix))

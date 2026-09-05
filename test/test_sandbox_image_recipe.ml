@@ -47,6 +47,23 @@ let test_build_argv_reads_the_recipe_from_stdin () =
     [ "build"; "-t"; "masc-sandbox:general"; "-" ]
     (Keeper_sandbox_image.build_argv ~tag:Keeper_sandbox_image.default_tag)
 
+(* A Keeper that names no image gets the general one, under Docker and under
+   microVM alike -- both guest paths read this same default
+   (keeper_sandbox_factory.resolve_guest). The Keepers that want MASC's own
+   development image name it; this is what the rest get. *)
+let test_runtime_default_is_the_general_image () =
+  (* Read the env the same way the resolver does rather than assume it is
+     unset: a host with an override is a correct configuration, not a failing
+     test, and the override winning is the other half of the contract. *)
+  match Sys.getenv_opt "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" with
+  | Some override when String.trim override <> "" ->
+    check string "an override wins over the default" override
+      (Env_config_sandbox.Runtime.docker_image ())
+  | _ ->
+    check string "unset env resolves to the general tag"
+      Keeper_sandbox_image.default_tag
+      (Env_config_sandbox.Runtime.docker_image ())
+
 let () =
   run "Sandbox image recipe"
     [ ( "dockerfile"
@@ -60,5 +77,9 @@ let () =
     ; ( "build_argv"
       , [ test_case "reads the recipe from stdin" `Quick
             test_build_argv_reads_the_recipe_from_stdin
+        ] )
+    ; ( "runtime default"
+      , [ test_case "is the general image" `Quick
+            test_runtime_default_is_the_general_image
         ] )
     ]

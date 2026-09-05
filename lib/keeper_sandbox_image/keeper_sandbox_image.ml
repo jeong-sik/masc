@@ -52,6 +52,11 @@ RUN apt-get update \
 RUN mkdir -p /home/keeper && chmod 0777 /home/keeper
 ENV HOME=/home/keeper
 
+# No VOLUME on purpose. MASC's own image declares VOLUME ["/tmp/keeper-creds"],
+# so every container started from it mints an anonymous volume that the removal
+# path has to carry -v to reap; leaving it out here means there is nothing to
+# orphan. Credential bundles are bind-mounted at run time either way.
+#
 # Declared for a reader, not enforced: the run command supplies its own user,
 # workdir and entrypoint.
 CMD ["bash", "-l"]

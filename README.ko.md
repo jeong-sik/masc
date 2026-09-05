@@ -156,10 +156,11 @@ subscription 로그인 확인은 독립 명령이기도 합니다. `masc runtime
 만들거나, 서버가 떠 있는 상태에서 `masc keeper-create`로 만듭니다. 설치할 때
 `--team <preset>`을 주면 그 팀이 대신 들어갑니다.
 
-**샌드박스 이미지가 아직 없습니다.** `sandbox_profile = "docker"`인 Keeper는 매 턴을
-이미지 안에서 돌리고, 이미지가 없으면 매 턴이 `docker_preflight_failed`로 멈춥니다.
-범용 이미지를 만드세요 — Debian 위에 bash, ripgrep, git. 저장소를 읽고 찾고
-고치는 데 한 턴이 필요로 하는 것들입니다.
+**샌드박스 이미지가 아직 없습니다.** Keeper는 매 턴을 이미지 안에서 돌립니다
+(`docker`도 `microvm`도 이미지를 씁니다). 없으면 매 턴이
+`docker_preflight_failed`로 멈춥니다. Keeper가 기본으로 받는 이미지를 만드세요 —
+Debian 위에 bash, ripgrep, git. 저장소를 읽고 찾고 고치는 데 한 턴이 필요로 하는
+것들입니다.
 
 ```bash
 masc sandbox-image                 # masc-sandbox:general 을 만듭니다
@@ -169,9 +170,12 @@ masc sandbox-image --print         # 먼저 레시피를 읽고 싶으면
 레시피는 바이너리에 들어 있고 docker 에 stdin 으로 갑니다. 체크아웃이 한 번도
 없던 호스트에서도 됩니다. 일부러 다국어 이미지로 만들지 않았습니다 — 프로젝트를
 **빌드**해야 하는 Keeper 는 그 프로젝트의 툴체인이 필요하고, 그건 Keeper 마다
-TOML 에 `sandbox_image = "node:22-bookworm"` 처럼 적습니다. MASC 자신의 개발 이미지
-`masc-keeper-sandbox:local`(OCaml + 이 저장소의 opam 의존성)은 여전히 체크아웃이
-있어야 만듭니다.
+TOML 에 `sandbox_image = "node:22-bookworm"` 처럼 적습니다.
+
+MASC 자신의 개발 이미지 `masc-keeper-sandbox:local`(OCaml + 이 저장소의 opam
+의존성)은 더 이상 기본값이 아닙니다. 그게 필요한 Keeper 가 이름을 적습니다. 그리고
+그 이미지는 Dockerfile 이 이 저장소의 opam 파일을 복사하므로 여전히 체크아웃이
+있어야 만들어집니다.
 
 ```bash
 scripts/build-keeper-sandbox-image.sh

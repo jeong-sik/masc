@@ -741,14 +741,29 @@ type repository_change_snapshot = {
   rcs_total : int;
 }
 
+(** One of the six conditions the memory keeper reports. The server derives the
+    wire's [severity] and [target] from this code, and the decoder rejects a
+    payload where they disagree, so the code alone identifies the alert. *)
+type memory_alert_code =
+  | Snapshot_read_error
+  | Source_snapshot_read_error
+  | Librarian_lane_busy
+  | Librarian_failures
+  | Librarian_starvation
+  | Vision_ingest_errors
+
+(** The severity the server is contractually required to send for a code. *)
+val memory_alert_severity : memory_alert_code -> [ `Warn | `Error ]
+
+(** The wire also carries [value] and [threshold]; neither is kept. Every count
+    a [value] would report is already drawn from {!memory_keeper_health} two
+    lines above the alert, and the server pins [threshold] to [0.0] for all six
+    codes. The decoder still requires and range-checks both, so a payload that
+    starts meaning something by them fails loudly instead of passing unread. *)
 type memory_alert = {
-  ma_code : string;
-  ma_severity : string;
-  ma_target : string;
+  ma_code : memory_alert_code;
   ma_label : string;
   ma_message : string;
-  ma_value : float;
-  ma_threshold : float;
 }
 
 type memory_keeper_health = {

@@ -876,9 +876,16 @@ let validate_prompt_templates () =
     (fun acc s ->
       let resolved = resolved_of_snapshot s in
       let issues =
-        match resolved with
-        | { effective = ""; source = Prompt_registry_types.Missing; _ } -> []
-        | resolved ->
+        (* A key nothing resolves and that carries no text has no template
+           to check. Every source is named rather than caught by a wildcard:
+           this arm decides what a new one would mean, and the compiler
+           should ask rather than fold it in with the rest. *)
+        match resolved.source, resolved.effective with
+        | Prompt_registry_types.Missing, "" -> []
+        | ( Prompt_registry_types.Missing
+          | Prompt_registry_types.Override
+          | Prompt_registry_types.File ),
+          _ ->
             unexpected_template_variables s.snap_meta resolved.effective
             |> List.map (fun variable -> (s.snap_key, variable))
       in

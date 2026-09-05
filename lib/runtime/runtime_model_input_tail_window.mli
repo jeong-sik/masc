@@ -105,12 +105,16 @@ val next_shrink_capacity_bytes
     zero-prior-history floor after every atom boundary has been exhausted.
 
     The returned capacity is never below the bytes required by pinned
-    messages, the synthetic preamble, and the newest atom. It is also strictly
-    smaller than the exact rejected window after synthetic framing is charged;
-    otherwise this function returns [None]. Thus applying {!project} cannot
-    replace a size-driven refusal with an equal or larger request.
-    [target_capacity_bytes] is used when it lies inside those structural
-    bounds (for example, the ordinary halving policy). *)
+    messages, the synthetic preamble, and the newest atom, and it is strictly
+    smaller than the exact rejected window after synthetic framing is
+    charged. Candidate views are tried largest first: every atom boundary at
+    or below [target_capacity_bytes], then the newest atom alone, then the
+    empty history when allowed; the first that frames strictly smaller is the
+    answer, and [None] means none does. A boundary can fail that test while a
+    deeper one passes: dropping only the oldest atom saves less than the
+    preamble the cut adds when that atom is shorter than the preamble
+    encoding (#33217). Thus applying {!project} cannot replace a size-driven
+    refusal with an equal or larger request. *)
 
 val minimum_capacity_bytes
   :  measure_message_bytes:(Agent_core.Types.message -> int)

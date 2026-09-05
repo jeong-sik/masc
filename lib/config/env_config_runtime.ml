@@ -224,6 +224,11 @@ module Transport = struct
       Accessor-shaped reader; listener lifecycle is still decided at boot. *)
   let ws_enabled () = Feature_flag_registry.get_bool "MASC_WS_ENABLED"
 
+  (** Whether HTTP serving is isolated to a dedicated OCaml domain (RFC-0204 Phase 3).
+      Default: true. *)
+  let serving_domain_enabled () =
+    Feature_flag_registry.get_bool "MASC_SERVING_DOMAIN_ENABLED"
+
   type h2_resolution =
     { value : h2_mode
     ; source : Env_config_snapshot_core.effective_source

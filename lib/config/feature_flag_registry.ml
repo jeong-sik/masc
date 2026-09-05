@@ -47,6 +47,11 @@ let all_flags : flag list = [
     default = true; category = "transport";
     lifecycle = Active };
 
+  { env_name = "MASC_SERVING_DOMAIN_ENABLED";
+    description = "Isolate HTTP serving to a dedicated OCaml domain (RFC-0204 Phase 3)";
+    default = true; category = "transport";
+    lifecycle = Active };
+
   { env_name = "MASC_HTTP_AUTH_STRICT";
     description = "Require auth for all HTTP endpoints (not just /mcp)";
     default = false; category = "transport";

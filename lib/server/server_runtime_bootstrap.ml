@@ -1616,23 +1616,12 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
   let background_request_authority =
     Server_request_authority.projection_context request_trust_policy
   in
-  let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
-  let request_handler = make_request_handler ~trust_policy:request_trust_policy routes in
-  let h2_request_handler =
-    make_h2_request_handler
-      ~trust_policy:request_trust_policy
-      ~sw
-      ~clock
-      ~server_start_time
-  in
-  let h2_error_handler = make_h2_error_handler () in
   let http_mode =
     match configured_http_mode with
     | Env_config.Transport.H2_only -> `H2_only
     | Env_config.Transport.H1_only -> `H1_only
     | Env_config.Transport.Auto -> `Auto
   in
-  let socket = Server_bootstrap_http.listen_socket ~sw ~net config in
   Transport_metrics.set_ws_same_origin_runtime_ready false;
   clear_server_state ();
   Server_startup_state.reset ();
@@ -1987,13 +1976,68 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
         (Printexc.to_string exn));
 
   (* 3. Start serving -- /health responds before init completes *)
-  let addr_label = Printf.sprintf "%s:%d" config.host config.port in
-  match http_mode with
-  | `H2_only ->
-    Server_bootstrap_http.serve_h2 ~sw ~clock ~socket ~addr_label
-      ~h2_request_handler ~h2_error_handler
-  | `H1_only ->
-    Server_bootstrap_http.serve ~sw ~clock ~socket ~addr_label ~request_handler
-  | `Auto ->
-    Server_bootstrap_http.serve_auto ~sw ~clock ~socket ~addr_label
-      ~request_handler ~h2_request_handler ~h2_error_handler
+  let run_serving ~sw ~socket ~routes:_ ~request_handler ~h2_request_handler
+      ~h2_error_handler =
+    let addr_label = Printf.sprintf "%s:%d" config.host config.port in
+    match http_mode with
+    | `H2_only ->
+      Server_bootstrap_http.serve_h2 ~sw ~clock ~socket ~addr_label
+        ~h2_request_handler ~h2_error_handler
+    | `H1_only ->
+      Server_bootstrap_http.serve ~sw ~clock ~socket ~addr_label ~request_handler
+    | `Auto ->
+      Server_bootstrap_http.serve_auto ~sw ~clock ~socket ~addr_label
+        ~request_handler ~h2_request_handler ~h2_error_handler
+  in
+  if Env_config.Transport.serving_domain_enabled ()
+  then (
+    Log.Server.info
+      "HTTP serving domain isolation enabled (RFC-0204 Phase 3): accept loop isolated on dedicated domain";
+    Eio.Domain_manager.run domain_mgr (fun () ->
+      Eio.Switch.run (fun serving_sw ->
+        Eio_context.with_turn_switch serving_sw (fun () ->
+          let socket =
+            Server_bootstrap_http.listen_socket ~sw:serving_sw ~net config
+          in
+          let routes =
+            make_routes ~port:config.port ~host:config.host ~sw:serving_sw ~clock
+          in
+          let request_handler =
+            make_request_handler ~trust_policy:request_trust_policy routes
+          in
+          let h2_request_handler =
+            make_h2_request_handler
+              ~trust_policy:request_trust_policy
+              ~sw:serving_sw
+              ~clock
+              ~server_start_time
+          in
+          let h2_error_handler = make_h2_error_handler () in
+          run_serving
+            ~sw:serving_sw
+            ~socket
+            ~routes
+            ~request_handler
+            ~h2_request_handler
+            ~h2_error_handler))))
+  else (
+    let socket = Server_bootstrap_http.listen_socket ~sw ~net config in
+    let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
+    let request_handler =
+      make_request_handler ~trust_policy:request_trust_policy routes
+    in
+    let h2_request_handler =
+      make_h2_request_handler
+        ~trust_policy:request_trust_policy
+        ~sw
+        ~clock
+        ~server_start_time
+    in
+    let h2_error_handler = make_h2_error_handler () in
+    run_serving
+      ~sw
+      ~socket
+      ~routes
+      ~request_handler
+      ~h2_request_handler
+      ~h2_error_handler)

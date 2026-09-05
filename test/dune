@@ -2482,6 +2482,8 @@
 
 (include stanzas/test_http_auth_strict_flag.inc)
 
+(include stanzas/test_serving_domain_isolation_flag.inc)
+
 (include stanzas/test_keeper_approval_resolved_history.inc)
 
 (include stanzas/test_keeper_tool_approval_mode_actor_log.inc)

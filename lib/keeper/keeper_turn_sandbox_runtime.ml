@@ -383,9 +383,9 @@ let policy_network_create_timeout_s = 60.0
 (* Returns the gateway a guest on the policy network reaches the host at, so
    the boot can point the guest's clients at the proxy behind it. [None] for
    every other mode, which needs no gateway. *)
-let ensure_policy_network backend (mode : Keeper_types_profile_sandbox.network_mode) =
+let ensure_policy_network backend ~keeper_name (mode : Keeper_types_profile_sandbox.network_mode) =
   let gateway_of_network () =
-    match Keeper_sandbox_microvm.policy_network_inspect_argv_for backend with
+    match Keeper_sandbox_microvm.policy_network_inspect_argv_for backend ~keeper_name with
     | Error _ as error -> error
     | Ok inspect_argv ->
       (match run_argv_with_status ~timeout_sec:policy_network_list_timeout_s inspect_argv with
@@ -408,7 +408,7 @@ let ensure_policy_network backend (mode : Keeper_types_profile_sandbox.network_m
      | Error _ as error -> error
      | Ok list_argv ->
        let create_network () =
-         match Keeper_sandbox_microvm.policy_network_create_argv_for backend with
+         match Keeper_sandbox_microvm.policy_network_create_argv_for backend ~keeper_name with
          | Error _ as error -> error
          | Ok create_argv ->
            (match run_argv_with_status ~timeout_sec:policy_network_create_timeout_s create_argv with
@@ -422,7 +422,7 @@ let ensure_policy_network backend (mode : Keeper_types_profile_sandbox.network_m
        in
        (match run_argv_with_status ~timeout_sec:policy_network_list_timeout_s list_argv with
         | Unix.WEXITED 0, listing ->
-          (match Keeper_sandbox_microvm.policy_network_present ~listing with
+          (match Keeper_sandbox_microvm.policy_network_present ~keeper_name ~listing with
            | Ok true -> gateway_of_network ()
            | Ok false ->
              (match create_network () with
@@ -670,15 +670,29 @@ let resolve_image (t : t) =
    Teardown is [teardown_keeper_sandbox], which shutdown finalization runs after
    the registry unregister succeeds -- the one point that knows the keeper is
    gone for good rather than between turns. *)
-let microvm_container_name ~(config : Workspace.config) ~keeper_name =
+(* The network mode is in the name for the reason it is in the Docker
+   container's: adopt matches by name, so a name that ignores the mode lets a
+   guest booted under one policy be adopted under another.
+
+   For [Network_policy] that is not only a wrong network. The guest carries
+   the proxy address in its environment, and the port is ephemeral, so a
+   guest adopted across a server restart would keep CONNECTing to a port
+   nothing is listening on -- no refusal, no event, and a keeper that looks
+   idle rather than cut off. A distinct name makes that guest a different
+   guest, so it is replaced instead of adopted. *)
+let microvm_container_name ~(config : Workspace.config) ~keeper_name ~network_mode =
   Printf.sprintf
-    "masc-keeper-vm-%s-%s"
+    "masc-keeper-vm-%s-%s-%s"
     (Workspace_utils.safe_filename keeper_name)
+    (Keeper_types_profile_sandbox.network_mode_to_string network_mode)
     (String.sub (Keeper_sandbox_runtime.base_path_hash config.base_path) 0 8)
 ;;
 
 let keeper_vm_name (t : t) =
-  microvm_container_name ~config:t.config ~keeper_name:t.meta.name
+  microvm_container_name
+    ~config:t.config
+    ~keeper_name:t.meta.name
+    ~network_mode:t.network_mode
 ;;
 
 let bind_registered_microvm_identity t container_name =
@@ -1004,7 +1018,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
             rather than handing msb Docker's flags, which it rejects at
             argument parsing with no statement of what the guest's network
             would have been. *)
-         (match ensure_policy_network backend t.network_mode with
+         (match ensure_policy_network backend ~keeper_name:t.meta.name t.network_mode with
           | Error detail -> Error ("microvm_start_failed: " ^ detail)
           | Ok policy_gateway ->
          let policy_proxy =
@@ -1026,7 +1040,8 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
            | Some _, None | None, _ -> None
          in
          (match
-            Keeper_sandbox_microvm.network_args_for backend ~dns ~policy_proxy t.network_mode
+            Keeper_sandbox_microvm.network_args_for backend ~dns ~keeper_name:t.meta.name ~policy_proxy
+              t.network_mode
           with
           | Error detail -> Error ("microvm_start_failed: " ^ detail)
           | Ok network_args ->
@@ -1252,18 +1267,39 @@ let teardown_keeper_sandbox_by_name
              from the keeper's meta"
             keeper_name)
      | Some microvm_backend ->
-       let guest_name = microvm_container_name ~config ~keeper_name in
+       (* Every mode's name, not the current one. The guest name carries the
+          network mode so adopt cannot cross modes, and teardown runs after
+          the registry entry is gone -- it does not know which mode the guest
+          on disk was booted under. Removing only today's name would leave a
+          guest from yesterday's mode running with nothing tracking it.
+
+          A name with no guest behind it is not an error: [stop_and_delete]
+          is idempotent for an absent guest, which is what makes sweeping the
+          whole set cheap. *)
+       let guest_names =
+         List.map
+           (fun network_mode ->
+              microvm_container_name ~config ~keeper_name ~network_mode)
+           Keeper_types_profile_sandbox.all_network_modes
+       in
        with_microvm_lifecycle_lock (fun () ->
-         match
-           stop_and_delete_microvm_container
-             ~timeout_sec
-             ~backend:microvm_backend
-             guest_name
-         with
-         | Error _ as error -> error
-         | Ok () ->
-           release_registered_microvm_identity guest_name;
-           Ok ()))
+         List.fold_left
+           (fun acc guest_name ->
+              match acc with
+              | Error _ as error -> error
+              | Ok () ->
+                (match
+                   stop_and_delete_microvm_container
+                     ~timeout_sec
+                     ~backend:microvm_backend
+                     guest_name
+                 with
+                 | Error _ as error -> error
+                 | Ok () ->
+                   release_registered_microvm_identity guest_name;
+                   Ok ()))
+           (Ok ())
+           guest_names))
 ;;
 
 let teardown_keeper_sandbox
@@ -1659,7 +1695,12 @@ let microvm_remote_endpoint ?timeout_sec (t : t) =
    runs only to name a failure it already has. *)
 let microvm_attached_endpoint ~(config : Workspace.config) ~(meta : keeper_meta) () =
   let t = create ~config ~meta () in
-  let container_name = microvm_container_name ~config ~keeper_name:meta.name in
+  let container_name =
+    microvm_container_name
+      ~config
+      ~keeper_name:meta.name
+      ~network_mode:meta.network_mode
+  in
   microvm_remote_endpoint_of_running t ~container_name
 ;;
 
@@ -1671,7 +1712,12 @@ let microvm_guest_absence_reason ?timeout_sec ~(config : Workspace.config)
   if meta.sandbox_profile <> Keeper_types_profile_sandbox.Micro_vm
   then None
   else
-    let container_name = microvm_container_name ~config ~keeper_name:meta.name in
+    let container_name =
+      microvm_container_name
+        ~config
+        ~keeper_name:meta.name
+        ~network_mode:meta.network_mode
+    in
     (* No recorded runtime means nothing here can state a fact about the
        guest, so the caller's own error stands rather than a probe run
        against a runtime the keeper never named. *)

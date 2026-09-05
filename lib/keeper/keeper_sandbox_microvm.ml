@@ -118,7 +118,23 @@ let work_volume_guest_root = "/masc-work"
    gateway. Creating it is the server's job; a guest is never attached to a
    network that does not exist, because [container run] fails rather than
    falling back to the default network. *)
-let policy_network_name = "masc-egress-policy"
+(* One network per keeper, not one for the fleet.
+
+   A shared network plus a listener on every interface let a guest reach any
+   keeper's proxy port through the common gateway: guest A opening
+   gateway:portB went out under B's allowlist and was recorded as B. The port
+   was the only thing saying whose request it was, and nothing stopped a
+   neighbour from picking a different one.
+
+   Splitting the network closes it at the routing layer. Measured
+   2026-09-05 on container 1.3.1: two [--internal] networks get separate
+   subnets (192.168.128.1 and 192.168.129.1), and a guest on the first
+   cannot reach the second's gateway on any port -- including a listener
+   bound to every interface. So a guest reaches its own keeper's proxy and no
+   other, and the port stops being the only claim of identity. *)
+let policy_network_name ~keeper_name =
+  Printf.sprintf "masc-egress-policy-%s" (Workspace_utils.safe_filename keeper_name)
+;;
 
 (* The proxy a policy guest is pointed at: the gateway it sees the host at,
    and the port that keeper's listener bound. Both are discovered at boot --
@@ -132,6 +148,7 @@ type policy_proxy =
 let network_args_for
       backend
       ~dns
+      ~keeper_name
       ~(policy_proxy : policy_proxy option)
       (mode : Keeper_types_profile_sandbox.network_mode)
   =
@@ -180,7 +197,7 @@ let network_args_for
              them the guest is merely stuck, which is how this lane shipped
              and did not work. *)
           Ok
-            ([ "--network"; policy_network_name; "--no-dns" ]
+            ([ "--network"; policy_network_name ~keeper_name; "--no-dns" ]
              @ List.concat_map
                  (fun (name, value) -> [ "-e"; name ^ "=" ^ value ])
                  (Egress_proxy_decision.client_env
@@ -684,12 +701,12 @@ let shim_exec_prefix_for backend ~container_name ~uid ~gid ~remote_root ~shim_co
    agreement visible: a backend that gained a policy arm without gaining
    these would fail here rather than boot a guest onto a network nobody
    created. *)
-let policy_network_create_argv_for backend =
+let policy_network_create_argv_for backend ~keeper_name =
   match (backend : Backend.t) with
   | Backend.Apple_container ->
     Ok
       (command_argv_for backend
-       @ [ "network"; "create"; "--internal"; policy_network_name ])
+       @ [ "network"; "create"; "--internal"; policy_network_name ~keeper_name ])
   | Backend.Microsandbox | Backend.Nerdctl_kata ->
     Error
       (Printf.sprintf
@@ -724,7 +741,7 @@ let policy_network_list_argv_for backend =
    and that create fails on this CLI -- so the guest would be refused with a
    message about creation rather than about the listing that could not be
    read. *)
-let policy_network_present ~listing =
+let policy_network_present ~keeper_name ~listing =
   match Yojson.Safe.from_string listing with
   | `List entries ->
     Ok
@@ -733,7 +750,8 @@ let policy_network_present ~listing =
             match entry with
             | `Assoc fields ->
               (match List.assoc_opt "id" fields with
-               | Some (`String id) -> String.equal id policy_network_name
+               | Some (`String id) ->
+                 String.equal id (policy_network_name ~keeper_name)
                | Some _ | None -> false)
             | _ -> false)
          entries)
@@ -742,7 +760,7 @@ let policy_network_present ~listing =
     Error ("container network list: unparseable JSON: " ^ detail)
 ;;
 
-let policy_network_inspect_argv_for backend =
+let policy_network_inspect_argv_for backend ~keeper_name =
   match (backend : Backend.t) with
   | Backend.Apple_container ->
     (* No [--format json] here, unlike [network list]: [network inspect]
@@ -750,7 +768,7 @@ let policy_network_inspect_argv_for backend =
        JSON. Measured 2026-09-05 on container 1.3.1 -- the two subcommands
        do not agree, and assuming they did made every policy boot fail at
        reading the gateway. *)
-    Ok (command_argv_for backend @ [ "network"; "inspect"; policy_network_name ])
+    Ok (command_argv_for backend @ [ "network"; "inspect"; policy_network_name ~keeper_name ])
   | Backend.Microsandbox | Backend.Nerdctl_kata ->
     Error
       (Printf.sprintf

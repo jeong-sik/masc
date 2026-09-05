@@ -25,6 +25,17 @@ type event =
   { keeper_name : string
   ; at : float
   ; outcome : outcome
+  ; rule_generation : string option
+        (** {!Egress_host.generation} of the rules that judged this request,
+            or [None] where none did -- an accept that failed, or a client
+            that sent nothing to judge.
+
+            The rules are read per request, so without this a record of
+            "admitted" cannot say which allowlist admitted it: an operator's
+            edit between two requests leaves no mark, and a destination that
+            should not have been reachable cannot be traced back to the rules
+            that allowed it. Two events with the same value were judged by
+            the same rules. *)
   }
 (** One request that reached the proxy. Every request produces one, admitted
     or not: the point of putting a proxy here is that a keeper's reach stops

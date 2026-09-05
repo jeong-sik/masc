@@ -226,6 +226,11 @@ let rec labels_end_with ~suffix labels =
     | _ :: rest -> labels_end_with ~suffix rest
 ;;
 
+(* Eight hex characters. Long enough that two allowlists in one fleet do not
+   collide by accident, short enough to sit in a log line an operator reads
+   across. *)
+let generation_hex_length = 8
+
 let matches_host rule_host host =
   match rule_host, host with
   | Exact (Ip_literal expected), Ip_literal actual -> String.equal expected actual
@@ -255,4 +260,14 @@ let ports_for_host rules host =
   |> List.filter_map (fun rule ->
        if matches_host rule.rule_host host then Some rule.port else None)
   |> List.sort_uniq Int.compare
+;;
+
+let generation rules =
+  rules
+  |> List.map rule_to_string
+  |> List.sort_uniq String.compare
+  |> String.concat "\n"
+  |> Digest.string
+  |> Digest.to_hex
+  |> fun hex -> String.sub hex 0 generation_hex_length
 ;;

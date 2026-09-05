@@ -122,3 +122,20 @@ val admits_host : rule list -> t -> bool
 
 val ports_for_host : rule list -> t -> int list
 (** The ports the rules permit for this host, so a refusal can name them. *)
+
+val generation : rule list -> string
+(** A short label for a set of rules, stable across processes and machines.
+
+    The rules an egress decision was made under are read per request, so a
+    log line saying "admitted" no longer says which allowlist admitted it: an
+    operator's edit between two requests is invisible in the record, and a
+    connection that should not have been possible cannot be traced to the
+    rules that allowed it. This is what closes that -- two requests with the
+    same generation were judged by the same rules, and a change in it is
+    where an edit landed.
+
+    Order and duplicates do not change it: the same rules written in another
+    order are the same policy. It is a [Digest] (MD5) of the normalized
+    spellings, truncated. That is an identity label and not a security
+    claim -- a collision here mislabels a log line; it does not admit a
+    connection, because nothing consults this value to decide anything. *)

@@ -470,6 +470,168 @@ let tool_projection_mode (state : state) =
   | Tools_compact -> Keeper_chat_transcript.Compact
   | Tools_full -> Keeper_chat_transcript.Full
 
+let is_all_digits s =
+  String.length s > 0
+  &&
+  let rec loop i =
+    if i >= String.length s then true
+    else if s.[i] >= '0' && s.[i] <= '9' then loop (i + 1)
+    else false
+  in
+  loop 0
+;;
+
+let split_last_space s =
+  match String.rindex_opt s ' ' with
+  | None -> None
+  | Some idx ->
+    let first = String.sub s 0 idx in
+    let second = String.sub s (idx + 1) (String.length s - idx - 1) in
+    Some (first, second)
+;;
+
+let split_on_middle_dot (s : string) : string list =
+  let dot = " \xc2\xb7 " in
+  let dot_len = String.length dot in
+  let len = String.length s in
+  let rec scan last_pos pos acc =
+    if pos + dot_len > len then
+      List.rev (String.sub s last_pos (len - last_pos) :: acc)
+    else if String.sub s pos dot_len = dot then
+      let piece = String.sub s last_pos (pos - last_pos) in
+      scan (pos + dot_len) (pos + dot_len) (piece :: acc)
+    else
+      scan last_pos (pos + 1) acc
+  in
+  scan 0 0 []
+;;
+
+let contains_sub s sub =
+  let len_s = String.length s in
+  let len_sub = String.length sub in
+  if len_sub = 0 then true
+  else if len_s < len_sub then false
+  else
+    let rec loop i =
+      if i + len_sub > len_s then false
+      else if String.sub s i len_sub = sub then true
+      else loop (i + 1)
+    in
+    loop 0
+;;
+
+let extract_tool_marker s =
+  let markers = [ "✓"; "✗"; "×"; "√"; "▶"; "◌"; "!"; "?" ] in
+  List.find_opt (fun m -> String.starts_with ~prefix:m s) markers
+;;
+
+let tool_marker_color = function
+  | "✓" | "√" -> Theme.ok ()
+  | "✗" | "×" | "!" -> Ansi.bold ^ Theme.bad ()
+  | "▶" | "?" -> Theme.warn ()
+  | "◌" -> Theme.info ()
+  | _ -> Ansi.reset
+;;
+
+let is_tool_row text =
+  let t = String.trim text in
+  let has_marker = Option.is_some (extract_tool_marker t) in
+  let has_dot = contains_sub t "\xc2\xb7" in
+  (has_marker && (String.contains t ' ' || has_dot))
+  || String.starts_with ~prefix:"Tools " t
+  || (has_dot
+     && (String.ends_with ~suffix:"folded" t
+        || String.ends_with ~suffix:"returned" t
+        || contains_sub t "failed"
+        || contains_sub t "awaiting result"))
+;;
+
+let dress_tool_clause (clause : string) : string =
+  let c = String.trim clause in
+  match extract_tool_marker c with
+  | Some m ->
+    let rest =
+      String.trim (String.sub c (String.length m) (String.length c - String.length m))
+    in
+    let col = tool_marker_color m in
+    if String.starts_with ~prefix:"Tools " rest || String.starts_with ~prefix:"Ran " rest then
+      match split_last_space rest with
+      | Some (word, count) when is_all_digits count ->
+        Printf.sprintf "%s%s%s %s%s%s %s%s%s" col m Ansi.reset
+          (Ansi.bold ^ Theme.info ()) word Ansi.reset
+          (Theme.recede () ^ Ansi.dim) count Ansi.reset
+      | _ ->
+        Printf.sprintf "%s%s%s %s%s%s" col m Ansi.reset
+          (Ansi.bold ^ Theme.info ()) rest Ansi.reset
+    else
+      (match String.index_opt rest ' ' with
+       | Some idx ->
+         let name = String.sub rest 0 idx in
+         let args = String.sub rest idx (String.length rest - idx) in
+         Printf.sprintf "%s%s%s %s%s%s%s" col m Ansi.reset
+           (Theme.tool_origin ()) name Ansi.reset args
+       | None ->
+         Printf.sprintf "%s%s%s %s%s%s" col m Ansi.reset
+           (Theme.tool_origin ()) rest Ansi.reset)
+  | None ->
+    if String.starts_with ~prefix:"Tools " c then
+      match split_last_space c with
+      | Some (word, count) when is_all_digits count ->
+        Printf.sprintf "%s%s%s %s%s%s"
+          (Ansi.bold ^ Theme.info ()) word Ansi.reset
+          (Theme.recede () ^ Ansi.dim) count Ansi.reset
+      | _ -> Printf.sprintf "%s%s%s" (Ansi.bold ^ Theme.info ()) c Ansi.reset
+    else if contains_sub c "detail" && contains_sub c "folded" then
+      Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c Ansi.reset
+    else if String.starts_with ~prefix:"Ctrl-" c || contains_sub c "carried by the transcript" then
+      Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c Ansi.reset
+    else if (String.ends_with ~suffix:"ms" c || String.ends_with ~suffix:"s" c)
+            && (match split_last_space c with None -> true | Some (_, _) -> false) then
+      Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c Ansi.reset
+    else if contains_sub c "returned" || contains_sub c "failed" || contains_sub c "awaiting" || contains_sub c "running" then
+      if contains_sub c ", " then
+        let parts = String.split_on_char ',' c in
+        let dressed =
+          List.map
+            (fun p ->
+              let p = String.trim p in
+              if String.ends_with ~suffix:"returned" p then
+                Printf.sprintf "%s%s%s" (Theme.ok ()) p Ansi.reset
+              else if contains_sub p "failed" || contains_sub p "never returned" then
+                Printf.sprintf "%s%s%s" (Ansi.bold ^ Theme.bad ()) p Ansi.reset
+              else if contains_sub p "awaiting" then
+                Printf.sprintf "%s%s%s" (Theme.warn ()) p Ansi.reset
+              else if contains_sub p "running" then
+                Printf.sprintf "%s%s%s" (Theme.info ()) p Ansi.reset
+              else p)
+            parts
+        in
+        String.concat ", " dressed
+      else if String.ends_with ~suffix:"returned" c then
+        Printf.sprintf "%s%s%s" (Theme.ok ()) c Ansi.reset
+      else if contains_sub c "failed" || contains_sub c "never returned" then
+        Printf.sprintf "%s%s%s" (Ansi.bold ^ Theme.bad ()) c Ansi.reset
+      else if contains_sub c "awaiting" then
+        Printf.sprintf "%s%s%s" (Theme.warn ()) c Ansi.reset
+      else if contains_sub c "running" then
+        Printf.sprintf "%s%s%s" (Theme.info ()) c Ansi.reset
+      else c
+    else
+      match split_last_space c with
+      | Some (name, count) when is_all_digits count ->
+        Printf.sprintf "%s%s%s %s%s%s"
+          (Theme.tool_origin ()) name Ansi.reset
+          (Theme.recede () ^ Ansi.dim) count Ansi.reset
+      | _ -> c
+;;
+
+let dress_tool_summary (line : string) : string =
+  let parts = split_on_middle_dot line in
+  let dressed = List.map dress_tool_clause parts in
+  let sep = Printf.sprintf " %s\xc2\xb7%s " (Theme.recede () ^ Ansi.dim) Ansi.reset in
+  String.concat sep dressed
+;;
+
 let render_chat_row ~theme buf cols (row : Message_layout.row) =
   match row.kind with
   | Message_layout.Viewport_gap { hidden_rows = _ } ->
@@ -485,13 +647,13 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
       let text = row.text in
       let context = Chat_theme.body_context theme row.style in
       let dress rest =
-        (* A pasted URL reads as a link, not prose. Its closer turns off only
-           the underline and link foreground; resetting here would cut an
-           enclosing diff background before the row's tail and padding. *)
-        Masc_tui_message_layout.dress_bare_links
-          ~open_style:(Ansi.underline ^ Theme.Syntax.link)
-          ~close_style:context.link_restore
-          rest
+        if is_tool_row rest then
+          dress_tool_summary rest
+        else
+          Masc_tui_message_layout.dress_bare_links
+            ~open_style:(Ansi.underline ^ Theme.Syntax.link)
+            ~close_style:context.link_restore
+            rest
       in
       (* Folded origins are the heading of each activity block. Keep them in
          the role colour and bold while the body stays neutral: after the old
@@ -564,15 +726,23 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
           | _, Message_layout.Shade_quoted ->
               Printf.sprintf "%s\xe2\x94\x82%s " (Theme.recede ()) Ansi.reset
         in
-        if context.ambient_background then
+        let is_tool = is_tool_row rest in
+        let body_style =
+          if is_tool then Ansi.reset
+          else Chat_theme.body row.style
+        in
+        if context.ambient_background && not is_tool then
           box_line_styled buf cols ~style:context.opening
             (Printf.sprintf "%s  %s" margin (dress rest))
         else
           box_line buf cols
             (Printf.sprintf "%s%s%s%s%s" margin rail
-               (Chat_theme.body row.style) (dress rest) Ansi.reset))
+               body_style (dress rest) Ansi.reset))
       else
-        box_line_styled buf cols ~style:context.opening (dress text)
+        let is_tool = is_tool_row text in
+        box_line_styled buf cols
+          ~style:(if is_tool then Ansi.reset else context.opening)
+          (dress text)
   | Message_layout.Metadata (Message_layout.Timeline_break _) ->
       box_line_styled buf cols ~style:(Theme.info () ^ Ansi.bold) row.text
   | Message_layout.Metadata (Message_layout.Continued_at { timestamp }) ->
@@ -949,9 +1119,9 @@ let skill_tone_of_state :
    window around the active entry with how many entries hide past each edge,
    so position in the cycle stays readable at any width. *)
 let surface_strip (state : state) ~cols =
-  let ring = Masc_tui_types.surface_ring in
+  let ring = Masc_tui_types.visible_surface_ring state in
   let n = List.length ring in
-  let active = Masc_tui_types.surface_ring_index state.view in
+  let active = Masc_tui_types.visible_surface_ring_index state state.view in
   (* A count rides the entry it belongs to, so pending work is visible from
      every surface without a spare row. Zero draws nothing -- an always-on
      badge would be texture, not information. *)
@@ -1015,14 +1185,39 @@ let surface_strip (state : state) ~cols =
       (Printf.sprintf "%s\xe2\x80\xb9%d%s " Ansi.dim lo Ansi.reset);
   for i = lo to hi do
     if i > lo then Buffer.add_string parts "  ";
+    let surface, _ = List.nth ring i in
+    let is_alert =
+      match surface with
+      | Approvals -> List.length (Masc_tui_types.approval_items state) > 0
+      | _ -> false
+    in
     if i = active then
       Buffer.add_string parts
-        (Ansi.bold ^ (Theme.info ()) ^ "\xe2\x96\xb8" ^ label i ^ Ansi.reset)
+        (Ansi.bold ^ (if is_alert then Theme.warn () else Theme.info ()) ^ "\xe2\x96\xb8" ^ label i ^ Ansi.reset)
+    else if is_alert then
+      Buffer.add_string parts
+        (Ansi.bold ^ (Theme.warn ()) ^ label i ^ Ansi.reset)
     else Buffer.add_string parts (Ansi.dim ^ label i ^ Ansi.reset)
   done;
   if hi < n - 1 then
     Buffer.add_string parts
       (Printf.sprintf " %s%d\xe2\x80\xba%s" Ansi.dim (n - 1 - hi) Ansi.reset);
+  if state.burn_hud_visible then begin
+    let total_cost = Masc_tui_types.fleet_total_cost_usd state in
+    let spark = Masc_tui_types.braille_sparkline state.burn_history in
+    let hud =
+      Printf.sprintf "%s[HUD $%.2f %s%s%s]%s"
+        (Theme.recede ()) total_cost (Theme.info ()) spark (Theme.recede ()) Ansi.reset
+    in
+    let hud_raw = Printf.sprintf "[HUD $%.2f %s]" total_cost spark in
+    let hud_cells = Message_layout.display_width hud_raw in
+    let used_cells = Message_layout.display_width (Masc_tui_theme.strip_sgr (Buffer.contents parts)) in
+    if cols >= used_cells + hud_cells + 2 then begin
+      let gap = String.make (max 1 (cols - used_cells - hud_cells - 1)) ' ' in
+      Buffer.add_string parts gap;
+      Buffer.add_string parts hud
+    end
+  end;
   Buffer.contents parts
 
 (* Side-by-side panes share one threshold and one context-pane width, so
@@ -17536,6 +17731,89 @@ let render_palette (state : state) =
             total));
   finish_surface state ~surface_key:"palette" ~rows:terminal_rows ~cols buf
 
+let render_patch_modal (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  let path_label =
+    match state.patch_modal_path with
+    | Some p -> p
+    | None -> (match state.repository_changes_diff_path with Some p -> p | None -> "Active Working Tree")
+  in
+  framed_shadow_top buf cols;
+  framed_shadow_line buf cols
+    (screen_title " Patch & Diff Review" ^ "  "
+     ^ (Theme.info ()) ^ "\xe2\x9a\xa1 " ^ Ansi.reset
+     ^ Ansi.bold ^ Terminal_text.single_line path_label ^ Ansi.reset);
+  framed_shadow_divider buf cols;
+  let pending_count = List.length (Masc_tui_types.approval_items state) in
+  let approval_header_rows =
+    if pending_count > 0 then begin
+      let alert_line =
+        Printf.sprintf "  %s[APPROVAL GATE · %d item(s) pending]%s  %sRequires Operator Consent%s"
+          (Theme.warn ()) pending_count Ansi.reset (Theme.recede ()) Ansi.reset
+      in
+      framed_shadow_line buf cols alert_line;
+      framed_shadow_divider buf cols;
+      2
+    end else 0
+  in
+  framed_shadow_line_styled buf cols ~style:(Theme.recede ())
+    "  old   new     diff preview (syntax colored)";
+  framed_shadow_divider buf cols;
+  let diff_opt =
+    match state.patch_modal_diff with
+    | Some (_, d) -> Some d
+    | None -> (match state.repository_changes_diff with Some (_, d) -> Some d | None -> None)
+  in
+  let diff_rows =
+    match diff_opt with
+    | Some diff -> diff.Masc.Tui_decode.gd_rows
+    | None -> []
+  in
+  let total = List.length diff_rows in
+  let fixed_chrome = 7 + approval_header_rows in
+  let content_height = max 1 (rows - fixed_chrome) in
+  let max_scroll = max 0 (total - content_height) in
+  let scroll = max 0 (min state.patch_modal_scroll max_scroll) in
+  if total = 0 then begin
+    let msg =
+      match state.patch_modal_error with
+      | Some e -> Printf.sprintf "(diff load error: %s — Esc to close)" e
+      | None ->
+          (match state.repository_changes_diff_error with
+           | Some e -> Printf.sprintf "(diff load error: %s — Esc to close)" e
+           | None -> "(no pending patch diff loaded — Esc to close)")
+    in
+    framed_shadow_line buf cols (Ansi.dim ^ "   " ^ msg ^ Ansi.reset);
+    for _ = 1 to content_height - 1 do
+      framed_shadow_empty buf cols
+    done
+  end else begin
+    for i = 0 to content_height - 1 do
+      match List.nth_opt diff_rows (i + scroll) with
+      | None -> framed_shadow_empty buf cols
+      | Some row ->
+          let inner = framed_inner_width (cols - 1) in
+          let span = tree_diff_row_span ~width:inner row in
+          let rendered_line = Masc_tui_span.render span in
+          framed_shadow_line buf cols (fit_width rendered_line inner)
+    done
+  end;
+  framed_shadow_divider buf cols;
+  framed_shadow_line buf cols
+    (Printf.sprintf "  %s[y]%s Approve & Apply   %s[n]%s Reject   %s[e]%s Edit ($EDITOR)   %s[Esc]%s Close"
+       (Theme.ok ()) Ansi.reset
+       (Theme.bad ()) Ansi.reset
+       (Theme.info ()) Ansi.reset
+       (Theme.recede ()) Ansi.reset);
+  framed_shadow_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:(Printf.sprintf "[%d lines, scroll %d]  y:approve  n:reject  e:edit  j/k:scroll  Esc:close" total scroll));
+  finish_surface state ~surface_key:"patch-modal" ~rows:terminal_rows ~cols buf
+;;
+
 let render_help (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -17796,6 +18074,14 @@ let render (state : state) =
   else if state.answering_open then
     let frame, clamped = render_answering state in
     (frame, clamped, None)
+  else if state.patch_modal_open then
+    let frame, clamped = render_patch_modal state in
+    let presented_approval =
+      match Masc_tui_types.approval_items state with
+      | [] -> None
+      | first :: _ -> Some first
+    in
+    (frame, clamped, presented_approval)
   else
     let frame, clamped = render_surface state in
     let presented_approval =

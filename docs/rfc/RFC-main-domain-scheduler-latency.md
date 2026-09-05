@@ -265,6 +265,10 @@ memprof A(ready+3분) → B(+7분), 240초: 584 MB/s(이 4분에 `agent_started`
 
 memprof A → B(240초): **1,103 MB/s** — 이 4분에 `agent_started` 58건(앞 창들의 2~4배)이라 턴당으로는 4.6 GB(앞 창 5.3~7.9). live 3.86 → 4.00 GB, sites 9,994 → 13,877. 하네스 ready+7분: lag p99 315 ms, max 2.36 s, stall 2(바쁜 창). 상위(4분 차): 체크포인트 디코드 8.9 GB, `measure_message_bytes` 6.7 + 3.6 GB, 승인 큐 스냅샷 재작성 6.1 + 3.9 + 3.4 GB(#33349 표적), **`Keeper_event_queue_persistence.save_state_unlocked` 3.6 GB**(이벤트 큐 상태 파일을 변경마다 통째로 쓴다 — P4a·P4e 와 같은 부류, 다음 표적), **`Tool_misc_web_fetch.extract_title` 3.3 GB**(가져온 HTML 전체를 제목 하나 때문에 훑는다).
 
+#### 발견: 워커 도메인 14개는 내내 2 MiB minor heap 으로 돌았다
+
+`bin/main_eio.ml` 의 `setup_gc` 는 메인 도메인에서 `Gc.set { minor_heap_size = 4M words }` 를 부른다. OCaml 5.4 런타임 소스로 확인한 사실: `caml_gc_set` 은 `Caml_state->minor_heap_wsz` — 호출한 도메인의 것 — 만 바꾸고, 새 도메인은 `domain_create(caml_params->init_minor_heap_wsz, …)` 로 만들어져 `OCAMLRUNPARAM` 의 `s` 값(기본 256k words = 2 MiB)을 받는다(`runtime/gc_ctrl.c`, `runtime/domain.c`, 2026-09-05 확인). 그래서 `Executor_pool` 의 도메인 14개는 2 MiB 로 돌았고, #33351 이 `/health` 를 전용 서빙 도메인으로 옮기자 `.gc.minor_heap_size` 가 32 MiB 에서 2 MiB 로 바뀌어 드러났다(다섯 번째 재기동). OCaml 5 의 minor 수집은 모든 도메인이 함께 멈추므로, 한 도메인이 2 MiB 를 채울 때마다 15개가 선다 — 분당 3,000~9,600회의 출처다.
+
 #### GC 파라미터 실험 (8.5 의 "카운터를 본 뒤 결정")
 
-카운터가 나왔다. minor 4,000~6,000/분은 초당 70~100회의 stop-the-world 이고, OCaml 5 는 minor 수집에 모든 도메인이 함께 멈춘다. 현재 값은 minor heap 4M words(32 MiB)/도메인(`bin/main_eio.ml`), space_overhead 100(`MASC_GC_SPACE_OVERHEAD`, 부트스트랩), 둘 다 `OCAMLRUNPARAM` 이 있으면 적용하지 않는다. 실험: `OCAMLRUNPARAM='s=32M,o=200'` (s 는 도메인당 words, 32M words = 256 MiB; o 는 space_overhead; OCaml 5.4 manual runtime 장에서 확인) 로 재기동해 같은 하네스로 minor/분·major/분·promoted·lag p99 를 비교한다. 기대: minor 1/8, promoted 감소, major 1/2, RSS +4~6 GB(128 GB 호스트). p99 가 안 내려가면 되돌린다.
+두 단계. 첫째는 설정 오류의 교정이라 변수 하나만 바꾼다: `OCAMLRUNPARAM='s=4M,o=100'` 로 재기동해 모든 도메인이 코드가 의도했던 32 MiB 를 받게 한다(`o=100` 은 부트스트랩이 `OCAMLRUNPARAM` 이 있으면 적용하지 않는 space_overhead 100 을 그대로 두기 위함). 기대: minor/분이 1/10 이하, lag p99 감소. 둘째는 튜닝: `s=32M,o=200`(도메인당 256 MiB, 15개면 3.8 GB; space_overhead 200 으로 major 절반). 코드 쪽 후속: 도메인마다 `Gc.set` 을 부르는 초기화(서빙 도메인 클로저 첫 줄, 풀은 weight 1.0 작업 `domain_count` 개를 latch 로 묶어 도메인마다 하나씩) 를 기본값으로 넣어 환경 변수 없이도 맞게 한다.

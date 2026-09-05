@@ -11080,6 +11080,33 @@ let render_fusion_list (state : state) =
          (Masc_tui_keys.footer_hints Fusion));
   finish_surface state ~surface_key:"fusion-list" ~rows:terminal_rows ~cols buf
 
+(* The panel as marks, one per model, filled where the model answered.
+
+   Which preset ran and whether the panel that fed the judge was whole is the
+   first thing an operator reads off a run, and the pane said it in a sentence
+   of counts -- "judge-of-judges  first x3  meta x1" -- with the failures
+   counted somewhere else entirely. A model that did not answer is a hole in
+   the row here, so a thin panel is seen before it is read.
+
+   Past the cap the row would stop being countable at a glance, so it becomes
+   the two numbers it was drawn from. *)
+let fusion_panel_dots ~answered ~failed =
+  let cap = 24 in
+  let filled = "\xe2\x97\x8f" in
+  let hollow = "\xe2\x97\x8b" in
+  let run style mark n =
+    if n <= 0 then ""
+    else style ^ String.concat "" (List.init n (fun _ -> mark)) ^ Ansi.reset
+  in
+  match answered + failed with
+  | 0 -> ""
+  | total when total > cap ->
+    Printf.sprintf "%s%d\xc3\x97%s%s  %s%d\xc3\x97%s%s"
+      (Theme.ok ()) answered filled Ansi.reset
+      (Theme.bad ()) failed hollow Ansi.reset
+  | _ -> run (Theme.ok ()) filled answered ^ run (Theme.bad ()) hollow failed
+;;
+
 let fusion_wrapped_block ~width ~indent text =
   let body_width = max 1 (width - Message_layout.display_width indent) in
   String.split_on_char '\n' text
@@ -11378,7 +11405,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
         let judge_lines =
           match evidence.fe_judge with
           | Fusion_judge_synthesized judge ->
-              [ ( Ansi.magenta
+              [ ( (Theme.info ())
                 , "  Judge [synthesized] "
                   ^ Terminal_text.single_line judge.fj_decision )
               ]
@@ -11439,7 +11466,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
                 |> List.mapi (fun index node ->
                        match node.fjn_outcome with
                        | Judge_node_synthesized synthesized ->
-                           [ ( Ansi.magenta
+                           [ ( (Theme.info ())
                              , Printf.sprintf
                                  "  First %d [synthesized] %s  (%d in / %d out)"
                                  (index + 1)
@@ -11473,9 +11500,15 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
                 |> List.concat
               in
               [ Ansi.dim, "" ]
+              (* The counts are already in pipeline order, so joining them
+                 with the same arrow the Goal stage rail uses draws the run
+                 rather than describing it. The shape name stays, at the end,
+                 because it is what the preset is called. *)
               @ ( Ansi.dim
-                , Printf.sprintf "  Judge topology: %s  \xc2\xb7  %s" shape
-                    (String.concat "  \xc2\xb7  " counts) )
+                , Printf.sprintf "  %s  \xe2\x94\x80\xe2\x96\xb6  %s  \xc2\xb7  %s"
+                    (fusion_panel_dots ~answered ~failed)
+                    (String.concat "  \xe2\x94\x80\xe2\x96\xb6  " counts)
+                    shape )
               :: first_cards
         in
         let tool_lines =
@@ -11497,7 +11530,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
         @ panel_chart_lines
         @ panel_lines
         @ [ Ansi.dim, ""
-          ; Ansi.magenta, "  3  JUDGE"
+          ; Ansi.bold, "  3  JUDGE"
           ]
         @ judge_lines
         @ judges_lines
@@ -11506,7 +11539,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
           ]
         @ tool_lines
         @ [ Ansi.dim, ""
-          ; (Theme.ok ()), "  5  EVIDENCE RECORDED"
+          ; Ansi.bold, "  5  EVIDENCE RECORDED"
           ; ( Ansi.dim
             , "  Board link: "
               ^ Link.reference Board_post

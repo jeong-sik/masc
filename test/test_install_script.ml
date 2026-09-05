@@ -268,42 +268,6 @@ max-request-body-bytes = 1048576
   runtime_file
 ;;
 
-let write_runtime_catalog_with_masc_api_key_provider base_path =
-  let config_dir = Filename.concat base_path ".masc/config" in
-  let runtime_file = Filename.concat config_dir "runtime.toml" in
-  ignore (Sys.command ("mkdir -p " ^ Filename.quote config_dir));
-  write_file
-    runtime_file
-    {|
-[runtime]
-default = "generic.deepseek-v4-flash"
-
-[providers.generic]
-display-name = "Generic OpenAI-compatible"
-protocol = "openai-compatible-http"
-endpoint = "https://example.invalid"
-
-[providers.generic.healthcheck]
-path = "/models"
-
-[providers.generic.credentials]
-type = "env"
-key = "MASC_API_KEY"
-
-[models.deepseek-v4-flash]
-api-name = "deepseek-v4-flash"
-max-context = 1048576
-tools-support = true
-thinking-support = true
-streaming = true
-
-[generic.deepseek-v4-flash]
-wizard-default = true
-max-request-body-bytes = 1048576
-|};
-  runtime_file
-;;
-
 let rec find_source_root_from dir hops rel =
   if hops > 8 then None
   else if Sys.file_exists (Filename.concat dir rel) then Some dir
@@ -490,37 +454,6 @@ let run_install_status ?(extra_env = "") args base_path =
       "%s%sMASC_RELEASE_BASE_URL=%s MASC_PREFIX=%s MASC_VERSION=%s MASC_BASE_PATH=%s bash %s --allow-unverified --no-seed --base-path %s %s 2>&1"
       extra_env
       (if String.equal extra_env "" then "" else " ")
-      (Filename.quote release_base_url)
-      (Filename.quote prefix)
-      (Filename.quote (release_tag ()))
-      (Filename.quote base_path)
-      (Filename.quote script)
-      (Filename.quote base_path)
-      quoted_args
-  in
-  let ic = Unix.open_process_in cmd in
-  let closed = ref false in
-  Fun.protect
-    ~finally:(fun () -> if not !closed then ignore (Unix.close_process_in ic))
-    (fun () ->
-       let output = In_channel.input_all ic in
-       closed := true;
-       let status = Unix.close_process_in ic in
-       output, status)
-;;
-
-let run_install_status_with_stdin stdin args base_path =
-  let root = source_root () in
-  let script = Filename.concat root "scripts/install.sh" in
-  let prefix = Filename.concat base_path ".local" in
-  install_real_masc_binary prefix;
-  let release_base_url = stage_release_mirror base_path in
-  let quoted_args = String.concat " " (List.map Filename.quote args) in
-  let cmd =
-    Printf.sprintf
-      "printf '%%s\\n' %s | MASC_RELEASE_BASE_URL=%s MASC_PREFIX=%s MASC_VERSION=%s \
-       MASC_BASE_PATH=%s bash %s --allow-unverified --no-seed --base-path %s %s 2>&1"
-      (Filename.quote stdin)
       (Filename.quote release_base_url)
       (Filename.quote prefix)
       (Filename.quote (release_tag ()))
@@ -953,35 +886,19 @@ let test_wizard_flags_exist () =
   assert_contains "wizard flag" script "--wizard";
   assert_contains "no-wizard flag" script "--no-wizard";
   assert_contains "provider flag" script "--provider";
-  assert_contains "api-key flag" script "--api-key";
-  assert_contains "api-key stdin flag" script "--api-key-stdin";
-  assert_contains "api-key argv warning" script "visible in ps"
+  (* No key flags: the installer reads the provider key from the environment and
+     stores none, so there is nothing to pass on a command line. *)
+  assert_not_contains "no api-key flag" script "--api-key";
+  assert_contains "key is read, never written" script "Read, never written"
 ;;
 
 let test_wizard_prompts_exist () =
   let script = install_script () in
   assert_contains "provider prompt" script "Choose your default provider";
-  assert_contains "key prompt" script "Enter %s";
-  assert_contains "connectivity prompt" script "Test connectivity"
-;;
-
-let test_env_local_writer_exists () =
-  let script = install_script () in
-  assert_contains "write_env_local function" script "write_env_local()";
-  assert_contains "env.local created under private umask" script "( umask 077";
-  assert_contains
-    "env.local uses private temp before replace"
-    script
-    {|mktemp "$env_dir/.env.local.tmp.XXXXXX"|};
-  assert_contains
-    "env.local atomically replaces final path"
-    script
-    {|mv -f "$tmp" "$env_file"|};
-  assert_contains "env.local chmod 600" script "chmod 600";
-  assert_contains
-    "env.local chmod failure is fatal"
-    script
-    "could not restrict permissions on $env_file"
+  assert_contains "connectivity prompt" script "Test connectivity";
+  (* The wizard never asks for a key: it has nowhere to put one that the server
+     would read, and the environment it would be typed into is the answer. *)
+  assert_not_contains "no key prompt" script "Enter %s"
 ;;
 
 let test_partial_files_are_cleaned_by_exit_trap () =
@@ -1042,7 +959,7 @@ let test_provider_display_name_with_pipe_round_trips () =
       ignore (write_runtime_catalog ~deepseek_display_name:"Deep|Seek API" tmpdir);
       let output, status =
         run_install_status
-          [ "--dry-run"; "--provider"; "deepseek"; "--api-key"; "fake-key" ]
+          [ "--dry-run"; "--provider"; "deepseek" ]
           tmpdir
       in
       check bool "display name with pipe exits 0" true (status = Unix.WEXITED 0);
@@ -1068,7 +985,7 @@ let test_wizard_offers_subscription_runtime () =
     ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
     (fun () ->
       ignore (write_runtime_catalog_with_subscription tmpdir);
-      (* No --api-key: a subscription signs in through its own CLI. *)
+      (* A subscription signs in through its own CLI and needs no key at all. *)
       let output, status =
         run_install_status [ "--dry-run"; "--provider"; "claude_code" ] tmpdir
       in
@@ -1101,7 +1018,7 @@ let test_wizard_reports_model_source_availability () =
       ignore (write_runtime_catalog_with_local_server tmpdir);
       let output, status =
         run_install_status
-          [ "--dry-run"; "--provider"; "deepseek"; "--api-key"; "fake-key" ]
+          [ "--dry-run"; "--provider"; "deepseek" ]
           tmpdir
       in
       check bool "detection report exits 0" true (status = Unix.WEXITED 0);
@@ -1127,7 +1044,7 @@ let test_wizard_warns_when_selected_local_server_is_down () =
     ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
     (fun () ->
       ignore (write_runtime_catalog_with_local_server tmpdir);
-      (* local_llama is keyless, so no --api-key is needed to select it. *)
+      (* local_llama is keyless: it declares no credential env var. *)
       let output, status =
         run_install_status [ "--dry-run"; "--provider"; "local_llama" ] tmpdir
       in
@@ -1340,117 +1257,76 @@ let test_provider_ping_does_not_expose_key_in_curl_argv () =
     {|-H "Authorization: Bearer $key"|}
 ;;
 
-let test_no_wizard_does_not_write_env_local () =
+(* The whole of what the wizard now does about credentials: name the variable
+   the server will look for, and say so when this shell does not have it. *)
+let test_wizard_names_the_missing_key_variable () =
   let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
   Sys.remove tmpdir;
   Unix.mkdir tmpdir 0o700;
-  let env_file = Filename.concat tmpdir ".masc/config/.env.local" in
   Fun.protect
     ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
     (fun () ->
-      let _output = run_install [ "--no-wizard" ] tmpdir in
-      check bool "env.local not written with --no-wizard" false (Sys.file_exists env_file))
+       ignore (write_runtime_catalog tmpdir);
+       let output, status =
+         run_install_status
+           ~extra_env:"env -u DEEPSEEK_API_KEY"
+           [ "--provider"; "deepseek" ]
+           tmpdir
+       in
+       (* A key it cannot store is not a reason to fail an install. *)
+       check bool "missing key still exits zero" true (status = Unix.WEXITED 0);
+       assert_contains "names the variable" output "DEEPSEEK_API_KEY is not set";
+       assert_contains "prints the export line" output "export DEEPSEEK_API_KEY=")
 ;;
 
-let test_dry_run_masks_key () =
+(* A ping with no key tests nothing, and must be reported as neither a pass nor
+   a failure. *)
+let test_wizard_skips_the_ping_without_a_key () =
   let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
   Sys.remove tmpdir;
   Unix.mkdir tmpdir 0o700;
-  let env_file = Filename.concat tmpdir ".masc/config/.env.local" in
   Fun.protect
     ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
     (fun () ->
-      ignore (write_runtime_catalog tmpdir);
-      let output =
-        run_install [ "--dry-run"; "--provider"; "deepseek"; "--api-key"; "supersecret123" ] tmpdir
-      in
-      assert_contains "masked key in dry-run" output "DEEPSEEK_API_KEY=***";
-      assert_not_contains "raw key not in dry-run" output "supersecret123";
-      check bool "env.local not written in dry-run" false (Sys.file_exists env_file))
+       ignore (write_runtime_catalog tmpdir);
+       let output, _status =
+         run_install_status
+           ~extra_env:"env -u DEEPSEEK_API_KEY"
+           [ "--provider"; "deepseek" ]
+           tmpdir
+       in
+       assert_contains
+         "says the check was skipped"
+         output
+         "skipping the connectivity check";
+       assert_not_contains "claims no connectivity pass" output "provider connectivity: ok")
 ;;
 
-let test_wizard_writes_env_local () =
-  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
-  Sys.remove tmpdir;
-  Unix.mkdir tmpdir 0o700;
-  let env_file = Filename.concat tmpdir ".masc/config/.env.local" in
-  Fun.protect
-    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
-    (fun () ->
-      ignore (write_runtime_catalog tmpdir);
-      let _output = run_install [ "--provider"; "deepseek"; "--api-key"; "fake-key-123" ] tmpdir in
-      check bool "env.local written" true (Sys.file_exists env_file);
-      let content = read_file env_file in
-      assert_contains "export line" content "export DEEPSEEK_API_KEY=";
-      assert_contains "key value" content "fake-key-123";
-      let st = Unix.stat env_file in
-      check int "env.local permissions are 0o600" 0o600 (st.Unix.st_perm land 0o777))
-;;
-
-let test_forced_env_local_replaces_symlink_without_touching_target () =
-  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
-  Sys.remove tmpdir;
-  Unix.mkdir tmpdir 0o700;
-  let env_file = Filename.concat tmpdir ".masc/config/.env.local" in
-  let symlink_target = Filename.concat tmpdir "outside-target" in
-  Fun.protect
-    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
-    (fun () ->
-      ignore (write_runtime_catalog tmpdir);
-      write_file symlink_target "do-not-touch\n";
-      Unix.symlink symlink_target env_file;
-      let _output =
-        run_install
-          [ "--force"; "--provider"; "deepseek"; "--api-key"; "replacement-key" ]
-          tmpdir
-      in
-      check string "symlink target unchanged" "do-not-touch\n" (read_file symlink_target);
-      check
-        bool
-        "env.local is regular file"
-        true
-        ((Unix.lstat env_file).Unix.st_kind = Unix.S_REG);
-      let content = read_file env_file in
-      assert_contains "replacement key written to env.local" content "replacement-key";
-      let st = Unix.stat env_file in
-      check int "replacement env.local permissions are 0o600" 0o600 (st.Unix.st_perm land 0o777))
-;;
-
-let test_api_key_stdin_writes_env_local () =
-  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
-  Sys.remove tmpdir;
-  Unix.mkdir tmpdir 0o700;
-  let env_file = Filename.concat tmpdir ".masc/config/.env.local" in
-  Fun.protect
-    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
-    (fun () ->
-      ignore (write_runtime_catalog tmpdir);
-      let output, status =
-        run_install_status_with_stdin
-          "stdin-key-123"
-          [ "--provider"; "deepseek"; "--api-key-stdin" ]
-          tmpdir
-      in
-      check bool "api-key-stdin exits zero" true (status = Unix.WEXITED 0);
-      assert_not_contains "stdin key not echoed" output "stdin-key-123";
-      check bool "env.local written" true (Sys.file_exists env_file);
-      let content = read_file env_file in
-      assert_contains "stdin key value" content "stdin-key-123")
-;;
-
-let test_empty_api_key_stdin_errors () =
+(* The installer writes no secret anywhere under the base path. Asserted over the
+   whole tree rather than one filename, so a future writer under a different name
+   is caught too. *)
+let test_wizard_writes_no_secret_file () =
   let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
   Sys.remove tmpdir;
   Unix.mkdir tmpdir 0o700;
   Fun.protect
     ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
     (fun () ->
-      ignore (write_runtime_catalog tmpdir);
-      let output, status =
-        run_install_status_with_stdin "" [ "--provider"; "deepseek"; "--api-key-stdin" ] tmpdir
-      in
-      check bool "empty api-key-stdin exits nonzero" true (status <> Unix.WEXITED 0);
-      assert_contains "empty stdin key is fatal" output "requires a non-empty key")
+       ignore (write_runtime_catalog tmpdir);
+       let _output, _status =
+         run_install_status
+           ~extra_env:"DEEPSEEK_API_KEY=supersecret123"
+           [ "--provider"; "deepseek" ]
+           tmpdir
+       in
+       let hits =
+         Filename.quote tmpdir
+         |> Printf.sprintf "grep -rl supersecret123 %s 2>/dev/null | head -5"
+       in
+       let ic = Unix.open_process_in hits in
+       let found = In_channel.input_all ic in
+       ignore (Unix.close_process_in ic);
+       check string "no file under the base path holds the key" "" found)
 ;;
 
 let test_wizard_updates_runtime_default () =
@@ -1470,7 +1346,7 @@ let test_wizard_updates_runtime_default () =
     ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
     (fun () ->
       let runtime_file = write_runtime_catalog tmpdir in
-      let _output = run_install [ "--provider"; "deepseek"; "--api-key"; "fake-key" ] tmpdir in
+      let _output = run_install [ "--provider"; "deepseek" ] tmpdir in
       let content = read_file runtime_file in
       assert_contains
         "default updated to concrete deepseek runtime"
@@ -1486,7 +1362,7 @@ let test_unknown_provider_aborts () =
     ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
     (fun () ->
       ignore (write_runtime_catalog tmpdir);
-      let output, status = run_install_status [ "--provider"; "not-a-real-provider"; "--api-key"; "x" ] tmpdir in
+      let output, status = run_install_status [ "--provider"; "not-a-real-provider" ] tmpdir in
       check bool "script fails for unknown provider" true (status <> Unix.WEXITED 0);
       assert_contains "unknown provider message" output "unknown provider")
 ;;
@@ -1500,53 +1376,13 @@ let test_unknown_default_provider_aborts () =
     (fun () ->
       ignore (write_runtime_catalog ~default:"missing.deepseek-v4-flash" tmpdir);
       let output, status =
-        run_install_status [ "--dry-run"; "--provider"; "deepseek"; "--api-key"; "fake-key" ] tmpdir
+        run_install_status [ "--dry-run"; "--provider"; "deepseek" ] tmpdir
       in
       check bool "script fails for unknown default provider" true (status <> Unix.WEXITED 0);
       assert_contains
         "unknown default provider message"
         output
         "default runtime id is not present in provider bindings")
-;;
-
-let test_key_with_shell_metachars_is_safely_quoted () =
-  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
-  Sys.remove tmpdir;
-  Unix.mkdir tmpdir 0o700;
-  let env_file = Filename.concat tmpdir ".masc/config/.env.local" in
-  Fun.protect
-    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
-    (fun () ->
-      ignore (write_runtime_catalog tmpdir);
-      let key = "fake\"key'$HOME`date`" in
-      let _output =
-        run_install [ "--provider"; "deepseek"; "--api-key"; key ] tmpdir
-      in
-      let cmd =
-        Printf.sprintf
-          "bash -c 'source %s && printf \"%%s\" \"$DEEPSEEK_API_KEY\"' 2>&1"
-          (Filename.quote env_file)
-      in
-      let ic = Unix.open_process_in cmd in
-      let sourced =
-        Fun.protect
-          ~finally:(fun () -> ignore (Unix.close_process_in ic))
-          (fun () -> In_channel.input_all ic)
-      in
-      check string "sourced key matches original" key sourced)
-;;
-
-let test_local_provider_omits_env_local () =
-  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
-  Sys.remove tmpdir;
-  Unix.mkdir tmpdir 0o700;
-  let env_file = Filename.concat tmpdir ".masc/config/.env.local" in
-  Fun.protect
-    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
-    (fun () ->
-      ignore (write_runtime_catalog tmpdir);
-      let _output = run_install [ "--provider"; "ollama"; "--api-key"; "ignored" ] tmpdir in
-      check bool "env.local not written for local provider" false (Sys.file_exists env_file))
 ;;
 
 let runtime_toml_or_fail path =
@@ -1568,21 +1404,6 @@ let provider_ids_in_runtime_toml path =
 
 let provider_healthcheck_path provider_tbl =
   Otoml.find_opt provider_tbl Otoml.get_string [ "healthcheck"; "path" ]
-;;
-
-let test_wizard_skips_existing_env_local () =
-  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
-  Sys.remove tmpdir;
-  Unix.mkdir tmpdir 0o700;
-  let env_file = Filename.concat tmpdir ".masc/config/.env.local" in
-  Fun.protect
-    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
-    (fun () ->
-      ignore (write_runtime_catalog tmpdir);
-      write_file env_file "# existing\n";
-      let output = run_install [ "--provider"; "deepseek"; "--api-key"; "fake" ] tmpdir in
-      assert_contains "skip message" output "already exists; skipping";
-      check string "existing env.local preserved" "# existing\n" (read_file env_file))
 ;;
 
 let test_wizard_dry_run_no_seed_skips () =
@@ -1609,95 +1430,6 @@ let test_wizard_forced_without_catalog_errors () =
       assert_contains "catalog missing message" output "runtime.toml not found")
 ;;
 
-let test_masc_api_key_does_not_cross_provider () =
-  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
-  Sys.remove tmpdir;
-  Unix.mkdir tmpdir 0o700;
-  Fun.protect
-    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
-    (fun () ->
-      ignore (write_runtime_catalog tmpdir);
-      let output, status =
-        run_install_status
-          ~extra_env:"env -u DEEPSEEK_API_KEY MASC_API_KEY=envsecret123"
-          [ "--dry-run"; "--provider"; "deepseek" ]
-          tmpdir
-      in
-      check bool "MASC_API_KEY for different provider exits nonzero" true
-        (status <> Unix.WEXITED 0);
-      assert_contains
-        "missing provider-specific key message"
-        output
-        "API key for DEEPSEEK_API_KEY is required in non-TTY mode";
-      assert_not_contains "raw env key not leaked" output "envsecret123")
-;;
-
-let test_masc_api_key_env_var_when_provider_declares_it () =
-  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
-  Sys.remove tmpdir;
-  Unix.mkdir tmpdir 0o700;
-  let env_file = Filename.concat tmpdir ".masc/config/.env.local" in
-  Fun.protect
-    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
-    (fun () ->
-      ignore (write_runtime_catalog_with_masc_api_key_provider tmpdir);
-      let output, status =
-        run_install_status
-          ~extra_env:"MASC_API_KEY=envsecret123"
-          [ "--dry-run"; "--provider"; "generic" ]
-          tmpdir
-      in
-      check bool "MASC_API_KEY-declared provider dry-run exits 0" true
-        (status = Unix.WEXITED 0);
-      assert_contains "masked key from env" output "MASC_API_KEY=***";
-      assert_not_contains "raw env key not leaked" output "envsecret123";
-      check bool "env.local not written in dry-run" false (Sys.file_exists env_file))
-;;
-
-let test_provider_key_env_var_precedes_masc_api_key () =
-  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
-  Sys.remove tmpdir;
-  Unix.mkdir tmpdir 0o700;
-  let env_file = Filename.concat tmpdir ".masc/config/.env.local" in
-  Fun.protect
-    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
-    (fun () ->
-      ignore (write_runtime_catalog tmpdir);
-      let output, status =
-        run_install_status
-          ~extra_env:"DEEPSEEK_API_KEY=providersecret123 MASC_API_KEY=genericsecret456"
-          [ "--provider"; "deepseek" ]
-          tmpdir
-      in
-      check bool "provider-specific env exits 0" true (status = Unix.WEXITED 0);
-      assert_not_contains "provider key not printed" output "providersecret123";
-      assert_not_contains "generic key not printed" output "genericsecret456";
-      let content = read_file env_file in
-      assert_contains "provider-specific key written" content "providersecret123";
-      assert_not_contains "generic fallback not written" content "genericsecret456")
-;;
-
-let test_provider_without_key_errors_in_non_tty () =
-  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
-  Sys.remove tmpdir;
-  Unix.mkdir tmpdir 0o700;
-  Fun.protect
-    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
-    (fun () ->
-      ignore (write_runtime_catalog tmpdir);
-      let output, status =
-        run_install_status
-          ~extra_env:"env -u DEEPSEEK_API_KEY -u MASC_API_KEY"
-          [ "--dry-run"; "--provider"; "deepseek" ]
-          tmpdir
-      in
-      check bool "provider without key exits nonzero" true (status <> Unix.WEXITED 0);
-      assert_contains
-        "missing key message"
-        output
-        "API key for DEEPSEEK_API_KEY is required in non-TTY mode")
-;;
-
 let test_invalid_provider_key_env_name_errors () =
   let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
   Sys.remove tmpdir;
@@ -1707,7 +1439,7 @@ let test_invalid_provider_key_env_name_errors () =
     (fun () ->
       ignore (write_runtime_catalog_with_invalid_key tmpdir);
       let output, status =
-        run_install_status [ "--dry-run"; "--provider"; "deepseek"; "--api-key"; "x" ] tmpdir
+        run_install_status [ "--dry-run"; "--provider"; "deepseek" ] tmpdir
       in
       check bool "invalid credential key exits nonzero" true (status <> Unix.WEXITED 0);
       assert_contains
@@ -1739,7 +1471,7 @@ let test_wizard_parses_real_runtime_toml () =
                     (Filename.quote (Filename.concat config_dir "runtime.toml"))));
             let output, status =
               run_install_status
-                [ "--dry-run"; "--provider"; id; "--api-key"; "x" ]
+                [ "--dry-run"; "--provider"; id ]
                 tmpdir
             in
             check bool ("dry-run succeeds for provider " ^ id) true (status = Unix.WEXITED 0);
@@ -1807,33 +1539,6 @@ let test_local_sandbox_profile_rejected () =
         "not a loadable profile")
 ;;
 
-let test_runtime_default_failure_does_not_write_env_local () =
-  if Unix.geteuid () = 0 then Alcotest.skip ();
-  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
-  Sys.remove tmpdir;
-  Unix.mkdir tmpdir 0o700;
-  let env_file = Filename.concat tmpdir ".masc/config/.env.local" in
-  let runtime_file = write_runtime_catalog tmpdir in
-  let config_dir = Filename.dirname runtime_file in
-  Unix.chmod config_dir 0o500;
-  Fun.protect
-    ~finally:(fun () ->
-      (try Unix.chmod config_dir 0o700 with
-       | _ -> ());
-      ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
-    (fun () ->
-      let output, status =
-        run_install_status [ "--provider"; "deepseek"; "--api-key"; "fake-key" ] tmpdir
-      in
-      check bool "runtime update failure exits nonzero" true (status <> Unix.WEXITED 0);
-      assert_contains
-        "runtime update failure message"
-        output
-        "could not update runtime.toml default";
-      check bool "env.local not written after runtime update failure" false
-        (Sys.file_exists env_file))
-;;
-
 let test_runtime_default_update_preserves_comments_and_leaves_no_temp () =
   let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
   Sys.remove tmpdir;
@@ -1876,7 +1581,7 @@ wizard-default = true
 max-request-body-bytes = 1048576
 |};
       let _output =
-        run_install [ "--provider"; "deepseek"; "--api-key"; "fake-key" ] tmpdir
+        run_install [ "--provider"; "deepseek" ] tmpdir
       in
       let updated = read_file runtime_file in
       assert_contains
@@ -1985,7 +1690,6 @@ let () =
     ; ( "wizard"
       , [ test_case "wizard flags exist" `Quick test_wizard_flags_exist
         ; test_case "wizard prompts exist" `Quick test_wizard_prompts_exist
-        ; test_case "env.local writer exists" `Quick test_env_local_writer_exists
         ; test_case "provider catalog comes from runtime.toml" `Quick test_provider_catalog_comes_from_runtime_toml
         ; test_case
             "provider display names with pipes round-trip"
@@ -1999,42 +1703,25 @@ let () =
             "partial files are cleaned by exit trap"
             `Quick
             test_partial_files_are_cleaned_by_exit_trap
-        ; test_case "--no-wizard does not write env.local" `Quick test_no_wizard_does_not_write_env_local
-        ; test_case "dry-run masks the api key" `Quick test_dry_run_masks_key
-        ; test_case "wizard writes env.local with 0o600 permissions" `Quick test_wizard_writes_env_local
         ; test_case
-            "forced env.local overwrite does not follow symlinks"
+            "wizard names the missing key variable"
             `Quick
-            test_forced_env_local_replaces_symlink_without_touching_target
-        ; test_case "api key can be read from stdin" `Quick test_api_key_stdin_writes_env_local
-        ; test_case "empty api key stdin is rejected" `Quick test_empty_api_key_stdin_errors
-        ; test_case "wizard updates runtime.toml default" `Quick test_wizard_updates_runtime_default
+            test_wizard_names_the_missing_key_variable
+        ; test_case
+            "wizard skips the ping without a key"
+            `Quick
+            test_wizard_skips_the_ping_without_a_key
+        ; test_case
+            "wizard writes no secret file"
+            `Quick
+            test_wizard_writes_no_secret_file        ; test_case "wizard updates runtime.toml default" `Quick test_wizard_updates_runtime_default
         ; test_case "unknown provider aborts" `Quick test_unknown_provider_aborts
         ; test_case
             "unknown default provider aborts"
             `Quick
             test_unknown_default_provider_aborts
-        ; test_case "shell metachars in key are safely quoted" `Quick test_key_with_shell_metachars_is_safely_quoted
-        ; test_case "local provider omits env.local" `Quick test_local_provider_omits_env_local
-        ; test_case "existing env.local is skipped by default" `Quick test_wizard_skips_existing_env_local
         ; test_case "dry-run + no-seed skips wizard when catalog is absent" `Quick test_wizard_dry_run_no_seed_skips
         ; test_case "forced wizard without catalog errors" `Quick test_wizard_forced_without_catalog_errors
-        ; test_case
-            "MASC_API_KEY does not cross provider credential keys"
-            `Quick
-            test_masc_api_key_does_not_cross_provider
-        ; test_case
-            "MASC_API_KEY works when provider declares it"
-            `Quick
-            test_masc_api_key_env_var_when_provider_declares_it
-        ; test_case
-            "provider-specific env key precedes MASC_API_KEY"
-            `Quick
-            test_provider_key_env_var_precedes_masc_api_key
-        ; test_case
-            "non-TTY provider without key errors"
-            `Quick
-            test_provider_without_key_errors_in_non_tty
         ; test_case
             "invalid provider key env name errors"
             `Quick
@@ -2091,10 +1778,6 @@ let () =
         ; test_case "--provider requires a value" `Quick test_missing_provider_flag_value_errors
         ; test_case "invalid --sandbox is rejected" `Quick test_invalid_sandbox_profile_rejected
         ; test_case "--sandbox local is rejected" `Quick test_local_sandbox_profile_rejected
-        ; test_case
-            "runtime default failure does not write env.local"
-            `Quick
-            test_runtime_default_failure_does_not_write_env_local
         ; test_case
             "runtime default update preserves comments and leaves no temp/bak files"
             `Quick

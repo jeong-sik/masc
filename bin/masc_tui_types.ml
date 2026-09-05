@@ -2026,7 +2026,6 @@ type surface =
 let surface_ring : (surface * string) list =
   [ (Overview, "Overview");
     (Acting, "Activity");
-    (Metrics, "Metrics");
     (Keepers Keeper_list, "Keepers");
     (Memory, "Memory");
     (Approvals, "Approvals");
@@ -2049,7 +2048,8 @@ let surface_ring : (surface * string) list =
    is registered here", read rarely and never raced against. System logs
    collapse onto Activity (the Acting surface): tool calls settling and the
    server's own log lines are two readings of the same fleet timeline, and
-   the ring stop that answers "what happened" is one. *)
+   the ring stop that answers "what happened" is one. Metrics is a deep-dive
+   telemetry surface that collapses onto Overview, off the Tab ring. *)
 let surface_ring_index (view : surface) =
   let family =
     match view with
@@ -2061,6 +2061,7 @@ let surface_ring_index (view : surface) =
     | Code -> Repositories
     | Resources | Tools -> Config
     | System_logs -> Acting
+    | Metrics -> Overview
     | v -> v
   in
   let rec find i = function
@@ -2547,6 +2548,27 @@ let memory_category_filter_label = function
   | Category_source -> "source"
   | Category_dropped -> "dropped"
 
+type memory_overview_sort =
+  | Mem_overview_facts
+  | Mem_overview_size
+  | Mem_overview_delta
+  | Mem_overview_state
+  | Mem_overview_name
+
+let memory_overview_sort_label = function
+  | Mem_overview_facts -> "Facts (Most)"
+  | Mem_overview_size -> "Size (Largest)"
+  | Mem_overview_delta -> "Delta (Recent changes)"
+  | Mem_overview_state -> "State (Attention first)"
+  | Mem_overview_name -> "Name (A-Z)"
+
+let next_memory_overview_sort = function
+  | Mem_overview_facts -> Mem_overview_size
+  | Mem_overview_size -> Mem_overview_delta
+  | Mem_overview_delta -> Mem_overview_state
+  | Mem_overview_state -> Mem_overview_name
+  | Mem_overview_name -> Mem_overview_facts
+
 type metrics_section =
   | Section_fleet
   | Section_resources
@@ -2563,9 +2585,9 @@ let prev_metrics_section = function
   | Section_tools -> Section_resources
 
 let metrics_section_label = function
-  | Section_fleet -> "Fleet & Velocity"
-  | Section_resources -> "Keeper Resources"
-  | Section_tools -> "Gate Queue"
+  | Section_fleet -> "Engine & Scheduler"
+  | Section_resources -> "Fleet & Velocity"
+  | Section_tools -> "Memory & Gate Safety"
 
 type state = {
   mutable metrics_scroll: int;
@@ -3188,6 +3210,7 @@ type state = {
   mutable memory_facts_scroll: int;
   mutable memory_facts_category: memory_category_filter;
   mutable memory_facts_sort: memory_sort_order;
+  mutable memory_overview_sort: memory_overview_sort;
   mutable repository_changes_open: bool;
   mutable repository_changes_scope: Tui_decode.repository_change_scope option;
   mutable repository_changes: Tui_decode.repository_change_snapshot option;
@@ -4241,6 +4264,7 @@ let create_state
   memory_facts_scroll = 0;
   memory_facts_category = Category_all;
   memory_facts_sort = Sort_recency;
+  memory_overview_sort = Mem_overview_facts;
   repository_changes_open = false;
   repository_changes_scope = None;
   repository_changes = None;
@@ -5664,6 +5688,9 @@ let palette_entries (state : state) =
   @ [ "go Resources", Palette_goto Resources ]
   @ [ "go Tools", Palette_goto Tools ]
   @ [ "go Logs", Palette_goto System_logs ]
+  @ [ "go Metrics", Palette_goto Metrics ]
+  @ [ "metrics", Palette_goto Metrics ]
+  @ [ "telemetry", Palette_goto Metrics ]
   @ [ "charts", Palette_goto Metrics ]
   @ [ "stats", Palette_goto Metrics ]
   @ List.map

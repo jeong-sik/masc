@@ -1,5 +1,5 @@
 name = "keeper_spawn_stop"
-description = "Signal a spawned process to end. Stopping one that has already ended is not an error, so there is no need to check first."
+description = "Signal a spawned process to end.\n\n Stopping one that has already ended is not an error, so there is no need to check first."
 additional_properties = false
 
 

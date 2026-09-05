@@ -389,12 +389,71 @@ let test_rows_and_header_share_one_grid () =
     check string "header names the text from cell 22" "CLAIM" (String.sub header 22 5)
 ;;
 
+let test_fleet_fact_row_line () =
+  let fact : Decode.memory_fact =
+    { mf_claim = "System uses Roger voice for Sangsu"
+    ; mf_category = "persona"
+    ; mf_origin = "sangsu · manual"
+    ; mf_first_seen = 100.0
+    ; mf_last_seen = 200.0
+    ; mf_memory_id = "mem-1"
+    ; mf_events = Decode.no_memory_fact_events
+    }
+  in
+  let row = Types.Memory_row_fact fact in
+  let line = Render_memory.memory_fact_row_line ~is_fleet:true ~cols:120 row in
+  check bool "fleet fact row line bounded" true (Layout.display_width line <= 120);
+  let stripped = Masc_tui_theme.strip_sgr line in
+  check bool "fleet fact row has sangsu tag" true (contains "sangsu" stripped);
+  check bool "fleet fact row has IDENTITY badge" true (contains "IDENTITY" stripped)
+;;
+
+let test_render_memory_body_sorting () =
+  let state = make_state () in
+  let k1 = make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:2048 in
+  let k2 = make_keeper_health ~keeper_id:"beta" ~facts:50 ~snapshot_bytes:1024 in
+  let health : Decode.memory_health_snapshot =
+    { mhs_generated_at = 1000.0
+    ; mhs_keepers = [ k1; k2 ]
+    ; mhs_total_facts = 60
+    ; mhs_total_observed_facts = 60
+    ; mhs_total_derived_facts = 0
+    ; mhs_total_support_invalidations = 0
+    ; mhs_total_snapshot_bytes = 3072
+    ; mhs_total_source_facts = 0
+    ; mhs_total_source_invalidations = 0
+    ; mhs_total_source_snapshot_bytes = 0
+    ; mhs_total_librarian_failures = 0
+    ; mhs_total_vision_ingest_errors = 0
+    ; mhs_total_read_errors = 0
+    ; mhs_total_source_read_errors = 0
+    ; mhs_warn_alerts = 0
+    ; mhs_error_alerts = 0
+    ; mhs_starving_keepers = 0
+    }
+  in
+  state.memory_health <- Some health;
+  state.memory_overview_sort <- Types.Mem_overview_facts;
+  let lines = ref [] in
+  Render_memory.render_memory_body
+    ~cols:100
+    ~budget:20
+    state
+    ~push:(fun s -> lines := s :: !lines)
+    ~push_styled:(fun ~style:_ s -> lines := s :: !lines)
+    ~push_selected:(fun s -> lines := s :: !lines)
+    ~push_divider:(fun () -> ())
+    ~push_empty:(fun () -> ());
+  check bool "render completed" true (List.length !lines > 0)
+;;
+
 let () =
   run "tui_render_memory"
     [ ( "age_label"
       , [ test_case "age_label_formatting" `Quick test_age_label ] )
     ; ( "row_lines"
       , [ test_case "fact_row" `Quick test_fact_row_line
+        ; test_case "fleet_fact_row" `Quick test_fleet_fact_row_line
         ; test_case "source_fact_row" `Quick test_source_fact_row_line
         ; test_case "invalidation_row" `Quick test_invalidation_row_line
         ; test_case "rows_and_header_share_one_grid" `Quick test_rows_and_header_share_one_grid
@@ -407,6 +466,7 @@ let () =
     ; ( "render_body"
       , [ test_case "memory_body_budget" `Quick test_render_memory_body
         ; test_case "memory_body_with_keepers" `Quick test_render_memory_body_with_keepers
+        ; test_case "memory_body_sorting" `Quick test_render_memory_body_sorting
         ; test_case "memory_body_cursor_clamping" `Quick test_render_memory_body_cursor_clamping
         ; test_case "memory_facts_body" `Quick test_render_memory_facts_body
         ] )

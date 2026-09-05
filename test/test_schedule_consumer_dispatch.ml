@@ -1378,7 +1378,7 @@ let test_keeper_wake_durable_state_failure_retries_same_occurrence () =
       "schedule-keeper"
   in
   mkdir_p keeper_owner_path;
-  let queue_path = Filename.concat keeper_owner_path "event-queue-v18.json" in
+  let queue_path = Filename.concat keeper_owner_path "event-queue-v19.json" in
   mkdir_p queue_path;
   let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
@@ -1500,7 +1500,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
           (Filename.concat
              (Common.keepers_runtime_dir_of_base ~base_path)
              keeper_name)
-          "event-queue-transitions-v7.jsonl"
+          "event-queue-transitions-v8.jsonl"
       in
       check bool "cancellation WAL survives until projection" true
         (Sys.file_exists transition_wal_path
@@ -1861,6 +1861,8 @@ let test_retry_before_terminal_reconciliation_retains_wake () =
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
      fail "schedule selection was reconciled as a spent grant replay"
+   | Ok (Keeper_heartbeat_stimulus_intake.Absent_grant_retired { approval_id; _ }) ->
+     failf "a resolution with a durable record was retired as absent: %s" approval_id
    | Error detail -> fail detail);
   check int "retry wake remains pending" 1
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
@@ -2407,6 +2409,8 @@ let test_consumed_grant_without_outcome_stays_actionable () =
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
      fail "consumed replay was discarded before its outcome became durable"
+   | Ok (Keeper_heartbeat_stimulus_intake.Absent_grant_retired { approval_id; _ }) ->
+     failf "a resolution with a durable record was retired as absent: %s" approval_id
    | Error detail -> fail detail);
   check int "repairable replay stays queued" 1
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
@@ -2460,6 +2464,8 @@ let test_consumed_grant_with_outcome_retires_without_a_turn () =
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
      fail "replay drained before the continuation turn was recorded"
+   | Ok (Keeper_heartbeat_stimulus_intake.Absent_grant_retired { approval_id; _ }) ->
+     failf "a resolution with a durable record was retired as absent: %s" approval_id
    | Error detail -> fail detail);
   check int "replay waits for continuation receipt" 1
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
@@ -2486,6 +2492,8 @@ let test_consumed_grant_with_outcome_retires_without_a_turn () =
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged -> ()
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable ->
      fail "durable replay outcome was left at the queue head"
+   | Ok (Keeper_heartbeat_stimulus_intake.Absent_grant_retired { approval_id; _ }) ->
+     failf "a resolution with a durable record was retired as absent: %s" approval_id
    | Error detail -> fail detail);
   check int "spent grant replay left the queue" 0
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
@@ -2581,6 +2589,8 @@ let test_rejected_resolution_projection_precedes_turn_intake () =
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
      fail "rejection was drained before its Keeper turn consumed it"
+   | Ok (Keeper_heartbeat_stimulus_intake.Absent_grant_retired { approval_id; _ }) ->
+     failf "a resolution with a durable record was retired as absent: %s" approval_id
    | Error detail -> fail detail);
   check int "rejection owns one visible resolution receipt" 1
     (approval_lifecycle_phases ~base_path ~keeper_name |> List.length);
@@ -2611,6 +2621,8 @@ let test_rejected_resolution_projection_precedes_turn_intake () =
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged -> ()
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable ->
      fail "recorded rejection continuation was delivered to a second turn"
+   | Ok (Keeper_heartbeat_stimulus_intake.Absent_grant_retired { approval_id; _ }) ->
+     failf "a resolution with a durable record was retired as absent: %s" approval_id
    | Error detail -> fail detail);
   check int "recorded rejection continuation drains after restart" 0
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
@@ -2636,6 +2648,8 @@ let test_unconsumed_grant_replay_stays_actionable () =
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
      fail "an unconsumed grant was discarded before its Keeper could use it"
+   | Ok (Keeper_heartbeat_stimulus_intake.Absent_grant_retired { approval_id; _ }) ->
+     failf "a resolution with a durable record was retired as absent: %s" approval_id
    | Error detail -> fail detail);
   check int "unconsumed grant replay stays queued" 1
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name

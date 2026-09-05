@@ -1,6 +1,8 @@
 name = "masc_goal_upsert"
 description = """
-Create or update flat Goal metadata. Creation requires a \
+Create or update flat Goal metadata.
+
+Creation requires a \
 measurable success condition: metric and target_value (RFC-0387 B1). Use \
 masc_goal_transition for lifecycle changes."""
 additional_properties = false

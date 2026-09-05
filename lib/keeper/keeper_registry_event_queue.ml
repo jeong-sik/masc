@@ -673,6 +673,15 @@ let ack_pending_result ~base_path name ~selection =
     ()
 ;;
 
+let note_checkpoint_retention_result ~base_path name ~selection () =
+  Keeper_event_queue_persistence.note_checkpoint_retention_result
+    ~base_path
+    ~keeper_name:name
+    ~selection
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+;;
+
 let cancel_pending_accepted_result
       ~base_path
       name

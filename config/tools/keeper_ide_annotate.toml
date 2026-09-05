@@ -1,6 +1,8 @@
 name = "keeper_ide_annotate"
 description = """
-Attach a keeper-authored annotation to a source file line range. Use this to \
+Attach a keeper-authored annotation to a source file line range.
+
+Use this to \
 leave durable IDE context linked to an optional goal, task, or opaque \
 external reference. codebase, file_path, line_start, and content are \
 required. Hand codebase and file_path back exactly as the IDE co-view \

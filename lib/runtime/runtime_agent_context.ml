@@ -84,14 +84,17 @@ type config =
   ; model_input_projection : Agent_core.Agent.model_input_projection option
     (** Caller-owned projection applied only to provider-bound messages.
         Agent state and checkpoints retain their canonical persisted form. *)
+  ; serialization_executor : Agent_core.Agent.serialization_executor option
+    (** Runs each provider request's body serialisation. MASC hands the domain
+        pool so the keeper's fiber scheduler is not held for that walk. *)
   ; pre_dispatch_serialization_observer :
       Agent_core.Agent.pre_dispatch_serialization_observer option
     (** Caller-owned observer for the exact serialized request body, invoked by
         AGENT_CORE after every stream-field injection and after the serialized-body
         admission check. This is the only place MASC can read the byte quantity
         the provider actually admits against [max_request_body_bytes]:
-        [Keeper_context_core_accessors.serialize_context] measures
-        [{system_prompt, messages}] and excludes tool schemas, and a failed
+        the canonical checkpoint's bytes measure
+        [{system_prompt, messages}] and exclude tool schemas, and a failed
         request is the only path that reports a size today. The observation is
         diagnostic and non-authoritative — AGENT_CORE reports a rejection or a raised
         callback as typed failure evidence without rewriting the result. *)
@@ -161,6 +164,7 @@ let default_config
   ; initial_messages = []
   ; model_input_projection = None
   ; pre_dispatch_serialization_observer = None
+  ; serialization_executor = None
   ; raw_trace = None
   ; trace_link = None
   ; enable_thinking = None
@@ -334,6 +338,11 @@ let builder
     match config.pre_dispatch_serialization_observer with
     | Some observe ->
       Agent_core.Builder.with_pre_dispatch_serialization_observer observe builder
+    | None -> builder
+  in
+  let builder =
+    match config.serialization_executor with
+    | Some executor -> Agent_core.Builder.with_serialization_executor executor builder
     | None -> builder
   in
   let builder =

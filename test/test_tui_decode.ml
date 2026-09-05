@@ -1666,6 +1666,80 @@ let skills_catalog_json ?(usage = true) ?(flow = true) () =
               ] ] )
     ]
 
+(* The discovery roots ride the same response the surfaces do, and the
+   projection dropped them: a Skill that never loaded had nowhere on screen
+   to say which root was looked at, or that the root was not there. *)
+let test_decode_skills_catalog_reads_the_discovery_roots () =
+  let snapshot =
+    `Assoc
+      [ "snapshot_revision", `String "snapshot-rev1"
+      ; "catalog_revision", `String "catalog-rev1"
+      ; ( "config"
+        , `Assoc
+            [ "kind", `String "configured"
+            ; "revision", `String "4e96407eeb70ddd0"
+            ; "resource_read_max_bytes", `Int 65536
+            ] )
+      ; ( "sources"
+        , `List
+            [ `Assoc
+                [ "id", `String "project-masc"
+                ; "anchor", `String "base-path"
+                ; "path", `String ".masc/skills"
+                ; "access", `String "read-write"
+                ; ( "observation"
+                  , `Assoc
+                      [ "kind", `String "ready"; "candidates", `Int 13 ] )
+                ]
+            ; `Assoc
+                [ "id", `String "user-agents"
+                ; "anchor", `String "user-home"
+                ; "path", `String ".agents/skills"
+                ; "access", `String "read-only"
+                ; "observation", `Assoc [ "kind", `String "missing" ]
+                ]
+            ] )
+      ; "skills", `List []
+      ; "effective_skills", `List []
+      ; "shadows", `List []
+      ; "rejections", `List []
+      ]
+  in
+  let payload =
+    `Assoc
+      [ "schema", `String "masc.skill-snapshot/v1"
+      ; "state", `String "ready"
+      ; "snapshot", snapshot
+      ; "surfaces", `List []
+      ]
+  in
+  match Tui_decode.decode_skills_catalog payload with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok catalog ->
+    (match catalog.Tui_decode.sc_config with
+     | Some
+         (Tui_decode.Skill_config_configured
+            { revision; resource_read_max_bytes }) ->
+       Alcotest.(check string) "config revision" "4e96407eeb70ddd0" revision;
+       Alcotest.(check (option int))
+         "resource read cap" (Some 65536) resource_read_max_bytes
+     | _ -> Alcotest.fail "a configured Skill section was read as something else");
+    (match catalog.Tui_decode.sc_sources with
+     | [ first; second ] ->
+       Alcotest.(check string) "first root" "project-masc" first.Tui_decode.scso_id;
+       Alcotest.(check (option string))
+         "first path" (Some ".masc/skills") first.Tui_decode.scso_path;
+       Alcotest.(check string)
+         "first access" "read-write" first.Tui_decode.scso_access;
+       Alcotest.(check bool) "first is ready with its candidate count" true
+         (first.Tui_decode.scso_observation = Tui_decode.Skill_source_ready 13);
+       (* A root that is not there is the answer to "why is my Skill not
+          loaded", so it has to survive the projection too. *)
+       Alcotest.(check bool) "second is missing" true
+         (second.Tui_decode.scso_observation = Tui_decode.Skill_source_missing)
+     | sources ->
+       Alcotest.failf "expected both roots, got %d" (List.length sources))
+
 let test_decode_skills_catalog_reads_usage_and_flow () =
   match Tui_decode.decode_skills_catalog (skills_catalog_json ()) with
   | Error err -> Alcotest.failf "decode failed: %s" err
@@ -5257,6 +5331,65 @@ let test_decode_server_identity_takes_an_integer_age () =
     Alcotest.(check (option (float 0.001))) "an int age still reads"
       (Some 60.0) identity.Tui_decode.sid_binary_commit_age_s
 
+let test_decode_server_identity_reads_telemetry () =
+  let json =
+    `Assoc
+      [ ("status", `String "ok")
+      ; ("version", `String "0.24.0")
+      ; ("uptime", `String "2h 15m")
+      ; ("sse_clients", `Int 3)
+      ; ( "gc"
+        , `Assoc
+            [ ("heap_words", `Int 5242880)
+            ; ("live_words", `Int 2621440)
+            ; ("minor_heap_size", `Int 4194304)
+            ; ("space_overhead", `Int 80)
+            ; ("minor_collections", `Int 120)
+            ; ("major_collections", `Int 5)
+            ; ("compactions", `Int 0)
+            ; ("forced_major_collections", `Int 0)
+            ; ("minor_words", `Float 83886080.0)
+            ; ("promoted_words", `Float 524288.0)
+            ; ("major_words", `Float 1048576.0)
+            ] )
+      ; ( "scheduler"
+        , `Assoc
+            [ ("probe", `String "running")
+            ; ("samples", `Int 600)
+            ; ("p50_ms", `Float 0.85)
+            ; ("p95_ms", `Float 1.42)
+            ; ("p99_ms", `Float 2.10)
+            ; ("max_ms", `Float 3.65)
+            ; ("mean_ms", `Float 0.92)
+            ; ("stalls", `Int 0)
+            ; ("pool_domains", `Int 15)
+            ] )
+      ]
+  in
+  match Tui_decode.decode_server_identity json with
+  | Error detail -> Alcotest.fail detail
+  | Ok identity ->
+      Alcotest.(check (option string)) "uptime reads" (Some "2h 15m") identity.Tui_decode.sid_uptime;
+      Alcotest.(check (option int)) "sse_clients reads" (Some 3) identity.Tui_decode.sid_sse_clients;
+      (match identity.Tui_decode.sid_gc with
+      | None -> Alcotest.fail "expected sid_gc"
+      | Some gc ->
+          Alcotest.(check int) "heap_words" 5242880 gc.Tui_decode.sgc_heap_words;
+          Alcotest.(check int) "live_words" 2621440 gc.Tui_decode.sgc_live_words;
+          Alcotest.(check int) "minor_heap_size" 4194304 gc.Tui_decode.sgc_minor_heap_size;
+          Alcotest.(check int) "space_overhead" 80 gc.Tui_decode.sgc_space_overhead;
+          Alcotest.(check int) "minor_collections" 120 gc.Tui_decode.sgc_minor_collections;
+          Alcotest.(check int) "major_collections" 5 gc.Tui_decode.sgc_major_collections);
+      (match identity.Tui_decode.sid_scheduler with
+      | None -> Alcotest.fail "expected sid_scheduler"
+      | Some sched ->
+          Alcotest.(check string) "probe" "running" sched.Tui_decode.ssch_probe;
+          Alcotest.(check int) "samples" 600 sched.Tui_decode.ssch_samples;
+          Alcotest.(check (option int)) "pool_domains" (Some 15) sched.Tui_decode.ssch_pool_domains;
+          Alcotest.(check int) "stalls" 0 sched.Tui_decode.ssch_stalls;
+          Alcotest.(check (float 0.01)) "p50_ms" 0.85 sched.Tui_decode.ssch_p50_ms;
+          Alcotest.(check (float 0.01)) "p95_ms" 1.42 sched.Tui_decode.ssch_p95_ms)
+
 (* GET /api/v1/prompts. Shaped from the live server: sixteen rows, each
    carrying the file value, any override, and what is effective. The row has
    to survive a prompt with no file on disk and one with no description --
@@ -7737,6 +7870,8 @@ let () =
           test_decode_server_identity_reads_the_worktree_verdict;
         Alcotest.test_case "reads the startup readiness" `Quick
           test_decode_server_identity_reads_the_startup_readiness;
+        Alcotest.test_case "reads telemetry" `Quick
+          test_decode_server_identity_reads_telemetry;
       ] );
     ( "bounded_parent_depth",
       [
@@ -7809,6 +7944,8 @@ let () =
       [
         Alcotest.test_case "reads usage rows and the execution flow" `Quick
           test_decode_skills_catalog_reads_usage_and_flow;
+        Alcotest.test_case "reads the discovery roots and the config" `Quick
+          test_decode_skills_catalog_reads_the_discovery_roots;
         Alcotest.test_case "keeps the profile while usage and flow are empty" `Quick
           test_decode_skills_catalog_tolerates_empty_usage_and_flow;
         Alcotest.test_case "rejects a non-string kind" `Quick

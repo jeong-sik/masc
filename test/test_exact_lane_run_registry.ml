@@ -755,6 +755,53 @@ let test_summary_carries_no_payload () =
   check bool "summary still identifies the run" true (Option.is_some (field "run_id" summary))
 ;;
 
+(* The projection dropping the payload was never the question -- it already
+   did. What held 498 MB of live heap on this fleet was the store underneath
+   it keeping every retained row whole, to serve a detail view that reads one
+   at a time (measured 2026-09-05).
+
+   This weighs the store rather than reading a field, because a field can be
+   `Null while the bytes are still reachable from somewhere else. *)
+let test_the_store_does_not_hold_the_payloads_it_retains () =
+  let path = Filename.temp_file "exact-lane-weight-" ".jsonl" in
+  remove_if_exists path;
+  let registry = R.create ~path () in
+  let payload_bytes = 200_000 in
+  let runs = 40 in
+  for i = 1 to runs do
+    let run_id = Printf.sprintf "run-%d" i in
+    R.register_running
+      registry
+      ~run_id
+      ~lane:R.Librarian
+      ~actor:"keeper-a"
+      ~started_at:(float_of_int i)
+      ~input:(R.Exact_input (`Assoc [ "prompt", `String (String.make payload_bytes 'A') ]));
+    mark_completed_exn
+      registry
+      ~run_id
+      ~outcome:R.Succeeded
+      ~elapsed_s:1.0
+      ~output:(`Assoc [ "reply", `String (String.make payload_bytes 'B') ])
+  done;
+  Gc.full_major ();
+  let held = Obj.reachable_words (Obj.repr registry) * (Sys.word_size / 8) in
+  let written = runs * payload_bytes * 2 in
+  check bool
+    (Printf.sprintf
+       "the store holds %d bytes for %d bytes of payload"
+       held
+       written)
+    true
+    (held < written / 10);
+  (* And the payloads are still there to be read, one at a time. *)
+  check bool "a detail read still gets the whole input" true
+    (match (R.get registry ~run_id:"run-7" |> Option.get).R.input with
+     | R.Exact_input (`Assoc [ "prompt", `String s ]) -> String.length s = payload_bytes
+     | _ -> false);
+  remove_if_exists path
+;;
+
 let test_projected_runs_omit_payload_in_memory () =
   let path = Filename.temp_file "exact-lane-proj-" ".jsonl" in
   remove_if_exists path;
@@ -849,5 +896,7 @@ let () =
         ; test_case "summary carries no payload" `Quick test_summary_carries_no_payload
         ; test_case "projected runs omit payload in memory" `Quick
             test_projected_runs_omit_payload_in_memory
+        ; test_case "the store does not hold the payloads it retains" `Quick
+            test_the_store_does_not_hold_the_payloads_it_retains
         ] )
     ]

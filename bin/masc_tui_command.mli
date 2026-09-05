@@ -19,6 +19,10 @@ type t =
     }
   | Task_missing_title  (** [/task] with nothing after it on the line. *)
   | Help  (** [/help] — draw the command list into the pane. *)
+  | About
+      (** [/about] or [/splash] — display MASC Horned Reaper ASCII emblem and system telemetry. *)
+  | Open_metrics
+      (** [/metrics] or [/telemetry] — display multicore engine telemetry, scheduler latency, and fleet metrics. *)
   | Open_settings
       (** [/settings] — open the type-aware Runtime parameters pane. *)
   | Open_diff
@@ -45,6 +49,9 @@ type t =
   | Cycle_memory
       (** [/memory] — cycle Librarian/Memory journal rows: summary, full,
           hidden. Ctrl-N walks the same cycle. *)
+  | Open_fleet_memory
+      (** [/fleet-memory] — browse the facts of every Keeper in the fleet at
+          once. [a] on the Memory overview opens the same screen. *)
   | Find_in_chat of string
       (** [/find <text>] — put the pane on the newest message holding [text].
 
@@ -154,6 +161,9 @@ val resolve_keeper_name : names:string list -> string -> keeper_match
 val parse : string -> t
 (** Read the composer's text. Leading blanks are not stripped before the
     slash is looked for: an operator who types a space first meant text. *)
+
+val about_banner : ?theme_name:string -> ?active_keepers:int -> unit -> string
+(** Horned Reaper ASCII splash emblem and live telemetry card. *)
 
 val task_message : task_id:string -> title:string -> body:string -> string
 (** The message handed to the keeper once its task exists: the task id in

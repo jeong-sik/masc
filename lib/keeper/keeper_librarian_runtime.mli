@@ -83,8 +83,13 @@ module For_testing : sig
     -> ( (Keeper_librarian.selection * Yojson.Safe.t) * string * int option
        , classified_error )
        result
-  (** The classified exact-output pass, exposed so the cli lane-slot fallback
-      can be driven with an injected runner and no live provider. The string
-      in the success triple is the slot that answered — a catalog slot id or
-      a cli runtime id. *)
+
+  val record_failure
+    :  keepers_dir:string
+    -> keeper_id:string
+    -> trace_id:string
+    -> kind:Keeper_memory_os_current.librarian_failure_kind
+    -> detail:string
+    -> cadence_deferred:bool
+    -> unit
 end

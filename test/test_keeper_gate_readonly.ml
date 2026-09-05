@@ -525,6 +525,117 @@ let test_auto_judge_allows_microvm_observation_without_queueing () =
   | Keeper_gate.Unavailable _ -> fail "microvm observation request made the queue unavailable"
 ;;
 
+(* ── the box between the tables and the judge (RFC-0422) ──────────────── *)
+
+(* An argv the tables do not answer, on the profile the fleet runs. *)
+let boxed_request base_path =
+  gate_request ~sandbox_profile:microvm base_path [ "python3"; "-c"; "print(1)" ]
+;;
+
+let deferred_to_the_judge label = function
+  | Keeper_gate.Deferred { reason = Judge_requested; _ }
+  | Keeper_gate.Deferred { reason = Auto_judge_unavailable _; _ } -> ()
+  | Keeper_gate.Allow { source; _ } ->
+    failf "%s was allowed through %s" label (Keeper_gate.authorization_source_to_string source)
+  | Keeper_gate.Deferred { reason = Human_requested; _ } ->
+    failf "%s went to the human queue, not the judge lane" label
+  | Keeper_gate.Deferred { reason = Mode_state_invalid detail; _ } ->
+    failf "%s: mode_state_invalid: %s" label detail
+  | Keeper_gate.Unavailable _ -> failf "%s made the queue unavailable" label
+;;
+
+(* Exit 0 in the box is the whole criterion: the kernel refused every write
+   outside the scratch and every socket, so the run left nothing behind and
+   its output is the answer. No queue entry, and the source says the box. *)
+let test_auto_judge_allows_a_clean_observe_run () =
+  with_auto_judge @@ fun base_path ->
+  let asked = ref 0 in
+  match
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      ~observe:(fun () ->
+        incr asked;
+        Keeper_gate.Observed_clean { run = Keeper_types_profile_sandbox.Observe })
+      (boxed_request base_path)
+  with
+  | Keeper_gate.Allow { source = Observed_in_box Keeper_types_profile_sandbox.Observe; _ } ->
+    check int "the box was asked exactly once" 1 !asked
+  | Keeper_gate.Allow { source; _ } ->
+    failf "a clean observe run was allowed through the wrong source: %s"
+      (Keeper_gate.authorization_source_to_string source)
+  | Keeper_gate.Deferred _ -> fail "a clean observe run was deferred"
+  | Keeper_gate.Unavailable _ -> fail "a clean observe run made the queue unavailable"
+;;
+
+(* A write the box refused ends non-zero. That is not an effect, and it is
+   not an answer either: the request keeps the judge it would have had. *)
+let test_auto_judge_defers_a_refused_observe_run () =
+  with_auto_judge @@ fun base_path ->
+  let stderr = "sh: 1: cannot create w: Permission denied" in
+  let decision =
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      ~observe:(fun () ->
+        Keeper_gate.Observed_refused { status = Unix.WEXITED 2; stderr })
+      (boxed_request base_path)
+  in
+  deferred_to_the_judge "a refused observe run" decision;
+  (* And the judge is shown what the box refused: the row the deferral wrote
+     carries the status and the program's own stderr (RFC-0422 §3.3). *)
+  match decision with
+  | Keeper_gate.Deferred { approval_id; _ } ->
+    (match Keeper_approval_queue.get_pending_entry_for_workspace ~base_path ~id:approval_id with
+     | Ok (Some { observation = Some refusal; _ }) ->
+       check bool "exit 2 on the row" true
+         (refusal.observed_status = Keeper_approval_queue_rules_types.Observed_exit 2);
+       check string "the program's stderr on the row" stderr refusal.observed_stderr;
+       check int "nothing cut at this size" 0 refusal.observed_stderr_omitted_bytes
+     | Ok (Some { observation = None; _ }) -> fail "the row carries no observation"
+     | Ok None -> fail "the deferral wrote no row"
+     | Error error -> fail (Keeper_approval_queue.storage_error_to_string error))
+  | Keeper_gate.Allow _ | Keeper_gate.Unavailable _ -> ()
+;;
+
+(* No box -- a Docker guest, a shim that predates it -- is the world before
+   this stage: the judge, never an unboxed run. *)
+let test_auto_judge_defers_when_no_box_can_be_built () =
+  with_auto_judge @@ fun base_path ->
+  Keeper_gate.decide
+    ~keeper_always_allow:false
+    ~observe:(fun () ->
+      Keeper_gate.Observation_unavailable
+        "docker_observe_unsupported: a Docker guest runs no masc-exec-shim")
+    (boxed_request base_path)
+  |> deferred_to_the_judge "a request with no box"
+;;
+
+(* The order is the point. A table answer costs nothing and comes first; an
+   always-allowed keeper never pays a box run at all. *)
+let test_the_box_is_asked_only_after_the_tables_decline () =
+  with_auto_judge @@ fun base_path ->
+  let never () = fail "the box was asked for a request the tables already answered" in
+  (match
+     Keeper_gate.decide
+       ~keeper_always_allow:false
+       ~observe:never
+       (gate_request ~sandbox_profile:microvm base_path [ "ls"; "-la" ])
+   with
+   | Keeper_gate.Allow { source = Readonly_sandbox; _ } -> ()
+   | Keeper_gate.Allow { source; _ } ->
+     failf "table observation allowed through %s" (Keeper_gate.authorization_source_to_string source)
+   | Keeper_gate.Deferred _ -> fail "table observation was deferred"
+   | Keeper_gate.Unavailable _ -> fail "table observation made the queue unavailable");
+  match
+    Keeper_gate.decide ~keeper_always_allow:true ~observe:never (boxed_request base_path)
+  with
+  | Keeper_gate.Allow { source = Keeper_always_allow; _ } -> ()
+  | Keeper_gate.Allow { source; _ } ->
+    failf "an always-allowed keeper was allowed through %s"
+      (Keeper_gate.authorization_source_to_string source)
+  | Keeper_gate.Deferred _ -> fail "an always-allowed keeper was deferred"
+  | Keeper_gate.Unavailable _ -> fail "an always-allowed keeper made the queue unavailable"
+;;
+
 (* Remote_ssh is transport-only and inherits the host network, so even an
    observation-shaped command stays with the judge end to end. *)
 let test_auto_judge_defers_remote_ssh_observation_to_the_judge () =
@@ -630,6 +741,22 @@ let () =
             "auto_judge allows microvm observation without queueing"
             `Quick
             test_auto_judge_allows_microvm_observation_without_queueing
+        ; test_case
+            "auto_judge allows a clean observe run"
+            `Quick
+            test_auto_judge_allows_a_clean_observe_run
+        ; test_case
+            "auto_judge defers a refused observe run"
+            `Quick
+            test_auto_judge_defers_a_refused_observe_run
+        ; test_case
+            "auto_judge defers when no box can be built"
+            `Quick
+            test_auto_judge_defers_when_no_box_can_be_built
+        ; test_case
+            "the box is asked only after the tables decline"
+            `Quick
+            test_the_box_is_asked_only_after_the_tables_decline
         ; test_case
             "auto_judge defers remote_ssh observation to the judge"
             `Quick

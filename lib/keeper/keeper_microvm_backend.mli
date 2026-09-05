@@ -64,6 +64,15 @@ type guest_constraint =
   | Remove_on_exit
       (** The runtime removes the guest when its process exits, so a guest
           left behind by a host reboot does not hold the name. *)
+  | Scratch_tmpfs
+      (** An in-memory filesystem at {!scratch_guest_root}, so the shim has
+          somewhere to make a boxed request's scratch while the rootfs stays
+          read-only (RFC-0422). *)
+
+val scratch_guest_root : string
+(** [/tmp]: the path the boot mounts the scratch filesystem at and the
+    [scratch_root] the shim's config names. One value, because the mount flag
+    and the config are two spellings of the same place. *)
 
 val all_guest_constraints : guest_constraint list
 (** Every guarantee, so a caller asks for the set rather than typing it and
@@ -75,12 +84,16 @@ val guest_constraint_to_string : guest_constraint -> string
 type constraint_class =
   | Isolation
   | Lifecycle
+  | Observation
 
 val constraint_class : guest_constraint -> constraint_class
 (** [Isolation] for a guarantee whose absence weakens the sandbox the profile
     was chosen for; the boot refuses rather than run without one. [Lifecycle]
     for one teardown covers by other means; the boot records the drop on the
-    guest and continues. *)
+    guest and continues. [Observation] for one only the observe lane needs:
+    without it the shim answers an observe request with
+    [observe_scratch_error] and the gate hands that request to the judge, so
+    the boot records the drop the same way and continues. *)
 
 type constraint_argv =
   | Expressed of string list  (** The tokens this runtime spells it with. *)

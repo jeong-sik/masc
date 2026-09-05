@@ -24,6 +24,36 @@ type network_mode =
           ignores advice. *)
 [@@deriving tla]
 
+(** Which box the executor builds around a [tool_execute] the observation
+    tables did not answer, before the judge is asked (RFC-0422 §3.4).
+
+    [Observe] refuses every write outside a scratch and every socket, so a
+    run that exits 0 is proven effect-free. [Guest_local] refuses sockets
+    only: writes land inside the guest, on the keeper's own volume, which a
+    microvm cannot leave (RFC-0422 §1.2) — so [dune build], [mkdir] and a
+    local [git checkout] run without the judge, at the cost of the judge no
+    longer standing between the keeper and its own tree. A remote_ssh
+    endpoint takes [Guest_local] only when its operator declared the account
+    home private ({!Exec_ssh_endpoint.t.private_home}). *)
+type observation_run =
+  | Observe
+  | Guest_local
+
+val observation_run_to_string : observation_run -> string
+val observation_run_of_string : string -> observation_run option
+val all_observation_runs : observation_run list
+val valid_observation_run_strings : string list
+
+val default_observation_run : observation_run
+(** [Observe]: the box that proves the most. *)
+
+val observation_run_rejection : sandbox_profile -> observation_run -> string option
+(** [None] when a keeper may hold that profile and that box together, and
+    [Some message] naming the refusal when it may not. A Docker guest runs no
+    shim, so it has no box to choose and refuses both. Whether a remote_ssh
+    endpoint may take [Guest_local] is the endpoint's declaration, not the
+    profile's, and is answered where the route is built. *)
+
 val sandbox_profile_to_string : sandbox_profile -> string
 val sandbox_profile_of_string : string -> sandbox_profile option
 val all_sandbox_profiles : sandbox_profile list

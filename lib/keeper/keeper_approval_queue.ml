@@ -76,6 +76,12 @@ type grant_error =
   | Grant_replay_not_consumed of string
   | Grant_replay_outcome_conflict of string
 
+type resolution_absence =
+  | Resolution_missing
+  | Resolution_still_pending
+  | Resolution_not_approved
+  | Resolution_workspace_mismatch of { stored_base_path : string }
+
 type approved_resolution_state =
   | Resolution_unconsumed
   | Resolution_consumed
@@ -297,6 +303,26 @@ let grant_error_to_string = function
       approval_id
 ;;
 
+let resolution_absence_of_grant_error = function
+  | Grant_resolution_missing _ -> Some Resolution_missing
+  | Grant_still_pending _ -> Some Resolution_still_pending
+  | Grant_resolution_not_approved _ -> Some Resolution_not_approved
+  | Grant_workspace_mismatch { stored_base_path; _ } ->
+    Some (Resolution_workspace_mismatch { stored_base_path })
+  | Grant_store_unavailable _
+  | Grant_replay_projection_unavailable _
+  | Grant_replay_not_consumed _
+  | Grant_replay_outcome_conflict _ -> None
+;;
+
+let resolution_absence_to_string = function
+  | Resolution_missing -> "resolution_missing"
+  | Resolution_still_pending -> "resolution_still_pending"
+  | Resolution_not_approved -> "resolution_not_approved"
+  | Resolution_workspace_mismatch { stored_base_path } ->
+    "resolution_workspace_mismatch:" ^ stored_base_path
+;;
+
 let install_error_to_string = function
   | Install_storage_failed error -> storage_error_to_string error
 ;;
@@ -504,6 +530,10 @@ let pending_entry_to_yojson
     ; ( "request_context_version"
       , match request_context with
         | Some _ -> `Int exact_request_context_version
+        | None -> `Null )
+    ; ( "observation"
+      , match entry.observation with
+        | Some refusal -> observed_refusal_to_yojson refusal
         | None -> `Null )
     ; "task_id", Json_util.string_opt_to_json entry.task_id
     ; "goal_id", Json_util.string_opt_to_json entry.goal_id
@@ -1151,6 +1181,7 @@ let pending_entry_of_yojson ~base_path json =
           ; "turn_id"
           ; "request_context"
           ; "request_context_version"
+          ; "observation"
           ; "task_id"
           ; "goal_id"
           ; "continuation_channel"
@@ -1203,6 +1234,14 @@ let pending_entry_of_yojson ~base_path json =
              "%s.request_context_version must be an integer or null"
              surface)
     in
+    let* observation =
+      match List.assoc_opt "observation" fields with
+      | None | Some `Null -> Ok None
+      | Some json ->
+        (match observed_refusal_of_yojson json with
+         | Ok refusal -> Ok (Some refusal)
+         | Error detail -> Error (Printf.sprintf "%s.%s" surface detail))
+    in
     let* task_id = optional_string ~surface "task_id" fields in
     let* goal_id = optional_string ~surface "goal_id" fields in
     let* continuation_json = required_member ~surface "continuation_channel" fields in
@@ -1237,6 +1276,7 @@ let pending_entry_of_yojson ~base_path json =
       ; requested_at
       ; turn_id
       ; request_context
+      ; observation
       ; task_id
       ; goal_id
       ; continuation_channel
@@ -2398,6 +2438,7 @@ let create_entry
       ~input
       ?turn_id
       ?request_context
+      ?observation
       ?task_id
       ?goal_id
       ~continuation_channel
@@ -2414,6 +2455,7 @@ let create_entry
   ; requested_at = Unix.gettimeofday ()
   ; turn_id
   ; request_context
+  ; observation
   ; task_id
   ; goal_id
     ; continuation_channel
@@ -3886,6 +3928,7 @@ let submit_pending
       ~base_path
       ?turn_id
       ?request_context
+      ?observation
       ?task_id
       ?goal_id
       ?continuation_channel
@@ -3951,6 +3994,7 @@ let submit_pending
                  ~input
                  ?turn_id
               ?request_context
+              ?observation
               ?task_id
               ?goal_id
               ~continuation_channel

@@ -703,7 +703,10 @@ let strip_generated_at_iso json =
   | `Assoc fields ->
     `Assoc
       (List.map
-         (fun (k, v) -> if String.equal k "generated_at_iso" then (k, `Null) else (k, v))
+         (fun (k, v) ->
+           if String.equal k "generated_at_iso" || String.equal k "generated_at"
+           then (k, `Null)
+           else (k, v))
          fields)
   | other -> other
 
@@ -976,6 +979,7 @@ let test_default_projections_no_longer_build_the_aggregate () =
       ignore (Activity_graph.json_response config ~after_seq:0 ~limit:1000 ());
       ignore (Activity_graph.graph_json config ~limit:500 ~timeline_limit:80 ());
       ignore (Activity_graph.agent_spans_json config ~limit:500 ());
+      ignore (Activity_graph.default_projections config);
       check int "unfiltered projections build no aggregate" 0
         (Activity_graph.For_testing.all_events_rebuild_count ());
       ignore
@@ -983,6 +987,107 @@ let test_default_projections_no_longer_build_the_aggregate () =
            ~keep:(fun _ -> true) ());
       check int "a filtered read still builds it" 1
         (Activity_graph.For_testing.all_events_rebuild_count ()))
+
+let test_default_projections_single_pass_matches_individual_outputs () =
+  with_config (fun config ->
+      Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+      emit_n config 15;
+      ignore
+        (Activity_graph.emit config ~kind:"task.claimed"
+           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~subject:(Activity_graph.entity ~kind:"task" "task-001")
+           ~payload:(`Assoc [ ("task_id", `String "task-001") ])
+           ());
+      ignore
+        (Activity_graph.emit config ~kind:"task.done"
+           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~subject:(Activity_graph.entity ~kind:"task" "task-001")
+           ~payload:(`Assoc [ ("task_id", `String "task-001") ])
+           ());
+      let single = Activity_graph.default_projections config in
+      let expected_events =
+        Activity_graph.json_response config ~kinds:[] ~after_seq:0 ~limit:1000 ()
+      in
+      let expected_graph =
+        Activity_graph.graph_json config ~kinds:[] ~limit:500 ~timeline_limit:80 ()
+      in
+      let expected_swimlane =
+        Activity_graph.agent_spans_json config ~limit:500 ()
+      in
+      check string "events_default matches structurally"
+        (Yojson.Safe.to_string (strip_generated_at_iso expected_events))
+        (Yojson.Safe.to_string (strip_generated_at_iso single.events_default));
+      check string "graph_default matches structurally"
+        (Yojson.Safe.to_string (strip_generated_at_iso expected_graph))
+        (Yojson.Safe.to_string (strip_generated_at_iso single.graph_default));
+      check string "swimlane_default matches structurally"
+        (Yojson.Safe.to_string expected_swimlane)
+        (Yojson.Safe.to_string single.swimlane_default);
+      let nodes_len json =
+        Yojson.Safe.Util.member "nodes" json
+        |> Yojson.Safe.Util.to_list |> List.length
+      in
+      check int "graph nodes count matches" (nodes_len expected_graph)
+        (nodes_len single.graph_default);
+      let edges_len json =
+        Yojson.Safe.Util.member "edges" json
+        |> Yojson.Safe.Util.to_list |> List.length
+      in
+      check int "graph edges count matches" (edges_len expected_graph)
+        (edges_len single.graph_default);
+      let spans_len json =
+        Yojson.Safe.Util.member "spans" json
+        |> Yojson.Safe.Util.to_list |> List.length
+      in
+      check bool "spans are non-empty" true (spans_len expected_swimlane > 0);
+      check int "swimlane spans count matches" (spans_len expected_swimlane)
+        (spans_len single.swimlane_default))
+
+let test_default_projections_single_pass_slices_tail_when_exceeding_500 () =
+  with_config (fun config ->
+      Activity_graph.For_testing.reset_past_day_cache_for_testing ();
+      Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+      Activity_graph.For_testing.reset_line_count_cache_for_testing ();
+      ignore (write_dated_file config ~day:2 ~seq_from:1 ~lines:600);
+      let single = Activity_graph.default_projections config in
+      let expected_events =
+        Activity_graph.json_response config ~kinds:[] ~after_seq:0 ~limit:1000 ()
+      in
+      let expected_graph =
+        Activity_graph.graph_json config ~kinds:[] ~limit:500 ~timeline_limit:80 ()
+      in
+      let expected_swimlane =
+        Activity_graph.agent_spans_json config ~limit:500 ()
+      in
+      check string "events_default matches structurally"
+        (Yojson.Safe.to_string (strip_generated_at_iso expected_events))
+        (Yojson.Safe.to_string (strip_generated_at_iso single.events_default));
+      check string "graph_default matches structurally"
+        (Yojson.Safe.to_string (strip_generated_at_iso expected_graph))
+        (Yojson.Safe.to_string (strip_generated_at_iso single.graph_default));
+      check string "swimlane_default matches structurally"
+        (Yojson.Safe.to_string expected_swimlane)
+        (Yojson.Safe.to_string single.swimlane_default);
+      let count_from json =
+        Yojson.Safe.Util.member "count" json |> Yojson.Safe.Util.to_int
+      in
+      check int "events count is 600" 600 (count_from single.events_default);
+      let events_analyzed json =
+        json
+        |> Yojson.Safe.Util.member "window"
+        |> Yojson.Safe.Util.member "events_analyzed"
+        |> Yojson.Safe.Util.to_int
+      in
+      check int "graph analyzes exactly 500 events (sliced from 600)" 500
+        (events_analyzed single.graph_default);
+      let events_total json =
+        json
+        |> Yojson.Safe.Util.member "window"
+        |> Yojson.Safe.Util.member "events_store_total"
+        |> Yojson.Safe.Util.to_int
+      in
+      check int "graph records 600 total store events" 600
+        (events_total single.graph_default))
 
 let test_same_size_rewrite_invalidates_current_day_cache () =
   with_config (fun config ->
@@ -1264,6 +1369,10 @@ let () =
             test_current_day_cache_rebuilds_once_per_fingerprint;
           Alcotest.test_case "unfiltered projections build no aggregate"
             `Quick test_default_projections_no_longer_build_the_aggregate;
+          Alcotest.test_case "default projections single pass matches individual outputs"
+            `Quick test_default_projections_single_pass_matches_individual_outputs;
+          Alcotest.test_case "default projections single pass slices tail when exceeding 500"
+            `Quick test_default_projections_single_pass_slices_tail_when_exceeding_500;
           test_case "append reuses the past-day merge" `Quick
             test_append_reuses_the_past_day_merge;
           test_case "a new past file rebuilds the merge" `Quick

@@ -87,6 +87,11 @@ val keeper_hitl_thinking_blocks : unit -> int
     denies. See {!Hitl_summary_worker} for what was measured on each side. *)
 
 val keeper_hitl_max_concurrent_per_keeper : unit -> int
+
+(** [keeper.hitl.observation_stderr_bytes], default 4096. How much of a
+    refused observe run's stderr tail the Gate keeps on the approval row for
+    the judge (RFC-0422 step 3b); the bytes cut are counted on the row. *)
+val keeper_hitl_observation_stderr_bytes : unit -> int
 (** Maximum concurrent Auto Judge workers admitted for one workspace/Keeper
     owner. This bounds per-Keeper fan-out; provider/runtime concurrency limits
     remain the fleet-wide backpressure authority. *)

@@ -148,6 +148,10 @@ module Payload = struct
   let running_noun = "review(s)"
   let restart_reason = "review fibers do not survive server restart"
   let replayed_running_completion = None
+  (* Nothing here is large enough to be worth re-reading from disk: this
+     registry's live share is under a megabyte. *)
+  let shed_registration r = r
+  let shed_completion c = c
   let completed_retention = `Latest 64
   let retention_group = None
 

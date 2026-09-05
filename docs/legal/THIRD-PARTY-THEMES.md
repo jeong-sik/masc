@@ -1,7 +1,7 @@
 # 번들된 색 스킴의 출처
 
-masc TUI 는 색 스킴 41개를 함께 배포하며 `config/themes/` 디렉터리의 TOML 테마를
-지원한다. 그중 `default-dark`, `default-light`, `dungeon-gold`, `norton`, `msx`, `pc-tools` 는 masc 자체 것이고,
+masc TUI 는 색 스킴 43개를 함께 배포하며 `config/themes/` 디렉터리의 TOML 테마를
+지원한다. 그중 `default-dark`, `default-light`, `dungeon-gold`, `norton`, `msx`, `pc-tools`, `msc`, `cyber` 는 masc 자체 것이고,
 **나머지 35개는 다른 사람이 만든 것**이다. 이 문서가 누가 만들었고 어떤 조건으로 쓰는지를 적는다.
 
 `LICENSE-AUDIT-2026-04.md` 가 "의존성 license 인벤토리 | 미점검" 으로 남겨둔 항목 중
@@ -108,6 +108,13 @@ Pro 의 라이선스 문구도 `Monokai Pro extensions` 로 범위가 그쪽에 
 | `horizon-dark` | `horizon-dark` | Michaël Ball (http://github.com/michael-ball/) | MIT (tinted-theming) |
 | `primer-dark-dimmed` | `primer-dark-dimmed` | Jimmy Lin | MIT (tinted-theming) |
 | `atelier-heath-light` | `atelier-heath-light` | Bram de Haan (http://atelierbramdehaan.nl) | MIT (tinted-theming) |
+| `msc` | — | masc | 이 저장소의 MIT |
+| `pc-tools` | — | masc | 이 저장소의 MIT |
+| `cyber` | — | masc | 이 저장소의 MIT |
+| `dungeon-gold` | — | masc | 이 저장소의 MIT |
+| `norton` | — | masc | 이 저장소의 MIT |
+| `msx` | — | masc | 이 저장소의 MIT |
+
 ## 여기 없는 것
 
 ### 그릴 수 없어서 뺀 것

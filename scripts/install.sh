@@ -18,8 +18,6 @@
 #   --wizard           Always run the first-time provider setup wizard
 #   --no-wizard        Skip the provider setup wizard
 #   --provider ID      Pre-select a provider for the wizard (e.g. deepseek)
-#   --api-key KEY      Provider API key (use with --provider; visible in ps)
-#   --api-key-stdin    Read provider API key from stdin (use with --provider)
 #   --team PRESET      Seed a keeper team preset (e.g. classic) into the config
 #   --sandbox PROFILE  Set the seeded team keepers' sandbox_profile
 #                        (docker|microvm|remote_ssh; use with --team)
@@ -43,9 +41,10 @@
 #   MASC_INSTALL_NO_PING=1  Skip the non-interactive wizard's connectivity check
 #                  (air-gapped/offline installs). The check is report-only and
 #                  never fails the install; this only silences it.
-#   <PROVIDER_API_KEY>  Provider key env declared by runtime.toml credentials.key
-#   MASC_API_KEY   Used only when the selected provider declares
-#                  credentials.key = "MASC_API_KEY" in runtime.toml.
+#   <PROVIDER_API_KEY>  Provider key env declared by runtime.toml credentials.key.
+#                  Read, never written: the wizard reports whether it is set and
+#                  pings with it, and the key stays in your shell. This script
+#                  writes no secret to disk.
 
 set -euo pipefail
 
@@ -61,9 +60,9 @@ DRY_RUN=0
 ALLOW_UNVERIFIED="${MASC_ALLOW_UNVERIFIED:-0}"
 WIZARD="${MASC_WIZARD:-auto}"
 WIZARD_PROVIDER=""
-WIZARD_API_KEY=""
-WIZARD_API_KEY_STDIN=0
-WIZARD_GENERIC_API_KEY="${MASC_API_KEY:-}"
+# Whether the config root was already here before this run. This is what makes
+# the setup wizard a first-time step rather than one that runs on every install.
+CONFIG_PREEXISTING=0
 TEAM="${MASC_TEAM_PRESET:-}"
 WIZARD_SANDBOX="${MASC_SANDBOX_PROFILE:-}"
 
@@ -183,7 +182,7 @@ load_provider_catalog() {
       subscription)
         # A subscription runtime signs in through its own CLI, so it carries no
         # API key and no endpoint. It joins the same menu as a keyless entry;
-        # the empty key and endpoint keep it off the .env.local and ping paths,
+        # the empty key and endpoint keep it off the key and ping paths,
         # and $command is what the wizard probes with `command -v`.
         read_catalog_field id
         read_catalog_field name
@@ -509,134 +508,16 @@ prompt_provider() {
   done
 }
 
-prompt_key() {
+# The key the server will use, read from this shell's environment. The installer
+# never asks for one and never stores one: the server resolves its credential
+# from the environment it is started in, so that environment is the only place a
+# key can be checked and the only place it needs to be.
+wizard_env_key() {
   local idx="$1"
   local key_var
   key_var=$(provider_key_var "$idx")
-  if [ -z "$key_var" ]; then
-    return 0
-  fi
-
-  if ! is_tty; then
-    return 0
-  fi
-
-  local existing=""
-  local existing_name=""
-  if [ -n "${!key_var:-}" ]; then
-    existing="${!key_var}"
-    existing_name="$key_var"
-  elif [ "$key_var" = "MASC_API_KEY" ] && [ -n "$WIZARD_GENERIC_API_KEY" ]; then
-    existing="$WIZARD_GENERIC_API_KEY"
-    existing_name="MASC_API_KEY"
-  fi
-
-  if [ -n "$existing" ]; then
-    echo >&2
-    printf '? %s is already set in the environment. Use it? [Y/n] ' "$existing_name" >&2
-    local reuse
-    read -r reuse || true
-    case "$reuse" in
-      [Nn]* ) ;;
-      *) echo "$existing"; return ;;
-    esac
-  fi
-
-  local key
-  while true; do
-    echo >&2
-    printf '? Enter %s: ' "$key_var" >&2
-    read -s -r key || true
-    echo >&2
-    if [ -z "$key" ]; then
-      warn "key is empty; please enter a value or press Ctrl-C to abort"
-      continue
-    fi
-    echo "$key"
-    return
-  done
-}
-
-resolve_wizard_key() {
-  local idx="$1"
-  local key_var
-  key_var=$(provider_key_var "$idx")
-  if [ -z "$key_var" ]; then
-    return 0
-  fi
-
-  if [ -n "$WIZARD_API_KEY" ]; then
-    echo "$WIZARD_API_KEY"
-    return 0
-  fi
-
-  if is_tty; then
-    prompt_key "$idx"
-    return
-  fi
-
-  if [ "$key_var" = "MASC_API_KEY" ] && [ -n "$WIZARD_GENERIC_API_KEY" ]; then
-    echo "$WIZARD_GENERIC_API_KEY"
-    return 0
-  fi
-
-  provider_env_key "$key_var" \
-    || die "API key for $key_var is required in non-TTY mode (set $key_var or pass --api-key)"
-}
-
-validate_provider_key() {
-  local key="$1" key_var="$2"
-  if [ -z "$key" ]; then
-    die "API key for $key_var cannot be empty"
-  fi
-  if [[ "$key" == *$'\r'* ]] || [[ "$key" == *$'\n'* ]]; then
-    die "API key for $key_var contains a newline; refusing to write"
-  fi
-}
-
-write_env_local() {
-  local base_path="$1" idx="$2" key="$3"
-  local key_var
-  key_var=$(provider_key_var "$idx")
-  local env_file="$base_path/.masc/config/.env.local"
-
-  if [ -z "$key_var" ]; then
-    log "provider $(provider_name "$idx") does not require an API key"
-    return 0
-  fi
-
-  validate_provider_key "$key" "$key_var"
-
-  if [ "$DRY_RUN" -eq 1 ]; then
-    log "[dry-run] would write $env_file with $key_var=***"
-    return 0
-  fi
-
-  local env_dir tmp
-  env_dir="$(dirname "$env_file")"
-  mkdir -p "$env_dir"
-  tmp="$(umask 077 && mktemp "$env_dir/.env.local.tmp.XXXXXX")" \
-    || die "could not create private temp file for $env_file"
-  PARTIAL_FILES+=("$tmp")
-  if ( umask 077 && printf 'export %s=%q\n' "$key_var" "$key" > "$tmp" ); then
-    :
-  else
-    rm -f "$tmp"
-    die "could not write $env_file"
-  fi
-  if chmod 600 "$tmp" 2>/dev/null; then
-    :
-  else
-    rm -f "$tmp"
-    die "could not restrict permissions on $env_file"
-  fi
-  if mv -f "$tmp" "$env_file"; then
-    :
-  else
-    rm -f "$tmp"
-    die "could not replace $env_file"
-  fi
-  log "wrote $env_file"
+  [ -n "$key_var" ] || return 0
+  printf '%s' "${!key_var:-}"
 }
 
 update_runtime_default() {
@@ -668,6 +549,15 @@ update_runtime_default() {
     return 1
   fi
   log "set [runtime].default = \"$runtime_id\" in $runtime_file"
+}
+
+# Whether a ping would test anything. A provider with no key variable has a
+# public healthcheck; one with a key variable can only be reached with the key,
+# and the installer only has it when the operator exported it.
+provider_ping_possible() {
+  local idx="$1" key="$2" key_var
+  key_var=$(provider_key_var "$idx")
+  [ -z "$key_var" ] || [ -n "$key" ]
 }
 
 ping_provider() {
@@ -713,7 +603,11 @@ ping_provider() {
     fi
   fi
 
-  validate_provider_key "$key" "$key_var"
+  # Callers decide whether a ping is possible ([provider_ping_possible]); an
+  # empty key here would mean this one answered yes for a provider that needs a
+  # key and has none, and a "ping" that tested nothing must not be reported as
+  # either a pass or a failure.
+  [ -n "$key" ] || die "internal: authenticated ping for $key_var without a key"
 
   # Feed the bearer header through an anonymous fd so the key is not written to
   # disk and does not appear in curl's process arguments.
@@ -752,10 +646,10 @@ run_wizard() {
       provider_idx="$green_idx"
       log "no terminal and no --provider; using the only ready source: ${PROVIDER_NAMES[$provider_idx]}"
     elif [ "$WIZARD" = "1" ]; then
-      die "no terminal, no --provider, and not exactly one ready source; pass --provider (with --api-key/env) or --no-wizard"
+      die "no terminal, no --provider, and not exactly one ready source; pass --provider or --no-wizard"
     else
       log "non-interactive shell and no single ready source; skipping first-time setup wizard"
-      log "edit .masc/config/.env.local and .masc/config/runtime.toml to finish setup"
+      log "set [runtime].default in .masc/config/runtime.toml to finish setup"
       return 0
     fi
   fi
@@ -770,11 +664,20 @@ run_wizard() {
     warn "$(provider_name "$provider_idx") is not running at ${PROVIDER_ENDPOINTS[$provider_idx]}; start it before using masc"
   fi
 
-  key=$(resolve_wizard_key "$provider_idx")
+  key=$(wizard_env_key "$provider_idx")
 
   update_runtime_default "$base_path" "${PROVIDER_DEFAULT_RUNTIME_IDS[$provider_idx]}" \
     || die "could not update runtime.toml default"
-  write_env_local "$base_path" "$provider_idx" "$key"
+
+  # The one thing left for the operator, said once and named exactly. The
+  # server reads this variable from its own environment, so a key that is not
+  # there yet has to be exported where the server will be started.
+  local key_var
+  key_var=$(provider_key_var "$provider_idx")
+  if [ -n "$key_var" ] && [ -z "$key" ]; then
+    warn "$key_var is not set; export it in the shell that starts masc:"
+    printf '    export %s=...\n' "$key_var" >&2
+  fi
 
   if [ "$DRY_RUN" -eq 1 ]; then
     return 0
@@ -793,11 +696,18 @@ run_wizard() {
     if [ "${MASC_INSTALL_NO_PING:-0}" = "1" ]; then
       return 0
     fi
-    if ping_provider "$provider_idx" "$key"; then
+    if ! provider_ping_possible "$provider_idx" "$key"; then
+      log "no key in this environment to reach $(provider_name "$provider_idx") with; skipping the connectivity check"
+    elif ping_provider "$provider_idx" "$key"; then
       log "provider connectivity: ok"
     else
       warn "provider connectivity check did not pass; masc will retry at first turn"
     fi
+    return 0
+  fi
+
+  if ! provider_ping_possible "$provider_idx" "$key"; then
+    log "no key in this environment to reach $(provider_name "$provider_idx") with; skipping the connectivity check"
     return 0
   fi
 
@@ -827,7 +737,6 @@ run_wizard() {
 
 maybe_run_wizard() {
   local base_path="$1"
-  local env_file="$base_path/.masc/config/.env.local"
   local runtime_file="$base_path/.masc/config/runtime.toml"
 
   if [ "$WIZARD" = "0" ]; then
@@ -839,25 +748,17 @@ maybe_run_wizard() {
       die "runtime.toml not found; cannot run wizard (did you mean to seed config?)"
     fi
     log "runtime.toml not found; skipping first-time setup wizard"
-    log "edit .masc/config/.env.local and .masc/config/runtime.toml to finish setup"
+    log "set [runtime].default in .masc/config/runtime.toml to finish setup"
     return 0
   fi
 
-  if [ -e "$env_file" ] && [ "$FORCE" -eq 0 ]; then
-    if [ "$WIZARD" = "1" ] && is_tty; then
-      echo >&2
-      printf '? %s already exists. Overwrite? [y/N] ' "$env_file" >&2
-      local answer
-      read -r answer || true
-      case "$answer" in
-        [Yy]*) ;;
-        *) log "keeping existing $env_file; skipping wizard" >&2; return 0 ;;
-      esac
-    else
-      log "$env_file already exists; skipping first-time setup wizard"
-      log "edit .masc/config/.env.local and .masc/config/runtime.toml to change provider or key"
-      return 0
-    fi
+  # "First-time" means the config root was not already here. A workspace that was
+  # already configured keeps the [runtime].default it has; --wizard or --force
+  # asks for the choice again.
+  if [ "$CONFIG_PREEXISTING" -eq 1 ] && [ "$FORCE" -eq 0 ] && [ "$WIZARD" != "1" ]; then
+    log "config root was already here; skipping first-time setup wizard"
+    log "run with --wizard to choose a provider again"
+    return 0
   fi
 
   # The non-TTY, no --provider case is decided inside run_wizard now: it can
@@ -896,23 +797,12 @@ while [ $# -gt 0 ]; do
     --wizard)      WIZARD=1; shift ;;
     --no-wizard)   WIZARD=0; shift ;;
     --provider)    require_flag_value "$1" "${2-}"; WIZARD_PROVIDER="$2"; shift 2 ;;
-    --api-key)     require_flag_value "$1" "${2-}"; WIZARD_API_KEY="$2"; shift 2 ;;
-    --api-key-stdin) WIZARD_API_KEY_STDIN=1; shift ;;
     --team)        require_flag_value "$1" "${2-}"; TEAM="$2"; shift 2 ;;
     --sandbox)     require_flag_value "$1" "${2-}"; WIZARD_SANDBOX="$2"; shift 2 ;;
     -h|--help) usage ;;
     *) die "unknown flag: $1 (try --help)" ;;
   esac
 done
-
-if [ "$WIZARD_API_KEY_STDIN" -eq 1 ]; then
-  [ -z "$WIZARD_API_KEY" ] || die "--api-key and --api-key-stdin are mutually exclusive"
-  if IFS= read -r -s WIZARD_API_KEY || [ -n "$WIZARD_API_KEY" ]; then
-    [ -n "$WIZARD_API_KEY" ] || die "--api-key-stdin requires a non-empty key on stdin"
-  else
-    die "--api-key-stdin requires one key on stdin"
-  fi
-fi
 
 case "$ALLOW_UNVERIFIED" in
   0|1) ;;
@@ -1211,6 +1101,7 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
   MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/agent-core-models-overlay.toml"
 
   if [ -e "$RUNTIME_FILE" ] && [ -e "$MODEL_CATALOG_OVERLAY_FILE" ] && [ "$FORCE" -eq 0 ]; then
+    CONFIG_PREEXISTING=1
     log "config already present at $CONFIG_DIR, skipping seed"
   elif [ "$DRY_RUN" -eq 1 ]; then
     log "[dry-run] would seed configs and model catalog overlay to $CONFIG_DIR from release"
@@ -1364,13 +1255,6 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
-source_hint=""
-if [ -e "$BASE_PATH/.masc/config/.env.local" ]; then
-  source_hint="source \"$BASE_PATH/.masc/config/.env.local\""
-else
-  source_hint="# .env.local was not created; configure provider key manually if needed"
-fi
-
 catalog_hint=$(model_catalog_env_value)
 # Keep the copy-paste start command aligned with runtime base/catalog env, but
 # do not default-disable Runtime_events. If the operator supplied an override,
@@ -1389,34 +1273,36 @@ cat <<EOF
 ${c_grn}masc ${VERSION} installed.${c_off}
 
 Next:
-  ${c_dim}# load provider key -- nothing reads this file for you, and the server${c_off}
-  ${c_dim}# the TUI starts inherits whatever environment the TUI was launched with${c_off}
-  $source_hint
+  ${c_dim}# export your provider key in this shell -- the server reads it from its${c_off}
+  ${c_dim}# own environment, and the server the TUI starts inherits the TUI's${c_off}
+  ${c_dim}# export <PROVIDER>_API_KEY=...   (runtime.toml names the variable)${c_off}
 
   ${c_dim}# mint a worker bearer in this shell for your MCP client${c_off}
   eval "\$($DEST login --base-path \"$BASE_PATH\" --host 127.0.0.1 --port \"$MASC_PORT\" --agent local-mcp-client --role worker --client-env MASC_TOKEN --no-expiry --shell)"
 
-  ${c_dim}# start server (loopback only)${c_off}
+  ${c_dim}# open the workspace: on a terminal this is the fleet TUI, and it starts${c_off}
+  ${c_dim}# the server here when nothing is answering the port${c_off}
   $start_env $DEST --base-path "$BASE_PATH"
 
-  ${c_dim}# if you need to change provider or key later, edit:${c_off}
-  #   $BASE_PATH/.masc/config/.env.local
+  ${c_dim}# the server on its own, with no terminal (loopback only)${c_off}
+  $start_env $DEST start --base-path "$BASE_PATH"
+
+  ${c_dim}# to change provider or model later, edit:${c_off}
   #   $BASE_PATH/.masc/config/runtime.toml
 
   ${c_dim}# sanity check${c_off}
   curl http://127.0.0.1:${MASC_PORT}/health
 
-  ${c_dim}# open the fleet TUI to watch, steer, and create Keepers (needs a TTY)${c_off}
+  ${c_dim}# the TUI under its own name, when the port is not the default${c_off}
   ${c_dim}# no Keepers yet? create your first from the Keepers view (or reinstall with --team)${c_off}
   $TUI_DEST --base-path "$BASE_PATH" --port "$MASC_PORT"
 
   ${c_dim}# or create one non-interactively once the server is up:${c_off}
   ${c_dim}# $DEST keeper-create --help${c_off}
 
-  ${c_dim}# a Keeper on sandbox_profile = "docker" runs inside masc-keeper-sandbox:local,${c_off}
-  ${c_dim}# which is built locally and published to no registry. Without it every turn${c_off}
-  ${c_dim}# stops at docker_preflight_failed. From a source checkout:${c_off}
-  ${c_dim}#   scripts/build-keeper-sandbox-image.sh${c_off}
+  ${c_dim}# a Keeper runs each turn inside an image. Build the general one -- bash,${c_off}
+  ${c_dim}# ripgrep and git -- or every turn stops at docker_preflight_failed:${c_off}
+  $DEST sandbox-image
 
   ${c_dim}# source the printed bearer exports in the shell that starts your MCP client${c_off}
   See: https://github.com/$REPO#mcp-client-setup

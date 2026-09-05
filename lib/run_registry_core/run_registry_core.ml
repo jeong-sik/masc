@@ -79,6 +79,11 @@ module type Payload = sig
   val registration_of_yojson : Yojson.Safe.t -> (registration, string) result
   val completion_to_yojson : completion -> Yojson.Safe.t
   val completion_of_yojson : Yojson.Safe.t -> (completion, string) result
+
+  (* The value with any heavy payload dropped, for the copy the store keeps.
+     Identity where rows are small. *)
+  val shed_registration : registration -> registration
+  val shed_completion : completion -> completion
   val running_noun : string
   val restart_reason : string
   val replayed_running_completion
@@ -325,7 +330,17 @@ module Make (Payload : Payload) = struct
   ;;
 
   let register t ~id ~started_at ~registration =
-    let entry = { id; started_at; registration; status = Running } in
+    (* The event carries the whole registration to disk; the entry keeps the
+       shed copy, as replay's does. Two paths build entries -- this one and
+       [apply_event] -- and both shed, or the store's weight depends on
+       whether a row was written by this process or read back by it. *)
+    let entry =
+      { id
+      ; started_at
+      ; registration = Payload.shed_registration registration
+      ; status = Running
+      }
+    in
     (* Memory publication and JSONL append are one ordered mutation. Without
        this registry-local lock, a completion on another domain can observe the
        new row after the CAS and append [Complete] before this [Register]
@@ -360,7 +375,7 @@ module Make (Payload : Payload) = struct
           current
           |> List.map (fun entry ->
             if String.equal entry.id id
-            then { entry with status = Completed completion }
+            then { entry with status = Completed (Payload.shed_completion completion) }
             else entry)
           |> prune
         in
@@ -374,10 +389,6 @@ module Make (Payload : Payload) = struct
   let list_entries t =
     Atomic.get t.entries
     |> List.sort (fun left right -> Float.compare right.started_at left.started_at)
-  ;;
-
-  let get t ~id =
-    List.find_opt (fun entry -> String.equal entry.id id) (Atomic.get t.entries)
   ;;
 
   let parse_event_line ~path ~line_no line =
@@ -394,9 +405,17 @@ module Make (Payload : Payload) = struct
         Printf.sprintf "%s:%d: %s" path line_no message)
   ;;
 
+  (* The store keeps the shed copy. The row it came from still has the whole
+     thing, and [get] reads it back for the one caller that wants it. *)
   let apply_event entries = function
     | Register { id; started_at; registration } ->
-      let entry = { id; started_at; registration; status = Running } in
+      let entry =
+        { id
+        ; started_at
+        ; registration = Payload.shed_registration registration
+        ; status = Running
+        }
+      in
       entry :: List.filter (fun existing -> not (String.equal existing.id id)) entries
     | Complete { id; completion } ->
       if List.exists (fun entry -> String.equal entry.id id) entries
@@ -404,7 +423,7 @@ module Make (Payload : Payload) = struct
         List.map
           (fun entry ->
              if String.equal entry.id id
-             then { entry with status = Completed completion }
+             then { entry with status = Completed (Payload.shed_completion completion) }
              else entry)
           entries
       else (
@@ -485,6 +504,64 @@ module Make (Payload : Payload) = struct
         Payload.name
         path
         (Printexc.to_string exn)
+  ;;
+
+  (* The whole entry, payloads included.
+
+     The store keeps the shed copy, so this rebuilds the full one from the
+     rows the entry was replayed from: the last [Register] for this id gives
+     the registration, the last [Complete] gives the completion. One pass over
+     the file, and only when a caller asks for one entry -- the list never
+     comes here.
+
+     The shed entry is the fallback rather than [None]. If the file is gone,
+     truncated past this row, or unreadable, the caller still gets the run's
+     identity and outcome and can say the payload is not there. Answering
+     [None] would read as "no such run", which is a different fact. *)
+  let full_entry_from_disk t (shed : entry) =
+    match t.path with
+    | None -> shed
+    | Some path ->
+      if not (Fs_compat.file_exists path)
+      then shed
+      else (
+        try
+          let (registration, completion), _boundary =
+            Fs_compat.fold_appended_lines
+              ~path
+              ~from:0
+              ~init:(None, None)
+              ~f:(fun (registration, completion) line ->
+                match parse_event_line ~path ~line_no:0 line with
+                | Ok (Some (Register r)) when String.equal r.id shed.id ->
+                  Some r.registration, completion
+                | Ok (Some (Complete c)) when String.equal c.id shed.id ->
+                  registration, Some c.completion
+                | Ok _ | Error _ -> registration, completion)
+          in
+          let entry =
+            match registration with
+            | Some registration -> { shed with registration }
+            | None -> shed
+          in
+          match completion, entry.status with
+          | Some completion, Completed _ -> { entry with status = Completed completion }
+          | Some _, Running | None, _ -> entry
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          Log.Misc.warn
+            "%s: could not re-read the payload for %s from %s: %s"
+            Payload.name
+            shed.id
+            path
+            (Printexc.to_string exn);
+          shed)
+  ;;
+
+  let get t ~id =
+    List.find_opt (fun entry -> String.equal entry.id id) (Atomic.get t.entries)
+    |> Option.map (full_entry_from_disk t)
   ;;
 
   let fold_replay_entries path =

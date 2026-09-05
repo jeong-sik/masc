@@ -63,6 +63,13 @@ type outcome =
       (** Host replay cannot safely enter the provider turn. The exact wake
           remains unacknowledged. If the raw effect result still exists in
           process, later attempts repair persistence without rerunning it. *)
+  | Resolution_absent of
+      { absence : Keeper_approval_queue.resolution_absence }
+      (** The durable store has no resolution behind the queued approval
+          ({!Keeper_approval_queue.resolution_absence}): nothing can be
+          replayed and reading again cannot change that. The turn proceeds
+          with this told to the model once; the queue entry is retired at
+          intake, so no wake stays behind it. *)
 
 val outcome_to_string : outcome -> string
 (** Render operation, journal state, exact evidence byte count, and SHA-256

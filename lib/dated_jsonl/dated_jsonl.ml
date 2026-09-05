@@ -652,7 +652,17 @@ let load_tail_lines_from_channel input ~max_lines =
     end
 ;;
 
-let load_tail_lines path ~max_lines =
+(* One day file's tail read, split and parse is a single job on the process
+   domain pool when one is installed: the reads are blocking syscalls, the
+   scan and the parse are CPU work, and none of it touches the calling
+   fiber's state. Without a pool, from a non-Eio context, or from a pool
+   worker it runs inline as before. Measured 2026-09-05: on a live keeper
+   these reads were about a tenth of the main thread's busy time and the
+   longest runs outside turn spans (RFC main-domain-scheduler-latency
+   section 8.8). *)
+let off_fiber f = Domain_pool_ref.submit_io_or_inline f
+
+let load_tail_lines_inline path ~max_lines =
   if max_lines <= 0 || not (Fs_compat.file_exists path)
   then []
   else
@@ -662,7 +672,11 @@ let load_tail_lines path ~max_lines =
       (fun () -> load_tail_lines_from_channel input ~max_lines)
 ;;
 
-let load_tail_lines_result path ~max_lines =
+let load_tail_lines path ~max_lines =
+  off_fiber (fun () -> load_tail_lines_inline path ~max_lines)
+;;
+
+let load_tail_lines_result_inline path ~max_lines =
   if max_lines <= 0
   then Ok []
   else
@@ -926,14 +940,15 @@ let filter_map_recent ?(offset=0) t n ~f =
            if !count >= n then raise_notrace Done;
            let path = Filename.concat month_path d in
            let need = n - !count + !skip in
-           let lines = load_tail_lines path ~max_lines:need in
-           let rev_lines = List.rev lines in
-           List.iter (fun line ->
+           let parsed_newest_first =
+             off_fiber (fun () ->
+               load_tail_lines_inline path ~max_lines:need
+               |> List.rev_map (fun line ->
+                 try Some (Yojson.Safe.from_string line)
+                 with Yojson.Json_error _ -> None))
+           in
+           List.iter (fun parsed ->
              if !count >= n then raise_notrace Done;
-             let parsed =
-               try Some (Yojson.Safe.from_string line)
-               with Yojson.Json_error _ -> None
-             in
              match parsed with
              | None -> ()
              | Some json ->
@@ -945,7 +960,7 @@ let filter_map_recent ?(offset=0) t n ~f =
                   | None -> ());
                  incr count
                end
-           ) rev_lines
+           ) parsed_newest_first
          ) days
        ) months
      with Done -> ());
@@ -1062,19 +1077,21 @@ let read_recent_result ?(offset=0) t n =
       | _ when !count >= n -> Ok ()
       | day :: rest ->
         let path = Filename.concat month_path day in
-        let* lines =
-          load_tail_lines_result path ~max_lines:(requested_line_count ())
+        let* entries_newest_first =
+          off_fiber (fun () ->
+            load_tail_lines_result_inline path ~max_lines:(requested_line_count ())
+            |> Result.map (List.rev_map (fun line -> recent_entry_of_line ~path line)))
         in
         List.iter
-          (fun line ->
+          (fun entry ->
              if !count < n
              then if !skip > 0
              then decr skip
              else begin
-               collected := recent_entry_of_line ~path line :: !collected;
+               collected := entry :: !collected;
                incr count
              end)
-          (List.rev lines);
+          entries_newest_first;
         visit_days month_path rest
     in
     let rec visit_months = function

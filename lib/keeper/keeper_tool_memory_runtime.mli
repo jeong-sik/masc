@@ -127,3 +127,10 @@ type memory_retract_validation =
   | Memory_retract_invalid of memory_retract_error_kind
 
 val validate_memory_retract_args : Yojson.Safe.t -> memory_retract_validation
+
+module For_testing : sig
+  val read_current_facts
+    :  keepers_dir:string
+    -> keeper_id:string
+    -> (Keeper_memory_os_types.fact list, string) result
+end

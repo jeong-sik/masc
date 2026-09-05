@@ -323,6 +323,8 @@ val reset_count_cache_for_testing : unit -> unit
 val load_tail_lines : string -> max_lines:int -> string list
 (** [load_tail_lines file ~max_lines] efficiently reads the last [max_lines]
     from a large file without loading the whole file into memory.
+    The read, the scan and the split run on the process domain pool when
+    one is installed, so the calling fiber's scheduler is not held for them.
     Reads backwards in chunks. Returns chronologically (oldest first). A
     missing file is an empty tail; other open and read errors are exceptions. *)
 

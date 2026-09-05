@@ -1,6 +1,8 @@
 name = "masc_board_cleanup"
 description = """
-Scan board posts matching filter criteria and delete or report them. \
+Scan board posts matching filter criteria and delete or report them.
+
+\
 Defaults to dry_run=true (report only). Set dry_run=false to delete. Safety: \
 never deletes posts with comments or votes unless filters are overridden."""
 

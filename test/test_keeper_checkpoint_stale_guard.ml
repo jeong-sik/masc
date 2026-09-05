@@ -1102,6 +1102,33 @@ let test_exact_snapshot_preserves_locked_canonical_bytes () =
    the save watermark and the message count from its canonical summary while
    the file on disk is the one it wrote. The file is made unreadable to show
    that neither answer reads it. *)
+let test_byte_count_from_summary_without_reading () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "byte-count-no-read" in
+  save_ok
+    ~session_dir
+    (make_checkpoint ~session_id:sid ~turn_count:3 ~marker:"three")
+    "save turn 3";
+  let path =
+    Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid
+  in
+  let on_disk = (Unix.stat path).Unix.st_size in
+  Unix.chmod path 0o000;
+  Fun.protect ~finally:(fun () -> Unix.chmod path 0o644) @@ fun () ->
+  (match Keeper_checkpoint_store.canonical_byte_count ~session_dir ~session_id:sid with
+   | Ok (Some bytes) -> check int "byte count is the file's size" on_disk bytes
+   | Ok None -> fail "byte count reported no checkpoint"
+   | Error _ -> fail "byte count read the unreadable file");
+  match Keeper_checkpoint_store.canonical_byte_count ~session_dir ~session_id:"absent" with
+  | Ok None -> ()
+  | Ok (Some _) -> fail "an absent session reported bytes"
+  | Error _ -> fail "an absent session is not a store error"
+;;
+
 let test_summary_answers_watermark_and_count_without_reading () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -1257,6 +1284,8 @@ let () =
             test_unencodable_payload_is_recovered_at_the_sink;
           test_case "summary answers watermark and count without reading" `Quick
             test_summary_answers_watermark_and_count_without_reading;
+          test_case "byte count comes from the summary without reading" `Quick
+            test_byte_count_from_summary_without_reading;
           test_case "summary follows a checkpoint replaced behind it" `Quick
             test_summary_follows_a_checkpoint_replaced_behind_it;
         ] );

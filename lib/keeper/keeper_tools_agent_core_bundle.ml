@@ -173,6 +173,11 @@ let make_tool_bundle_for_descriptors_with_policy
          Log.Keeper.error
            "gate replay approval=%s %s"
            approval_id
+           (Keeper_gate_replay.outcome_to_string outcome)
+       | Keeper_gate_replay.Resolution_absent _ as outcome ->
+         Log.Keeper.warn
+           "gate replay approval=%s %s"
+           approval_id
            (Keeper_gate_replay.outcome_to_string outcome));
       Some
         Keeper_tools_agent_core.

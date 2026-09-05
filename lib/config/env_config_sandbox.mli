@@ -94,7 +94,11 @@ module Runtime : sig
       Default names the keeper image's opam switch ahead of the system
       directories. *)
   (** Env: [MASC_KEEPER_SANDBOX_DOCKER_IMAGE].  Default:
-      ["masc-keeper-sandbox:local"]. *)
+      {!Keeper_sandbox_image.default_tag} -- the general image, which
+      [masc sandbox-image] builds. Read by both the Docker and the microVM
+      guest paths, so a Keeper that names no [sandbox_image] gets this whichever
+      of the two it runs under. MASC's own development image is opt-in by
+      name. *)
 
   val docker_playground_enabled : unit -> bool
   (** Route Execute through a Docker container instead of local

@@ -36,6 +36,23 @@ module type Payload = sig
   val registration_of_yojson : Yojson.Safe.t -> (registration, string) result
   val completion_to_yojson : completion -> Yojson.Safe.t
   val completion_of_yojson : Yojson.Safe.t -> (completion, string) result
+
+  val shed_registration : registration -> registration
+  val shed_completion : completion -> completion
+  (** The value with any heavy payload dropped, for the copy the store keeps
+      in memory.
+
+      A registry whose rows are small returns the value unchanged and nothing
+      about it changes. One whose rows carry model input or output drops those
+      fields: the store retains thousands of rows to serve a list that does
+      not read them, and a detail view that reads one at a time. Measured
+      2026-09-05, the exact-lane registry held 498 MB of live heap and 98% of
+      the file behind it was the prompt text.
+
+      What was shed is not lost -- it is on the row this entry was replayed
+      from, and {!Make.get} reads it back. So a shed value must still carry
+      everything a list projection reads, and a payload the store cannot
+      re-read from a row must not be shed. *)
   val running_noun : string
   val restart_reason : string
   val replayed_running_completion

@@ -2177,7 +2177,18 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
              (Terminal_text.single_line choice.Masc.Tui_decode.ac_id)
              Ansi.reset)
         ~style:(if picked then Ansi.bold else Ansi.dim)
-        choice.Masc.Tui_decode.ac_label)
+        choice.Masc.Tui_decode.ac_label;
+      (* What picking this commits to. The wire carries it, the dashboard
+         draws it under the label, and this pane dropped it -- so the operator
+         answering from the terminal weighed a label where the one answering
+         from a browser weighed a label and its consequence. *)
+      match choice.Masc.Tui_decode.ac_description with
+      | None -> ()
+      | Some description ->
+        box_wrapped_field buf cols
+          ~head:"          "
+          ~style:Ansi.dim
+          (Terminal_text.single_line description))
     question.Masc.Tui_decode.aq_choices;
   (* What the operator has put down so far, in the two shapes a list of
      choices cannot show. *)
@@ -2627,11 +2638,17 @@ let render_approvals (state : state) =
   if count = 0 then begin
     (match state.approval_snapshot, approvals_error with
      | _, Some err ->
-         box_line buf cols (data_unreliable_row ~cols err)
+         box_line buf cols (data_unreliable_row ~cols err);
+         for _ = 1 to max 0 (approval_body_rows - 1) do
+           box_empty buf cols
+         done
      | None, None ->
          box_line buf cols
            (Ansi.dim ^ "  (no approval data — press 'r' to refresh)"
-           ^ Ansi.reset)
+           ^ Ansi.reset);
+         for _ = 1 to max 0 (approval_body_rows - 1) do
+           box_empty buf cols
+         done
      | Some _, None ->
          (* An unreadable approval-queue store and an empty queue must not
             share a face: the server says which one it was, and "no pending
@@ -2640,13 +2657,16 @@ let render_approvals (state : state) =
          (match state.gate_queue_unavailable with
           | Some detail ->
               box_line buf cols
-                (data_unreliable_row ~cols ("approval queue unavailable: " ^ detail))
+                (data_unreliable_row ~cols ("approval queue unavailable: " ^ detail));
+              for _ = 1 to max 0 (approval_body_rows - 1) do
+                box_empty buf cols
+              done
           | None ->
               box_line buf cols
-                (Ansi.dim ^ "  (no pending approvals)" ^ Ansi.reset)));
-    for _ = 1 to approval_body_rows do
-      box_empty buf cols
-    done
+                (Ansi.dim ^ "  (no pending approvals)" ^ Ansi.reset);
+              for _ = 1 to max 0 (approval_body_rows - 1) do
+                box_empty buf cols
+              done));
   end else begin
     let content_height = approval_body_rows in
     let scroll_offset =
@@ -3630,7 +3650,8 @@ let planning_phase_label phase = Goal_phase.to_string phase
    form needs the rows below the list to be certain, and being one short is
    silent -- the frame drops its last row, which is the footer. #32928 carries
    that change for the three surfaces where the tail is already established. *)
-let planning_list_chrome_rows = 14
+(* One more than it was: the JUDGE legend sits under the column header. *)
+let planning_list_chrome_rows = 15
 let planning_list_verdict_rows = 2
 
 let planning_phase_column =
@@ -3655,6 +3676,56 @@ let planning_phase_color = function
   | Goal_phase.Completed -> (Theme.ok ())
   | Goal_phase.Dropped -> (Theme.muted ())
 
+(* The lifecycle as a rail, not a single word. The phase says where the goal
+   is; it never said what the stages are or which way they run, so "what does
+   [c] do here" was a question the screen could not answer. The occupied stop
+   is bracketed and keeps its colour, the rest stay dim.
+
+   [Dropped] is not a stop on this line -- it leaves the line -- so a dropped
+   goal draws what it is and how to come back instead of highlighting a stop
+   on a rail it is no longer on. *)
+let planning_stage_rail (phase : Goal_phase.t) =
+  let stop stage =
+    let label = planning_phase_label stage in
+    if stage = phase then
+      planning_phase_color stage ^ Ansi.bold ^ "[" ^ label ^ "]" ^ Ansi.reset
+    else Ansi.dim ^ " " ^ label ^ " " ^ Ansi.reset
+  in
+  let arrow = Ansi.dim ^ "\xe2\x94\x80\xe2\x96\xb6" ^ Ansi.reset in
+  match phase with
+  | Goal_phase.Dropped ->
+    planning_phase_color Goal_phase.Dropped
+    ^ Ansi.bold ^ "[dropped]" ^ Ansi.reset
+    ^ Ansi.dim ^ "  (off the line; [o] puts it back on executing)" ^ Ansi.reset
+  | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Completed ->
+    String.concat arrow
+      [ stop Goal_phase.Executing
+      ; stop Goal_phase.Verifying
+      ; stop Goal_phase.Completed
+      ]
+;;
+
+(* What moves this goal next, in one sentence, from the pair the operator can
+   see separately but had to combine themselves: the phase and the judge's
+   last word. [executing] with a refusal on the ledger is a different
+   instruction from [executing] with nothing on it, and both drew the same
+   word. Only the goal phase decides here -- the linked tasks have their own
+   surface and their own verdicts. *)
+let planning_next_step (goal : planning_goal) =
+  match goal.pg_phase, goal.pg_proof with
+  | Goal_phase.Executing, Tui_decode.Proof_refuted _ ->
+    ( (Theme.bad ())
+    , "refused - fix what the verdict names below, then [c] to resubmit" )
+  | Goal_phase.Executing, _ ->
+    ( Ansi.dim
+    , "work the linked tasks, then [c] to submit it for verification" )
+  | Goal_phase.Verifying, _ ->
+    ( (Theme.warn ())
+    , "with the completion judge - nothing to press; [c] re-arms the request" )
+  | Goal_phase.Completed, _ -> (Ansi.dim, "reached its target - [o] reopens it")
+  | Goal_phase.Dropped, _ -> (Ansi.dim, "abandoned - [o] reopens it")
+;;
+
 (* Planning is one operator workspace with three authorities behind it: Goal
    lifecycle, the Task verdict queue, and the verdicts the judge recorded.
    Keep their APIs separate, but make the hierarchy visible in the title
@@ -3678,8 +3749,14 @@ type planning_tab = Render_schedule.planning_tab =
    count pass "". *)
 let planning_workspace_title (state : state) ~(tab : planning_tab) ~(window : string) =
   let review_count = Option.map (fun s -> s.vs_total) state.verification in
+  let verifying_count =
+    Option.map
+      (fun (p : planning_snapshot) -> p.pl_rollup.pr_verifying)
+      state.planning
+  in
   let labels =
-    Render_schedule.planning_strip_plain ~tab ~review_count ~window
+    Render_schedule.planning_strip_plain ~tab ~review_count ~verifying_count
+      ~window
   in
   let stops = [ Planning_goals; Planning_task_review; Planning_verdicts ] in
   let draw stop label =
@@ -3874,6 +3951,11 @@ let render_planning_list (state : state) =
        in
        box_line_styled buf cols ~style:(Theme.recede ())
          ("  " ^ Render_schedule.planning_header_row ~phase_width ~title_width);
+       (* What the JUDGE column's marks mean, once, under the header that
+          names it. The glyphs are the only part of a row an operator cannot
+          read straight off, and every one of them changes what to do next. *)
+       box_line_styled buf cols ~style:Ansi.dim
+         ("  JUDGE  \xe2\x80\xa6 waiting  \xe2\x9c\x93 proven  \xe2\x9c\x97 refused, back in executing  ! unreadable");
        box_divider buf cols;
 
        if count = 0 then begin
@@ -4013,7 +4095,9 @@ let render_planning_list (state : state) =
    add one more when they are there, so the block is measured against them
    rather than against a constant that would push the footer off a full
    screen. *)
-let planning_detail_fixed_rows = 11
+(* One more than it was: the stage rail took the phase word's row and the
+   next-step sentence is a row of its own. Counted here, drawn below. *)
+let planning_detail_fixed_rows = 12
 
 let planning_detail_tone (tone : Planning_detail.tone) =
   match tone with
@@ -4051,10 +4135,11 @@ let planning_detail_pane (state : state)
   in
   let proof_glyph = planning_proof_mark goal.pg_proof in
   box_line buf cols
-    (Printf.sprintf "  Phase: %s[%s]%s   Priority: %sP%d%s   Proof: %s"
-       status_color status_label Ansi.reset
-       prio_color goal.pg_priority Ansi.reset
-       proof_glyph);
+    (Printf.sprintf "  Stage:   %s   %s"
+       (planning_stage_rail goal.pg_phase) proof_glyph);
+  let next_colour, next_text = planning_next_step goal in
+  box_line buf cols
+    (Printf.sprintf "  Next:    %s%s%s" next_colour next_text Ansi.reset);
   let due_text =
     match Terminal_text.optional_single_line goal.pg_due_date with
     | Some d -> d
@@ -4072,7 +4157,8 @@ let planning_detail_pane (state : state)
     | None -> "\xe2\x80\x94"
   in
   box_line buf cols
-    (Printf.sprintf "  Due: %s   Metric: %s" due_text metric_text);
+    (Printf.sprintf "  Target:  %s   Due: %s   Priority: %sP%d%s"
+       metric_text due_text prio_color goal.pg_priority Ansi.reset);
   box_line buf cols
     (Printf.sprintf "  Actions:  %s[c]%s Complete   %s[x]%s Drop   %s[o]%s Reopen"
        (Theme.ok ()) Ansi.reset
@@ -10463,7 +10549,7 @@ let render_harness_list (state : state) =
      by whom, and where a fallback answered instead of the evaluator the Gate
      names. *)
   box_line_styled buf cols ~style:(Theme.recede ())
-    "  Evaluator Verdicts = automatic Gate rulings (old Harness); not Goal proof.";
+    "  Task Verdicts = automatic Gate rulings on Tasks (old Harness); not Goal proof.";
   List.iter (box_line buf cols) (harness_ledger_lines ~cols state.harness);
   (* A ledger that quietly stopped is this screen's own failure mode: it once
      starved for a month while the judge kept running, and the stale rows
@@ -10994,6 +11080,33 @@ let render_fusion_list (state : state) =
          (Masc_tui_keys.footer_hints Fusion));
   finish_surface state ~surface_key:"fusion-list" ~rows:terminal_rows ~cols buf
 
+(* The panel as marks, one per model, filled where the model answered.
+
+   Which preset ran and whether the panel that fed the judge was whole is the
+   first thing an operator reads off a run, and the pane said it in a sentence
+   of counts -- "judge-of-judges  first x3  meta x1" -- with the failures
+   counted somewhere else entirely. A model that did not answer is a hole in
+   the row here, so a thin panel is seen before it is read.
+
+   Past the cap the row would stop being countable at a glance, so it becomes
+   the two numbers it was drawn from. *)
+let fusion_panel_dots ~answered ~failed =
+  let cap = 24 in
+  let filled = "\xe2\x97\x8f" in
+  let hollow = "\xe2\x97\x8b" in
+  let run style mark n =
+    if n <= 0 then ""
+    else style ^ String.concat "" (List.init n (fun _ -> mark)) ^ Ansi.reset
+  in
+  match answered + failed with
+  | 0 -> ""
+  | total when total > cap ->
+    Printf.sprintf "%s%d\xc3\x97%s%s  %s%d\xc3\x97%s%s"
+      (Theme.ok ()) answered filled Ansi.reset
+      (Theme.bad ()) failed hollow Ansi.reset
+  | _ -> run (Theme.ok ()) filled answered ^ run (Theme.bad ()) hollow failed
+;;
+
 let fusion_wrapped_block ~width ~indent text =
   let body_width = max 1 (width - Message_layout.display_width indent) in
   String.split_on_char '\n' text
@@ -11292,7 +11405,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
         let judge_lines =
           match evidence.fe_judge with
           | Fusion_judge_synthesized judge ->
-              [ ( Ansi.magenta
+              [ ( (Theme.info ())
                 , "  Judge [synthesized] "
                   ^ Terminal_text.single_line judge.fj_decision )
               ]
@@ -11353,7 +11466,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
                 |> List.mapi (fun index node ->
                        match node.fjn_outcome with
                        | Judge_node_synthesized synthesized ->
-                           [ ( Ansi.magenta
+                           [ ( (Theme.info ())
                              , Printf.sprintf
                                  "  First %d [synthesized] %s  (%d in / %d out)"
                                  (index + 1)
@@ -11387,9 +11500,15 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
                 |> List.concat
               in
               [ Ansi.dim, "" ]
+              (* The counts are already in pipeline order, so joining them
+                 with the same arrow the Goal stage rail uses draws the run
+                 rather than describing it. The shape name stays, at the end,
+                 because it is what the preset is called. *)
               @ ( Ansi.dim
-                , Printf.sprintf "  Judge topology: %s  \xc2\xb7  %s" shape
-                    (String.concat "  \xc2\xb7  " counts) )
+                , Printf.sprintf "  %s  \xe2\x94\x80\xe2\x96\xb6  %s  \xc2\xb7  %s"
+                    (fusion_panel_dots ~answered ~failed)
+                    (String.concat "  \xe2\x94\x80\xe2\x96\xb6  " counts)
+                    shape )
               :: first_cards
         in
         let tool_lines =
@@ -11411,7 +11530,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
         @ panel_chart_lines
         @ panel_lines
         @ [ Ansi.dim, ""
-          ; Ansi.magenta, "  3  JUDGE"
+          ; Ansi.bold, "  3  JUDGE"
           ]
         @ judge_lines
         @ judges_lines
@@ -11420,7 +11539,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
           ]
         @ tool_lines
         @ [ Ansi.dim, ""
-          ; (Theme.ok ()), "  5  EVIDENCE RECORDED"
+          ; Ansi.bold, "  5  EVIDENCE RECORDED"
           ; ( Ansi.dim
             , "  Board link: "
               ^ Link.reference Board_post
@@ -17232,14 +17351,14 @@ let render_palette (state : state) =
   let matches = Masc_tui_types.palette_matches state in
   let total = List.length matches in
   let cursor = max 0 (min state.palette_cursor (total - 1)) in
-  framed_top buf cols;
-  framed_line buf cols
+  framed_shadow_top buf cols;
+  framed_shadow_line buf cols
     (screen_title " Quick Jump & Navigation" ^ "  "
      ^ (Theme.warn ()) ^ "\xe2\x9a\xa1" ^ Ansi.reset ^ "  "
      ^ Ansi.bold ^ ":" ^ Ansi.reset ^ " "
      ^ (Terminal_text.single_line state.palette_query)
      ^ ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "\xe2\x96\x8c" ^ Ansi.reset));
-  framed_divider buf cols;
+  framed_shadow_divider buf cols;
   let content_height = framed_content_height ~rows in
   let first =
     if cursor < content_height then 0
@@ -17250,12 +17369,12 @@ let render_palette (state : state) =
   |> List.iteri (fun visible_index (label, _) ->
        let selected = first + visible_index = cursor in
        if selected then
-         framed_line_styled buf cols ~style:Theme.selection (" \xe2\x96\xb8 " ^ label)
+         framed_shadow_line_styled buf cols ~style:Theme.selection (" \xe2\x96\xb8 " ^ label)
        else
-         framed_line buf cols ("   " ^ label));
+         framed_shadow_line buf cols ("   " ^ label));
   if total = 0 then
-    framed_line buf cols (Ansi.dim ^ "   (no match)" ^ Ansi.reset);
-  framed_bottom buf cols;
+    framed_shadow_line buf cols (Ansi.dim ^ "   (no match)" ^ Ansi.reset);
+  framed_shadow_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:

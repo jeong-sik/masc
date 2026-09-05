@@ -112,6 +112,31 @@ let test_tool_result_error_round_trip () =
   | None -> fail "returned None"
 ;;
 
+let test_tool_result_skip_parse_json () =
+  let json =
+    `Assoc
+      [ "type", `String "tool_result"
+      ; "tool_use_id", `String "tu_skip"
+      ; "content", `String {|{"status":"ok","code":200}|}
+      ; "is_error", `Bool false
+      ]
+  in
+  (* Default parse_tool_result_json = true parses JSON *)
+  (match Llm_provider.Api_common.content_block_of_json json with
+   | Some (Types.ToolResult { json = Some (`Assoc _); _ }) -> ()
+   | _ -> fail "expected default to parse JSON");
+  (* parse_tool_result_json = false leaves json as None and avoids parsing AST *)
+  (match
+     Llm_provider.Api_common.content_block_of_json
+       ~parse_tool_result_json:false
+       json
+   with
+   | Some (Types.ToolResult { json = None; content; tool_use_id; _ }) ->
+     check string "tool_use_id" "tu_skip" tool_use_id;
+     check string "content" {|{"status":"ok","code":200}|} content
+   | _ -> fail "expected parse_tool_result_json:false to yield None")
+;;
+
 let test_image_round_trip () =
   let block =
     Types.Image { media_type = "image/png"; data = "abc"; source_type = Types.Base64 }
@@ -920,6 +945,10 @@ let () =
         ; test_case "tool_use" `Quick test_tool_use_round_trip
         ; test_case "tool_result" `Quick test_tool_result_round_trip
         ; test_case "tool_result_error" `Quick test_tool_result_error_round_trip
+        ; test_case
+            "tool_result_skip_parse_json"
+            `Quick
+            test_tool_result_skip_parse_json
         ; test_case "image" `Quick test_image_round_trip
         ; test_case "document" `Quick test_document_round_trip
         ; test_case "unknown type" `Quick test_unknown_type_returns_none

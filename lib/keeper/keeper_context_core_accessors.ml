@@ -127,18 +127,6 @@ let message_to_json = Message_json.message_to_json
 let message_of_json = Message_json.message_of_json
 let text_of_history_jsonl_json = Message_json.text_of_history_jsonl_json
 
-let serialize_context (ctx : working_context) : string =
-  let json = `Assoc [
-    ( "system_prompt",
-      `String
-        (Inference_utils.sanitize_text_utf8 (system_prompt_of_context ctx)) );
-    ("messages", `List (List.map message_to_json (messages_of_context ctx)));
-  ] in
-  Yojson.Safe.to_string json
-
-let serialized_bytes (ctx : working_context) : int =
-  String.length (serialize_context ctx)
-
 (* Naming a session does not open one. Every writer under this directory goes
    through [Keeper_fs.save_atomic], which creates the parent it needs, so the
    directory appears when something is actually stored in it. Creating it here

@@ -152,6 +152,72 @@ let test_parse_config_ok () =
     check (list string) "payload path defaults to the fixed base"
       Exec_shim.default_payload_path c.Exec_shim.payload_path
 
+(* RFC-0422: the box. *)
+let has_code code message =
+  let n = String.length code and h = String.length message in
+  let rec scan i = i + n <= h && (String.sub message i n = code || scan (i + 1)) in
+  scan 0
+
+let plan_label = function
+  | Exec_shim.Run_effect -> "effect"
+  | Exec_shim.Run_boxed { deny_fs = true; deny_net = true } -> "boxed:fs+net"
+  | Exec_shim.Run_boxed { deny_fs = false; deny_net = true } -> "boxed:net"
+  | Exec_shim.Run_boxed { deny_fs = true; deny_net = false } -> "boxed:fs"
+  | Exec_shim.Run_boxed { deny_fs = false; deny_net = false } -> "boxed:none"
+  | Exec_shim.Refuse_observe_unsupported -> "refuse"
+
+let test_plan_for_mode () =
+  let plan ~supported mode = plan_label (Exec_shim.plan_for_mode ~supported mode) in
+  check string "effect runs unboxed on a supporting host" "effect"
+    (plan ~supported:true Exec_ssh_protocol.Effect);
+  check string "effect runs unboxed on an unsupporting host too" "effect"
+    (plan ~supported:false Exec_ssh_protocol.Effect);
+  check string "observe denies writes and sockets" "boxed:fs+net"
+    (plan ~supported:true Exec_ssh_protocol.Observe);
+  check string "guest_local denies sockets only" "boxed:net"
+    (plan ~supported:true Exec_ssh_protocol.Guest_local);
+  check string "observe on an unsupporting host is refused, not unboxed" "refuse"
+    (plan ~supported:false Exec_ssh_protocol.Observe);
+  check string "guest_local on an unsupporting host is refused too" "refuse"
+    (plan ~supported:false Exec_ssh_protocol.Guest_local)
+
+let test_scratch_env () =
+  let env = Exec_shim.scratch_env ~scratch:"/tmp/masc-observe-1-abc"
+      [ "HOME", "/home/keeper"; "PATH", "/usr/bin"; "TMPDIR", "/tmp" ] in
+  check (option string) "HOME is the scratch" (Some "/tmp/masc-observe-1-abc") (List.assoc_opt "HOME" env);
+  check (option string) "TMPDIR is the scratch" (Some "/tmp/masc-observe-1-abc") (List.assoc_opt "TMPDIR" env);
+  check (option string) "PATH is untouched" (Some "/usr/bin") (List.assoc_opt "PATH" env);
+  check int "no duplicate names" 3 (List.length env)
+
+let test_parse_config_scratch_root () =
+  (match Exec_shim.parse_config "remote_root=/srv/masc
+scratch_root=/tmp/masc-scratch
+" with
+   | Ok c -> check (option string) "scratch_root" (Some "/tmp/masc-scratch") c.Exec_shim.scratch_root
+   | Error e -> fail e);
+  (match Exec_shim.parse_config "remote_root=/srv/masc
+" with
+   | Ok c -> check (option string) "absent scratch_root is None" None c.Exec_shim.scratch_root
+   | Error e -> fail e);
+  (match Exec_shim.parse_config "remote_root=/srv/masc
+scratch_root=relative/dir
+" with
+   | Ok _ -> fail "relative scratch_root accepted"
+   | Error e -> check bool "relative scratch_root is a config error" true
+                  (has_code Exec_shim.config_error_code e));
+  match Exec_shim.parse_config "remote_root=/srv/masc
+scratch_root=
+" with
+  | Ok _ -> fail "empty scratch_root accepted"
+  | Error e -> check bool "empty scratch_root is a config error" true
+                 (has_code Exec_shim.config_error_code e)
+
+let test_observe_support_is_consistent () =
+  (* The probe and the plan read the same kernel answer; off Linux it is no. *)
+  let supported = Exec_shim.observe_supported () in
+  if Sys.os_type <> "Unix" || not (Sys.file_exists "/proc/version")
+  then check bool "no Landlock outside Linux" false supported
+
 let test_parse_config_path_ok () =
   let content =
     "remote_root=/masc-work\npath=/home/opam/.opam/5.5/bin:/usr/local/bin:/usr/bin:/bin\n"
@@ -290,6 +356,7 @@ let request_for ~remote_root ~cwd =
   ; remote_root
   ; timeout_sec = 1.0
   ; stdin_len = 0L
+  ; mode = Exec_ssh_protocol.Effect
   }
 
 let config_for root =
@@ -377,11 +444,13 @@ let test_drain_fd () =
 (* {1 probe} *)
 
 let test_probe_identity () =
-  let p = Exec_shim.probe in
+  let p = Exec_shim.probe () in
   let protocol_version = string_of_int Exec_ssh_protocol.protocol_version in
   check string "name" "masc-exec-shim" p.Exec_ssh_protocol.name;
   check string "version" (protocol_version ^ ".0.0") p.Exec_ssh_protocol.version;
-  check (list string) "capabilities" [] p.Exec_ssh_protocol.capabilities;
+  check (list string) "capabilities say exactly whether this host can box a payload"
+    (if Exec_shim.observe_supported () then [ Exec_ssh_protocol.observe_capability ] else [])
+    p.Exec_ssh_protocol.capabilities;
   match Exec_ssh_protocol.parse_probe (Exec_ssh_protocol.render_probe p) with
   | Error e -> fail e
   | Ok p' ->
@@ -431,4 +500,8 @@ let () =
                   test_dispatch_rejects_a_request_root_outside_the_host_root
               ; test_case "rejects missing cwd" `Quick test_jail_rejects_missing_cwd ]
     ; "io", [ test_case "drain_fd" `Quick test_drain_fd ]
-    ; "probe", [ test_case "identity" `Quick test_probe_identity ] ]
+    ; "probe", [ test_case "identity" `Quick test_probe_identity ]
+    ; "box", [ test_case "plan for mode" `Quick test_plan_for_mode
+             ; test_case "scratch env" `Quick test_scratch_env
+             ; test_case "scratch_root config" `Quick test_parse_config_scratch_root
+             ; test_case "support is consistent" `Quick test_observe_support_is_consistent ] ]

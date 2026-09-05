@@ -293,7 +293,15 @@ let test_glyphs_hold_their_bytes () =
   check str "priority 1 speaks once" "!" (priority 1);
   check str "priority 2 says nothing" "" (priority 2);
   check str "priority 3 says nothing" "" (priority 3);
-  check str "priority 4 and below say nothing" "" (priority 4)
+  check str "priority 4 and below say nothing" "" (priority 4);
+  check str "braille spinner frame 0" "\xe2\xa3\xbe" (braille_spinner 0);
+  check str "braille spinner frame 7" "\xe2\xa3\xb7" (braille_spinner 7);
+  check str "braille spinner cycles" "\xe2\xa3\xbe" (braille_spinner 8);
+  check str "braille spinner negative step" "\xe2\xa3\xb7" (braille_spinner (-1));
+  check str "equalizer min level" " " (equalizer_level 0);
+  check str "equalizer max level" "\xe2\x96\x88" (equalizer_level 7);
+  check str "equalizer negative level clamped" " " (equalizer_level (-1));
+  check str "equalizer overflow clamped" "\xe2\x96\x88" (equalizer_level 99)
 
 let test_the_shim_is_the_same_strings () =
   (* Masc_tui_ansi is not linkable from tests (it lives in the executable),

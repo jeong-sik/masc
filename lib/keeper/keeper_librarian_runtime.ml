@@ -622,7 +622,8 @@ let execute_exact_output_classified
 let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail ~cadence_deferred =
   let snapshot_absent =
     match
-      Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
+      Domain_pool_ref.submit_io_or_inline (fun () ->
+        Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id)
     with
     | Ok (Some _) -> false
     | Ok None | Error _ -> true
@@ -636,15 +637,16 @@ let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail ~cadence_defe
   if snapshot_absent
   then Log.Keeper.error ~keeper_name:keeper_id "%s" message
   else Log.Keeper.warn ~keeper_name:keeper_id "%s" message;
-  Keeper_memory_os_current.append_librarian_failure
-    ~keepers_dir
-    ~keeper_id
-    ~now:(Time_compat.now ())
-    ~trace_id
-    ~kind
-    ~detail
-    ~snapshot_present:(not snapshot_absent)
-    ~cadence_deferred
+  Domain_pool_ref.submit_io_or_inline (fun () ->
+    Keeper_memory_os_current.append_librarian_failure
+      ~keepers_dir
+      ~keeper_id
+      ~now:(Time_compat.now ())
+      ~trace_id
+      ~kind
+      ~detail
+      ~snapshot_present:(not snapshot_absent)
+      ~cadence_deferred)
 ;;
 
 let current_selection_registry_summary = function
@@ -844,19 +846,20 @@ let run_best_effort
              (* The snapshot is committed; each supersede the answer stated is
                 now a Revised event on the old id (RFC-0418). A sidecar that
                 cannot be written is said here and does not undo the pass. *)
-             Keeper_memory_os_events.append_all
-               ~keepers_dir
-               ~keeper_id
-               (List.map
-                  (fun (revision : Keeper_librarian.revision) : Keeper_memory_os_events.event ->
-                     { recorded_at = snapshot.updated_at
-                     ; memory_id = revision.superseded
-                     ; trace_id = input_trace_id inp
-                     ; kind =
-                         Keeper_memory_os_events.Revised
-                           { superseded_by = revision.superseded_by }
-                     })
-                  selection.revisions)
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               Keeper_memory_os_events.append_all
+                 ~keepers_dir
+                 ~keeper_id
+                 (List.map
+                    (fun (revision : Keeper_librarian.revision) : Keeper_memory_os_events.event ->
+                       { recorded_at = snapshot.updated_at
+                       ; memory_id = revision.superseded
+                       ; trace_id = input_trace_id inp
+                       ; kind =
+                           Keeper_memory_os_events.Revised
+                             { superseded_by = revision.superseded_by }
+                       })
+                    selection.revisions))
              |> List.iter (fun error ->
                Log.Keeper.warn
                  ~keeper_name:keeper_id
@@ -1001,4 +1004,5 @@ module For_testing = struct
 
   let classified_error_detail = extraction_error_to_string
   let execute_exact_output_classified = execute_exact_output_classified
+  let record_failure = record_failure
 end

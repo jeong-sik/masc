@@ -1,6 +1,8 @@
 name = "keeper_voice_speak"
 description = """
-Speak a short utterance via the voice bridge. Blocks until local playback \
+Speak a short utterance via the voice bridge.
+
+Blocks until local playback \
 finishes: status='spoken' with played_seconds means the user has already \
 heard it — do NOT repeat or rephrase the same content. Duplicate identical \
 messages within 30s return status='dedup_skipped' without playing. TTS or \

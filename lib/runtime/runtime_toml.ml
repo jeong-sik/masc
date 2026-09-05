@@ -1258,6 +1258,7 @@ let exec_ssh_endpoint_keys =
   ; "max_concurrent_sessions"
   ; "env_allowlist"
   ; "capabilities"
+  ; "private_home"
   ]
 ;;
 
@@ -1386,6 +1387,12 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
   in
   let env_allowlist_result = string_array_field "env_allowlist" in
   let capabilities_result = string_array_field "capabilities" in
+  (* RFC-0422 §3.4: the operator's declaration that the account home is the
+     keeper's alone. Absent is [false], so a shared account keeps the judge
+     for every write until someone says otherwise in this file. *)
+  let private_home_result =
+    typed_find_or "a boolean" path tbl "private_home" Otoml.get_boolean ~default:false
+  in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let field_errors =
     errs host_result
@@ -1399,6 +1406,7 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
     @ errs max_concurrent_sessions_result
     @ errs env_allowlist_result
     @ errs capabilities_result
+    @ errs private_home_result
   in
   match unknown_key_errors with
   | _ :: _ -> Error (unknown_key_errors @ field_errors)
@@ -1414,7 +1422,8 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
        , connect_timeout_sec_result
        , max_concurrent_sessions_result
        , env_allowlist_result
-       , capabilities_result )
+       , capabilities_result
+       , private_home_result )
      with
      | ( Ok host
        , Ok user
@@ -1426,7 +1435,8 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
        , Ok connect_timeout_sec
        , Ok max_concurrent_sessions
        , Ok env_allowlist
-       , Ok declared_capabilities ) ->
+       , Ok declared_capabilities
+       , Ok private_home ) ->
        let capabilities =
          List.filter
            (fun capability ->
@@ -1464,6 +1474,7 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
                max_concurrent_sessions
          ; env_allowlist
          ; capabilities
+         ; private_home
          }
      (* [field_errors] is non-empty exactly when some field result is [Error],
         so this arm always carries at least one error. *)

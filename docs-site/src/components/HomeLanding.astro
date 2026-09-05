@@ -7,39 +7,65 @@ const { lang = 'en' } = Astro.props;
 const isKo = lang === 'ko';
 
 const t = {
+  // Not the page title again -- the <h1> above already carries that sentence.
+  // This line is for what the title leaves out.
   tagline: isKo
-    ? "여러 코딩 에이전트가 함께 쓰는 로컬 작업 공간"
-    : "A local workspace shared by several coding agents.",
-  copyCommand: "./quickstart.sh",
+    ? "서버 하나, .masc 디렉터리 하나. 에이전트가 작업을 집어 들고 샌드박스에서 턴을 돌리면, 그 기록을 다음 에이전트가 읽습니다."
+    : "One server, one .masc directory. An agent claims a task, runs its turns in a sandbox, and the next agent reads what it left.",
+  // Was `./quickstart.sh`, which only exists in a source checkout -- the wrong
+  // command for the reader this page is for. Installing is genuinely four
+  // steps (pick a tag, download, read it, run it) and the Quickstart button
+  // beside this carries them; what fits on one line is the command that opens
+  // everything once installed.
+  copyCommand: "masc --base-path ~/masc",
+  copyCommandNote: isKo
+    ? "설치 후 이 한 줄이면 UI 가 열리고 서버는 뒤에서 뜹니다."
+    : "After installing, this one line opens the UI and starts the server behind it.",
 
-  // Tabs for real screenshot
+  // Tabs for real screenshot. The label is the surface name in the TUI's own
+  // ring, because that is the word a reader will press.
   tab1: isKo ? "개요" : "Overview",
   tab2: isKo ? "키퍼" : "Keepers",
-  tab3: isKo ? "런타임" : "Lanes",
+  tab3: isKo ? "런타임" : "Runtime",
   tab4: isKo ? "승인" : "Approvals",
   tab5: isKo ? "활동" : "Activity",
+  shotAlt1: isKo
+    ? "MASC 개요 화면: 함대 상태 한 줄, 주의가 필요한 Keeper 목록, 작업 목록."
+    : "MASC Overview surface: one fleet status line, the Keepers needing attention, and the task list.",
+  shotAlt2: isKo
+    ? "MASC Keepers 화면: Keeper 한 명당 한 줄로 상태, 오토부트, 샌드박스, 런타임, 맡은 작업."
+    : "MASC Keepers surface: one row per Keeper with health, autoboot, sandbox, runtime and current task.",
+  shotAlt3: isKo
+    ? "MASC Runtime 화면: LLM 레인별 슬롯 순서와 카탈로그 시도 순서."
+    : "MASC Runtime surface: each LLM lane's slot order and the catalog attempt order.",
+  shotAlt4: isKo
+    ? "MASC Approvals 화면: 사람의 판단을 기다리는 항목 큐."
+    : "MASC Approvals surface: the queue of items waiting on a human decision.",
+  shotAlt5: isKo
+    ? "MASC Activity 화면: 모든 Keeper 의 도구 호출과 턴 경계를 최신순으로 흘리는 피드."
+    : "MASC Activity surface: the newest-first feed of every Keeper's tool calls and turn boundaries.",
   screenCaption: isKo 
     ? "실제 터미널 런타임 캡처 (masc-tui · 2026-09-04 실측 133×28)" 
     : "Actual terminal capture from masc-tui (2026-09-04 live runtime 133×28)",
 
   // Invariants
-  invariantsTag: isKo ? "핵심 불변식" : "CORE INVARIANTS",
-  invariantsTitle: isKo ? "4대 런타임 불변식" : "Four Runtime Invariants",
+  invariantsTag: isKo ? "핵심 기능" : "CAPABILITIES",
+  invariantsTitle: isKo ? "MASC가 하는 일" : "What MASC does",
 
-  card1Title: isKo ? "파일 락 기반 작업 선점 (Claim)" : "File-Locked Task Claiming",
+  card1Title: isKo ? "작업 선점 (Claim)" : "Task Claiming",
   card1Desc: isKo
-    ? ".masc/ 작업 저장소의 파일 락을 통해 Task 소유권을 확정하여 복수 에이전트 간 중복 작업을 분할합니다."
-    : "Tasks are exclusively claimed via .masc/ file locks to coordinate work partitions across multiple agents.",
+    ? "작업을 한 에이전트가 claim하면 스토어가 다른 에이전트의 claim을 거절합니다. 소유권과 진행 상태가 공용 저장소에 남습니다."
+    : "Once an agent claims a task, the store rejects any other claim. Ownership and progress stay in the shared store.",
 
   card2Title: isKo ? "단일 MCP 게이트웨이" : "Unified MCP Gateway",
   card2Desc: isKo
-    ? "Claude Code, Cursor 등 외부 도구가 HTTP SSE 엔드포인트(:8935/mcp)로 연결되며 masc mcp-config로 즉시 설정합니다."
-    : "Exposes HTTP SSE endpoint (:8935/mcp) for external tools with instant masc mcp-config generation.",
+    ? "Claude Code, Cursor 같은 MCP 클라이언트가 :8935/mcp 엔드포인트로 접속합니다. masc mcp-config가 토큰과 설정 블록을 만들어 줍니다."
+    : "MCP clients such as Claude Code and Cursor connect to the :8935/mcp endpoint; masc mcp-config mints the token and config block.",
 
-  card3Title: isKo ? "인과 장기 기억 (Memory OS)" : "Causal Memory OS",
+  card3Title: isKo ? "장기 기억 (Memory OS)" : "Memory OS",
   card3Desc: isKo
-    ? "트리거, 의사결정, 결과 노드를 인과 그래프로 영속화하여 세션 종료 후에도 작업 맥락을 유지합니다."
-    : "Persists trigger-decision-outcome graph nodes across sessions without loss of context.",
+    ? "Keeper가 학습한 사실을 저장하고 다음 턴에 다시 씁니다. 사실이 언제 회수되고 인용됐는지 사건으로 기록합니다."
+    : "Facts a Keeper learns are stored and reused on later turns. Retrieval and citation land as recorded events.",
 
   card4Title: isKo ? "샌드박스 격리 & 오퍼레이터 승인" : "Sandbox Isolation & Operator Approvals",
   card4Desc: isKo
@@ -49,12 +75,18 @@ const t = {
   // Quickstart
   quickTag: isKo ? "빠른 시작" : "QUICKSTART",
   quickTitle: isKo ? "3단계로 즉시 실행" : "Up and Running in 3 Steps",
-  step1: isKo ? "1. 작업 공간 서버 기동" : "1. Launch Workspace Server",
-  step1Desc: isKo ? "스크립트로 .masc 디렉터리를 초기화하고 포트 8935 서버를 기동합니다." : "Initializes local .masc state and starts server on port 8935.",
-  step2: isKo ? "2. 터미널 조종석 접속" : "2. Launch Terminal UI",
-  step2Desc: isKo ? "masc-tui로 에이전트 궤적, 툴 트리, 작업 상태를 실시간 관측합니다." : "Supervises live agent trajectories, tool calls, and state in masc-tui.",
-  step3: isKo ? "3. MCP 클라이언트 연동" : "3. Connect MCP Client",
-  step3Desc: isKo ? "원클릭으로 Claude Code, Cursor용 베어러 토큰 및 설정 블록을 생성합니다." : "Generates ready configuration snippet with long-lived worker bearer.",
+  step1: isKo ? "작업 공간 심기" : "Seed the workspace",
+  step1Desc: isKo
+    ? "설정 트리를 바이너리 안에서 꺼내 씁니다. 저장소를 받아본 적 없는 기계에서도 됩니다. install.sh 로 설치했다면 이미 끝나 있습니다."
+    : "Writes the configuration tree out of the binary itself, so it works on a machine that never had a checkout. install.sh has already done this.",
+  step2: isKo ? "켜기" : "Start it",
+  step2Desc: isKo
+    ? "터미널에서는 UI 가 열리고 서버는 그 뒤에서 뜹니다. 파이프나 systemd 아래에서는 같은 명령이 서버로 돕니다."
+    : "In a terminal the UI opens and the server starts behind it. Under a pipe or a unit file the same command runs the server instead.",
+  step3: isKo ? "MCP 클라이언트 연동" : "Connect an MCP client",
+  step3Desc: isKo
+    ? "masc mcp-config 가 토큰과 설정 블록을 만들어 줍니다. env, codex, claude-desktop 중에 고릅니다."
+    : "masc mcp-config mints the token and the config block. Pick env, codex, or claude-desktop.",
 
   // Quick links
   docsTitle: isKo ? "문서 둘러보기" : "Documentation Matrix",
@@ -80,11 +112,13 @@ const t = {
       </div>
     </div>
     <div class="masthead-right">
-      <div class="quick-cmd" id="copy-install-cmd" title="Click to copy">
-        <span class="cmd-dollar">$</span>
+      <button class="quick-cmd" id="copy-install-cmd" type="button"
+              aria-label={t.copyCommandNote}>
+        <span class="cmd-dollar" aria-hidden="true">$</span>
         <code class="cmd-code">{t.copyCommand}</code>
         <span class="copy-badge">Copy</span>
-      </div>
+      </button>
+      <p class="quick-cmd-note">{t.copyCommandNote}</p>
       <a href={isKo ? "/ko/getting-started/quickstart/" : "/getting-started/quickstart/"} class="nav-link-btn">
         {isKo ? "빠른 시작 →" : "Quickstart →"}
       </a>
@@ -97,29 +131,40 @@ const t = {
   {/* REAL TERMINAL CAPTURE SHOWCASE (NO FAKE CSS TERMINAL) */}
   <section class="tui-showcase-section">
     <div class="tui-tab-bar">
-      <div class="tui-tabs">
-        <button class="tui-tab active" data-img="/01-overview.png">{t.tab1}</button>
-        <button class="tui-tab" data-img="/02-keepers.png">{t.tab2}</button>
-        <button class="tui-tab" data-img="/03-lanes.png">{t.tab3}</button>
-        <button class="tui-tab" data-img="/05-approvals.png">{t.tab4}</button>
-        <button class="tui-tab" data-img="/06-activity.png">{t.tab5}</button>
+      {/* A real tablist: the product is driven from a keyboard, and a strip of
+          bare buttons that only answers a mouse reads as a contradiction.
+          Arrow keys, Home and End move; only the selected tab is tabbable. */}
+      <div class="tui-tabs" role="tablist" aria-label={t.screenCaption}>
+        <button class="tui-tab active" role="tab" aria-selected="true" tabindex="0"
+                data-img="/01-overview.png" data-alt={t.shotAlt1}>{t.tab1}</button>
+        <button class="tui-tab" role="tab" aria-selected="false" tabindex="-1"
+                data-img="/02-keepers.png" data-alt={t.shotAlt2}>{t.tab2}</button>
+        <button class="tui-tab" role="tab" aria-selected="false" tabindex="-1"
+                data-img="/03-lanes.png" data-alt={t.shotAlt3}>{t.tab3}</button>
+        <button class="tui-tab" role="tab" aria-selected="false" tabindex="-1"
+                data-img="/05-approvals.png" data-alt={t.shotAlt4}>{t.tab4}</button>
+        <button class="tui-tab" role="tab" aria-selected="false" tabindex="-1"
+                data-img="/06-activity.png" data-alt={t.shotAlt5}>{t.tab5}</button>
       </div>
       <span class="tui-caption">{t.screenCaption}</span>
     </div>
 
+    {/* 2242x896 is what the capture is. Declaring 1920x1080 made the browser
+        hold a 16:9 box and then jump to 2.5:1 when the file arrived. */}
     <div class="tui-frame">
       <img 
         id="tui-active-img" 
         src="/01-overview.png" 
-        alt="MASC Terminal UI Live Screenshot" 
-        width="1920" 
-        height="1080" 
+        alt={t.shotAlt1}
+        width="2242" 
+        height="896" 
         loading="eager"
+        decoding="async"
       />
     </div>
   </section>
 
-  {/* 4 HARDENED INVARIANTS */}
+  {/* Four capability cards */}
   <section class="sec-block">
     <div class="sec-hdr">
       <span class="sec-tag">{t.invariantsTag}</span>
@@ -191,7 +236,7 @@ const t = {
         <div class="q-content">
           <h4>{t.step1}</h4>
           <p>{t.step1Desc}</p>
-          <pre><code>$ ./quickstart.sh</code></pre>
+          <pre><code>$ masc init --base-path ~/masc</code></pre>
         </div>
       </div>
       <div class="q-card">
@@ -199,7 +244,7 @@ const t = {
         <div class="q-content">
           <h4>{t.step2}</h4>
           <p>{t.step2Desc}</p>
-          <pre><code>$ masc-tui</code></pre>
+          <pre><code>$ masc --base-path ~/masc</code></pre>
         </div>
       </div>
       <div class="q-card">
@@ -244,18 +289,54 @@ const t = {
 
 <script>
   // Real Screenshot Tab Switching
-  const tabs = document.querySelectorAll('.tui-tab');
+  const tabs = Array.from(document.querySelectorAll('.tui-tab')) as HTMLButtonElement[];
   const activeImg = document.getElementById('tui-active-img') as HTMLImageElement;
 
+  // Fetch every frame up front. Each is a flat terminal capture that gzips
+  // small, and without this the first press of a tab shows an empty frame
+  // while the file is still on the wire.
   tabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-      tabs.forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
+    const src = tab.getAttribute('data-img');
+    if (src) { const pre = new Image(); pre.src = src; }
+  });
 
-      const imgSrc = tab.getAttribute('data-img');
-      if (activeImg && imgSrc) {
-        activeImg.src = imgSrc;
-      }
+  const select = (tab: HTMLButtonElement, focus: boolean) => {
+    tabs.forEach(t => {
+      const on = t === tab;
+      t.classList.toggle('active', on);
+      t.setAttribute('aria-selected', String(on));
+      t.tabIndex = on ? 0 : -1;
+    });
+
+    const imgSrc = tab.getAttribute('data-img');
+    if (activeImg && imgSrc && activeImg.getAttribute('src') !== imgSrc) {
+      // Fade through, rather than swapping under the reader's eye. The class
+      // is dropped on load so a cached frame still lands at full opacity.
+      activeImg.classList.add('swapping');
+      const show = () => {
+        activeImg.classList.remove('swapping');
+        activeImg.removeEventListener('load', show);
+      };
+      activeImg.addEventListener('load', show);
+      activeImg.src = imgSrc;
+      activeImg.alt = tab.getAttribute('data-alt') || activeImg.alt;
+    }
+
+    if (focus) tab.focus();
+  };
+
+  tabs.forEach((tab, i) => {
+    tab.addEventListener('click', () => select(tab, false));
+    tab.addEventListener('keydown', (event) => {
+      const key = (event as KeyboardEvent).key;
+      let next = -1;
+      if (key === 'ArrowRight') next = (i + 1) % tabs.length;
+      else if (key === 'ArrowLeft') next = (i - 1 + tabs.length) % tabs.length;
+      else if (key === 'Home') next = 0;
+      else if (key === 'End') next = tabs.length - 1;
+      if (next < 0) return;
+      event.preventDefault();
+      select(tabs[next], true);
     });
   });
 
@@ -455,7 +536,50 @@ const t = {
     display: block;
     width: 100%;
     height: auto;
-    object-fit: cover;
+    /* The attributes now carry the capture's own 2242x896, so the box is
+       reserved at the right shape and there is nothing to crop. `cover` here
+       would only ever cut the terminal's edge columns off. */
+    object-fit: contain;
+    opacity: 1;
+    transition: opacity 160ms ease;
+  }
+
+  .tui-frame img.swapping {
+    opacity: 0.35;
+  }
+
+  .quick-cmd {
+    /* It was a div with a title attribute: not reachable by keyboard and
+       invisible to a screen reader. A button costs nothing and says what it is. */
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  .quick-cmd-note {
+    margin: 0.4rem 0 0;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    opacity: 0.6;
+    max-width: 42ch;
+    /* Korean has no spaces inside a word, so the default break rule splits
+       one mid-syllable ("뜹니 다"). keep-all breaks between words instead. */
+    word-break: keep-all;
+  }
+
+  .quick-cmd:focus-visible,
+  .tui-tab:focus-visible {
+    outline: 2px solid #d98a3d;
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tui-frame img {
+      transition: none;
+    }
+    .tui-frame img.swapping {
+      opacity: 1;
+    }
   }
 
   /* SECTION BLOCKS */

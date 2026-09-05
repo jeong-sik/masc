@@ -63,6 +63,14 @@ val read_backlog_snapshot : config:Workspace.config -> meta:keeper_meta -> backl
     different backlog revisions. Only typed task identities cross into prompt
     observation; task titles remain behind the task-tool boundary. *)
 
+val tasks_with_identities_memoized
+  :  Masc_domain.task list
+  -> ((Masc_domain.task * Keeper_id.Task_id.t) list, string) result
+(** Typed identities for [tasks], answered from a one-entry memo when [tasks]
+    is physically the list last seen. The backlog store returns the same
+    decoded record while the file is unchanged, so repeated observations of an
+    unchanged backlog do not validate every task id again. *)
+
 (** [task_is_self_authored_todo ~meta task] is true when an unclaimed [Todo]
     was authored by the keeper's own stable handle ([meta.name]).
 

@@ -36,7 +36,7 @@ dune build bin/masc_tui.exe
 | **Memory** | 키퍼별 Memory OS 상태 | `Enter`: 팩트 브라우저 |
 | **Approvals** | 게이트 승인 대기열, 상시 허용 규칙, 키퍼가 사람에게 묻는 질문 | |
 | **Board** | 사람, 에이전트, 자동화, 시스템의 게시글 | |
-| **Planning** | 목표와 계획 | `v`: Goals → Task Review → Evaluator Verdicts |
+| **Planning** | 목표와 계획 | `v`: Goals · Task Review · Task Verdicts |
 | **Fusion** | 패널·심판 실행 목록과 상세 | `Enter`: 실행 상세 |
 | **Workspace** | 등록된 저장소, 워킹 트리 변경 (`d`) | `Enter`: 코드 브라우저 |
 | **Runtime** | 런타임 레인, 우선순위 후보, 프로바이더 도달성 | `p`: 레인 상세 |
@@ -59,7 +59,7 @@ dune build bin/masc_tui.exe
 - 목록에서 `c` 대화, `l` 로그, `t` 도구 호출, `u` 런타임 레인 선택, `g` 승인 모드(yolo/auto) 전환, `p`/`w` 일시정지·깨우기, `s` 종료입니다.
 
 ### Planning과 Fusion
-Planning의 `v`는 세 탭을 순회합니다: Goals → Task Review → Evaluator Verdicts. 심의(Fusion)는 별도의 링 항목이며, 실행 목록에서 `Enter`로 상세를 엽니다. 실행 중인 행의 `STATE`는 현재 단계를 그대로 보여 줍니다: `accepted`, `panel(N)`, `judge(A/F)`, `computed(A/F)`, `recording(A/F)`.
+Planning의 `v`는 세 탭을 순회합니다: Goals, Task Review, Task Verdicts. Goals는 목표 수명주기이고 뒤의 둘은 Task 판정의 앞뒤 절반이라, 순서가 아니라 서로 다른 주제입니다. 심의(Fusion)는 별도의 링 항목이며, 실행 목록에서 `Enter`로 상세를 엽니다. 실행 중인 행의 `STATE`는 현재 단계를 그대로 보여 줍니다: `accepted`, `panel(N)`, `judge(A/F)`, `computed(A/F)`, `recording(A/F)`.
 
 ### Memory
 `Enter`로 팩트 브라우저를 엽니다. `c`/`C`는 카테고리 필터를 앞뒤로 순환하고, `s`는 정렬을 바꿉니다(최신, 마지막 인출, 인출 횟수, 카테고리, 내용). `/`로 텍스트 필터를 걸고 `n`/`N`으로 일치 항목을 오갑니다. `Esc`로 닫으면 건강 표로 돌아갑니다.

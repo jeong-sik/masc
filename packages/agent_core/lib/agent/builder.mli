@@ -145,6 +145,10 @@ val with_pre_dispatch_serialization_observer
   -> t
   -> t
 
+(** Run each admitted provider body's serialisation through [executor], for
+    example on another domain, instead of on the fiber that drives the turn. *)
+val with_serialization_executor : Agent.serialization_executor -> t -> t
+
 (** Inject an {!Llm_provider.Llm_transport.t} for non-HTTP providers.
     Required for CLI provider kinds ([Claude_code], [Codex],
     [Gemini], [Kimi]) which are reached via subprocess rather

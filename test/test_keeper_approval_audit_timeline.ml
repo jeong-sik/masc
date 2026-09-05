@@ -203,6 +203,8 @@ let every_authorization_source =
   ; Q.Exact_always_rule
   ; Q.Keeper_always_allow
   ; Q.Workspace_always_allow
+  ; Q.Readonly_sandbox
+  ; Q.Observed_in_box
   ]
 ;;
 
@@ -210,7 +212,7 @@ let test_authorization_sources_are_distinct () =
   let rendered = List.map Q.authorization_source_to_string every_authorization_source in
   check (list string) "each authority renders as itself"
     [ "one_shot_resolution"; "exact_always_rule"; "keeper_always_allow";
-      "workspace_always_allow" ]
+      "workspace_always_allow"; "readonly_sandbox"; "observed_in_box" ]
     rendered;
   check int "no two authorities share a spelling"
     (List.length rendered)

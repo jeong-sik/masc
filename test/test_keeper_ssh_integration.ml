@@ -34,6 +34,7 @@ let endpoint fixture : Exec_ssh_endpoint.t =
   ; max_concurrent_sessions = 4
   ; env_allowlist = [ "FOO"; "PATH" ]
   ; capabilities = []
+  ; private_home = false
   }
 ;;
 

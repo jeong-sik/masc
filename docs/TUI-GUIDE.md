@@ -10,7 +10,7 @@ rotate with `Tab` in the order `surface_ring` spells in
 `bin/masc_tui_types.ml`: Overview, Activity, Keepers, Memory, Approvals,
 Board, Planning, Workspace, Runtime, Config.
 Eleven more surfaces hang off parents instead of holding Tab stops:
-Planning's `v` walks Task Review, Evaluator Verdicts, Schedules, and Fusion;
+Planning's `v` walks Task Review, Task Verdicts, Schedules, and Fusion;
 the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,
 Automation, and Runs as tabs. Runtime reaches standalone Lanes with `p` (its
 third stop) and the clients roster with `c`, Workspace reaches Code with
@@ -936,15 +936,19 @@ authored Markdown.
 
 ### Planning
 
-Planning is one workspace with three ordered child views: `1 Goals` groups the
-outcome and its linked Tasks; `2 Task Review` holds Task completion requests
-waiting for an operator decision; `3 Evaluator Verdicts` shows automatic Gate
-rulings recorded afterward; `4 Schedules` and `5 Fusion` keep their own
-headers but continue the same walk. Press `v` to move through that order.
-Evaluator Verdicts is the old Harness ledger, not a Goal completion proof.
+Planning is one workspace holding two different subjects, which is why its
+stops are not numbered. `Goals` is the goal lifecycle, judged against the
+goal verification ledger. `Task Review` and `Task Verdicts` are the two
+halves of the Task protocol: what is waiting for a ruling, and what was
+ruled. A goal sitting in `verifying` appears in neither of them, and Task
+Verdicts is the old Harness ledger, not a Goal completion proof. `Schedules`
+and `Fusion` keep their own headers but continue the same `v` walk.
+
+Each side carries its own count on the strip: `Goals·2` is goals with the
+completion judge, `Task Review·7` is tasks waiting for an operator.
 
 ```
- MASC Planning  ▸1 Goals  2 Task Review·2  3 Evaluator Verdicts  10:44:57  [connected]
+ MASC Planning  ▸Goals·1  Task Review·2  Task Verdicts  10:44:57  [connected]
    show executing + verifying · order phase order, then P1→P5
    Executing: 3  Paused/Blocked: 1  Verifying: 0  Done: 24  Dropped: 22
    Backlog: todo=4  claimed=0  running=6  done=109  cancelled=37

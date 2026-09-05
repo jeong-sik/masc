@@ -911,32 +911,6 @@ let check_agent_rate_limit request reqd =
         Error ()
       end
 
-(** Admin-only access - requires MASC_ADMIN_TOKEN.
-    Delegates timing-resistant comparison to Eqaf. *)
-let admin_token_equal = Eqaf.equal
-
-let with_admin_auth handler request reqd =
-  match current_server_state () with
-  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
-  | Some state ->
-      let admin_token = Env_config_core.admin_token_opt () in
-      let provided = auth_token_from_request request in
-      match admin_token, provided with
-      | None, _ ->
-          Http_server_eio.Response.json ~status:`Forbidden
-            {|{"error":"MASC_ADMIN_TOKEN not configured"}|} reqd
-      | Some _, None ->
-          Http_server_eio.Response.json
-            ~status:`Unauthorized
-            ~extra_headers:(auth_error_headers ~status:`Unauthorized ~cors:[])
-            {|{"error":"Admin token required"}|} reqd
-      | Some expected, Some given ->
-          if admin_token_equal expected given then
-            handler state request reqd
-          else
-            Http_server_eio.Response.json ~status:`Forbidden
-              {|{"error":"Invalid admin token"}|} reqd
-
 (** Public read access - no auth required (dashboard, health) *)
 let is_public_read_path path =
   String.equal path "/health"
@@ -1198,7 +1172,6 @@ and with_token_permission_auth ~permission handler request reqd =
       | Error err -> respond_auth_error request reqd err)
 
 module For_testing = struct
-  let admin_token_equal = admin_token_equal
   let snapshot_server_state = current_server_state
   let restore_server_state state = Atomic.set server_state state
 

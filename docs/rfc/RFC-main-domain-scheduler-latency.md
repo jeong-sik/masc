@@ -301,7 +301,7 @@ minor heap 을 16배 키워도 STW minor 횟수가 같다. 힙이 차서 도는 
 
 #### 링 버퍼 실측
 
-masc 는 runtime events 를 기본으로 켠다(`Masc_runtime_events.start_listener`, `MASC_RUNTIME_EVENTS` 기본 true). 링은 서버 cwd 의 `<pid>.events` 다. stdlib `runtime_events` 와 `eio.runtime_events` 만으로 소비 프로그램 둘을 만들어 붙였다(별도 PR 로 `scripts/harness/perf/` 에 넣는다). 하나는 GC 구간·카운터와 "STW 에 마지막으로 도착한 도메인", 다른 하나는 도메인별 fiber 의 연속 실행 시간과 그 앞뒤 suspend 이유다. Eio 는 링이 켜져 있으면 fiber 전환과 suspend 를 그대로 내보낸다.
+masc 는 runtime events 를 기본으로 켠다(`Masc_runtime_events.start_listener`, `MASC_RUNTIME_EVENTS` 기본 true). 링은 서버 cwd 의 `<pid>.events` 다. stdlib `runtime_events` 와 `eio.runtime_events` 만으로 소비 프로그램 둘을 만들어 붙였다(`tools/rtev_trace/`, #33377). 하나는 GC 구간·카운터와 "STW 에 마지막으로 도착한 도메인", 다른 하나는 도메인별 fiber 의 연속 실행 시간과 그 앞뒤 suspend 이유다. Eio 는 링이 켜져 있으면 fiber 전환과 suspend 를 그대로 내보낸다.
 
 90초 창(13:23:26Z~, build `718a0df327`, 같은 창에서 하네스: lag p99 68 ms·max 321 ms, minor/min 66, major/min 6, alloc 77 MB/s):
 

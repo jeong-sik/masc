@@ -213,8 +213,8 @@ let memory_fact_row_line ~cols (row : memory_fact_row) =
       in
       let pad = String.make (max 0 (16 - Message_layout.display_width path_str)) ' ' in
       let path_badge = Printf.sprintf "%s%s%s%s" (Theme.info ()) path_str pad Ansi.reset in
-      let prefix = Printf.sprintf "  %s   -   %s %s " cat_badge age_badge path_badge in
-      let prefix_cells = 2 + 12 + 1 + 5 + 1 + 6 + 1 + 16 + 1 in
+      let prefix = Printf.sprintf "  %s %s %s " cat_badge age_badge path_badge in
+      let prefix_cells = 2 + 12 + 1 + 6 + 1 + 16 + 1 in
       let claim_budget = max 4 (inner_width - prefix_cells) in
       let claim = Terminal_text.single_line fact.msf_claim in
       let claim_display =
@@ -238,8 +238,8 @@ let memory_fact_row_line ~cols (row : memory_fact_row) =
       in
       let pad = String.make (max 0 (16 - Message_layout.display_width path_str)) ' ' in
       let path_badge = Printf.sprintf "%s%s%s%s" (Theme.recede ()) path_str pad Ansi.reset in
-      let prefix = Printf.sprintf "  %s   -   %s %s " cat_badge age_badge path_badge in
-      let prefix_cells = 2 + 12 + 1 + 5 + 1 + 6 + 1 + 16 + 1 in
+      let prefix = Printf.sprintf "  %s %s %s " cat_badge age_badge path_badge in
+      let prefix_cells = 2 + 12 + 1 + 6 + 1 + 16 + 1 in
       let claim_budget = max 4 (inner_width - prefix_cells) in
       let reason = Terminal_text.single_line row.mi_reason in
       let reason_display =
@@ -462,7 +462,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
               ("  source-bound store: " ^ Terminal_text.single_line detail)
         | Memory_store_absent | Memory_store_present _ -> ()));
   let col_header =
-    Printf.sprintf "  %-12s %-5s %-6s %s" "CATEGORY" "REINF" "AGE" "CLAIM / BOUND PATH"
+    Printf.sprintf "  %-12s %6s %s" "CATEGORY" "AGE" "CLAIM / BOUND PATH"
   in
   push_styled ~style:(Theme.recede ()) col_header;
   push_divider ();

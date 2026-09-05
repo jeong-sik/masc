@@ -276,6 +276,83 @@ let test_render_memory_facts_body () =
   check bool "facts body rendered" true (!count > 0 && !count <= 20)
 ;;
 
+let contains needle haystack =
+  let n = String.length needle
+  and h = String.length haystack in
+  let rec go i = i + n <= h && (String.equal (String.sub haystack i n) needle || go (i + 1)) in
+  go 0
+;;
+
+(* The three row kinds and the column header share one grid: badge in cells
+   2-13, age right-aligned in cells 15-20, text from cell 22. #33237 removed the
+   reinforcement column from fact rows but left its five cells and a "-"
+   placeholder in the source and dropped rows and a REINF label in the header,
+   so the same list drew two grids. The bounded-width checks above cannot see
+   that; this one reads the cells. *)
+let test_rows_and_header_share_one_grid () =
+  let cols = 120 in
+  let fact : Decode.memory_fact =
+    { mf_claim = "System uses Roger voice for Sangsu"
+    ; mf_category = "persona"
+    ; mf_origin = "manual"
+    ; mf_first_seen = 100.0
+    ; mf_last_seen = 200.0
+    ; mf_memory_id = "mem-1"
+    }
+  in
+  let sfact : Decode.memory_source_fact =
+    { msf_claim = "Config points to runtime.toml"
+    ; msf_first_seen = 150.0
+    ; msf_path = "config/rt.toml" (* 16 cells or fewer: longer paths are shortened *)
+    ; msf_sha256 = "abc123sha"
+    }
+  in
+  let inv : Decode.memory_invalidation =
+    { mi_source_path = "legacy_docs.md"; mi_invalidated_at = 300.0; mi_reason = "superseded" }
+  in
+  let cells row = Masc_tui_theme.strip_sgr (Render_memory.memory_fact_row_line ~cols row) in
+  let grid what line text_at_22 =
+    check char (what ^ ": badge opens at cell 2") '[' line.[2];
+    check char (what ^ ": badge closes at cell 13") ']' line.[13];
+    check char (what ^ ": one space before the age") ' ' line.[14];
+    let age = String.sub line 15 6 in
+    check bool (what ^ ": age is right-aligned in cells 15-20 and not blank") true
+      (String.equal age (Printf.sprintf "%6s" (String.trim age)) && String.trim age <> "");
+    check char (what ^ ": one space after the age") ' ' line.[21];
+    check string (what ^ ": text starts at cell 22") text_at_22
+      (String.sub line 22 (String.length text_at_22))
+  in
+  grid "fact row" (cells (Types.Memory_row_fact fact)) fact.mf_claim;
+  grid "source row" (cells (Types.Memory_row_source_fact sfact)) sfact.msf_path;
+  grid "dropped row" (cells (Types.Memory_row_invalidation inv)) inv.mi_source_path;
+  let state = make_state () in
+  let store : Decode.memory_ordinary_store =
+    { mos_revision = 1; mos_updated_at = 1000.0; mos_facts = [ fact ] }
+  in
+  state.memory_facts
+  <- Some
+       { mfs_keeper = "alpha"
+       ; mfs_ordinary = Decode.Memory_store_present store
+       ; mfs_source = Decode.Memory_store_absent
+       };
+  state.memory_facts_cursor <- 0;
+  let styled = ref [] in
+  Render_memory.render_memory_facts_body
+    ~cols
+    ~budget:30
+    state
+    ~push:(fun _ -> ())
+    ~push_styled:(fun ~style:_ line -> styled := line :: !styled)
+    ~push_selected:(fun _ -> ())
+    ~push_divider:(fun () -> ())
+    ~push_empty:(fun () -> ());
+  match List.find_opt (contains "CATEGORY") (List.map Masc_tui_theme.strip_sgr !styled) with
+  | None -> fail "the facts body has no column header"
+  | Some header ->
+    check string "header names the age over cells 15-20" "   AGE" (String.sub header 15 6);
+    check string "header names the text from cell 22" "CLAIM" (String.sub header 22 5)
+;;
+
 let () =
   run "tui_render_memory"
     [ ( "age_label"
@@ -284,6 +361,7 @@ let () =
       , [ test_case "fact_row" `Quick test_fact_row_line
         ; test_case "source_fact_row" `Quick test_source_fact_row_line
         ; test_case "invalidation_row" `Quick test_invalidation_row_line
+        ; test_case "rows_and_header_share_one_grid" `Quick test_rows_and_header_share_one_grid
         ] )
     ; ( "detail_lines"
       , [ test_case "detail_lines_bounded" `Quick test_detail_lines

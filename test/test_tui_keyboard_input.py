@@ -5610,19 +5610,31 @@ def memory_facts_interaction() -> Interaction:
             b"the deploy needs assets",
             start=0, timeout=5.0,
         )
+        # Badges are padded to ten cells and the age column sits between the
+        # badge and the text, so a needle is either the badge or the text.
         for needle in (
-            b"[blocker] port 8935 is already claimed",
-            b"[source] docs/config.md",
-            b"[dropped] docs/old.md \xe2\x80\x94 source_changed",
-            b"origin authored",
-            b"ordinary r7 \xc2\xb7 2 facts",
+            b"[blocker   ]",
+            b"port 8935 is already claimed",
+            b"[source    ]",
+            b"docs/config.md",
+            b"[dropped   ]",
+            b"docs/old.md",
+            b"source_changed",
+            b"(2 ord \xc2\xb7 1 src \xc2\xb7 1 drop)",
         ):
             wait_for_output(
                 process, master_fd, output, needle, start=0, timeout=5.0
             )
-        # The categories are the loaded ones, sorted: blocker first.
-        send_and_wait(process, master_fd, output, b"c", b"filter blocker")
-        send_and_wait(process, master_fd, output, b"c", b"filter lesson")
+        # Recency sorting opens on the dropped row, so its detail shows first;
+        # one step down lands on an ordinary fact and its origin line.
+        send_and_wait(process, master_fd, output, b"j", b"Origin:")
+        wait_for_output(
+            process, master_fd, output, b"authored", start=0, timeout=5.0
+        )
+        # The categories are the loaded ones, sorted: blocker first. The
+        # selected one carries the filled marker in the category strip.
+        send_and_wait(process, master_fd, output, b"c", b"\xe2\x97\x8f blocker")
+        send_and_wait(process, master_fd, output, b"c", b"\xe2\x97\x8f lesson")
         # Esc closes the browser back to the health table, whose title tail
         # is the only place this phrase appears.
         send_and_wait(process, master_fd, output, b"\x1b", b"failed/no ordinary")

@@ -470,3 +470,31 @@ P4h-1 #33421(뒤로 읽는 스캔 `find_latest_entry_result`·`collect_matching`
 `fs_compat` 은 `Domain_pool_ref` 를 볼 수 없다. `masc_core` 가 `fs_compat` 에 의존하고 `Eio_guard` 가 `Fs_compat` 을 쓴다. 그래서 pool 대신 같은 파일이 이미 디렉터리 fsync 에 쓰는 `Eio_unix.run_in_systhread` 를 쓴다. `save_file_atomic_with_parent_sync` 의 페이로드 fsync·rename·부모 fsync 세 syscall 이 fiber 안에서는 systhread 작업 하나로 돌고, Eio 밖에서는 inline 이다. Eio 컨텍스트 판별은 `Fs_compat.execution_context` 에서 `fs_compat_internal.Execution_context` 로 내려가 `Atomic_write` 가 쓴다. 실패 단계와 취소 보고는 그대로다. eio 의 thread pool 이 작업 스레드의 예외를 그 백트레이스와 함께 fiber 에서 다시 던진다(`eio/unix/thread_pool.ml:73,134`). 임시 파일 생성과 `Eio.Path.save` 는 fiber 에 남는다.
 
 남은 표적 하나는 pool 로도 systhread 로도 못 내린다. `Eio.Process.spawn` 은 eio_posix 가 `fork()` 로 구현하고 자식 실행 전 부모의 malloc zone 을 전부 잠근다. 힙이 2 GB 인 지금 한 번에 141 ms 다. switch 와 proc_mgr 가 부르는 fiber 의 도메인에 묶여 있어 다른 도메인으로 옮길 수 없다. 턴당 스폰 횟수를 줄이거나 스폰 전용 보조 프로세스를 두는 것이 방향이고, 별도 절이 필요하다.
+
+#### P4h-1 뒤, 무거운 창 (pid 61274, 커밋 75e904a8c2 = P4h-0·1 라이브, 15:55:13Z ready+4분, 90초)
+
+| 항목 | 기준선 | 전체 P4g(1) | P4h-0 | P4h-1(무거운 창) |
+|---|---|---|---|---|
+| 하네스 lag p99 / max | 153 / 552 ms | 70.8 / 409 ms | 84.0 / 324 ms | **234.7 / 848 ms** |
+| main 도메인 점유 | 12.6% | 15.6% | 9.2% | 20.2% |
+| main 의 ≥10 / ≥50 / ≥100 ms 실행 | 109 / 37 / 19 | 191 / 106 / 11 | 84 / 31 / 4 | 233 / 66 / **24** |
+| main 의 최대 실행 | 954 ms | 427 ms | 200 ms | 512 ms |
+| 할당 / STW minor / major | 617 MB/s / 561 / 11.9 | 62 / 48 / 0 | 121 / 107 / 6.0 | 106 / 107 / 5.9 |
+
+이 창은 재기동 4분 뒤 keeper 들이 첫 턴을 도는 때다. 꼬리의 부류가 P4g 이전으로 돌아갔다. 가장 긴 실행 여섯(512·448·431·429·412·387 ms)이 전부 **turn 스팬 깊이 2** 의 한 fiber(cc#68)이고 `openat`·`fstat` 으로 끝난다. 스택 샘플 40초(main 스레드 busy 10,034/31,971 = 31.4%)는 그 안에서 무엇이 도는지 말한다.
+
+| 프레임 | 샘플(1 ms) | 내용 |
+|---|---|---|
+| `Re.Compile.loop` + `Re.Compile.make_match_str` | 1,793 + 1,766 | 정규식 컴파일과 첫 매칭의 DFA 채우기 — busy 의 **35%** |
+| `Yojson` 읽기·쓰기 | 약 1,000 | 턴 조립 |
+| `Filename.try_name` | 211 | `Filename.temp_file` 의 O_EXCL 열기 |
+
+귀속된 정규식 프레임은 전부 `Secret_patterns.redact_text` ← `Keeper_chat_store.redact_message` / `redact_approval_lifecycle` 와 `Keeper_secret_redaction.snapshot_with_additional_secret_files` 다. 코드는 `keeper_secret_redaction.ml` 의 `List.map (fun value -> Re.compile (Re.str value)) values`: 스냅샷을 만들 때마다 비밀 파일을 전부 읽고 값마다 컴파일한다. 부르는 곳은 채팅 기록 로드(`Keeper_chat_store.redaction_for`, 로드마다), 커넥터 수신, 스트림 투영·재생, 대시보드 채팅 조작이다. 새 `Re.re` 는 DFA 표가 비어 있어 `replace_string` 이 첫 사용 때 다시 채우므로 컴파일과 매칭 둘 다 매번 처음부터다.
+
+같은 창의 pool 도메인에는 2.4~6.9초짜리 단일 작업(도메인 14: 6,863 ms) 이 있다. 날짜별 JSONL 의 큰 day 파일 읽기다. main 에서 내린 일이 pool 을 채우는 것이라 다음은 "새 줄만" 읽는 커서(§8.8 P4h 계획) 차례다.
+
+#### P4h-4 — 비밀 값 스냅샷을 소스 스탬프로 메모 (#33436)
+
+순회를 열거와 읽기로 나눈다. 열거는 매번 하고(정규 파일마다 `lstat`), 파일의 (device, inode, size, mtime) 이 같은 인자로 메모된 것과 하나도 다르지 않으면 메모된 스냅샷을 돌려준다. 메모는 `Domain.DLS` 로 도메인별이다. 컴파일된 `Re.re` 는 매칭 중 DFA 표를 바꾸므로 도메인 간에 공유하면 안 된다. 값 추출 규칙과 `dedupe` 정렬은 그대로라 결과가 같다.
+
+P4h-3 #33429(OTel 저장소 순회를 pool 로) 는 15:57Z 에 병합됐고 P4h-2 와 함께 아직 라이브가 아니다.

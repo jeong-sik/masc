@@ -6533,7 +6533,6 @@ def chat_visibility_modes_interaction(
             "\u25c6".encode(),
             "DELIVERED \u00b7 USED".encode(),
             b"masc_fusion",
-            b"Ctrl-D: full calls / schedule / diffs",
         ):
             wait_for_output(
                 process,

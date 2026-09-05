@@ -647,32 +647,18 @@ let chat_role_label_width ~pane_cells =
   max chat_role_label_column
     (min chat_role_label_budget (pane_cells / chat_role_label_share))
 
-(* Put the mark and label next to one another, then pad the column. The former
-   right alignment made a short label look causally detached from its mark --
-   [●                polisher] -- even though those cells carried no fact.
-   An overrun still loses its head: these read [agent · surface] and share long
-   prefixes, so the tail is what tells two of them apart. *)
-let fit_name column label =
-  let pieces = display_pieces label in
-  let cells = pieces_width pieces in
-  if cells > column then
-    let kept = cell_suffix_of_pieces label pieces (column - 1) in
-    let pad = max 0 (column - 1 - pieces_width (display_pieces kept)) in
-    "…" ^ String.make pad ' ' ^ kept
-  else label ^ String.make (column - cells) ' '
-
 (* Keep both ends of [label] in [column] cells, dropping the middle.
 
-   [fit_width] keeps the head and [fit_name] keeps the tail; an identifier
-   needs both. Keeper names share long prefixes and differ in their tail --
-   [fit_name] says so above -- but a name cut to its tail alone no longer says
-   which family it came from. Cutting "rw-e0-r9-20260820-revision-audit" to
+   [fit_width] keeps the head and a tail-only cut keeps the tail; an
+   identifier needs both. Keeper names share long prefixes and differ in
+   their tail, but a name cut to its tail alone no longer says which family
+   it came from. Cutting "rw-e0-r9-20260820-revision-audit" to
    "rw-e0-r9-20260820-revi~" loses exactly the part that distinguishes it,
    and to "…0820-revision-audit" loses exactly the part that groups it.
 
    The tail gets two thirds of the budget because it is the deciding end. As
    [column] shrinks the head's third reaches zero and this degrades into
-   [fit_name]'s shape, which is the right thing to lose last.
+   a tail-only cut, which is the right thing to lose last.
 
    Left-aligned and padded to [column], so this is a drop-in where
    [fit_width] was cutting identifiers. *)
@@ -767,8 +753,8 @@ let align_role_label ?(column = chat_role_label_column) ~style label =
   if inner < 1 then
     (* A pane too narrow to hold both keeps the name. Losing track of who is
        talking costs more than losing the shorthand for it. *)
-    fit_name column label
-  else mark ^ " " ^ fit_name inner label
+    fit_middle column label
+  else mark ^ " " ^ fit_middle inner label
 
 (* The inverse of {!align_role_label}: the mark, the name, and the trailing
    column padding. Written here because this is where the three are joined, and a

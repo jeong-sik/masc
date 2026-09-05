@@ -8085,10 +8085,13 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
     ~activity_details:(keeper_message_tool_activity_details state ~keeper_name)
     file_change_index projection
   in
-  match mode, projection.hidden_activity_rows, rows with
-  | Keeper_chat_transcript.Compact, hidden, row :: rest when hidden > 0 ->
-      (row ^ " \xc2\xb7 Ctrl-D: full calls / schedule / diffs") :: rest
-  | (Keeper_chat_transcript.Compact | Keeper_chat_transcript.Full), _, _ -> rows
+  (* The fold says how many rows it is holding; the key that opens them is in
+     the footer, on every frame, next to the other five. Repeating it on the
+     row cost thirty-eight cells of the widest line in the pane, and a screen
+     with four tool blocks carried the same sentence four times -- which is
+     what pushed the tool names onto a second line and broke the read of the
+     conversation they sit inside. *)
+  rows
 
 (* Every committed row of one keeper's conversation, as the layout entries the
    pane draws -- the grouping, the aligned badges, the tool projections, and
@@ -9028,8 +9031,8 @@ let render_keeper_message (state : state) =
          A superseded attempt's stretches are drawn in place with their own
          styles, each label ending in the retry mark and the number of the try
          it came from (" ↺1" = the first try, superseded). The mark goes at the
-         tail because [fit_name] keeps a label's tail when it overruns the
-         column. Not dimmed: the layout has no dim variant per style, and
+         tail because the role label keeps two thirds of its tail when it
+         overruns the column. Not dimmed: the layout has no dim variant per style, and
          adding one is the 3b restyle.
 
          Every row is built as a continuation; the corners are set once the

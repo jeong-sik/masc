@@ -3,11 +3,10 @@
    stored Gate input to the write tool arguments. *)
 
 (* The Gate replay/resolution wording lives in managed prompt templates
-   under the config/prompts/keeper.gate_replay prefix; without a loaded
-   registry the
-   execution path falls back to bare data and the wording assertions below
-   see nothing. Same repo-root idiom test_tool_task_coverage uses — that
-   executable passes inside the CI sandbox, so the mechanism is CI-proven. *)
+   under the config/prompts/keeper.gate_replay prefix. [Prompt_defaults.init]
+   loads them, and the registry locates config/prompts itself under Dune;
+   without a loaded registry the execution path falls back to bare data and
+   the wording assertions below see nothing. *)
 let () =
   Masc.Prompt_defaults.init ()
 ;;

@@ -5,15 +5,16 @@
 # Config seeding intentionally excludes keepers/, so a fresh
 # install boots zero keepers. This script is the explicit opt-in that seeds a
 # team. It copies files from presets/<preset>/ (listed in that preset's
-# manifest.txt) into <base-path>/.masc/config/. The keepers inherit
-# [runtime].default from runtime.toml (ollama_cloud.deepseek-v4-flash), so no
-# model catalog is touched — AGENT_CORE embedded catalog plus deployment overlay stays authoritative.
+# manifest.txt) into <base-path>/.masc/config/. The keepers name no model of
+# their own: they inherit [runtime].default from that config root's
+# runtime.toml, so no model catalog is touched — AGENT_CORE embedded catalog
+# plus deployment overlay stays authoritative.
 #
 # Usage:
 #   scripts/seed-team.sh [--preset classic] --base-path DIR [--force] [--dry-run] [--list]
 #
 # Flags:
-#   --preset ID     Team preset under config/team-presets/ (default: classic)
+#   --preset ID     Team preset under presets/ (default: classic)
 #   --base-path DIR Live MASC base path; seeds into DIR/.masc/config (required)
 #   --force         Overwrite existing Keeper files
 #   --dry-run       Print what would happen, write nothing
@@ -127,6 +128,18 @@ fi
 
 if [ "${#keeper_names[@]}" -gt 0 ]; then
   log "keepers that will autoboot on next start: ${keeper_names[*]}"
-  printf '%s  model: ollama_cloud.deepseek-v4-flash (runtime.toml [runtime].default)%s\n' "$c_dim" "$c_off"
-  printf '%s  requires: OLLAMA_CLOUD_API_KEY in the server environment%s\n' "$c_dim" "$c_off"
+  # The seeded keepers name no model; the live config root's runtime.toml
+  # does, under [runtime].default, and the operator owns that file. Read it
+  # rather than restate it here: the repo default moved once already and
+  # this line kept printing the old one.
+  runtime_toml="$CONFIG_DIR/runtime.toml"
+  default_runtime=""
+  if [ -f "$runtime_toml" ]; then
+    default_runtime="$(awk -F'"' '/^\[/ { in_runtime = ($0 == "[runtime]") } in_runtime && /^default[[:space:]]*=/ { print $2; exit }' "$runtime_toml")"
+  fi
+  if [ -n "$default_runtime" ]; then
+    printf '%s  model: %s ([runtime].default in %s)%s\n' "$c_dim" "$default_runtime" "$runtime_toml" "$c_off"
+  else
+    warn "no [runtime].default in $runtime_toml; the keepers have no model until it names one"
+  fi
 fi

@@ -114,31 +114,6 @@ let dashboard_board_payload
         ]))
 ;;
 
-let dashboard_board_json
-      ?config
-      ?hearth
-      ?author_filter
-      ?sort_by
-      ?exclude_system
-      ?exclude_automation
-      ?limit
-      ?offset
-      ?voter
-      ()
-  : Yojson.Safe.t
-  =
-  (dashboard_board_payload
-     ?config
-     ?hearth
-     ?author_filter
-     ?sort_by
-     ?exclude_system
-     ?exclude_automation
-     ?limit
-     ?offset
-     ?voter
-     ()).json
-;;
 
 let dashboard_memory_http_payload ?config request : Dashboard_cache.cached_payload =
   let hearth = query_param request "hearth" in

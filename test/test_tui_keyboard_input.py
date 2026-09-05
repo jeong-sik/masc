@@ -7593,10 +7593,12 @@ def planning_review_hierarchy_interaction() -> Interaction:
                     f"Task Verdicts did not explain itself ({needle!r}): "
                     f"{verdicts_plain!r}"
                 )
-        # The walk continues through the two children that keep their own
-        # headers, then wraps back round to Goals.
-        send_and_wait(process, master_fd, output, b"v", b"MASC Schedules")
-        send_and_wait(process, master_fd, output, b"v", b"MASC Fusion")
+        # [v] walks a 3-stop ring (Goals/Task Review -> Task Verdicts ->
+        # back to Goals), not 5: Schedules and Fusion left this walk once
+        # they became tabs of the selected Keeper instead of children of
+        # the fleet's planning workspace (bin/masc_tui.ml's Planning ->
+        # Verification -> Harness -> Planning arm, RFC-tui-operator-ia
+        # section 3.1).
         goals_again = send_and_wait(
             process, master_fd, output, b"v", b"\xe2\x96\xb8Goals"
         )
@@ -7605,7 +7607,10 @@ def planning_review_hierarchy_interaction() -> Interaction:
                 f"Goals did not retain the Task Review sibling: {goals_again!r}"
             )
         # The children are [v] stops, not the next top-level Tab destination.
-        send_and_wait(process, master_fd, output, b"\t", b"MASC Workspace")
+        # Fusion sits on the top-level ring right after Planning now (the
+        # same move that took it out of Planning's [v] walk above), so Tab
+        # from Planning lands on Fusion, not Workspace.
+        send_and_wait(process, master_fd, output, b"\t", b"MASC Fusion")
         os.write(master_fd, b"q")
 
     return interact

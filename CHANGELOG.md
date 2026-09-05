@@ -4,9 +4,9 @@
 
 - **A context overflow walks the history down to its floor.** The same-run
   shrink retry no longer stops after three halvings; it goes on while the
-  runtime can name a strictly smaller view and ends on the floor's own
-  answer, so `bootstrap_floor_exceeded` is committed only after the floor was
-  refused. Measured 2026-09-05: a 4.1 MB history on a 128k-token model was
+  runtime can name a strictly smaller view and ends where none exists, so
+  `bootstrap_floor_exceeded` is committed only once no smaller view remains.
+  Measured 2026-09-05: a 4.1 MB history on a 128k-token model was
   cut to 498 KB in three halvings and left on an operator recovery with 79
   messages still attached.
 - **A cancel claim is the operator's to close; the system LLM reviews

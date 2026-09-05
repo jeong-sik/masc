@@ -1082,8 +1082,8 @@ let run_without_lifecycle ~runtime_id ~keeper_name
 (* RFC claude-code-context-overflow-bounded-restart §6.3, same rule as the
    Claude Code runtime: the same-run shrink retry is the one re-entry an
    input rejection admits. [on_shrink_retry] fires only after the sequence
-   verified the typed observation-free overflow, the strictly smaller next
-   capacity, and the retry budget, so consuming the just-written
+   verified the typed observation-free overflow and the strictly smaller
+   next capacity, so consuming the just-written
    [Input_rejected] recovery with an explicit [Restart_fresh] resolution
    cannot bypass the fence. A failed resolution is not retried here; the next
    attempt's claim surfaces the refusal instead. *)

@@ -382,8 +382,8 @@ end
    retry is the one re-entry an input rejection admits. [on_shrink_retry]
    fires only after the sequence verified every authority condition — a typed
    observation-free overflow (the only shape mapped to [Api ContextOverflow]
-   in [claude_error_to_core_error]), a strictly smaller next capacity, and the
-   retry budget — so consuming the just-written [Input_rejected] recovery with
+   in [claude_error_to_core_error]) and a strictly smaller next capacity — so
+   consuming the just-written [Input_rejected] recovery with
    an explicit [Restart_fresh] resolution cannot bypass the fence: a
    next-cycle replay never passes through that callback, and [Effect_fenced]
    recoveries are never resolved here because an effect-observed overflow is

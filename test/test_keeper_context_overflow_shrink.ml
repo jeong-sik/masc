@@ -75,9 +75,8 @@ let test_halves_capacity_on_repeated_overflow_until_success () =
     (List.rev !shrink_events)
 ;;
 
-(* No attempt count: the walk goes on while the lane names a strictly
-   smaller view and stops the moment it cannot. Six halvings here would have
-   been cut at three by the count this replaces. *)
+(* The walk goes on while the lane names a strictly smaller view and stops
+   the moment it cannot; six halvings here, every one attempted. *)
 let test_walks_until_no_smaller_view_is_named () =
   let attempted_capacities = ref [] in
   let attempt ~capacity_bytes =

@@ -1144,8 +1144,8 @@ let context_overflow_shrink_sequence
            through [final_shrink_capacity]; once the ordinary target would
            reach or pass that floor, the floor itself is the next attempt,
            and its refusal is the floor verdict. Measured 2026-09-05 on
-           keeper geek-scout: a fixed count of three halvings left a 4.1 MB
-           history at 498 KB against a 128k-token model and committed
+           keeper geek-scout: a 4.1 MB history against a 128k-token model was
+           refused at 1.9 MB, 507 KB and 498 KB and then committed as
            [Bootstrap_floor_exceeded] with 79 messages still attached; the
            floor had never been asked, and the keeper sat on an operator
            recovery it could have walked out of in two more attempts. *)
@@ -1404,5 +1404,4 @@ module For_testing = struct
   let memoize_message_measurement = memoize_message_measurement
   let plan_and_window_model_input = plan_and_window_model_input
   let offload_model_input_cpu = offload_model_input_cpu
-  let context_overflow_shrink_divisor = context_overflow_shrink_divisor
 end

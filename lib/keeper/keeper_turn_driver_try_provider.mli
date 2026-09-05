@@ -280,5 +280,4 @@ module For_testing : sig
 
   val offload_model_input_cpu : (unit -> 'a) -> 'a
 
-  val context_overflow_shrink_divisor : int
 end

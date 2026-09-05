@@ -1537,8 +1537,39 @@ let render_overview (state : state) =
   box_divider buf cols;
 
   (* Tasks section *)
-  Buffer.add_string buf
-    (Printf.sprintf " %sTasks%s\n" Ansi.bold Ansi.reset);
+  let task_header =
+    if List.is_empty state.tasks then Printf.sprintf " %sTasks%s\n" Ansi.bold Ansi.reset
+    else
+      let count = List.length state.tasks in
+      let done_c =
+        List.fold_left
+          (fun acc (t : task) -> match t.status with Done _ -> acc + 1 | _ -> acc)
+          0 state.tasks
+      in
+      let active_c =
+        List.fold_left
+          (fun acc (t : task) -> match t.status with InProgress _ | Claimed _ -> acc + 1 | _ -> acc)
+          0 state.tasks
+      in
+      let awaiting_c =
+        List.fold_left
+          (fun acc (t : task) -> match t.status with AwaitingVerification _ -> acc + 1 | _ -> acc)
+          0 state.tasks
+      in
+      let todo_c =
+        List.fold_left
+          (fun acc (t : task) -> match t.status with Todo -> acc + 1 | _ -> acc)
+          0 state.tasks
+      in
+      Printf.sprintf " %sTasks%s (%d · %s%d done%s · %s%d active%s · %s%d awaiting%s · %s%d todo%s)\n"
+        Ansi.bold Ansi.reset
+        count
+        (Theme.ok ()) done_c Ansi.reset
+        (Theme.info ()) active_c Ansi.reset
+        (Theme.warn ()) awaiting_c Ansi.reset
+        Ansi.dim todo_c Ansi.reset
+  in
+  Buffer.add_string buf task_header;
 
   (match tasks_error with
    | Some err when row_budget.task_error_rows > 0 ->
@@ -2447,11 +2478,22 @@ let render_approvals (state : state) =
     | None -> ""
   in
   let action_badge = if action_inflight then "  [submitting]" else "" in
+  let type_breakdown =
+    let held_c = List.length state.keeper_tool_approvals in
+    let gate_c = List.length state.gate_pending in
+    let op_c = List.length (operator_approval_items state) in
+    if count > 0 then
+      Printf.sprintf " [%s%d held%s · %s%d gate%s · %s%d op%s]"
+        (Theme.warn ()) held_c Ansi.reset
+        (Theme.bad ()) gate_c Ansi.reset
+        (Theme.info ()) op_c Ansi.reset
+    else ""
+  in
   let header =
     Printf.sprintf
-      "%s (%d%s%s)  %s  %s%s"
+      "%s (%d%s%s%s)  %s  %s%s"
       (screen_title " MASC Approvals")
-      count queue_note held_note timestamp
+      count type_breakdown queue_note held_note timestamp
       (connection_badge state) action_badge
   in
 
@@ -10565,8 +10607,28 @@ let render_fusion_list (state : state) =
           (screen_title " MASC Fusion") timestamp
           (connection_badge state)
     | Some _ ->
-        Printf.sprintf "%s (%d runs)  %s  %s"
-          (screen_title " MASC Fusion") shown timestamp
+        let completed_count =
+          List.fold_left
+            (fun acc (r : Tui_decode.fusion_run) ->
+               if r.fur_status = Tui_decode.Fusion_completed then acc + 1 else acc)
+            0 runs
+        in
+        let failed_count =
+          List.fold_left
+            (fun acc (r : Tui_decode.fusion_run) ->
+               match r.fur_status with Tui_decode.Fusion_failed _ -> acc + 1 | _ -> acc)
+            0 runs
+        in
+        let running_count = Stdlib.max 0 (shown - completed_count - failed_count) in
+        let stats_note =
+          Printf.sprintf " (%d runs · %s%d done%s · %s%d run%s%s)"
+            shown
+            (Theme.ok ()) completed_count Ansi.reset
+            (Theme.info ()) running_count Ansi.reset
+            (if failed_count > 0 then Printf.sprintf " · %s%d fail%s" (Theme.bad ()) failed_count Ansi.reset else "")
+        in
+        Printf.sprintf "%s%s  %s  %s"
+          (screen_title " MASC Fusion") stats_note timestamp
           (connection_badge state)
   in
   (* Measured from the rows, the way the Approvals table measures its own
@@ -10889,6 +10951,30 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
                          failure.fpf_reason_detail)
           |> List.concat
         in
+        let panel_token_items =
+          List.filter_map
+            (function
+              | Fusion_panel_answered answer ->
+                  Some
+                    { Chart.name = Terminal_text.single_line answer.fpa_model
+                    ; count = answer.fpa_input_tokens + answer.fpa_output_tokens
+                    ; style = Some (Chart.Status Masc_tui_theme.Ok)
+                    }
+              | Fusion_panel_failed failure ->
+                  Some
+                    { Chart.name = Terminal_text.single_line failure.fpf_model
+                    ; count = 0
+                    ; style = Some (Chart.Status Masc_tui_theme.Bad)
+                    })
+            evidence.fe_panel
+        in
+        let panel_chart_lines =
+          if List.length panel_token_items >= 2 then
+            (Ansi.dim, "  Model token distribution:")
+            :: List.map (fun row -> (Ansi.reset, row)) (Chart.distribution_bars ~width panel_token_items)
+            @ [ Ansi.dim, "" ]
+          else []
+        in
         let judge_lines =
           match evidence.fe_judge with
           | Fusion_judge_synthesized judge ->
@@ -11008,6 +11094,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
                 answered failed input_tokens output_tokens )
         ]
         @ [ Ansi.dim, "" ]
+        @ panel_chart_lines
         @ panel_lines
         @ [ Ansi.dim, ""
           ; Ansi.magenta, "  3  JUDGE"
@@ -15799,6 +15886,7 @@ let help_lines (state : state) =
       section first @ slash_commands @ List.concat_map section rest
 
 module Context_bars = Masc_tui_context_bars
+module Chart = Masc_tui_chart
 
 let context_component_style = function
   | Turn_record.Prompt_block Prompt_block_id.Memory_os_recall ->
@@ -16161,11 +16249,39 @@ let context_composition_lines ~cols ~turn_back
             ^ Ansi.reset
           ]
     in
+    let inputs =
+      List.filter_map
+        (fun r ->
+          match r.Inspector.input_tokens with
+          | Some n when n > 0 -> Some n
+          | _ -> None)
+        selection.Inspector.recent
+      |> List.rev
+    in
+    let velocity_lines =
+      match inputs with
+      | [] | [ _ ] -> []
+      | _ ->
+          let latest_tokens =
+            match selection.Inspector.recent with
+            | { input_tokens = Some n; _ } :: _ -> Inspector.format_tokens n
+            | _ -> "-"
+          in
+          [ Printf.sprintf "  %sVelocity:%s %s  %s(%d turns recorded)  ·  latest %s tokens%s"
+              Ansi.dim Ansi.reset
+              (Chart.sparkline inputs)
+              Ansi.dim
+              (List.length inputs)
+              latest_tokens
+              Ansi.reset
+          ]
+    in
     [ "  "
       ^ Context_bars.band ~width ~title:"RECENT TURNS"
           ~caption:
             "input the provider counted, one row per dispatched turn"
     ]
+    @ velocity_lines
     @ List.concat (List.mapi row selection.Inspector.recent)
   in
   [ identity; turn; trace; "" ]

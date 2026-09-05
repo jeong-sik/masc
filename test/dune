@@ -1106,6 +1106,11 @@
  (libraries alcotest ast_grep))
 
 (test
+ (name test_heap_roots)
+ (modules test_heap_roots)
+ (libraries alcotest masc.masc_core))
+
+(test
  (name test_keeper_tool_error_text_bounded)
  (modules test_keeper_tool_error_text_bounded)
  (libraries alcotest ast_grep masc_test_deps masc.masc_core))

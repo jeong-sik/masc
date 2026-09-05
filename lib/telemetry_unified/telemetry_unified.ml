@@ -1398,3 +1398,6 @@ module For_testing = struct
   let reset_trajectory_summary_cache_for_testing =
     reset_trajectory_summary_cache_for_testing
 end
+
+(* For [Heap_roots]: the value the diagnostic walks. *)
+let heap_root () = Obj.repr trajectory_summary_cache

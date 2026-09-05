@@ -28,7 +28,8 @@
   list_util
   set_util
   read_drop_reason
-  eval_tool_selector)
+  eval_tool_selector
+  heap_roots)
  (libraries
   (re_export masc_string_util)
   shared_types

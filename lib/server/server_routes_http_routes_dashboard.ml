@@ -2715,6 +2715,15 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/diagnostics/heap-roots" (fun request reqd ->
+       (* Operator diagnostic, never cached and never public: the walk stalls
+          the process, so only an admin token may ask for it, and each call
+          must walk afresh to say what the heap holds now. *)
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name req reqd ->
+            let json = Server_diagnostics_heap_roots.report_json () in
+            Http.Response.json_value ~compress:true ~request:req json reqd)
+         request reqd)
   |> Http.Router.get "/api/v1/dashboard/transport-health" (fun request reqd ->
        with_public_read (fun state req reqd ->
          (* No route cache here. The producer is not a computation — it reads a

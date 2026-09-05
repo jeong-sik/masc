@@ -1692,6 +1692,32 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
         ~sw
         ~clock
         ~request_authority:background_request_authority;
+      (* Roots for GET /api/v1/diagnostics/heap-roots. Registered here, after
+         owner readiness, because every store named below is installed by
+         now; a walk before that would size the empty initial registries. *)
+      List.iter
+        (fun (name, value) ->
+           match Heap_roots.register ~name value with
+           | Ok () -> ()
+           | Error `Duplicate ->
+             Log.Server.warn
+               "heap root %S was already registered; the first registration stands"
+               name)
+        [ ("exact_lane_runs", fun () -> Some (Obj.repr (Exact_lane_run_registry.global ())))
+        ; ("verification_runs", fun () -> Some (Obj.repr (Verification_run_registry.global ())))
+        ; ( "goal_verification_runs"
+          , fun () -> Some (Obj.repr (Goal_verification_run_registry.global ())) )
+        ; ("fusion_runs", fun () -> Some (Obj.repr (Fusion_run_registry.global ())))
+        ; ("sse_clients", fun () -> Some (Obj.repr (Atomic.get Sse.clients)))
+        ; ("dashboard_snapshot", fun () -> Option.map Obj.repr (Dashboard_snapshot.current ()))
+        ; ( "keeper_registry"
+          , fun () -> Some (Obj.repr (Atomic.get Keeper_registry_setup.registry)) )
+        ; ("keeper_owner_pools", fun () -> Some (Keeper_owner_registry.heap_root ()))
+        ; ( "board_attention_partition_caches"
+          , fun () -> Some (Keeper_board_attention_partition.heap_root ()) )
+        ; ("activity_graph_caches", fun () -> Some (Activity_graph.heap_root ()))
+        ; ("telemetry_trajectory_summaries", fun () -> Some (Telemetry_unified.heap_root ()))
+        ];
       let path_diagnostics = activated_owner.path_diagnostics in
       let resolved_base, masc_dir =
         start_post_ready_owner_lanes ~sw ~clock ~env state

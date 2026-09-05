@@ -1697,3 +1697,6 @@ module For_testing = struct
   let path = path
 end
 ;;
+
+(* For [Heap_roots]: the value the diagnostic walks. *)
+let heap_root () = Obj.repr cache_registry

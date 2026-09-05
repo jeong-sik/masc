@@ -191,10 +191,13 @@ scripts/build-keeper-sandbox-image.sh
 
 There is no host arm — the profiles are `docker`, `microvm` and `remote_ssh`
 only — so a host with no Docker, no `container`, and no SSH endpoint can run
-the workspace but cannot run a Keeper. On Linux that narrows to `docker` and
-`remote_ssh` in practice: `microvm` assumes Apple's `container`, which is
-macOS-only, and a Keeper that asked for a microVM on another host is refused at
-boot rather than quietly given a shared kernel.
+the workspace but cannot run a Keeper. `microvm` names a guest behind a
+hypervisor, not one runtime: `microvm_backend` picks between `apple_container`,
+`microsandbox` and `nerdctl_kata`, and only the assumed default is host-derived
+— Apple's `container` on macOS, nothing elsewhere. So a Linux host names its
+backend rather than inheriting one, and a Keeper that asked for a microVM where
+none is named is refused at boot rather than quietly given a shared kernel. The
+table above is where each backend stands as measured.
 
 **And that image is MASC's own development environment**, not a general one. It
 is `ocaml/opam:ubuntu-24.04-ocaml-5.5` with this repository's opam dependencies

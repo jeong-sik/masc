@@ -167,10 +167,13 @@ scripts/build-keeper-sandbox-image.sh
 
 호스트에서 그냥 도는 선택지는 없습니다. 프로필은 `docker`, `microvm`,
 `remote_ssh` 셋뿐이라 Docker도 `container`도 SSH endpoint도 없는 호스트는
-워크스페이스는 띄워도 Keeper는 못 돌립니다. Linux에서는 실질적으로 `docker`와
-`remote_ssh` 둘입니다. `microvm`은 Apple의 `container`를 전제하는데 그건
-macOS에만 있고, 다른 호스트에서 microVM을 요청한 Keeper는 조용히 공유 커널을
-받는 대신 부팅에서 거절됩니다.
+워크스페이스는 띄워도 Keeper는 못 돌립니다. `microvm`은 하이퍼바이저 뒤의 게스트를
+뜻하지 런타임 하나를 뜻하지 않습니다. `microvm_backend`가 `apple_container`,
+`microsandbox`, `nerdctl_kata` 중에서 고르고, 호스트에서 자동으로 정해지는 건
+기본값뿐입니다 — macOS면 Apple의 `container`, 그 밖에는 없음. 그래서 Linux
+호스트는 백엔드를 물려받는 대신 직접 적습니다. 아무것도 안 적힌 곳에서 microVM을
+요청한 Keeper는 조용히 공유 커널을 받는 대신 부팅에서 거절됩니다. 각 백엔드가
+지금 어디까지 되는지는 위 표에 있습니다.
 
 **그리고 그 이미지는 MASC 자신의 개발 환경입니다.** 범용이 아닙니다.
 `ocaml/opam:ubuntu-24.04-ocaml-5.5` 에 이 저장소의 opam 의존성을 미리 넣어 둔

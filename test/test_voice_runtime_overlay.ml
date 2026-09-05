@@ -335,16 +335,24 @@ let test_keeper_voice_speak_surfaces_tts_failure () =
   Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
     let config = test_config () in
     let meta = make_keeper_meta "voice-sync-keeper" in
+    (* No config at all is not a config that failed to load: the Gate still
+       reviews this speak, and the bridge refuses it afterwards. *)
+    let reviewed = ref false in
+    let review_then_continue ~operation:_ ~input:_ ~continue =
+      reviewed := true;
+      continue ()
+    in
     let raw =
       Masc.Keeper_tool_voice_runtime.handle_voice_tool
         ~config
         ~meta
-        ~authorize_external_effect:allow_external_effect
+        ~authorize_external_effect:review_then_continue
         ~name:"keeper_voice_speak"
         ~args:(`Assoc [ "message", `String "hello from sync voice test" ])
         ()
     in
     let json = Yojson.Safe.from_string raw in
+    check bool "the Gate was asked" true !reviewed;
     check string "error status" "error"
       Yojson.Safe.Util.(member "status" json |> to_string);
     check string "failure reason surfaced" "no configured TTS endpoint"
@@ -786,8 +794,9 @@ let broken_config_json = "{ this is not json"
 
 (* A speak under a voice config that exists and does not parse. The Gate is
    not asked: nothing can be played under that config, so a review would
-   approve nothing and hide why. The tool answers with the loader's reason,
-   the sentence the bridge writes, naming the key that did not parse.
+   approve nothing and hide why. The tool answers with the loader's own
+   sentence, naming the key that did not parse and the type it wanted, from
+   the one read that decided the route.
 
    [Voice_config.load_detailed] reads the config root's [runtime.toml]
    [\[voice\]] section before the JSON file, and the root follows
@@ -822,12 +831,12 @@ let test_keeper_voice_speak_under_an_invalid_config_is_refused_without_review ()
       check string "error status" "error"
         Yojson.Safe.Util.(member "status" json |> to_string);
       let message = Yojson.Safe.Util.(member "message" json |> to_string) in
-      check bool "the refusal is the loader's" true
-        (String_util.string_contains_substring ~needle:"voice config load failed" message);
-      check bool "and names the key that did not parse" true
+      check bool "the refusal names the key that did not parse" true
         (String_util.string_contains_substring
            ~needle:"capture.trigger_margin_db"
-           message)))
+           message);
+      check bool "and the type it wanted" true
+        (String_util.string_contains_substring ~needle:"must be a number" message)))
 ;;
 
 (* Valid config whose TTS/STT endpoints all fail deterministically without

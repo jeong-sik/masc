@@ -12068,6 +12068,9 @@ let render_memory (state : state) =
            c.push_divider ();
            List.iter (c.push_styled ~style:(Theme.recede ())) lines))
 
+let memory_fact_age_label ts =
+  keeper_lane_idle_text (int_of_float (Unix.gettimeofday () -. ts))
+
 (* The fact browser Enter opens over a health row: what the keeper actually
    remembers, row by row, with the cursor row unpacked below the list. The
    category and origin strings are drawn exactly as the server spelled
@@ -12165,9 +12168,6 @@ let memory_fact_row_line ~cols (row : Masc_tui_types.memory_fact_row) =
         else reason
       in
       prefix ^ reason_display
-
-let memory_fact_age_label ts =
-  keeper_lane_idle_text (int_of_float (Unix.gettimeofday () -. ts))
 
 let memory_fact_detail_lines ~cols (row : Masc_tui_types.memory_fact_row) =
   let open Masc.Tui_decode in

@@ -1636,7 +1636,19 @@ network_mode = "none"
       !probed_image;
     check (option string) "parsed profile_defaults retains sandbox_image"
       (Some "masc-keeper-sandbox:custom-tag")
-      parsed.profile_defaults.sandbox_image
+      parsed.profile_defaults.sandbox_image;
+    let failing_docker_preflight ?image ~timeout_sec:_ =
+      probed_image := image;
+      Some (preflight_fixture ~ok:false)
+    in
+    (match Keeper_turn_up_args.parse ~docker_preflight:failing_docker_preflight ctx args with
+     | Ok _ -> fail "admission should fail when custom image preflight fails"
+     | Error result ->
+       let body = Keeper_types_profile.tool_result_body result in
+       check bool "rejected under docker_preflight_failed" true
+         (String.starts_with
+            ~prefix:(Keeper_sandbox_runtime.docker_preflight_failed_label ^ ":")
+            body))
   | Error result ->
     failf "unexpected parse error: %s"
       (Keeper_types_profile.tool_result_body result)

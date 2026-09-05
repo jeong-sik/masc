@@ -784,7 +784,7 @@ let docker_preflight ?image ~timeout_sec () =
   else (
     let image =
       match image with
-      | Some img when String.trim img <> "" -> img
+      | Some img when String.trim img <> "" -> String.trim img
       | _ -> Env_config_sandbox.Runtime.docker_image ()
     in
     let docker_runtime_ok, docker_runtime_error, docker_runtime_failure_class =

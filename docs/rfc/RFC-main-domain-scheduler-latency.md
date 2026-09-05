@@ -526,3 +526,28 @@ pool 도메인의 긴 작업은 이 창에서 최대 475 ms 다. 무거운 창�
 | `posix_spawn` 스텁 | masc 소유 C 스텁으로 `posix_spawn(2)` 를 부르는 process backend. macOS 의 `posix_spawn` 은 시스템 콜이라 atfork 핸들러와 zone 잠금이 없다 | C 스텁·fd 상속·cwd·env 처리·취소 계약을 새로 만듦 |
 | 스폰 보조 프로세스 | 힙이 작은 보조 프로세스가 스폰만 맡고 파이프로 fd 를 넘김 | 프로토콜·수명 관리·fd 전달 |
 | 턴당 스폰 축소 | 같은 턴에서 반복되는 `git`·셸 호출을 묶음 | 도구 계약 변경 |
+
+#### P4h-4 라이브 (pid 27910, 커밋 f91917f5e2 = P4h-0~4, 16:23:41Z 기동)
+
+두 창을 잡았다. 부팅 직후 창(16:26:39Z, ready+3분)은 첫 턴들이 몰리는 때이고, 표준 창(16:28:10Z, ready+4.5분)은 호스트 부하 평균이 140 이던 때다(agy 97%, masc 89%, conmon 83%, fseventsd 78%, watchman 35%).
+
+| 항목 | P4h-1(무거운 창) | P4h-0~3(깨끗한 창) | P4h-4 부팅 직후 | P4h-4 표준(호스트 과부하) |
+|---|---|---|---|---|
+| 하네스 lag p99 / max | 234.7 / 848 ms | 15.8 / 37.4 ms | **31.0 / 39.9 ms** | 66.5 / 147.8 ms |
+| main 도메인 점유 | 20.2% | 6.7% | 14.4% | 28.0% |
+| main 의 ≥10 / ≥50 / ≥100 ms 실행 | 233 / 66 / 24 | 106 / 11 / 0 | 218 / 38 / **0** | 428 / 114 / 17 |
+| main 의 최대 실행 | 512 ms | 74 ms | **87 ms** | 219 ms |
+| 할당 / STW minor / major | 106 MB/s / 107 / 5.9 | 162 / 197 / 6.0 | 193 / 173 / 6.0 | 198 / 165 / 5.9 |
+| 샘플의 `Re.Compile` | 3,559 / 10,034 busy | — | **126** / 2,071 | 278 / 3,538 |
+
+부팅 직후 창이 P4h-4 의 판정이다. 같은 부류의 창(첫 턴들, 점유 14~20%)에서 정규식 컴파일이 3,559 에서 126 샘플로 줄고, 100 ms 를 넘는 실행이 24 에서 0 이 됐다.
+
+표준 창의 17회는 코드 부류로 읽을 수 없다. GC 추적의 `stw_handler` p99 72 ms·max 136 ms, `minor_leave_barrier` max 120 ms 는 OS 가 도메인을 선점해 STW 장벽에 늦게 도착한 것이고, 그 대기가 main 의 실행 안에 GC 시간으로 잡힌다. 호스트가 과포화되면 15 도메인 프로세스의 STW 는 가장 늦은 도메인을 기다린다. 이건 코드가 아니라 호스트의 문제다.
+
+두 창 모두에서 main 의 10 ms 이상 실행 중 가장 큰 묶음은 `openat -> switch` 다(부팅 직후 131회 5,864 ms, 표준 82회 5,638 ms, 최대 87·178 ms). 이 부류는 P4g 이후 모든 창에 있었고 정체는 다음과 같다.
+
+#### `openat -> switch` 의 정체 — 턴마다 읽는 35 MB 체크포인트 (P4h-5, #33453)
+
+`Fs_compat.load_file` 의 Eio 경로는 `Eio.Path.load` 다. `with_open_in`(worker 스레드의 `openat`, 그래서 재개 사유가 `openat`) 안에서 파일을 fiber 위에서 끝까지 복사하고 `Switch.run` 이 닫히며 끝난다(종료 사유 `switch`). keeper 의 정본 체크포인트 `traces/<trace>/<trace>.json` 은 13~35 MB 이고 턴마다 이 경로로 읽혔다. 디코드는 이미 pool 에 있었지만 바이트 복사는 아니었다. 같은 디렉터리의 history 스냅샷 `agent-core-snapshot-*.json` 은 한 시간에 117개·1,350 MB 가 쓰였다. 쓰기는 `Keeper_fs.save_bytes_durable_atomic_core` 가 이미 `Eio_guard.run_in_systhread` 안에서 한다.
+
+P4h-5 는 두 읽기(정본·history)를 `Fs_compat.load_owned_regular_file ~ownership_root:(dirname session_dir)` 로 바꾼다. 쓰는 쪽과 같은 소유 경계이고, Eio 파일시스템이 있으면 systhread 에서 읽는다. 심볼릭 링크와 바뀐 부모 체인은 `Io_error` 로 거절한다(전에는 따라갔다). 더 깊은 고침은 체크포인트 크기 자체다 — 35 MB 를 턴마다 읽고 쓰는 구조(§8.6 의 P4c, exact-lane 본문을 blob 참조로).

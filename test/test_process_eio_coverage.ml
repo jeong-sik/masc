@@ -126,6 +126,53 @@ let test_run_argv_with_status_fallback_surfaces_spawn_error () =
   check bool "missing command output surfaced" true
     (contains output "process_eio_error")
 
+let status_to_string = function
+  | Unix.WEXITED code -> Printf.sprintf "exited %d" code
+  | Unix.WSIGNALED signal -> Printf.sprintf "signaled %d" signal
+  | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
+
+let missing_program = "/definitely/missing/process-eio-command"
+
+let check_refusal_names_the_missing_program () =
+  match Process_eio.run_argv_with_status_split_or_refusal [ missing_program ] with
+  | Error (Process_eio.Executable_not_found named) ->
+    check string "the refusal names argv[0] as given" missing_program named
+  | Ok (status, _stdout, stderr) ->
+    failf "expected a refusal, got %s with stderr %S" (status_to_string status) stderr
+
+(* The typed runner hands a program the spawn cannot find back as a value.
+   The tuple runners above keep folding it into exit 127 plus text. Unix
+   fallback path. *)
+let test_run_argv_with_status_split_or_refusal_names_missing_program () =
+  Process_eio.reset_for_testing ();
+  check_refusal_names_the_missing_program ()
+
+(* Same contract on the Eio path, where the refusal originates as
+   [Eio.Process.Executable_not_found] from the spawner's PATH resolution. *)
+let test_run_argv_with_status_split_or_refusal_names_missing_program_eio () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  check_refusal_names_the_missing_program ();
+  Process_eio.reset_for_testing ()
+
+(* A program that ran is [Ok] with its own status and streams, exactly what
+   [run_argv_with_status_split] returns; only the pre-spawn case differs. *)
+let test_run_argv_with_status_split_or_refusal_returns_status_when_it_ran () =
+  Process_eio.reset_for_testing ();
+  match
+    Process_eio.run_argv_with_status_split_or_refusal
+      [ "/bin/sh"; "-c"; "echo refused-by-fixture >&2; exit 3" ]
+  with
+  | Error (Process_eio.Executable_not_found named) ->
+    failf "sh was reported missing: %s" named
+  | Ok (status, stdout, stderr) ->
+    check string "the child's exit status" "exited 3" (status_to_string status);
+    check string "stdout stays separate" "" stdout;
+    check bool "stderr is the child's own" true (contains stderr "refused-by-fixture")
+
 let test_run_argv_with_status_fallback_enforces_timeout () =
   Process_eio.reset_for_testing ();
   let status, _output =
@@ -969,6 +1016,16 @@ let () =
             test_run_argv_fallback_surfaces_spawn_error;
           test_case "argv-with-status-fallback-surfaces-spawn-error" `Quick
             test_run_argv_with_status_fallback_surfaces_spawn_error;
+          test_case "argv-with-status-split-or-refusal-names-missing-program"
+            `Quick
+            test_run_argv_with_status_split_or_refusal_names_missing_program;
+          test_case
+            "argv-with-status-split-or-refusal-names-missing-program-eio"
+            `Quick
+            test_run_argv_with_status_split_or_refusal_names_missing_program_eio;
+          test_case "argv-with-status-split-or-refusal-returns-status-when-it-ran"
+            `Quick
+            test_run_argv_with_status_split_or_refusal_returns_status_when_it_ran;
           test_case "argv-with-status-fallback-enforces-timeout" `Quick
             test_run_argv_with_status_fallback_enforces_timeout;
           test_case "argv-with-status-fallback-observes-timeout" `Quick

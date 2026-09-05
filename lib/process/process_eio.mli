@@ -212,6 +212,30 @@ val run_argv_with_status_split :
 (** Like [run_argv_with_status], but returns
     [(status, stdout, stderr)] without combining stderr into stdout. *)
 
+type spawn_refusal =
+  | Executable_not_found of string
+      (** argv[0], as the caller gave it, resolved to no file on [PATH], so no
+          process ran. Eio's spawner does the resolution and raises
+          [Eio.Process.Executable_not_found]; the Unix fallback gets the same
+          answer from [Unix.create_process_env] raising [ENOENT] at the spawn. *)
+
+val run_argv_with_status_split_or_refusal :
+  ?timeout_sec:float ->
+  ?env:string array ->
+  ?cwd:string ->
+  string list ->
+  (Unix.process_status * string * string, spawn_refusal) result
+(** {!run_argv_with_status_split} with the one failure that happens before a
+    process exists returned as a value instead of folded into the status.
+
+    Every other [run_argv*] here turns a missing program into
+    [Unix.WEXITED 127] plus a synthesized stderr line, which is the same shape
+    a program that ran and exited 127 produces. A caller that tries several
+    programs in turn (an image scaler chain, a player chain) then cannot say
+    which of them was absent without reading that text. [Ok] carries exactly
+    what {!run_argv_with_status_split} returns, timeouts included; the
+    refusal is not logged here because the caller owns what it means. *)
+
 type output_destination =
   | Captured
       (** today's behaviour: the child writes into a pipe this process drains

@@ -38,6 +38,7 @@ module Status = Masc.Keeper_status_runtime
 module Render_tools = Masc_tui_render_tools
 module Span = Masc_tui_span
 module Diff = Masc_tui_diff
+module Chart = Masc_tui_chart
 
 let json_assoc_member_opt = Masc_tui_json.member_opt
 
@@ -15886,7 +15887,6 @@ let help_lines (state : state) =
       section first @ slash_commands @ List.concat_map section rest
 
 module Context_bars = Masc_tui_context_bars
-module Chart = Masc_tui_chart
 
 let context_component_style = function
   | Turn_record.Prompt_block Prompt_block_id.Memory_os_recall ->

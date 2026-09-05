@@ -57,18 +57,17 @@ graph TB
 | `00-glossary.md` | Glossary | 용어 정의, 약어 목록 | Draft |
 | `01-system-overview.md` | System Overview | 문제 정의, 배포 모델, 기술 스택, sub-library 의존성 | Draft |
 | `02-types-and-invariants.md` | Types and Invariants | 핵심 타입 정의, 상태 전이, 불변식 | Draft |
-| `03-workspace-state collaboration.md` | Workspace State | Workspace 생명주기, session 관리, agent join/leave | Draft |
+| `03-workspace-state.md` | Workspace State | Workspace 생명주기, session 관리, agent join/leave | Draft |
 | `04-turn-lifecycle.md` | Turn Lifecycle | Keeper turn 시작/종료, heartbeat/polling/waiting, direct msg, FSM, receipt | Draft |
 | `05-keeper-agent.md` | Keeper Engine | 자율 에이전트 루프, succession, context 관리 | Draft |
 | `09-server-transport.md` | Server and Transport | HTTP transport, SSE, JSON-RPC dispatch, routing | Draft |
 | `10-dashboard.md` | Dashboard | Web UI, API endpoints, SSE real-time updates | Draft |
 | `11-board.md` | Board System | Posts, comments, votes, filesystem/JSONL backend | Draft |
 | `12-memory-systems.md` | Memory Systems | Memory OS fact store, context budget | Draft |
-| `13-agent-core-integration.md` | agent core Integration | agent core Agent SDK bridge, runtime config, completion authority/evaluator, event bus, boundary rules | Draft |
+| `13-agent-core.md` | agent core Integration | agent core Agent SDK bridge, runtime config, completion authority/evaluator, event bus, boundary rules | Draft |
 | `14-configuration.md` | Configuration | env, profile, prompt, runtime 설정 | Draft |
 | `15-testing.md` | Testing | 검증 계층, contract suites, fixture/manual 분리 | Draft |
 | `16-root-cause-rubric.md` | Root-Cause Rubric | Markers behind the `root/*` values declared in a `masc-triage` block | Reference |
-| `17-keeper-behavioral-regime.md` | Keeper Behavioral Regime | 7th FSM axis rules, `tool_aggregate` semantics, snapshot invariants | Reference |
 | `18-log-severity-taxonomy.md` | Log Severity Taxonomy | 4-level contract for `Log.{debug,info,warn,error}` callsites + anti-pattern catalog + lint rules | Reference |
 
 ## Active Design Documents
@@ -77,8 +76,8 @@ graph TB
 
 | Document | Description | Related Spec |
 |----------|-------------|--------------|
-| `docs/design/checkpoint-truth-and-replay-rfc.md` | Checkpoint truth hierarchy, replay semantics, side-effect boundary | `13-agent-core-integration.md` |
-| `docs/KEEPER-STATE-OWNERSHIP.md` | Keeper lane, checkpoint, domain state, and receipt ownership | `05-keeper-agent.md`, `13-agent-core-integration.md` |
+| `docs/design/checkpoint-truth-and-replay-rfc.md` | Checkpoint truth hierarchy, replay semantics, side-effect boundary | `13-agent-core.md` |
+| `docs/KEEPER-STATE-OWNERSHIP.md` | Keeper lane, checkpoint, domain state, and receipt ownership | `05-keeper-agent.md`, `13-agent-core.md` |
 
 ## Conventions
 

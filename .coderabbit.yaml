@@ -22,10 +22,6 @@ reviews:
       instructions: >
         Prioritize OCaml 5 correctness, interface/signature consistency, Eio cancellation and
         resource safety, and removal of hidden partial failures.
-    - path: "trpg/**/*.ml"
-      instructions: >
-        Validate TRPG state transitions for deterministic turn flow, workspace/session isolation, and
-        idempotent updates on retries.
     - path: "**/*.proto"
       instructions: >
         Check protobuf backward compatibility, stable field numbering, reserved fields,

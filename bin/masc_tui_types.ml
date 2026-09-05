@@ -3205,8 +3205,12 @@ type state = {
   mutable code_entries: Tui_decode.workspace_tree_node list;
   mutable code_entries_error: string option;
   mutable code_cursor: int;
-  mutable code_file: (string * (string * string) list list) option;
-  mutable code_file_error: string option;
+  (* The open file's lexed rows, keyed by its path. One value rather than a
+     pair of options: the pair could not say "reading", so a file being
+     fetched drew the same blank pane an empty file draws -- and nothing
+     matched an arriving answer against the path still on screen, so a slow
+     read of one file could replace another the operator had since opened. *)
+  mutable code_file: (string, (string * string) list list) Masc_tui_fetched.t;
   mutable code_file_scroll: int;
   (* The line the pane's cursor is on (0-based), the anchor a language-server
      question is asked at. j/k move it; the scroll follows to keep it
@@ -4245,8 +4249,7 @@ let create_state
   code_entries = [];
   code_entries_error = None;
   code_cursor = 0;
-  code_file = None;
-  code_file_error = None;
+  code_file = Masc_tui_fetched.initial;
   code_file_scroll = 0;
   code_file_cursor = 0;
   code_lsp_note = None;
@@ -5375,12 +5378,17 @@ let surface_row_texts (state : state) : surface -> string list option = function
         state.code_focus_file = Right_pane && not state.code_history_open
         && not state.code_diff_open && not state.code_notes_open
       then
-        Option.map
-          (fun (_, rows) ->
-            List.map
-              (fun segments -> String.concat "" (List.map fst segments))
-              rows)
-          state.code_file
+        (match Masc_tui_fetched.current state.code_file with
+         | Some (_, Masc_tui_fetched.Ready rows) ->
+           Some
+             (List.map
+                (fun segments -> String.concat "" (List.map fst segments))
+                rows)
+         (* Nothing to search through while the file is still being read, and
+            nothing to search through if it failed. *)
+         | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+         | Some (_, Masc_tui_fetched.Absent)
+         | None -> None)
       else
         Some
           (List.map
@@ -5576,9 +5584,8 @@ type palette_action =
    or a number -- those offer no name a language server answers about --
    rather than keeping a second keyword list that could drift. *)
 let code_cursor_line_symbols (state : state) =
-  match state.code_file with
-  | None -> []
-  | Some (_, rows) -> (
+  match Masc_tui_fetched.current state.code_file with
+  | Some (_, Masc_tui_fetched.Ready rows) -> (
       match List.nth_opt rows state.code_file_cursor with
       | None -> []
       | Some segments ->
@@ -5618,6 +5625,10 @@ let code_cursor_line_symbols (state : state) =
               end)
             segments;
           List.rev !names)
+  (* No open file, still reading, or the read failed: nothing to name. *)
+  | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+  | Some (_, Masc_tui_fetched.Absent)
+  | None -> []
 
 (* The Code pane asks the server for at most this many entries per directory
    and the server answers a bare list, so a full page is the only sign that a

@@ -1880,7 +1880,7 @@ type async_msg =
   | Resources_listed of (Masc_tui_mcp.resource list, string) result
   | Code_entries_loaded of
       string * (Masc.Tui_decode.workspace_tree_node list, string) result
-  | Code_file_loaded of string * (string, string) result
+  | Code_file_loaded of string Masc_tui_fetched.request * (string, string) result
   | Code_history_loaded of
       code_workspace_scope
       * string
@@ -3037,6 +3037,10 @@ let launch_code_entries_load state ~mailbox =
         (Code_entries_loaded (dir, Error "Eio switch is unavailable"))
 
 let launch_code_file_load state ~mailbox ~path =
+  match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
+  | Masc_tui_fetched.Already_loading -> ()
+  | Masc_tui_fetched.Started (next, request) ->
+  state.code_file <- next;
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -3048,7 +3052,7 @@ let launch_code_file_load state ~mailbox ~path =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Code_file_loaded (path, result))
+    enqueue_async mailbox (Code_file_loaded (request, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -3057,7 +3061,7 @@ let launch_code_file_load state ~mailbox ~path =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Code_file_loaded (path, Error "Eio switch is unavailable"))
+        (Code_file_loaded (request, Error "Eio switch is unavailable"))
 
 (* The 50-commit first page covers the pane; the route caps at 200 anyway. *)
 let code_history_limit = 50
@@ -3325,7 +3329,7 @@ let start_code_note_write state ~mailbox ~codebase ~path ~line_start ~line_end
 let code_jump_back_limit = 20
 
 let push_code_jump state =
-  let file = Option.map fst state.code_file in
+  let file = Masc_tui_fetched.current_key state.code_file in
   let entry =
     ( state.code_scope,
       state.code_dir,
@@ -3346,9 +3350,9 @@ let push_code_jump state =
    repository ask about their own bytes. *)
 let start_code_lsp_question state ~mailbox ~(question : string)
     ~(symbol : string) =
-  match state.code_file with
+  match Masc_tui_fetched.current_key state.code_file with
   | None -> add_event state "error" "no file is open on the Code surface"
-  | Some (path, _) ->
+  | Some path ->
       state.code_lsp_note <-
         Some (Printf.sprintf "asking %s about %S" question symbol);
       let host = server_peer_host in
@@ -4150,8 +4154,7 @@ let open_repository_change_in_code state ~mailbox ~scope
   state.code_cursor <- 0;
   state.code_entries <- [];
   state.code_entries_error <- None;
-  state.code_file <- None;
-  state.code_file_error <- None;
+  state.code_file <- Masc_tui_fetched.clear state.code_file;
   state.code_focus_file <- Left_pane;
   close_repository_changes state;
   state.view <- Code;
@@ -9696,7 +9699,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             state.code_cursor <-
               max 0 (min state.code_cursor (List.length entries - 1))
         | Error detail -> state.code_entries_error <- Some detail)
-  | Code_file_loaded (path, result) -> (
+  | Code_file_loaded (request, result) -> (
+      let path = Masc_tui_fetched.request_key request in
+      (* An answer for a file the operator has moved past describes bytes
+         that are no longer on screen, and everything below resets the
+         scroll, the cursor and the sibling panes to match it. The sibling
+         loads already guarded on the open path; this one never did. *)
+      if not (Masc_tui_fetched.is_current ~equal:String.equal state.code_file request)
+      then ()
+      else
       match result with
       | Ok content ->
           (* Lex once at load: comment and string state crosses rows, so a
@@ -9712,8 +9723,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  (List.map (fun (text, kind) ->
                       (Masc.Tui_decode.sanitize_terminal_text text, kind)))
           in
-          state.code_file <- Some (path, rows);
-          state.code_file_error <- None;
+          state.code_file <-
+            Masc_tui_fetched.complete ~equal:String.equal state.code_file request
+              (Ok rows);
           (* The jump that asked for this file may have named a line; the
              reset and the jump live together so neither overwrites the
              other. Consumed once -- the next plain open starts at the top. *)
@@ -9755,14 +9767,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.code_notes_scroll <- 0;
           state.code_blame <- None;
           state.code_blame_error <- None
-      | Error detail -> state.code_file_error <- Some detail)
+      | Error detail ->
+          state.code_file <-
+            Masc_tui_fetched.complete ~equal:String.equal state.code_file request
+              (Error detail))
   | Code_blame_loaded (path, result) ->
       (* Stamped by path like the notes below: an answer that arrives after
          the operator moved on describes bytes that are no longer on screen,
          and a margin naming the wrong authors is worse than no margin. *)
       let still_current =
-        match state.code_file with
-        | Some (open_path, _) -> String.equal open_path path
+        match Masc_tui_fetched.current_key state.code_file with
+        | Some open_path -> String.equal open_path path
         | None -> false
       in
       if still_current then (
@@ -9775,8 +9790,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             state.code_blame_error <- Some detail)
   | Code_notes_loaded (path, result) ->
       let still_current =
-        match state.code_file with
-        | Some (open_path, _) -> String.equal open_path path
+        match Masc_tui_fetched.current_key state.code_file with
+        | Some open_path -> String.equal open_path path
         | None -> false
       in
       if still_current then (
@@ -9792,8 +9807,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           add_event state "system" ("note added to " ^ path);
           (* Re-read rather than splice: the server owns ids and order. *)
           let still_current =
-            match state.code_file with
-            | Some (open_path, _) -> String.equal open_path path
+            match Masc_tui_fetched.current_key state.code_file with
+            | Some open_path -> String.equal open_path path
             | None -> false
           in
           if still_current then (
@@ -9829,8 +9844,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                Some
                  (Printf.sprintf "%s: %s:%d" symbol location.ll_path
                     location.ll_line);
-             match state.code_file with
-             | Some (open_path, rows)
+             match Masc_tui_fetched.current state.code_file with
+             | Some (open_path, Masc_tui_fetched.Ready rows)
                when String.equal open_path location.ll_path ->
                  let cursor =
                    max 0
@@ -9843,6 +9858,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                    Masc_tui_scroll.ensure_visible ~cursor
                      ~height:(Masc_tui_render.code_pane_content_height state)
                      state.code_file_scroll
+             (* A different file, or this one not readable yet: ask for it.
+                [start] answers Already_loading if that is the read already in
+                flight, so a jump into the file being read does not double it. *)
              | Some _ | None ->
                  state.code_target_line <- Some location.ll_line;
                  launch_code_file_load state ~mailbox
@@ -9858,8 +9876,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Code_diff_loaded (path, result) ->
       (* Keyed to the file still open, as the history is. *)
       let still_current =
-        match state.code_file with
-        | Some (open_path, _) -> String.equal open_path path
+        match Masc_tui_fetched.current_key state.code_file with
+        | Some open_path -> String.equal open_path path
         | None -> false
       in
       if still_current then (
@@ -9875,8 +9893,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          put the wrong Keeper activity under the new file. *)
       let still_current =
         state.code_scope = scope
-        && match state.code_file with
-        | Some (open_path, _) -> String.equal open_path path
+        && match Masc_tui_fetched.current_key state.code_file with
+        | Some open_path -> String.equal open_path path
         | None -> false
       in
       if still_current then (
@@ -11932,9 +11950,9 @@ let main () =
      file unannotated. Reachable only from the notes view, which already
      proved the scope has a codebase slug. *)
   let handle_code_note_write () =
-    match state.code_file with
+    match Masc_tui_fetched.current_key state.code_file with
     | None -> ()
-    | Some (path, _) -> (
+    | Some path -> (
         match code_scope_codebase state with
         | Error why -> report_action state "system" ("notes: " ^ why)
         | Ok codebase -> (
@@ -13763,7 +13781,7 @@ and is loaded on demand through keeper_skill.
                 end
                 else begin
                   close ();
-                  if state.view <> Code || Option.is_none state.code_file
+                  if state.view <> Code || Option.is_none (Masc_tui_fetched.current_key state.code_file)
                   then
                     add_event state "error"
                       "hover, def and refs ask about the file open on the \
@@ -14744,23 +14762,24 @@ and is loaded on demand through keeper_skill.
                 end;
                 (match file with
                  | None ->
-                     state.code_file <- None;
-                     state.code_file_error <- None;
+                     state.code_file <- Masc_tui_fetched.clear state.code_file;
                      state.code_focus_file <- Left_pane
                  | Some path -> (
-                     match state.code_file with
-                     | Some (open_path, _)
+                     match Masc_tui_fetched.current state.code_file with
+                     | Some (open_path, Masc_tui_fetched.Ready _)
                        when String.equal open_path path ->
                          state.code_file_cursor <- cursor;
                          state.code_file_scroll <- scroll;
                          state.code_focus_file <- Right_pane
+                     (* A different file, or this one not readable yet.
+                        [start] collapses a repeat of the read in flight. *)
                      | Some _ | None ->
                          state.code_target_line <- Some (cursor + 1);
                          launch_code_file_load state
                            ~mailbox:async_messages ~path)))
        | Some (("K" | "D" | "R") as key_name)
          when state.view = Code && state.code_focus_file = Right_pane
-              && Option.is_some state.code_file
+              && Option.is_some (Masc_tui_fetched.current_key state.code_file)
               && not state.code_history_open
               && not state.code_diff_open
               && not state.code_notes_open ->
@@ -14791,7 +14810,7 @@ and is loaded on demand through keeper_skill.
               scope, and the fresh listing lands where the writer looks. *)
            handle_code_note_write ()
        | Some "b" when state.view = Code && state.code_focus_file = Right_pane
-                       && Option.is_some state.code_file ->
+                       && Option.is_some (Masc_tui_fetched.current_key state.code_file) ->
            (* Who last touched each run of lines, in the margin beside the
               code. A margin rather than a view: blame answers a question
               about the line you are reading, and a separate screen would
@@ -14801,9 +14820,9 @@ and is loaded on demand through keeper_skill.
               Re-fetched rather than kept on a second press: an edit or a
               commit since the last read moves the runs, and a stale margin
               names the wrong author with no sign that it is stale. *)
-           (match state.code_file with
+           (match Masc_tui_fetched.current_key state.code_file with
             | None -> ()
-            | Some (path, _) ->
+            | Some path ->
                 if Option.is_some state.code_blame then begin
                   state.code_blame <- None;
                   state.code_blame_error <- None
@@ -14813,14 +14832,14 @@ and is loaded on demand through keeper_skill.
                   launch_code_blame_load state ~mailbox:async_messages ~path
                 end)
        | Some "m" when state.view = Code && state.code_focus_file = Right_pane
-                       && Option.is_some state.code_file ->
+                       && Option.is_some (Masc_tui_fetched.current_key state.code_file) ->
            (* The notes anchored to the open file. Repository scope only:
               the annotation routes are scoped by the server-minted codebase
               slug, and only a Repositories row carries one -- the other
               scopes say so instead of guessing a slug. *)
-           (match state.code_file with
+           (match Masc_tui_fetched.current_key state.code_file with
             | None -> ()
-            | Some (path, _) ->
+            | Some path ->
                 if state.code_notes_open then state.code_notes_open <- false
                 else
                   match code_scope_codebase state with
@@ -14839,14 +14858,14 @@ and is loaded on demand through keeper_skill.
                            launch_code_notes_load state
                              ~mailbox:async_messages ~codebase ~path))
        | Some "d" when state.view = Code && state.code_focus_file = Right_pane
-                       && Option.is_some state.code_file ->
+                       && Option.is_some (Masc_tui_fetched.current_key state.code_file) ->
            (* The working tree against HEAD, over the open file. One overlay
               at a time: opening this closes the history, and H the reverse.
               Same key closes it; a diff already fetched for this path is
               shown as it stands. *)
-           (match state.code_file with
+           (match Masc_tui_fetched.current_key state.code_file with
             | None -> ()
-            | Some (path, _) ->
+            | Some path ->
                 if state.code_diff_open then state.code_diff_open <- false
                 else begin
                   state.code_diff_open <- true;
@@ -14866,9 +14885,9 @@ and is loaded on demand through keeper_skill.
            (* History over the open file. The capital only: lowercase h/l
               choose panes, while shifted arrows pan the file. Same key closes
               it; a listing already fetched for this path is shown as it stands. *)
-           (match state.code_file with
+           (match Masc_tui_fetched.current_key state.code_file with
             | None -> ()
-            | Some (path, _) ->
+            | Some path ->
                 if state.code_history_open then
                   state.code_history_open <- false
                 else begin
@@ -14925,7 +14944,7 @@ and is loaded on demand through keeper_skill.
                       (match state.board_mode with
                        | Board_read _ -> not state.board_detail_wide
                        | Board_list | Board_compose -> false)
-                  | Code -> Option.is_some state.code_file
+                  | Code -> Option.is_some (Masc_tui_fetched.current_key state.code_file)
                   | Acting | Metrics | Keepers _ | Lanes | Clients | Approvals
                   | Planning
                   | Schedules | Verification | Harness | Fusion
@@ -14941,7 +14960,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_detail -> state.keeper_detail_focus <- focus
             | Resources -> state.resource_focus <- focus
             | Code
-              when Option.is_some state.code_file
+              when Option.is_some (Masc_tui_fetched.current_key state.code_file)
                    && not state.repository_changes_open ->
                 state.code_focus_file <- focus
             | Acting | Metrics | Keepers _ | Lanes | Clients | Approvals | Planning
@@ -15777,8 +15796,8 @@ and is loaded on demand through keeper_skill.
                             (state.code_history_scroll + 1)
                     | None -> ())
                   else
-                    match state.code_file with
-                    | Some (_, rows) ->
+                    match Masc_tui_fetched.current state.code_file with
+                    | Some (_, Masc_tui_fetched.Ready rows) ->
                         let cursor =
                           Masc_tui_scroll.cursor_down
                             ~count:(List.length rows)
@@ -15789,7 +15808,8 @@ and is loaded on demand through keeper_skill.
                           Masc_tui_scroll.ensure_visible ~cursor
                             ~height:(Masc_tui_render.code_pane_content_height state)
                             state.code_file_scroll
-                    | None -> ())
+                    (* No rows to move a cursor through. *)
+                    | Some (_, _) | None -> ())
                 else
                   state.code_cursor <-
                     Masc_tui_scroll.cursor_down
@@ -16150,8 +16170,8 @@ and is loaded on demand through keeper_skill.
                     state.code_history_scroll <-
                       max 0 (state.code_history_scroll - 1)
                   else
-                    match state.code_file with
-                    | Some (_, rows) ->
+                    match Masc_tui_fetched.current state.code_file with
+                    | Some (_, Masc_tui_fetched.Ready rows) ->
                         let cursor =
                           Masc_tui_scroll.cursor_up
                             ~count:(List.length rows)
@@ -16162,7 +16182,8 @@ and is loaded on demand through keeper_skill.
                           Masc_tui_scroll.ensure_visible ~cursor
                             ~height:(Masc_tui_render.code_pane_content_height state)
                             state.code_file_scroll
-                    | None -> ())
+                    (* No rows to move a cursor through. *)
+                    | Some (_, _) | None -> ())
                 else
                   state.code_cursor <-
                     Masc_tui_scroll.cursor_up
@@ -16534,9 +16555,8 @@ and is loaded on demand through keeper_skill.
                       with
                       | None -> ()
                       | Some (Hist_keeper_change change) -> (
-                          match state.code_file with
-                          | None -> ()
-                          | Some (_, rows) ->
+                          match Masc_tui_fetched.current state.code_file with
+                          | Some (_, Masc_tui_fetched.Ready rows) ->
                             push_code_jump state;
                             state.code_history_open <- false;
                             let cursor =
@@ -16551,7 +16571,9 @@ and is loaded on demand through keeper_skill.
                               Masc_tui_scroll.ensure_visible ~cursor
                                 ~height:
                                   (Masc_tui_render.code_pane_content_height state)
-                                state.code_file_scroll)
+                                state.code_file_scroll
+                          (* No rows on screen to jump within. *)
+                          | Some (_, _) | None -> ())
                       | Some (Hist_commit row) ->
                           let open Masc.Tui_decode in
                           state.code_lsp_note <-
@@ -16788,8 +16810,7 @@ and is loaded on demand through keeper_skill.
                         state.code_cursor <- 0;
                         state.code_entries <- [];
                         state.code_entries_error <- None;
-                        state.code_file <- None;
-                        state.code_file_error <- None;
+                        state.code_file <- Masc_tui_fetched.clear state.code_file;
                         state.code_focus_file <- Left_pane;
                         state.view <- Code;
                         launch_code_entries_load state
@@ -17150,8 +17171,7 @@ and is loaded on demand through keeper_skill.
                         state.code_entries <- [];
                         state.code_entries_error <- None;
                         state.code_cursor <- 0;
-                        state.code_file <- None;
-                        state.code_file_error <- None;
+                        state.code_file <- Masc_tui_fetched.clear state.code_file;
                         state.code_focus_file <- Left_pane;
                         state.code_target_line <-
                           Some (Masc.Tui_decode.file_change_target_line change);

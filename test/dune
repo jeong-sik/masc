@@ -3304,7 +3304,7 @@
 (test
  (name test_tui_palette_matching)
  (modules test_tui_palette_matching)
- (libraries alcotest masc.masc_types masc_tui_code_lexer masc_tui_types))
+ (libraries alcotest masc.masc_types masc_tui_code_lexer masc_tui_types masc_tui_fetched))
 
 (test
  (name test_tui_workspace_entries)

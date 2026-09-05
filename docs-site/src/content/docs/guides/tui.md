@@ -36,7 +36,7 @@ Without a server, the keeper roster and the task backlog still render, read from
 | **Memory** | Memory OS health per keeper | `Enter`: the fact browser |
 | **Approvals** | The gate queue, standing always-allow rules, and questions keepers ask a person | |
 | **Board** | Posts from people, agents, automation, and the system | |
-| **Planning** | Goals and plans | `v`: Goals → Task Review → Evaluator Verdicts |
+| **Planning** | Goals and plans | `v`: Goals · Task Review · Task Verdicts |
 | **Fusion** | The panel/judge run list and detail | `Enter`: run detail |
 | **Workspace** | Registered repositories, working-tree changes (`d`) | `Enter`: the code browser |
 | **Runtime** | Runtime lanes, ordered candidates, provider reachability | `p`: lane detail |
@@ -59,7 +59,7 @@ Each queued ask draws on one row. `Enter` opens the full text of a multi-line ar
 - On the list: `c` chat, `l` logs, `t` tool calls, `u` pick a runtime lane, `g` toggle yolo/auto approval, `p`/`w` pause/wake, `s` shutdown.
 
 ### Planning and Fusion
-Planning's `v` walks three tabs: Goals → Task Review → Evaluator Verdicts. Fusion is its own ring stop; `Enter` opens a run's detail. While a run is active its `STATE` shows the exact stage: `accepted`, `panel(N)`, `judge(A/F)`, `computed(A/F)`, `recording(A/F)`.
+Planning's `v` walks three tabs: Goals, Task Review, Task Verdicts. Goals is the goal lifecycle; the other two are the near and far halves of the Task protocol, so they are separate subjects rather than an order. Fusion is its own ring stop; `Enter` opens a run's detail. While a run is active its `STATE` shows the exact stage: `accepted`, `panel(N)`, `judge(A/F)`, `computed(A/F)`, `recording(A/F)`.
 
 ### Memory
 `Enter` opens the fact browser. `c`/`C` cycles the category filter forward and backward, `s` changes the sort (recency, last retrieved, retrieved count, category, claim), `/` sets a live text filter with `n`/`N` stepping through matches, and `Esc` closes back to the health table.

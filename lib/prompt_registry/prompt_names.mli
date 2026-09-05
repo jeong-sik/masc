@@ -328,6 +328,7 @@ val keeper_tool_filesystem_patch_target_missing : string
 val keeper_gate_replay_resolution_consumed_without_outcome : string
 val keeper_gate_replay_resolution_invalid_replay_state : string
 val keeper_gate_replay_resolution_journal_unreadable : string
+val keeper_gate_replay_resolution_absent : string
 val keeper_gate_replay_resolution_rejected : string
 val keeper_gate_replay_artifact_missing : string
 val keeper_gate_replay_artifact_length_mismatch : string

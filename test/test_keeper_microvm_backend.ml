@@ -170,7 +170,7 @@ let test_boot_argv_is_each_runtimes_own () =
      @ [ "--label"; "masc.mcp.kind=keeper-vm" ]
      @ [ "--label"; "masc.mcp.microvm_backend=apple_container" ]
      @ [ "--user"; "501:20" ]
-     @ [ "--cap-drop"; "ALL"; "--read-only"; "--rm" ]
+     @ [ "--cap-drop"; "ALL"; "--read-only"; "--rm"; "--tmpfs"; "/tmp" ]
      @ [ "--memory"; "2g" ]
      @ [ "-v"; "h:c:ro" ]
      @ [ "--workdir"; Microvm.work_volume_guest_root ]
@@ -186,7 +186,7 @@ let test_boot_argv_is_each_runtimes_own () =
      @ [ "--label"; "masc.mcp.kind=keeper-vm" ]
      @ [ "--label"; "masc.mcp.microvm_backend=nerdctl_kata" ]
      @ [ "--user"; "501:20" ]
-     @ [ "--cap-drop"; "ALL"; "--read-only"; "--rm" ]
+     @ [ "--cap-drop"; "ALL"; "--read-only"; "--rm"; "--tmpfs"; "/tmp" ]
      @ [ "--memory"; "2g" ]
      @ [ "--runtime"; "io.containerd.kata.v2" ]
      @ [ "-v"; "h:c:ro" ]
@@ -228,7 +228,7 @@ let test_an_isolation_guarantee_is_never_silently_dropped () =
               ( Backend.constraint_class guest_constraint
               , Backend.run_constraint_argv backend guest_constraint )
             with
-            | Backend.Lifecycle, _ -> ()
+            | Backend.Lifecycle, _ | Backend.Observation, _ -> ()
             | Backend.Isolation, Backend.Not_expressible _ ->
               Alcotest.failf
                 "%s booted Ok while unable to express %s"
@@ -264,6 +264,46 @@ let test_a_lifecycle_drop_is_recorded_on_the_guest () =
       (List.exists
          (String.equal "masc.mcp.microvm_dropped=remove_on_exit")
          argv)
+;;
+
+(* The scratch is what the observe lane writes to. A runtime that cannot
+   mount one still boots a usable guest -- the shim answers observe requests
+   with observe_scratch_error and the gate keeps the judge for them -- so the
+   drop is a label on the guest, not a refusal. *)
+let test_an_observation_drop_is_recorded_on_the_guest () =
+  match boot ~constraints:[ Backend.Scratch_tmpfs ] Backend.Microsandbox with
+  | Error (Network_refused detail) -> fail ("the network refused the boot: " ^ detail)
+  | Error (Constraints_refused _) -> fail "an observation-only guarantee refused the boot"
+  | Ok argv ->
+    check
+      Alcotest.bool
+      "the drop travels as a label"
+      true
+      (List.exists
+         (String.equal "masc.mcp.microvm_dropped=scratch_tmpfs")
+         argv)
+;;
+
+(* The path the boot mounts and the path the shim is told are one value; a
+   scratch mounted at one place and named at another would be a box that
+   cannot write anywhere, discovered one observe request at a time. *)
+let test_the_scratch_the_boot_mounts_is_the_one_the_shim_is_told () =
+  List.iter
+    (fun backend ->
+      match Backend.run_constraint_argv backend Backend.Scratch_tmpfs with
+      | Backend.Expressed [ "--tmpfs"; path ] ->
+        check
+          Alcotest.string
+          (Backend.to_string backend ^ " mounts the scratch where the shim looks")
+          Backend.scratch_guest_root
+          path
+      | Backend.Expressed tokens ->
+        Alcotest.failf
+          "%s spells the scratch mount as %s"
+          (Backend.to_string backend)
+          (String.concat " " tokens)
+      | Backend.Not_expressible _ -> ())
+    Backend.all
 ;;
 
 (* Every pair answered, so a runtime added later cannot be half-registered:
@@ -789,6 +829,11 @@ let () =
             `Quick test_an_isolation_guarantee_is_never_silently_dropped
         ; Alcotest.test_case "a lifecycle drop is recorded on the guest" `Quick
             test_a_lifecycle_drop_is_recorded_on_the_guest
+        ; Alcotest.test_case "an observation drop is recorded on the guest" `Quick
+            test_an_observation_drop_is_recorded_on_the_guest
+        ; Alcotest.test_case
+            "the scratch the boot mounts is the one the shim is told"
+            `Quick test_the_scratch_the_boot_mounts_is_the_one_the_shim_is_told
         ; Alcotest.test_case "every runtime answers every guarantee" `Quick
             test_every_runtime_answers_every_guarantee
         ; Alcotest.test_case

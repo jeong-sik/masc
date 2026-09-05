@@ -53,8 +53,14 @@ end
 (* --------------------------------------------------------------- *)
 
 module Runtime = struct
+  (* The general image, not MASC's own development one. A Keeper that has to
+     build MASC needs the OCaml toolchain and names it -- the fleet that does
+     carries [sandbox_image = "masc-keeper-sandbox:local"] -- but a Keeper that
+     declared no image is far more likely to be working on something else, and
+     handing it an OCaml image it cannot install out of is the worse default.
+     `masc sandbox-image` builds what this names. *)
   let docker_image () =
-    get_string ~default:"masc-keeper-sandbox:local"
+    get_string ~default:Keeper_sandbox_image.default_tag
       "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
 
   (* container's guest resolver points at the gateway, and the gateway

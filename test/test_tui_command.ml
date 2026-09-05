@@ -12,6 +12,7 @@ let describe = function
   | Command.Open_settings -> "open-settings"
   | Command.Open_diff -> "open-diff"
   | Command.Open_changes -> "open-changes"
+  | Command.Open_metrics -> "open-metrics"
   | Command.Switch_keeper name -> "keeper:" ^ name
   | Command.Switch_keeper_missing_name -> "keeper-missing-name"
   | Command.Interrupt_turn -> "interrupt"

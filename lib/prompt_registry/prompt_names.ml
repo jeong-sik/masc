@@ -537,6 +537,8 @@ let keeper_gate_replay_resolution_journal_unreadable =
   "keeper.gate_replay.resolution_journal_unreadable"
 ;;
 
+let keeper_gate_replay_resolution_absent = "keeper.gate_replay.resolution_absent"
+
 let keeper_gate_replay_resolution_rejected = "keeper.gate_replay.resolution_rejected"
 let keeper_gate_replay_artifact_missing = "keeper.gate_replay.artifact_missing"
 

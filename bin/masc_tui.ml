@@ -2046,6 +2046,14 @@ let server_peer_host = Masc_network_defaults.masc_http_loopback_peer
 let tui_owned_server : Masc_tui_server_lifecycle.owned_server option ref =
   ref None
 
+(* Whether this session has already reached for a server on its own. The TUI is
+   the front door and the server is meant to be an implementation detail of
+   opening it, so the first time nothing answers the port we start one instead
+   of asking. Once per session and no more: a refresh can fail for reasons that
+   have nothing to do with a missing server, and one spawn attempt is the whole
+   budget rather than one per failed poll. [s] stays the manual path. *)
+let tui_auto_start_attempted = ref false
+
 (* Resolve [name] on $PATH — the fallback after the sibling-binary probe.
    [Sys.file_exists] is the same presence test the installer's layout gives
    us; the executable bit is not re-checked here because a non-executable
@@ -6628,6 +6636,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Buffer.clear state.msg_input;
       state.changes_return <- Changes_return_chat;
       goto_surface state ~mailbox Changes
+  | Masc_tui_command.Open_metrics ->
+      Buffer.clear state.msg_input;
+      goto_surface state ~mailbox Metrics
   | Masc_tui_command.Open_settings ->
       Buffer.clear state.msg_input;
       state.config_pane <- Config_params;
@@ -9118,8 +9129,8 @@ let handle_composer_key state ~base_path ~mailbox key =
            state.view <- Keepers Keeper_message
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
-       | Masc_tui_command.Open_diff | Masc_tui_command.Open_changes
-       | Masc_tui_command.Open_settings
+        | Masc_tui_command.Open_diff | Masc_tui_command.Open_changes
+        | Masc_tui_command.Open_settings | Masc_tui_command.Open_metrics
        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Steer_turn _
        | Masc_tui_command.Steer_missing_message
        | Masc_tui_command.Set_thinking _
@@ -9511,6 +9522,24 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       state.server_identity <- None;
       state.connection_status <- Masc_tui_types.Disconnected;
       add_event state "error" err;
+      (* Nothing is answering the port. The TUI is the front door and the
+         server is how it opens, so start one rather than leave the operator
+         looking at a disconnected workspace and a key to press. This is the
+         only place the TUI concludes Disconnected, and
+         [tui_auto_start_attempted] makes it one spawn for the whole session:
+         a refresh also fails for reasons a new server would not fix, and a
+         second masc on this port would only fail to bind. *)
+      if not !tui_auto_start_attempted then begin
+        tui_auto_start_attempted := true;
+        start_masc_server_here ~base_path ~host:server_peer_host
+          ~port:state.port
+          ~note:(fun msg -> add_event state "system" msg)
+          ~on_ready:(fun () ->
+            start_http_refresh state ~host:server_peer_host ~port:state.port
+              ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+              ~scoped_refresh_inflight:http_scoped_refresh_inflight
+              ~scoped_refresh_followup ~mailbox)
+      end;
       start_scoped_refresh_followup state ~host:(server_peer_host)
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight

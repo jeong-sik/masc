@@ -64,6 +64,11 @@ let counterpart_observations_before ~base_dir ~keeper_name ~before =
 ;;
 
 
+let counterpart_observations_before_offloaded ~base_dir ~keeper_name ~before =
+  Domain_pool_ref.submit_io_or_inline (fun () ->
+    counterpart_observations_before ~base_dir ~keeper_name ~before)
+;;
+
 let run
   ~config
   ~(meta : Keeper_meta_contract.keeper_meta)
@@ -96,15 +101,16 @@ let run
            Both reads are bounded and fenced before this turn's post-turn
            timestamp; identity is never recovered from checkpoint prose. *)
         let counterpart_observations =
-          counterpart_observations_before
+          counterpart_observations_before_offloaded
             ~base_dir:config.Workspace.base_path
             ~keeper_name:meta.name
             ~before:post_turn_t0
         in
         match
-          Keeper_memory_os_current.read_for_keepers_dir
-            ~keepers_dir
-            ~keeper_id:meta.name
+          Domain_pool_ref.submit_io_or_inline (fun () ->
+            Keeper_memory_os_current.read_for_keepers_dir
+              ~keepers_dir
+              ~keeper_id:meta.name)
         with
         | Error detail ->
           Otel_metric_store.inc_counter
@@ -200,4 +206,5 @@ let run
 
 module For_testing = struct
   let counterpart_observations_before = counterpart_observations_before
+  let counterpart_observations_before_offloaded = counterpart_observations_before_offloaded
 end

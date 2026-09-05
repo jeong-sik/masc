@@ -1300,10 +1300,9 @@ Next:
   ${c_dim}# or create one non-interactively once the server is up:${c_off}
   ${c_dim}# $DEST keeper-create --help${c_off}
 
-  ${c_dim}# a Keeper on sandbox_profile = "docker" runs inside masc-keeper-sandbox:local,${c_off}
-  ${c_dim}# which is built locally and published to no registry. Without it every turn${c_off}
-  ${c_dim}# stops at docker_preflight_failed. From a source checkout:${c_off}
-  ${c_dim}#   scripts/build-keeper-sandbox-image.sh${c_off}
+  ${c_dim}# a Keeper runs each turn inside an image. Build the general one -- bash,${c_off}
+  ${c_dim}# ripgrep and git -- or every turn stops at docker_preflight_failed:${c_off}
+  $DEST sandbox-image
 
   ${c_dim}# source the printed bearer exports in the shell that starts your MCP client${c_off}
   See: https://github.com/$REPO#mcp-client-setup

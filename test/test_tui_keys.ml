@@ -10,7 +10,7 @@ let check = Alcotest.check
 let str = Alcotest.string
 
 let every_surface =
-  [ Overview; Acting; Keepers Keeper_list; Keepers Keeper_detail
+  [ Overview; Acting; Metrics; Keepers Keeper_list; Keepers Keeper_detail
   ; Keepers Keeper_logs; Keepers Keeper_calls; Keepers Keeper_message
   ; Keepers Keeper_runtime_pick; Lanes; Board; Approvals; Planning
   ; Schedules; Verification; Harness; Fusion; Repositories; Code; Changes
@@ -478,7 +478,7 @@ let test_verdicts_is_a_planning_child () =
     (surface_ring_index Harness);
   Alcotest.(check bool) "and the help sheet files it under Planning" true
     (List.exists
-       (fun (label, _) -> String.equal label "Planning / Verdicts")
+       (fun (label, _) -> String.equal label "Planning / Task Verdicts")
        (Masc_tui_keys.help_sections ()))
 
 (* Changes reads one keeper's file writes and binds to the roster cursor on
@@ -616,6 +616,22 @@ let test_logs_is_an_activity_child () =
   in
   Alcotest.(check bool) "Activity documents the [l] hop" true
     (List.mem "l" acting_keys)
+
+(* Telemetry and multicore engine metrics hang off Overview under [m]
+   instead of holding a top-level Tab stop of their own. *)
+let test_metrics_is_an_overview_child () =
+  Alcotest.(check bool) "Metrics is not a top-level ring entry" false
+    (List.exists (fun (surface, _) -> surface = Metrics) surface_ring);
+  Alcotest.(check int) "Metrics highlights Overview"
+    (surface_ring_index Overview)
+    (surface_ring_index Metrics);
+  let overview_keys =
+    List.map
+      (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
+      (Masc_tui_keys.for_surface Overview)
+  in
+  Alcotest.(check bool) "Overview documents the [m] hop" true
+    (List.mem "m" overview_keys)
 
 let test_config_footer_names_both_hops () =
   check str "Config names its two off-ring children"
@@ -1396,6 +1412,8 @@ let () =
             test_config_footer_names_both_hops
         ; Alcotest.test_case "Logs is an Activity child" `Quick
             test_logs_is_an_activity_child
+        ; Alcotest.test_case "Metrics is an Overview child" `Quick
+            test_metrics_is_an_overview_child
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
         ; Alcotest.test_case "Keeper detail reserves u for channel unbind"

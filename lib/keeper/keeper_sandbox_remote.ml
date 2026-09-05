@@ -58,6 +58,11 @@ let lane_prefix = function
 type shared_state =
   { semaphore : Eio.Semaphore.t
   ; first_dispatch_logged : bool Atomic.t
+  ; probe_capabilities : string list option Atomic.t
+    (* What the endpoint's shim answered to [--probe], kept for the life of
+       this process once asked (RFC-0422). [None] until a probe has run.
+       The shim is a host-installed binary, so its answer changes only when
+       the operator replaces it, and that comes with a server restart. *)
   }
 
 (* Runner values are rebuilt per typed dispatch, while the session ceiling
@@ -77,6 +82,7 @@ let shared_state ~base_path ~name ~max_concurrent_sessions =
       let state =
         { semaphore = Eio.Semaphore.make max_concurrent_sessions
         ; first_dispatch_logged = Atomic.make false
+        ; probe_capabilities = Atomic.make None
         }
       in
       Hashtbl.add shared_states key state;
@@ -405,7 +411,7 @@ let log_first_dispatch t =
       c.container_name c.shim_path
 ;;
 
-let runner ~timeout_sec t =
+let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
   fun ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd ->
     match wire_env t env with
     | Error error -> Unix.WEXITED 1, "", error
@@ -431,9 +437,7 @@ let runner ~timeout_sec t =
         ; remote_root = t.remote_root
         ; timeout_sec
         ; stdin_len = Int64.of_int (String.length stdin)
-          (* RFC-0422 step 1 ships the box in the shim only; the gate's
-             Observe stage (step 3) is what will ask for it. *)
-        ; mode = Exec_ssh_protocol.Effect
+        ; mode
         }
       in
       (match Exec_ssh_protocol.encode_request request ~stdin with
@@ -591,7 +595,9 @@ let run_probe t =
      | Ok probe ->
        let want = string_of_int Exec_ssh_protocol.protocol_version in
        if Exec_ssh_protocol.probe_major_compatible ~want probe.version
-       then Ok ()
+       then (
+         Atomic.set t.shared.probe_capabilities (Some probe.capabilities);
+         Ok ())
        else
          Error
            (Printf.sprintf
@@ -608,6 +614,35 @@ let run_probe t =
       (Printf.sprintf
          "%s: endpoint %s host %s signal %d"
          (code t "endpoint_unreachable") t.name (host_label t) signal)
+;;
+
+(* Whether this endpoint's shim can build the box (RFC-0422). The shim says
+   so itself through the probe's [capabilities], so the answer is the
+   binary's rather than a guess from the profile; a guest whose shim
+   predates the box, or a host without Landlock, answers no and the request
+   keeps the judge. Asked once per endpoint per process: a guest is never
+   probed by the lane otherwise (see [Keeper_sandbox_remote_lane]), and an
+   OpenSSH endpoint's preflight has usually answered already. A probe that
+   fails is a deployment already failing loudly elsewhere; here it is a no. *)
+let observe_supported t =
+  let advertised capabilities =
+    List.mem Exec_ssh_protocol.observe_capability capabilities
+  in
+  match Atomic.get t.shared.probe_capabilities with
+  | Some capabilities -> advertised capabilities
+  | None ->
+    (match run_probe t with
+     | Ok () ->
+       (match Atomic.get t.shared.probe_capabilities with
+        | Some capabilities -> advertised capabilities
+        | None -> false)
+     | Error error ->
+       Log.Keeper.warn
+         ~keeper_name:t.keeper_name
+         "%s probe before an observe run failed; the request keeps the judge: %s"
+         (lane_prefix t.transport)
+         error;
+       false)
 ;;
 
 (* [test -d] writes nothing to stderr: it answers by exit code alone. A

@@ -7483,9 +7483,9 @@ def planning_review_hierarchy_interaction() -> Interaction:
     ) -> None:
         goals = tab_until(process, master_fd, output, b"MASC Planning")
         for needle in (
-            b"\xe2\x96\xb81 Goals",
-            b"2 Task Review",
-            b"3 Evaluator Verdicts",
+            b"\xe2\x96\xb8Goals",
+            b"Task Review",
+            b"Task Verdicts",
         ):
             if needle not in goals:
                 raise AssertionError(
@@ -7493,7 +7493,7 @@ def planning_review_hierarchy_interaction() -> Interaction:
                     f"({needle!r}): {goals!r}"
                 )
         review = send_and_wait(
-            process, master_fd, output, b"v", b"\xe2\x96\xb82 Task Review"
+            process, master_fd, output, b"v", b"\xe2\x96\xb8Task Review"
         )
         wait_for_output(process, master_fd, output, b"task-901", start=0, timeout=3.0)
         plain_review = CSI_RE.sub(b"", review)
@@ -7504,13 +7504,13 @@ def planning_review_hierarchy_interaction() -> Interaction:
             master_fd,
             output,
             b"v",
-            b"\xe2\x96\xb83 Evaluator Verdicts",
+            b"\xe2\x96\xb8Task Verdicts",
         )
         verdicts_plain = CSI_RE.sub(b"", verdicts)
-        for needle in (b"old Harness", b"not Goal proof", b"Evaluator"):
+        for needle in (b"old Harness", b"not Goal proof", b"Task Verdicts"):
             if needle not in verdicts_plain:
                 raise AssertionError(
-                    f"Evaluator Verdicts did not explain itself ({needle!r}): "
+                    f"Task Verdicts did not explain itself ({needle!r}): "
                     f"{verdicts_plain!r}"
                 )
         # The walk continues through the two children that keep their own
@@ -7518,9 +7518,9 @@ def planning_review_hierarchy_interaction() -> Interaction:
         send_and_wait(process, master_fd, output, b"v", b"MASC Schedules")
         send_and_wait(process, master_fd, output, b"v", b"MASC Fusion")
         goals_again = send_and_wait(
-            process, master_fd, output, b"v", b"\xe2\x96\xb81 Goals"
+            process, master_fd, output, b"v", b"\xe2\x96\xb8Goals"
         )
-        if b"2 Task Review" not in goals_again:
+        if b"Task Review" not in goals_again:
             raise AssertionError(
                 f"Goals did not retain the Task Review sibling: {goals_again!r}"
             )

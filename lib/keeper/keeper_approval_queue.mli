@@ -88,6 +88,23 @@ type grant_error =
   | Grant_replay_not_consumed of string
   | Grant_replay_outcome_conflict of string
 
+(** What the durable Gate store says when a queued approved resolution has
+    nothing behind it. Each constructor is a fact about the store, not a read
+    failure: reading again on the next turn returns the same answer, so the
+    queued resolution has nothing to replay and is retired. Read failures
+    stay in [grant_error] and remain actionable. *)
+type resolution_absence =
+  | Resolution_missing
+      (** neither a delivery row nor a pending row carries the id; the store
+          was reset or the row was removed after the resolution was queued *)
+  | Resolution_still_pending
+      (** the store holds the id unresolved while the queue already carries
+          its resolution *)
+  | Resolution_not_approved
+      (** the store recorded a rejection for an id the queue carries as
+          approved *)
+  | Resolution_workspace_mismatch of { stored_base_path : string }
+
 type approved_resolution_state =
   | Resolution_unconsumed
   | Resolution_consumed
@@ -160,6 +177,13 @@ val summary_owner_retirement_error_to_string :
   summary_owner_retirement_error -> string
 val exact_attempt_error_to_string : exact_attempt_error -> string
 val grant_error_to_string : grant_error -> string
+
+val resolution_absence_of_grant_error : grant_error -> resolution_absence option
+(** [Some] for the store answers that say there is no resolution behind an
+    approval id; [None] for read failures and for producer-side replay
+    conflicts, which are not statements about the resolution's existence. *)
+
+val resolution_absence_to_string : resolution_absence -> string
 val install_error_to_string : install_error -> string
 
 (** Install one workspace's persisted Gate queue. The file is parsed as one

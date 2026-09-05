@@ -156,10 +156,26 @@ subscription 로그인 확인은 독립 명령이기도 합니다. `masc runtime
 만들거나, 서버가 떠 있는 상태에서 `masc keeper-create`로 만듭니다. 설치할 때
 `--team <preset>`을 주면 그 팀이 대신 들어갑니다.
 
-**Docker 샌드박스 이미지가 안 만들어져 있습니다.** `sandbox_profile = "docker"`인
-Keeper는 `masc-keeper-sandbox:local` 안에서 도는데, 이 이미지는 로컬에서 만드는
-것이고 어느 레지스트리에도 없습니다. 없으면 매 턴이 `docker_preflight_failed`로
-멈춥니다. 소스 체크아웃에서 이렇게 만듭니다.
+**샌드박스 이미지가 아직 없습니다.** Keeper는 매 턴을 이미지 안에서 돌립니다
+(`docker`도 `microvm`도 이미지를 씁니다). 없으면 매 턴이
+`docker_preflight_failed`로 멈춥니다. Keeper가 기본으로 받는 이미지를 만드세요 —
+Debian 위에 bash, ripgrep, git. 저장소를 읽고 찾고 고치는 데 한 턴이 필요로 하는
+것들입니다.
+
+```bash
+masc sandbox-image                 # masc-sandbox:general 을 만듭니다
+masc sandbox-image --print         # 먼저 레시피를 읽고 싶으면
+```
+
+레시피는 바이너리에 들어 있고 docker 에 stdin 으로 갑니다. 체크아웃이 한 번도
+없던 호스트에서도 됩니다. 일부러 다국어 이미지로 만들지 않았습니다 — 프로젝트를
+**빌드**해야 하는 Keeper 는 그 프로젝트의 툴체인이 필요하고, 그건 Keeper 마다
+TOML 에 `sandbox_image = "node:22-bookworm"` 처럼 적습니다.
+
+MASC 자신의 개발 이미지 `masc-keeper-sandbox:local`(OCaml + 이 저장소의 opam
+의존성)은 더 이상 기본값이 아닙니다. 그게 필요한 Keeper 가 이름을 적습니다. 그리고
+그 이미지는 Dockerfile 이 이 저장소의 opam 파일을 복사하므로 여전히 체크아웃이
+있어야 만들어집니다.
 
 ```bash
 scripts/build-keeper-sandbox-image.sh
@@ -167,7 +183,41 @@ scripts/build-keeper-sandbox-image.sh
 
 호스트에서 그냥 도는 선택지는 없습니다. 프로필은 `docker`, `microvm`,
 `remote_ssh` 셋뿐이라 Docker도 `container`도 SSH endpoint도 없는 호스트는
-워크스페이스는 띄워도 Keeper는 못 돌립니다.
+워크스페이스는 띄워도 Keeper는 못 돌립니다. `microvm`은 하이퍼바이저 뒤의 게스트를
+뜻하지 런타임 하나를 뜻하지 않습니다. `microvm_backend`가 `apple_container`,
+`microsandbox`, `nerdctl_kata` 중에서 고르고, 호스트에서 자동으로 정해지는 건
+기본값뿐입니다 — macOS면 Apple의 `container`, 그 밖에는 없음. 그래서 Linux
+호스트는 백엔드를 물려받는 대신 직접 적습니다. 아무것도 안 적힌 곳에서 microVM을
+요청한 Keeper는 조용히 공유 커널을 받는 대신 부팅에서 거절됩니다. 각 백엔드가
+지금 어디까지 되는지는 위 표에 있습니다.
+
+**그리고 그 이미지는 MASC 자신의 개발 환경입니다.** 범용이 아닙니다.
+`ocaml/opam:ubuntu-24.04-ocaml-5.5` 에 이 저장소의 opam 의존성을 미리 넣어 둔
+것입니다. Keeper 의 한 턴은 `docker run --rm` 으로 매번 새 컨테이너에서 돌고
+rootfs 는 읽기 전용, `--cap-drop=ALL` 입니다. 턴이 시작된 뒤에는 아무것도 설치할
+수 없으니 필요한 건 전부 이미지에 미리 있어야 합니다. TypeScript나 Python
+프로젝트를 맡은 Keeper 는 엉뚱한 툴체인을 만나고 맞는 걸 받아 올 수도 없습니다.
+
+그 일에 맞는 이미지를 Keeper 마다 TOML 에 적으세요.
+
+```toml
+[keeper]
+sandbox_profile = "docker"
+sandbox_image = "node:22-bookworm"
+network_mode = "none"
+```
+
+`MASC_KEEPER_SANDBOX_DOCKER_IMAGE` 는 이미지를 안 적은 모든 Keeper 의 기본값을
+바꿉니다. 한 턴은 `<이미지> bash -l -s` 로 돌고 도구 스크립트가 stdin 으로
+들어가므로, 어떤 이미지든 세 가지를 만족해야 합니다.
+
+- **`bash` 가 `PATH` 에 있을 것.** 턴을 받는 건 로그인 셸이라 `sh` 만 있는 Alpine
+  이미지는 턴을 못 받습니다.
+- **호스트 uid 로 돌 수 있을 것.** 컨테이너는 `--user <내 uid>:<gid>` 로 돕니다.
+  자기 전용 사용자로만 동작하는 이미지는 홈 디렉터리 없이 떨어집니다.
+- **툴체인이 이미 들어 있을 것.** rootfs 는 tmpfs 하나와 마운트된 작업 공간을 빼면
+  읽기 전용이고 `--cap-drop=ALL` 에 `no-new-privileges` 라, 턴이 없는 걸 발견해도
+  설치할 수 없습니다.
 
 **모델 제공자 키는 서버 환경에 있어야 합니다.** 변수 이름은 provider마다
 `runtime.toml`이 정합니다 — `OLLAMA_CLOUD_API_KEY`, `DEEPSEEK_API_KEY` 같은
@@ -325,6 +375,12 @@ Keeper에게 바로 넘깁니다. `masc_ask`로 질문을 던진 Keeper에게는
 TUI와 서버가 서로 다른 작업 공간을 보고 있으면 머리글이 그렇게 말합니다 — 연결
 표시 옆 `[workspace mismatch]`, 그리고 아래 줄에 두 경로가 같이 나옵니다. 그동안
 둘을 섞을 읽기는 거절되지만, 서버가 답하는 화면은 그대로 그려집니다.
+
+포트에 아무도 응답하지 않으면 TUI가 옆에 있는 `masc` 를 자식 프로세스로 띄우고
+`/health` 를 기다립니다. TUI를 닫으면 그 서버도 같이 내려갑니다 — 다만 이미 돌고
+있던 서버는 건드리지 않습니다. 자동 시작은 세션당 한 번입니다. 안 뜨면(포트를 다른
+게 쓰고 있거나, `masc` 가 TUI 옆에 없거나) Keepers 화면에서 `s` 로 다시 시도할 수
+있고, 무엇이 실패했는지는 아래 줄에 나옵니다.
 
 서버가 꺼져 있어도 Keeper 명단, Keeper 상세, 할 일 목록은 디스크에서 읽으므로 그대로
 보입니다. Approvals, Board, Planning, Fusion, Runtime, 로그, 메시지 보내기는 서버가

@@ -10,13 +10,21 @@ type target_error =
   ; class_ : Tool_result.tool_failure_class
   }
 
+type observe_route =
+  | Boxed of Masc_exec.Sandbox_target.t
+  | No_box of string
+
 type guest_dispatch =
   { target : Masc_exec.Sandbox_target.t
   ; runtime : Keeper_turn_sandbox_runtime.t
   ; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile
+  ; observe_route : unit -> observe_route
   }
 
-type ssh_dispatch = { target : Masc_exec.Sandbox_target.t }
+type ssh_dispatch =
+  { target : Masc_exec.Sandbox_target.t
+  ; observe_route : unit -> observe_route
+  }
 
 type guest_profile =
   | Docker_guest
@@ -121,6 +129,32 @@ let microvm_runner ~runtime ~timeout_sec =
         ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd
 ;;
 
+(* The box for one endpoint (RFC-0422): the same transport, with the request
+   asking the shim for [Observe]. Built only after the shim has said it can
+   build one, so a runner here never asks a shim that would refuse; a shim
+   that predates the box, or a host without Landlock, is a [No_box] with the
+   endpoint named, and the request keeps the judge. *)
+let observe_route_for_endpoint ~timeout_sec ~target_of_runner endpoint =
+  if Keeper_sandbox_remote.observe_supported endpoint
+  then
+    Boxed
+      (target_of_runner
+         (Keeper_sandbox_remote.runner
+            ~mode:Exec_ssh_protocol.Observe
+            ~timeout_sec
+            endpoint))
+  else
+    No_box
+      (Printf.sprintf
+         "%s_observe_unsupported: the shim at endpoint %s advertises no observe capability"
+         (Keeper_sandbox_remote.lane_prefix (Keeper_sandbox_remote.transport endpoint))
+         (Keeper_sandbox_remote.name endpoint))
+;;
+
+let docker_has_no_box =
+  "docker_observe_unsupported: a Docker guest runs no masc-exec-shim, and the box is the shim's"
+;;
+
 let guest_target
       ~(binding : Keeper_sandbox_factory.runtime_binding)
       ~(meta : keeper_meta)
@@ -142,18 +176,28 @@ let guest_target
   else
     let runtime = binding.runtime in
     let image = binding.image in
-    let target =
+    let target, observe_route =
       match guest_profile with
       | Docker_guest ->
         let runner, pipeline_runner = docker_runners ~runtime ~timeout_sec ~cwd in
-        Masc_exec.Sandbox_target.docker ~image ~runner ~pipeline_runner ()
+        ( Masc_exec.Sandbox_target.docker ~image ~runner ~pipeline_runner ()
+        , fun () -> No_box docker_has_no_box )
       | Micro_vm_guest ->
-        Masc_exec.Sandbox_target.micro_vm
-          ~image
-          ~runner:(microvm_runner ~runtime ~timeout_sec)
-          ()
+        ( Masc_exec.Sandbox_target.micro_vm
+            ~image
+            ~runner:(microvm_runner ~runtime ~timeout_sec)
+            ()
+        , fun () ->
+            match Keeper_sandbox_remote_lane.microvm_endpoint ~timeout_sec runtime with
+            | Error err -> No_box err
+            | Ok endpoint ->
+              observe_route_for_endpoint
+                ~timeout_sec
+                ~target_of_runner:(fun runner ->
+                  Masc_exec.Sandbox_target.micro_vm ~image ~runner ())
+                endpoint )
     in
-    Ok { target; runtime; sandbox_profile }
+    Ok { target; runtime; sandbox_profile; observe_route }
 ;;
 
 let ssh_target ~base_path ~meta ~timeout_sec ?ssh_bin () =
@@ -192,10 +236,16 @@ let ssh_target ~base_path ~meta ~timeout_sec ?ssh_bin () =
                message)
         | Ok () ->
           let runner = Keeper_sandbox_remote.runner ~timeout_sec ssh in
+          let sandbox_endpoint = Keeper_sandbox_ssh.sandbox_endpoint ~base_path endpoint in
           Ok
             { target =
-                Masc_exec.Sandbox_target.ssh
-                  ~endpoint:(Keeper_sandbox_ssh.sandbox_endpoint ~base_path endpoint)
-                  ~runner ()
+                Masc_exec.Sandbox_target.ssh ~endpoint:sandbox_endpoint ~runner ()
+            ; observe_route =
+                (fun () ->
+                  observe_route_for_endpoint
+                    ~timeout_sec
+                    ~target_of_runner:(fun runner ->
+                      Masc_exec.Sandbox_target.ssh ~endpoint:sandbox_endpoint ~runner ())
+                    ssh)
             }))
 ;;

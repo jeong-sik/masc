@@ -168,6 +168,7 @@ type stream =
   ; host : string
   ; emit : string -> unit
   ; mutable pending : string
+  ; mutable offset : int (* bytes of [pending] before it are consumed *)
   ; mutable previous : char option
   }
 
@@ -177,18 +178,38 @@ let stream ~base_path ~remote_root ~keeper ~emit =
   ; host = host_root ~base_path ~keeper
   ; emit
   ; pending = ""
+  ; offset = 0
   ; previous = None
   }
 ;;
 
-let prefix_of ~prefix text =
-  String.length text <= String.length prefix
-  && String.sub prefix 0 (String.length text) = text
+(* [pending] is consumed by advancing [offset], never by re-slicing: the
+   scanner takes one byte per step, and a slice per step copied the rest of
+   the chunk each time — a 100 KB chunk allocated about 5 GB. The consumed
+   prefix is dropped once per chunk, in [rewrite_stream_chunk], when at most
+   [String.length remote - 1] bytes can remain unconsumed. Measured 2026-09-05
+   (RFC main-domain-scheduler-latency §8.6): 4.5 GB in four minutes from
+   [consume] alone. *)
+let pending_length stream = String.length stream.pending - stream.offset
+let pending_char stream index = stream.pending.[stream.offset + index]
+let consume stream count = stream.offset <- stream.offset + count
+
+(* Both compare byte by byte from [offset] without allocating. *)
+let rec bytes_match stream prefix index limit =
+  index >= limit
+  || (Char.equal (pending_char stream index) prefix.[index]
+      && bytes_match stream prefix (index + 1) limit)
 ;;
 
-let consume stream count =
-  stream.pending <-
-    String.sub stream.pending count (String.length stream.pending - count)
+let pending_starts_with stream prefix =
+  let n = String.length prefix in
+  pending_length stream >= n && bytes_match stream prefix 0 n
+;;
+
+(* The unconsumed bytes are a prefix of [prefix] (the empty string included). *)
+let pending_is_prefix_of stream prefix =
+  let n = pending_length stream in
+  n <= String.length prefix && bytes_match stream prefix 0 n
 ;;
 
 (* Bytes that need no rewriting accumulate into one run and leave as one [emit],
@@ -204,16 +225,13 @@ let flush_stream ~finish stream =
       stream.emit (Buffer.contents literal);
       Buffer.clear literal)
   in
+  let remote_len = String.length stream.remote in
   let rec loop () =
-    if stream.pending = ""
+    let pending_len = pending_length stream in
+    if pending_len = 0
     then ()
     else
-      let remote_len = String.length stream.remote in
-      let pending_len = String.length stream.pending in
-      let starts_remote =
-        pending_len >= remote_len
-        && String.sub stream.pending 0 remote_len = stream.remote
-      in
+      let starts_remote = pending_starts_with stream stream.remote in
       let before_boundary =
         match stream.previous with
         | None -> true
@@ -221,7 +239,7 @@ let flush_stream ~finish stream =
       in
       let after_boundary =
         if pending_len > remote_len
-        then not (path_component_char stream.pending.[remote_len])
+        then not (path_component_char (pending_char stream remote_len))
         else finish && pending_len = remote_len
       in
       if starts_remote && before_boundary && after_boundary
@@ -232,10 +250,10 @@ let flush_stream ~finish stream =
         stream.emit stream.host;
         loop ())
       else if (not finish) && pending_len <= remote_len
-              && prefix_of ~prefix:stream.remote stream.pending
+              && pending_is_prefix_of stream stream.remote
       then ()
       else (
-        let c = stream.pending.[0] in
+        let c = pending_char stream 0 in
         stream.previous <- Some c;
         consume stream 1;
         Buffer.add_char literal c;
@@ -246,7 +264,11 @@ let flush_stream ~finish stream =
 ;;
 
 let rewrite_stream_chunk stream chunk =
-  stream.pending <- stream.pending ^ chunk;
+  (* Drop the consumed prefix here, once per chunk: after a flush the
+     unconsumed tail is empty or a proper prefix of [remote]. *)
+  let unconsumed = String.sub stream.pending stream.offset (pending_length stream) in
+  stream.pending <- unconsumed ^ chunk;
+  stream.offset <- 0;
   flush_stream ~finish:false stream
 ;;
 

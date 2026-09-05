@@ -188,7 +188,7 @@ let test_a_choice_lists_the_names_and_nothing_else () =
   state.palette_mode <- Palette_jump;
   state.palette_query <- "";
   check_bool "a jump lists destinations again" true
-    (List.exists (fun (label, _) -> String.length label > 3 && String.sub label 0 3 = "go ") (labels ()))
+    (List.exists (fun label -> String.length label > 3 && String.sub label 0 3 = "go ") (labels ()))
 ;;
 
 let test_the_cursor_lines_names_are_the_candidates () =

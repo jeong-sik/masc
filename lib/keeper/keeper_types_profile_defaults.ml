@@ -15,6 +15,10 @@ type keeper_profile_defaults = {
      Phase 1 task 2. *)
   remote_endpoint : string option;
   microvm_backend : Keeper_microvm_backend.t option;
+  (* RFC-0422 §3.4: which box a tool_execute runs in before the judge is
+     asked. [None] is [Observe]. Read where the route is built, not carried
+     on keeper meta, as [remote_endpoint] is. *)
+  observation_run : Keeper_types_profile_sandbox.observation_run option;
   max_context_override : int option;
   (* Telemetry Feedback — inject behavioral stats into keeper context *)
   telemetry_feedback_enabled : bool option;
@@ -54,6 +58,7 @@ let empty_keeper_profile_defaults =
     network_mode = None;
     remote_endpoint = None;
     microvm_backend = None;
+    observation_run = None;
     max_context_override = None;
     telemetry_feedback_enabled = None;
     telemetry_feedback_window_hours = None;

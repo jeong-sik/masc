@@ -11,7 +11,10 @@ type target_error =
   }
 
 type observe_route =
-  | Boxed of Masc_exec.Sandbox_target.t
+  | Boxed of
+      { target : Masc_exec.Sandbox_target.t
+      ; run : Keeper_types_profile_sandbox.observation_run
+      }
   | No_box of string
 
 type guest_dispatch =
@@ -129,26 +132,72 @@ let microvm_runner ~runtime ~timeout_sec =
         ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd
 ;;
 
+let protocol_mode_of_run = function
+  | Keeper_types_profile_sandbox.Observe -> Exec_ssh_protocol.Observe
+  | Keeper_types_profile_sandbox.Guest_local -> Exec_ssh_protocol.Guest_local
+;;
+
+(* Read at the moment the route is resolved, as [remote_endpoint] is
+   ({!Keeper_sandbox_ssh.resolve_endpoint}), rather than carried on keeper
+   meta: the switch is TOML-owned, and meta has a constructor at every site
+   that would have to learn a field no dispatch reads. *)
+let observation_run_for ~base_path ~keeper_name =
+  match
+    Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+      ~base_path
+      keeper_name
+  with
+  | Ok defaults ->
+    Ok
+      (Option.value
+         defaults.observation_run
+         ~default:Keeper_types_profile_sandbox.default_observation_run)
+  | Error error -> Error (Keeper_types_profile.keeper_toml_load_error_to_string error)
+;;
+
 (* The box for one endpoint (RFC-0422): the same transport, with the request
-   asking the shim for [Observe]. Built only after the shim has said it can
-   build one, so a runner here never asks a shim that would refuse; a shim
-   that predates the box, or a host without Landlock, is a [No_box] with the
-   endpoint named, and the request keeps the judge. *)
-let observe_route_for_endpoint ~timeout_sec ~target_of_runner endpoint =
-  if Keeper_sandbox_remote.observe_supported endpoint
-  then
-    Boxed
-      (target_of_runner
-         (Keeper_sandbox_remote.runner
-            ~mode:Exec_ssh_protocol.Observe
-            ~timeout_sec
-            endpoint))
-  else
+   asking the shim for the box the keeper TOML chose. Built only after the
+   shim has said it can build one, so a runner here never asks a shim that
+   would refuse; a shim that predates the box, or a host without Landlock,
+   is a [No_box] with the endpoint named, and the request keeps the judge.
+
+   [Guest_local] lets writes land inside the guest. On a microvm that is the
+   keeper's own volume and nothing else (RFC-0422 §1.2). On an OpenSSH
+   endpoint it is the account's home, which is the keeper's alone only when
+   the operator has said so in runtime.toml ([private_home = true]); without
+   that declaration the request keeps the judge rather than writing where
+   someone else may also live. *)
+let observe_route_for_endpoint ~run ~timeout_sec ~target_of_runner endpoint =
+  match run, Keeper_sandbox_remote.transport endpoint with
+  | ( Keeper_types_profile_sandbox.Guest_local
+    , Keeper_sandbox_remote.Openssh { endpoint = declared; _ } )
+    when not declared.Exec_ssh_endpoint.private_home ->
     No_box
       (Printf.sprintf
-         "%s_observe_unsupported: the shim at endpoint %s advertises no observe capability"
-         (Keeper_sandbox_remote.lane_prefix (Keeper_sandbox_remote.transport endpoint))
-         (Keeper_sandbox_remote.name endpoint))
+         "remote_ssh_guest_local_requires_private_home: the keeper asks \
+          observation_run = \"guest_local\", but endpoint %s does not declare \
+          private_home = true; a guest_local box writes inside the account, and \
+          the operator has not said the account is this keeper's alone"
+         declared.Exec_ssh_endpoint.name)
+  | ( (Keeper_types_profile_sandbox.Observe | Keeper_types_profile_sandbox.Guest_local)
+    , (Keeper_sandbox_remote.Openssh _ | Keeper_sandbox_remote.Container_exec _) ) ->
+    if Keeper_sandbox_remote.observe_supported endpoint
+    then
+      Boxed
+        { target =
+            target_of_runner
+              (Keeper_sandbox_remote.runner
+                 ~mode:(protocol_mode_of_run run)
+                 ~timeout_sec
+                 endpoint)
+        ; run
+        }
+    else
+      No_box
+        (Printf.sprintf
+           "%s_observe_unsupported: the shim at endpoint %s advertises no observe capability"
+           (Keeper_sandbox_remote.lane_prefix (Keeper_sandbox_remote.transport endpoint))
+           (Keeper_sandbox_remote.name endpoint))
 ;;
 
 let docker_has_no_box =
@@ -160,6 +209,7 @@ let guest_target
       ~(meta : keeper_meta)
       ~cwd
       ~timeout_sec
+      ~base_path
       ()
   =
   let sandbox_profile, guest_profile =
@@ -188,14 +238,18 @@ let guest_target
             ~runner:(microvm_runner ~runtime ~timeout_sec)
             ()
         , fun () ->
-            match Keeper_sandbox_remote_lane.microvm_endpoint ~timeout_sec runtime with
-            | Error err -> No_box err
-            | Ok endpoint ->
-              observe_route_for_endpoint
-                ~timeout_sec
-                ~target_of_runner:(fun runner ->
-                  Masc_exec.Sandbox_target.micro_vm ~image ~runner ())
-                endpoint )
+            match observation_run_for ~base_path ~keeper_name:meta.name with
+            | Error reason -> No_box reason
+            | Ok run ->
+              (match Keeper_sandbox_remote_lane.microvm_endpoint ~timeout_sec runtime with
+               | Error err -> No_box err
+               | Ok endpoint ->
+                 observe_route_for_endpoint
+                   ~run
+                   ~timeout_sec
+                   ~target_of_runner:(fun runner ->
+                     Masc_exec.Sandbox_target.micro_vm ~image ~runner ())
+                   endpoint) )
     in
     Ok { target; runtime; sandbox_profile; observe_route }
 ;;
@@ -242,10 +296,14 @@ let ssh_target ~base_path ~meta ~timeout_sec ?ssh_bin () =
                 Masc_exec.Sandbox_target.ssh ~endpoint:sandbox_endpoint ~runner ()
             ; observe_route =
                 (fun () ->
-                  observe_route_for_endpoint
-                    ~timeout_sec
-                    ~target_of_runner:(fun runner ->
-                      Masc_exec.Sandbox_target.ssh ~endpoint:sandbox_endpoint ~runner ())
-                    ssh)
+                  match observation_run_for ~base_path ~keeper_name:meta.name with
+                  | Error reason -> No_box reason
+                  | Ok run ->
+                    observe_route_for_endpoint
+                      ~run
+                      ~timeout_sec
+                      ~target_of_runner:(fun runner ->
+                        Masc_exec.Sandbox_target.ssh ~endpoint:sandbox_endpoint ~runner ())
+                      ssh)
             }))
 ;;

@@ -31,6 +31,7 @@ let keeper_toml_fields =
   ; "network_mode", Field_string
   ; "remote_endpoint", Field_string
   ; "microvm_backend", Field_string
+  ; "observation_run", Field_string
   ; "max_context_override", Field_int
   ; "telemetry_feedback_enabled", Field_bool
   ; "telemetry_feedback_window_hours", Field_int
@@ -261,6 +262,33 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
               "microvm_backend_requires_microvm: keeper.microvm_backend is only \
                valid with sandbox_profile = \"microvm\"")
   in
+  (* RFC-0422 §3.4: [observation_run] chooses the box a tool_execute runs in
+     before the judge is asked. The spelling is checked whether or not a
+     profile is declared; the profile pairing
+     ({!Keeper_types_profile_sandbox.observation_run_rejection}) only when
+     one is, since an absent profile is resolved later from the workspace
+     default and this loader cannot see it. *)
+  let result =
+    Result.bind result (fun () ->
+        match str "observation_run" with
+        | None -> Ok ()
+        | Some raw ->
+            (match observation_run_of_string raw with
+            | None ->
+                Error
+                  (Printf.sprintf
+                     "observation_run_unknown: keeper.observation_run = %S is not \
+                      one of: %s"
+                     raw
+                     (String.concat ", " valid_observation_run_strings))
+            | Some run ->
+                (match Option.bind (str "sandbox_profile") sandbox_profile_of_string with
+                | None -> Ok ()
+                | Some profile ->
+                    (match observation_run_rejection profile run with
+                    | Some message -> Error message
+                    | None -> Ok ()))))
+  in
   let result =
     Result.bind result (fun () ->
         match str "tools.native" with
@@ -302,6 +330,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         remote_endpoint = str "remote_endpoint";
         microvm_backend =
           Option.bind (str "microvm_backend") Keeper_microvm_backend.of_string;
+        observation_run =
+          Option.bind (str "observation_run") observation_run_of_string;
         max_context_override;
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
@@ -349,6 +379,7 @@ let merge_keeper_profile_defaults
     network_mode = prefer overlay.network_mode base.network_mode;
     remote_endpoint = prefer overlay.remote_endpoint base.remote_endpoint;
     microvm_backend = prefer overlay.microvm_backend base.microvm_backend;
+    observation_run = prefer overlay.observation_run base.observation_run;
     max_context_override =
       prefer overlay.max_context_override base.max_context_override;
     telemetry_feedback_enabled =

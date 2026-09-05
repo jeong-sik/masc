@@ -286,6 +286,7 @@ let handle_tool_execute_typed
               ~meta
               ~cwd
               ~timeout_sec
+              ~base_path:config.base_path
               ()
             |> Result.map (fun dispatch -> `Guest dispatch)
         in
@@ -513,7 +514,7 @@ let handle_tool_execute_typed
                  , Keeper_approval_queue_rules_types.observed_refusal_to_yojson
                      (Keeper_gate.observed_refusal ~status ~stderr) )
                ]
-             | Some (Keeper_gate.Observed_clean | Keeper_gate.Observation_unavailable _)
+             | Some (Keeper_gate.Observed_clean _ | Keeper_gate.Observation_unavailable _)
              | None -> []
            in
            Keeper_gate_deferred_payload.create
@@ -710,7 +711,7 @@ let handle_tool_execute_typed
                  ( authorization.source
                  , Keeper_tool_execute_observe.observed_result observation )
                with
-               | Keeper_gate.Observed_in_box, Some result ->
+               | Keeper_gate.Observed_in_box _, Some result ->
                  (* The box already ran this call and the kernel says it
                     changed nothing, so its output is the answer; running it
                     again would be a second read for no new fact. Replayed
@@ -721,7 +722,7 @@ let handle_tool_execute_typed
                  if not (String.equal result.stderr "")
                  then on_output_chunk (`Stderr result.stderr);
                  Ok result
-               | Keeper_gate.Observed_in_box, None ->
+               | Keeper_gate.Observed_in_box _, None ->
                  (* Unreachable by construction: the stage stores the result
                     before it answers clean. Should it ever happen, the call
                     runs once unboxed -- the same thing an allow from the

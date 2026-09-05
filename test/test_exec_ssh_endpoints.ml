@@ -105,6 +105,21 @@ capabilities = ["kvm"]
    between encoder and decoder fails here instead of letting every fixture
    silently feed a dead table. *)
 
+(* RFC-0422 §3.4: the operator's declaration that the account home is the
+   keeper's alone. Absent is false, so a shared account keeps the judge for
+   every write; anything but a boolean is a load error, not a guess. *)
+let test_private_home_is_declared_or_false () =
+  (match parse_cfg (endpoint_toml "dev" "") with
+   | Error errors -> fail (render_errors errors)
+   | Ok cfg -> check bool "absent is false" false (endpoint_exn cfg "dev").Exec_ssh_endpoint.private_home);
+  (match parse_cfg (endpoint_toml "dev" "private_home = true") with
+   | Error errors -> fail (render_errors errors)
+   | Ok cfg -> check bool "declared" true (endpoint_exn cfg "dev").Exec_ssh_endpoint.private_home);
+  match parse_cfg (endpoint_toml "dev" "private_home = \"yes\"") with
+  | Ok _ -> fail "a string is not a declaration"
+  | Error errors -> check bool "names the key" true (contains "private_home" (render_errors errors))
+;;
+
 let test_roundtrip_full_fields () =
   let endpoint =
     Exec_ssh_endpoint.
@@ -119,6 +134,7 @@ let test_roundtrip_full_fields () =
       ; max_concurrent_sessions = 2
       ; env_allowlist = [ "PATH"; "HOME" ]
       ; capabilities = [ "kvm" ]
+      ; private_home = true
       }
   in
   match parse_cfg (Exec_ssh_endpoint.to_toml endpoint) with
@@ -142,6 +158,7 @@ let test_roundtrip_defaults () =
       ; max_concurrent_sessions = default_max_concurrent_sessions
       ; env_allowlist = []
       ; capabilities = []
+      ; private_home = false
       }
   in
   match parse_cfg (Exec_ssh_endpoint.to_toml endpoint) with
@@ -167,6 +184,7 @@ let test_roundtrip_no_stray_name_field () =
       ; max_concurrent_sessions = default_max_concurrent_sessions
       ; env_allowlist = []
       ; capabilities = []
+      ; private_home = false
       }
   in
   let text = Exec_ssh_endpoint.to_toml endpoint in
@@ -337,6 +355,8 @@ let () =
     ; ( "roundtrip"
       , [ test_case "full-field roundtrip" `Quick test_roundtrip_full_fields
         ; test_case "spec defaults roundtrip" `Quick test_roundtrip_defaults
+        ; test_case "private_home is declared or false" `Quick
+            test_private_home_is_declared_or_false
         ; test_case "no stray name field" `Quick test_roundtrip_no_stray_name_field
         ]
       )

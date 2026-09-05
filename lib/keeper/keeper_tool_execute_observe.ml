@@ -32,11 +32,11 @@ let observe t () : Keeper_gate.observation =
     match t.route () with
     | Keeper_sandbox_shell_ir_target.No_box reason ->
       Keeper_gate.Observation_unavailable reason
-    | Keeper_sandbox_shell_ir_target.Boxed sandbox ->
+    | Keeper_sandbox_shell_ir_target.Boxed { target = sandbox; run } ->
       (match t.dispatch sandbox with
        | Ok ({ Masc_exec.Exec_dispatch.status = Unix.WEXITED 0; _ } as result) ->
          t.observed := Some result;
-         Keeper_gate.Observed_clean
+         Keeper_gate.Observed_clean { run }
        | Ok { Masc_exec.Exec_dispatch.status; stderr; stdout = _ } ->
          Keeper_gate.Observed_refused { status; stderr }
        | Error error -> Keeper_gate.Observation_unavailable (unavailable_tag error))

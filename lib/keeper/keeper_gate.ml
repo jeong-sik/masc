@@ -69,10 +69,10 @@ type authorization_source =
   | Keeper_always_allow
   | Workspace_always_allow
   | Readonly_sandbox
-  | Observed_in_box
+  | Observed_in_box of Keeper_types_profile_sandbox.observation_run
 
 type observation =
-  | Observed_clean
+  | Observed_clean of { run : Keeper_types_profile_sandbox.observation_run }
   | Observed_refused of
       { status : Unix.process_status
       ; stderr : string
@@ -275,7 +275,7 @@ let authorization_source_to_string = function
   | Keeper_always_allow -> "keeper_always_allow"
   | Workspace_always_allow -> "workspace_always_allow"
   | Readonly_sandbox -> "readonly_sandbox"
-  | Observed_in_box -> "observed_in_box"
+  | Observed_in_box _ -> "observed_in_box"
 ;;
 
 let deferred_reason_to_string = function
@@ -313,8 +313,11 @@ let source_fields = function
     [ "authorization_source", `String "workspace_always_allow" ]
   | Readonly_sandbox ->
     [ "authorization_source", `String "readonly_sandbox" ]
-  | Observed_in_box ->
-    [ "authorization_source", `String "observed_in_box" ]
+  | Observed_in_box run ->
+    [ "authorization_source", `String "observed_in_box"
+    ; ( "observation_run"
+      , `String (Keeper_types_profile_sandbox.observation_run_to_string run) )
+    ]
 ;;
 
 let request_turn_id request =
@@ -330,7 +333,7 @@ let approval_sse_audit_event = "approval:audit"
 let authorization_subject_id = function
   | One_shot_resolution approval_id -> Some approval_id
   | Exact_always_rule rule_id -> Some rule_id
-  | Keeper_always_allow | Workspace_always_allow | Readonly_sandbox | Observed_in_box ->
+  | Keeper_always_allow | Workspace_always_allow | Readonly_sandbox | Observed_in_box _ ->
     None
 ;;
 
@@ -460,7 +463,7 @@ let audit_authorization_source
   | Workspace_always_allow ->
     Keeper_approval_queue_rules_types.Workspace_always_allow
   | Readonly_sandbox -> Keeper_approval_queue_rules_types.Readonly_sandbox
-  | Observed_in_box -> Keeper_approval_queue_rules_types.Observed_in_box
+  | Observed_in_box _ -> Keeper_approval_queue_rules_types.Observed_in_box
 ;;
 
 let audit_allow request ?rule_match ?source_approval_id ?decision_source source =
@@ -472,7 +475,7 @@ let audit_allow request ?rule_match ?source_approval_id ?decision_source source 
       (match source with
        | One_shot_resolution approval_id -> approval_id
        | Exact_always_rule rule_id -> rule_id
-       | Keeper_always_allow | Workspace_always_allow | Readonly_sandbox | Observed_in_box ->
+       | Keeper_always_allow | Workspace_always_allow | Readonly_sandbox | Observed_in_box _ ->
          Keeper_approval_queue.generate_id ())
     ~keeper_name:request.keeper_name
     ~tool_name:request.operation
@@ -1987,8 +1990,8 @@ let decide_after_observation request ~observe =
   | None -> defer request Judge_requested
   | Some run ->
     (match (run () : observation) with
-     | Observed_clean ->
-       let source = Observed_in_box in
+     | Observed_clean { run } ->
+       let source = Observed_in_box run in
        let audit_receipt =
          audit_allow
            request

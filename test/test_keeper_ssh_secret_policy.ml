@@ -81,6 +81,7 @@ remote_endpoint = "fixture"
            ; max_concurrent_sessions = 2
            ; env_allowlist = [ "LANG" ]
            ; capabilities = []
+           ; private_home = false
            });
     f ~config ~meta ~playground)
 ;;

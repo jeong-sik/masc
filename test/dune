@@ -4437,6 +4437,8 @@
 
 (include stanzas/test_tui_ask_projection.inc)
 
+(include stanzas/test_runtime_toml_wrong_typed_keys.inc)
+
 (test
  (name test_tui_identity_tab)
  (modules test_tui_identity_tab)

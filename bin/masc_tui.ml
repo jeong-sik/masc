@@ -4967,7 +4967,6 @@ let show_lanes_action_error state detail =
   state.lanes_action_error <- Some detail
 
 let search_jump ?(backwards = false) state ~query ~after =
-  let query = String.lowercase_ascii query in
   match surface_row_texts state state.view with
   | None -> ()
   | Some texts ->
@@ -6635,7 +6634,7 @@ let seek_in_chat state ~target ~restart =
          echoes back to them. *)
       match
         Masc_tui_render.keeper_message_find_scroll state ~keeper_name
-          ~needle:(String.lowercase_ascii (String.trim state.msg_find))
+          ~needle:(String.trim state.msg_find)
           ~older_than
       with
       | Some (scroll, anchor) ->

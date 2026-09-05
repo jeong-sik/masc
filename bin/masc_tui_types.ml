@@ -4906,23 +4906,18 @@ type memory_fact_row =
   | Memory_row_source_fact of Tui_decode.memory_source_fact
   | Memory_row_invalidation of Tui_decode.memory_invalidation
 
-(* Prefix match: the lowercased label starts with the query. An empty query
-   is a prefix of everything. *)
-let palette_starts_with ~needle haystack =
-  String.starts_with ~prefix:needle (String.lowercase_ascii haystack)
+(* The three palette matchers fold case themselves, on both sides. A caller
+   hands them the operator's text as typed; "ADM" and "adm" find the same
+   rows, and a new caller cannot forget a step it never had. *)
 
-let palette_contains ~needle haystack =
-  let h = String.lowercase_ascii haystack in
-  let n = String.length needle and hl = String.length h in
-  if n = 0 then true
-  else begin
-    let found = ref false in
-    for start = 0 to hl - n do
-      if (not !found) && String.equal (String.sub h start n) needle then
-        found := true
-    done;
-    !found
-  end
+(* Prefix match: the label starts with the query. An empty query is a prefix
+   of everything. *)
+let palette_starts_with ~needle haystack =
+  String.starts_with
+    ~prefix:(String.lowercase_ascii needle)
+    (String.lowercase_ascii haystack)
+
+let palette_contains ~needle haystack = lowercase_contains ~needle haystack
 
 (* The flat row list the browser's cursor, scroll, and search all read. The
    category filter narrows only ordinary facts: source-bound rows carry no
@@ -4978,11 +4973,8 @@ let memory_fact_rows (state : state) : memory_fact_row list =
       let all_rows = ordinary @ source_rows @ invalidation_rows in
       let query =
         match state.search with
-        | Some q -> String.lowercase_ascii (String.trim q)
-        | None ->
-            if String.length (String.trim state.search_last) > 0 then
-              String.lowercase_ascii (String.trim state.search_last)
-            else ""
+        | Some q -> String.trim q
+        | None -> String.trim state.search_last
       in
       let filtered_rows =
         if query = "" then all_rows
@@ -5868,19 +5860,18 @@ let palette_entries (state : state) =
    "keeper adm-race". *)
 let palette_subsequence ~needle haystack =
   let h = String.lowercase_ascii haystack in
-  let hl = String.length h and nl = String.length needle in
+  let n = String.lowercase_ascii needle in
+  let hl = String.length h and nl = String.length n in
   let rec walk hi ni =
     if ni >= nl then true
     else if hi >= hl then false
-    else if Char.equal h.[hi] needle.[ni] then walk (hi + 1) (ni + 1)
+    else if Char.equal h.[hi] n.[ni] then walk (hi + 1) (ni + 1)
     else walk (hi + 1) ni
   in
   walk 0 0
 
 let palette_matches (state : state) =
-  let needle =
-    String.lowercase_ascii (String.trim state.palette_query)
-  in
+  let needle = String.trim state.palette_query in
   let entries =
     match state.palette_mode with
     | Palette_jump -> palette_entries state

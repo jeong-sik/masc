@@ -9425,10 +9425,13 @@ let handle_composer_key state ~base_path ~mailbox key =
         | Masc_tui_command.Open_diff | Masc_tui_command.Open_patch_modal
         | Masc_tui_command.Toggle_burn_hud | Masc_tui_command.Open_changes
         | Masc_tui_command.Toggle_acting_pane
-        | Masc_tui_command.Show_acting_pane_tab _
-        | Masc_tui_command.Acting_pane_tab_unknown _
-        | Masc_tui_command.Open_settings | Masc_tui_command.Open_metrics
-       | Masc_tui_command.Interrupt_turn | Masc_tui_command.Steer_turn _
+         | Masc_tui_command.Show_acting_pane_tab _
+         | Masc_tui_command.Acting_pane_tab_unknown _
+         | Masc_tui_command.Open_settings | Masc_tui_command.Open_metrics
+         | Masc_tui_command.Open_link_preview _
+         | Masc_tui_command.Open_links_list
+         | Masc_tui_command.Set_embeds _
+        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Steer_turn _
        | Masc_tui_command.Steer_missing_message
        | Masc_tui_command.Set_thinking _
        | Masc_tui_command.Set_tools _ | Masc_tui_command.Cycle_memory
@@ -15472,7 +15475,8 @@ and is loaded on demand through keeper_skill.
                 state.link_modal_scroll <- 0;
                 state.link_modal_cursor <- 0
             | [] ->
-                chat_notice state ~role:Message_local "No web links found in this conversation to preview.")
+                chat_notice state ~keeper_name:state.msg_target_keeper_name ~role:Message_local
+                  "No web links found in this conversation to preview.")
        | Some "\023"
          when state.view = Board
               && terminal_columns >= keeper_split_threshold_cols

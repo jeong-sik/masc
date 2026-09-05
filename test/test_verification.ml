@@ -434,19 +434,39 @@ let test_scan_scope_limits_a_submission_to_its_own_verification () =
 
 
 (* RFC-0415 §4.1/§6.3: the system lane's authority ends where a cancellation
-   begins. The pure gate is the contract; the runtime path consults it before
-   any review starts and records [Not_reviewed { gate = "operator_routing" }],
-   leaving the Task pending for the operator's one click — no timer behind it. *)
-let test_cancel_intent_is_refused_by_system_review () =
+   begins. The routing is pure and read off the status; the runtime path
+   consults it before any review starts, records a cancel claim as
+   [Operator_routed], and leaves the Task pending for the operator's one
+   click — no timer behind it, and no prompt: the question type has no arm a
+   cancel could render through. *)
+let test_cancel_claim_is_routed_to_the_operator () =
   let module For_testing = Masc.Completion_authority_agent.For_testing in
+  let awaiting intent =
+    Masc_domain.AwaitingVerification
+      { assignee = "keeper-a"
+      ; started_at = "2026-09-05T00:00:00Z"
+      ; submitted_at = "2026-09-05T00:01:00Z"
+      ; intent
+      ; verification_id = "vrf-routing"
+      }
+  in
   Alcotest.(check bool)
     "completion review stays with the system lane"
     true
-    (For_testing.system_review_allowed Masc_domain.Complete_task);
+    (For_testing.admission_of_status (awaiting Masc_domain.Complete_task)
+     = For_testing.Review_completion);
   Alcotest.(check bool)
-    "cancel verdicts belong to the operator alone"
-    false
-    (For_testing.system_review_allowed Masc_domain.Cancel_task)
+    "a cancel claim is the operator's, and no review starts"
+    true
+    (For_testing.admission_of_status (awaiting Masc_domain.Cancel_task)
+     = For_testing.Operator_routed);
+  Alcotest.(check bool)
+    "a Task that is not awaiting anything is not an obligation"
+    true
+    (For_testing.admission_of_status
+       (Masc_domain.InProgress
+          { assignee = "keeper-a"; started_at = "2026-09-05T00:00:00Z" })
+     = For_testing.Not_awaiting)
 
 
 let test_system_llm_review_notes_are_metadata_only () =
@@ -3022,10 +3042,9 @@ let test_unreadable_artifacts_reach_the_judge () =
     carried
 ;;
 
-(* The intent-to-question mapping. A Task reaching the authority carries an
-   intent, and that intent alone decides which question the judge is put. The
-   request supplies the material for whichever branch the intent picked; it
-   never picks the branch itself. *)
+(* The request-to-question mapping. The request supplies the completion
+   material; a stop never reaches this mapping, so a request shaped for one is
+   a missing field rather than a question. *)
 let request_with ~output =
   { V.id = "vrf-question"
   ; task_id = "task-question"
@@ -3040,22 +3059,24 @@ let completion_output =
   `Assoc [ "required_artifacts", `List [ `String "note:done" ] ]
 ;;
 
-let cancellation_output =
+(* The shape a cancel claim's record has. It carries no required_artifacts
+   because a stop makes none, and the operator reads it, not this mapping. *)
+let cancel_record_output =
   `Assoc [ "cancel_reason", `String "the upstream schema landed instead" ]
 ;;
 
-let test_complete_intent_asks_the_completion_question () =
+let test_the_request_asks_the_completion_question () =
   match
-    CA.For_testing.verdict_question_of_request ~intent:Masc_domain.Complete_task
+    CA.For_testing.verdict_question_of_request
       (request_with ~output:completion_output)
   with
   | Error e -> Alcotest.fail ("completion question must be built: " ^ e)
-  | Ok (Masc.Task.Anti_rationalization.Cancellation _) ->
-    Alcotest.fail "Complete_task must not reach the cancellation question"
   | Ok
-      (Masc.Task.Anti_rationalization.Completion
-        { completion_contract; required_evidence; evidence_posture; few_shot_block })
-    ->
+      { Masc.Task.Anti_rationalization.completion_contract
+      ; required_evidence
+      ; evidence_posture
+      ; few_shot_block
+      } ->
     (* This function maps an intent to a question and reads no store. The
        calibration block and the evidence posture are filled at the review
        site, where the snapshot and the ledger are opened; a value here would
@@ -3075,42 +3096,16 @@ let test_complete_intent_asks_the_completion_question () =
       [ "note:done" ] required_evidence
 ;;
 
-let test_cancel_intent_asks_the_cancellation_question () =
-  match
-    CA.For_testing.verdict_question_of_request ~intent:Masc_domain.Cancel_task
-      (request_with ~output:cancellation_output)
-  with
-  | Error e -> Alcotest.fail ("cancellation question must be built: " ^ e)
-  | Ok (Masc.Task.Anti_rationalization.Completion _) ->
-    Alcotest.fail "Cancel_task must not reach the completion question"
-  | Ok
-      (Masc.Task.Anti_rationalization.Cancellation { reason; contract_context })
-    ->
-    Alcotest.(check string)
-      "the reason is the request's cancel_reason"
-      "the upstream schema landed instead" reason;
-    Alcotest.(check (list string))
-      "the contract travels as context, not as the thing being judged"
-      [ "the cancel record is written from the produced status" ]
-      contract_context
-;;
-
-(* The intent picks the branch, so an output shaped for the other branch is a
-   missing field, not a fallback into the question it happens to fit. *)
-let test_intent_not_payload_shape_picks_the_question () =
-  let expect_error label intent output =
-    match CA.For_testing.verdict_question_of_request ~intent (request_with ~output) with
+(* A record without the completion material is a missing field, not a
+   question that happens to fit. *)
+let test_a_record_without_completion_material_is_no_question () =
+  let expect_error label output =
+    match CA.For_testing.verdict_question_of_request (request_with ~output) with
     | Ok _ -> Alcotest.fail (label ^ " must not build a question")
     | Error _ -> ()
   in
-  expect_error "a completion intent over a cancellation output"
-    Masc_domain.Complete_task cancellation_output;
-  expect_error "a cancellation intent over a completion output"
-    Masc_domain.Cancel_task completion_output;
-  expect_error "a blank cancel_reason" Masc_domain.Cancel_task
-    (`Assoc [ "cancel_reason", `String "   " ]);
-  expect_error "a non-object output" Masc_domain.Cancel_task
-    (`String "the upstream schema landed instead")
+  expect_error "a cancel claim's record" cancel_record_output;
+  expect_error "a non-object output" (`String "the upstream schema landed instead")
 ;;
 
 let () =
@@ -3123,12 +3118,10 @@ let () =
         test_verification_evidence_decode_requires_both_keys;
     ];
     "verdict question", [
-      Alcotest.test_case "a completion intent asks the completion question" `Quick
-        test_complete_intent_asks_the_completion_question;
-      Alcotest.test_case "a cancel intent asks the cancellation question" `Quick
-        test_cancel_intent_asks_the_cancellation_question;
-      Alcotest.test_case "the intent picks the branch, not the payload shape" `Quick
-        test_intent_not_payload_shape_picks_the_question;
+      Alcotest.test_case "the request asks the completion question" `Quick
+        test_the_request_asks_the_completion_question;
+      Alcotest.test_case "a record without completion material is no question" `Quick
+        test_a_record_without_completion_material_is_no_question;
     ];
     "criterion", [
       Alcotest.test_case "roundtrip" `Quick test_criterion_roundtrip;
@@ -3141,8 +3134,8 @@ let () =
         test_system_llm_authority_helpers_are_typed;
       Alcotest.test_case "system LLM retry disposition is typed" `Quick
         test_system_llm_retry_disposition_is_typed;
-      Alcotest.test_case "cancel intent is refused by the system reviewer" `Quick
-        test_cancel_intent_is_refused_by_system_review;
+      Alcotest.test_case "a cancel claim is routed to the operator" `Quick
+        test_cancel_claim_is_routed_to_the_operator;
       Alcotest.test_case "scan scope limits a submission to its own verification" `Quick
         test_scan_scope_limits_a_submission_to_its_own_verification;
       Alcotest.test_case "system LLM notes keep metadata only" `Quick

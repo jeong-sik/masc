@@ -5486,6 +5486,7 @@ let test_decode_lane_run_status_is_typed () =
             ; lane_run_summary_json ~status:"completion_durability_unknown"
                 "lib-dubious"
             ; lane_run_summary_json ~status:"exploded" "lib-new"
+            ; lane_run_summary_json ~status:"operator_routed" "lib-routed"
             ] )
       ]
   in
@@ -5493,7 +5494,7 @@ let test_decode_lane_run_status_is_typed () =
   | Error detail -> Alcotest.fail detail
   | Ok page ->
       (match page.Tui_decode.lrpg_runs with
-       | [ ok; dubious; novel ] ->
+       | [ ok; dubious; novel; routed ] ->
            Alcotest.(check string) "known label" "succeeded"
              (Tui_decode.lane_run_status_label ok.Tui_decode.lrs_status);
            Alcotest.(check bool) "durability variant" true
@@ -5502,8 +5503,18 @@ let test_decode_lane_run_status_is_typed () =
            (* A label the producer adds later must survive the decode, not
               vanish into a default. *)
            Alcotest.(check string) "unknown label is preserved" "exploded"
-             (Tui_decode.lane_run_status_label novel.Tui_decode.lrs_status)
-       | _ -> Alcotest.fail "expected three runs")
+             (Tui_decode.lane_run_status_label novel.Tui_decode.lrs_status);
+           (* A claim the lane handed to the operator is typed, and it is not
+              a decision this lane failed to reach: the operator's click is
+              the verdict. *)
+           Alcotest.(check bool) "operator-routed variant" true
+             (routed.Tui_decode.lrs_status = Tui_decode.Lane_run_operator_routed);
+           Alcotest.(check bool) "operator-routed is not a decision" true
+             (Tui_decode.lane_run_decision
+                ~run_kind:Tui_decode.Lane_run_task_verification
+                ~status:routed.Tui_decode.lrs_status
+              = Tui_decode.Lane_run_not_a_decision)
+       | _ -> Alcotest.fail "expected four runs")
 
 let test_decode_verifier_lane_summary_keeps_subject_and_verdict () =
   let listing =

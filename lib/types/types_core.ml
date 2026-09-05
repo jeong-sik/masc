@@ -227,17 +227,12 @@ let verification_intent_of_string = function
 
 (** What the producer places before the authority. [verification_intent] is
     the projection of this that the task status carries; the request record
-    the authority reads carries the claim itself, so a judge asked to approve
-    a stop sees the stated reason rather than completion evidence the
-    producer never had. *)
+    the authority reads carries the claim itself, so whoever answers a stop
+    sees the stated reason rather than completion evidence the producer never
+    had. *)
 type verification_claim =
   | Completion_evidence of { evidence_refs : string list }
   | Cancellation_reason of { reason : string }
-
-let verification_intent_of_claim = function
-  | Completion_evidence _ -> Complete_task
-  | Cancellation_reason _ -> Cancel_task
-;;
 
 type task_status =
   | Todo

@@ -22,7 +22,12 @@ let with_reviewer reviewer f =
 let review () =
   AR.review
     ~evaluator_runtime:"task-reviewer"
-    ~question:(AR.Completion { completion_contract = None; required_evidence = []; evidence_posture = AR.Note_only; few_shot_block = "" })
+    ~question:
+      { AR.completion_contract = None
+      ; required_evidence = []
+      ; evidence_posture = AR.Note_only
+      ; few_shot_block = ""
+      }
     ~lookup:AR.No_lookup_surface
     ~base_path:(Filename.get_temp_dir_name ())
     request
@@ -41,7 +46,12 @@ let test_explicit_base_path_reaches_reviewer () =
     (fun () ->
        ignore
          (AR.review ~evaluator_runtime:"task-reviewer"
-            ~question:(AR.Completion { completion_contract = None; required_evidence = []; evidence_posture = AR.Note_only; few_shot_block = "" })
+            ~question:
+              { AR.completion_contract = None
+              ; required_evidence = []
+              ; evidence_posture = AR.Note_only
+              ; few_shot_block = ""
+              }
             ~lookup:AR.No_lookup_surface ~base_path:expected request);
        match !received with
        | Some actual ->

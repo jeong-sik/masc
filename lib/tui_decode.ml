@@ -6921,6 +6921,7 @@ type lane_run_status =
   | Lane_run_not_reviewed
   | Lane_run_commit_failed
   | Lane_run_raised
+  | Lane_run_operator_routed
   | Lane_run_other of string
 
 let lane_run_status_of_string = function
@@ -6940,6 +6941,7 @@ let lane_run_status_of_string = function
   | "not_reviewed" -> Lane_run_not_reviewed
   | "commit_failed" -> Lane_run_commit_failed
   | "raised" -> Lane_run_raised
+  | "operator_routed" -> Lane_run_operator_routed
   | other -> Lane_run_other other
 
 let lane_run_status_label = function
@@ -6959,6 +6961,7 @@ let lane_run_status_label = function
   | Lane_run_not_reviewed -> "not_reviewed"
   | Lane_run_commit_failed -> "commit_failed"
   | Lane_run_raised -> "raised"
+  | Lane_run_operator_routed -> "operator_routed"
   | Lane_run_other status -> status
 
 type lane_run_kind =
@@ -7010,6 +7013,9 @@ let lane_run_decision ~run_kind ~status =
      | Lane_run_completion_persistence_failed
      | Lane_run_completion_durability_unknown ->
        Lane_run_decision_not_reached
+     (* The operator's click is the verdict; this row is the lane declining
+        to make one, not a decision that was not reached. *)
+     | Lane_run_operator_routed -> Lane_run_not_a_decision
      | Lane_run_succeeded | Lane_run_other _ -> Lane_run_decision_unknown)
   | Lane_run_kind_other _ -> Lane_run_decision_unknown
 ;;
@@ -7130,6 +7136,7 @@ let decode_lane_run_gate_judgment ~lane ~status ~output =
       | Lane_run_not_reviewed
       | Lane_run_commit_failed
       | Lane_run_raised
+      | Lane_run_operator_routed
       | Lane_run_other _ )
       , _
     | Lane_run_succeeded, None

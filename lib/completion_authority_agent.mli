@@ -20,11 +20,9 @@ module For_testing : sig
     Yojson.Safe.t -> (string list, string) result
 
   val verdict_question_of_request :
-    intent:Masc_domain.verification_intent ->
     Verification.verification_request ->
     (Task.Anti_rationalization.verdict_question, string) result
-  (** The intent-to-question mapping. Which prompt a Task's obligation reaches
-      is decided here and nowhere else, so it is exported to be pinned. *)
+  (** The request-to-question mapping: pure, reads no store. *)
 
   val completion_verdict_of_review :
     Task.Anti_rationalization.verdict -> Masc_domain.completion_verdict
@@ -74,9 +72,15 @@ module For_testing : sig
       which have no key to name. Pure, so the scope rule is checkable without a
       backlog or an Eio runtime. *)
 
-  (** RFC-0415 §4.1: the pure operator-routing gate, exposed for the refusal
-      contract test. Completion review stays with the system lane; a cancel
-      verdict belongs to the operator's one click. *)
-  val system_review_allowed : Masc_domain.verification_intent -> bool
+  (** RFC-0415 §4.1: what the system lane does with one Task, read off its
+      status. A completion claim is reviewed; a cancel claim is handed to the
+      operator without a prompt and recorded as
+      [Verification_run_registry.Operator_routed]; any other status is not an
+      obligation. Pure, so the routing is pinned without a runtime. *)
+  type admission =
+    | Review_completion
+    | Operator_routed
+    | Not_awaiting
 
+  val admission_of_status : Masc_domain.task_status -> admission
 end

@@ -111,17 +111,10 @@ val run
     template and calls this directly: the two lanes judge different things and
     share no prompt variables. *)
 
-(** Which question the completion authority is being asked, and the material
-    that question needs. The Task's [verification_intent] chooses it.
-
-    One value rather than two optional arguments because the two prompts want
-    opposite things from the same contract: the completion block demands
-    evidence for every item, the cancellation block offers the items as
-    context for a producer asking not to do them. Passed separately, a
-    cancellation could be rendered through the completion prompt with its
-    contract attached — which is what happened, and refused every cancellation
-    of a contracted Task for not finishing the work it asks not to finish
-    (#33052). *)
+(** The question the completion authority is asked, and the material it
+    needs. Only a completion reaches this module: a cancel claim is the
+    operator's to close (RFC-0415 §4.1) and the system lane hands it on
+    without a prompt. *)
 
 (** The evidence posture of a completion submission, as the judge sees it.
     [Note_only]: zero artifacts it can open — every item a note or an unusable
@@ -133,26 +126,15 @@ type evidence_posture =
   | Usable_artifacts of int
 
 type verdict_question =
-  | Completion of
-      { completion_contract : string list option
-      ; required_evidence : string list
-      ; evidence_posture : evidence_posture
-            (** Computed at the review site from the fixed snapshot. Rides
-                inside the arm like [few_shot_block]: the question picker
-                reads no store. *)
-      ; few_shot_block : string
-            (** Operator disagreements returned to the judge as examples. Only
-                the completion prompt has a slot for it, so it rides in this
-                arm: as a separate argument it was accepted for a cancellation
-                and dropped in silence, and the ledger read behind it ran for
-                nothing. *)
-      }
-  | Cancellation of
-      { reason : string
-            (** The producer's stated why. The whole of what is judged: a stop
-                submits no artifacts and is not refused for having none. *)
-      ; contract_context : string list
-      }
+  { completion_contract : string list option
+  ; required_evidence : string list
+  ; evidence_posture : evidence_posture
+        (** Computed at the review site from the fixed snapshot. The question
+            picker reads no store. *)
+  ; few_shot_block : string
+        (** Operator disagreements returned to the judge as examples, filled
+            at the review site where the calibration ledger is read. *)
+  }
 
 val review
   :  ?evaluator_runtime:string
@@ -175,10 +157,8 @@ val review
     attempt. An explicit [~evaluator_runtime] is a single-slot lane with no
     failover. *)
 
-(** Render the review prompt the [question] selects: {!Prompt_names.verification}
-    for a completion, {!Prompt_names.verification_cancellation} for a stop. The
-    lookup surface is described in that question's terms too, so a cancellation
-    is not handed the completion wording about submitted snapshots.
+(** Render the review prompt {!Prompt_names.verification} with the sections
+    the [question] and the [lookup] surface supply.
 
     There is no inline fallback prompt; an error keeps the Task nonterminal. *)
 val build_prompt

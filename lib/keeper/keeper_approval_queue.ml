@@ -2000,17 +2000,19 @@ let call_summary_max_length = 80
 
 let call_summary_of_input (input : Yojson.Safe.t) : string option =
   let of_text text =
-    let first_line = match String.index_opt text '\n' with
-      | None -> text
-      | Some cut -> String.sub text 0 cut
+    let lines = String.split_on_char '\n' text in
+    let rec first_non_empty = function
+      | [] -> None
+      | line :: rest ->
+        let trimmed = String.trim line in
+        if trimmed = "" then first_non_empty rest
+        else if String.length trimmed <= call_summary_max_length then Some trimmed
+        else
+          Some
+            (String.sub trimmed 0
+               (String_util.utf8_char_boundary trimmed call_summary_max_length))
     in
-    let trimmed = String.trim first_line in
-    if trimmed = "" then None
-    else if String.length trimmed <= call_summary_max_length then Some trimmed
-    else
-      Some
-        (String.sub trimmed 0
-           (String_util.utf8_char_boundary trimmed call_summary_max_length))
+    first_non_empty lines
   in
   let of_argv argv = of_text (String.concat " " argv) in
   let string_argv = function
@@ -2018,23 +2020,51 @@ let call_summary_of_input (input : Yojson.Safe.t) : string option =
       Some (List.filter_map (function `String item -> Some item | _ -> None) items)
     | _ -> None
   in
-  let rec extract_from_fields fields =
-    match List.assoc_opt "argv" fields with
-    | Some argv -> Option.bind (string_argv argv) of_argv
-    | None ->
-      (match List.find_map (fun k -> List.assoc_opt k fields) [ "script"; "command"; "cmd"; "file_path"; "path"; "url"; "title"; "query" ] with
-       | Some (`String s) -> of_text s
-       | _ ->
-         (match List.find_map (fun k -> List.assoc_opt k fields) [ "input"; "args"; "arguments" ] with
-          | Some (`Assoc inner) -> extract_from_fields inner
-          | _ ->
+  let rec extract_from_fields ~depth fields =
+    if depth > 4 then None
+    else
+      (* 1. Try argv *)
+      let from_argv =
+        match List.assoc_opt "argv" fields with
+        | Some argv -> Option.bind (string_argv argv) of_argv
+        | None -> None
+      in
+      match from_argv with
+      | Some summary -> Some summary
+      | None ->
+        (* 2. Try direct string candidate fields *)
+        let from_string =
+          List.find_map
+            (fun k ->
+              match List.assoc_opt k fields with
+              | Some (`String s) -> of_text s
+              | _ -> None)
+            [ "script"; "command"; "cmd"; "file_path"; "path"; "url"; "title"; "query" ]
+        in
+        match from_string with
+        | Some summary -> Some summary
+        | None ->
+          (* 3. Try nested objects *)
+          let from_nested =
+            List.find_map
+              (fun k ->
+                match List.assoc_opt k fields with
+                | Some (`Assoc inner) -> extract_from_fields ~depth:(depth + 1) inner
+                | _ -> None)
+              [ "input"; "args"; "arguments" ]
+          in
+          match from_nested with
+          | Some summary -> Some summary
+          | None ->
+            (* 4. Try provider_id / remote_name *)
             (match List.assoc_opt "provider_id" fields, List.assoc_opt "remote_name" fields with
              | Some (`String provider), Some (`String remote) ->
                Some (provider ^ "/" ^ remote)
-             | _ -> None)))
+             | _ -> None)
   in
   match input with
-  | `Assoc fields -> extract_from_fields fields
+  | `Assoc fields ->
+    (try extract_from_fields ~depth:0 fields with _ -> None)
   | _ -> None
 ;;
 

@@ -929,19 +929,52 @@ let read_text_file path =
     (fun () -> really_input_string channel (in_channel_length channel))
 ;;
 
-let test_bundled_profiles_reject_local_sandbox () =
-  (* RFC-0394: the local playground is fail-closed, so no bundled keeper
-     profile may pin sandbox_profile = "docker". *)
+(* Every keeper TOML this repo ships has to load, and presets/ counts:
+   scripts/seed-team.sh copies those files verbatim into a live config dir, so a
+   value the parser rejects there produces a keeper that never starts.
+
+   The check runs the real loader rather than matching field spellings, so the
+   whole field domain is covered rather than one key at a time.
+
+   Both counts are asserted before the walk. A path typo would otherwise iterate
+   an empty list and pass forever. *)
+let test_shipped_keeper_profiles_load () =
   let repo = repo_root () in
-  let keepers_dir = Filename.concat repo "config/keepers" in
-  Sys.readdir keepers_dir
-  |> Array.to_list
-  |> List.filter (fun file -> Filename.check_suffix file ".toml")
-  |> List.iter (fun file ->
-       let contents = read_text_file (Filename.concat keepers_dir file) in
-       let squeezed = String.concat "" (String.split_on_char ' ' contents) in
-       check bool (file ^ " must not pin the local playground") false
-         (String_util.contains_substring squeezed "sandbox_profile=\"local\""))
+  let toml_files dir =
+    if Sys.file_exists dir && Sys.is_directory dir
+    then
+      Sys.readdir dir
+      |> Array.to_list
+      |> List.filter (fun file -> Filename.check_suffix file ".toml")
+      |> List.map (Filename.concat dir)
+      |> List.sort String.compare
+    else []
+  in
+  let preset_files =
+    let presets_dir = Filename.concat repo "presets" in
+    if Sys.file_exists presets_dir && Sys.is_directory presets_dir
+    then
+      Sys.readdir presets_dir
+      |> Array.to_list
+      |> List.sort String.compare
+      |> List.concat_map (fun preset ->
+           toml_files
+             (Filename.concat presets_dir (Filename.concat preset "keepers")))
+    else []
+  in
+  let config_files = toml_files (Filename.concat repo "config/keepers") in
+  check bool "config/keepers holds keeper TOMLs" true (config_files <> []);
+  check bool "presets hold keeper TOMLs" true (preset_files <> []);
+  List.iter
+    (fun path ->
+      let contents = read_text_file path in
+      match TL.parse_toml contents with
+      | Error error -> fail (path ^ ": " ^ error)
+      | Ok doc ->
+        (match KTP.profile_defaults_of_toml doc with
+         | Ok _ -> ()
+         | Error detail -> fail (path ^ ": " ^ detail)))
+    (config_files @ preset_files)
 
 let concrete_keeper_inventory_path repo =
   Filename.concat repo "test/fixtures/concrete-keeper-identities.txt"
@@ -1766,8 +1799,8 @@ let () =
             test_profile_defaults_materializable_for_name_uses_base_path;
           test_case "bundled keeper profiles resolve prompt defaults" `Quick
             test_bundled_keeper_profiles_resolve_prompt_defaults;
-          test_case "bundled profiles reject local sandbox" `Quick
-            test_bundled_profiles_reject_local_sandbox;
+          test_case "every shipped keeper TOML loads" `Quick
+            test_shipped_keeper_profiles_load;
           test_case "OCaml sources exclude concrete Keeper identities" `Quick
             test_ocaml_sources_exclude_declared_concrete_keeper_identities;
         ] );

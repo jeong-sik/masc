@@ -1,9 +1,9 @@
 [keeper]
 autoboot_enabled = true
-# sandbox_profile = "local" (not "docker") for the one-touch preset — see
-# presets/README.md § classic for the Docker-in-Docker rationale and the
-# host-native override.
-sandbox_profile = "local"
+# sandbox_profile takes docker / microvm / remote_ssh. If the server itself runs
+# inside a container, docker here means Docker-in-Docker — mount the host docker
+# socket or use microvm.
+sandbox_profile = "docker"
 network_mode = "inherit"
 
 # Was keepers/frontend/AGENT.md until nothing read that file any more.

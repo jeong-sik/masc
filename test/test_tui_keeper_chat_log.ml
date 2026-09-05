@@ -266,6 +266,103 @@ let journal_tagged_deltas events =
     (fun (seq, event) -> Option.map (fun d -> (Some seq, d)) (Log.delta_of_journaled event))
     events
 
+let events_error =
+  testable (Fmt.of_to_string Log.events_error_to_string) ( = )
+
+let envelope ?(schema = "masc.keeper_chat_operation.error.v1") code message =
+  Yojson.Safe.to_string
+    (`Assoc
+      [ "schema", `String schema; "error", `String code; "message", `String message ])
+;;
+
+(* The code decides; the message rides along only where the code alone does
+   not say what to do. *)
+let test_decode_events_error_by_code () =
+  let decode ~status body = Log.decode_events_error ~status ~credential_sent:true body in
+  check events_error "404 unknown_operation" Log.Unknown_operation
+    (decode ~status:404 (envelope "unknown_operation" "no such op"));
+  check events_error "410 journal_pruned" Log.Journal_pruned
+    (decode ~status:410 (envelope "journal_pruned" "gone"));
+  check events_error "503 journal_unreadable keeps the message"
+    (Log.Journal_unavailable "disk says no")
+    (decode ~status:503 (envelope "journal_unreadable" "disk says no"));
+  check events_error "503 journal_corrupt keeps the message"
+    (Log.Journal_unavailable "bad line 7")
+    (decode ~status:503 (envelope "journal_corrupt" "bad line 7"));
+  check events_error "an unknown code is undecodable with the status and message"
+    (Log.Events_undecodable "400 operation_id is required")
+    (decode ~status:400 (envelope "invalid_input" "operation_id is required"));
+  check events_error "a body that is not JSON is undecodable as it came"
+    (Log.Events_undecodable "502 <html>bad gateway</html>")
+    (decode ~status:502 "<html>bad gateway</html>");
+  check events_error "an object with no error code is undecodable"
+    (Log.Events_undecodable "500 {\"oops\":true}")
+    (decode ~status:500 "{\"oops\":true}");
+  (* A 401/403 is about the credential, whatever the body says. *)
+  check events_error "401 is a refusal"
+    (Log.Events_refused (Masc_tui_credential.refusal ~credential_sent:true))
+    (decode ~status:401 (envelope "unauthorized" "bad token"));
+  check events_error "403 without a bearer names the missing credential"
+    (Log.Events_refused (Masc_tui_credential.refusal ~credential_sent:false))
+    (Log.decode_events_error ~status:403 ~credential_sent:false "forbidden")
+;;
+
+(* The pager follows has_more only while the position advances, starts where
+   it is told, and stops at the first error. *)
+let test_read_whole_journal_pages_until_the_position_stops_moving () =
+  let asked = ref [] in
+  let page_of since_seq =
+    asked := since_seq :: !asked;
+    let l seq = line seq (float_of_int seq) (E.Text_delta (string_of_int seq)) in
+    match since_seq with
+    | -1 -> Ok { Log.operation_id = "op"; events = [ l 0; l 1 ]; has_more = true; next_since_seq = 1 }
+    | 1 -> Ok { Log.operation_id = "op"; events = [ l 2 ]; has_more = true; next_since_seq = 2 }
+    | 2 -> Ok { Log.operation_id = "op"; events = []; has_more = false; next_since_seq = 2 }
+    | _ -> Error (Log.Events_transport "unexpected page")
+  in
+  (match Log.read_whole_journal ~since_seq:(-1) ~fetch:(fun ~since_seq -> page_of since_seq) with
+   | Ok lines ->
+       check (list int) "every line once, in order" [ 0; 1; 2 ]
+         (List.map (fun (l : Journal.journaled_event) -> l.seq) lines)
+   | Error error -> failf "unexpected %s" (Log.events_error_to_string error));
+  check (list int) "each page asked once, from -1" [ -1; 1; 2 ] (List.rev !asked);
+  (* A resume starts where the log ends. *)
+  asked := [];
+  (match Log.read_whole_journal ~since_seq:1 ~fetch:(fun ~since_seq -> page_of since_seq) with
+   | Ok lines -> check int "only what the log lacks" 1 (List.length lines)
+   | Error error -> failf "unexpected %s" (Log.events_error_to_string error));
+  check (list int) "asked from the resume position" [ 1; 2 ] (List.rev !asked);
+  (* A page that claims more without advancing ends the read. *)
+  let stuck ~since_seq =
+    Ok { Log.operation_id = "op"; events = []; has_more = true; next_since_seq = since_seq }
+  in
+  (match Log.read_whole_journal ~since_seq:(-1) ~fetch:stuck with
+   | Ok lines -> check int "nothing, once" 0 (List.length lines)
+   | Error error -> failf "unexpected %s" (Log.events_error_to_string error));
+  (* An error ends the read as that error. *)
+  let failing ~since_seq =
+    if since_seq = -1
+    then Ok { Log.operation_id = "op"; events = []; has_more = true; next_since_seq = 5 }
+    else Error Log.Journal_pruned
+  in
+  check bool "the first error is the result" true
+    (match Log.read_whole_journal ~since_seq:(-1) ~fetch:failing with
+     | Error Log.Journal_pruned -> true
+     | Ok _ | Error _ -> false)
+;;
+
+let test_hold_seq_counts_without_an_entry () =
+  let log = Log.create ~keeper_name:"k" ~request_id:"r" ~started_at:0. in
+  Log.hold_seq log 4;
+  check int "held position moves last_seq" 4 (Log.last_seq log);
+  check int "and adds no entry" 0 (List.length (Log.entries log));
+  check bool "a frame arriving at a held position is a duplicate" false
+    (Log.add log ~seq:(Some 4) Live.Run_started);
+  let revision = Log.revision log in
+  Log.hold_seq log 4;
+  check int "holding again changes nothing" revision (Log.revision log)
+;;
+
 let test_golden_journal_equals_wire () =
   let events = List.mapi (fun seq event -> (seq, event)) golden in
   let wire = wire_tagged_deltas events in
@@ -362,6 +459,12 @@ let () =
       , [ test_case "decode events page" `Quick test_decode_events_page
         ; test_case "add_journaled holds undrawn positions" `Quick
             test_add_journaled_holds_undrawn_positions
+        ; test_case "decode events error by code" `Quick
+            test_decode_events_error_by_code
+        ; test_case "hold_seq counts without an entry" `Quick
+            test_hold_seq_counts_without_an_entry
+        ; test_case "read_whole_journal pages until the position stops moving" `Quick
+            test_read_whole_journal_pages_until_the_position_stops_moving
         ] )
     ; ( "golden"
       , [ test_case "journal equals wire" `Quick test_golden_journal_equals_wire

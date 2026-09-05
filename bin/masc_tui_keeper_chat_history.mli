@@ -172,6 +172,14 @@ type row =
       (** Exact producer identity for grouping rows from one turn: the typed
           delivery key for direct turns, otherwise the persisted [turn_ref].
           [None] for old rows and Memory journal entries. *)
+  ; operation_id : string option
+      (** The chat operation a direct turn ran as -- the same value as
+          [turn_id] when the delivery key is an operation, and only then, on
+          every row the turn produced. [None] on autonomous turns, on rows
+          carrying another delivery key, and on Memory journal entries. The
+          v2 journal endpoint is keyed by this, so a reload can ask for
+          exactly the turns that have a journal without reading [turn_id]'s
+          shape. *)
   ; kind : kind
   ; text : string
       (** What to draw. Empty for [Tool_calls] and [Reasoning], whose typed

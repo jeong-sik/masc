@@ -36,27 +36,13 @@ let has_in s needle =
   with Not_found -> false
 
 (* The shared Keeper prompt identifies the repository root from a Dune sandbox. *)
-let has_prompt_root path =
-  Sys.file_exists (Filename.concat path "config/prompts/keeper.md")
-
-let repo_root () =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root when has_prompt_root root -> root
-  | _ ->
-      let rec ascend path =
-        if has_prompt_root path then path
-        else
-          let parent = Filename.dirname path in
-          if String.equal parent path then Sys.getcwd () else ascend parent
-      in
-      ascend (Sys.getcwd ())
-
 let () =
-  let root = repo_root () in
-  let prompts_dir = Filename.concat root "config/prompts" in
-  Unix.putenv "MASC_CONFIG_DIR" (Filename.concat root "config");
+  (* Config_dir_resolver reads no environment root of its own, so this
+     suite still has to name the checkout. *)
+  (match Sys.getenv_opt "DUNE_SOURCEROOT" with
+   | Some root -> Unix.putenv "MASC_CONFIG_DIR" (Filename.concat root "config")
+   | None -> failwith "DUNE_SOURCEROOT is unset; run this test through Dune");
   Config_dir_resolver.reset ();
-  Prompt_registry.set_markdown_dir prompts_dir;
   Masc.Prompt_defaults.init ()
 
 (* ── Fixture: realistic keeper prompt components ──────── *)

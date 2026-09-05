@@ -213,6 +213,21 @@ val apply : now:float -> t -> Masc_tui_keeper_chat_live.delta -> unit
 
 val note_interrupt : t -> interrupt -> unit
 
+val note_tool_outcome :
+  t -> execution_id:string -> outcome:tool_outcome -> duration:string option -> bool
+(** Folds in what the durable transcript recorded for one call -- its outcome
+    and its [dur] -- matched by execution id; returns whether a call matched.
+    The wire does not carry either yet (RFC-0412 stage 4 moves them there), so
+    a turn drawn from its log would otherwise show a failed call as returned
+    and no durations once the loaded rows are left out of the timeline. A
+    durable outcome that says less than the stream saw ([Never_returned],
+    unrecorded) changes nothing. *)
+
+val revision : t -> int
+(** Bumped by every mutation ({!apply}, {!note_interrupt},
+    {!note_tool_outcome}): the memo key for anything drawn from this
+    transcript. *)
+
 val phase : t -> phase
 val interrupt : t -> interrupt
 val text : t -> string
@@ -260,18 +275,61 @@ val trail : t -> trail_item list
 val attempt : t -> int
 (** 0-based runtime attempt the growing trail belongs to. *)
 
-val reply : t -> (string * Masc.Keeper_turn_outcome.t) option
-(** The recorded reply and its typed outcome (KEEPER_REPLY_DETAILS), once
-    the turn has one. Not a trail item. For [Visible_reply] the text is
-    already in the trail: the server streams it as deltas and, when nothing
-    streamed, chunks the reply at the end. For the four control outcomes
-    ([Continuation_checkpoint], [Terminal_effect_settled],
-    [Awaiting_gate_approval], [No_visible_reply]) nothing is chunked, so the
-    reply text lives only here; the pane draws those turns' status row from
-    this accessor (today via the strict decode in [apply_keeper_chat_result];
-    from the log once settle commits the log). A streamed [Visible_reply] can
-    also differ from the trail's text when the server stripped control tokens
-    from the visible reply; the same projection step reconciles that. *)
+(** The recorded reply (KEEPER_REPLY_DETAILS): the visible text, the typed
+    outcome, and the turn it was recorded under. *)
+type reply =
+  { reply_text : string
+  ; reply_outcome : Masc.Keeper_turn_outcome.t
+  ; reply_turn_ref : string
+  }
+
+val reply : t -> reply option
+(** The recorded reply, once the turn has one. Not a trail item. For
+    [Visible_reply] the text is already in the trail: the server streams it as
+    deltas and, when nothing streamed, chunks the reply at the end. For the
+    four control outcomes ([Continuation_checkpoint],
+    [Terminal_effect_settled], [Awaiting_gate_approval], [No_visible_reply])
+    nothing is chunked, so the reply text lives only here. {!drawn} is the one
+    place both are reconciled into rows. *)
+
+val turn_status_text :
+  reply:string -> turn_ref:string -> Masc.Keeper_turn_outcome.t -> string
+(** The one line a turn's ending reads as: the reply itself for a
+    [Visible_reply] with text, otherwise a sentence naming the outcome and the
+    turn. The strict whole-body decode and the log projection both draw a
+    turn's last row through this, so a turn watched live and one read back
+    end in the same words. *)
+
+(** One row of a turn as the pane draws it. *)
+type drawn =
+  | Drawn_thinking of string list
+  | Drawn_skill of skill_activity
+  | Drawn_tools of tool_block
+  | Drawn_text of string  (** A reply stretch as it streamed. *)
+  | Drawn_reply of string
+      (** The recorded visible reply, standing in for the current attempt's
+          streamed stretches when they did not add up to it. *)
+  | Drawn_status of string
+      (** How a turn without visible reply text ended, from the recorded
+          reply through {!turn_status_text}. *)
+
+type drawn_item =
+  { superseded : int option
+        (** [Some attempt] when a later runtime attempt superseded this row;
+            [None] on the current attempt's rows. *)
+  ; drawn : drawn
+  }
+
+val drawn : t -> drawn_item list
+(** The trail flattened -- a superseded block's rows in place, tagged with
+    their attempt -- and reconciled with the recorded reply. Without a reply,
+    the trail as it is. The recorded reply is the terminal message's text, not
+    the whole turn's, so with a [Visible_reply] it is compared (trimmed) to
+    the current attempt's last text stretch only: equal, the trail as it is;
+    different, that one stretch is replaced by one [Drawn_reply] (appended
+    when nothing streamed); earlier stretches -- the turn's earlier rounds --
+    stay as they streamed. With a blank [Visible_reply] or any control
+    outcome, one [Drawn_status] is appended and the streamed rows stay. *)
 
 val of_log : now:float -> Masc_tui_keeper_chat_log.t -> t
 (** The transcript a log projects to: {!create} from the log's identity, then

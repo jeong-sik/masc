@@ -4,7 +4,7 @@
 
     - {!Keeper_turn_driver_try_provider.context_overflow_shrink_sequence}:
       the pure same-runtime retry policy. Injects a fake [attempt] callback
-      so the halving sequence, the attempt cap, the same-run-retry-authority
+      so the halving sequence, the walk to the floor, the same-run-retry-authority
       gate, and the "only a typed overflow retries" rule are verified
       without an Eio-backed provider.
     - {!Keeper_context_overflow_shrink_state}: the process-local (keeper,
@@ -75,17 +75,25 @@ let test_halves_capacity_on_repeated_overflow_until_success () =
     (List.rev !shrink_events)
 ;;
 
-let test_stops_at_the_named_attempt_cap_then_falls_through () =
+(* No attempt count: the walk goes on while the lane names a strictly
+   smaller view and stops the moment it cannot. Six halvings here would have
+   been cut at three by the count this replaces. *)
+let test_walks_until_no_smaller_view_is_named () =
   let attempted_capacities = ref [] in
   let attempt ~capacity_bytes =
     attempted_capacities := capacity_bytes :: !attempted_capacities;
     Error (context_overflow ())
   in
+  let smallest_view = 16 in
   let shrink_count = ref 0 in
   let result =
     Try_provider.context_overflow_shrink_sequence
       ~starting_capacity_bytes:1024
       ~same_run_retry_authorized:always_authorized
+      ~shrink_capacity:(fun ~capacity_bytes ~default_capacity_bytes ->
+        (* The lane names the halved view until the smallest one; after that
+           it names the rejected view itself, which is no smaller view. *)
+        if capacity_bytes <= smallest_view then capacity_bytes else default_capacity_bytes)
       ~shrink_admits_history:always_admits_history
       ~record_success:(fun ~capacity_bytes:_ -> fail "overflow never succeeds here")
       ~on_shrink_retry:(fun ~shrink_attempt:_ ~previous_capacity_bytes:_ ~capacity_bytes:_ ->
@@ -97,22 +105,10 @@ let test_stops_at_the_named_attempt_cap_then_falls_through () =
     (match result with
      | Error (Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _)) -> true
      | Error _ | Ok _ -> false);
-  check int "exactly the named cap worth of shrink retries fired"
-    Try_provider.For_testing.context_overflow_shrink_max_attempts
-    !shrink_count;
-  let expected_attempts_count =
-    Try_provider.For_testing.context_overflow_shrink_max_attempts + 1
-  in
-  check int "one initial attempt plus one per shrink retry"
-    expected_attempts_count
-    (List.length !attempted_capacities);
-  let divisor = Try_provider.For_testing.context_overflow_shrink_divisor in
-  let rec expected capacity n =
-    if n = 0 then [ capacity ] else capacity :: expected (capacity / divisor) (n - 1)
-  in
-  check (list int) "capacities halve down to the cap"
-    (expected 1024 Try_provider.For_testing.context_overflow_shrink_max_attempts)
-    (List.rev !attempted_capacities)
+  check (list int) "every named view was attempted, down to the smallest"
+    [ 1024; 512; 256; 128; 64; 32; 16 ]
+    (List.rev !attempted_capacities);
+  check int "one shrink retry per named view" 6 !shrink_count
 ;;
 
 let test_non_overflow_error_never_shrinks () =
@@ -224,7 +220,10 @@ let test_non_decreasing_custom_shrink_does_not_repeat_provider_attempt () =
   check int "no false shrink event is emitted" 0 !shrink_events
 ;;
 
-let test_last_retry_uses_the_measured_floor () =
+(* The floor is the last view: once the ordinary halving would reach or
+   pass it, the floor is attempted instead, and nothing is attempted below
+   it. *)
+let test_the_floor_is_the_last_view () =
   let attempted_capacities = ref [] in
   let result =
     Try_provider.context_overflow_shrink_sequence
@@ -246,8 +245,8 @@ let test_last_retry_uses_the_measured_floor () =
      | Error _ | Ok _ -> false);
   check
     (list int)
-    "the final bounded dispatch jumps to the measured floor"
-    [ 1024; 512; 256; 17 ]
+    "halving runs until it would pass the floor, then the floor is asked once"
+    [ 1024; 512; 256; 128; 64; 32; 17 ]
     (List.rev !attempted_capacities)
 ;;
 
@@ -420,9 +419,9 @@ let () =
             `Quick
             test_halves_capacity_on_repeated_overflow_until_success
         ; test_case
-            "stops at the named attempt cap then falls through"
+            "walks until no smaller view is named"
             `Quick
-            test_stops_at_the_named_attempt_cap_then_falls_through
+            test_walks_until_no_smaller_view_is_named
         ; test_case
             "a non-overflow error never shrinks"
             `Quick
@@ -440,9 +439,9 @@ let () =
             `Quick
             test_non_decreasing_custom_shrink_does_not_repeat_provider_attempt
         ; test_case
-            "the last retry uses the measured floor"
+            "the floor is the last view"
             `Quick
-            test_last_retry_uses_the_measured_floor
+            test_the_floor_is_the_last_view
         ; test_case
             "a reserve larger than the next capacity stops the shrink"
             `Quick

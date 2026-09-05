@@ -223,7 +223,11 @@ safe overflow 뒤 더 작은 view가 존재할 때만 현재 process가 exact re
 - `tool_effect_attempted = false`
 - `response_emitted = false`
 - next view가 current view보다 strictly smaller다.
-- retry budget 안이다.
+- next view가 있다. walk는 attempt 횟수가 아니라 더 작은 view가 없는 floor에서 끝나고,
+  floor rejection이 마지막이다. (2026-09-05까지 코드는 고정 3회 상한이었다. geek-scout에서
+  4.1MB history를 세 번 절반씩 498KB까지 줄인 뒤 floor를 묻지 않은 채
+  `Bootstrap_floor_exceeded`를 commit했고, keeper는 두 번만 더 줄이면 빠져나올 자리에서
+  operator recovery에 멈춰 있었다.)
 
 final floor rejection에는 다음 retry authority를 만들지 않고 `Input_rejected`를
 commit한다.

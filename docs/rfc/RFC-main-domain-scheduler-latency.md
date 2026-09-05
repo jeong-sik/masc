@@ -263,6 +263,8 @@ memprof A(ready+3분) → B(+7분), 240초: 584 MB/s(이 4분에 `agent_started`
 
 힙 루트 ready+3분: `exact_lane_runs` **530 MB**(전 564 → 559 → 530). #33347 은 projection 의 `run` 사본에서 `input`·`output` 을 `Null` 로 바꿨지만 `Run_registry_core` 의 `Store.entry` 는 `registration`(입력)과 `Completed.output` 을 그대로 든다. projection 의 본문은 코어 항목과 같은 값을 물리적으로 공유했으므로 `Obj.reachable_words` 는 이미 한 번만 세고 있었고, 사라진 것은 `run` 레코드 자체(약 30 MB)뿐이다. **P4c 의 −545 MB 는 아직 남았다.** 본문을 메모리에서 빼려면 코어 항목이 본문 대신 참조(8.5 의 `Tool_blob_store` 참조 + v6 컷)를 들어야 한다. 상세 조회가 JSONL 줄에서 `"id":"<run_id>"` 부분 문자열로 행을 찾는 것도 같은 PR 에서 정본 디코더로 바꿔야 한다.
 
+memprof A → B(240초): **1,103 MB/s** — 이 4분에 `agent_started` 58건(앞 창들의 2~4배)이라 턴당으로는 4.6 GB(앞 창 5.3~7.9). live 3.86 → 4.00 GB, sites 9,994 → 13,877. 하네스 ready+7분: lag p99 315 ms, max 2.36 s, stall 2(바쁜 창). 상위(4분 차): 체크포인트 디코드 8.9 GB, `measure_message_bytes` 6.7 + 3.6 GB, 승인 큐 스냅샷 재작성 6.1 + 3.9 + 3.4 GB(#33349 표적), **`Keeper_event_queue_persistence.save_state_unlocked` 3.6 GB**(이벤트 큐 상태 파일을 변경마다 통째로 쓴다 — P4a·P4e 와 같은 부류, 다음 표적), **`Tool_misc_web_fetch.extract_title` 3.3 GB**(가져온 HTML 전체를 제목 하나 때문에 훑는다).
+
 #### GC 파라미터 실험 (8.5 의 "카운터를 본 뒤 결정")
 
 카운터가 나왔다. minor 4,000~6,000/분은 초당 70~100회의 stop-the-world 이고, OCaml 5 는 minor 수집에 모든 도메인이 함께 멈춘다. 현재 값은 minor heap 4M words(32 MiB)/도메인(`bin/main_eio.ml`), space_overhead 100(`MASC_GC_SPACE_OVERHEAD`, 부트스트랩), 둘 다 `OCAMLRUNPARAM` 이 있으면 적용하지 않는다. 실험: `OCAMLRUNPARAM='s=32M,o=200'` (s 는 도메인당 words, 32M words = 256 MiB; o 는 space_overhead; OCaml 5.4 manual runtime 장에서 확인) 로 재기동해 같은 하네스로 minor/분·major/분·promoted·lag p99 를 비교한다. 기대: minor 1/8, promoted 감소, major 1/2, RSS +4~6 GB(128 GB 호스트). p99 가 안 내려가면 되돌린다.

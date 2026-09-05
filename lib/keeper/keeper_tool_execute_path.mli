@@ -15,9 +15,13 @@ val resolve_tool_execute_cwd :
 (** Resolve typed Execute cwd. Uses the keeper write boundary default
     for omitted cwd only when write execution is enabled; read-only
     Execute uses the no-create playground root. Explicit cwd resolution
-    never creates directories or changes repo/worktree state. A successful
-    resolution also verifies the immutable allowed-root identity before
-    returning the host path. *)
+    never creates directories or changes repo/worktree state. For a
+    shared-mount tree (docker) a successful resolution also checks that the
+    directory exists here and verifies the immutable allowed-root identity.
+    For a tree the endpoint owns (microvm, remote_ssh) the host is not asked
+    whether the directory exists: the confined host-form path is returned
+    for the remote lane to map, and the endpoint answers ENOENT itself
+    (RFC-0427 A-1). *)
 
 type execute_cwd_resolution_error
 

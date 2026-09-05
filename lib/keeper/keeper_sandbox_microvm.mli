@@ -250,13 +250,10 @@ val shim_exec_prefix_for :
     under. All three CLIs document the environment entry the first needs
     ([msb exec] has [-e, --env]).
 
-    [Error] for [msb]: [container exec --user] documents [name|uid[:gid]] and
-    nerdctl takes Docker's, but [msb exec --user] documents a guest user name
-    and no numeric form (0.6.16), so the mapped [uid:gid] a keeper's commands
-    run as cannot be named. Sending it would either be rejected or resolved
-    as somebody else's user name, writing to the keeper's tree as that user.
-    Naming a guest user for the lane is the change that would settle it,
-    which is a decision about identity rather than a spelling. *)
+    [container exec --user] documents [name|uid[:gid]] and nerdctl takes
+    Docker's. [msb exec --user] documents a guest user name and no numeric form,
+    so msb omits [--user]; the work volume's [uid=,gid=] mount places writes
+    at the right host uid. *)
 
 val stop_argv_for :
   Keeper_microvm_backend.t -> container_name:string -> string list

@@ -1435,7 +1435,21 @@ let test_shim_exec_prefix_for_microsandbox_probe_omits_stream () =
    | Error err -> Alcotest.fail err
    | Ok apple_probe_prefix ->
      Alcotest.(check bool) "apple probe prefix omits -i" false
-       (List.mem "-i" apple_probe_prefix))
+       (List.mem "-i" apple_probe_prefix));
+  (match
+     Masc.Keeper_sandbox_microvm.shim_exec_prefix_for
+       ~stdin:false
+       Masc.Keeper_microvm_backend.Nerdctl_kata
+       ~container_name
+       ~uid:501
+       ~gid:20
+       ~remote_root
+       ~shim_config_path
+   with
+   | Error err -> Alcotest.fail err
+   | Ok probe_prefix ->
+     Alcotest.(check bool) "nerdctl probe prefix omits -i" false
+       (List.mem "-i" probe_prefix))
 ;;
 
 (* The volume probe's ambiguity: [container volume inspect] exits 1 for an

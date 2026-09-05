@@ -1744,8 +1744,7 @@ let microvm_remote_endpoint_of_running (t : t) ~container_name =
     in
     (* The exec prefix is the declaring runtime's, built here because this is
        where the runtime, the work root and the shim config path are all in
-       hand -- and because one runtime cannot express it, which the transport
-       (returning an argv, not a result) has no way to say. *)
+       hand. *)
     Result.bind (microvm_backend_of t) (fun backend ->
       Result.bind
         (Keeper_sandbox_microvm.shim_exec_prefix_for

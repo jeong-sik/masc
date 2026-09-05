@@ -244,6 +244,99 @@ let load_agent_core_history_file ~(session_dir : string) ~(snapshot_id : string)
       | exn -> Error (Io_error (Printexc.to_string exn))
     else Error Not_found)
 
+(* ── Canonical summary (RFC main-domain-scheduler-latency §8 P4b) ────
+   The scalars other paths need from the canonical checkpoint — session_id
+   and turn_count for the save watermark, the message count for the
+   heartbeat — are kept per canonical path together with the identity of the
+   file they describe. Every writer publishes the canonical file by atomic
+   rename, so a changed file is a new inode; equal (device, inode, size,
+   mtime) therefore means the file the summary describes is still the one on
+   disk. A summary is filled from a parse of the bytes on disk, or from the
+   value a writer installed. The whole checkpoint value is never cached: its
+   codec round trip is not proven exact, and a second copy of a 13-20 MB
+   checkpoint per keeper would grow the live heap the major GC walks.
+   Measured 2026-09-05: the save watermark alone re-read and re-parsed the
+   canonical file on every turn, 5.2 GB allocated per 4 minutes across the
+   fleet, and every heartbeat did the same for one integer. *)
+type canonical_identity =
+  { device : int
+  ; inode : int
+  ; size : int
+  ; mtime : float
+  }
+
+type canonical_summary =
+  { identity : canonical_identity
+  ; summary_session_id : string
+  ; summary_turn_count : int
+  ; summary_message_count : int
+  }
+
+let canonical_summaries : (string, canonical_summary) Hashtbl.t = Hashtbl.create 16
+
+(* Stdlib mutex on purpose: touched from systhread and main-domain paths; the
+   critical section is a Hashtbl lookup with no yield. *)
+let canonical_summaries_mutex = Stdlib.Mutex.create ()
+
+let canonical_identity_equal left right =
+  Int.equal left.device right.device
+  && Int.equal left.inode right.inode
+  && Int.equal left.size right.size
+  && Float.equal left.mtime right.mtime
+
+let canonical_identity_of_stats (stats : Unix.stats) =
+  { device = stats.st_dev
+  ; inode = stats.st_ino
+  ; size = stats.st_size
+  ; mtime = stats.st_mtime
+  }
+
+let canonical_identity_opt path =
+  match Unix.stat path with
+  | stats when stats.Unix.st_kind = Unix.S_REG -> Some (canonical_identity_of_stats stats)
+  | _ -> None
+  | exception Unix.Unix_error _ -> None
+
+(* [Some summary] only while the file at [canonical_path] is the one the
+   summary was taken from. *)
+let cached_summary ~canonical_path =
+  match canonical_identity_opt canonical_path with
+  | None -> None
+  | Some identity ->
+    Stdlib.Mutex.protect canonical_summaries_mutex (fun () ->
+      match Hashtbl.find_opt canonical_summaries canonical_path with
+      | Some summary when canonical_identity_equal summary.identity identity ->
+        Some summary
+      | Some _ | None -> None)
+
+let summary_of_checkpoint ~identity (checkpoint : Agent_core.Checkpoint.t) =
+  { identity
+  ; summary_session_id = checkpoint.session_id
+  ; summary_turn_count = checkpoint.turn_count
+  ; summary_message_count = List.length checkpoint.messages
+  }
+
+let publish_summary ~canonical_path summary =
+  Stdlib.Mutex.protect canonical_summaries_mutex (fun () ->
+    Hashtbl.replace canonical_summaries canonical_path summary)
+
+(* After a parse: the summary describes the bytes parsed only if the file
+   identity is the same before and after the read. Otherwise a rename landed
+   during the read and nothing is published; the next access reads again. *)
+let publish_summary_after_parse ~canonical_path ~identity_before checkpoint =
+  match identity_before, canonical_identity_opt canonical_path with
+  | Some before, Some after when canonical_identity_equal before after ->
+    publish_summary ~canonical_path (summary_of_checkpoint ~identity:before checkpoint)
+  | Some _, (Some _ | None) | None, (Some _ | None) -> ()
+
+(* After a durable atomic write under the session lock: the file at the path
+   is the one just installed. *)
+let publish_summary_after_write ~canonical_path checkpoint =
+  match canonical_identity_opt canonical_path with
+  | Some identity ->
+    publish_summary ~canonical_path (summary_of_checkpoint ~identity checkpoint)
+  | None -> ()
+
 let load_agent_core ~(session_dir : string) ~(session_id : string) :
     (Agent_core.Checkpoint.t, checkpoint_load_error) result =
   (* RFC-0089 G4: typed ENOENT classification at the OS boundary.
@@ -265,14 +358,35 @@ let load_agent_core ~(session_dir : string) ~(session_id : string) :
   else
   let path = agent_core_checkpoint_path ~session_dir ~session_id in
   if Fs_compat.file_exists path then
+    let identity_before = canonical_identity_opt path in
     try
       match decode_checkpoint_off_scheduler (Fs_compat.load_file path) with
-      | Ok ckpt -> Ok ckpt
+      | Ok ckpt ->
+        publish_summary_after_parse ~canonical_path:path ~identity_before ckpt;
+        Ok ckpt
       | Error e -> Error (classify_core_error e)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn -> Error (Io_error (Printexc.to_string exn))
   else Error Not_found
+
+(** Message count of the canonical checkpoint. Answered from the canonical
+    summary while the file on disk is the one the summary was taken from;
+    otherwise the checkpoint is loaded and parsed once, which fills the
+    summary. [Ok None] when there is no checkpoint. *)
+let canonical_message_count ~(session_dir : string) ~(session_id : string)
+  : (int option, checkpoint_load_error) result =
+  if not (leaf_is_real_segment session_id) then
+    Error (Store_error "session_id is not a real path segment")
+  else
+    let canonical_path = agent_core_checkpoint_path ~session_dir ~session_id in
+    match cached_summary ~canonical_path with
+    | Some summary -> Ok (Some summary.summary_message_count)
+    | None ->
+      (match load_agent_core ~session_dir ~session_id with
+       | Ok checkpoint -> Ok (Some (List.length checkpoint.messages))
+       | Error Not_found -> Ok None
+       | Error error -> Error error)
 
 (* ── RFC-0225 §3.2: disk-SSOT monotonic checkpoint transaction ──────
    One stable per-session lock covers canonical disk load, comparison,
@@ -445,7 +559,8 @@ let load_canonical_bytes_strict path =
       Error (unix_error error operation argument)
     | stat when stat.Unix.st_kind <> Unix.S_REG ->
       Error (Io_error ("canonical checkpoint is not a regular file: " ^ path))
-    | _ ->
+    | stats ->
+      let identity_before = canonical_identity_of_stats stats in
       (try
          let buffer = Buffer.create 4096 in
          let bytes = Bytes.create 65536 in
@@ -461,7 +576,7 @@ let load_canonical_bytes_strict path =
          let content =
            Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> read_fd fd)
          in
-         Ok (Some content)
+         Ok (Some (identity_before, content))
        with
        | Unix.Unix_error (error, operation, argument) ->
          Error (unix_error error operation argument))
@@ -476,7 +591,7 @@ let load_canonical_bytes_and_checkpoint_strict path =
   match load_canonical_bytes_strict path with
   | Error _ as error -> error
   | Ok None -> Ok None
-  | Ok (Some content) ->
+  | Ok (Some (identity_before, content)) ->
     (* This decode runs inside the durable session lock, so the caller now
        waits on worker-pool capacity while holding it (the submit is a
        rendezvous at CPU weight). Accepted trade-off: the wait is bounded
@@ -484,7 +599,12 @@ let load_canonical_bytes_and_checkpoint_strict path =
        transaction, whereas the previous inline parse stalled every fiber
        on the scheduler domain for the whole conversion. *)
     (match decode_checkpoint_off_scheduler content with
-     | Ok checkpoint -> Ok (Some (content, checkpoint))
+     | Ok checkpoint ->
+       publish_summary_after_parse
+         ~canonical_path:path
+         ~identity_before:(Some identity_before)
+         checkpoint;
+       Ok (Some (content, checkpoint))
      | Error error -> Error (classify_core_error error))
 
 let load_canonical_strict path =
@@ -495,10 +615,18 @@ type watermark = { session_id : string; turn_count : int }
 
 let known_watermark ~canonical_path
   : (watermark option, checkpoint_load_error) result =
-  load_canonical_strict canonical_path
-  |> Result.map
-       (Option.map (fun (existing : Agent_core.Checkpoint.t) ->
-          { session_id = existing.session_id; turn_count = existing.turn_count }))
+  match cached_summary ~canonical_path with
+  | Some summary ->
+    Ok
+      (Some
+         { session_id = summary.summary_session_id
+         ; turn_count = summary.summary_turn_count
+         })
+  | None ->
+    load_canonical_strict canonical_path
+    |> Result.map
+         (Option.map (fun (existing : Agent_core.Checkpoint.t) ->
+            { session_id = existing.session_id; turn_count = existing.turn_count }))
 
 type checkpoint_identity_error =
   | Session_id_invalid of string
@@ -896,7 +1024,8 @@ module For_testing = struct
   ;;
 end
 
-let save_outcome_after_write ~session_dir ~known ckpt =
+let save_outcome_after_write ~session_dir ~canonical_path ~known ckpt =
+  publish_summary_after_write ~canonical_path ckpt;
   archive_agent_core_history_best_effort ~session_dir ckpt;
   Ok
     (Saved
@@ -950,7 +1079,7 @@ let save_agent_core_classified_typed
             (fun () -> Agent_core.Checkpoint.to_json payload)
         in
         (match write ckpt with
-         | Ok () -> save_outcome_after_write ~session_dir ~known ckpt
+         | Ok () -> save_outcome_after_write ~session_dir ~canonical_path ~known ckpt
          (* #31677: a payload-encode refusal means the in-memory checkpoint
             carries a json payload the v10 contract cannot encode — a
             provider-authored duplicate key or non-finite float. Without
@@ -972,7 +1101,7 @@ let save_agent_core_classified_typed
              (match write recovered with
               | Error retry_error -> Error (Canonical_write_failed retry_error)
               | Ok () ->
-                save_outcome_after_write ~session_dir ~known recovered))
+                save_outcome_after_write ~session_dir ~canonical_path ~known recovered))
          | Error error -> Error (Canonical_write_failed error)))
 
 let save_agent_core_classified ~(session_dir : string) (ckpt : Agent_core.Checkpoint.t)

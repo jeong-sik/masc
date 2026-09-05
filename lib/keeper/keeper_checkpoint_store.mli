@@ -116,6 +116,16 @@ val load_agent_core :
   session_id:string ->
   (Agent_core.Checkpoint.t, checkpoint_load_error) result
 
+(** Message count of the canonical checkpoint for [session_id]. Answered
+    without reading the file while the file on disk is the one the store's
+    canonical summary was taken from (a parse or a write by this process);
+    otherwise the checkpoint is loaded and parsed once. [Ok None] when there
+    is no checkpoint. *)
+val canonical_message_count :
+  session_dir:string ->
+  session_id:string ->
+  (int option, checkpoint_load_error) result
+
 type checkpoint_identity_error =
   | Session_id_invalid of string
   | Ref_create_failed of Keeper_checkpoint_ref.create_error

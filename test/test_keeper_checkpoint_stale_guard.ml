@@ -1098,6 +1098,112 @@ let test_exact_snapshot_preserves_locked_canonical_bytes () =
              (Keeper_checkpoint_store.exact_snapshot_reference decoded))
       | Error _ -> fail "exact snapshot bytes did not decode")
 
+(* RFC main-domain-scheduler-latency §8 P4b. After a save, the store answers
+   the save watermark and the message count from its canonical summary while
+   the file on disk is the one it wrote. The file is made unreadable to show
+   that neither answer reads it. *)
+let test_summary_answers_watermark_and_count_without_reading () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "summary-no-read" in
+  save_ok
+    ~session_dir
+    (make_checkpoint ~session_id:sid ~turn_count:3 ~marker:"three")
+    "save turn 3";
+  let path =
+    Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid
+  in
+  Unix.chmod path 0o000;
+  Fun.protect ~finally:(fun () -> Unix.chmod path 0o644) @@ fun () ->
+  (match
+     Keeper_checkpoint_store.canonical_message_count ~session_dir ~session_id:sid
+   with
+   | Ok (Some count) -> check int "message count from the summary" 2 count
+   | Ok None -> fail "summary reported no checkpoint"
+   | Error _ -> fail "message count read the unreadable file");
+  match
+    Keeper_checkpoint_store.save_agent_core_classified
+      ~session_dir
+      (make_checkpoint ~session_id:sid ~turn_count:2 ~marker:"stale")
+  with
+  | Ok
+      (Keeper_checkpoint_store.Stale_noop
+         { incoming_turn_count = 2; known_turn_count = 3 }) -> ()
+  | Ok (Keeper_checkpoint_store.Stale_noop _) ->
+    fail "stale verdict carried other turn counts"
+  | Ok (Keeper_checkpoint_store.Saved _) -> fail "a stale turn was saved"
+  | Error e -> fail ("watermark read the unreadable file: " ^ e)
+;;
+
+(* A canonical file replaced behind the store (another process, an operator)
+   is a new inode, so the summary no longer matches and the next answer
+   parses the file; a removed file answers as no checkpoint. *)
+let test_summary_follows_a_checkpoint_replaced_behind_it () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "summary-replaced" in
+  save_ok
+    ~session_dir
+    (make_checkpoint ~session_id:sid ~turn_count:1 ~marker:"one")
+    "save turn 1";
+  let path =
+    Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid
+  in
+  let replacement =
+    let base = make_checkpoint ~session_id:sid ~turn_count:5 ~marker:"five" in
+    { base with
+      messages =
+        base.messages
+        @ [ Agent_core.Types.
+              { role = User
+              ; content = [ Text "again" ]
+              ; name = None
+              ; tool_call_id = None
+              ; metadata = []
+              }
+          ]
+    }
+  in
+  let staged = path ^ ".replacement" in
+  Out_channel.with_open_bin staged (fun channel ->
+    output_string
+      channel
+      (Yojson.Safe.to_string (Agent_core.Checkpoint.to_json replacement)));
+  Sys.rename staged path;
+  (match
+     Keeper_checkpoint_store.canonical_message_count ~session_dir ~session_id:sid
+   with
+   | Ok (Some count) -> check int "message count of the replacement" 3 count
+   | Ok None -> fail "replacement reported no checkpoint"
+   | Error _ -> fail "replacement could not be read");
+  (match
+     Keeper_checkpoint_store.save_agent_core_classified
+       ~session_dir
+       (make_checkpoint ~session_id:sid ~turn_count:4 ~marker:"four")
+   with
+   | Ok
+       (Keeper_checkpoint_store.Stale_noop
+          { incoming_turn_count = 4; known_turn_count = 5 }) -> ()
+   | Ok (Keeper_checkpoint_store.Stale_noop _) ->
+     fail "stale verdict carried other turn counts"
+   | Ok (Keeper_checkpoint_store.Saved _) ->
+     fail "the watermark still answered from the old summary"
+   | Error e -> fail ("save failed: " ^ e));
+  Sys.remove path;
+  match
+    Keeper_checkpoint_store.canonical_message_count ~session_dir ~session_id:sid
+  with
+  | Ok None -> ()
+  | Ok (Some _) -> fail "a removed checkpoint still answered from the summary"
+  | Error _ -> fail "a removed checkpoint was reported as an error"
+;;
+
 let () =
   run "Keeper_checkpoint_store checkpoint watermark (RFC-0225 §3.2)"
     [
@@ -1149,5 +1255,9 @@ let () =
             test_valid_checkpoint_still_saves;
           test_case "an unencodable payload is recovered at the sink" `Quick
             test_unencodable_payload_is_recovered_at_the_sink;
+          test_case "summary answers watermark and count without reading" `Quick
+            test_summary_answers_watermark_and_count_without_reading;
+          test_case "summary follows a checkpoint replaced behind it" `Quick
+            test_summary_follows_a_checkpoint_replaced_behind_it;
         ] );
     ]

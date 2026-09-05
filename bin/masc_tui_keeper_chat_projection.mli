@@ -172,14 +172,17 @@ val create_request :
   message:string ->
   unit ->
   request
-val request_to_yojson : since_seq:int option -> request -> Yojson.Safe.t
-(** The POST body. [since_seq] is the resume position of a re-POST of the same
-    operation (the last journal seq the pane holds; [-1] asks for the whole
-    turn) and is written only when [Some]; a first submit passes [None] and
-    the body is what it always was. It is not part of the request: the
-    request is the operator's words and keeps one identity across resends. *)
+val request_to_yojson :
+  since_seq:Masc.Keeper_chat_event_log.replay_position -> request -> Yojson.Safe.t
+(** The POST body. [since_seq] is where a re-POST of the same operation asks
+    the stream to resume: after the last journal seq the pane holds, or the
+    whole turn. It is written only for [After_seq]; the whole turn is the
+    field's absence, which is what a first submit passes, so a first submit's
+    body is what it always was. It is not part of the request: the request is
+    the operator's words and keeps one identity across resends. *)
 
-val request_body : since_seq:int option -> request -> string
+val request_body :
+  since_seq:Masc.Keeper_chat_event_log.replay_position -> request -> string
 val same_request_identity : request -> request -> bool
 val compact_request_id : string -> string
 val terminal_safe_text : ?preserve_newlines:bool -> string -> string

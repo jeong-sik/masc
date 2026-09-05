@@ -1057,6 +1057,39 @@ val read_private_jsonl_slice_locked_result :
   , Private_jsonl_slice.error )
   private_file_transaction_outcome
 
+module Private_jsonl_rows : sig
+  type t =
+    | Rows_missing  (** No file at the path. *)
+    | Rows_present of
+        { rows : string
+              (** Bytes [[0, rows_end)]: every ['\n']-terminated row, in order. *)
+        ; rows_end : int  (** Offset just past the last ['\n']; [0] for an empty store. *)
+        ; end_offset : int
+              (** File length under the lock. [rows_end < end_offset] means a
+                  final fragment with no ['\n'] follows the rows: an append
+                  that never completed. *)
+        }
+
+  type error = Io_failed of exn
+
+  val error_to_string : error -> string
+end
+
+(** Read a private JSONL store through the writer's own framing rule
+    ({!append_private_jsonl_durable_locked_result} refuses to append after a
+    tail without ['\n']), while holding the same per-path in-process mutex and
+    a shared cross-process lock the durable writer takes exclusively — so no
+    append is in progress while the bytes are read, and the read runs in a
+    systhread when the caller is an Eio fiber. The complete rows come back
+    as bytes; a torn tail is reported by offset, never returned. Unlike
+    {!read_private_jsonl_slice_locked_result}, a missing file is its own
+    value, not the empty stream. *)
+val read_private_jsonl_rows_locked_result :
+  string ->
+  ( Private_jsonl_rows.t
+  , Private_jsonl_rows.error )
+  private_file_transaction_outcome
+
 type private_jsonl_transaction_success =
   | Snapshot_succeeded of private_jsonl_snapshot
   | Cursor_succeeded of Private_jsonl_cursor.t

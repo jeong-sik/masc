@@ -2124,11 +2124,17 @@ let post_keeper_chat_watching ~mailbox ~port ~log request =
            , "sending without a live view: no Eio clock to bound the stream" ));
       Masc_tui_http.post_keeper_chat ~host ~port request
   | Some clock ->
-      (* The highest seq this watcher has handed to the mailbox. The log is
-         folded by the main loop, so at the moment of a re-POST it may still
-         be behind what arrived; the resume position is the larger of the
-         two, so the server is never asked for frames already in hand. *)
-      let delivered = ref (-1) in
+      (* After the highest seq this watcher has handed to the mailbox. The
+         log is folded by the main loop, so at the moment of a re-POST it may
+         still be behind what arrived; the resume position is the later of
+         the two, so the server is never asked for frames already in hand. *)
+      let delivered = ref Masc.Keeper_chat_event_log.Whole_turn in
+      let resume_position () =
+        match Keeper_chat_log.resume_position log with
+        | Masc.Keeper_chat_event_log.Whole_turn -> !delivered
+        | Masc.Keeper_chat_event_log.After_seq held ->
+            Masc.Keeper_chat_event_log.replay_position_advance !delivered held
+      in
       let rec watch ~since_seq was_unverified =
         let decoder = Keeper_chat_live.create () in
         (* Each idempotent re-subscribe has its own SSE grammar state. The
@@ -2144,8 +2150,11 @@ let post_keeper_chat_watching ~mailbox ~port ~log request =
               List.iter
                 (fun (seq, _) ->
                   match seq with
-                  | Some seq when seq > !delivered -> delivered := seq
-                  | Some _ | None -> ())
+                  | Some seq ->
+                      delivered :=
+                        Masc.Keeper_chat_event_log.replay_position_advance
+                          !delivered seq
+                  | None -> ())
                 deltas;
               enqueue_async mailbox
                 (Keeper_chat_stream_deltas (request, deltas))
@@ -2171,12 +2180,10 @@ let post_keeper_chat_watching ~mailbox ~port ~log request =
                one watcher observes terminal truth, so NEXT cannot overlap a
                turn whose first stream merely disappeared. *)
             Eio.Time.sleep clock 0.5;
-            watch
-              ~since_seq:(Some (max !delivered (Keeper_chat_log.last_seq log)))
-              true
+            watch ~since_seq:(resume_position ()) true
         | (Ok _ | Error _) as terminal -> terminal
       in
-      watch ~since_seq:None false
+      watch ~since_seq:Masc.Keeper_chat_event_log.Whole_turn false
 
 let inflight_entry_by_request_id state request_id =
   List.find_opt

@@ -225,7 +225,7 @@ let prune_shared_jsonl_stores ~prune_dir ~days ~masc_root =
      the privacy posture, not just disk hygiene. *)
   + prune_children_dirs
       ~prune_dir:(prune_flat_jsonl_older_than ~days)
-      (Filename.concat masc_root "keeper_chat_events")
+      (Filename.concat masc_root Keeper_chat_event_log.events_dirname)
   + prune_children_dirs ~prune_dir (Filename.concat masc_root "resilience_audit")
   (* decision_audit: [<keeper>/YYYY-MM/DD.jsonl] written via
      [Keeper_decision_audit.append] ([keeper_decision_audit.ml:185]). Same

@@ -12,6 +12,12 @@ module Journal = Masc.Keeper_chat_event_log
 module Outcome = Masc.Keeper_turn_outcome
 module Projection = Server_keeper_chat_agui_projection
 
+let position =
+  testable
+    (fun formatter position ->
+      Format.pp_print_string formatter (Journal.replay_position_to_string position))
+    ( = )
+
 let occurrence_to_string (o : Live.tool_occurrence) =
   Printf.sprintf "%d/%d/%s/%s" o.stream_scope o.block_index
     (Option.value ~default:"-" o.provider_message_id)
@@ -72,14 +78,15 @@ let test_seq_dedup_and_none_never_dedupes () =
   check bool "an id-less delta is added" true (Log.add t ~seq:None (Live.Accepted { admission = Live.Running; queue_length = 1 }));
   check bool "and again: None never dedupes" true (Log.add t ~seq:None (Live.Accepted { admission = Live.Running; queue_length = 1 }));
   check int "three entries" 3 (List.length (Log.entries t));
-  check int "last seq" 0 (Log.last_seq t)
+  check position "resume position" (Journal.After_seq 0) (Log.resume_position t)
 
-let test_last_seq_follows_the_highest_held () =
+let test_resume_position_follows_the_highest_held () =
   let t = log () in
-  check int "empty log" (-1) (Log.last_seq t);
+  check position "empty log: the whole turn" Journal.Whole_turn (Log.resume_position t);
   ignore (Log.add t ~seq:(Some 4) (Live.Text "a") : bool);
   ignore (Log.add t ~seq:(Some 2) (Live.Text "b") : bool);
-  check int "gaps do not matter, order does not matter" 4 (Log.last_seq t)
+  check position "gaps do not matter, order does not matter" (Journal.After_seq 4)
+    (Log.resume_position t)
 
 let test_attempt_advances_on_runtime_attempt_started () =
   let t = log () in
@@ -111,7 +118,7 @@ let page_json ?(schema = "masc.keeper_chat_events.v2") ~has_more ~next_since_seq
     ; "operation_id", `String "tui-req-1"
     ; "events", `List (List.map Journal.journaled_event_to_json lines)
     ; "has_more", `Bool has_more
-    ; "next_since_seq", `Int next_since_seq
+    ; "next_since_seq", Journal.replay_position_to_yojson next_since_seq
     ]
 
 let test_decode_events_page () =
@@ -120,15 +127,41 @@ let test_decode_events_page () =
     ; line 1 1.5 (E.Text_delta "hello")
     ]
   in
-  (match Log.decode_events_page (page_json ~has_more:true ~next_since_seq:1 lines) with
+  (match
+     Log.decode_events_page
+       (page_json ~has_more:true ~next_since_seq:(Journal.After_seq 1) lines)
+   with
    | Ok page ->
        check string "operation id" "tui-req-1" page.operation_id;
        check int "two events" 2 (List.length page.events);
        check bool "has_more" true page.has_more;
-       check int "cursor" 1 page.next_since_seq
+       check position "cursor" (Journal.After_seq 1) page.next_since_seq
    | Error detail -> fail detail);
-  (match Log.decode_events_page (page_json ~schema:"masc.keeper_chat_events.v1" ~has_more:false ~next_since_seq:0 lines) with
+  (* An empty whole-journal page hands back null: the whole journal again. *)
+  (match
+     Log.decode_events_page
+       (page_json ~has_more:false ~next_since_seq:Journal.Whole_turn [])
+   with
+   | Ok page -> check position "null cursor" Journal.Whole_turn page.next_since_seq
+   | Error detail -> fail detail);
+  (match
+     Log.decode_events_page
+       (page_json ~schema:"masc.keeper_chat_events.v1" ~has_more:false
+          ~next_since_seq:(Journal.After_seq 0) lines)
+   with
    | Ok _ -> fail "a wrong schema decoded"
+   | Error _ -> ());
+  (match
+     Log.decode_events_page
+       (`Assoc
+          [ "schema", `String "masc.keeper_chat_events.v2"
+          ; "operation_id", `String "x"
+          ; "events", `List []
+          ; "has_more", `Bool false
+          ; "next_since_seq", `Int (-1)
+          ])
+   with
+   | Ok _ -> fail "a negative cursor decoded"
    | Error _ -> ());
   match
     Log.decode_events_page
@@ -165,7 +198,8 @@ let test_add_journaled_holds_undrawn_positions () =
   check taken "the fold hands back the taken lines with their deltas and times"
     [ ((0, 1.0), Live.Run_started); ((2, 1.2), Live.Text "hi") ]
     (taken_to_tagged first);
-  check int "the undrawn seq still counts as held" 2 (Log.last_seq t);
+  check position "the undrawn seq still counts as held" (Journal.After_seq 2)
+    (Log.resume_position t);
   check bool "a live frame for the undrawn seq is a duplicate" false
     (Log.add t ~seq:(Some 1) (Live.Text "late"));
   let before = Log.revision t in
@@ -175,7 +209,8 @@ let test_add_journaled_holds_undrawn_positions () =
   in
   check taken "a line already held and an undrawn line are not handed back" []
     (taken_to_tagged again);
-  check int "an undrawn line moves last_seq" 3 (Log.last_seq t);
+  check position "an undrawn line moves the resume position" (Journal.After_seq 3)
+    (Log.resume_position t);
   check int "but not the revision: nothing to redraw" before (Log.revision t)
 
 (* ── Golden: journal vs wire ──────────────────────────────────────── *)
@@ -328,53 +363,81 @@ let test_decode_events_error_by_code () =
    it is told, and stops at the first error. *)
 let test_read_whole_journal_pages_until_the_position_stops_moving () =
   let asked = ref [] in
-  let page_of since_seq =
+  let page_of (since_seq : Journal.replay_position) =
     asked := since_seq :: !asked;
     let l seq = line seq (float_of_int seq) (E.Text_delta (string_of_int seq)) in
     match since_seq with
-    | -1 -> Ok { Log.operation_id = "op"; events = [ l 0; l 1 ]; has_more = true; next_since_seq = 1 }
-    | 1 -> Ok { Log.operation_id = "op"; events = [ l 2 ]; has_more = true; next_since_seq = 2 }
-    | 2 -> Ok { Log.operation_id = "op"; events = []; has_more = false; next_since_seq = 2 }
-    | _ -> Error (Log.Events_transport "unexpected page")
+    | Journal.Whole_turn ->
+        Ok { Log.operation_id = "op"; events = [ l 0; l 1 ]; has_more = true
+           ; next_since_seq = Journal.After_seq 1 }
+    | Journal.After_seq 1 ->
+        Ok { Log.operation_id = "op"; events = [ l 2 ]; has_more = true
+           ; next_since_seq = Journal.After_seq 2 }
+    | Journal.After_seq 2 ->
+        Ok { Log.operation_id = "op"; events = []; has_more = false
+           ; next_since_seq = Journal.After_seq 2 }
+    | Journal.After_seq _ -> Error (Log.Events_transport "unexpected page")
   in
-  (match Log.read_whole_journal ~since_seq:(-1) ~fetch:(fun ~since_seq -> page_of since_seq) with
+  (match
+     Log.read_whole_journal ~since_seq:Journal.Whole_turn
+       ~fetch:(fun ~since_seq -> page_of since_seq)
+   with
    | Ok lines ->
        check (list int) "every line once, in order" [ 0; 1; 2 ]
          (List.map (fun (l : Journal.journaled_event) -> l.seq) lines)
    | Error error -> failf "unexpected %s" (Log.events_error_to_string error));
-  check (list int) "each page asked once, from -1" [ -1; 1; 2 ] (List.rev !asked);
+  check (list position) "each page asked once, from the whole journal"
+    [ Journal.Whole_turn; Journal.After_seq 1; Journal.After_seq 2 ]
+    (List.rev !asked);
   (* A resume starts where the log ends. *)
   asked := [];
-  (match Log.read_whole_journal ~since_seq:1 ~fetch:(fun ~since_seq -> page_of since_seq) with
+  (match
+     Log.read_whole_journal ~since_seq:(Journal.After_seq 1)
+       ~fetch:(fun ~since_seq -> page_of since_seq)
+   with
    | Ok lines -> check int "only what the log lacks" 1 (List.length lines)
    | Error error -> failf "unexpected %s" (Log.events_error_to_string error));
-  check (list int) "asked from the resume position" [ 1; 2 ] (List.rev !asked);
+  check (list position) "asked from the resume position"
+    [ Journal.After_seq 1; Journal.After_seq 2 ]
+    (List.rev !asked);
   (* A page that claims more without advancing is an error naming the
      position, asked once: the lines read so far are not the journal, and a
      shorter [Ok] would have the handler hold a truncated turn as the record
-     and say nothing. *)
+     and say nothing. The whole journal is never past anything, so a null
+     cursor is stuck too. *)
   asked := [];
   let stuck ~since_seq =
     asked := since_seq :: !asked;
     Ok { Log.operation_id = "op"; events = [ line 0 1.0 (E.Text_delta "0") ]
        ; has_more = true; next_since_seq = since_seq }
   in
-  (match Log.read_whole_journal ~since_seq:(-1) ~fetch:stuck with
+  (match Log.read_whole_journal ~since_seq:Journal.Whole_turn ~fetch:stuck with
    | Ok lines -> failf "a stuck page read as %d line(s)" (List.length lines)
    | Error (Log.Events_undecodable detail) ->
        check string "the error names the position that did not advance"
-         "page after seq -1 claims more but did not advance (next_since_seq -1)"
+         "page after since_seq=whole_turn claims more but did not advance \
+          (next_since_seq=whole_turn)"
          detail
    | Error error -> failf "unexpected %s" (Log.events_error_to_string error));
-  check (list int) "the stuck page is asked once" [ -1 ] (List.rev !asked);
+  check (list position) "the stuck page is asked once" [ Journal.Whole_turn ]
+    (List.rev !asked);
+  (match Log.read_whole_journal ~since_seq:(Journal.After_seq 4) ~fetch:stuck with
+   | Ok lines -> failf "a stuck page after a held seq read as %d line(s)" (List.length lines)
+   | Error (Log.Events_undecodable detail) ->
+       check string "the error names the held seq that did not advance"
+         "page after since_seq=4 claims more but did not advance (next_since_seq=4)"
+         detail
+   | Error error -> failf "unexpected %s" (Log.events_error_to_string error));
   (* An error ends the read as that error. *)
   let failing ~since_seq =
-    if since_seq = -1
-    then Ok { Log.operation_id = "op"; events = []; has_more = true; next_since_seq = 5 }
-    else Error Log.Journal_pruned
+    match since_seq with
+    | Journal.Whole_turn ->
+        Ok { Log.operation_id = "op"; events = []; has_more = true
+           ; next_since_seq = Journal.After_seq 5 }
+    | Journal.After_seq _ -> Error Log.Journal_pruned
   in
   check bool "the first error is the result" true
-    (match Log.read_whole_journal ~since_seq:(-1) ~fetch:failing with
+    (match Log.read_whole_journal ~since_seq:Journal.Whole_turn ~fetch:failing with
      | Error Log.Journal_pruned -> true
      | Ok _ | Error _ -> false)
 ;;
@@ -382,7 +445,8 @@ let test_read_whole_journal_pages_until_the_position_stops_moving () =
 let test_hold_seq_counts_without_an_entry () =
   let log = Log.create ~keeper_name:"k" ~request_id:"r" ~started_at:0. in
   Log.hold_seq log 4;
-  check int "held position moves last_seq" 4 (Log.last_seq log);
+  check position "a held position moves the resume position" (Journal.After_seq 4)
+    (Log.resume_position log);
   check int "and adds no entry" 0 (List.length (Log.entries log));
   check bool "a frame arriving at a held position is a duplicate" false
     (Log.add log ~seq:(Some 4) Live.Run_started);
@@ -460,8 +524,8 @@ let test_a_journal_page_fills_the_log_like_the_wire_does () =
      frames that drew something. The fixture ends with two undrawn
      bookkeeping events and then Run_finished, so the two agree here; a turn
      whose last frames draw nothing would leave the journal-fed log ahead. *)
-  check int "same last seq when the turn ends in a drawn event"
-    (Log.last_seq from_wire) (Log.last_seq from_journal);
+  check position "same resume position when the turn ends in a drawn event"
+    (Log.resume_position from_wire) (Log.resume_position from_journal);
   let trailing_undrawn = golden @ [ E.Agent_core_stream_ping; E.Agent_core_stream_ping ] in
   let events = List.mapi (fun seq event -> (seq, event)) trailing_undrawn in
   let from_journal = log () in
@@ -473,10 +537,10 @@ let test_a_journal_page_fills_the_log_like_the_wire_does () =
     (List.length taken_from_journal) (List.length taken_with_trailing);
   let from_wire = log () in
   List.iter (fun (seq, d) -> ignore (Log.add from_wire ~seq d : bool)) (wire_tagged_deltas events);
-  check int "the journal-fed log is ahead by the trailing undrawn frames"
-    (List.length golden + 1) (Log.last_seq from_journal);
-  check int "the wire-fed log stops at the last drawn frame"
-    (List.length golden - 1) (Log.last_seq from_wire);
+  check position "the journal-fed log is ahead by the trailing undrawn frames"
+    (Journal.After_seq (List.length golden + 1)) (Log.resume_position from_journal);
+  check position "the wire-fed log stops at the last drawn frame"
+    (Journal.After_seq (List.length golden - 1)) (Log.resume_position from_wire);
   check int "same attempt" (Log.attempt from_wire) (Log.attempt from_journal);
   check bool "the wire's attempt advanced past the retry" true (Log.attempt from_wire = 1)
 
@@ -486,7 +550,7 @@ let () =
       , [ test_case "seq dedup, and None never dedupes" `Quick
             test_seq_dedup_and_none_never_dedupes
         ; test_case "last seq follows the highest held" `Quick
-            test_last_seq_follows_the_highest_held
+            test_resume_position_follows_the_highest_held
         ; test_case "attempt advances on runtime attempt started" `Quick
             test_attempt_advances_on_runtime_attempt_started
         ; test_case "commit is idempotent and bumps once" `Quick

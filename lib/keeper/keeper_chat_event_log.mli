@@ -47,6 +47,15 @@ val journaled_event_of_string : string -> (journaled_event, string) result
 type journal
 (** An open per-operation journal: a resolved path. *)
 
+val events_dirname : string
+(** The store's directory name under [.masc] — the one literal behind
+    {!events_dir}, the audit sweep, and the retention pruner (which walks a
+    masc root it already holds). *)
+
+val events_dir : base_dir:string -> string
+(** [<base>/.masc/keeper_chat_events]: the root every keeper's journals live
+    under, [<events_dir>/<keeper>/<operation_id>.jsonl]. *)
+
 val journal_path :
   base_dir:string -> keeper_name:string -> operation_id:string -> string
 (** [<base>/.masc/keeper_chat_events/<keeper>/<operation_id>.jsonl], with both
@@ -75,27 +84,69 @@ val append :
     event is logged and skipped instead of appended. Only
     [Eio.Cancel.Cancelled] propagates. *)
 
-val read_journal : journal -> journaled_event list
-(** Reads and strictly decodes every line. Raises [Invalid_argument] on a
-    corrupt line and [Sys_error] if the journal file does not exist. Test
-    support in stage 1. *)
-
-val read_journal_path : string -> journaled_event list
-(** {!read_journal} over an already-resolved path, creating nothing on disk —
-    unlike {!open_journal}, which mkdirs the parent. For read-only consumers
-    (the stage-2 consistency audit). Same strictness: [Invalid_argument] on a
-    corrupt line, [Sys_error] when the file does not exist. *)
-
-(** Why a serving read of a journal produced no entries. *)
+(** Why a read of a journal produced no entries. *)
 type read_failure =
   | Journal_missing  (** No file at the path: nothing journaled yet, or pruned. *)
   | Journal_unreadable of string
-      (** The file exists but could not be opened or read ([Sys_error] text). *)
-  | Journal_corrupt of string  (** A line failed the strict decode. *)
+      (** The file exists but could not be opened or read (the exception's
+          text). *)
+  | Journal_corrupt of string  (** A complete row failed the strict decode. *)
 
 val read_journal_path_result : string -> (journaled_event list, read_failure) result
-(** {!read_journal_path} with its two exceptions turned into {!read_failure},
-    for production readers that must degrade rather than raise. Reads without
-    the writer's lock, like every other reader of these stores: a line is
-    appended by one [write] and lines are small, so a torn tail is not
-    expected; if one is ever observed it surfaces as [Journal_corrupt]. *)
+(** Every complete row of the journal at an already-resolved path, strictly
+    decoded, creating nothing on disk — unlike {!open_journal}, which mkdirs
+    the parent. The read goes through
+    [Fs_compat.read_private_jsonl_rows_locked_result]: it holds the per-path
+    mutex and a shared file lock against the exclusive lock {!append} takes,
+    so it never observes a write in flight, and it runs in a systhread when
+    called from an Eio fiber. The writer's framing rule is applied on the
+    way out: a final fragment with no trailing newline is the remains of an
+    append that never completed, not a row — it is logged, the complete rows
+    before it are returned, and the writer refuses to append after it, so
+    those rows are the journal's final content. A bad complete row is
+    [Journal_corrupt]. Never raises except [Eio.Cancel.Cancelled]. *)
+
+val read_journal : journal -> (journaled_event list, read_failure) result
+(** {!read_journal_path_result} over an open journal's path. *)
+
+(** {1 Replay position} *)
+
+(** Where a client wants a journal read to start: the whole turn, or only the
+    entries after the seq it already holds. On the wire ([since_seq] on the
+    chat-stream POST body and the v2 events query) the field is absent for
+    the whole turn and a non-negative integer otherwise; a negative integer
+    is rejected at the boundary. Decoded once there, at the boundary, and
+    passed through replay as this type. *)
+type replay_position =
+  | Whole_turn
+  | After_seq of int
+
+val replay_position_of_wire : int option -> replay_position option
+(** The request-side spelling: an absent field is [Whole_turn], [n >= 0] is
+    [After_seq n], a negative integer is [None]. The only place the wire's
+    absence rule is read. *)
+
+val replay_position_to_wire : replay_position -> int option
+(** Inverse of {!replay_position_of_wire}: the field to write, or nothing. *)
+
+val replay_position_to_string : replay_position -> string
+(** For log lines: ["whole_turn"], or the held seq. *)
+
+val replay_position_to_yojson : replay_position -> Yojson.Safe.t
+(** The response-side spelling ([next_since_seq] on the v2 events page): a
+    response field cannot be absent the way a request field can, so
+    [Whole_turn] is [`Null] and [After_seq n] is [`Int n]. *)
+
+val replay_position_of_yojson : Yojson.Safe.t -> replay_position option
+(** Inverse of {!replay_position_to_yojson}, for a client reading a page:
+    [`Null] is [Whole_turn], [`Int n] with [n >= 0] is [After_seq n], anything
+    else is [None]. *)
+
+val seq_is_after : replay_position -> int -> bool
+(** Whether an entry with this seq lies past the position: every seq for
+    [Whole_turn], [seq > held] for [After_seq held]. *)
+
+val replay_position_advance : replay_position -> int -> replay_position
+(** The position after an entry with this seq was received: [After_seq seq]
+    when it lies past the position ({!seq_is_after}), the position unchanged
+    otherwise. *)

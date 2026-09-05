@@ -129,7 +129,7 @@ let bool_field name body =
 ;;
 
 let test_chat_events_page_walks_by_seq () =
-  let first = page ~since_seq:(-1) ~limit:3 () in
+  let first = page ~since_seq:L.Whole_turn ~limit:3 () in
   check string
     "schema"
     "masc.keeper_chat_events.v2"
@@ -141,26 +141,43 @@ let test_chat_events_page_walks_by_seq () =
   check (list int) "first page seqs" [ 0; 1; 2 ] (seqs first);
   check bool "first page has more" true (bool_field "has_more" first);
   check int "cursor is the last seq served" 2 (int_field "next_since_seq" first);
-  let second = page ~since_seq:(int_field "next_since_seq" first) ~limit:3 () in
+  let second = page ~since_seq:(L.After_seq (int_field "next_since_seq" first)) ~limit:3 () in
   check (list int) "second page continues without gap or repeat" [ 3; 4; 5 ] (seqs second);
   check bool "second page has more" true (bool_field "has_more" second);
-  let third = page ~since_seq:(int_field "next_since_seq" second) ~limit:3 () in
+  let third = page ~since_seq:(L.After_seq (int_field "next_since_seq" second)) ~limit:3 () in
   check (list int) "third page is the tail" [ 6 ] (seqs third);
   check bool "tail has no more" false (bool_field "has_more" third);
   check int "tail cursor" 6 (int_field "next_since_seq" third);
-  let empty = page ~since_seq:6 ~limit:3 () in
+  let empty = page ~since_seq:(L.After_seq 6) ~limit:3 () in
   check (list int) "past the end is empty" [] (seqs empty);
   check bool "empty page has no more" false (bool_field "has_more" empty);
   check int
     "an empty page hands the caller's cursor back unchanged"
     6
-    (int_field "next_since_seq" empty)
+    (int_field "next_since_seq" empty);
+  let nothing = page ~since_seq:L.Whole_turn ~limit:3 () in
+  check (list int) "a whole-turn page starts at seq 0" [ 0; 1; 2 ] (seqs nothing);
+  (* An empty page for the whole journal has no seq to hand back, and a
+     response field cannot be absent the way the request's was: it is null,
+     which a client reads as the whole journal again. *)
+  check bool
+    "an empty whole-journal page hands back null"
+    true
+    (field
+       "next_since_seq"
+       (Api.chat_events_page
+          ~operation_id:"kmsg-events"
+          ~since_seq:L.Whole_turn
+          ~limit:3
+          ~redact_json:Fun.id
+          [])
+     = `Null)
 ;;
 
 (* The response is the journal as written: each element is the stage-1
    envelope, reasoning delta included -- which is why the route is CanAdmin. *)
 let test_chat_events_are_the_journal_lines () =
-  let body = page ~since_seq:(-1) ~limit:Keeper_chat_event_log.page_default_limit () in
+  let body = page ~since_seq:L.Whole_turn ~limit:Keeper_chat_event_log.page_default_limit () in
   (match field "events" body with
    | `List events ->
      check int "every entry served" (List.length journal) (List.length events);
@@ -203,7 +220,11 @@ let rec mask_private = function
 
 let test_chat_events_are_redacted_per_line () =
   let body =
-    page ~redact_json:mask_private ~since_seq:(-1) ~limit:Keeper_chat_event_log.page_default_limit ()
+    page
+      ~redact_json:mask_private
+      ~since_seq:L.Whole_turn
+      ~limit:Keeper_chat_event_log.page_default_limit
+      ()
   in
   match field "events" body with
   | `List events ->
@@ -238,18 +259,35 @@ let test_missing_journal_is_classified_by_the_row () =
     (classify (Some (Keeper_owner.Chat_operation.Running { started_at = 1.0 }))
      = Api.Nothing_journaled_yet);
   check bool
-    "a succeeded row means the journal was pruned"
+    "a succeeded row with no journal is a settled operation without one"
     true
     (classify
        (Some
           (Keeper_owner.Chat_operation.Succeeded
              { completed_at = 2.0; outcome_ref = "outcome-1" }))
-     = Api.Journal_pruned);
+     = Api.No_journal_for_settled_operation);
   check bool
-    "a cancelled row means the journal was pruned"
+    "a cancelled row with no journal is a settled operation without one"
     true
     (classify (Some (Keeper_owner.Chat_operation.Cancelled { completed_at = 2.0 }))
-     = Api.Journal_pruned)
+     = Api.No_journal_for_settled_operation);
+  (* The server cannot tell a retention prune from an append that never
+     created the file, so the message names the operation and its ended
+     state and claims no cause. *)
+  let message =
+    Api.For_testing.no_journal_for_settled_operation_message ~operation_id:"kmsg-gone"
+  in
+  check bool
+    "the message names the operation"
+    true
+    (Astring.String.is_infix ~affix:"kmsg-gone" message);
+  List.iter
+    (fun claim ->
+       check bool
+         ("the message does not claim a cause: " ^ claim)
+         false
+         (Astring.String.is_infix ~affix:claim message))
+    [ "retention"; "aged"; "prune" ]
 ;;
 
 (* F3 from the adversarial review: pin the permission through the same

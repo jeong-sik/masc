@@ -1,7 +1,7 @@
 (* RFC-0412 stage 2 — since_seq replay. The journaled suffix re-folded from
    [Projection.initial] reproduces the live SSE bytes, frame ids are journal
    seqs (so entries that project to [None] leave gaps), the stream request
-   parser admits [since_seq] only as an integer >= -1, the reconnect dedup
+   parser admits [since_seq] only absent or as an integer >= 0, the reconnect dedup
    keeps an event the journal lost, and the handler-side replay never raises
    into the server switch. *)
 
@@ -66,10 +66,12 @@ let live_frames () =
 let replay since_seq =
   Replay.replay ~redact_text:Fun.id ~redact_json:Fun.id ~since_seq journaled
 
+let after seq = L.After_seq seq
+
 let seqs pairs = List.map fst pairs
 
 let test_suffix_reproduces_live_bytes () =
-  let replayed = replay 4 |> List.map (fun pair -> fst pair, frame pair) in
+  let replayed = replay (after 4) |> List.map (fun pair -> fst pair, frame pair) in
   let expected = live_frames () |> List.filter (fun (seq, _) -> seq > 4) in
   Alcotest.(check (list int)) "suffix seqs" [ 5; 6; 7; 8 ] (seqs replayed);
   Alcotest.(check (list (pair int string)))
@@ -77,8 +79,8 @@ let test_suffix_reproduces_live_bytes () =
     expected
     replayed
 
-let test_minus_one_replays_the_whole_turn () =
-  let replayed = replay (-1) in
+let test_whole_turn_replays_everything () =
+  let replayed = replay L.Whole_turn in
   Alcotest.(check (list int))
     "every projected seq; 3 is absent because a status block never hits the wire"
     [ 0; 1; 2; 4; 5; 6; 7; 8 ]
@@ -89,8 +91,8 @@ let test_minus_one_replays_the_whole_turn () =
     (List.map frame replayed)
 
 let test_cut_at_or_past_the_end_replays_nothing () =
-  Alcotest.(check (list int)) "at the last seq" [] (seqs (replay 8));
-  Alcotest.(check (list int)) "past the last seq" [] (seqs (replay 40))
+  Alcotest.(check (list int)) "at the last seq" [] (seqs (replay (after 8)));
+  Alcotest.(check (list int)) "past the last seq" [] (seqs (replay (after 40)))
 
 let test_frame_id_is_the_journal_seq () =
   List.iter
@@ -102,7 +104,7 @@ let test_frame_id_is_the_journal_seq () =
          true
          (String.length text >= String.length prefix
           && String.equal (String.sub text 0 (String.length prefix)) prefix))
-    (replay (-1))
+    (replay L.Whole_turn)
 
 (* The fold must start at [initial]: the delta at seq 5 carries the message
    and run identity established at seqs 0 and 1, before the cut. Folding the
@@ -112,11 +114,11 @@ let test_projection_state_before_the_cut_is_kept () =
     Replay.replay
       ~redact_text:Fun.id
       ~redact_json:Fun.id
-      ~since_seq:(-1)
+      ~since_seq:L.Whole_turn
       (List.filter (fun (entry : L.journaled_event) -> entry.seq > 4) journaled)
     |> List.map frame
   in
-  let full_fold = replay 4 |> List.map frame in
+  let full_fold = replay (after 4) |> List.map frame in
   Alcotest.(check bool)
     "a suffix-only fold produces different bytes"
     false
@@ -139,16 +141,27 @@ let parse_ok body =
   | Ok payload -> payload
   | Error err -> Alcotest.fail ("expected parse to succeed: " ^ err)
 
+let position_testable =
+  let pp formatter position =
+    Format.pp_print_string formatter (L.replay_position_to_string position)
+  in
+  Alcotest.testable pp ( = )
+
+(* The wire: an absent [since_seq] is the whole turn, [n >= 0] is the last
+   seq received. There is no sentinel integer for the whole turn. *)
 let test_parser_reads_since_seq () =
-  Alcotest.(check (option int)) "absent" None (parse_ok (body ())).since_seq;
-  Alcotest.(check (option int))
+  Alcotest.(check position_testable)
+    "absent asks for the whole turn"
+    L.Whole_turn
+    (parse_ok (body ())).since_seq;
+  Alcotest.(check position_testable)
     "a received seq"
-    (Some 12)
+    (L.After_seq 12)
     (parse_ok (body ~since_seq:"12" ())).since_seq;
-  Alcotest.(check (option int))
-    "-1 asks for the whole turn"
-    (Some (-1))
-    (parse_ok (body ~since_seq:"-1" ())).since_seq
+  Alcotest.(check position_testable)
+    "0 is after seq 0"
+    (L.After_seq 0)
+    (parse_ok (body ~since_seq:"0" ())).since_seq
 
 let test_parser_rejects_malformed_since_seq () =
   List.iter
@@ -160,7 +173,46 @@ let test_parser_rejects_malformed_since_seq () =
            ("rejection names the field for " ^ raw)
            true
            (Astring.String.is_infix ~affix:"since_seq" message))
-    [ "-2"; {|"12"|}; "1.5"; "null" ]
+    [ "-1"; "-2"; {|"12"|}; "1.5"; "null" ]
+
+(* The two spellings of a position are inverses: the request side omits the
+   whole turn, the response side writes it as null. *)
+let test_replay_position_round_trips_both_spellings () =
+  List.iter
+    (fun position ->
+       Alcotest.(check (option position_testable))
+         ("request spelling round-trips " ^ L.replay_position_to_string position)
+         (Some position)
+         (L.replay_position_of_wire (L.replay_position_to_wire position));
+       Alcotest.(check (option position_testable))
+         ("response spelling round-trips " ^ L.replay_position_to_string position)
+         (Some position)
+         (L.replay_position_of_yojson (L.replay_position_to_yojson position)))
+    [ L.Whole_turn; L.After_seq 0; L.After_seq 12 ];
+  Alcotest.(check (option position_testable))
+    "a negative integer is no position on the request side"
+    None
+    (L.replay_position_of_wire (Some (-1)));
+  Alcotest.(check (option position_testable))
+    "a negative integer is no position on the response side"
+    None
+    (L.replay_position_of_yojson (`Int (-1)));
+  Alcotest.(check (option position_testable))
+    "a string is no position"
+    None
+    (L.replay_position_of_yojson (`String "12"));
+  Alcotest.(check position_testable)
+    "a seq past the position advances it"
+    (L.After_seq 7)
+    (L.replay_position_advance (L.After_seq 3) 7);
+  Alcotest.(check position_testable)
+    "a seq at or before the position leaves it"
+    (L.After_seq 7)
+    (L.replay_position_advance (L.After_seq 7) 7);
+  Alcotest.(check position_testable)
+    "any seq advances the whole turn"
+    (L.After_seq 0)
+    (L.replay_position_advance L.Whole_turn 0)
 
 (* ---- handler side: typed reads, dedup, and the exception boundary ---- *)
 
@@ -251,14 +303,14 @@ let test_handler_replay_matches_the_pure_fold () =
         ~base_path:base_dir
         ~keeper_name
         ~operation_id
-        ~since_seq:4
+        ~since_seq:(after 4)
       |> List.map frame
     in
     (* No secret is registered under this base, so the redaction the handler
        takes is the identity on this fixture and the bytes must match. *)
     Alcotest.(check (list string))
       "handler replay equals the pure fold"
-      (replay 4 |> List.map frame)
+      (replay (after 4) |> List.map frame)
       frames)
 
 let test_handler_replay_degrades_to_nothing () =
@@ -268,12 +320,21 @@ let test_handler_replay_degrades_to_nothing () =
         ~base_path:base_dir
         ~keeper_name
         ~operation_id
-        ~since_seq:(-1)
+        ~since_seq:L.Whole_turn
     in
     Alcotest.(check int) "missing journal replays nothing" 0 (List.length (replay_frames ()));
     let path = write_journal ~base_dir journaled in
+    (* An append cut before its newline is not a row: the complete rows
+       replay, so a client resumes from the last seq it was handed. *)
     let oc = open_out_gen [ Open_append; Open_wronly ] 0o600 path in
-    output_string oc "{\"v\":1,\"seq\":99}\n";
+    output_string oc "{\"v\":1,\"seq\":99,\"ts\":9.0,\"event\":{\"type\":\"text_de";
+    close_out oc;
+    Alcotest.(check (list string))
+      "a torn tail replays the complete rows"
+      (replay L.Whole_turn |> List.map frame)
+      (replay_frames () |> List.map frame);
+    let oc = open_out_gen [ Open_append; Open_wronly ] 0o600 path in
+    output_string oc "lta\",\"delta\":\"x\"}}\n{\"v\":1,\"seq\":100}\n";
     close_out oc;
     Alcotest.(check int)
       "corrupt journal replays nothing rather than a prefix"
@@ -296,7 +357,7 @@ let test_handler_replay_degrades_to_nothing () =
         ~base_path:base_dir
         ~keeper_name
         ~operation_id
-        ~since_seq:(-1)
+        ~since_seq:L.Whole_turn
     with
     | frames ->
       Alcotest.(check int) "a refused event empties the replay" 0 (List.length frames)
@@ -309,8 +370,8 @@ let () =
     [ ( "replay"
       , [ Alcotest.test_case "suffix reproduces live bytes" `Quick
             test_suffix_reproduces_live_bytes
-        ; Alcotest.test_case "-1 replays the whole turn" `Quick
-            test_minus_one_replays_the_whole_turn
+        ; Alcotest.test_case "the whole turn replays everything" `Quick
+            test_whole_turn_replays_everything
         ; Alcotest.test_case "cut at or past the end replays nothing" `Quick
             test_cut_at_or_past_the_end_replays_nothing
         ; Alcotest.test_case "frame id is the journal seq" `Quick
@@ -323,6 +384,8 @@ let () =
             test_parser_reads_since_seq
         ; Alcotest.test_case "parser rejects malformed since_seq" `Quick
             test_parser_rejects_malformed_since_seq
+        ; Alcotest.test_case "a position round-trips both wire spellings" `Quick
+            test_replay_position_round_trips_both_spellings
         ] )
     ; ( "handler"
       , [ Alcotest.test_case "read result names missing, corrupt and unreadable" `Quick

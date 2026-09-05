@@ -49,7 +49,7 @@ let stream_payload_exn
   ; channel_workspace_id
   ; attachments
   ; direct_message
-  ; since_seq = None
+  ; since_seq = Keeper_chat_event_log.Whole_turn
   }
 
 let rec remove_tree path =

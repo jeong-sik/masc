@@ -168,10 +168,12 @@ let attachment_block_to_yojson attachment =
     ]
 
 (* [since_seq] is where a re-POST of the same operation asks the stream to
-   resume: the last journal seq the pane holds, [-1] for the whole turn. It
+   resume: after the last journal seq the pane holds, or the whole turn. It
    belongs to the POST, not to the request -- the request is what the
    operator said and keeps one identity across every resend -- so it rides
-   beside the record and is absent from a first submit. *)
+   beside the record. On the wire the whole turn is the field's absence
+   ([Masc.Keeper_chat_event_log.replay_position_to_wire]), which is what a
+   first submit sends too, so a first submit's body is what it always was. *)
 let request_to_yojson ~since_seq request =
   let base =
     [ "request_id", `String request.request_id
@@ -180,7 +182,7 @@ let request_to_yojson ~since_seq request =
     ]
   in
   let resume =
-    match since_seq with
+    match Masc.Keeper_chat_event_log.replay_position_to_wire since_seq with
     | None -> []
     | Some seq -> [ "since_seq", `Int seq ]
   in

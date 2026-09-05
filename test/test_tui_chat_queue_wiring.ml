@@ -14,6 +14,13 @@ module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Live = Masc_tui_keeper_chat_live
 module Log = Masc_tui_keeper_chat_log
 module Tui_types = Masc_tui_types
+
+let position =
+  testable
+    (fun formatter position ->
+      Format.pp_print_string formatter
+        (Masc.Keeper_chat_event_log.replay_position_to_string position))
+    ( = )
 module Interrupt_signal = Masc_tui_interrupt_signal
 
 let calls ~module_path ~callee = Ast_grep.count_calls ~module_path ~callee
@@ -879,14 +886,14 @@ let test_the_reply_row_defers_to_a_log_that_holds_the_turn () =
 ;;
 
 (* The reconnect resumes from the log, not from the decoder: the watcher
-   opens a fresh decoder per (re)connect and re-POSTs with the log's last
-   seq, so the server replays only what the pane missed. *)
-let test_a_reconnect_resumes_from_the_logs_last_seq () =
+   opens a fresh decoder per (re)connect and re-POSTs with the log's resume
+   position, so the server replays only what the pane missed. *)
+let test_a_reconnect_resumes_from_the_logs_position () =
   let resumes =
     Ast_grep.count_calls_in_value_binding
       ~module_path:"bin/masc_tui.ml"
       ~binding_name:"post_keeper_chat_watching"
-      ~callee:"Keeper_chat_log.last_seq"
+      ~callee:"Keeper_chat_log.resume_position"
   in
   let decoders =
     Ast_grep.count_calls_in_value_binding
@@ -896,8 +903,8 @@ let test_a_reconnect_resumes_from_the_logs_last_seq () =
   in
   if resumes < 1 || decoders < 1 then
     failf
-      "post_keeper_chat_watching must re-POST from the log's last seq with a \
-       fresh decoder: last_seq reads=%d decoders=%d"
+      "post_keeper_chat_watching must re-POST from the log's resume position \
+       with a fresh decoder: resume_position reads=%d decoders=%d"
       resumes decoders
 ;;
 
@@ -911,14 +918,18 @@ let test_replayed_frames_up_to_the_last_seq_are_not_added_twice () =
   let add seq delta = Tui_types.turn_log_add ~now:11.0 log ~seq:(Some seq) delta in
   add 0 Live.Run_started;
   List.iteri (fun i word -> add (i + 1) (Live.Text word)) [ "a"; "b"; "c"; "d"; "e" ];
-  check int "the cut stream left the log at seq 5" 5 (Log.last_seq log.Tui_types.tl_log);
+  check position "the cut stream left the log at seq 5"
+    (Masc.Keeper_chat_event_log.After_seq 5)
+    (Log.resume_position log.Tui_types.tl_log);
   (* The server replays from 3 (a generous since_seq) and continues live. *)
   List.iter
     (fun (seq, word) -> add seq (Live.Text word))
     [ (3, "c"); (4, "d"); (5, "e"); (6, "f"); (7, "g") ];
   check string "only the frames past the last seq are folded" "abcdefg"
     (Keeper_chat_transcript.text log.Tui_types.tl_transcript);
-  check int "the log moved to the newest seq" 7 (Log.last_seq log.Tui_types.tl_log)
+  check position "the log moved to the newest seq"
+    (Masc.Keeper_chat_event_log.After_seq 7)
+    (Log.resume_position log.Tui_types.tl_log)
 ;;
 
 let settled_log ~request_id deltas =
@@ -1023,7 +1034,8 @@ let test_a_journal_fills_a_turn_log_at_the_lines_own_times () =
     ];
   check string "the text is the fold of the drawn lines" "hello"
     (Keeper_chat_transcript.text log.Tui_types.tl_transcript);
-  check int "the undrawn line still counts" 5 (Log.last_seq log.Tui_types.tl_log);
+  check position "the undrawn line still counts" (Journal.After_seq 5)
+    (Log.resume_position log.Tui_types.tl_log);
   check int "one entry per drawn line" 5 (List.length (Log.entries log.Tui_types.tl_log));
   check bool "the turn ended, so the log stands for it once committed" true
     (Log.commit log.Tui_types.tl_log;
@@ -1053,16 +1065,16 @@ let test_a_journal_read_resumes_after_a_partial_log () =
   let state =
     Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
-  check int "nothing held: the whole journal" (-1)
+  check position "nothing held: the whole journal" Journal.Whole_turn
     (Tui_types.journal_resume_position state ~keeper_name:"alpha" "op-1");
   let partial = journal_log ~request_id:"op-1" ~started_at:1. ~finished:false () in
   Tui_types.hold_settled_log state partial;
-  check int "a partial log: after what it has" 2
+  check position "a partial log: after what it has" (Journal.After_seq 2)
     (Tui_types.journal_resume_position state ~keeper_name:"alpha" "op-1");
-  check int "another keeper's record does not count" (-1)
+  check position "another keeper's record does not count" Journal.Whole_turn
     (Tui_types.journal_resume_position state ~keeper_name:"beta" "op-1");
   Tui_types.hold_settled_log state (journal_log ~request_id:"op-1" ~started_at:1. ());
-  check int "a whole log is not read again" (-1)
+  check position "a whole log is not read again" Journal.Whole_turn
     (Tui_types.journal_resume_position state ~keeper_name:"alpha" "op-1");
   Tui_types.journal_read_started state "op-9";
   Tui_types.journal_read_started state "op-9";
@@ -2235,7 +2247,7 @@ let () =
         ; test_case "a turn log folds each accepted delta once" `Quick
             test_a_turn_log_folds_each_accepted_delta_once
         ; test_case "a reconnect resumes from the log's last seq" `Quick
-            test_a_reconnect_resumes_from_the_logs_last_seq
+            test_a_reconnect_resumes_from_the_logs_position
         ; test_case "replayed frames up to the last seq are not added twice" `Quick
             test_replayed_frames_up_to_the_last_seq_are_not_added_twice
         ; test_case "settle commits the log instead of copying rows" `Quick

@@ -841,6 +841,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     (fun () ->
     let last_prune = ref (Unix.gettimeofday ()) in
     let last_chat_journal_audit = ref (Unix.gettimeofday ()) in
+    (* Operations the audit has reported: each settled operation is audited
+       once per process life. *)
+    let chat_journal_audited = ref Keeper_chat_journal_audit.Audited.empty in
     let transition_projection_cursor =
       ref Keeper_event_queue_recovery.initial_sweep_cursor
     in
@@ -1026,12 +1029,66 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          then begin
            last_chat_journal_audit := now;
            (try
-              let results =
+              let base_dir = (Mcp_server.workspace_config state).base_path in
+              (* Whether a journal may still be appended is the chat operation
+                 registry's answer: a queued or running row is a live turn.
+                 A terminal row, no row, or a keeper the inventory no longer
+                 holds (nothing can run its turns) is settled. Every other
+                 registry outcome is transient and leaves the file for the
+                 next pass. *)
+              let liveness ~keeper_name ~operation_id =
+                match Keeper_owner.Chat_operation.Operation_id.of_string operation_id with
+                | Error _ ->
+                  (* Not an operation id the registry can hold, so no turn
+                     of the registry's can be appending to it. *)
+                  Keeper_chat_journal_audit.Turn_settled
+                | Ok operation_id ->
+                  (match
+                     Keeper_owner_registry.exact_operation
+                       ~base_path:base_dir
+                       ~keeper_name
+                       operation_id
+                   with
+                   | Ok
+                       (Some
+                          { Keeper_owner.Chat_operation.state =
+                              ( Keeper_owner.Chat_operation.Queued
+                              | Keeper_owner.Chat_operation.Running _ )
+                          ; _
+                          }) -> Keeper_chat_journal_audit.Turn_running
+                   | Ok
+                       (Some
+                          { Keeper_owner.Chat_operation.state =
+                              ( Keeper_owner.Chat_operation.Succeeded _
+                              | Keeper_owner.Chat_operation.Failed _
+                              | Keeper_owner.Chat_operation.Cancelled _ )
+                          ; _
+                          })
+                   | Ok None
+                   | Error
+                       (Keeper_owner_registry.Command_lookup_failed
+                          (Keeper_owner_registry.Owner_not_found _)) ->
+                     Keeper_chat_journal_audit.Turn_settled
+                   | Error
+                       (( Keeper_owner_registry.Command_lookup_failed
+                            ( Keeper_owner_registry.Inventory_not_installed _
+                            | Owner_unavailable _
+                            | Owner_initialization_failed _
+                            | Inventory_stopping )
+                        | Command_lifecycle_reserved _
+                        | Command_rejected _ ) as error) ->
+                     Keeper_chat_journal_audit.Registry_unanswered
+                       (Keeper_owner_registry.command_error_to_string error))
+              in
+              let results, audited =
                 Keeper_chat_journal_audit.sweep
-                  ~base_dir:(Mcp_server.workspace_config state).base_path
-                  ~window_sec:(2. *. Masc_time_constants.hour)
+                  ~base_dir
+                  ~lookback_sec:(2. *. Masc_time_constants.hour)
+                  ~liveness
+                  ~audited:!chat_journal_audited
                   ()
               in
+              chat_journal_audited := audited;
               List.iter
                 (fun (keeper, operation_id, verdict) ->
                    match verdict with

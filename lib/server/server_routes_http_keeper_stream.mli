@@ -91,11 +91,14 @@ type keeper_chat_stream_request = {
   channel_workspace_id : string;
   attachments : Keeper_chat_store.attachment list;
   direct_message : Keeper_invocation_contract.direct_message;
-  since_seq : int option;
-      (** A reconnecting client re-POSTs the same [request_id] with the last
-          journal seq it received; the handler replays the journaled suffix
-          before the live sink attaches (RFC-0412 §3.2). [-1] asks for the
-          whole turn. Absent on a first submit. *)
+  since_seq : Keeper_chat_event_log.replay_position;
+      (** Where a re-POST of the same [request_id] asks the replay to start:
+          after the last journal seq the client received, or the whole turn
+          — which is also what an absent field, a first submit, says. When
+          the owner already holds the operation the handler replays the
+          journaled suffix before the live sink attaches (RFC-0412 §3.2).
+          Decoded by {!Keeper_chat_event_log.replay_position_of_wire}: absent
+          or an integer [>= 0]; anything else fails the parse. *)
 }
 (** Parsed payload of a keeper chat-stream HTTP request.
     [message] is the text fallback used by the existing direct keeper
@@ -341,7 +344,7 @@ module For_testing : sig
     base_path:string ->
     keeper_name:string ->
     operation_id:string ->
-    since_seq:int ->
+    since_seq:Keeper_chat_event_log.replay_position ->
     (int * Ag_ui.event) list
   val has_connector_context : keeper_chat_stream_request -> bool
   val has_external_speaker : keeper_chat_stream_request -> bool

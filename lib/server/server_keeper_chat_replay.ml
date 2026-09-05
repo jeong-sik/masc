@@ -14,7 +14,8 @@ let replay ~redact_text ~redact_json ~since_seq entries =
          in
          let acc =
            match projected with
-           | Some event when entry.seq > since_seq -> (entry.seq, event) :: acc
+           | Some event when Keeper_chat_event_log.seq_is_after since_seq entry.seq ->
+             (entry.seq, event) :: acc
            | Some _ | None -> acc
          in
          projection, acc)

@@ -570,10 +570,13 @@ type journal = { path : string }
 
 let sanitize_segment = Workspace_utils_backend_setup.sanitize_namespace_segment
 
+(* The single spelling of the store's directory name: the journal writer, the
+   consistency audit's sweep, and the retention pruner all derive their paths
+   from it. *)
+let events_dirname = "keeper_chat_events"
+
 let events_dir ~base_dir =
-  Filename.concat
-    (Common.masc_dir_from_base_path ~base_path:base_dir)
-    "keeper_chat_events"
+  Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) events_dirname
 ;;
 
 let journal_path ~base_dir ~keeper_name ~operation_id =
@@ -658,57 +661,127 @@ let append journal ~seq ~ts event =
       (Printexc.to_string exn)
 ;;
 
-(* Strict read: a corrupt line raises [Invalid_argument]. Stage 1 has no
-   consumer for this beyond tests; replay serving (stage 2) decides the
-   production corrupt-line policy then. *)
-let read_journal journal =
-  let ic = open_in_bin journal.path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () ->
-       let rec loop acc =
-         match input_line ic with
-         | exception End_of_file -> List.rev acc
-         | line ->
-           if String.equal (String.trim line) ""
-           then loop acc
-           else begin
-             match journaled_event_of_string line with
-             | Ok journaled -> loop (journaled :: acc)
-             | Error detail ->
-               raise
-                 (Invalid_argument
-                    (Printf.sprintf
-                       "keeper_chat_event_log: corrupt journal line path=%s: %s"
-                       journal.path
-                       detail))
-           end
-       in
-       loop [])
-;;
-
-(* Read-only consumers (the consistency audit) must not mkdir as a side
-   effect of reading, so they hold no [open_journal] handle. *)
-let read_journal_path path = read_journal { path }
-
-
 type read_failure =
   | Journal_missing
   | Journal_unreadable of string
   | Journal_corrupt of string
 
-(* Serving readers (stream replay, the v2 events endpoint) need the three
-   failure shapes apart: a missing journal is the normal state of a queued
-   operation, an unreadable one is an operator problem, a corrupt one is a
-   codec problem. [Sys_error] alone conflates the first two, so the path is
-   re-checked before naming the failure. *)
+(* Strict decode of the complete rows: the first line that is not an envelope
+   makes the whole read [Journal_corrupt]. Blank rows are skipped, as the
+   writer never emits one and a reader must not invent an event for one. *)
+let decode_rows ~path rows =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | line :: rest ->
+      if String.equal (String.trim line) ""
+      then loop acc rest
+      else begin
+        match journaled_event_of_string line with
+        | Ok journaled -> loop (journaled :: acc) rest
+        | Error detail ->
+          Error
+            (Journal_corrupt
+               (Printf.sprintf
+                  "keeper_chat_event_log: corrupt journal line path=%s: %s"
+                  path
+                  detail))
+      end
+  in
+  loop [] (String.split_on_char '\n' rows)
+;;
+
+let log_settlement_failure ~path cleanup_failure =
+  Log.Keeper.error
+    "keeper_chat_event_log: journal read succeeded with descriptor settlement failure path=%s: %s"
+    path
+    (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+;;
+
+(* Serving readers (stream replay, the v2 events endpoint) and the
+   consistency audit read through the writer's lock and framing
+   ([Fs_compat.read_private_jsonl_rows_locked_result]): the shared lock waits
+   out an append in progress, so the bytes are never a write in flight, and a
+   fragment after the last '\n' — the rows an append left when the process
+   died between its write and its rollback — is not a row. Such a fragment
+   is logged and the complete rows are served; the writer refuses to append
+   after it, so the journal is frozen at exactly those rows. The three
+   failure shapes stay apart: a missing journal is the normal state of a
+   queued operation, an unreadable one is an operator problem, a corrupt one
+   is a codec problem. *)
 let read_journal_path_result path =
-  match read_journal_path path with
-  | entries -> Ok entries
-  | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
-  | exception Sys_error detail ->
-    if Sys.file_exists path
-    then Error (Journal_unreadable detail)
-    else Error Journal_missing
-  | exception Invalid_argument detail -> Error (Journal_corrupt detail)
+  let of_rows = function
+    | Fs_compat.Private_jsonl_rows.Rows_missing -> Error Journal_missing
+    | Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset } ->
+      if rows_end < end_offset
+      then
+        Log.Keeper.warn
+          "keeper_chat_event_log: journal has a torn tail path=%s rows_end=%d end_offset=%d: bytes after the last row are an append that never completed; serving the complete rows"
+          path
+          rows_end
+          end_offset;
+      decode_rows ~path rows
+  in
+  match Fs_compat.read_private_jsonl_rows_locked_result path with
+  | Fs_compat.Private_file_succeeded rows -> of_rows rows
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->
+    log_settlement_failure ~path cleanup_failure;
+    of_rows value
+  | Fs_compat.Private_file_failed (Fs_compat.Private_jsonl_rows.Io_failed exn) ->
+    Error (Journal_unreadable (Printexc.to_string exn))
+  | Fs_compat.Private_file_failed_with_cleanup_failure
+      { error = Fs_compat.Private_jsonl_rows.Io_failed exn; cleanup_failure } ->
+    log_settlement_failure ~path cleanup_failure;
+    Error (Journal_unreadable (Printexc.to_string exn))
+;;
+
+let read_journal journal = read_journal_path_result journal.path
+
+(** {1 Replay position} *)
+
+type replay_position =
+  | Whole_turn
+  | After_seq of int
+
+(* The wire spells the position as an optional non-negative integer: absent
+   is the whole turn, [n >= 0] is the last seq held. A negative integer is no
+   position at all. Decoded here once; the handlers and the fold see only the
+   sum type. *)
+let replay_position_of_wire = function
+  | None -> Some Whole_turn
+  | Some raw -> if raw >= 0 then Some (After_seq raw) else None
+;;
+
+let replay_position_to_wire = function
+  | Whole_turn -> None
+  | After_seq seq -> Some seq
+;;
+
+let replay_position_to_string = function
+  | Whole_turn -> "whole_turn"
+  | After_seq seq -> string_of_int seq
+;;
+
+(* A response field cannot be absent the way a request field can, so a
+   response spells the whole turn as [null]. *)
+let replay_position_to_yojson position : Yojson.Safe.t =
+  match replay_position_to_wire position with
+  | None -> `Null
+  | Some seq -> `Int seq
+;;
+
+let replay_position_of_yojson (json : Yojson.Safe.t) =
+  match json with
+  | `Null -> replay_position_of_wire None
+  | `Int raw -> replay_position_of_wire (Some raw)
+  | `Assoc _ | `Bool _ | `Float _ | `Intlit _ | `List _ | `String _ -> None
+;;
+
+let seq_is_after position seq =
+  match position with
+  | Whole_turn -> true
+  | After_seq held -> seq > held
+;;
+
+let replay_position_advance position seq =
+  if seq_is_after position seq then After_seq seq else position
 ;;

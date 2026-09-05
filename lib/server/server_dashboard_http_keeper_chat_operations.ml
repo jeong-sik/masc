@@ -154,17 +154,29 @@ let parse_after_sequence request =
    ([Keeper_chat_event_log.page_default_limit], [page_max_limit]), read here
    and by the TUI that pages at the ceiling. *)
 
+(* The wire's absence rule lives in [Keeper_chat_event_log.replay_position_of_wire]:
+   no [since_seq] is the whole journal, [n >= 0] is the last seq already held. *)
 let parse_since_seq request =
-  match Server_utils.query_param request "since_seq" with
-  | None -> Ok (-1)
-  | Some raw ->
-    (match int_of_string_opt (String.trim raw) with
-     | Some value when value >= -1 -> Ok value
-     | Some _ | None ->
-       Error
-         (invalid_input
-            "since_seq must be an integer >= -1: the last seq already held, or -1 \
-             for the whole journal"))
+  let rejected =
+    Error
+      (invalid_input
+         "since_seq must be an integer >= 0, the last seq already held; omit it for \
+          the whole journal")
+  in
+  let raw =
+    match Server_utils.query_param request "since_seq" with
+    | None -> Ok None
+    | Some raw ->
+      (match int_of_string_opt (String.trim raw) with
+       | Some value -> Ok (Some value)
+       | None -> rejected)
+  in
+  match raw with
+  | Error _ as error -> error
+  | Ok raw ->
+    (match Keeper_chat_event_log.replay_position_of_wire raw with
+     | Some position -> Ok position
+     | None -> rejected)
 ;;
 
 let parse_limit request =
@@ -196,32 +208,46 @@ let rec take_at_most n acc = function
 
 (* What a missing journal means depends on what the store holds for the
    operation. Queued or Running: nothing journaled yet, so an empty page is
-   the truth. Terminal: the journal was written and the retention sweep has
-   since removed it (terminal rows themselves are never deleted), so an empty
-   page would draw an empty conversation with no error; the caller is told
-   the log is gone instead. No row at all: an operation nobody submitted. *)
+   the truth. Terminal: there is no journal and the row does not say why —
+   the retention sweep removes finished operations' journals, but a fail-open
+   append that never created the file (mkdir or first append failure) and an
+   operation that ran before journaling existed leave the same absence — so
+   an empty page would draw an empty conversation with no error, and the
+   caller is told only what is known: no journal. No row at all: an operation
+   nobody submitted. *)
 type missing_journal =
   | Nothing_journaled_yet
-  | Journal_pruned
+  | No_journal_for_settled_operation
   | Unknown_operation
 
 let classify_missing_journal = function
   | None -> Unknown_operation
   | Some state ->
-    if Operation.is_terminal state then Journal_pruned else Nothing_journaled_yet
+    if Operation.is_terminal state
+    then No_journal_for_settled_operation
+    else Nothing_journaled_yet
+;;
+
+let no_journal_for_settled_operation_message ~operation_id =
+  "no journal exists for Keeper chat operation " ^ operation_id ^ ", which has ended"
 ;;
 
 let chat_events_page ~operation_id ~since_seq ~limit ~redact_json entries =
   let page, rest =
     entries
     |> List.filter (fun (entry : Keeper_chat_event_log.journaled_event) ->
-      entry.seq > since_seq)
+      Keeper_chat_event_log.seq_is_after since_seq entry.seq)
     |> take_at_most limit []
   in
+  (* The position to feed back: after the last event served, or the caller's
+     own position when the page is empty — [null] when that was the whole
+     journal, since a response field cannot be absent the way a request field
+     can. *)
   let next_since_seq =
     match List.rev page with
     | [] -> since_seq
-    | (last : Keeper_chat_event_log.journaled_event) :: _ -> last.seq
+    | (last : Keeper_chat_event_log.journaled_event) :: _ ->
+      Keeper_chat_event_log.After_seq last.seq
   in
   `Assoc
     [ "schema", `String "masc.keeper_chat_events.v2"
@@ -232,7 +258,7 @@ let chat_events_page ~operation_id ~since_seq ~limit ~redact_json entries =
              (fun entry -> redact_json (Keeper_chat_event_log.journaled_event_to_json entry))
              page) )
     ; "has_more", `Bool (not (List.is_empty rest))
-    ; "next_since_seq", `Int next_since_seq
+    ; "next_since_seq", Keeper_chat_event_log.replay_position_to_yojson next_since_seq
     ]
 ;;
 
@@ -257,10 +283,10 @@ let handle_get state request reqd = function
        in
        let respond entries =
          Log.Dashboard.debug
-           "keeper_chat_events keeper=%s operation_id=%s since_seq=%d limit=%d journaled=%d"
+           "keeper_chat_events keeper=%s operation_id=%s since_seq=%s limit=%d journaled=%d"
            keeper_name
            operation_id_text
-           since_seq
+           (Keeper_chat_event_log.replay_position_to_string since_seq)
            limit
            (List.length entries);
          (* Same second redaction layer the SSE projection and the reconnect
@@ -287,15 +313,17 @@ let handle_get state request reqd = function
                   (Option.map (fun (operation : Operation.t) -> operation.state) operation)
               with
               | Nothing_journaled_yet -> respond []
-              | Journal_pruned ->
+              | No_journal_for_settled_operation ->
+                (* The [journal_pruned] code is the client's contract for
+                   "nothing to reload, now or later"; the message states only
+                   what the server knows. *)
                 respond_error
                   request
                   reqd
                   (gone
                      "journal_pruned"
-                     ("the event journal of Keeper chat operation "
-                      ^ operation_id_text
-                      ^ " has aged out of retention"))
+                     (no_journal_for_settled_operation_message
+                        ~operation_id:operation_id_text))
               | Unknown_operation ->
                 respond_error
                   request
@@ -450,6 +478,8 @@ let handle_mutation state request reqd route body =
 ;;
 
 module For_testing = struct
+  let no_journal_for_settled_operation_message = no_journal_for_settled_operation_message
+
   let parse_mutation_body mutation body =
     match mutation with
     | Edit ->

@@ -19,9 +19,11 @@ type verdict =
   | Match
   | Mismatch of mismatch_kind list
   | Journal_missing
+  | Journal_unreadable of string
   | Journal_truncated
   | Journal_corrupt of string
   | Store_unreadable of string
+  | Liveness_unknown of string
 [@@deriving show, eq]
 
 (* Bounded constructor name for metric labels: [show_verdict] embeds exception
@@ -31,10 +33,27 @@ let verdict_label = function
   | Match -> "match"
   | Mismatch _ -> "mismatch"
   | Journal_missing -> "journal_missing"
+  | Journal_unreadable _ -> "journal_unreadable"
   | Journal_truncated -> "journal_truncated"
   | Journal_corrupt _ -> "journal_corrupt"
   | Store_unreadable _ -> "store_unreadable"
+  | Liveness_unknown _ -> "liveness_unknown"
 ;;
+
+type operation_liveness =
+  | Turn_running
+  | Turn_settled
+  | Registry_unanswered of string
+
+module Audited = Set.Make (struct
+    type t = string * string
+
+    let compare (left_keeper, left_operation) (right_keeper, right_operation) =
+      match String.compare left_keeper right_keeper with
+      | 0 -> String.compare left_operation right_operation
+      | order -> order
+    ;;
+  end)
 
 let is_surface_post_row ~first_ts ~last_ts (row : Store.chat_message) =
   Store.Role.equal row.role Store.Role.Assistant
@@ -217,17 +236,6 @@ let compare entries rows =
 
 (** {1 IO shell} *)
 
-(* Read-only: [read_journal_path] creates nothing on disk, unlike
-   [Journal.open_journal] whose mkdir would mint junk directories for ids
-   whose sanitized path does not exist. *)
-let read_journal_entries path =
-  try `Entries (Journal.read_journal_path path) with
-  | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
-  | Sys_error _ -> `Missing
-  | Invalid_argument detail -> `Corrupt detail
-  | exn -> `Corrupt (Printexc.to_string exn)
-;;
-
 let operation_delivery_key operation_id =
   match Delivery.Request_id.of_string operation_id with
   | Ok request_id -> Some (Delivery.Operation request_id)
@@ -331,12 +339,16 @@ let audit_loaded ~base_dir ~keeper_name ~operation_id ~rows entries =
   | _ -> audit_entries ~operation_id ~entries ~rows
 ;;
 
+(* Read-only: [read_journal_path_result] creates nothing on disk, unlike
+   [Journal.open_journal] whose mkdir would mint junk directories for ids
+   whose sanitized path does not exist. *)
 let audit_operation ~base_dir ~keeper_name ~operation_id =
   let path = Journal.journal_path ~base_dir ~keeper_name ~operation_id in
-  match read_journal_entries path with
-  | `Missing -> Journal_missing
-  | `Corrupt detail -> Journal_corrupt detail
-  | `Entries entries ->
+  match Journal.read_journal_path_result path with
+  | Error Journal.Journal_missing -> Journal_missing
+  | Error (Journal.Journal_unreadable detail) -> Journal_unreadable detail
+  | Error (Journal.Journal_corrupt detail) -> Journal_corrupt detail
+  | Ok entries ->
     let rows = Store.load_all ~base_dir ~keeper_name in
     audit_loaded ~base_dir ~keeper_name ~operation_id ~rows entries
 ;;
@@ -345,14 +357,45 @@ let stem_is_canonical stem =
   String.equal (Workspace_utils_backend_setup.sanitize_namespace_segment stem) stem
 ;;
 
-let sweep ~base_dir ~window_sec ?(grace_sec = 600.) () =
-  let root =
-    Filename.concat
-      (Common.masc_dir_from_base_path ~base_path:base_dir)
-      "keeper_chat_events"
-  in
+(* What the sweep does with one journal file. [Leave] keeps it out of this
+   pass without a verdict: still running, vanished under us, or outside the
+   audit for good. Every reported verdict except [Liveness_unknown] marks the
+   operation audited; an unanswered registry leaves it for the next pass. *)
+type sweep_step =
+  | Leave
+  | Report of verdict
+
+let sweep_file ~base_dir ~keeper_name ~operation_id ~path ~liveness ~rows =
+  match liveness ~keeper_name ~operation_id with
+  | Turn_running -> Leave
+  | Registry_unanswered detail -> Report (Liveness_unknown detail)
+  | Turn_settled ->
+    (try
+       match Journal.read_journal_path_result path with
+       | Error Journal.Journal_missing ->
+         (* Vanished between readdir and read (the retention sweep raced us):
+            never report [Journal_missing] for a file that was visible on
+            disk. *)
+         Leave
+       | Error (Journal.Journal_unreadable detail) -> Report (Journal_unreadable detail)
+       | Error (Journal.Journal_corrupt detail) -> Report (Journal_corrupt detail)
+       | Ok entries ->
+         Report
+           (audit_loaded
+              ~base_dir
+              ~keeper_name
+              ~operation_id
+              ~rows:(Lazy.force rows)
+              entries)
+     with
+     | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+     | exn -> Report (Journal_corrupt (Printexc.to_string exn)))
+;;
+
+let sweep ~base_dir ~lookback_sec ~liveness ~audited () =
+  let root = Journal.events_dir ~base_dir in
   if not (Sys.file_exists root)
-  then []
+  then [], audited
   else begin
     let now = Unix.gettimeofday () in
     let keeper_names =
@@ -365,8 +408,19 @@ let sweep ~base_dir ~window_sec ?(grace_sec = 600.) () =
       with
       | Sys_error _ -> []
     in
-    List.concat_map
-      (fun keeper_name ->
+    (* The lookback selects files, never verdicts: [audited] lives in process
+       memory, so without it the first pass after a restart would re-read
+       every journal under retention (days of reasoning text). A file whose
+       mtime is older than the lookback was last appended before it, and its
+       settled verdict, if any, was reported by an earlier process life.
+       Whether a turn may still append is the registry's answer, [liveness],
+       never the file's age. *)
+    let within_lookback path =
+      try now -. (Unix.stat path).st_mtime <= lookback_sec with
+      | Unix.Unix_error _ -> false
+    in
+    List.fold_left
+      (fun (results, audited) keeper_name ->
          let dir = Filename.concat root keeper_name in
          let files =
            try Array.to_list (Sys.readdir dir) with
@@ -376,61 +430,34 @@ let sweep ~base_dir ~window_sec ?(grace_sec = 600.) () =
             an auditable journal; auditing each file against its own load was
             O(files x store size). *)
          let rows = lazy (Store.load_all ~base_dir ~keeper_name) in
-         List.filter_map
-           (fun file ->
-              if not (Filename.check_suffix file ".jsonl")
-              then None
+         List.fold_left
+           (fun (results, audited) file ->
+              let operation_id = Filename.remove_extension file in
+              let path = Filename.concat dir file in
+              (* [sanitize_namespace_segment] is not idempotent for
+                 non-canonical stems (a second pass appends another digest),
+                 so the filename stem cannot be re-derived into a path.
+                 Non-canonical ids are outside the audit. *)
+              if (not (Filename.check_suffix file ".jsonl"))
+                 || (not (stem_is_canonical operation_id))
+                 || Audited.mem (keeper_name, operation_id) audited
+                 || not (within_lookback path)
+              then results, audited
               else begin
-                let operation_id = Filename.remove_extension file in
-                (* [sanitize_namespace_segment] is not idempotent for
-                   non-canonical stems (a second pass appends another digest),
-                   so the filename stem cannot be re-derived into a path.
-                   Non-canonical ids are outside the audit. *)
-                if not (stem_is_canonical operation_id)
-                then None
-                else begin
-                  let path = Filename.concat dir file in
-                  let auditable =
-                    try
-                      let stats = Unix.stat path in
-                      let age = now -. stats.st_mtime in
-                      grace_sec <= age && age <= window_sec
-                    with
-                    | Unix.Unix_error _ -> false
-                  in
-                  if not auditable
-                  then None
-                  else begin
-                    try
-                      match read_journal_entries path with
-                      | `Missing ->
-                        (* Vanished between readdir and read (the retention
-                           sweep raced us): never report [Journal_missing] for
-                           a file that was visible on disk. *)
-                        None
-                      | `Corrupt detail ->
-                        Some (keeper_name, operation_id, Journal_corrupt detail)
-                      | `Entries entries ->
-                        let verdict =
-                          audit_loaded
-                            ~base_dir
-                            ~keeper_name
-                            ~operation_id
-                            ~rows:(Lazy.force rows)
-                            entries
-                        in
-                        Some (keeper_name, operation_id, verdict)
-                    with
-                    | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
-                    | exn ->
-                      Some
-                        ( keeper_name
-                        , operation_id
-                        , Journal_corrupt (Printexc.to_string exn) )
-                  end
-                end
+                match
+                  sweep_file ~base_dir ~keeper_name ~operation_id ~path ~liveness ~rows
+                with
+                | Leave -> results, audited
+                | Report (Liveness_unknown _ as verdict) ->
+                  (keeper_name, operation_id, verdict) :: results, audited
+                | Report verdict ->
+                  ( (keeper_name, operation_id, verdict) :: results
+                  , Audited.add (keeper_name, operation_id) audited )
               end)
+           (results, audited)
            files)
+      ([], audited)
       keeper_names
+    |> fun (results, audited) -> List.rev results, audited
   end
 ;;

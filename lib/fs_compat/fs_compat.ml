@@ -3227,6 +3227,72 @@ let read_private_jsonl_slice_locked_with_io_for_testing ~io path ~from =
   read_private_jsonl_slice_locked_with_io ~io path ~from
 ;;
 
+module Private_jsonl_rows = struct
+  type t =
+    | Rows_missing
+    | Rows_present of
+        { rows : string
+        ; rows_end : int
+        ; end_offset : int
+        }
+
+  type error = Io_failed of exn
+
+  let error_to_string = function
+    | Io_failed exn -> Printexc.to_string exn
+  ;;
+end
+
+(* The writer's framing rule applied by a reader: under the same per-path
+   mutex and a shared cross-process lock, the file is every row that ends in
+   '\n' plus, at most, one fragment a crashed append left behind (the
+   exclusive lock means no append is in progress while the shared lock is
+   held). The fragment is reported by [rows_end < end_offset], never returned
+   as bytes, so the caller sees exactly the rows a later append would build
+   on. *)
+let read_private_jsonl_rows_locked_with_io ~io path =
+  let open Private_jsonl_rows in
+  try
+    test_exec_home_guard ~op:"read_private_jsonl_rows_locked" path;
+    let path_mu = get_append_path_mutex path in
+    run_blocking_private_file_transaction
+      ~label:"fs-compat-private-jsonl-rows-read"
+      ~path
+      (fun () ->
+         Stdlib.Mutex.protect path_mu (fun () ->
+           match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
+           | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+             Private_file_succeeded Rows_missing
+           | fd ->
+             private_jsonl_with_fd_outcome
+               ~close_operation:Close_transaction_data
+               ~close_fd:io.close_fd
+               fd
+               (fun () ->
+                  try
+                    lock_whole_file_shared fd;
+                    let bytes = read_fd_chunks fd (Buffer.create 65536) in
+                    let end_offset = String.length bytes in
+                    let rows_end =
+                      match String.rindex_opt bytes '\n' with
+                      | Some newline -> newline + 1
+                      | None -> 0
+                    in
+                    Ok
+                      (Rows_present
+                         { rows = String.sub bytes 0 rows_end; rows_end; end_offset })
+                  with
+                  | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+                  | exn -> Error (Io_failed exn))))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Private_file_failed (Io_failed exn)
+;;
+
+let read_private_jsonl_rows_locked_result path =
+  read_private_jsonl_rows_locked_with_io ~io:private_jsonl_transaction_unix_io path
+;;
+
 let update_private_file_durable_locked_with_io ~io path decide =
   test_exec_home_guard ~op:"update_private_file_durable_locked" path;
   let dir = Filename.dirname path in

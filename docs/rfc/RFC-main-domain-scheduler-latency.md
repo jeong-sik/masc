@@ -187,6 +187,8 @@ Phase 0c 가 머지된 빌드를 재기동하고 2분 뒤와 6분 뒤에 `GET /a
 
 **P4e. 승인 큐 스냅샷을 다시 쓰지 않는다.** `gate/pending.json` 은 23 MB(deliveries 4,937건, pending 0, 중앙값 4.4 KB·최대 106 KB)인데, `persist_pending_entry_unlocked`·`persist_exact_attempt_entry_unlocked` 가 승인 항목 하나가 바뀔 때마다 `Yojson.Safe.pretty_to_string` 으로 통째로 다시 쓴다. 두 번째 재기동의 4분 창에서 12.4 GB, 이 창의 가장 큰 단일 묶음이다. P4a 와 같은 부류이고 같은 처방이다: 항목 단위 append 로그 + 프로세스 안 상태, 압축은 비율로. 그 전에 제품 판단 하나 — deliveries 는 replay·grant 소비·remember 규칙을 위해 남는데, 지워지는 경로가 하나(`SMap.remove`, :3567)뿐이라 끝없이 자란다. 감사 원장(`audit-approvals/`, 75 MB dated)이 따로 있으니 deliveries 는 projection 이고 retention 을 가질 수 있는지 확인한다.
 
+P4e 설계. 상태는 이미 프로세스 안에 있다(`pending`·`deliveries` 가 `Atomic` SMap 이고 부팅의 `install_persistence` 가 한 번 읽는다). 변경마다 스냅샷을 통째로 쓰는 것이 유일한 비용이므로, 바뀐 항목 하나를 `pending.log.jsonl` 에 append 한다(`Fs_compat` 커서 계열, P4a 와 같은 잠금 한 계열). 행은 `pending_upsert`·`pending_remove`·`delivery_upsert`·`delivery_remove`·`next_sequence` 다섯 종류이고 재생은 멱등이다(id 로 add/remove, sequence 는 max). 부팅은 스냅샷 + 로그 재생. 로그 행이 (pending + deliveries) 의 2배를 넘으면 스냅샷을 다시 쓰고(compact `to_string`, pretty 아님) 로그를 커서에서 비운다. 스냅샷을 먼저 쓰고 로그를 비우므로 그 사이에 죽어도 재생이 멱등이라 상태가 같다. 스냅샷 버전은 9 → 10 으로 올린다. 로더가 다른 버전을 "reset runtime state before restarting" 으로 거부하는 기존 경로가 곧 하드컷이고, 로그를 모르는 옛 바이너리가 v10 을 열어 해결된 승인을 다시 pending 으로 보이는 일을 막는다. 컷 시점 비용: pending 은 지금 0, deliveries 4,937건은 사라진다 — 잃는 것은 소비 안 된 grant(키퍼가 다시 승인을 청한다, fail-closed 방향)와 replay 결과 표시뿐이고 remember 규칙은 `always-allowed.json` 에 따로 있다. 결정 둘: 컷을 받아들일지, deliveries 에 retention 을 둘지(감사 원장이 따로 있으니 projection 으로 볼 여지가 있다). 기대: 이 창 기준 −12 GB/4분, 스냅샷 크기가 10배 커져도 변경당 비용은 항목 하나.
+
 각 단계는 같은 하네스로 전후를 잰다. P4a 뒤 할당 −20% 이상, P4b 뒤 −25% 이상, P4c 뒤 live −500MB 이상이 기대치이고, 못 미치면 그 단계는 되돌린다.
 
 ### 8.6 상태와 재측정 (2026-09-05)

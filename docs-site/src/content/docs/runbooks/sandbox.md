@@ -24,7 +24,7 @@ looks like:
 
 ```toml
 sandbox_profile = "docker"   # "docker" | "microvm" | "remote_ssh"
-network_mode = "none"        # "none" | "inherit"
+network_mode = "none"        # "none" | "inherit" | "policy"
 
 # only for sandbox_profile = "remote_ssh":
 # remote_endpoint = "worker-node-1"
@@ -32,9 +32,11 @@ network_mode = "none"        # "none" | "inherit"
 
 `network_mode` is separate from the profile and is required. `none` gives the
 guest no network at all — a Keeper that does web search or `git push` needs
-`inherit`. The default for `docker` and `microvm` is `none`, which is why
-`masc keeper-create` refuses to proceed without the flag rather than choosing for
-you.
+`inherit`. `policy` is the mode between the two: the guest reaches an allowlist
+proxy this server owns and nothing else (today only the `apple_container`
+microVM backend carries this mode). The default for `docker` and `microvm`
+is `none`, which is why `masc keeper-create` refuses to proceed without the
+flag rather than choosing for you.
 
 ---
 
@@ -42,7 +44,7 @@ you.
 
 You can reconfigure a Keeper's sandbox backend on the fly directly inside `masc-tui` without editing raw TOML files:
 
-1. Press `Tab` to navigate to **Keepers (Surface 3)**.
+1. Press `Tab` to navigate to **Keepers**.
 2. Select the target Keeper and press `Enter` to open the **Detail View**.
 3. Use `[` / `]` to switch to the **`Sandbox`** tab.
 4. Press a single shortcut key to change the isolation profile:

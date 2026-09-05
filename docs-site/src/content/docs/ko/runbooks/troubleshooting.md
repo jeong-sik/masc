@@ -34,7 +34,8 @@ lsof -i :8935
 kill <PID>
 ```
 
-또는 다른 포트로 켜고 TUI 도 같은 포트로 맞추세요.
+또는 다른 포트로 켜고 TUI 도 같은 포트로 맞추세요. 서버 기본 포트는 `MASC_HTTP_PORT`
+환경 변수로 바꾸거나 명령줄에서 `masc --port` 로 지정합니다.
 
 ```bash
 masc --base-path ~/masc --port 8936
@@ -70,8 +71,10 @@ TUI에 `reconnecting...` 배너가 반복되거나 서버 지연이 튀는 경�
    ```bash
    curl -s http://127.0.0.1:8935/health | jq '{scheduler: .scheduler, gc: .gc}'
    ```
-   `.scheduler.stalls_ge_1s`(1초 이상 스톨 횟수) 및 백분위 링(`p50`, `p95`, `p99`, `max`)을
-   확인하세요. `max`가 높다면 메인 도메인의 락 획득 지연이 발생한 것입니다.
+   `.scheduler.stalls`(1초 이상 스톨 횟수)와 백분위(`p50_ms`, `p95_ms`, `p99_ms`,
+   `max_ms`)를 보세요. 이 값들은 최근 1분 링의 실측이고, 높다는 건 메인 도메인이
+   준비된 파이버를 제때 못 돌렸다는 뜻입니다(yield 없이 계산한 파이버, stop-the-world
+   GC, 스케줄러 스레드의 블로킹 호출 등).
 
 2. 실시간 스케줄러 지연 프로브 실행:
    ```bash

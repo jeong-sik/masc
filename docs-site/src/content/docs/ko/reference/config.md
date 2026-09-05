@@ -17,8 +17,9 @@ description: .masc/config/*.toml 파일의 스키마와 예시입니다.
     └── reviewer.toml
 ```
 
-다른 파일(`connectors.toml` — Slack/Discord 연결, `repositories.toml`,
-`keeper_repo_mappings.toml`)은 해당 기능을 쓰기 시작하면 생깁니다.
+Discord·Slack 같은 커넥터 설정은 별도 파일이 아니라 `runtime.toml` 안의
+테이블(`[discord]` 등)로 씁니다. `repositories.toml` 과
+`keeper_repo_mappings.toml` 은 해당 기능을 쓰기 시작하면 생깁니다.
 
 ---
 
@@ -81,7 +82,7 @@ Keeper 프로필입니다. 이 파일은 설치 스크립트가 쓰지 않습니
 autoboot_enabled = true
 proactive_enabled = false
 sandbox_profile = "docker"   # "docker" | "microvm" | "remote_ssh"; host 는 거부됨
-network_mode = "none"        # "none" | "inherit"; "none" 은 게스트 네트워크 전면 차단
+network_mode = "none"        # "none" | "inherit" | "policy"; "none" 은 게스트 네트워크 전면 차단
 instructions = """
 당신은 리뷰 Keeper 입니다. 지금 변경을 살펴보고 파일 경로와 명령으로 구체적인
 근거를 보고하세요.

@@ -398,7 +398,12 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
             | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
             | exception exn ->
               { status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
-            | status, stdout, stderr ->
+            | Sandbox_target.Transport_failed { reason = _; stdout; stderr } ->
+              (* The lane never delivered a command result; surface it the way
+                 an exception is -- a failed status with the error already in
+                 stderr -- so a boxed command is not read as a clean run. *)
+              { status = Unix.WEXITED 1; stdout; stderr }
+            | Sandbox_target.Ran { status; stdout; stderr } ->
               (match
                  ( deliver_capture attachments.stdout_to stdout
                  , deliver_capture attachments.stderr_to stderr )

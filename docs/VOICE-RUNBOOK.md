@@ -137,9 +137,17 @@ number drives the trigger, the end, and the bar the operator watches.
   those two numbers are what separates them.
 - All four are `[voice.capture]` keys in `runtime.toml`.
 
-Stopping the recording is a cancel, and the reap sends `SIGTERM` before
-`SIGKILL`. sox closes the file on `SIGTERM` and writes the length into the
-header — a recording killed at two seconds read back as 1.75 s of valid audio.
+Stopping the recording is a cancel. The cancelled spawn sends sox `SIGTERM`,
+then waits for sox to close its pipes — up to
+`Process_eio.child_exit_grace_seconds` (2 s) — and only then lets `SIGKILL`
+follow. sox flushes and closes the WAV on `SIGTERM`, writing the length into
+the header, so the recording read back is the whole capture.
+
+Before the wait existed the `SIGKILL` arrived in the same instant as the
+`SIGTERM`: a recording stopped at two seconds read back as 1.75 s, and the
+missing quarter second matches sox's unflushed stdio buffer. The 1.75 s figure
+was measured 2026-09-04 under that shape; the full-length claim for the current
+shape has not been re-measured on a live microphone.
 
 ### Why the gate exists
 

@@ -1148,10 +1148,16 @@ let record_and_transcribe
       play_tone 880.0;
       (* The recorder has no end of its own now that the silence filter is
          gone, so the watcher is what stops it: when the watcher returns,
-         [Fiber.first] cancels the recording, and the reap sends SIGTERM
-         before SIGKILL. sox closes the file on SIGTERM and writes the length
-         into the header — measured 2026-09-04, a recording killed at two
-         seconds read back as 1.75 s of valid audio.
+         [Fiber.first] cancels the recording. The cancelled spawn sends sox
+         SIGTERM and then waits, up to [Process_eio.child_exit_grace_seconds],
+         for sox to close its pipes -- which it does on exit, after it has
+         written the length into the WAV header. SIGKILL follows only if the
+         grace runs out.
+
+         The wait is what keeps the tail: sox flushes its output on SIGTERM,
+         and the SIGKILL used to arrive before it could. Measured 2026-09-04
+         under that shape, a recording stopped at two seconds read back as
+         1.75 s -- the missing quarter second is about one stdio buffer.
 
          The recorder's own arm carries the same deadline so that a watcher
          that somehow never returns cannot leave a microphone open. *)

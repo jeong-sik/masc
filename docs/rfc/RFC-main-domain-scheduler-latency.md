@@ -69,3 +69,42 @@ TUI 와 대시보드가 느린 이유는 메인 Eio 도메인이 자기 일을 �
 - 프로브 fiber 는 100ms 마다 깨는 fiber 하나다. 비용은 sleep 하나와 float 하나 쓰기다.
 - `/health` 응답이 필드 11개 늘어난다. 읽는 쪽(TUI `Tui_decode.decode_server_identity`)은 모르는 필드를 무시한다.
 - 링을 다른 도메인에서 읽으면 한 슬롯이 덮어쓰기 중일 수 있다. 값은 옛것 아니면 새것이다. 진단 용도로 충분하다.
+
+## 7. Phase 2 재고 조사 — systhread 로 가는 클로저 (2026-09-05, HEAD `ba554f5cc7`)
+
+`Eio_unix.run_in_systhread` 와 `Eio_guard.run_in_systhread` 호출 55곳을 읽었다. OCaml 5.5 매뉴얼 §5.1 대로 한 도메인에서는 systhread 하나만 OCaml 코드를 돌리므로, systhread 안에서 OCaml 로직이 도는 시간만큼 메인 스케줄러는 서 있다.
+
+### 7.1 그대로 두어도 되는 것 — 닫힌 syscall 집합의 후보
+
+| 호출 | 자리 |
+|---|---|
+| `fsync` / `fchmod` on fd | `fs_compat.ml:1901`, `capability_recovery_obligation.ml:1426,1457,2190`, `atomic_write.ml:803,817,833,893`, `capability_head.ml:330,340`, `keeper_tool_filesystem_runtime.ml:1087` |
+| `stat` / `fstat` / `lstat` / `realpath` | `fs_compat.ml:1091,1102,1175`, `capability_exact_read.ml:157`, `keeper_checkpoint_store.ml:379`, `server_runtime_bootstrap.ml:844`, `server_dashboard_http_delete_actions.ml:60` |
+| `read` / `write` on fd | `capability_exact_read.ml:170`, `blocking_write.ml:13` |
+| `openat` | `capability_exact_read.ml:147` |
+| `mkdir` / `rename` / `remove` / `rmdir` / `unlink` / `chmod` / `readdir` / `file_exists` | `server_skill_editor.ml:546,569,757`, `server_routes_http_dashboard_dev_token.ml:194`, `server_dashboard_http_delete_actions.ml:114`, `keeper_owner_registry.ml:142`, `auth_credential_base.ml:58-64` |
+
+이 집합이 Phase 2 의 `Blocking_syscall.t` 생성자 목록이다. 각 생성자는 인자와 반환 타입이 정해진 순수 C 호출이다.
+
+### 7.2 systhread 안에서 OCaml 로직이 도는 것 — 옮겨야 한다
+
+| 클로저 | 자리 | 무엇이 도는가 |
+|---|---|---|
+| `load_owned_regular_file_{with_snapshot,prefix,range}_blocking` | `fs_compat.ml:942,996,1052` | 파일 전체를 문자열로 읽는 루프 |
+| `Keeper_fs.save_atomic` 본문 | `keeper_fs.ml:321` | temp 열기·쓰기·rename 을 잇는 제어 흐름 |
+| durable directory chain 준비 | `keeper_fs_durable_directory.ml:359,485,534` | stat 걷기와 fsync 순서 결정 |
+| `Fs_compat.cleanup_atomic_orphans` | `fusion_delivery_obligation.ml:477`, `keeper_msg_async.ml:1845` | readdir + unlink 루프 |
+| `remove_tree_blocking` | `keeper_shutdown_finalize.ml:464`, `fs_compat.ml:1168` | 재귀 삭제 |
+| `Keeper_wire_capture.prune_expired` | `server_runtime_bootstrap.ml:1182` | readdir + 판정 + unlink |
+| `Store.store` / `Store.load` | `keeper_vision_tool.ml:123,126` | 바이트 쓰기/읽기 |
+| `detect_system_fd_snapshot_now` | `keeper_fd_pressure.ml:266` | 시스템 fd 스냅샷 |
+
+### 7.3 임의 클로저를 받는 래퍼 — Phase 2 가 지우는 것
+
+`run_blocking_private_file_transaction` (`fs_compat.ml:1946`), `Keeper_board_attention_partition.run_blocking` (`:833`), `Skill_catalog_snapshot_service.run_blocking` (`:78`), `Backend.run_blocking_file_op` (`:223`), `Mcp_server_eio_resource.run_blocking_resource_io` (`:31`), `Keeper_owner` 의 systhread 래퍼 (`:440`), `Server_routes_http_routes_workspace` (`:374`, `Effect.Unhandled` 면 인라인으로 되돌리는 분기까지 있다), `Server_skill_editor` (`:630`), `Keeper_fs.run_in_systhread_cancel_checked` (`:238`), `Keeper_checkpoint_store` 의 `read` (`:465`), 그리고 `Eio_guard.run_in_systhread` 자체.
+
+이 래퍼들은 `unit -> 'a` 를 받으므로 무엇이든 systhread 로 들어간다. Phase 2 는 이 시그니처를 `'a Blocking_syscall.t -> 'a` 로 바꾼다. 그러면 7.2 의 클로저는 컴파일되지 않고, 호출자는 syscall 만 넘기고 나머지 로직은 fiber 나 domain pool 에서 돌리게 된다. 55곳을 손으로 한 곳씩 고치는 대신 컴파일러가 전부를 열거한다.
+
+### 7.4 이 조사가 말하지 않는 것
+
+7.2 의 클로저가 실제로 락을 얼마나 오래 쥐는지는 여기 없다. Phase 0 의 프로브가 배포되면 `stalls` 와 p99 로 먼저 보고, 그 다음에 7.3 의 래퍼를 없앤다.

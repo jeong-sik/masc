@@ -507,7 +507,8 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
               , Some (fun chunk -> on_chunk (`Stderr chunk)) )
         in
         (match
-           runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd
+           Sandbox_target.status_tuple
+             (runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd)
          with
          | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
          | exception exn ->
@@ -647,7 +648,8 @@ let rec dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
                        , Some (fun chunk -> on_chunk (`Stderr chunk)) )
                  in
                  let status, stdout, stderr =
-                   runner ~on_stdout_chunk ~on_stderr_chunk ~stages:specs
+                   Sandbox_target.status_tuple
+                     (runner ~on_stdout_chunk ~on_stderr_chunk ~stages:specs)
                  in
                  { status; stdout; stderr }
              | None ->

@@ -696,8 +696,9 @@ let preflight_argv_for_log argv =
 let run_preflight_command t ~error_code argv =
   let run = runner ~timeout_sec:(preflight_timeout_sec t) t in
   let status, stdout, stderr =
-    run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
-      ~argv ~env:[||] ~cwd:(Some t.remote_root)
+    Masc_exec.Sandbox_target.status_tuple
+      (run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+         ~argv ~env:[||] ~cwd:(Some t.remote_root))
   in
   match status with
   | Unix.WEXITED 0 -> Ok stdout
@@ -735,8 +736,9 @@ let github_api_probe_argv =
 let github_transport t =
   let run = runner ~timeout_sec:(preflight_timeout_sec t) t in
   let status, _stdout, _stderr =
-    run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
-      ~argv:github_api_probe_argv ~env:[||] ~cwd:(Some t.remote_root)
+    Masc_exec.Sandbox_target.status_tuple
+      (run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+         ~argv:github_api_probe_argv ~env:[||] ~cwd:(Some t.remote_root))
   in
   match status with
   | Unix.WEXITED 0 -> Api_reachable

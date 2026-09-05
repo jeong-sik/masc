@@ -20,6 +20,13 @@ type run_outcome =
   | Ran of { status : Unix.process_status; stdout : string; stderr : string }
   | Transport_failed of { reason : string; stdout : string; stderr : string }
 
+(** Collapse a [run_outcome] to the legacy [status, stdout, stderr] tuple for
+    consumers that treat a transport failure the same as any command failure
+    ([Transport_failed] becomes [WEXITED 1]). Do NOT use this where a non-zero
+    exit can mean success (the read backend's Grep lane): match the variant
+    directly there so a down lane cannot read as an empty result. *)
+val status_tuple : run_outcome -> Unix.process_status * string * string
+
 (** A runner closure executes an argv with the given env / cwd and returns a
     [run_outcome]. Exceptions are propagated; callers in [Exec_dispatch] catch
     and translate them into structured dispatch results. *)

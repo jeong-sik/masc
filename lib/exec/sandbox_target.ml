@@ -36,6 +36,18 @@ type run_outcome =
   | Ran of { status : Unix.process_status; stdout : string; stderr : string }
   | Transport_failed of { reason : string; stdout : string; stderr : string }
 
+(* For a consumer that treats a transport failure the same as any command
+   failure -- a non-zero status with the error in stderr, which is what the
+   remote runner returned for every transport fault before run_outcome
+   existed. Collapsing the two is correct only when the consumer does not
+   accept a non-zero exit as success: the read backend must NOT use this
+   (its Grep lane accepts exit 1, so a collapsed transport fault would read
+   as "no match" again) -- it matches the variant directly. *)
+let status_tuple : run_outcome -> Unix.process_status * string * string =
+  function
+  | Ran { status; stdout; stderr } -> status, stdout, stderr
+  | Transport_failed { reason = _; stdout; stderr } -> Unix.WEXITED 1, stdout, stderr
+
 type runner =
   on_stdout_chunk:(string -> unit) option ->
   on_stderr_chunk:(string -> unit) option ->

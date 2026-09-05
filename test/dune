@@ -172,6 +172,7 @@
   test_keeper_codex_error_carriage
   test_keeper_codex_effort_clamp
   test_keeper_codex_write_path_note
+  test_keeper_codex_blank_system_prompt
   test_workspace_message_seq_resume
   test_domain_pool
   test_sse
@@ -520,6 +521,7 @@
   test_keeper_codex_error_carriage
   test_keeper_codex_effort_clamp
   test_keeper_codex_write_path_note
+  test_keeper_codex_blank_system_prompt
   test_workspace_message_seq_resume
   test_domain_pool
   test_sse

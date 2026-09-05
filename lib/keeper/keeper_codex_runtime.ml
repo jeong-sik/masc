@@ -566,17 +566,6 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         ~model_input_projection
         ~hooks:(Some hooks)
     in
-    (* Reported from [prepared.messages], the post-window list, gated on the
-       same [thread_mode] that decides whether [thread/inject_items] runs at
-       all. Only a [Start] injects the history into the new thread; a [Resume]
-       sends the prompt and leaves the conversation in the thread the
-       app-server owns, so on that branch there is nothing here to attribute.
-       The composition line further down states the same split. *)
-    on_transmitted_model_input
-      (match thread_mode with
-       | Runtime_codex_app_server.Start ->
-         Host.Whole_input_transmitted prepared.messages
-       | Runtime_codex_app_server.Resume _ -> Host.Held_by_client_session);
     (* Snap the operator-declared effort into the catalog's accepted set so a
        per-model cap (e.g. [Max] unsupported on a model that tops out at
        [XHigh]) does not fail the turn. The same value feeds the raw_trace
@@ -606,13 +595,47 @@ let run_without_lifecycle ~runtime_id ~keeper_name
                 })
               images )
     in
-    let developer_instructions =
-      (prepared.system_prompt :: native_posture_note native_posture)
-      @ developer_messages
-      |> List.filter (fun text -> String.trim text <> "")
-      |> String.concat "\n\n"
-      |> String_util.trim_nonempty
+    (* [None] here means "send no developerInstructions": [optional_field]
+       omits the member and the app-server runs the thread on Codex's own
+       default instructions. The composition must therefore not reach [None]
+       by collapsing a blank result -- [String_util.trim_nonempty] returns
+       [None] on an empty string -- or a keeper whose composed prompt came out
+       blank would run every turn under the vendor default with masc's tool
+       surface still attached, a failure that looks like it is working. Same
+       refusal as the Claude Code lane (#33086): masc composing nothing is a
+       configuration defect and is named before the thread is started. The
+       probe and fusion callers build [None] on purpose and do not pass
+       through here. *)
+    let* developer_instructions =
+      match
+        (prepared.system_prompt :: native_posture_note native_posture)
+        @ developer_messages
+        |> List.filter (fun text -> String.trim text <> "")
+        |> String.concat "\n\n"
+        |> String_util.trim_nonempty
+      with
+      | Some text -> Ok (Some text)
+      | None ->
+        Error
+          (config_error
+             ~field:"system_prompt"
+             "the composed keeper system prompt is empty; the turn would run \
+              under the client's built-in instructions")
     in
+    (* Reported from [prepared.messages], the post-window list, gated on the
+       same [thread_mode] that decides whether [thread/inject_items] runs at
+       all. Only a [Start] injects the history into the new thread; a [Resume]
+       sends the prompt and leaves the conversation in the thread the
+       app-server owns, so on that branch there is nothing here to attribute.
+       The composition line further down states the same split. Reported once
+       the composition is admitted: a turn refused above never dispatches, and
+       a record saying it transmitted its whole input would be masc#32995's
+       zero-bytes misreading with the sign flipped. *)
+    on_transmitted_model_input
+      (match thread_mode with
+       | Runtime_codex_app_server.Start ->
+         Host.Whole_input_transmitted prepared.messages
+       | Runtime_codex_app_server.Resume _ -> Host.Held_by_client_session);
     let client_config =
       { Runtime_codex_app_server.cli_path = config.cli_path
       ; model = config.model

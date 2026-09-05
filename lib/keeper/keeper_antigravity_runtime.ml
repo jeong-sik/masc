@@ -494,6 +494,25 @@ let run_without_lifecycle ~runtime_id ~keeper_name
              ~field:"reasoning_effort"
              "Antigravity effort must be declared by its runtime provider")
     in
+    (* [prompt_for_turn] renders [prepared.system_prompt] as the
+       system-instructions section only when it trims non-empty, so a keeper
+       whose composed prompt came out blank would open the conversation with
+       the goal alone, under the CLI's own harness prompt, with masc's tool
+       surface still projected -- a failure that looks like it is working.
+       Same refusal as the Codex and Claude Code lanes (#33086): masc
+       composing nothing is a configuration defect, named here before the
+       input is reported or the CLI is spawned. A resume does not render the
+       section, but the defect is the same one, so the mode is not consulted. *)
+    let* () =
+      match String_util.trim_nonempty prepared.system_prompt with
+      | Some _ -> Ok ()
+      | None ->
+        Error
+          (config_error
+             ~field:"system_prompt"
+             "the composed keeper system prompt is empty; the turn would run \
+              under the client's built-in prompt")
+    in
     (* Reported from [prepared.messages], which is post-carrier-append and
        post-window: the admission contract runs inside [Host.prepare_turn], so
        this list is the last shape masc holds before rendering.

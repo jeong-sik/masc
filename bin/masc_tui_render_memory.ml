@@ -308,9 +308,9 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
 let render_memory_body ~cols ~budget (state : state)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
-    ~push_selected:_
+    ~(push_selected : string -> unit)
     ~(push_divider : unit -> unit)
-    ~push_empty:_ : unit =
+    ~(push_empty : unit -> unit) : unit =
   let keepers =
     match state.memory_health with
     | None -> []
@@ -338,7 +338,10 @@ let render_memory_body ~cols ~budget (state : state)
   let context_rows =
     match context_lines with [] -> 0 | _ -> 1 + List.length context_lines
   in
-  let fixed = 2 + context_rows in
+  let fixed =
+    2 + context_rows
+    + (if Option.is_some state.memory_health_error then 2 else 0)
+  in
   let available = max 1 (budget - fixed) in
   let overflowing = shown > available in
   let content_height = if overflowing then max 1 (available - 1) else available in
@@ -353,10 +356,10 @@ let render_memory_body ~cols ~budget (state : state)
     for i = 0 to content_height - 1 do
       let idx = i + scroll in
       match List.nth_opt keepers idx with
-      | None -> ()
+      | None -> push_empty ()
       | Some k ->
           if idx = state.memory_health_cursor then
-            push_styled ~style:(Ansi.reverse ()) (memory_row_line columns k)
+            push_selected (memory_row_line columns k)
           else push (memory_row_line columns k)
     done;
     if overflowing then

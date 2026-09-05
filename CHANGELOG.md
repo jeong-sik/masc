@@ -11,6 +11,13 @@
   release note the Task still carries, and is refused when neither is given;
   the record the operator judges, the committed Task, the message log, the
   activity event and the duration metric carry one sentence.
+- **The nightly test lane runs what it says.** It builds the root `@runtest`
+  alias, so the 41 suites in `packages/agent_core/test`, the ten in
+  `lib/exec/test` and the `tools/` suites run with the rest; the scheduled run
+  on main has its own concurrency lane, so a branch dispatch no longer cancels
+  it; a failure in any `dune` file is attributed to its suite and a run in
+  which a failure header names no suite fails; and a deadline expiry lists the
+  suite executables still alive instead of only a log tail.
 
 ## [0.31.0] - 2026-09-04
 

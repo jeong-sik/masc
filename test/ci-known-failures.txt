@@ -1,4 +1,7 @@
-# Test suites that `dune build @test/runtest` runs and that do not pass.
+# Test suites that `dune build @runtest` from the repository root runs and
+# that do not pass. The alias covers test/, packages/agent_core/test,
+# lib/exec/test and tools/; until 2026-09 the lane built @test/runtest, so
+# the suites outside test/ have no measured baseline yet.
 #
 # scripts/ci-run-test-suite.sh compares the suites that actually fail against
 # this list and fails CI when the two differ in either direction: a suite that

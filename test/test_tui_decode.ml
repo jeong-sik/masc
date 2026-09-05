@@ -220,6 +220,22 @@ let test_terminal_text_is_idempotent_and_single_line () =
   Alcotest.(check string) "sanitization is idempotent" once
     (Tui_decode.sanitize_terminal_text once)
 
+let test_preview_line_marks_breaks_and_escapes_the_rest () =
+  let mark = "\xe2\x8f\x8e" in
+  Alcotest.(check string) "a break is one return mark" ("a" ^ mark ^ "b")
+    (Tui_decode.preview_line "a\nb");
+  Alcotest.(check string) "CR LF is one break, not two" ("a" ^ mark ^ "b")
+    (Tui_decode.preview_line "a\r\nb");
+  Alcotest.(check string) "a lone CR is a break" ("a" ^ mark ^ "b")
+    (Tui_decode.preview_line "a\rb");
+  Alcotest.(check string) "a tab is a space" "a b" (Tui_decode.preview_line "a\tb");
+  Alcotest.(check string) "other controls still escape" "a\\x1Bb"
+    (Tui_decode.preview_line "a\027b");
+  Alcotest.(check string) "printable UTF-8 survives" ("정상" ^ mark ^ "café")
+    (Tui_decode.preview_line "정상\ncafé");
+  Alcotest.(check bool) "the result is one row" false
+    (String.contains (Tui_decode.preview_line "x\ny\nz") '\n')
+
 let keeper_call_row ~keeper ~tool ?(success = true) ?duration_ms ?turn
     ?execution_id ?tool_use_id ?planned_index ?batch_index ?batch_size
     ?execution_mode ?result_bytes ?truncated_to ?disposition () =
@@ -7940,6 +7956,8 @@ let () =
           test_terminal_text_escapes_malformed_utf8_bytes
       ; Alcotest.test_case "is idempotent and single-line" `Quick
           test_terminal_text_is_idempotent_and_single_line
+      ; Alcotest.test_case "preview marks breaks and escapes the rest" `Quick
+          test_preview_line_marks_breaks_and_escapes_the_rest
       ; Alcotest.test_case "sanitizes timestamp slices after selection" `Quick
           test_timestamp_slices_are_sanitized_after_selection
       ] );

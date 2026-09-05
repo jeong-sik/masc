@@ -41,6 +41,14 @@ val sanitize_terminal_text : string -> string
     terminal rendering boundary; decoded records intentionally retain their raw
     typed value for non-terminal consumers. *)
 
+val preview_line : string -> string
+(** One row of a multi-line text for a list cell: each line break (LF, CR LF,
+    or a lone CR) becomes the one-cell return mark U+23CE, a tab becomes a
+    space, and everything else goes through {!sanitize_terminal_text}. Where
+    that function is the boundary for values that must not carry control
+    bytes, this one is for text whose breaks are content: a file's edit, a
+    tool call's arguments. *)
+
 val short_timestamp_for_terminal : string -> string
 (** Keep at most the first 19 source bytes, then sanitize the result. Slicing
     before the terminal boundary ensures a split UTF-8 scalar cannot recreate a

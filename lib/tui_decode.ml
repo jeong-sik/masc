@@ -815,6 +815,38 @@ let sanitize_terminal_text text =
   Buffer.contents output
 ;;
 
+(* One row of a text that has rows. The terminal boundary escapes control
+   bytes because an external value may carry them by mistake or on purpose;
+   a file's newline is neither, it is the text's own shape, and a list cell
+   that prints it as [\x0A] reads as damage. So a break becomes a one-cell
+   return mark, a tab a space, and the rest goes through the same escape as
+   every other external value. The mark is neutral-width (U+23CE), so a
+   preview grows by one cell per line, never by six. *)
+let preview_line text =
+  let return_mark = "\xe2\x8f\x8e" in
+  let output = Buffer.create (String.length text) in
+  let length = String.length text in
+  let rec walk index =
+    if index < length
+    then (
+      match text.[index] with
+      | '\r' when index + 1 < length && text.[index + 1] = '\n' ->
+        Buffer.add_string output return_mark;
+        walk (index + 2)
+      | '\n' | '\r' ->
+        Buffer.add_string output return_mark;
+        walk (index + 1)
+      | '\t' ->
+        Buffer.add_char output ' ';
+        walk (index + 1)
+      | byte ->
+        Buffer.add_char output byte;
+        walk (index + 1))
+  in
+  walk 0;
+  sanitize_terminal_text (Buffer.contents output)
+;;
+
 let short_timestamp_for_terminal text =
   sanitize_terminal_text
     (if String.length text > 19 then String.sub text 0 19

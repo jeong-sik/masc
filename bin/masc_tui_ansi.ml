@@ -469,6 +469,7 @@ let fit_width = Masc_tui_message_layout.fit_width
     styling or width calculation is applied. *)
 module Terminal_text = struct
   let single_line text = Masc.Tui_decode.sanitize_terminal_text text
+  let preview_line text = Masc.Tui_decode.preview_line text
   let optional_single_line = Option.map single_line
 
   let single_line_or ~default value =

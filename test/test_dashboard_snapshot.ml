@@ -129,13 +129,13 @@ let test_activity_defaults_cache_retains_last_good () =
     Dashboard_snapshot.For_testing.refresh_activity_defaults
       ~now ~ttl:10.0 ~cache compute
   in
-  let dummy1 : Masc.Activity_graph.default_projections =
+  let dummy1 : Activity_graph.default_projections =
     { events_default = `String "e1"
     ; graph_default = `String "g1"
     ; swimlane_default = `String "s1"
     }
   in
-  let dummy2 : Masc.Activity_graph.default_projections =
+  let dummy2 : Activity_graph.default_projections =
     { events_default = `String "e2"
     ; graph_default = `String "g2"
     ; swimlane_default = `String "s2"

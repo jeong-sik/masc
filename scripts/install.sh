@@ -1396,8 +1396,12 @@ Next:
   ${c_dim}# mint a worker bearer in this shell for your MCP client${c_off}
   eval "\$($DEST login --base-path \"$BASE_PATH\" --host 127.0.0.1 --port \"$MASC_PORT\" --agent local-mcp-client --role worker --client-env MASC_TOKEN --no-expiry --shell)"
 
-  ${c_dim}# start server (loopback only)${c_off}
+  ${c_dim}# open the workspace: on a terminal this is the fleet TUI, and it starts${c_off}
+  ${c_dim}# the server here when nothing is answering the port${c_off}
   $start_env $DEST --base-path "$BASE_PATH"
+
+  ${c_dim}# the server on its own, with no terminal (loopback only)${c_off}
+  $start_env $DEST start --base-path "$BASE_PATH"
 
   ${c_dim}# if you need to change provider or key later, edit:${c_off}
   #   $BASE_PATH/.masc/config/.env.local
@@ -1406,7 +1410,7 @@ Next:
   ${c_dim}# sanity check${c_off}
   curl http://127.0.0.1:${MASC_PORT}/health
 
-  ${c_dim}# open the fleet TUI to watch, steer, and create Keepers (needs a TTY)${c_off}
+  ${c_dim}# the TUI under its own name, when the port is not the default${c_off}
   ${c_dim}# no Keepers yet? create your first from the Keepers view (or reinstall with --team)${c_off}
   $TUI_DEST --base-path "$BASE_PATH" --port "$MASC_PORT"
 

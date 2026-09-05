@@ -8,6 +8,7 @@
  (package masc)
  (libraries
   masc
+  masc_front_door
   masc.auth
   masc.http_client
   masc_cli_keeper_create
@@ -275,6 +276,14 @@
  (wrapped false)
  (modules masc_tui_server_lifecycle)
  (libraries masc.masc_process))
+
+;; What bare `masc` does: the TUI on a terminal, the server everywhere else.
+;; Own library, no dependencies, so the rule runs under a test without a TTY,
+;; a PATH, or an installed masc-tui.
+(library
+ (name masc_front_door)
+ (wrapped false)
+ (modules masc_front_door))
 
 ;; Bars and band headers for the Context inspector. Own library so the
 ;; largest-remainder split, the never-floor-a-real-share rule, and the cell

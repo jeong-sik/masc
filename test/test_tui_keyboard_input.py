@@ -10224,6 +10224,15 @@ def runtime_surface_interaction(
                         f"{catalog_detail_plain!r}"
                     )
             send_and_wait(process, master_fd, output, b"\x1b", b"All runtimes (4)")
+            # b10d25cc12 turned [p] into a three-stop circuit: lanes tab,
+            # catalog, then the standalone Lanes surface ("off the ring"),
+            # and [p] there returns to the lanes tab. The old two-stop step
+            # waited for the tab header right after leaving the catalog and
+            # starved on the standalone surface instead, whose header stays
+            # "(not loaded)" because this fixture serves no
+            # /api/v1/dashboard/standalone-lanes body. Walk the full circuit
+            # so the return leg is what gets asserted.
+            send_and_wait(process, master_fd, output, b"p", b"MASC Lanes")
             send_and_wait(process, master_fd, output, b"p", b"Lanes (3 lanes, 4 slots)")
 
             # The overflow scroll hint is unreachable with this fixture: it

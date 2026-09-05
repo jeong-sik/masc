@@ -10,19 +10,20 @@ Keeper 하나에 Jira 나 Notion 같은 서비스를 붙이면, 그 서비스의
 표면에 올라옵니다. 붙이는 건 브라우저에서 한 번 승인하는 일이고, 승인하고 나면
 토큰은 그 Keeper 전용 시크릿으로 들어갑니다. 다른 Keeper 는 못 씁니다.
 
-`config/identity/` 에 선언된 서비스가 54개입니다. 목록은 화면이 보여주니 여기
+`config/identity/` 에 선언된 서비스가 77개입니다. 목록은 화면이 보여주니 여기
 적지 않습니다.
 
 ## 두 가지 경우
 
 | | 서비스 | 준비 |
 |---|---|---|
-| **바로 됨** | 43개 — Atlassian, Linear, Notion, Sentry, Stripe … | 없음 |
-| **앱을 먼저** | Slack, GitHub, Figma, Google 8개 | 각 서비스에서 앱 하나 |
+| **바로 됨** | 58개 — Atlassian, Linear, Notion, Sentry, Stripe, Algolia, Perplexity, Replicate … | 없음 (Enter 치면 브라우저 즉시 연결) |
+| **앱을 먼저** | Slack, GitHub, Figma, Google 8개 등 | 각 서비스에서 앱 하나 (`A` 또는 `a` 키로 설정) |
 
 갈리는 이유는 하나입니다. 앞쪽은 masc 가 필요할 때 스스로 클라이언트를 등록할 수
 있고, 뒤쪽은 그 창구를 안 열어 둡니다. Google 은 아예 안 하고, Figma 는 열어는
-뒀는데 아무나 쓰면 403 을 냅니다.
+뒀는데 아무나 쓰면 403 을 냅니다. 미등록 상태에서 Enter 를 누르거나 `A`/`a` 키를
+누르면 TUI 에서 즉시 앱 등록 폼(Client ID, Client Secret, Scopes)이 열립니다.
 
 ## 바로 되는 것
 

@@ -9817,10 +9817,34 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          rather than instead of it -- one provider refusing is not a reason
          to take the others off the screen, and the message that matters
          most here is the one telling them what to do about it. *)
-      | Login_attached msg ->
-          state.identity_attempt_error <- Some (Masc_tui_types.Notice_ok, msg)
       | Login_failed detail ->
-          state.identity_attempt_error <- Some (Masc_tui_types.Notice_bad, detail))
+          state.identity_attempt_error <- Some (Masc_tui_types.Notice_bad, detail);
+          if Option.is_none state.identity_app_form
+             && (Masc_tui_types.lowercase_contains ~needle:"declined" detail
+                 || Masc_tui_types.lowercase_contains ~needle:"403" detail
+                 || Masc_tui_types.lowercase_contains ~needle:"no registration" detail
+                 || Masc_tui_types.lowercase_contains ~needle:"could not register" detail)
+          then (
+            match (selected_keeper state, state.identity_view) with
+            | Some keeper, Some (stamp, providers)
+              when String.equal stamp keeper.k_name -> (
+                match
+                  Masc_tui_types.identity_cursor_provider
+                    ~query:(identity_query state) ~providers
+                    state.identity_cursor
+                with
+                | Some (provider_id, label) ->
+                    state.identity_app_form <-
+                      Some
+                        { Masc_tui_types.iaf_provider = provider_id
+                        ; iaf_label = label
+                        ; iaf_field = Masc_tui_types.App_client_id
+                        ; iaf_client_id = ""
+                        ; iaf_client_secret = ""
+                        ; iaf_scopes = ""
+                        }
+                | None -> ())
+            | _ -> ()))
   | Identity_app_saved (provider_id, result) ->
     state.identity_attempt_error <-
       Some
@@ -13721,55 +13745,55 @@ and is loaded on demand through keeper_skill.
                      state.runtime_lane_pick_cursor <- 0;
                      state.runtime_lane_error <- None;
                      launch_runtime_catalog_load state ~mailbox:async_messages))
-       | Some "T"
-         when state.view = Keepers Keeper_detail
-              && state.detail_tab = Detail_identity
-              && not compact_viewport -> (
-           match (selected_keeper state, state.identity_view) with
-           | Some keeper, Some (stamp, providers)
-             when String.equal stamp keeper.k_name -> (
-               match
-                 Masc_tui_types.identity_cursor_provider
-                   ~query:(identity_query state) ~providers
-                   state.identity_cursor
-               with
-               | Some (provider_id, _) -> (
-                   let row =
-                     List.find_map
-                       (function
-                         | Masc_tui_types.Identity_declared
-                             { idp_id
-                             ; idp_tools
-                             ; idp_enabled
-                             ; idp_switch_problem
-                             ; _
-                             }
-                           when String.equal idp_id provider_id ->
-                             Some (idp_tools, idp_enabled, idp_switch_problem)
-                         | Masc_tui_types.Identity_declared _
-                         | Masc_tui_types.Identity_unreadable _ -> None)
-                       providers
-                   in
-                   match row with
-                   | Some (Some _, enabled, None) ->
-                       state.identity_attempt_error <- None;
-                       launch_identity_switch state ~mailbox:async_messages
-                         ~keeper_name:keeper.k_name ~provider_id
-                         ~enabled:(enabled = Some false)
-                   | Some (Some _, _, Some problem) ->
-                       state.identity_attempt_error <-
-                         Some
-                           ( Masc_tui_types.Notice_bad
-                           , "switch store unreadable: " ^ problem )
-                   | Some (None, _, _) | None ->
-                       add_event state "system"
-                         "connect it first; the switch is for an attached service")
-               | None -> ())
-           | Some _, (Some _ | None) | None, _ -> ())
-       | Some "A"
-         when state.view = Keepers Keeper_detail
-              && state.detail_tab = Detail_identity
-              && not compact_viewport -> (
+        | Some ("T" | "t")
+          when state.view = Keepers Keeper_detail
+               && state.detail_tab = Detail_identity
+               && not compact_viewport -> (
+            match (selected_keeper state, state.identity_view) with
+            | Some keeper, Some (stamp, providers)
+              when String.equal stamp keeper.k_name -> (
+                match
+                  Masc_tui_types.identity_cursor_provider
+                    ~query:(identity_query state) ~providers
+                    state.identity_cursor
+                with
+                | Some (provider_id, _) -> (
+                    let row =
+                      List.find_map
+                        (function
+                          | Masc_tui_types.Identity_declared
+                              { idp_id
+                              ; idp_tools
+                              ; idp_enabled
+                              ; idp_switch_problem
+                              ; _
+                              }
+                            when String.equal idp_id provider_id ->
+                              Some (idp_tools, idp_enabled, idp_switch_problem)
+                          | Masc_tui_types.Identity_declared _
+                          | Masc_tui_types.Identity_unreadable _ -> None)
+                        providers
+                    in
+                    match row with
+                    | Some (Some _, enabled, None) ->
+                        state.identity_attempt_error <- None;
+                        launch_identity_switch state ~mailbox:async_messages
+                          ~keeper_name:keeper.k_name ~provider_id
+                          ~enabled:(enabled = Some false)
+                    | Some (Some _, _, Some problem) ->
+                        state.identity_attempt_error <-
+                          Some
+                            ( Masc_tui_types.Notice_bad
+                            , "switch store unreadable: " ^ problem )
+                    | Some (None, _, _) | None ->
+                        add_event state "system"
+                          "connect it first; the switch is for an attached service")
+                | None -> ())
+            | Some _, (Some _ | None) | None, _ -> ())
+        | Some ("A" | "a")
+          when state.view = Keepers Keeper_detail
+               && state.detail_tab = Detail_identity
+               && not compact_viewport -> (
            match (selected_keeper state, state.identity_view) with
            | Some keeper, Some (stamp, providers)
              when String.equal stamp keeper.k_name -> (
@@ -14060,7 +14084,7 @@ and is loaded on demand through keeper_skill.
                      ~keeper_name:keeper.k_name ~provider_id ~label
                | None -> ())
            | Some _, (Some _ | None) | None, _ -> ())
-       | Some "R"
+       | Some ("R" | "r")
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_identity -> (
            match (selected_keeper state, state.identity_view) with

@@ -19,7 +19,8 @@ let start_error_to_string = function
     Printf.sprintf "could not find out where authorization lives: %s"
       (Discovery.error_to_string err)
   | Registration_failed err ->
-    Printf.sprintf "could not register a client: %s"
+    Printf.sprintf
+      "could not register a client: %s; in TUI press 'A' (내 앱 쓰기) to set your Client ID and Secret (or POST /api/v1/keepers/oauth/client)"
       (Registration.error_to_string err)
   | No_pkce_s256 issuer ->
     Printf.sprintf

@@ -1079,6 +1079,24 @@ let test_start_says_when_there_is_no_way_to_get_a_client () =
         (Keeper_oauth_session.start_error_to_string other)
   | Ok _ -> Alcotest.fail "a login started with no client id and no way to get one"
 
+let test_start_guides_operator_when_registration_fails () =
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  let fail_register ~registration_url:_ ~client_name:_ ~redirect_uri:_ =
+    Error (Keeper_oauth_registration.Refused { status = 403; body = "Forbidden" })
+  in
+  match
+    start_login ~discover:(stub_discover ()) ~register:fail_register provider table
+  with
+  | Error (Keeper_oauth_session.Registration_failed _ as e) ->
+      let msg = Keeper_oauth_session.start_error_to_string e in
+      if not (String.contains msg 'A') then
+        Alcotest.failf "error message does not guide operator: %s" msg
+  | Error other ->
+      Alcotest.failf "wrong refusal: %s"
+        (Keeper_oauth_session.start_error_to_string other)
+  | Ok _ -> Alcotest.fail "a login succeeded when registration failed"
+
 let test_a_registration_with_no_secret_is_a_public_client () =
   (* Measured 2026-08-27: Vercel and Hugging Face both leave "none" out of
      the methods their metadata lists, and both answer registration with a
@@ -1470,6 +1488,8 @@ let () =
             test_start_refuses_a_server_without_pkce;
           Alcotest.test_case "says when there is no way to get a client" `Quick
             test_start_says_when_there_is_no_way_to_get_a_client;
+          Alcotest.test_case "guides operator when registration fails" `Quick
+            test_start_guides_operator_when_registration_fails;
           Alcotest.test_case "no secret back means a public client" `Quick
             test_a_registration_with_no_secret_is_a_public_client;
           Alcotest.test_case "a secret from registration is kept" `Quick

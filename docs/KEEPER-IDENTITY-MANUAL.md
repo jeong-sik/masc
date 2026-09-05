@@ -11,19 +11,21 @@ service's tools appear on that Keeper's surface. Attaching is one approval in
 a browser; what comes back is stored as that Keeper's own secret. No other
 Keeper can use it.
 
-Fifty-four services are declared under `config/identity/`. The list is on the
+Seventy-seven services are declared under `config/identity/`. The list is on the
 screen, so it is not repeated here.
 
 ## Two cases
 
 | | Services | Setup |
 |---|---|---|
-| **Just works** | 43 -- Atlassian, Linear, Notion, Sentry, Stripe … | none |
-| **App first** | Slack, GitHub, Figma, and Google's eight | one app per service |
+| **Just works** | 58 -- Atlassian, Linear, Notion, Sentry, Stripe, Algolia, Perplexity, Replicate … | none (Enter immediately opens browser) |
+| **App first** | Slack, GitHub, Figma, Google's eight, and others | one app per service (`A` or `a` key to configure) |
 
 What separates them: the first group lets masc register a client when it
 needs one. The second does not offer that. Google does not do it at all, and
-Figma's endpoint answers 403 to anyone who asks.
+Figma's endpoint answers 403 to anyone who asks. Pressing Enter or `A`/`a` on
+an unconfigured service in this group opens the app configuration form directly
+in the TUI (Client ID, Client Secret, Scopes).
 
 ## The ones that just work
 

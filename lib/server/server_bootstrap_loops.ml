@@ -485,6 +485,7 @@ type keeper_persistence_failure_cause =
   | Shutdown_inventory_unavailable_cause of Keeper_shutdown_store.error
   | Shutdown_admission_unavailable_cause of string
   | Unexpected_exception_cause of keeper_persistence_raised_cause
+  | Store_quarantine_refused_cause of Keeper_store_boot_reconcile.undecodable list
   | Lifecycle_invariant_cause of string
 
 type keeper_persistence_failure =
@@ -503,6 +504,7 @@ type keeper_persistence_prepare_error =
   | Preparation_already_claimed
   | Preparation_failed_previously of keeper_persistence_failure
   | Preparation_ownership_lost
+  | Store_quarantine_refused of Keeper_store_boot_reconcile.undecodable list
 
 type keeper_persistence_base_path =
   { requested : string
@@ -619,6 +621,8 @@ let keeper_persistence_failure_cause_to_string = function
   | Shutdown_inventory_unavailable_cause error ->
     Keeper_shutdown_store.error_to_string error
   | Shutdown_admission_unavailable_cause detail -> detail
+  | Store_quarantine_refused_cause undecodable ->
+    Keeper_store_boot_reconcile.refusal_to_string undecodable
   | Lifecycle_invariant_cause detail -> detail
 ;;
 
@@ -650,6 +654,8 @@ let keeper_persistence_prepare_error_to_string = function
     ^ keeper_persistence_failure_to_string failure
   | Preparation_ownership_lost ->
     "keeper persistence preparation lost its lifecycle ownership"
+  | Store_quarantine_refused undecodable ->
+    Keeper_store_boot_reconcile.refusal_to_string undecodable
 ;;
 
 let failure_cause_of_prepare_error = function
@@ -657,6 +663,7 @@ let failure_cause_of_prepare_error = function
     Shutdown_inventory_unavailable_cause error
   | Shutdown_admission_unavailable detail ->
     Shutdown_admission_unavailable_cause detail
+  | Store_quarantine_refused undecodable -> Store_quarantine_refused_cause undecodable
   | Preparation_base_path_identity_unavailable failure
   | Preparation_config_not_canonical failure ->
     failure.cause
@@ -669,7 +676,12 @@ let failure_cause_of_prepare_error = function
       (keeper_persistence_prepare_error_to_string error)
 ;;
 
-let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
+let prepare_keeper_persistence_owned
+      ~base_path_identity
+      ~set_phase
+      ~accept_store_quarantine
+      ~config
+  =
   let base_path = config.Workspace.base_path in
   set_phase Restoring_shutdown;
   let shutdown_started = preparation_stage_started () in
@@ -700,14 +712,31 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
   | Error _ as error -> error
   | Ok shutdown ->
   set_phase Recovering_persistence;
-  (* A store this build cannot decode is moved aside now, in one place,
-     before any keeper loop reads it: a schema hard cut finishes at the first
-     boot instead of surfacing per keeper, hours later, on whichever read or
-     write happens to come first. Nothing else runs yet, so no writer races
-     the rename. *)
+  (* A store this build cannot decode is settled now, in one place, before
+     any keeper loop reads it: a schema hard cut finishes at the first boot
+     instead of surfacing per keeper, hours later, on whichever read or write
+     happens to come first. Moving a store aside changes what its keeper
+     remembers, so boot refuses unless the operator asked for it with
+     --accept-store-quarantine (RFC-0420). Nothing else runs yet, so no
+     writer races the rename. *)
   let store_reconcile_started = preparation_stage_started () in
+  let examination = Keeper_store_boot_reconcile.examine config in
+  match
+    Keeper_store_boot_reconcile.admit
+      ~accept_quarantine:accept_store_quarantine
+      examination
+  with
+  | Error undecodable ->
+    observe_preparation_stage
+      ~stage:"store_reconcile"
+      ~started:store_reconcile_started
+      ~examined:
+        (examination.Keeper_store_boot_reconcile.readable + List.length undecodable)
+      ~failures:(List.length undecodable);
+    Error (Store_quarantine_refused undecodable)
+  | Ok examination ->
   let store_reconcile =
-    Keeper_store_boot_reconcile.reconcile ~now:(Time_compat.now ()) config
+    Keeper_store_boot_reconcile.quarantine ~now:(Time_compat.now ()) config examination
   in
   observe_preparation_stage
     ~stage:"store_reconcile"
@@ -811,7 +840,7 @@ let log_lifecycle_transition_loss ~from_phase ~failure =
     (keeper_persistence_failure_to_string failure)
 ;;
 
-let prepare_keeper_persistence ?requested_base_path ~config () =
+let prepare_keeper_persistence ?requested_base_path ~accept_store_quarantine ~config () =
   let preparing = Preparing (ref ()) in
   match acquire_preparation_ownership preparing with
   | Error _ as error -> error
@@ -881,6 +910,7 @@ let prepare_keeper_persistence ?requested_base_path ~config () =
             prepare_keeper_persistence_owned
               ~base_path_identity
               ~set_phase:(fun next_phase -> phase := next_phase)
+              ~accept_store_quarantine
               ~config
       with
       | outcome -> outcome

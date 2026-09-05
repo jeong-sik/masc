@@ -829,6 +829,7 @@ let initialize_owner_state_blocking
       ~env
       ~base_path
       ?input_base_path
+      ~accept_store_quarantine
       ~clock
       ~mono_clock
       ~net
@@ -1169,6 +1170,7 @@ let initialize_owner_state_blocking
     match
       Server_bootstrap_loops.prepare_keeper_persistence
         ~requested_base_path
+        ~accept_store_quarantine
         ~config:(Mcp_server.workspace_config state)
         ()
     with
@@ -1558,8 +1560,8 @@ let activate_owner_state
   }
 ;;
 
-let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_request_handler
-    ~make_h2_request_handler ~make_h2_error_handler () =
+let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantine
+    ~make_routes ~make_request_handler ~make_h2_request_handler ~make_h2_error_handler () =
   let resolved_auth_config =
     match Server_auth_config.resolve (Server_auth_config.read_env ()) with
     | Ok config -> config
@@ -1661,7 +1663,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       Server_startup_state.mark_blocking ();
       let initialized_owner =
         initialize_owner_state_blocking ~sw ~env ~base_path ?input_base_path
-          ~clock ~mono_clock ~net ~domain_mgr ~proc_mgr ~fs ()
+          ~accept_store_quarantine ~clock ~mono_clock ~net ~domain_mgr ~proc_mgr ~fs ()
       in
       let activated_owner =
         activate_owner_state

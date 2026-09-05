@@ -365,7 +365,7 @@ let make_extended_handler ~trust_policy routes =
              | None -> try_internal_error_response reqd msg)))
 
 (** Main server loop *)
-let run_server ~sw ~env ~host ~port ~base_path ~input_base_path =
+let run_server ~sw ~env ~host ~port ~base_path ~input_base_path ~accept_store_quarantine =
   (* Use the parent switch directly so that ALL fibers spawned by
      Server_runtime_bootstrap (background maintenance, keeper loops,
      dashboard refresh, etc.) are children of this switch.  Graceful
@@ -375,7 +375,7 @@ let run_server ~sw ~env ~host ~port ~base_path ~input_base_path =
      the 10s force-exit timeout. *)
   try
     Server_runtime_bootstrap.run ~sw ~env ~host ~port ~base_path
-      ~input_base_path ~make_routes
+      ~input_base_path ~accept_store_quarantine ~make_routes
       ~make_request_handler:make_extended_handler
       ~make_h2_request_handler:Server_h2_gateway.make_request_handler
       ~make_h2_error_handler:Server_h2_gateway.make_error_handler
@@ -422,6 +422,12 @@ let run_base_path =
     "Workspace root for MASC data. Runtime state lives under <base-path>/.masc; do not pass the .masc directory itself."
   in
   Arg.(value & opt (some string) None & info ["base-path"] ~docv:"PATH" ~doc)
+
+let accept_store_quarantine =
+  let doc =
+    "Let boot move aside every keeper store this build cannot decode and start those keepers with empty stores. Without this flag boot refuses to start while such a store exists and prints each path with its rejection (RFC-0420). The deploy script never passes it: its preflight refuses the same files before the executable starts."
+  in
+  Arg.(value & flag & info ["accept-store-quarantine"] ~doc)
 
 let build_provenance_path =
   let doc = "Absolute content-addressed executable provenance sidecar path" in
@@ -548,7 +554,7 @@ let acquire_base_path_lock ~run_dir base_path =
            (Server_startup_takeover.base_path_lock_rejection_to_string rejection));
       exit 1
 
-let run_cmd host port cli_base_path =
+let run_cmd host port cli_base_path accept_store_quarantine =
   Printexc.record_backtrace true;
   let resolved_base_path =
     Server_base_path_guard.resolve_startup_base_path ~cli_base_path
@@ -813,7 +819,8 @@ let run_cmd host port cli_base_path =
                 ~host
                 ~port
                 ~base_path:canonical_base_path
-                ~input_base_path:raw_base_path)
+                ~input_base_path:raw_base_path
+                ~accept_store_quarantine)
             await_shutdown_signal;
             (* Server stopped; close SSE connections after server is down. *)
             (try close_all_sse_connections ()
@@ -886,15 +893,15 @@ let run_cmd host port cli_base_path =
             Masc.Shutdown.await_deadline_watchdog watchdog));
   Log.Server.info "MASC MCP: Shutdown complete."
 
-let run_cmd_exit host port base_path provenance_path provenance_sha256 provenance_device provenance_inode =
+let run_cmd_exit host port base_path accept_store_quarantine provenance_path provenance_sha256 provenance_device provenance_inode =
   match provenance_path, provenance_sha256, provenance_device, provenance_inode with
   | None, None, None, None ->
-    run_cmd host port base_path;
+    run_cmd host port base_path accept_store_quarantine;
     Cmd.Exit.ok
   | Some path, Some sha256, Some device, Some inode ->
     (match Build_identity.bind_executable_provenance ~path ~sha256 ~device ~inode with
      | Ok () ->
-       run_cmd host port base_path;
+       run_cmd host port base_path accept_store_quarantine;
        Cmd.Exit.ok
      | Error message ->
        Printf.eprintf "invalid build provenance: %s\n" message;
@@ -1024,7 +1031,7 @@ let start_cmd =
   in
   let info = Cmd.info "start" ~doc in
   Cmd.v info
-    Term.(const run_cmd_exit $ host $ port $ run_base_path $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode)
+    Term.(const run_cmd_exit $ host $ port $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode)
 
 let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in
@@ -1973,7 +1980,7 @@ let cmd =
   let info = Cmd.info "masc" ~version:Runtime_build_version.current ~doc in
   Cmd.group
     ~default:
-      Term.(const run_cmd_exit $ host $ port $ run_base_path $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode)
+      Term.(const run_cmd_exit $ host $ port $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode)
     info
     [ init_cmd
     ; start_cmd

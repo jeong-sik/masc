@@ -84,7 +84,7 @@ let test_callstack_key_is_bounded_text () =
   let key = P.key_of_callstack (Printexc.get_callstack 64) in
   let lines = List.filter (fun line -> line <> "") (String.split_on_char '\n' key) in
   check bool "non-empty" true (lines <> []);
-  check bool "at most the frame bound" true (List.length lines <= P.callstack_frames)
+  check bool "at most the frames a key keeps" true (List.length lines <= P.frames_per_key)
 ;;
 
 (* The scenario the callback rule exists for: with a real profile sampling

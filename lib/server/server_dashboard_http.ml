@@ -813,6 +813,7 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
   let warm_board () =
     try
       let t_start = Time_compat.now () in
+      (* fire-and-forget: pre-warm board cache *)
       ignore (dashboard_board_payload ~config ~limit:100 ~offset:0 ());
       Log.Dashboard.info "board surface pre-warmed (%.1fms)" ((Time_compat.now () -. t_start) *. 1000.0)
     with
@@ -823,6 +824,7 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
     try
       let t_start = Time_compat.now () in
       let cache_key = Printf.sprintf "planning:%s" base_path in
+      (* fire-and-forget: pre-warm planning cache *)
       ignore
         (Dashboard_cache.get_or_compute cache_key
            ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (fun () ->
@@ -836,6 +838,7 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
   let warm_config () =
     try
       let t_start = Time_compat.now () in
+      (* fire-and-forget: pre-warm config cache *)
       ignore
         (Dashboard_cache.get_or_compute "config_introspect"
            ~ttl:Server_dashboard_http_core_cache.config_cache_ttl_s
@@ -849,6 +852,7 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
     try
       let t_start = Time_compat.now () in
       let cache_key = Printf.sprintf "keeper_memory_health:%s" base_path in
+      (* fire-and-forget: pre-warm keeper-memory-health cache *)
       ignore
         (Dashboard_cache.get_or_compute cache_key
            ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (fun () ->

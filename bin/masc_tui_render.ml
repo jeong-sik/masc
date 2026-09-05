@@ -2627,11 +2627,17 @@ let render_approvals (state : state) =
   if count = 0 then begin
     (match state.approval_snapshot, approvals_error with
      | _, Some err ->
-         box_line buf cols (data_unreliable_row ~cols err)
+         box_line buf cols (data_unreliable_row ~cols err);
+         for _ = 1 to max 0 (approval_body_rows - 1) do
+           box_empty buf cols
+         done
      | None, None ->
          box_line buf cols
            (Ansi.dim ^ "  (no approval data — press 'r' to refresh)"
-           ^ Ansi.reset)
+           ^ Ansi.reset);
+         for _ = 1 to max 0 (approval_body_rows - 1) do
+           box_empty buf cols
+         done
      | Some _, None ->
          (* An unreadable approval-queue store and an empty queue must not
             share a face: the server says which one it was, and "no pending
@@ -2640,13 +2646,30 @@ let render_approvals (state : state) =
          (match state.gate_queue_unavailable with
           | Some detail ->
               box_line buf cols
-                (data_unreliable_row ~cols ("approval queue unavailable: " ^ detail))
+                (data_unreliable_row ~cols ("approval queue unavailable: " ^ detail));
+              for _ = 1 to max 0 (approval_body_rows - 1) do
+                box_empty buf cols
+              done
           | None ->
-              box_line buf cols
-                (Ansi.dim ^ "  (no pending approvals)" ^ Ansi.reset)));
-    for _ = 1 to approval_body_rows do
-      box_empty buf cols
-    done
+              if approval_body_rows >= 6 then begin
+                let gold = Masc_tui_theme.tone Masc_tui_theme.Accent in
+                let green = Masc_tui_theme.status Masc_tui_theme.Ok in
+                let dim = Masc_tui_theme.tone Masc_tui_theme.Dim in
+                box_line buf cols "";
+                box_line buf cols (Printf.sprintf "  %s╭──────────────────────────────────────────────────╮%s" dim Ansi.reset);
+                box_line buf cols (Printf.sprintf "  %s│%s  %s[ $ $ $ ]%s  %sALL GATES SECURE · ZERO PENDING%s      %s│%s" dim Ansi.reset gold Ansi.reset green Ansi.reset dim Ansi.reset);
+                box_line buf cols (Printf.sprintf "  %s│%s  %sDungeon treasury safe — zero held tool calls.%s   %s│%s" dim Ansi.reset dim Ansi.reset dim Ansi.reset);
+                box_line buf cols (Printf.sprintf "  %s╰──────────────────────────────────────────────────╯%s" dim Ansi.reset);
+                for _ = 1 to max 0 (approval_body_rows - 5) do
+                  box_empty buf cols
+                done
+              end else begin
+                box_line buf cols
+                  (Ansi.dim ^ "  (no pending approvals)" ^ Ansi.reset);
+                for _ = 1 to max 0 (approval_body_rows - 1) do
+                  box_empty buf cols
+                done
+              end));
   end else begin
     let content_height = approval_body_rows in
     let scroll_offset =
@@ -17232,14 +17255,14 @@ let render_palette (state : state) =
   let matches = Masc_tui_types.palette_matches state in
   let total = List.length matches in
   let cursor = max 0 (min state.palette_cursor (total - 1)) in
-  framed_top buf cols;
-  framed_line buf cols
+  framed_shadow_top buf cols;
+  framed_shadow_line buf cols
     (screen_title " Quick Jump & Navigation" ^ "  "
      ^ (Theme.warn ()) ^ "\xe2\x9a\xa1" ^ Ansi.reset ^ "  "
      ^ Ansi.bold ^ ":" ^ Ansi.reset ^ " "
      ^ (Terminal_text.single_line state.palette_query)
      ^ ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "\xe2\x96\x8c" ^ Ansi.reset));
-  framed_divider buf cols;
+  framed_shadow_divider buf cols;
   let content_height = framed_content_height ~rows in
   let first =
     if cursor < content_height then 0
@@ -17250,12 +17273,12 @@ let render_palette (state : state) =
   |> List.iteri (fun visible_index (label, _) ->
        let selected = first + visible_index = cursor in
        if selected then
-         framed_line_styled buf cols ~style:Theme.selection (" \xe2\x96\xb8 " ^ label)
+         framed_shadow_line_styled buf cols ~style:Theme.selection (" \xe2\x96\xb8 " ^ label)
        else
-         framed_line buf cols ("   " ^ label));
+         framed_shadow_line buf cols ("   " ^ label));
   if total = 0 then
-    framed_line buf cols (Ansi.dim ^ "   (no match)" ^ Ansi.reset);
-  framed_bottom buf cols;
+    framed_shadow_line buf cols (Ansi.dim ^ "   (no match)" ^ Ansi.reset);
+  framed_shadow_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:

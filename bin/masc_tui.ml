@@ -6484,6 +6484,18 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Buffer.clear state.msg_input;
       notice ~role:Message_local
         (String.concat "\n" Masc_tui_command.help_lines)
+  | Masc_tui_command.About ->
+      Buffer.clear state.msg_input;
+      let active_keepers = List.length state.keepers in
+      let theme_name =
+        match state.theme_choice with
+        | Some name -> name
+        | None -> "default"
+      in
+      let banner =
+        Masc_tui_command.about_banner ~theme_name ~active_keepers ()
+      in
+      notice ~role:Message_local banner
   | Masc_tui_command.Open_diff ->
       Buffer.clear state.msg_input;
       state.repository_changes_return_chat <- true;
@@ -8978,7 +8990,7 @@ let handle_composer_key state ~base_path ~mailbox key =
            end;
            state.view <- Keepers Keeper_message
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
-       | Masc_tui_command.Help | Masc_tui_command.Switch_keeper_missing_name
+       | Masc_tui_command.Help | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
        | Masc_tui_command.Open_diff | Masc_tui_command.Open_changes
        | Masc_tui_command.Open_settings
        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Steer_turn _

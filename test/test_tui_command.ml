@@ -8,6 +8,7 @@ let describe = function
   | Command.Task_for_keeper { title; body } -> Printf.sprintf "task:%s|%s" title body
   | Command.Task_missing_title -> "task-missing-title"
   | Command.Help -> "help"
+  | Command.About -> "about"
   | Command.Open_settings -> "open-settings"
   | Command.Open_diff -> "open-diff"
   | Command.Open_changes -> "open-changes"
@@ -71,6 +72,8 @@ let test_task_takes_the_line_as_title_and_the_rest_as_body () =
 let test_pane_commands_parse_by_word () =
   check (list string) "pane commands"
     [ "help"
+    ; "about"
+    ; "about"
     ; "open-settings"
     ; "open-diff"
     ; "open-changes"
@@ -98,6 +101,8 @@ let test_pane_commands_parse_by_word () =
     (List.map
        (fun text -> describe (Command.parse text))
        [ "/help"
+       ; "/about"
+       ; "/splash"
        ; "/settings"
        ; "/diff"
        ; "/changes"
@@ -126,6 +131,28 @@ let test_pane_commands_parse_by_word () =
        ; "/image shots/frame.png"
        ; "/image   "
        ])
+
+let test_about_banner () =
+  let banner = Command.about_banner ~theme_name:"dungeon-gold" ~active_keepers:3 () in
+  let contains_sub haystack needle =
+    let len_h = String.length haystack in
+    let len_n = String.length needle in
+    if len_n = 0 then true
+    else if len_h < len_n then false
+    else
+      let rec loop i =
+        if i + len_n > len_h then false
+        else if String.sub haystack i len_n = needle then true
+        else loop (i + 1)
+      in
+      loop 0
+  in
+  check bool "banner starts with ASCII art header" true
+    (String.starts_with ~prefix:"   ___" banner);
+  check bool "banner contains HORNED REAPER CORE" true
+    (contains_sub banner "HORNED REAPER CORE");
+  check bool "banner includes active theme" true
+    (contains_sub banner "dungeon-gold")
 
 let test_preset_commands_parse_verb_name_and_description () =
   check (list string) "preset commands"
@@ -697,6 +724,8 @@ let () =
             test_keeper_names_resolve_by_unique_prefix
         ; test_case "pane commands parse by word" `Quick
             test_pane_commands_parse_by_word
+        ; test_case "about banner contains Horned Reaper emblem" `Quick
+            test_about_banner
         ; test_case "every command has a help line" `Quick
             test_every_command_has_a_help_line
         ; test_case "preset commands parse verb, name and description" `Quick

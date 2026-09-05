@@ -4655,13 +4655,13 @@ let test_runtime_lsp_servers_answers_the_operator_then_the_table () =
   let path = Filename.temp_file "lsp_servers_" ".toml" in
   Out_channel.with_open_bin path (fun oc ->
     Out_channel.output_string oc
-      (text ^ "\n[lsp.servers]\npython = [\"pyright-langserver\", \"--stdio\"]\n"));
+      (text ^ "\n[lsp.servers]\npython = [\"pylsp\"]\n"));
   match Runtime.init_default ~config_path:path with
   | Error msg -> failf "the seed config plus one override should init: %s" msg
   | Ok () ->
     let servers = Runtime.lsp_servers () in
     check (pair string (list string)) "the operator's command for python"
-      ("pyright-langserver", [ "pyright-langserver"; "--stdio" ])
+      ("pylsp", [ "pylsp" ])
       (servers Lsp_process_manager.Python);
     check (pair string (list string)) "the client's own table for ocaml"
       (Lsp_process_manager.command_of_language Lsp_process_manager.Ocaml)

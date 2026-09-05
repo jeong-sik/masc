@@ -208,10 +208,28 @@ Keeper 가 hover 나 정의로 가려면 샌드박스 `PATH` 에 언어 서버�
 | 언어 | 프로그램 |
 | --- | --- |
 | OCaml | `ocamllsp` |
-| TypeScript, JavaScript | `typescript-language-server` |
-| Python | `pylsp` |
+| TypeScript | `typescript-language-server` |
+| JavaScript | `typescript-language-server` |
+| Python | `pyright-langserver` |
 | Rust | `rust-analyzer` |
 | Go | `gopls` |
+| C | `clangd` |
+| C++ | `clangd` |
+| Swift | `sourcekit-lsp` |
+| Java | `jdtls` |
+| Kotlin | `kotlin-language-server` |
+| Ruby | `ruby-lsp` |
+| PHP | `intelephense` |
+| Lua | `lua-language-server` |
+| Bash | `bash-language-server` |
+| JSON | `vscode-json-language-server` |
+| YAML | `yaml-language-server` |
+| Zig | `zls` |
+| Haskell | `haskell-language-server-wrapper` |
+| Elixir | `elixir-ls` |
+| Dart | `dart` |
+| Scala | `metals` |
+| C# | `csharp-ls` |
 
 ## 잘 안 될 때
 

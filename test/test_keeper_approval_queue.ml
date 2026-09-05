@@ -771,7 +771,18 @@ let exact_summary ?(context_summary = "Exact attempt summary") model_run_id :
   }
 ;;
 
+(* The durable view: the snapshot file plus the rows appended after it.
+   Mutations append rows and rewrite the snapshot only by ratio, so the file
+   alone is not what a restart loads. *)
 let read_pending_snapshot ~base_path =
+  match AQ.For_testing.durable_snapshot_json ~base_path with
+  | Ok json -> json
+  | Error reason -> Alcotest.failf "durable snapshot unreadable: %s" reason
+;;
+
+(* The snapshot file itself, for the cases about a file the store must not
+   touch. *)
+let read_pending_snapshot_file ~base_path =
   Yojson.Safe.from_file (AQ.For_testing.pending_store_path ~base_path)
 ;;
 
@@ -781,9 +792,13 @@ let read_pending_snapshot_bytes ~base_path =
     In_channel.input_all
 ;;
 
+(* A written fixture is the whole durable state: rows a previous install
+   appended describe the snapshot they extended, not this one. *)
 let write_pending_snapshot ~base_path json =
   let path = AQ.For_testing.pending_store_path ~base_path in
   ensure_dir (Filename.dirname path);
+  let log_path = AQ.For_testing.pending_log_path ~base_path in
+  if Sys.file_exists log_path then Sys.remove log_path;
   Out_channel.with_open_text path (fun channel ->
     output_string channel (Yojson.Safe.pretty_to_string json))
 ;;
@@ -811,7 +826,8 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 9
+             [ "version", `Int 10
+            ; "generation", `Int 1
             ; "next_sequence", `Int 1
             ; "pending", `List []
             ; "deliveries", `List []
@@ -2075,7 +2091,7 @@ let test_exact_binding_codec_validates_entry_identity () =
          (run_exact_transition AQ.bind_summary_exact_attempt identity);
        let snapshot = read_pending_snapshot ~base_path in
        let open Yojson.Safe.Util in
-       Alcotest.(check int) "v9 snapshot" 9 (snapshot |> member "version" |> to_int);
+       Alcotest.(check int) "v10 snapshot" 10 (snapshot |> member "version" |> to_int);
        let exact_json =
          snapshot
          |> member "pending"
@@ -3669,7 +3685,8 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 9
+            [ "version", `Int 10
+            ; "generation", `Int 1
             ; "next_sequence", `Int 1
             ; "pending", `String "malformed-pending-array"
             ; "deliveries", `List []
@@ -3700,12 +3717,13 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
         with
         | Error _ -> ()
         | Ok _ -> Alcotest.fail "an invalid installed store must remain unavailable");
-       let persisted = read_pending_snapshot ~base_path in
+       let persisted = read_pending_snapshot_file ~base_path in
        Alcotest.(check bool) "invalid store is not overwritten" true
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 9
+               [ "version", `Int 10
+               ; "generation", `Int 1
                ; "next_sequence", `Int 1
                ; "pending", `String "malformed-pending-array"
                ; "deliveries", `List []
@@ -3782,7 +3800,7 @@ let test_partial_pending_snapshot_preserves_readable_entries () =
        Alcotest.(check bool)
          "partially readable source is preserved"
          true
-         (Yojson.Safe.equal original (read_pending_snapshot ~base_path));
+         (Yojson.Safe.equal original (read_pending_snapshot_file ~base_path));
        let after =
          Masc.Otel_metric_store.metric_value_or_zero
            Masc.Otel_metric_store.metric_persistence_read_drops
@@ -3813,7 +3831,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
         | Error
             (AQ.Install_storage_failed
               { reason =
-                  "gate_pending.version 8 is unsupported (current 9); reset \
+                  "gate_pending.version 8 is unsupported (current 10); reset \
                    runtime state before restarting MASC"
               ; _
               }) ->
@@ -4024,7 +4042,8 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 9
+             [ "version", `Int 10
+            ; "generation", `Int 1
             ; "next_sequence", `Int 2
             ; "pending", `List []
             ; ( "deliveries"
@@ -4345,7 +4364,8 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 9
+             [ "version", `Int 10
+            ; "generation", `Int 1
             ; "next_sequence", `Int 4
             ; "pending", `List []
             ; ( "deliveries"
@@ -5190,6 +5210,166 @@ let test_resolved_audit_event_carries_judge_evidence () =
            (row |> member "exact_attempt"))
 ;;
 
+(* RFC main-domain-scheduler-latency §8.5 P4e: a mutation appends the rows
+   it changed instead of rewriting the snapshot. The snapshot file lags, the
+   log carries the difference, and a restart loads both. *)
+let log_row_count ~base_path =
+  let path = AQ.For_testing.pending_log_path ~base_path in
+  if not (Sys.file_exists path)
+  then 0
+  else
+    In_channel.with_open_bin path In_channel.input_all
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> not (String.equal (String.trim line) ""))
+    |> List.length
+;;
+
+let snapshot_file_ids ~base_path member_name =
+  let open Yojson.Safe.Util in
+  read_pending_snapshot_file ~base_path
+  |> member member_name
+  |> to_list
+  |> List.map (fun json ->
+    let entry = if String.equal member_name "deliveries" then json |> member "entry" else json in
+    entry |> member "id" |> to_string)
+;;
+
+let test_mutations_append_rows_and_a_restart_replays_them () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-append-log" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let first = submit ~base_path ~keeper_name ~input:(`Assoc [ "n", `Int 1 ]) in
+       (* The first write of a fresh store rewrites the snapshot; the log is empty. *)
+       Alcotest.(check int) "fresh store: no rows" 0 (log_row_count ~base_path);
+       let second = submit ~base_path ~keeper_name ~input:(`Assoc [ "n", `Int 2 ]) in
+       Alcotest.(check int) "second submit appended one row" 1 (log_row_count ~base_path);
+       Alcotest.(check (list string))
+         "snapshot file still holds only the first entry"
+         [ first ]
+         (snapshot_file_ids ~base_path "pending");
+       let open Yojson.Safe.Util in
+       let durable_ids =
+         read_pending_snapshot ~base_path
+         |> member "pending"
+         |> to_list
+         |> List.map (fun entry -> entry |> member "id" |> to_string)
+         |> List.sort String.compare
+       in
+       Alcotest.(check (list string))
+         "durable view holds both"
+         (List.sort String.compare [ first; second ])
+         durable_ids;
+       AQ.For_testing.reset_runtime_state ();
+       let report = install_exn ~base_path in
+       Alcotest.(check int) "restart replays the appended entry" 2 report.loaded_pending;
+       Alcotest.(check bool)
+         "both entries are pending after the restart"
+         true
+         (Option.is_some (AQ.For_testing.get_pending_entry_unchecked ~id:first)
+          && Option.is_some (AQ.For_testing.get_pending_entry_unchecked ~id:second)))
+;;
+
+(* Rows are bounded by the entries they describe: once they outnumber twice
+   the entries, the write rewrites the snapshot and empties the log. *)
+let test_rows_past_the_ratio_rewrite_the_snapshot () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-append-compaction" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let input = `Assoc [ "target", `String "compaction" ] in
+       let id = submit ~base_path ~keeper_name ~input in
+       Alcotest.(check int) "fresh store: no rows" 0 (log_row_count ~base_path);
+       (match aq_resolve ~base_path ~id ~decision:Rule_types.Decision.Approve with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       (* One entry moved from pending to delivery: two rows for one entry. *)
+       Alcotest.(check int) "resolution appended two rows" 2 (log_row_count ~base_path);
+       Alcotest.(check (list string))
+         "snapshot file still lists the entry as pending"
+         [ id ]
+         (snapshot_file_ids ~base_path "pending");
+       (match
+          AQ.consume_approved_resolution
+            ~base_path
+            ~id
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~input
+        with
+        | Ok (AQ.Consumption_committed _) -> ()
+        | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
+          Alcotest.fail "grant consumption did not commit"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       (* A third row for one entry crosses the ratio: the snapshot is
+          rewritten with the consumed delivery and the log is empty. *)
+       Alcotest.(check int) "log emptied by the rewrite" 0 (log_row_count ~base_path);
+       Alcotest.(check (list string))
+         "snapshot file now carries the consumption tombstone"
+         [ id ]
+         (snapshot_file_ids ~base_path "deliveries");
+       let open Yojson.Safe.Util in
+       Alcotest.(check int)
+         "second rewrite is generation 2"
+         2
+         (read_pending_snapshot_file ~base_path |> member "generation" |> to_int);
+       Alcotest.(check bool)
+         "tombstone is consumed"
+         true
+         (read_pending_snapshot_file ~base_path
+          |> member "deliveries"
+          |> to_list
+          |> List.hd
+          |> member "grant_consumed"
+          |> to_bool))
+;;
+
+(* A row whose durable append did not finish leaves a final line without its
+   newline. The install drops that line, rewrites the snapshot, and empties
+   the log; the entries before it survive. *)
+let test_partial_log_tail_is_dropped_and_the_snapshot_rewritten () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-append-partial" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let first = submit ~base_path ~keeper_name ~input:(`Assoc [ "n", `Int 1 ]) in
+       let second = submit ~base_path ~keeper_name ~input:(`Assoc [ "n", `Int 2 ]) in
+       let log_path = AQ.For_testing.pending_log_path ~base_path in
+       Out_channel.with_open_gen [ Open_append; Open_binary ] 0o600 log_path (fun channel ->
+         output_string channel "{\"kind\":\"pending_upsert\",\"generation\":1");
+       let open Yojson.Safe.Util in
+       let generation_before =
+         read_pending_snapshot_file ~base_path |> member "generation" |> to_int
+       in
+       AQ.For_testing.reset_runtime_state ();
+       let report = install_exn ~base_path in
+       Alcotest.(check int) "both complete rows survive" 2 report.loaded_pending;
+       Alcotest.(check int) "install emptied the log" 0 (log_row_count ~base_path);
+       Alcotest.(check int)
+         "install rewrote the snapshot at the next generation"
+         (generation_before + 1)
+         (read_pending_snapshot_file ~base_path |> member "generation" |> to_int);
+       Alcotest.(check (list string))
+         "rewritten snapshot holds both entries"
+         (List.sort String.compare [ first; second ])
+         (List.sort String.compare (snapshot_file_ids ~base_path "pending")))
+;;
+
 let () =
   Alcotest.run
     "Keeper_approval_queue"
@@ -5420,6 +5600,18 @@ let () =
             "queue writes advance the projection revision"
             `Quick
             test_queue_writes_advance_the_projection_revision
+        ; Alcotest.test_case
+            "mutations append rows and a restart replays them"
+            `Quick
+            test_mutations_append_rows_and_a_restart_replays_them
+        ; Alcotest.test_case
+            "rows past the ratio rewrite the snapshot"
+            `Quick
+            test_rows_past_the_ratio_rewrite_the_snapshot
+        ; Alcotest.test_case
+            "partial log tail is dropped and the snapshot rewritten"
+            `Quick
+            test_partial_log_tail_is_dropped_and_the_snapshot_rewritten
         ] )
     ]
 ;;

@@ -771,6 +771,175 @@ let test_cancel_grace_is_bounded_when_the_child_ignores_sigterm () =
          (elapsed < Process_eio.child_exit_grace_seconds +. 5.0))
 ;;
 
+(* #33182: a timeout raced the finalizer onto the switch-off path, which
+   waits for EOF on the child's pipes, and a grandchild that inherited stdout
+   held the pipe for its whole life: a 0.2s budget came back at 2.03s. A
+   timeout leaves the switch on, so the finalizer reaps the child the
+   ordinary way and returns when the child is gone, whatever its grandchild
+   still holds. The fixture is the one that measured it: a sh script whose
+   foreground sleep inherits stdout and outlives the budget. Two of the six
+   entry points that nest their switch outside the timeout run it. *)
+let grandchild_timeout_budget_seconds = 0.2
+
+(* As long as the grace. A finalizer that waited on the pipes would come back
+   only when this sleep, the last holder of stdout, exits. *)
+let grandchild_lifetime_seconds = Process_eio.child_exit_grace_seconds
+
+(* Between the budget and the grace: five budgets of scheduling slack, and a
+   second short of the wait a pipe-bound return takes. *)
+let timeout_return_bound_seconds = 1.0
+
+let grandchild_holding_stdout_script =
+  Printf.sprintf "sleep %g; printf late" grandchild_lifetime_seconds
+;;
+
+let timeout_with_a_grandchild_holding_stdout ~clock run =
+  let t0 = Eio.Time.now clock in
+  let status, stdout, _stderr =
+    run ~timeout_sec:grandchild_timeout_budget_seconds
+      [ "/bin/sh"; "-c"; grandchild_holding_stdout_script ]
+  in
+  let elapsed = Eio.Time.now clock -. t0 in
+  check bool "the call reports the timeout" true
+    (Process_eio.exit_reason_of_status status = Process_eio.Timed_out);
+  check string "nothing printed after the budget comes back" "" stdout;
+  check bool
+    (Printf.sprintf
+       "the call came back at the budget, not when the grandchild let go (%.2fs)"
+       elapsed)
+    true
+    (elapsed < timeout_return_bound_seconds)
+;;
+
+let test_timeout_with_a_grandchild_holding_stdout_returns_at_the_budget () =
+  with_process_runtime @@ fun ~clock ->
+  timeout_with_a_grandchild_holding_stdout ~clock (fun ~timeout_sec argv ->
+    Process_eio.run_argv_with_status_split ~timeout_sec argv)
+;;
+
+let test_timeout_with_stdin_and_a_grandchild_holding_stdout_returns_at_the_budget
+    ()
+  =
+  with_process_runtime @@ fun ~clock ->
+  timeout_with_a_grandchild_holding_stdout ~clock (fun ~timeout_sec argv ->
+    Process_eio.run_argv_with_stdin_and_status_split
+      ~timeout_sec
+      ~stdin_content:""
+      argv)
+;;
+
+(* The ordinary reap sends SIGTERM and waits out the grace under
+   [Eio.Cancel.protect]. The daemon that resolves [Eio.Process.await] is a
+   fiber of the switch the child was spawned in; when that switch's parent is
+   cancelled during the grace, the daemon dies, and an await after the SIGKILL
+   has nothing left to resolve it, because the release hook that would reap
+   the child runs only once this fiber has returned. A stop request landing
+   while an exec is timing out is that shape. The reap reads the switch again
+   after the grace and returns without waiting when it is off.
+
+   An Eio timeout around the call cannot turn that hang into a failure: it
+   cancels its body, and a body inside [Cancel.protect] is not interrupted
+   (measured in scratch: such a wait outlived a 2.0s [with_timeout] until an
+   8s alarm). The watchdog is a wall clock on another domain, and a scenario
+   that does not come back leaves its domain blocked until the process
+   exits. *)
+exception Operator_stop_during_the_reap_grace
+
+let operator_stop_into_grace_seconds = 0.5
+
+(* Longer than the watchdog bound: a child that exited on its own inside the
+   window would satisfy the timing for the wrong reason. *)
+let sigterm_ignoring_child_lifetime_seconds = 5.0
+
+let watchdog_poll_interval_seconds = 0.05
+
+(* A second for two timers and one process exit to be scheduled, on top of
+   the budget and the grace the reap waits out. *)
+let reap_return_allowance_seconds = 1.0
+
+let reap_return_bound_seconds =
+  grandchild_timeout_budget_seconds
+  +. Process_eio.child_exit_grace_seconds
+  +. reap_return_allowance_seconds
+;;
+
+let outcome_within_seconds bound scenario =
+  let outcome = Atomic.make None in
+  let runner =
+    Domain.spawn (fun () ->
+      let result =
+        try Ok (with_process_runtime scenario) with
+        | exn -> Error exn
+      in
+      Atomic.set outcome (Some result))
+  in
+  let deadline = Unix.gettimeofday () +. bound in
+  let rec wait () =
+    match Atomic.get outcome with
+    | Some result ->
+      Domain.join runner;
+      `Came_back result
+    | None when Unix.gettimeofday () > deadline -> `Still_blocked
+    | None ->
+      Unix.sleepf watchdog_poll_interval_seconds;
+      wait ()
+  in
+  wait ()
+;;
+
+let describe_status = function
+  | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+  | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
+  | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
+;;
+
+let parent_cancel_during_the_reap_grace ~clock =
+  let t0 = Eio.Time.now clock in
+  let how =
+    match
+      Eio.Switch.run (fun outer ->
+        Eio.Fiber.fork ~sw:outer (fun () ->
+          Eio.Time.sleep clock
+            (grandchild_timeout_budget_seconds +. operator_stop_into_grace_seconds);
+          Eio.Switch.fail outer Operator_stop_during_the_reap_grace);
+        Process_eio.run_argv_with_status_split
+          ~timeout_sec:grandchild_timeout_budget_seconds
+          [ "/bin/sh";
+            "-c";
+            Printf.sprintf "trap '' TERM; sleep %g"
+              sigterm_ignoring_child_lifetime_seconds ])
+    with
+    | status, _stdout, _stderr ->
+      Printf.sprintf "the call returned (%s)" (describe_status status)
+    | exception Operator_stop_during_the_reap_grace ->
+      "the outer switch re-raised the stop"
+  in
+  Eio.Time.now clock -. t0, how
+;;
+
+let test_parent_cancel_during_the_reap_grace_returns () =
+  match
+    outcome_within_seconds reap_return_bound_seconds
+      parent_cancel_during_the_reap_grace
+  with
+  | `Still_blocked ->
+    fail
+      (Printf.sprintf
+         "the call did not come back within %.1fs: a cancel during the reap grace hangs it"
+         reap_return_bound_seconds)
+  | `Came_back (Error exn) ->
+    fail (Printf.sprintf "the scenario raised: %s" (Printexc.to_string exn))
+  | `Came_back (Ok (elapsed, how)) ->
+    check bool
+      (Printf.sprintf "%s once the grace had run out (%.2fs)" how elapsed)
+      true
+      (elapsed >= Process_eio.child_exit_grace_seconds);
+    check bool
+      (Printf.sprintf "%s within the bound (%.2fs)" how elapsed)
+      true
+      (elapsed < reap_return_bound_seconds)
+;;
+
 let () =
   run "Process_eio coverage"
     [
@@ -867,5 +1036,18 @@ let () =
             test_cancel_waits_for_the_child_to_act_on_sigterm;
           test_case "cancel-grace-is-bounded-when-the-child-ignores-sigterm" `Quick
             test_cancel_grace_is_bounded_when_the_child_ignores_sigterm;
+        ] );
+      ( "timeout-grace",
+        [
+          test_case
+            "run_argv_with_status_split-timeout-with-a-grandchild-holding-stdout-returns-at-the-budget"
+            `Quick
+            test_timeout_with_a_grandchild_holding_stdout_returns_at_the_budget;
+          test_case
+            "run_argv_with_stdin_and_status_split-timeout-with-a-grandchild-holding-stdout-returns-at-the-budget"
+            `Quick
+            test_timeout_with_stdin_and_a_grandchild_holding_stdout_returns_at_the_budget;
+          test_case "parent-cancel-during-the-reap-grace-returns" `Quick
+            test_parent_cancel_during_the_reap_grace_returns;
         ] );
     ]

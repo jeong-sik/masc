@@ -542,34 +542,65 @@ let child_exit_grace_seconds = 2.0
     The Eio spawn helper registers the handle with a switch, but relying solely
     on switch finalizers leaves a window where the child keeps running after a
     timeout/cancel.  This helper sends [SIGTERM], waits
-    {!child_exit_grace_seconds}, then escalates to [SIGKILL] and awaits the
-    final status.  It is safe to call on an already-exited process. *)
-let reap_proc_with_clock clock proc =
-  let signal_and_await sig_ =
-    try
-      Eio.Process.signal proc sig_;
-      Eio.Process.await proc |> ignore
-    with
+    {!child_exit_grace_seconds}, then escalates to [SIGKILL].  It is safe to
+    call on an already-exited process.
+
+    What follows the [SIGKILL] depends on [sw], read again once the grace has
+    run out. [Eio.Process.await] is resolved by a daemon fiber of the switch
+    the child was spawned in (eio_posix [low_level.ml:577-581]). When that
+    switch is cancelled while this reap is waiting -- a keeper turn aborted,
+    or a shutdown, arriving during the grace -- the daemon is gone and the
+    await would never return, while the switch's release hook, which sends
+    the non-cancellable [SIGKILL] and [waitpid]s the child
+    ([low_level.ml:567-576]), runs only once every fiber of the switch has
+    returned, this one included. So a switch that is off after the grace gets
+    the [SIGKILL] and no wait: its release hook is the authority for the last
+    reap. A switch that is still on gets the await, bounded by the same grace:
+    a child that has not died that long after a [SIGKILL] is in a state no
+    wait here can change, and the release hook reaps it all the same. *)
+let reap_proc_with_clock ~sw clock proc =
+  let signal_best_effort sig_ =
+    try Eio.Process.signal proc sig_ with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn ->
       Log.Misc.warn
-        "[Process_eio] failed to signal/reap child with signal=%d: %s"
+        "[Process_eio] failed to signal child with signal=%d: %s"
         sig_
         (Printexc.to_string exn)
   in
-  try
-    Eio.Process.signal proc Sys.sigterm;
-    (try
-       Eio.Time.with_timeout_exn clock child_exit_grace_seconds (fun () ->
-         Eio.Process.await proc |> ignore)
-     with Eio.Time.Timeout -> signal_and_await Sys.sigkill)
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
+  let await_within_grace () =
+    match
+      Eio.Time.with_timeout clock child_exit_grace_seconds (fun () ->
+        Ok (Eio.Process.await proc))
+    with
+    | Ok (`Exited _ | `Signaled _) -> `Exited
+    | Error `Timeout -> `Still_running
+  in
+  let escalate_to_sigkill () =
+    signal_best_effort Sys.sigkill;
+    match Eio.Switch.get_error sw with
+    | Some (_ : exn) ->
+      Log.Misc.debug
+        "[Process_eio] owning switch went off during the %.1fs grace; SIGKILL sent, its release hook reaps the child"
+        child_exit_grace_seconds
+    | None ->
+      (match await_within_grace () with
+       | `Exited -> ()
+       | `Still_running ->
+         Log.Misc.warn
+           "[Process_eio] child not reaped %.1fs after SIGKILL; leaving it to the switch release hook"
+           child_exit_grace_seconds)
+  in
+  signal_best_effort Sys.sigterm;
+  match await_within_grace () with
+  | `Exited -> ()
+  | `Still_running -> escalate_to_sigkill ()
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn ->
     Log.Misc.warn
       "[Process_eio] graceful child reap failed; escalating to SIGKILL: %s"
       (Printexc.to_string exn);
-    signal_and_await Sys.sigkill
+    escalate_to_sigkill ()
 
 let drain_chunk_size = 4096
 
@@ -644,7 +675,9 @@ let finalize_spawned_proc ~sw ~clock proc status ~sinks ~sources =
      cancellation as the switch's sent every exec timeout down the second
      path, and a 0.2s budget returned when the child's orphaned grandchild
      closed the pipe two seconds later (#33182). Record the switch's state
-     before entering the protected cleanup context. *)
+     before entering the protected cleanup context. A switch that is on here
+     can still be cancelled while the ordinary reap waits out its grace, and
+     that reap reads the state again before deciding what to wait on. *)
   let owning_switch_cancelled = Option.is_some (Eio.Switch.get_error sw) in
   let close_all flows =
     List.iter (fun (label, flow) -> close_flow_best_effort label flow) flows
@@ -655,7 +688,7 @@ let finalize_spawned_proc ~sw ~clock proc status ~sinks ~sources =
     | Some _, _ -> close_all sources
     | None, false ->
       close_all sources;
-      reap_proc_with_clock clock proc
+      reap_proc_with_clock ~sw clock proc
     | None, true ->
       (* The owning Eio switch release hook performs the non-cancellable
          SIGKILL/waitpid before [Switch.run] re-raises the cancellation. It
@@ -1740,7 +1773,7 @@ let run_argv_pipeline_with_status_split ?timeout_sec
                          , Exec_buffer.render stdout_buf
                          , stderr ))
                    with Explicit_process_timeout timeout_sec ->
-                     List.iter (reap_proc_with_clock clk) procs;
+                     List.iter (reap_proc_with_clock ~sw clk) procs;
                      raise (Explicit_process_timeout timeout_sec))
              with
              | Pipeline_redirect_failed message -> Error message

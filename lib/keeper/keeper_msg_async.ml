@@ -442,36 +442,51 @@ exception Lane_admission_timeout of string
 
 let with_lane_gate ~on_wait ~wait_budget ~lane_label sem f =
   let acquired =
-    if Eio.Semaphore.get_value sem > 0
-    then (
-      (* Fast path: a free token means [acquire] cannot suspend. *)
+    match wait_budget with
+    | None ->
+      (* Unbounded (settlement path): a committed write must always be able
+         to settle, so [acquire] waits as long as it takes. *)
+      if Eio.Semaphore.get_value sem <= 0 then on_wait ();
       Eio.Semaphore.acquire sem;
-      true)
-    else (
-      on_wait ();
-      match wait_budget with
-      | None ->
-        Eio.Semaphore.acquire sem;
-        true
-      | Some budget_sec ->
-        (match Eio_context.get_mono_clock_opt () with
-         | None ->
-           (* No ambient monotonic clock (pre-boot): the wait cannot be
-              bounded honestly, so refuse instead of hanging. *)
-           false
-         | Some clock ->
-           if budget_sec <= 0.0
-           then false
+      true
+    | Some budget_sec ->
+      (match Eio_context.get_mono_clock_opt () with
+       | None ->
+         (* No ambient monotonic clock (pre-boot): a contended wait cannot
+            be bounded honestly, so refuse instead of hanging. A free token
+            is still taken directly. *)
+         if Eio.Semaphore.get_value sem > 0
+         then (
+           Eio.Semaphore.acquire sem;
+           true)
+         else (
+           on_wait ();
+           false)
+       | Some clock ->
+         if budget_sec <= 0.0
+         then (
+           if Eio.Semaphore.get_value sem > 0
+           then (
+             Eio.Semaphore.acquire sem;
+             true)
            else (
-             match
-               Eio.Time.Timeout.run
-                 (Eio.Time.Timeout.seconds clock budget_sec)
-                 (fun () ->
-                    Eio.Semaphore.acquire sem;
-                    Ok ())
-             with
-             | Ok () -> true
-             | Error `Timeout -> false)))
+             on_wait ();
+             false))
+         else (
+           (* Bounded acquisition runs under the timeout even on the fast
+              path: [get_value] and [acquire] are not atomic, and a
+              cross-domain steal between them must not fall back into an
+              unbounded wait. *)
+           if Eio.Semaphore.get_value sem <= 0 then on_wait ();
+           match
+             Eio.Time.Timeout.run
+               (Eio.Time.Timeout.seconds clock budget_sec)
+               (fun () ->
+                  Eio.Semaphore.acquire sem;
+                  Ok ())
+           with
+           | Ok () -> true
+           | Error `Timeout -> false))
   in
   if not acquired then raise (Lane_admission_timeout lane_label);
   (* A started durable systhread cannot be cancelled. Keep the lane held until

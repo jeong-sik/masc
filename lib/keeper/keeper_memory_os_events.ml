@@ -222,3 +222,16 @@ let summary_for ~memory_id (events : event list) : summary =
   ; revised_from
   }
 ;;
+
+let summary_to_json (s : summary) : Yojson.Safe.t =
+  `Assoc
+    [ "retrieved_count", `Int s.retrieved_count
+    ; "retrieved_distinct_days", `Int s.retrieved_distinct_days
+    ; ( "last_retrieved_at"
+      , match s.last_retrieved_at with
+        | None -> `Null
+        | Some at -> `Float at )
+    ; "cited_count", `Int s.cited_count
+    ; "revised_from", `List (List.map (fun id -> `String id) s.revised_from)
+    ]
+;;

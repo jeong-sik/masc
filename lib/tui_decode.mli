@@ -749,6 +749,23 @@ type memory_health_snapshot = {
   mhs_starving_keepers : int;
 }
 
+(** What the keeper did with one fact, as the server projected it from the
+    memory-events sidecar (RFC-0418): how often a search returned it, on how
+    many distinct UTC days, when last, how often a tool cited it by id, and
+    which dropped facts it continues. No strength or score; the numbers are
+    the record. *)
+type memory_fact_events = {
+  mfe_retrieved_count : int;
+  mfe_retrieved_distinct_days : int;
+  mfe_last_retrieved_at : float option;
+  mfe_cited_count : int;
+  mfe_revised_from : string list;
+}
+
+(** A fact nothing has used yet: every count zero, no retrieval, no
+    predecessors. Fixtures start here. *)
+val no_memory_fact_events : memory_fact_events
+
 (** One remembered fact from a keeper's ordinary Memory OS store. The
     category and origin are the server's closed taxonomy, carried as the
     strings it spelled them in: this side renders and groups them by exact
@@ -760,6 +777,7 @@ type memory_fact = {
   mf_first_seen : float;
   mf_last_seen : float;
   mf_memory_id : string;
+  mf_events : memory_fact_events;
 }
 
 (** A fact bound to a file: it holds only while the file at [msf_path] still

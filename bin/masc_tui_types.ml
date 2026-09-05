@@ -2513,16 +2513,22 @@ let runtime_param_edit_value edit =
 
 type memory_sort_order =
   | Sort_recency
+  | Sort_last_retrieved
+  | Sort_retrieved_count
   | Sort_category
   | Sort_claim
 
 let memory_sort_order_label = function
   | Sort_recency -> "Recency (Newest)"
+  | Sort_last_retrieved -> "Last retrieved (Newest)"
+  | Sort_retrieved_count -> "Retrieved (Most)"
   | Sort_category -> "Category (A-Z)"
   | Sort_claim -> "Claim (A-Z)"
 
 let next_memory_sort = function
-  | Sort_recency -> Sort_category
+  | Sort_recency -> Sort_last_retrieved
+  | Sort_last_retrieved -> Sort_retrieved_count
+  | Sort_retrieved_count -> Sort_category
   | Sort_category -> Sort_claim
   | Sort_claim -> Sort_recency
 
@@ -4910,6 +4916,42 @@ let memory_fact_rows (state : state) : memory_fact_row list =
                  | Memory_row_invalidation f -> f.Tui_decode.mi_invalidated_at
                in
                Stdlib.compare (ts b) (ts a))
+             filtered_rows
+       | Sort_last_retrieved ->
+           (* Facts by their last retrieval, newest first. A fact never
+              retrieved, then the source and dropped rows, follow in their
+              recency order: the record says nothing about them, so nothing
+              is invented. *)
+           List.sort
+             (fun a b ->
+               let key = function
+                 | Memory_row_fact f ->
+                   (match f.Tui_decode.mf_events.Tui_decode.mfe_last_retrieved_at with
+                    | Some at -> (0, at)
+                    | None -> (1, f.Tui_decode.mf_last_seen))
+                 | Memory_row_source_fact f -> (2, f.Tui_decode.msf_first_seen)
+                 | Memory_row_invalidation f -> (2, f.Tui_decode.mi_invalidated_at)
+               in
+               let g_a, t_a = key a in
+               let g_b, t_b = key b in
+               if g_a <> g_b then Stdlib.compare g_a g_b else Stdlib.compare t_b t_a)
+             filtered_rows
+       | Sort_retrieved_count ->
+           List.sort
+             (fun a b ->
+               let key = function
+                 | Memory_row_fact f ->
+                   ( 0
+                   , f.Tui_decode.mf_events.Tui_decode.mfe_retrieved_count
+                   , f.Tui_decode.mf_last_seen )
+                 | Memory_row_source_fact f -> (1, 0, f.Tui_decode.msf_first_seen)
+                 | Memory_row_invalidation f -> (1, 0, f.Tui_decode.mi_invalidated_at)
+               in
+               let g_a, n_a, t_a = key a in
+               let g_b, n_b, t_b = key b in
+               if g_a <> g_b then Stdlib.compare g_a g_b
+               else if n_a <> n_b then Stdlib.compare n_b n_a
+               else Stdlib.compare t_b t_a)
              filtered_rows
        | Sort_category ->
            List.sort

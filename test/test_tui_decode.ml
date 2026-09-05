@@ -3082,6 +3082,90 @@ let memory_fact_snapshot_json ~ordinary ~source_bound =
     ; "source_bound", source_bound
     ]
 
+let memory_fact_events_json ?(retrieved = 0) ?(days = 0) ?(last = `Null) ?(cited = 0)
+    ?(revised_from = []) () =
+  `Assoc
+    [ "retrieved_count", `Int retrieved
+    ; "retrieved_distinct_days", `Int days
+    ; "last_retrieved_at", last
+    ; "cited_count", `Int cited
+    ; "revised_from", `List (List.map (fun id -> `String id) revised_from)
+    ]
+
+(* RFC-0418: the row carries the server's projection of the fact's use. It is
+   required: a row without it is a server this decoder does not know. *)
+let test_decode_memory_fact_reads_the_use_record () =
+  let mentions needle text =
+    let n = String.length needle and h = String.length text in
+    let rec go i = i + n <= h && (String.sub text i n = needle || go (i + 1)) in
+    go 0
+  in
+  let snapshot_with ?events () =
+    let fact =
+      `Assoc
+        ([ "claim", `String "the deploy needs assets"
+         ; "category", `String "lesson"
+         ; "origin", `String "authored"
+         ; "first_seen", `Float 1_775_000_000.0
+         ; "last_seen", `Float 1_775_000_050.0
+         ; "memory_id", `String "mem-1"
+         ]
+         @ match events with None -> [] | Some events -> [ "events", events ])
+    in
+    Tui_decode.decode_memory_fact_snapshot
+      (memory_fact_snapshot_json
+         ~ordinary:
+           (`Assoc
+              [ "present", `Bool true
+              ; "revision", `Int 7
+              ; "updated_at", `Float 1_775_000_100.0
+              ; "facts", `List [ fact ]
+              ])
+         ~source_bound:(`Assoc [ "present", `Bool false ]))
+  in
+  let only_fact = function
+    | Error error -> Alcotest.failf "snapshot rejected: %s" error
+    | Ok snapshot -> (
+        match snapshot.Tui_decode.mfs_ordinary with
+        | Tui_decode.Memory_store_present store -> (
+            match store.Tui_decode.mos_facts with
+            | [ fact ] -> fact
+            | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts))
+        | Tui_decode.Memory_store_read_error error ->
+            Alcotest.failf "ordinary store rejected: %s" error
+        | Tui_decode.Memory_store_absent -> Alcotest.fail "ordinary store absent")
+  in
+  let fact =
+    only_fact
+      (snapshot_with
+         ~events:
+           (memory_fact_events_json ~retrieved:4 ~days:2
+              ~last:(`Float 1_775_000_040.0) ~cited:1 ~revised_from:[ "mem-0" ] ())
+         ())
+  in
+  Alcotest.(check int) "retrieved" 4 fact.Tui_decode.mf_events.Tui_decode.mfe_retrieved_count;
+  Alcotest.(check int) "days" 2 fact.Tui_decode.mf_events.Tui_decode.mfe_retrieved_distinct_days;
+  Alcotest.(check (option (float 0.0))) "last" (Some 1_775_000_040.0)
+    fact.Tui_decode.mf_events.Tui_decode.mfe_last_retrieved_at;
+  Alcotest.(check int) "cited" 1 fact.Tui_decode.mf_events.Tui_decode.mfe_cited_count;
+  Alcotest.(check (list string)) "revised from" [ "mem-0" ]
+    fact.Tui_decode.mf_events.Tui_decode.mfe_revised_from;
+  let unused = only_fact (snapshot_with ~events:(memory_fact_events_json ()) ()) in
+  Alcotest.(check (option (float 0.0))) "never retrieved is None" None
+    unused.Tui_decode.mf_events.Tui_decode.mfe_last_retrieved_at;
+  (* A row without the record is a server this decoder does not know. *)
+  match snapshot_with () with
+  | Error error ->
+      Alcotest.(check bool) "the rejection names the field" true (mentions "events" error)
+  | Ok snapshot -> (
+      match snapshot.Tui_decode.mfs_ordinary with
+      | Tui_decode.Memory_store_read_error error ->
+          Alcotest.(check bool) "the store rejection names the field" true
+            (mentions "events" error)
+      | Tui_decode.Memory_store_present _ ->
+          Alcotest.fail "a row without events must be rejected"
+      | Tui_decode.Memory_store_absent -> Alcotest.fail "ordinary store absent")
+
 let test_decode_memory_facts_keeps_both_stores () =
   let ordinary =
     `Assoc
@@ -3097,6 +3181,7 @@ let test_decode_memory_facts_keeps_both_stores () =
                 ; "first_seen", `Float 1_775_000_000.0
                 ; "last_seen", `Float 1_775_000_050.0
                 ; "memory_id", `String "mem-1"
+                ; "events", memory_fact_events_json ()
                 ]
             ] )
       ]
@@ -7327,6 +7412,8 @@ let () =
           test_decode_memory_health_rejects_stale_schema;
         Alcotest.test_case "memory facts keep both stores" `Quick
           test_decode_memory_facts_keeps_both_stores;
+        Alcotest.test_case "memory fact row carries the use record" `Quick
+          test_decode_memory_fact_reads_the_use_record;
         Alcotest.test_case "memory facts keep store states apart" `Quick
           test_decode_memory_facts_keeps_store_states_apart;
         Alcotest.test_case "memory facts reject a shapeless store" `Quick

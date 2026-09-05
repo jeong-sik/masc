@@ -95,3 +95,7 @@ type summary =
 (** What the events say about one fact. Events about other facts are ignored
     except [Revised] events that point at [memory_id]. *)
 val summary_for : memory_id:string -> event list -> summary
+
+(** The summary on the wire: the five fields by name, [last_retrieved_at]
+    null when the fact was never retrieved. *)
+val summary_to_json : summary -> Yojson.Safe.t

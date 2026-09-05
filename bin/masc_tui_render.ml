@@ -15613,9 +15613,10 @@ let render_prompt_registry (state : state) =
       if index >= first && index < first + list_height then begin
         incr drawn;
         let mark =
-          if row.Tui_decode.pr_has_override then (Theme.warn ()) ^ "*" ^ Ansi.reset
-          else if row.Tui_decode.pr_file_exists then " "
-          else (Theme.bad ()) ^ "!" ^ Ansi.reset
+          match row.Tui_decode.pr_source with
+          | Tui_decode.Prompt_override -> (Theme.warn ()) ^ "*" ^ Ansi.reset
+          | Tui_decode.Prompt_file -> " "
+          | Tui_decode.Prompt_missing -> (Theme.bad ()) ^ "!" ^ Ansi.reset
         in
         let category =
           match row.Tui_decode.pr_category with
@@ -15662,16 +15663,10 @@ let render_prompt_registry (state : state) =
        done
    | Some row ->
        let source =
-         if String.equal row.Tui_decode.pr_source "" then
-           if row.pr_has_override then "재정의"
-           else if row.pr_file_exists then "파일"
-           else "없음"
-         else
-           match row.pr_source with
-           | "override" -> "재정의"
-           | "file" -> "파일"
-           | "missing" -> "없음"
-           | source -> source
+         match row.Tui_decode.pr_source with
+         | Tui_decode.Prompt_override -> "재정의"
+         | Tui_decode.Prompt_file -> "파일"
+         | Tui_decode.Prompt_missing -> "없음"
        in
        box_line buf cols
          (Printf.sprintf "  유효 템플릿  %s \xc2\xb7 %s \xc2\xb7 %s"

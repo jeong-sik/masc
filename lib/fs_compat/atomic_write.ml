@@ -27,6 +27,21 @@ let fsync_path_with ~allow_unsupported path =
 let fsync_path = fsync_path_with ~allow_unsupported:true
 let fsync_path_strict = fsync_path_with ~allow_unsupported:false
 
+(* The commit of an atomic replacement is three blocking syscalls: fsync of
+   the payload, rename over the target, fsync of the parent directory. Inside
+   an Eio fiber they run as one systhread job so the domain keeps scheduling
+   other fibers while the kernel works; a single rename held the main domain
+   for 486 ms in the 2026-09-05 stack sample (RFC
+   main-domain-scheduler-latency §8.8). Outside Eio they run inline.
+   [Eio_unix.run_in_systhread] re-raises the job's exception in the fiber
+   with the backtrace captured in the thread (eio/unix/thread_pool.ml), so
+   the failure stage and cancellation reporting below are unchanged. *)
+let blocking_syscalls ~label f =
+  match Execution_context.current () with
+  | Execution_context.Non_eio -> f ()
+  | Execution_context.Eio_fiber -> Eio_unix.run_in_systhread ~label f
+;;
+
 (* #10205 finding 2: keep the atomic-tmp filename shape in one place
    so the writer ([save_file_atomic]) and the orphan-sweep matcher
    ([is_atomic_orphan_name]) cannot drift independently. A
@@ -2634,10 +2649,11 @@ let save_file_atomic_with_parent_sync
   | Ok tmp ->
     (try
        save_file tmp content;
-       sync_file tmp;
-       Stdlib.Sys.rename tmp path;
-       stage := After_rename;
-       sync_parent dir;
+       blocking_syscalls ~label:"fs-compat-atomic-commit" (fun () ->
+         sync_file tmp;
+         Stdlib.Sys.rename tmp path;
+         stage := After_rename;
+         sync_parent dir);
        Ok ()
      with
      | exception_ ->

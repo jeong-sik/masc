@@ -14255,21 +14255,27 @@ let render_code (state : state) =
                  | None -> box_empty pane_buf pane_cols
                done)
      else if history_showing then
-       match state.code_history_error, state.code_history with
-       | Some detail, _ ->
+       (* "(loading history)" used to be what an unasked overlay said as well
+          as a reading one. Now it is only the reading one. *)
+       match Masc_tui_fetched.current state.code_history with
+       | Some (_, Masc_tui_fetched.Failed detail) ->
            box_line pane_buf pane_cols
              ((Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail
              ^ Ansi.reset);
            for _ = 2 to content_height do
              box_empty pane_buf pane_cols
            done
-       | None, None ->
+       | Some (_, Masc_tui_fetched.Loading) ->
            box_line pane_buf pane_cols
              (Ansi.dim ^ "  (loading history)" ^ Ansi.reset);
            for _ = 2 to content_height do
              box_empty pane_buf pane_cols
            done
-       | None, Some (_, { chl_entries = []; chl_activity_note }) ->
+       | Some (_, Masc_tui_fetched.Absent) | None ->
+           for _ = 1 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | Some (_, Masc_tui_fetched.Ready { chl_entries = []; chl_activity_note }) ->
            box_line pane_buf pane_cols
              (Ansi.dim
               ^ "  (no commit or exact Keeper change touches this file)"
@@ -14279,7 +14285,7 @@ let render_code (state : state) =
            for _ = 3 to content_height do
              box_empty pane_buf pane_cols
            done
-       | None, Some (_, { chl_entries; chl_activity_note }) ->
+       | Some (_, Masc_tui_fetched.Ready { chl_entries; chl_activity_note }) ->
            box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
              ("  " ^ Terminal_text.single_line chl_activity_note);
            let list_height = max 1 (content_height - 1) in
@@ -14388,8 +14394,9 @@ let render_code (state : state) =
              | _ -> []
            in
            let keeper_spans =
-             match state.code_history with
-             | Some (loaded_path, listing) when matches_open_file loaded_path ->
+             match Masc_tui_fetched.current state.code_history with
+             | Some ((_, loaded_path), Masc_tui_fetched.Ready listing)
+               when matches_open_file loaded_path ->
                  List.concat_map
                    (function
                      | Hist_keeper_change change ->

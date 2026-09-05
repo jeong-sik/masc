@@ -1,4 +1,16 @@
-# Test suites that `dune build @test/runtest` runs and that do not pass.
+# Test suites that `dune build @runtest` from the repository root runs and
+# that do not pass. The alias covers test/, packages/agent_core/test,
+# lib/exec/test and tools/; until 2026-09 the lane built @test/runtest, so
+# the suites outside test/ have no measured baseline yet.
+#
+# A row is <dir>/<suite>: the directory whose dune file declares the suite,
+# then the stanza name. A stanza in test/stanzas/*.inc is included by
+# test/dune, so it is keyed under test/, where its executable is built. The
+# directory is not decoration: test/dune and packages/agent_core/test/dune
+# both declare test_session, test_trajectory, test_schema_surface_index and
+# test_tool_input_validation, and test/dune shares test_workspace with
+# test/multimodal/dune and test_keeper_event_queue with
+# test/keeper_event_queue/dune.
 #
 # scripts/ci-run-test-suite.sh compares the suites that actually fail against
 # this list and fails CI when the two differ in either direction: a suite that
@@ -25,18 +37,18 @@
 # forty. A deadline that covers the build measures the build.
 
 # --- assertions that fail -------------------------------------------------
-test_fs_compat                               # save_file_atomic: strict payload cancellation
-test_fs_compat_capability_exact_read         # conformance: fatal backtrace propagation
-test_fs_compat_capability_head               # authority: absent publish
-test_fs_compat_capability_write              # publication: replace fatal and cancellation
-test_keeper_fs_directory_durability          # durable commit observer: observer exception
-test_keeper_board_attention_exact_flow       # production adapter: resumable status gate
-test_keeper_tool_matrix                      # inventory: the AGENT_CORE bundle
-test_server_mcp_session_persist              # persistence: save/forget/load round-trip
+test/test_fs_compat                               # save_file_atomic: strict payload cancellation
+test/test_fs_compat_capability_exact_read         # conformance: fatal backtrace propagation
+test/test_fs_compat_capability_head               # authority: absent publish
+test/test_fs_compat_capability_write              # publication: replace fatal and cancellation
+test/test_keeper_fs_directory_durability          # durable commit observer: observer exception
+test/test_keeper_board_attention_exact_flow       # production adapter: resumable status gate
+test/test_keeper_tool_matrix                      # inventory: the AGENT_CORE bundle
+test/test_server_mcp_session_persist              # persistence: save/forget/load round-trip
 
 # --- cannot be exercised where it stands ----------------------------------
 # The defence is live: with_deepest_existing_parent descends one component at a
 # time with Eio.Path.open_dir and never re-reads the path string. The race has
 # nowhere to enter, because a keeper can only write inside the playground and
 # playground writes skip the gate the injection point sits behind (#29858).
-test_keeper_fs_edit_patch
+test/test_keeper_fs_edit_patch

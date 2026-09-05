@@ -34,10 +34,15 @@ on:
 permissions:
   contents: read
 
-# One run at a time for the whole repo: a new run cancels the one in
-# flight instead of stacking a second one.
+# Two lanes. Every dispatch shares one, where a new dispatch cancels the
+# run in flight instead of stacking a second 180-minute job, as before;
+# the scheduled run has a lane of its own that no dispatch can reach. One
+# group for the whole repo did reach it: on 2026-09-04 the scheduled run
+# (17:43:56Z, 7aed1b696f) was cancelled within two seconds by a branch
+# dispatch created the same second, and of this lane's first 13 runs none
+# completed successfully.
 concurrency:
-  group: test
+  group: test-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -48,8 +53,15 @@ jobs:
     # cache miss the setup steps can consume 40-75 minutes (compiler
     # bootstrap plus up to three 20-minute install attempts), so 180 =
     # worst-case setup (~75 min) + the full 100-minute test budget with
-    # margin. Warm runs are far under it: the cache key is shared with
-    # pr-check.yml, which runs on every PR push and keeps it hot.
+    # margin. Whether a run is warm depends on where the cache came from:
+    # GitHub restores a cache only from the run's own ref or the default
+    # branch, and a cache written by a pull_request run belongs to its
+    # merge ref, so pr-check.yml keeps nothing warm for this lane. A
+    # branch dispatch restores what its own branch or main saved; the
+    # scheduled run on main restores only what a run on main saved, and
+    # actions/cache saves only when the job succeeds. Until a dispatch of
+    # ci.yml or this workflow on main, or a nightly, has completed green,
+    # the nightly pays the cold-cache setup every time.
     timeout-minutes: 180
     steps:
       - name: Free disk space
@@ -79,6 +91,14 @@ jobs:
       - name: Check source text integrity
         run: scripts/ci/check-source-text-integrity.sh
 
+      - name: Suite runner self-test
+        # The reader's own fixtures, under this runner's awk and python3,
+        # before any toolchain work: a header it cannot attribute or a
+        # suite it cannot find at the deadline is a wrong verdict later.
+        # scripts/ci/run-lint-suite.sh also runs this, but nothing runs
+        # that script.
+        run: bash scripts/ci-run-test-suite.sh --self-test
+
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain
 
@@ -103,8 +123,9 @@ jobs:
           DUNE_JOBS: "4"
           # Three nested deadlines, innermost first:
           # 1. MASC_TEST_SUITE_DEADLINE (90 min) bounds the suite itself;
-          #    on expiry ci-run-test-suite.sh prints its diagnostics and a
-          #    log tail before failing, so a hang leaves evidence.
+          #    on expiry ci-run-test-suite.sh lists the executables still
+          #    running under dune, then a log tail, before failing, so a
+          #    hang leaves evidence that names it.
           # 2. CI_TEST_TIMEOUT_SEC (100 min) is the observer's fail-closed
           #    backstop -- reached only if the suite script cannot enforce
           #    its own deadline.
@@ -116,9 +137,11 @@ jobs:
         # The runner is scripts/ci-run-test-suite.sh, NOT raw dune test:
         # nine suites in test/ci-known-failures.txt fail today, so plain
         # dune test exits 1 on every run -- permanently red, zero signal.
-        # The suite runner compares what fails against that list and fails
-        # only on the delta: an unlisted suite breaking, or a listed suite
-        # newly passing. ci-run-tests.sh wraps it as the heartbeat observer.
+        # The suite runner builds the root @runtest alias (test/, packages/,
+        # lib/exec/test and tools/), compares what fails against that list
+        # and fails only on the delta: an unlisted suite breaking, a listed
+        # suite newly passing, or a failure header that names no suite.
+        # ci-run-tests.sh wraps it as the heartbeat observer.
         run: |
           set -euo pipefail
           scripts/ci-run-tests.sh "scripts/ci-run-test-suite.sh"

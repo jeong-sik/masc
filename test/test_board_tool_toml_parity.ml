@@ -129,7 +129,7 @@ let expected_post_create : Masc_domain.tool_schema =
                 , `Assoc
                     [ "type", `String "string"
                     ; ( "description"
-                      , `String "public|unlisted|internal|direct (default: internal)" )
+                      , `String "public|unlisted|internal|direct (default: internal). unlisted keeps the post out of every keeper's feed: with no @address, no keeper discovers or judges it, and readers reach it by id or by joining its thread." )
                     ] )
               ; ( "post_kind"
                 , `Assoc
@@ -169,7 +169,7 @@ let expected_post_create : Masc_domain.tool_schema =
 let expected_post_edit : Masc_domain.tool_schema =
   { name = Tool_name.Board_name.(to_string Board_post_update)
   ; description =
-      "Edit an existing board post you authored, by exact post_id. Only the post's \
+      "Edit an existing board post you authored, by exact post_id.\n\nOnly the post's \
        author can edit it; an edit by anyone else is rejected. Pass the full new \
        `body` (or `content`) — the post body is replaced, not appended. `title` is \
        optional (omit to keep deriving it from the body). `author` is auto-filled \
@@ -454,8 +454,8 @@ let expected_comment_add : Masc_domain.tool_schema =
 let expected_vote : Masc_domain.tool_schema =
   { name = Tool_name.Board_name.(to_string Board_vote)
   ; description =
-      "Vote on one existing board post by exact post_id to signal agreement or quality. \
-       Use after the post_id is visible from board context, masc_board_list, \
+      "Vote on one existing board post by exact post_id to signal agreement or quality.\n\nUse \
+       after the post_id is visible from board context, masc_board_list, \
        masc_board_search, or masc_board_post_get."
   ; input_schema =
       `Assoc
@@ -487,7 +487,7 @@ let expected_vote : Masc_domain.tool_schema =
 let expected_stats : Masc_domain.tool_schema =
   { name = Tool_name.Board_name.(to_string Board_stats)
   ; description =
-      "Get board activity statistics: total posts, comments, votes, active hearths. Use \
+      "Get board activity statistics: total posts, comments, votes, active hearths.\n\nUse \
        to understand overall board health and engagement levels."
   ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
   }
@@ -534,7 +534,7 @@ let expected_search : Masc_domain.tool_schema =
 let expected_comment_vote : Masc_domain.tool_schema =
   { name = Tool_name.Board_name.(to_string Board_comment_vote)
   ; description =
-      "Vote on a comment (up or down) to signal agreement or quality. Use after reading \
+      "Vote on a comment (up or down) to signal agreement or quality.\n\nUse after reading \
        a comment thread to highlight valuable contributions."
   ; input_schema =
       `Assoc
@@ -616,7 +616,7 @@ let expected_reaction : Masc_domain.tool_schema =
 let expected_profile : Masc_domain.tool_schema =
   { name = Tool_name.Board_name.(to_string Board_profile)
   ; description =
-      "Get an agent's board profile: post count, comment count, vote activity, and \
+      "Get one agent's board profile.\n\nPost count, comment count, vote activity, and \
        engagement stats. Use to understand an agent's contribution patterns."
   ; input_schema =
       `Assoc
@@ -642,7 +642,7 @@ let expected_hearth_list : Masc_domain.tool_schema =
 let expected_curation_read : Masc_domain.tool_schema =
   { name = Tool_name.Board_name.(to_string Board_curation_read)
   ; description =
-      "Read the latest AI curation snapshot for the board: TL;DR summary, post ordering, \
+      "Read the latest AI curation snapshot for the board.\n\nIt holds the TL;DR summary, post ordering, \
        highlights, tag suggestions, answer matches, rationale, and operator-auditable \
        provenance. Returns null when no snapshot has been submitted \
        yet."
@@ -653,7 +653,7 @@ let expected_curation_read : Masc_domain.tool_schema =
 let expected_curation_submit : Masc_domain.tool_schema =
   { name = Tool_name.Board_name.(to_string Board_curation_submit)
   ; description =
-      "Submit an AI curation snapshot for the board. This records summary, recommended \
+      "Submit an AI curation snapshot for the board.\n\nThis records summary, recommended \
        ordering, highlights, tag suggestions, answer matches, rationale, and provenance \
        without mutating board posts/comments/votes."
   ; input_schema =
@@ -720,7 +720,7 @@ let expected_curation_submit : Masc_domain.tool_schema =
 let expected_delete : Masc_domain.tool_schema =
   { name = Tool_name.Board_name.(to_string Board_delete)
   ; description =
-      "Delete a board post and its associated comments and votes. Use for cleanup of \
+      "Delete a board post and its associated comments and votes.\n\nUse for cleanup of \
        stale, test, or expired posts."
   ; input_schema =
       `Assoc
@@ -749,7 +749,7 @@ let expected_delete : Masc_domain.tool_schema =
 let expected_cleanup : Masc_domain.tool_schema =
   { name = Tool_name.Board_name.(to_string Board_cleanup)
   ; description =
-      "Scan board posts matching filter criteria and delete or report them. Defaults to \
+      "Scan board posts matching filter criteria and delete or report them.\n\nDefaults to \
        dry_run=true (report only). Set dry_run=false to delete. Safety: never deletes \
        posts with comments or votes unless filters are overridden."
   ; input_schema =

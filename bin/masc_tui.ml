@@ -4055,6 +4055,129 @@ let launch_memory_facts_load state ~mailbox ~keeper_name =
       enqueue_async mailbox
         (Memory_facts_loaded (keeper_name, Error "Eio switch is unavailable"))
 
+let launch_all_memory_facts_load state ~mailbox =
+  let host = server_peer_host in
+  let port = state.port in
+  let keepers =
+    match state.memory_health with
+    | Some h -> h.Tui_decode.mhs_keepers
+    | None -> []
+  in
+  let run () =
+    if keepers = [] then
+      enqueue_async mailbox
+        (Memory_facts_loaded
+           ( "*",
+             Ok
+               { Tui_decode.mfs_keeper = "*"
+               ; mfs_ordinary =
+                   Tui_decode.Memory_store_present
+                     { Tui_decode.mos_revision = 1
+                     ; mos_updated_at = Unix.gettimeofday ()
+                     ; mos_facts = []
+                     }
+               ; mfs_source =
+                   Tui_decode.Memory_store_present
+                     { Tui_decode.mss_revision = 1
+                     ; mss_updated_at = Unix.gettimeofday ()
+                     ; mss_facts = []
+                     ; mss_invalidations = []
+                     }
+               } ))
+    else
+      let all_ord_facts = ref [] in
+      let all_src_facts = ref [] in
+      let all_invals = ref [] in
+      List.iter
+        (fun (k : Tui_decode.memory_keeper_health) ->
+          let keeper_name = k.Tui_decode.mkh_keeper_id in
+          match
+            try Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | _ -> Error "failed"
+          with
+          | Ok snap ->
+              (match snap.Tui_decode.mfs_ordinary with
+               | Tui_decode.Memory_store_present store ->
+                   let tagged =
+                     List.map
+                       (fun (f : Tui_decode.memory_fact) ->
+                         { f with
+                           Tui_decode.mf_origin =
+                             if String.starts_with ~prefix:(keeper_name ^ " · ") f.Tui_decode.mf_origin then
+                               f.Tui_decode.mf_origin
+                             else Printf.sprintf "%s · %s" keeper_name f.Tui_decode.mf_origin
+                         })
+                       store.Tui_decode.mos_facts
+                   in
+                   all_ord_facts := !all_ord_facts @ tagged
+               | _ -> ());
+              (match snap.Tui_decode.mfs_source with
+               | Tui_decode.Memory_store_present store ->
+                   let tagged_src =
+                     List.map
+                       (fun (f : Tui_decode.memory_source_fact) ->
+                         { f with
+                           Tui_decode.msf_path =
+                             if String.starts_with ~prefix:(keeper_name ^ ":") f.Tui_decode.msf_path then
+                               f.Tui_decode.msf_path
+                             else Printf.sprintf "%s:%s" keeper_name f.Tui_decode.msf_path
+                         })
+                       store.Tui_decode.mss_facts
+                   in
+                   let tagged_inv =
+                     List.map
+                       (fun (inv : Tui_decode.memory_invalidation) ->
+                         { inv with
+                           Tui_decode.mi_source_path =
+                             if String.starts_with ~prefix:(keeper_name ^ ":") inv.Tui_decode.mi_source_path then
+                               inv.Tui_decode.mi_source_path
+                             else Printf.sprintf "%s:%s" keeper_name inv.Tui_decode.mi_source_path
+                         })
+                       store.Tui_decode.mss_invalidations
+                   in
+                   all_src_facts := !all_src_facts @ tagged_src;
+                   all_invals := !all_invals @ tagged_inv
+               | _ -> ())
+          | Error _ -> ())
+        keepers;
+      let combined =
+        { Tui_decode.mfs_keeper = "*"
+        ; mfs_ordinary =
+            Tui_decode.Memory_store_present
+              { Tui_decode.mos_revision = 1
+              ; mos_updated_at = Unix.gettimeofday ()
+              ; mos_facts = !all_ord_facts
+              }
+        ; mfs_source =
+            Tui_decode.Memory_store_present
+              { Tui_decode.mss_revision = 1
+              ; mss_updated_at = Unix.gettimeofday ()
+              ; mss_facts = !all_src_facts
+              ; mss_invalidations = !all_invals
+              }
+        }
+      in
+      enqueue_async mailbox (Memory_facts_loaded ("*", Ok combined))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Memory_facts_loaded ("*", Error "Eio switch is unavailable"))
+
+let open_all_fleet_memory state ~mailbox =
+  state.memory_facts_keeper <- Some "*";
+  state.memory_facts <- None;
+  state.memory_facts_error <- None;
+  state.memory_facts_cursor <- 0;
+  state.memory_facts_scroll <- 0;
+  state.memory_facts_category <- Category_all;
+  launch_all_memory_facts_load state ~mailbox
+
 let repository_change_scope_equal left right =
   match left, right with
   | Tui_decode.Repository_change_project, Tui_decode.Repository_change_project ->
@@ -6596,6 +6719,10 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         ("Librarian/Memory timeline: "
          ^ memory_visibility_to_string state.msg_memory_visibility
          ^ " (Ctrl-N or /memory to cycle)")
+  | Masc_tui_command.Open_fleet_memory ->
+      Buffer.clear state.msg_input;
+      goto_surface state ~mailbox Memory;
+      open_all_fleet_memory state ~mailbox
   | Masc_tui_command.Find_in_chat query ->
       (* A new query starts at the newest message; [Find_next] below carries on
          from wherever this landed. *)
@@ -9008,6 +9135,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Steer_missing_message
        | Masc_tui_command.Set_thinking _
        | Masc_tui_command.Set_tools _ | Masc_tui_command.Cycle_memory
+       | Masc_tui_command.Open_fleet_memory
        (* [/find] moves the pane on purpose, so unlike every other command it
           must not be followed by the reset to the newest row above. *)
        | Masc_tui_command.Find_in_chat _ | Masc_tui_command.Find_next
@@ -14516,6 +14644,15 @@ and is loaded on demand through keeper_skill.
              Masc_tui_types.next_memory_sort state.memory_facts_sort;
            state.memory_facts_cursor <- 0;
            state.memory_facts_scroll <- 0
+       | Some ("s" | "S")
+         when state.view = Memory
+              && Option.is_none state.memory_facts_keeper ->
+           state.memory_overview_sort <-
+             Masc_tui_types.next_memory_overview_sort state.memory_overview_sort;
+           state.memory_health_cursor <- 0;
+           state.memory_health_scroll <- 0
+       | Some ("a" | "A") when state.view = Memory ->
+           open_all_fleet_memory state ~mailbox:async_messages
        (* Resources and Tools hang off Config the way Connectors hangs off
           Runtime: not on the Tab ring, one key from their parent. Both
           cases, like every other hang-off hop (c|C, f|F, p|P), and no
@@ -15410,6 +15547,8 @@ and is loaded on demand through keeper_skill.
             | Memory ->
                 launch_memory_health_load state ~mailbox:async_messages;
                 (match state.memory_facts_keeper with
+                 | Some "*" ->
+                     launch_all_memory_facts_load state ~mailbox:async_messages
                  | Some keeper_name ->
                      launch_memory_facts_load state ~mailbox:async_messages
                        ~keeper_name

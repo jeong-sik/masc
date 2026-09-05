@@ -166,30 +166,64 @@ let memory_row_line columns (k : memory_keeper_health) =
       ; mrow_delta = delta
       }
 
-let memory_fact_row_line ~cols (row : memory_fact_row) =
+let format_cat_badge cat =
+  let raw_cat = Terminal_text.single_line (String.trim cat) in
+  let cat_style, label =
+    match String.lowercase_ascii raw_cat with
+    | "rule" | "rules" -> (Theme.warn (), "RULE")
+    | "persona" | "identity" -> (Theme.info (), "IDENTITY")
+    | "preference" | "user" -> (Theme.ok (), "PREF")
+    | "architecture" | "system" -> (Theme.info (), "ARCH")
+    | "lesson" -> (Theme.ok (), "LESSON")
+    | "source" -> (Theme.info (), "SOURCE")
+    | "dropped" -> (Theme.bad (), "DROPPED")
+    | other -> (Theme.recede (), String.uppercase_ascii other)
+  in
+  let cat_str =
+    if Message_layout.display_width label > 10 then
+      Message_layout.take_cells label 9 ^ "\xe2\x80\xa6"
+    else label
+  in
+  let pad = String.make (max 0 (10 - Message_layout.display_width cat_str)) ' ' in
+  Printf.sprintf "%s%s[%s%s]%s" Ansi.bold cat_style cat_str pad Ansi.reset
+
+let memory_fact_row_line ?(is_fleet = false) ~cols (row : memory_fact_row) =
   let inner_width = max 10 (framed_inner_width cols) in
+  let keeper_prefix =
+    if not is_fleet then ""
+    else
+      let keeper =
+        match row with
+        | Memory_row_fact fact ->
+            (match String.index_opt fact.mf_origin ' ' with
+             | Some idx when idx > 0 -> String.sub fact.mf_origin 0 idx
+             | _ -> if String.trim fact.mf_origin <> "" then fact.mf_origin else "fleet")
+        | Memory_row_source_fact fact ->
+            (match String.split_on_char ':' fact.msf_path with
+             | k :: _ when String.trim k <> "" -> String.trim k
+             | _ -> "fleet")
+        | Memory_row_invalidation row ->
+            (match String.split_on_char ':' row.mi_source_path with
+             | k :: _ when String.trim k <> "" -> String.trim k
+             | _ -> "fleet")
+      in
+      let clean = Terminal_text.single_line keeper in
+      let truncated =
+        if Message_layout.display_width clean > 8 then
+          Message_layout.take_cells clean 7 ^ "\xe2\x80\xa6"
+        else clean
+      in
+      let pad = String.make (max 0 (8 - Message_layout.display_width truncated)) ' ' in
+      Printf.sprintf "%s[%s%s]%s " (Theme.info ()) truncated pad Ansi.reset
+  in
+  let keeper_cells = if is_fleet then 11 else 0 in
   match row with
   | Memory_row_fact fact ->
-      let cat_style =
-        match fact.mf_category with
-        | "rule" | "rules" -> Theme.warn ()
-        | "persona" | "identity" -> Theme.info ()
-        | "preference" | "user" -> Theme.ok ()
-        | "architecture" | "system" -> Theme.info ()
-        | _ -> Theme.recede ()
-      in
-      let raw_cat = Terminal_text.single_line fact.mf_category in
-      let cat_str =
-        if Message_layout.display_width raw_cat > 10 then
-          Message_layout.take_cells raw_cat 9 ^ "\xe2\x80\xa6"
-        else raw_cat
-      in
-      let pad = String.make (max 0 (10 - Message_layout.display_width cat_str)) ' ' in
-      let cat_badge = Printf.sprintf "%s[%s%s]%s" cat_style cat_str pad Ansi.reset in
+      let cat_badge = format_cat_badge fact.mf_category in
       let age = memory_fact_age_label fact.mf_last_seen in
       let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
-      let prefix = Printf.sprintf "  %s %s " cat_badge age_badge in
-      let prefix_cells = 2 + 12 + 1 + 6 + 1 in
+      let prefix = Printf.sprintf "  %s%s %s " keeper_prefix cat_badge age_badge in
+      let prefix_cells = 2 + keeper_cells + 12 + 1 + 6 + 1 in
       let claim_budget = max 4 (inner_width - prefix_cells) in
       let claim = Terminal_text.single_line fact.mf_claim in
       let claim_display =
@@ -201,10 +235,17 @@ let memory_fact_row_line ~cols (row : memory_fact_row) =
       in
       prefix ^ claim_display
   | Memory_row_source_fact fact ->
-      let cat_badge = Printf.sprintf "%s[source    ]%s" (Theme.info ()) Ansi.reset in
+      let cat_badge = format_cat_badge "source" in
       let age = memory_fact_age_label fact.msf_first_seen in
       let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
-      let path_raw = Terminal_text.single_line fact.msf_path in
+      let raw_path =
+        if is_fleet then
+          match String.split_on_char ':' fact.msf_path with
+          | _ :: rest -> String.concat ":" rest
+          | [] -> fact.msf_path
+        else fact.msf_path
+      in
+      let path_raw = Terminal_text.single_line raw_path in
       let path_width = Message_layout.display_width path_raw in
       let path_str =
         if path_width > 16 then
@@ -213,8 +254,8 @@ let memory_fact_row_line ~cols (row : memory_fact_row) =
       in
       let pad = String.make (max 0 (16 - Message_layout.display_width path_str)) ' ' in
       let path_badge = Printf.sprintf "%s%s%s%s" (Theme.info ()) path_str pad Ansi.reset in
-      let prefix = Printf.sprintf "  %s %s %s " cat_badge age_badge path_badge in
-      let prefix_cells = 2 + 12 + 1 + 6 + 1 + 16 + 1 in
+      let prefix = Printf.sprintf "  %s%s %s %s " keeper_prefix cat_badge age_badge path_badge in
+      let prefix_cells = 2 + keeper_cells + 12 + 1 + 6 + 1 + 16 + 1 in
       let claim_budget = max 4 (inner_width - prefix_cells) in
       let claim = Terminal_text.single_line fact.msf_claim in
       let claim_display =
@@ -226,10 +267,17 @@ let memory_fact_row_line ~cols (row : memory_fact_row) =
       in
       prefix ^ claim_display
   | Memory_row_invalidation row ->
-      let cat_badge = Printf.sprintf "%s[dropped   ]%s" (Theme.bad ()) Ansi.reset in
+      let cat_badge = format_cat_badge "dropped" in
       let age = memory_fact_age_label row.mi_invalidated_at in
       let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
-      let path_raw = Terminal_text.single_line row.mi_source_path in
+      let raw_path =
+        if is_fleet then
+          match String.split_on_char ':' row.mi_source_path with
+          | _ :: rest -> String.concat ":" rest
+          | [] -> row.mi_source_path
+        else row.mi_source_path
+      in
+      let path_raw = Terminal_text.single_line raw_path in
       let path_width = Message_layout.display_width path_raw in
       let path_str =
         if path_width > 16 then
@@ -238,8 +286,8 @@ let memory_fact_row_line ~cols (row : memory_fact_row) =
       in
       let pad = String.make (max 0 (16 - Message_layout.display_width path_str)) ' ' in
       let path_badge = Printf.sprintf "%s%s%s%s" (Theme.recede ()) path_str pad Ansi.reset in
-      let prefix = Printf.sprintf "  %s %s %s " cat_badge age_badge path_badge in
-      let prefix_cells = 2 + 12 + 1 + 6 + 1 + 16 + 1 in
+      let prefix = Printf.sprintf "  %s%s %s %s " keeper_prefix cat_badge age_badge path_badge in
+      let prefix_cells = 2 + keeper_cells + 12 + 1 + 6 + 1 + 16 + 1 in
       let claim_budget = max 4 (inner_width - prefix_cells) in
       let reason = Terminal_text.single_line row.mi_reason in
       let reason_display =
@@ -306,16 +354,88 @@ let render_memory_body ~cols ~budget (state : state)
     ~(push_selected : string -> unit)
     ~(push_divider : unit -> unit)
     ~(push_empty : unit -> unit) : unit =
-  let keepers =
+  let raw_keepers =
     match state.memory_health with
     | None -> []
     | Some s -> s.mhs_keepers
+  in
+  let sorted_keepers =
+    match state.memory_overview_sort with
+    | Mem_overview_facts ->
+        List.sort
+          (fun (a : memory_keeper_health) (b : memory_keeper_health) ->
+            if a.mkh_facts <> b.mkh_facts then Stdlib.compare b.mkh_facts a.mkh_facts
+            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_size ->
+        List.sort
+          (fun a b ->
+            if a.mkh_snapshot_bytes <> b.mkh_snapshot_bytes then
+              Stdlib.compare b.mkh_snapshot_bytes a.mkh_snapshot_bytes
+            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_delta ->
+        List.sort
+          (fun a b ->
+            let da = a.mkh_added + a.mkh_removed in
+            let db = b.mkh_added + b.mkh_removed in
+            if da <> db then Stdlib.compare db da
+            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_state ->
+        List.sort
+          (fun a b ->
+            let sa = memory_state a in
+            let sb = memory_state b in
+            if sa <> sb then Stdlib.compare sb sa
+            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_name ->
+        List.sort
+          (fun a b -> String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+  in
+  let query =
+    match state.search with
+    | Some q -> String.lowercase_ascii (String.trim q)
+    | None ->
+        if String.length (String.trim state.search_last) > 0 then
+          String.lowercase_ascii (String.trim state.search_last)
+        else ""
+  in
+  let keepers =
+    if query = "" then sorted_keepers
+    else
+      List.filter
+        (fun k ->
+          palette_contains ~needle:query k.mkh_keeper_id
+          || palette_contains ~needle:query (memory_state_label (memory_state k)))
+        sorted_keepers
   in
   let shown = List.length keepers in
   let columns =
     Render_schedule.allocate_memory_columns
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
+  let sort_label = memory_overview_sort_label state.memory_overview_sort in
+  let info_bar =
+    Printf.sprintf "  %sSort [s]:%s %s  %s·%s  %s[a / A]:%s Fleet Memory Search  %s·%s  %s[/]:%s Filter"
+      (Theme.recede ()) Ansi.reset sort_label
+      (Theme.recede ()) Ansi.reset
+      Ansi.bold Ansi.reset
+      (Theme.recede ()) Ansi.reset
+      (Theme.recede ()) Ansi.reset
+  in
+  push info_bar;
+  let search_bar =
+    if query <> "" then
+      Printf.sprintf "  %sFilter [/]:%s \"%s\" (%d matching keepers)  %s[Esc to clear]%s"
+        Ansi.bold Ansi.reset (Terminal_text.single_line state.search_last)
+        shown (Theme.recede ()) Ansi.reset
+    else ""
+  in
+  if search_bar <> "" then push search_bar;
+  push_divider ();
   push_styled ~style:(Theme.recede ())
     ("  " ^ Render_schedule.memory_header_row columns);
   push_divider ();
@@ -337,7 +457,9 @@ let render_memory_body ~cols ~budget (state : state)
     match context_lines with [] -> 0 | _ -> 1 + List.length context_lines
   in
   let fixed =
-    2 + context_rows
+    4
+    + (if search_bar <> "" then 1 else 0)
+    + context_rows
     + (if Option.is_some state.memory_health_error then 2 else 0)
   in
   let available = max 1 (budget - fixed) in
@@ -349,6 +471,9 @@ let render_memory_body ~cols ~budget (state : state)
     let note =
       if Option.is_some state.memory_health_error then
         "  (server error \xe2\x80\x94 waiting for retry)"
+      else if query <> "" then
+        Printf.sprintf "  (no keepers matching \"%s\" \xe2\x80\x94 Esc clears filter)"
+          state.search_last
       else
         match state.memory_health with
         | None -> "  (waiting for the server)"
@@ -381,10 +506,20 @@ let render_memory_facts_body ~cols ~budget (state : state)
     ~(push_selected : string -> unit)
     ~(push_divider : unit -> unit)
     ~(push_empty : unit -> unit) : unit =
+  let is_fleet =
+    Option.equal String.equal state.memory_facts_keeper (Some "*")
+  in
   let rows = memory_fact_rows state in
   let total = List.length rows in
   let cursor = max 0 (min state.memory_facts_cursor (total - 1)) in
   let sort_label = memory_sort_order_label state.memory_facts_sort in
+  let fleet_banner =
+    if is_fleet then
+      Printf.sprintf "  %s%s[GLOBAL FLEET KNOWLEDGE BASE — ALL KEEPERS CONSOLIDATED]%s"
+        Ansi.bold (Theme.info ()) Ansi.reset
+    else ""
+  in
+  if fleet_banner <> "" then push fleet_banner;
   let stats_line, pills_line =
     match state.memory_facts with
     | None -> ("  (loading facts\xe2\x80\xa6)", "")
@@ -472,7 +607,10 @@ let render_memory_facts_body ~cols ~budget (state : state)
               ("  source-bound store: " ^ Terminal_text.single_line detail)
         | Memory_store_absent | Memory_store_present _ -> ()));
   let col_header =
-    Printf.sprintf "  %-12s %6s %s" "CATEGORY" "AGE" "CLAIM / BOUND PATH"
+    if is_fleet then
+      Printf.sprintf "  %-10s %-12s %6s %s" "KEEPER" "CATEGORY" "AGE" "CLAIM / BOUND PATH"
+    else
+      Printf.sprintf "  %-12s %6s %s" "CATEGORY" "AGE" "CLAIM / BOUND PATH"
   in
   push_styled ~style:(Theme.recede ()) col_header;
   push_divider ();
@@ -497,6 +635,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
   in
   let top_fixed =
     1
+    + (if fleet_banner <> "" then 1 else 0)
     + (if pills_line <> "" then 1 else 0)
     + (if search_banner <> "" then 1 else 0)
     + 1
@@ -518,6 +657,8 @@ let render_memory_facts_body ~cols ~budget (state : state)
            if state.search_last <> "" then
              Printf.sprintf "  (no facts matching \"%s\" \xe2\x80\x94 Esc clears filter)"
                state.search_last
+           else if is_fleet then
+             "  (no facts across any keeper in the fleet)"
            else "  (no facts in either store)"
        | Some _, filt ->
            Printf.sprintf "  (no facts in category %s \xe2\x80\x94 c/C cycles)"
@@ -530,7 +671,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
       match List.nth_opt rows idx with
       | None -> push_empty ()
       | Some row ->
-          let line = memory_fact_row_line ~cols row in
+          let line = memory_fact_row_line ~is_fleet ~cols row in
           if idx = cursor then push_selected (Masc_tui_theme.strip_sgr line)
           else push line
     done;

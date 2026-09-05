@@ -15273,7 +15273,7 @@ and is loaded on demand through keeper_skill.
                     state.memory_facts_error <- None;
                     state.memory_facts_cursor <- 0;
                     state.memory_facts_scroll <- 0;
-                    state.memory_facts_category <- None
+                    state.memory_facts_category <- Category_all
                   end
                 end
                 else state.view <- Overview
@@ -16434,7 +16434,7 @@ and is loaded on demand through keeper_skill.
                             state.memory_facts_error <- None;
                             state.memory_facts_cursor <- 0;
                             state.memory_facts_scroll <- 0;
-                            state.memory_facts_category <- None;
+                            state.memory_facts_category <- Category_all;
                             launch_memory_facts_load state
                               ~mailbox:async_messages ~keeper_name)))
             | Repositories -> (

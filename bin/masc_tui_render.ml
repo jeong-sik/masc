@@ -12074,7 +12074,7 @@ let render_memory (state : state) =
    them. *)
 let memory_fact_row_line ~cols (row : Masc_tui_types.memory_fact_row) =
   let open Masc.Tui_decode in
-  let inner_width = max 30 (cols - 4) in
+  let inner_width = max 10 (framed_inner_width cols) in
   match row with
   | Masc_tui_types.Memory_row_fact fact ->
       let cat_style =
@@ -12093,7 +12093,7 @@ let memory_fact_row_line ~cols (row : Masc_tui_types.memory_fact_row) =
       let raw_cat = Terminal_text.single_line fact.mf_category in
       let cat_str =
         if Message_layout.display_width raw_cat > 10 then
-          Terminal_text.take_width 9 raw_cat ^ "\xe2\x80\xa6"
+          Message_layout.take_cells raw_cat 9 ^ "\xe2\x80\xa6"
         else raw_cat
       in
       let pad = String.make (max 0 (10 - Message_layout.display_width cat_str)) ' ' in
@@ -12105,11 +12105,13 @@ let memory_fact_row_line ~cols (row : Masc_tui_types.memory_fact_row) =
       let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
       let prefix = Printf.sprintf "  %s %s %s " cat_badge reinf_badge age_badge in
       let prefix_cells = 2 + 12 + 1 + 5 + 1 + 6 + 1 in
-      let claim_budget = max 10 (inner_width - prefix_cells) in
+      let claim_budget = max 4 (inner_width - prefix_cells) in
       let claim = Terminal_text.single_line fact.mf_claim in
       let claim_display =
         if Message_layout.display_width claim > claim_budget then
-          Terminal_text.take_width (claim_budget - 1) claim ^ "\xe2\x80\xa6"
+          if claim_budget > 1 then
+            Message_layout.take_cells claim (claim_budget - 1) ^ "\xe2\x80\xa6"
+          else Message_layout.take_cells claim claim_budget
         else claim
       in
       prefix ^ claim_display
@@ -12118,20 +12120,23 @@ let memory_fact_row_line ~cols (row : Masc_tui_types.memory_fact_row) =
       let age = memory_fact_age_label fact.msf_first_seen in
       let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
       let path_raw = Terminal_text.single_line fact.msf_path in
+      let path_width = Message_layout.display_width path_raw in
       let path_str =
-        if Message_layout.display_width path_raw > 16 then
-          "\xe2\x80\xa6" ^ String.sub path_raw (String.length path_raw - 15) 15
+        if path_width > 16 then
+          "\xe2\x80\xa6" ^ Message_layout.drop_cells path_raw (path_width - 15)
         else path_raw
       in
       let pad = String.make (max 0 (16 - Message_layout.display_width path_str)) ' ' in
       let path_badge = Printf.sprintf "%s%s%s%s" (Theme.accent ()) path_str pad Ansi.reset in
       let prefix = Printf.sprintf "  %s   -   %s %s " cat_badge age_badge path_badge in
       let prefix_cells = 2 + 12 + 1 + 5 + 1 + 6 + 1 + 16 + 1 in
-      let claim_budget = max 10 (inner_width - prefix_cells) in
+      let claim_budget = max 4 (inner_width - prefix_cells) in
       let claim = Terminal_text.single_line fact.msf_claim in
       let claim_display =
         if Message_layout.display_width claim > claim_budget then
-          Terminal_text.take_width (claim_budget - 1) claim ^ "\xe2\x80\xa6"
+          if claim_budget > 1 then
+            Message_layout.take_cells claim (claim_budget - 1) ^ "\xe2\x80\xa6"
+          else Message_layout.take_cells claim claim_budget
         else claim
       in
       prefix ^ claim_display
@@ -12140,20 +12145,23 @@ let memory_fact_row_line ~cols (row : Masc_tui_types.memory_fact_row) =
       let age = memory_fact_age_label row.mi_invalidated_at in
       let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
       let path_raw = Terminal_text.single_line row.mi_source_path in
+      let path_width = Message_layout.display_width path_raw in
       let path_str =
-        if Message_layout.display_width path_raw > 16 then
-          "\xe2\x80\xa6" ^ String.sub path_raw (String.length path_raw - 15) 15
+        if path_width > 16 then
+          "\xe2\x80\xa6" ^ Message_layout.drop_cells path_raw (path_width - 15)
         else path_raw
       in
       let pad = String.make (max 0 (16 - Message_layout.display_width path_str)) ' ' in
       let path_badge = Printf.sprintf "%s%s%s%s" (Theme.recede ()) path_str pad Ansi.reset in
       let prefix = Printf.sprintf "  %s   -   %s %s " cat_badge age_badge path_badge in
       let prefix_cells = 2 + 12 + 1 + 5 + 1 + 6 + 1 + 16 + 1 in
-      let claim_budget = max 10 (inner_width - prefix_cells) in
+      let claim_budget = max 4 (inner_width - prefix_cells) in
       let reason = Terminal_text.single_line row.mi_reason in
       let reason_display =
         if Message_layout.display_width reason > claim_budget then
-          Terminal_text.take_width (claim_budget - 1) reason ^ "\xe2\x80\xa6"
+          if claim_budget > 1 then
+            Message_layout.take_cells reason (claim_budget - 1) ^ "\xe2\x80\xa6"
+          else Message_layout.take_cells reason claim_budget
         else reason
       in
       prefix ^ reason_display
@@ -12229,16 +12237,15 @@ let render_memory_facts (state : state) =
       now.Unix.tm_sec
   in
   let filter_label =
-    match state.memory_facts_category with
-    | None -> "All"
-    | Some category -> category
+    Masc_tui_types.memory_category_filter_label state.memory_facts_category
   in
   let sort_label = Masc_tui_types.memory_sort_order_label state.memory_facts_sort in
   let query_label =
     match state.search with
     | Some q when String.length (String.trim q) > 0 ->
         Printf.sprintf " · find \"%s\"" (Terminal_text.single_line (String.trim q))
-    | _ ->
+    | Some _ -> " · find \"\""
+    | None ->
         if String.length (String.trim state.search_last) > 0 then
           Printf.sprintf " · filter \"%s\"" (Terminal_text.single_line (String.trim state.search_last))
         else ""
@@ -12298,32 +12305,32 @@ let render_memory_facts (state : state) =
                 (Theme.recede ()) Ansi.reset sort_label
             in
             let all_categories = Masc_tui_types.memory_fact_categories state in
-            let pill_of_cat cat count is_active =
+            let pill_of_filter filt count is_active =
               let marker = if is_active then "\xe2\x97\x8f" else "\xe2\x97\x8b" in
               let style = if is_active then Ansi.bold ^ Theme.accent () else Theme.recede () in
-              Printf.sprintf "%s[%s %s: %d]%s" style marker cat count Ansi.reset
+              let label = Masc_tui_types.memory_category_filter_label filt in
+              Printf.sprintf "%s[%s %s: %d]%s" style marker label count Ansi.reset
             in
             let all_pill =
-              pill_of_cat "All" grand_total (Option.is_none state.memory_facts_category)
+              pill_of_filter Masc_tui_types.Category_all grand_total
+                (state.memory_facts_category = Masc_tui_types.Category_all)
             in
             let cat_pills =
               List.map
-                (fun cat ->
+                (fun filt ->
                   let count =
-                    if cat = "source" then src_count
-                    else if cat = "dropped" then dropped_count
-                    else
-                      List.length
-                        (List.filter
-                           (fun (f : Tui_decode.memory_fact) -> f.mf_category = cat)
-                           ord_facts)
+                    match filt with
+                    | Masc_tui_types.Category_all -> grand_total
+                    | Masc_tui_types.Category_source -> src_count
+                    | Masc_tui_types.Category_dropped -> dropped_count
+                    | Masc_tui_types.Category_ordinary cat ->
+                        List.length
+                          (List.filter
+                             (fun (f : Tui_decode.memory_fact) -> f.mf_category = cat)
+                             ord_facts)
                   in
-                  let is_active =
-                    match state.memory_facts_category with
-                    | Some c -> String.equal c cat
-                    | None -> false
-                  in
-                  pill_of_cat cat count is_active)
+                  let is_active = state.memory_facts_category = filt in
+                  pill_of_filter filt count is_active)
                 all_categories
             in
             let pills = "  Categories [c/C]: " ^ String.concat " " (all_pill :: cat_pills) in
@@ -12404,14 +12411,14 @@ let render_memory_facts (state : state) =
         (let empty =
            match state.memory_facts, state.memory_facts_category with
            | None, _ -> "  (waiting for the server)"
-           | Some _, Some category ->
-               Printf.sprintf "  (no facts in category %s \xe2\x80\x94 c/C cycles)"
-                 category
-           | Some _, None ->
+           | Some _, Masc_tui_types.Category_all ->
                if state.search_last <> "" then
                  Printf.sprintf "  (no facts matching \"%s\" \xe2\x80\x94 Esc clears filter)"
                    state.search_last
                else "  (no facts in either store)"
+           | Some _, filt ->
+               Printf.sprintf "  (no facts in category %s \xe2\x80\x94 c/C cycles)"
+                 (Masc_tui_types.memory_category_filter_label filt)
          in
          c.push_styled ~style:(Theme.recede ()) empty)
       else begin
@@ -12421,7 +12428,7 @@ let render_memory_facts (state : state) =
           | None -> c.push_empty ()
           | Some row ->
               let line = memory_fact_row_line ~cols row in
-              if idx = cursor then c.push_selected line
+              if idx = cursor then c.push_selected (Masc_tui_theme.strip_sgr line)
               else c.push line
         done;
         if overflowing then

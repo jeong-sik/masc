@@ -43,6 +43,16 @@ let make_snapshot ~ordinary_facts ~source_facts ~invalidations =
         }
   }
 
+let category_filter_testable =
+  let pp fmt = function
+    | Types.Category_all -> Format.pp_print_string fmt "Category_all"
+    | Types.Category_ordinary s -> Format.fprintf fmt "Category_ordinary %S" s
+    | Types.Category_source -> Format.pp_print_string fmt "Category_source"
+    | Types.Category_dropped -> Format.pp_print_string fmt "Category_dropped"
+  in
+  testable pp ( = )
+;;
+
 let test_category_navigation () =
   let state = Types.init_state () in
   let f1 = make_fact ~category:"rule" ~claim:"No local dune" "1" in
@@ -58,26 +68,67 @@ let test_category_navigation () =
   in
   state.memory_facts <- Some snap;
   let cats = Types.memory_fact_categories state in
-  check (list string) "categories list contains ordinary, source, and dropped"
-    [ "persona"; "rule"; "source"; "dropped" ] cats;
+  check (list category_filter_testable) "categories list contains ordinary, source, and dropped"
+    [ Types.Category_ordinary "persona"
+    ; Types.Category_ordinary "rule"
+    ; Types.Category_source
+    ; Types.Category_dropped
+    ] cats;
   (* Test cycling forward *)
-  let c1 = Types.next_memory_category None cats in
-  check (option string) "first category" (Some "persona") c1;
+  let c1 = Types.next_memory_category Types.Category_all cats in
+  check category_filter_testable "first category" (Types.Category_ordinary "persona") c1;
   let c2 = Types.next_memory_category c1 cats in
-  check (option string) "second category" (Some "rule") c2;
+  check category_filter_testable "second category" (Types.Category_ordinary "rule") c2;
   let c3 = Types.next_memory_category c2 cats in
-  check (option string) "third category" (Some "source") c3;
+  check category_filter_testable "third category" Types.Category_source c3;
   let c4 = Types.next_memory_category c3 cats in
-  check (option string) "fourth category" (Some "dropped") c4;
+  check category_filter_testable "fourth category" Types.Category_dropped c4;
   let c5 = Types.next_memory_category c4 cats in
-  check (option string) "wraps back to All" None c5;
+  check category_filter_testable "wraps back to All" Types.Category_all c5;
   (* Test cycling backward *)
-  let p1 = Types.prev_memory_category None cats in
-  check (option string) "last category from All" (Some "dropped") p1;
+  let p1 = Types.prev_memory_category Types.Category_all cats in
+  check category_filter_testable "last category from All" Types.Category_dropped p1;
   let p2 = Types.prev_memory_category p1 cats in
-  check (option string) "backward from dropped" (Some "source") p2;
-  let p3 = Types.prev_memory_category (Some "persona") cats in
-  check (option string) "backward from first wraps to All" None p3
+  check category_filter_testable "backward from dropped" Types.Category_source p2;
+  let p3 = Types.prev_memory_category (Types.Category_ordinary "persona") cats in
+  check category_filter_testable "backward from first wraps to All" Types.Category_all p3
+;;
+
+let test_category_filtering_isolation () =
+  let state = Types.init_state () in
+  let f_ord_source = make_fact ~category:"source" ~claim:"Ordinary fact named source" "1" in
+  let f_ord_other = make_fact ~category:"rule" ~claim:"Ordinary rule" "2" in
+  let sf = make_source_fact ~path:"src.ml" ~claim:"Source file fact" "sha" in
+  let inv = make_invalidation ~path:"inv.ml" ~reason:"File gone" 100.0 in
+  state.memory_facts <-
+    Some (make_snapshot
+      ~ordinary_facts:[ f_ord_source; f_ord_other ]
+      ~source_facts:[ sf ]
+      ~invalidations:[ inv ]);
+  (* Category_all -> 4 rows *)
+  state.memory_facts_category <- Types.Category_all;
+  check int "all rows" 4 (List.length (Types.memory_fact_rows state));
+  (* Category_ordinary "source" -> only f_ord_source *)
+  state.memory_facts_category <- Types.Category_ordinary "source";
+  let rows_ord_src = Types.memory_fact_rows state in
+  check int "only ordinary fact named source" 1 (List.length rows_ord_src);
+  (match rows_ord_src with
+   | [ Types.Memory_row_fact f ] -> check string "claim matches" "Ordinary fact named source" f.mf_claim
+   | _ -> fail "expected ordinary fact");
+  (* Category_source -> only source file fact sf *)
+  state.memory_facts_category <- Types.Category_source;
+  let rows_src = Types.memory_fact_rows state in
+  check int "only source fact" 1 (List.length rows_src);
+  (match rows_src with
+   | [ Types.Memory_row_source_fact f ] -> check string "claim matches" "Source file fact" f.msf_claim
+   | _ -> fail "expected source-bound fact");
+  (* Category_dropped -> only invalidation inv *)
+  state.memory_facts_category <- Types.Category_dropped;
+  let rows_drop = Types.memory_fact_rows state in
+  check int "only dropped fact" 1 (List.length rows_drop);
+  (match rows_drop with
+   | [ Types.Memory_row_invalidation f ] -> check string "reason matches" "File gone" f.mi_reason
+   | _ -> fail "expected invalidation")
 ;;
 
 let test_sorting_orders () =
@@ -138,6 +189,10 @@ let test_search_filtering () =
   state.search_last <- "roger";
   let matched_roger = Types.memory_fact_rows state in
   check int "matches 'roger'" 1 (List.length matched_roger);
+  (* Active search input empty query: Some "" does not fall back to search_last *)
+  state.search <- Some "";
+  check int "active empty search matches all" 3 (List.length (Types.memory_fact_rows state));
+  state.search <- None;
   (* Non-matching query *)
   state.search_last <- "nonexistent";
   check int "no match" 0 (List.length (Types.memory_fact_rows state))
@@ -146,7 +201,9 @@ let test_search_filtering () =
 let () =
   run "masc_tui_memory_facts_explorer"
     [ ( "navigation"
-      , [ test_case "category navigation" `Quick test_category_navigation ] )
+      , [ test_case "category navigation" `Quick test_category_navigation
+        ; test_case "category filtering isolation" `Quick test_category_filtering_isolation
+        ] )
     ; ( "sorting"
       , [ test_case "sorting orders" `Quick test_sorting_orders ] )
     ; ( "search"

@@ -853,6 +853,9 @@ let fusion_row ~state_style ~keeper_width ~run_width values =
   Table.row
     (fusion_cells ~state_style ~keeper_width ~run_width values)
 
+let fusion_sidebar_label ~status ~time ~keeper ~run_id =
+  Printf.sprintf "[%s] %s @%s %s" status time keeper run_id
+
 (* Harness verdict columns.
 
    Six widths in the header and the same six in the rows. The header called

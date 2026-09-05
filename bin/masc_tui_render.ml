@@ -11134,27 +11134,115 @@ let fusion_tool_trace_lines ~width (trace : Tui_decode.fusion_tool_trace) =
       in
       (coverage :: observed) @ gaps @ events
 
+let fusion_pipeline_diagram (run : Tui_decode.fusion_run) =
+  let glyph_done = (Theme.ok ()) ^ "\xe2\x97\x8f" ^ Ansi.reset in
+  let glyph_active = (Theme.warn ()) ^ "\xe2\x97\x90" ^ Ansi.reset in
+  let glyph_waiting = Ansi.dim ^ "\xe2\x97\x8b" ^ Ansi.reset in
+  let glyph_failed = (Theme.bad ()) ^ "\xc3\x97" ^ Ansi.reset in
+  let arrow = " " ^ (Theme.recede ()) ^ "\xe2\x96\xb8" ^ Ansi.reset ^ " " in
+  let step_question = glyph_done ^ " 1 Question" in
+  let step_panel, step_judge, step_evidence =
+    match run.fur_status with
+    | Fusion_completed ->
+        ( glyph_done ^ " 2 Panel"
+        , glyph_done ^ " 3 Judge"
+        , glyph_done ^ " 4 Evidence" )
+    | Fusion_failed _ ->
+        (match run.fur_stage with
+         | Fusion_stage_accepted
+         | Fusion_stage_panel _ ->
+             ( glyph_failed ^ " 2 Panel"
+             , glyph_waiting ^ " 3 Judge"
+             , glyph_waiting ^ " 4 Evidence" )
+         | Fusion_stage_judge _ ->
+             ( glyph_done ^ " 2 Panel"
+             , glyph_failed ^ " 3 Judge"
+             , glyph_waiting ^ " 4 Evidence" )
+         | Fusion_stage_computed _
+         | Fusion_stage_recording_evidence _ ->
+             ( glyph_done ^ " 2 Panel"
+             , glyph_done ^ " 3 Judge"
+             , glyph_failed ^ " 4 Evidence" )
+         | Fusion_stage_failed ->
+             ( glyph_failed ^ " 2 Panel"
+             , glyph_failed ^ " 3 Judge"
+             , glyph_failed ^ " 4 Evidence" )
+         | Fusion_stage_completed ->
+             ( glyph_done ^ " 2 Panel"
+             , glyph_done ^ " 3 Judge"
+             , glyph_done ^ " 4 Evidence" ))
+    | Fusion_running ->
+        (match run.fur_stage with
+         | Fusion_stage_accepted ->
+             ( glyph_waiting ^ " 2 Panel"
+             , glyph_waiting ^ " 3 Judge"
+             , glyph_waiting ^ " 4 Evidence" )
+         | Fusion_stage_panel { frs_expected } ->
+             ( Printf.sprintf "%s 2 Panel(%d)" glyph_active frs_expected
+             , glyph_waiting ^ " 3 Judge"
+             , glyph_waiting ^ " 4 Evidence" )
+         | Fusion_stage_judge { frs_expected; frs_answered; frs_failed } ->
+             let panel_label =
+               if frs_failed > 0 then
+                 Printf.sprintf "2 Panel(%d/%d)" frs_answered frs_expected
+               else
+                 Printf.sprintf "2 Panel(%d)" frs_answered
+             in
+             ( glyph_done ^ " " ^ panel_label
+             , glyph_active ^ " 3 Judge"
+             , glyph_waiting ^ " 4 Evidence" )
+         | Fusion_stage_computed { frs_answered; frs_expected; _ }
+         | Fusion_stage_recording_evidence { frs_answered; frs_expected; _ } ->
+             ( Printf.sprintf "%s 2 Panel(%d/%d)" glyph_done frs_answered frs_expected
+             , glyph_done ^ " 3 Judge"
+             , glyph_active ^ " 4 Evidence" )
+         | Fusion_stage_completed ->
+             ( glyph_done ^ " 2 Panel"
+             , glyph_done ^ " 3 Judge"
+             , glyph_done ^ " 4 Evidence" )
+         | Fusion_stage_failed ->
+             ( glyph_failed ^ " 2 Panel"
+             , glyph_failed ^ " 3 Judge"
+             , glyph_failed ^ " 4 Evidence" ))
+  in
+  step_question ^ arrow ^ step_panel ^ arrow ^ step_judge ^ arrow ^ step_evidence
+
 let fusion_detail_lines ~width (detail : fusion_detail) =
   let run = detail.fud_run in
   let status = fusion_run_status_to_string run.fur_status in
+  let now = Unix.gettimeofday () in
+  let started_iso = Masc_domain.iso8601_of_unix_seconds run.fur_started_at in
+  let date_time =
+    if String.length started_iso >= 19 then
+      String.sub started_iso 0 10 ^ " " ^ String.sub started_iso 11 8
+    else started_iso
+  in
+  let age = fusion_run_age ~now run in
+  let started_text = Printf.sprintf "%s (%s ago)" date_time age in
+  let pipeline = fusion_pipeline_diagram run in
   let run_lines =
     [ Ansi.bold, "  RUN"
     ; (Masc_tui_theme.tone Masc_tui_theme.Accent), "  Flow: Question \xe2\x86\x92 Panel \xe2\x86\x92 Judge \xe2\x86\x92 Evidence"
+    ; Ansi.reset, "  Pipeline: " ^ pipeline
     ; ( Ansi.dim
       , "  Link: "
         ^ Link.reference Fusion_run
             (Terminal_text.single_line run.fur_run_id) )
-    ; ( Ansi.dim
-      , "  Keeper link: "
-        ^ Link.reference Keeper
-            (Terminal_text.single_line run.fur_keeper) )
+    ; ( Ansi.reset
+      , Printf.sprintf "  Caller: %s@%s%s %s[Keeper]%s  \xc2\xb7  %s"
+          (Masc_tui_theme.tone Masc_tui_theme.Accent)
+          (Terminal_text.single_line run.fur_keeper)
+          Ansi.reset
+          (Theme.warn ())
+          Ansi.reset
+          (Link.reference Keeper (Terminal_text.single_line run.fur_keeper)) )
     ; fusion_run_status_color run.fur_status, "  Status: " ^ status
     ; (Masc_tui_theme.tone Masc_tui_theme.Accent), "  Stage: " ^ fusion_run_stage_to_string run.fur_stage
     ; Ansi.dim, "  Progress: " ^ fusion_run_progress_text run.fur_stage
     ; ( Ansi.reset
     , "  Configuration: " ^ Terminal_text.single_line run.fur_preset ^ " \xc2\xb7 "
       ^ Fusion_types.fusion_topology_to_string run.fur_topology )
-    ; Ansi.dim, "  Started: " ^ fusion_run_clock run
+    ; Ansi.dim, "  Started: " ^ started_text
     ]
     @
     match run.fur_status with
@@ -11447,12 +11535,23 @@ let render_fusion_detail (state : state) run_id =
       fusion_detail_pane state ~rows ~cols run_id buf
     else begin
       let left_cols = keeper_roster_pane_cols in
+      let format_sidebar_fusion (row : Tui_decode.fusion_run) =
+        let status =
+          match row.fur_status with
+          | Tui_decode.Fusion_running -> "run "
+          | Tui_decode.Fusion_completed -> "done"
+          | Tui_decode.Fusion_failed _ -> "fail"
+        in
+        let time = fusion_run_clock row in
+        let keeper = Terminal_text.single_line row.fur_keeper in
+        let run_id = Terminal_text.single_line row.fur_run_id in
+        Render_schedule.fusion_sidebar_label ~status ~time ~keeper ~run_id
+      in
       let labels =
         match state.fusion_runs with
         | None -> []
         | Some snapshot ->
-          List.map (fun (row : Tui_decode.fusion_run) -> row.Tui_decode.fur_run_id)
-            snapshot.Tui_decode.fus_runs
+          List.map format_sidebar_fusion snapshot.Tui_decode.fus_runs
       in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in

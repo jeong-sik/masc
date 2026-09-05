@@ -97,7 +97,7 @@ def require(condition: bool, detail: str) -> None:
 
 def current_keeper_meta() -> dict[str, object]:
     meta: dict[str, object] = {
-        "schema": "masc.keeper_meta.v1",
+        "schema": "masc.keeper_meta.v2",
         "name": KEEPER,
         "instructions": "Runtime evidence fixture for Keeper chat recovery.",
         "trace_id": "trace-capture-v3",
@@ -114,6 +114,8 @@ def current_keeper_meta() -> dict[str, object]:
         "current_task_id": None,
         "keeper_id": None,
         "agent_core_env": {},
+        "usage_cursor": None,
+        "last_usage_resolution": None,
     }
     for key in (
         "last_handoff_ts",

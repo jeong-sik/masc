@@ -106,6 +106,8 @@ class CaptureTuiKeeperChatTest(unittest.TestCase):
                 "current_task_id",
                 "keeper_id",
                 "agent_core_env",
+                "usage_cursor",
+                "last_usage_resolution",
                 "last_handoff_ts",
                 "total_turns",
                 "total_input_tokens",

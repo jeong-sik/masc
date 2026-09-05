@@ -105,6 +105,60 @@ let rec forget_microvm_work_root container_name =
   then forget_microvm_work_root container_name
 ;;
 
+(* The proxy port each policy guest was booted against.
+
+   A [Network_policy] guest carries its one route in its environment, and the
+   lane's listener takes an ephemeral port. The two have different lifetimes:
+   the guest is keeper-lifetime, the port belongs to the lane fiber. When the
+   lane rebinds -- its fiber died and respawned, or the lane restarted in
+   place -- the port moves and the still-running guest keeps CONNECTing to a
+   port nothing holds. Nothing refuses it: the guest's traffic fails at the
+   socket, so a cut-off keeper looks idle.
+
+   The guest's name cannot carry the port. A name is durable and a port is
+   not, and pinning one to the other would boot a fresh VM on every rebind.
+   So it is recorded here and compared at adopt, and a guest booted against a
+   port this process no longer holds is replaced rather than adopted.
+
+   Across a server restart the port is unknowable, but so is the identity
+   snapshot: [bind_registered_microvm_identity] finds nothing and the guest
+   is already replaced on that account. This table therefore only has to
+   answer for guests booted by the process asking. *)
+let microvm_policy_ports : (string * int) list Atomic.t = Atomic.make []
+
+let microvm_policy_port container_name =
+  Atomic.get microvm_policy_ports |> List.assoc_opt container_name
+;;
+
+let rec record_microvm_policy_port container_name port =
+  let current = Atomic.get microvm_policy_ports in
+  let updated = (container_name, port) :: List.remove_assoc container_name current in
+  if not (Atomic.compare_and_set microvm_policy_ports current updated)
+  then record_microvm_policy_port container_name port
+;;
+
+let rec forget_microvm_policy_port container_name =
+  let current = Atomic.get microvm_policy_ports in
+  let updated = List.remove_assoc container_name current in
+  if not (Atomic.compare_and_set microvm_policy_ports current updated)
+  then forget_microvm_policy_port container_name
+;;
+
+(* Whether an adoptable policy guest still points at a live listener.
+
+   Only [Network_policy] guests carry a proxy address, so every other mode
+   answers true: there is no route to go stale. *)
+let policy_route_holds ~network_mode ~booted_port ~bound_port =
+  match (network_mode : Keeper_types_profile_sandbox.network_mode) with
+  | Network_none | Network_inherit -> true
+  | Network_policy ->
+    (match booted_port, bound_port with
+     | Some booted, Some bound -> booted = bound
+     (* No record means this process did not boot it, and no bound port means
+        there is nothing to point at. Neither is adoptable. *)
+     | None, _ | _, None -> false)
+;;
+
 type t =
   { config : Workspace.config
   ; meta : keeper_meta
@@ -231,6 +285,7 @@ module For_testing = struct
   let set_state = set_state
 
   let keeper_docker_container_name = keeper_docker_container_name
+  let policy_route_holds = policy_route_holds
 end
 
 
@@ -688,11 +743,30 @@ let microvm_container_name ~(config : Workspace.config) ~keeper_name ~network_mo
     (String.sub (Keeper_sandbox_runtime.base_path_hash config.base_path) 0 8)
 ;;
 
+(* The port is read from the keeper's registry entry rather than carried in
+   the turn state: the proxy is bound once per keeper lane and a guest boots
+   per turn, so the two ends have different lifetimes and the entry is what
+   both can see. [None] means no listener -- the lane is down, or its fiber
+   died -- and no guest may be pointed at it. *)
+let bound_egress_proxy_port (t : t) =
+  Keeper_registry.get ~base_path:t.config.base_path t.meta.name
+  |> Option.map (fun (entry : Keeper_registry_types.registry_entry) ->
+       Atomic.get entry.egress_proxy_port)
+  |> Option.join
+;;
+
 let keeper_vm_name (t : t) =
   microvm_container_name
     ~config:t.config
     ~keeper_name:t.meta.name
     ~network_mode:t.network_mode
+;;
+
+let policy_route_still_holds (t : t) container_name =
+  policy_route_holds
+    ~network_mode:t.network_mode
+    ~booted_port:(microvm_policy_port container_name)
+    ~bound_port:(bound_egress_proxy_port t)
 ;;
 
 let bind_registered_microvm_identity t container_name =
@@ -720,6 +794,7 @@ let stop_and_delete_microvm_container ?timeout_sec ~backend container_name =
   match probe_microvm_container_state ?timeout_sec ~backend container_name with
   | Ok Keeper_sandbox_runtime.Docker_container_absent ->
     forget_microvm_work_root container_name;
+    forget_microvm_policy_port container_name;
     Ok ()
   | Ok Keeper_sandbox_runtime.Docker_container_running
   | Ok Keeper_sandbox_runtime.Docker_container_stopped ->
@@ -903,6 +978,33 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
       set_state t (Running { container_name });
       Ok container_name
     in
+    (* A keeper that changed network mode has a guest under the previous
+       mode's name: still running, on the wrong network, holding a snapshot
+       mount. Nothing was removing it -- the all-modes sweep runs at keeper
+       teardown, which is keeper removal, not a mode change -- so it stayed
+       until the server stopped.
+
+       Removing them before booting is idempotent for a name with no guest
+       behind it, and a failure here is not fatal: the guest we are about to
+       boot is the one that matters, and a stale sibling is a leak rather
+       than a correctness problem. It is logged so the leak is visible. *)
+    List.iter
+      (fun mode ->
+         if mode <> t.network_mode
+         then (
+           let stale =
+             microvm_container_name ~config:t.config ~keeper_name:t.meta.name
+               ~network_mode:mode
+           in
+           match stop_and_delete_microvm_container ?timeout_sec ~backend stale with
+           | Ok () -> ()
+           | Error detail ->
+             Log.Keeper.warn
+               "microvm stale-mode guest not removed keeper=%s name=%s: %s"
+               t.meta.name
+               stale
+               detail))
+      Keeper_types_profile_sandbox.all_network_modes;
     let start_state =
       match
         probe_microvm_container_state
@@ -912,7 +1014,18 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
       with
       | Ok Keeper_sandbox_runtime.Docker_container_running ->
         (match bind_registered_microvm_identity t container_name with
-         | Some snapshot -> `Adopt snapshot
+         | Some snapshot when policy_route_still_holds t container_name ->
+           `Adopt snapshot
+         | Some _ ->
+           (* Booted against a port this process no longer holds. The guest
+              is intact and its snapshot is ours, but its one route is dead,
+              so adopting it hands the keeper a network that fails at the
+              socket with nothing said. Replace it. *)
+           (match
+              stop_and_delete_microvm_container ?timeout_sec ~backend container_name
+            with
+            | Ok () -> `Boot
+            | Error error -> `Error error)
          | None ->
            (* A guest from an older server process can still be running, but
               its temp snapshot capability died with that process. It is not
@@ -1026,13 +1139,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
               carried in this state: the proxy is bound once per keeper lane
               and a guest boots per turn, so the two ends have different
               lifetimes and the entry is what both can see. *)
-           let bound_port =
-             Keeper_registry.get ~base_path:t.config.base_path t.meta.name
-             |> Option.map (fun (entry : Keeper_registry_types.registry_entry) ->
-                  Atomic.get entry.egress_proxy_port)
-             |> Option.join
-           in
-           match policy_gateway, bound_port with
+           match policy_gateway, bound_egress_proxy_port t with
            | Some gateway, Some port -> Some { Keeper_sandbox_microvm.gateway; port }
            (* Either half missing means the guest cannot be told its one
               route. [network_args_for] refuses on [None] rather than booting
@@ -1147,6 +1254,15 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                 with
                 | Ok () ->
                   mark_microvm_work_root_ready container_name;
+                  (* The port this guest's environment now names. Recorded
+                     only on a boot that succeeded, so a failed start leaves
+                     no claim on the name. The race-loser path below does not
+                     record: that guest is the winner's, and the winner's
+                     port is the one in it. *)
+                  Option.iter
+                    (fun (proxy : Keeper_sandbox_microvm.policy_proxy) ->
+                       record_microvm_policy_port container_name proxy.port)
+                    policy_proxy;
                   adopt github_identity
                 | Error detail ->
                   take_down_after_boot

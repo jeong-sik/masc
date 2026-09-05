@@ -24,12 +24,43 @@ type event =
 let request_head_max_bytes = 8 * 1024
 let request_line_max_bytes = request_head_max_bytes
 
+(* Every address the name resolves to, in the order the resolver gave them.
+   Taking the first alone meant a host whose first record was unreachable --
+   an IPv6 address on a host with no IPv6 route, a machine that is down in a
+   round-robin -- failed as if the whole destination were gone, while the
+   next address would have answered. *)
 let resolve_upstream ~net ~host ~port =
   let name = Egress_host.to_string host in
   match Eio.Net.getaddrinfo_stream net name ~service:(string_of_int port) with
   | [] -> Error (Printf.sprintf "no address for %s" name)
-  | address :: _ -> Ok address
+  | addresses -> Ok addresses
   | exception exn -> Error (Printexc.to_string exn)
+;;
+
+(* Try them in order and report the last failure. Reporting the first would
+   name whichever address the resolver happened to put first rather than the
+   one that ended the attempt. *)
+let connect_first_reachable ~sw ~net addresses =
+  let rec attempt last_error = function
+    | [] ->
+      Error (Option.value last_error ~default:"no address answered")
+    | address :: rest ->
+      (match Eio.Net.connect ~sw net address with
+       | flow -> Ok flow
+       | exception exn ->
+         (match exn with
+          (* A cancelled switch is the lane going away, not this address
+             failing; trying the next one would outlive the reason to try. *)
+          | Eio.Cancel.Cancelled _ -> raise exn
+          | _ -> attempt (Some (Printexc.to_string exn)) rest))
+  in
+  attempt None addresses
+;;
+
+let ignore_flow_error f =
+  try f () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | _ -> ()
 ;;
 
 let write_all flow text = Eio.Flow.copy_string text flow
@@ -42,11 +73,6 @@ let write_all flow text = Eio.Flow.copy_string text flow
    here caught [Eio.Cancel.Cancelled] too, so a lane being torn down waited
    on however long the tunnel lived -- and a keeper's shutdown joined on a
    connection to somewhere else. *)
-let ignore_flow_error f =
-  try f () with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | _ -> ()
-;;
 
 let splice ~client ~upstream =
   Eio.Fiber.both
@@ -98,7 +124,8 @@ let handle_connection ~net ~clock ~keeper_name ~rules ~on_event ~read_timeout_s 
     (match decision with
      | Egress_proxy_decision.Refused refusal ->
        emit (Refused { detail = Egress_proxy_decision.refusal_to_string refusal });
-       (try write_all flow (Egress_proxy_decision.response_of_decision decision) with _ -> ())
+       ignore_flow_error (fun () ->
+         write_all flow (Egress_proxy_decision.response_of_decision decision))
      | Egress_proxy_decision.Admitted { host; port } ->
        let host_text = Egress_host.to_string host in
        (* Resolution happens here and nowhere earlier: the name the resolver
@@ -107,37 +134,40 @@ let handle_connection ~net ~clock ~keeper_name ~rules ~on_event ~read_timeout_s 
        (match resolve_upstream ~net ~host ~port with
         | Error detail ->
           emit (Upstream_failed { host = host_text; port; detail });
-          (try
-             write_all
-               flow
-               (Egress_proxy_decision.response_of_decision
-                  (Egress_proxy_decision.Refused
-                     (Egress_proxy_decision.Malformed_request
-                        ("upstream is unreachable: " ^ detail))))
-           with _ -> ())
-        | Ok address ->
+          ignore_flow_error (fun () ->
+            write_all
+              flow
+              (Egress_proxy_decision.response_of_decision
+                 (Egress_proxy_decision.Refused
+                    (Egress_proxy_decision.Upstream_unreachable
+                       { host = host_text; port; detail }))))
+        | Ok addresses ->
           Eio.Switch.run (fun upstream_sw ->
-            match Eio.Net.connect ~sw:upstream_sw net address with
-            | exception exn ->
-              emit
-                (Upstream_failed
-                   { host = host_text; port; detail = Printexc.to_string exn })
-            | upstream ->
+            match connect_first_reachable ~sw:upstream_sw ~net addresses with
+            | Error detail ->
+              emit (Upstream_failed { host = host_text; port; detail });
+              ignore_flow_error (fun () ->
+                write_all
+                  flow
+                  (Egress_proxy_decision.response_of_decision
+                     (Egress_proxy_decision.Refused
+                        (Egress_proxy_decision.Upstream_unreachable
+                           { host = host_text; port; detail }))))
+            | Ok upstream ->
               emit (Admitted { host = host_text; port });
-              (try write_all flow (Egress_proxy_decision.response_of_decision decision) with
-               | _ -> ());
+              ignore_flow_error (fun () ->
+                write_all flow (Egress_proxy_decision.response_of_decision decision));
               (* Whatever the reader buffered past the blank line is already
                  the tunnel's first bytes -- a client that writes its head and
                  its ClientHello in one segment leaves them here. Dropping
                  them stalls the handshake; the splice below reads from the
                  flow and would never see them. *)
-              (try
-                 let buffered = Eio.Buf_read.peek reader in
-                 if Cstruct.length buffered > 0
-                 then (
-                   Eio.Flow.copy_string (Cstruct.to_string buffered) upstream;
-                   Eio.Buf_read.consume reader (Cstruct.length buffered))
-               with _ -> ());
+              ignore_flow_error (fun () ->
+                let buffered = Eio.Buf_read.peek reader in
+                if Cstruct.length buffered > 0
+                then (
+                  Eio.Flow.copy_string (Cstruct.to_string buffered) upstream;
+                  Eio.Buf_read.consume reader (Cstruct.length buffered)));
               splice ~client:flow ~upstream)))
 ;;
 

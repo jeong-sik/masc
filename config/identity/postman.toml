@@ -15,5 +15,5 @@ mcp_url = "https://mcp.postman.com/mcp"
 
 access_token_env = "POSTMAN_ACCESS_TOKEN"
 expires_at_env = "POSTMAN_EXPIRES_AT"
-refresh_token_file = "postman_refresh_token"
+refresh_token_file = "/home/keeper/.postman/refresh_token"
 renew_before_sec = 300

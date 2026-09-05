@@ -15,5 +15,5 @@ mcp_url = "https://mcp.substack.com/api/v1/mcp"
 
 access_token_env = "SUBSTACK_ACCESS_TOKEN"
 expires_at_env = "SUBSTACK_EXPIRES_AT"
-refresh_token_file = "substack_refresh_token"
+refresh_token_file = "/home/keeper/.substack/refresh_token"
 renew_before_sec = 300

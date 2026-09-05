@@ -15,5 +15,5 @@ mcp_url = "https://mcp.prismic.io/mcp"
 
 access_token_env = "PRISMIC_ACCESS_TOKEN"
 expires_at_env = "PRISMIC_EXPIRES_AT"
-refresh_token_file = "prismic_refresh_token"
+refresh_token_file = "/home/keeper/.prismic/refresh_token"
 renew_before_sec = 300

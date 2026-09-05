@@ -22,15 +22,6 @@ module Attr_key : sig
   val masc_turn_execution_ids : string
   val keeper_name : string
   val keeper_agent_name : string
-
-  (** Every registered Attr_key constant exported by this module.
-
-      Exported constants are created through the internal registration helper,
-      and this list is derived from that registry. Tests assert that exported
-      string constants are registered and that the boundary lists form a
-      disjoint partition of the registry. *)
-  val all_known : string list
-
 end
 
 module Mcp_attr_key : sig

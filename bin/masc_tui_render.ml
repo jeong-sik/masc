@@ -3156,8 +3156,8 @@ let render_board_list (state : state) =
            same on both. *)
         let hearth_text =
           match Terminal_text.optional_single_line p.bp_hearth with
-          | Some h -> "#" ^ h
-          | None -> ""
+          | Some h when not (String.equal h "") -> "#" ^ h
+          | _ -> ""
         in
         let score_text =
           if p.bp_votes > 0 then Printf.sprintf "▲%+d" p.bp_votes

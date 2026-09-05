@@ -83,9 +83,6 @@ let test_annotate_leaves_a_non_object_alone () =
     (Source.annotate_row (`String "not a row") = `String "not a row")
 ;;
 
-let () =
-  Alcotest.run
-    "keeper_tool_definition_source"
 (* A deferred tool is chosen from one line. The listing shows
    [Keeper_identity_tool_search.summary_of], which takes the first line of the
    description and cuts it at the summary budget, so a description whose first
@@ -145,6 +142,9 @@ let test_a_deferred_tool_is_offered_a_whole_sentence () =
       (String.concat "\n  " cut)
 ;;
 
+let () =
+  Alcotest.run
+    "keeper_tool_definition_source"
     [ ( "deferred summary"
       , [ Alcotest.test_case "a whole sentence is offered" `Quick
             test_a_deferred_tool_is_offered_a_whole_sentence

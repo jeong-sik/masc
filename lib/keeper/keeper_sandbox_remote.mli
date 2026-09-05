@@ -23,6 +23,9 @@ type container_exec =
         runs as can be given as [uid:gid] at all -- and one of them cannot
         express that last one, which a function returning an argv could not
         say. *)
+  ; probe_prefix : string list option
+    (** The exec argv without stdin-streaming flags for probe executions.
+        When [None], falls back to [prefix]. *)
   ; container_name : string  (** The running guest. *)
   ; shim_path : string  (** Absolute guest path of [masc-exec-shim]. *)
   }

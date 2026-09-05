@@ -679,13 +679,13 @@ let exec_argv_for backend ~container_name ~uid ~gid ~container_cwd ~stdin ~comma
     write, not a failed call. So this refuses. Settling it means either msb
     documenting the numeric form or the lane naming a guest user, which is a
     decision about identity rather than a spelling. *)
-let shim_exec_prefix_for backend ~container_name ~uid ~gid ~remote_root ~shim_config_path =
+let shim_exec_prefix_for ?(stdin = true) backend ~container_name ~uid ~gid ~remote_root ~shim_config_path =
   match (backend : Backend.t) with
   | Backend.Apple_container | Backend.Nerdctl_kata ->
     Ok
       (command_argv_for backend
        @ [ "exec" ]
-       @ Backend.exec_stdin_args backend
+       @ (if stdin then Backend.exec_stdin_args backend else [])
        @ [ "--user"
          ; Printf.sprintf "%d:%d" uid gid
          ; "-w"
@@ -704,7 +704,7 @@ let shim_exec_prefix_for backend ~container_name ~uid ~gid ~remote_root ~shim_co
     Ok
       (command_argv_for backend
        @ [ "exec" ]
-       @ Backend.exec_stdin_args backend
+       @ (if stdin then Backend.exec_stdin_args backend else [])
        @ [ "-w"
          ; remote_root
          ; "--env"

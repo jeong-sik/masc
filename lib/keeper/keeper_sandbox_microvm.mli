@@ -235,6 +235,7 @@ val exec_argv_for :
     command bare with [-i]. *)
 
 val shim_exec_prefix_for :
+  ?stdin:bool ->
   Keeper_microvm_backend.t ->
   container_name:string ->
   uid:int ->

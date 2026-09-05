@@ -11,10 +11,43 @@ Keeper 의 셸 명령은 여러분 기기가 아니라 격리된 공간에서 �
 
 - **`docker`** — Keeper 의 도구를 컨테이너 안에서 돌립니다. Docker 설치와 데몬 실행이
   필요합니다.
-- **`microvm`** — 하이퍼바이저 경계 뒤에서 돌립니다. macOS 에서는 Apple 의
-  `container` CLI 를 쓰므로 먼저 설치하세요.
+- **`microvm`** — 하이퍼바이저 경계 뒤에서 돌립니다. 빠져나가려면 공유 커널이
+  아니라 하이퍼바이저를 넘어야 합니다. 이 방식을 말하는 런타임이 셋 있습니다.
+  아래를 보세요.
 - **`remote_ssh`** — `runtime.toml` 의 `[exec.ssh.endpoints]` 에 선언한 원격
   호스트에서 돌립니다. `remote_endpoint` 로 고릅니다.
+
+## microVM 런타임 고르기
+
+`microvm` 은 프로그램 이름이 아니라 방식입니다. MASC 는 셋 중 하나를 몹니다.
+
+| 백엔드 | 프로그램 | 어디에 맞나 |
+| --- | --- | --- |
+| `apple_container` | Apple 의 `container` CLI | macOS 26+. 지금 `network_mode = "policy"` 를 지원하는 유일한 백엔드입니다. |
+| `microsandbox` | `msb` | Linux 와 macOS. 게스트 사용자를 uid:gid 숫자가 아니라 이름으로 받고, 작업 볼륨이 디렉터리 종류입니다. |
+| `nerdctl_kata` | Kata 런타임을 쓰는 `nerdctl` | Kata 컨테이너를 이미 쓰고 있는 Linux. |
+
+macOS 기본값은 `apple_container` 입니다. `/System/Library/CoreServices/SystemVersion.plist`
+가 있는지로 정합니다. **Linux 에는 기본값이 없습니다** — 백엔드를 직접 적지 않으면
+Keeper 가 띄울 microVM 런타임이 없습니다.
+
+## 샌드박스 이미지
+
+MASC 는 이미지를 같이 배송하지 않습니다. 범용 이미지를 한 번 만듭니다.
+
+```bash
+masc sandbox-image
+```
+
+`masc-sandbox:general` 은 Debian slim 에 `bash`(턴이 `bash -l -s` 로 돕니다),
+`ripgrep`(Grep 도구가 `rg` 없이는 거부합니다), `git`, `curl`, `ca-certificates`,
+`less`, `procps`, `findutils` 를 담습니다. 그 이상은 가정하지 않습니다. 프로젝트의
+툴체인은 그 프로젝트 이미지에 있어야 하고, Keeper 마다 `sandbox_image` 로 가리킵니다.
+
+레시피는 바이너리 안에 있고 빌드 컨텍스트 없이 `docker build -` 로 넘어갑니다. 그래서
+저장소를 받아본 적 없는 기계에서도 똑같이 만들어집니다. `masc sandbox-image --print`
+는 빌드 대신 Dockerfile 을 표준출력으로 내보냅니다. `MASC_KEEPER_SANDBOX_DOCKER_IMAGE`
+로 기본 태그를 바꾸면 `docker` 와 `microvm` 양쪽 게스트 경로가 같이 따릅니다.
 
 ## 설정
 

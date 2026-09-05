@@ -648,7 +648,6 @@ let project_tool_block mode (block : tool_block) =
         full_activity_rows, 0, None
     | Full, _ -> full_activity_rows, 0, None
     | Compact, activities ->
-        let outcomes = String.concat ", " (compact_outcome_parts activities) in
         let mix = compact_tool_mix activities in
         let kinds =
           match compact_activity_kinds activities with
@@ -656,12 +655,46 @@ let project_tool_block mode (block : tool_block) =
           | kinds -> " · " ^ String.concat " · " kinds
         in
         let hidden_activity_rows = List.length full_activity_rows in
-        ( [ safe_line
-              (Printf.sprintf "%s Tools %d%s · %s · %s · %s folded"
-                 (compact_marker activities)
-                 activity_count kinds mix outcomes
-                 (plural hidden_activity_rows "detail"))
-          ]
+        (* What ran and what came of it are two questions, and the fold
+           answered both on one line: a run of names and counts, then a run
+           of outcomes and counts, five clauses deep with nowhere for the eye
+           to land. Calls that returned belong with the inventory -- they are
+           what ran, finished. Everything still open or failed gets a line of
+           its own under its own mark, so a block's trouble is a line rather
+           than a clause in the middle of one.
+
+           A block where every call returned keeps its single line. *)
+        let settled, unsettled =
+          List.partition
+            (fun activity ->
+               match activity.outcome with
+               | Returned -> true
+               | Started | Awaiting_result | Failed | Never_returned
+               | Outcome_unrecorded -> false)
+            activities
+        in
+        let inventory =
+          let returned =
+            match compact_outcome_parts settled with
+            | [] -> ""
+            | parts -> String.concat ", " parts ^ " · "
+          in
+          safe_line
+            (Printf.sprintf "%s Tools %d%s · %s · %s%s folded"
+               (compact_marker activities)
+               activity_count kinds mix returned
+               (plural hidden_activity_rows "detail"))
+        in
+        let unsettled_rows =
+          match unsettled with
+          | [] -> []
+          | unsettled ->
+            [ safe_line
+                (Printf.sprintf "%s %s" (compact_marker unsettled)
+                   (String.concat ", " (compact_outcome_parts unsettled)))
+            ]
+        in
+        ( inventory :: unsettled_rows
         , hidden_activity_rows
         , Some (compact_outcome activities) )
   in

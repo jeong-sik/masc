@@ -258,6 +258,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0415 | keeper egress 에 none 과 inherit 사이를 만든다 | Draft | - |
 | 0416 | 중단 요청은 이미 기록된다 — 새 상태 대신 그 기록을 배포하고 보여준다 | Draft | - |
 | 0417 | 취소 판정의 주인은 운영자의 클릭 하나다 — 시스템 레인은 심사를 거절한다 | Draft | - |
+| 0418 | Memory OS: reinforcement 는 librarian 이 '이번 대화가 이 기억을 다시 뒷받침했다' 고 판단한 횟수다 — 바이... | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |

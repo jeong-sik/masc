@@ -20,6 +20,10 @@ on:
 
 permissions:
   contents: read
+  # The edited-test step asks the pull request API which files changed. A
+  # three-dot git diff cannot answer it here: the check job checks out at
+  # depth 1, so there is no merge base and the answer would be the tree.
+  pull-requests: read
 
 concurrency:
   group: pr-check-${{ github.event.pull_request.number }}
@@ -149,3 +153,26 @@ jobs:
         run: |
           set -euo pipefail
           dune build @check
+
+      # RFC-0428 step one. @check type-checks and links nothing, which is the
+      # right trade for the whole tree and says nothing about whether an
+      # assertion holds. Measured over 2026-09-06: five defects across five
+      # TUI pull requests, @check caught one, and three of the four it missed
+      # broke inside a test file the same pull request was editing.
+      #
+      # So this links only those and runs them. It is not the suite; 344
+      # stanzas is the link cost the design above is buying and this does not
+      # spend it. It runs here rather than in a job of its own because the
+      # build cache it needs is the one the step above just filled.
+      #
+      # continue-on-error until main's red count is known. Gating on an
+      # unknown number stops pull requests that changed nothing to do with it.
+      - name: Run the tests this pull request edits
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          DUNE_JOBS: "4"
+        run: |
+          bash scripts/ci/run-edited-tests.sh \
+            "${{ github.event.pull_request.number }}"

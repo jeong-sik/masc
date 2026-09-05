@@ -259,6 +259,10 @@ ready 11:49:07Z 이전. memprof A(ready+3분) → B(+7분), 239초: **428 MB/s**
 
 memprof A(ready+3분) → B(+7분), 240초: 584 MB/s(이 4분에 `agent_started` 24건), live 3.40 → 3.32 GB, sites 8,313 → 11,679 — Eio 프레임을 빼도 4분에 +3.4k 이므로 사이트 증가의 원인은 다른 데 있다(클로저 줄 번호로 보이나 상위 30 만으로는 못 본다). 하네스 ready+7분: lag p99 320 ms, minor 9,603/분, major 23.8/분(그 10초 창은 바빴다). 상위: 승인 큐 스냅샷 재작성 6행 합 13.8 GB, 체크포인트 디코드 7.1 GB, `measure_message_bytes` 5.6 + 2.9 GB, 반응 원장 스캔 2.5 GB. **P4e 는 #33349** 로 열었다: 델타 append + generation + 비율 압축 + v10. 재기동 전에 `gate/pending.json`·`replay-results.json` 을 지워야 한다(안 지우면 저장소가 unsupported version 으로 unavailable). 소비된 grant 의 tombstone 은 크래시 뒤 재실행을 막는 durable truth 라("consumption tombstone remains explicit" 시험이 못박는다) retention 은 이 PR 의 범위 밖이고, 나이 제한은 별도 결정이다.
 
+#### 네 번째 재기동 — 12:31Z, #33347(exact-lane projection 에서 본문 제거) 포함
+
+힙 루트 ready+3분: `exact_lane_runs` **530 MB**(전 564 → 559 → 530). #33347 은 projection 의 `run` 사본에서 `input`·`output` 을 `Null` 로 바꿨지만 `Run_registry_core` 의 `Store.entry` 는 `registration`(입력)과 `Completed.output` 을 그대로 든다. projection 의 본문은 코어 항목과 같은 값을 물리적으로 공유했으므로 `Obj.reachable_words` 는 이미 한 번만 세고 있었고, 사라진 것은 `run` 레코드 자체(약 30 MB)뿐이다. **P4c 의 −545 MB 는 아직 남았다.** 본문을 메모리에서 빼려면 코어 항목이 본문 대신 참조(8.5 의 `Tool_blob_store` 참조 + v6 컷)를 들어야 한다. 상세 조회가 JSONL 줄에서 `"id":"<run_id>"` 부분 문자열로 행을 찾는 것도 같은 PR 에서 정본 디코더로 바꿔야 한다.
+
 #### GC 파라미터 실험 (8.5 의 "카운터를 본 뒤 결정")
 
 카운터가 나왔다. minor 4,000~6,000/분은 초당 70~100회의 stop-the-world 이고, OCaml 5 는 minor 수집에 모든 도메인이 함께 멈춘다. 현재 값은 minor heap 4M words(32 MiB)/도메인(`bin/main_eio.ml`), space_overhead 100(`MASC_GC_SPACE_OVERHEAD`, 부트스트랩), 둘 다 `OCAMLRUNPARAM` 이 있으면 적용하지 않는다. 실험: `OCAMLRUNPARAM='s=32M,o=200'` (s 는 도메인당 words, 32M words = 256 MiB; o 는 space_overhead; OCaml 5.4 manual runtime 장에서 확인) 로 재기동해 같은 하네스로 minor/분·major/분·promoted·lag p99 를 비교한다. 기대: minor 1/8, promoted 감소, major 1/2, RSS +4~6 GB(128 GB 호스트). p99 가 안 내려가면 되돌린다.

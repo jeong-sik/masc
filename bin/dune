@@ -488,7 +488,11 @@
  (name masc_tui_theme_catalog)
  (wrapped false)
  (modules masc_tui_theme_catalog)
- (libraries masc_tui_terminal_palette))
+ (libraries
+  masc.config_dir_resolver
+  masc.fs_compat
+  masc.keeper_toml
+  masc_tui_terminal_palette))
 
 (library
  (name masc_tui_theme_choice)

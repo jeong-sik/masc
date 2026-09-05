@@ -445,11 +445,132 @@ let to_palette scheme =
   | _ -> None
 ;;
 
-let names () = List.map (fun scheme -> scheme.name) bundled
+let clean_hex raw =
+  let trimmed = String.trim raw in
+  let hex =
+    if String.starts_with ~prefix:"#" trimmed then
+      String.sub trimmed 1 (String.length trimmed - 1)
+    else trimmed
+  in
+  let hex = String.lowercase_ascii hex in
+  if String.length hex <> 6 then None
+  else
+    match hex_pair hex 0, hex_pair hex 2, hex_pair hex 4 with
+    | Some _, Some _, Some _ -> Some hex
+    | _ -> None
+;;
 
-let find name =
-  List.find_opt (fun scheme -> String.equal scheme.name name) bundled
+let slot_names =
+  [| "base00"; "base01"; "base02"; "base03"
+   ; "base04"; "base05"; "base06"; "base07"
+   ; "base08"; "base09"; "base0a"; "base0b"
+   ; "base0c"; "base0d"; "base0e"; "base0f"
+  |]
+;;
+
+let find_slot_string doc slot =
+  let upper = String.uppercase_ascii slot in
+  match Keeper_toml_loader.toml_string_opt doc ("palette." ^ slot) with
+  | Some s -> Some s
+  | None ->
+    match Keeper_toml_loader.toml_string_opt doc ("palette." ^ upper) with
+    | Some s -> Some s
+    | None ->
+      match Keeper_toml_loader.toml_string_opt doc slot with
+      | Some s -> Some s
+      | None -> Keeper_toml_loader.toml_string_opt doc upper
+;;
+
+let of_toml_content ?default_name content =
+  match Keeper_toml_loader.parse_toml content with
+  | Error msg -> Error ("TOML parse error: " ^ msg)
+  | Ok doc ->
+    let name_opt =
+      match Keeper_toml_loader.toml_string_opt doc "name" with
+      | Some n when String.trim n <> "" -> Some (String.trim n)
+      | _ -> default_name
+    in
+    match name_opt with
+    | None -> Error "theme name is required"
+    | Some name ->
+      let light =
+        Option.value (Keeper_toml_loader.toml_bool_opt doc "light") ~default:false
+      in
+      let palette = Array.make 16 "" in
+      let rec fill idx =
+        if idx = 16 then Ok { name; light; palette }
+        else
+          let slot = slot_names.(idx) in
+          match find_slot_string doc slot with
+          | None -> Error (Printf.sprintf "missing slot %s in theme %s" slot name)
+          | Some raw ->
+            match clean_hex raw with
+            | None ->
+              Error
+                (Printf.sprintf "invalid hex for slot %s in theme %s: %S" slot name raw)
+            | Some h ->
+              palette.(idx) <- h;
+              fill (idx + 1)
+      in
+      fill 0
+;;
+
+let load_file path =
+  match Fs_compat.load_file path with
+  | exception Sys_error err -> Error err
+  | content ->
+    let default_name = Filename.remove_extension (Filename.basename path) in
+    of_toml_content ~default_name content
+;;
+
+let load_dir dir =
+  match Sys.readdir dir with
+  | exception Sys_error _ -> []
+  | entries ->
+    Array.to_list entries
+    |> List.filter (fun name -> String.ends_with ~suffix:".toml" name)
+    |> List.sort String.compare
+    |> List.filter_map (fun filename ->
+         let path = Filename.concat dir filename in
+         match load_file path with
+         | Ok scheme -> Some scheme
+         | Error _ -> None)
+;;
+
+let theme_dirs_for_base base_path =
+  let inputs = Config_dir_resolver.inputs_from_env () in
+  let resolution =
+    Config_dir_resolver.resolve_with { inputs with env_base_path = Some base_path }
+  in
+  let root = resolution.Config_dir_resolver.config_root.path in
+  [ Filename.concat base_path "config/themes"
+  ; Filename.concat root "themes"
+  ]
+;;
+
+let all ?base_path () =
+  let base =
+    match base_path with
+    | Some b -> b
+    | None -> Config_dir_resolver.base_path_or_cwd ()
+  in
+  let dirs = theme_dirs_for_base base in
+  let from_files = List.concat_map load_dir dirs in
+  let file_names = List.map (fun s -> s.name) from_files in
+  let bundled_filtered =
+    List.filter (fun s -> not (List.mem s.name file_names)) bundled
+  in
+  bundled_filtered @ from_files
+;;
+
+let names ?base_path () =
+  List.map (fun scheme -> scheme.name) (all ?base_path ())
+;;
+
+let find ?base_path name =
+  List.find_opt (fun scheme -> String.equal scheme.name name) (all ?base_path ())
 ;;
 
 let name scheme = scheme.name
 let light scheme = scheme.light
+

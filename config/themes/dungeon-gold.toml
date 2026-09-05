@@ -1,0 +1,20 @@
+name = "dungeon-gold"
+light = false
+
+[palette]
+base00 = "141210"
+base01 = "201c18"
+base02 = "322a22"
+base03 = "5c4e3f"
+base04 = "9e8c78"
+base05 = "ebdcc8"
+base06 = "f6ecde"
+base07 = "fffaf2"
+base08 = "ea4c46"
+base09 = "f28e2b"
+base0a = "f5c542"
+base0b = "52b788"
+base0c = "4cc9f0"
+base0d = "6688fc"
+base0e = "c768e8"
+base0f = "d48b55"

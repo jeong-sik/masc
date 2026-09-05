@@ -57,7 +57,7 @@ let entries () =
                 Palette.background palette
                 :: List.filter_map (Palette.ansi palette) measured_slots
             })
-      Catalog.bundled
+      (Catalog.all ())
   in
   (* Put the schemes that already clear the readable floor first. The old
      catalog order was explicitly "no particular order", which hid native

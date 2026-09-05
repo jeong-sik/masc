@@ -11576,10 +11576,23 @@ let main () =
      The scheme in force is remembered on the first preview rather than on
      entering the pane: entering and leaving without moving should cost
      nothing, and there is no "they might" to record. *)
+  let filtered_theme_entries () =
+    let all = Masc_tui_theme_choice.entries () in
+    match state.theme_filter with
+    | `All -> all
+    | `Dark ->
+        List.filter
+          (fun (e : Masc_tui_theme_choice.entry) -> not e.light)
+          all
+    | `Light ->
+        List.filter
+          (fun (e : Masc_tui_theme_choice.entry) -> e.light)
+          all
+  in
   let preview_theme_under_cursor () =
     if state.theme_before_preview = None
     then state.theme_before_preview <- Some state.theme_choice;
-    match List.nth_opt (Masc_tui_theme_choice.entries ()) state.theme_cursor with
+    match List.nth_opt (filtered_theme_entries ()) state.theme_cursor with
     | None -> ()
     | Some entry ->
       if Masc_tui_theme_choice.apply entry.Masc_tui_theme_choice.name
@@ -14411,7 +14424,7 @@ and is loaded on demand through keeper_skill.
               All three spellings, because a terminal sends CR, a Kitty-
               protocol one sends the name, and a footer that says "Enter" has
               to mean whichever one arrived. *)
-           let entries = Masc_tui_theme_choice.entries () in
+           let entries = filtered_theme_entries () in
            (match List.nth_opt entries state.theme_cursor with
             | None -> ()
             | Some entry ->
@@ -15867,7 +15880,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_calls ->
                 state.keeper_calls_scroll <- state.keeper_calls_scroll + 1
             | Config when state.config_pane = Config_themes ->
-                let last = List.length (Masc_tui_theme_choice.entries ()) - 1 in
+                let last = List.length (filtered_theme_entries ()) - 1 in
                 state.theme_cursor <- min (max 0 last) (state.theme_cursor + 1);
                 preview_theme_under_cursor ()
             | Config when state.config_pane = Config_presets ->
@@ -16873,6 +16886,18 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages Changes
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
+       | Some "f" | Some "F"
+         when state.view = Config && state.config_pane = Config_themes ->
+           let next =
+             match state.theme_filter with
+             | `All -> `Dark
+             | `Dark -> `Light
+             | `Light -> `All
+           in
+           state.theme_filter <- next;
+           let count = List.length (filtered_theme_entries ()) in
+           state.theme_cursor <- min state.theme_cursor (max 0 (count - 1));
+           preview_theme_under_cursor ()
        | Some "f" | Some "F"
          when state.view = Board && state.board_mode <> Board_compose ->
            (* All, then each hearth the unnarrowed list showed, busiest first,

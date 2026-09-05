@@ -9778,11 +9778,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         state.acting_dropped <- state.acting_dropped + dropped
       end;
       if !pane_keeper_acted then refresh_acting_pane_changes state ~mailbox;
-      (* The pane otherwise reloads only on open, on its own sends and on
-         the operator cadence — a turn appended from anywhere else (API
-         chat, another operator, a connector) stayed invisible until the
-         operator left and re-entered.  Same guard as the cadence reload:
-         an operator scrolled into the past keeps their place. *)
+      (* The pane otherwise reloads only on open and on its own sends — a
+         turn appended from anywhere else (API chat, another operator, a
+         connector) stayed invisible until the operator left and re-entered.
+         Same guard the cadence reload used: an operator scrolled into the
+         past keeps their place. *)
       (if !open_chat_gained_turn && state.msg_scroll = 0 then
          match state.msg_target_keeper_name with
          | Some keeper_name ->
@@ -18754,7 +18754,18 @@ and is loaded on demand through keeper_skill.
           ~scoped_refresh_inflight:http_scoped_refresh_inflight
           ~scoped_refresh_followup
           ~mailbox:async_messages;
-        refresh_acting_pane_changes state ~mailbox:async_messages;
+        (* The Changes tab is not reloaded here. Its answer comes from
+           [GET /api/v1/keepers/<name>/file-changes], which parses every row
+           in the date files the window touches -- that endpoint's own
+           comment records 4.4s for 24h, and this server answered 1.8-8.8s
+           per call on 2026-09-06. On the cadence, an open tab kept one of
+           those in flight continuously and the whole server felt it.
+
+           The observer already reloads the tab when the feed shows the
+           selected keeper finish a tool call, which is when the list can
+           change; opening the tab or moving the cursor loads it too. What
+           this line added was coverage for a change with no feed event, and
+           that is not worth a seconds-long scan on a timer. *)
         (* Also refresh logs / Board detail if viewing them. *)
         (match state.view with
          | Code -> ()

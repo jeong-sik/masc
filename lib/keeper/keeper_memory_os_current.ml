@@ -722,7 +722,7 @@ let maintain_supported_facts facts =
    a Board reference outranks the transcript because it names a source the
    transcript cannot. Two Board references keep the first unless the second
    names a comment under the same post the first only named as a post; the
-   second reading is otherwise already counted as reinforcement. *)
+   second reading otherwise adds nothing the first did not. *)
 let merge_observation existing incoming =
   match existing, incoming with
   | Board { post_id; comment_id = None }, Board { post_id = incoming_post; comment_id = Some _ }
@@ -1401,17 +1401,15 @@ let upsert_fact
            then (
              found := true;
              (* Byte-identical re-observation of an existing row. The exact
-                claim bytes were already on file, so this is reinforcement,
-                not a new fact: preserve the authoritative insertion time and
-                the original origin (an injected copy re-observed must not
-                repaint an authored row), refresh the observation time, and
-                count the re-observation. This is the measurable damper on
-                byte-identical reinjection: the loop accumulates a count, not
-                rows. *)
+                claim bytes were already on file, so this is not a new fact:
+                preserve the authoritative insertion time and the original
+                origin (an injected copy re-observed must not repaint an
+                authored row) and refresh the observation time. Nothing is
+                counted: seeing the same bytes again says nothing about the
+                fact's worth (RFC-0418). *)
              { incoming with
                first_seen = existing.first_seen
              ; last_seen = Float.max existing.last_seen incoming.last_seen
-             ; reinforcement = existing.reinforcement + 1
              ; origin = existing.origin
              ; basis = merge_basis existing.basis incoming.basis
              })

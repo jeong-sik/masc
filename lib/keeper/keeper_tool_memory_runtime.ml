@@ -682,7 +682,6 @@ let upsert_explicit_fact
     ; category = Keeper_memory_os_types.Fact
     ; first_seen = now
     ; last_seen = now
-    ; reinforcement = 0
     ; origin = { kind = Keeper_memory_os_types.Authored; trace_id }
     ; basis
     }

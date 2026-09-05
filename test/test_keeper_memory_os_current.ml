@@ -24,7 +24,6 @@ let fact ?(claim = "claim") () :
   ; category = Types.Constraint
   ; first_seen = 100.0
   ; last_seen = 100.0
-  ; reinforcement = 0
   ; origin = { kind = Types.Authored; trace_id = "trace" }
   ; basis = Types.Observed Types.Transcript
   }
@@ -1035,11 +1034,11 @@ let test_stale_replace_rejects_concurrent_explicit_write () =
     (fact_ids snapshot.facts)
 ;;
 
-(* Byte-identical re-observation is reinforcement, not duplication: the row
+(* Byte-identical re-observation is not duplication and not a score: the row
    count stays flat, insertion time stays authoritative, the observation time
-   refreshes, the re-observation is counted, and an injected copy re-observing
-   an authored row must not repaint its origin (task-1032 loop damper). *)
-let test_reobservation_reinforces_instead_of_duplicating () =
+   refreshes, and an injected copy re-observing an authored row must not
+   repaint its origin (task-1032 loop damper, RFC-0418). *)
+let test_reobservation_refreshes_instead_of_duplicating () =
   with_temp_keepers @@ fun keepers_dir ->
   let initial = fact ~claim:"reinforced claim" () in
   ignore (replace ~keepers_dir ~facts:[ initial ] () |> require_ok);
@@ -1064,7 +1063,6 @@ let test_reobservation_reinforces_instead_of_duplicating () =
   let stored = List.hd snapshot.facts in
   check (float 0.0) "insertion time remains authoritative" 100.0 stored.first_seen;
   check (float 0.0) "observation time refreshed" 600.0 stored.last_seen;
-  check int "re-observation counted" 1 stored.reinforcement;
   check bool "original origin preserved" true (stored.origin.kind = Types.Authored);
   check bool "category still updates" true (stored.category = Types.Lesson)
 ;;
@@ -1747,9 +1745,9 @@ let () =
             `Quick
             test_journal_recreated_after_purge_sequence
         ; test_case
-            "re-observation reinforces instead of duplicating"
+            "re-observation refreshes instead of duplicating"
             `Quick
-            test_reobservation_reinforces_instead_of_duplicating
+            test_reobservation_refreshes_instead_of_duplicating
         ] )
     ; ( "undecodable state is not a wedge"
       , [ test_case

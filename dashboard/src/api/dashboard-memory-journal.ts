@@ -36,7 +36,6 @@ export type MemoryJournalFact = {
   readonly category: MemoryOsFactCategoryTag
   readonly firstSeen: number
   readonly lastSeen: number
-  readonly reinforcement: number
   readonly origin: {
     readonly kind: 'authored' | 'injected'
     readonly traceId: string
@@ -103,7 +102,6 @@ function decodeFact(raw: unknown): MemoryJournalFact | null {
     'category',
     'first_seen',
     'last_seen',
-    'reinforcement',
     'origin',
     'basis',
   ])) return null
@@ -113,7 +111,6 @@ function decodeFact(raw: unknown): MemoryJournalFact | null {
     : null
   const firstSeen = asNumber(raw.first_seen)
   const lastSeen = asNumber(raw.last_seen)
-  const reinforcement = asNumber(raw.reinforcement)
   const basis = decodeMemoryOsBasis(raw.basis)
   const origin = isRecord(raw.origin) && hasExactKeys(raw.origin, ['kind', 'trace_id'])
     ? raw.origin
@@ -128,9 +125,6 @@ function decodeFact(raw: unknown): MemoryJournalFact | null {
     || category == null
     || firstSeen == null
     || lastSeen == null
-    || reinforcement == null
-    || !Number.isSafeInteger(reinforcement)
-    || reinforcement < 0
     || originKind == null
     || traceId == null
     || basis == null
@@ -140,7 +134,6 @@ function decodeFact(raw: unknown): MemoryJournalFact | null {
         category,
         firstSeen,
         lastSeen,
-        reinforcement,
         origin: { kind: originKind, traceId },
         basis,
       }

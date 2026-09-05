@@ -1617,6 +1617,25 @@ let test_docker_preflight_classifies_image_inspect_timeout () =
       Alcotest.(check bool) "not misclassified as image missing" false
         (List.mem "image_missing" preflight.failure_classes)
 
+let test_docker_preflight_respects_image_override () =
+  with_fake_docker fake_docker_preflight_ok_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:default" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  (match Keeper_sandbox_runtime.docker_preflight ~timeout_sec:5.0 () with
+   | None -> Alcotest.fail "expected docker preflight report"
+   | Some preflight ->
+     Alcotest.(check bool) "default missing image fails" false preflight.ok;
+     Alcotest.(check string) "default image reported" "missing:default" preflight.image);
+  (match Keeper_sandbox_runtime.docker_preflight ~image:"alpine:test" ~timeout_sec:5.0 () with
+   | None -> Alcotest.fail "expected docker preflight report"
+   | Some preflight ->
+     Alcotest.(check bool) "overridden image succeeds" true preflight.ok;
+     Alcotest.(check string) "overridden image reported" "alpine:test" preflight.image)
+;;
+
 let test_run_command_nonzero_exit_errors_by_default () =
   with_fake_docker fake_docker_exit_1_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
@@ -2555,6 +2574,8 @@ let run_tests ~clock () =
             test_docker_preflight_does_not_infer_daemon_state_from_stderr;
           Alcotest.test_case "image inspect timeout has distinct failure class" `Quick
             test_docker_preflight_classifies_image_inspect_timeout;
+          Alcotest.test_case "preflight respects image override" `Quick
+            test_docker_preflight_respects_image_override;
         ] );
       ( "docker_cleanup",
         [

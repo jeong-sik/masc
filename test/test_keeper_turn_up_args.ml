@@ -84,7 +84,7 @@ let with_test_context f =
    [docker info] on every case. [None] is what the real probe answers when
    the preflight master switch is off. The cases that pin the probe itself
    pass their own. *)
-let no_daemon_in_this_suite ~timeout_sec:_ = None
+let no_daemon_in_this_suite ?image:_ ~timeout_sec:_ () = None
 
 let parse_stating_a_profile ctx json =
   let json =
@@ -1532,7 +1532,7 @@ let test_docker_profile_is_refused_when_its_preflight_fails () =
   with_test_context
   @@ fun ctx ->
   let probes = ref 0 in
-  let docker_preflight ~timeout_sec:_ =
+  let docker_preflight ?image:_ ~timeout_sec:_ () =
     incr probes;
     Some (preflight_fixture ~ok:false)
   in
@@ -1555,7 +1555,7 @@ let test_docker_profile_is_admitted_when_its_preflight_passes () =
   with_test_context
   @@ fun ctx ->
   let probes = ref 0 in
-  let docker_preflight ~timeout_sec:_ =
+  let docker_preflight ?image:_ ~timeout_sec:_ () =
     incr probes;
     Some (preflight_fixture ~ok:true)
   in
@@ -1568,13 +1568,98 @@ let test_docker_profile_is_admitted_when_its_preflight_passes () =
   check int "probed once" 1 !probes
 ;;
 
+let test_docker_profile_preflights_sandbox_image_override () =
+  with_test_context
+  @@ fun ctx ->
+  let name = "docker-image-override-keeper" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:ctx.config.Workspace.base_path
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  let toml_path = Filename.concat keepers_dir (name ^ ".toml") in
+  let toml_content =
+    {|[keeper]
+instructions = "test instructions"
+sandbox_profile = "docker"
+sandbox_image = "masc-keeper-sandbox:local"
+|}
+  in
+  let oc = open_out_bin toml_path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    output_string oc toml_content);
+  let checked_image = ref None in
+  let docker_preflight ?image ~timeout_sec:_ () =
+    checked_image := image;
+    Some (preflight_fixture ~ok:true)
+  in
+  (match
+     Keeper_turn_up_args.parse
+       ~docker_preflight
+       ctx
+       (`Assoc [ "name", `String name ])
+   with
+   | Ok _ -> ()
+   | Error result ->
+     failf
+       "keeper with sandbox_image override should be admitted: %s"
+       (Keeper_types_profile.tool_result_body result));
+  check
+    (option string)
+    "docker preflight received sandbox_image override from toml"
+    (Some "masc-keeper-sandbox:local")
+    !checked_image
+;;
+
+let test_docker_profile_preflights_default_image_when_override_absent () =
+  with_test_context
+  @@ fun ctx ->
+  let name = "docker-default-image-keeper" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:ctx.config.Workspace.base_path
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  let toml_path = Filename.concat keepers_dir (name ^ ".toml") in
+  let toml_content =
+    {|[keeper]
+instructions = "test instructions"
+sandbox_profile = "docker"
+|}
+  in
+  let oc = open_out_bin toml_path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    output_string oc toml_content);
+  let checked_image = ref (Some "initial") in
+  let docker_preflight ?image ~timeout_sec:_ () =
+    checked_image := image;
+    Some (preflight_fixture ~ok:true)
+  in
+  (match
+     Keeper_turn_up_args.parse
+       ~docker_preflight
+       ctx
+       (`Assoc [ "name", `String name ])
+   with
+   | Ok _ -> ()
+   | Error result ->
+     failf
+       "keeper without sandbox_image override should be admitted: %s"
+       (Keeper_types_profile.tool_result_body result));
+  check
+    (option string)
+    "docker preflight received None when sandbox_image absent"
+    None
+    !checked_image
+;;
+
 (* The master switch off ([None]) admits without a verdict, and no other
    profile consults the docker probe at all. *)
 let test_docker_preflight_is_consulted_only_for_the_docker_profile () =
   with_test_context
   @@ fun ctx ->
   let probes = ref 0 in
-  let switched_off ~timeout_sec:_ =
+  let switched_off ?image:_ ~timeout_sec:_ () =
     incr probes;
     None
   in
@@ -1585,7 +1670,7 @@ let test_docker_preflight_is_consulted_only_for_the_docker_profile () =
        "docker with the preflight switched off must be admitted: %s"
        (Keeper_types_profile.tool_result_body result));
   check int "docker consulted the probe" 1 !probes;
-  let failing ~timeout_sec:_ =
+  let failing ?image:_ ~timeout_sec:_ () =
     incr probes;
     Some (preflight_fixture ~ok:false)
   in
@@ -1780,6 +1865,14 @@ let () =
             "docker profile is admitted when its preflight passes"
             `Quick
             test_docker_profile_is_admitted_when_its_preflight_passes
+        ; test_case
+            "docker profile preflights sandbox_image override"
+            `Quick
+            test_docker_profile_preflights_sandbox_image_override
+        ; test_case
+            "docker profile preflights default image when override absent"
+            `Quick
+            test_docker_profile_preflights_default_image_when_override_absent
         ; test_case
             "docker preflight is consulted only for the docker profile"
             `Quick

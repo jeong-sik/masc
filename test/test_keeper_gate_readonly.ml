@@ -59,7 +59,8 @@ let test_observation_table_is_fully_read () =
   passes "rg --pretty stays allowed" [ "rg"; "--pretty"; "x" ];
   passes "grep" [ "grep"; "-r"; "x"; "." ];
   passes "find read" [ "find"; "."; "-name"; "*.ml" ];
-  passes "sed filter" [ "sed"; "-n"; "1,5p"; "f" ];
+  blocked "sed is judged, never fast-pathed (script can write/exec)"
+    [ "sed"; "-n"; "1,5p"; "f" ];
   passes "sort read" [ "sort"; "-u"; "f" ];
   passes "uniq one operand" [ "uniq"; "f" ];
   passes "date read" [ "date"; "-u" ];
@@ -132,6 +133,11 @@ let test_write_shapes_stay_blocked () =
   blocked "sed in-place" [ "sed"; "-i"; "s/a/b/"; "f" ];
   blocked "sed in-place backup suffix" [ "sed"; "-i.bak"; "s/a/b/"; "f" ];
   blocked "sed --in-place" [ "sed"; "--in-place"; "s/a/b/"; "f" ];
+  (* The write/exec verbs a flag denylist cannot see, which is why sed is not
+     fast-pathed at all: [w] writes a file, [e] runs a shell -- neither is a
+     flag, both without [-i]. *)
+  blocked "sed script write verb" [ "sed"; "w /etc/passwd"; "f" ];
+  blocked "sed script exec verb" [ "sed"; "s/a/b/e"; "f" ];
   blocked "sort -o writes" [ "sort"; "-o"; "out"; "f" ];
   blocked "sort --output= writes" [ "sort"; "--output=out"; "f" ];
   blocked "diff -o writes" [ "diff"; "-o"; "out"; "a"; "b" ];

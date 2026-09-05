@@ -143,3 +143,46 @@ Phase 0·0b·1 이 머지된 빌드. 호스트는 오후의 load 80~300 상태�
 ### 7.4 이 조사가 말하지 않는 것
 
 7.2 의 클로저가 실제로 락을 얼마나 오래 쥐는지는 여기 없다. Phase 0 의 프로브가 배포되면 `stalls` 와 p99 로 먼저 보고, 그 다음에 7.3 의 래퍼를 없앤다.
+
+## 8. Phase 4 표적 — Memprof 실측 (2026-09-05 19:15 KST, build `c94f057edc`)
+
+Phase 0c 가 머지된 빌드를 재기동하고 2분 뒤와 6분 뒤에 `GET /api/v1/diagnostics/memprof` 를 읽었다. 비율 1e-5, 두 읽기 사이 4분에 누적 할당 63.6GB → 169.6GB, 즉 **약 440MB/s**. live 추정 2.9GB → 2.8GB. 같은 시각 `/health` 는 minor 4,935/분, major 23.9/분, 할당 606MB/s(부팅 직후 창), live 3.1GB 였다.
+
+### 8.1 스테디 상태 할당 상위 (두 읽기의 차)
+
+| 할당 지점 (masc 호출자) | 4분간 | 뜻 |
+|---|---|---|
+| 사이트 표 상한 초과 묶음 | 8.5GB | 표가 2만 개에 차서 귀속 못 함 (§8.4) |
+| `Keeper_checkpoint_store.load_canonical_bytes_strict` (read + read_fd) | 5.2GB | keeper 턴마다 13~20MB 체크포인트를 디스크에서 다시 읽는다 |
+| `Fs_compat.update_private_file_durable_locked_with_io` → `read_fd_chunks` | 1.8GB | board-attention 원장을 통째로 읽는다 |
+| `Keeper_board_attention_candidate.parse_rows` → `Yojson.Safe.from_string` | 1.4GB | 그 원장의 행 1,137개를 매번 다시 파싱한다 |
+| `Fs_compat.load_file_opt` ← `rewrite_private_file_durable_locked_result` | 1.3GB | 같은 원장을 다시 쓰기 위해 또 읽는다 |
+| `Yojson.Safe.to_string` + `write_string` | 2.7GB | 체크포인트·원장 재직렬화 |
+| `Yojson.Safe.from_string` (입력 복사) + 렉서 | 3.1GB | `Lexing.from_string` 은 입력 전체를 복사한다 |
+
+턴은 분당 약 12회(시스템 로그 10:15~10:22Z). 턴 하나가 체크포인트를 읽고(15MB → 문자열 2벌) 파싱하고(`Yojson.Safe.t`) 직렬화해 쓴다. `keeper_owner_pools` 가 3.8MB 인 이유가 이것이다. Agent Core 상태는 메모리에 살지 않고 매 턴 디스크에서 다시 태어난다.
+
+### 8.2 board-attention 원장
+
+`.masc/board_attention_candidates/` 는 키퍼당 파일 하나, 합계 9,376행 124MB, 가장 큰 파일 25.5MB 에 1,137행, 행 평균 15.4KB, 최대 772KB. 행의 거의 전부가 `judgment_request` 다(100KB 넘는 행 484개). `update_ledger_many` 는 갱신마다 파일 전체를 읽고, 행마다 파싱하고, 최신 행만 남겨 다시 직렬화하고, 통째로 다시 쓴다(주석 "Compact on write"). 갱신은 분당 약 20회(로그의 `board_attention` 행). 즉 분당 약 500MB 를 읽고 파싱하고 다시 쓴다.
+
+### 8.3 부팅 전용 비용
+
+`Keeper_approval_queue.install_persistence_internal.replay` 가 `Dated_jsonl.iter_all_entries_result` 로 모든 월·일 파일을 줄 단위로 읽어 파싱한다. 첫 읽기(부팅 2분)에서 5.3GB, 두 번째 읽기의 차에는 없다. 부팅 창(11~61초)의 한 몫이다.
+
+### 8.4 계기 자체의 한계
+
+- 사이트 키가 호출 스택 16프레임이라 클로저·fiber 경로마다 키가 갈려 2만 개 상한에 닿았고 8.5GB 가 묶음으로 갔다. 키는 masc 프레임(`lib/`·`bin/`)만으로 만들어야 한다.
+- `Obj.reachable_words` 는 대기 fiber 의 스택을 세지 않는다(#33290). 체크포인트가 fiber 지역값이라는 §4.2 의 추정과 8.1 의 실측이 맞물린다.
+
+### 8.5 Phase 4 설계 — 순서대로
+
+**P4a. board-attention 원장을 다시 쓰지 않는다.** 최신-행-per-id 집합을 `Keeper_board_attention_partition` 의 캐시(이미 경로별 `view` 와 mutation mutex 가 있다)에 authoritative projection 으로 두고, 갱신은 바뀐 행만 durable append 한다(`Fs_compat.append_fd_durable`). 파일이 live 행 수의 2배를 넘으면 그때만 최신 집합으로 다시 쓴다. 갱신당 비용이 O(원장) 에서 O(바뀐 행) 으로 간다. 읽기 쪽은 이미 "id 당 최신 행만" 을 취하므로 파일 형식은 그대로다. 두 번째 단계로 `judgment_request` 를 blob(`Tool_blob_store` 의 content-addressed 저장)으로 빼고 행에는 참조만 남기면 원장이 10배 줄지만, 이는 fresh-state 하드컷이 필요하다(Pending 후보는 wall-clock 만료가 없는 durable truth 라 지우는 건 운영자 결정).
+
+**P4b. 체크포인트를 매 턴 다시 파싱하지 않는다.** keeper 가 자기가 쓴 체크포인트를 다음 턴에 다시 읽는다. 마지막으로 쓴 값과 그 파일의 identity(크기·mtime·sha256)를 owner 가 들고, 로드 시 identity 가 같으면 파싱 없이 그 값을 쓴다. 다르면 지금처럼 읽는다. `authoritative_read_only` 는 지켜진다: 권위 있는 파일을 여전히 확인하고, 내용이 바뀌었으면 그 내용을 쓴다. 로드 쪽 5.2GB/4분과 파싱 몫이 사라진다. 저장 쪽(직렬화 2.7GB/4분)은 체크포인트를 턴 끝에만 쓰는지 확인한 뒤 다룬다.
+
+**P4c. exact-lane 본문은 디스크에.** 목록 API 는 이미 요약만 보낸다(`routes_dashboard.ml:1459`). projection 에는 요약만 두고 본문은 run_id 로 파일 오프셋에서 읽는다. live −545MB.
+
+**P4d. Memprof 키를 masc 프레임으로.** 8.4 의 한계 제거. 이 RFC 의 다음 PR.
+
+각 단계는 같은 하네스로 전후를 잰다. P4a 뒤 할당 −20% 이상, P4b 뒤 −25% 이상, P4c 뒤 live −500MB 이상이 기대치이고, 못 미치면 그 단계는 되돌린다.

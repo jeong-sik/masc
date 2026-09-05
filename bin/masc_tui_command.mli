@@ -27,6 +27,10 @@ type t =
       (** [/settings] — open the type-aware Runtime parameters pane. *)
   | Open_diff
       (** [/diff] — open Git working-tree changes and diff for the workspace. *)
+  | Open_patch_modal
+      (** [/patch] or [/review] — open interactive 3D drop-shadow patch review modal. *)
+  | Toggle_burn_hud
+      (** [/burn] or [/cost] — toggle token burn velocity and financial telemetry HUD. *)
   | Open_changes
       (** [/changes] — open recorded file changes for this keeper. *)
   | Toggle_acting_pane

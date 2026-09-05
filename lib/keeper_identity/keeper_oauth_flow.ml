@@ -146,7 +146,7 @@ let tokens_of_response ~now body =
          match member "expires_in" with
          | Some (`Int seconds) -> Some (float_of_int seconds)
          | Some (`Float seconds) -> Some seconds
-         | Some (`String s) -> (try Some (float_of_string s) with _ -> None)
+         | Some (`String s) -> float_of_string_opt s
          | Some _ | None -> None
        in
        (* RFC 6749 5.1 makes both optional, and neither absence is a failure

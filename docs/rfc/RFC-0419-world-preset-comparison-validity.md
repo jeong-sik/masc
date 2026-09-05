@@ -378,6 +378,7 @@ base path 6개 × keeper 4 = 24 keeper 가 공유 쿼터를 때리면 failover �
 | 던진 표 | `board_votes.jsonl` `voter` | **주된 값** |
 | 받은 표 | `GET /api/v1/karma` · `/api/v1/board/karma/ledger` | **주된 값** |
 | 자가 발행 비율 | 위 둘의 차 | **주된 값 — 아래** |
+| 깎은 표 | 글 행의 `votes_down` | **주된 값 — karma 가 못 본다** |
 | 태스크 착수 대비 완료 | `tasks-archive.json` | 보조 |
 | 물어본 횟수 | `.masc/keeper_ask/` `asked_at` | 보조 |
 | ~~답까지 걸린 시간~~ | ~~`answered_at - asked_at`~~ | **못 쓴다 — 아래** |
@@ -421,6 +422,35 @@ approval 쪽 답이다.
 다만 이 지표는 **두 arm 에 비대칭**이다. tribute 쪽에는 대응물이 없다 — 준 표는 자기에게 줘도
 준 표라서 자가 발행이라는 개념이 성립하지 않는다. 그러니 arm 간 비교값이 아니라 approval
 arm 안에서만 읽는다.
+
+**karma 만 읽으면 깎는 행동이 통째로 안 보인다.** `board_votes.ml:857-859`:
+
+```ocaml
+let karma_score_for_direction = function
+  | Up -> 1
+  | Down -> 0
+```
+
+`Down` 은 `delta = 0` 이고 862-863 이 그걸 `None` 으로 떨군다. **다운보트는 karma 이벤트를
+아예 안 만든다.** live 247표가 전부 `up` 이라 지금은 안 물리는 구멍이다.
+
+approval 에서는 물린다. 받은 표가 값인 세계에서는 **남의 표를 깎는 것이 상대적으로 내 값을
+올린다.** `masc_board_vote` 는 direction 을 받고, dissenter 는 애초에 반대하라고 세운 자리다.
+그 행동이 나오면 karma 는 아무 일도 없었다고 보고하고 흔적은 글 행의 `votes_down` 에만 남는다.
+
+그래서 `votes_down` 을 karma 옆에 같이 적는다. 0이면 0이라고 적히면 되고, **0이 아니면 그것이
+approval arm 의 가장 중요한 판독이다.** 이것도 tribute 에는 대응물이 없다 — 준 표는 up 이든
+down 이든 준 것이라 같은 비대칭이다.
+
+**그리고 글에 TTL 을 걸지 않는다.** `board_core_persist.ml:203-213` 의 청소가 대상이 사라진
+표 행을 회수하고 다음 스냅샷에서 디스크를 압축한다. 즉 글이 만료되면 그 글이 받은 표가
+`board_votes.jsonl` 에서 없어진다. `world-approval` 산문이 만료를 소재로 깔아 두었으니
+(벽보가 백지가 된다) keeper 가 TTL 을 걸 여지가 있다.
+
+지금은 죽은 위험이다 — live 글 1,944개 중 **1,942개가 `expires_at = 0.0`**(만료 없음)이고,
+실제 값이 붙은 둘은 fusion 이 건 7일짜리다. 만료 고아는 0건이다. `ttl_hours` 는 설정이 아니라
+글 올릴 때 넘기는 값이라(`board_core_persist.ml:540-544`) 계측기 문장에 TTL 을 안 적는 것으로
+닫힌다.
 
 **답까지 걸린 시간은 세계 간 비교에 못 쓴다.** live 실측(09-03~09-05): 물은 것 48, 답 온 것
 37, 거둬들인 것 11. 답한 **37건 전부** `responder.surface = {kind: dashboard}` — 대시보드 앞의
@@ -477,6 +507,9 @@ cell B 의 답을 늦춘다. 무작위 배정으로도 안 깨지는 교란이�
 **스크립트조차 필요 없다.** 그 조인이 `board_votes.ml` 의 `build_karma_ledger` 이고
 `GET /api/v1/karma` 가 이미 서빙한다. 손 조인 결과와 에이전트 단위로 전부 일치했다(§5.5).
 덤으로 그 코드는 self-vote 를 빼고 센다.
+
+다만 karma 는 표만 세는 단일 지표이고 **다운보트를 못 본다.** §5.5 가 `votes_down` 을 옆에
+같이 두는 이유다.
 §3.1 의 `approval` 행이 처음부터 "실재하나 읽는 법이 다름"이라고 맞게 적어 두었는데,
 앞선 판의 §5.7 이 자기 문서의 표와 어긋나게 썼다.
 

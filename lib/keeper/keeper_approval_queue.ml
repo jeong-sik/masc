@@ -76,6 +76,12 @@ type grant_error =
   | Grant_replay_not_consumed of string
   | Grant_replay_outcome_conflict of string
 
+type resolution_absence =
+  | Resolution_missing
+  | Resolution_still_pending
+  | Resolution_not_approved
+  | Resolution_workspace_mismatch of { stored_base_path : string }
+
 type approved_resolution_state =
   | Resolution_unconsumed
   | Resolution_consumed
@@ -295,6 +301,26 @@ let grant_error_to_string = function
     Printf.sprintf
       "approval %s already has a different durable replay outcome"
       approval_id
+;;
+
+let resolution_absence_of_grant_error = function
+  | Grant_resolution_missing _ -> Some Resolution_missing
+  | Grant_still_pending _ -> Some Resolution_still_pending
+  | Grant_resolution_not_approved _ -> Some Resolution_not_approved
+  | Grant_workspace_mismatch { stored_base_path; _ } ->
+    Some (Resolution_workspace_mismatch { stored_base_path })
+  | Grant_store_unavailable _
+  | Grant_replay_projection_unavailable _
+  | Grant_replay_not_consumed _
+  | Grant_replay_outcome_conflict _ -> None
+;;
+
+let resolution_absence_to_string = function
+  | Resolution_missing -> "resolution_missing"
+  | Resolution_still_pending -> "resolution_still_pending"
+  | Resolution_not_approved -> "resolution_not_approved"
+  | Resolution_workspace_mismatch { stored_base_path } ->
+    "resolution_workspace_mismatch:" ^ stored_base_path
 ;;
 
 let install_error_to_string = function

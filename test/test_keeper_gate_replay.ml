@@ -1067,6 +1067,41 @@ let test_speak_summary_is_the_first_line_of_the_message () =
   | Error _ -> ()
 ;;
 
+(* #33373: an approval whose durable record is gone yields a plain model
+   message, not replay evidence, and its log line names the store's answer. *)
+let test_resolution_absent_tells_the_model_once () =
+  let outcome =
+    Masc.Keeper_gate_replay.Resolution_absent
+      { absence = Masc.Keeper_approval_queue.Resolution_missing }
+  in
+  let message =
+    Masc.Keeper_gate_replay.append_model_evidence
+      ~approval_id:"approval-absent"
+      ~user_message:"continue"
+      outcome
+  in
+  Alcotest.(check bool)
+    "names the approval"
+    true
+    (String_util.contains_substring message.text "approval-absent");
+  Alcotest.(check bool)
+    "names the store's answer"
+    true
+    (String_util.contains_substring message.text "resolution_missing");
+  Alcotest.(check bool)
+    "keeps the user message"
+    true
+    (String_util.contains_substring message.text "continue");
+  Alcotest.(check bool)
+    "carries no replay evidence"
+    true
+    (Option.is_none message.replay_evidence);
+  Alcotest.(check string)
+    "the log line names the store's answer"
+    "resolution_absent store=resolution_missing"
+    (Masc.Keeper_gate_replay.outcome_to_string outcome)
+;;
+
 let () =
   Alcotest.run
     "keeper_gate_replay"
@@ -1202,6 +1237,12 @@ let () =
             "a speak states the first line of its message"
             `Quick
             test_speak_summary_is_the_first_line_of_the_message
+        ] )
+    ; ( "absent resolution"
+      , [ Alcotest.test_case
+            "tells the model the approval has no record and carries no evidence"
+            `Quick
+            test_resolution_absent_tells_the_model_once
         ] )
     ]
 ;;

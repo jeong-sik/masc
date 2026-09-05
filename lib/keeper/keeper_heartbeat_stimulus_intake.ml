@@ -485,6 +485,30 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
     true
 ;;
 
+(* A queued approved resolution whose durable record is gone is retired by
+   [reconcile_spent_selection] when the queue reaches it. Projecting it into
+   an earlier turn would hand the replay an id with nothing behind it. A read
+   failure keeps the entry projectable, as before: the store may answer
+   inside the turn. *)
+let resolution_has_durable_record
+      ~base_path
+      (resolution : Keeper_event_queue.hitl_resolution)
+  =
+  match resolution.decision with
+  | Keeper_event_queue.Hitl_rejected _ -> true
+  | Keeper_event_queue.Hitl_approved ->
+    (match
+       Keeper_approval_queue.approved_resolution_delivery
+         ~base_path
+         ~id:resolution.approval_id
+     with
+     | Ok _ -> true
+     | Error error ->
+       (match Keeper_approval_queue.resolution_absence_of_grant_error error with
+        | Some _ -> false
+        | None -> true))
+;;
+
 (* #28809: a ready [Hitl_resolved] may sit behind the stimulus that woke this
    turn — typically a redelivered workspace message whose own earlier turn
    deferred on that very approval. The resolution is durable truth in the
@@ -501,7 +525,9 @@ let ready_hitl_resolution_peek ~base_path ~keeper_name =
       (fun (stimulus : Keeper_event_queue.stimulus) ->
          match stimulus.payload with
          | Keeper_event_queue.Hitl_resolved resolution ->
-           if stimulus_ready_for_intake ~base_path stimulus
+           if
+             stimulus_ready_for_intake ~base_path stimulus
+             && resolution_has_durable_record ~base_path resolution
            then Some resolution
            else None
          | Keeper_event_queue.Board_signal _
@@ -528,6 +554,10 @@ let ready_hitl_resolution_peek ~base_path ~keeper_name =
 type spent_selection_reconciliation =
   | Selection_actionable
   | Spent_grant_replay_acknowledged
+  | Absent_grant_retired of
+      { approval_id : string
+      ; absence : Keeper_approval_queue.resolution_absence
+      }
 
 let reconcile_spent_selection
       ~config
@@ -621,7 +651,7 @@ let reconcile_spent_selection
         with
         | Ok () -> Ok Selection_actionable
         | Error message -> Error ("approval resolution projection failed: " ^ message))
-     | Error _ ->
+     | Error error ->
        (match
           Keeper_approval_queue.ensure_resolution_chat_projection
             ~base_path:config.Workspace_utils.base_path
@@ -630,8 +660,27 @@ let reconcile_spent_selection
             ~tool_name:None
             ~decision:Keeper_approval_queue_rules_types.Decision.Approve
         with
-        | Ok () -> Ok Selection_actionable
-        | Error message -> Error ("approval resolution projection failed: " ^ message)))
+        | Error message -> Error ("approval resolution projection failed: " ^ message)
+        | Ok () ->
+          (match Keeper_approval_queue.resolution_absence_of_grant_error error with
+           | None ->
+             (* A read failure: the store may answer on the next turn. *)
+             Ok Selection_actionable
+           | Some absence ->
+             (* The store's answer is a fact that reading again will not
+                change: nothing stands behind this entry to replay. A turn
+                spent on it failed the same way every cycle after a store
+                version cut removed the delivery rows while the queues kept
+                their wakes (#33373), so the entry is retired here. *)
+             (match
+                Keeper_registry_event_queue.ack_pending_result
+                  ~base_path:config.Workspace_utils.base_path
+                  keeper_name
+                  ~selection
+              with
+              | Error message ->
+                Error ("absent grant retirement ack failed: " ^ message)
+              | Ok () -> Ok (Absent_grant_retired { approval_id; absence })))))
   | Hitl_resolved
       { approval_id; decision = Keeper_event_queue.Hitl_rejected rationale; _ } ->
     (match
@@ -821,6 +870,14 @@ let heartbeat_event_intake
              "turn entry: acknowledged spent Gate grant replay without a turn \
               keeper=%s"
              keeper_name;
+           loop observations_rev stimuli_rev selections_rev first_withdrawn rest
+         | Ok (Absent_grant_retired { approval_id; absence }) ->
+           Log.Keeper.warn
+             "turn entry: retired approved Gate resolution without a durable \
+              record keeper=%s approval=%s store=%s"
+             keeper_name
+             approval_id
+             (Keeper_approval_queue.resolution_absence_to_string absence);
            loop observations_rev stimuli_rev selections_rev first_withdrawn rest
          | Ok Selection_actionable ->
            (match

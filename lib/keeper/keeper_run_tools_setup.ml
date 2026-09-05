@@ -524,7 +524,8 @@ let prepare_agent_setup
           | Keeper_gate_replay.Applied _
           | Keeper_gate_replay.Applied_with_warning _
           | Keeper_gate_replay.Failed _
-          | Keeper_gate_replay.Indeterminate _ ) )
+          | Keeper_gate_replay.Indeterminate _
+          | Keeper_gate_replay.Resolution_absent _ ) )
     | None ->
       Ok ()
   in

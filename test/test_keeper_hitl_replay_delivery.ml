@@ -301,6 +301,127 @@ let test_peek_skips_resolution_still_pending () =
           ~keeper_name))
 ;;
 
+(* --- absent durable record ---------------------------------------------- *)
+
+(* #33373: a store version cut discarded the delivery rows while each keeper's
+   queue kept its [Hitl_resolved] wake. Reading the store again never changes
+   that answer, so the wake must be retired instead of spending a turn on a
+   replay that fails the same way every cycle. *)
+let enqueue_resolution_without_record ~config ~keeper_name =
+  let base_path = config.Workspace_utils.base_path in
+  (match Keeper_approval_queue.install_persistence ~base_path with
+   | Ok _ -> ()
+   | Error error -> fail (Keeper_approval_queue.install_error_to_string error));
+  let approval_id = "appr_absent_" ^ keeper_name in
+  (match
+     Keeper_registry_event_queue.enqueue_hitl_resolution_durable_result
+       ~base_path
+       ~keeper_name
+       ~approval_id
+       ~decision:Q.Hitl_approved
+       ~channel:unrouted
+   with
+   | Ok () -> ()
+   | Error error ->
+     fail
+       (Keeper_registry_event_queue.hitl_resolution_enqueue_error_to_string
+          error));
+  approval_id
+;;
+
+let test_grant_error_absence_classification () =
+  let storage_error : Keeper_approval_queue.storage_error =
+    { path = "gate/pending.json"; reason = "unreadable" }
+  in
+  let absence_of error =
+    Option.map
+      Keeper_approval_queue.resolution_absence_to_string
+      (Keeper_approval_queue.resolution_absence_of_grant_error error)
+  in
+  check (option string) "missing row is an absence"
+    (Some "resolution_missing")
+    (absence_of (Keeper_approval_queue.Grant_resolution_missing "a"));
+  check (option string) "still pending is an absence"
+    (Some "resolution_still_pending")
+    (absence_of (Keeper_approval_queue.Grant_still_pending "a"));
+  check (option string) "rejected is an absence"
+    (Some "resolution_not_approved")
+    (absence_of (Keeper_approval_queue.Grant_resolution_not_approved "a"));
+  check (option string) "another workspace's row is an absence"
+    (Some "resolution_workspace_mismatch:/elsewhere")
+    (absence_of
+       (Keeper_approval_queue.Grant_workspace_mismatch
+          { approval_id = "a"
+          ; requested_base_path = "/here"
+          ; stored_base_path = "/elsewhere"
+          }));
+  check (option string) "a store read failure is not an absence" None
+    (absence_of (Keeper_approval_queue.Grant_store_unavailable storage_error));
+  check (option string) "a projection read failure is not an absence" None
+    (absence_of
+       (Keeper_approval_queue.Grant_replay_projection_unavailable storage_error));
+  check (option string) "an unconsumed replay record is not an absence" None
+    (absence_of (Keeper_approval_queue.Grant_replay_not_consumed "a"));
+  check (option string) "a conflicting replay record is not an absence" None
+    (absence_of (Keeper_approval_queue.Grant_replay_outcome_conflict "a"))
+;;
+
+let test_peek_skips_resolution_without_record () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace_utils.base_path in
+  let keeper_name = "hitl-absent-peek-keeper" in
+  create_keeper_exn ~config keeper_name;
+  let _approval_id = enqueue_resolution_without_record ~config ~keeper_name in
+  check int "the wake is queued" 1 (queue_length ~base_path ~keeper_name);
+  check bool "a resolution without a record is not projected" true
+    (Option.is_none
+       (Keeper_heartbeat_stimulus_intake.ready_hitl_resolution_peek
+          ~base_path
+          ~keeper_name));
+  check int "peek leaves the queue alone" 1 (queue_length ~base_path ~keeper_name)
+;;
+
+let test_reconcile_retires_resolution_without_record () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace_utils.base_path in
+  let keeper_name = "hitl-absent-retire-keeper" in
+  create_keeper_exn ~config keeper_name;
+  let approval_id = enqueue_resolution_without_record ~config ~keeper_name in
+  let selection =
+    match
+      Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name
+    with
+    | Ok [ selection ] -> selection
+    | Ok selections ->
+      failf "expected one pending selection, got %d" (List.length selections)
+    | Error message -> fail message
+  in
+  (match
+     Keeper_heartbeat_stimulus_intake.reconcile_spent_selection
+       ~config
+       ~keeper_name
+       selection
+   with
+   | Ok
+       (Keeper_heartbeat_stimulus_intake.Absent_grant_retired
+          { approval_id = retired
+          ; absence = Keeper_approval_queue.Resolution_missing
+          }) ->
+     check string "the retired wake names the approval" approval_id retired
+   | Ok (Keeper_heartbeat_stimulus_intake.Absent_grant_retired { absence; _ }) ->
+     failf
+       "retired with the wrong store answer: %s"
+       (Keeper_approval_queue.resolution_absence_to_string absence)
+   | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable ->
+     fail "a wake with no record was left to spend a turn"
+   | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
+     fail "a wake with no record was acknowledged as a spent grant"
+   | Error message -> fail message);
+  check int "the wake left the queue" 0 (queue_length ~base_path ~keeper_name)
+;;
+
 (* --- absent recipient --------------------------------------------------- *)
 
 (* #31684: a resolution addressed to a Keeper that does not exist used to
@@ -378,6 +499,20 @@ let () =
             "projects nothing from an empty queue"
             `Quick
             test_peek_none_on_empty_queue
+        ] )
+    ; ( "absent durable record"
+      , [ test_case
+            "store answers about a missing resolution are told apart from read failures"
+            `Quick
+            test_grant_error_absence_classification
+        ; test_case
+            "a resolution without a record is not projected into a turn"
+            `Quick
+            test_peek_skips_resolution_without_record
+        ; test_case
+            "a resolution without a record is retired without a turn"
+            `Quick
+            test_reconcile_retires_resolution_without_record
         ] )
     ; ( "retired recipient"
       , [ test_case

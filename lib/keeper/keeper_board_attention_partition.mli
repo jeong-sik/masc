@@ -242,7 +242,7 @@ module For_testing : sig
   val path : base_path:string -> keeper_name:string -> string
 end
 
-val heap_root : unit -> Obj.t
-(** The retained state of this module as an opaque value for
-    [Heap_roots.measure] to walk with [Obj.reachable_words]. Diagnostics
-    only: the walk stalls the process for its duration. *)
+val heap_root : (Obj.t -> 'a) -> 'a
+(** Run [walk] on this module's retained state, under the lock that guards
+    it, for [Heap_roots.measure] to size with [Obj.reachable_words].
+    Diagnostics only: the walk stalls the process for its duration. *)

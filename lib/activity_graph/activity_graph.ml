@@ -1233,5 +1233,7 @@ module For_testing = struct
   let current_day_path = day_path
 end
 
-(* For [Heap_roots]: the value the diagnostic walks. *)
-let heap_root () = Obj.repr all_events_workspace_caches
+(* For [Heap_roots]: walk the table under its own lock, so the diagnostic
+   never counts a bucket array another domain is resizing. Never called from
+   inside this module's critical sections; the lock is not reentrant. *)
+let heap_root walk = Stdlib.Mutex.protect all_events_workspace_caches_mu (fun () -> walk (Obj.repr all_events_workspace_caches))

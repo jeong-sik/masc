@@ -130,6 +130,8 @@ status: reference
   - fleet-health attribution view
 - `GET /api/v1/dashboard/transport-health`
   - runtime transport health + connection freshness view
+- `GET /api/v1/diagnostics/heap-roots`
+  - admin-only: reachable size of each registered heap root; stalls the process for the walk
 - `GET /api/v1/models/metrics`, `GET /api/v1/dashboard/keeper-costs`
   - runtime cost/latency view
 - `GET /api/v1/dashboard/keeper-decisions`

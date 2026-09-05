@@ -85,7 +85,7 @@ let write_file path content =
 ;;
 
 let make_meta
-      ?(sandbox = Keeper_types_profile_sandbox.Remote_ssh)
+      ?(sandbox = Keeper_types_profile_sandbox.Docker)
       ?(always_allow = false)
       name
   =
@@ -96,7 +96,9 @@ let make_meta
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> if always_allow then { meta with always_allow = Some true } else meta
+  | Ok meta ->
+    let meta = { meta with sandbox_profile = sandbox } in
+    if always_allow then { meta with always_allow = Some true } else meta
   | Error e -> Alcotest.fail e
 ;;
 
@@ -108,10 +110,12 @@ let with_eio_fs f =
   let fs = Eio.Stdenv.fs env in
   Fs_compat.set_fs fs;
   Process_eio.init
-    ~cwd_default:(Eio.Stdenv.cwd env)
+    ~cwd_default:Eio.Path.(fs / Sys.getcwd ())
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock:(Eio.Stdenv.clock env);
-  f ~fs ~sw ()
+  Fun.protect
+    ~finally:Process_eio.reset_for_testing
+    (fun () -> f ~fs ~sw ())
 ;;
 
 let setup ?sandbox ?always_allow f =

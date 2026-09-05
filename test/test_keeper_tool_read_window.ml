@@ -94,10 +94,12 @@ let with_eio_fs f =
   let fs = Eio.Stdenv.fs env in
   Fs_compat.set_fs fs;
   Process_eio.init
-    ~cwd_default:(Eio.Stdenv.cwd env)
+    ~cwd_default:Eio.Path.(fs / Sys.getcwd ())
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock:(Eio.Stdenv.clock env);
-  f ~fs ~sw ()
+  Fun.protect
+    ~finally:Process_eio.reset_for_testing
+    (fun () -> f ~fs ~sw ())
 ;;
 
 let allow_repo ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) repo_id =

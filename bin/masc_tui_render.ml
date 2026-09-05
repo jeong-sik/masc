@@ -9066,10 +9066,10 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
    turn's height above the bottom edge rather than on it -- context below a
    result, and it settles when the turn ends.
 
-   [needle] is trimmed and lower-cased by its caller, which is where the
-   operator's text enters -- the same contract {!Masc_tui_types.palette_contains}
-   states, and it keeps case folding out of a module whose one rule about
-   [String.lowercase_ascii] is that it does not appear here.
+   [needle] is trimmed by its caller and case-folded inside
+   {!Masc_tui_types.palette_contains}, which keeps case folding out of a
+   module whose one rule about [String.lowercase_ascii] is that it does not
+   appear here.
 
    Pure. The renderer does not mutate state, and a search that scrolled the
    pane itself would be the exception that ends that. *)

@@ -255,9 +255,9 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   if inner_width >= 80 then
     combine c1 c2 c3 c4
   else
-    [ Printf.sprintf "  %s[ENGINE]%s %s · %s%s[SCHED]%s %s"
+    [ Printf.sprintf "  %s[ENGINE]%s %s · %s[SCHED]%s %s"
         (Theme.info ()) Ansi.reset c1_l1
-        Ansi.reset c2_tone c2_l1
+        c2_tone Ansi.reset c2_l1
     ; Printf.sprintf "  %s[FLEET]%s %d keepers (%d done) · %s[GATE]%s %d pending / %d sse"
         (Theme.warn ()) Ansi.reset kpis.total_keepers kpis.done_tasks
         c4_tone Ansi.reset kpis.gate_pending_count sse_count

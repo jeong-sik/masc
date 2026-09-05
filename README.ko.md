@@ -225,10 +225,10 @@ network_mode = "none"
 export 하세요. TUI로 시작할 때 놓치기 쉬운데, TUI가 띄운 서버는 TUI의 환경을 그대로
 물려받기 때문입니다. 켜기 **전에** export 하세요.
 
-**시드된 모델 카탈로그 대부분은 바로 못 씁니다.** 카탈로그에는 예시를 겸해
-provider/model 바인딩 31개가 들어 있고, 그중 `max-request-body-bytes`를 선언한
-13개만 Keeper 턴을 받습니다. 나머지는 부팅 경고에 어떤 키를 넣어야 하는지까지
-같이 찍힙니다. `[runtime].default`는 13개 안에 있습니다.
+**시드된 모델 카탈로그는 모두 keeper-dispatchable 합니다.** 카탈로그에는 예시를 겸해
+provider/model 바인딩 31개가 들어 있고, 31개 모두 `max-request-body-bytes`를 선언하여
+설정된 어떤 모델이든 부팅 경고 없이 Keeper 턴을 받을 수 있습니다. `[runtime].default`는
+31개 안에 있습니다.
 
 ### 갓 만든 Keeper가 할 수 있는 일
 

@@ -634,6 +634,20 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
                   (agent_core_provider_config runtime).model_capabilities_override))
       runtimes
 
+let test_repo_runtime_toml_all_seeded_bindings_are_keeper_dispatchable () =
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  match Runtime.load_list ~config_path:path with
+  | Error msg -> failf "repo runtime.toml should load: %s" msg
+  | Ok (runtimes, _, _, _, _) ->
+    check int "expected 31 seeded runtimes" 31 (List.length runtimes);
+    check (list string)
+      "all seeded runtimes in repo config/runtime.toml are keeper-dispatchable"
+      []
+      (List.map
+         (fun ((runtime : Runtime.t), reason) ->
+            Printf.sprintf "%s: %s" runtime.id reason)
+         (Runtime.keeper_dispatch_blocked runtimes))
+
 let test_deployment_agent_core_model_catalog_modality_priorities_resolve () =
   with_deployment_agent_core_model_catalog @@ fun catalog ->
   let rows =
@@ -4613,6 +4627,9 @@ let () =
           test_case
             "repo runtime bindings resolve through AGENT_CORE provider configs"
             `Quick test_repo_runtime_bindings_resolve_through_agent_core_provider_config;
+          test_case
+            "repo runtime.toml all seeded bindings are keeper-dispatchable"
+            `Quick test_repo_runtime_toml_all_seeded_bindings_are_keeper_dispatchable;
           test_case
             "deployment AGENT_CORE catalog modality priority strings resolve"
             `Quick test_deployment_agent_core_model_catalog_modality_priorities_resolve;

@@ -47,7 +47,11 @@ val policy_network_present : listing:string -> (bool, string) result
 
 val policy_network_inspect_argv_for : Keeper_microvm_backend.t -> (string list, string) result
 (** Inspect the policy network, to learn the gateway a guest on it reaches
-    the host at. *)
+    the host at.
+
+    Carries no [--format json], unlike {!policy_network_list_argv_for}:
+    [network inspect] rejects the flag and already answers JSON. The two
+    subcommands do not agree, and they were measured rather than assumed. *)
 
 val policy_network_gateway : inspect:string -> (string, string) result
 (** The [status.ipv4Gateway] of the inspected network.

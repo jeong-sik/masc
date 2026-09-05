@@ -17807,10 +17807,22 @@ let render_palette (state : state) =
   let total = List.length matches in
   let cursor = max 0 (min state.palette_cursor (total - 1)) in
   framed_shadow_top buf cols;
+  (* A choice says which question, how many names and which line; the
+     prompt is a filter over those names, not a jump query. *)
+  let title, prompt, action =
+    match state.palette_mode with
+    | Masc_tui_types.Palette_jump -> (" Quick Jump & Navigation", ":", "Jump")
+    | Masc_tui_types.Palette_choice { choice_question; choice_line } ->
+        let names = List.length (Masc_tui_types.code_cursor_line_symbols state) in
+        ( Printf.sprintf " %s \xc2\xb7 %d name%s on line %d" choice_question names
+            (if names = 1 then "" else "s") choice_line
+        , "filter:"
+        , "Ask" )
+  in
   framed_shadow_line buf cols
-    (screen_title " Quick Jump & Navigation" ^ "  "
+    (screen_title title ^ "  "
      ^ (Theme.warn ()) ^ "\xe2\x9a\xa1" ^ Ansi.reset ^ "  "
-     ^ Ansi.bold ^ ":" ^ Ansi.reset ^ " "
+     ^ Ansi.bold ^ prompt ^ Ansi.reset ^ " "
      ^ (Terminal_text.single_line state.palette_query)
      ^ ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "\xe2\x96\x8c" ^ Ansi.reset));
   framed_shadow_divider buf cols;
@@ -17833,9 +17845,9 @@ let render_palette (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Printf.sprintf "%d/%d · [Enter] Jump · [Up/Down] Navigate · [Esc] Close"
+         (Printf.sprintf "%d/%d · [Enter] %s · [Up/Down] Navigate · [Esc] Close"
             (if total = 0 then 0 else cursor + 1)
-            total));
+            total action));
   finish_surface state ~surface_key:"palette" ~rows:terminal_rows ~cols buf
 
 let render_patch_modal (state : state) =

@@ -504,7 +504,9 @@ let test_context_checkpoint_failure_prevents_boundary_and_resume () =
   let checkpoint_sink (snapshot : Agent.checkpoint_snapshot) =
     match snapshot.stage with
     | Agent.After_context_injection -> Error "durable sink rejected boundary"
-    | Agent.After_assistant_collected | Agent.After_tool_results_appended -> Ok ()
+    | Agent.After_assistant_collected
+    | Agent.After_tool_results_appended
+    | Agent.After_rejected_response_dropped -> Ok ()
   in
   let context_injector ~tool_name:_ ~input:_ ~output:_ =
     Some { Hooks.context_updates = []; extra_messages = [] }
@@ -575,7 +577,9 @@ let test_assistant_checkpoint_failure_suppresses_release_and_tool () =
   let checkpoint_sink (snapshot : Agent.checkpoint_snapshot) =
     match snapshot.stage with
     | Agent.After_assistant_collected -> Error "assistant checkpoint rejected"
-    | Agent.After_tool_results_appended | Agent.After_context_injection -> Ok ()
+    | Agent.After_tool_results_appended
+    | Agent.After_context_injection
+    | Agent.After_rejected_response_dropped -> Ok ()
   in
   let lease_events = ref [] in
   let tool_executed = ref false in

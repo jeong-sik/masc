@@ -10,7 +10,7 @@ let check = Alcotest.check
 let str = Alcotest.string
 
 let every_surface =
-  [ Overview; Acting; Keepers Keeper_list; Keepers Keeper_detail
+  [ Overview; Acting; Metrics; Keepers Keeper_list; Keepers Keeper_detail
   ; Keepers Keeper_logs; Keepers Keeper_calls; Keepers Keeper_message
   ; Keepers Keeper_runtime_pick; Lanes; Board; Approvals; Planning
   ; Schedules; Verification; Harness; Fusion; Repositories; Code; Changes

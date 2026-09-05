@@ -437,11 +437,13 @@ const DASHBOARD_BOOTSTRAP_WARM_PATHS = new Set([
  *      `secret_projection` -- environment variable names and host paths, no
  *      values -- and listing a route is precisely what would put those on
  *      disk, so it stays `no-store` despite repeating byte-identically.
- *
- * Measured 2026-08-13 against a live server: these routes carry 1,741,479 of
- * the 2,132,911 bytes one refresh cycle transfers (81.6%). Condition 2 costs
- * 49,743 of those bytes (2.3%); condition 1 excludes a further 341,689 (16.0%)
- * that no caching strategy could recover.
+ * Baseline measured 2026-08-13 against a live server: initial routes carried
+ * 1,741,479 of the 2,132,911 bytes one refresh cycle transfers (81.6%).
+ * Expanded in 2026-09 to cover execution, config, keeper-memory-health, tasks history,
+ * workspace, provider-logs, briefing, planning, and tool-metrics where server-side
+ * weak ETags and 304 fast-paths eliminate repetitive JSON transfer and deserialization.
+ * Condition 2 costs 49,743 of those bytes (2.3%); condition 1 excludes dynamic
+ * non-repeatable routes that no caching strategy could recover.
  *
  * Listing a route cannot serve a stale body: `no-cache` stores the response but
  * revalidates before every use, so the server's ETag decides what the client
@@ -457,6 +459,15 @@ const BROWSER_REVALIDATED_PATHS = new Set([
   '/api/v1/agent-activity',
   '/api/v1/dashboard/goals',
   '/api/v1/dashboard/gate',
+  '/api/v1/dashboard/execution',
+  '/api/v1/dashboard/config',
+  '/api/v1/dashboard/keeper-memory-health',
+  '/api/v1/dashboard/tasks/history',
+  '/api/v1/dashboard/workspace',
+  '/api/v1/dashboard/provider-logs',
+  '/api/v1/dashboard/briefing',
+  '/api/v1/dashboard/planning',
+  '/api/v1/tool-metrics',
 ])
 
 /**

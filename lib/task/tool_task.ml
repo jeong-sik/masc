@@ -333,7 +333,16 @@ and handle_transition ~tool_name ~start_time ctx args =
          ~started_at
          ~completed_at:(Some (Time_compat.now ()))
          ~success:false
-         ~error_message:(Some (if String.equal reason "" then "Cancelled" else reason))
+         ~error_message:
+           (Some
+              (* The same sentence the transition recorded: the caller may have
+                 stated it in handoff_context.summary rather than in [reason].
+                 A committed stop of a started task always carries one — the
+                 transition refuses a cancel claim without it — so the bare
+                 label only ever names the event. *)
+              (match Masc_domain.stated_reason ~reason:(Some reason) ~handoff_context with
+               | Some reason -> reason
+               | None -> "Cancelled"))
          ~collaborators:collaborators_from_task
          ~handoff_from:None
          ~handoff_to:None

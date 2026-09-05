@@ -531,11 +531,6 @@ let install () =
            ~verification_id
            ~reason);
 
-  Atomic.set Workspace_hooks.is_admin_agent_fn (fun ~base_path ~agent_name ->
-    match Auth.read_initial_admin base_path with
-    | Some admin when String.equal agent_name admin -> true
-    | _ -> false);
-
   (* Wrapper for cache desync cleared *)
   let original_cache_desync = Atomic.get Workspace_hooks.cache_desync_cleared_fn in
   Atomic.set Workspace_hooks.cache_desync_cleared_fn (fun config ~module_name ~task_id ~status ->

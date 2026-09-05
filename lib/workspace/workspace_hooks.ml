@@ -386,6 +386,3 @@ let verification_notify_verdict_fn
            (Masc_domain.completion_authority_actor authority)
            decision_kind)
 
-let is_admin_agent_fn
-  : (base_path:string -> agent_name:string -> bool) Atomic.t
-  = Atomic.make (fun ~base_path:_ ~agent_name:_ -> false)

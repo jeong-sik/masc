@@ -649,6 +649,8 @@ let test_autocomplete_prev_direction () =
     (Some "/thinking folded") (Command.autocomplete ~direction:Command.Prev "/thinking full");
   check (option string) "prev on /thinking folded cycles to hidden"
     (Some "/thinking hidden") (Command.autocomplete ~direction:Command.Prev "/thinking folded");
+  check (option string) "prev on /thinking hidden wraps to full"
+    (Some "/thinking full") (Command.autocomplete ~direction:Command.Prev "/thinking hidden");
   let keeper_names = [ "sol-xhigh"; "roger" ] in
   check (option string) "prev on keeper wraps to last keeper"
     (Some "/keeper roger") (Command.autocomplete ~direction:Command.Prev ~keeper_names "/keeper ")
@@ -662,6 +664,8 @@ let test_is_slash_navigable () =
     (Command.is_slash_navigable "/");
   check bool "/t prefix is navigable" true
     (Command.is_slash_navigable "/t");
+  check bool "/task without space is navigable (arg-taking command)" true
+    (Command.is_slash_navigable "/task");
   check bool "/task with empty space is not navigable (free text)" false
     (Command.is_slash_navigable "/task ");
   check bool "/settings with no args is not navigable" false
@@ -674,6 +678,9 @@ let test_is_slash_navigable () =
     (Command.is_slash_navigable "/thinking h");
   check bool "/thinking hidden[space] is not navigable (arg complete)" false
     (Command.is_slash_navigable "/thinking hidden ");
+  let keeper_names = [ "sol-xhigh"; "roger" ] in
+  check bool "/keeper with space is navigable" true
+    (Command.is_slash_navigable ~keeper_names "/keeper ");
   check bool "/unknown is not navigable" false
     (Command.is_slash_navigable "/xyz")
 

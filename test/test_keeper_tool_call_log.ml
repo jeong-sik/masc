@@ -206,6 +206,50 @@ let with_tmp_corrupt_tool_call_store f =
       Fs_compat.remove_tree dir)
     (fun () -> f ~dir ~masc_root)
 
+(* ── read_window ─────────────────────────── *)
+
+(* [read_window] filters as it reads rather than building the day range and
+   filtering after. What it keeps, and in what order, is the contract; the
+   store held 40,268 rows in a 24h window on 2026-09-06 and a keeper-scoped
+   caller kept 7-19% of them, so what the other 80% cost is the reason the
+   read changed and not part of the contract. *)
+let test_read_window_keeps_the_keepers_rows_in_order () =
+  with_tmp_log (fun () ->
+    let log keeper tool =
+      Keeper_tool_call_log.log_call
+        ~keeper_name:keeper ~tool_name:tool
+        ~input:(`Assoc []) ~output_text:"out"
+        ~success:true ~duration_ms:1.0 ()
+    in
+    log "alice" "first";
+    log "bob" "between";
+    log "alice" "second";
+    log "carol" "other";
+    log "alice" "third";
+    let tools rows =
+      List.filter_map (fun row -> Safe_ops.json_string_opt "tool" row) rows
+    in
+    let alice = Keeper_tool_call_log.read_window ~keeper_name:"alice" ~window_hours:1.0 () in
+    Alcotest.(check (list string))
+      "the keeper's rows, in the order they were written"
+      [ "first"; "second"; "third" ]
+      (tools alice);
+    let all = Keeper_tool_call_log.read_window ~window_hours:1.0 () in
+    Alcotest.(check (list string))
+      "no keeper filter keeps every row"
+      [ "first"; "between"; "second"; "other"; "third" ]
+      (tools all);
+    Alcotest.(check int)
+      "a keeper that wrote nothing has nothing"
+      0
+      (List.length
+         (Keeper_tool_call_log.read_window ~keeper_name:"dave" ~window_hours:1.0 ()));
+    Alcotest.(check int)
+      "a non-positive window is empty"
+      0
+      (List.length (Keeper_tool_call_log.read_window ~window_hours:0.0 ())))
+;;
+
 (* ── read_recent edge cases ─────────────────────────── *)
 
 let test_read_recent_n_zero () =
@@ -1916,6 +1960,10 @@ let () =
             "cancelled invocation releases file evidence"
             `Quick
             test_abandoned_file_change_evidence_is_released_with_invocation
+        ] )
+    ; ( "read_window",
+        [ eio_test "keeps the keeper's rows in order"
+            test_read_window_keeps_the_keepers_rows_in_order
         ] )
     ; ( "read_recent",
         [ eio_test "n=0 returns []" test_read_recent_n_zero

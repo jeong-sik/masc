@@ -144,7 +144,7 @@ let run_endpoint_command_with_status
       host_root
   in
   let runner = Keeper_sandbox_remote.runner ~timeout_sec endpoint in
-  let status, stdout, stderr =
+  let outcome =
     runner ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
       ~argv:command_argv ~env:[||] ~cwd:(Some cwd)
   in
@@ -152,29 +152,40 @@ let run_endpoint_command_with_status
     Keeper_sandbox_remote.lane_prefix (Keeper_sandbox_remote.transport endpoint)
   in
   let endpoint_name = Keeper_sandbox_remote.name endpoint in
-  match status with
-  | Unix.WEXITED code
-    when List.exists (fun allowed -> allowed = code) ok_exit_codes ->
-    let output =
-      if String.length stdout > max_bytes then String.sub stdout 0 max_bytes
-      else stdout
-    in
-    Ok (status, output)
-  | Unix.WEXITED code ->
+  match outcome with
+  | Masc_exec.Sandbox_target.Transport_failed { reason; stderr; _ } ->
+    (* The lane failed to deliver a command result at all. Reporting it as an
+       error -- never an empty [Ok] -- is the whole point of run_outcome: a
+       down guest/SSH lane used to reach Grep as {ok:true, matches:[]}, an
+       empty search that never ran. *)
     Error
       (Printf.sprintf
-         "%s_read_failed: endpoint=%s exit=%d stderr=%s"
-         lane endpoint_name code (Exec_policy.truncate_for_log stderr))
-  | Unix.WSIGNALED signal ->
-    Error
-      (Printf.sprintf
-         "%s_read_signaled: endpoint=%s signal=%d stderr=%s"
-         lane endpoint_name signal (Exec_policy.truncate_for_log stderr))
-  | Unix.WSTOPPED signal ->
-    Error
-      (Printf.sprintf
-         "%s_read_stopped: endpoint=%s signal=%d"
-         lane endpoint_name signal)
+         "%s_read_transport_failed: endpoint=%s reason=%s stderr=%s"
+         lane endpoint_name reason (Exec_policy.truncate_for_log stderr))
+  | Ran { status; stdout; stderr } ->
+    (match status with
+     | Unix.WEXITED code
+       when List.exists (fun allowed -> allowed = code) ok_exit_codes ->
+       let output =
+         if String.length stdout > max_bytes then String.sub stdout 0 max_bytes
+         else stdout
+       in
+       Ok (status, output)
+     | Unix.WEXITED code ->
+       Error
+         (Printf.sprintf
+            "%s_read_failed: endpoint=%s exit=%d stderr=%s"
+            lane endpoint_name code (Exec_policy.truncate_for_log stderr))
+     | Unix.WSIGNALED signal ->
+       Error
+         (Printf.sprintf
+            "%s_read_signaled: endpoint=%s signal=%d stderr=%s"
+            lane endpoint_name signal (Exec_policy.truncate_for_log stderr))
+     | Unix.WSTOPPED signal ->
+       Error
+         (Printf.sprintf
+            "%s_read_stopped: endpoint=%s signal=%d"
+            lane endpoint_name signal))
 ;;
 
 type read_dispatch =

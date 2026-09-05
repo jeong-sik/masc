@@ -304,6 +304,17 @@ type cache_stats = {
 type current_day_entry = {
   cd_fingerprint : file_fingerprint;
   cd_events : event list;  (* unsorted — callers always re-sort by [seq] *)
+  cd_parsed_to : int;
+      (** Byte offset the events above were parsed up to: the end of the last
+          newline-terminated line. *)
+  cd_prefix_digest : string;
+      (** Digest of the bytes below {!cd_parsed_to}. An append leaves them
+          alone and a rewrite does not, and no cheaper property tells the two
+          apart: a file rewritten in place keeps its inode, and one rewritten
+          to the same length keeps its size. Reading and digesting the prefix
+          costs 7.5 ms against 67.3 ms to parse it (5.3 MB current-day file,
+          measured 2026-09-05), so proving the prefix is nine times cheaper
+          than re-reading it. *)
 }
 
 type all_events_cache_entry =
@@ -457,32 +468,99 @@ let cache_stats () =
     caches
 ;;
 
+(* How often an append was read as an append rather than as a whole file.
+   Beside [current_day_rebuild_counter] so a test can say which path ran. *)
+let current_day_append_counter = Atomic.make 0
+
 let reset_current_day_cache_for_testing () =
   reset_all_events_cache_for_testing ();
-  Atomic.set current_day_rebuild_counter 0
+  Atomic.set current_day_rebuild_counter 0;
+  Atomic.set current_day_append_counter 0
 
-(* The current-day file is mutable. An exact full fingerprint hit is safe to
-   reuse; every change takes one repair-aware full reparse. The dashboard now
-   refreshes activity projections on a bounded component TTL and the aggregate
-   cache shares this parsed list, so correctness does not depend on proving an
-   append-only prefix across external writers. *)
+(* The current-day file is mutable, and it changes constantly: it is the file
+   every event is appended to. Keying the cache on the whole fingerprint meant
+   size and mtime moved on each append, so each read re-parsed the file from
+   zero. Measured 2026-09-05 on a 5.4 MB current-day file growing ~4 KB per
+   ten seconds: this call site allocated 1.9 GB in twenty-five seconds, the
+   largest single source in an otherwise idle server, and the resulting minor
+   collections stalled the scheduler past a second.
+
+   Soundness is proved rather than assumed. Same inode and a size that only
+   grew is not enough -- a file rewritten in place keeps its inode, and one
+   rewritten to the same length keeps its size, and the tests below hold both
+   cases against this. What settles it is the prefix itself: its digest is
+   recorded, and a read that finds it unchanged knows the bytes it already
+   parsed are the bytes still there. Anything else takes the full reparse.
+   [fold_appended_lines] stops at the last newline, so a line still being
+   flushed is left for the next read rather than parsed in half.
+
+   UTF-8 is not lost by reading a slice: [parse_event_line] repairs per line
+   through [Safe_ops.parse_json_safe], and the whole-file pass this replaces
+   never rewrote the current day either -- it repaired in memory and said so. *)
 let parse_current_day_events_cached cache config path : event list =
+  let prefix_digest upto =
+    if upto <= 0 then Digest.string ""
+    else Digest.string (Fs_compat.read_slice ~path ~from:0 ~len:upto)
+  in
+  let record fingerprint events parsed_to =
+    (* Re-stat: a write between the read and here would make the recorded
+       offset describe bytes we did not see. Storing the fingerprint we read
+       under keeps the next call's comparison honest. *)
+    match file_fingerprint path with
+    | Some after when same_file_fingerprint fingerprint after ->
+      Hashtbl.replace cache.current_day_cache path
+        { cd_fingerprint = after
+        ; cd_events = events
+        ; cd_parsed_to = parsed_to
+        ; cd_prefix_digest = prefix_digest parsed_to
+        }
+    | None | Some _ -> ()
+  in
+  let full_reparse fingerprint =
+    let events = parse_events_from_file config path in
+    Atomic.incr current_day_rebuild_counter;
+    (* Everything up to the last newline is accounted for. Taking the file
+       size instead would claim a half-written trailing line was parsed. *)
+    let (), boundary =
+      Fs_compat.fold_appended_lines ~path ~from:0 ~init:() ~f:(fun () _ -> ())
+    in
+    record fingerprint events boundary;
+    events
+  in
   match file_fingerprint path with
   | None -> parse_events_from_file config path
   | Some fingerprint ->
     (match Hashtbl.find_opt cache.current_day_cache path with
-     | Some entry
-       when same_file_fingerprint entry.cd_fingerprint fingerprint ->
+     | Some entry when same_file_fingerprint entry.cd_fingerprint fingerprint ->
        entry.cd_events
-     | None | Some _ ->
-       let events = parse_events_from_file config path in
-       Atomic.incr current_day_rebuild_counter;
-       (match file_fingerprint path with
-        | Some after when same_file_fingerprint fingerprint after ->
-          Hashtbl.replace cache.current_day_cache path
-            { cd_fingerprint = after; cd_events = events }
-        | None | Some _ -> ());
-       events)
+     | Some entry
+       when same_file_identity entry.cd_fingerprint fingerprint
+            && fingerprint.size >= entry.cd_parsed_to
+            && String.equal
+                 (prefix_digest entry.cd_parsed_to)
+                 entry.cd_prefix_digest ->
+       (* The bytes already parsed are still those bytes, so only what follows
+          them is read. *)
+       let appended, boundary =
+         Fs_compat.fold_appended_lines ~path ~from:entry.cd_parsed_to ~init:[]
+           ~f:(fun acc line ->
+             match parse_event_line line with
+             | Some event -> event :: acc
+             | None -> acc)
+       in
+       if boundary = entry.cd_parsed_to && appended = []
+       then (
+         (* Grown, but not yet by a whole line. The parsed set is unchanged;
+            the fingerprint is refreshed so the next call compares against
+            what is on disk now. *)
+         record fingerprint entry.cd_events entry.cd_parsed_to;
+         entry.cd_events)
+       else (
+         let events = entry.cd_events @ List.rev appended in
+         Atomic.incr current_day_append_counter;
+         record fingerprint events boundary;
+         events)
+     | None | Some _ -> full_reparse fingerprint)
 
 (* P0-4 item (2): [past_day_cache] never removed an entry once inserted, so
    a file pruned from disk by the existing 24h [MASC_JSONL_RETENTION_DAYS]
@@ -1211,6 +1289,7 @@ module For_testing = struct
   let reset_past_day_cache_for_testing = reset_past_day_cache_for_testing
   let reset_line_count_cache_for_testing = reset_line_count_cache_for_testing
   let current_day_rebuild_count () = Atomic.get current_day_rebuild_counter
+  let current_day_append_count () = Atomic.get current_day_append_counter
   let all_events_rebuild_count () = Atomic.get all_events_rebuild_counter
   let past_merged_rebuild_count () = Atomic.get past_merged_rebuild_counter
   let touch_workspace_cache root =

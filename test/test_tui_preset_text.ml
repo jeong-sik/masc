@@ -9,6 +9,7 @@ let morning : D.preset_manifest =
   ; pm_description = "before the campaign"
   ; pm_created_at = "2026-09-03T10:26:08Z"
   ; pm_override_count = 1
+  ; pm_override_keys = Some [ "keeper" ]
   ; pm_keepers = [ "analyst"; "spruce" ]
   ; pm_assignment_count = 12
   ; pm_lane_count = 4
@@ -78,14 +79,84 @@ let test_pane_row_and_detail () =
     [ "morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
     ; "before the campaign"
     ; "저장 시각 2026-09-03T10:26:08Z"
+    ; "프롬프트 override keeper"
     ; "지시문 analyst, spruce"
+      (* Selected but not yet answered for. Saying so beats a pane that looks
+         complete while the interesting half is still in flight. *)
+    ; ""
+    ; "내용을 읽는 중…"
     ]
-    (Text.detail_lines ~selected:(Some morning) ~report:None);
+    (Text.detail_lines ~selected:(Some morning) ~detail:None ~report:None);
+  (* A preset saved before the server named its overrides must not read as
+     one that overrides nothing. *)
+  check (list string) "an older preset says the keys are unknown"
+    [ "morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
+    ; "before the campaign"
+    ; "저장 시각 2026-09-03T10:26:08Z"
+    ; "프롬프트 override 1개 — 어느 것인지는 이 프리셋에 적혀 있지 않습니다"
+    ; "지시문 analyst, spruce"
+    ; ""
+    ; "내용을 읽는 중…"
+    ]
+    (Text.detail_lines
+       ~selected:(Some { morning with D.pm_override_keys = None })
+       ~detail:None ~report:None);
+  check (list string) "and one that truly overrides nothing says that"
+    [ "morning · overrides 0 · keepers 2 · assignments 12 · lanes 4"
+    ; "before the campaign"
+    ; "저장 시각 2026-09-03T10:26:08Z"
+    ; "프롬프트 override 없음"
+    ; "지시문 analyst, spruce"
+    ; ""
+    ; "내용을 읽는 중…"
+    ]
+    (Text.detail_lines
+       ~selected:
+         (Some { morning with D.pm_override_keys = Some []; pm_override_count = 0 })
+       ~detail:None ~report:None);
+  (* Once the server answers, the pane says what applying this would touch.
+     Sizes, because the point is the decision and a 4 KB prompt does not fit
+     in a pane. *)
+  let contents : D.preset_detail =
+    { D.pd_name = "morning"
+    ; pd_overrides = [ "keeper", 4431 ]
+    ; pd_instructions = [ "analyst.toml", 812; "spruce.toml", 640 ]
+    ; pd_assignments = [ "analyst", "glm-coding.glm-5.3" ]
+    ; pd_lanes = [ "verifier_exact" ]
+    }
+  in
+  check (list string) "the contents follow the manifest lines"
+    [ "morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
+    ; "before the campaign"
+    ; "저장 시각 2026-09-03T10:26:08Z"
+    ; "프롬프트 override keeper"
+    ; "지시문 analyst, spruce"
+    ; ""
+    ; "override keeper(4431B)"
+    ; "지시문 analyst.toml(812B), spruce.toml(640B)"
+    ; "배정 analyst→glm-coding.glm-5.3"
+    ; "레인 verifier_exact"
+    ]
+    (Text.detail_lines ~selected:(Some morning) ~detail:(Some contents) ~report:None);
+  (* A late answer for a preset the cursor has left is not this one's. *)
+  check (list string) "contents for another preset are not shown"
+    [ "morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
+    ; "before the campaign"
+    ; "저장 시각 2026-09-03T10:26:08Z"
+    ; "프롬프트 override keeper"
+    ; "지시문 analyst, spruce"
+    ; ""
+    ; "내용을 읽는 중…"
+    ]
+    (Text.detail_lines
+       ~selected:(Some morning)
+       ~detail:(Some { contents with D.pd_name = "evening" })
+       ~report:None);
   check (list string) "no selection says so"
     [ "선택한 프리셋이 없습니다" ]
-    (Text.detail_lines ~selected:None ~report:None);
+    (Text.detail_lines ~selected:None ~detail:None ~report:None);
   let with_report =
-    Text.detail_lines ~selected:(Some morning)
+    Text.detail_lines ~selected:(Some morning) ~detail:None
       ~report:(Some (report ~skipped:[] ~runtime:D.Preset_runtime_committed))
   in
   check bool "the report follows the preset in the detail" true

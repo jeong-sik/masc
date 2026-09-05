@@ -1380,6 +1380,15 @@ let load_presets ~(host : string) ~(port : int) :
   | Error err -> Error ("presets load failed: " ^ err)
   | Ok json -> Tui_decode.decode_presets json
 
+(** GET /api/v1/presets/show — what the named preset holds. *)
+let load_preset_detail ~(host : string) ~(port : int) ~(name : string)
+  : (Tui_decode.preset_detail, string) result
+  =
+  match Masc_tui_http.fetch_preset_detail ~host ~port ~name with
+  | Error err -> Error ("preset detail load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_preset_detail json
+;;
+
 (** POST /api/v1/presets — the manifest the server wrote. *)
 let save_preset ~(host : string) ~(port : int) ~(name : string) ~(description : string)
     : (Tui_decode.preset_manifest, string) result =

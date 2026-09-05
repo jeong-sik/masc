@@ -84,7 +84,36 @@ let pane_row (m : D.preset_manifest) =
 
 (* The detail below the list: what the selected preset holds, and the last
    restore report this session saw. *)
+(* What the preset actually holds, once the server has answered for it. The
+   manifest above says how many; this says which and how big. *)
+let contents_lines (d : D.preset_detail) =
+  let sized label rows =
+    match rows with
+    | [] -> []
+    | rows ->
+      [ Printf.sprintf
+          "%s %s"
+          label
+          (String.concat ", "
+             (List.map (fun (name, bytes) -> Printf.sprintf "%s(%dB)" name bytes) rows))
+      ]
+  in
+  sized "override" d.D.pd_overrides
+  @ sized "지시문" d.D.pd_instructions
+  @ (match d.D.pd_assignments with
+     | [] -> []
+     | rows ->
+       [ "배정 "
+         ^ String.concat ", "
+             (List.map (fun (keeper, runtime) -> keeper ^ "→" ^ runtime) rows)
+       ])
+  @ (match d.D.pd_lanes with
+     | [] -> []
+     | lanes -> [ "레인 " ^ String.concat ", " lanes ])
+;;
+
 let detail_lines ~(selected : D.preset_manifest option)
+      ~(detail : D.preset_detail option)
       ~(report : D.preset_restore_report option) =
   let preset =
     match selected with
@@ -93,14 +122,32 @@ let detail_lines ~(selected : D.preset_manifest option)
       [ Printf.sprintf "%s · %s" m.D.pm_name (counts m)
       ; (if String.equal m.D.pm_description "" then "설명 없음" else m.D.pm_description)
       ; "저장 시각 " ^ m.D.pm_created_at
+      ; (* Which prompts, not how many. A count cannot be chosen between,
+           and choosing is what this pane is for. A preset saved before the
+           server named them says so rather than reading as "none". *)
+        (match m.D.pm_override_keys, m.D.pm_override_count with
+         | Some [], _ -> "프롬프트 override 없음"
+         | Some keys, _ -> "프롬프트 override " ^ String.concat ", " keys
+         | None, 0 -> "프롬프트 override 없음"
+         | None, n ->
+           Printf.sprintf "프롬프트 override %d개 — 어느 것인지는 이 프리셋에 적혀 있지 않습니다" n)
       ; (match m.D.pm_keepers with
          | [] -> "지시문을 담은 keeper 없음"
          | keepers -> "지시문 " ^ String.concat ", " keepers)
       ]
   in
+  let contents =
+    match selected, detail with
+    | Some m, Some d when String.equal m.D.pm_name d.D.pd_name ->
+      (match contents_lines d with
+       | [] -> []
+       | lines -> "" :: lines)
+    | Some _, _ -> [ ""; "내용을 읽는 중…" ]
+    | None, _ -> []
+  in
   match report with
-  | None -> preset
-  | Some report -> preset @ [ "" ] @ restore_lines report
+  | None -> preset @ contents
+  | Some report -> preset @ contents @ [ "" ] @ restore_lines report
 ;;
 
 (* Clean means nothing was skipped and runtime.toml did not fail; the pane

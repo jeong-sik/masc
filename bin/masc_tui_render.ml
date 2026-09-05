@@ -15263,7 +15263,8 @@ let render_presets (state : state) =
   done;
   box_divider buf cols;
   let detail =
-    Masc_tui_preset_text.detail_lines ~selected ~report:state.preset_report
+    Masc_tui_preset_text.detail_lines ~selected ~detail:state.preset_detail
+      ~report:state.preset_report
     @ List.map
         (fun (name, reason) -> Printf.sprintf "! %s — %s" name reason)
         unreadable

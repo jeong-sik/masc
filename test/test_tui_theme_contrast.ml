@@ -28,15 +28,21 @@ type scheme =
   ; palette : Palette.t
   }
 
+(* [all], not [bundled]. A scheme in config/themes shadows a bundled one of the
+   same name, so [bundled] is the copy and [all] is what a reader gets. masc's
+   own schemes live only in config/themes and would sit outside every contract
+   below if this read the other list. If that directory is not found, [all]
+   quietly narrows to [bundled] -- test_load_retro_themes_toml names the six
+   and fails loudly, which is what keeps this coverage from shrinking in
+   silence. *)
 let schemes =
   List.map
-    (fun bundled ->
-      match Catalog.to_palette bundled with
-      | Some palette -> { name = Catalog.name bundled; palette }
+    (fun shipped ->
+      match Catalog.to_palette shipped with
+      | Some palette -> { name = Catalog.name shipped; palette }
       | None ->
-        Alcotest.failf "bundled scheme %s has malformed hex"
-          (Catalog.name bundled))
-    Catalog.bundled
+        Alcotest.failf "shipped scheme %s has malformed hex" (Catalog.name shipped))
+    (Catalog.all ())
 ;;
 
 
@@ -584,22 +590,19 @@ let test_load_retro_themes_toml () =
         check string ("name matches " ^ name) name (Catalog.name scheme);
         check bool "is dark theme" false (Catalog.light scheme);
         check bool "to_palette produces palette" true (Option.is_some (Catalog.to_palette scheme)))
-    [ "dungeon-gold"; "norton"; "msx"; "pc-tools" ]
+    [ "dungeon-gold"; "norton"; "msx"; "pc-tools"; "msc"; "cyber" ]
 ;;
 
-let test_alias_resolution () =
-  check bool "pctools alias resolves to pc-tools" true
-    (match Catalog.find "pctools" with
-     | Some s -> Catalog.name s = "pc-tools"
-     | None -> false);
-  check bool "mc alias resolves to msc" true
-    (match Catalog.find "mc" with
-     | Some s -> Catalog.name s = "msc"
-     | None -> false);
-  check bool "midnight-commander alias resolves to msc" true
-    (match Catalog.find "midnight-commander" with
-     | Some s -> Catalog.name s = "msc"
-     | None -> false)
+(* The schemes above are found by name; this says they are also *measured*.
+   [schemes] is the list every contract in this file iterates, so a theme
+   missing here is a theme masc draws and never checks. *)
+let test_contracts_cover_the_toml_themes () =
+  let measured = List.map (fun s -> s.name) schemes in
+  List.iter
+    (fun name ->
+      check bool (name ^ " is under the readability contracts") true
+        (List.mem name measured))
+    [ "dungeon-gold"; "norton"; "msx"; "pc-tools"; "msc"; "cyber" ]
 ;;
 
 let test_clean_hex_rejects_underscores () =
@@ -669,8 +672,8 @@ let () =
             test_clean_hex_rejects_underscores
         ; Alcotest.test_case "official toml themes discovered from config/themes" `Quick
             test_load_retro_themes_toml
-        ; Alcotest.test_case "alias resolution for pctools and mc" `Quick
-            test_alias_resolution
+        ; Alcotest.test_case "readability contracts cover the toml themes" `Quick
+            test_contracts_cover_the_toml_themes
         ] )
     ]
 ;;

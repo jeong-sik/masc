@@ -19,6 +19,7 @@ type t =
   | Set_thinking of [ `Cycle | `Hidden | `Folded | `Full ]
   | Set_tools of [ `Toggle | `Compact | `Full ]
   | Cycle_memory
+  | Open_fleet_memory
   | Find_in_chat of string
   | Find_next
   | Inspect_context
@@ -90,10 +91,6 @@ let catalog =
     ; summary = "cycle Librarian/Memory journal rows: summary, full, hidden"
     }
   ; { word = "fleet-memory"
-    ; args = ""
-    ; summary = "browse consolidated facts across the entire keeper fleet"
-    }
-  ; { word = "all-memory"
     ; args = ""
     ; summary = "browse consolidated facts across the entire keeper fleet"
     }
@@ -201,7 +198,7 @@ let parse text =
     | "tools", "compact" -> Set_tools `Compact
     | "tools", "full" -> Set_tools `Full
     | "memory", _ -> Cycle_memory
-    | "fleet-memory", _ | "all-memory", _ -> Open_fleet_memory
+    | "fleet-memory", _ -> Open_fleet_memory
     | "find", "" -> Find_next
     | "find", text -> Find_in_chat text
     | "context", _ -> Inspect_context

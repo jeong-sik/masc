@@ -391,31 +391,13 @@ let bundled =
        ; "96d0ff"; "539bf5"; "e275ad"; "ae5622"
       |]
   }
-  ; { name = "msc"
-  ; light = false
+  ; { name = "atelier-heath-light"
+  ; light = true
   ; palette =
-      [| "001144"; "002266"; "003388"; "5577aa"
-       ; "88bbdd"; "ffffff"; "e0f0ff"; "ffffff"
-       ; "ff5555"; "ffaa00"; "ffff55"; "55ff55"
-       ; "55ffff"; "5599ff"; "ff55ff"; "ddbb88"
-      |]
-  }
-  ; { name = "pc-tools"
-  ; light = false
-  ; palette =
-      [| "0e2424"; "163838"; "225050"; "4a7070"
-       ; "a0bcbc"; "e6e6e6"; "f0f4f4"; "ffffff"
-       ; "e05d59"; "f0ad4e"; "e5b53b"; "5cb85c"
-       ; "5bc0de"; "4892d4"; "ba68c8"; "c49a45"
-      |]
-  }
-  ; { name = "cyber"
-  ; light = false
-  ; palette =
-      [| "0c0e17"; "151828"; "222740"; "4d5882"
-       ; "8e9ed6"; "e2e8ff"; "f0f4ff"; "ffffff"
-       ; "ff0055"; "ff7700"; "ffe600"; "00ff9f"
-       ; "00f0ff"; "3a86ff"; "f72585"; "b5179e"
+      [| "f7f3f7"; "d8cad8"; "ab9bab"; "9e8f9e"
+       ; "776977"; "695d69"; "292329"; "1b181b"
+       ; "ca402b"; "a65926"; "bb8a35"; "918b3b"
+       ; "159393"; "516aec"; "7b59c0"; "cc33cc"
       |]
   }
   ]
@@ -595,16 +577,7 @@ let names ?base_path () =
 ;;
 
 let find ?base_path name =
-  let candidate =
-    match String.lowercase_ascii name with
-    | "pctools" -> "pc-tools"
-    | "mc" | "midnight-commander" -> "msc"
-    | other -> other
-  in
-  match List.find_opt (fun scheme -> String.equal scheme.name name) (all ?base_path ()) with
-  | Some s -> Some s
-  | None ->
-      List.find_opt (fun scheme -> String.equal scheme.name candidate) (all ?base_path ())
+  List.find_opt (fun scheme -> String.equal scheme.name name) (all ?base_path ())
 ;;
 
 let name scheme = scheme.name

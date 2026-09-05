@@ -32,6 +32,7 @@ let describe = function
          | `Compact -> "compact"
          | `Full -> "full")
   | Command.Cycle_memory -> "cycle-memory"
+  | Command.Open_fleet_memory -> "open-fleet-memory"
   | Command.Find_in_chat text -> "find:" ^ text
   | Command.Find_next -> "find-next"
   | Command.Inspect_context -> "inspect-context"
@@ -91,6 +92,7 @@ let test_pane_commands_parse_by_word () =
     ; "tools:compact"
     ; "tools:full"
     ; "cycle-memory"
+    ; "open-fleet-memory"
     ; "find:caret"
     ; "find:two words"
     ; "find-next"
@@ -120,6 +122,7 @@ let test_pane_commands_parse_by_word () =
        ; "/tools compact"
        ; "/tools full"
        ; "/memory"
+       ; "/fleet-memory"
        (* The text is the rest of the line, spaces and all: a search phrase is
           not one word, and quoting it would be a second grammar. *)
        ; "/find caret"

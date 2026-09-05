@@ -5693,8 +5693,6 @@ let palette_entries (state : state) =
   @ [ "telemetry", Palette_goto Metrics ]
   @ [ "charts", Palette_goto Metrics ]
   @ [ "stats", Palette_goto Metrics ]
-  @ [ "fleet memory", Palette_goto Memory ]
-  @ [ "global memory", Palette_goto Memory ]
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring

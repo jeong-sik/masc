@@ -56,6 +56,13 @@ ALLOWLIST=(
   # on purpose: its .mli documents got = "intlit" / "list" / "assoc"
   # and test_json_field pins them. Not a copy of the canonical mapping.
   "lib/json_field/json_field.ml"
+
+  # Prose for error sentences, not a type-name mapping: it returns
+  # "a boolean" / "an integer" / "a list" so that wrong_shape can write
+  # "limit: expected an integer, got a string". Substituting the
+  # canonical mapping would produce "got string", and `Intlit` is folded
+  # into "an integer" on purpose. Not a copy of the canonical mapping.
+  "lib/keeper/keeper_sandbox_remote_checkouts.ml"
 )
 
 matches_file=$(mktemp)

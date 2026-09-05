@@ -43,6 +43,7 @@ let push event =
 let admit event block =
   if Atomic.get pending_count >= max_pending_events
   then begin
+    (* See mli: the count before the add is not needed, only the running total. *)
     ignore (Atomic.fetch_and_add dropped_samples block.n_samples : int);
     None
   end
@@ -169,6 +170,7 @@ let apply = function
 let drain () =
   let events = Atomic.exchange pending [] in
   let count = List.length events in
+  (* See mli: the stack is already taken above; the old count is not needed. *)
   ignore (Atomic.fetch_and_add pending_count (-count) : int);
   List.iter apply (List.rev events)
 ;;
@@ -305,6 +307,7 @@ module For_testing = struct
 
   let reset () =
     Stdlib.Mutex.protect sites_mutex (fun () ->
+      (* See mli: tests discard undrained events on purpose. *)
       ignore (Atomic.exchange pending [] : event list);
       Atomic.set pending_count 0;
       Atomic.set dropped_samples 0;

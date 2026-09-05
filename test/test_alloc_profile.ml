@@ -48,6 +48,7 @@ let test_direct_major_allocation_counts_as_major_not_promotion () =
 let test_top_cuts_the_tables_not_the_totals () =
   with_clean @@ fun () ->
   T.set_sampling_rate 0.5;
+  (* See below: only the table matters here, not the block handles. *)
   List.iter (fun key -> ignore (T.observe_alloc ~key ~n_samples:1)) [ "x"; "y"; "z" ];
   let report = P.report ~top:2 in
   check int "two rows" 2 (List.length report.allocated);
@@ -58,6 +59,7 @@ let test_top_cuts_the_tables_not_the_totals () =
 
 let test_no_rate_means_no_word_estimate () =
   with_clean @@ fun () ->
+  (* See below: the block is never promoted or freed in this case. *)
   ignore (T.observe_alloc ~key:"k" ~n_samples:3);
   let report = P.report ~top:5 in
   check int "samples still counted" 3 report.allocated_samples;
@@ -68,6 +70,7 @@ let test_no_rate_means_no_word_estimate () =
 let test_sites_past_the_bound_fold_into_one () =
   with_clean @@ fun () ->
   for index = 1 to P.max_sites + 5 do
+    (* See below: the site count is what the case checks, not the handles. *)
     ignore (T.observe_alloc ~key:(Printf.sprintf "site-%d" index) ~n_samples:1)
   done;
   let report = P.report ~top:1 in
@@ -103,7 +106,7 @@ let test_report_under_a_live_profile_does_not_raise () =
   Gc.full_major ();
   (* Deallocation callbacks run at poll points after the collection; one
      report drains what has run, the next catches the stragglers. *)
-  ignore (P.report ~top:5 : P.report);
+  ignore (P.report ~top:5 : P.report); (* See above: this report only drains. *)
   let second = P.report ~top:5 in
   check bool "frees were reported after the sink was dropped" true
     (second.live_samples < first.live_samples);
@@ -113,6 +116,7 @@ let test_report_under_a_live_profile_does_not_raise () =
 let test_wire_shape () =
   with_clean @@ fun () ->
   T.set_sampling_rate 0.1;
+  (* See below: the wire shape is what the case checks, not the handle. *)
   ignore (T.observe_alloc ~key:"site\nframe2" ~n_samples:1);
   match P.report_to_yojson (P.report ~top:5) with
   | `Assoc fields ->

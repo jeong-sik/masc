@@ -88,7 +88,7 @@ let set_switch sw =
     let rec drain () =
       match Eio.Stream.take_nonblocking dispatch_stream with
       | Some task ->
-        (try task () with _ -> ());
+        (try task () with _ -> ());  (* cancel-guard-ok: release-time drain; Cancelled is the expected teardown signal here and must not abort the drain *)
         drain ()
       | None -> ()
     in
@@ -97,7 +97,7 @@ let set_switch sw =
     while true do
       let task = Eio.Stream.take dispatch_stream in
       Eio.Fiber.fork ~sw (fun () ->
-        try task () with _ -> ())
+        try task () with _ -> ())  (* cancel-guard-ok: daemon safety net; a task's own catch resolves its promise first, so this arm only sees fork-teardown noise the daemon must survive *)
     done;
     `Stop_daemon)
 
@@ -119,7 +119,7 @@ let run_on_owner_domain (type a) (f : unit -> a) : a =
       try
         let res = f () in
         Eio.Promise.resolve_ok r res
-      with exn ->
+      with exn ->  (* cancel-guard-ok: not a swallow — the exception, Cancelled included, is re-delivered to the awaiting domain via the promise *)
         let bt = Printexc.get_raw_backtrace () in
         Eio.Promise.resolve_error r (exn, bt)
     in

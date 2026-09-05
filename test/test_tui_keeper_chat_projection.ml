@@ -1,6 +1,7 @@
 open Alcotest
 
 module Chat = Masc_tui_keeper_chat_projection
+module Position = Masc.Keeper_chat_event_log
 
 let json_string json = Yojson.Safe.to_string json
 let sse_event json = "data: " ^ json_string json ^ "\n\n"
@@ -87,26 +88,27 @@ let decode_with_provenance events =
   events |> List.map sse_event |> String.concat ""
   |> Chat.decode_response_with_provenance ~request
 
-(* A re-POST after a cut stream says where to resume; a first submit says
-   nothing, so its body is byte-identical to what it always was. The request
-   itself does not change: identity ignores the position. *)
+(* A re-POST after a cut stream says where to resume; the whole turn -- a
+   first submit, or a resume with nothing held -- says nothing, so that body
+   is byte-identical to what it always was. The request itself does not
+   change: identity ignores the position. *)
 let test_a_resume_position_rides_beside_the_request () =
   let request = Chat.create_request ~keeper_name:"keeper.one" ~message:"hello" () in
-  check string "a first submit carries no position"
+  check string "the whole turn carries no position"
     (Printf.sprintf
        {|{"request_id":%S,"name":"keeper.one","message":"hello"}|}
        request.request_id)
-    (Chat.request_body ~since_seq:None request);
+    (Chat.request_body ~since_seq:Position.Whole_turn request);
   check string "a resume names the last seq held"
     (Printf.sprintf
        {|{"request_id":%S,"name":"keeper.one","message":"hello","since_seq":5}|}
        request.request_id)
-    (Chat.request_body ~since_seq:(Some 5) request);
-  check string "an empty log asks for the whole turn"
+    (Chat.request_body ~since_seq:(Position.After_seq 5) request);
+  check string "seq 0 held is a position, not absence"
     (Printf.sprintf
-       {|{"request_id":%S,"name":"keeper.one","message":"hello","since_seq":-1}|}
+       {|{"request_id":%S,"name":"keeper.one","message":"hello","since_seq":0}|}
        request.request_id)
-    (Chat.request_body ~since_seq:(Some (-1)) request);
+    (Chat.request_body ~since_seq:(Position.After_seq 0) request);
   let attachment =
     { Chat.attachment_id = "att-1"
     ; name = "a.png"
@@ -121,7 +123,7 @@ let test_a_resume_position_rides_beside_the_request () =
   in
   check bool "the position follows the multimodal fields too" true
     (Yojson.Safe.Util.member "since_seq"
-       (Chat.request_to_yojson ~since_seq:(Some 9) with_image)
+       (Chat.request_to_yojson ~since_seq:(Position.After_seq 9) with_image)
      = `Int 9);
   check bool "identity does not read the position" true
     (Chat.same_request_identity request request)
@@ -138,7 +140,7 @@ let test_request_body_and_identity () =
     (Printf.sprintf
        {|{"request_id":%S,"name":"keeper.one","message":"hello"}|}
        request.request_id)
-    (Chat.request_body ~since_seq:None request);
+    (Chat.request_body ~since_seq:Position.Whole_turn request);
   let second = Chat.create_request ~keeper_name:"keeper.one" ~message:"hello" () in
   check bool "fresh id per send" false
     (String.equal request.request_id second.request_id)
@@ -1069,7 +1071,7 @@ let test_attachment_reaches_both_wire_fields () =
   let request =
     Chat.create_request ~attachments:[ attachment ] ~keeper_name:"k" ~message:"look" ()
   in
-  let json = Chat.request_to_yojson ~since_seq:None request in
+  let json = Chat.request_to_yojson ~since_seq:Position.Whole_turn request in
   let member name = Yojson.Safe.Util.member name json in
   (match member "attachments" with
    | `List [ one ] ->
@@ -1101,7 +1103,7 @@ let test_attachment_reaches_both_wire_fields () =
    turn is byte-identical to what this surface sent before attachments existed. *)
 let test_no_attachment_sends_no_multimodal_fields () =
   let json =
-    Chat.request_to_yojson ~since_seq:None
+    Chat.request_to_yojson ~since_seq:Position.Whole_turn
       (Chat.create_request ~keeper_name:"k" ~message:"hi" ())
   in
   Alcotest.(check bool)

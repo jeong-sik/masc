@@ -14,7 +14,8 @@ type t =
   ; started_at : float
   ; mutable reversed_entries : entry list
   ; held_seqs : (int, unit) Hashtbl.t
-  ; mutable last_seq : int
+  ; mutable resume_position : Journal.replay_position
+        (* After the highest seq held; the whole turn while none is. *)
   ; mutable attempt : int
   ; mutable committed : bool
   ; mutable revision : int
@@ -26,7 +27,7 @@ let create ~keeper_name ~request_id ~started_at =
   ; started_at
   ; reversed_entries = []
   ; held_seqs = Hashtbl.create 64
-  ; last_seq = -1
+  ; resume_position = Journal.Whole_turn
   ; attempt = 0
   ; committed = false
   ; revision = 0
@@ -36,7 +37,7 @@ let keeper_name t = t.keeper_name
 let request_id t = t.request_id
 let started_at t = t.started_at
 let entries t = List.rev t.reversed_entries
-let last_seq t = t.last_seq
+let resume_position t = t.resume_position
 let attempt t = t.attempt
 let committed t = t.committed
 let revision t = t.revision
@@ -63,7 +64,7 @@ let add t ~seq (delta : Live.delta) =
     (match seq with
      | Some seq ->
        Hashtbl.replace t.held_seqs seq ();
-       if seq > t.last_seq then t.last_seq <- seq
+       t.resume_position <- Journal.replay_position_advance t.resume_position seq
      | None -> ());
     t.reversed_entries <- { seq; attempt = t.attempt; delta } :: t.reversed_entries;
     bump t;
@@ -169,7 +170,7 @@ let hold_seq t seq =
   if not (Hashtbl.mem t.held_seqs seq)
   then begin
     Hashtbl.replace t.held_seqs seq ();
-    if seq > t.last_seq then t.last_seq <- seq
+    t.resume_position <- Journal.replay_position_advance t.resume_position seq
   end
 ;;
 
@@ -196,7 +197,7 @@ type events_page =
   { operation_id : string
   ; events : Journal.journaled_event list
   ; has_more : bool
-  ; next_since_seq : int
+  ; next_since_seq : Journal.replay_position
   }
 
 let events_schema = "masc.keeper_chat_events.v2"
@@ -222,9 +223,14 @@ let decode_events_page (json : Yojson.Safe.t) =
       | Some _ | None -> Error "events body has no boolean has_more"
     in
     let* next_since_seq =
+      (* The response spelling of a position: null for the whole journal, an
+         integer >= 0 for the seq to read after. *)
       match List.assoc_opt "next_since_seq" fields with
-      | Some (`Int value) -> Ok value
-      | Some _ | None -> Error "events body has no integer next_since_seq"
+      | Some json ->
+        (match Journal.replay_position_of_yojson json with
+         | Some position -> Ok position
+         | None -> Error "events body's next_since_seq is neither null nor an integer >= 0")
+      | None -> Error "events body has no next_since_seq"
     in
     let* raw_events =
       match List.assoc_opt "events" fields with
@@ -291,12 +297,20 @@ let decode_events_error ~status ~credential_sent body =
   | exception Yojson.Json_error _ -> rejected body
 ;;
 
+(* Whether a page's cursor lies past the position it was asked from. The
+   whole journal is behind every seq and never past anything. *)
+let position_advanced ~from (next : Journal.replay_position) =
+  match next with
+  | Journal.Whole_turn -> false
+  | Journal.After_seq next -> Journal.seq_is_after from next
+;;
+
 (* A whole journal, page by page, through the caller's fetch. [since_seq] is
-   where to start ([-1] for the whole journal, a held log's [last_seq] to read
-   only what it lacks). The loop follows [has_more] while [next_since_seq]
-   advances. A page that claims more without advancing would be read
-   forever, and the lines read so far are not the journal: such a read is
-   an error naming the position, not a shorter [Ok]. *)
+   where to start (the whole journal, or a held log's {!resume_position} to
+   read only what it lacks). The loop follows [has_more] while
+   [next_since_seq] advances. A page that claims more without advancing
+   would be read forever, and the lines read so far are not the journal:
+   such a read is an error naming the position, not a shorter [Ok]. *)
 let read_whole_journal ~fetch ~since_seq =
   let rec page since_seq acc =
     match fetch ~since_seq with
@@ -305,15 +319,15 @@ let read_whole_journal ~fetch ~since_seq =
       let acc = List.rev_append events acc in
       if not has_more
       then Ok (List.rev acc)
-      else if next_since_seq > since_seq
+      else if position_advanced ~from:since_seq next_since_seq
       then page next_since_seq acc
       else
         Error
           (Events_undecodable
              (Printf.sprintf
-                "page after seq %d claims more but did not advance (next_since_seq %d)"
-                since_seq
-                next_since_seq))
+                "page after since_seq=%s claims more but did not advance (next_since_seq=%s)"
+                (Journal.replay_position_to_string since_seq)
+                (Journal.replay_position_to_string next_since_seq)))
   in
   page since_seq []
 ;;

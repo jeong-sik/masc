@@ -3571,8 +3571,8 @@ let journal_read_finished state operation_id =
 let journal_resume_position state ~keeper_name operation_id =
   match settled_log_for_request state ~keeper_name operation_id with
   | Some held when not (turn_log_holds_the_turn held) ->
-      Masc_tui_keeper_chat_log.last_seq held.tl_log
-  | Some _ | None -> -1
+      Masc_tui_keeper_chat_log.resume_position held.tl_log
+  | Some _ | None -> Masc.Keeper_chat_event_log.Whole_turn
 ;;
 
 (* Whether the loaded transcript says this turn is over: the keeper's reply,

@@ -219,9 +219,10 @@ let post_keeper_chat ~(host : string) ~(port : int)
     json_headers
       (("Accept", "text/event-stream") :: auth_headers ())
   in
-  (* Whole body, no live view, no position to resume from. *)
+  (* Whole body, no live view, nothing held to resume after. *)
   let body =
-    Masc_tui_keeper_chat_projection.request_body ~since_seq:None request
+    Masc_tui_keeper_chat_projection.request_body
+      ~since_seq:Masc.Keeper_chat_event_log.Whole_turn request
   in
   match
     Masc_http_client.post_sync ?clock:(request_clock ())
@@ -252,11 +253,12 @@ let post_keeper_chat ~(host : string) ~(port : int)
     cap. That is strictly more room than the buffered send had: a turn that
     keeps emitting is no longer cut off at all, and one that goes quiet is
     still bounded by the same number. *)
-(* [since_seq] is [None] on the first POST and the log's last seq on a
-   re-POST after the stream was cut, so the server replays only what the pane
-   missed before switching to live frames. *)
+(* [since_seq] is the whole turn on the first POST and the log's resume
+   position on a re-POST after the stream was cut, so the server replays only
+   what the pane missed before switching to live frames. *)
 let post_keeper_chat_streaming ~clock ~(host : string) ~(port : int)
-    ~(on_chunk : string -> unit) ~(since_seq : int option)
+    ~(on_chunk : string -> unit)
+    ~(since_seq : Masc.Keeper_chat_event_log.replay_position)
     (request : Masc_tui_keeper_chat_projection.request) :
     ( Masc_tui_keeper_chat_projection.response
     , Masc_tui_keeper_chat_projection.error )
@@ -843,16 +845,22 @@ let fetch_lane_run_detail ~(host : string) ~(port : int) ~(run_id : string) :
     for; every failure is typed ({!Masc_tui_keeper_chat_log.events_error}) so
     the caller decides by code, not by reading the server's sentence. *)
 let fetch_keeper_chat_events ~(host : string) ~(port : int)
-    ~(keeper_name : string) ~(operation_id : string) ~(since_seq : int)
-    ~(limit : int) :
+    ~(keeper_name : string) ~(operation_id : string)
+    ~(since_seq : Masc.Keeper_chat_event_log.replay_position) ~(limit : int) :
     ( Masc_tui_keeper_chat_log.events_page
     , Masc_tui_keeper_chat_log.events_error )
     result =
+  (* The whole journal is the parameter's absence; a held seq is the seq. *)
+  let since_seq_query =
+    match Masc.Keeper_chat_event_log.replay_position_to_wire since_seq with
+    | None -> ""
+    | Some seq -> Printf.sprintf "&since_seq=%d" seq
+  in
   let path =
-    Printf.sprintf "/api/v1/keepers/%s/chat/events?operation_id=%s&since_seq=%d&limit=%d"
+    Printf.sprintf "/api/v1/keepers/%s/chat/events?operation_id=%s%s&limit=%d"
       (percent_encode_path_segment keeper_name)
       (percent_encode_query_value operation_id)
-      since_seq limit
+      since_seq_query limit
   in
   match http_get ~host ~port ~path with
   | Error detail -> Error (Masc_tui_keeper_chat_log.Events_transport detail)

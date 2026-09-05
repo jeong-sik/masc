@@ -3,8 +3,9 @@
     endpoint feed the same log; {!Masc_tui_keeper_chat_transcript} projects
     it. Entries are kept in insertion order; both producers deliver seqs in
     increasing order (the live wire in publish order, a v2 page in journal
-    order), so insertion order is seq order. A seq that arrives below
-    [last_seq] is accepted where it lands, not reordered. *)
+    order), so insertion order is seq order. A seq that arrives below the
+    position held ({!resume_position}) is accepted where it lands, not
+    reordered. *)
 
 type entry =
   { seq : int option
@@ -30,7 +31,7 @@ val add : t -> seq:int option -> Masc_tui_keeper_chat_live.delta -> bool
 
 val hold_seq : t -> int -> unit
 (** Holds a journal position without an entry: a line the pane draws nothing
-    for still counts for {!last_seq} and for deduplication. *)
+    for still counts for {!resume_position} and for deduplication. *)
 
 val add_journaled :
   t ->
@@ -55,11 +56,12 @@ val delta_of_journaled :
 
 val entries : t -> entry list  (** Insertion order. *)
 
-val last_seq : t -> int
-(** Highest seq held, or [-1]. A journal page holds every line's seq, drawn
+val resume_position : t -> Masc.Keeper_chat_event_log.replay_position
+(** Where a resume of this turn starts: after the highest seq held, or the
+    whole turn while none is. A journal page holds every line's seq, drawn
     or not; the live wire can hold only the seqs of frames that produced a
     delta, because the decoder reports deltas, not frames. So after the same
-    turn the journal-fed log's [last_seq] can exceed the wire-fed one by the
+    turn the journal-fed log's position can exceed the wire-fed one by the
     trailing undrawn frames — harmless for a [since_seq] resume, which then
     replays a few frames that draw nothing. *)
 val attempt : t -> int  (** Current attempt; [0] before any retry. *)
@@ -76,7 +78,10 @@ type events_page =
   { operation_id : string
   ; events : Masc.Keeper_chat_event_log.journaled_event list
   ; has_more : bool
-  ; next_since_seq : int
+  ; next_since_seq : Masc.Keeper_chat_event_log.replay_position
+        (** The position to ask the next page from, in the response spelling
+            ({!Masc.Keeper_chat_event_log.replay_position_of_yojson}: null is
+            the whole journal, an integer >= 0 the seq to read after). *)
   }
 
 val decode_events_page : Yojson.Safe.t -> (events_page, string) result
@@ -91,8 +96,10 @@ val decode_events_page : Yojson.Safe.t -> (events_page, string) result
 type events_error =
   | Unknown_operation  (** No operation of that id: nothing to reload. *)
   | Journal_pruned
-      (** The turn ran and its journal has since been retained away; the v1
-          rows are all there is. *)
+      (** The turn ended and no journal exists for it: the server cannot say
+          whether retention removed it or an append never created it, only
+          that there is nothing to reload, now or later. The v1 rows are all
+          there is. *)
   | Journal_unavailable of string
       (** The journal exists and could not be read now; the server's message. *)
   | Events_refused of string
@@ -113,10 +120,13 @@ val decode_events_error : status:int -> credential_sent:bool -> string -> events
     else is {!Events_undecodable}. *)
 
 val read_whole_journal :
-  fetch:(since_seq:int -> (events_page, events_error) result) ->
-  since_seq:int ->
+  fetch:
+    (since_seq:Masc.Keeper_chat_event_log.replay_position ->
+     (events_page, events_error) result) ->
+  since_seq:Masc.Keeper_chat_event_log.replay_position ->
   (Masc.Keeper_chat_event_log.journaled_event list, events_error) result
-(** Every line after [since_seq], page by page through [fetch], following
-    [has_more] while [next_since_seq] advances. The first error ends the
-    read; a page that claims more without advancing is
-    {!Events_undecodable}, naming the position, never a shorter [Ok]. *)
+(** Every line past [since_seq] (the whole journal, or after a held seq),
+    page by page through [fetch], following [has_more] while
+    [next_since_seq] advances past the position asked from. The first error
+    ends the read; a page that claims more without advancing is
+    {!Events_undecodable}, naming both positions, never a shorter [Ok]. *)

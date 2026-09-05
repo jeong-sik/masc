@@ -60,9 +60,18 @@ let json_assoc_member_opt = Masc_tui_json.member_opt
    is finished. Shadowing the probe here (and, via open order, in masc_tui.ml)
    keeps all sixteen surfaces' row budgets and the input layer's paging math
    in step without touching each formula. *)
+(* The columns the Activity pane holds on the right of the current frame.
+   [render] sets it once per frame from the reader's preference and the
+   terminal's width, so every surface that reads [get_terminal_size] below
+   lays out beside the pane without knowing it is there, and the input
+   layer's paging math (which reads the same probe) agrees with the drawn
+   frame. Zero when the pane is hidden, too narrow, or the surface is the
+   Activity feed itself. *)
+let acting_pane_reserved_cols = ref 0
+
 let get_terminal_size () =
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
-  (max 1 (rows - 1), cols)
+  (max 1 (rows - 1), max 1 (cols - !acting_pane_reserved_cols))
 
 let frame_lines buf =
   let str = Buffer.contents buf in
@@ -1079,6 +1088,89 @@ let agenda_line agenda ~cols =
    height, and one that came out short used to leave its footer stranded
    partway up the screen; now it would push the composer up with it, and the
    row an operator reaches for would move per surface. *)
+(* What the Activity pane reads, gathered from the state the surfaces
+   already hold. The pane module interprets none of it: health becomes a
+   mark and a tone here, the feed's status becomes its four words here, and
+   the agent-core correlation ids resolve through the same trace table the
+   Activity surface uses. *)
+let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
+  let module Pane = Masc_tui_acting_pane in
+  let keepers =
+    List.map
+      (fun (keeper : keeper) ->
+        let reading = keeper_reading state keeper in
+        let health = Keeper_control.health reading in
+        let paused = reading.Keeper_control.paused in
+        let reading_of_health = Option.map Tui_decode.keeper_health_reading health in
+        let mark_tone =
+          if paused then Pane.Dim
+          else
+            match reading_of_health with
+            | Some Tui_decode.Health_running -> Pane.Ok
+            | Some Tui_decode.Health_idle -> Pane.Dim
+            | Some (Tui_decode.Health_stale | Tui_decode.Health_degraded) -> Pane.Warn
+            | Some (Tui_decode.Health_offline | Tui_decode.Health_zombie) -> Pane.Bad
+            | None -> Pane.Dim
+        in
+        { Pane.name = keeper.k_name
+        ; mark = Masc_tui_keeper_mark.glyph ~paused reading_of_health
+        ; mark_tone
+        ; trace_id = keeper.k_trace_id
+        })
+      state.keepers
+  in
+  let feed =
+    match state.observer with
+    | Observer_off -> Pane.Feed_off
+    | Observer_opening -> Pane.Feed_opening
+    | Observer_live { events; _ } -> Pane.Feed_live events
+    | Observer_closed { reason; _ } -> Pane.Feed_closed reason
+  in
+  { Pane.now = Unix.gettimeofday ()
+  ; feed
+  ; keepers
+  ; selected =
+      Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
+  ; approvals =
+      (* Every kind of pending approval the Approvals surface lists, read to
+         the two facts the pane states: whose, and for which tool. *)
+      List.map
+        (fun (row : approval_row) ->
+          match row with
+          | Keeper_tool_row held ->
+              { Pane.approval_keeper = held.kta_keeper; approval_tool = held.kta_tool }
+          | Gate_row pending ->
+              { Pane.approval_keeper = pending.gp_keeper
+              ; approval_tool = pending.gp_display_tool
+              }
+          | Operator_row item ->
+              { Pane.approval_keeper = item.ap_actor
+              ; approval_tool = item.ap_delegated_tool
+              })
+        (Masc_tui_types.approval_items state)
+  ; entries = state.acting
+  }
+
+(* A pane tone is a reading; the theme answers with the colour. *)
+let acting_pane_sgr (tone : Masc_tui_acting_pane.tone) =
+  match tone with
+  | Masc_tui_acting_pane.Plain -> ""
+  | Masc_tui_acting_pane.Dim -> Theme.recede ()
+  | Masc_tui_acting_pane.Accent -> Ansi.bold ^ Theme.info ()
+  | Masc_tui_acting_pane.Ok -> Theme.ok ()
+  | Masc_tui_acting_pane.Warn -> Theme.warn ()
+  | Masc_tui_acting_pane.Bad -> Theme.bad ()
+  | Masc_tui_acting_pane.Info -> Theme.info ()
+
+let paint_acting_pane_line (line : Masc_tui_acting_pane.line) =
+  String.concat ""
+    (List.map
+       (fun (span : Masc_tui_acting_pane.span) ->
+         match acting_pane_sgr span.tone with
+         | "" -> span.text
+         | sgr -> sgr ^ span.text ^ Ansi.reset)
+       line)
+
 let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
   (* [surface_body_rows] removes the strip before either the frame or the
      typed scroll layout receives its body budget. Two readers of that one
@@ -1096,19 +1188,42 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
          be the one that disappears when a surface miscounts. *)
       List.filteri (fun index _ -> index < body_rows) drawn
   in
+  (* [cols] is what the surface laid out against: the terminal less the
+     Activity pane when the pane shows. The body shares its rows with the
+     pane; the agenda, the composer, and the strip span the whole terminal,
+     the way an editor's side bar stops above the command line. *)
+  let pane_cols = !acting_pane_reserved_cols in
+  let full_cols = cols + pane_cols in
   let framed = Buffer.create (String.length (Buffer.contents buf) + 256) in
-  List.iter
-    (fun line ->
-       Buffer.add_string framed line;
-       Buffer.add_char framed '\n')
-    body;
+  (if pane_cols > 0 then begin
+     let left = Buffer.create (String.length (Buffer.contents buf) + 256) in
+     List.iter
+       (fun line ->
+          Buffer.add_string left (Message_layout.fit_width line cols);
+          Buffer.add_char left '\n')
+       body;
+     let right = Buffer.create 4096 in
+     List.iter
+       (fun line ->
+          Buffer.add_string right (paint_acting_pane_line line);
+          Buffer.add_char right '\n')
+       (Masc_tui_acting_pane.lines ~rows:body_rows ~cols:pane_cols
+          (acting_pane_input state));
+     write_two_panes framed ~left_cols:cols ~left ~right
+   end
+   else
+     List.iter
+       (fun line ->
+          Buffer.add_string framed line;
+          Buffer.add_char framed '\n')
+       body);
   (if agenda_rows > 0 then
-     match agenda_line (Masc_tui_types.agenda state) ~cols with
+     match agenda_line (Masc_tui_types.agenda state) ~cols:full_cols with
      | Some line -> Buffer.add_string framed (line ^ "\n")
      | None -> ());
-  Buffer.add_string framed (composer_line state ~cols ^ "\n");
+  Buffer.add_string framed (composer_line state ~cols:full_cols ^ "\n");
   finish_frame_with_strip state ?clamped ~surface_key
-    ~cursor:(composer_cursor state ~rows ~cols) ~rows ~cols framed
+    ~cursor:(composer_cursor state ~rows ~cols:full_cols) ~rows ~cols:full_cols framed
 
 (* Exhaustive over [connection_status]: a new state is a compile error
    here rather than an unexplained [disconnected] on screen. *)
@@ -17605,6 +17720,21 @@ let render_terminal_too_small ~rows ~cols =
     largest declared fixed-row budget. Main ignores hidden surface input, and
     growing the terminal restores the unchanged selected surface. *)
 let render (state : state) =
+  (* Decide the pane before any surface measures the terminal. Modals draw
+     over the whole terminal and the Activity feed already fills its own
+     screen, so neither reserves the columns. *)
+  (acting_pane_reserved_cols :=
+     let _rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in
+     let modal =
+       state.palette_open || state.context_inspector_open || state.help_open
+       || state.agenda_open || state.answering_open
+     in
+     if modal || state.view = Acting then 0
+     else if
+       Masc_tui_acting_pane.shown ~hidden:state.acting_pane_hidden
+         ~cols:terminal_cols
+     then Masc_tui_acting_pane.pane_cols
+     else 0);
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)

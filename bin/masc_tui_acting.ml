@@ -507,17 +507,18 @@ let chunk_tools_text tools =
       | None -> ct_tool)
   |> String.concat " \xc2\xb7 "
 
+(* The ledger is the authority when it reported at all; the wire list only
+   stands in for runtimes whose ledger plane is silent. *)
+let chunk_tools chunk =
+  match chunk.ck_ledger_tools with
+  | [] ->
+      List.map
+        (fun wt -> { ct_tool = wt.wt_tool; ct_duration_ms = wt.wt_duration_ms })
+        chunk.ck_wire_tools
+  | l -> l
+
 let row_of_chunk chunk =
-  (* The ledger is the authority when it reported at all; the wire list only
-     stands in for runtimes whose ledger plane is silent. *)
-  let tools =
-    match chunk.ck_ledger_tools with
-    | [] ->
-        List.map
-          (fun wt -> { ct_tool = wt.wt_tool; ct_duration_ms = wt.wt_duration_ms })
-          chunk.ck_wire_tools
-    | l -> l
-  in
+  let tools = chunk_tools chunk in
   let tools_text = chunk_tools_text tools in
   let tokens =
     match chunk.ck_tokens with
@@ -560,7 +561,7 @@ let row_of_chunk chunk =
    [acting_retained_entries] rows and this runs on every frame, so chunks
    live in a per-keeper table: attaching costs the keeper's own chunk count,
    not the whole screen. *)
-let chunk_rows ~traces entries =
+let fold_chunks ~traces entries =
   let oldest_first = List.rev entries in
   let chunks : (string, chunk list) Hashtbl.t = Hashtbl.create 16 in
   let plains = ref [] in
@@ -624,6 +625,18 @@ let chunk_rows ~traces entries =
           in
           Hashtbl.replace chunks keeper updated)
     oldest_first;
+  (chunks, !plains)
+
+(* Every keeper's turns as data, newest activity first. The Activity pane
+   draws the same fold the [Turns] rows draw, keyed by keeper, so the two
+   cannot disagree about which turn is current. *)
+let chunks ~traces entries =
+  let chunks, _plains = fold_chunks ~traces entries in
+  Hashtbl.fold (fun _ keeper_chunks acc -> keeper_chunks @ acc) chunks []
+  |> List.stable_sort (fun a b -> Float.compare b.ck_at a.ck_at)
+
+let chunk_rows ~traces entries =
+  let chunks, plains = fold_chunks ~traces entries in
   let chunk_rows =
     Hashtbl.fold
       (fun _ keeper_chunks acc ->
@@ -633,7 +646,7 @@ let chunk_rows ~traces entries =
       chunks []
   in
   (* Latest activity first, so a long-running turn surfaces when it moves. *)
-  chunk_rows @ !plains
+  chunk_rows @ plains
   |> List.stable_sort (fun (a, _) (b, _) -> Float.compare b a)
   |> List.map snd
 

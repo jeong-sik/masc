@@ -6568,6 +6568,24 @@ let seek_in_chat state ~target ~restart =
                  "/find %s \xe2\x80\x94 no older match; /find %s starts again"
                  state.msg_find state.msg_find))
 
+(* The Activity pane's toggle, shared by Ctrl-L and [/activity]. Measured
+   against the terminal's own width, not the width the surfaces lay out
+   against: with the pane showing, that width is already short by the pane,
+   and a threshold read from it could refuse to hide the very pane that
+   narrowed it. *)
+let toggle_acting_pane (state : state) =
+  let _rows, cols = Masc_tui_ansi.get_terminal_size () in
+  match
+    Masc_tui_acting_pane.toggle_hidden ~hidden:state.acting_pane_hidden ~cols
+  with
+  | None ->
+      Error
+        (Printf.sprintf "Activity pane needs %d columns; preference unchanged"
+           Masc_tui_acting_pane.threshold_cols)
+  | Some hidden ->
+      state.acting_pane_hidden <- hidden;
+      Ok hidden
+
 let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   let target =
     match keeper_name with
@@ -6636,6 +6654,13 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Buffer.clear state.msg_input;
       state.changes_return <- Changes_return_chat;
       goto_surface state ~mailbox Changes
+  | Masc_tui_command.Toggle_acting_pane ->
+      Buffer.clear state.msg_input;
+      (match toggle_acting_pane state with
+       | Ok hidden ->
+           notice ~role:Message_local
+             (if hidden then "Activity pane hidden" else "Activity pane shown")
+       | Error reason -> notice ~role:Message_error reason)
   | Masc_tui_command.Open_metrics ->
       Buffer.clear state.msg_input;
       goto_surface state ~mailbox Metrics
@@ -9130,6 +9155,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
         | Masc_tui_command.Open_diff | Masc_tui_command.Open_changes
+        | Masc_tui_command.Toggle_acting_pane
         | Masc_tui_command.Open_settings | Masc_tui_command.Open_metrics
        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Steer_turn _
        | Masc_tui_command.Steer_missing_message
@@ -11353,6 +11379,13 @@ let toggle_mouse_tracking_key = "\020"
    composer every letter is text. *)
 let toggle_roster_pane_key = "\002"
 
+(* Ctrl-L, beside Ctrl-B: the Activity pane is the side bar on the other
+   edge. It costs the surface [Masc_tui_acting_pane.pane_cols] columns for
+   the fleet's live feed, and a reader who wants the width back, or the feed
+   beside a chat, toggles it. A letter would not do -- in the composer every
+   letter is text. *)
+let toggle_acting_pane_key = "\012"
+
 let terminal_title_visible_keeper state =
   match state.view with
   | Code -> None
@@ -13398,6 +13431,7 @@ and is loaded on demand through keeper_skill.
         && state.view <> Keepers Keeper_message
         && key <> Some toggle_mouse_tracking_key
         && key <> Some toggle_roster_pane_key
+        && key <> Some toggle_acting_pane_key
         &&
         match key with
         | Some k -> handle_composer_key state ~base_path ~mailbox:async_messages k
@@ -13511,6 +13545,10 @@ and is loaded on demand through keeper_skill.
                 state.roster_pane_hidden <- hidden;
                 if hidden then state.keeper_message_focus <- Right_pane;
                 Render_schedule.request render_schedule Render_schedule.Force)
+       | Some k when String.equal k toggle_acting_pane_key ->
+           (match toggle_acting_pane state with
+            | Error reason -> add_event state "system" reason
+            | Ok _ -> Render_schedule.request render_schedule Render_schedule.Force)
        (* The compact fallback owns every remaining key. Put this before every
           modal and surface branch: those states are hidden, and a question,
           search cursor, or draft must not move behind the fallback. *)

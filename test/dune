@@ -4147,6 +4147,17 @@
  (libraries alcotest masc_tui_roster_pane masc_tui_message_layout))
 
 (test
+ (name test_tui_acting_pane)
+ (modules test_tui_acting_pane)
+ (libraries
+  alcotest
+  masc_tui_acting_pane
+  masc_tui_acting
+  masc_tui_observer
+  masc_tui_roster_pane
+  masc_tui_message_layout))
+
+(test
  (name test_tui_keeper_mark)
  (modules test_tui_keeper_mark)
  (libraries alcotest masc masc_tui_keeper_mark masc_tui_message_layout))

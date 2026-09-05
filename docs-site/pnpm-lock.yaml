@@ -14,19 +14,19 @@ importers:
       astro:
         specifier: ^7.2.10
         version: 7.3.1(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.3)(@types/node@24.13.3)
+      astro-mermaid:
+        specifier: ^2.1.0
+        version: 2.1.0(astro@7.3.1(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.3)(@types/node@24.13.3))(mermaid@11.17.2)
+      mermaid:
+        specifier: ^11.17.2
+        version: 11.17.2
       sharp:
         specifier: ^0.35.3
         version: 0.35.4(@types/node@24.13.3)
     devDependencies:
-      astro-mermaid:
-        specifier: ^2.1.0
-        version: 2.1.0(astro@7.3.1(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.3)(@types/node@24.13.3))(mermaid@11.17.2)
       jsdom:
         specifier: ^30.0.1
         version: 30.0.1
-      mermaid:
-        specifier: ^11.17.2
-        version: 11.17.2
 
 packages:
 

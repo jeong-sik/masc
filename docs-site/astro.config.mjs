@@ -6,11 +6,17 @@ import mermaid from 'astro-mermaid';
 // https://astro.build/config
 export default defineConfig({
 	integrations: [
+		// autoTheme followed the visitor's OS, but custom.css pins the page dark
+		// for every value of data-theme. A light OS therefore drew a light diagram
+		// on a black page. One theme, like the rest of the chrome.
 		mermaid({
 			theme: 'dark',
-			autoTheme: true,
+			autoTheme: false,
 		}),
 		starlight({
+			// Same reason as the diagrams: the page is dark at every data-theme, so
+			// a code block that follows the OS came out white on black.
+			expressiveCode: { themes: ['github-dark'] },
 			title: 'MASC',
 			description: 'Multi-Agent Shared Context & Autonomous Coding Agent Harness',
 			defaultLocale: 'root',
@@ -48,7 +54,7 @@ export default defineConfig({
 					items: [
 						{ label: 'Terminal UI (TUI)', translations: { 'ko': '터미널에서 조작하기' }, slug: 'guides/tui' },
 						{ label: 'Running Keepers', translations: { 'ko': 'Keeper 사용하기' }, slug: 'guides/keeper' },
-						{ label: 'Connecting External Tools', translations: { 'ko': 'Claude Code · Cursor 연동' }, slug: 'guides/mcp-clients' },
+						{ label: 'Connecting MCP clients', translations: { 'ko': 'MCP 클라이언트 연결' }, slug: 'guides/mcp-clients' },
 					],
 				},
 				{

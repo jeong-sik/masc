@@ -141,7 +141,7 @@ MCP 클라이언트를 여기에 연결하면 하나의 `.masc/` 작업 공간�
 자기 모델을 들고 오므로 모델 키는 필요 없습니다. 이 엔드포인트는 bearer 토큰을
 요구하는데, 그 토큰을 만드는 `masc login` 명령도 설치 스크립트가 찍어줍니다.
 
-연결 방법은 [Claude Code · Cursor 연동](/ko/guides/mcp-clients/)을 따르세요.
+연결 방법은 [MCP 클라이언트 연결](/ko/guides/mcp-clients/)을 따르세요.
 
 작업 공간은 토큰의 SHA-256 만 들고 있습니다. 그래서 bearer 원문이 남아 있는 곳은
 `.masc/auth/<agent>.token`(권한 `0600`) 하나뿐입니다. 뭐가 있는지 보고 하나를

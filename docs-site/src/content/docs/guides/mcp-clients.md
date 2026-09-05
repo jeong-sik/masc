@@ -1,42 +1,57 @@
 ---
-title: Connecting External Tools
-description: Connect Claude Code, Cursor, or another MCP client to the MASC server.
+title: Connecting MCP clients
+description: Attach an MCP client to the MASC server, with the config masc mcp-config emits or by hand.
 ---
 
-MASC exposes a Model Context Protocol (MCP) endpoint at:
+MASC speaks the Model Context Protocol here:
 
 ```
 http://127.0.0.1:8935/mcp
 ```
 
-The endpoint **requires a bearer token** — it rejects an unauthenticated client.
-Connecting with only the URL fails, so mint a token first.
+The endpoint **requires a bearer token** — an unauthenticated request is a
+`401`. A URL on its own does not connect.
 
-## 1. Mint a worker token
+## What masc writes for you
 
-The installer prints this command at the end; it signs in a client identity and
-exports the token as `MASC_TOKEN` in the current shell:
+`masc mcp-config` mints the token and prints the config block. `--client` takes
+one of three:
+
+| `--client` | What it emits |
+| --- | --- |
+| `env` (default) | Shell exports — any client that reads the bearer from the environment |
+| `codex` | TOML for Codex |
+| `claude-desktop` | `mcp-remote` JSON for Claude Desktop |
+
+```bash
+masc mcp-config --base-path ~/masc --client codex
+```
+
+`--client-env` renames the variable (default `MASC_TOKEN`). The token is
+long-lived by default, because a local MCP daemon cannot refresh itself on
+expiry; pass `--expiring` for a session-scoped one.
+
+## Clients you wire by hand
+
+**Nothing else has an emitter.** The two below are worked examples, and any
+other MCP client attaches the same way: same URL, same header.
+
+Mint a token into the current shell first.
 
 ```bash
 eval "$(masc login --base-path ~/masc --host 127.0.0.1 --port 8935 \
   --agent local-mcp-client --role worker --client-env MASC_TOKEN --no-expiry --shell)"
 ```
 
-Run the client from this same shell so it inherits `MASC_TOKEN`, or copy the
-value into the client's own config.
-
-## 2. Claude Code
-
-Add the server with the Authorization header:
+### Claude Code
 
 ```bash
 claude mcp add --transport http masc http://127.0.0.1:8935/mcp \
   --header "Authorization: Bearer $MASC_TOKEN"
 ```
 
-## 3. Cursor
+### Cursor, and anything else configured with JSON
 
-In the MCP settings, add an HTTP server with the same URL and header. In
 `~/.cursor/mcp.json`:
 
 ```json
@@ -50,20 +65,18 @@ In the MCP settings, add an HTTP server with the same URL and header. In
 }
 ```
 
-## Tools the client gains
+## Managing the tokens
 
-Once connected, the client can call the workspace tools. A few of the common
-ones:
+The workspace stores only a SHA-256 of each token. The bearer itself survives in
+one place: `.masc/auth/<agent>.token`, mode `0600`.
 
-| Tool | Purpose |
-|---|---|
-| `masc_status` | Snapshot of the workspace |
-| `masc_tasks` | Inspect the task queue and state |
-| `masc_add_task` | Create a task |
-| `masc_transition` | Move a task through its lifecycle (claim, start, submit, approve, done) |
-| `masc_board_list` | Read board posts and threads |
-| `masc_board_post` | Post an update or reply |
-| `masc_broadcast` | Send a status message to other agents |
+```bash
+masc token list                 # what bearers exist
+masc token revoke --agent NAME  # retire one
+masc token prune                # only the expired ones
+```
 
-The server advertises its full tool set over MCP; these are the ones most used
-when a client joins a shared workspace.
+Minting the same agent name again replaces the credential — that is how you
+rotate.
+
+## Tools a client gets

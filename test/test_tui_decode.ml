@@ -3634,7 +3634,8 @@ let test_decode_keeper_lanes_requires_the_table_fields () =
         (String.starts_with ~prefix:"snapshots[0]: missing required field 'idle_seconds'" detail)
 
 let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
-    ?(running = 0) ?(selected_slots = []) lane_id label =
+    ?(running = 0) ?(selected_slots = []) ?(configuration_state = "ready")
+    lane_id label =
   `Assoc
     ([ "lane_id", `String lane_id
      ; "label", `String label
@@ -3643,7 +3644,7 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
      @ [ "required", `Bool true
     ; "observation_only", `Bool true
     ; "configured", `Bool true
-    ; "configuration_state", `String "ready"
+    ; "configuration_state", `String configuration_state
     ; "admitted_slots", `List [ `String "qwen-primary" ]
     ; "cli_slots", `List []
     ; "dropped_slots", `List []
@@ -3660,6 +3661,42 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ; "p50_elapsed_s", (if retained = 0 then `Null else `Float 1.)
     ; "selected_slots", `List selected_slots
     ])
+
+(* The server collapses "nobody configured this lane" and "the registry could
+   not be read" into one status word, and keeps them apart only in
+   [configuration_state]. Decoding that word into a variant is what lets the
+   detail pane say which of the two it is. *)
+let test_decode_standalone_lane_configuration_is_a_closed_set () =
+  let snapshot configuration_state =
+    `Assoc
+      [ "schema", `String "masc.standalone_llm_lanes.v1"
+      ; "generated_at", `String "2026-08-27T00:00:00Z"
+      ; "observed_at_unix", `Float 20.
+      ; "observation_only", `Bool true
+      ; "exact_run_projection_count", `Int 1
+      ; "exact_run_source_total", `Int 1
+      ; "exact_run_projection_truncated", `Bool false
+      ; ( "lanes"
+        , `List
+            [ standalone_lane_json ~configuration_state "board_attention_exact"
+                "Board Attention"
+            ] )
+      ]
+  in
+  let decoded configuration_state =
+    match Tui_decode.decode_standalone_lanes_snapshot (snapshot configuration_state) with
+    | Ok { Tui_decode.sls_lanes = [ lane ]; _ } -> Some lane.Tui_decode.sl_configuration_state
+    | Ok _ | Error _ -> None
+  in
+  Alcotest.(check bool) "ready" true (decoded "ready" = Some Tui_decode.Lane_ready);
+  Alcotest.(check bool) "the server's degraded is a lane with no slot admitted" true
+    (decoded "degraded" = Some Tui_decode.Lane_slotless);
+  Alcotest.(check bool) "unconfigured stays apart from unreadable" true
+    (decoded "unconfigured" = Some Tui_decode.Lane_unconfigured);
+  Alcotest.(check bool) "unavailable is the registry, not the lane" true
+    (decoded "unavailable" = Some Tui_decode.Lane_registry_unavailable);
+  Alcotest.(check bool) "a word outside the set is refused" true
+    (decoded "half-configured" = None)
 
 (* The start of the newest run. The fixture has carried it since this suite
    was written and the decoder read it into an underscore, so the field
@@ -7681,6 +7718,8 @@ let () =
           test_decode_memory_health_rejects_stale_schema;
         Alcotest.test_case "memory alert keeps the code contract" `Quick
           test_decode_memory_alert_keeps_the_code_contract;
+        Alcotest.test_case "standalone lane configuration is a closed set" `Quick
+          test_decode_standalone_lane_configuration_is_a_closed_set;
         Alcotest.test_case "memory facts keep both stores" `Quick
           test_decode_memory_facts_keeps_both_stores;
         Alcotest.test_case "memory fact row carries the use record" `Quick

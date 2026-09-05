@@ -1093,6 +1093,18 @@ type standalone_lane_status =
   | Standalone_no_retained_observation
   | Standalone_unavailable
 
+(** Why a lane can or cannot run, as the server derived it from the registry.
+    [sl_status] collapses the last two into one word ("unavailable"); this
+    keeps them apart, because a lane nobody configured and a lane whose
+    registry could not be read are different problems with different fixes.
+    [Lane_slotless] is the server's "degraded": configured, but with no
+    catalog slot and no CLI slot admitted. *)
+type standalone_lane_configuration =
+  | Lane_ready
+  | Lane_slotless
+  | Lane_unconfigured
+  | Lane_registry_unavailable
+
 type standalone_lane_slot_count = {
   slsc_slot_id : string;
   slsc_count : int;
@@ -1106,7 +1118,7 @@ type standalone_lane = {
           read a retained v1 snapshot written before the field was added. *)
   sl_required : bool;
   sl_status : standalone_lane_status;
-  sl_configuration_state : string;
+  sl_configuration_state : standalone_lane_configuration;
   sl_admitted_slots : string list;
   sl_cli_slots : string list;
   sl_dropped_slots : string list;
@@ -1135,6 +1147,9 @@ type standalone_lanes_snapshot = {
 }
 
 val standalone_lane_status_to_string : standalone_lane_status -> string
+
+val standalone_lane_configuration_to_string :
+  standalone_lane_configuration -> string
 val decode_standalone_lanes_snapshot :
   Yojson.Safe.t -> (standalone_lanes_snapshot, string) result
 

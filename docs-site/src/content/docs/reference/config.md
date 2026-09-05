@@ -10,20 +10,45 @@ file** rather than write one from scratch.
 ## Directory Structure
 
 ```text
-.masc/config/
-├── runtime.toml    # provider catalog, model bindings, [runtime].default, lanes
-├── .env.local      # provider API keys; written by quickstart.sh and read by
-│                   # start-masc.sh — the source-checkout pair. A binary install
-│                   # has neither: export the key in your shell instead.
-└── keepers/        # per-Keeper profiles, one <name>.toml each
-    └── reviewer.toml
+.masc/config/                     # 271 files, written by `masc init`
+├── runtime.toml                  # provider catalog, model bindings, [runtime].default, lanes
+├── agent-core-models-overlay.toml
+├── prompts/                      # 25 — the text every role is given
+├── tools/                        # 146 — one declaration per tool
+├── identity/                     # 89
+├── themes/                       # 6 — masc's own colour schemes
+├── mcp/                          # 3
+└── keepers/                      # empty on a fresh install, on purpose
 ```
 
-Connector settings (Discord, Slack) are not a separate file: they are tables
-inside `runtime.toml` (e.g. `[discord]`). `repositories.toml` and
+A roster is per workspace, so `masc init` creates `keepers/` and puts nothing in
+it. Connector settings (Discord, Slack) are not separate files either: they are
+tables inside `runtime.toml` (e.g. `[discord]`). `repositories.toml` and
 `keeper_repo_mappings.toml` appear once you use those features.
 
----
+There is no `.env.local`. Settings live in TOML and credentials live in the
+environment the server is started in — see [Environment variables](/reference/env-contract/).
+
+## What the catalog ships
+
+`runtime.toml` seeds five providers. Four need a variable exported in the
+server's environment; the fifth is local.
+
+| Provider | Endpoint | Variable |
+| --- | --- | --- |
+| `ollama_cloud` | `ollama.com/v1` | `OLLAMA_CLOUD_API_KEY` |
+| `deepseek` | `api.deepseek.com` | `DEEPSEEK_API_KEY` |
+| `glm-coding` | `api.z.ai/api/coding/paas/v4` | `ZAI_API_KEY_SB` |
+| `kimi_coding` | `api.kimi.com/coding/v1` | `KIMI_API_KEY` |
+| `ollama` | `localhost:11434` | none |
+
+`llama_server`, `vllm` and `mlx_server` ship commented out — see
+[Local AI models](/runbooks/llama-server/).
+
+**Most of the seeded bindings cannot take a turn.** The catalog carries 31
+provider/model pairs as documented examples; the 13 that declare
+`max-request-body-bytes` are dispatchable and startup names the other 18 in a
+warning that says which key to add. `[runtime].default` is one of the 13.
 
 ## runtime.toml
 

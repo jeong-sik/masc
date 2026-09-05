@@ -1209,6 +1209,22 @@ let test_nontty_wizard_connectivity_check_is_wired () =
     "MASC_INSTALL_NO_PING"
 ;;
 
+(* A fresh install with no --team has zero Keepers, and the post-install "Next"
+   block used to stop at "start server + open TUI" without saying how to get one.
+   Guard that it now points at both the TUI Keepers view and the scripted
+   keeper-create path. *)
+let test_next_steps_guide_first_keeper () =
+  let script = install_script () in
+  assert_contains
+    "the post-install guidance points at creating a first keeper in the TUI"
+    script
+    "create your first from the Keepers view";
+  assert_contains
+    "the post-install guidance surfaces the scripted keeper-create path"
+    script
+    "keeper-create --help"
+;;
+
 let test_wizard_reports_execution_sandboxes () =
   let tmpdir = Filename.temp_file "masc-install-sandbox-" "" in
   Sys.remove tmpdir;
@@ -2047,6 +2063,10 @@ let () =
             "non-TTY connectivity check and its opt-out stay wired into install.sh"
             `Quick
             test_nontty_wizard_connectivity_check_is_wired
+        ; test_case
+            "post-install guidance points at creating a first keeper"
+            `Quick
+            test_next_steps_guide_first_keeper
         ; test_case
             "wizard reports available execution sandboxes"
             `Quick

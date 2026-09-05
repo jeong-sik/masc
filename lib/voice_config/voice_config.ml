@@ -50,12 +50,18 @@ type local_playback_config = {
   agents : string list;
 }
 
+type gate_config = {
+  always_allow : bool;
+  exempt_agents : string list;
+}
+
 type t = {
   tts : tts_config;
   stt : stt_config;
   session : session_config;
   capture : capture_config;
   local_playback : local_playback_config;
+  gate : gate_config;
 }
 
 open Result.Syntax
@@ -449,6 +455,29 @@ let parse_local_playback json =
         (Printf.sprintf "root.local_playback must be an object, got %s: %s"
            (Json_util.kind_name other) (Json_util.excerpt other))
 
+let parse_gate json =
+  match Json_util.assoc_member_opt "gate" json with
+  | Some (`Assoc _ as gate_json) ->
+      let always_allow =
+        Option.value ~default:false (Json_util.get_bool gate_json "always_allow")
+      in
+      let exempt_agents =
+        let from_field key =
+          match Json_util.assoc_member_opt key gate_json with
+          | Some (`List values) -> List.filter_map trim_nonempty_json values
+          | _ -> []
+        in
+        match from_field "exempt_agents" with
+        | [] -> from_field "agents"
+        | list -> list
+      in
+      Ok { always_allow; exempt_agents }
+  | None | Some `Null -> Ok { always_allow = false; exempt_agents = [] }
+  | Some other ->
+      Error
+        (Printf.sprintf "root.gate must be an object, got %s: %s"
+           (Json_util.kind_name other) (Json_util.excerpt other))
+
 let parse_json json =
   let open Result in
   let* tts = parse_tts json in
@@ -456,7 +485,8 @@ let parse_json json =
   let* session = parse_session json in
   let* capture = parse_capture json in
   let* local_playback = parse_local_playback json in
-  Ok { tts; stt; session; capture; local_playback }
+  let* gate = parse_gate json in
+  Ok { tts; stt; session; capture; local_playback; gate }
 
 (** ── runtime.toml [voice] section loading ─────────────────────
     Otoml → Yojson bridge so {!parse_json} can consume a TOML
@@ -607,6 +637,10 @@ let local_playback_enabled_for_agent config agent_id =
   | [] -> true
   | agents -> List.mem agent_id agents
 
+let voice_gate_always_allow_for_agent config agent_id =
+  config.gate.always_allow
+  || List.mem agent_id config.gate.exempt_agents
+
 let unique_strings = Json_util.dedupe_keep_order
 
 let available_voices config =
@@ -663,5 +697,13 @@ let public_json config =
             ( "agents",
               `List
                 (List.map (fun agent_id -> `String agent_id) config.local_playback.agents) );
+          ] );
+      ( "gate",
+        `Assoc
+          [
+            ("always_allow", `Bool config.gate.always_allow);
+            ( "exempt_agents",
+              `List
+                (List.map (fun agent_id -> `String agent_id) config.gate.exempt_agents) );
           ] );
     ]

@@ -313,6 +313,7 @@ let profile_update_command (meta : keeper_meta) =
     ; telemetry_feedback_enabled = meta.telemetry_feedback_enabled
     ; telemetry_feedback_window_hours = meta.telemetry_feedback_window_hours
     ; always_allow = meta.always_allow
+    ; voice_always_allow = meta.voice_always_allow
     ; agent_core_env = meta.agent_core_env
     ; updated_at = meta.updated_at
     }
@@ -470,6 +471,8 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
         old.telemetry_feedback_window_hours;
     always_allow =
       Dashboard_utils.first_some p.profile_defaults.always_allow old.always_allow;
+    voice_always_allow =
+      Dashboard_utils.first_some p.profile_defaults.voice_always_allow old.voice_always_allow;
     proactive = {
       enabled =
         (match p.proactive_enabled_opt with

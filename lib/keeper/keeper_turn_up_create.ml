@@ -174,6 +174,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
         telemetry_feedback_enabled = p.profile_defaults.telemetry_feedback_enabled;
         telemetry_feedback_window_hours = p.profile_defaults.telemetry_feedback_window_hours;
         always_allow = p.profile_defaults.always_allow;
+        voice_always_allow = p.profile_defaults.voice_always_allow;
         runtime = {
           usage = {
             total_turns = 0;

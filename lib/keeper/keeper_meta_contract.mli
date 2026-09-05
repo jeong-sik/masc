@@ -237,6 +237,7 @@ type keeper_meta = {
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   always_allow : bool option;
+  voice_always_allow : bool option;
   (* Agent runtime state *)
   runtime : agent_runtime_state;
   (* Identity & concurrency *)

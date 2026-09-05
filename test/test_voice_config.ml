@@ -502,6 +502,59 @@ let test_a_zero_calibration_is_refused () =
       (String_util.string_contains_substring ~needle:"calibration_seconds" message)
 ;;
 
+let test_gate_defaults_when_absent () =
+  match Vc.parse_json (config_with []) with
+  | Error message -> fail message
+  | Ok config ->
+    check bool "always_allow defaults to false" false config.Vc.gate.always_allow;
+    check (list string) "exempt_agents defaults to empty" [] config.Vc.gate.exempt_agents;
+    check bool "agent is not exempt" false
+      (Vc.voice_gate_always_allow_for_agent config "sangsu")
+;;
+
+let test_gate_always_allow_true () =
+  match
+    Vc.parse_json
+      (config_with [ "gate", `Assoc [ "always_allow", `Bool true ] ])
+  with
+  | Error message -> fail message
+  | Ok config ->
+    check bool "always_allow is true" true config.Vc.gate.always_allow;
+    check bool "sangsu is exempt" true
+      (Vc.voice_gate_always_allow_for_agent config "sangsu");
+    check bool "any agent is exempt" true
+      (Vc.voice_gate_always_allow_for_agent config "other_agent")
+;;
+
+let test_gate_exempt_agents () =
+  match
+    Vc.parse_json
+      (config_with
+         [ "gate", `Assoc [ "exempt_agents", `List [ `String "sangsu" ] ] ])
+  with
+  | Error message -> fail message
+  | Ok config ->
+    check bool "always_allow is false" false config.Vc.gate.always_allow;
+    check bool "sangsu is exempt" true
+      (Vc.voice_gate_always_allow_for_agent config "sangsu");
+    check bool "other agent is not exempt" false
+      (Vc.voice_gate_always_allow_for_agent config "other_agent")
+;;
+
+let test_gate_agents_alias () =
+  match
+    Vc.parse_json
+      (config_with
+         [ "gate", `Assoc [ "agents", `List [ `String "sangsu" ] ] ])
+  with
+  | Error message -> fail message
+  | Ok config ->
+    check bool "sangsu is exempt via agents alias" true
+      (Vc.voice_gate_always_allow_for_agent config "sangsu");
+    check bool "other agent is not exempt" false
+      (Vc.voice_gate_always_allow_for_agent config "other_agent")
+;;
+
 let () =
   Alcotest.run "voice_config"
     [
@@ -524,6 +577,17 @@ let () =
             `Quick test_a_live_shaped_endpoint_parses;
           test_case "an unknown endpoint field is rejected by name"
             `Quick test_an_unknown_endpoint_field_is_rejected_by_name;
+        ] );
+      ( "gate",
+        [
+          test_case "defaults when section is absent"
+            `Quick test_gate_defaults_when_absent;
+          test_case "always_allow = true exempts all agents"
+            `Quick test_gate_always_allow_true;
+          test_case "exempt_agents exempts listed agent"
+            `Quick test_gate_exempt_agents;
+          test_case "agents alias works for exempt_agents"
+            `Quick test_gate_agents_alias;
         ] );
       ( "load_detailed",
         [

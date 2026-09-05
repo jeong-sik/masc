@@ -128,6 +128,13 @@ type local_playback_config = {
           Empty list = all agents permitted (when [enabled = true]). *)
 }
 
+type gate_config = {
+  always_allow : bool;
+  exempt_agents : string list;
+      (** Allow-list of agent ids permitted to bypass Gate approval for voice speak.
+          When [always_allow = true], all agents bypass Gate approval. *)
+}
+
 (** {1 Composite config} *)
 
 type t = {
@@ -136,6 +143,7 @@ type t = {
   session : session_config;
   capture : capture_config;
   local_playback : local_playback_config;
+  gate : gate_config;
 }
 (** Complete voice configuration. *)
 
@@ -233,6 +241,12 @@ val local_playback_enabled_for_agent : t -> string -> bool
     + [config.local_playback.enabled] is [true], AND
     + [config.local_playback.agents] is empty (allow-all) OR
       contains [agent_id]. *)
+
+val voice_gate_always_allow_for_agent : t -> string -> bool
+(** [voice_gate_always_allow_for_agent config agent_id] is true iff:
+
+    + [config.gate.always_allow] is [true], OR
+    + [config.gate.exempt_agents] contains [agent_id]. *)
 
 val available_voices : t -> string list
 (** [available_voices config] returns the [default_voice] followed

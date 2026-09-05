@@ -454,6 +454,7 @@ let decode_current_meta fields =
       ; mention_targets = []
       ; proactive = { enabled = default_proactive_enabled }
       ; always_allow = None
+      ; voice_always_allow = None
       ; created_at
       ; updated_at
       ; paused

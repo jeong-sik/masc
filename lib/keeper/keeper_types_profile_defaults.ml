@@ -20,6 +20,7 @@ type keeper_profile_defaults = {
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   always_allow : bool option;
+  voice_always_allow : bool option;
   (* RFC-0390: how much of an official client's built-in tool surface this
      keeper may use. [None] keeps each runtime's own default posture. *)
   native_tool_posture : Runtime_native_tools.posture option;
@@ -57,6 +58,7 @@ let empty_keeper_profile_defaults =
     telemetry_feedback_enabled = None;
     telemetry_feedback_window_hours = None;
     always_allow = None;
+    voice_always_allow = None;
     native_tool_posture = None;
     skill_names = None;
     attached_tool_allow = None;

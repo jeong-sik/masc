@@ -307,8 +307,9 @@ type drawn =
   | Drawn_tools of tool_block
   | Drawn_text of string  (** A reply stretch as it streamed. *)
   | Drawn_reply of string
-      (** The recorded visible reply, standing in for the current attempt's
-          streamed stretches when they did not add up to it. *)
+      (** The recorded visible reply, standing where the current attempt's
+          last streamed stretch was: the record is the store's text for the
+          turn's terminal message, so it is the text drawn there. *)
   | Drawn_status of string
       (** How a turn without visible reply text ended, from the recorded
           reply through {!turn_status_text}. *)
@@ -324,12 +325,15 @@ val drawn : t -> drawn_item list
 (** The trail flattened -- a superseded block's rows in place, tagged with
     their attempt -- and reconciled with the recorded reply. Without a reply,
     the trail as it is. The recorded reply is the terminal message's text, not
-    the whole turn's, so with a [Visible_reply] it is compared (trimmed) to
-    the current attempt's last text stretch only: equal, the trail as it is;
-    different, that one stretch is replaced by one [Drawn_reply] (appended
-    when nothing streamed); earlier stretches -- the turn's earlier rounds --
-    stay as they streamed. With a blank [Visible_reply] or any control
-    outcome, one [Drawn_status] is appended and the streamed rows stay. *)
+    the whole turn's, so with a [Visible_reply] it stands for the current
+    attempt's last text stretch only: that one stretch is replaced by one
+    [Drawn_reply] carrying the record's text (appended when nothing
+    streamed); earlier stretches -- the turn's earlier rounds -- stay as they
+    streamed. The reply is this turn's because the log this transcript
+    projects is one operation's and both the stream and the journal reach it
+    by that id; the two texts are not compared. With a blank [Visible_reply]
+    or any control outcome, one [Drawn_status] is appended and the streamed
+    rows stay. *)
 
 val of_log : now:float -> Masc_tui_keeper_chat_log.t -> t
 (** The transcript a log projects to: {!create} from the log's identity, then

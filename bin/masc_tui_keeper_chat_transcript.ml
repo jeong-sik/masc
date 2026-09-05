@@ -1367,8 +1367,8 @@ let drawn t =
      ([Agent_core.Types.text_of_content result.response.content], normalized),
      not the whole turn's: a turn that said "Let me check." before its tool
      round and "Done." after records "Done.". So only the last stretch of the
-     current attempt is the one the reply can stand in for; the stretches
-     before it are the turn's earlier rounds and stay as they streamed. *)
+     current attempt is the one the reply stands for; the stretches before it
+     are the turn's earlier rounds and stay as they streamed. *)
   let last_text =
     List.fold_left
       (fun (index, last) item ->
@@ -1380,22 +1380,23 @@ let drawn t =
   | None -> items
   | Some { reply_text; reply_outcome = Masc.Keeper_turn_outcome.Visible_reply; _ }
     when String.trim reply_text <> "" -> (
-      let canonical = safe_block reply_text in
-      let reply_item = { superseded = None; drawn = Drawn_reply canonical } in
+      (* Which turn this reply belongs to was decided before it got here, by
+         the log this transcript projects: a log is one operation's
+         ([Masc_tui_keeper_chat_log.request_id]), a live frame reaches the
+         log of the in-flight request it was streamed for (matched on the
+         request's identity, not its words), and a journal is read per
+         operation into the log created with that id. So a reply on this
+         transcript is this operation's, and the operation records one reply:
+         the terminal message, the last stretch of the current attempt. The
+         record is the store's text for it and stands where that stretch
+         was, typed as the record -- whatever the stream's copy read. *)
+      let reply_item = { superseded = None; drawn = Drawn_reply (safe_block reply_text) } in
       match last_text with
       | None ->
           (* Nothing streamed for the reply: the record is all there is. *)
           items @ [ reply_item ]
-      | Some last -> (
-          match List.nth items last with
-          | { drawn = Drawn_text streamed; _ }
-            when String.equal (String.trim streamed) (String.trim canonical) ->
-              items
-          | _ ->
-              (* The server stripped something the stream carried, or the
-                 stream's last stretch was cut short: the recorded text stands
-                 where that stretch was. *)
-              List.mapi (fun index item -> if index = last then reply_item else item) items))
+      | Some last ->
+          List.mapi (fun index item -> if index = last then reply_item else item) items)
   | Some { reply_text; reply_outcome; reply_turn_ref } ->
       (* Nothing is chunked for a control outcome, and a visible reply with
          no text has nothing to chunk: the one row that says how the turn

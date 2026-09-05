@@ -404,8 +404,10 @@ let control_reply outcome =
     { reply = "recorded but not chunked"; turn_outcome = outcome; turn_ref = "trace-1#3" }
 ;;
 
-(* The trail is what the pane draws while the reply equals what streamed. *)
-let test_drawn_keeps_the_trail_when_the_reply_is_what_streamed () =
+(* The record stands where the last stretch streamed, one row, however the
+   two read: here the stream's copy ended in a newline the store did not
+   keep, and the row is the store's text. *)
+let test_drawn_is_one_row_when_the_record_differs_from_the_stream_by_whitespace () =
   let t = fresh () in
   feed t
     [ Live.Run_started
@@ -416,9 +418,32 @@ let test_drawn_keeps_the_trail_when_the_reply_is_what_streamed () =
     ; Live.Text "look.\n"
     ; reply_details ~reply:"Let me look." ()
     ];
-  check (list string) "one row per stretch, the text as it streamed"
-    [ "thinking:look first"; "tools:" ^ String.concat "|" (Transcript.tool_rows t); "text:Let me look.\n" ]
+  check (list string) "one row per stretch, the last one the record's"
+    [ "thinking:look first"; "tools:" ^ String.concat "|" (Transcript.tool_rows t); "reply:Let me look." ]
     (drawn t)
+;;
+
+(* Two operations that ended in the same words: the reply of one is a row on
+   that one's transcript only. What places a reply is the transcript it was
+   applied to -- one operation's log -- not what the text reads. *)
+let test_drawn_places_a_reply_by_its_operation_not_by_its_text () =
+  let earlier =
+    Transcript.create ~keeper_name:"keeper.one" ~request_id:"req-1" ~started_at:origin
+  in
+  let later =
+    Transcript.create ~keeper_name:"keeper.one" ~request_id:"req-2"
+      ~started_at:(origin +. 1.)
+  in
+  feed earlier [ Live.Run_started; Live.Text "Done." ];
+  feed later [ Live.Run_started; Live.Text "Done."; reply_details ~reply:"Done." () ];
+  check (list string) "the earlier turn, still streaming, keeps its stream"
+    [ "text:Done." ] (drawn earlier);
+  check (list string) "the later turn's row is its own record"
+    [ "reply:Done." ] (drawn later);
+  check (option string) "and the earlier turn holds no reply" None
+    (Option.map
+       (fun (reply : Transcript.reply) -> reply.reply_text)
+       (Transcript.reply earlier))
 ;;
 
 (* The recorded reply is the terminal message's text. The server strips
@@ -447,7 +472,8 @@ let test_drawn_replaces_the_streamed_text_with_a_differing_reply () =
 ;;
 
 (* A turn that spoke before its tool round and again after records only the
-   second as its reply; the first is not taken back. *)
+   second as its reply; the first is not taken back, and the second is drawn
+   as the record. *)
 let test_drawn_keeps_earlier_rounds_when_the_reply_is_the_last_stretch () =
   let t = fresh () in
   feed t
@@ -458,10 +484,10 @@ let test_drawn_keeps_earlier_rounds_when_the_reply_is_the_last_stretch () =
     ; Live.Text "Done."
     ; reply_details ~reply:"Done." ()
     ];
-  check (list string) "both rounds stay as they streamed"
+  check (list string) "the earlier round stays as it streamed, the last is the record"
     [ "text:Let me check."
     ; "tools:" ^ String.concat "|" (Transcript.tool_rows t)
-    ; "text:Done."
+    ; "reply:Done."
     ]
     (drawn t)
 ;;
@@ -1570,8 +1596,10 @@ let () =
             test_runtime_attempt_keeps_the_earlier_attempt_superseded
         ; test_case "reply details is recorded, not drawn" `Quick
             test_reply_details_is_recorded_not_drawn
-        ; test_case "drawn keeps the trail when the reply is what streamed" `Quick
-            test_drawn_keeps_the_trail_when_the_reply_is_what_streamed
+        ; test_case "drawn is one row when the record differs from the stream by whitespace"
+            `Quick test_drawn_is_one_row_when_the_record_differs_from_the_stream_by_whitespace
+        ; test_case "drawn places a reply by its operation, not by its text" `Quick
+            test_drawn_places_a_reply_by_its_operation_not_by_its_text
         ; test_case "drawn replaces the streamed text with a differing reply" `Quick
             test_drawn_replaces_the_streamed_text_with_a_differing_reply
         ; test_case "drawn keeps earlier rounds when the reply is the last stretch" `Quick

@@ -2667,6 +2667,16 @@ type state = {
   (* Rows scrolled into the pane's full list; zero is the overview. The
      renderer clamps it to what the list holds and a toggle resets it. *)
   mutable acting_pane_scroll: int;
+  (* Which of the pane's two readings is up. Survives a toggle: a reader
+     who put the pane away on Changes gets Changes back. *)
+  mutable acting_pane_tab: Masc_tui_acting_pane.tab;
+  (* The selected keeper's recorded file changes, keyed by keeper name, for
+     the pane's Changes tab. Refetched when the feed shows that keeper
+     complete a tool call and on the operator cadence. *)
+  mutable acting_pane_changes:
+    (string, Tui_decode.file_change_snapshot) Masc_tui_fetched.t;
+  (* When the answer on screen landed, so the tab can say how old it is. *)
+  mutable acting_pane_changes_at: float option;
   (* Derived display phase for the selected long name in the narrow roster.
      The main loop advances it only while that roster is visible. *)
   mutable roster_marquee_frame: int;
@@ -4006,6 +4016,9 @@ let create_state
   roster_pane_hidden = false;
   acting_pane_hidden = false;
   acting_pane_scroll = 0;
+  acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;
+  acting_pane_changes = Masc_tui_fetched.initial;
+  acting_pane_changes_at = None;
   roster_marquee_frame = 0;
   activity_frame = -1;
   keeper_detail_focus = Right_pane;

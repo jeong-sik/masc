@@ -31,7 +31,9 @@ let global =
   ; b Meta "@" "answering: who is mid-turn or just finished; Enter opens their chat"
   ; b Meta "?" "this help"
   ; b Meta "Ctrl-B" "show or hide a visible keeper roster pane"
-  ; b Meta "Ctrl-L" "show or hide the Activity pane: what every keeper is doing right now"
+  ; b Meta "Ctrl-L"
+      "show or hide the Activity pane: what every keeper is doing right now, and \
+       on its Changes tab the selected keeper's files (press the header to switch)"
       ~help:"the wheel over it scrolls the full list; a press picks a keeper, a second press opens its chat"
   ; b Meta "Ctrl-T" "release the mouse so you can drag-select and copy"
   ; b Navigate "Ctrl-]" "follow the reference under the cursor"

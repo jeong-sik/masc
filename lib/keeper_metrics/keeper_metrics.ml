@@ -186,6 +186,7 @@ type t =
   | VisionCandidateAttempts
   | VisionIngestEvictions
   | VisionIngestErrors
+  | VisionDownscale
   (* Instruction monitoring metrics *)
   | PromptSegmentBytes          (* histogram: bytes per prompt segment *)
   | PromptTemplateRenderOutcome (* counter: template render ok/fallback/empty *)
@@ -399,6 +400,7 @@ let to_string = function
   | VisionCandidateAttempts -> "masc_keeper_vision_candidate_attempts_total"
   | VisionIngestEvictions -> "masc_keeper_vision_ingest_evictions_total"
   | VisionIngestErrors -> "masc_keeper_vision_ingest_errors_total"
+  | VisionDownscale -> "masc_keeper_vision_downscale_total"
   | PromptSegmentBytes -> "masc_keeper_prompt_segment_bytes"
   | PromptTemplateRenderOutcome -> "masc_keeper_prompt_template_render_outcome_total"
   | ToolCallParamCompleteness -> "masc_keeper_tool_call_param_completeness_total"

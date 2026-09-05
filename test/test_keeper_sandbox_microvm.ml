@@ -1511,6 +1511,231 @@ let test_the_other_modes_are_untouched_by_the_route_check () =
     [ Profile.Network_none; Profile.Network_inherit ]
 ;;
 
+(* ── The live lane ───────────────────────────────────────────────
+
+   These boot a real guest on the real runtime, so they run only when asked
+   for by name. Everything above this line is argv and decision shape; this
+   is the part that says the shapes add up to a guest that behaves.
+
+   Set MASC_MICROVM_LANE_LIVE=1 and have `container` running with the
+   masc-keeper-sandbox:local image present. *)
+
+let live_lane_requested () = Option.is_some (Sys.getenv_opt "MASC_MICROVM_LANE_LIVE")
+
+(* The guest runs commands through a statically linked Linux shim mounted
+   from the base path. It is a build artifact, not something a test can
+   produce, so the path is named rather than guessed: guessing would tie this
+   to one developer's home. *)
+let install_shim ~base =
+  match Sys.getenv_opt "MASC_MICROVM_SHIM" with
+  | None ->
+    Alcotest.fail
+      "MASC_MICROVM_LANE_LIVE needs MASC_MICROVM_SHIM pointing at a built \
+       masc-exec-shim (scripts/remote-ssh/build-shim.sh --arch arm64)"
+  | Some source ->
+    let dir = Filename.concat (Filename.concat base ".masc") "microvm" in
+    let shim_dir = Filename.concat dir "shim" in
+    List.iter
+      (fun d -> if not (Sys.file_exists d) then Unix.mkdir d 0o755)
+      [ Filename.concat base ".masc"; dir; shim_dir ];
+    let target = Filename.concat shim_dir "masc-exec-shim" in
+    let ic = open_in_bin source in
+    let body = really_input_string ic (in_channel_length ic) in
+    close_in ic;
+    let oc = open_out_bin target in
+    output_string oc body;
+    close_out oc;
+    Unix.chmod target 0o755
+;;
+
+let guest_names_now () =
+  let ic = Unix.open_process_in "container list --all --format json 2>/dev/null" in
+  let body = In_channel.input_all ic in
+  ignore (Unix.close_process_in ic);
+  match Yojson.Safe.from_string body with
+  | `List rows ->
+    List.filter_map
+      (fun row ->
+         match row with
+         | `Assoc _ ->
+           (match Yojson.Safe.Util.member "configuration" row with
+            | `Assoc _ as cfg ->
+              (match Yojson.Safe.Util.member "id" cfg with
+               | `String id -> Some id
+               | _ -> None)
+            | _ ->
+              (match Yojson.Safe.Util.member "id" row with
+               | `String id -> Some id
+               | _ -> None))
+         | _ -> None)
+      rows
+  | _ -> []
+  | exception _ -> []
+;;
+
+(* Booting is asking for the endpoint: a microvm keeper's commands go over
+   the remote lane, not a docker-shaped exec, and the endpoint call is what
+   ensures the guest is up. *)
+let boot_once ~config ~meta ~network_mode =
+  let runtime =
+    Masc.Keeper_turn_sandbox_runtime.create ~config ~meta ~network_mode ()
+  in
+  Masc.Keeper_turn_sandbox_runtime.microvm_remote_endpoint ~timeout_sec:180.0 runtime
+;;
+
+(* A keeper that changed network mode had a guest under the previous mode's
+   name still running, on the wrong network, until the server stopped. The
+   sweep that fixes it runs at boot, so this is what says it runs. *)
+let test_live_a_mode_change_removes_the_old_guest () =
+  if not (live_lane_requested ())
+  then ()
+  else
+    with_eio_fs @@ fun () ->
+    let base = temp_dir "microvm_mode_sweep_" in
+    let config = Masc.Workspace.default_config base in
+    install_shim ~base;
+    let meta = microvm_meta ~name:"modesweep" in
+    let name_for mode =
+      Masc.Keeper_turn_sandbox_runtime.For_testing_microvm.microvm_container_name
+        ~config ~keeper_name:meta.name ~network_mode:mode
+    in
+    (* Delete by the exact names this test made, and nothing else. The live
+       server runs its keepers on this same container runtime, so a sweep by
+       label here would be a sweep across somebody's working guests. *)
+    let teardown () =
+      List.iter
+        (fun mode ->
+           ignore
+             (Sys.command
+                (Printf.sprintf
+                   "container delete --force %s >/dev/null 2>&1"
+                   (Filename.quote (name_for mode)))
+              : int))
+        Profile.all_network_modes
+    in
+    Fun.protect ~finally:teardown @@ fun () ->
+    (match boot_once ~config ~meta ~network_mode:Profile.Network_inherit with
+     | Error detail -> Alcotest.failf "the inherit guest did not boot: %s" detail
+     | Ok _ -> ());
+    let after_inherit = guest_names_now () in
+    Alcotest.(check bool)
+      "the inherit guest is up"
+      true
+      (List.exists (String.equal (name_for Profile.Network_inherit)) after_inherit);
+    (match boot_once ~config ~meta ~network_mode:Profile.Network_none with
+     | Error detail -> Alcotest.failf "the none guest did not boot: %s" detail
+     | Ok _ -> ());
+    let after_none = guest_names_now () in
+    Alcotest.(check bool)
+      "the none guest is up"
+      true
+      (List.exists (String.equal (name_for Profile.Network_none)) after_none);
+    Alcotest.(check bool)
+      "and the guest from the previous mode is gone"
+      false
+      (List.exists (String.equal (name_for Profile.Network_inherit)) after_none)
+;;
+
+let guest_proxy_env ~name =
+  let ic =
+    Unix.open_process_in
+      (Printf.sprintf "container inspect %s 2>/dev/null" (Filename.quote name))
+  in
+  let body = In_channel.input_all ic in
+  ignore (Unix.close_process_in ic);
+  match Yojson.Safe.from_string body with
+  | exception _ -> None
+  | json ->
+    let row = match json with `List (r :: _) -> r | other -> other in
+    (match
+       Yojson.Safe.Util.(row |> member "configuration" |> member "initProcess"
+                         |> member "environment")
+     with
+     | `List entries ->
+       List.find_map
+         (fun entry ->
+            match entry with
+            | `String text when String.length text > 12
+                                && String.equal (String.sub text 0 12) "HTTPS_PROXY=" ->
+              Some (String.sub text 12 (String.length text - 12))
+            | _ -> None)
+         entries
+     | _ -> None)
+;;
+
+(* A policy guest carries the lane's proxy port in its environment. The port
+   is ephemeral and the guest is not, so when the lane rebinds the two part
+   and the still-running guest keeps CONNECTing to a port nothing holds --
+   silently, because it fails at the socket. This boots one, moves the port,
+   and asks what the guest is pointed at afterwards. *)
+let test_live_a_moved_proxy_port_replaces_the_guest () =
+  if not (live_lane_requested ())
+  then ()
+  else
+    with_eio_fs @@ fun () ->
+    let base = temp_dir "microvm_policy_adopt_" in
+    let config = Masc.Workspace.default_config base in
+    install_shim ~base;
+    let meta = microvm_meta ~name:"adoptport" in
+    let entry = Masc.Keeper_registry.register_offline ~base_path:base meta.name meta in
+    let name =
+      Masc.Keeper_turn_sandbox_runtime.For_testing_microvm.microvm_container_name
+        ~config ~keeper_name:meta.name ~network_mode:Profile.Network_policy
+    in
+    let teardown () =
+      ignore
+        (Sys.command
+           (Printf.sprintf "container delete --force %s >/dev/null 2>&1"
+              (Filename.quote name))
+         : int);
+      ignore
+        (Sys.command
+           (Printf.sprintf "container network delete %s >/dev/null 2>&1"
+              (Filename.quote (M.policy_network_name ~keeper_name:meta.name)))
+         : int)
+    in
+    Fun.protect ~finally:teardown @@ fun () ->
+    let boot () = boot_once ~config ~meta ~network_mode:Profile.Network_policy in
+    let port_the_guest_names () =
+      match guest_proxy_env ~name with
+      | None -> Alcotest.fail "the guest names no HTTPS_PROXY"
+      | Some value -> value
+    in
+    Atomic.set entry.Masc.Keeper_registry_types.egress_proxy_port (Some 51_022);
+    (match boot () with
+     | Error detail -> Alcotest.failf "the policy guest did not boot: %s" detail
+     | Ok _ -> ());
+    let first = port_the_guest_names () in
+    Alcotest.(check bool)
+      "the guest is pointed at the bound port"
+      true
+      (String_util.contains_substring first ":51022");
+    (* The port did not move, so this guest is the right one and adoption is
+       what should happen. If it were replaced here, every turn would pay a
+       VM boot. *)
+    (match boot () with
+     | Error detail -> Alcotest.failf "the second boot failed: %s" detail
+     | Ok _ -> ());
+    Alcotest.(check string)
+      "an unchanged port adopts the guest it already has"
+      first
+      (port_the_guest_names ());
+    (* Now the lane rebound. *)
+    Atomic.set entry.Masc.Keeper_registry_types.egress_proxy_port (Some 51_099);
+    (match boot () with
+     | Error detail -> Alcotest.failf "the boot after the port moved failed: %s" detail
+     | Ok _ -> ());
+    let after = port_the_guest_names () in
+    Alcotest.(check bool)
+      "a moved port leaves the guest pointed at the new one"
+      true
+      (String_util.contains_substring after ":51099");
+    Alcotest.(check bool)
+      "which means it was replaced, not adopted"
+      true
+      (not (String.equal first after))
+;;
+
 let () =
   Alcotest.run
     "keeper_sandbox_microvm"
@@ -1543,6 +1768,12 @@ let () =
             test_leaves_guests_it_cannot_account_for
         ; Alcotest.test_case "skips listing when CLI is unavailable" `Quick
             test_sweep_skips_listing_when_cli_is_unavailable
+        ] )
+    ; ( "live"
+      , [ Alcotest.test_case "a mode change removes the old guest" `Slow
+            test_live_a_mode_change_removes_the_old_guest
+        ; Alcotest.test_case "a moved proxy port replaces the guest" `Slow
+            test_live_a_moved_proxy_port_replaces_the_guest
         ] )
     ; ( "adoption"
       , [ Alcotest.test_case "a policy guest is not adopted once its listener is gone"

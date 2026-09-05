@@ -12,6 +12,7 @@ let describe = function
   | Command.Open_settings -> "open-settings"
   | Command.Open_diff -> "open-diff"
   | Command.Open_changes -> "open-changes"
+  | Command.Toggle_acting_pane -> "toggle-acting-pane"
   | Command.Open_metrics -> "open-metrics"
   | Command.Switch_keeper name -> "keeper:" ^ name
   | Command.Switch_keeper_missing_name -> "keeper-missing-name"
@@ -79,6 +80,7 @@ let test_pane_commands_parse_by_word () =
     ; "open-settings"
     ; "open-diff"
     ; "open-changes"
+    ; "toggle-acting-pane"
     ; "keeper:orbiter"
     ; "keeper-missing-name"
     ; "interrupt"
@@ -109,6 +111,7 @@ let test_pane_commands_parse_by_word () =
        ; "/settings"
        ; "/diff"
        ; "/changes"
+       ; "/activity"
        ; "/keeper orbiter"
        ; "/keeper   "
        ; "/interrupt"

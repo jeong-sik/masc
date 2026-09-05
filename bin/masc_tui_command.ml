@@ -11,6 +11,7 @@ type t =
   | Open_settings
   | Open_diff
   | Open_changes
+  | Toggle_acting_pane
   | Switch_keeper of string
   | Switch_keeper_missing_name
   | Interrupt_turn
@@ -69,6 +70,10 @@ let catalog =
   ; { word = "changes"
     ; args = ""
     ; summary = "open recorded file changes for this keeper"
+    }
+  ; { word = "activity"
+    ; args = ""
+    ; summary = "show or hide the Activity pane beside this surface"
     }
   ; { word = "interrupt"
     ; args = ""
@@ -183,6 +188,7 @@ let parse text =
     | "settings", _ -> Open_settings
     | "diff", _ -> Open_diff
     | "changes", _ -> Open_changes
+    | "activity", _ -> Toggle_acting_pane
     | "keeper", "" -> Switch_keeper_missing_name
     | "keeper", name -> Switch_keeper name
     | "interrupt", _ -> Interrupt_turn

@@ -102,6 +102,42 @@ val row_of_event :
 (** One row per event. [duration_ms] is drawn on a completed call when the
     caller could pair it with its start; see {!duration_of_completion}. *)
 
+(** The turn fold as data, for a surface that draws it its own way. *)
+type chunk_tool = {
+  ct_tool : string;
+  ct_duration_ms : float option;
+}
+
+type wire_tool = {
+  wt_id : string option;
+  wt_started : float;
+  wt_tool : string;
+  wt_duration_ms : float option;
+}
+
+type chunk = {
+  ck_keeper : string;
+  ck_turn : int option;
+  ck_at : float;  (** newest member's arrival — the chunk's feed position *)
+  ck_wire_tools : wire_tool list;  (** oldest-first, from the agent-core wire *)
+  ck_ledger_tools : chunk_tool list;  (** oldest-first, from the keeper ledger *)
+  ck_settled : bool;
+  ck_tokens : int option * int option;
+  ck_cost_usd : float option;
+  ck_calls : int option;
+}
+
+val chunks : traces:(string * string) list -> entry list -> chunk list
+(** Every keeper's turns, newest activity first: the fold {!chunk_rows} draws,
+    before it becomes rows. A running turn's wire calls carry their start and,
+    once returned, their duration. *)
+
+val chunk_tools : chunk -> chunk_tool list
+(** The calls a chunk names: the ledger's when it reported, else the wire's. *)
+
+val turn_text : int option -> string
+(** [turn 41], or [turn ?] when the event carried none. *)
+
 val chunk_rows : traces:(string * string) list -> entry list -> row list
 (** The [Turns] projection: entries (newest first) folded into one row per
     keeper turn, plus the rows that are not turn lifecycle (chat, approvals,

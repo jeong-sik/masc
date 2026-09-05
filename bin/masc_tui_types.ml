@@ -2659,6 +2659,10 @@ type state = {
      list the reader may already know. Hidden is a choice they make, not a
      width the terminal forces, so it survives resizing. *)
   mutable roster_pane_hidden: bool;
+  (* The Activity pane on the right edge costs a surface 44 columns for the
+     fleet's live feed. Same contract as the roster: hidden is the reader's
+     choice and survives a resize; the width is the terminal's. *)
+  mutable acting_pane_hidden: bool;
   (* Derived display phase for the selected long name in the narrow roster.
      The main loop advances it only while that roster is visible. *)
   mutable roster_marquee_frame: int;
@@ -3996,6 +4000,7 @@ let create_state
   context_inspector_focus = Left_pane;
   context_inspector_turn_back = 0;
   roster_pane_hidden = false;
+  acting_pane_hidden = false;
   roster_marquee_frame = 0;
   activity_frame = -1;
   keeper_detail_focus = Right_pane;

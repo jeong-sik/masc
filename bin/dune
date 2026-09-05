@@ -736,6 +736,16 @@
  (libraries masc_tui_message_layout))
 
 (library
+ (name masc_tui_acting_pane)
+ (wrapped false)
+ (modules masc_tui_acting_pane)
+ (libraries
+  masc_tui_acting
+  masc_tui_observer
+  masc_tui_message_layout
+  masc_tui_roster_pane))
+
+(library
  (name masc_tui_keeper_mark)
  (wrapped false)
  (modules masc_tui_keeper_mark)
@@ -1126,6 +1136,7 @@
   masc_tui_footer
   masc_tui_approval_detail
   masc_tui_roster_pane
+  masc_tui_acting_pane
   masc_tui_keeper_mark
   masc_tui_help
   masc_tui_context_state

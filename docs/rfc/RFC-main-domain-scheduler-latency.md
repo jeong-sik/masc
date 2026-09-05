@@ -255,6 +255,10 @@ ready 11:49:07Z 이전. memprof A(ready+3분) → B(+7분), 239초: **428 MB/s**
 
 `Keeper_remote_path.consume` 은 상위에서 사라졌다(#33329; 원격 lane 이 조용했을 가능성은 남는다). `keeper_owner_pools` 는 2 MB 로 돌아왔다 — 앞 재기동의 67 MB 는 P4a 가 아니라 그때의 키퍼 상태였다. Eio 프레임 문제는 #33339(키 skip 목록에 Eio 접두어).
 
+#### 세 번째 재기동 — 12:08Z, #33339(키에서 Eio 프레임 제외) 포함
+
+memprof A(ready+3분) → B(+7분), 240초: 584 MB/s(이 4분에 `agent_started` 24건), live 3.40 → 3.32 GB, sites 8,313 → 11,679 — Eio 프레임을 빼도 4분에 +3.4k 이므로 사이트 증가의 원인은 다른 데 있다(클로저 줄 번호로 보이나 상위 30 만으로는 못 본다). 하네스 ready+7분: lag p99 320 ms, minor 9,603/분, major 23.8/분(그 10초 창은 바빴다). 상위: 승인 큐 스냅샷 재작성 6행 합 13.8 GB, 체크포인트 디코드 7.1 GB, `measure_message_bytes` 5.6 + 2.9 GB, 반응 원장 스캔 2.5 GB. **P4e 는 #33349** 로 열었다: 델타 append + generation + 비율 압축 + v10. 재기동 전에 `gate/pending.json`·`replay-results.json` 을 지워야 한다(안 지우면 저장소가 unsupported version 으로 unavailable). 소비된 grant 의 tombstone 은 크래시 뒤 재실행을 막는 durable truth 라("consumption tombstone remains explicit" 시험이 못박는다) retention 은 이 PR 의 범위 밖이고, 나이 제한은 별도 결정이다.
+
 #### GC 파라미터 실험 (8.5 의 "카운터를 본 뒤 결정")
 
 카운터가 나왔다. minor 4,000~6,000/분은 초당 70~100회의 stop-the-world 이고, OCaml 5 는 minor 수집에 모든 도메인이 함께 멈춘다. 현재 값은 minor heap 4M words(32 MiB)/도메인(`bin/main_eio.ml`), space_overhead 100(`MASC_GC_SPACE_OVERHEAD`, 부트스트랩), 둘 다 `OCAMLRUNPARAM` 이 있으면 적용하지 않는다. 실험: `OCAMLRUNPARAM='s=32M,o=200'` (s 는 도메인당 words, 32M words = 256 MiB; o 는 space_overhead; OCaml 5.4 manual runtime 장에서 확인) 로 재기동해 같은 하네스로 minor/분·major/분·promoted·lag p99 를 비교한다. 기대: minor 1/8, promoted 감소, major 1/2, RSS +4~6 GB(128 GB 호스트). p99 가 안 내려가면 되돌린다.

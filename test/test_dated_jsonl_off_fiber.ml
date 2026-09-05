@@ -1,7 +1,9 @@
 (** [Dated_jsonl] reads a day file's tail, splits it and parses its rows as one
-    job on the process domain pool when one is installed. These tests read the
-    same store inline and through a one-domain pool and expect identical
-    results: order, offsets, malformed rows and the direct tail loader. *)
+    job on the process domain pool when one is installed, and its backwards
+    scans take one chunk per pool job while the caller's filter stays on the
+    fiber. These tests read the same store inline and through a one-domain
+    pool and expect identical results: order, offsets, malformed rows, the
+    direct tail loader, the latest-entry scan and collect_matching. *)
 open Alcotest
 
 let counter = ref 0
@@ -44,7 +46,25 @@ let read_everything store day_file =
       | _ -> None)
   in
   let tail = Dated_jsonl.load_tail_lines day_file ~max_lines:2 in
-  [ recent; offset; strict; filtered; tail ]
+  let latest =
+    match
+      Dated_jsonl.find_latest_entry_result store (function
+        | Dated_jsonl.Parsed (`Assoc fields) ->
+          (match List.assoc_opt "n" fields with
+           | Some (`Int 2) -> Some "n=2"
+           | Some _ | None -> None)
+        | Dated_jsonl.Parsed _ | Dated_jsonl.Malformed_json _ -> None)
+    with
+    | Ok (Some found) -> [ found ]
+    | Ok None -> [ "none" ]
+    | Error error -> [ "error:" ^ Dated_jsonl.read_error_to_string error ]
+  in
+  let matching =
+    Dated_jsonl.collect_matching store 2 ~f:(function
+      | `Assoc fields -> List.assoc_opt "n" fields |> Option.map Yojson.Safe.to_string
+      | _ -> None)
+  in
+  [ recent; offset; strict; filtered; tail; latest; matching ]
 ;;
 
 let with_pool env f =
@@ -69,13 +89,15 @@ let test_pool_and_inline_read_the_same () =
   let pooled = with_pool env (fun () -> read_everything store day_file) in
   check (list (list string)) "pooled reads equal inline reads" inline pooled;
   (match inline with
-   | [ recent; _; strict; filtered; tail ] ->
+   | [ recent; _; strict; filtered; tail; latest; matching ] ->
      check (list string) "newest two parsed rows, oldest first"
        [ {|{"n":2}|}; {|{"n":3}|} ] recent;
      check int "strict read counts the malformed row" 4 (List.length strict);
      check (list string) "filter_map sees the parsed rows" [ "1"; "2"; "3" ] filtered;
      check (list string) "tail loader returns the raw last lines"
-       [ {|{"n":3}|}; "{not json" ] tail
+       [ {|{"n":3}|}; "{not json" ] tail;
+     check (list string) "the latest matching entry is found past the malformed row" [ "n=2" ] latest;
+     check (list string) "collect_matching keeps the newest two selected values" [ "2"; "3" ] matching
    | _ -> fail "read_everything shape changed")
 ;;
 

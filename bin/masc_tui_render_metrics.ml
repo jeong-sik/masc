@@ -386,7 +386,7 @@ let render_section_fleet ~cols (state : state) : string list =
   in
   let pressure_str =
     match state.transport with
-    | Some t -> (match t.th_queue_pressure with Low -> "low" | Medium -> "moderate" | High -> "high" | Critical -> "CRITICAL")
+    | Some t -> Masc.Transport_metrics.queue_pressure_kind_to_string t.th_queue_pressure
     | None -> "normal"
   in
   let title_transport =
@@ -436,12 +436,18 @@ let render_section_resources ~cols (state : state) : string list =
       List.map
         (fun (ktr : Decode.keeper_turn_row) ->
           match ktr.ktr_state with
-          | Decode.Keeper_turn_running { ktr_lane_id; ktr_started_at; _ } ->
-              let elapsed = max 0.0 (Unix.gettimeofday () -. ktr_started_at) in
+          | Decode.Keeper_turn_running { lane; started_at_unix; _ } ->
+              let elapsed = max 0.0 (Unix.gettimeofday () -. started_at_unix) in
+              let lane_str =
+                match lane with
+                | Decode.Turn_lane_autonomous -> "autonomous"
+                | Decode.Turn_lane_chat_operation -> "chat_operation"
+                | Decode.Turn_lane_maintenance -> "maintenance"
+              in
               Printf.sprintf "    %-18s  %sRUNNING%s   lane: %-14s   elapsed: %.1fs"
                 (Layout.fit_width ktr.ktr_keeper_name 18)
                 (Theme.ok ()) Ansi.reset
-                (Layout.fit_width ktr_lane_id 14)
+                (Layout.fit_width lane_str 14)
                 elapsed
           | Decode.Keeper_turn_idle ->
               Printf.sprintf "    %-18s  %sidle%s"
@@ -573,7 +579,7 @@ let render_section_tools ~cols (state : state) : string list =
             total_facts
             (mhs.mhs_total_observed_facts + mhs.mhs_total_derived_facts)
             mhs.mhs_total_source_facts
-            (format_words (List.fold_left (fun acc (k : Decode.memory_keeper_health) -> acc + (k.mkh_snapshot_bytes / 8)) 0 mhs.mhs_keepers))
+            (Masc_tui_context_inspector.format_bytes (List.fold_left (fun acc (k : Decode.memory_keeper_health) -> acc + k.mkh_snapshot_bytes) 0 mhs.mhs_keepers))
         in
         let rows =
           if mhs.mhs_keepers = [] then
@@ -587,7 +593,7 @@ let render_section_tools ~cols (state : state) : string list =
                   (Layout.fit_width k.mkh_keeper_id 16)
                   k.mkh_facts
                   bar
-                  (format_words (k.mkh_snapshot_bytes / 8))
+                  (Masc_tui_context_inspector.format_bytes k.mkh_snapshot_bytes)
                   Ansi.reset)
               mhs.mhs_keepers
         in
@@ -693,5 +699,13 @@ let render_metrics_body ~cols ~budget (state : state)
     | None -> push_empty ()
   done;
   if hint_rows > 0 then
-    push_styled ~style:(Theme.recede ())
-      (Printf.sprintf "  [%d rows, scroll %d · j/k to scroll · 1-3 to switch section · Esc:overview]" total_lines scroll)
+    let inner_width = max 20 (framed_inner_width cols) in
+    let hint_text =
+      Printf.sprintf "  [%d rows, scroll %d · j/k to scroll · 1-3 to switch section · Esc:overview]" total_lines scroll
+    in
+    let clipped =
+      if Layout.display_width hint_text > inner_width then
+        Layout.take_cells hint_text inner_width
+      else hint_text
+    in
+    push_styled ~style:(Theme.recede ()) clipped

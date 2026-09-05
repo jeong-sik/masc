@@ -120,7 +120,7 @@ let test_a_pause_that_outlasts_the_window_ends_the_capture () =
   let paused = Bridge.Speaking { floor = room; quiet_since = Some 5.0 } in
   match finishes ~now:7.0 ~level:(at (-40.0)) paused with
   | Bridge.Ended_after_speech -> ()
-  | Bridge.Ended_without_speech _ | Bridge.Ended_by_operator _ ->
+  | Bridge.Ended_without_speech _ | Bridge.Stopped_before_speech _ | Bridge.Discarded_after_speech _ ->
     fail "a capture that heard speech must end as having heard it"
 ;;
 
@@ -131,7 +131,7 @@ let test_a_pause_that_outlasts_the_window_ends_the_capture () =
 let test_a_deadline_during_speech_still_counts_as_speech () =
   match Bridge.end_at_deadline speaking with
   | Bridge.Ended_after_speech -> ()
-  | Bridge.Ended_without_speech _ | Bridge.Ended_by_operator _ ->
+  | Bridge.Ended_without_speech _ | Bridge.Stopped_before_speech _ | Bridge.Discarded_after_speech _ ->
     fail "speech already heard must survive the deadline"
 ;;
 
@@ -140,7 +140,7 @@ let test_a_deadline_before_any_speech_carries_no_transcript () =
     (fun phase ->
        match Bridge.end_at_deadline phase with
        | Bridge.Ended_without_speech _ -> ()
-       | Bridge.Ended_after_speech | Bridge.Ended_by_operator _ ->
+       | Bridge.Ended_after_speech | Bridge.Stopped_before_speech _ | Bridge.Discarded_after_speech _ ->
          failf "%s must not be transcribed" (phase_name phase))
     [ listening; Bridge.Calibrating { until = 1.0; floor = None } ]
 ;;
@@ -152,7 +152,7 @@ let test_a_deadline_before_any_speech_carries_no_transcript () =
 let test_a_stop_mid_sentence_keeps_what_was_said () =
   match Bridge.end_at_operator_stop Bridge.Keep_what_was_heard speaking with
   | Bridge.Ended_after_speech -> ()
-  | Bridge.Ended_without_speech _ | Bridge.Ended_by_operator _ ->
+  | Bridge.Ended_without_speech _ | Bridge.Stopped_before_speech _ | Bridge.Discarded_after_speech _ ->
     fail "a stop after speech must keep it"
 ;;
 
@@ -160,7 +160,7 @@ let test_a_stop_during_a_pause_keeps_what_was_said () =
   let paused = Bridge.Speaking { floor = room; quiet_since = Some 5.0 } in
   match Bridge.end_at_operator_stop Bridge.Keep_what_was_heard paused with
   | Bridge.Ended_after_speech -> ()
-  | Bridge.Ended_without_speech _ | Bridge.Ended_by_operator _ ->
+  | Bridge.Ended_without_speech _ | Bridge.Stopped_before_speech _ | Bridge.Discarded_after_speech _ ->
     fail "a pause inside a sentence is still a sentence"
 ;;
 
@@ -170,7 +170,9 @@ let test_a_stop_before_any_speech_carries_no_transcript () =
   List.iter
     (fun phase ->
        match Bridge.end_at_operator_stop Bridge.Keep_what_was_heard phase with
-       | Bridge.Ended_by_operator _ -> ()
+       | Bridge.Stopped_before_speech _ -> ()
+       | Bridge.Discarded_after_speech _ ->
+         failf "%s heard no speech, so there was nothing to discard" (phase_name phase)
        | Bridge.Ended_after_speech | Bridge.Ended_without_speech _ ->
          failf "%s must not be transcribed" (phase_name phase))
     [ listening; Bridge.Calibrating { until = 1.0; floor = None } ]
@@ -179,19 +181,132 @@ let test_a_stop_before_any_speech_carries_no_transcript () =
 (* Esc, and the only place in the capture path where the operator says what
    they want instead of the levels inferring it. A recording that picked up
    something they did not mean to send has to be abandonable, and no amount of
-   speech in it makes that less true. *)
-let test_a_discard_throws_away_even_a_full_sentence () =
+   speech in it makes that less true. Mid-sentence the ending says a sentence
+   was thrown away: reported as "nothing was heard", an operator who had just
+   spoken went looking for a microphone fault that was not there. *)
+let test_a_discard_mid_sentence_says_a_sentence_was_thrown_away () =
   List.iter
     (fun phase ->
        match Bridge.end_at_operator_stop Bridge.Discard phase with
-       | Bridge.Ended_by_operator _ -> ()
+       | Bridge.Discarded_after_speech floor ->
+         check (float 0.5) "carrying the room it was speaking over" (-40.0)
+           (Bridge.db_of_amplitude floor)
+       | Bridge.Stopped_before_speech _ ->
+         failf "a discard of %s is not a stop before speech" (phase_name phase)
        | Bridge.Ended_after_speech | Bridge.Ended_without_speech _ ->
          failf "a discard must abandon %s" (phase_name phase))
-    [ speaking
-    ; Bridge.Speaking { floor = room; quiet_since = Some 5.0 }
-    ; listening
-    ; Bridge.Calibrating { until = 1.0; floor = None }
-    ]
+    [ speaking; Bridge.Speaking { floor = room; quiet_since = Some 5.0 } ]
+;;
+
+let test_a_discard_before_any_speech_is_a_plain_stop () =
+  List.iter
+    (fun phase ->
+       match Bridge.end_at_operator_stop Bridge.Discard phase with
+       | Bridge.Stopped_before_speech _ -> ()
+       | Bridge.Discarded_after_speech _ ->
+         failf "%s heard no speech, so there was nothing to discard" (phase_name phase)
+       | Bridge.Ended_after_speech | Bridge.Ended_without_speech _ ->
+         failf "a discard must abandon %s" (phase_name phase))
+    [ listening; Bridge.Calibrating { until = 1.0; floor = None } ]
+;;
+
+(* The result JSON is read back through the bridge's own reader. These pin
+   that every status it writes has a row, and that the one status it does not
+   write is reported rather than folded into a silence -- the TUI's string
+   match used to send a transcriber that answered with empty text to
+   "nothing was heard". *)
+let outcome_json ?(text = "") ?message ?endpoint_id status =
+  `Assoc
+    ([ "status", `String status; "text", `String text ]
+     @ (match message with
+        | Some m -> [ "message", `String m ]
+        | None -> [])
+     @
+     match endpoint_id with
+     | Some e -> [ "endpoint_id", `String e ]
+     | None -> [])
+;;
+
+let test_every_status_reads_back_as_itself () =
+  List.iter
+    (fun status ->
+       check bool
+         (Bridge.capture_status_to_string status)
+         true
+         (Bridge.capture_status_of_string (Bridge.capture_status_to_string status)
+          = Some status))
+    [ Bridge.Transcribed; Bridge.No_audio; Bridge.Discarded ]
+;;
+
+let test_a_discard_reads_back_as_a_discard () =
+  match
+    Bridge.capture_outcome_of_json
+      (outcome_json ~message:"recording discarded" "discarded")
+  with
+  | Bridge.Discarded_recording { message } ->
+    check string "with its message" "recording discarded" message
+  | Bridge.Transcript _
+  | Bridge.Transcriber_returned_nothing _
+  | Bridge.Nothing_heard _
+  | Bridge.Unrecognized_status _ -> fail "a discard must read back as a discard"
+;;
+
+let test_an_empty_transcript_names_the_transcriber () =
+  match
+    Bridge.capture_outcome_of_json
+      (outcome_json ~text:"  " ~endpoint_id:"whisper-local" "transcribed")
+  with
+  | Bridge.Transcriber_returned_nothing { endpoint_id } ->
+    check (option string) "naming the endpoint that answered" (Some "whisper-local")
+      endpoint_id
+  | Bridge.Transcript _
+  | Bridge.Discarded_recording _
+  | Bridge.Nothing_heard _
+  | Bridge.Unrecognized_status _ ->
+    fail "an empty transcript is the transcriber's answer, not a silence"
+;;
+
+let test_a_transcript_reads_back_trimmed () =
+  match
+    Bridge.capture_outcome_of_json
+      (outcome_json ~text:"  hello there \n" ~endpoint_id:"whisper-local" "transcribed")
+  with
+  | Bridge.Transcript { text; endpoint_id } ->
+    check string "text" "hello there" text;
+    check (option string) "endpoint" (Some "whisper-local") endpoint_id
+  | Bridge.Transcriber_returned_nothing _
+  | Bridge.Discarded_recording _
+  | Bridge.Nothing_heard _
+  | Bridge.Unrecognized_status _ -> fail "a transcript must read back as one"
+;;
+
+let test_a_silence_reads_back_with_its_levels () =
+  match
+    Bridge.capture_outcome_of_json
+      (outcome_json ~message:"nothing rose above the room — room -40.0 dB" "no_audio")
+  with
+  | Bridge.Nothing_heard { message } ->
+    check string "the message is what the operator sees" "nothing rose above the room — room -40.0 dB"
+      message
+  | Bridge.Transcript _
+  | Bridge.Transcriber_returned_nothing _
+  | Bridge.Discarded_recording _
+  | Bridge.Unrecognized_status _ -> fail "a silence must read back as one"
+;;
+
+let test_an_unknown_status_is_reported_not_folded () =
+  (match Bridge.capture_outcome_of_json (outcome_json "queued") with
+   | Bridge.Unrecognized_status status -> check string "the status is named" "queued" status
+   | Bridge.Transcript _
+   | Bridge.Transcriber_returned_nothing _
+   | Bridge.Discarded_recording _
+   | Bridge.Nothing_heard _ -> fail "an unknown status must not become any known one");
+  match Bridge.capture_outcome_of_json (`Assoc [ "text", `String "hello" ]) with
+  | Bridge.Unrecognized_status _ -> ()
+  | Bridge.Transcript _
+  | Bridge.Transcriber_returned_nothing _
+  | Bridge.Discarded_recording _
+  | Bridge.Nothing_heard _ -> fail "text without a status is not a transcript"
 ;;
 
 (* The two requests are only allowed to differ where there is speech. Before
@@ -214,7 +329,7 @@ let test_stop_and_discard_differ_only_once_there_is_speech () =
 let test_a_stop_and_a_deadline_agree_on_whether_there_is_speech () =
   let carries = function
     | Bridge.Ended_after_speech -> true
-    | Bridge.Ended_without_speech _ | Bridge.Ended_by_operator _ -> false
+    | Bridge.Ended_without_speech _ | Bridge.Stopped_before_speech _ | Bridge.Discarded_after_speech _ -> false
   in
   List.iter
     (fun phase ->
@@ -239,7 +354,7 @@ let test_an_ending_without_speech_carries_the_room_it_measured () =
     check (float 0.5) "the room it was listening against" (-40.0)
       (Bridge.db_of_amplitude floor)
   | Bridge.Ended_without_speech None -> fail "the room was measured, so it must be reported"
-  | Bridge.Ended_after_speech | Bridge.Ended_by_operator _ ->
+  | Bridge.Ended_after_speech | Bridge.Stopped_before_speech _ | Bridge.Discarded_after_speech _ ->
     fail "listening with no speech must end without speech"
 ;;
 
@@ -251,7 +366,7 @@ let test_an_ending_during_calibration_reports_no_room_when_none_was_read () =
   | Bridge.Ended_without_speech None -> ()
   | Bridge.Ended_without_speech (Some floor) ->
     failf "no reading arrived, yet %f was reported" floor
-  | Bridge.Ended_after_speech | Bridge.Ended_by_operator _ ->
+  | Bridge.Ended_after_speech | Bridge.Stopped_before_speech _ | Bridge.Discarded_after_speech _ ->
     fail "calibration with no speech must end without speech"
 ;;
 
@@ -312,9 +427,13 @@ let () =
             `Quick
             test_a_stop_before_any_speech_carries_no_transcript
         ; test_case
-            "a discard throws away even a full sentence"
+            "a discard mid-sentence says a sentence was thrown away"
             `Quick
-            test_a_discard_throws_away_even_a_full_sentence
+            test_a_discard_mid_sentence_says_a_sentence_was_thrown_away
+        ; test_case
+            "a discard before any speech is a plain stop"
+            `Quick
+            test_a_discard_before_any_speech_is_a_plain_stop
         ; test_case
             "stop and discard differ only once there is speech"
             `Quick
@@ -343,6 +462,23 @@ let () =
             "a deadline before any speech carries no transcript"
             `Quick
             test_a_deadline_before_any_speech_carries_no_transcript
+        ] )
+    ; ( "reading the result back"
+      , [ test_case "every status reads back as itself" `Quick test_every_status_reads_back_as_itself
+        ; test_case "a discard reads back as a discard" `Quick test_a_discard_reads_back_as_a_discard
+        ; test_case
+            "an empty transcript names the transcriber"
+            `Quick
+            test_an_empty_transcript_names_the_transcriber
+        ; test_case "a transcript reads back trimmed" `Quick test_a_transcript_reads_back_trimmed
+        ; test_case
+            "a silence reads back with its levels"
+            `Quick
+            test_a_silence_reads_back_with_its_levels
+        ; test_case
+            "an unknown status is reported, not folded"
+            `Quick
+            test_an_unknown_status_is_reported_not_folded
         ] )
     ]
 ;;

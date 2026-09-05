@@ -76,6 +76,20 @@ val get_agent_voice :
 
 (** {1 Speech-to-Text} *)
 
+(** The [status] field of every capture result this module returns, as a
+    closed set. {!record_and_transcribe} and {!transcribe_audio} write it;
+    {!capture_outcome_of_json} reads it back. A reader that matches on the
+    string instead falls through whatever it does not know into "nothing was
+    heard", which is how a discarded sentence was reported as a dead
+    microphone. *)
+type capture_status =
+  | Transcribed
+  | No_audio
+  | Discarded
+
+val capture_status_to_string : capture_status -> string
+val capture_status_of_string : string -> capture_status option
+
 val transcribe_audio :
   audio_file:string ->
   ?language_code:string ->
@@ -143,11 +157,6 @@ type level_phase =
   | Listening of { floor : float }
   | Speaking of { floor : float; quiet_since : float option }
 
-(** Why a recording ended. What happens to it turns on whether speech was
-    heard, not on which of these it was: a capture stopped mid-sentence, and
-    one that ran out of time mid-sentence, both carry a sentence.
-    [Ended_by_operator] therefore means a stop that came before anything was
-    said. *)
 (** What the operator asked for when they ended a recording early. One variant
     rather than two flags: a stop and a discard cannot both be requested, and a
     pair of booleans would let them be. *)
@@ -155,18 +164,31 @@ type stop_request =
   | Keep_what_was_heard
   | Discard
 
+(** Why a recording ended. What happens to it turns on whether speech was
+    heard and on whether the operator said they do not want it. A capture
+    stopped mid-sentence by the stop key, and one that ran out of time
+    mid-sentence, both carry a sentence and are transcribed. *)
 type capture_end =
   | Ended_after_speech
   | Ended_without_speech of float option
-  | Ended_by_operator of float option
-      (** Both carry the room level the capture settled on, as a linear RMS
-          amplitude, or [None] when the recorder never produced a sample to
-          measure.
+      (** The capture ran to its deadline and no reading ever cleared the
+          room. Carries the room level the capture settled on, as a linear
+          RMS amplitude, or [None] when the recorder never produced a sample
+          to measure.
 
           It is carried because an empty draft is the same sight whether the
           microphone heard nothing, the room sat above the threshold, or the
           transcriber failed. The two levels separate those: "room -38.2 dB,
           speech had to clear -32.2 dB" is a thing to act on. *)
+  | Stopped_before_speech of float option
+      (** Either key, pressed before anything was said. Nothing waited for
+          speech, so this is not a silence verdict on the microphone; it
+          carries the room the same way for the same reason. *)
+  | Discarded_after_speech of float
+      (** The discard key, pressed after speech was heard. The sentence is
+          thrown away on purpose and the operator is told that, not that
+          nothing was heard: the microphone worked. The floor is always known
+          here because speech was heard, so calibration had finished. *)
 
 type level_step =
   | Continue of level_phase
@@ -208,11 +230,14 @@ val end_at_operator_stop : stop_request -> level_phase -> capture_end
 
     [Keep_what_was_heard] mid-sentence is "send what I said", which is usually
     why the key is pressed -- the alternative is waiting out
-    {!Voice_config.trailing_silence_seconds}. Before any speech it is an abort.
+    {!Voice_config.trailing_silence_seconds}. Before any speech it is
+    [Stopped_before_speech].
 
     [Discard] is an abort whatever was heard. It is the only place in the
     capture path where the operator says what they want rather than the levels
-    inferring it. *)
+    inferring it. Mid-sentence it is [Discarded_after_speech], so the report
+    says a sentence was thrown away; before any speech it is the same
+    [Stopped_before_speech] as the other key. *)
 
 val record_and_transcribe :
   agent_id:string ->
@@ -240,7 +265,8 @@ val record_and_transcribe :
     recording and still transcribes what was said -- the usual reason to stop
     a capture is that the speaker has finished and does not want to wait out
     {!Voice_config.trailing_silence_seconds}. [Discard] throws the recording
-    away. Either one before any speech yields no transcript, which is what
+    away and, when speech had been heard, says so with the [discarded]
+    status. Either one before any speech yields [no_audio], which is what
     keeps a room away from a transcriber that answers silence with a sentence.
 
     [noise_floor] reuses an RMS level already measured, skipping calibration.
@@ -248,4 +274,28 @@ val record_and_transcribe :
 
     Returns transcription JSON on success, or a [no_audio] status when nothing
     rose above the room — a recording of a room must not reach the endpoint,
-    which answers it with a fluent sentence. *)
+    which answers it with a fluent sentence — or [discarded]. The [status]
+    field is one of {!capture_status}; read it with
+    {!capture_outcome_of_json}. *)
+
+(** The result of {!record_and_transcribe} read back as what it is. The JSON
+    stays the wire shape for the keeper tool; this is for a caller that has
+    to act on it. *)
+type capture_outcome =
+  | Transcript of
+      { text : string
+      ; endpoint_id : string option
+      }
+  | Transcriber_returned_nothing of { endpoint_id : string option }
+      (** The endpoint answered and its answer was empty. Not a silence: the
+          capture heard speech and sent it, and the transcriber is the thing
+          to look at. *)
+  | Nothing_heard of { message : string }
+      (** A [no_audio] result; the message carries the room level and the
+          level speech had to clear, when they were measured. *)
+  | Discarded_recording of { message : string }
+  | Unrecognized_status of string
+      (** A status neither side of this module knows. Reported rather than
+          folded into any of the above. *)
+
+val capture_outcome_of_json : Yojson.Safe.t -> capture_outcome

@@ -42,6 +42,27 @@ let available_stt_endpoints (config : Voice_config.t) =
   config.stt.endpoints |> List.filter (fun (ep : Voice_config.endpoint) -> ep.enabled)
 ;;
 
+(* The [status] field of every capture result this module returns. One closed
+   set, spelled here and read back by {!capture_outcome_of_json}, so a reader
+   cannot fall through a string it does not know into "nothing was heard". *)
+type capture_status =
+  | Transcribed
+  | No_audio
+  | Discarded
+
+let capture_status_to_string = function
+  | Transcribed -> "transcribed"
+  | No_audio -> "no_audio"
+  | Discarded -> "discarded"
+;;
+
+let capture_status_of_string = function
+  | "transcribed" -> Some Transcribed
+  | "no_audio" -> Some No_audio
+  | "discarded" -> Some Discarded
+  | _ -> None
+;;
+
 let transcribe_audio ~audio_file ?language_code () =
   match Voice_config.load_detailed () with
   | Error (Voice_config.Invalid msg) ->
@@ -79,7 +100,7 @@ let transcribe_audio ~audio_file ?language_code () =
            in
            Ok
              (`Assoc
-                 [ "status", `String "transcribed"
+                 [ "status", `String (capture_status_to_string Transcribed)
                  ; "text", `String text
                  ; "language_code", `String lang
                  ; "endpoint_id", `String endpoint.id
@@ -923,19 +944,25 @@ type stop_request =
   | Keep_what_was_heard
   | Discard
 
-(* Why a recording is over, which is only ever three things. What is done with
-   it does not depend on this, though -- it depends on whether speech was
-   heard. A capture the operator stopped mid-sentence carries a sentence. *)
+(* Why a recording is over. What is done with it turns on two things: whether
+   speech was heard, and whether the operator said they do not want it. A
+   capture stopped mid-sentence by the stop key carries a sentence; one
+   abandoned mid-sentence by the discard key carried one and threw it away,
+   and must say so -- reporting it as nothing heard tells an operator who
+   just said something that their microphone is dead. *)
 type capture_end =
   | Ended_after_speech
-  (* Both carry the room the capture measured, when it got that far. An
+  (* These carry the room the capture measured, when it got that far. An
      operator whose draft came back empty cannot tell a microphone that heard
      nothing from a transcriber that failed, and the two levels are the
      difference: "you were at -38, speech had to clear -32" is a thing to act
      on, where "nothing was heard" is not. [None] when the recorder never
      produced a sample to measure. *)
   | Ended_without_speech of float option
-  | Ended_by_operator of float option
+  | Stopped_before_speech of float option
+  (* The floor is always known here: speech was heard, so calibration had
+     finished. *)
+  | Discarded_after_speech of float
 
 (* Watches the recording as it is written and decides when it is over.
 
@@ -1016,13 +1043,15 @@ let end_at_operator_stop request phase =
   match request, phase with
   (* An explicit discard is the operator saying they do not want it, which no
      amount of speech overrides. Nothing else in the capture path can say
-     that: every other ending is inferred from levels. *)
-  | Discard, Speaking { floor; _ } -> Ended_by_operator (Some floor)
-  | Discard, Calibrating { floor; _ } -> Ended_by_operator floor
-  | Discard, Listening { floor } -> Ended_by_operator (Some floor)
+     that: every other ending is inferred from levels. It is its own ending
+     because what was thrown away was a sentence, and the operator is told
+     that rather than that nothing was heard. *)
+  | Discard, Speaking { floor; _ } -> Discarded_after_speech floor
+  | Discard, Calibrating { floor; _ } -> Stopped_before_speech floor
+  | Discard, Listening { floor } -> Stopped_before_speech (Some floor)
   | Keep_what_was_heard, Speaking _ -> Ended_after_speech
-  | Keep_what_was_heard, Calibrating { floor; _ } -> Ended_by_operator floor
-  | Keep_what_was_heard, Listening { floor } -> Ended_by_operator (Some floor)
+  | Keep_what_was_heard, Calibrating { floor; _ } -> Stopped_before_speech floor
+  | Keep_what_was_heard, Listening { floor } -> Stopped_before_speech (Some floor)
 ;;
 
 let watch_capture_level
@@ -1101,7 +1130,54 @@ let no_audio ~reason ~floor (capture : Voice_config.capture_config) =
        samples at all. *)
     | None -> reason ^ " — the recorder produced no audio to measure"
   in
-  `Assoc [ "status", `String "no_audio"; "text", `String ""; "message", `String detail ]
+  `Assoc
+    [ "status", `String (capture_status_to_string No_audio)
+    ; "text", `String ""
+    ; "message", `String detail
+    ]
+;;
+
+(* What a discarded capture says for itself. It heard speech -- that is what
+   separates it from {!no_audio} -- so the levels that explain a silence are
+   not the point; that a sentence was thrown away on purpose is. *)
+let discarded_json =
+  `Assoc
+    [ "status", `String (capture_status_to_string Discarded)
+    ; "text", `String ""
+    ; "message", `String "recording discarded — speech was heard and not transcribed"
+    ]
+;;
+
+(* The capture result read back as one of the things it can be. This is the
+   reader for the JSON {!record_and_transcribe} returns, kept next to the
+   writers so the two cannot drift: a status neither knows is reported as
+   such, not folded into "nothing was heard". *)
+type capture_outcome =
+  | Transcript of
+      { text : string
+      ; endpoint_id : string option
+      }
+  | Transcriber_returned_nothing of { endpoint_id : string option }
+  | Nothing_heard of { message : string }
+  | Discarded_recording of { message : string }
+  | Unrecognized_status of string
+
+let capture_outcome_of_json json =
+  let field name = Json_util.get_string json name in
+  let nonempty name = Json_util.get_string_nonempty json name in
+  let message ~fallback = Option.value (nonempty "message") ~default:fallback in
+  match field "status" with
+  | None -> Unrecognized_status "<absent>"
+  | Some raw ->
+    (match capture_status_of_string raw with
+     | None -> Unrecognized_status raw
+     | Some Transcribed ->
+       (match nonempty "text" with
+        | Some text -> Transcript { text = String.trim text; endpoint_id = nonempty "endpoint_id" }
+        | None -> Transcriber_returned_nothing { endpoint_id = nonempty "endpoint_id" })
+     | Some No_audio -> Nothing_heard { message = message ~fallback:"nothing was heard" }
+     | Some Discarded ->
+       Discarded_recording { message = message ~fallback:"recording discarded" })
 ;;
 
 let record_and_transcribe
@@ -1191,11 +1267,16 @@ let record_and_transcribe
       on_level Float.neg_infinity;
       (match outcome with
        | Error message -> Error message
-       | Ok (Ended_by_operator floor) ->
+       | Ok (Stopped_before_speech floor) ->
          (* Stopped before anything was said. Distinct from the message below
             because nothing waited for speech here -- saying the room was too
             quiet would blame a microphone that was never given a chance. *)
          Ok (no_audio ~reason:"stopped before anything was said" ~floor capture)
+       | Ok (Discarded_after_speech _) ->
+         (* The operator abandoned a recording that had speech in it. Not a
+            silence: the microphone worked, and saying otherwise would send
+            them looking for a fault that is not there. *)
+         Ok discarded_json
        | Ok (Ended_without_speech floor) ->
          (* The gate that keeps a room away from the transcriber. It used to
             re-read the finished file and compare its average against its own

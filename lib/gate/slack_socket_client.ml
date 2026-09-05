@@ -29,7 +29,7 @@
      failure is indistinguishable from an early peer close, which is fine:
      both retry the same way.
 
-   See: docs/rfc/RFC-0xxx-slack-builtin-gateway.md (and RFC-0203 for the
+   See: docs/rfc/RFC-0317-slack-builtin-gateway.md (and RFC-0203 for the
    Discord original this is modeled on). *)
 
 (* Re-export the caller-facing types so callers don't reach into the state

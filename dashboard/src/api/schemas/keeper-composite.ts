@@ -344,8 +344,9 @@ export function parseKeeperCompositeSnapshot(data: unknown): KeeperCompositeSnap
 // share render logic between single-keeper detail and fleet views.
 //
 // Each poll bumps the masc_keeper_invariant_violations_total counter
-// for any violating keeper (documented poll-triggered behaviour,
-// docs/observability/runtime-metrics.md §masc_keeper_invariant_violations_total).
+// for any violating keeper. The counter is declared in
+// lib/keeper_metrics/keeper_metrics.ml; no document under docs/observability/
+// covers it yet.
 
 export const FleetCompositeSnapshotSchema = object({
   generated_at: number(),

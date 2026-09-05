@@ -15553,7 +15553,7 @@ and is loaded on demand through keeper_skill.
               candidates: one name is asked about at once, several open the
               palette with each as an entry (typing still narrows, and a
               typed "def <name>" keeps working), and none says so. *)
-           let question, prefix =
+           let question =
              match key_name with
              | "K" -> "hover"
              | "R" -> "references"

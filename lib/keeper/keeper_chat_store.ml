@@ -2714,12 +2714,13 @@ let approval_lifecycle_phase_present
    producer, so every later phase row copies the line from here. Read from the
    stored row, so the copy carries the redaction the store applied. *)
 let approval_request_call_summary ~base_dir ~keeper_name ~approval_id =
-  existing_approval_lifecycle_at_slot
-    ~base_dir
-    ~keeper_name
-    ~approval_id
-    ~transcript_slot:Keeper_chat_delivery_identity.Approval_request
-  |> Option.bind (fun (_row_id, lifecycle) -> lifecycle.call_summary)
+  Option.bind
+    (existing_approval_lifecycle_at_slot
+       ~base_dir
+       ~keeper_name
+       ~approval_id
+       ~transcript_slot:Keeper_chat_delivery_identity.Approval_request)
+    (fun (_row_id, lifecycle) -> lifecycle.call_summary)
 ;;
 
 (* RFC-0235 P3: the history endpoint can tell the dashboard that a clip

@@ -816,7 +816,7 @@ let test_keeper_voice_speak_under_an_invalid_config_is_refused_without_review ()
     with_voice_config_file {|{ "capture": { "trigger_margin_db": "6" } }|} (fun () ->
       let config = test_config () in
       let meta = make_keeper_meta "voice-invalid-config-keeper" in
-      let refuse_review ~operation ~input:_ ~continue:_ =
+      let refuse_review ~operation ~input:_ ~call_summary:_ ~continue:_ =
         fail ("the Gate was asked to review " ^ operation)
       in
       let raw =

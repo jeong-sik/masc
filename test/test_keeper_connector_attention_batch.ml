@@ -419,6 +419,25 @@ let test_one_intake_admits_only_one_hitl_resolution () =
    actual decision function. Now that the decision is the pure
    [Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome], pin its
    branches directly: no queue, no Eio, no registry. *)
+let test_retention_decision_polarity () =
+  (* The ack branch's comparison was inverted in review (2026-09-06): the
+     wake must survive every unsettled retention below the bound and retire
+     first exactly at it. *)
+  let module L = Keeper_heartbeat_loop in
+  (match L.connector_attention_retention_decision 1 with
+   | `Retain -> ()
+   | `Retire -> Alcotest.fail "first unsettled retention retired the wake");
+  (match L.connector_attention_retention_decision 7 with
+   | `Retain -> ()
+   | `Retire -> Alcotest.fail "seventh unsettled retention retired the wake");
+  (match L.connector_attention_retention_decision 8 with
+   | `Retire -> ()
+   | `Retain -> Alcotest.fail "bound retention did not retire the wake");
+  (match L.connector_attention_retention_decision 9 with
+   | `Retire -> ()
+   | `Retain -> Alcotest.fail "retention past the bound did not retire")
+;;
+
 let test_batch_disposition_of_cycle_outcome_pure_branches () =
   let meta = test_meta "batch-disposition-pure" in
   (match
@@ -799,6 +818,9 @@ let () =
             `Quick
             test_batch_completion_acks_every_member
         ] )
+    ; ( "retention decision polarity"
+      , [ test_case "retain below the bound, retire at it" `Quick
+            test_retention_decision_polarity ] )
     ; ( "batch_disposition_of_cycle_outcome (P1-2)"
       , [ test_case
             "pins every branch of the pure disposition function"

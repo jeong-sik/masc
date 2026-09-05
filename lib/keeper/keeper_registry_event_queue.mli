@@ -101,7 +101,7 @@ val ack_pending_result :
   selection:Keeper_event_queue_state.pending_selection ->
   (unit, string) result
 
-val note_checkpoint_retention_result :
+val note_attention_retention_result :
   base_path:string ->
   string ->
   selection:Keeper_event_queue_state.pending_selection ->

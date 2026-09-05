@@ -673,8 +673,8 @@ let ack_pending_result ~base_path name ~selection =
     ()
 ;;
 
-let note_checkpoint_retention_result ~base_path name ~selection () =
-  Keeper_event_queue_persistence.note_checkpoint_retention_result
+let note_attention_retention_result ~base_path name ~selection () =
+  Keeper_event_queue_persistence.note_attention_retention_result
     ~base_path
     ~keeper_name:name
     ~selection

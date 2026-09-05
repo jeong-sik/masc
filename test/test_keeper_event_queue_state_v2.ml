@@ -81,12 +81,12 @@ let test_checkpoint_retention_spends_the_caller_snapshot () =
   let state = State.with_pending (queue [ stimulus "discord-a" 1.0 ]) State.empty in
   let selected = select state in
   let bumped, (updated, retentions) =
-    State.note_checkpoint_retention ~selection:selected state
+    State.note_attention_retention ~selection:selected state
     |> require_ok "note retention"
   in
   Alcotest.(check int) "count is one" 1 retentions;
   Alcotest.(check int) "entry carries the count" 1
-    (List.hd (State.pending_selections bumped)).checkpoint_retentions;
+    (List.hd (State.pending_selections bumped)).attention_retentions;
   (match State.validate_pending_selection ~selection:selected bumped with
    | Error _ -> () (* the pre-bump snapshot is structurally spent *)
    | Ok () -> Alcotest.fail "pre-bump snapshot still validates");
@@ -668,7 +668,7 @@ let test_current_schema_round_trip () =
      Alcotest.fail "duplicate pending source identity was accepted")
 ;;
 
-(* v18 hard cut: an old-shape pending entry (no [checkpoint_retentions]) must
+(* v18 hard cut: an old-shape pending entry (no [attention_retentions]) must
    not decode — a default would silently resurrect an uncounted retention. *)
 let test_pending_entry_hard_cut_rejects_pre_v19_shape () =
   let strip_retention_field (json : Yojson.Safe.t) : Yojson.Safe.t =
@@ -693,7 +693,7 @@ let test_pending_entry_hard_cut_rejects_pre_v19_shape () =
                                       not
                                         (String.equal
                                            name
-                                           "checkpoint_retentions"))
+                                           "attention_retentions"))
                                    entry_fields)
                             | other -> other)
                          entries)
@@ -717,7 +717,7 @@ let test_pending_entry_hard_cut_rejects_pre_v19_shape () =
   (match State.pending_selections round_tripped with
    | [ entry ] ->
      Alcotest.(check int) "fresh entry round-trips with zero retentions" 0
-       entry.checkpoint_retentions
+       entry.attention_retentions
    | _ -> Alcotest.fail "round trip lost the pending entry")
 ;;
 
@@ -895,7 +895,7 @@ let test_durable_checkpoint_retention_counts_and_acks_with_updated () =
     in
     let first = pending_selection () in
     let updated, retentions =
-      Persistence.note_checkpoint_retention_result
+      Persistence.note_attention_retention_result
         ~base_path
         ~keeper_name
         ~selection:first
@@ -904,7 +904,7 @@ let test_durable_checkpoint_retention_counts_and_acks_with_updated () =
     in
     Alcotest.(check int) "first retention counts" 1 retentions;
     (match
-       Persistence.note_checkpoint_retention_result
+       Persistence.note_attention_retention_result
          ~base_path
          ~keeper_name
          ~selection:first
@@ -913,7 +913,7 @@ let test_durable_checkpoint_retention_counts_and_acks_with_updated () =
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "spent snapshot accepted by the durable store");
     let updated2, retentions2 =
-      Persistence.note_checkpoint_retention_result
+      Persistence.note_attention_retention_result
         ~base_path
         ~keeper_name
         ~selection:updated
@@ -1462,11 +1462,11 @@ let () =
     ; ( "persistence"
       , [ Alcotest.test_case "durable peek ack restart" `Quick test_durable_peek_ack_restart
         ; Alcotest.test_case
-            "checkpoint retention spends the caller snapshot"
+            "attention retention spends the caller snapshot"
             `Quick
             test_checkpoint_retention_spends_the_caller_snapshot
         ; Alcotest.test_case
-            "durable checkpoint retention counts and acks with updated"
+            "durable attention retention counts and acks with updated"
             `Quick
             test_durable_checkpoint_retention_counts_and_acks_with_updated
         ; Alcotest.test_case

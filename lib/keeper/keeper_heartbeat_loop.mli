@@ -159,6 +159,11 @@ type batch_disposition =
   | Batch_ack_attention_only
   | Batch_no_action
 
+val connector_attention_retention_decision : int -> [ `Retain | `Retire ]
+(** [ `Retire] at and past {!connector_attention_retention_bound},
+    [ `Retain] below it. Pure so a test can pin the polarity; an inverted
+    comparison in the ack branch retired wakes on their first retention. *)
+
 val batch_disposition_of_cycle_outcome :
   Keeper_heartbeat_loop_cycle.cycle_outcome option -> batch_disposition
 (** The queue action a turn's [cycle_outcome] implies. A completed turn ACKs

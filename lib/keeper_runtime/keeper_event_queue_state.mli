@@ -118,7 +118,7 @@ type t
 type pending_selection =
   { source : Keeper_event_queue.stimulus
   ; admitted_revision : int64
-  ; checkpoint_retentions : int
+  ; attention_retentions : int
   }
 (** One exact durable queue entry. [admitted_revision] records the durable
     transform that admitted the snapshot; entries admitted by the same
@@ -204,7 +204,7 @@ val ack_pending :
     Unrelated queue revisions and enqueues are allowed; a missing, duplicated,
     or changed selected identity fails closed. *)
 
-val note_checkpoint_retention :
+val note_attention_retention :
   selection:pending_selection ->
   t ->
   ((t * (pending_selection * int)), string) result
@@ -332,4 +332,4 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v17"] is the only accepted schema. *)
+(** ["keeper.event_queue.state.v18"] is the only accepted schema. *)

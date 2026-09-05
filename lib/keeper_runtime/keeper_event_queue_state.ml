@@ -93,7 +93,7 @@ type outbox_entry =
 type pending_selection =
   { source : Keeper_event_queue.stimulus
   ; admitted_revision : int64
-  ; checkpoint_retentions : int
+  ; attention_retentions : int
   }
 
 type t =
@@ -374,7 +374,7 @@ let project_accepted_transfer (transfer : accepted_transfer) state =
                state.pending_entries
                @ [ { source = transfer.source
                    ; admitted_revision = state.revision
-                   ; checkpoint_retentions = 0
+                   ; attention_retentions = 0
                    }
                  ]
            ; accepted_transfer_projections =
@@ -439,7 +439,7 @@ let with_pending pending state =
       let entry =
         match existing with
         | Some entry -> entry
-        | None -> { source; admitted_revision = state.revision; checkpoint_retentions = 0 }
+        | None -> { source; admitted_revision = state.revision; attention_retentions = 0 }
       in
       reconcile available (entry :: acc) rest
   in
@@ -537,12 +537,12 @@ let ack_pending ~(selection : pending_selection) state =
    server restart must not reset it. The returned selection carries the new
    count: validation is structural, so the caller's pre-bump snapshot is
    spent and must not be reused for a later ack or defer of this entry. *)
-let note_checkpoint_retention ~(selection : pending_selection) state =
+let note_attention_retention ~(selection : pending_selection) state =
   match validate_pending_selection ~selection state with
   | Error _ as error -> error
   | Ok () ->
-    let retentions = selection.checkpoint_retentions + 1 in
-    let updated = { selection with checkpoint_retentions = retentions } in
+    let retentions = selection.attention_retentions + 1 in
+    let updated = { selection with attention_retentions = retentions } in
     let pending_entries =
       List.map
         (fun entry -> if entry = selection then updated else entry)
@@ -568,7 +568,7 @@ let reprioritize_pending
       let updated =
         { source = { selection.source with urgency }
         ; admitted_revision = next_revision
-        ; checkpoint_retentions = selection.checkpoint_retentions
+        ; attention_retentions = selection.attention_retentions
         }
       in
       let pending_entries =
@@ -813,7 +813,7 @@ let cancel_pending_accepted
     let* () = validate_accepted_cancellation cancellation in
     let* () =
       (* Identity and admission revision, not full structural equality:
-         a live entry can carry checkpoint retentions the receipt cannot
+         a live entry can carry attention retentions the receipt cannot
          know, so exact-selection comparison would fail against a retained
          entry. *)
       resolve_pending_selection
@@ -886,7 +886,7 @@ let transfer_pending_accepted
     let* () = validate_accepted_transfer transfer in
     let* () =
       (* Identity and admission revision, not full structural equality:
-         a live entry can carry checkpoint retentions the receipt cannot
+         a live entry can carry attention retentions the receipt cannot
          know, so exact-selection comparison would fail against a retained
          entry. *)
       resolve_pending_selection
@@ -973,7 +973,7 @@ let ack_pending_source_terminal
     let* () = validate_accepted_source_terminal source_terminal in
     let* () =
       (* Identity and admission revision, not full structural equality:
-         a live entry can carry checkpoint retentions the receipt cannot
+         a live entry can carry attention retentions the receipt cannot
          know, so exact-selection comparison would fail against a retained
          entry. *)
       resolve_pending_selection
@@ -1786,7 +1786,7 @@ let pending_entry_to_yojson entry =
   `Assoc
     [ "source", Keeper_event_queue.stimulus_to_yojson entry.source
     ; "admitted_revision", int64_json entry.admitted_revision
-    ; "checkpoint_retentions", `Int entry.checkpoint_retentions
+    ; "attention_retentions", `Int entry.attention_retentions
     ]
 ;;
 
@@ -1796,7 +1796,7 @@ let pending_entry_of_yojson json =
   let* () =
     exact_fields
       ~context
-      ~expected:[ "source"; "admitted_revision"; "checkpoint_retentions" ]
+      ~expected:[ "source"; "admitted_revision"; "attention_retentions" ]
       fields
   in
   let* source_json = required_field ~context "source" fields in
@@ -1804,14 +1804,14 @@ let pending_entry_of_yojson json =
   let* admitted_revision =
     int64_field ~context "admitted_revision" fields
   in
-  let* checkpoint_retentions =
-    int_field ~context "checkpoint_retentions" fields
+  let* attention_retentions =
+    int_field ~context "attention_retentions" fields
   in
   if Int64.compare admitted_revision 0L < 0
   then Error "event queue pending admission revision must not be negative"
-  else if checkpoint_retentions < 0 then
-    Error "event queue pending checkpoint retentions must not be negative"
-  else Ok { source; admitted_revision; checkpoint_retentions }
+  else if attention_retentions < 0 then
+    Error "event queue pending attention retentions must not be negative"
+  else Ok { source; admitted_revision; attention_retentions }
 ;;
 
 let to_yojson state =

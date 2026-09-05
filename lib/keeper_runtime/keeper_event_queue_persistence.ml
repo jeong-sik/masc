@@ -87,9 +87,9 @@ type transfer_projection_result = State.transfer_projection_result =
   | Transfer_already_projected
 
 
-(* v19 adds [checkpoint_retentions] to every pending entry: a checkpoint-yield
+(* v19 adds [attention_retentions] to every pending entry: a checkpoint-yield
    turn's retention of a Connector_attention wake is durable delivery bookkeeping
-   (see [note_checkpoint_retention_result]), so a restart must not reset it and
+   (see [note_attention_retention_result]), so a restart must not reset it and
    v18 snapshots cannot supply it. The transition WAL carries a full pre-state,
    so both files hard-cut together; there is no compatibility decoder. *)
 let snapshot_filename = "event-queue-v19.json"
@@ -1101,7 +1101,7 @@ let ack_pending_result
     | Ok state -> Ok (state, ()))
 ;;
 
-let note_checkpoint_retention_result
+let note_attention_retention_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
@@ -1109,7 +1109,7 @@ let note_checkpoint_retention_result
       ()
   =
   commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
-    match State.note_checkpoint_retention ~selection state with
+    match State.note_attention_retention ~selection state with
     | Error _ as error -> error
     | Ok (state, payload) -> Ok (state, payload))
 ;;

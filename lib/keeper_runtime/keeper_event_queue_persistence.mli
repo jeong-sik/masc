@@ -1,12 +1,13 @@
 (** Durable per-Keeper Event Layer state.
 
-    Current writes go to [event-queue-v18.json] with the exact
-    [keeper.event_queue.state.v17] compact-witness schema. The envelope holds
+    Current writes go to [event-queue-v19.json] with the exact
+    [keeper.event_queue.state.v18] schema (each pending entry carries its
+    [attention_retentions] count). The envelope holds
     revision, pending stimuli, the latest
     projected transition, an operation-indexed ledger of older projected
     dispositions, at most one unprojected transition, and durable
     accepted-transfer target projections. Only this schema and the
-    [event-queue-transitions-v7.jsonl] WAL are queue authority. Every WAL row
+    [event-queue-transitions-v8.jsonl] WAL are queue authority. Every WAL row
     carries the complete pre-transition state needed for snapshot-independent
     recovery. The WAL accepts at most one row and is retired after projection,
     so its retained size is bounded by one complete state. Serializing that
@@ -146,7 +147,7 @@ val ack_pending_result :
   unit ->
   (unit, string) result
 
-val note_checkpoint_retention_result :
+val note_attention_retention_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->

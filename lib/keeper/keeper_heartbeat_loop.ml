@@ -319,12 +319,20 @@ type batch_disposition =
    repeated tool-call loop guard — never reaches that settlement: four
    Discord wakes were re-admitted 1,179 times over 14 hours on 2026-09-05,
    each re-admission spending a full rate-limited turn. Retention is
-   therefore counted on the queue entry and bounded: after this many
-   checkpoint retentions the wake is retired by a plain ack. Normal
-   settlement completes within one or two cycles; eight consecutive
-   checkpoint yields is the degenerate signature. Remeasure after deploy
-   (parity C2 discipline). *)
+   therefore counted on the queue entry (one count per
+   [Batch_ack_attention_only] disposition over the entry) and bounded: after
+   this many consecutive unsettled retentions the wake is retired by a plain
+   ack. The bound also absorbs preemption ([Durable_stimulus_arrived] admits
+   the wake and yields the turn), which counts as one unsettled retention
+   too — deliberately, since the wake was projected into that turn.
+   Remeasure after deploy (parity C2 discipline). *)
 let connector_attention_retention_bound = 8
+
+(* Pure decision so the polarity is pinnable by a test: an inverted
+   comparison in the ack branch retired wakes on their first retention
+   (adversarial review of this branch, 2026-09-06). *)
+let connector_attention_retention_decision retentions =
+  if retentions >= connector_attention_retention_bound then `Retire else `Retain
 
 let batch_disposition_of_cycle_outcome
       (cycle_outcome : Keeper_heartbeat_loop_cycle.cycle_outcome option)
@@ -955,7 +963,7 @@ let run_keepalive_unified_turn
       (match !consumed_selections with
        | [] -> ()
        | (_ :: _) as selections ->
-           let remove_completed_selections ~should_ack =
+           let remove_completed_selections ~should_ack lst =
              let should_ack selection =
                should_ack selection
                &&
@@ -965,7 +973,7 @@ let run_keepalive_unified_turn
                | _ -> true
              in
              let selections_to_ack, retained_selections =
-               List.partition should_ack selections
+               List.partition should_ack lst
              in
              let all_acked =
                List.fold_left
@@ -979,42 +987,49 @@ let run_keepalive_unified_turn
            in
            match disposition with
            | Batch_ack_completed ->
-             remove_completed_selections ~should_ack:(fun _ -> true)
+             remove_completed_selections ~should_ack:(fun _ -> true) selections
            | Batch_ack_attention_only ->
              (* Retention is counted, not unbounded. Each Connector_attention
-                entry this checkpoint-yield keeps takes one durable retention
-                here; at [connector_attention_retention_bound] the wake is
-                retired by a plain ack instead of being re-admitted next
-                cycle. The bump spends the caller's selection snapshot
-                (validation is structural), so the retirement acks with the
-                selection the bump returned. *)
-             let attention_selections =
-               List.filter
-                 (fun selection ->
-                    match selection.Keeper_event_queue_state.source.payload with
-                    | Keeper_event_queue.Connector_attention _ -> true
-                    | _ -> false)
-                 selections
+                entry this disposition keeps takes one durable retention here;
+                at [connector_attention_retention_bound] consecutive
+                unsettled retentions the wake is retired by a plain ack
+                instead of being re-admitted next cycle. The bump spends the
+                caller's selection snapshot (validation is structural), so
+                the retirement acks with the selection the bump returned. *)
+             let is_attention selection =
+               match selection.Keeper_event_queue_state.source.payload with
+               | Keeper_event_queue.Connector_attention _ -> true
+               | _ -> false
              in
+             let attention_selections, others = List.partition is_attention selections in
+             let attention_pending = ref false in
              List.iter
                (fun selection ->
                   match
                     Keeper_registry_event_queue
-                    .note_checkpoint_retention_result
+                    .note_attention_retention_result
                       ~base_path:ctx.config.base_path
                       meta_after_triage.name
                       ~selection
                       ()
                   with
                   | Error detail ->
+                    (* Fail open, like every other queue storage error here:
+                       the count is unknown, so the entry stays pending and
+                       the error is operator-visible every cycle. *)
+                    attention_pending := true;
                     Log.Keeper.error
-                      "turn exit: checkpoint retention count failed for                        connector attention event_id=%s keeper=%s: %s"
+                      "turn exit: attention retention count failed for connector \
+                       attention event_id=%s keeper=%s: %s"
                       selection.source.Keeper_event_queue.post_id
                       meta_after_triage.name
                       detail
                   | Ok (updated, retentions) ->
-                    if retentions < connector_attention_retention_bound
-                    then
+                    if
+                      connector_attention_retention_decision retentions
+                      = `Retain
+                    then attention_pending := true
+                    else
                       (match
                          Keeper_registry_event_queue.ack_pending_result
                            ~base_path:ctx.config.base_path
@@ -1023,26 +1038,26 @@ let run_keepalive_unified_turn
                        with
                        | Ok () ->
                          Log.Keeper.warn
-                           "turn exit: retired connector attention wake after                             %d checkpoint retentions without a settling turn                             event_id=%s keeper=%s"
+                           "turn exit: retired connector attention wake after %d \
+                            unsettled retentions without a settling turn \
+                            event_id=%s keeper=%s"
                            retentions
                            updated.source.Keeper_event_queue.post_id
                            meta_after_triage.name
                        | Error detail ->
+                         attention_pending := true;
                          Log.Keeper.error
-                           "turn exit: retiring retained connector attention                             failed event_id=%s keeper=%s: %s"
+                           "turn exit: retiring retained connector attention \
+                            failed event_id=%s keeper=%s: %s"
                            updated.source.Keeper_event_queue.post_id
                            meta_after_triage.name
                            detail))
                attention_selections;
-             (* The original attention-only predicate still applies: entries
-                retained below the bound stay pending, and entries retired at
-                the bound were already acked by the pass above, so the
-                terminalize path must not see them. *)
-             remove_completed_selections
-               ~should_ack:(fun selection ->
-                 match selection.Keeper_event_queue_state.source.payload with
-                 | Keeper_event_queue.Connector_attention _ -> false
-                 | _ -> true)
+             remove_completed_selections ~should_ack:(fun _ -> true) others;
+             (* [remove_completed_selections] reported over [others] only; an
+                attention entry still pending keeps the cycle's queue
+                accounting honest, while a retired one was acked above. *)
+             if !attention_pending then stimuli_acked := false
            | Batch_no_action -> ());
       { meta = meta_after_cycle
       ; cycle_status =

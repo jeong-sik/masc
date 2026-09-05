@@ -1886,13 +1886,15 @@ type async_msg =
       * string
       * (Masc_tui_types.code_history_listing, string) result
   | Code_diff_loaded of
-      string * (Masc.Tui_decode.git_diff, string) result
+      string Masc_tui_fetched.request * (Masc.Tui_decode.git_diff, string) result
   | Code_notes_loaded of
-      string * (Masc.Tui_decode.ide_annotation list, string) result
+      string Masc_tui_fetched.request
+      * (Masc.Tui_decode.ide_annotation list, string) result
   (* The path the margin describes; stamped so a late answer cannot caption
      another file. *)
   | Code_blame_loaded of
-      string * (Masc.Tui_decode.blame_block list, string) result
+      string Masc_tui_fetched.request
+      * (Masc.Tui_decode.blame_block list, string) result
   (* The path the note anchored to; success re-reads the listing. *)
   | Code_note_written of string * (unit, string) result
   (* (question, symbol, answer) — the note the pane shows names both. *)
@@ -3205,6 +3207,10 @@ let launch_code_history_load state ~mailbox ~path =
            (scope, path, Error "Eio switch is unavailable"))
 
 let launch_code_diff_load state ~mailbox ~path =
+  match Masc_tui_fetched.start ~equal:String.equal state.code_diff ~key:path with
+  | Masc_tui_fetched.Already_loading -> ()
+  | Masc_tui_fetched.Started (next, request) ->
+  state.code_diff <- next;
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -3217,7 +3223,7 @@ let launch_code_diff_load state ~mailbox ~path =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Code_diff_loaded (path, result))
+    enqueue_async mailbox (Code_diff_loaded (request, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -3226,7 +3232,7 @@ let launch_code_diff_load state ~mailbox ~path =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Code_diff_loaded (path, Error "Eio switch is unavailable"))
+        (Code_diff_loaded (request, Error "Eio switch is unavailable"))
 
 (* The squash-merge convention leaves the PR number as the subject's last
    "(#N)"; a subject without one truthfully has no PR to point at. *)
@@ -3259,6 +3265,10 @@ let pr_number_of_subject subject =
    describes the checkout on screen rather than whichever one the server
    would default to. *)
 let launch_code_blame_load state ~mailbox ~path =
+  match Masc_tui_fetched.start ~equal:String.equal state.code_blame ~key:path with
+  | Masc_tui_fetched.Already_loading -> ()
+  | Masc_tui_fetched.Started (next, request) ->
+  state.code_blame <- next;
   let host = server_peer_host in
   let port = state.port in
   let keeper, repo = code_scope_axes state in
@@ -3269,7 +3279,7 @@ let launch_code_blame_load state ~mailbox ~path =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Code_blame_loaded (path, result))
+    enqueue_async mailbox (Code_blame_loaded (request, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -3278,9 +3288,13 @@ let launch_code_blame_load state ~mailbox ~path =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Code_blame_loaded (path, Error "Eio switch is unavailable"))
+        (Code_blame_loaded (request, Error "Eio switch is unavailable"))
 
 let launch_code_notes_load state ~mailbox ~codebase ~path =
+  match Masc_tui_fetched.start ~equal:String.equal state.code_notes ~key:path with
+  | Masc_tui_fetched.Already_loading -> ()
+  | Masc_tui_fetched.Started (next, request) ->
+  state.code_notes <- next;
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -3292,7 +3306,7 @@ let launch_code_notes_load state ~mailbox ~codebase ~path =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Code_notes_loaded (path, result))
+    enqueue_async mailbox (Code_notes_loaded (request, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -3301,7 +3315,7 @@ let launch_code_notes_load state ~mailbox ~codebase ~path =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Code_notes_loaded (path, Error "Eio switch is unavailable"))
+        (Code_notes_loaded (request, Error "Eio switch is unavailable"))
 
 (* Same fiber-and-mailbox shape as the other writes. *)
 let start_code_note_write state ~mailbox ~codebase ~path ~line_start ~line_end
@@ -9766,50 +9780,37 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.code_history_error <- None;
           state.code_history_open <- false;
           state.code_history_scroll <- 0;
-          state.code_diff <- None;
-          state.code_diff_error <- None;
+          state.code_diff <- Masc_tui_fetched.clear state.code_diff;
           state.code_diff_open <- false;
           state.code_diff_scroll <- 0;
-          state.code_notes <- None;
-          state.code_notes_error <- None;
+          state.code_notes <- Masc_tui_fetched.clear state.code_notes;
           state.code_notes_open <- false;
           state.code_notes_scroll <- 0;
-          state.code_blame <- None;
-          state.code_blame_error <- None
+          state.code_blame <- Masc_tui_fetched.clear state.code_blame
       | Error detail ->
           state.code_file <-
             Masc_tui_fetched.complete ~equal:String.equal state.code_file request
               (Error detail))
-  | Code_blame_loaded (path, result) ->
-      (* Stamped by path like the notes below: an answer that arrives after
-         the operator moved on describes bytes that are no longer on screen,
-         and a margin naming the wrong authors is worse than no margin. *)
-      let still_current =
-        match Masc_tui_fetched.current_key state.code_file with
-        | Some open_path -> String.equal open_path path
-        | None -> false
+  | Code_blame_loaded (request, result) ->
+      (* An answer that arrives after the operator moved on describes bytes
+         that are no longer on screen, and a margin naming the wrong authors
+         is worse than no margin. Opening a file clears the blame, so a
+         request from before that is no longer the one being waited on and
+         [complete] drops it -- the hand-written path comparison this arm
+         used to carry said the same thing in more places. *)
+      state.code_blame <-
+        Masc_tui_fetched.complete ~equal:String.equal state.code_blame request result
+  | Code_notes_loaded (request, result) ->
+      (* Opening a file clears the notes, so a request from before that is no
+         longer the one being waited on and [complete] drops it. The scroll
+         reset belongs to an answer that actually landed. *)
+      let landed =
+        Masc_tui_fetched.is_current ~equal:String.equal state.code_notes request
+        && Result.is_ok result
       in
-      if still_current then (
-        match result with
-        | Ok blocks ->
-            state.code_blame <- Some (path, blocks);
-            state.code_blame_error <- None
-        | Error detail ->
-            state.code_blame <- None;
-            state.code_blame_error <- Some detail)
-  | Code_notes_loaded (path, result) ->
-      let still_current =
-        match Masc_tui_fetched.current_key state.code_file with
-        | Some open_path -> String.equal open_path path
-        | None -> false
-      in
-      if still_current then (
-        match result with
-        | Ok notes ->
-            state.code_notes <- Some (path, notes);
-            state.code_notes_error <- None;
-            state.code_notes_scroll <- 0
-        | Error detail -> state.code_notes_error <- Some detail)
+      state.code_notes <-
+        Masc_tui_fetched.complete ~equal:String.equal state.code_notes request result;
+      if landed then state.code_notes_scroll <- 0
   | Code_note_written (path, result) -> (
       match result with
       | Ok () ->
@@ -9823,11 +9824,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           if still_current then (
             match code_scope_codebase state with
             | Ok codebase ->
-                state.code_notes <- None;
-                state.code_notes_error <- None;
+                (* Cleared first so [start] treats this as a new read rather
+                   than a revalidation that keeps the pre-write list on
+                   screen. *)
+                state.code_notes <- Masc_tui_fetched.clear state.code_notes;
                 launch_code_notes_load state ~mailbox ~codebase ~path
             | Error _ -> ())
-      | Error detail -> state.code_notes_error <- Some detail)
+      (* The write failed, which is not a fact about the notes that are
+         loaded. It is said as an event rather than replacing them. *)
+      | Error detail ->
+          add_event state "error" ("note not written to " ^ path ^ ": " ^ detail))
   | Code_lsp_answered (question, symbol, result) ->
       (match result with
        | Error detail ->
@@ -9882,20 +9888,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                Some
                  (Printf.sprintf "%s: outside the workspace at %s:%d" symbol
                     location.ll_path location.ll_line))
-  | Code_diff_loaded (path, result) ->
-      (* Keyed to the file still open, as the history is. *)
-      let still_current =
-        match Masc_tui_fetched.current_key state.code_file with
-        | Some open_path -> String.equal open_path path
-        | None -> false
+  | Code_diff_loaded (request, result) ->
+      let landed =
+        Masc_tui_fetched.is_current ~equal:String.equal state.code_diff request
+        && Result.is_ok result
       in
-      if still_current then (
-        match result with
-        | Ok diff ->
-            state.code_diff <- Some (path, diff);
-            state.code_diff_error <- None;
-            state.code_diff_scroll <- 0
-        | Error detail -> state.code_diff_error <- Some detail)
+      state.code_diff <-
+        Masc_tui_fetched.complete ~equal:String.equal state.code_diff request result;
+      if landed then state.code_diff_scroll <- 0
   | Code_history_loaded (scope, path, result) ->
       (* Keyed to the scope and file still open: two repositories can carry
          the same relative path, so path alone would let a slow old response
@@ -14832,14 +14832,12 @@ and is loaded on demand through keeper_skill.
            (match Masc_tui_fetched.current_key state.code_file with
             | None -> ()
             | Some path ->
-                if Option.is_some state.code_blame then begin
-                  state.code_blame <- None;
-                  state.code_blame_error <- None
-                end
-                else begin
-                  state.code_blame_error <- None;
-                  launch_code_blame_load state ~mailbox:async_messages ~path
-                end)
+                (* A second press puts the margin away, whatever state it is
+                   in -- including one still being read, which is the press an
+                   operator makes when a slow blame is taking too long. *)
+                if Option.is_some (Masc_tui_fetched.current state.code_blame)
+                then state.code_blame <- Masc_tui_fetched.clear state.code_blame
+                else launch_code_blame_load state ~mailbox:async_messages ~path)
        | Some "m" when state.view = Code && state.code_focus_file = Right_pane
                        && Option.is_some (Masc_tui_fetched.current_key state.code_file) ->
            (* The notes anchored to the open file. Repository scope only:
@@ -14857,13 +14855,13 @@ and is loaded on demand through keeper_skill.
                       state.code_notes_open <- true;
                       state.code_diff_open <- false;
                       state.code_history_open <- false;
-                      (match state.code_notes with
+                      (* Already about this file -- loaded, reading, or
+                         failed -- so opening the overlay shows what there is
+                         rather than asking again. *)
+                      (match Masc_tui_fetched.current state.code_notes with
                        | Some (loaded_path, _)
-                         when String.equal loaded_path path ->
-                           ()
+                         when String.equal loaded_path path -> ()
                        | Some _ | None ->
-                           state.code_notes <- None;
-                           state.code_notes_error <- None;
                            launch_code_notes_load state
                              ~mailbox:async_messages ~codebase ~path))
        | Some "d" when state.view = Code && state.code_focus_file = Right_pane
@@ -14880,13 +14878,10 @@ and is loaded on demand through keeper_skill.
                   state.code_diff_open <- true;
                   state.code_history_open <- false;
                   state.code_notes_open <- false;
-                  (match state.code_diff with
+                  (match Masc_tui_fetched.current state.code_diff with
                    | Some (loaded_path, _)
-                     when String.equal loaded_path path ->
-                       ()
+                     when String.equal loaded_path path -> ()
                    | Some _ | None ->
-                       state.code_diff <- None;
-                       state.code_diff_error <- None;
                        launch_code_diff_load state ~mailbox:async_messages
                          ~path)
                 end)
@@ -15780,22 +15775,22 @@ and is loaded on demand through keeper_skill.
                   state.repository_changes_scroll <- scroll
                 else if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then (
-                    match state.code_notes with
-                    | Some (_, notes) ->
+                    match Masc_tui_fetched.current state.code_notes with
+                    | Some (_, Masc_tui_fetched.Ready notes) ->
                         state.code_notes_scroll <-
                           min
                             (max 0 (List.length notes - 1))
                             (state.code_notes_scroll + 1)
-                    | None -> ())
+                    | Some (_, _) | None -> ())
                   else if state.code_diff_open then (
-                    match state.code_diff with
-                    | Some (_, diff) ->
+                    match Masc_tui_fetched.current state.code_diff with
+                    | Some (_, Masc_tui_fetched.Ready diff) ->
                         state.code_diff_scroll <-
                           min
                             (max 0
                                (List.length diff.Masc.Tui_decode.gd_rows - 1))
                             (state.code_diff_scroll + 1)
-                    | None -> ())
+                    | Some (_, _) | None -> ())
                   else if state.code_history_open then (
                     match state.code_history with
                     | Some (_, listing) ->

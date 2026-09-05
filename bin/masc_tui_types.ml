@@ -3244,16 +3244,16 @@ type state = {
   (* The file pane's diff view: d on an open file swaps the content for what
      the working tree holds against HEAD, keyed the same way. One overlay at
      a time -- opening this closes the history and vice versa. *)
-  mutable code_diff: (string * Tui_decode.git_diff) option;
-  mutable code_diff_error: string option;
+  (* The open file's uncommitted diff, keyed by its path. *)
+  mutable code_diff: (string, Tui_decode.git_diff) Masc_tui_fetched.t;
   mutable code_diff_open: bool;
   mutable code_diff_scroll: int;
   (* The file pane's notes view: m on an open file (repository scope only --
      the annotation routes are scoped by the server-minted codebase slug,
      which only a Repositories row carries) swaps the content for the notes
      anchored to the file. *)
-  mutable code_notes: (string * Tui_decode.ide_annotation list) option;
-  mutable code_notes_error: string option;
+  (* The notes anchored to the open file, keyed by its path. *)
+  mutable code_notes: (string, Tui_decode.ide_annotation list) Masc_tui_fetched.t;
   mutable code_notes_open: bool;
   mutable code_notes_scroll: int;
   (* The file pane's blame margin: b on an open file fetches who last touched
@@ -3263,8 +3263,11 @@ type state = {
      [b] again drops it. No [_open] flag: shown-with-nothing-loaded is not a
      state this can be in. Keyed by path like the others, so opening another
      file drops the margin rather than captioning it wrongly. *)
-  mutable code_blame: (string * Tui_decode.blame_block list) option;
-  mutable code_blame_error: string option;
+  (* Who last touched each run of the open file, keyed by its path. One
+     value: the pair could not say the blame was being read, so pressing [b]
+     on a large file left the margin blank with nothing to distinguish "still
+     reading" from "no blame here". *)
+  mutable code_blame: (string, Tui_decode.blame_block list) Masc_tui_fetched.t;
   (* Whose workspace the surface reads. One field, one value: a keeper's
      playground and a project repository at the same time is not a
      representable state. *)
@@ -4264,16 +4267,13 @@ let create_state
   code_history_error = None;
   code_history_open = false;
   code_history_scroll = 0;
-  code_diff = None;
-  code_diff_error = None;
+  code_diff = Masc_tui_fetched.initial;
   code_diff_open = false;
   code_diff_scroll = 0;
-  code_notes = None;
-  code_notes_error = None;
+  code_notes = Masc_tui_fetched.initial;
   code_notes_open = false;
   code_notes_scroll = 0;
-  code_blame = None;
-  code_blame_error = None;
+  code_blame = Masc_tui_fetched.initial;
   code_scope = Code_scope_project;
   code_target_line = None;
   changes_keeper = None;

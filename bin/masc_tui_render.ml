@@ -14077,10 +14077,15 @@ let render_code (state : state) =
              in -- the margin is beside the code, not instead of it -- so the
              refusal rides the title the way a language-server answer does.
              In the bad tone rather than the accent: this one is a failure. *)
-          (match state.code_blame_error with
-           | Some detail ->
+          (* The margin has no pane of its own to speak in, so both the
+             refusal and the wait ride the title. *)
+          (match Masc_tui_fetched.current state.code_blame with
+           | Some (_, Masc_tui_fetched.Failed detail) ->
                with_note ^ "  " ^ Theme.bad () ^ "blame: "
                ^ Terminal_text.single_line detail ^ Ansi.reset
+           | Some (_, Masc_tui_fetched.Loading) ->
+               with_note ^ "  " ^ Theme.recede () ^ "blame 읽는 중…" ^ Ansi.reset
+           | Some (_, (Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent))
            | None -> with_note)
       | None -> "(Enter opens the selected file)"
     in
@@ -14093,27 +14098,33 @@ let render_code (state : state) =
     box_divider pane_buf pane_cols;
     let content_height = code_pane_content_height state in
     (if notes_showing then
-       match state.code_notes_error, state.code_notes with
-       | Some detail, _ ->
+       (* "(loading notes)" used to be what an unasked overlay said as well
+          as a reading one. Now it is only the reading one. *)
+       match Masc_tui_fetched.current state.code_notes with
+       | Some (_, Masc_tui_fetched.Failed detail) ->
            box_line pane_buf pane_cols
              ((Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail
              ^ Ansi.reset);
            for _ = 2 to content_height do
              box_empty pane_buf pane_cols
            done
-       | None, None ->
+       | Some (_, Masc_tui_fetched.Loading) ->
            box_line pane_buf pane_cols
              (Ansi.dim ^ "  (loading notes)" ^ Ansi.reset);
            for _ = 2 to content_height do
              box_empty pane_buf pane_cols
            done
-       | None, Some (_, []) ->
+       | Some (_, Masc_tui_fetched.Absent) | None ->
+           for _ = 1 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | Some (_, Masc_tui_fetched.Ready []) ->
            box_line pane_buf pane_cols
              (Ansi.dim ^ "  (no note anchors to this file)" ^ Ansi.reset);
            for _ = 2 to content_height do
              box_empty pane_buf pane_cols
            done
-       | None, Some (_, notes) ->
+       | Some (_, Masc_tui_fetched.Ready notes) ->
            let total = List.length notes in
            let max_scroll = max 0 (total - content_height) in
            let scroll = max 0 (min state.code_notes_scroll max_scroll) in
@@ -14144,21 +14155,25 @@ let render_code (state : state) =
              | None -> box_empty pane_buf pane_cols
            done
      else if diff_showing then
-       match state.code_diff_error, state.code_diff with
-       | Some detail, _ ->
+       match Masc_tui_fetched.current state.code_diff with
+       | Some (_, Masc_tui_fetched.Failed detail) ->
            box_line pane_buf pane_cols
              ((Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail
              ^ Ansi.reset);
            for _ = 2 to content_height do
              box_empty pane_buf pane_cols
            done
-       | None, None ->
+       | Some (_, Masc_tui_fetched.Loading) ->
            box_line pane_buf pane_cols
              (Ansi.dim ^ "  (reading the tree)" ^ Ansi.reset);
            for _ = 2 to content_height do
              box_empty pane_buf pane_cols
            done
-       | None, Some (_, diff) -> (
+       | Some (_, Masc_tui_fetched.Absent) | None ->
+           for _ = 1 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | Some (_, Masc_tui_fetched.Ready diff) -> (
            match diff.Masc.Tui_decode.gd_rows with
            | [] ->
                box_line pane_buf pane_cols
@@ -14363,9 +14378,9 @@ let render_code (state : state) =
              | None -> false
            in
            let note_spans =
-             match state.code_notes with
-             | Some (loaded_path, notes) when matches_open_file loaded_path
-               ->
+             match Masc_tui_fetched.current state.code_notes with
+             | Some (loaded_path, Masc_tui_fetched.Ready notes)
+               when matches_open_file loaded_path ->
                  List.map
                    (fun (n : Masc.Tui_decode.ide_annotation) ->
                      (n.ia_line_start, n.ia_line_end))
@@ -14393,10 +14408,10 @@ let render_code (state : state) =
               Same rule as the two span lists above: the pane decorates what
               is loaded and does not fetch to decorate. *)
            let blame_blocks =
-             match state.code_blame with
-             | Some (loaded_path, blocks) when matches_open_file loaded_path ->
-                 blocks
-             | _ -> []
+             match Masc_tui_fetched.current state.code_blame with
+             | Some (loaded_path, Masc_tui_fetched.Ready blocks)
+               when matches_open_file loaded_path -> blocks
+             | Some _ | None -> []
            in
            let blame_now_s = Unix.gettimeofday () in
            (* One name per run, not one per line: the run boundary is the fact

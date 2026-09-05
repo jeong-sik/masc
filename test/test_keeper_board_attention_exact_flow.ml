@@ -11,30 +11,11 @@ type callback_event =
   | Dispatch of Exact_flow.attempt_provenance
   | Advance of Exact_flow.advance_source * Exact_flow.candidate_visit
 
-let has_prompt_root path =
-  Sys.file_exists (Filename.concat path "config/prompts")
-;;
-
-let repo_root () =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root when has_prompt_root root -> root
-  | _ ->
-    let rec ascend path =
-      if has_prompt_root path
-      then path
-      else (
-        let parent = Filename.dirname path in
-        if String.equal parent path then Sys.getcwd () else ascend parent)
-    in
-    ascend (Sys.getcwd ())
-;;
-
 let with_prompt_registry f =
   Fun.protect
     ~finally:Prompt_registry.clear
     (fun () ->
       Prompt_registry.clear ();
-      Prompt_registry.set_markdown_dir (Filename.concat (repo_root ()) "config/prompts");
       Prompt_defaults.init ();
       f ())
 ;;

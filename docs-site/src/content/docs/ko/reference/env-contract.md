@@ -43,7 +43,7 @@ description: MASC가 읽는 환경 변수의 범위와 적용 시점.
 
 ### 프로바이더 API 키
 
-프로바이더 키는 고정 목록이 아니라 `runtime.toml`의 `[providers.<id>.credentials]` (`type = "env"`, `key = "<변수명>"`)이 이름을 정합니다. 설치·퀵스타트 스크립트가 `.env.local`에 씁니다(권한 600).
+프로바이더 키는 고정 목록이 아니라 `runtime.toml`의 `[providers.<id>.credentials]` (`type = "env"`, `key = "<변수명>"`)이 이름을 정하고, 서버는 자기가 시작된 환경에서 그 값을 읽습니다. 소스 체크아웃에서는 `quickstart.sh`가 `.env.local`(권한 600)에 쓰고 `start-masc.sh`가 읽습니다. 바이너리 설치에는 둘 다 없으니 직접 export 하세요.
 
 ## 새 환경 변수 규칙
 

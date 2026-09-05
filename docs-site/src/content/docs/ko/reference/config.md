@@ -12,7 +12,9 @@ description: .masc/config/*.toml 파일의 스키마와 예시입니다.
 ```text
 .masc/config/
 ├── runtime.toml    # provider 목록, model 바인딩, [runtime].default, lane
-├── .env.local      # provider API 키, 설치 스크립트가 씀 (chmod 600)
+├── .env.local      # provider API 키. quickstart.sh 가 쓰고 start-masc.sh 가
+│                   # 읽는 소스 체크아웃 짝입니다. 바이너리 설치에는 둘 다
+│                   # 없으니 셸에서 export 하세요.
 └── keepers/        # Keeper 별 프로필, 하나에 <name>.toml
     └── reviewer.toml
 ```

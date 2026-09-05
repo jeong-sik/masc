@@ -119,7 +119,7 @@ bash /tmp/masc-install.sh --version "$TAG"
 
 바이너리를 놓은 뒤 설치 스크립트가 일회성 설정 마법사를 실행합니다(`--no-wizard`
 로 건너뜀). 아무것도 쓰기 전에 이 호스트에서 감지한 것을 먼저 보여주고, 실제로
-쓰는 파일은 `.masc/config/.env.local`(provider 키 하나)과 `runtime.toml`의
+쓰는 것은 `runtime.toml`의
 `[runtime].default` 둘뿐입니다.
 
 두 축을 보여줍니다. **모델 소스**는 턴이 토큰을 받는 곳입니다.
@@ -169,11 +169,11 @@ scripts/build-keeper-sandbox-image.sh
 `remote_ssh` 셋뿐이라 Docker도 `container`도 SSH endpoint도 없는 호스트는
 워크스페이스는 띄워도 Keeper는 못 돌립니다.
 
-**모델 제공자 키가 서버 환경에 안 들어가 있습니다.** 마법사는 키를
-`.masc/config/.env.local`에 적어 두고, 그 파일을 대신 읽어 주는 건 아무것도
-없습니다. 서버를 띄우는 셸에서 직접 `source` 하세요. TUI로 시작할 때 놓치기
-쉬운데, TUI에서 `s`로 띄운 서버는 TUI의 환경을 그대로 물려받기 때문입니다. TUI를
-켜기 **전에** 읽어 두세요.
+**모델 제공자 키는 서버 환경에 있어야 합니다.** 변수 이름은 provider마다
+`runtime.toml`이 정합니다 — `OLLAMA_CLOUD_API_KEY`, `DEEPSEEK_API_KEY` 같은
+것들이고, 서버는 자기가 시작된 환경에서 그 값을 읽습니다. `masc`를 띄우는 셸에서
+export 하세요. TUI로 시작할 때 놓치기 쉬운데, TUI가 띄운 서버는 TUI의 환경을 그대로
+물려받기 때문입니다. 켜기 **전에** export 하세요.
 
 **시드된 모델 카탈로그 대부분은 바로 못 씁니다.** 카탈로그에는 예시를 겸해
 provider/model 바인딩 31개가 들어 있고, 그중 `max-request-body-bytes`를 선언한
@@ -368,7 +368,6 @@ MASC는 런타임 데이터를 `<base-path>/.masc` 아래에서 찾습니다. �
 | `keepers/<name>.toml` | Keeper 하나에 필요한 전부. 운영 설정, 프롬프트(`keeper.instructions`), `[keeper.tools]` 도구 포스처 |
 | `repositories.toml` | 저장소 작업에 쓰는 저장소 정보와 체크아웃 경로 |
 | `keeper_repo_mappings.toml` | Keeper–저장소 기본 연결. 권한 경계가 아니라 기본값입니다 |
-| `.env.local` | 설치와 quickstart가 써 넣는 프로바이더 환경 변수 |
 
 같은 뿌리 아래 한 디렉터리는 생성물이 아니라 사람이 씁니다.
 

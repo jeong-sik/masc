@@ -1217,7 +1217,8 @@ let runtime_wizard_credential_key (provider : Runtime_schema.provider) =
   | Some (Runtime_schema.File _ | Runtime_schema.Inline _) ->
       Error
         (Printf.sprintf
-           "provider %s uses a non-env credential; install wizard cannot write .env.local"
+           "provider %s uses a non-env credential; the setup wizard reports only \
+            environment-variable keys"
            provider.id)
 
 let runtime_wizard_binding_for_provider (cfg : Runtime_schema.config)

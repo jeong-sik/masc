@@ -132,7 +132,8 @@ Keepers are agents MASC runs itself. Two extra pieces are needed:
 - **A model source** for the Keeper's turns. The cheapest is a local model with
   no API key — see [Local Models](/runbooks/llama-server/) to run Ollama or
   `llama-server`. A cloud provider (Anthropic, OpenAI, DeepSeek, …) works too;
-  the setup wizard from step 1 stores its API key in `.masc/config/.env.local`.
+  export its API key in the shell you start the server from — the wizard from
+  step 1 names the variable, and the server reads it from its own environment.
 - **A command sandbox**, because a Keeper's shell commands run isolated, not on
   your host. MASC does not run a Keeper without one. Install Docker, or on Apple
   Silicon the `container` CLI — see [Docker Sandbox](/runbooks/sandbox/).

@@ -12,7 +12,9 @@ file** rather than write one from scratch.
 ```text
 .masc/config/
 ├── runtime.toml    # provider catalog, model bindings, [runtime].default, lanes
-├── .env.local      # provider API keys, written by the installer (chmod 600)
+├── .env.local      # provider API keys; written by quickstart.sh and read by
+│                   # start-masc.sh — the source-checkout pair. A binary install
+│                   # has neither: export the key in your shell instead.
 └── keepers/        # per-Keeper profiles, one <name>.toml each
     └── reviewer.toml
 ```

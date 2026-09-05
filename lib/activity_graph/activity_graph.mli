@@ -197,3 +197,8 @@ module For_testing : sig
       append growth, truncation, or invalid UTF-8 without going through
       {!emit}. *)
 end
+
+val heap_root : unit -> Obj.t
+(** The retained state of this module as an opaque value for
+    [Heap_roots.measure] to walk with [Obj.reachable_words]. Diagnostics
+    only: the walk stalls the process for its duration. *)

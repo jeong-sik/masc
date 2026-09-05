@@ -12,6 +12,9 @@ type t =
   | Open_diff
   | Open_patch_modal
   | Toggle_burn_hud
+  | Open_link_preview of string option
+  | Open_links_list
+  | Set_embeds of [ `On | `Compact | `Off ]
   | Open_changes
   | Toggle_acting_pane
   | Show_acting_pane_tab of [ `Fleet | `Changes ]
@@ -154,6 +157,18 @@ let catalog =
     ; summary =
         "show or hide the Activity pane beside this surface, or show one of its tabs"
     }
+  ; { word = "preview"
+    ; args = "[url]"
+    ; summary = "open 3D drop-shadow OpenGraph preview and rich embed modal for a web link"
+    }
+  ; { word = "links"
+    ; args = ""
+    ; summary = "browse and inspect all web links mentioned in the current conversation"
+    }
+  ; { word = "embeds"
+    ; args = "[on|compact|off]"
+    ; summary = "configure inline chat rich embed cards (on, compact, or off)"
+    }
   ]
 
 let usage entry =
@@ -210,6 +225,17 @@ let parse text =
     | "diff", _ -> Open_diff
     | "patch", _ | "review", _ -> Open_patch_modal
     | "burn", _ | "cost", _ -> Toggle_burn_hud
+    | "preview", arg ->
+        let trimmed = String.trim arg in
+        if String.equal trimmed "" then Open_link_preview None
+        else Open_link_preview (Some trimmed)
+    | "links", _ -> Open_links_list
+    | "embeds", arg ->
+        let trimmed = String.trim arg |> String.lowercase_ascii in
+        (match trimmed with
+         | "off" | "none" -> Set_embeds `Off
+         | "compact" -> Set_embeds `Compact
+         | "on" | "rich" | "full" | _ -> Set_embeds `On)
     | "changes", _ -> Open_changes
     | "activity", "" -> Toggle_acting_pane
     | "activity", "fleet" -> Show_acting_pane_tab `Fleet

@@ -4304,6 +4304,7 @@
 (include stanzas/test_connector_names.inc)
 (include stanzas/test_tui_image_ref.inc)
 (include stanzas/test_tui_link_label.inc)
+(include stanzas/test_tui_link_preview.inc)
 
 (test
  (name test_tui_terminal_probe)

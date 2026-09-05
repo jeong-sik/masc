@@ -830,6 +830,8 @@ let test_cross_domain_start_keepalive_and_swap () =
       seed_keeper_sandbox_profile ~base_dir keeper_name;
       Eio.Switch.run @@ fun root_sw ->
       Eio_context.set_switch root_sw;
+      install_owner_inventory_exn ~sw:root_sw config;
+      ensure_owner_meta_exn config meta;
       let ctx : _ Keeper_types_profile.context =
         {
           config;
@@ -890,6 +892,8 @@ let test_cross_domain_shutdown_submit () =
       Eio.Switch.run @@ fun root_sw ->
       Eio_context.set_switch root_sw;
       Masc.Keeper_process_switch.set root_sw;
+      install_owner_inventory_exn ~sw:root_sw config;
+      ensure_owner_meta_exn config meta;
       let ctx : _ Keeper_types_profile.context =
         {
           config;
@@ -1005,6 +1009,9 @@ let test_direct_stop_resolves_done_after_librarian_drain_failure () =
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       let meta = make_meta keeper_name in
       Eio.Switch.run @@ fun keeper_sw ->
+      Masc.Keeper_process_switch.set keeper_sw;
+      install_owner_inventory_exn ~sw:keeper_sw config;
+      ensure_owner_meta_exn config meta;
       let ctx : _ Keeper_types_profile.context =
         { config
         ; agent_name = "tester"

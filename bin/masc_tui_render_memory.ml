@@ -348,10 +348,15 @@ let render_memory_body ~cols ~budget (state : state)
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.memory_health_scroll max_scroll) in
   if shown = 0 then
-    push_styled ~style:(Theme.recede ())
-      (match state.memory_health with
-       | None -> "  (waiting for the server)"
-       | Some _ -> "  (no keepers in the fleet)")
+    let note =
+      if Option.is_some state.memory_health_error then
+        "  (server error \xe2\x80\x94 waiting for retry)"
+      else
+        match state.memory_health with
+        | None -> "  (waiting for the server)"
+        | Some _ -> "  (no keepers with a memory config or snapshot)"
+    in
+    push_styled ~style:(Theme.recede ()) note
   else begin
     for i = 0 to content_height - 1 do
       let idx = i + scroll in

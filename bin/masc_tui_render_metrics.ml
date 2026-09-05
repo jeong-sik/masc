@@ -105,7 +105,7 @@ let overview_pulse_line ~cols (state : state) : string =
       Ansi.reset
   in
   if Layout.display_width text > inner_width then
-    Layout.take_cells text inner_width
+    Layout.take_cells text inner_width ^ Ansi.reset
   else text
 
 let section_pills_line ~cols ~(active : metrics_section) : string =
@@ -124,7 +124,7 @@ let section_pills_line ~cols ~(active : metrics_section) : string =
     Ansi.bold Ansi.reset p1 p2 p3 p4
   in
   if Layout.display_width line > inner_width then
-    Layout.take_cells line inner_width
+    Layout.take_cells line inner_width ^ Ansi.reset
   else line
 
 let repeat_glyph glyph count =
@@ -196,7 +196,7 @@ let render_kpi_cards ~cols (kpis : metrics_kpis) : string list =
         (Masc_tui_context_inspector.format_bytes kpis.snapshot_bytes)
         (Theme.bad ()) Ansi.reset kpis.gate_pending_count kpis.held_approvals_count
     ]
-    |> List.map (fun line -> if Layout.display_width line > inner_width then Layout.take_cells line inner_width else line)
+    |> List.map (fun line -> if Layout.display_width line > inner_width then Layout.take_cells line inner_width ^ Ansi.reset else line)
 
 let render_section_fleet ~cols (state : state) : string list =
   let inner_width = max 20 (framed_inner_width cols) in
@@ -285,14 +285,14 @@ let render_section_resources ~cols (state : state) : string list =
   let header =
     [ Printf.sprintf "  %s%sKeeper Memory & Context Capacity Gauges%s"
         Ansi.bold (Theme.info ()) Ansi.reset
-    ; Printf.sprintf "  %-16s  %-26s  %-26s  %s"
-        "KEEPER" "FACT CAPACITY" "SNAPSHOT BYTES" "METRICS"
+    ; Printf.sprintf "  %-16s  %-*s  %-*s  %s"
+        "KEEPER" gauge_w "FACT CAPACITY" gauge_w "SNAPSHOT BYTES" "METRICS"
     ]
   in
   List.map
     (fun line ->
       if Layout.display_width line > inner_width then
-        Layout.take_cells line inner_width
+        Layout.take_cells line inner_width ^ Ansi.reset
       else line)
     (header @ keeper_rows)
 

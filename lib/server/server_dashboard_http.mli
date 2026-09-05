@@ -158,3 +158,11 @@ val dashboard_bootstrap_http_json :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Httpun.Request.t ->
   Yojson.Safe.t
+
+(** {1 Multi-Core Dashboard Pre-warming} *)
+
+val warm_dashboard_surfaces : Mcp_server.server_state -> unit
+(** Concurrently pre-warms primary dashboard surfaces (shell, board,
+    planning, config, keeper-memory-health) across worker domains using
+    the multi-core domain pool so initial requests hit warm caches instantly. *)
+

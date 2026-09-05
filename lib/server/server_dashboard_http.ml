@@ -805,3 +805,68 @@ let dashboard_bootstrap_http_json
     ; namespace_truth
     ]
 ;;
+
+let warm_dashboard_surfaces (state : Mcp_server.server_state) =
+  let t0 = Time_compat.now () in
+  let config = Mcp_server.workspace_config state in
+  let base_path = config.Workspace.base_path in
+  let warm_board () =
+    try
+      let t_start = Time_compat.now () in
+      ignore (dashboard_board_payload ~config ~limit:100 ~offset:0 ());
+      Log.Dashboard.info "board surface pre-warmed (%.1fms)" ((Time_compat.now () -. t_start) *. 1000.0)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn -> Log.Dashboard.warn "board pre-warm failed: %s" (Printexc.to_string exn)
+  in
+  let warm_planning () =
+    try
+      let t_start = Time_compat.now () in
+      let cache_key = Printf.sprintf "planning:%s" base_path in
+      ignore
+        (Dashboard_cache.get_or_compute cache_key
+           ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               dashboard_planning_http_json ~config)));
+      Log.Dashboard.info "planning surface pre-warmed (%.1fms)" ((Time_compat.now () -. t_start) *. 1000.0)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn -> Log.Dashboard.warn "planning pre-warm failed: %s" (Printexc.to_string exn)
+  in
+  let warm_config () =
+    try
+      let t_start = Time_compat.now () in
+      ignore
+        (Dashboard_cache.get_or_compute "config_introspect"
+           ~ttl:Server_dashboard_http_core_cache.config_cache_ttl_s
+           Env_config_introspect.to_json);
+      Log.Dashboard.info "config surface pre-warmed (%.1fms)" ((Time_compat.now () -. t_start) *. 1000.0)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn -> Log.Dashboard.warn "config pre-warm failed: %s" (Printexc.to_string exn)
+  in
+  let warm_keeper_memory_health () =
+    try
+      let t_start = Time_compat.now () in
+      let cache_key = Printf.sprintf "keeper_memory_health:%s" base_path in
+      ignore
+        (Dashboard_cache.get_or_compute cache_key
+           ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               Server_dashboard_http_keeper_memory_health.keeper_memory_health_http_json ~base_path)));
+      Log.Dashboard.info "keeper-memory-health surface pre-warmed (%.1fms)" ((Time_compat.now () -. t_start) *. 1000.0)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn -> Log.Dashboard.warn "keeper-memory-health pre-warm failed: %s" (Printexc.to_string exn)
+  in
+  Eio.Fiber.all
+    [ (fun () -> warm_shell_cache state)
+    ; warm_board
+    ; warm_planning
+    ; warm_config
+    ; warm_keeper_memory_health
+    ];
+  Log.Dashboard.info "all primary dashboard surfaces pre-warmed in parallel (%.1fms total)"
+    ((Time_compat.now () -. t0) *. 1000.0)
+;;
+

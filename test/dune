@@ -155,6 +155,7 @@
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os_current
+  test_keeper_memory_os_events
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page
   test_keeper_paused_work_resume_surface
@@ -505,6 +506,7 @@
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os_current
+  test_keeper_memory_os_events
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page
   test_keeper_paused_work_resume_surface

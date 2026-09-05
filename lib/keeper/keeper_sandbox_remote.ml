@@ -556,9 +556,21 @@ let wire_major t =
 ;;
 
 let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
+  (* A real remote exit/signal is [Ran]; a transport that failed before or
+     instead of producing one is [Transport_failed]. Every arm below that
+     used to return [Unix.WEXITED 1, _, <error>] was a transport failure the
+     old 3-tuple could not tell apart from grep's real exit 1 -- the silent
+     failure the read backend then read as "no match". *)
+  let ran status stdout stderr =
+    Masc_exec.Sandbox_target.Ran { status; stdout; stderr }
+  in
+  let transport_failed ?(stdout = "") ?(prefix_stderr = "") reason =
+    Masc_exec.Sandbox_target.Transport_failed
+      { reason; stdout; stderr = append_error prefix_stderr reason }
+  in
   fun ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd ->
     match wire_env t env with
-    | Error error -> Unix.WEXITED 1, "", error
+    | Error error -> transport_failed error
     | Ok env ->
       let injected = injected_env t in
       let env =
@@ -571,7 +583,7 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
       let stdin = Option.value stdin_content ~default:"" in
       let cwd = Option.value cwd ~default:t.remote_root in
       (match remote_cwd t cwd with
-       | Error error -> Unix.WEXITED 1, "", error
+       | Error error -> transport_failed error
        | Ok cwd ->
       let request : Exec_ssh_protocol.request =
         { v = wire_major t
@@ -585,7 +597,7 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
         }
       in
       (match Exec_ssh_protocol.encode_request request ~stdin with
-       | Error error -> Unix.WEXITED 1, "", error
+       | Error error -> transport_failed error
        | Ok frame ->
          if Atomic.compare_and_set t.shared.first_dispatch_logged false true
          then log_first_dispatch t;
@@ -644,7 +656,8 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
                else Transport_failed, transport_error t detail
              in
              settle (failed failure error)
-               (Unix.WEXITED 1, rewrite stdout, append_error (rewrite raw_stderr) error)
+               (transport_failed ~stdout:(rewrite stdout)
+                  ~prefix_stderr:(rewrite raw_stderr) error)
            | Ok (payload_stderr, trailer_bytes) ->
              let streamed_payload =
                match split_final_trailer stderr_stream.tail with
@@ -659,40 +672,40 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
               | true, _ ->
                 let error = local_timeout_error t budget in
                 settle (failed Local_timeout error)
-                  (Unix.WEXITED 1, stdout, append_error payload_stderr error)
+                  (transport_failed ~stdout ~prefix_stderr:payload_stderr error)
               | false, Some detail ->
                 let error = transport_error t detail in
                 settle (failed Transport_failed error)
-                  (Unix.WEXITED 1, stdout, append_error payload_stderr error)
+                  (transport_failed ~stdout ~prefix_stderr:payload_stderr error)
               | false, None ->
                 (match Exec_ssh_protocol.parse_trailer trailer_bytes with
                  | Error error ->
                    let error = transport_error t error in
                    settle (failed Transport_failed error)
-                     (Unix.WEXITED 1, stdout, append_error payload_stderr error)
+                     (transport_failed ~stdout ~prefix_stderr:payload_stderr error)
                  | Ok trailer
                    when trailer.timed_out && status = Unix.WEXITED 0 ->
                    let error = remote_timeout_error t timeout_sec in
                    settle (failed Remote_timeout error)
-                     (Unix.WEXITED 1, stdout, append_error payload_stderr error)
+                     (transport_failed ~stdout ~prefix_stderr:payload_stderr error)
                  | Ok { shim_error = Some error; _ }
                    when status = Unix.WEXITED 1 ->
                    settle (failed Shim_refused error)
-                     (Unix.WEXITED 1, stdout, append_error payload_stderr error)
+                     (transport_failed ~stdout ~prefix_stderr:payload_stderr error)
                  | Ok { exit = Some code; signal = None; shim_error = None; _ }
                    when status = Unix.WEXITED 0 ->
                    settle (finished (Unix.WEXITED code))
-                     (Unix.WEXITED code, stdout, payload_stderr)
+                     (ran (Unix.WEXITED code) stdout payload_stderr)
                  | Ok { signal = Some signal; exit = None; shim_error = None; _ }
                    when status = Unix.WEXITED 0 ->
                    settle (finished (Unix.WSIGNALED signal))
-                     (Unix.WSIGNALED signal, stdout, payload_stderr)
+                     (ran (Unix.WSIGNALED signal) stdout payload_stderr)
                  | Ok _ ->
                    let error =
                      transport_error t "transport status and result trailer disagree"
                    in
                    settle (failed Trailer_disagreement error)
-                     (Unix.WEXITED 1, stdout, append_error payload_stderr error))))))
+                     (transport_failed ~stdout ~prefix_stderr:payload_stderr error))))))
 ;;
 
 (* ── Preflight ───────────────────────────────────────────────────────── *)
@@ -778,8 +791,9 @@ let preflight_argv_for_log argv =
 let run_preflight_command t ~error_code argv =
   let run = runner ~timeout_sec:(preflight_timeout_sec t) t in
   let status, stdout, stderr =
-    run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
-      ~argv ~env:[||] ~cwd:(Some t.remote_root)
+    Masc_exec.Sandbox_target.status_tuple
+      (run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+         ~argv ~env:[||] ~cwd:(Some t.remote_root))
   in
   match status with
   | Unix.WEXITED 0 -> Ok stdout
@@ -817,8 +831,9 @@ let github_api_probe_argv =
 let github_transport t =
   let run = runner ~timeout_sec:(preflight_timeout_sec t) t in
   let status, _stdout, _stderr =
-    run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
-      ~argv:github_api_probe_argv ~env:[||] ~cwd:(Some t.remote_root)
+    Masc_exec.Sandbox_target.status_tuple
+      (run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+         ~argv:github_api_probe_argv ~env:[||] ~cwd:(Some t.remote_root))
   in
   match status with
   | Unix.WEXITED 0 -> Api_reachable

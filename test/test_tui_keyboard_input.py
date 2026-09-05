@@ -7593,12 +7593,14 @@ def planning_review_hierarchy_interaction() -> Interaction:
                     f"Task Verdicts did not explain itself ({needle!r}): "
                     f"{verdicts_plain!r}"
                 )
-        # [v] walks a 3-stop ring (Goals/Task Review -> Task Verdicts ->
-        # back to Goals), not 5: Schedules and Fusion left this walk once
-        # they became tabs of the selected Keeper instead of children of
-        # the fleet's planning workspace (bin/masc_tui.ml's Planning ->
-        # Verification -> Harness -> Planning arm, RFC-tui-operator-ia
-        # section 3.1).
+        # Planning's [v] strip has exactly three stops — Goals, Task Review,
+        # Task Verdicts — and wraps back round to Goals. The walk used to
+        # keep two extra children, Schedules and Fusion, but Schedules was
+        # promoted to its own top-level surface (palette: "go Schedules";
+        # the wake-schedule scenario asserts that entry point) and Fusion
+        # became a tab of the selected Keeper (RFC-tui-operator-ia 3.1).
+        # Waiting for their boxed titles here starved with the strip
+        # redrawn every stop but theirs never drawn.
         goals_again = send_and_wait(
             process, master_fd, output, b"v", b"\xe2\x96\xb8Goals"
         )
@@ -7607,9 +7609,9 @@ def planning_review_hierarchy_interaction() -> Interaction:
                 f"Goals did not retain the Task Review sibling: {goals_again!r}"
             )
         # The children are [v] stops, not the next top-level Tab destination.
-        # Fusion sits on the top-level ring right after Planning now (the
-        # same move that took it out of Planning's [v] walk above), so Tab
-        # from Planning lands on Fusion, not Workspace.
+        # From Planning, the ring's next stop is Fusion (surface_ring:
+        # ... Planning; Fusion; Workspace/Repositories; ...), so one Tab
+        # lands on Fusion's boxed title, not on Workspace two stops later.
         send_and_wait(process, master_fd, output, b"\t", b"MASC Fusion")
         os.write(master_fd, b"q")
 

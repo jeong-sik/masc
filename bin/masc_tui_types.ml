@@ -4899,13 +4899,12 @@ let palette_starts_with ~needle haystack =
 
 let palette_contains ~needle haystack =
   let h = String.lowercase_ascii haystack in
-  let n_str = String.lowercase_ascii needle in
-  let n = String.length n_str and hl = String.length h in
+  let n = String.length needle and hl = String.length h in
   if n = 0 then true
   else begin
     let found = ref false in
     for start = 0 to hl - n do
-      if (not !found) && String.equal (String.sub h start n) n_str then
+      if (not !found) && String.equal (String.sub h start n) needle then
         found := true
     done;
     !found

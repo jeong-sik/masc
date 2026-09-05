@@ -23,6 +23,31 @@
    no runner closure.  [Exec_dispatch] routes [Host] directly to
    [Process_eio], and guest / SSH targets via the carried [runner]. *)
 
+(* Whether a runner delivered the command's own result, or the transport
+   failed before/instead of producing one. Keeping the two apart at the type
+   level is what stops a lane failure -- which the remote runner used to
+   report as [WEXITED 1] -- from reading as grep's real "no match" (exit 1).
+   That conflation is how a guest/SSH lane that was down returned
+   [{ok:true, matches:[]}] to Grep: an empty result that never ran. A local
+   docker/host exec has no transport that can fail before producing an exit,
+   so its runner is always [Ran]; only the remote lane raises
+   [Transport_failed]. *)
+type run_outcome =
+  | Ran of { status : Unix.process_status; stdout : string; stderr : string }
+  | Transport_failed of { reason : string; stdout : string; stderr : string }
+
+(* For a consumer that treats a transport failure the same as any command
+   failure -- a non-zero status with the error in stderr, which is what the
+   remote runner returned for every transport fault before run_outcome
+   existed. Collapsing the two is correct only when the consumer does not
+   accept a non-zero exit as success: the read backend must NOT use this
+   (its Grep lane accepts exit 1, so a collapsed transport fault would read
+   as "no match" again) -- it matches the variant directly. *)
+let status_tuple : run_outcome -> Unix.process_status * string * string =
+  function
+  | Ran { status; stdout; stderr } -> status, stdout, stderr
+  | Transport_failed { reason = _; stdout; stderr } -> Unix.WEXITED 1, stdout, stderr
+
 type runner =
   on_stdout_chunk:(string -> unit) option ->
   on_stderr_chunk:(string -> unit) option ->
@@ -30,7 +55,7 @@ type runner =
   argv:string list ->
   env:string array ->
   cwd:string option ->
-  Unix.process_status * string * string
+  run_outcome
 
 type pipeline_stage = {
   argv : string list;
@@ -42,7 +67,7 @@ type pipeline_runner =
   on_stdout_chunk:(string -> unit) option ->
   on_stderr_chunk:(string -> unit) option ->
   stages:pipeline_stage list ->
-  Unix.process_status * string * string
+  run_outcome
 
 (* A standalone copy of the keeper-side endpoint identity, NOT
    [Exec_ssh_endpoint.t]: [lib/exec] cannot depend on [lib/runtime], so the

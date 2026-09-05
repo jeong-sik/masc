@@ -60,9 +60,10 @@ let state fixture =
 ;;
 
 let run_remote ?(timeout_sec = 10.0) ?stdin ?(env = [||]) state argv =
-  Keeper_sandbox_remote.runner ~timeout_sec state
-    ~on_stdout_chunk:None ~on_stderr_chunk:None
-    ~stdin_content:stdin ~argv ~env ~cwd:None
+  Masc_exec.Sandbox_target.status_tuple
+    (Keeper_sandbox_remote.runner ~timeout_sec state
+       ~on_stdout_chunk:None ~on_stderr_chunk:None
+       ~stdin_content:stdin ~argv ~env ~cwd:None)
 ;;
 
 let status_is expected actual = expected = actual

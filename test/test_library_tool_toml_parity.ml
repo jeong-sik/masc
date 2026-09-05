@@ -30,9 +30,13 @@ let rec sorted (json : Yojson.Safe.t) : Yojson.Safe.t =
 
 (* name, description, input_schema (keys sorted) *)
 let expected =
-    [ {|masc_library_list|}, {|List all documents in the agent knowledge library with title, source, author, created date, and tags. Use when browsing available knowledge or checking if a topic is already documented. Pair with masc_library_read to fetch a specific document or masc_library_search to query by content.|}, {|{"properties":{},"type":"object"}|}
+    [ {|masc_library_list|}, {|List every document in the agent knowledge library.
+
+Each row carries title, source, author, created date, and tags. Use when browsing available knowledge or checking if a topic is already documented. Pair with masc_library_read to fetch a specific document or masc_library_search to query by content.|}, {|{"properties":{},"type":"object"}|}
     ; {|masc_library_read|}, {|Read a specific library document by topic name or partial match. Use when you need the full content of a known knowledge document. After masc_library_list or masc_library_search to find the topic name.|}, {|{"properties":{"topic":{"description":"Topic name or partial match (e.g., 'eio-mutex')","type":"string"}},"required":["topic"],"type":"object"}|}
-    ; {|masc_library_add|}, {|Add a new document to the agent knowledge library. Use when recording a new finding, experiment result, or pattern that other agents should know about.|}, {|{"properties":{"content":{"description":"Document body content (markdown)","type":"string"},"source":{"description":"Source type: direct_experience, research, experiment, observation","enum":["direct_experience","research","experiment","observation"],"type":"string"},"tags":{"description":"List of tags","items":{"type":"string"},"type":"array"},"title":{"description":"Document title","type":"string"}},"required":["title","source","content"],"type":"object"}|}
+    ; {|masc_library_add|}, {|Add a new document to the agent knowledge library.
+
+Use when recording a new finding, experiment result, or pattern that other agents should know about.|}, {|{"properties":{"content":{"description":"Document body content (markdown)","type":"string"},"source":{"description":"Source type: direct_experience, research, experiment, observation","enum":["direct_experience","research","experiment","observation"],"type":"string"},"tags":{"description":"List of tags","items":{"type":"string"},"type":"array"},"title":{"description":"Document title","type":"string"}},"required":["title","source","content"],"type":"object"}|}
     ; {|masc_library_search|}, {|Search the agent knowledge library by content keywords or tags. Use when looking for documents on a specific topic without knowing the exact title. Pair with masc_library_read to fetch matching documents in full.|}, {|{"properties":{"query":{"description":"Search query; empty or missing returns a workflow error","type":"string"}},"type":"object"}|}
     ]
 ;;

@@ -1223,7 +1223,7 @@ let test_repo_runtime_toml_loads () =
       , media_failover
       , lanes ) ->
     check bool "at least one runtime" true (List.length runtimes > 0);
-    check string "default runtime" "ollama_cloud.deepseek-v4-flash"
+    check string "default runtime" "ollama_cloud.ollama-cloud-glm-5-3-flash"
       default.Runtime.id;
     (match Runtime_toml.parse_file path with
      | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
@@ -1619,7 +1619,8 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
   let io : Exact_output.resolver_io =
     { getenv =
         (function
-          | "ZAI_CODING_API_KEY" | "ZAI_API_KEY_SB" | "KIMI_API_KEY" ->
+          | "ZAI_CODING_API_KEY" | "ZAI_API_KEY_SB" | "KIMI_API_KEY"
+          | "OLLAMA_CLOUD_API_KEY" ->
             Ok (Some "exact-output-seed-test")
           | _ -> Ok None)
     }

@@ -157,9 +157,11 @@ let find_flag_writes_or_execs flag =
   || String.starts_with ~prefix:"-fprint" flag
 ;;
 
-let sed_flag_is_in_place flag =
-  String.starts_with ~prefix:"-i" flag || String.equal flag "--in-place"
-;;
+(* [sed] is deliberately not fast-pathed. Its write ([w]/[W]) and execute
+   ([e]) verbs live in the script argument, not in a flag, so no flag
+   denylist can prove a [sed] invocation observation-only -- [sed 's/a/b/e' f]
+   runs a shell and [sed 'w /path' f] writes a file, both with no [-i]. It
+   falls through to the configured judge like any unclassified command. *)
 
 let writes_to_file flag =
   String.equal flag "-o" || String.starts_with ~prefix:"--output" flag
@@ -200,7 +202,6 @@ let classify_argv argv =
     (match command with
      | "env" -> rest = [] (* [env CMD …] executes CMD; only bare [env] prints. *)
      | "find" -> not (rejected find_flag_writes_or_execs)
-     | "sed" -> not (rejected sed_flag_is_in_place)
      | "sort" | "diff" -> not (rejected writes_to_file)
      | "rg" -> not (rejected rg_flag_runs_preprocessor)
      | "date" -> not (rejected sets_system_time)

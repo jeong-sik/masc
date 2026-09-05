@@ -17,15 +17,25 @@ cd "$repo_root" || exit 2
 # had no lane at all while the changelog called this the full suite.
 alias_target="@runtest"
 
-# The header dune prints before a failure it can locate:
+# The header dune prints before a failure or warning it can locate:
 #   File "test/dune", line 1089, characters 2-16:
 #   File "test/dune", lines 2961-2970, characters 0-202:
 #   File "test/test_x.ml", line 12, characters 4-10:
 # The quoted source lines after it each start with the line number and a bar.
 header_re='^File "[^"]+", lines? [0-9]+(-[0-9]+)?(, characters [0-9]+-[0-9]+)?:$'
 
-# One line per header in the log: the suite it resolves to, a tab, the header
-# itself; "-" when no suite could be read.
+# One line per header in the log, tab-separated: the suite key, the kind, the
+# header itself. The key is "-" when no suite could be read; the kind is
+# "warning" when the line after the quote starts with Warning, "failure"
+# otherwise.
+#
+# A suite key is <dir>/<name>: the directory whose dune file declares the
+# suite, then the stanza name. A bare name is ambiguous now that the root
+# alias runs both test/ and packages/agent_core/test, which declare
+# test_session, test_trajectory, test_schema_surface_index and others under
+# one name; test/dune and test/multimodal/dune already shared test_workspace.
+# The .inc files under test/stanzas/ are (include)d by test/dune, so a suite
+# declared there is keyed under test/, where its executable is built.
 #
 # Where the name sits depends on the stanza:
 #   File "test/dune", line 1089, characters 2-16:    /  1089 |   test_fs_compat
@@ -37,56 +47,82 @@ header_re='^File "[^"]+", lines? [0-9]+(-[0-9]+)?(, characters [0-9]+-[0-9]+)?:$
 # whose suite failed, so that atom is read by its character range first: on
 # `(names test_a test_b)` the first test_ word is test_a whichever one broke,
 # and a break in test_b would be booked against test_a. A (rule) stanza spans
-# lines and names its suite in an alias; the last resort is the first test_
-# word in the quote. A header for a .ml file is a compile error and names no
-# suite. Headers used to be read only from test/dune and test/stanzas/*.inc,
-# so a failure in any of the 18 test/<dir>/dune files or in packages/ was
-# dropped whenever another suite also failed; now every header is listed and
-# the caller refuses a run in which one names no suite.
+# lines and names its suite in an alias, read across the whole quote. The
+# last resort is the first whole atom in the quote that starts with test_;
+# agent_core_test_deps is one atom and yields nothing. A header for a .ml
+# file is a compile error and names no suite. Headers used to be read only
+# from test/dune and test/stanzas/*.inc, so a failure in any of the 18
+# test/<dir>/dune files or in packages/ was dropped whenever another suite
+# also failed; now every header is listed and the caller refuses a run in
+# which a failure header names no suite.
 attribute_failures() {
   awk -v header_re="$header_re" '
-    function flush() {
-      if (header != "") printf "%s\t%s\n", (name == "" ? "-" : name), header
-      header = ""; name = ""; first = 0
+    function resolve(   atom, s, rest, tok) {
+      if (!dune_file) return ""
+      if (first_src != "" && from >= 0) {
+        atom = substr(first_src, from + 1, to - from)
+        if (atom ~ /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/) return atom
+      }
+      if (match(quote, /\(alias +runtest-[A-Za-z0-9_-]+/)) {
+        s = substr(quote, RSTART, RLENGTH); sub(/.*runtest-/, "", s); return s
+      }
+      rest = quote
+      while (match(rest, /[A-Za-z0-9_][A-Za-z0-9_-]*/)) {
+        tok = substr(rest, RSTART, RLENGTH)
+        if (tok ~ /^test_/) return tok
+        rest = substr(rest, RSTART + RLENGTH)
+      }
+      return ""
+    }
+    function flush(   name) {
+      if (header != "") {
+        name = resolve()
+        printf "%s\t%s\t%s\n", (name == "" ? "-" : dir "/" name), kind, header
+      }
+      header = ""; quote = ""; first_src = ""
     }
     $0 ~ header_re {
       flush()
-      header = $0
-      dune_file = ($0 ~ /^File "([^"]*\/)?dune", / || $0 ~ /^File "[^"]*\.inc", /)
+      header = $0; kind = "failure"
+      file = $0; sub(/^File "/, "", file); sub(/".*/, "", file)
+      dune_file = (file ~ /(^|\/)dune$/ || file ~ /\.inc$/)
+      dir = file
+      if (dir ~ /\//) sub(/\/[^\/]*$/, "", dir); else dir = "."
+      if (file ~ /\.inc$/) sub(/\/stanzas$/, "", dir)
       from = -1; to = -1
       if (dune_file && match($0, /line [0-9]+, characters [0-9]+-[0-9]+:$/)) {
         range = substr($0, RSTART, RLENGTH)
         sub(/.*characters /, "", range); sub(/:$/, "", range)
         split(range, cols, "-"); from = cols[1] + 0; to = cols[2] + 0
       }
-      first = 1
       next
     }
     header == "" { next }
-    $0 !~ /^ *[0-9]+ \|/ { flush(); next }
-    name != "" { next }
-    first && from >= 0 {
+    $0 !~ /^ *[0-9]+ \|/ {
+      if ($0 ~ /^Warning/) kind = "warning"
+      flush()
+      next
+    }
+    {
       src = substr($0, index($0, "| ") + 2)
-      atom = substr(src, from + 1, to - from)
-      if (atom ~ /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/) { name = atom; next }
+      if (quote == "") first_src = src
+      quote = quote src "\n"
     }
-    { first = 0 }
-    !dune_file { next }
-    match($0, /\(alias +runtest-[A-Za-z0-9_-]+/) {
-      name = substr($0, RSTART, RLENGTH); sub(/.*runtest-/, "", name); next
-    }
-    match($0, /test_[a-z0-9_]+/) { name = substr($0, RSTART, RLENGTH) }
     END { flush() }
   ' "$1"
 }
 
 extract_failed_names() {
-  attribute_failures "$1" | awk -F'\t' '$1 != "-" { print $1 }'
+  attribute_failures "$1" | awk -F'\t' '$2 == "failure" && $1 != "-" { print $1 }'
 }
 
-# "<headers> <attributed>" for an attribution listing.
+# "<failure headers> <attributed>" for an attribution listing; warnings are
+# not failures and count in neither.
 count_attribution() {
-  awk -F'\t' '{ headers++ } $1 != "-" { named++ } END { print headers + 0, named + 0 }' "$1"
+  awk -F'\t' '
+    $2 == "failure" { headers++ }
+    $2 == "failure" && $1 != "-" { named++ }
+    END { print headers + 0, named + 0 }' "$1"
 }
 
 # The log from one header line up to the next header: the quoted stanza, the
@@ -101,39 +137,75 @@ print_block_from_header() {
 }
 
 print_failure_block() {
-  local name="$1"
+  local key="$1"
   local source_log="$2"
   local header
   header="$(attribute_failures "$source_log" \
-    | awk -F'\t' -v n="$name" '$1 == n { print $2; exit }')"
+    | awk -F'\t' -v k="$key" '$2 == "failure" && $1 == k { print $3; exit }')"
   [ -n "$header" ] && print_block_from_header "$header" "$source_log"
 }
 
-# "<name> <elapsed>" for each process in process group $1 that is a built
-# executable or a python suite file, read from `ps -o pgid=,etime=,args=`
-# lines on stdin. Dune runs a suite as ./test_x.exe inside its sandbox, so
-# argv[0] names it; the (rule) suites driven by python show their test file;
-# a server binary a suite spawned is listed under its own name. The group is
-# dune's, so an executable that happens to run elsewhere on the host is not
-# reported as a suite.
-name_suite_processes() {
-  awk -v pgid="$1" '
-    $1 != pgid { next }
-    { name = "" }
-    $3 ~ /\.exe$/ { name = $3; sub(/.*\//, "", name); sub(/\.exe$/, "", name) }
-    name == "" && match($0, /test_[a-z0-9_]+\.py/) { name = substr($0, RSTART, RLENGTH - 3) }
-    name != "" { print name " " $2 }'
+# The process columns this script reads: pid, parent, group, elapsed, argv.
+process_table() {
+  ps -axo pid=,ppid=,pgid=,etime=,args=
 }
 
-suites_running_now() {
-  ps -axo pgid=,etime=,args= | name_suite_processes "$1"
+# The rows of process $1 and its descendants, from process_table lines on
+# stdin, followed through parent links. Not through the process group: dune
+# 3.24.1 (masc.opam.locked) starts every action in a group of its own --
+# src/dune_engine/process.ml, run_internal, setpgid = Some
+# Spawn.Pgid.new_process_group -- so a suite's group holds only the suite,
+# and dune's group holds no suite at all.
+process_tree_of() {
+  awk -v root="$1" '
+    { pid[NR] = $1; parent[$1] = $2; row[NR] = $0 }
+    END {
+      for (i = 1; i <= NR; i++) {
+        p = pid[i]
+        for (depth = 0; depth < 64 && p != "" && p != root; depth++) p = parent[p]
+        if (p == root) print row[i]
+      }
+    }'
+}
+
+# "<name> <elapsed>" for each process_table row on stdin that is a built
+# executable or a python suite file. Dune runs a suite as ./test_x.exe inside
+# its sandbox, so argv[0] names it; the (rule) suites driven by python show
+# their test file; a server binary a suite spawned is listed under its own
+# name.
+name_suite_processes() {
+  awk '
+    { name = "" }
+    $5 ~ /\.exe$/ { name = $5; sub(/.*\//, "", name); sub(/\.exe$/, "", name) }
+    name == "" && match($0, /test_[a-z0-9_]+\.py/) { name = substr($0, RSTART, RLENGTH - 3) }
+    name != "" { print name " " $4 }'
+}
+
+# TERM every pid in the rows of file $1, give them $2 seconds, then KILL what
+# is still there. The rows were taken before the first signal, so a child
+# reparented when its parent dies is still on the list.
+terminate_rows() {
+  local pids
+  local grace="$2"
+  pids="$(awk '{ print $1 }' "$1" | tr '\n' ' ')"
+  [ -n "${pids// /}" ] || return 0
+  # shellcheck disable=SC2086
+  kill -TERM $pids 2>/dev/null
+  # shellcheck disable=SC2086
+  while [ "$grace" -gt 0 ] && kill -0 $pids 2>/dev/null; do
+    sleep 1
+    grace=$((grace - 1))
+  done
+  # shellcheck disable=SC2086
+  kill -KILL $pids 2>/dev/null
 }
 
 self_test() {
   local exact_block
   local longer_block
   fixture_log="$(mktemp "${TMPDIR:-/tmp}/masc-test-suite-self-test.XXXXXX")"
-  trap 'rm -f "$fixture_log"' EXIT
+  fixture_rows="$(mktemp "${TMPDIR:-/tmp}/masc-test-suite-rows.XXXXXX")"
+  trap 'terminate_rows "$fixture_rows" 1; rm -f "$fixture_log" "$fixture_rows"' EXIT
 
   cat > "$fixture_log" <<'EOF'
 File "test/dune", line 10, characters 0-20:
@@ -150,8 +222,8 @@ This run has ID `EXACT'.
 ASSERT exact assertion survived the blank line
 EOF
 
-  exact_block="$(print_failure_block test_ci_failure_output "$fixture_log")"
-  longer_block="$(print_failure_block test_ci_failure_output_extra "$fixture_log")"
+  exact_block="$(print_failure_block test/test_ci_failure_output "$fixture_log")"
+  longer_block="$(print_failure_block test/test_ci_failure_output_extra "$fixture_log")"
 
   printf '%s\n' "$exact_block" | grep -Fq '[FAIL]        exact group          7   exact failing case.' \
     || { echo "[test-suite] self-test FAIL - exact case is missing" >&2; exit 1; }
@@ -187,8 +259,8 @@ Traceback (most recent call last):
 AssertionError: a scenario the gate could not name
 File "test/dune", lines 1449-1460, characters 0-180:
 1449 | (rule
-1450 |  (alias runtest-dashboard-http-behavior-contracts)
-1451 |  (deps a b))
+1450 |  (deps a b)
+1451 |  (alias runtest-dashboard-http-behavior-contracts))
 Command exited with code 1.
 File "test/stanzas/test_keeper_toml.inc", line 2, characters 1-40:
 2 |  (name test_keeper_toml)
@@ -197,16 +269,16 @@ File "test/stanzas/test_keeper_toml.inc", line 2, characters 1-40:
 EOF
 
   names="$(extract_failed_names "$rule_log" | sort -u | tr '\n' ' ')"
-  [ "$names" = "dashboard-http-behavior-contracts test_keeper_toml test_tui_keyboard_input " ] \
+  [ "$names" = "test/dashboard-http-behavior-contracts test/test_keeper_toml test/test_tui_keyboard_input " ] \
     || { echo "[test-suite] self-test FAIL - rule-declared suites are unnamed: $names" >&2
          rm -f "$rule_log"; exit 1; }
 
-  printf '%s\n' "$(print_failure_block test_tui_keyboard_input "$rule_log")" \
+  printf '%s\n' "$(print_failure_block test/test_tui_keyboard_input "$rule_log")" \
     | grep -Fq 'AssertionError: a scenario the gate could not name' \
     || { echo "[test-suite] self-test FAIL - a rule's own output is missing" >&2
          rm -f "$rule_log"; exit 1; }
 
-  if printf '%s\n' "$(print_failure_block test_tui_keyboard_input "$rule_log")" \
+  if printf '%s\n' "$(print_failure_block test/test_tui_keyboard_input "$rule_log")" \
      | grep -Fq 'a named suite still reads'; then
     echo "[test-suite] self-test FAIL - a later suite leaked into the rule block" >&2
     rm -f "$rule_log"; exit 1
@@ -216,9 +288,10 @@ EOF
   echo "[test-suite] self-test OK - a (rule ...) stanza names its suite"
 
   # Headers outside test/dune: a test/<dir>/dune file, packages/, a one-line
-  # (names ...) list where the second name failed, and a name without the
-  # test_ prefix. The character range, not the first test_ word, picks the
-  # suite.
+  # (names ...) list where the second name failed, a name without the test_
+  # prefix, and one name declared in two directories. The character range,
+  # not the first test_ word, picks the suite, and the directory keeps the
+  # two test_session apart.
   subdir_log="$(mktemp "${TMPDIR:-/tmp}/masc-test-suite-subdir.XXXXXX")"
   cat > "$subdir_log" <<'EOF'
 File "test/keeper_event_queue/dune", line 2, characters 7-30:
@@ -233,65 +306,128 @@ File "test/fusion_core/dune", line 6, characters 19-38:
 File "tools/tlc_test_gen/sample_outputs/dune", line 38, characters 26-46:
 38 |  (names sample_inv_runner nested_sample_runner)
   [FAIL]        nested         0   a name without the test_ prefix.
+File "test/dune", line 500, characters 2-14:
+500 |   test_session
+  [FAIL]        session        0   the test/ one.
+File "packages/agent_core/test/dune", line 90, characters 2-14:
+90 |   test_session
+  [FAIL]        session        0   the packages/ one.
 EOF
 
   names="$(extract_failed_names "$subdir_log" | tr '\n' ' ')"
-  [ "$names" = "test_keeper_event_queue test_agent_race test_fusion_harness nested_sample_runner " ] \
+  [ "$names" = "test/keeper_event_queue/test_keeper_event_queue packages/agent_core/test/test_agent_race test/fusion_core/test_fusion_harness tools/tlc_test_gen/sample_outputs/nested_sample_runner test/test_session packages/agent_core/test/test_session " ] \
     || { echo "[test-suite] self-test FAIL - headers outside test/dune are misread: $names" >&2
          rm -f "$subdir_log"; exit 1; }
 
-  printf '%s\n' "$(print_failure_block test_fusion_harness "$subdir_log")" \
+  printf '%s\n' "$(print_failure_block test/fusion_core/test_fusion_harness "$subdir_log")" \
     | grep -Fq 'the second name on the line' \
     || { echo "[test-suite] self-test FAIL - the block for a column-picked name is missing" >&2
+         rm -f "$subdir_log"; exit 1; }
+
+  printf '%s\n' "$(print_failure_block packages/agent_core/test/test_session "$subdir_log")" \
+    | grep -Fq 'the packages/ one' \
+    || { echo "[test-suite] self-test FAIL - the second test_session block is not its own" >&2
          rm -f "$subdir_log"; exit 1; }
 
   rm -f "$subdir_log"
   echo "[test-suite] self-test OK - a header outside test/dune names its suite"
 
-  # A compile error prints a header for the .ml file and names no suite. The
-  # count has to show the gap, or the run reads as its known failures only.
+  # A compile error prints a header for the .ml file and names no suite; a
+  # library stanza that quotes agent_core_test_deps names no suite either,
+  # since test_deps is not an atom of its own. The count has to show the gap,
+  # or the run reads as its known failures only. A dune warning has the same
+  # header and is neither a failure nor a gap.
   gap_log="$(mktemp "${TMPDIR:-/tmp}/masc-test-suite-gap.XXXXXX")"
   cat > "$gap_log" <<'EOF'
 File "test/test_broken_module.ml", line 3, characters 8-21:
 3 | let x = missing_value
 Error: Unbound value missing_value
+File "packages/agent_core/test/dune", lines 1-4, characters 0-90:
+1 | (library
+2 |  (name agent_core_test_deps)
+3 |  (modules agent_core_test_deps)
+4 |  (libraries missing_library))
+Error: Library "missing_library" not found.
 File "test/stanzas/test_keeper_toml.inc", line 2, characters 1-40:
 2 |  (name test_keeper_toml)
   [FAIL]        toml          3   a named suite still reads.
+File "test/dune", line 7, characters 1-24:
+7 |  (deprecated_field true)
+Warning: deprecated_field is deprecated.
 EOF
 
   gap_tsv="$(mktemp "${TMPDIR:-/tmp}/masc-test-suite-gap-tsv.XXXXXX")"
   attribute_failures "$gap_log" > "$gap_tsv"
   counts="$(count_attribution "$gap_tsv")"
-  [ "$counts" = "2 1" ] \
-    || { echo "[test-suite] self-test FAIL - expected 2 headers 1 attributed, got: $counts" >&2
+  [ "$counts" = "3 1" ] \
+    || { echo "[test-suite] self-test FAIL - expected 3 failure headers 1 attributed, got: $counts" >&2
          rm -f "$gap_log" "$gap_tsv"; exit 1; }
-  unattributed="$(awk -F'\t' '$1 == "-" { print $2 }' "$gap_tsv")"
-  [ "$unattributed" = 'File "test/test_broken_module.ml", line 3, characters 8-21:' ] \
-    || { echo "[test-suite] self-test FAIL - the compile error header is not the unattributed one: $unattributed" >&2
+  unattributed="$(awk -F'\t' '$2 == "failure" && $1 == "-" { print $3 }' "$gap_tsv" | tr '\n' ';')"
+  [ "$unattributed" = 'File "test/test_broken_module.ml", line 3, characters 8-21:;File "packages/agent_core/test/dune", lines 1-4, characters 0-90:;' ] \
+    || { echo "[test-suite] self-test FAIL - the unattributed headers are wrong: $unattributed" >&2
          rm -f "$gap_log" "$gap_tsv"; exit 1; }
-  printf '%s\n' "$(print_block_from_header "$unattributed" "$gap_log")" \
+  warnings="$(awk -F'\t' '$2 == "warning" { print $3 }' "$gap_tsv")"
+  [ "$warnings" = 'File "test/dune", line 7, characters 1-24:' ] \
+    || { echo "[test-suite] self-test FAIL - the warning header is not read as a warning: $warnings" >&2
+         rm -f "$gap_log" "$gap_tsv"; exit 1; }
+  printf '%s\n' "$(print_block_from_header 'File "test/test_broken_module.ml", line 3, characters 8-21:' "$gap_log")" \
     | grep -Fq 'Error: Unbound value missing_value' \
     || { echo "[test-suite] self-test FAIL - the unattributed block lost its error line" >&2
          rm -f "$gap_log" "$gap_tsv"; exit 1; }
 
   rm -f "$gap_log" "$gap_tsv"
-  echo "[test-suite] self-test OK - a header that names no suite is counted"
+  echo "[test-suite] self-test OK - a header that names no suite is counted, a warning is not"
 
-  # What the deadline snapshot reads from ps: in dune's process group a
-  # dune-run suite, a python rule and a server binary a suite spawned; not a
-  # shell in that group, and not an executable in another group.
+  # What the deadline snapshot reads from process rows: a dune-run suite, a
+  # python rule and a server binary a suite spawned; not a shell.
   running="$(printf '%s\n' \
-      '4242    01:15:02 ./test_keeper_owner.exe' \
-      '4242       05:00 python3 /home/r/w/test/test_tui_keyboard_input.py --pty' \
-      '4242       00:02 bash -c sleep 3' \
-      '4242    00:00:40 /home/r/w/_build/default/bin/masc_server.exe --port 1' \
-      '   7 03-11:36:59 /Applications/masc/masc_tui.exe' \
-    | name_suite_processes 4242 | tr '\n' ';')"
+      '4242 4000 4242    01:15:02 ./test_keeper_owner.exe' \
+      '4243 4000 4243       05:00 python3 /home/r/w/test/test_tui_keyboard_input.py --pty' \
+      '4244 4242 4244       00:02 bash -c sleep 3' \
+      '4245 4242 4245    00:00:40 /home/r/w/_build/default/bin/masc_server.exe --port 1' \
+    | name_suite_processes | tr '\n' ';')"
   [ "$running" = "test_keeper_owner 01:15:02;test_tui_keyboard_input 05:00;masc_server 00:00:40;" ] \
     || { echo "[test-suite] self-test FAIL - the deadline snapshot misnames processes: $running" >&2
          exit 1; }
   echo "[test-suite] self-test OK - the deadline snapshot names suite processes"
+
+  # A live tree, with the suite in a process group of its own the way dune
+  # 3.24 starts every action: the parent walk finds it, its group would not,
+  # and termination reaches it.
+  fixture_py="$(mktemp "${TMPDIR:-/tmp}/masc-test-suite-setpgid.XXXXXX")"
+  cat > "$fixture_py" <<'EOF'
+import os
+os.setpgrp()
+os.execvp("sleep", ["./test_setpgid_suite.exe", "60"])
+EOF
+  # The middle shell traps TERM so it exits normally once the suite is
+  # gone, and its stderr is dropped: the shell reports the suite's death by
+  # signal there, which is the expected outcome, not a finding.
+  bash -c "trap : TERM; python3 '$fixture_py'; :" 2>/dev/null &
+  fixture_root=$!
+  sleep 2
+  process_table | process_tree_of "$fixture_root" > "$fixture_rows"
+  rm -f "$fixture_py"
+  running="$(name_suite_processes < "$fixture_rows")"
+  case "$running" in
+    "test_setpgid_suite "*) ;;
+    *) echo "[test-suite] self-test FAIL - the parent walk did not reach the suite: [$running]" >&2
+       exit 1 ;;
+  esac
+  root_pgid="$(awk -v r="$fixture_root" '$1 == r { print $3 }' "$fixture_rows")"
+  suite_pgid="$(awk '$5 ~ /test_setpgid_suite/ { print $3 }' "$fixture_rows")"
+  suite_pid="$(awk '$5 ~ /test_setpgid_suite/ { print $1 }' "$fixture_rows")"
+  [ -n "$suite_pgid" ] && [ "$suite_pgid" != "$root_pgid" ] \
+    || { echo "[test-suite] self-test FAIL - the fixture suite is not in a group of its own (root $root_pgid, suite $suite_pgid)" >&2
+         exit 1; }
+  terminate_rows "$fixture_rows" 5
+  wait "$fixture_root" 2>/dev/null
+  if kill -0 "$suite_pid" 2>/dev/null; then
+    echo "[test-suite] self-test FAIL - the suite in its own group survived termination" >&2
+    exit 1
+  fi
+  : > "$fixture_rows"
+  echo "[test-suite] self-test OK - a suite in its own process group is found and terminated"
 }
 
 if [ "${1:-}" = "--self-test" ]; then
@@ -305,6 +441,7 @@ known_file="test/ci-known-failures.txt"
 deadline="${MASC_TEST_SUITE_DEADLINE:-5400}"
 tmp="${RUNNER_TEMP:-/tmp}"
 log="$tmp/test-suite.log"
+tree_at_deadline="$tmp/test-suite-tree-at-deadline.txt"
 running_at_deadline="$tmp/test-suite-running-at-deadline.txt"
 
 if [ ! -f "$known_file" ]; then
@@ -318,27 +455,20 @@ fi
 # tail names the last suite that finished, not the one that hung. In run
 # 33916791821 (2026-09-04) the tail ended with output stamped 20:49 and the
 # deadline fell at 22:04, with nothing in between. At the deadline the
-# snapshot is taken, then dune's process group gets the TERM timeout would
-# have sent, KILL after a grace period, and rc is 124 as before.
+# process tree under dune is recorded, the executables in it are named, and
+# the whole tree gets TERM, then KILL after a grace period; rc is 124 as
+# before.
 run_suite_under_deadline() {
-  set -m
   opam exec -- dune build --root . "$alias_target" > "$log" 2>&1 &
   local dune_pid=$!
-  set +m
   local exited
-  local grace
   rc=""
   : > "$running_at_deadline"
   while kill -0 "$dune_pid" 2>/dev/null; do
     if [ $(( $(date +%s) - started )) -ge "$deadline" ]; then
-      suites_running_now "$dune_pid" > "$running_at_deadline"
-      kill -TERM -- "-$dune_pid" 2>/dev/null
-      grace=30
-      while [ "$grace" -gt 0 ] && kill -0 "$dune_pid" 2>/dev/null; do
-        sleep 1
-        grace=$((grace - 1))
-      done
-      kill -KILL -- "-$dune_pid" 2>/dev/null
+      process_table | process_tree_of "$dune_pid" > "$tree_at_deadline"
+      name_suite_processes < "$tree_at_deadline" > "$running_at_deadline"
+      terminate_rows "$tree_at_deadline" 30
       rc=124
       break
     fi
@@ -360,16 +490,19 @@ if [ "$rc" = 124 ]; then
     echo "[test-suite] running at deadline (name, elapsed):"
     sed 's/^/  - /' "$running_at_deadline"
   else
-    echo "[test-suite] running at deadline: no suite executable was alive;" \
+    echo "[test-suite] running at deadline: no executable under dune;" \
          "dune was still building or linking, or the hang is not a suite process"
   fi
+  echo "[test-suite] process tree under dune at deadline:"
+  sed 's/^/  /' "$tree_at_deadline"
   echo
   tail -60 "$log"
   exit 2
 fi
 
 attribute_failures "$log" > "$tmp/attributed.tsv"
-awk -F'\t' '$1 != "-" { print $1 }' "$tmp/attributed.tsv" | sort -u > "$tmp/failed.txt"
+awk -F'\t' '$2 == "failure" && $1 != "-" { print $1 }' "$tmp/attributed.tsv" | sort -u \
+  > "$tmp/failed.txt"
 
 sed 's/#.*//' "$known_file" | tr -d '[:blank:]' | grep -v '^$' | sort -u \
   > "$tmp/known.txt"
@@ -377,6 +510,9 @@ sed 's/#.*//' "$known_file" | tr -d '[:blank:]' | grep -v '^$' | sort -u \
 failed_count=$(wc -l < "$tmp/failed.txt" | tr -d ' ')
 known_count=$(wc -l < "$tmp/known.txt" | tr -d ' ')
 read -r header_count attributed_count < <(count_attribution "$tmp/attributed.tsv")
+
+awk -F'\t' '$2 == "warning" { print "[test-suite] dune warning, not a failure: " $3 }' \
+  "$tmp/attributed.tsv"
 
 # Errors Dune reported without a stanza header: an alias that resolves to
 # nothing, a dune that died before printing one. Attributing zero of them to
@@ -389,18 +525,20 @@ if [ "$rc" != 0 ] && [ "$header_count" -eq 0 ]; then
 fi
 
 status=0
-# Every header has to resolve to a suite, or the delta below cannot read the
-# run: a compile error in a test module, a rule with no alias name, a stanza
-# shape this reader does not know. The old guard fired only when nothing at
-# all was attributed, which the nine known failures made impossible.
+# Every failure header has to resolve to a suite, or the delta below cannot
+# read the run: a compile error in a test module, a rule with no alias name,
+# a stanza shape this reader does not know. The old guard fired only when
+# nothing at all was attributed, which the nine known failures made
+# impossible.
 if [ "$header_count" -ne "$attributed_count" ]; then
   status=2
   echo "[test-suite] FAIL - ${header_count} failure headers, ${attributed_count} attributed to a suite"
   echo
-  awk -F'\t' '$1 == "-" { print $2 }' "$tmp/attributed.tsv" | while IFS= read -r header; do
-    echo "--- unattributed: $header ---"
-    print_block_from_header "$header" "$log" | head -40
-  done
+  awk -F'\t' '$2 == "failure" && $1 == "-" { print $3 }' "$tmp/attributed.tsv" \
+    | while IFS= read -r header; do
+        echo "--- unattributed: $header ---"
+        print_block_from_header "$header" "$log" | head -40
+      done
   echo
 fi
 
@@ -414,12 +552,12 @@ if [ -n "$new" ]; then
   echo "Fix the suite. Adding it to $known_file records the break as normal,"
   echo "which is how the last six spent a month unnoticed."
   echo
-  for name in $new; do
-    echo "--- $name ---"
+  for key in $new; do
+    echo "--- $key ---"
     # Print the exact Dune failure block, including Alcotest's case name and
     # assertion after the blank line that follows its run ID. Match the suite
-    # name from the stanza line instead of a substring in another executable.
-    print_failure_block "$name" "$log"
+    # key from the stanza header instead of a substring in another executable.
+    print_failure_block "$key" "$log"
   done
 fi
 

@@ -15,9 +15,12 @@
   alias, so the 41 suites in `packages/agent_core/test`, the ten in
   `lib/exec/test` and the `tools/` suites run with the rest; the scheduled run
   on main has its own concurrency lane, so a branch dispatch no longer cancels
-  it; a failure in any `dune` file is attributed to its suite and a run in
-  which a failure header names no suite fails; and a deadline expiry lists the
-  suite executables still alive instead of only a log tail.
+  it; a failure in any `dune` file is attributed to its suite, keyed as
+  `<dir>/<name>` in `test/ci-known-failures.txt` because two directories now
+  declare the same names, and a run in which a failure header names no suite
+  fails; and a deadline expiry lists the executables still running under dune,
+  found through parent links since dune starts each one in its own process
+  group, instead of only a log tail.
 
 ## [0.31.0] - 2026-09-04
 

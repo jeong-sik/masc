@@ -21,6 +21,7 @@
   executor_pool_ref
   domain_pool
   domain_pool_ref
+  scheduler_lag
   masc_runtime_events
   system_error_class
   executable_path
@@ -39,6 +40,7 @@
   re.pcre
   eio
   eio.unix
+  mtime
   time_compat
   fs_compat
   masc_log

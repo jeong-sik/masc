@@ -46,7 +46,12 @@ val resolve_source :
   file_value:string option ->
   prompt_source * string
 (** The source and the text it selects. One decision, so one function: the
-    source names which of the two values the caller is being handed. *)
+    source names which of the two values the caller is being handed.
+
+    [Missing] always comes with [""]. The pair type does not say so, and the
+    alternative — a variant carrying the text — would store it twice, beside
+    the [effective] field that already holds it. The invariant is held by
+    this one function, which is why the two ladders it replaced are gone. *)
 
 val prompt_source_to_string : prompt_source -> string
 (** The word the HTTP surfaces have always sent: ["override"], ["file"],

@@ -211,6 +211,105 @@ let short_revision_length = 12
 let short_revision value =
   if String.length value <= short_revision_length then value
   else String.sub value 0 short_revision_length ^ "\xe2\x80\xa6"
+
+(* The Skill discovery roots, in the order the catalog consults them.
+
+   The pane named skills and never named where they were looked for, so
+   "my Skill is not loaded" had no first question to ask. A root that is
+   missing, refused, or read-only contributes nothing and only shows here:
+   the editor's own sources endpoint filters to the read-write roots that
+   resolved, because it is choosing somewhere to write. *)
+let skill_access_short = function
+  | "read-write" -> "rw"
+  | "read-only" -> "ro"
+  | other -> other
+;;
+
+let skill_source_reading (observation : Masc.Tui_decode.skill_source_observation) =
+  match observation with
+  | Masc.Tui_decode.Skill_source_ready count ->
+    ( (if count = 0 then Ansi.dim else Theme.ok ())
+    , (if count = 0 then "\xc2\xb7" else "\xe2\x9c\x93")
+    , Printf.sprintf "%d skill director%s" count
+        (if count = 1 then "y" else "ies") )
+  | Skill_source_missing -> (Ansi.dim, "\xc2\xb7", "missing")
+  | Skill_source_not_directory kind ->
+    (Theme.warn (), "!", "not a directory (" ^ kind ^ ")")
+  | Skill_source_unavailable operation ->
+    (Theme.warn (), "!", "unreadable at " ^ operation)
+  | Skill_source_unresolved ->
+    (Theme.warn (), "!", "path refused by config")
+;;
+
+let skill_config_line (config : Masc.Tui_decode.skill_catalog_config option) =
+  match config with
+  | None -> []
+  | Some (Masc.Tui_decode.Skill_config_configured { revision; resource_read_max_bytes })
+    ->
+    let cap =
+      match resource_read_max_bytes with
+      | None -> "no resource read cap"
+      | Some bytes -> Printf.sprintf "resource read \xe2\x89\xa4 %d bytes" bytes
+    in
+    [ ( Ansi.dim
+      , Printf.sprintf "   config %s \xc2\xb7 %s"
+          (short_revision (Terminal_text.single_line revision))
+          cap )
+    ]
+  | Some (Skill_config_rejected { source_revision; diagnostics }) ->
+    (* The catalog still stands on the defaults, so nothing else on the
+       screen changes when the operator's section stops parsing. *)
+    ( Theme.warn ()
+    , Printf.sprintf "   runtime.toml Skill config rejected (rev %s) \xe2\x80\x94 defaults in use"
+        (short_revision (Terminal_text.single_line source_revision)) )
+    :: List.map
+         (fun diagnostic ->
+            (Theme.warn (), "     " ^ Terminal_text.single_line diagnostic))
+         diagnostics
+  | Some Skill_config_unreadable ->
+    [ ( Theme.warn ()
+      , "   runtime.toml Skill config unreadable \xe2\x80\x94 defaults in use" )
+    ]
+;;
+
+let skill_source_lines ~config ~(sources : Masc.Tui_decode.skill_catalog_source list) =
+  let ready =
+    List.length
+      (List.filter
+         (fun (source : Masc.Tui_decode.skill_catalog_source) ->
+            match source.scso_observation with
+            | Masc.Tui_decode.Skill_source_ready count -> count > 0
+            | _ -> false)
+         sources)
+  in
+  let heading =
+    ( Ansi.bold
+    , Printf.sprintf " Skill Sources \xe2\x80\x94 %d of %d root%s carrying skills"
+        ready (List.length sources)
+        (if List.length sources = 1 then "" else "s") )
+  in
+  let rows =
+    List.map
+      (fun (source : Masc.Tui_decode.skill_catalog_source) ->
+         let tone, mark, reading = skill_source_reading source.scso_observation in
+         let path =
+           match source.scso_path with
+           | Some path -> Terminal_text.single_line path
+           | None -> "(absolute; path not published)"
+         in
+         ( tone
+         , Printf.sprintf "   %s %-16s %-10s %-26s %-2s  %s" mark
+             (Terminal_text.single_line source.scso_id)
+             (Terminal_text.single_line source.scso_anchor)
+             path
+             (skill_access_short source.scso_access)
+             reading ))
+      sources
+  in
+  match sources with
+  | [] -> []
+  | _ -> (heading :: rows) @ skill_config_line config @ [ (Ansi.dim, "") ]
+;;
 ;;
 
 let tools_pane_strip (state : state) =
@@ -978,18 +1077,29 @@ let tools_display_lines (state : state) =
           Printf.sprintf " Skill Usage — catalog %s"
             (Terminal_text.single_line
                (Masc.Tui_decode.skills_catalog_state_to_string sc_state)) ]
-    | Some { Masc.Tui_decode.sc_surfaces; sc_rejections; _ } ->
+    | Some
+        { Masc.Tui_decode.sc_surfaces; sc_rejections; sc_sources; sc_config; _ }
+      ->
         let used =
           List.filter
             (fun (surface : Masc.Tui_decode.skills_catalog_surface) ->
                surface.scs_usage <> [])
             sc_surfaces
         in
+        (* A skill no keeper has reached yet was drawn nowhere: the pane
+           listed only the used ones, so a skill that loaded correctly and has
+           never been invoked read exactly like one that failed to load. The
+           catalog total says how many there are to account for. *)
+        let never_used = List.length sc_surfaces - List.length used in
         let heading =
-          [ Ansi.bold,
-            Printf.sprintf " Skill Usage — %d skill%s in use across keepers"
+          skill_source_lines ~config:sc_config ~sources:sc_sources
+          @ [ Ansi.bold,
+            Printf.sprintf " Skill Usage — %d of %d loaded skill%s used by a keeper%s"
               (List.length used)
-              (if List.length used = 1 then "" else "s")
+              (List.length sc_surfaces)
+              (if List.length sc_surfaces = 1 then "" else "s")
+              (if never_used <= 0 then ""
+               else Printf.sprintf "; %d never invoked" never_used)
           (* One skill's keepers do not fit beside its name -- there can be
              several, joined -- so the rows put them on the line below. The
              header said the two sat side by side and named the second column

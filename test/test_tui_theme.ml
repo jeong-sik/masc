@@ -229,7 +229,7 @@ let test_user_message_background_blend () =
 let test_side_pane_background_shares_the_user_row_ground () =
   List.iter
     (fun background ->
-       let palette = Some (palette background) in
+       let palette = palette background in
        Alcotest.(check string)
          "same ground"
          (Masc_tui_theme.user_message_background palette)

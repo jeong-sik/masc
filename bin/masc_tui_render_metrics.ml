@@ -286,14 +286,16 @@ let render_section_resources ~cols (state : state) : string list =
       Layout.take_cells line inner_width ^ Ansi.reset
     else line
   in
-  let gauge_w = max 15 (min 26 (max 15 ((inner_width - 36) / 2))) in
+  (* Facts and snapshot bytes are counts with no capacity: memory OS declares
+     no fact ceiling and no snapshot size limit, so a bar for either would
+     be drawn against a number this pane made up (it was facts*2 and 200 KiB,
+     #33297). They are shown as the readings they are, the way the Memory
+     pane shows them. *)
   let header =
     [ clip
-        (Printf.sprintf "  %s%sKeeper Memory & Context Capacity Gauges%s"
+        (Printf.sprintf "  %s%sKeeper Memory%s"
            Ansi.bold (Theme.info ()) Ansi.reset)
-    ; clip
-        (Printf.sprintf "  %-16s  %-*s  %-*s  %s"
-           "KEEPER" gauge_w "FACT CAPACITY" gauge_w "SNAPSHOT BYTES" "METRICS")
+    ; clip (Printf.sprintf "  %-16s  %s" "KEEPER" "FACTS · SNAPSHOT")
     ]
   in
   let rows =
@@ -314,18 +316,8 @@ let render_section_resources ~cols (state : state) : string list =
         else
           List.map
             (fun (k : Masc.Tui_decode.memory_keeper_health) ->
-              let max_f = max 50 (k.mkh_facts * 2) in
-              let fact_g =
-                Chart.gauge ~width:gauge_w ~value:k.mkh_facts ~max_value:max_f ~label:"Facts" ()
-              in
-              let max_b = 200 * 1024 in
-              let byte_g =
-                Chart.gauge ~width:gauge_w ~value:k.mkh_snapshot_bytes ~max_value:max_b ~label:"Bytes" ()
-              in
-              Printf.sprintf "  %s  %s  %s  %s%4d ord · %s%s"
+              Printf.sprintf "  %s  %s%4d ord · %s%s"
                 (Layout.fit_width k.mkh_keeper_id 16)
-                fact_g
-                byte_g
                 (Theme.recede ()) k.mkh_facts
                 (Masc_tui_context_inspector.format_bytes k.mkh_snapshot_bytes)
                 Ansi.reset)
@@ -360,7 +352,7 @@ let render_section_tools ~cols (state : state) : string list =
       Hashtbl.replace counts tool (current + 1))
     state.keeper_tool_approvals;
   if Hashtbl.length counts = 0 then
-    [ title; "  (no active gate tool operations recorded in fleet state)" ]
+    [ title; clip "  (no active gate tool operations recorded in fleet state)" ]
   else
     let items =
       Hashtbl.fold

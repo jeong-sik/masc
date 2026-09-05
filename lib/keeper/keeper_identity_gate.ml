@@ -239,6 +239,11 @@ let execution_of_call_result result =
       ~class_:Tool_result.Runtime_failure
       ~effect_disposition:Tool_result.Proven_pre_effect
       message
+  | Error (Keeper_identity_tools.Transient_precondition message) ->
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
+      ~effect_disposition:Tool_result.Proven_pre_effect
+      message
   | Error (Keeper_identity_tools.Mcp { phase = Keeper_identity_tools.Before_send; error }) ->
     Keeper_tool_execution.failure
       ~class_:Tool_result.Runtime_failure

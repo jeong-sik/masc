@@ -33,6 +33,27 @@ let test_sparkline_colored () =
   check int "sparkline colored has 3 display cells" 3 (Layout.display_width colored)
 ;;
 
+(* A gauge draws a proportion, not a verdict: no level colouring at any
+   fill, so a task-completion gauge at 90% is not painted Bad (#33297). *)
+let test_gauge_carries_no_level_colour () =
+  let contains ~needle hay =
+    let n = String.length needle and h = String.length hay in
+    let rec go i = i + n <= h && (String.equal (String.sub hay i n) needle || go (i + 1)) in
+    n > 0 && go 0
+  in
+  List.iter
+    (fun value ->
+      let g = Chart.gauge ~width:40 ~value ~max_value:100 ~label:"Health" () in
+      List.iter
+        (fun (name, status) ->
+          check bool
+            (Printf.sprintf "gauge at %d%% carries no %s colour" value name)
+            false
+            (contains ~needle:(Masc_tui_theme.status status) g))
+        [ ("Ok", Masc_tui_theme.Ok); ("Warn", Masc_tui_theme.Warn); ("Bad", Masc_tui_theme.Bad) ])
+    [ 0; 50; 70; 85; 100 ]
+;;
+
 let test_gauge_proportions () =
   let g50 = Chart.gauge ~width:40 ~value:50 ~max_value:100 ~label:"Context" () in
   check bool "gauge fits within 40 width" true (Layout.display_width g50 <= 40);
@@ -108,7 +129,8 @@ let () =
         ; Alcotest.test_case "colored" `Quick test_sparkline_colored
         ] )
     ; ( "gauges"
-      , [ Alcotest.test_case "proportions" `Quick test_gauge_proportions
+      , [ Alcotest.test_case "no level colour" `Quick test_gauge_carries_no_level_colour
+        ; Alcotest.test_case "proportions" `Quick test_gauge_proportions
         ; Alcotest.test_case "compact_number" `Quick test_compact_number
         ] )
     ; ( "heatmap"

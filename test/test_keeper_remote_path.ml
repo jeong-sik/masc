@@ -125,6 +125,36 @@ let test_rewrite_output_and_chunk_boundary () =
     (Buffer.contents out)
 ;;
 
+(* One chunk carries many remote paths; the streamed rewrite must equal the
+   whole-string rewrite, and its allocation must stay linear in the chunk.
+   The scanner used to re-slice the pending string on every byte, so a chunk
+   of n bytes allocated about n^2 / 2 bytes (RFC main-domain-scheduler-latency
+   §8.6: 4.5 GB in four minutes from remote lanes). The bound below is words
+   allocated per input byte: linear scanning stays under a few dozen, the
+   quadratic form needs tens of thousands at this size. *)
+let test_large_chunk_allocates_linearly () =
+  let line = "at " ^ remote_file ^ ":7 in keeper-a-copy/x.ml, then some prose\n" in
+  let chunk = String.concat "" (List.init 2_000 (fun _ -> line)) in
+  let expected =
+    Keeper_remote_path.rewrite_output ~base_path ~remote_root ~keeper:"keeper-a" chunk
+  in
+  let out = Buffer.create (String.length chunk) in
+  let stream =
+    Keeper_remote_path.stream ~base_path ~remote_root ~keeper:"keeper-a"
+      ~emit:(Buffer.add_string out)
+  in
+  let before = Gc.minor_words () in
+  Keeper_remote_path.rewrite_stream_chunk stream chunk;
+  Keeper_remote_path.finish_stream stream;
+  let words = Gc.minor_words () -. before in
+  check string "streamed rewrite equals whole-string rewrite" expected (Buffer.contents out);
+  let words_per_byte = words /. float_of_int (String.length chunk) in
+  check bool
+    (Printf.sprintf "allocation is linear: %.1f words per input byte" words_per_byte)
+    true
+    (words_per_byte < 64.0)
+;;
+
 let () =
   run "keeper_remote_path"
     [ ( "mapping"
@@ -138,5 +168,7 @@ let () =
         ; test_case "relative dot segments" `Quick test_relative_dot_segments
         ; test_case "output rewrite + chunk boundary" `Quick
             test_rewrite_output_and_chunk_boundary
+        ; test_case "large chunk allocates linearly" `Quick
+            test_large_chunk_allocates_linearly
         ] )
     ]

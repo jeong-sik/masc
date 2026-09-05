@@ -97,8 +97,11 @@ type call_phase =
 
 type call_error =
   | Precondition of string
-      (** no credential, or a renewal this Keeper needed failed; nothing was
-          sent *)
+      (** no credential, or a renewal this Keeper needed failed permanently;
+          nothing was sent *)
+  | Transient_precondition of string
+      (** a renewal failed for a reason a retry may clear (a network blip, a
+          5xx/429 from the token endpoint); nothing was sent *)
   | Mcp of {
       phase : call_phase;
       error : Mcp_client.error;
@@ -109,6 +112,13 @@ val run_call :
       (** How a call reaches the provider. Injected for the same reason it is
           everywhere else here: a test that needs network is a test that does
           not run. *)
+  ?token_post:Keeper_oauth_flow.post ->
+      (** The OAuth token endpoint, injected so the reactive refresh on a 401
+          can be exercised without a live provider. *)
+  ?discover:
+    (mcp_url:string ->
+     (Keeper_oauth_discovery.t, Keeper_oauth_discovery.error) result) ->
+      (** Discovery for that same reactive refresh. *)
   base_path:string ->
   keeper_name:string ->
   provider:Keeper_oauth_provider.t ->
@@ -161,6 +171,17 @@ val for_turn : base_path:string -> keeper_name:string -> offering
     switch. An unreadable switch store marks every declared provider
     unusable rather than offering tools that may have been turned off. *)
 
+type renewal_error =
+  | Renew_transient of string
+      (** the renewal failed for a reason a later attempt may clear (a network
+          blip, a 5xx/429 from the token endpoint) *)
+  | Renew_permanent of string
+      (** the renewal cannot succeed without re-attaching the provider (a
+          revoked refresh token, no registered client) *)
+
+val renewal_error_message : renewal_error -> string
+(** The human-readable reason, without the transient/permanent distinction. *)
+
 val renew_if_needed :
   ?token_post:Keeper_oauth_flow.post ->
   ?discover:
@@ -172,7 +193,7 @@ val renew_if_needed :
   now:float ->
   access_token:string ->
   unit ->
-  (string, string) result
+  (string, renewal_error) result
 (** The access token to use right now, exchanged for a fresh one first if
     the stored expiry is inside the declaration's renewal window.
 

@@ -1168,6 +1168,55 @@ let test_replaced_store_is_reread_and_appended_after () =
   Alcotest.(check int) "three rows on disk" 3 (List.length (ledger_rows ~base_path))
 ;;
 
+(* #33322. The ledger lock is held across the store transaction, and from an
+   Eio fiber that transaction runs its Unix I/O in a systhread, so the holder
+   yields while locked. A second fiber on the same domain that reads or writes
+   the same ledger meanwhile must wait for it. With a Stdlib mutex the second
+   fiber re-locked the domain's own mutex and got
+   [Sys_error "Mutex.lock: Resource deadlock avoided"]; on 2026-09-05 four
+   keepers each lost a turn to that in the first five seconds after boot. *)
+let test_fibers_on_one_domain_share_the_ledger_lock () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.on_release sw Fs_compat.clear_fs;
+  with_temp_base "board-attention-candidate-fibers" @@ fun base_path ->
+  let first = record ~base_path (candidate (signal "fibers-first")) in
+  let read_answers = ref [] in
+  Eio.Fiber.all
+    [ (fun () ->
+        List.iter
+          (fun i ->
+             ignore
+               (record ~base_path (candidate (signal (Printf.sprintf "fibers-write-%d" i)))))
+          [ 1; 2; 3 ])
+    ; (fun () ->
+        List.iter
+          (fun _ ->
+             read_answers
+             := ok "load while a writer holds the ledger"
+                  (A.load_candidates ~base_path ~keeper_name:"alpha")
+                :: !read_answers;
+             Eio.Fiber.yield ())
+          [ 1; 2; 3 ])
+    ];
+  let final = ok "load" (A.load_candidates ~base_path ~keeper_name:"alpha") in
+  Alcotest.(check int) "every write landed" 4 (List.length final);
+  Alcotest.(check bool)
+    "the first candidate is still first"
+    true
+    (match final with
+     | head :: _ -> head = first
+     | [] -> false);
+  Alcotest.(check int) "every read answered" 3 (List.length !read_answers);
+  Alcotest.(check bool)
+    "every read answered candidates that are in the final ledger"
+    true
+    (List.for_all
+       (fun answer -> List.for_all (fun c -> List.mem c final) answer)
+       !read_answers)
+;;
+
 let () =
   Alcotest.run
     "keeper_board_attention_candidate"
@@ -1248,6 +1297,10 @@ let () =
             "replaced store is reread and appended after"
             `Quick
             test_replaced_store_is_reread_and_appended_after
+        ; Alcotest.test_case
+            "fibers on one domain share the ledger lock"
+            `Quick
+            test_fibers_on_one_domain_share_the_ledger_lock
         ] )
     ]
 ;;

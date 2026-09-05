@@ -460,14 +460,6 @@ let known_sub_arguments ~keeper_names word =
   | "keeper" -> keeper_names
   | _ -> []
 
-let get_siblings word =
-  if String.equal word "" then List.map (fun e -> e.word) catalog
-  else
-    let initial = String.sub word 0 1 in
-    catalog
-    |> List.filter (fun e -> String.starts_with ~prefix:initial e.word)
-    |> List.map (fun e -> e.word)
-
 let with_body body text =
   if String.equal body "" then text else text ^ "\n" ^ body
 
@@ -488,23 +480,11 @@ let autocomplete ?(direction = Next) ?(keeper_names = []) text =
       match candidates with
       | [] -> None
       | [ single ] ->
+          let suffix = if String.equal single.args "" then "" else " " in
           if String.equal line single.word then
-            let siblings = get_siblings line in
-            if List.length siblings > 1 then
-              match cycle_step ~direction ~items:siblings line with
-              | Some next_word ->
-                  let next_entry =
-                    List.find (fun e -> String.equal e.word next_word) catalog
-                  in
-                  let suffix = if String.equal next_entry.args "" then "" else " " in
-                  Some (with_body body ("/" ^ next_word ^ suffix))
-              | None -> None
-            else
-              let suffix = if String.equal single.args "" then "" else " " in
-              if String.equal suffix "" then None
-              else Some (with_body body ("/" ^ single.word ^ suffix))
+            if String.equal suffix "" then None
+            else Some (with_body body ("/" ^ single.word ^ suffix))
           else
-            let suffix = if String.equal single.args "" then "" else " " in
             Some (with_body body ("/" ^ single.word ^ suffix))
       | entries ->
           let words = List.map (fun e -> e.word) entries in
@@ -528,21 +508,8 @@ let autocomplete ?(direction = Next) ?(keeper_names = []) text =
         String.sub line (word_len + 1) (String.length line - word_len - 1)
       in
       let options = known_sub_arguments ~keeper_names word in
-      if options = [] then begin
-        if String.equal (String.trim after_space) "" then
-          let siblings = get_siblings word in
-          if List.length siblings > 1 then
-            match cycle_step ~direction ~items:siblings word with
-            | Some next_word ->
-                let next_entry =
-                  List.find (fun e -> String.equal e.word next_word) catalog
-                in
-                let suffix = if String.equal next_entry.args "" then "" else " " in
-                Some (with_body body ("/" ^ next_word ^ suffix))
-            | None -> None
-          else None
-        else None
-      end else if String.equal (String.trim after_space) "" then
+      if options = [] then None
+      else if String.equal (String.trim after_space) "" then
         let chosen =
           match direction with
           | Next -> List.hd options
@@ -593,9 +560,7 @@ let is_slash_navigable ?(keeper_names = []) text =
       | [] -> false
       | [ single ] ->
           if not (String.equal line single.word) then true
-          else
-            let siblings = get_siblings line in
-            List.length siblings > 1 || not (String.equal single.args "")
+          else not (String.equal single.args "")
       | _ :: _ -> true
     else
       let word_len = String.index line ' ' in
@@ -604,11 +569,7 @@ let is_slash_navigable ?(keeper_names = []) text =
         String.sub line (word_len + 1) (String.length line - word_len - 1)
       in
       let options = known_sub_arguments ~keeper_names word in
-      if options = [] then
-        if String.equal (String.trim after_space) "" then
-          let siblings = get_siblings word in
-          List.length siblings > 1
-        else false
+      if options = [] then false
       else if String.equal (String.trim after_space) "" then true
       else if String.ends_with ~suffix:" " after_space then false
       else

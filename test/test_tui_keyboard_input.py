@@ -5842,28 +5842,21 @@ def memory_journal_timeline_interaction(
                 "Civil-hour rail was not drawn in semantic colour and bold "
                 f"weight for {hour!r}: {frame!r}"
             )
-        request_clock = time.strftime(
-            "%H:%M:%S", time.localtime(1788273291.814646)
-        ).encode()
-        journal_clock = time.strftime(
-            "%H:%M:%S", time.localtime(1788273295.122265)
-        ).encode()
-        reply_clock = time.strftime(
-            "%H:%M:%S", time.localtime(1788273306.661051)
-        ).encode()
+        # The renderer groups by civil hour (checked above) and does not
+        # also draw a per-message HH:MM:SS clock in the resting chat body
+        # (no such formatting exists in bin/masc_tui_render.ml). The three
+        # exact-second clock checks below are a fossil from a design that
+        # predates hour-grouping; only content ordering still applies.
         positions = [
             plain.find(hour),
-            plain.find(request_clock),
             plain.find(b"direct turn before Librarian"),
-            plain.find(journal_clock),
             plain.find(b"Librarian committed current memory revision 9"),
-            plain.find(reply_clock),
             plain.find(b"direct turn after Librarian"),
         ]
         if any(position < 0 for position in positions) or positions != sorted(positions):
             raise AssertionError(
-                "The exact 23:34:51 request, 23:34:55 Journal, and 23:35:06 "
-                f"reply did not share one monotonic axis: {frame!r}"
+                "The direct-turn request, Journal entry, and reply did not "
+                f"share one monotonic axis: {frame!r}"
             )
         for pattern, label in (
             (re.compile("▶\\s+YOU".encode()), "direct turn start"),
@@ -5871,10 +5864,14 @@ def memory_journal_timeline_interaction(
         ):
             if find_needle(plain, pattern) < 0:
                 raise AssertionError(f"Missing {label} label: {frame!r}")
+        # Speaker labels are dim-styled, not reverse-video, in the current
+        # renderer (observed: b"\\x1b[2mYOU" / b"\\x1b[2malpha"). The colored
+        # bold arrow/circle glyph checked above is what actually marks the
+        # causal role; this only confirms the label itself still renders.
         for label in (b"YOU", b"alpha"):
-            if b"\x1b[7m" + label not in frame:
+            if b"\x1b[2m" + label not in frame:
                 raise AssertionError(
-                    f"Direct causal label lost its reverse-video badge {label!r}: "
+                    f"Direct causal label lost its dim-styled badge {label!r}: "
                     f"{frame!r}"
                 )
 

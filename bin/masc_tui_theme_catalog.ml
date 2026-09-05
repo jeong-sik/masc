@@ -454,6 +454,7 @@ let clean_hex raw =
   in
   let hex = String.lowercase_ascii hex in
   if String.length hex <> 6 then None
+  else if not (String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) hex) then None
   else
     match hex_pair hex 0, hex_pair hex 2, hex_pair hex 4 with
     | Some _, Some _, Some _ -> Some hex
@@ -543,8 +544,9 @@ let theme_dirs_for_base base_path =
     Config_dir_resolver.resolve_with { inputs with env_base_path = Some base_path }
   in
   let root = resolution.Config_dir_resolver.config_root.path in
-  [ Filename.concat base_path "config/themes"
-  ; Filename.concat root "themes"
+  (* Local root themes take precedence over project config/themes *)
+  [ Filename.concat root "themes"
+  ; Filename.concat base_path "config/themes"
   ]
 ;;
 
@@ -556,11 +558,19 @@ let all ?base_path () =
   in
   let dirs = theme_dirs_for_base base in
   let from_files = List.concat_map load_dir dirs in
-  let file_names = List.map (fun s -> s.name) from_files in
+  (* Deduplicate from_files by name preserving earlier directory priority *)
+  let from_files_dedup =
+    List.fold_left
+      (fun acc s ->
+        if List.exists (fun e -> String.equal e.name s.name) acc then acc
+        else acc @ [ s ])
+      [] from_files
+  in
+  let file_names = List.map (fun s -> s.name) from_files_dedup in
   let bundled_filtered =
     List.filter (fun s -> not (List.mem s.name file_names)) bundled
   in
-  bundled_filtered @ from_files
+  bundled_filtered @ from_files_dedup
 ;;
 
 let names ?base_path () =

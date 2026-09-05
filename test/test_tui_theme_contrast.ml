@@ -583,6 +583,32 @@ let test_load_dungeon_gold_toml () =
     check bool "is dark theme" false (Catalog.light scheme)
 ;;
 
+let test_clean_hex_rejects_underscores () =
+  let content = {|
+name = "bad-hex"
+[palette]
+base00 = "1_2_3_"
+base01 = "010101"
+base02 = "020202"
+base03 = "030303"
+base04 = "040404"
+base05 = "050505"
+base06 = "060606"
+base07 = "070707"
+base08 = "080808"
+base09 = "090909"
+base0a = "0a0a0a"
+base0b = "0b0b0b"
+base0c = "0c0c0c"
+base0d = "0d0d0d"
+base0e = "0e0e0e"
+base0f = "0f0f0f"
+|} in
+  match Catalog.of_toml_content content with
+  | Ok _ -> Alcotest.fail "Expected clean_hex to reject underscores"
+  | Error _ -> ()
+;;
+
 let () =
   Alcotest.run "masc-tui-theme-contrast"
     [ ( "lift_colours"
@@ -620,6 +646,8 @@ let () =
             test_of_toml_content_parses_valid_theme
         ; Alcotest.test_case "of_toml_content rejects missing slot" `Quick
             test_of_toml_content_rejects_missing_slot
+        ; Alcotest.test_case "clean_hex rejects underscores" `Quick
+            test_clean_hex_rejects_underscores
         ; Alcotest.test_case "dungeon-gold discovered from config/themes" `Quick
             test_load_dungeon_gold_toml
         ] )

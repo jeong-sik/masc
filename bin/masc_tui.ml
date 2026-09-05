@@ -15293,6 +15293,7 @@ and is loaded on demand through keeper_skill.
               end)
        | Some "r" | Some "R" ->
            state.pending_approval_action <- None;
+           Masc_tui_theme_choice.invalidate_cache ();
            load_local_workspace_if_safe state base_path;
            let host = server_peer_host in
            let port = state.port in
@@ -16888,16 +16889,17 @@ and is loaded on demand through keeper_skill.
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
        | Some "f" | Some "F"
          when state.view = Config && state.config_pane = Config_themes ->
-           let next =
-             match state.theme_filter with
-             | `All -> `Dark
-             | `Dark -> `Light
-             | `Light -> `All
-           in
-           state.theme_filter <- next;
-           let count = List.length (filtered_theme_entries ()) in
-           state.theme_cursor <- min state.theme_cursor (max 0 (count - 1));
-           preview_theme_under_cursor ()
+            let next =
+              match state.theme_filter with
+              | `All -> `Dark
+              | `Dark -> `Light
+              | `Light -> `All
+            in
+            state.theme_filter <- next;
+            let count = List.length (filtered_theme_entries ()) in
+            state.theme_cursor <- min state.theme_cursor (max 0 (count - 1));
+            if Option.is_some state.theme_before_preview then
+              preview_theme_under_cursor ()
        | Some "f" | Some "F"
          when state.view = Board && state.board_mode <> Board_compose ->
            (* All, then each hearth the unnarrowed list showed, busiest first,

@@ -15408,10 +15408,14 @@ let render_themes (state : state) =
       (chip "Dark" (state.theme_filter = `Dark) dark_count)
       (chip "Light" (state.theme_filter = `Light) light_count)
   in
-  box_line_styled buf cols ~style:Ansi.dim
-    ("  " ^ filter_tag ^ "  ·  "
-     ^ (if lift_on then "native 7/7=no lift · lift N/7=N raised"
-        else "native 7/7=all pass · N/7 low=below 4.5:1"));
+  let explanation =
+    if cols >= 92 then
+      "  ·  "
+      ^ (if lift_on then "native 7/7=no lift · lift N/7=N raised"
+         else "native 7/7=all pass · N/7 low=below 4.5:1")
+    else ""
+  in
+  box_line_styled buf cols ~style:Ansi.dim ("  " ^ filter_tag ^ explanation);
   let chosen = state.theme_choice in
   List.iteri
     (fun index (entry : Theme_choice.entry) ->
@@ -15448,20 +15452,16 @@ let render_themes (state : state) =
   if show_sample then begin
     box_divider buf cols;
     box_line buf cols
-      (fit_width
-         (Printf.sprintf "  Sample: %s[● Ok]%s  %s[▲ Warn]%s  %s[× Bad]%s  %s[◆ Info]%s  %s[@keeper]%s  %s[⚡ tool]%s"
-            (Theme.ok ()) Ansi.reset
-            (Theme.warn ()) Ansi.reset
-            (Theme.bad ()) Ansi.reset
-            (Theme.info ()) Ansi.reset
-            (Theme.keeper ()) Ansi.reset
-            (Theme.tool ()) Ansi.reset)
-         (max 1 (cols - 1)));
+      (Printf.sprintf "  Sample: %s[● Ok]%s  %s[▲ Warn]%s  %s[× Bad]%s  %s[◆ Info]%s  %s[@keeper]%s  %s[⚡ tool]%s"
+         (Theme.ok ()) Ansi.reset
+         (Theme.warn ()) Ansi.reset
+         (Theme.bad ()) Ansi.reset
+         (Theme.info ()) Ansi.reset
+         (Theme.keeper ()) Ansi.reset
+         (Theme.tool ()) Ansi.reset);
     box_line buf cols
-      (fit_width
-         (Printf.sprintf "  Text:   %sThe quick brown fox jumps over the lazy dog (0123456789)%s"
-            (Theme.text ()) Ansi.reset)
-         (max 1 (cols - 1)));
+      (Printf.sprintf "  Text:   %sThe quick brown fox jumps over the lazy dog (0123456789)%s"
+         (Theme.text ()) Ansi.reset);
   end;
   box_line_styled buf cols ~style:Ansi.dim
     (match chosen with

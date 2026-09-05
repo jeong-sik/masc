@@ -996,11 +996,13 @@ let test_default_projections_single_pass_matches_individual_outputs () =
         (Activity_graph.emit config ~kind:"task.claimed"
            ~actor:(Activity_graph.entity ~kind:"agent" "claude")
            ~subject:(Activity_graph.entity ~kind:"task" "task-001")
+           ~payload:(`Assoc [ ("task_id", `String "task-001") ])
            ());
       ignore
         (Activity_graph.emit config ~kind:"task.done"
            ~actor:(Activity_graph.entity ~kind:"agent" "claude")
            ~subject:(Activity_graph.entity ~kind:"task" "task-001")
+           ~payload:(`Assoc [ ("task_id", `String "task-001") ])
            ());
       let single = Activity_graph.default_projections config in
       let expected_events =

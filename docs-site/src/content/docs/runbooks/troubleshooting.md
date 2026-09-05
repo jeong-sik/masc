@@ -35,12 +35,12 @@ lsof -i :8935
 kill <PID>
 ```
 
-Or start on a different port and point the TUI at the same one. The server
-port comes from the `MASC_HTTP_PORT` environment variable or
-`start-masc.sh --port` (the `masc` binary itself takes no `--port`):
+Or start on a different port and point the TUI at the same one. The server's
+default port comes from `MASC_HTTP_PORT`, or pass `masc --port` on the
+command line:
 
 ```bash
-./start-masc.sh --http --base-path ~/masc --port 8936
+masc --base-path ~/masc --port 8936
 masc-tui --base-path ~/masc --port 8936
 ```
 

@@ -32,7 +32,8 @@ network_mode = "none"        # "none" | "inherit" | "policy"
 
 `network_mode` 는 프로필과 별개이고 필수입니다. `none` 은 게스트에 네트워크를 전혀
 주지 않습니다 — 웹 검색이나 `git push` 를 하는 Keeper 는 `inherit` 가 필요합니다.
-`policy` 는 그 중간으로, 이 서버가 소유한 허용 목록 프록시에만 닿을 수 있습니다.
+`policy` 는 그 중간으로, 이 서버가 소유한 허용 목록 프록시에만 닿을 수 있습니다
+(지금 이 모드를 실제로 지원하는 백엔드는 `apple_container` 마이크로VM뿐입니다).
 `docker` 와 `microvm` 의 기본값은 `none` 이라, `masc keeper-create` 는 대신 정하지
 않고 이 값을 안 주면 진행을 거부합니다.
 

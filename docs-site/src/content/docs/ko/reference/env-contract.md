@@ -26,6 +26,7 @@ description: MASC가 읽는 환경 변수의 범위와 적용 시점.
 | `MASC_CONFIG_DIR` | 설정 루트를 따로 지정 |
 | `MASC_HOST` | 서버 바인딩 주소 |
 | `MASC_HTTP_PORT` | HTTP·MCP 포트 |
+| `MASC_LOG_LEVEL` | 로그 레벨(`debug`, `info`, `warn`, `error`) |
 | `MASC_GRPC_PORT` · `MASC_GRPC_ENABLED` · `MASC_WS_ENABLED` | gRPC·WebSocket 전송 on/off |
 | `MASC_STARTUP_WATCHDOG_SEC` | 부팅 와치독 |
 

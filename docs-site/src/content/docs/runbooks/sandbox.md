@@ -33,7 +33,8 @@ network_mode = "none"        # "none" | "inherit" | "policy"
 `network_mode` is separate from the profile and is required. `none` gives the
 guest no network at all — a Keeper that does web search or `git push` needs
 `inherit`. `policy` is the mode between the two: the guest reaches an allowlist
-proxy this server owns and nothing else. The default for `docker` and `microvm`
+proxy this server owns and nothing else (today only the `apple_container`
+microVM backend carries this mode). The default for `docker` and `microvm`
 is `none`, which is why `masc keeper-create` refuses to proceed without the
 flag rather than choosing for you.
 

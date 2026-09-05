@@ -34,9 +34,9 @@ flowchart TD
     end
 
     subgraph Sidecar ["Per-keeper event sidecar"]
-        RET -.->|"retrieval record"| EV["<keeper>.memory-events.jsonl"]
-        REC["Retract"] -.->|"citation chain"| EV
-        REV["Revise"] -.->|"revision record"| EV
+        RET -.->|"retrieved"| EV["<keeper>.memory-events.jsonl"]
+        TOOL["Tool call carries the id"] -.->|"cited"| EV
+        REV["Revision (continues and drops)"] -.->|"revised"| EV
     end
 
     subgraph Facts ["Current fact store"]
@@ -45,15 +45,15 @@ flowchart TD
 ```
 
 ### 1. Typed sidecar event stream
-Each keeper appends memory-use events to one JSONL sidecar (`<keeper>.memory-events.jsonl`):
-* `retrieval`: one per fact returned by `keeper_memory_search`.
-* `citation`: a chain citing the prior fact, on retract or update.
-* `revision`: on a formal revision of an existing claim's boundary or wording.
+Each keeper appends memory-use events to one JSONL sidecar (`<keeper>.memory-events.jsonl`). The closed set of kinds:
+* `retrieved`: the fact was among the results `keeper_memory_search` returned for a query.
+* `cited`: the fact's `memory_id` was a typed argument of a tool call. Ids found by scanning free text do not count.
+* `revised`: the librarian wrote a new claim that continues this fact and dropped this one; `superseded_by` carries the new fact's id.
 
-The API row and the terminal UI show, per fact, what the keeper actually did with it — retrieved, cited, revised — from this sidecar.
+A dropped fact keeps its events — events outlive facts, and readers attach them only to facts that still exist. The API row and the terminal UI show, per fact, what the keeper actually did with it — retrieved, cited, revised — from this sidecar.
 
 ### 2. Dead counters removed
-The static integer counter (`fact.reinforcement`) is gone from the fact store. Confidence labels in the terminal UI are computed from actual retrieval and citation frequency, not from how many times a fact happened to be re-stored.
+The static integer counter (`fact.reinforcement`) is gone from the fact store. A fact's row in the terminal UI shows the counts gathered from these events — retrieved, distinct days, last retrieval, cited, revised-from — as they are.
 
 ---
 

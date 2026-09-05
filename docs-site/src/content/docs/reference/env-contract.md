@@ -26,6 +26,7 @@ Default policy: every environment variable is `boot_static`. Live tuning goes th
 | `MASC_CONFIG_DIR` | Selects a different config root |
 | `MASC_HOST` | Server bind address |
 | `MASC_HTTP_PORT` | HTTP and MCP port |
+| `MASC_LOG_LEVEL` | Log level (`debug`, `info`, `warn`, `error`) |
 | `MASC_GRPC_PORT` · `MASC_GRPC_ENABLED` · `MASC_WS_ENABLED` | gRPC/WebSocket transports |
 | `MASC_STARTUP_WATCHDOG_SEC` | Boot watchdog |
 

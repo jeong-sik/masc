@@ -34,9 +34,9 @@ flowchart TD
     end
 
     subgraph Sidecar ["키퍼별 이벤트 사이드카"]
-        RET -.->|"회수 기록"| EV["<keeper>.memory-events.jsonl"]
-        REC["주장 철회 (Retract)"] -.->|"인용 체인 기록"| EV
-        REV["주장 개정 (Revise)"] -.->|"개정 기록"| EV
+        RET -.->|"retrieved"| EV["<keeper>.memory-events.jsonl"]
+        TOOL["도구 호출 인자에 id 포함"] -.->|"cited"| EV
+        REV["주장 개정 (잇고 버림)"] -.->|"revised"| EV
     end
 
     subgraph Facts ["현재 사실 저장소"]
@@ -45,15 +45,15 @@ flowchart TD
 ```
 
 ### 1. 타입화된 사이드카 이벤트 스트림
-각 키퍼는 기억 사용 사건을 단일 JSONL 사이드카(`<keeper>.memory-events.jsonl`)에 순차 기록합니다:
-* `retrieval`: `keeper_memory_search` 결과로 반환된 사실마다 1건.
-* `citation`: 철회(retract) 또는 업데이트 시 이전 사실을 인용한 체인.
-* `revision`: 기존 주장의 경계나 문장을 정식 개정할 때.
+각 키퍼는 기억 사용 사건을 단일 JSONL 사이드카(`<keeper>.memory-events.jsonl`)에 순차 기록합니다. 종류는 닫힌 세 가지입니다:
+* `retrieved`: 사실이 `keeper_memory_search`가 어떤 질의에 대해 반환한 결과에 들어 있을 때 1건.
+* `cited`: 사실의 `memory_id`가 도구 호출의 타입된 인자로 실렸을 때. 자유 텍스트를 훑어 찾은 id는 세지 않습니다.
+* `revised`: librarian이 이 사실을 잇는 새 주장을 쓰고 이것을 버릴 때. `superseded_by`에 새 사실의 id가 남습니다.
 
-API 행과 터미널 UI는 각 사실에 대해 키퍼가 실제로 무엇을 했는지(회수·인용·개정) 이 사이드카에서 보여 줍니다.
+버려진 사실의 사건도 지워지지 않습니다 — 사건은 사실보다 오래 남고, 읽는 쪽은 살아 있는 사실에만 붙여 봅니다. API 행과 터미널 UI는 각 사실에 대해 키퍼가 실제로 무엇을 했는지(회수·인용·개정) 이 사이드카에서 보여 줍니다.
 
 ### 2. 정적 카운터 제거
-사실 저장소에서 의미를 잃은 정적 정수 카운터(`fact.reinforcement`)를 걷어냈습니다. 터미널 UI의 신뢰도 표기는 중복 저장 횟수가 아니라 실제 검색·인용 빈도로 계산됩니다.
+사실 저장소에서 의미를 잃은 정적 정수 카운터(`fact.reinforcement`)를 걷어냈습니다. 터미널 UI의 사실 행에는 이 사건들에서 모은 회수 횟수·회수한 날 수·마지막 회수·인용 횟수·개정 원본 수가 그대로 표시됩니다.
 
 ---
 

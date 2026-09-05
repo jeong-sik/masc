@@ -34,12 +34,11 @@ lsof -i :8935
 kill <PID>
 ```
 
-또는 다른 포트로 켜고 TUI 도 같은 포트로 맞추세요. 서버 포트는 `MASC_HTTP_PORT`
-환경 변수나 `start-masc.sh --port` 로 정합니다(`masc` 바이너리 자체는 `--port` 를
-받지 않습니다).
+또는 다른 포트로 켜고 TUI 도 같은 포트로 맞추세요. 서버 기본 포트는 `MASC_HTTP_PORT`
+환경 변수로 바꾸거나 명령줄에서 `masc --port` 로 지정합니다.
 
 ```bash
-./start-masc.sh --http --base-path ~/masc --port 8936
+masc --base-path ~/masc --port 8936
 masc-tui --base-path ~/masc --port 8936
 ```
 

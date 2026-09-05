@@ -138,8 +138,8 @@ let check_refusal_names_the_missing_program () =
   | Error (Process_eio.Executable_not_found named) ->
     check string "the refusal names argv[0] as given" missing_program named
   | Error
-      ((Process_eio.Empty_argv | Process_eio.Spawn_failed _ | Process_eio.Child_setup_failed _) as
-       refusal) ->
+      (( Process_eio.Empty_argv | Process_eio.Spawn_failed _ | Process_eio.Child_setup_failed _
+       | Process_eio.Cwd_unavailable _ ) as refusal) ->
     failf "expected Executable_not_found, got %s" (Process_eio.spawn_refusal_to_string refusal)
   | Ok (status, _stdout, stderr) ->
     failf "expected a refusal, got %s with stderr %S" (status_to_string status) stderr
@@ -188,6 +188,25 @@ let test_or_refusal_carries_the_child_setup_text_eio () =
     check bool "eio's text is carried" true (String.length detail > 0)
   | Error refusal ->
     failf "expected Child_setup_failed, got %s" (Process_eio.spawn_refusal_to_string refusal)
+  | Ok (status, _stdout, stderr) ->
+    failf "expected a refusal, got %s with stderr %S" (status_to_string status) stderr
+
+(* Eio path: the cwd is opened before the fork (spawn_unix on both
+   backends), so a directory that does not exist is a refusal with eio's
+   own Fs error, not a 127 with text. *)
+let test_or_refusal_names_the_missing_cwd_eio () =
+  with_runtime_reset @@ fun () ->
+  match
+    Process_eio.run_argv_with_status_split_or_refusal
+      ~cwd:"/definitely/missing/process-eio-cwd"
+      [ "/bin/sh"; "-c"; "exit 0" ]
+  with
+  | Error (Process_eio.Cwd_unavailable { cwd; error = Eio.Fs.Not_found _ }) ->
+    check bool "the refusal names the directory" true
+      (contains cwd "definitely/missing/process-eio-cwd")
+  | Error refusal ->
+    failf "expected Cwd_unavailable Not_found, got %s"
+      (Process_eio.spawn_refusal_to_string refusal)
   | Ok (status, _stdout, stderr) ->
     failf "expected a refusal, got %s with stderr %S" (status_to_string status) stderr
 
@@ -1093,6 +1112,9 @@ let () =
           test_case "argv-with-status-split-or-refusal-refuses-empty-argv-both-paths"
             `Quick
             test_or_refusal_refuses_empty_argv_on_both_paths;
+          test_case "argv-with-status-split-or-refusal-names-the-missing-cwd-eio"
+            `Quick
+            test_or_refusal_names_the_missing_cwd_eio;
           test_case "argv-with-status-fallback-enforces-timeout" `Quick
             test_run_argv_with_status_fallback_enforces_timeout;
           test_case "argv-with-status-fallback-observes-timeout" `Quick

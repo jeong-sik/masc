@@ -389,8 +389,8 @@ let check_executable_not_found label (a : Vd.attempt) =
   | Vd.Spawn_refused (Process_eio.Executable_not_found program) ->
     check string (label ^ ": the refusal names the absent program") missing_program program
   | Vd.Spawn_refused
-      ((Process_eio.Empty_argv | Process_eio.Spawn_failed _ | Process_eio.Child_setup_failed _) as
-       refusal) ->
+      (( Process_eio.Empty_argv | Process_eio.Spawn_failed _ | Process_eio.Child_setup_failed _
+       | Process_eio.Cwd_unavailable _ ) as refusal) ->
     failf "%s: expected Executable_not_found, got %s" label
       (Process_eio.spawn_refusal_to_string refusal)
   | Vd.Exited_nonzero _
@@ -495,7 +495,8 @@ let test_downscale_oversized_png_live () =
         match a.failure with
         | Vd.Spawn_refused (Process_eio.Executable_not_found _) -> ()
         | Vd.Spawn_refused
-            (Process_eio.Empty_argv | Process_eio.Spawn_failed _ | Process_eio.Child_setup_failed _)
+            ( Process_eio.Empty_argv | Process_eio.Spawn_failed _ | Process_eio.Child_setup_failed _
+            | Process_eio.Cwd_unavailable _ )
         | Vd.Exited_nonzero _
         | Vd.Timed_out _
         | Vd.Signaled _

@@ -248,6 +248,13 @@ type spawn_refusal =
           ["<action>: <strerror>"] over a pipe and the parent raises
           [Failure] with that text, so the errno reaches here already as
           text. [detail] is that text, carried, not parsed. *)
+  | Cwd_unavailable of
+      { cwd : string
+      ; error : Eio.Fs.error
+      }
+      (** Eio path only: the working directory the caller asked for could
+          not be opened before the fork ([Not_found], [Permission_denied]).
+          The Unix fallback ignores [?cwd], so it never reports this. *)
 
 val spawn_refusal_to_string : spawn_refusal -> string
 

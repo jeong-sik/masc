@@ -223,8 +223,19 @@ let create_process_env prog argv env stdin_fd stdout_fd stderr_fd =
      [Failure] with that text (posix low_level.ml:585, linux
      low_level.ml:628). The errno is already text there, so
      [Child_setup_failed] carries the text as data and nothing here parses it.
+   - A requested cwd is opened before the fork ([spawn_unix], posix
+     process.ml:35-40 via [Err.run], linux eio_linux.ml:229-233 via
+     [with_dir]); [ENOENT] and [EACCES]/[EPERM] arrive as
+     [Eio.Io (Fs.E (Not_found | Permission_denied))] and any other errno as
+     [Eio.Io (Exn.X (Eio_unix.Unix_error ...))] (posix err.ml:16-25, linux
+     err.ml:10-17). The [Fmt.invalid_arg "cwd is not an OS directory!"] there
+     cannot fire: every cwd this module passes derives from [Eio.Stdenv.fs].
    [Eio.Process.Child_error] is raised by [run]/[parse_out] after the child
    exits, never by [spawn].
+   Nothing of this module's own runs a [failwith] inside that window: between
+   the [try] and the [phase_ref := Command] flip in [spawn_and_drain_both]
+   the only calls are [Eio.Process.pipe] twice and [Eio.Process.spawn], so a
+   [Failure] seen in the [Spawn] phase is eio's child report and nothing else.
 
    Unix fallback ([Unix.create_process_env], OCaml 5.5 otherlibs/unix/spawn.c):
    - with [posix_spawnp] (macOS, glibc) every failure is
@@ -246,6 +257,10 @@ type spawn_refusal =
       { executable : string
       ; detail : string
       }
+  | Cwd_unavailable of
+      { cwd : string
+      ; error : Eio.Fs.error
+      }
 
 let spawn_refusal_to_string = function
   | Empty_argv -> "argv is empty"
@@ -255,6 +270,9 @@ let spawn_refusal_to_string = function
       Printf.sprintf "spawn of %S failed: %s" executable (Unix.error_message error)
   | Child_setup_failed { executable; detail } ->
       Printf.sprintf "child for %S could not start: %s" executable detail
+  | Cwd_unavailable { cwd; error } ->
+      Printf.sprintf "cwd %s could not be opened: %s" cwd
+        (Format.asprintf "%a" Eio.Exn.pp_err (Eio.Fs.E error))
 
 (* True while the child does not exist yet. [phase_ref] moves to [Command]
    right after [Eio.Process.spawn] returns, so an exception seen in [Spawn]
@@ -1560,6 +1578,14 @@ let run_argv_with_status_split_resolving ?timeout_sec ?env ?cwd
                 Error (Child_setup_failed { executable; detail }, exn)
             | Unix.Unix_error (error, _, _) as exn
               when in_spawn_phase phase_ref && not (should_retry_unix_fallback exn) ->
+                Error (Spawn_failed { executable; error }, exn)
+            | Eio.Io (Eio.Fs.E error, _) as exn when in_spawn_phase phase_ref ->
+                Error
+                  ( Cwd_unavailable
+                      { cwd = Format.asprintf "%a" Eio.Path.pp effective_cwd; error }
+                  , exn )
+            | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (error, _, _)), _) as exn
+              when in_spawn_phase phase_ref ->
                 Error (Spawn_failed { executable; error }, exn)
             | exn ->
                 if should_retry_unix_fallback exn then (

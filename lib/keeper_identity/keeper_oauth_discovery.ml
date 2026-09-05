@@ -159,14 +159,22 @@ let require ~url ~key value =
 let fetch_with_root_fallback ~get ~url ~segment ~base_url =
   match fetch_json ~get ~url with
   | Ok pairs -> Ok pairs
-  | Error (Not_published _) as orig_error ->
+  | Error (Not_published _ as not_pub) ->
+    let orig_error = Error not_pub in
     (match root_well_known_url ~segment base_url with
-     | Ok root_url when not (String.equal root_url url) ->
-       (match fetch_json ~get ~url:root_url with
-        | Ok pairs -> Ok pairs
-        | Error _ -> orig_error)
-     | _ -> orig_error)
-  | Error other -> Error other
+     | Error _ -> orig_error
+     | Ok root_url ->
+       if String.equal root_url url then orig_error
+       else
+         (match fetch_json ~get ~url:root_url with
+          | Ok pairs -> Ok pairs
+          | Error (Not_published _ | Transport _ | Malformed _
+                 | Bad_mcp_url _ | No_authorization_server _) ->
+            orig_error))
+  | Error (Bad_mcp_url _ as err) -> Error err
+  | Error (Transport _ as err) -> Error err
+  | Error (Malformed _ as err) -> Error err
+  | Error (No_authorization_server _ as err) -> Error err
 
 let discover ?(get = default_get) ?(ask = default_ask) ~mcp_url () =
   (* Asked before computed. Of 41 live MCP servers measured on 2026-08-27,

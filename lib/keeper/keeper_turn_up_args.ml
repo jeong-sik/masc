@@ -261,7 +261,7 @@ let validate_no_unknown_keys args =
 (* The Docker dispatchability probe [parse] runs for a Docker profile. The
    real one shells out to [docker info] and inspects the image; the test
    suite has no daemon and passes its own. *)
-let docker_preflight_default ?image ~timeout_sec =
+let docker_preflight_default ?image ~timeout_sec () =
   Keeper_sandbox_runtime.docker_preflight ?image ~timeout_sec ()
 ;;
 
@@ -403,6 +403,7 @@ let parse
                   (Env_config_sandbox.Shell_timeout.timeout_sec
                      ~bucket:Env_config_sandbox.Shell_timeout.Io
                      ())
+                ()
             with
             | None -> None
             | Some preflight ->

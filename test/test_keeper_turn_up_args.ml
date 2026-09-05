@@ -84,7 +84,7 @@ let with_test_context f =
    [docker info] on every case. [None] is what the real probe answers when
    the preflight master switch is off. The cases that pin the probe itself
    pass their own. *)
-let no_daemon_in_this_suite ?image:_ ~timeout_sec:_ = None
+let no_daemon_in_this_suite ?image:_ ~timeout_sec:_ () = None
 
 let parse_stating_a_profile ctx json =
   let json =
@@ -1532,7 +1532,7 @@ let test_docker_profile_is_refused_when_its_preflight_fails () =
   with_test_context
   @@ fun ctx ->
   let probes = ref 0 in
-  let docker_preflight ?image:_ ~timeout_sec:_ =
+  let docker_preflight ?image:_ ~timeout_sec:_ () =
     incr probes;
     Some (preflight_fixture ~ok:false)
   in
@@ -1555,7 +1555,7 @@ let test_docker_profile_is_admitted_when_its_preflight_passes () =
   with_test_context
   @@ fun ctx ->
   let probes = ref 0 in
-  let docker_preflight ?image:_ ~timeout_sec:_ =
+  let docker_preflight ?image:_ ~timeout_sec:_ () =
     incr probes;
     Some (preflight_fixture ~ok:true)
   in
@@ -1574,7 +1574,7 @@ let test_docker_preflight_is_consulted_only_for_the_docker_profile () =
   with_test_context
   @@ fun ctx ->
   let probes = ref 0 in
-  let switched_off ?image:_ ~timeout_sec:_ =
+  let switched_off ?image:_ ~timeout_sec:_ () =
     incr probes;
     None
   in
@@ -1585,7 +1585,7 @@ let test_docker_preflight_is_consulted_only_for_the_docker_profile () =
        "docker with the preflight switched off must be admitted: %s"
        (Keeper_types_profile.tool_result_body result));
   check int "docker consulted the probe" 1 !probes;
-  let failing ?image:_ ~timeout_sec:_ =
+  let failing ?image:_ ~timeout_sec:_ () =
     incr probes;
     Some (preflight_fixture ~ok:false)
   in
@@ -1606,7 +1606,7 @@ let test_docker_preflight_receives_sandbox_image_from_profile_defaults () =
     Config_dir_resolver.keepers_dir_for_base_path
       ~base_path:ctx.config.Workspace.base_path
   in
-  Masc_domain.mkdir_p keepers_dir;
+  Fs_compat.mkdir_p keepers_dir;
   let toml_path = Filename.concat keepers_dir (keeper_name ^ ".toml") in
   let toml_content =
     {|
@@ -1619,7 +1619,7 @@ network_mode = "none"
   Out_channel.with_open_bin toml_path (fun oc ->
     Out_channel.output_string oc toml_content);
   let probed_image = ref None in
-  let docker_preflight ?image ~timeout_sec:_ =
+  let docker_preflight ?image ~timeout_sec:_ () =
     probed_image := image;
     Some (preflight_fixture ~ok:true)
   in
@@ -1637,7 +1637,7 @@ network_mode = "none"
     check (option string) "parsed profile_defaults retains sandbox_image"
       (Some "masc-keeper-sandbox:custom-tag")
       parsed.profile_defaults.sandbox_image;
-    let failing_docker_preflight ?image ~timeout_sec:_ =
+    let failing_docker_preflight ?image ~timeout_sec:_ () =
       probed_image := image;
       Some (preflight_fixture ~ok:false)
     in

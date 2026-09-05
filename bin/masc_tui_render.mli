@@ -163,7 +163,7 @@ type change_context = {
   ctx_goal_title : string option;
   ctx_turn : int option;
   ctx_comment : string option;
-  ctx_pr_number : string option;
+  ctx_pr : Masc_tui_pr_ref.t option;
 }
 val resolve_change_context :
   Masc_tui_types.state -> path_opt:string option -> change_context

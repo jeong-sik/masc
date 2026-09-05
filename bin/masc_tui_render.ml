@@ -10753,7 +10753,7 @@ let fusion_tool_actor_text actor =
   match actor.fta_phase with
   | Fusion_tool_panel -> "panel/" ^ Terminal_text.single_line actor.fta_identity
   | Fusion_tool_judge role ->
-      Printf.sprintf "judge/%s/%s" (Terminal_text.single_line role)
+      Printf.sprintf "judge/%s/%s" (fusion_judge_role_label role)
         (Terminal_text.single_line actor.fta_identity)
 
 let fusion_tool_agent_suffix actor agent_name =
@@ -11356,7 +11356,10 @@ type change_context = {
   ctx_goal_title : string option;
   ctx_turn : int option;
   ctx_comment : string option;
-  ctx_pr_number : string option;
+  ctx_pr : Masc_tui_pr_ref.t option;
+      (** An explicit PR reference -- a pull link or a PR-N token -- found in
+          the task title, then its description, then the chat note. A bare
+          [#n] is a list item as often as a PR and is not read as one. *)
 }
 
 let file_change_matches_path (path : string) (fc : Masc.Tui_decode.file_change) =
@@ -11365,31 +11368,6 @@ let file_change_matches_path (path : string) (fc : Masc.Tui_decode.file_change) 
   | Masc.Tui_decode.Fc_in_bundle { bundle_path } -> String.equal bundle_path path
   | Masc.Tui_decode.Fc_at_absolute_path { path = p } ->
       String.equal p path || String.equal (Filename.basename p) (Filename.basename path)
-
-let extract_pr_number (s : string) : string option =
-  let n = String.length s in
-  let rec scan i =
-    if i >= n then None
-    else if s.[i] = '#' && i + 1 < n && s.[i + 1] >= '0' && s.[i + 1] <= '9' then
-      let start_digits = i + 1 in
-      let rec digits j =
-        if j < n && s.[j] >= '0' && s.[j] <= '9' then digits (j + 1)
-        else j
-      in
-      let end_digits = digits start_digits in
-      Some (String.sub s start_digits (end_digits - start_digits))
-    else if (i + 3 <= n && (String.sub s i 3 = "PR-" || String.sub s i 3 = "pr-"))
-            && i + 3 < n && s.[i + 3] >= '0' && s.[i + 3] <= '9' then
-      let start_digits = i + 3 in
-      let rec digits j =
-        if j < n && s.[j] >= '0' && s.[j] <= '9' then digits (j + 1)
-        else j
-      in
-      let end_digits = digits start_digits in
-      Some (String.sub s start_digits (end_digits - start_digits))
-    else scan (i + 1)
-  in
-  scan 0
 
 let first_line_summary ?(max_len = 34) (s : string) : string =
   let lines = String.split_on_char '\n' s in
@@ -11504,13 +11482,10 @@ let resolve_change_context (state : state) ~(path_opt : string option) : change_
     | Some c -> Some c
     | None -> task_description
   in
-  let pr_number =
-    match Option.bind task_title extract_pr_number with
-    | Some _ as p -> p
-    | None ->
-        (match Option.bind task_description extract_pr_number with
-         | Some _ as p -> p
-         | None -> Option.bind comment extract_pr_number)
+  let pr =
+    List.find_map
+      (fun text -> Option.bind text Masc_tui_pr_ref.find)
+      [ task_title; task_description; comment ]
   in
   { ctx_keeper = keeper
   ; ctx_task_id = task_id
@@ -11520,7 +11495,7 @@ let resolve_change_context (state : state) ~(path_opt : string option) : change_
   ; ctx_goal_title = goal_title
   ; ctx_turn = turn
   ; ctx_comment = effective_comment
-  ; ctx_pr_number = pr_number
+  ; ctx_pr = pr
   }
 
 let build_change_context_lines (change_ctx : change_context) : string list =
@@ -11546,8 +11521,9 @@ let build_change_context_lines (change_ctx : change_context) : string list =
   in
   let line2_items = [] in
   let line2_items =
-    match change_ctx.ctx_pr_number with
-    | Some pr -> ("PR: #" ^ pr) :: line2_items
+    match change_ctx.ctx_pr with
+    | Some pr ->
+        Printf.sprintf "PR: #%d" (Masc_tui_pr_ref.number pr) :: line2_items
     | None -> line2_items
   in
   let line2_items =
@@ -11674,7 +11650,7 @@ let render_repository_changes_diff (state : state) ~path =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:Masc_tui_keys.footer_hints_git_diff);
-  finish_surface state
+  finish_surface state ~clamped:(Repository_changes_diff_scroll scroll)
     ~surface_key:"repository-changes-diff" ~rows:terminal_rows ~cols buf
 
 let render_repository_changes (state : state) =

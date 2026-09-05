@@ -321,7 +321,8 @@ type msg_identity =
    for. *)
 type gate_step = {
   gs_approval_id: string;
-  gs_phase: string;
+  gs_phase: Masc.Keeper_chat_store.approval_lifecycle_phase;
+      (** The store's closed sum, parsed once by the history decoder. *)
   gs_tool: string option;
   gs_summary: string option;
 }
@@ -442,13 +443,14 @@ let fold_gate_runs entries =
         match steps with
         | [] -> acc
         | (newest, extra) :: _ ->
+          (* [steps] was filtered on [me_gate] being a step of this approval,
+             so the map is total over what it keeps. *)
           let phases =
-            List.rev_map
-              (fun (entry, _) ->
-                match entry.me_gate with
-                | Some gate -> gate.gs_phase
-                | None -> "")
-              steps
+            List.rev
+              (List.filter_map
+                 (fun (entry, _) ->
+                   Option.map (fun gate -> gate.gs_phase) entry.me_gate)
+                 steps)
           in
           let tool =
             match newest.me_gate with Some gate -> gate.gs_tool | None -> None
@@ -4527,6 +4529,10 @@ type clamped_scroll =
      the stored value kept climbing past the end of the diff, and coming back
      up took one keypress per step taken past it. *)
   | Changes_diff_scroll of int
+  (* The Git Changes file diff is the same shape with its own scroll: the
+     rows exist only once the drawing has read the tree, and the keypress
+     stepped the stored value past them unbounded. *)
+  | Repository_changes_diff_scroll of int
   (* Both surfaces worked out the row they could actually draw and then threw
      it away: the drawing clamped for display while the stored value kept
      climbing, so coming back up took one keypress per step taken past the
@@ -4552,6 +4558,8 @@ let apply_clamped_scroll (state : state) = function
   | Planning_detail_scroll value -> state.planning_scroll <- value
   | Lane_run_detail_scroll value -> state.lane_run_detail_scroll <- value
   | Changes_diff_scroll value -> state.changes_diff_scroll <- value
+  | Repository_changes_diff_scroll value ->
+      state.repository_changes_diff_scroll <- value
   | Resource_scroll value -> state.resource_scroll <- value
   | Approval_detail_scroll value -> state.approval_detail_scroll <- value
 

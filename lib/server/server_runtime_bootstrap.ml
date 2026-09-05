@@ -1934,9 +1934,9 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
         ~clock
         ~broadcast_digest:
           Server_dashboard_http_execution_surfaces.broadcast_operator_digest;
-      (* Pre-warm shell cache in a separate fiber so it cannot block
-         lazy startup tasks or later keeper loop startup
-         (#keeper-bootstrap-stuck). *)
+      (* Pre-warm primary dashboard surfaces in parallel across worker
+         domains in a separate fiber so it cannot block lazy startup tasks
+         or later keeper loop startup (#keeper-bootstrap-stuck). *)
       Atomic.set Server_dashboard_http.shell_warming true;
       Eio.Fiber.fork ~sw (fun () ->
         let outer_timeout_sec =
@@ -1944,17 +1944,17 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
         in
         try
            match Eio.Time.with_timeout clock outer_timeout_sec (fun () ->
-             Server_dashboard_http.warm_shell_cache state;
+             Server_dashboard_http.warm_dashboard_surfaces state;
              Ok ())
            with
            | Ok () -> ()
            | Error `Timeout ->
-             Log.Dashboard.warn "shell cache pre-warm timed out (%.1fs)"
+             Log.Dashboard.warn "dashboard surfaces pre-warm timed out (%.1fs)"
                outer_timeout_sec
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
-             Log.Dashboard.warn "shell cache pre-warm failed: %s"
+             Log.Dashboard.warn "dashboard surfaces pre-warm failed: %s"
              (Printexc.to_string exn));
       ()
     with

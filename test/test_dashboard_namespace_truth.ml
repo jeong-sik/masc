@@ -708,6 +708,38 @@ let test_namespace_truth_snapshot_hash_avoids_string_collision () =
       check bool "different string concatenation still broadcasts" true
         (Server_dashboard_http.should_broadcast_namespace_truth_snapshot b))
 
+let test_warm_dashboard_surfaces_populates_caches () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Dashboard_cache.invalidate_all ();
+      cleanup_dir dir)
+    (fun () ->
+      Dashboard_cache.invalidate_all ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
+      ignore (Lib.Workspace.init (Lib.Mcp_server.workspace_config state) ~agent_name:None);
+      Server_dashboard_http.warm_dashboard_surfaces state;
+      check bool "shell_warmed is true" true
+        (Atomic.get Server_dashboard_http.shell_warmed);
+      let last_good = Atomic.get Server_dashboard_http.last_good_shell in
+      check bool "last good shell is non-empty after warm" true
+        (last_good <> `Assoc []);
+      check bool "config_introspect cache key populated" true
+        (Option.is_some (Dashboard_cache.peek "config_introspect"));
+      let planning_key = Printf.sprintf "planning:%s" dir in
+      check bool "planning cache key populated" true
+        (Option.is_some (Dashboard_cache.peek planning_key));
+      let keeper_health_key = Printf.sprintf "keeper_memory_health:%s" dir in
+      check bool "keeper_memory_health cache key populated" true
+        (Option.is_some (Dashboard_cache.peek keeper_health_key));
+      let board_key =
+        Printf.sprintf "board:memory:-;-;hot;false;false;100;0;%s;-" dir
+      in
+      check bool "board cache key populated" true
+        (Option.is_some (Dashboard_cache.peek_payload board_key)))
+
 let () =
   Alcotest.run "Dashboard Namespace Truth"
     [
@@ -736,5 +768,7 @@ let () =
             test_namespace_truth_snapshot_hash_ignores_generated_at;
           test_case "snapshot hash avoids string concatenation collisions" `Quick
             test_namespace_truth_snapshot_hash_avoids_string_collision;
+          test_case "warm dashboard surfaces populates caches" `Quick
+            test_warm_dashboard_surfaces_populates_caches;
         ] );
     ]

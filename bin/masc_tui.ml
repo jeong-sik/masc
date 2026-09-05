@@ -14369,15 +14369,12 @@ and is loaded on demand through keeper_skill.
                 end
             | "o" | "O" | "\r" ->
                 (match state.link_modal_url with
-                 | Some url ->
-                     let cmd =
-                       if Sys.os_type = "Unix" && Sys.command "which open >/dev/null 2>&1" = 0 then
-                         Printf.sprintf "open %s >/dev/null 2>&1 &" (Filename.quote url)
-                       else
-                         Printf.sprintf "xdg-open %s >/dev/null 2>&1 &" (Filename.quote url)
-                     in
-                     ignore (Sys.command cmd);
-                     add_event state "system" ("Opening in browser: " ^ url)
+                 | Some url -> (
+                     match Masc_tui_browser.open_url url with
+                     | Ok opener ->
+                         add_event state "system" (Printf.sprintf "Opened in browser (%s): %s" opener url)
+                     | Error err ->
+                         add_event state "system" (Printf.sprintf "Could not open browser: %s" err))
                  | None -> ())
             | "y" | "Y" ->
                 (match state.link_modal_url with

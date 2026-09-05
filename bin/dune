@@ -1309,4 +1309,4 @@
  (name masc_tui_link_preview)
  (wrapped false)
  (modules masc_tui_link_preview)
- (libraries uri yojson))
+ (libraries masc_tui_link_label masc_tui_lru masc_tui_message_layout uri))

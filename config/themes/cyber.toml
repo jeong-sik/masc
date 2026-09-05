@@ -1,0 +1,20 @@
+name = "cyber"
+light = false
+
+[palette]
+base00 = "0c0e17"
+base01 = "151828"
+base02 = "222740"
+base03 = "4d5882"
+base04 = "8e9ed6"
+base05 = "e2e8ff"
+base06 = "f0f4ff"
+base07 = "ffffff"
+base08 = "ff0055"
+base09 = "ff7700"
+base0a = "ffe600"
+base0b = "00ff9f"
+base0c = "00f0ff"
+base0d = "3a86ff"
+base0e = "f72585"
+base0f = "b5179e"

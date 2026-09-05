@@ -32,6 +32,7 @@ let describe = function
          | `Compact -> "compact"
          | `Full -> "full")
   | Command.Cycle_memory -> "cycle-memory"
+  | Command.Open_fleet_memory -> "open-fleet-memory"
   | Command.Find_in_chat text -> "find:" ^ text
   | Command.Find_next -> "find-next"
   | Command.Inspect_context -> "inspect-context"
@@ -91,6 +92,7 @@ let test_pane_commands_parse_by_word () =
     ; "tools:compact"
     ; "tools:full"
     ; "cycle-memory"
+    ; "open-fleet-memory"
     ; "find:caret"
     ; "find:two words"
     ; "find-next"
@@ -120,6 +122,7 @@ let test_pane_commands_parse_by_word () =
        ; "/tools compact"
        ; "/tools full"
        ; "/memory"
+       ; "/fleet-memory"
        (* The text is the rest of the line, spaces and all: a search phrase is
           not one word, and quoting it would be a second grammar. *)
        ; "/find caret"
@@ -360,7 +363,7 @@ let test_a_lone_slash_lists_everything () =
      | Command.No_command | Command.Chosen _ | Command.Unknown_command _ -> 0)
 
 let test_a_prefix_narrows_the_list () =
-  check string "t narrows to three" "candidates:task,thinking,tools" (hint "/t");
+  check string "t narrows to four" "candidates:task,thinking,tools,telemetry" (hint "/t");
   check string "th narrows to one" "candidates:thinking" (hint "/th")
 
 (* [parse] does no prefix matching, so a half-typed word is not a command yet.
@@ -460,15 +463,15 @@ let test_the_typed_run_is_what_was_pressed () =
   (* One candidate left, so the argument comes along with it. *)
   check string "a prefix highlights through the slash"
     "T[/ta]U[sk]D[ <title>]" (spans "/ta");
-  (* Three left, so names only -- and each carries the same typed run. The
+  (* Four left, so names only -- and each carries the same typed run. The
      separator is one space. *)
-  check string "one glyph, three candidates"
-    "T[/t]U[ask]D[ ]T[/t]U[hinking]D[ ]T[/t]U[ools]" (spans "/t");
+  check string "one glyph, four candidates"
+    "T[/t]U[ask]D[ ]T[/t]U[hinking]D[ ]T[/t]U[ools]D[ ]T[/t]U[elemetry]" (spans "/t");
   (* The bare slash draws its shared prefix once, then what fits. The catalog
      outgrew an 80-column composer, so the row says how many words it could
      not carry and points at the list that is complete by definition. *)
   check string "the bare slash highlights only itself"
-    "T[/]U[task keeper settings interrupt steer thinking tools memory find]D[ +5 more (/help)]"
+    "T[/]U[task keeper settings diff changes interrupt steer thinking]D[ +12 more (/help)]"
     (spans "/")
 
 (* The row an operator types knowing nothing is the one that must not run off
@@ -564,8 +567,11 @@ let test_autocomplete_unique_prefix () =
   check (option string) "/th -> /thinking " (Some "/thinking ") (Command.autocomplete "/th");
   check (option string) "/ta -> /task " (Some "/task ") (Command.autocomplete "/ta");
   check (option string) "/se -> /settings" (Some "/settings") (Command.autocomplete "/se");
-  check (option string) "/m -> /memory" (Some "/memory") (Command.autocomplete "/m");
-  check (option string) "/c -> /context" (Some "/context") (Command.autocomplete "/c");
+  (* Two words each, so neither is a unique prefix any more: [m] stops at the
+     shared "me" of memory and metrics, and [c] has nothing shared past the
+     letter itself, so it offers the first of changes and context. *)
+  check (option string) "/m -> /me" (Some "/me") (Command.autocomplete "/m");
+  check (option string) "/c -> /changes" (Some "/changes") (Command.autocomplete "/c");
   check (option string) "/h -> /help" (Some "/help") (Command.autocomplete "/h");
   check (option string) "/zork -> None" None (Command.autocomplete "/zork")
 
@@ -574,12 +580,26 @@ let test_autocomplete_cycles_ambiguous_prefix () =
   check (option string) "/to -> /tools " (Some "/tools ") (Command.autocomplete "/to");
   check (option string) "/st -> /steer " (Some "/steer ") (Command.autocomplete "/st")
 
-let test_autocomplete_exact_command_is_stable () =
-  check (option string) "/settings stays" None (Command.autocomplete "/settings");
-  check (option string) "/help stays" None (Command.autocomplete "/help");
-  check (option string) "/memory stays" None (Command.autocomplete "/memory");
-  check (option string) "/task adds space" (Some "/task ") (Command.autocomplete "/task");
-  check (option string) "/task with space stays" None (Command.autocomplete "/task ")
+(* A finished command word is not the end of the road. #33071 made Tab walk the
+   commands sharing its first letter, so /settings steps to the next s word
+   instead of standing still, and only a letter with one command behind it has
+   nowhere to go. A trailing space walks the same ring when the command takes
+   free text, because there is no argument list to offer in its place.
+
+   Written down because the behaviour surprises: a fully typed command plus a
+   habitual Tab becomes a different command. Whether that is the right trade is
+   asked in #33405, not settled here. *)
+let test_autocomplete_walks_siblings_of_a_finished_word () =
+  check (option string) "/settings steps to the next s word" (Some "/steer ")
+    (Command.autocomplete "/settings");
+  check (option string) "/memory steps to metrics" (Some "/metrics")
+    (Command.autocomplete "/memory");
+  check (option string) "/help is the only h word, so it stays" None
+    (Command.autocomplete "/help");
+  check (option string) "/task steps to the next t word" (Some "/thinking ")
+    (Command.autocomplete "/task");
+  check (option string) "a trailing space walks the same ring" (Some "/thinking ")
+    (Command.autocomplete "/task ")
 
 let test_autocomplete_preserves_multiline_body () =
   check (option string) "multiline body preserved on command"
@@ -625,7 +645,7 @@ let test_autocomplete_sub_arguments () =
 
 let test_autocomplete_prev_direction () =
   check (option string) "prev on /t wraps to last candidate"
-    (Some "/tools ") (Command.autocomplete ~direction:Command.Prev "/t");
+    (Some "/telemetry") (Command.autocomplete ~direction:Command.Prev "/t");
   check (option string) "prev on /tools cycles to thinking"
     (Some "/thinking ") (Command.autocomplete ~direction:Command.Prev "/tools");
   check (option string) "prev on /thinking cycles to task"
@@ -772,8 +792,8 @@ let () =
             test_autocomplete_unique_prefix
         ; test_case "autocomplete cycles ambiguous prefix" `Quick
             test_autocomplete_cycles_ambiguous_prefix
-        ; test_case "autocomplete exact command is stable" `Quick
-            test_autocomplete_exact_command_is_stable
+        ; test_case "autocomplete walks siblings of a finished word" `Quick
+            test_autocomplete_walks_siblings_of_a_finished_word
         ; test_case "autocomplete preserves multiline body" `Quick
             test_autocomplete_preserves_multiline_body
         ; test_case "autocomplete utf8 lcp safety" `Quick

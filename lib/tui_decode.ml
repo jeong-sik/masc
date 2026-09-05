@@ -266,12 +266,13 @@ type fusion_judge =
       fj_error : string;
     }
 
-(* RFC-0284 judge-node roles. The server's judge_role_projection is the only
-   producer of this vocabulary, so the decode is closed: a role this build
-   was not taught fails the node instead of drawing it as something it is
-   not. [Judge_stage_meta] carries no number on purpose -- the identity
-   string ("stage-1") is what the server projects and what a row prints. *)
-type fusion_judge_role =
+(* RFC-0284 judge-node roles: the kind the server's judge_role_projection
+   writes, read back through the same closed set it wrote from, so a role
+   this build was not taught fails the node instead of drawing it as
+   something it is not. [Judge_stage_meta] carries no number on purpose --
+   the identity string ("stage-1") is what the server projects and what a
+   row prints. *)
+type fusion_judge_role = Fusion_types.judge_role_kind =
   | Judge_single
   | Judge_refine
   | Judge_first
@@ -5512,25 +5513,10 @@ let decode_fusion_judge json =
       Ok (Fusion_judge_failed { fj_failure_code; fj_error })
   | other -> Error (Printf.sprintf "unknown fusion judge status %S" other)
 
-(* The one place the server's judge_role_projection labels turn into the
-   closed sum: judge nodes read it off ["role"], tool-trace actors off
-   ["judge_role"]. *)
-let fusion_judge_role_of_label = function
-  | "single" -> Ok Judge_single
-  | "refine" -> Ok Judge_refine
-  | "first" -> Ok Judge_first
-  | "meta" -> Ok Judge_meta
-  | "stage_meta" -> Ok Judge_stage_meta
-  | "final_meta" -> Ok Judge_final_meta
-  | other -> Error (Printf.sprintf "unknown fusion judge role %S" other)
-
-let fusion_judge_role_label = function
-  | Judge_single -> "single"
-  | Judge_refine -> "refine"
-  | Judge_first -> "first"
-  | Judge_meta -> "meta"
-  | Judge_stage_meta -> "stage_meta"
-  | Judge_final_meta -> "final_meta"
+(* The labels live beside the producer in [Fusion_types]; judge nodes read
+   one off ["role"], tool-trace actors off ["judge_role"]. *)
+let fusion_judge_role_of_label = Fusion_types.judge_role_kind_of_label
+let fusion_judge_role_label = Fusion_types.judge_role_kind_label
 
 let decode_fusion_judge_role json =
   let* role = required_string_field json "role" in

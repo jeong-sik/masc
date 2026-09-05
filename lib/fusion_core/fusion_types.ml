@@ -210,6 +210,43 @@ type judge_role =
   | Final_meta  (** staged JOJ의 최종 reducer. *)
 [@@deriving yojson, show, eq]
 
+(* 심판 역할의 위상 종류. 정체성(panelist_id, stage 번호)을 뺀 것이 board meta_json 의
+   ["role"] 필드와 TUI 디코드가 공유하는 어휘다. 양쪽이 이 하나의 닫힌 집합을 쓰므로
+   한쪽만 아는 종류는 그쪽에서 실패하지 다른 것으로 그려지지 않는다. *)
+type judge_role_kind =
+  | Judge_single
+  | Judge_refine
+  | Judge_first
+  | Judge_meta
+  | Judge_stage_meta
+  | Judge_final_meta
+[@@deriving show, eq]
+
+let judge_role_kind = function
+  | Single -> Judge_single
+  | Refine_pass -> Judge_refine
+  | First _ -> Judge_first
+  | Meta -> Judge_meta
+  | Stage_meta _ -> Judge_stage_meta
+  | Final_meta -> Judge_final_meta
+
+let judge_role_kind_label = function
+  | Judge_single -> "single"
+  | Judge_refine -> "refine"
+  | Judge_first -> "first"
+  | Judge_meta -> "meta"
+  | Judge_stage_meta -> "stage_meta"
+  | Judge_final_meta -> "final_meta"
+
+let judge_role_kind_of_label = function
+  | "single" -> Ok Judge_single
+  | "refine" -> Ok Judge_refine
+  | "first" -> Ok Judge_first
+  | "meta" -> Ok Judge_meta
+  | "stage_meta" -> Ok Judge_stage_meta
+  | "final_meta" -> Ok Judge_final_meta
+  | other -> Error (Printf.sprintf "unknown fusion judge role %S" other)
+
 type tool_judge_actor =
   { role : judge_role
   ; identity : string

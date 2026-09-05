@@ -214,6 +214,25 @@ type judge_role =
   | Final_meta
 [@@deriving yojson, show, eq]
 
+(** 심판 역할의 위상 종류. 정체성을 뺀 것으로, board meta_json 의 ["role"] 필드가
+    나르고 TUI 가 되읽는 어휘다. 양쪽이 같은 닫힌 집합을 쓴다. *)
+type judge_role_kind =
+  | Judge_single
+  | Judge_refine
+  | Judge_first
+  | Judge_meta
+  | Judge_stage_meta
+  | Judge_final_meta
+[@@deriving show, eq]
+
+val judge_role_kind : judge_role -> judge_role_kind
+
+val judge_role_kind_label : judge_role_kind -> string
+(** 와이어에 쓰는 철자. [judge_role_kind_of_label] 의 역. *)
+
+val judge_role_kind_of_label : string -> (judge_role_kind, string) result
+(** 와이어 철자를 되읽는다. 모르는 철자는 [Error] 다. *)
+
 (** {1 Actual Fusion tool execution trace}
 
     Tool availability is configuration, not proof of use. These records are

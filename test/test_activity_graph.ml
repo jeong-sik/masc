@@ -797,13 +797,20 @@ let test_current_day_cache_rebuilds_once_per_fingerprint () =
       emit_n config 5;
       let second = Activity_graph.list_events config ~after_seq:0 ~limit:100 ~keep:(fun _ -> true) () in
       check int "second read sees all 15 events" 15 (List.length second);
-      check int "changed fingerprint rebuilds once" 2
+      (* The file grew, so the fingerprint moved -- but the bytes before it
+         did not, and re-reading them was the largest allocation source in an
+         idle server. The five new lines are read; the ten old ones are not. *)
+      check int "an append does not rebuild the file" 1
         (Activity_graph.For_testing.current_day_rebuild_count ());
+      check int "it is read as an append" 1
+        (Activity_graph.For_testing.current_day_append_count ());
       ignore
         (Activity_graph.list_events config ~after_seq:0 ~limit:100
            ~keep:(fun _ -> true) ());
-      check int "unchanged fingerprint reuses cache" 2
-        (Activity_graph.For_testing.current_day_rebuild_count ()))
+      check int "an unchanged file reuses the cache outright" 1
+        (Activity_graph.For_testing.current_day_rebuild_count ());
+      check int "and does not read it as an append either" 1
+        (Activity_graph.For_testing.current_day_append_count ()))
 
 (* The aggregate is keyed on every file including today's, and today's grows
    on nearly every tick, so an append misses it. What must NOT happen on that

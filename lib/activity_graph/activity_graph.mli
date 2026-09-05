@@ -176,6 +176,12 @@ module For_testing : sig
 
   val current_day_rebuild_count : unit -> int
 
+  val current_day_append_count : unit -> int
+  (** How often the current-day file was read from where the last read
+      stopped rather than from zero. A test that appends to a file and reads
+      it again asserts on this: the events being right does not say which
+      path produced them. *)
+
   val all_events_rebuild_count : unit -> int
   (** Number of full retained-list aggregate rebuilds since the current-day
       cache was reset.  Repeated unchanged projections must reuse one build. *)

@@ -1,48 +1,45 @@
 ---
-title: Multi-Model Deliberation (Fusion Design Decision)
-description: The 4x cost and 7x latency trade-offs, and why multi-model deliberation is designed as an optional async tool.
+title: Multi-Model Deliberation (Fusion)
+description: Why multi-model deliberation is an optional, asynchronous tool rather than an always-on engine.
 ---
 
-Even the most capable AI models can have domain-specific blind spots or hallucinate plausible answers.
+A single model's answer can have blind spots. MASC carries **Fusion**: the same prompt fans out to a panel of N models, and one judge model synthesizes the answers.
 
-To address this, MASC implements **Fusion**: an architecture that fans out the same prompt across multiple distinct models and uses an independent judge model to synthesize the final verdict.
-
-However, Fusion is **not a core loop running on every turn.** Due to strict cost and latency trade-offs, it was intentionally designed as an **out-of-band advisory tool**.
-
----
-
-## 1. The Dilemma & Design Decision
-
-### Why Not Run Fusion on Every Turn?
-Passing a prompt through 3–4 panel models plus 1 judge model incurs measurable penalties:
-
-* **~4x Token Cost**: Compute scales linearly with the number of models in the panel.
-* **~7x Latency**: The turn must wait for the slowest panelist to finish, plus the subsequent judge synthesis step.
-
-If a Keeper ran this full deliberative loop synchronously on every edit or terminal command, the agent would block (become deaf to board events) and consume enormous amounts of tokens.
-
-> **Design Decision**: Fusion is decoupled from the main Keeper turn loop. It is an **out-of-band advisory tool** invoked only when a Keeper explicitly decides that a high-stakes decision warrants cross-model deliberation.
+This is not an engine that runs on every turn. Cost and latency trade-offs made it an **optional, out-of-band tool** by design.
 
 ---
 
-## 2. Execution Architecture
+## 1. The trade-off and the decision
 
-When invoked, Fusion runs completely isolated from the Keeper's main loop.
+### Why not run Fusion on every turn?
+
+The reference point is OpenRouter's measured panel deliberation on identical prompts (cited by RFC-0252): +3.7pp accuracy (65.3% → 69.0%) bought at roughly 4x cost and 7x latency.
+
+* **~4x cost**: token spend scales with the number of models called.
+* **~7x latency**: the turn waits for the slowest panelist, then adds the judge's synthesis.
+
+Buying +3.7pp on every turn at that price is a loss. A keeper runs turns back to back; one turn slowed 7x stops that keeper.
+
+> **Design decision**: Fusion is not the main loop. It is an **asynchronous advisory tool** a keeper delegates to in the background when a judgment needs it.
+
+---
+
+## 2. How it runs
 
 ```mermaid
 flowchart TD
-    KEEPER["Keeper Agent<br/>(High-Stakes Decision)"]
-    ASYNC["Async Request<br/>(calls masc_fusion tool)"]
-    RESUME["Keeper resumes<br/>work immediately"]
-    
-    subgraph OUT_OF_BAND ["Out-of-Band Background Deliberation"]
-        P1["Model A (e.g. Claude)"]
-        P2["Model B (e.g. OpenAI)"]
-        P3["Model C (e.g. Local LLM)"]
-        JUDGE["Judge Model<br/>Structured Synthesis"]
+    KEEPER["Keeper<br/>(facing a judgment that needs deliberation)"]
+    ASYNC["Async deliberation request<br/>(masc_fusion tool call)"]
+    RESUME["Keeper continues<br/>with its next work"]
+
+    subgraph OUT_OF_BAND ["Background deliberation (out-of-band)"]
+        P1["Panel model A"]
+        P2["Panel model B"]
+        P3["Panel model C"]
+        JUDGE["Judge model<br/>structured synthesis"]
     end
-    
-    DELIVERY["Delivered to Chat Lane / Board<br/>Keeper woken up"]
+
+    DELIVERY["Result delivered (chat lane + board)"]
 
     KEEPER --> ASYNC
     ASYNC --> RESUME
@@ -52,20 +49,18 @@ flowchart TD
     DELIVERY -.-> KEEPER
 ```
 
-1. **Non-Blocking Loop**: The Keeper calls `masc_fusion`, immediately receives a Run ID, and continues other work.
-2. **Parallel Fan-out**: Background fibers submit the prompt concurrently to the configured panel models.
-3. **Structured Synthesis**: The judge model highlights consensus, contradictions, unique insights, blind spots, and recommendations.
-4. **Async Delivery**: When complete, the synthesized evidence lands in the Keeper's chat lane and on the dashboard board, waking the Keeper.
+1. **Non-blocking**: `masc_fusion` returns a run id immediately; the keeper's turn continues.
+2. **Parallel panel**: the background fans the prompt out to the N configured models.
+3. **Judge synthesis**: consensus, contradictions, partial coverage, and blind spots are structured into one verdict.
+4. **Async delivery**: when deliberation ends, the result lands in the keeper's chat lane and on the board (RFC-0266). A paused keeper is not force-woken.
+
+Panel and judge agents receive no fusion tool, so recursive deliberation is blocked, and each panel answer's measured token usage is summed into the run's record.
 
 ---
 
-## 3. Current Implementation Status
+## 3. What exists today
 
-* **Standalone Harness CLI (`bin/fusion_run.exe`)**:
-  * Side-by-side comparison between Single Model, Self-Consistency, Self-MoA, and Heterogeneous Fusion.
-* **Keeper Tool (`masc_fusion`)**:
-  * Allows active Keepers to delegate deliberation asynchronously.
-* **Observability UI**:
-  * TUI and Web Dashboard both expose live Fusion run pipelines and structured judge metadata.
-* **Operational Prerequisite**:
-  * Requires valid API keys for multiple providers (Anthropic, OpenAI, etc.) configured in `runtime.toml`.
+* **Comparison harness (`bin/fusion_run.exe`)**: a CLI that runs single-model vs. self-consistency voting vs. same-model deliberation (self-MoA) vs. heterogeneous multi-model (fusion) side by side, with measured token cost.
+* **Keeper tool (`masc_fusion`)**: delegates a deliberation asynchronously at runtime.
+* **Observation UI**: the terminal UI's Fusion surface and the web dashboard list runs with judge detail. An active row's `STATE` shows the exact stage (`accepted`, `panel(N)`, `judge(A/F)`, `computed`, `recording`).
+* **Prerequisite**: multiple model providers configured in `runtime.toml`.

@@ -1,81 +1,74 @@
 ---
-title: Memory OS Architecture
-description: Local causal graph-based persistent memory surviving session resets.
+title: Long-Term Memory (Memory OS)
+description: The subsystem that keeps facts a Keeper learns across turns, records their use, and curates them by selection.
 ---
 
-Memory OS is a local persistent memory subsystem that retains causality and intent across context window truncations and process restarts.
-
----
-
-## Memory Pipeline
-
-```mermaid
-flowchart LR
-    subgraph Work ["Keeper Turn Execution"]
-        T["Code Edits & Tool Output"] --> OBS["Observation Stream"]
-    end
-
-    subgraph Memory ["Memory Storage"]
-        OBS --> G["Causal Relationship Graph"]
-        G --> N1[("Key Decisions<br/>(Architecture & Invariants)")]
-        G --> N2[("Transient Data<br/>(Debug Logs & Temp Output)")]
-    end
-
-    subgraph Caretaker ["Background Curator"]
-        LIB["Librarian Worker"]
-        LIB -->|"Retain high-value directives"| N1
-        LIB -->|"Prune and decay stale outputs"| N2
-    end
-
-    N1 -.->|"Inject context on next task"| Work
-```
+Memory OS is the subsystem that keeps the facts a Keeper learns across turns. Facts live in per-keeper stores on disk, survive a server restart, and are re-injected into later turns' context.
 
 ---
 
-## Core Primitives
+## Two stores
 
-### 1. Causal Graph Storage
-Rather than flat text embeddings, Memory OS records directed edges between task triggers, technical decisions, and empirical execution outcomes.
+Each keeper has two memory stores.
 
-### 2. Node Lifecycle & Decay
-* **Retained Nodes**: Operator directives, invariant violations, and verified architectural decisions.
-* **Transient Nodes**: Ephemeral build outputs, intermediate tool errors, and scratch data slated for decay.
+| Store | What it holds |
+|---|---|
+| Ordinary | The keeper's current facts |
+| Source-bound | Facts bound to their source material, with invalidation records |
 
-### 3. Asynchronous Curation (Librarian Worker)
-Graph deduplication and compression run in background fibers decoupled from the active Keeper turn execution loop.
+A keeper whose ordinary snapshot is gone while the source-bound snapshot remains shows as `source-only`. The terminal UI's Memory surface reports the health of both stores per keeper.
 
 ---
 
-## Usage-Driven Reinforcement (RFC-0418)
+## Usage-driven reinforcement (RFC-0418)
 
-In conventional memory systems, a memory node is often reinforced when the identical claim is re-observed. However, LLM generation variability means identical claims are rarely emitted byte-for-byte, leaving static re-observation counters stagnant.
+Raising a counter when the same claim is observed again does not work: an LLM does not regenerate a fact byte-identically, so a static reobservation counter stays at zero.
 
-Memory OS establishes that **memory solidifies when retrieved and applied, not passively re-observed**:
+Memory OS follows the principle **"a memory solidifies when it is retrieved and used"**:
 
 ```mermaid
 flowchart TD
-    subgraph Execution ["Turn Execution"]
-        Q["keeper_memory_search"] --> RET["1 Fact = 1 Retrieval Event"]
-        RET --> USE["Injected into Context"]
+    subgraph Execution ["Turn execution"]
+        Q["keeper_memory_search"] --> RET["1 fact = 1 retrieval event"]
+        RET --> USE["Injected into context and used"]
     end
 
-    subgraph Sidecar ["Per-Keeper Event Sidecar"]
-        RET -.->|"Log retrieval"| EV["<keeper>.memory-events.jsonl"]
-        REC["Retract Claim"] -.->|"Log citation chain"| EV
-        REV["Revise Claim"] -.->|"Log revision"| EV
+    subgraph Sidecar ["Per-keeper event sidecar"]
+        RET -.->|"retrieval record"| EV["<keeper>.memory-events.jsonl"]
+        REC["Retract"] -.->|"citation chain"| EV
+        REV["Revise"] -.->|"revision record"| EV
     end
 
-    subgraph Facts ["Current Facts Store"]
-        EV ==>|"Derived Salience"| DB["<keeper>.memory-current.json"]
+    subgraph Facts ["Current fact store"]
+        EV ==>|"derives actual usage"| DB["<keeper>.memory-current.json"]
     end
 ```
 
-### 1. Typed Sidecar Event Stream
-Each Keeper records lifecycle actions into an append-only JSONL sidecar (`<keeper>.memory-events.jsonl`):
-* `retrieval`: Recorded per fact returned by `keeper_memory_search`.
-* `citation`: Recorded when a retract or update operation cites a prior fact.
-* `revision`: Recorded when an existing claim's boundary or text is formally revised.
+### 1. Typed sidecar event stream
+Each keeper appends memory-use events to one JSONL sidecar (`<keeper>.memory-events.jsonl`):
+* `retrieval`: one per fact returned by `keeper_memory_search`.
+* `citation`: a chain citing the prior fact, on retract or update.
+* `revision`: on a formal revision of an existing claim's boundary or wording.
 
-### 2. Elimination of Dead Counters
-The legacy `fact.reinforcement` integer counter in the fact store has been removed. High confidence and confirmed badges in the TUI reflect verified retrieval velocity and explicit citations rather than duplicate ingestion counts.
+The API row and the terminal UI show, per fact, what the keeper actually did with it — retrieved, cited, revised — from this sidecar.
 
+### 2. Dead counters removed
+The static integer counter (`fact.reinforcement`) is gone from the fact store. Confidence labels in the terminal UI are computed from actual retrieval and citation frequency, not from how many times a fact happened to be re-stored.
+
+---
+
+## Curation: the librarian lane
+
+Curation runs on a background lane, separate from the keeper's own execution. The librarian reads the keeper's instructions, the whole current memory, and a bounded slice of new conversation, and answers in structured JSON:
+
+* Every existing memory ID must appear exactly once, either in `retained_memory_ids` (kept) or in `dropped` (removed with a one-sentence reason). An ID in neither rejects the whole answer.
+* What matters is judged relative to that keeper's charge and ongoing work. A fact worthless to a general assistant can be central to this keeper, and the reverse.
+* There is no target item count and no deterministic ranking after the judgment. No numeric scores, no decay curves.
+
+The terminal UI's Memory surface shows the lane state (`librarian lane-busy · failures`) per keeper.
+
+---
+
+## Viewing it in the terminal UI
+
+On the Memory surface, `Enter` opens the fact browser. `c`/`C` cycles the category filter, `s` changes the sort (recency, last retrieved, retrieved count, category, claim), and `/` sets a text filter. See the [terminal UI guide](/guides/tui/) for the full key table.

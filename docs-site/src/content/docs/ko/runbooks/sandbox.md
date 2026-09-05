@@ -24,7 +24,7 @@ Keeper 의 셸 명령은 여러분 기기가 아니라 격리된 공간에서 �
 
 ```toml
 sandbox_profile = "docker"   # "docker" | "microvm" | "remote_ssh"
-network_mode = "none"        # "none" | "inherit"
+network_mode = "none"        # "none" | "inherit" | "policy"
 
 # sandbox_profile = "remote_ssh" 일 때만:
 # remote_endpoint = "worker-node-1"
@@ -32,6 +32,7 @@ network_mode = "none"        # "none" | "inherit"
 
 `network_mode` 는 프로필과 별개이고 필수입니다. `none` 은 게스트에 네트워크를 전혀
 주지 않습니다 — 웹 검색이나 `git push` 를 하는 Keeper 는 `inherit` 가 필요합니다.
+`policy` 는 그 중간으로, 이 서버가 소유한 허용 목록 프록시에만 닿을 수 있습니다.
 `docker` 와 `microvm` 의 기본값은 `none` 이라, `masc keeper-create` 는 대신 정하지
 않고 이 값을 안 주면 진행을 거부합니다.
 
@@ -41,7 +42,7 @@ network_mode = "none"        # "none" | "inherit"
 
 실행 중인 TUI(`masc-tui`) 내에서 TOML 설정을 직접 편집하지 않고 키보드 단축키로 샌드박스 백엔드를 즉시 전환할 수 있습니다:
 
-1. `Tab` 키로 **Keepers (서피스 3)** 화면으로 이동합니다.
+1. `Tab` 키로 **Keepers** 화면으로 이동합니다.
 2. 목록에서 대상 Keeper를 선택하고 `Enter`를 눌러 **상세 뷰**로 진입합니다.
 3. `[` / `]` 키로 **`Sandbox`** 탭을 선택합니다.
 4. 다음 단축키를 눌러 원하는 격리 환경으로 즉각 재구성합니다:

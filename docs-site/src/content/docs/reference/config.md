@@ -17,8 +17,9 @@ file** rather than write one from scratch.
     └── reviewer.toml
 ```
 
-Other files (`connectors.toml` for Slack/Discord bindings, `repositories.toml`,
-`keeper_repo_mappings.toml`) appear once you use those features.
+Connector settings (Discord, Slack) are not a separate file: they are tables
+inside `runtime.toml` (e.g. `[discord]`). `repositories.toml` and
+`keeper_repo_mappings.toml` appear once you use those features.
 
 ---
 
@@ -81,7 +82,7 @@ A Keeper's profile. The installer does not write these; create them with
 autoboot_enabled = true
 proactive_enabled = false
 sandbox_profile = "docker"   # "docker" | "microvm" | "remote_ssh"; host is refused
-network_mode = "none"        # "none" | "inherit"; "none" blocks all guest network
+network_mode = "none"        # "none" | "inherit" | "policy"; "none" blocks all guest network
 instructions = """
 You are the review Keeper. Inspect the current change and report concrete
 evidence with file paths and commands.

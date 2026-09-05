@@ -92,8 +92,13 @@ val key_of_callstack : Printexc.raw_backtrace -> string
     libraries are skipped because their frames say how a value was built
     (a lexer recursion, a Bytes copy), not who asked for it, and they
     multiply distinct stacks past any table bound; every other frame counts.
-    A stack made only of skipped frames keeps its top frames; a frame
-    without debug information reads [<unknown>]. *)
+    A stack made only of skipped frames keeps its top frames and is prefixed
+    with {!unattributed_marker}, so a reading can tell "this is where the
+    bytes came from" apart from "the window held no caller"; a frame without
+    debug information reads [<unknown>]. *)
+
+val unattributed_marker : string
+(** First line of a key whose sampled window held no masc frame. *)
 
 val frames_per_key : int
 

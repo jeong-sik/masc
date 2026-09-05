@@ -62,6 +62,11 @@ val language_of_lang_id : string -> language option
     not named another. *)
 val command_of_language : language -> string * string list
 
+(** Who answers "which command starts this language's server". The caller
+    passes {!command_of_language} where nothing is configured, or the
+    runtime's resolver where an operator named a server for a language. *)
+type servers = language -> string * string list
+
 (** What has to exist on disk before a language server answers about
     references outside the file it was given. *)
 type reference_index =
@@ -118,6 +123,7 @@ val read_message : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r -> s
     the process is terminated automatically via [on_release]. *)
 val spawn :
   sw:Eio.Switch.t ->
+  servers:servers ->
   lang_id:string ->
   workspace_root:string ->
   Eio_unix.Process.mgr_ty Eio.Resource.t ->

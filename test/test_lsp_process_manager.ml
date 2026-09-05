@@ -119,6 +119,7 @@ let check_ocamllsp_command_not_found ~path =
     match
       Lsp_process_manager.spawn
         ~sw
+        ~servers:Lsp_process_manager.command_of_language
         ~lang_id:"ocaml"
         ~workspace_root:path
         (Eio.Stdenv.process_mgr env)

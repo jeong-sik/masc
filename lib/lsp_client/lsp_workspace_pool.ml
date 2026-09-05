@@ -41,12 +41,14 @@ type t =
   ; table_mutex : Eio.Mutex.t (* guards [servers] and [spawn_locks] *)
   ; servers : (key, Lsp_process_manager.lsp_process) Hashtbl.t
   ; spawn_locks : (key, Eio.Mutex.t) Hashtbl.t
+  ; commands : Lsp_process_manager.servers (* which command starts each language *)
   }
 
-let create ~sw ~clock ~proc_mgr =
+let create ~sw ~clock ~proc_mgr ~servers =
   { sw
   ; clock
   ; proc_mgr
+  ; commands = servers
   ; router = Lsp_message_router.create ()
   ; table_mutex = Eio.Mutex.create ()
   ; servers = Hashtbl.create 8
@@ -122,7 +124,9 @@ let discard_unless_installed proc installed =
 
 let start_locked t ~key ~language ~workspace_root =
   let lang_id = Lsp_process_manager.lang_id_of_language language in
-  match Lsp_process_manager.spawn ~sw:t.sw ~lang_id ~workspace_root t.proc_mgr with
+  match
+    Lsp_process_manager.spawn ~sw:t.sw ~servers:t.commands ~lang_id ~workspace_root t.proc_mgr
+  with
   | Error err ->
     Error
       (Server_failed
@@ -172,7 +176,7 @@ let ensure t ~language ~workspace_root =
      question — [language] is a variant — and answers the second here, so a
      caller never has to read a string to learn which happened. *)
   let lang_id = Lsp_process_manager.lang_id_of_language language in
-  let command, _argv = Lsp_process_manager.command_of_language language in
+  let command, _argv = t.commands language in
   if not (Executable_path.path_has_executable command)
   then Error (Server_unavailable { lang_id; command })
   else (
@@ -234,8 +238,8 @@ let close t =
     held
 ;;
 
-let with_pool ~clock ~proc_mgr f =
+let with_pool ~clock ~proc_mgr ~servers f =
   Eio.Switch.run (fun sw ->
-    let t = create ~sw ~clock ~proc_mgr in
+    let t = create ~sw ~clock ~proc_mgr ~servers in
     Fun.protect ~finally:(fun () -> close t) (fun () -> f t))
 ;;

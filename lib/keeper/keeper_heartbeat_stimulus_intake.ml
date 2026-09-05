@@ -652,26 +652,41 @@ let reconcile_spent_selection
         | Ok () -> Ok Selection_actionable
         | Error message -> Error ("approval resolution projection failed: " ^ message))
      | Error error ->
-       (match
-          Keeper_approval_queue.ensure_resolution_chat_projection
-            ~base_path:config.Workspace_utils.base_path
-            ~keeper_name
-            ~approval_id
-            ~tool_name:None
-            ~decision:Keeper_approval_queue_rules_types.Decision.Approve
-        with
-        | Error message -> Error ("approval resolution projection failed: " ^ message)
-        | Ok () ->
-          (match Keeper_approval_queue.resolution_absence_of_grant_error error with
-           | None ->
-             (* A read failure: the store may answer on the next turn. *)
-             Ok Selection_actionable
-           | Some absence ->
-             (* The store's answer is a fact that reading again will not
-                change: nothing stands behind this entry to replay. A turn
-                spent on it failed the same way every cycle after a store
-                version cut removed the delivery rows while the queues kept
-                their wakes (#33373), so the entry is retired here. *)
+       let project_approved () =
+         Keeper_approval_queue.ensure_resolution_chat_projection
+           ~base_path:config.Workspace_utils.base_path
+           ~keeper_name
+           ~approval_id
+           ~tool_name:None
+           ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+       in
+       (match Keeper_approval_queue.resolution_absence_of_grant_error error with
+        | None ->
+          (* A read failure: the store may answer on the next turn. *)
+          (match project_approved () with
+           | Ok () -> Ok Selection_actionable
+           | Error message ->
+             Error ("approval resolution projection failed: " ^ message))
+        | Some absence ->
+          (* The store's answer is a fact that reading again will not change:
+             nothing stands behind this entry to replay. A turn spent on it
+             failed the same way every cycle after a store version cut removed
+             the delivery rows while the queues kept their wakes (#33373), so
+             the entry is retired here. The queued decision is projected as the
+             resolution only where the store holds no decision of its own; a
+             store that recorded a rejection already speaks for itself. *)
+          let projection =
+            match absence with
+            | Keeper_approval_queue.Resolution_not_approved -> Ok ()
+            | Keeper_approval_queue.Resolution_missing
+            | Keeper_approval_queue.Resolution_still_pending
+            | Keeper_approval_queue.Resolution_workspace_mismatch _ ->
+              project_approved ()
+          in
+          (match projection with
+           | Error message ->
+             Error ("approval resolution projection failed: " ^ message)
+           | Ok () ->
              (match
                 Keeper_registry_event_queue.ack_pending_result
                   ~base_path:config.Workspace_utils.base_path

@@ -332,6 +332,9 @@ val fusion_row :
     where it used to be unbounded in the header and cut at fourteen in the
     row. *)
 
+val fusion_sidebar_label :
+  status:string -> time:string -> keeper:string -> run_id:string -> string
+
 (** {1 Harness verdict columns} *)
 
 type harness_row_values = {

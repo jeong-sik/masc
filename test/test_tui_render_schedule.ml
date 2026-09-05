@@ -1191,6 +1191,14 @@ let test_fusion_keeper_growth_comes_out_of_the_run_id () =
     (Masc_tui_message_layout.display_width
        (Schedule.fusion_header_row ~keeper_width:26 ~run_width:wide))
 
+let test_fusion_sidebar_label_format () =
+  let label =
+    Schedule.fusion_sidebar_label ~status:"done" ~time:"14:20:05"
+      ~keeper:"edgar" ~run_id:"fusion-target-501"
+  in
+  check string "label starts with status, time, keeper, and run id"
+    "[done] 14:20:05 @edgar fusion-target-501" label
+
 (* The strip named five stops while the Planning walk had three: Schedules and
    Fusion had become tabs of the selected Keeper and nothing took their names
    off this row. A reader pressing 4 or 5 arrived nowhere. *)
@@ -1591,6 +1599,8 @@ let () =
             test_fusion_columns_hold_their_offsets
         ; test_case "fusion keeper growth comes out of the run id" `Quick
             test_fusion_keeper_growth_comes_out_of_the_run_id
+        ; test_case "fusion sidebar label format" `Quick
+            test_fusion_sidebar_label_format
         ; test_case "planning strip names only its own stops" `Quick
             test_planning_strip_names_only_its_own_stops
         ; test_case "planning window rides the active stop" `Quick

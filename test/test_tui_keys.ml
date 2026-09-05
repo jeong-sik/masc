@@ -255,7 +255,7 @@ let test_memory_footer_offers_the_fact_browser () =
   (* One spelling for the keeper row. [ / ] was listed beside j/k for the
      same movement and no arm answered it. *)
   check str "the health table names the way into the facts"
-    "j/k:move  Enter:facts  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  Enter:facts  a / A:all fleet  s:sort  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Memory);
   check Alcotest.bool "the dead bracket hint is gone" false
     (List.exists

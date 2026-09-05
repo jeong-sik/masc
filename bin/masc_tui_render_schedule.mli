@@ -385,6 +385,8 @@ val planning_title_width : inner_width:int -> phase_width:int -> int
 val planning_header_row : phase_width:int -> title_width:int -> string
 
 val planning_row :
+  ?priority_style:string ->
+  ?open_style:string ->
   phase_style:string ->
   phase_width:int ->
   title_width:int ->

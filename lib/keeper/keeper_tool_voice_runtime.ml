@@ -45,8 +45,28 @@ let command_of_string (s : string) : voice_command option =
 type external_effect_authorizer =
   operation:string ->
   input:Yojson.Safe.t ->
+  call_summary:string option ->
   continue:(unit -> Keeper_tool_execution.t) ->
   Keeper_tool_execution.t
+
+(* The one argument a speak is for. Read once here for both the handler and
+   the approval row: a [message] that is absent, not a string, or blank is
+   not a speak, so there is nothing to play and nothing to state. *)
+let speak_message_of_args (args : Yojson.Safe.t) =
+  match args with
+  | `Assoc fields ->
+    (match List.assoc_opt "message" fields with
+     | Some (`String message) ->
+       (match String_util.trim_nonempty message with
+        | Some message -> Ok message
+        | None -> Error "message is blank")
+     | Some _ -> Error "message must be a string"
+     | None -> Error "message is missing")
+  | _ -> Error "arguments must be an object"
+
+(* What a speak approval is about, in one line: the first line of what would
+   be said, whole. *)
+let speak_call_summary ~message = String_util.first_nonblank_line message
 
 (* Which way a speak leaves the tool. The Gate reviews it unless the keeper
    or the voice config exempts it; a config that does not load is a third
@@ -66,7 +86,6 @@ let handle_speak_with_outcome
       ~(authorize_external_effect : external_effect_authorizer)
       ~(args : Yojson.Safe.t)
   =
-  let message = Safe_ops.json_string ~default:"" "message" args |> String.trim in
   let provider =
     Safe_ops.json_string_opt "provider" args
     |> Option.map String.trim
@@ -82,12 +101,12 @@ let handle_speak_with_outcome
     | Some d when d <> "" -> Some d
     | _ -> None
   in
-  if message = ""
-  then
+  match speak_message_of_args args with
+  | Error reason ->
     Keeper_tool_execution.failure
       ~class_:Tool_result.Workflow_rejection
-      (error_json "message is required. Good: message='Hello team.'. Bad: message=''.")
-  else (
+      (error_json (reason ^ ". Good: message='Hello team.'. Bad: message=''."))
+  | Ok message -> (
     match
       ( Eio_context.get_root_switch_opt ()
       , Eio_context.get_clock_opt ()
@@ -205,6 +224,7 @@ let handle_speak_with_outcome
          authorize_external_effect
            ~operation:(command_to_string Speak)
            ~input:args
+           ~call_summary:(speak_call_summary ~message)
            ~continue:run_speak)
     | _ ->
       Keeper_tool_execution.success

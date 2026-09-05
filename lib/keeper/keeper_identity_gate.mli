@@ -41,6 +41,13 @@ val replay_of_gate_input : Yojson.Safe.t -> (replay_call, string) result
 (** Strict: every field exactly once, unknown fields rejected, blank ids
     rejected. An approval that cannot be decoded is repaired, not guessed. *)
 
+val call_summary : replay_call -> string option
+(** The one line an identity_call approval is about: the provider surface it
+    would reach, as [provider_id/remote_name]. This is the identity tool's
+    declared call summary; the submitting path and the replay engine both
+    state it through this function. The arguments are the remote tool's
+    payload and take no part in it. *)
+
 val agent_tool :
   ?post:Mcp_client.post ->
   config:Workspace.config ->

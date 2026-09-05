@@ -23,12 +23,28 @@ val command_of_string : string -> voice_command option
 (** Caller-owned authorization boundary around one concrete voice effect. The
     voice runtime invokes it only at the TTS/playback leaf; the microphone
     window is wall-clock bound, so listening stays ungated, and local
-    capability and session reads do not become Gate requests either. *)
+    capability and session reads do not become Gate requests either.
+    [call_summary] is the speak's declared one-line statement
+    ({!speak_call_summary}); the authorizer forwards it to the Gate request
+    without reading it. *)
 type external_effect_authorizer =
   operation:string ->
   input:Yojson.Safe.t ->
+  call_summary:string option ->
   continue:(unit -> Keeper_tool_execution.t) ->
   Keeper_tool_execution.t
+
+val speak_message_of_args : Yojson.Safe.t -> (string, string) result
+(** The one argument a speak is for, read once for the handler and for the
+    approval row: [message], trimmed. Absent, non-string, or blank is an
+    error; the handler refuses such a call and the replay engine states no
+    summary for it. *)
+
+val speak_call_summary : message:string -> string option
+(** The one line a speak approval is about: the first non-blank line of the
+    message, whole. This is the speak tool's declared call summary; the
+    handler states it when it asks the Gate, and the replay engine states it
+    from {!speak_message_of_args} over the approved input. *)
 
 val handle_voice_tool :
   config:Workspace.config ->

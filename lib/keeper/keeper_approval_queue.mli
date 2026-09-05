@@ -221,22 +221,20 @@ val record_consumed_resolution_replay :
   outcome:resolution_replay_outcome ->
   (replay_recording, grant_error) result
 
-(** One line naming what a gated call asked for, taken from its persisted
-    input. [None] when the input names no argv and no provider surface: the
-    row then reads as it did before the field existed, rather than from a
-    guess. *)
-val call_summary_of_input : Yojson.Safe.t -> string option
-
 (** Idempotently project durable approval truth into the originating Keeper's
     visible chat. These receipts never authorize or replay an effect; they are
     the presentation acknowledgement required before the wake event may be
-    drained. *)
+    drained.
+
+    Each row's [call_summary] is copied from the approval's request row
+    ({!Keeper_chat_store.approval_request_call_summary}): the producer stated
+    that line once, on the Gate request ({!Keeper_gate.request}), and this
+    queue never derives one from the stored input. *)
 val ensure_resolution_chat_projection :
   base_path:string ->
   keeper_name:string ->
   approval_id:string ->
   tool_name:string option ->
-  call_summary:string option ->
   decision:decision ->
   (unit, string) result
 
@@ -245,7 +243,6 @@ val ensure_replay_chat_projection :
   keeper_name:string ->
   approval_id:string ->
   tool_name:string option ->
-  call_summary:string option ->
   outcome:resolution_replay_outcome ->
   (unit, string) result
 
@@ -342,11 +339,16 @@ end
     entry but is not part of the request's identity: a next-turn retry of the
     same call folds onto the approval already in flight instead of opening a
     second one (#28866). A deduplicated or folded request does not consume a
-    durable queue sequence or emit a new pending audit event. *)
+    durable queue sequence or emit a new pending audit event.
+
+    [call_summary] is the producer's one-line statement of the call
+    ({!Keeper_gate.request.call_summary}); it is written on the request's chat
+    row and takes no part in the request's identity. *)
 val submit_pending :
   keeper_name:string ->
   tool_name:string ->
   input:Yojson.Safe.t ->
+  call_summary:string option ->
   base_path:string ->
   ?turn_id:int ->
   ?request_context:Yojson.Safe.t ->

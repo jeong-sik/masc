@@ -566,7 +566,6 @@ let reconcile_spent_selection
             ~keeper_name
             ~approval_id
             ~tool_name:(Some request.tool_name)
-            ~call_summary:(Keeper_approval_queue.call_summary_of_input request.input)
             ~decision:Keeper_approval_queue_rules_types.Decision.Approve
         with
         | Error message -> Error ("approval resolution projection failed: " ^ message)
@@ -577,7 +576,6 @@ let reconcile_spent_selection
                ~keeper_name
                ~approval_id
                ~tool_name:(Some request.tool_name)
-               ~call_summary:(Keeper_approval_queue.call_summary_of_input request.input)
                ~outcome:replay_outcome
            with
            | Error message -> Error ("approval replay projection failed: " ^ message)
@@ -619,7 +617,6 @@ let reconcile_spent_selection
             ~keeper_name
             ~approval_id
             ~tool_name:(Some request.tool_name)
-            ~call_summary:(Keeper_approval_queue.call_summary_of_input request.input)
             ~decision:Keeper_approval_queue_rules_types.Decision.Approve
         with
         | Ok () -> Ok Selection_actionable
@@ -631,7 +628,6 @@ let reconcile_spent_selection
             ~keeper_name
             ~approval_id
             ~tool_name:None
-            ~call_summary:None
             ~decision:Keeper_approval_queue_rules_types.Decision.Approve
         with
         | Ok () -> Ok Selection_actionable
@@ -644,7 +640,6 @@ let reconcile_spent_selection
          ~keeper_name
          ~approval_id
          ~tool_name:None
-         ~call_summary:None
          ~decision:(Keeper_approval_queue_rules_types.Decision.Reject rationale)
      with
      | Ok () ->

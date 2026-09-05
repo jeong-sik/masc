@@ -134,6 +134,13 @@ val strip_trailing_cr : string -> string
 val first_line : string -> string
 (** [first_line text] returns the bytes of [text] before the first ['\\n'].
     Returns [text] unchanged when it contains no ['\\n']. Does not trim. *)
+
+val first_nonblank_line : string -> string option
+(** [first_nonblank_line text] is the first line of [text] that holds a
+    non-whitespace character, trimmed. [None] when every line is blank. The
+    line is returned whole: a caller that must fit it somewhere cuts it
+    there. *)
+
 val escape_xml : string -> string
 (** Escape the five XML 1.0 predefined entities: ampersand,
     less-than, greater-than, double-quote, and apostrophe.

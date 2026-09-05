@@ -9817,6 +9817,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          rather than instead of it -- one provider refusing is not a reason
          to take the others off the screen, and the message that matters
          most here is the one telling them what to do about it. *)
+      | Login_attached msg ->
+          state.identity_attempt_error <- Some (Masc_tui_types.Notice_ok, msg)
       | Login_failed detail ->
           state.identity_attempt_error <- Some (Masc_tui_types.Notice_bad, detail);
           if Option.is_none state.identity_app_form

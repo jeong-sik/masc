@@ -139,6 +139,12 @@ type standalone_lane_status =
   | Standalone_no_retained_observation
   | Standalone_unavailable
 
+type standalone_lane_configuration =
+  | Lane_ready
+  | Lane_slotless
+  | Lane_unconfigured
+  | Lane_registry_unavailable
+
 type standalone_lane_slot_count = {
   slsc_slot_id : string;
   slsc_count : int;
@@ -150,7 +156,7 @@ type standalone_lane = {
   sl_purpose : string option;
   sl_required : bool;
   sl_status : standalone_lane_status;
-  sl_configuration_state : string;
+  sl_configuration_state : standalone_lane_configuration;
   sl_admitted_slots : string list;
   sl_cli_slots : string list;
   sl_dropped_slots : string list;
@@ -5264,6 +5270,22 @@ let decode_keeper_lanes_snapshot json =
   let* kls_lanes = decode_list "snapshots" decode_keeper_lane items in
   Ok { kls_generated_at; kls_count; kls_lanes }
 
+let standalone_lane_configuration_of_string = function
+  | "ready" -> Ok Lane_ready
+  (* The server calls this one "degraded": configured, but nothing admitted.
+     The word it shares with the status axis means something else there, so
+     the type says what the state is rather than how bad it is. *)
+  | "degraded" -> Ok Lane_slotless
+  | "unconfigured" -> Ok Lane_unconfigured
+  | "unavailable" -> Ok Lane_registry_unavailable
+  | other -> Error ("standalone lane configuration: unknown value " ^ other)
+
+let standalone_lane_configuration_to_string = function
+  | Lane_ready -> "ready"
+  | Lane_slotless -> "no slot admitted"
+  | Lane_unconfigured -> "not configured"
+  | Lane_registry_unavailable -> "registry unreadable"
+
 let standalone_lane_status_of_string = function
   | "running" -> Ok Standalone_running
   | "idle" -> Ok Standalone_idle
@@ -5300,7 +5322,10 @@ let decode_standalone_lane json =
     else Error "standalone lane row is not observation-only"
   in
   let* _configured = required_nullable_bool_field json "configured" in
-  let* sl_configuration_state = required_string_field json "configuration_state" in
+  let* configuration_state = required_string_field json "configuration_state" in
+  let* sl_configuration_state =
+    standalone_lane_configuration_of_string configuration_state
+  in
   let* admitted_slots = required_list_field json "admitted_slots" in
   let* sl_admitted_slots =
     decode_list

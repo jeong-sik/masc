@@ -2326,12 +2326,20 @@ let test_judge_effect_prompt_comes_from_registry () =
   | Error detail -> fail ("Gate judgment prompt unavailable: " ^ detail)
   | Ok prompt ->
     check bool "prompt is non-empty" true (String.trim prompt <> "");
-    check bool
-      "judge is scoped to effect safety"
-      true
-      (Astring.String.is_infix
-         ~affix:"authority is the concrete effect's safety"
-         prompt);
+    (* Registry ownership is a fact about where the text came from, not
+       about which words it contains: the shipped prompt is edited (it
+       moved to Korean on 2026-09-01) and a sentence pinned here goes stale
+       without saying so. The resolution names the file the slot was read
+       from and whether an override replaced it. *)
+    let resolution = Prompt_registry.resolve_prompt Prompt_names.judge_effect in
+    check (option string)
+      "the slot resolves against its group file"
+      (Some "judge.md")
+      (Option.map Filename.basename resolution.file_path);
+    check bool "no override stands in for the shipped text" false
+      resolution.has_override;
+    check string "the worker renders the registry's text" resolution.effective
+      prompt;
     check bool
       "missing task purpose alone does not escalate"
       true

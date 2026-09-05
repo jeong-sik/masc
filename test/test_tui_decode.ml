@@ -3096,7 +3096,6 @@ let test_decode_memory_facts_keeps_both_stores () =
                 ; "origin", `String "authored"
                 ; "first_seen", `Float 1_775_000_000.0
                 ; "last_seen", `Float 1_775_000_050.0
-                ; "reinforcement", `Int 3
                 ; "memory_id", `String "mem-1"
                 ]
             ] )
@@ -3141,9 +3140,7 @@ let test_decode_memory_facts_keeps_both_stores () =
                 Alcotest.(check string) "category as the server spelled it"
                   "lesson" fact.Tui_decode.mf_category;
                 Alcotest.(check string) "origin" "authored"
-                  fact.Tui_decode.mf_origin;
-                Alcotest.(check int) "reinforcement" 3
-                  fact.Tui_decode.mf_reinforcement
+                  fact.Tui_decode.mf_origin
             | facts ->
                 Alcotest.fail
                   (Printf.sprintf "expected one fact, got %d"

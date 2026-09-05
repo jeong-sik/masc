@@ -759,7 +759,6 @@ type memory_fact = {
   mf_origin : string;
   mf_first_seen : float;
   mf_last_seen : float;
-  mf_reinforcement : int;
   mf_memory_id : string;
 }
 

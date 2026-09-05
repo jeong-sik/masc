@@ -1271,7 +1271,7 @@ let handle_keeper_get_subroutes state req request reqd =
            (`Assoc [ ("error", `String msg) ]) reqd)
   else if ends_with "/memory-facts" then
     (* What this keeper remembers, fact by fact. The store keeps a closed
-       taxonomy, provenance, and reinforcement on every row, and the health
+       taxonomy and provenance on every row, and the health
        projection reports only counts. Ordinary and source-bound stores are
        two readings and stay two fields, each with its own read error, so
        one failing store never blanks the other. *)
@@ -1297,7 +1297,6 @@ let handle_keeper_get_subroutes state req request reqd =
             )
           ; "first_seen", `Float fact.first_seen
           ; "last_seen", `Float fact.last_seen
-          ; "reinforcement", `Int fact.reinforcement
           ; "memory_id", `String (Keeper_memory_os_types.memory_id fact)
           ; "basis", Keeper_memory_os_types.basis_to_json fact.basis
           ]

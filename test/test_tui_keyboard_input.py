@@ -5542,7 +5542,6 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                         "origin": "authored",
                         "first_seen": 1787340000.0,
                         "last_seen": 1787347000.0,
-                        "reinforcement": 3,
                         "memory_id": "mem-1",
                     },
                     {
@@ -5551,7 +5550,6 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                         "origin": "injected",
                         "first_seen": 1787341000.0,
                         "last_seen": 1787346000.0,
-                        "reinforcement": 1,
                         "memory_id": "mem-2",
                     },
                 ],
@@ -5609,7 +5607,7 @@ def memory_facts_interaction() -> Interaction:
         # The listing arrives async after the browser opens.
         wait_for_output(
             process, master_fd, output,
-            b"[lesson] the deploy needs assets \xc3\x973",
+            b"the deploy needs assets",
             start=0, timeout=5.0,
         )
         for needle in (

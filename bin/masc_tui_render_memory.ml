@@ -178,11 +178,6 @@ let memory_fact_row_line ~cols (row : memory_fact_row) =
         | "architecture" | "system" -> Theme.info ()
         | _ -> Theme.recede ()
       in
-      let reinf_style =
-        if fact.mf_reinforcement >= 10 then Ansi.bold ^ Theme.ok ()
-        else if fact.mf_reinforcement >= 3 then Ansi.bold
-        else Theme.recede ()
-      in
       let raw_cat = Terminal_text.single_line fact.mf_category in
       let cat_str =
         if Message_layout.display_width raw_cat > 10 then
@@ -191,13 +186,10 @@ let memory_fact_row_line ~cols (row : memory_fact_row) =
       in
       let pad = String.make (max 0 (10 - Message_layout.display_width cat_str)) ' ' in
       let cat_badge = Printf.sprintf "%s[%s%s]%s" cat_style cat_str pad Ansi.reset in
-      let reinf_badge =
-        Printf.sprintf "%s\xc3\x97%-3d%s" reinf_style fact.mf_reinforcement Ansi.reset
-      in
       let age = memory_fact_age_label fact.mf_last_seen in
       let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
-      let prefix = Printf.sprintf "  %s %s %s " cat_badge reinf_badge age_badge in
-      let prefix_cells = 2 + 12 + 1 + 5 + 1 + 6 + 1 in
+      let prefix = Printf.sprintf "  %s %s " cat_badge age_badge in
+      let prefix_cells = 2 + 12 + 1 + 6 + 1 in
       let claim_budget = max 4 (inner_width - prefix_cells) in
       let claim = Terminal_text.single_line fact.mf_claim in
       let claim_display =
@@ -267,16 +259,9 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
         Message_layout.split_cells ~max_cells:inner_width (Terminal_text.single_line fact.mf_claim)
         |> List.map (fun line -> "    " ^ line)
       in
-      let reinf_tag =
-        if fact.mf_reinforcement >= 10 then " (High Confidence)"
-        else if fact.mf_reinforcement >= 3 then " (Confirmed)"
-        else " (Provisional)"
-      in
       [ Printf.sprintf "  %s%sFact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
       @ claim_lines
-      @ [ Printf.sprintf "    %sCategory:%s   %-15s %sReinforced:%s \xc3\x97%d%s"
-            (Theme.recede ()) Ansi.reset fact.mf_category
-            (Theme.recede ()) Ansi.reset fact.mf_reinforcement reinf_tag
+      @ [ Printf.sprintf "    %sCategory:%s   %-15s" (Theme.recede ()) Ansi.reset fact.mf_category
         ; Printf.sprintf "    %sOrigin:%s     %-15s %sTimeline:%s   First: %s · Last: %s"
             (Theme.recede ()) Ansi.reset fact.mf_origin
             (Theme.recede ()) Ansi.reset
@@ -407,27 +392,11 @@ let render_memory_facts_body ~cols ~budget (state : state)
           | _ -> (0, 0)
         in
         let grand_total = ord_count + src_count + dropped_count in
-        let max_reinf =
-          List.fold_left
-            (fun acc (f : memory_fact) -> max acc f.mf_reinforcement)
-            0 ord_facts
-        in
-        let avg_reinf =
-          if ord_count = 0 then 0.0
-          else
-            float_of_int
-              (List.fold_left
-                 (fun acc (f : memory_fact) -> acc + f.mf_reinforcement)
-                 0 ord_facts)
-            /. float_of_int ord_count
-        in
         let stats =
           Printf.sprintf
-            "  %sTotal:%s %d facts  %s(%d ord · %d src · %d drop)%s · %sMax Reinf:%s \xc3\x97%d · %sAvg:%s \xc3\x97%.1f · %sSort [s]:%s %s"
+            "  %sTotal:%s %d facts  %s(%d ord · %d src · %d drop)%s · %sSort [s]:%s %s"
             Ansi.bold Ansi.reset grand_total
             (Theme.recede ()) ord_count src_count dropped_count Ansi.reset
-            (Theme.recede ()) Ansi.reset max_reinf
-            (Theme.recede ()) Ansi.reset avg_reinf
             (Theme.recede ()) Ansi.reset sort_label
         in
         let all_categories = memory_fact_categories state in

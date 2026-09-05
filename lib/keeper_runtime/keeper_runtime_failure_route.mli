@@ -49,8 +49,11 @@ type rotate_class =
   | Runtime_exhausted  (** generic whole-runtime exhaustion *)
   | No_progress_empty
   | No_progress_thinking_only
-      (** accept-rejections carrying an explicit no-progress recovery hint:
-          a different model may make progress *)
+  | No_progress_truncated
+      (** accept-rejections carrying a no-progress recovery hint: the response
+          was empty, thinking-only, or cut at [MaxTokens] after the
+          continuation on this runtime did not deliver; a different model may
+          make progress *)
 
 (** Typed terminal classes that mechanical retry or rotation cannot change. *)
 type terminal_class =

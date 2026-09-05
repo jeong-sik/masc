@@ -426,22 +426,28 @@ let test_keeper_action_colours_stay_apart_without_red_and_green () =
     schemes
 ;;
 
-(* Six hues for six kinds, measured on all 43 shipped schemes.
+(* The slot hues, measured on all 43 shipped schemes -- 37 bundled and the
+   six under config/themes.
 
-   0.024 is the observed worst pair -- horizon-dark's yellow against its
-   green -- and it sits just under the 0.025 the keeper action colours hold.
-   That set is four colours with no green in it; six cannot be picked that
-   far apart out of a palette that only names seven. The number is here as a
-   ratchet: a scheme added below it fails this rather than a reader's eye.
+   The worst pair in full colour vision is 0.023960: horizon-dark's yellow
+   against its green, base0A EFB993 against base0B EFAF8E. The floor is
+   0.023, which leaves about the same margin under the observation that the
+   keeper action floor leaves under its own. It is a ratchet: a scheme added
+   below it fails here rather than in a reader's terminal.
 
-   Colour is not what carries this axis, and the measurement is why. Under
-   deuteranopia the worst pair falls to 0.0014 (tokyo-night-light, yellow
-   against magenta) and under protanopia to 0.0044 (edge-dark, yellow
-   against green) -- eighteen and six times under the floor. So the glyph is
-   load-bearing rather than decorative, and test_tui_file_icon's
-   [glyphs_distinct] is what holds it. Any axis moved onto these slots needs
-   its own second channel; the colour is redundancy. *)
-let categorical_separation_floor = 0.024
+   Not comparable to that floor, though the two numbers look alike. The
+   keeper action test measures only under simulated deficiency and never in
+   full colour vision; this one is the other way round. Measured the same
+   way, these five hues come to 0.003345 under deuteranopia (ayu-dark) and
+   0.003246 under protanopia (ayu-light) -- both the yellow-green pair
+   again, and both about seven times under 0.025.
+
+   So colour does not carry this axis and is not asked to. The file list
+   separates its kinds by glyph; test_tui_file_icon's [glyphs_distinct]
+   checks those are distinct strings, which is byte distinctness and not a
+   measurement of how far apart they read. Any axis moved onto these slots
+   needs a second channel of its own. *)
+let categorical_separation_floor = 0.023
 
 let labelled_categories =
   List.map
@@ -501,7 +507,9 @@ let test_categorical_slots_hold_their_measured_floor () =
               (ansi scheme (Masc_tui_theme.For_testing.ansi_color_index right))
           in
           check bool
-            (Printf.sprintf "%s: %s and %s stay %.4f apart" scheme.name
+            (* Six places, so a failure cannot print the same number it is
+               being compared against. *)
+            (Printf.sprintf "%s: %s and %s stay %.6f apart" scheme.name
                left_label right_label separation)
             true
             (separation >= categorical_separation_floor))

@@ -7,6 +7,4 @@ type history_line_action =
   | Move_internal
   | Drop_line
 
-val classify_history_entry : source:string -> history_line_action
-
 val persist_message : ?source:string -> session_context -> Agent_core.Types.message -> unit

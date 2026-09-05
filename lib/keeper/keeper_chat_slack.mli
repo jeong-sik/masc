@@ -132,10 +132,6 @@ module For_testing : sig
   val message_blocks_of_text :
     mention_user_ids:string list -> string -> Yojson.Safe.t list
 
-  val markdown_block_json : string -> Yojson.Safe.t
-
-  val mention_block_json : string list -> Yojson.Safe.t
-
   val final_message_blocks :
     content:string -> event_blocks:Yojson.Safe.t list -> Yojson.Safe.t list
   (** Merge text-derived blocks with explicitly emitted rich event blocks in

@@ -611,16 +611,6 @@ let docker_image_present_with_class ~image ~timeout_sec =
   docker_image_present_with_class_optional ~image ~timeout_sec ()
 ;;
 
-let docker_image_present_optional ~image ?timeout_sec () =
-  match docker_image_present_with_class_optional ~image ?timeout_sec () with
-  | Ok () -> Ok ()
-  | Error classified -> Error classified.message
-;;
-
-let docker_image_present ~image ~timeout_sec =
-  docker_image_present_optional ~image ~timeout_sec ()
-;;
-
 let ensure_keeper_sandbox_image_present_with_class_optional
       ~image
       ?timeout_sec
@@ -778,11 +768,15 @@ let ensure_keeper_sandbox_runtime ~timeout_sec =
   ensure_keeper_sandbox_runtime_optional ~timeout_sec ()
 ;;
 
-let docker_preflight ~timeout_sec () =
+let docker_preflight ?image ~timeout_sec () =
   if not (Env_config_sandbox.Preflight.enabled ())
   then None
   else (
-    let image = Env_config_sandbox.Runtime.docker_image () in
+    let image =
+      match image with
+      | Some img when String.trim img <> "" -> String.trim img
+      | _ -> Env_config_sandbox.Runtime.docker_image ()
+    in
     let docker_runtime_ok, docker_runtime_error, docker_runtime_failure_class =
       match docker_info_security_options_with_class ~timeout_sec with
       | Ok _ -> true, None, None

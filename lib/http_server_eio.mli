@@ -241,13 +241,10 @@ end
     capped at {!max_body_bytes}; oversized requests respond
     [`Payload_too_large] before the handler is invoked. *)
 module Request : sig
-  (** [20 * 1024 * 1024] (= 20 MiB).  The hard-coded default
-      when no env override is set. *)
-  val default_max_body_bytes : int
 
   (** Effective max body size, resolved at module-load time
       from [MASC_MAX_BODY_BYTES], falling back to
-      {!default_max_body_bytes}.  Restart required for env
+      [default_max_body_bytes].  Restart required for env
       changes. *)
   val max_body_bytes : int
 
@@ -270,12 +267,6 @@ module Request : sig
       EOF.  413 / 500 errors auto-respond before [callback] is
       invoked. *)
   val read_body_async : Httpun.Reqd.t -> (string -> unit) -> unit
-
-  (** [read_body_sync reqd] is the Promise-backed synchronous
-      wrapper.  Returns [Ok body] or [Error message]; size +
-      transport errors are translated into the [Error] string
-      and a 4xx/5xx HTTP response is auto-sent. *)
-  val read_body_sync : Httpun.Reqd.t -> (string, string) result
 
   (** [path request] is the path portion of the URI (everything
       before [?]). *)

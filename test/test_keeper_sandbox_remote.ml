@@ -157,14 +157,14 @@ let exec_prefix ~cli =
   ; "--env"; "MASC_EXEC_SHIM_CONFIG=" ^ shim_config_path; guest_name ]
 ;;
 
-let guest ~cli : Keeper_sandbox_remote.container_exec =
-  { prefix = exec_prefix ~cli; container_name = guest_name; shim_path }
+let guest ~cli ?probe_prefix () : Keeper_sandbox_remote.container_exec =
+  { prefix = exec_prefix ~cli; probe_prefix; container_name = guest_name; shim_path }
 ;;
 
 let make_state ~base_path ~cli =
   Keeper_sandbox_remote.of_container_exec ~base_path ~keeper_name:"keeper-a"
     ~remote_root ~gh_config_dir ~injected_env:[] ~env_allowlist:[ "LANG" ]
-    ~connect_timeout_sec:1 ~max_concurrent_sessions:2 (guest ~cli)
+    ~connect_timeout_sec:1 ~max_concurrent_sessions:2 (guest ~cli ())
 ;;
 
 let contains needle haystack =
@@ -213,6 +213,25 @@ let test_transport_and_probe_argv () =
     (Keeper_sandbox_remote.remote_keeper_root state);
   check string "lane prefix" "microvm_remote"
     (Keeper_sandbox_remote.lane_prefix (Keeper_sandbox_remote.transport state))
+;;
+
+let test_container_exec_probe_argv_prefers_probe_prefix () =
+  let prefix = [ "container"; "exec"; "-i"; "guest" ] in
+  let probe_prefix = [ "container"; "exec"; "guest" ] in
+  let custom_guest : Keeper_sandbox_remote.container_exec =
+    { prefix; probe_prefix = Some probe_prefix; container_name = guest_name; shim_path }
+  in
+  let state =
+    Keeper_sandbox_remote.of_container_exec ~base_path:"/workspace" ~keeper_name:"keeper-a"
+      ~remote_root ~gh_config_dir ~injected_env:[] ~env_allowlist:[ "LANG" ]
+      ~connect_timeout_sec:1 ~max_concurrent_sessions:2 custom_guest
+  in
+  check (list string) "transport argv uses prefix"
+    (prefix @ [ shim_path ])
+    (Keeper_sandbox_remote.transport_argv state);
+  check (list string) "probe argv uses probe_prefix without -i"
+    (probe_prefix @ [ shim_path; "--probe" ])
+    (Keeper_sandbox_remote.probe_argv state)
 ;;
 
 (* The OpenSSH probe stays one shell word, because sshd hands the remote
@@ -340,6 +359,80 @@ let test_a_v2_shim_is_spoken_to_in_v2 () =
   check bool "by name" true (contains "remote_ssh_version_error" stderr)
 ;;
 
+(* RFC-0427 D-1: the lane report is the last dispatch's own branch and the
+   probe's own answer, kept with the endpoint's shared state -- not a reading
+   of the message text, and empty before anything has been asked. *)
+let test_the_lane_report_is_what_the_last_dispatch_said () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, _ = make_stub ~dir:base_path ~mode:"exit3" in
+  let state = make_state ~base_path ~cli in
+  (match Keeper_sandbox_remote.report state with
+   | { probe = Probe_not_asked; last_dispatch = None; lane = "microvm_remote"; _ } -> ()
+   | { probe = Probe_answered _ | Probe_failed _; _ } -> fail "probed before anything asked"
+   | { last_dispatch = Some _; _ } -> fail "a dispatch recorded before any ran"
+   | { lane; _ } -> fail ("lane label " ^ lane));
+  let _ = run_request (Keeper_sandbox_remote.runner ~timeout_sec:2.0 state) ~cwd:None () in
+  (match Keeper_sandbox_remote.report state with
+   | { probe = Probe_answered { major = Exec_ssh_protocol.V3; _ }
+     ; last_dispatch = Some (Payload_finished { status = Unix.WEXITED 3; _ })
+     ; _ } -> ()
+   | { probe = Probe_answered { major = Exec_ssh_protocol.V2; _ }; _ } -> fail "the stub speaks v3"
+   | { probe = Probe_not_asked | Probe_failed _; _ } -> fail "the first dispatch probes"
+   | { last_dispatch = Some (Payload_finished { status; _ }); _ } ->
+     fail ("payload status " ^ Keeper_sandbox_exec_failure.status_label status)
+   | { last_dispatch = Some (Dispatch_failed { detail; _ }); _ } -> fail ("lane failed: " ^ detail)
+   | { last_dispatch = None; _ } -> fail "exit3 left no record");
+  let cli, _ = make_stub ~dir:base_path ~mode:"shim-error" in
+  let state = make_state ~base_path ~cli in
+  let _ = run_request (Keeper_sandbox_remote.runner ~timeout_sec:2.0 state) ~cwd:None () in
+  (match (Keeper_sandbox_remote.report state).last_dispatch with
+   | Some (Dispatch_failed { failure = Shim_refused; detail; _ }) ->
+     check bool "the shim's own words" true (contains "remote_ssh_path_jail_violation" detail)
+   | Some (Dispatch_failed { failure = Local_timeout | Remote_timeout | Transport_failed | Trailer_disagreement; detail; _ }) ->
+     fail ("wrong class for a shim_error trailer: " ^ detail)
+   | Some (Payload_finished _) | None -> fail "a shim_error trailer is a lane failure");
+  let cli, _ = make_stub ~dir:base_path ~mode:"malformed" in
+  let state = make_state ~base_path ~cli in
+  let _ = run_request (Keeper_sandbox_remote.runner ~timeout_sec:2.0 state) ~cwd:None () in
+  match (Keeper_sandbox_remote.report state).last_dispatch with
+  | Some (Dispatch_failed { failure = Transport_failed; _ }) -> ()
+  | Some (Dispatch_failed { failure = Local_timeout | Remote_timeout | Shim_refused | Trailer_disagreement; detail; _ }) ->
+    fail ("wrong class for an unreadable trailer: " ^ detail)
+  | Some (Payload_finished _) | None -> fail "an unreadable trailer is a lane failure"
+;;
+
+(* The tool's JSON names the operator action from the failure's class. *)
+let test_the_lane_status_names_who_acts () =
+  let at = 1.0 in
+  let report last_dispatch probe =
+    Keeper_tool_lane_status.json_of_report
+      { Keeper_sandbox_remote.lane = "microvm_remote"; endpoint = "vm-x"; probe; last_dispatch }
+  in
+  let field name json = Yojson.Safe.Util.member name json in
+  let version_skew =
+    report
+      (Some
+         (Keeper_sandbox_remote.Dispatch_failed
+            { at; failure = Transport_failed
+            ; detail = "remote_ssh_version_error: trailer carries v=2, this build speaks v3" }))
+      (Keeper_sandbox_remote.Probe_answered { major = Exec_ssh_protocol.V3; capabilities = [] })
+  in
+  check string "failure class" "transport_failed"
+    (Yojson.Safe.Util.to_string (field "failure" (field "last_dispatch" version_skew)));
+  check bool "the action says who replaces the shim" true
+    (contains "operator has to replace the shim" (Yojson.Safe.Util.to_string (field "operator_action" version_skew)));
+  let finished =
+    report (Some (Keeper_sandbox_remote.Payload_finished { at; status = Unix.WEXITED 0 })) Keeper_sandbox_remote.Probe_not_asked
+  in
+  check bool "a finished payload asks nothing of the operator" true
+    (field "operator_action" finished = `Null);
+  let probe_down = report None (Keeper_sandbox_remote.Probe_failed { at; detail = "endpoint_unreachable" }) in
+  check string "probe state" "failed" (Yojson.Safe.Util.to_string (field "state" (field "probe" probe_down)));
+  check bool "a failed probe is the operator's" true
+    (contains "operator" (Yojson.Safe.Util.to_string (field "operator_action" probe_down)))
+;;
+
 let test_lane_error_codes () =
   with_eio @@ fun () ->
   let base_path = temp_dir () in
@@ -388,6 +481,8 @@ let () =
     run "keeper_sandbox_remote"
       [ ( "container_exec"
         , [ test_case "transport + probe argv" `Quick test_transport_and_probe_argv
+          ; test_case "probe prefers probe_prefix when present" `Quick
+              test_container_exec_probe_argv_prefers_probe_prefix
           ; test_case "openssh probe stays one word" `Quick
               test_openssh_probe_stays_one_word
           ; test_case "frame, exit and injected env" `Quick
@@ -398,6 +493,10 @@ let () =
               test_observe_support_is_what_the_shim_advertises
           ; test_case "a v2 shim is spoken to in v2" `Quick
               test_a_v2_shim_is_spoken_to_in_v2
+          ; test_case "the lane report is what the last dispatch said" `Quick
+              test_the_lane_report_is_what_the_last_dispatch_said
+          ; test_case "the lane status names who acts" `Quick
+              test_the_lane_status_names_who_acts
           ; test_case "lane error codes" `Quick test_lane_error_codes
           ; test_case "preflight unreachable names the guest" `Quick
               test_preflight_unreachable_names_the_guest

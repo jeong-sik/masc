@@ -168,14 +168,6 @@ module Http_negotiation : sig
   val json_content_type : string
   (** Re-export of {!Mcp_protocol.Http_negotiation.json_content_type}. *)
 
-  val exists_accepted :
-    string ->
-    check:(type_:string -> subtype:string -> bool) ->
-    bool
-  (** [exists_accepted h ~check] parses [h] (Accept header) via the SDK
-      and returns [true] iff some entry has positive quality and
-      satisfies [check]. [type_] and [subtype] are passed lowercased. *)
-
   val accepts_sse_header : string option -> bool
   (** [true] iff the header advertises [text/event-stream]. *)
 

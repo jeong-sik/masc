@@ -892,11 +892,17 @@ let test_run_named_media_degrade_emits_typed_manifest () =
          ()
        : (Driver.named_run_result, Agent_core.Error.t) result);
     let degraded =
+      (* Manifest rows arrive newest-first here; [List.rev] puts them back in
+         emission order so the walk takes the first row the run emitted, not
+         the last. #33165 decides the degrade per lane candidate, so a turn
+         that degrades on the head and falls through to the next candidate
+         emits one degraded row per attempt, and the operator-facing account
+         starts where the turn actually started. *)
       List.find_opt
         (fun (manifest : Runtime_manifest.t) ->
            manifest.event = Runtime_manifest.Runtime_routed
            && String.equal manifest.status "degraded")
-        !manifests
+        (List.rev !manifests)
     in
     match degraded with
     | None -> Alcotest.fail "run_named omitted the media degradation manifest"

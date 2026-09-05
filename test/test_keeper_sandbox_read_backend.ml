@@ -1042,6 +1042,29 @@ esac\n\
 printf 'unexpected docker invocation\\n' >&2\n\
 exit 2\n"
 
+let fake_docker_preflight_custom_image_script =
+  "#!/bin/sh\n\
+case \"$1\" in\n\
+  info)\n\
+    printf '[]\\n'\n\
+    exit 0\n\
+    ;;\n\
+  image)\n\
+    if [ \"$2\" = \"inspect\" ] && [ \"$3\" = \"custom:test\" ]; then\n\
+      printf '[]\\n'\n\
+      exit 0\n\
+    fi\n\
+    printf 'missing image\\n' >&2\n\
+    exit 1\n\
+    ;;\n\
+  run)\n\
+    printf 'preflight must not execute product/tool inventory\\n' >&2\n\
+    exit 2\n\
+    ;;\n\
+esac\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
+
 let fake_docker_preflight_missing_image_script =
   "#!/bin/sh\n\
 case \"$1\" in\n\
@@ -1562,6 +1585,25 @@ let test_docker_preflight_reports_ready_image () =
       "no missing command admission field"
       true
       Yojson.Safe.Util.(member "missing_commands" json = `Null)
+
+let test_docker_preflight_respects_custom_image_argument () =
+  with_fake_docker fake_docker_preflight_custom_image_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  (match Keeper_sandbox_runtime.docker_preflight ~timeout_sec:5.0 () with
+   | None -> Alcotest.fail "expected docker preflight report"
+   | Some preflight ->
+     Alcotest.(check bool) "default image fails on custom mock" false preflight.ok;
+     Alcotest.(check bool) "default image absent" false preflight.image_present);
+  match Keeper_sandbox_runtime.docker_preflight ~image:"custom:test" ~timeout_sec:5.0 () with
+  | None -> Alcotest.fail "expected docker preflight report"
+  | Some preflight ->
+    Alcotest.(check bool) "custom image succeeds" true preflight.ok;
+    Alcotest.(check bool) "custom image present" true preflight.image_present;
+    Alcotest.(check string) "preflight record image matches custom" "custom:test" preflight.image
 
 let test_docker_preflight_surfaces_image_inspect_error () =
   with_fake_docker fake_docker_preflight_missing_image_script @@ fun () ->
@@ -2600,6 +2642,8 @@ let run_tests ~clock () =
         [
           Alcotest.test_case "ready image reports ok" `Quick
             test_docker_preflight_reports_ready_image;
+          Alcotest.test_case "custom image argument is respected" `Quick
+            test_docker_preflight_respects_custom_image_argument;
           Alcotest.test_case "image inspect error stays structural" `Quick
             test_docker_preflight_surfaces_image_inspect_error;
           Alcotest.test_case "daemon stderr does not create a semantic class" `Quick

@@ -5063,13 +5063,15 @@ let goto_surface state ~mailbox (destination : surface) =
    call this; so does board compose when its handler declines the key, so
    "Tab falls through" stays true while composing. *)
 let cycle_surface state ~mailbox ~backwards =
-  let ring = Masc_tui_types.surface_ring in
+  let ring = Masc_tui_types.visible_surface_ring state in
   let count = List.length ring in
-  let step = if backwards then count - 1 else 1 in
-  let index =
-    (Masc_tui_types.surface_ring_index state.view + step) mod count
-  in
-  goto_surface state ~mailbox (fst (List.nth ring index))
+  if count > 0 then begin
+    let step = if backwards then count - 1 else 1 in
+    let index =
+      (Masc_tui_types.visible_surface_ring_index state state.view + step) mod count
+    in
+    goto_surface state ~mailbox (fst (List.nth ring index))
+  end
 
 let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
   let host = server_peer_host in
@@ -6829,6 +6831,76 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       state.repository_changes_return_chat <- true;
       open_repository_changes state ~mailbox
         ~scope:Tui_decode.Repository_change_project
+  | Masc_tui_command.Open_patch_modal ->
+      Buffer.clear state.msg_input;
+      state.patch_modal_open <- true;
+      state.patch_modal_scroll <- 0;
+      let target_path =
+        match state.repository_changes_diff_path with
+        | Some p -> p
+        | None -> "."
+      in
+      state.patch_modal_path <- Some target_path;
+      launch_repository_changes_diff_load state ~mailbox
+        ~scope:Tui_decode.Repository_change_project ~path:target_path
+  | Masc_tui_command.Toggle_burn_hud ->
+      Buffer.clear state.msg_input;
+      state.burn_hud_visible <- not state.burn_hud_visible;
+      let status_str = if state.burn_hud_visible then "enabled" else "hidden" in
+      let cost = Masc_tui_types.fleet_total_cost_usd state in
+      notice ~role:Message_local
+        (Printf.sprintf "Token burn velocity HUD %s (fleet total: $%.4f)" status_str cost)
+  | Masc_tui_command.Open_link_preview url_opt ->
+      Buffer.clear state.msg_input;
+      let all_urls = Masc_tui_types.conversation_urls state in
+      state.link_modal_links <- all_urls;
+      let target_url =
+        match url_opt with
+        | Some u -> Some u
+        | None ->
+            (match all_urls with
+             | first :: _ -> Some first
+             | [] -> None)
+      in
+      (match target_url with
+       | Some u ->
+           state.link_modal_open <- true;
+           state.link_modal_url <- Some u;
+           state.link_modal_scroll <- 0;
+           let rec find_idx i = function
+             | [] -> 0
+             | x :: _ when String.equal x u -> i
+             | _ :: xs -> find_idx (i + 1) xs
+           in
+           state.link_modal_cursor <- find_idx 0 all_urls
+       | None ->
+           notice ~role:Message_local
+             "No web links found in this conversation to preview. Use /preview <url> to preview any link.")
+  | Masc_tui_command.Open_links_list ->
+      Buffer.clear state.msg_input;
+      let all_urls = Masc_tui_types.conversation_urls state in
+      state.link_modal_links <- all_urls;
+      (match all_urls with
+       | first :: _ ->
+           state.link_modal_open <- true;
+           state.link_modal_url <- Some first;
+           state.link_modal_scroll <- 0;
+           state.link_modal_cursor <- 0
+       | [] ->
+           notice ~role:Message_local "No web links found in this conversation.")
+  | Masc_tui_command.Set_embeds mode ->
+      Buffer.clear state.msg_input;
+      state.link_previews_mode <-
+        (match mode with
+         | `On -> `Rich
+         | `Compact -> `Compact
+         | `Off -> `Off);
+      notice ~role:Message_local
+        (Printf.sprintf "Inline link embed cards: %s"
+           (match state.link_previews_mode with
+            | `Rich -> "Rich (Full Cards)"
+            | `Compact -> "Compact (One Line)"
+            | `Off -> "Off"))
   | Masc_tui_command.Open_changes ->
       Buffer.clear state.msg_input;
       state.changes_return <- Changes_return_chat;
@@ -9350,12 +9422,16 @@ let handle_composer_key state ~base_path ~mailbox key =
            state.view <- Keepers Keeper_message
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
-        | Masc_tui_command.Open_diff | Masc_tui_command.Open_changes
+        | Masc_tui_command.Open_diff | Masc_tui_command.Open_patch_modal
+        | Masc_tui_command.Toggle_burn_hud | Masc_tui_command.Open_changes
         | Masc_tui_command.Toggle_acting_pane
-        | Masc_tui_command.Show_acting_pane_tab _
-        | Masc_tui_command.Acting_pane_tab_unknown _
-        | Masc_tui_command.Open_settings | Masc_tui_command.Open_metrics
-       | Masc_tui_command.Interrupt_turn | Masc_tui_command.Steer_turn _
+         | Masc_tui_command.Show_acting_pane_tab _
+         | Masc_tui_command.Acting_pane_tab_unknown _
+         | Masc_tui_command.Open_settings | Masc_tui_command.Open_metrics
+         | Masc_tui_command.Open_link_preview _
+         | Masc_tui_command.Open_links_list
+         | Masc_tui_command.Set_embeds _
+        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Steer_turn _
        | Masc_tui_command.Steer_missing_message
        | Masc_tui_command.Set_thinking _
        | Masc_tui_command.Set_tools _ | Masc_tui_command.Cycle_memory
@@ -11328,7 +11404,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          | Ok diff ->
              state.repository_changes_diff <- Some (path, diff);
              state.repository_changes_diff_error <- None
-         | Error detail -> state.repository_changes_diff_error <- Some detail)
+         | Error detail -> state.repository_changes_diff_error <- Some detail);
+      if
+        state.patch_modal_open
+        && Option.equal String.equal state.patch_modal_path (Some path)
+      then
+        (match result with
+         | Ok diff ->
+             state.patch_modal_diff <- Some (path, diff);
+             state.patch_modal_error <- None
+         | Error detail -> state.patch_modal_error <- Some detail)
   | Keeper_chat_file_changes_loaded (generation, keeper_name, result) ->
       let still_current =
         generation = state.msg_file_changes_generation
@@ -14250,6 +14335,131 @@ and is loaded on demand through keeper_skill.
                      state.view <- Keepers Keeper_message
                  | Some _ | None -> ())
             | _ -> ())
+       | Some k when state.link_modal_open ->
+           let close () =
+             state.link_modal_open <- false;
+             state.link_modal_scroll <- 0
+           in
+           (match k with
+            | "esc" | "q" | "Q" -> close ()
+            | "j" | "down" ->
+                state.link_modal_scroll <- state.link_modal_scroll + 1
+            | "k" | "up" ->
+                state.link_modal_scroll <- max 0 (state.link_modal_scroll - 1)
+            | "d" | "pagedown" ->
+                state.link_modal_scroll <- state.link_modal_scroll + 5
+            | "u" | "pageup" ->
+                state.link_modal_scroll <- max 0 (state.link_modal_scroll - 5)
+            | "g" | "home" ->
+                state.link_modal_scroll <- 0
+            | "G" | "end" ->
+                state.link_modal_scroll <- 9999
+            | "n" | "right" | "\t" ->
+                let count = List.length state.link_modal_links in
+                if count > 1 then begin
+                  let next_idx = (state.link_modal_cursor + 1) mod count in
+                  state.link_modal_cursor <- next_idx;
+                  state.link_modal_url <- List.nth_opt state.link_modal_links next_idx;
+                  state.link_modal_scroll <- 0
+                end
+            | "p" | "left" ->
+                let count = List.length state.link_modal_links in
+                if count > 1 then begin
+                  let prev_idx = (state.link_modal_cursor - 1 + count) mod count in
+                  state.link_modal_cursor <- prev_idx;
+                  state.link_modal_url <- List.nth_opt state.link_modal_links prev_idx;
+                  state.link_modal_scroll <- 0
+                end
+            | "o" | "O" | "\r" ->
+                (match state.link_modal_url with
+                 | Some url -> (
+                     match Masc_tui_browser.open_url url with
+                     | Ok opener ->
+                         add_event state "system" (Printf.sprintf "Opened in browser (%s): %s" opener url)
+                     | Error err ->
+                         add_event state "system" (Printf.sprintf "Could not open browser: %s" err))
+                 | None -> ())
+            | "y" | "Y" ->
+                (match state.link_modal_url with
+                 | Some url ->
+                     copy_reference_to_terminal render_schedule url;
+                     add_event state "system" ("Copied URL to clipboard: " ^ url)
+                 | None -> ())
+            | "v" | "V" ->
+                (match state.link_modal_url with
+                 | Some url ->
+                     let p = Masc_tui_link_preview.get_preview url in
+                     (match p.image_url with
+                      | Some img_url ->
+                          let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
+                          open_image state ~notice img_url
+                      | None ->
+                          add_event state "system" "Selected link is not an image resource")
+                 | None -> ())
+            | _ -> ())
+       | Some k when state.patch_modal_open ->
+           let close () =
+             state.patch_modal_open <- false;
+             state.patch_modal_scroll <- 0
+           in
+           (match k with
+            | "esc" | "q" | "Q" -> close ()
+            | "j" | "down" ->
+                state.patch_modal_scroll <- state.patch_modal_scroll + 1
+            | "k" | "up" ->
+                state.patch_modal_scroll <- max 0 (state.patch_modal_scroll - 1)
+            | "d" | "pagedown" ->
+                state.patch_modal_scroll <- state.patch_modal_scroll + 10
+            | "u" | "pageup" ->
+                state.patch_modal_scroll <- max 0 (state.patch_modal_scroll - 10)
+            | "g" | "home" ->
+                state.patch_modal_scroll <- 0
+            | "G" | "end" ->
+                let total_rows =
+                  match state.patch_modal_diff with
+                  | Some (_, d) -> List.length d.Masc.Tui_decode.gd_rows
+                  | None ->
+                      (match state.repository_changes_diff with
+                       | Some (_, d) -> List.length d.Masc.Tui_decode.gd_rows
+                       | None -> 0)
+                in
+                state.patch_modal_scroll <- max 0 (total_rows - 5)
+            | "e" | "E" ->
+                let path_opt =
+                  match state.patch_modal_path with
+                  | Some p -> Some p
+                  | None -> state.repository_changes_diff_path
+                in
+                (match path_opt with
+                 | None ->
+                     add_event state "error" "No file path associated with active patch"
+                 | Some path ->
+                     close ();
+                     match Masc_tui_editor_jump.route () with
+                     | Masc_tui_editor_jump.No_editor ->
+                         add_event state "error"
+                           "no editor: run this inside Neovim, or set $EDITOR"
+                     | Masc_tui_editor_jump.Remote_neovim { server } -> (
+                         let target =
+                           { Masc_tui_editor_jump.path; Masc_tui_editor_jump.line = 1 }
+                         in
+                         match
+                           Masc_tui_editor_jump.send_to_neovim ~server target
+                         with
+                         | Ok () ->
+                             add_event state "system"
+                               (Printf.sprintf "opened %s in Neovim" path)
+                         | Error detail -> add_event state "error" detail)
+                     | Masc_tui_editor_jump.Terminal_handoff { editor } ->
+                         restore_terminal ();
+                         let command =
+                           Printf.sprintf "%s %s" editor (Filename.quote path)
+                         in
+                         let _ : Unix.process_status = Unix.system command in
+                         reenter_terminal ();
+                         add_event state "system"
+                           (Printf.sprintf "closed %s" path))
+            | _ -> ())
        (* The palette is the same kind of modal, but typed: printable keys
           build the query, arrows move the cursor, Enter runs the highlighted
           jump through the exact goto/chat paths the bound keys use. *)
@@ -15255,6 +15465,18 @@ and is loaded on demand through keeper_skill.
            state.palette_open <- true;
            state.palette_query <- "";
            state.palette_cursor <- 0
+       | Some "\025" ->
+           let all_urls = Masc_tui_types.conversation_urls state in
+           state.link_modal_links <- all_urls;
+           (match all_urls with
+            | first :: _ ->
+                state.link_modal_open <- true;
+                state.link_modal_url <- Some first;
+                state.link_modal_scroll <- 0;
+                state.link_modal_cursor <- 0
+            | [] ->
+                chat_notice state ~keeper_name:state.msg_target_keeper_name ~role:Message_local
+                  "No web links found in this conversation to preview.")
        | Some "\023"
          when state.view = Board
               && terminal_columns >= keeper_split_threshold_cols

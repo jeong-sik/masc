@@ -405,10 +405,6 @@ val sub_board_access_of_string_opt : string -> sub_board_access option
 val sub_board_to_yojson : sub_board -> Yojson.Safe.t
 val sub_board_of_yojson : Yojson.Safe.t -> sub_board option
 
-(** Snapshots [store.sub_boards] under the state lock, then atomically
-    rewrites {!sub_boards_path} under the persist lock. *)
-val rewrite_sub_boards : store -> unit
-
 (** Creates a new sub-board with the given slug (unique, lowercase).
     [members] are canonicalised agent ids; the owner is always included.
     Returns [Validation_error] when the slug is invalid or already taken. JSONL append

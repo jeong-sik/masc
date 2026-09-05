@@ -20,7 +20,6 @@ type terminal_effect =
   | Usage_metrics
   | Terminal_fsm_projection
 
-val criticality : terminal_effect -> criticality
 val effect_label : terminal_effect -> string
 val failure_blocks_product_success : terminal_effect -> bool
 

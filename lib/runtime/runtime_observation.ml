@@ -614,11 +614,6 @@ let run_actor () =
 let start_actor_if_needed ~sw =
   Eio.Fiber.fork_daemon ~sw run_actor
 
-let record_runtime ?keeper_name ~observation ~runtime_id ~outcome () =
-  let now = Time_compat.now () in
-  Eio.Stream.add stream
-    (Record_runtime { keeper_name; runtime_id; observation; outcome; now })
-
 let runtime_metrics_json () =
   let p, u = Eio.Promise.create () in
   Eio.Stream.add stream (Get_metrics_json u);

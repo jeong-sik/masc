@@ -335,6 +335,19 @@ val fusion_row :
 val fusion_sidebar_label :
   status:string -> time:string -> keeper:string -> run_id:string -> string
 
+val fusion_pipeline_diagram :
+  ?glyph_done:string ->
+  ?glyph_active:string ->
+  ?glyph_waiting:string ->
+  ?glyph_failed:string ->
+  ?arrow:string ->
+  status:[ `Completed | `Running | `Failed ] ->
+  stage:[ `Accepted | `Panel | `Judge | `Evidence | `Failed | `Completed ] ->
+  panel_answered:int ->
+  panel_expected:int ->
+  unit ->
+  string
+
 (** {1 Harness verdict columns} *)
 
 type harness_row_values = {

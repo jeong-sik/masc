@@ -192,6 +192,9 @@ type dispatch_bundle =
   ; fields : (string * Yojson.Safe.t) list
   ; base_host_env : string array option
   ; github_secret_files : unit -> (string list, string) result
+  ; observe_route : unit -> Keeper_sandbox_shell_ir_target.observe_route
+    (* Where this call can run boxed before the judge is asked (RFC-0422).
+       Lazy: resolving it may acquire the guest. *)
   ; cleanup : unit -> unit
   }
 
@@ -320,6 +323,7 @@ let handle_tool_execute_typed
                      @ endpoint_fields
                  ; base_host_env = None
                  ; github_secret_files = (fun () -> Ok [])
+                 ; observe_route = dispatch.observe_route
                  ; cleanup = Fun.id
                  })
           (* The factory result is the sole route authority. Its frozen guest
@@ -344,6 +348,7 @@ let handle_tool_execute_typed
                      Keeper_turn_sandbox_runtime.prepare_github_identity_secret_files
                        ~timeout_sec
                        dispatch.runtime)
+              ; observe_route = dispatch.observe_route
               ; cleanup = Fun.id
               }
         in
@@ -469,9 +474,26 @@ let handle_tool_execute_typed
           ; sandbox_profile = Some dispatch_bundle.sandbox_profile
           }
         in
+        (* RFC-0422: the box the gate may ask for, after every cheaper
+           authority has declined. The same IR, the same cwd and budget, a
+           target whose runner asks the shim for [Observe]; no output
+           streaming, because until the gate has read the answer this run is
+           not yet the call's result. *)
+        let observation =
+          Keeper_tool_execute_observe.create
+            ~route:dispatch_bundle.observe_route
+            ~dispatch:(fun sandbox ->
+              Keeper_tooling.Execute_shell_ir.dispatch
+                ~workdir:cwd
+                ~sandbox
+                ~timeout_sec
+                ?base_host_env
+                ir)
+        in
         let gate_decision =
           Keeper_gate.decide
             ?cycle_grant:gate_grant
+            ~observe:(Keeper_tool_execute_observe.observe observation)
             (* NDT-OK: this typed, caller-owned policy input is consumed only
                at the external-effect authorization boundary. *)
             ~keeper_always_allow:(Option.value ~default:false meta.always_allow)
@@ -658,17 +680,49 @@ let handle_tool_execute_typed
             | [] -> []
             | advice -> [ "escaped_shell", `List advice ]
           in
+          let dispatch_unboxed () =
+            Keeper_tooling.Execute_shell_ir.dispatch
+              ~workdir:cwd
+              ~sandbox:dispatch_sandbox
+              ~timeout_sec
+              ?base_host_env
+              ~on_output_chunk
+              ir
+          in
           let dispatch () =
             match !For_testing.dispatch_override with
             | Some override -> override ()
             | None ->
-              Keeper_tooling.Execute_shell_ir.dispatch
-                ~workdir:cwd
-                ~sandbox:dispatch_sandbox
-                ~timeout_sec
-                ?base_host_env
-                ~on_output_chunk
-                ir
+              (match
+                 ( authorization.source
+                 , Keeper_tool_execute_observe.observed_result observation )
+               with
+               | Keeper_gate.Observed_in_box, Some result ->
+                 (* The box already ran this call and the kernel says it
+                    changed nothing, so its output is the answer; running it
+                    again would be a second read for no new fact. Replayed
+                    through the stream so the operator surface sees what the
+                    keeper receives. *)
+                 if not (String.equal result.stdout "")
+                 then on_output_chunk (`Stdout result.stdout);
+                 if not (String.equal result.stderr "")
+                 then on_output_chunk (`Stderr result.stderr);
+                 Ok result
+               | Keeper_gate.Observed_in_box, None ->
+                 (* Unreachable by construction: the stage stores the result
+                    before it answers clean. Should it ever happen, the call
+                    runs once unboxed -- the same thing an allow from the
+                    tables does -- and says so. *)
+                 Log.Keeper.warn
+                   ~keeper_name:meta.name
+                   "observed_in_box authorization without a stored result; running the call once";
+                 dispatch_unboxed ()
+               | ( Keeper_gate.One_shot_resolution _
+                 | Keeper_gate.Exact_always_rule _
+                 | Keeper_gate.Keeper_always_allow
+                 | Keeper_gate.Workspace_always_allow
+                 | Keeper_gate.Readonly_sandbox )
+               , _ -> dispatch_unboxed ())
           in
           let dispatch_result =
             match dispatch_sandbox with

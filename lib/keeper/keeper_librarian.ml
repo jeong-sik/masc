@@ -312,7 +312,6 @@ let fact_of_json ~now (json : Yojson.Safe.t) : fact option =
             ; category
             ; first_seen = now
             ; last_seen = now
-            ; reinforcement = 0
             ; origin = { kind = Keeper_memory_os_types.Injected; trace_id = "" }
             ; basis = Keeper_memory_os_types.Observed observation
             })

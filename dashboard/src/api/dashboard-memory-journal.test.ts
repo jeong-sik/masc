@@ -35,7 +35,6 @@ const committed = {
       category: 'fact',
       first_seen: 1785990000,
       last_seen: 1785990001,
-      reinforcement: 1,
       origin: { kind: 'injected', trace_id: '' },
       basis: { kind: 'observed' },
     }],
@@ -47,7 +46,6 @@ const committed = {
         category: 'fact',
         first_seen: 1785980000,
         last_seen: 1785980001,
-        reinforcement: 0,
         origin: { kind: 'authored', trace_id: 'trace-before' },
         basis: {
           kind: 'derived',

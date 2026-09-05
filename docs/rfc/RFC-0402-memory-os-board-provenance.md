@@ -43,7 +43,7 @@ type basis = Observed of observation | Derived of derivation list
 - `{"kind":"observed","board":{"post_id":"p-…"}}` 와 `{"kind":"observed","board":{"post_id":"p-…","comment_id":"c-…"}}` 가 추가된다. 필드 집합은 정확히 이 셋 중 하나여야 한다.
 - id 는 `Board_types.Post_id.of_string` / `Comment_id.of_string` 으로 검사한다. Memory OS 가 문법을 따로 적지 않는다.
 - 존재 여부는 쓰기 시점에 검사하지 않는다. 참조는 "무엇을 인용했는가" 이고, 글이 아직 있는지는 읽는 쪽의 질문이다. source-bound 사실이 recall 때 파일 바이트로 재검증되는 것과 같은 자리다. 이 재검증은 조각 2 다.
-- `memory_id` 는 여전히 claim 바이트만의 digest 다. 출처가 다른 같은 문장은 같은 사실이고, 두 번째 관측은 reinforcement 로 센다.
+- `memory_id` 는 여전히 claim 바이트만의 digest 다. 출처가 다른 같은 문장은 같은 사실이고, 두 번째 관측은 `last_seen` 만 옮긴다(RFC-0418).
 
 ### 3.3 생산자
 

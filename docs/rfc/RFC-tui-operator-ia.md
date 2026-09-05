@@ -89,7 +89,7 @@ Harness → Planning (`v` 순환), Changes → Keepers (`f`). **Harness 와 Chan
 | async 도구 뭐가 돌고 뭘 대기 | Tools > async runs | 채팅·Acting 모듈에 `async` 0회. 양쪽 다 `request_id`/`keeper` 를 들고도 조인 안 됨 |
 | diff 는 어디서 보나 | 채팅 Ctrl-D Full · Changes · Repos `d` | 세 렌즈의 정보량이 다르다 — `fc_turn`/`fc_task_id` 가 Changes 엔 있고(render.ml:9080-9082) 채팅 diff 엔 없다(diff.ml:322-330). 부분 커버리지 필드(missing/ambiguous_execution_ids, diff.mli:24-30)는 렌더 지점 자체가 없다 |
 | 다음 턴에 뭘 알고 시작하나, 용량은 | `/context`·Ctrl-X 모달 | 데이터는 풍부하다 — 토큰 비율 바, 구성요소별 바이트 분해, prompt block 원문, included_by/retention 트리(render.ml:13241-13545). 문제는 (a) 발견성, (b) "마지막으로 보낸 입력"의 사후 판독만 있다는 것 |
-| memory 에 뭐가 쌓였나, 카테고리는 | Memory 탭(개수 통계만) | store 에는 닫힌 8분류(`Code_change…Lesson`, keeper_memory_os_types.mli:41-49) + origin + reinforcement + first/last_seen 이 전부 있는데 health JSON 이 **하나도 내보내지 않는다**(server_dashboard_http_keeper_memory_health.ml:341-437) |
+| memory 에 뭐가 쌓였나, 카테고리는 | Memory 탭(개수 통계만) | store 에는 닫힌 8분류(`Code_change…Lesson`, keeper_memory_os_types.mli:41-49) + origin + first/last_seen 이 전부 있는데 health JSON 이 **하나도 내보내지 않는다**(server_dashboard_http_keeper_memory_health.ml:341-437) |
 | 함대 시간축에 무슨 일이 | Acting(SSE) · Logs(REST) · Overview 세션 이벤트(로컬 146곳) | 같은 사건이 세 갈래에 다른 모양으로 나타나고 조인되지 않는다 |
 
 ## 3. 설계
@@ -175,7 +175,7 @@ surface variant 와 `surface_ring` 항목을 지우고, 팔레트 사전·`?` �
 지금의 Memory 는 개수 통계표다. store 에는 닫힌 8분류
 (`Code_change, Fact, Preference, Blocker, Goal, Constraint, Validated_approach,
 Lesson` — keeper_memory_os_types.mli:41-49)와 사실별 origin
-(`Authored|Injected|Legacy`), reinforcement, first/last_seen, source-bound 의
+(`Authored|Injected|Legacy`), first/last_seen, source-bound 의
 `file_source{path;sha256}` 와 무효화 사유까지 전부 있는데, health 엔드포인트가
 개수만 내보낸다. 재정의 순서:
 

@@ -229,9 +229,8 @@ val upsert_fact
     preserving the rest of the current snapshot. A matching identity (same
     claim bytes) is a re-observation, not a duplicate: the authoritative
     [first_seen] and the original [origin] are preserved (an injected copy
-    re-observing an authored row must not repaint it), [last_seen] moves to
-    the later of the two, and [reinforcement] counts the re-observation —
-    the byte-identical reinjection loop accumulates a count, not rows. The
+    re-observing an authored row must not repaint it) and [last_seen] moves to
+    the later of the two; nothing is counted (RFC-0418). The
     basis join preserves an existing observation, promotes a derived fact
     re-observed directly to an observation, replaces the premise set for an
     existing rule identity, and appends a distinct rule identity.

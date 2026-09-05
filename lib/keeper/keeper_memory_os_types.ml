@@ -9,7 +9,6 @@ let wire_field_claim = "claim"
 let wire_field_category = "category"
 let wire_field_first_seen = "first_seen"
 let wire_field_last_seen = "last_seen"
-let wire_field_reinforcement = "reinforcement"
 let wire_field_origin = "origin"
 let wire_field_memory_id = "memory_id"
 let wire_field_reason = "reason"
@@ -240,7 +239,6 @@ let fact_wire_fields =
     ; wire_field_category
     ; wire_field_first_seen
     ; wire_field_last_seen
-    ; wire_field_reinforcement
     ; wire_field_origin
     ; wire_field_basis
     ]
@@ -413,17 +411,14 @@ type basis =
 (* The fact carries the exact claim, its recalled category, and observable
    insertion/refresh timestamps. [first_seen]: insertion, authoritative,
    preserved across re-upsert. [last_seen]: most recent observation of the
-   same claim bytes. [reinforcement]: how many times the exact claim bytes were
-   re-observed — the measurable damper on the byte-identical reinjection loop:
-   a re-injected row
-   increments instead of accumulating a duplicate. A fact's value is the
-   librarian's judgment, not a score or a model-invented semantic identity. *)
+   same claim bytes; a re-observation refreshes it and adds no row, and is
+   not a strength signal (RFC-0418). A fact's value is the librarian's
+   judgment, not a score or a model-invented semantic identity. *)
 type fact =
   { claim : string
   ; category : category
   ; first_seen : float
   ; last_seen : float
-  ; reinforcement : int
   ; origin : origin
   ; basis : basis
   }
@@ -670,7 +665,6 @@ let observed ~claim ~category ~now ~origin =
   ; category
   ; first_seen = now
   ; last_seen = now
-  ; reinforcement = 0
   ; origin
   ; basis = Observed Transcript
   }
@@ -685,7 +679,6 @@ let derived ~claim ~category ~now ~origin ~derivations =
       ; category
       ; first_seen = now
       ; last_seen = now
-      ; reinforcement = 0
       ; origin
       ; basis = Derived (List.map normalize_derivation derivations)
       }
@@ -702,14 +695,11 @@ let fact_to_json (f : fact) =
   then invalid_arg "memory fact first_seen must be finite";
   if not (Float.is_finite f.last_seen)
   then invalid_arg "memory fact last_seen must be finite";
-  if f.reinforcement < 0
-  then invalid_arg "memory fact reinforcement must be non-negative";
   `Assoc
     [ wire_field_claim, `String f.claim
     ; wire_field_category, `String (category_to_string f.category)
     ; wire_field_first_seen, `Float f.first_seen
     ; wire_field_last_seen, `Float f.last_seen
-    ; wire_field_reinforcement, `Int f.reinforcement
     ; wire_field_origin, origin_to_json f.origin
     ; wire_field_basis, basis_to_json f.basis
     ]
@@ -721,7 +711,6 @@ let current_fact fields =
   let* category_token = wire_string_field wire_field_category fields in
   let* first_seen = wire_number_field wire_field_first_seen fields in
   let* last_seen = wire_number_field wire_field_last_seen fields in
-  let* reinforcement = wire_int_field wire_field_reinforcement fields in
   let* origin_json = wire_json_field wire_field_origin fields in
   let* basis_json = wire_json_field wire_field_basis fields in
   let* category =
@@ -741,17 +730,12 @@ let current_fact fields =
     then Ok ()
     else wire_fail [ Wire_field wire_field_first_seen ] Not_finite
   in
-  let* () =
+  let+ () =
     if Float.is_finite last_seen
     then Ok ()
     else wire_fail [ Wire_field wire_field_last_seen ] Not_finite
   in
-  let+ () =
-    if reinforcement >= 0
-    then Ok ()
-    else wire_fail [ Wire_field wire_field_reinforcement ] Negative
-  in
-  { claim; category; first_seen; last_seen; reinforcement; origin; basis }
+  { claim; category; first_seen; last_seen; origin; basis }
 ;;
 
 let fact_of_json (json : Yojson.Safe.t) =

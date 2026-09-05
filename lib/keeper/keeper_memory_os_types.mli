@@ -234,26 +234,23 @@ val origin_kind_to_string : origin_kind -> string
 
 (** A single semantic claim extracted from conversation history.
     [first_seen] insertion (authoritative, preserved across re-upsert);
-    [last_seen] most recent re-observation of the same claim bytes;
-    [reinforcement] re-observation count of the
-    exact claim bytes, the measurable damper on byte-identical reinjection. *)
+    [last_seen] most recent re-observation of the same claim bytes. A
+    re-observation is not a strength signal (RFC-0418). *)
 type fact =
   { claim : string
   ; category : category
   ; first_seen : float
   ; last_seen : float
-  ; reinforcement : int
   ; origin : origin
   ; basis : basis
   }
 
 (** A claim observed for the first time. [first_seen] and [last_seen] are both
-    [now] and [reinforcement] is zero, because a row seen once has been seen
-    once.
+    [now].
 
-    The three identity fields move together, and this is the one place that
-    says how. Spelled at each construction site instead, the invariant would
-    live in as many copies as there are fixtures. *)
+    The two timestamps move together, and this is the one place that says
+    how. Spelled at each construction site instead, the invariant would live
+    in as many copies as there are fixtures. *)
 val observed
   :  claim:string
   -> category:category

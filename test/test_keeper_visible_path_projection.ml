@@ -84,6 +84,18 @@ let write_file path content =
     (fun () -> output_string oc content)
 ;;
 
+let is_sandbox_available =
+  lazy (
+    try Sys.command "docker image inspect masc-sandbox:general > /dev/null 2>&1" = 0
+    with _ -> false
+  )
+;;
+
+let require_sandbox () =
+  if not (Lazy.force is_sandbox_available) then
+    Alcotest.skip ()
+;;
+
 let make_meta
       ?(sandbox = Keeper_types_profile_sandbox.Remote_ssh)
       ?(always_allow = false)
@@ -115,6 +127,9 @@ let with_eio_fs f =
 ;;
 
 let setup ?sandbox ?always_allow f =
+  (match sandbox with
+   | Some Keeper_types_profile_sandbox.Docker -> require_sandbox ()
+   | _ -> ());
   with_eio_fs
   @@ fun ~fs ~sw () ->
   let base = temp_dir () in
@@ -382,7 +397,7 @@ let test_relative_parent_escape_is_rejected () =
 ;;
 
 let test_read_with_visible_repo_cwd_and_relative_file_path () =
-  setup
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
   allow_repo ~config ~meta "masc";
   let target = Filename.concat playground "repos/masc/README.md" in
@@ -407,7 +422,7 @@ let test_read_with_visible_repo_cwd_and_relative_file_path () =
 ;;
 
 let test_repository_backlog_file_is_readable () =
-  setup
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
   allow_repo ~config ~meta "masc";
   let target = Filename.concat playground "repos/masc/docs/backlog.json" in
@@ -433,7 +448,7 @@ let test_repository_backlog_file_is_readable () =
 (* A repo-prefixed missing read preserves producer facts without inventing
    repository or retry advice at the dispatch boundary. *)
 let test_repo_prefixed_missing_read_preserves_exact_input () =
-  setup
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground:_ ~publication_recovery:_ ->
   allow_repo ~config ~meta "masc";
   let raw =
@@ -519,7 +534,7 @@ let test_cwd_rejection_says_when_nothing_is_materialized () =
 ;;
 
 let test_valid_repo_cwd_carries_no_hint () =
-  setup
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
   allow_repo ~config ~meta "masc";
   write_file (Filename.concat playground "repos/masc/README.md") "readme\n";

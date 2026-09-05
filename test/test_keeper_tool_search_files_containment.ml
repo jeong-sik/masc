@@ -182,8 +182,19 @@ let test_docker_keeper_blocks_rg_outside () =
   Alcotest.(check bool) "rg outside playground blocked" true
     (blocked_by_sandbox_boundary raw)
 
+let is_sandbox_available =
+  lazy (
+    try Sys.command "docker image inspect masc-sandbox:general > /dev/null 2>&1" = 0
+    with _ -> false
+  )
+
+let require_sandbox () =
+  if not (Lazy.force is_sandbox_available) then
+    Alcotest.skip ()
+
 let test_local_keeper_rg_file_path_uses_parent_workdir () =
-  setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
+  require_sandbox ();
+  setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   if not (Keeper_tool_execute_path.shell_command_available "rg") then ()
   else (
@@ -220,7 +231,8 @@ let test_local_keeper_rg_file_path_uses_parent_workdir () =
    keeper_tool_runtime.ml returns verbatim to the keeper, so what we
    assert here is exactly what the keeper receives — no producer-only gap. *)
 let test_local_keeper_rg_invalid_type_surfaces_stderr () =
-  setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
+  require_sandbox ();
+  setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   if not (Keeper_tool_execute_path.shell_command_available "rg") then ()
   else (

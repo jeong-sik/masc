@@ -12,6 +12,8 @@ type t =
   | Open_diff
   | Open_changes
   | Toggle_acting_pane
+  | Show_acting_pane_tab of [ `Fleet | `Changes ]
+  | Acting_pane_tab_unknown of string
   | Switch_keeper of string
   | Switch_keeper_missing_name
   | Interrupt_turn
@@ -130,8 +132,9 @@ let catalog =
     ; summary = "display multicore engine telemetry, scheduler latency, and fleet health"
     }
   ; { word = "activity"
-    ; args = ""
-    ; summary = "show or hide the Activity pane beside this surface"
+    ; args = "[fleet|changes]"
+    ; summary =
+        "show or hide the Activity pane beside this surface, or show one of its tabs"
     }
   ]
 
@@ -188,7 +191,10 @@ let parse text =
     | "settings", _ -> Open_settings
     | "diff", _ -> Open_diff
     | "changes", _ -> Open_changes
-    | "activity", _ -> Toggle_acting_pane
+    | "activity", "" -> Toggle_acting_pane
+    | "activity", "fleet" -> Show_acting_pane_tab `Fleet
+    | "activity", "changes" -> Show_acting_pane_tab `Changes
+    | "activity", other -> Acting_pane_tab_unknown other
     | "keeper", "" -> Switch_keeper_missing_name
     | "keeper", name -> Switch_keeper name
     | "interrupt", _ -> Interrupt_turn

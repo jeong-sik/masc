@@ -573,6 +573,7 @@ remote_endpoint = "fixture"
          ; max_concurrent_sessions = 2
          ; env_allowlist = []
          ; capabilities = []
+         ; private_home = false
          });
   let missing_host_path =
     Filename.concat
@@ -1908,6 +1909,7 @@ let test_typed_guest_target_leaves_image_preflight_to_runtime_creation () =
         ~meta
         ~cwd:host_root
         ~timeout_sec:60.0
+        ~base_path:base
         ()
     with
     | Error error -> Alcotest.fail error.message

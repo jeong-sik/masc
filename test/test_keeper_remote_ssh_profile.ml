@@ -195,6 +195,77 @@ let test_an_unknown_backend_is_refused_by_name () =
     check bool "names what it would have taken" true (contains "microsandbox" msg)
 ;;
 
+(* ── observation_run (RFC-0422 §3.4) ─────────────────────────────────── *)
+
+let defaults_of pairs =
+  Masc.Keeper_types_profile_toml_parser.profile_defaults_of_toml
+    (toml_doc_of_string_pairs pairs)
+;;
+
+let test_observation_run_parses_under_a_shim_profile () =
+  let carried profile expected =
+    match
+      defaults_of [ "keeper.sandbox_profile", profile; "keeper.observation_run", "guest_local" ]
+    with
+    | Error msg -> failf "%s refused observation_run: %s" profile msg
+    | Ok defaults ->
+      check (option string) (profile ^ " carries the box")
+        (Some expected)
+        (Option.map Keeper_types_profile_sandbox.observation_run_to_string
+           defaults.observation_run)
+  in
+  carried "microvm" "guest_local";
+  carried "remote_ssh" "guest_local";
+  (match defaults_of [ "keeper.sandbox_profile", "microvm" ] with
+   | Error msg -> fail msg
+   | Ok defaults ->
+     check bool "absent is absent, the default is applied where the route is built" true
+       (Option.is_none defaults.observation_run))
+;;
+
+(* A Docker guest runs no shim, so there is no box to choose. *)
+let test_observation_run_is_refused_under_docker () =
+  match
+    defaults_of [ "keeper.sandbox_profile", "docker"; "keeper.observation_run", "observe" ]
+  with
+  | Ok _ -> fail "observation_run under docker must be refused"
+  | Error msg -> check bool "named error" true (contains "docker_no_observation_run" msg)
+;;
+
+let test_an_unknown_observation_run_is_refused_by_name () =
+  match
+    defaults_of [ "keeper.sandbox_profile", "microvm"; "keeper.observation_run", "yolo" ]
+  with
+  | Ok _ -> fail "an unknown box must not load"
+  | Error msg ->
+    check bool "names the key" true (contains "observation_run_unknown" msg);
+    check bool "names what it would have taken" true (contains "guest_local" msg)
+;;
+
+let test_the_rejection_table_and_default_are_closed () =
+  check string "default is the box that proves the most" "observe"
+    (Keeper_types_profile_sandbox.observation_run_to_string
+       Keeper_types_profile_sandbox.default_observation_run);
+  List.iter
+    (fun run ->
+      let spelling = Keeper_types_profile_sandbox.observation_run_to_string run in
+      check (option string) ("round-trips: " ^ spelling) (Some spelling)
+        (Option.map Keeper_types_profile_sandbox.observation_run_to_string
+           (Keeper_types_profile_sandbox.observation_run_of_string spelling)))
+    Keeper_types_profile_sandbox.all_observation_runs;
+  List.iter
+    (fun run ->
+      check bool "docker refuses every box" true
+        (Option.is_some
+           (Keeper_types_profile_sandbox.observation_run_rejection
+              Keeper_types_profile_sandbox.Docker run));
+      check bool "microvm takes every box" true
+        (Option.is_none
+           (Keeper_types_profile_sandbox.observation_run_rejection
+              Keeper_types_profile_sandbox.Micro_vm run)))
+    Keeper_types_profile_sandbox.all_observation_runs
+;;
+
 let test_remote_endpoint_requires_remote_ssh () =
   let reject profile_pair =
     let doc =
@@ -234,4 +305,12 @@ let () =
                   ; Alcotest.test_case "microvm_backend requires microvm"
                       `Quick test_microvm_backend_requires_microvm
                   ; Alcotest.test_case "an unknown backend is refused by name"
-                      `Quick test_an_unknown_backend_is_refused_by_name ] ]
+                      `Quick test_an_unknown_backend_is_refused_by_name ]
+    ; "observation_run", [ test_case "parses under a shim profile" `Quick
+                             test_observation_run_parses_under_a_shim_profile
+                         ; test_case "refused under docker" `Quick
+                             test_observation_run_is_refused_under_docker
+                         ; test_case "unknown refused by name" `Quick
+                             test_an_unknown_observation_run_is_refused_by_name
+                         ; test_case "rejection table and default are closed" `Quick
+                             test_the_rejection_table_and_default_are_closed ] ]

@@ -39,19 +39,12 @@ A conventional software team: `tech_lead`, `backend`, `frontend`, `qa`. The tech
 lead breaks requirements into tasks and reviews PRs; backend and frontend
 implement; QA verifies. All four inherit `[runtime].default` from `runtime.toml`.
 
-All four keeper TOMLs set `sandbox_profile = "local"` (not `"docker"`).
+All four keeper TOMLs set `sandbox_profile = "docker"`.
 
-WORKAROUND: the quick-start install can run the MASC server itself inside a
-Docker container. With `sandbox_profile = "docker"` each keeper Execute would
-spawn a nested container (Docker-in-Docker), which needs a mounted host docker
-socket and fails closed on a plain `docker compose up`. The classic-team demo
-keepers collaborate over the board/tasks/chat and do not require
-container-isolated shell execution to show the dashboard working. The
-one-click image therefore sets `MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1` explicitly;
-the global server default remains fail-closed outside that image.
-Root fix: when running the server natively on a host (not in a container),
-override to `sandbox_profile = "docker"` per keeper for real Execute isolation,
-or mount `/var/run/docker.sock` into the server container and switch back.
+If the MASC server itself runs inside a container, `"docker"` makes each keeper
+Execute spawn a nested container, which needs `/var/run/docker.sock` mounted and
+fails closed on a plain `docker compose up`. Mount the socket, or set these four
+to `"microvm"`.
 
 ## world-* — 가치 체계만 바꾸는 프리셋 묶음
 
@@ -96,6 +89,7 @@ instructions 는 각 keeper 의 다음 up 에서 반영된다.
 
 ### 도구면은 세계마다 같다
 
-`sandbox_profile = "local"`, `network_mode = "inherit"`, 도구 제한 없음. 세계마다 다르면
-비교되는 게 가치 체계가 아니라 권한이 된다. 호스트에서 네이티브로 돌릴 때 실제 격리가
-필요하면 `install.sh --sandbox docker` 로 일괄 덮거나 seed 후 각 파일에서 바꾼다.
+`sandbox_profile = "docker"`, `network_mode = "inherit"`, 도구 제한 없음. 세계마다 다르면
+비교되는 게 가치 체계가 아니라 권한이 된다. 서버 자체가 컨테이너 안에서 돈다면 keeper 의
+Execute 가 중첩 컨테이너를 띄우게 되므로 호스트 docker 소켓을 물리거나 `microvm` 으로
+바꾼다. 컨테이너를 아예 안 쓰는 값은 keeper TOML 로 쓸 수 없다.

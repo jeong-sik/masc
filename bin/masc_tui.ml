@@ -1625,7 +1625,13 @@ type http_surface_results = {
    and nothing else, so there are no surfaces to carry. *)
 type http_refresh_outcome =
   | Refresh_surfaces of http_surface_results
-  | Refresh_server_booting of (Tui_decode.server_identity, string) result
+  | Refresh_server_booting of
+      { identity : (Tui_decode.server_identity, string) result
+      ; (* The generation [start_http_refresh] reserved before the probe went
+           out. Carried so the approvals panel learns why its rows are stale,
+           the same way a failed refresh tells it. *)
+        approval_generation : Approval.Flow.generation option
+      }
 
 type preset_sink =
   | Preset_to_chat of string option
@@ -7074,7 +7080,7 @@ let load_http_surfaces ~host ~port ~approval_generation ~board_sort
      surface asked of it would only wait out its timeout. *)
   let http_server_identity = load_server_identity ~host ~port in
   if Masc_tui_types.server_is_booting http_server_identity
-  then Refresh_server_booting http_server_identity
+  then Refresh_server_booting { identity = http_server_identity; approval_generation }
   else begin
     let http_overview = load_overview ~host ~port in
     let http_approvals =
@@ -7108,24 +7114,28 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_fleet_safety_load state) results.http_fleet_safety;
   Option.iter (apply_keeper_roster_load state) results.http_keeper_roster
 
+(* This is a current reading, not a last-known cache. A failed probe makes
+   the projection unread; every following refresh asks again, so a same-port
+   replacement still moves A -> B as soon as /health succeeds. The local
+   workspace follows the reading in the same step: a mismatch clears it, a
+   match reloads it, so a screen never shows rows from a workspace the server
+   just stopped serving. *)
+let apply_server_identity_reading state reading =
+  state.server_identity <- Masc_tui_types.server_identity_of_refresh reading;
+  state.workspace_identity <-
+    Masc_tui_types.workspace_identity_of_refresh
+      ~local_base_path:state.local_base_path reading;
+  match state.workspace_identity with
+  | Masc_tui_types.Workspace_identity_mismatch _ -> clear_local_workspace state
+  | Masc_tui_types.Workspace_identity_match ->
+    load_from_masc_dir state state.local_base_path
+  | Masc_tui_types.Workspace_identity_unread -> ()
+
 let apply_http_surfaces state results =
   apply_overview_load state results.http_overview;
   Option.iter (apply_approval_observation state) results.http_approvals;
   apply_http_scoped_surfaces state results.http_scoped;
-  (* This is a current reading, not a last-known cache. A failed probe makes
-     the projection unread; every following refresh asks again, so a same-port
-     replacement still moves A -> B as soon as /health succeeds. *)
-  state.server_identity <-
-    Masc_tui_types.server_identity_of_refresh results.http_server_identity;
-  state.workspace_identity <-
-    Masc_tui_types.workspace_identity_of_refresh
-      ~local_base_path:state.local_base_path
-      results.http_server_identity;
-  (match state.workspace_identity with
-   | Masc_tui_types.Workspace_identity_mismatch _ -> clear_local_workspace state
-   | Masc_tui_types.Workspace_identity_match ->
-     load_from_masc_dir state state.local_base_path
-   | Masc_tui_types.Workspace_identity_unread -> ());
+  apply_server_identity_reading state results.http_server_identity;
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
   in
@@ -7143,19 +7153,23 @@ let apply_http_surfaces state results =
             results.http_approvals
           |> Option.to_list))
 
-let apply_server_booting state identity =
+let apply_server_booting state ~identity ~approval_generation =
   (* The identity is read the same way a full refresh reads it, so a same-port
      replacement is noticed even while the new process is still booting. No
-     surface was asked, so nothing else changes. *)
-  state.server_identity <- Masc_tui_types.server_identity_of_refresh identity;
-  state.workspace_identity <-
-    Masc_tui_types.workspace_identity_of_refresh
-      ~local_base_path:state.local_base_path identity;
+     surface was asked. The approvals panel is told why its rows are stale,
+     as a failed refresh tells it; nothing else changes. *)
+  apply_server_identity_reading state identity;
+  Option.iter
+    (fun ao_generation ->
+       apply_approval_observation state
+         { ao_generation; ao_result = Error "server booting" })
+    approval_generation;
   state.connection_status <- Masc_tui_types.Booting
 
 let apply_http_refresh_outcome state = function
   | Refresh_surfaces results -> apply_http_surfaces state results
-  | Refresh_server_booting identity -> apply_server_booting state identity
+  | Refresh_server_booting { identity; approval_generation } ->
+    apply_server_booting state ~identity ~approval_generation
 
 let load_local_workspace_if_safe state base_path =
   match state.workspace_identity with
@@ -7403,7 +7417,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        pane read once on open and a message that arrived after that waited for
        the operator to leave and come back. *)
     (if
-       needs.Masc_tui_types.needs_keeper_chat
+       (not was_booting)
+       && needs.Masc_tui_types.needs_keeper_chat
        (* Not while reading back: the reload replaces the transcript with the
           newest window, which throws away every older page the operator
           fetched and snaps the view to the bottom mid-read. The next tick
@@ -7422,7 +7437,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        reason: a pane that read once on open showed a fact that had since
        changed. *)
     (if
-       state.view = Keepers Keeper_detail
+       (not was_booting)
+       && state.view = Keepers Keeper_detail
        && state.detail_tab = Detail_identity
        && state.identity_login <> None
      then
@@ -9127,12 +9143,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         chat_notice state ~keeper_name:(Some keeper) ~role:Message_error
           ("voice failed: " ^ error);
         state.last_action <- Some ("voice failed: " ^ error, Unix.gettimeofday ()))
-  | Http_refresh_done (Refresh_server_booting identity) ->
+  | Http_refresh_done (Refresh_server_booting { identity; approval_generation }) ->
       http_refresh_inflight := false;
       (* Nothing else was asked of a booting server, so nothing else follows:
-         no held-call listing, no observer, no scoped follow-up. The next tick
-         probes again. *)
-      apply_server_booting state identity
+         no held-call listing, no observer. The scoped follow-up is left
+         queued on purpose -- draining it now would send surface loads to the
+         booting server -- and the first non-booting completion drains it. *)
+      apply_server_booting state ~identity ~approval_generation
   | Http_refresh_done (Refresh_surfaces results) ->
       http_refresh_inflight := false;
       apply_http_surfaces state results;

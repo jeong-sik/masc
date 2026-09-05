@@ -4,18 +4,29 @@
     the other half of the policy lane: a keeper names [network_mode =
     "policy"] and this reads what that mode permits it to reach. *)
 
-val resolve_allowlist
-  :  base_path:string
+val resolve_config_path : base_path:string -> keeper_name:string -> (string, string) result
+(** Which runtime.toml governs this keeper.
+
+    Answered once, when the lane starts, and never again: the workspace file
+    or the global one is a fact about the deployment, not about a request.
+    Deciding it per read put the choice inside the window an editor opens
+    when it saves by temp-and-rename, so a request landing in that window was
+    answered by a different file and then cached as though it were the
+    keeper's own rules. *)
+
+val read_allowlist
+  :  config_path:string
   -> keeper_name:string
   -> (Egress_host.rule list, string) result
-(** The rules for [keeper_name], or a typed reason the lane cannot be served.
+(** The rules for [keeper_name] as [config_path] currently spells them, or a
+    typed reason they cannot be read.
 
     An absent [\[egress.keepers.<name>\]] table is [Ok \[\]], not an error:
     an empty allowlist is a keeper that reaches nothing, which is a coherent
     thing to declare by omission and is what the lane does anyway when a
     listener has no rules. A missing or unparsable runtime.toml is an error,
     because then nothing is known -- including whether an allowlist was
-    meant. *)
+    meant. The caller decides what to serve while that lasts. *)
 
 val listen_backlog : int
 (** How many guest connections may queue before the accept loop takes them.

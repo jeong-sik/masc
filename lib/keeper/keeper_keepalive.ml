@@ -462,10 +462,15 @@ let fork_egress_proxy
   | Keeper_types_profile_sandbox.Network_none | Keeper_types_profile_sandbox.Network_inherit
     -> ()
   | Keeper_types_profile_sandbox.Network_policy ->
+    (* Settled once, so a later read cannot answer from a different file. *)
     (match
-       Keeper_egress_lane.resolve_allowlist
-         ~base_path:ctx.config.base_path
-         ~keeper_name
+       Result.bind
+         (Keeper_egress_lane.resolve_config_path
+            ~base_path:ctx.config.base_path
+            ~keeper_name)
+         (fun config_path ->
+            Keeper_egress_lane.read_allowlist ~config_path ~keeper_name
+            |> Result.map (fun rules -> config_path, rules))
      with
      | Error detail ->
        Log.Keeper.error
@@ -481,7 +486,7 @@ let fork_egress_proxy
          "egress proxy not started keeper=%s: this lane has no network \
           capability (the lane stays closed)"
          keeper_name
-     | Ok initial_rules ->
+     | Ok (config_path, initial_rules) ->
        let net = Option.get ctx.net in
        (* Re-read per request, so an operator's edit reaches the next
           connection instead of waiting for a lane restart -- the sibling SSH
@@ -493,14 +498,14 @@ let fork_egress_proxy
           an operator last successfully granted, and a typo does not widen
           it. The first read is different -- there is no previous, and the
           lane is refused above rather than served an empty allowlist that
-          would look like a policy decision. *)
+          would look like a policy decision.
+
+          The file itself is not re-chosen. Only its contents are read, so a
+          save that briefly unlinks it is a read failure held as stale rather
+          than a silent switch to whichever other runtime.toml exists. *)
        let last_good = Atomic.make initial_rules in
        let rules () =
-         match
-           Keeper_egress_lane.resolve_allowlist
-             ~base_path:ctx.config.base_path
-             ~keeper_name
-         with
+         match Keeper_egress_lane.read_allowlist ~config_path ~keeper_name with
          | Ok rules ->
            Atomic.set last_good rules;
            { Egress_proxy_net.rules; freshness = Egress_proxy_net.Fresh }

@@ -262,6 +262,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0420 | 부팅은 store 를 격리하지 않고 거부한다 — 운영자가 명시하지 않는 한 | Draft | - |
 | 0421 | 관측 여부는 문자열이 아니라 셸 IR 로 정한다 — 파서가 이미 푼 것을 분류기가 다시 못 읽는 일을 끝낸다 | Draft | - |
 | 0423 | 실행 기록의 페이로드는 볼 때 읽는다 — 목록이 안 읽는 340MB 를 메모리에서 뺀다 | Draft | - |
+| 0424 | 디스크에 있고 메모리에 없는 것에 이름을 준다 — 후보 원장의 286MB 를 안 들고 있기 위해 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |

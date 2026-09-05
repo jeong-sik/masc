@@ -65,29 +65,6 @@ let header_value headers name =
       if String.equal (String.lowercase_ascii key) wanted then Some value else None)
     headers
 
-(* RFC 9728 §5.1: the challenge names where this server's protected-resource
-   metadata lives. Worth carrying up, because it is what an OAuth client
-   would go read next. *)
-let resource_metadata_of_challenge challenge =
-  let marker = "resource_metadata=\"" in
-  match String.index_opt challenge '"' with
-  | None -> None
-  | Some _ ->
-    let length = String.length challenge in
-    let marker_length = String.length marker in
-    let rec scan index =
-      if index + marker_length > length
-      then None
-      else if String.equal (String.sub challenge index marker_length) marker
-      then (
-        let start = index + marker_length in
-        match String.index_from_opt challenge start '"' with
-        | None -> None
-        | Some stop -> Some (String.sub challenge start (stop - start)))
-      else scan (index + 1)
-    in
-    scan 0
-
 (* Streamable HTTP answers a POST either with a JSON body or with an event
    stream carrying the same message. Which one arrives is the server's
    choice, so both are read. The content type decides -- not the shape of
@@ -217,9 +194,12 @@ let request ~post t ~include_protocol_version ~body =
       Error
         (Unauthorized
            { resource_metadata =
-               Option.bind
-                 (header_value response.Masc_http_client.headers "www-authenticate")
-                 resource_metadata_of_challenge
+               (* RFC 9728 5.1: the Bearer challenge names where this
+                  server's protected-resource metadata lives. Worth carrying
+                  up, because it is what an OAuth client would go read
+                  next. *)
+               Masc_http_client.Www_authenticate.resource_metadata_of_headers
+                 response.Masc_http_client.headers
            })
     else if status < 200 || status >= 300
     then Error (Http { status; body = response.Masc_http_client.body })

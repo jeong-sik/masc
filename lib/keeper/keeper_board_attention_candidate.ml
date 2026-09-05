@@ -1545,17 +1545,26 @@ type ledger_state =
   }
 
 type ledger_entry =
-  { ledger_mutex : Stdlib.Mutex.t
+  { ledger_mutex : Cross_context_mutex.t
   ; mutable ledger_cache : ledger_state option
     (* [None]: unknown; the next access reads the whole store *)
   }
 
 let ledger_registry : (string, ledger_entry) Hashtbl.t = Hashtbl.create 16
 
-(* Stdlib mutexes on purpose: touched from systhread and main-domain paths, and
-   the critical sections never yield to the Eio scheduler. The per-path mutex
-   is held across the blocking store transaction, as the per-path mutex inside
-   [Fs_compat.rewrite_private_file_durable_locked_result] was before. *)
+(* The registry mutex guards only the table lookup, which never yields, so a
+   Stdlib mutex is enough there and it works from systhreads and other domains.
+
+   The per-path lock is held across the whole store transaction, and from an
+   Eio fiber that transaction runs its Unix I/O in a systhread
+   ([Fs_compat.run_blocking_private_file_transaction]), so the holder yields
+   while locked. A Stdlib mutex there made any other fiber on the same domain
+   that touched the same ledger re-lock the domain's own mutex:
+   [Sys_error "Mutex.lock: Resource deadlock avoided"], four keepers each
+   losing a turn in the first seconds after the 2026-09-05 boot (#33322).
+   [Cross_context_mutex] makes an Eio waiter yield instead, and still
+   serialises against systhread and other-domain callers through its Stdlib
+   half. *)
 let ledger_registry_mutex = Stdlib.Mutex.create ()
 
 let ledger_entry path =
@@ -1563,7 +1572,7 @@ let ledger_entry path =
     match Hashtbl.find_opt ledger_registry path with
     | Some entry -> entry
     | None ->
-      let entry = { ledger_mutex = Stdlib.Mutex.create (); ledger_cache = None } in
+      let entry = { ledger_mutex = Cross_context_mutex.create (); ledger_cache = None } in
       Hashtbl.add ledger_registry path entry;
       entry)
 ;;
@@ -1663,7 +1672,7 @@ let load_candidates_with_rejections ~base_path ~keeper_name =
 let load_candidates ~base_path ~keeper_name =
   let path = candidate_path ~base_path ~keeper_name in
   let entry = ledger_entry path in
-  Stdlib.Mutex.protect entry.ledger_mutex (fun () ->
+  Cross_context_mutex.with_lock entry.ledger_mutex (fun () ->
     Result.map (fun state -> state.latest) (refresh_ledger ~path entry))
 ;;
 
@@ -1701,7 +1710,7 @@ let update_ledger_many ~base_path ~keeper_name decide =
   let path = candidate_path ~base_path ~keeper_name in
   let entry = ledger_entry path in
   try
-    Stdlib.Mutex.protect entry.ledger_mutex (fun () ->
+    Cross_context_mutex.with_durable_lock entry.ledger_mutex (fun () ->
       let* state = refresh_ledger ~path entry in
       match decide state.latest with
       | Error _ as error -> error

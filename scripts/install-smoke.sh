@@ -8,9 +8,12 @@
 # depends on -- the contract that broke silently when nothing exercised the
 # download path end to end -- without any network access.
 #
-# Config seeding fetches from raw.githubusercontent, so this runs the
-# installer with --no-seed and seeds the base path from the repo's own
-# config/runtime.toml the way release-binary-smoke.sh does.
+# Config seeding runs for real. It used to fetch from raw.githubusercontent, so
+# this smoke passed --no-seed and copied the repo's own config/runtime.toml into
+# place afterwards -- which meant the seeding path was the one part of the
+# installer nothing exercised, and a release binary that could not seed itself
+# reached a fresh host and died on "no runtime config path". The seed now comes
+# out of the binary, so the smoke drives it and asserts what landed.
 #
 # Usage: install-smoke.sh <binaries_dir> <arch>
 #   binaries_dir holds the release-named files:
@@ -27,10 +30,8 @@ ARCH="${2:?usage: install-smoke.sh <binaries_dir> <arch>}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 INSTALL_SH="$REPO_ROOT/scripts/install.sh"
 [ -x "$INSTALL_SH" ] || { echo "install-smoke: $INSTALL_SH not executable" >&2; exit 2; }
-[ -f "$REPO_ROOT/config/runtime.toml" ] || {
-  echo "install-smoke: config/runtime.toml missing" >&2; exit 2; }
-[ -f "$REPO_ROOT/config/agent-core-models-overlay.toml" ] || {
-  echo "install-smoke: config/agent-core-models-overlay.toml missing" >&2; exit 2; }
+# No precondition on the repo's config/ tree: the config the installer seeds now
+# comes out of the binary under test, which is the thing this smoke is for.
 
 ASSETS=(
   "masc-$ARCH"
@@ -81,7 +82,6 @@ MASC_RELEASE_BASE_URL="file://$work/release" \
     --version "$VERSION" \
     --prefix "$prefix" \
     --base-path "$base" \
-    --no-seed \
     --no-wizard
 
 for a in masc masc-tui masc-deployment-preflight-helper masc-check-runtime-deployment-preflight; do
@@ -89,16 +89,22 @@ for a in masc masc-tui masc-deployment-preflight-helper masc-check-runtime-deplo
 done
 echo "install-smoke: installer placed all four binaries"
 
-# Boot the installed server. --no-seed left no config, so seed the same files
-# the real installer seeds: runtime.toml AND the model-catalog overlay. Without
-# the overlay the exact-output lanes (e.g. hitl_auto_judge) reference glm slots
-# the ambient catalog does not admit, and the server exits FATAL before /health
-# -- which is exactly the shape a bare-Linux user hits, so the smoke must seed
-# what install.sh seeds, not a subset.
-mkdir -p "$base/.masc/config"
-cp "$REPO_ROOT/config/runtime.toml" "$base/.masc/config/runtime.toml"
-cp "$REPO_ROOT/config/agent-core-models-overlay.toml" \
-  "$base/.masc/config/agent-core-models-overlay.toml"
+# What the installer's own seed had to produce. runtime.toml AND the
+# model-catalog overlay both matter: without the overlay the exact-output lanes
+# (e.g. hitl_auto_judge) reference glm slots the ambient catalog does not admit,
+# and the server exits FATAL before /health.
+for f in runtime.toml agent-core-models-overlay.toml; do
+  [ -f "$base/.masc/config/$f" ] || {
+    echo "install-smoke: installer seeded no $f" >&2; exit 1; }
+done
+# The roster is the operator's. A seed that hands over keepers would autoboot
+# them into a sandbox this host does not have.
+if [ -n "$(ls -A "$base/.masc/config/keepers" 2>/dev/null)" ]; then
+  echo "install-smoke: installer seeded keeper manifests into an untouched workspace" >&2
+  ls -A "$base/.masc/config/keepers" >&2
+  exit 1
+fi
+echo "install-smoke: installer seeded config and left the keeper roster empty"
 
 PORT="${INSTALL_SMOKE_PORT:-18946}"
 log="$work/server.log"

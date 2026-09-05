@@ -162,6 +162,42 @@ The subscription sign-in check is also a standalone command:
 when it is not, reusing the server's login probe instead of reading credential
 files.
 
+### What a finished install still does not have
+
+The install ends with a workspace that serves MCP and a dashboard. Four things
+it deliberately does not do, each of which is a step you take next.
+
+**No Keeper exists.** The config seed writes runtime settings, prompts, tool
+definitions and connector declarations, and leaves `config/keepers/` empty. A
+roster is per workspace, so neither the installer nor the server invents one.
+Create the first from the TUI's Keepers surface, or with `masc keeper-create`
+against a running server. `--team <preset>` at install time seeds one instead.
+
+**The Docker sandbox image is not built.** A Keeper on `sandbox_profile =
+"docker"` runs in `masc-keeper-sandbox:local`, which is built locally and is
+published to no registry. Without it every turn stops at
+`docker_preflight_failed`. From a source checkout:
+
+```bash
+scripts/build-keeper-sandbox-image.sh
+```
+
+There is no host arm — the profiles are `docker`, `microvm` and `remote_ssh`
+only — so a host with no Docker, no `container`, and no SSH endpoint can run
+the workspace but cannot run a Keeper.
+
+**The provider key is not in the server's environment.** The wizard writes it
+to `.masc/config/.env.local`, and nothing reads that file for you: `source` it
+in the shell that starts the server. This is easy to miss on the TUI path,
+because the server the TUI starts with `s` inherits the TUI's environment — so
+source the file before launching the TUI, not after.
+
+**Most of the seeded model catalog is not dispatchable.** The catalog ships 31
+provider/model bindings as documented examples; the 13 that declare
+`max-request-body-bytes` can take a Keeper turn and the rest are named in a
+startup warning that says exactly which key to add. `[runtime].default` is one
+of the 13.
+
 ## Terminal UI
 
 A release install puts `masc-tui` on `PATH` next to `masc`; from a source
@@ -239,6 +275,25 @@ against HEAD, `H` lists the commits that touched it, `b` puts `git blame` in the
 margin, `m` shows the notes anchored to it, and `K`/`D` ask the language server
 for hover text or the definition under the cursor. Changes, the Keeper's own
 file writes, opens the same viewer with `v`.
+
+MASC ships no language server. It starts the one the project's language names
+and expects that program on `PATH`; an absent one answers `Command_not_found`
+rather than a guess.
+
+| Language | Program | Project marker |
+|---|---|---|
+| OCaml | `ocamllsp` | `dune-project`, `dune-workspace` |
+| TypeScript | `typescript-language-server` | `tsconfig.json`, `package.json` |
+| JavaScript | `typescript-language-server` | `jsconfig.json`, `package.json` |
+| Python | `pylsp` | `pyproject.toml`, `setup.py`, `setup.cfg` |
+| Rust | `rust-analyzer` | `Cargo.toml` |
+| Go | `gopls` | `go.mod` |
+
+The same servers back the Keeper's `keeper_code_query` tool, so a Keeper asked
+about a language whose server is missing falls back to reading text. For OCaml,
+`references` also needs `dune build @ocaml-index`; without it the answer names
+that command rather than returning a short list. The other five declare no
+index precondition this client checks.
 
 ### When the server is not there
 

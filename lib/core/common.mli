@@ -34,6 +34,16 @@ val keepers_runtime_dirname : string
 (** OUTPUT root segment for server-written keeper runtime state. Single literal
     behind both keeper-dir SSOT functions; the input/output relocation flips it. *)
 
+val seeds_into_fresh_config_root : string -> bool
+(** Whether a distribution config asset may be written into a fresh runtime
+    config root. Takes an asset path relative to the embedded [config/] tree
+    ([runtime.toml], [prompts/keeper.md]) or a bare top-level entry name, so the
+    filesystem seed and the embedded seed answer from one place.
+
+    [false] for keeper manifests — the roster is declared per workspace, and the
+    shipped examples autoboot into a sandbox the host may not have — and for
+    [dune], a build input rather than runtime config. *)
+
 val keepers_runtime_dir_of_base : base_path:string -> string
 (** [<base_path>/.masc/keepers] for callers holding only a [base_path]
     (default cluster). Low-level SSOT that avoids the Workspace dependency cycle

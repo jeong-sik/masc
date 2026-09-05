@@ -143,8 +143,52 @@ let test_frontmatter_line_without_colon_is_skipped () =
   check string "title still read" "T" (Frontmatter.field parsed "title");
   check int "only one field" 1 (List.length parsed.Frontmatter.fields)
 
+(* The predicate both config-root seeds ask ([masc init] and the server's own
+   bootstrap). Its whole job is to keep two categories out, so the cases below
+   pin the boundary rather than a sample. *)
+let test_seeds_admits_distribution_assets () =
+  List.iter
+    (fun rel ->
+       check bool rel true (Common.seeds_into_fresh_config_root rel))
+    [ "runtime.toml"
+    ; "agent-core-models-overlay.toml"
+    ; "prompts/keeper.md"
+    ; "tools/masc_status.toml"
+    ; "mcp/prompts.toml"
+    ; "identity/github.toml"
+    ; "keeper.env"
+    ]
+
+let test_seeds_rejects_keeper_manifests () =
+  List.iter
+    (fun rel ->
+       check bool rel false (Common.seeds_into_fresh_config_root rel))
+    [ "keepers"; "keepers/taskmaster.toml"; "keepers/nested/deep.toml" ]
+
+let test_seeds_rejects_dune_files () =
+  check bool "top-level dune" false (Common.seeds_into_fresh_config_root "dune");
+  check bool "nested dune" false
+    (Common.seeds_into_fresh_config_root "prompts/dune")
+
+(* "keepers" is rejected as a whole segment, not as a prefix: a directory that
+   merely starts with those letters is ordinary distribution config. *)
+let test_seeds_matches_whole_segment_only () =
+  check bool "keepers-archive" true
+    (Common.seeds_into_fresh_config_root "keepers-archive/x.toml");
+  check bool "dune-project" true
+    (Common.seeds_into_fresh_config_root "dune-project")
+
 let () =
   run "Common" [
+    "config_root_seed", [
+      test_case "admits distribution assets" `Quick
+        test_seeds_admits_distribution_assets;
+      test_case "rejects keeper manifests" `Quick
+        test_seeds_rejects_keeper_manifests;
+      test_case "rejects dune files" `Quick test_seeds_rejects_dune_files;
+      test_case "matches whole segment only" `Quick
+        test_seeds_matches_whole_segment_only;
+    ];
     "finalizer_guard", [
       test_case "runs finally" `Quick test_protect_finally_runs;
       test_case "finalizer error no raise" `Quick test_protect_finally_error_no_raise;

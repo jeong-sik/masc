@@ -1215,41 +1215,21 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
   elif [ "$DRY_RUN" -eq 1 ]; then
     log "[dry-run] would seed configs and model catalog overlay to $CONFIG_DIR from release"
   else
-    log "seeding configs and model catalog overlay to $CONFIG_DIR"
+    # The binary carries the whole config/ tree it was built from, so the seed
+    # is `masc init` rather than a fetch of the same files from the repo. Three
+    # things follow: an offline or mirrored install works, the seed cannot drift
+    # from the binary's contract the way a raw fetch at a different tag could,
+    # and no checksum is needed for files that arrived inside a verified binary.
+    # `init` writes what is missing and leaves the rest; --force overwrites.
+    log "seeding configs and model catalog overlay to $CONFIG_DIR from the binary"
     mkdir -p "$CONFIG_DIR"
-
-    seed_raw() {
-      local raw_path="$1" name="$2" dest="$3"
-      local raw="https://raw.githubusercontent.com/$REPO/$VERSION/$raw_path"
-      local tmp="$dest.partial"
-      PARTIAL_FILES+=("$tmp")
-      fetch_release_checksums
-      curl -fsSL \
-        --max-time "$MASC_INSTALL_CONFIG_FETCH_TIMEOUT_S" \
-        --retry "$MASC_INSTALL_CURL_RETRIES" \
-        -o "$tmp" \
-        "$raw" \
-        || die "config seed failed (raw fetch from $raw)"
-      verify_checksum "$tmp" "$name"
-      mv "$tmp" "$dest"
-    }
-
-    seed_raw_if_missing() {
-      local raw_path="$1" name="$2" dest="$3"
-      if [ -e "$dest" ] && [ "$FORCE" -eq 0 ]; then
-        log "config already present: $dest, skipping seed"
-      else
-        seed_raw "$raw_path" "$name" "$dest"
-      fi
-    }
-
-    seed_config_if_missing() {
-      local name="$1" dest="$2"
-      seed_raw_if_missing "config/$name" "$name" "$dest"
-    }
-
-    seed_config_if_missing "runtime.toml" "$RUNTIME_FILE"
-    seed_config_if_missing "agent-core-models-overlay.toml" "$MODEL_CATALOG_OVERLAY_FILE"
+    init_args=(init --base-path "$BASE_PATH")
+    [ "$FORCE" -eq 1 ] && init_args+=(--force)
+    if ! init_summary="$("$DEST" "${init_args[@]}" 2>&1 | tail -1)"; then
+      die "config seed failed ($DEST ${init_args[*]}): $init_summary"
+    fi
+    log "$init_summary"
+    [ -e "$RUNTIME_FILE" ] || die "config seed produced no $RUNTIME_FILE"
   fi
 fi
 
@@ -1409,7 +1389,8 @@ cat <<EOF
 ${c_grn}masc ${VERSION} installed.${c_off}
 
 Next:
-  ${c_dim}# load provider key${c_off}
+  ${c_dim}# load provider key -- nothing reads this file for you, and the server${c_off}
+  ${c_dim}# the TUI starts inherits whatever environment the TUI was launched with${c_off}
   $source_hint
 
   ${c_dim}# mint a worker bearer in this shell for your MCP client${c_off}
@@ -1431,6 +1412,11 @@ Next:
 
   ${c_dim}# or create one non-interactively once the server is up:${c_off}
   ${c_dim}# $DEST keeper-create --help${c_off}
+
+  ${c_dim}# a Keeper on sandbox_profile = "docker" runs inside masc-keeper-sandbox:local,${c_off}
+  ${c_dim}# which is built locally and published to no registry. Without it every turn${c_off}
+  ${c_dim}# stops at docker_preflight_failed. From a source checkout:${c_off}
+  ${c_dim}#   scripts/build-keeper-sandbox-image.sh${c_off}
 
   ${c_dim}# source the printed bearer exports in the shell that starts your MCP client${c_off}
   See: https://github.com/$REPO#mcp-client-setup

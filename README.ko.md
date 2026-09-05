@@ -140,6 +140,41 @@ subscription 로그인 확인은 독립 명령이기도 합니다. `masc runtime
 <runtime_id>`는 CLI가 로그인돼 있으면 `0`, 아니면 `1`로 끝나며, 자격증명 파일을
 읽지 않고 서버의 로그인 probe를 재사용합니다.
 
+### 설치가 끝나도 아직 없는 것
+
+설치가 끝나면 MCP와 대시보드를 서비스하는 워크스페이스가 생깁니다. 일부러 하지
+않는 일이 넷 있고, 각각이 다음 단계입니다.
+
+**Keeper가 한 명도 없습니다.** 설정 시드는 런타임 설정, 프롬프트, 도구 정의,
+커넥터 선언을 쓰고 `config/keepers/`는 비워 둡니다. 누가 일할지는 워크스페이스마다
+다르니 설치 스크립트도 서버도 대신 정하지 않습니다. TUI의 Keepers 화면에서
+만들거나, 서버가 떠 있는 상태에서 `masc keeper-create`로 만듭니다. 설치할 때
+`--team <preset>`을 주면 그 팀이 대신 들어갑니다.
+
+**Docker 샌드박스 이미지가 안 만들어져 있습니다.** `sandbox_profile = "docker"`인
+Keeper는 `masc-keeper-sandbox:local` 안에서 도는데, 이 이미지는 로컬에서 만드는
+것이고 어느 레지스트리에도 없습니다. 없으면 매 턴이 `docker_preflight_failed`로
+멈춥니다. 소스 체크아웃에서 이렇게 만듭니다.
+
+```bash
+scripts/build-keeper-sandbox-image.sh
+```
+
+호스트에서 그냥 도는 선택지는 없습니다. 프로필은 `docker`, `microvm`,
+`remote_ssh` 셋뿐이라 Docker도 `container`도 SSH endpoint도 없는 호스트는
+워크스페이스는 띄워도 Keeper는 못 돌립니다.
+
+**모델 제공자 키가 서버 환경에 안 들어가 있습니다.** 마법사는 키를
+`.masc/config/.env.local`에 적어 두고, 그 파일을 대신 읽어 주는 건 아무것도
+없습니다. 서버를 띄우는 셸에서 직접 `source` 하세요. TUI로 시작할 때 놓치기
+쉬운데, TUI에서 `s`로 띄운 서버는 TUI의 환경을 그대로 물려받기 때문입니다. TUI를
+켜기 **전에** 읽어 두세요.
+
+**시드된 모델 카탈로그 대부분은 바로 못 씁니다.** 카탈로그에는 예시를 겸해
+provider/model 바인딩 31개가 들어 있고, 그중 `max-request-body-bytes`를 선언한
+13개만 Keeper 턴을 받습니다. 나머지는 부팅 경고에 어떤 키를 넣어야 하는지까지
+같이 찍힙니다. `[runtime].default`는 13개 안에 있습니다.
+
 ## MCP 클라이언트 설정
 
 한 번에 끝내는 길은 `masc mcp-config`입니다. bearer를 발급하고 클라이언트용
@@ -270,7 +305,17 @@ Keeper를 알려 줍니다. 둘 다 없으면 그 줄도 없습니다.
 Keeper에게 바로 넘깁니다. `masc_ask`로 질문을 던진 Keeper에게는 터미널에서 바로
 답합니다 — 입력줄 위 그 줄이 가리키는 것이 이겁니다. Code 화면에서는 `Enter`로
 파일을 열고, `d`로 HEAD 대비 지금 고친 내용을, `H`로 그 파일을 건드린 커밋을,
-`m`으로 그 파일에 달린 메모를 봅니다.
+`m`으로 그 파일에 달린 메모를 봅니다. `K`와 `D`는 커서가 놓인 이름의 타입과
+정의를 언어 서버에 물어봅니다.
+
+언어 서버는 MASC가 같이 배포하지 않습니다. 프로젝트 언어에 맞는 프로그램을
+`PATH`에서 찾아 직접 띄우고, 없으면 짐작하는 대신 `Command_not_found`로
+답합니다. OCaml은 `ocamllsp`, TypeScript와 JavaScript는
+`typescript-language-server`, Python은 `pylsp`, Rust는 `rust-analyzer`, Go는
+`gopls`입니다. Keeper의 `keeper_code_query` 도구도 같은 서버를 쓰므로, 서버가
+없는 언어를 맡은 Keeper는 파일을 글자로 읽는 데까지만 갑니다. OCaml에서
+`references`는 `dune build @ocaml-index`가 추가로 필요하고, 없으면 답이 그
+명령을 알려 줍니다.
 
 TUI와 서버가 서로 다른 작업 공간을 보고 있으면 머리글이 그렇게 말합니다 — 연결
 표시 옆 `[workspace mismatch]`, 그리고 아래 줄에 두 경로가 같이 나옵니다. 그동안

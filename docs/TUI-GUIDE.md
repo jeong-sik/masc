@@ -616,8 +616,14 @@ the preceding operator message.
 
 ```
  [21:41:34]  tools
-   ✗ Ran 2 tools · 1 returned, 1 failed · 2 details folded
+   ✗ Tools 4 · read_file 2 · web_fetch 1 · glob 1 · 3 returned · 4 details folded
+   ✗ 1 failed: web_fetch
 ```
+
+What ran is on the first row and what did not is on the second, under its own
+mark. A block whose calls are all accounted for keeps one row, and so does a
+block of two calls -- splitting those would draw as many rows as showing each
+call whole.
 
 Only rows the server marks as autonomous turns are read this way. A turn
 in the conversation itself already has its calls in the transcript as tool

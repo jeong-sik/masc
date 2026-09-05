@@ -143,21 +143,38 @@ let test_decode_events_page () =
   | Ok _ -> fail "a malformed line decoded"
   | Error _ -> ()
 
+(* What the fold hands back is what a projection has to apply: each taken
+   line with its delta, at the line's own time. *)
+let taken_to_tagged taken =
+  List.map (fun ((l : Journal.journaled_event), d) -> ((l.seq, l.ts), d)) taken
+
+let taken = list (pair (pair int (float 0.0)) delta)
+
 let test_add_journaled_holds_undrawn_positions () =
   let t = log () in
-  Log.add_journaled t
-    [ line 0 1.0 (E.Run_started { run_id = "r"; thread_id = "keeper:keeper.one" })
-    ; line 1 1.1 (E.Text_message_start { message_id = "m"; role = E.Assistant })
-    ; line 2 1.2 (E.Text_delta "hi")
-    ];
+  let first =
+    Log.add_journaled t
+      [ line 0 1.0 (E.Run_started { run_id = "r"; thread_id = "keeper:keeper.one" })
+      ; line 1 1.1 (E.Text_message_start { message_id = "m"; role = E.Assistant })
+      ; line 2 1.2 (E.Text_delta "hi")
+      ]
+  in
   check (list tagged) "start and delta are entries, message start is not"
     [ (Some 0, Live.Run_started); (Some 2, Live.Text "hi") ]
     (List.map (fun (entry : Log.entry) -> (entry.seq, entry.delta)) (Log.entries t));
+  check taken "the fold hands back the taken lines with their deltas and times"
+    [ ((0, 1.0), Live.Run_started); ((2, 1.2), Live.Text "hi") ]
+    (taken_to_tagged first);
   check int "the undrawn seq still counts as held" 2 (Log.last_seq t);
   check bool "a live frame for the undrawn seq is a duplicate" false
     (Log.add t ~seq:(Some 1) (Live.Text "late"));
   let before = Log.revision t in
-  Log.add_journaled t [ line 3 1.3 E.Agent_core_stream_ping ];
+  let again =
+    Log.add_journaled t
+      [ line 2 1.2 (E.Text_delta "hi"); line 3 1.3 E.Agent_core_stream_ping ]
+  in
+  check taken "a line already held and an undrawn line are not handed back" []
+    (taken_to_tagged again);
   check int "an undrawn line moves last_seq" 3 (Log.last_seq t);
   check int "but not the revision: nothing to redraw" before (Log.revision t)
 
@@ -332,13 +349,24 @@ let test_read_whole_journal_pages_until_the_position_stops_moving () =
    | Ok lines -> check int "only what the log lacks" 1 (List.length lines)
    | Error error -> failf "unexpected %s" (Log.events_error_to_string error));
   check (list int) "asked from the resume position" [ 1; 2 ] (List.rev !asked);
-  (* A page that claims more without advancing ends the read. *)
+  (* A page that claims more without advancing is an error naming the
+     position, asked once: the lines read so far are not the journal, and a
+     shorter [Ok] would have the handler hold a truncated turn as the record
+     and say nothing. *)
+  asked := [];
   let stuck ~since_seq =
-    Ok { Log.operation_id = "op"; events = []; has_more = true; next_since_seq = since_seq }
+    asked := since_seq :: !asked;
+    Ok { Log.operation_id = "op"; events = [ line 0 1.0 (E.Text_delta "0") ]
+       ; has_more = true; next_since_seq = since_seq }
   in
   (match Log.read_whole_journal ~since_seq:(-1) ~fetch:stuck with
-   | Ok lines -> check int "nothing, once" 0 (List.length lines)
+   | Ok lines -> failf "a stuck page read as %d line(s)" (List.length lines)
+   | Error (Log.Events_undecodable detail) ->
+       check string "the error names the position that did not advance"
+         "page after seq -1 claims more but did not advance (next_since_seq -1)"
+         detail
    | Error error -> failf "unexpected %s" (Log.events_error_to_string error));
+  check (list int) "the stuck page is asked once" [ -1 ] (List.rev !asked);
   (* An error ends the read as that error. *)
   let failing ~since_seq =
     if since_seq = -1
@@ -419,10 +447,15 @@ let test_a_journal_page_fills_the_log_like_the_wire_does () =
     (fun (seq, d) -> ignore (Log.add from_wire ~seq d : bool))
     (wire_tagged_deltas events);
   let from_journal = log () in
-  Log.add_journaled from_journal
-    (List.map (fun (seq, event) -> line seq (1000.0 +. float_of_int seq) event) events);
+  let taken_from_journal =
+    Log.add_journaled from_journal
+      (List.map (fun (seq, event) -> line seq (1000.0 +. float_of_int seq) event) events)
+  in
   let view t = List.map (fun (entry : Log.entry) -> (entry.seq, entry.delta)) (Log.entries t) in
   check (list tagged) "same entries" (view from_wire) (view from_journal);
+  check (list tagged) "the fold hands back exactly the wire's deltas"
+    (wire_tagged_deltas events)
+    (List.map (fun ((l : Journal.journaled_event), d) -> (Some l.seq, d)) taken_from_journal);
   (* The journal holds every line's seq; the wire holds only the seqs of
      frames that drew something. The fixture ends with two undrawn
      bookkeeping events and then Run_finished, so the two agree here; a turn
@@ -432,8 +465,12 @@ let test_a_journal_page_fills_the_log_like_the_wire_does () =
   let trailing_undrawn = golden @ [ E.Agent_core_stream_ping; E.Agent_core_stream_ping ] in
   let events = List.mapi (fun seq event -> (seq, event)) trailing_undrawn in
   let from_journal = log () in
-  Log.add_journaled from_journal
-    (List.map (fun (seq, event) -> line seq (1000.0 +. float_of_int seq) event) events);
+  let taken_with_trailing =
+    Log.add_journaled from_journal
+      (List.map (fun (seq, event) -> line seq (1000.0 +. float_of_int seq) event) events)
+  in
+  check int "the trailing undrawn frames hand nothing more back"
+    (List.length taken_from_journal) (List.length taken_with_trailing);
   let from_wire = log () in
   List.iter (fun (seq, d) -> ignore (Log.add from_wire ~seq d : bool)) (wire_tagged_deltas events);
   check int "the journal-fed log is ahead by the trailing undrawn frames"

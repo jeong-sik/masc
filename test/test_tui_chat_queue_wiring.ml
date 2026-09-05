@@ -2001,6 +2001,68 @@ let test_quiet_leave_routes_past_the_composer_gate () =
       routed
 ;;
 
+(* The compose hold (#33047) keeps a settle from sending a keeper's waiting
+   line out from under the line being typed. It is a hold on typing, not on
+   a draft: the pane left with the draft still in the composer, or the
+   composer row released, is text nobody is typing, and an idle keeper has
+   no settle coming to send the line -- so the hold has to end there. *)
+let test_composing_holds_only_while_the_composer_is_live () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  state.msg_target_keeper_name <- Some "alpha";
+  state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+  Buffer.add_string state.msg_input "half a";
+  check bool "typing in the pane holds alpha's line" true
+    (Tui_types.composing_for_keeper state "alpha");
+  check bool "and nobody else's" false (Tui_types.composing_for_keeper state "beta");
+  (* Leaving saves the draft and changes the surface; the buffer still holds
+     the text, as it does after [leave_keeper_message]. *)
+  state.view <- Tui_types.Keepers Tui_types.Keeper_list;
+  check bool "the pane left releases the hold, draft or no draft" false
+    (Tui_types.composing_for_keeper state "alpha");
+  (* The composer row on another surface is the composer once it has focus. *)
+  state.view <- Tui_types.Overview;
+  state.composer_focused <- true;
+  check bool "the focused row holds again" true
+    (Tui_types.composing_for_keeper state "alpha");
+  state.composer_focused <- false;
+  check bool "the row released does not" false
+    (Tui_types.composing_for_keeper state "alpha");
+  state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+  Buffer.clear state.msg_input;
+  check bool "an empty composer holds nothing" false
+    (Tui_types.composing_for_keeper state "alpha");
+  Buffer.add_string state.msg_input "half a";
+  state.coalesce_queued_input <- false;
+  check bool "with coalescing off there is no hold at all" false
+    (Tui_types.composing_for_keeper state "alpha")
+;;
+
+(* Releasing the hold is not enough on its own: an idle keeper's line is
+   sent only when something drains the queue, and nothing was draining it
+   at a leave or a retarget -- the line waited until the operator came back
+   and cleared the draft. The three ways the composer is put away or aimed
+   elsewhere each drain, in the executable. *)
+let test_putting_the_composer_away_drains_the_queue () =
+  let in_binding ~binding_name ~callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+      ~binding_name ~callee
+  in
+  let on_leave = in_binding ~binding_name:"leave_keeper_message" ~callee:"drain_queue" in
+  let on_retarget =
+    in_binding ~binding_name:"open_message_for_keeper" ~callee:"drain_queue"
+  in
+  (* Two in the composer row's handler: the retarget when the row takes
+     focus for another keeper, and the row released. *)
+  let on_row = in_binding ~binding_name:"handle_composer_key" ~callee:"drain_queued_message" in
+  if on_leave <> 1 || on_retarget <> 1 || on_row <> 2 then
+    failf
+      "leaving the pane, retargeting the composer and releasing the row must \
+       each drain the queue: leave=%d retarget=%d row=%d"
+      on_leave on_retarget on_row
+;;
+
 let test_cancel_and_edit_take_the_row_with_them () =
   let cancelled =
     Ast_grep.count_calls_in_value_binding
@@ -2236,6 +2298,10 @@ let () =
             test_quiet_leave_leaves_without_touching_the_turn
         ; test_case "quiet leave routes past the composer gate" `Quick
             test_quiet_leave_routes_past_the_composer_gate
+        ; test_case "composing holds only while the composer is live" `Quick
+            test_composing_holds_only_while_the_composer_is_live
+        ; test_case "putting the composer away drains the queue" `Quick
+            test_putting_the_composer_away_drains_the_queue
         ; test_case "roster footer names arrows, not vim letters" `Quick
             test_roster_footer_names_arrows_not_vim_letters
         ; test_case "the budget and the pane agree about queue rows" `Quick

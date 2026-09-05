@@ -999,8 +999,12 @@ let reset_message_file_changes state keeper_name =
   state.msg_file_changes_refresh_pending <- false;
   state.msg_file_changes_error <- None
 
+(* [drain_queue] runs once the composer is aimed at [keeper_name]: a line the
+   previous target's compose was holding ([composing_for_keeper]) is released
+   by the retarget, and this is when it goes. Passed in because the drain is
+   defined with the dispatch path, after this. *)
 let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
-    keeper_name =
+    keeper_name ~drain_queue =
   (* The paste goes back into the draft before the draft is put away. A spill
      lives with the composer; a saved draft has to stand on its own, and a
      placeholder without its text would reach the keeper as a sentence about a
@@ -1019,9 +1023,14 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
   state.keeper_message_focus <- Right_pane;
   Buffer.clear state.msg_input;
   List.assoc_opt keeper_name state.msg_drafts
-  |> Option.iter (Buffer.add_string state.msg_input)
+  |> Option.iter (Buffer.add_string state.msg_input);
+  drain_queue ()
 
-let leave_keeper_message state =
+(* Leaving puts the draft away, and a line held only for that compose
+   ([composing_for_keeper]) goes once the pane is gone: an idle keeper has no
+   settle coming to send it, and the operator who left is not about to fold
+   another line onto it. *)
+let leave_keeper_message state ~drain_queue =
   save_message_draft state;
   let target_registered =
     match state.msg_target_keeper_name with
@@ -1035,7 +1044,8 @@ let leave_keeper_message state =
      | Keeper_chat_return_list, _ | Keeper_chat_return_detail, false ->
          Keepers Keeper_list);
   state.detail_scroll <- 0;
-  if not target_registered then state.log_scroll <- 0
+  if not target_registered then state.log_scroll <- 0;
+  drain_queue ()
 
 let clear_current_message_draft state =
   Buffer.clear state.msg_input;
@@ -1296,7 +1306,9 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
      grace window, or a request to leave once the interrupt is stale,
      declined, or errored. Leaving cancels nothing: the interrupt proceeds
      server-side and the pane can be reopened. *)
-  | "esc" -> if interrupt_turn () then true else (leave_keeper_message state; true)
+  | "esc" ->
+    if interrupt_turn () then true
+    else (leave_keeper_message state ~drain_queue; true)
   (* Q is the leave half of Esc with the interrupt half taken out. Esc's
      first press on a live turn spends itself stopping the turn, so an
      operator who wants to walk away and let the turn run had no key: the
@@ -1318,7 +1330,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          && Buffer.length state.msg_input = 0
          && Option.is_none state.msg_recall_replaces
          && Option.is_none state.voice_capture ->
-    leave_keeper_message state;
+    leave_keeper_message state ~drain_queue;
     true
   | "\r" ->
     let text = Buffer.contents state.msg_input in
@@ -4822,10 +4834,6 @@ let launch_keeper_history_load ?(load_file_changes = true) state ~mailbox
   if load_file_changes then
     launch_keeper_chat_tool_details_load state ~mailbox ~keeper_name
 
-(* The journal endpoint's page ceiling ([chat_events_max_limit] on the
-   server); a turn longer than one page is read page by page. *)
-let journal_reload_page_limit = 2000
-
 (* One fiber per turn, each reading the journal from where the session's
    record of it ends and handing the lines to the mailbox; the handler folds
    them. The operation is marked in flight until its result is handled, so a
@@ -4841,8 +4849,12 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
           try
             Keeper_chat_log.read_whole_journal ~since_seq
               ~fetch:(fun ~since_seq ->
+                (* Pages at the journal's own ceiling: one definition, the
+                   server's and this client's, so the ask can never exceed
+                   what the endpoint admits. *)
                 Masc_tui_http.fetch_keeper_chat_events ~host ~port ~keeper_name
-                  ~operation_id ~since_seq ~limit:journal_reload_page_limit)
+                  ~operation_id ~since_seq
+                  ~limit:Masc.Keeper_chat_event_log.page_max_limit)
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Keeper_chat_log.Events_transport (Printexc.to_string exn))
@@ -4917,11 +4929,12 @@ let open_context_inspector state ~mailbox ~keeper_name =
   state.context_inspector_turn_back <- 0;
   launch_context_inspector_load state ~mailbox ~keeper_name
 
-let switch_to_next_keeper_message state ~mailbox =
+let switch_to_next_keeper_message state ~mailbox ~drain_queue =
   match next_keeper_message_target state with
   | Masc_tui_keeper_selection.No_alternative -> ()
   | Masc_tui_keeper_selection.Switch_to { keeper_name; cursor } ->
-      open_message_for_keeper ~return_to:state.msg_return state keeper_name;
+      open_message_for_keeper ~return_to:state.msg_return state keeper_name
+        ~drain_queue;
       state.keeper_cursor <- cursor;
       set_msg_scroll state 0;
       state.msg_loaded <- [];
@@ -5694,19 +5707,6 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                    blocking.Keeper_chat.request_id waiting))))
 ;;
 
-(* The operator is mid-line for this keeper: the composer holds text and it is
-   aimed here. While that is true, a settle should not dispatch the keeper's
-   waiting line out from under the line being typed -- holding it lets the next
-   Enter fold the two together ([coalesce_queued_input]). Gated on that setting:
-   with coalescing off the operator wants every line its own turn, so the settle
-   dispatches promptly as before. *)
-let composing_for_keeper state keeper_name =
-  state.coalesce_queued_input
-  && Buffer.length state.msg_input > 0
-  && (match state.msg_target_keeper_name with
-      | Some target -> String.equal target keeper_name
-      | None -> false)
-
 let drain_queued_message state ~base_path ~mailbox =
   (* Send everything that can go now, oldest first, skipping lines whose own
      keeper still has a turn running. Sending sets that keeper's in-flight, so
@@ -6405,7 +6405,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       match Masc_tui_command.resolve_keeper_name ~names name with
       | Masc_tui_command.Keeper_found keeper_name ->
           Buffer.clear state.msg_input;
-          open_message_for_keeper ~return_to:state.msg_return state keeper_name;
+          open_message_for_keeper ~return_to:state.msg_return state keeper_name
+            ~drain_queue:(fun () -> drain_queued_message state ~base_path ~mailbox);
           launch_keeper_history_load state ~mailbox ~keeper_name;
           state.view <- Keepers Keeper_message
       | Masc_tui_command.Keeper_ambiguous candidates ->
@@ -8659,10 +8660,15 @@ let handle_composer_key state ~base_path ~mailbox key =
            (* Taking focus is what names the recipient: the draft that follows
               belongs to the keeper the row showed at that moment. *)
            state.msg_return <- Keeper_chat_return_detail;
+           (* Focus first: the retarget drains the queue, and a line for the
+              keeper the row now aims at is held only while the row is live
+              ([composing_for_keeper]). *)
+           state.composer_focused <- true;
            if
              state.msg_target_keeper_name <> Some keeper_name
-           then open_message_for_keeper state keeper_name;
-           state.composer_focused <- true
+           then
+             open_message_for_keeper state keeper_name ~drain_queue:(fun () ->
+                 drain_queued_message state ~base_path ~mailbox)
        | Composer.No_target | Composer.Unreachable _ -> ());
       true
   | Composer.Start_listening ->
@@ -8716,7 +8722,11 @@ let handle_composer_key state ~base_path ~mailbox key =
            state.last_action <- Some ("voice: discarding", Unix.gettimeofday ())
        | None ->
            save_message_draft state;
-           state.composer_focused <- false);
+           state.composer_focused <- false;
+           (* The row put away releases a line held for its compose
+              ([composing_for_keeper]); it goes now, not at a settle an idle
+              keeper never has. *)
+           drain_queued_message state ~base_path ~mailbox);
       true
   | Composer.Send ->
       state.composer_focused <- false;
@@ -9010,7 +9020,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               (match event with
                | Masc_tui_observer.Fusion_run_status { run_id; _ } ->
                    fusion_status_seen := Some run_id
-               | _ -> ());
+               | Masc_tui_observer.Agent_core _
+               | Masc_tui_observer.Keeper_heartbeat _
+               | Masc_tui_observer.Keeper_tool_call _
+               | Masc_tui_observer.Keeper_turn_complete _
+               | Masc_tui_observer.Keeper_composite_changed _
+               | Masc_tui_observer.Keeper_chat_appended _
+               | Masc_tui_observer.Keeper_chat_stream_frame _
+               | Masc_tui_observer.Keeper_waiting_inventory_changed _
+               | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
+                   ());
               state.acting <-
                 { Masc_tui_acting.ae_at = received; ae_event = event }
                 :: state.acting;
@@ -9057,14 +9076,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          are inflight-guarded, so a run that pushes several stage frames
          collapses to one fetch, and a missed frame is healed by the
          cadence reload the Fusion view already runs. *)
-      (match (!fusion_status_seen, state.view) with
-       | Some run_id, Fusion ->
-           launch_fusion_runs_load state ~mailbox;
-           (match state.fusion_mode with
-            | Fusion_detail open_id when String.equal run_id open_id ->
-                launch_fusion_detail_load state ~mailbox ~run_id
-            | _ -> ())
-       | _ -> ())
+      (match !fusion_status_seen with
+       | None -> ()
+       | Some run_id -> (
+           match state.view with
+           | Fusion -> (
+               launch_fusion_runs_load state ~mailbox;
+               match state.fusion_mode with
+               | Fusion_detail open_id when String.equal run_id open_id ->
+                   launch_fusion_detail_load state ~mailbox ~run_id
+               | Fusion_detail _ | Fusion_list -> ())
+           | Overview | Acting | Keepers _ | Memory | Lanes | Clients | Board
+           | Approvals | Planning | Schedules | Verification | Harness
+           | Repositories | Code | Changes | Connectors | Runtime | Config
+           | Resources | Tools | System_logs ->
+               ()))
   | Task_dispatched { keeper; task_id; title; body } ->
       add_event state "task" (Printf.sprintf "%s created for %s" task_id keeper);
       (* The jump lands on a clean screen: a modal or roster search opened
@@ -13422,7 +13448,10 @@ and is loaded on demand through keeper_skill.
                  | Some { Masc_tui_answering.target = Some keeper_name; _ } ->
                      close ();
                      open_message_for_keeper
-                       ~return_to:Keeper_chat_return_list state keeper_name;
+                       ~return_to:Keeper_chat_return_list state keeper_name
+                       ~drain_queue:(fun () ->
+                         drain_queued_message state ~base_path
+                           ~mailbox:async_messages);
                      launch_keeper_history_load state
                        ~mailbox:async_messages ~keeper_name;
                      state.view <- Keepers Keeper_message
@@ -13521,7 +13550,10 @@ and is loaded on demand through keeper_skill.
                      goto_surface state ~mailbox:async_messages Config
                  | Some (_, Masc_tui_types.Palette_chat keeper_name) ->
                      open_message_for_keeper
-                       ~return_to:Keeper_chat_return_list state keeper_name;
+                       ~return_to:Keeper_chat_return_list state keeper_name
+                       ~drain_queue:(fun () ->
+                         drain_queued_message state ~base_path
+                           ~mailbox:async_messages);
                      launch_keeper_history_load state
                        ~mailbox:async_messages ~keeper_name;
                      state.view <- Keepers Keeper_message
@@ -14174,7 +14206,9 @@ and is loaded on demand through keeper_skill.
            (match List.nth_opt state.keepers state.keeper_cursor with
             | Some keeper ->
                 open_message_for_keeper ~return_to:state.msg_return state
-                  keeper.k_name;
+                  keeper.k_name ~drain_queue:(fun () ->
+                    drain_queued_message state ~base_path
+                      ~mailbox:async_messages);
                 set_msg_scroll state 0;
                 state.msg_loaded <- [];
                 state.msg_loaded_keeper <- None;
@@ -14228,6 +14262,9 @@ and is loaded on demand through keeper_skill.
                    ~mailbox:async_messages
                end;
                switch_to_next_keeper_message state ~mailbox:async_messages
+                 ~drain_queue:(fun () ->
+                   drain_queued_message state ~base_path
+                     ~mailbox:async_messages)
              end else
                let (_handled : bool) =
                  handle_message_key state
@@ -16987,7 +17024,9 @@ and is loaded on demand through keeper_skill.
                    && state.keeper_cursor < List.length state.keepers ->
                 let keeper = List.nth state.keepers state.keeper_cursor in
                 open_message_for_keeper ~return_to:Keeper_chat_return_list state
-                  keeper.k_name;
+                  keeper.k_name ~drain_queue:(fun () ->
+                    drain_queued_message state ~base_path
+                      ~mailbox:async_messages);
                 launch_keeper_history_load state ~mailbox:async_messages
                   ~keeper_name:keeper.k_name;
                 state.view <- Keepers Keeper_message
@@ -16996,7 +17035,9 @@ and is loaded on demand through keeper_skill.
                    && state.keeper_cursor < List.length state.keepers ->
                 let keeper = List.nth state.keepers state.keeper_cursor in
                 open_message_for_keeper ~return_to:Keeper_chat_return_detail
-                  state keeper.k_name;
+                  state keeper.k_name ~drain_queue:(fun () ->
+                    drain_queued_message state ~base_path
+                      ~mailbox:async_messages);
                 launch_keeper_history_load state ~mailbox:async_messages
                   ~keeper_name:keeper.k_name;
                 state.view <- Keepers Keeper_message

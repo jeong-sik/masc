@@ -151,6 +151,59 @@ let test_replaced_settled_logs_are_seen () =
     (after == Tui_types.chat_rows_for state "alpha")
 ;;
 
+(* A held log that comes to stand for its turn in place is an input change
+   too. A cut stream leaves a partial log among the settled ones; a journal
+   read then feeds the rest of the turn into that same log, through the fold
+   the reload handler uses, and holds it again. The list the memo keys on
+   must be a new value then, or the memo keeps answering with the loaded
+   rows the log now draws itself -- the turn on screen twice. *)
+let test_a_held_log_completed_in_place_is_seen () =
+  let module E = Masc.Keeper_chat_events in
+  let module Journal = Masc.Keeper_chat_event_log in
+  let line seq ts event : Journal.journaled_event = { Journal.seq; ts; event } in
+  let state = fresh_state () in
+  state.Tui_types.msg_loaded <-
+    entry_at ~request_id:"cut" 3.0 :: state.Tui_types.msg_loaded;
+  let log =
+    Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"cut"
+      ~started_at:3.0
+  in
+  (* The cut: the stream delivered a start and some text, then went away;
+     the settle committed what it had. *)
+  Tui_types.turn_log_add_journaled log
+    [ line 0 3.0 (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" })
+    ; line 1 3.1 (E.Text_delta "row at 3")
+    ];
+  Masc_tui_keeper_chat_log.commit log.Tui_types.tl_log;
+  Tui_types.hold_settled_log state log;
+  let partial = Tui_types.chat_rows_for state "alpha" in
+  Alcotest.(check bool) "a partial log does not stand for the turn" false
+    (Tui_types.turn_log_holds_the_turn log);
+  Alcotest.(check (list string)) "so the loaded row is still drawn"
+    [ "row at 1"; "row at 2"; "row at 3" ] (texts partial);
+  (* The journal read: the rest of the turn joins the same log, which is
+     committed and held again, as the reload handler does. *)
+  Tui_types.turn_log_add_journaled log
+    [ line 2 3.2
+        (E.Reply_details
+           { reply = "row at 3"
+           ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
+           ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
+           })
+    ; line 3 3.3 (E.Run_finished { run_id = "r" })
+    ];
+  Masc_tui_keeper_chat_log.commit log.Tui_types.tl_log;
+  Tui_types.hold_settled_log state log;
+  Alcotest.(check bool) "the log now stands for the turn" true
+    (Tui_types.turn_log_holds_the_turn log);
+  let whole = Tui_types.chat_rows_for state "alpha" in
+  Alcotest.(check bool) "recomputed" false (partial == whole);
+  Alcotest.(check (list string)) "the loaded row for the turn is the log's now"
+    [ "row at 1"; "row at 2" ] (texts whole);
+  Alcotest.(check bool) "then stable again" true
+    (whole == Tui_types.chat_rows_for state "alpha")
+;;
+
 let () =
   Alcotest.run
     "tui chat rows memo"
@@ -166,7 +219,9 @@ let () =
           Alcotest.test_case "replaced queue recomputes, identical inflight does not" `Quick
             test_replaced_queue_recomputes_and_identical_inflight_does_not;
           Alcotest.test_case "replaced settled logs are seen" `Quick
-            test_replaced_settled_logs_are_seen
+            test_replaced_settled_logs_are_seen;
+          Alcotest.test_case "a held log completed in place is seen" `Quick
+            test_a_held_log_completed_in_place_is_seen
         ] )
     ]
 ;;

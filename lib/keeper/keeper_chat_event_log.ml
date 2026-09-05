@@ -8,6 +8,13 @@ open Keeper_chat_events
 
 let codec_version = 1
 
+(* One page of the journal over the wire (RFC-0412 §3.2): what a read
+   returns when it names no count, and the most it may ask for. The server
+   admits [1..page_max_limit]; the TUI pages at [page_max_limit]. One
+   definition so the two cannot drift into a 400. *)
+let page_default_limit = 500
+let page_max_limit = 2000
+
 let json_opt key value =
   match value with
   | None -> []

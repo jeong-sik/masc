@@ -481,8 +481,36 @@ let fork_egress_proxy
          "egress proxy not started keeper=%s: this lane has no network \
           capability (the lane stays closed)"
          keeper_name
-     | Ok rules ->
+     | Ok initial_rules ->
        let net = Option.get ctx.net in
+       (* Re-read per request, so an operator's edit reaches the next
+          connection instead of waiting for a lane restart -- the sibling SSH
+          lane already re-reads its registry on every dispatch, and one file
+          behaving two ways is worse than the cost of a parse.
+
+          A read that fails keeps the last rules that parsed. That is
+          fail-closed-to-previous, not fail-open: the keeper keeps the reach
+          an operator last successfully granted, and a typo does not widen
+          it. The first read is different -- there is no previous, and the
+          lane is refused above rather than served an empty allowlist that
+          would look like a policy decision. *)
+       let last_good = Atomic.make initial_rules in
+       let rules () =
+         match
+           Keeper_egress_lane.resolve_allowlist
+             ~base_path:ctx.config.base_path
+             ~keeper_name
+         with
+         | Ok rules ->
+           Atomic.set last_good rules;
+           rules
+         | Error detail ->
+           Log.Keeper.warn
+             ~keeper_name
+             "egress allowlist unreadable, serving the last rules that parsed: %s"
+             detail;
+           Atomic.get last_good
+       in
        Eio.Fiber.fork ~sw (fun () ->
          try
            Eio.Switch.run (fun proxy_sw ->
@@ -524,7 +552,7 @@ let fork_egress_proxy
                     "egress proxy listening keeper=%s port=%d rules=%d"
                     keeper_name
                     port
-                    (List.length rules);
+                    (List.length initial_rules);
                   Eio.Fiber.first
                     (fun () ->
                        Egress_proxy_net.serve

@@ -173,25 +173,35 @@ A keeper's own account of where it went is not evidence. These events are.
   never becomes a generic tunnel by omission.
 - **The proxy sees the name, not the payload.** TLS is tunnelled, not
   terminated. What a keeper sent to an allowed host is not recorded here.
-- **The allowlist is read once, when the keeper's lane starts.** The proxy
-  is forked with that lane and holds the rules it read; there is no live
-  reload. A tunnel outliving the policy that opened it would be worse, so
-  the rules a listener serves never change under it.
+- **The allowlist is read per request, so an edit applies to the next
+  connection.** No restart, no reload command. The sibling SSH lane already
+  re-reads its endpoint registry on every dispatch, and one `runtime.toml`
+  behaving two ways would be worse than the cost of a parse.
 
-  What applies a change is restarting the lane, and `masc_keeper_up` does
-  that when the keeper is idle — which is the same call that writes
-  `egress_allow`, so setting the allowlist through the tool applies it in one
-  step. On a busy keeper the call says so rather than pretending:
+  It is read per request rather than per connection because a tunnel
+  outliving the policy that opened it is the one thing worse than a slow
+  reload: the rules that admit a CONNECT are the rules in force when it is
+  admitted, and that tunnel then runs to completion under them. Removing a
+  host stops the next connection, not one already open.
+
+  **A read that fails keeps the last rules that parsed**, and logs. That is
+  fail-closed-to-previous, not fail-open: a typo in `runtime.toml` leaves the
+  keeper with the reach you last successfully granted rather than widening
+  it. Watch for this line, because the file and the enforced policy have
+  diverged until it stops:
 
   ```
-  keeper metadata was updated but the keepalive lane was not restarted:
-  a turn holds this keeper's slot. Retry masc_keeper_up when the keeper is idle.
+  egress allowlist unreadable, serving the last rules that parsed: <detail>
   ```
 
-  **Editing `runtime.toml` by hand does not apply until the lane restarts.**
-  The file will say one thing and the running listener will enforce another,
-  with nothing reporting the difference. Prefer the tool; if you edit the
-  file, restart the keeper.
+  **The first read is different.** There is no previous set to fall back to,
+  so the lane is refused rather than served an empty allowlist that would
+  read as a deliberate "reaches nothing":
+
+  ```
+  egress proxy not started keeper=<name>: <detail> (the lane stays closed)
+  ```
+
 - **This is not a complete security boundary.** Neither is any of the
   sandbox profiles. It bounds reach and records it; it does not make an
   unattended agent safe.

@@ -43,4 +43,10 @@ module For_testing : sig
     keeper_name:string ->
     before:float ->
     Keeper_counterpart_observation.t list
+
+  val counterpart_observations_before_offloaded :
+    base_dir:string ->
+    keeper_name:string ->
+    before:float ->
+    Keeper_counterpart_observation.t list
 end

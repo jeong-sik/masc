@@ -408,9 +408,9 @@ val planning_row :
   title_width:int ->
   planning_row_values ->
   string
-(** One goal, on the same columns as {!planning_header_row}. The proof mark's
-    column is named with a space: it is a mark like the roster's, and a name
-    would be four cells wider than the cell holding it. *)
+(** One goal, on the same columns as {!planning_header_row}. The judge's mark
+    gets a named column of its own: the glyph is the only part of a row that
+    cannot be read straight off, and it was the one column with no header. *)
 
 (** Board post columns.
 
@@ -488,12 +488,25 @@ type planning_tab =
   | Planning_verdicts
 
 val planning_strip_plain :
-  tab:planning_tab -> review_count:int option -> window:string -> string list
+  tab:planning_tab ->
+  review_count:int option ->
+  verifying_count:int option ->
+  window:string ->
+  string list
 (** The Planning strip's stop labels, in order, without styling. Exactly three:
     Schedules and Fusion are tabs of the selected Keeper, not stops here.
-    [window] is the page-versus-ledger reading, already formatted (e.g.
-    [" (8 of 4223)"]); it is appended to [tab]'s label and to no other, because
-    a count placed after the whole strip reads as belonging to its last name. *)
+
+    Unnumbered, and the two task stops share a word. The numbers read as a
+    pipeline the surfaces do not form: Goals is the goal lifecycle judged
+    against its own ledger, while Task Review and Task Verdicts are the two
+    halves of the task protocol, and a goal in [verifying] appears in neither.
+
+    [verifying_count] and [review_count] are what each side is holding, so
+    the reading an operator opens this screen for is on the strip rather than
+    counted by eye. [window] is the page-versus-ledger reading, already
+    formatted (e.g. [" (8 of 4223)"]); it is appended to [tab]'s label and to
+    no other, because a count placed after the whole strip reads as belonging
+    to its last name. *)
 
 type keeper_schedule_absence =
   | Store_has_none

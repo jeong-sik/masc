@@ -56,24 +56,30 @@ let tool_result_ids_of_message (message : Agent_core.Types.message) =
     message.content
 ;;
 
+(* Encodes one message the way the judge will see it and reports its size. *)
+let measure_gate_history_message (message : Agent_core.Types.message) =
+  let json = Keeper_context_core.message_to_json message in
+  json, String.length (Yojson.Safe.to_string json)
+;;
+
 (* Returns the newest messages that fit the budget, plus how many were left
    out. The count is carried into the bundle: a judge that cannot tell it was
    handed a partial view weighs partial evidence as if it were complete, and
-   the prompt already asks it to name absent context in its rationale. *)
-let gate_history_slice (messages : Agent_core.Types.message list) =
-  let sized =
-    List.map
-      (fun message ->
-         let json = Keeper_context_core.message_to_json message in
-         message, json, String.length (Yojson.Safe.to_string json))
-      messages
-  in
+   the prompt already asks it to name absent context in its rationale.
+
+   The walk starts at the newest message and encodes one message at a time
+   until the first that does not fit, so the work is the window's size, not
+   the history's. Before this the whole history was encoded first and then
+   cut: tens of thousands of messages per gate decision on a live keeper,
+   all on the main domain (RFC main-domain-scheduler-latency section 8.7). *)
+let gate_history_slice_measured ~measure (messages : Agent_core.Types.message list) =
   let rec newest_within budget kept = function
     | [] -> kept
-    | (message, json, size) :: older ->
+    | message :: older ->
+      let json, size = measure message in
       if size > budget then kept else newest_within (budget - size) ((message, json) :: kept) older
   in
-  let kept = newest_within gate_history_budget_bytes [] (List.rev sized) in
+  let kept = newest_within gate_history_budget_bytes [] (List.rev messages) in
   (* A tool result whose call fell outside the window reads as evidence of
      something the judge never sees happen. Drop those rather than present a
      dangling half of a pair. *)
@@ -86,6 +92,10 @@ let gate_history_slice (messages : Agent_core.Types.message list) =
       kept
   in
   List.map snd kept, List.length messages - List.length kept
+;;
+
+let gate_history_slice messages =
+  gate_history_slice_measured ~measure:measure_gate_history_message messages
 ;;
 
 let gate_causal_initial

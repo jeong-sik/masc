@@ -2490,6 +2490,24 @@ let runtime_param_edit_value edit =
      | "string" -> Ok (`String edit.rpe_draft)
      | _ -> parse_json ())
 
+type memory_sort_order =
+  | Sort_reinforcement
+  | Sort_recency
+  | Sort_category
+  | Sort_claim
+
+let memory_sort_order_label = function
+  | Sort_reinforcement -> "Reinforcement (\xc3\x97N)"
+  | Sort_recency -> "Recency (Newest)"
+  | Sort_category -> "Category (A-Z)"
+  | Sort_claim -> "Claim (A-Z)"
+
+let next_memory_sort = function
+  | Sort_reinforcement -> Sort_recency
+  | Sort_recency -> Sort_category
+  | Sort_category -> Sort_claim
+  | Sort_claim -> Sort_reinforcement
+
 type state = {
   mutable agents: agent list;
   mutable tasks: task list;
@@ -3097,6 +3115,7 @@ type state = {
   mutable memory_facts_cursor: int;
   mutable memory_facts_scroll: int;
   mutable memory_facts_category: string option;
+  mutable memory_facts_sort: memory_sort_order;
   mutable repository_changes_open: bool;
   mutable repository_changes_scope: Tui_decode.repository_change_scope option;
   mutable repository_changes: Tui_decode.repository_change_snapshot option;
@@ -4108,6 +4127,7 @@ let create_state
   memory_facts_cursor = 0;
   memory_facts_scroll = 0;
   memory_facts_category = None;
+  memory_facts_sort = Sort_reinforcement;
   repository_changes_open = false;
   repository_changes_scope = None;
   repository_changes = None;
@@ -4701,6 +4721,7 @@ let memory_fact_rows (state : state) : memory_fact_row list =
             let facts =
               match state.memory_facts_category with
               | None -> store.Tui_decode.mos_facts
+              | Some "source" | Some "dropped" -> []
               | Some category ->
                   List.filter
                     (fun (fact : Tui_decode.memory_fact) ->
@@ -4715,32 +4736,137 @@ let memory_fact_rows (state : state) : memory_fact_row list =
           ->
             ([], [])
         | Tui_decode.Memory_store_present store ->
-            ( List.map
-                (fun fact -> Memory_row_source_fact fact)
-                store.Tui_decode.mss_facts
-            , List.map
-                (fun row -> Memory_row_invalidation row)
-                store.Tui_decode.mss_invalidations )
+            let src =
+              match state.memory_facts_category with
+              | None | Some "source" ->
+                  List.map
+                    (fun fact -> Memory_row_source_fact fact)
+                    store.Tui_decode.mss_facts
+              | Some _ -> []
+            in
+            let inv =
+              match state.memory_facts_category with
+              | None | Some "dropped" ->
+                  List.map
+                    (fun row -> Memory_row_invalidation row)
+                    store.Tui_decode.mss_invalidations
+              | Some _ -> []
+            in
+            (src, inv)
       in
-      ordinary @ source_rows @ invalidation_rows
+      let all_rows = ordinary @ source_rows @ invalidation_rows in
+      let query =
+        match state.search with
+        | Some q when String.length (String.trim q) > 0 ->
+            String.lowercase_ascii (String.trim q)
+        | _ ->
+            if String.length (String.trim state.search_last) > 0 then
+              String.lowercase_ascii (String.trim state.search_last)
+            else ""
+      in
+      let filtered_rows =
+        if query = "" then all_rows
+        else
+          List.filter
+            (fun row ->
+              let text =
+                match row with
+                | Memory_row_fact f ->
+                    f.Tui_decode.mf_claim ^ " " ^ f.Tui_decode.mf_category ^ " "
+                    ^ f.Tui_decode.mf_origin
+                | Memory_row_source_fact f ->
+                    f.Tui_decode.msf_claim ^ " " ^ f.Tui_decode.msf_path
+                | Memory_row_invalidation f ->
+                    f.Tui_decode.mi_reason ^ " " ^ f.Tui_decode.mi_source_path
+              in
+              palette_contains ~needle:query text)
+            all_rows
+      in
+      (match state.memory_facts_sort with
+       | Sort_reinforcement ->
+           List.sort
+             (fun a b ->
+               let score = function
+                 | Memory_row_fact f ->
+                     (f.Tui_decode.mf_reinforcement, f.Tui_decode.mf_last_seen)
+                 | Memory_row_source_fact f ->
+                     (1, f.Tui_decode.msf_first_seen)
+                 | Memory_row_invalidation f ->
+                     (0, f.Tui_decode.mi_invalidated_at)
+               in
+               let r_a, t_a = score a in
+               let r_b, t_b = score b in
+               if r_a <> r_b then Stdlib.compare r_b r_a
+               else Stdlib.compare t_b t_a)
+             filtered_rows
+       | Sort_recency ->
+           List.sort
+             (fun a b ->
+               let ts = function
+                 | Memory_row_fact f -> f.Tui_decode.mf_last_seen
+                 | Memory_row_source_fact f -> f.Tui_decode.msf_first_seen
+                 | Memory_row_invalidation f -> f.Tui_decode.mi_invalidated_at
+               in
+               Stdlib.compare (ts b) (ts a))
+             filtered_rows
+       | Sort_category ->
+           List.sort
+             (fun a b ->
+               let cat = function
+                 | Memory_row_fact f -> f.Tui_decode.mf_category
+                 | Memory_row_source_fact _ -> "source"
+                 | Memory_row_invalidation _ -> "dropped"
+               in
+               let c = String.compare (cat a) (cat b) in
+               if c <> 0 then c
+               else
+                 let claim = function
+                   | Memory_row_fact f -> f.Tui_decode.mf_claim
+                   | Memory_row_source_fact f -> f.Tui_decode.msf_claim
+                   | Memory_row_invalidation f -> f.Tui_decode.mi_reason
+                 in
+                 String.compare (claim a) (claim b))
+             filtered_rows
+       | Sort_claim ->
+           List.sort
+             (fun a b ->
+               let claim = function
+                 | Memory_row_fact f -> f.Tui_decode.mf_claim
+                 | Memory_row_source_fact f -> f.Tui_decode.msf_claim
+                 | Memory_row_invalidation f -> f.Tui_decode.mi_reason
+               in
+               String.compare (claim a) (claim b))
+             filtered_rows)
 
-(* The categories the loaded ordinary store actually holds, distinct and
+(* The categories the loaded ordinary store and source store actually hold, distinct and
    sorted -- the [c] cycle walks these. Read from the rows, never from a
    list this side hardcodes: the taxonomy is the server's, and a category it
    adds appears here without a code change. *)
 let memory_fact_categories (state : state) : string list =
   match state.memory_facts with
   | None -> []
-  | Some snapshot -> (
-      match snapshot.Tui_decode.mfs_ordinary with
-      | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
-        ->
-          []
-      | Tui_decode.Memory_store_present store ->
-          store.Tui_decode.mos_facts
-          |> List.map (fun (fact : Tui_decode.memory_fact) ->
-               fact.Tui_decode.mf_category)
-          |> List.sort_uniq String.compare)
+  | Some snapshot ->
+      let ordinary_cats =
+        match snapshot.Tui_decode.mfs_ordinary with
+        | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
+          ->
+            []
+        | Tui_decode.Memory_store_present store ->
+            store.Tui_decode.mos_facts
+            |> List.map (fun (fact : Tui_decode.memory_fact) ->
+                 fact.Tui_decode.mf_category)
+            |> List.sort_uniq String.compare
+      in
+      let source_cats =
+        match snapshot.Tui_decode.mfs_source with
+        | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
+          ->
+            []
+        | Tui_decode.Memory_store_present store ->
+            (if store.Tui_decode.mss_facts <> [] then [ "source" ] else [])
+            @ (if store.Tui_decode.mss_invalidations <> [] then [ "dropped" ] else [])
+      in
+      ordinary_cats @ source_cats
 
 (* All -> first category -> ... -> last -> All. A [current] that is no
    longer among [categories] (the snapshot refreshed under the filter)
@@ -4758,6 +4884,21 @@ let next_memory_category (current : string option) (categories : string list)
             else after rest
       in
       after categories
+
+let prev_memory_category (current : string option) (categories : string list)
+    : string option =
+  match current with
+  | None -> (match List.rev categories with [] -> None | last :: _ -> Some last)
+  | Some current ->
+      let rev = List.rev categories in
+      let rec before = function
+        | [] -> None
+        | candidate :: rest ->
+            if String.equal candidate current then
+              (match rest with [] -> None | prev :: _ -> Some prev)
+            else before rest
+      in
+      before rev
 
 let scrolled_surface_rows (state : state) : surface -> scrolled option =
   let listing ~error count =

@@ -14126,6 +14126,21 @@ and is loaded on demand through keeper_skill.
                (Masc_tui_types.memory_fact_categories state);
            state.memory_facts_cursor <- 0;
            state.memory_facts_scroll <- 0
+       | Some "C"
+         when state.view = Memory
+              && Option.is_some state.memory_facts_keeper ->
+           state.memory_facts_category <-
+             Masc_tui_types.prev_memory_category state.memory_facts_category
+               (Masc_tui_types.memory_fact_categories state);
+           state.memory_facts_cursor <- 0;
+           state.memory_facts_scroll <- 0
+       | Some ("s" | "S")
+         when state.view = Memory
+              && Option.is_some state.memory_facts_keeper ->
+           state.memory_facts_sort <-
+             Masc_tui_types.next_memory_sort state.memory_facts_sort;
+           state.memory_facts_cursor <- 0;
+           state.memory_facts_scroll <- 0
        (* Resources and Tools hang off Config the way Connectors hangs off
           Runtime: not on the Tab ring, one key from their parent. Both
           cases, like every other hang-off hop (c|C, f|F, p|P), and no
@@ -15243,15 +15258,23 @@ and is loaded on demand through keeper_skill.
             | Connectors -> state.view <- Keepers Keeper_detail
             | Memory ->
                 if Option.is_some state.memory_facts_keeper then begin
-                  (* Close the fact browser back to the health table. The
-                     listing is dropped with it: facts are cheap to re-ask
-                     and a kept copy would redraw stale rows on reopen. *)
-                  state.memory_facts_keeper <- None;
-                  state.memory_facts <- None;
-                  state.memory_facts_error <- None;
-                  state.memory_facts_cursor <- 0;
-                  state.memory_facts_scroll <- 0;
-                  state.memory_facts_category <- None
+                  if Option.is_some state.search || state.search_last <> "" then begin
+                    state.search <- None;
+                    state.search_last <- "";
+                    state.memory_facts_cursor <- 0;
+                    state.memory_facts_scroll <- 0
+                  end
+                  else begin
+                    (* Close the fact browser back to the health table. The
+                       listing is dropped with it: facts are cheap to re-ask
+                       and a kept copy would redraw stale rows on reopen. *)
+                    state.memory_facts_keeper <- None;
+                    state.memory_facts <- None;
+                    state.memory_facts_error <- None;
+                    state.memory_facts_cursor <- 0;
+                    state.memory_facts_scroll <- 0;
+                    state.memory_facts_category <- None
+                  end
                 end
                 else state.view <- Overview
             | Tools ->

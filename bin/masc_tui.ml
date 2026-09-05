@@ -9817,6 +9817,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          zombie under) a surface it was not opened on. *)
       state.help_open <- false;
       state.palette_open <- false;
+      state.palette_mode <- Masc_tui_types.Palette_jump;
       state.palette_query <- "";
       state.palette_cursor <- 0;
       state.search <- None;
@@ -14489,6 +14490,7 @@ and is loaded on demand through keeper_skill.
          when text_input_target state ~compact_viewport = Some Text_palette ->
            let close () =
              state.palette_open <- false;
+             state.palette_mode <- Masc_tui_types.Palette_jump;
              state.palette_query <- "";
              state.palette_cursor <- 0
            in
@@ -15485,6 +15487,7 @@ and is loaded on demand through keeper_skill.
               | [] -> 0)
        | Some ":" ->
            state.palette_open <- true;
+           state.palette_mode <- Masc_tui_types.Palette_jump;
            state.palette_query <- "";
            state.palette_cursor <- 0
        | Some "\025" ->
@@ -15572,11 +15575,11 @@ and is loaded on demand through keeper_skill.
               candidates: one name is asked about at once, several open the
               palette with each as an entry (typing still narrows, and a
               typed "def <name>" keeps working), and none says so. *)
-           let question, prefix =
+           let question =
              match key_name with
-             | "K" -> ("hover", "hover ")
-             | "R" -> ("references", "refs ")
-             | "D" | _ -> ("definition", "def ")
+             | "K" -> "hover"
+             | "R" -> "references"
+             | "D" | _ -> "definition"
            in
            (match Masc_tui_types.code_cursor_line_symbols state with
             | [] ->
@@ -15587,7 +15590,12 @@ and is loaded on demand through keeper_skill.
                   ~question ~symbol
             | _ :: _ :: _ ->
                 state.palette_open <- true;
-                state.palette_query <- prefix;
+                state.palette_mode <-
+                  Masc_tui_types.Palette_choice
+                    { choice_question = question
+                    ; choice_line = state.code_file_cursor + 1
+                    };
+                state.palette_query <- "";
                 state.palette_cursor <- 0)
        | Some "w" when state.view = Code && state.code_notes_open ->
            (* Adding a note lives inside the notes view: the view proves the

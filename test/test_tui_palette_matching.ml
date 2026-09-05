@@ -158,6 +158,39 @@ let landed ~path rows =
 
 let check_names = Alcotest.(check (list string))
 
+(* K/D/R with several names on the line open the palette as a choice: the
+   list is those names for that question, the typed text filters them, and
+   no task or post rides along however its title spells. *)
+let test_a_choice_lists_the_names_and_nothing_else () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  state.code_file <-
+    landed ~path:"lib/a.ml" [ [ ("Foo.bar x'", Masc_tui_code_lexer.kind_code) ] ];
+  state.code_file_cursor <- 0;
+  state.view <- Code;
+  state.code_focus_file <- Right_pane;
+  state.palette_open <- true;
+  state.palette_mode <- Palette_choice { choice_question = "hover"; choice_line = 1 };
+  state.palette_query <- "";
+  let labels () = List.map fst (palette_matches state) in
+  check_names "the three names, in reading order" [ "Foo"; "bar"; "x'" ] (labels ());
+  check_bool "every entry asks the question about its name" true
+    (List.for_all
+       (function
+         | name, Palette_lsp ("hover", symbol) -> String.equal name symbol
+         | _ -> false)
+       (palette_matches state));
+  state.palette_query <- "ba";
+  check_names "the typed text filters the names" [ "bar" ] (labels ());
+  state.palette_query <- "zzz";
+  check_names "a filter no name matches lists nothing" [] (labels ());
+  state.palette_mode <- Palette_jump;
+  state.palette_query <- "";
+  check_bool "a jump lists destinations again" true
+    (List.exists (fun label -> String.length label > 3 && String.sub label 0 3 = "go ") (labels ()))
+;;
+
 let test_the_cursor_lines_names_are_the_candidates () =
   let state =
     create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
@@ -259,6 +292,8 @@ let () =
             test_the_palette_lists_tasks_and_posts
         ; Alcotest.test_case "the cursor line's names are the candidates"
             `Quick test_the_cursor_lines_names_are_the_candidates
+        ; Alcotest.test_case "a choice lists the names and nothing else" `Quick
+            test_a_choice_lists_the_names_and_nothing_else
         ; Alcotest.test_case "friendly runtime parameter editing" `Quick
             test_friendly_runtime_param_editing
         ] )

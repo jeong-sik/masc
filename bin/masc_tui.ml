@@ -6505,6 +6505,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Buffer.clear state.msg_input;
       state.changes_return <- Changes_return_chat;
       goto_surface state ~mailbox Changes
+  | Masc_tui_command.Open_metrics ->
+      Buffer.clear state.msg_input;
+      goto_surface state ~mailbox Metrics
   | Masc_tui_command.Open_settings ->
       Buffer.clear state.msg_input;
       state.config_pane <- Config_params;
@@ -8991,8 +8994,8 @@ let handle_composer_key state ~base_path ~mailbox key =
            state.view <- Keepers Keeper_message
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
-       | Masc_tui_command.Open_diff | Masc_tui_command.Open_changes
-       | Masc_tui_command.Open_settings
+        | Masc_tui_command.Open_diff | Masc_tui_command.Open_changes
+        | Masc_tui_command.Open_settings | Masc_tui_command.Open_metrics
        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Steer_turn _
        | Masc_tui_command.Steer_missing_message
        | Masc_tui_command.Set_thinking _

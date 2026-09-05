@@ -7,6 +7,7 @@ type t =
   | Task_missing_title
   | Help
   | About
+  | Open_metrics
   | Open_settings
   | Open_diff
   | Open_changes
@@ -114,6 +115,14 @@ let catalog =
     ; args = ""
     ; summary = "display MASC Horned Reaper ASCII emblem and system telemetry"
     }
+  ; { word = "metrics"
+    ; args = ""
+    ; summary = "display multicore engine telemetry, scheduler latency, and fleet health"
+    }
+  ; { word = "telemetry"
+    ; args = ""
+    ; summary = "display multicore engine telemetry, scheduler latency, and fleet health"
+    }
   ]
 
 let usage entry =
@@ -165,6 +174,7 @@ let parse text =
     | "task", title -> Task_for_keeper { title; body }
     | "help", _ -> Help
     | "about", _ | "splash", _ -> About
+    | "metrics", _ | "telemetry", _ -> Open_metrics
     | "settings", _ -> Open_settings
     | "diff", _ -> Open_diff
     | "changes", _ -> Open_changes

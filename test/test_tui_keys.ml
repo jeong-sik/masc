@@ -616,6 +616,22 @@ let test_logs_is_an_activity_child () =
   Alcotest.(check bool) "Activity documents the [l] hop" true
     (List.mem "l" acting_keys)
 
+(* Telemetry and multicore engine metrics hang off Overview under [m]
+   instead of holding a top-level Tab stop of their own. *)
+let test_metrics_is_an_overview_child () =
+  Alcotest.(check bool) "Metrics is not a top-level ring entry" false
+    (List.exists (fun (surface, _) -> surface = Metrics) surface_ring);
+  Alcotest.(check int) "Metrics highlights Overview"
+    (surface_ring_index Overview)
+    (surface_ring_index Metrics);
+  let overview_keys =
+    List.map
+      (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
+      (Masc_tui_keys.for_surface Overview)
+  in
+  Alcotest.(check bool) "Overview documents the [m] hop" true
+    (List.mem "m" overview_keys)
+
 let test_config_footer_names_both_hops () =
   check str "Config names its two off-ring children"
     "j/k:select / scroll  p:runtime.toml / models / params / prompts / themes  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  Esc:overview  r:reload  Tab:next"
@@ -1395,6 +1411,8 @@ let () =
             test_config_footer_names_both_hops
         ; Alcotest.test_case "Logs is an Activity child" `Quick
             test_logs_is_an_activity_child
+        ; Alcotest.test_case "Metrics is an Overview child" `Quick
+            test_metrics_is_an_overview_child
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
         ; Alcotest.test_case "Keeper detail reserves u for channel unbind"

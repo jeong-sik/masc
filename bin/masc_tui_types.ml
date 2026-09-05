@@ -2026,7 +2026,6 @@ type surface =
 let surface_ring : (surface * string) list =
   [ (Overview, "Overview");
     (Acting, "Activity");
-    (Metrics, "Metrics");
     (Keepers Keeper_list, "Keepers");
     (Memory, "Memory");
     (Approvals, "Approvals");
@@ -2049,7 +2048,8 @@ let surface_ring : (surface * string) list =
    is registered here", read rarely and never raced against. System logs
    collapse onto Activity (the Acting surface): tool calls settling and the
    server's own log lines are two readings of the same fleet timeline, and
-   the ring stop that answers "what happened" is one. *)
+   the ring stop that answers "what happened" is one. Metrics is a deep-dive
+   telemetry surface that collapses onto Overview, off the Tab ring. *)
 let surface_ring_index (view : surface) =
   let family =
     match view with
@@ -2061,6 +2061,7 @@ let surface_ring_index (view : surface) =
     | Code -> Repositories
     | Resources | Tools -> Config
     | System_logs -> Acting
+    | Metrics -> Overview
     | v -> v
   in
   let rec find i = function
@@ -2563,9 +2564,9 @@ let prev_metrics_section = function
   | Section_tools -> Section_resources
 
 let metrics_section_label = function
-  | Section_fleet -> "Fleet & Velocity"
-  | Section_resources -> "Keeper Resources"
-  | Section_tools -> "Gate Queue"
+  | Section_fleet -> "Engine & Scheduler"
+  | Section_resources -> "Fleet & Velocity"
+  | Section_tools -> "Memory & Gate Safety"
 
 type state = {
   mutable metrics_scroll: int;
@@ -5664,6 +5665,9 @@ let palette_entries (state : state) =
   @ [ "go Resources", Palette_goto Resources ]
   @ [ "go Tools", Palette_goto Tools ]
   @ [ "go Logs", Palette_goto System_logs ]
+  @ [ "go Metrics", Palette_goto Metrics ]
+  @ [ "metrics", Palette_goto Metrics ]
+  @ [ "telemetry", Palette_goto Metrics ]
   @ [ "charts", Palette_goto Metrics ]
   @ [ "stats", Palette_goto Metrics ]
   @ List.map

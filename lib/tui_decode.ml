@@ -6519,6 +6519,32 @@ let decode_runtime_resolved json =
   in
   Ok (snapshot.rrs_runtimes, assignments)
 
+type server_gc_health = {
+  sgc_heap_words : int;
+  sgc_live_words : int;
+  sgc_minor_heap_size : int;
+  sgc_space_overhead : int;
+  sgc_minor_collections : int;
+  sgc_major_collections : int;
+  sgc_compactions : int;
+  sgc_forced_major_collections : int;
+  sgc_minor_words : float;
+  sgc_promoted_words : float;
+  sgc_major_words : float;
+}
+
+type server_scheduler_health = {
+  ssch_probe : string;
+  ssch_samples : int;
+  ssch_p50_ms : float;
+  ssch_p95_ms : float;
+  ssch_p99_ms : float;
+  ssch_max_ms : float;
+  ssch_mean_ms : float;
+  ssch_stalls : int;
+  ssch_pool_domains : int option;
+}
+
 type server_identity = {
   sid_version : string;
   sid_binary_commit : string;
@@ -6527,6 +6553,10 @@ type server_identity = {
   sid_masc_root : string;
   sid_executable_in_worktree : bool option;
   sid_state_ready : bool option;
+  sid_uptime : string option;
+  sid_sse_clients : int option;
+  sid_gc : server_gc_health option;
+  sid_scheduler : server_scheduler_health option;
 }
 
 (* [/health] answers before the workspace is fully up, so every field here is
@@ -6537,6 +6567,8 @@ let decode_server_identity json =
   let* build = optional_object_field json "build" in
   let* paths = optional_object_field json "paths" in
   let* startup = optional_object_field json "startup" in
+  let* gc_obj = optional_object_field json "gc" in
+  let* sched_obj = optional_object_field json "scheduler" in
   (* A section the probe did not carry leaves its fields unread. Standing an
      empty object in for it would read the same here and mean something else:
      absent is what the footer draws as unread. *)
@@ -6544,6 +6576,24 @@ let decode_server_identity json =
     match Option.map (member field) section with
     | Some (`String value) -> value
     | Some _ | None -> ""
+  in
+  let int_in section field default =
+    match Option.map (member field) section with
+    | Some (`Int value) -> value
+    | Some (`Float value) -> int_of_float value
+    | Some _ | None -> default
+  in
+  let float_in section field default =
+    match Option.map (member field) section with
+    | Some (`Float value) -> value
+    | Some (`Int value) -> float_of_int value
+    | Some _ | None -> default
+  in
+  let opt_int_in section field =
+    match Option.map (member field) section with
+    | Some (`Int value) -> Some value
+    | Some (`Float value) -> Some (int_of_float value)
+    | Some _ | None -> None
   in
   let sid_binary_commit_age_s =
     match Option.map (member "binary_commit_age_seconds") build with
@@ -6565,6 +6615,52 @@ let decode_server_identity json =
     | Some (`Bool value) -> Some value
     | Some _ | None -> None
   in
+  let sid_uptime =
+    match member "uptime" json with
+    | `String value -> Some value
+    | _ -> None
+  in
+  let sid_sse_clients =
+    match member "sse_clients" json with
+    | `Int value -> Some value
+    | `Float value -> Some (int_of_float value)
+    | _ -> None
+  in
+  let sid_gc =
+    match gc_obj with
+    | None -> None
+    | Some _ ->
+        Some
+          { sgc_heap_words = int_in gc_obj "heap_words" 0
+          ; sgc_live_words = int_in gc_obj "live_words" 0
+          ; sgc_minor_heap_size = int_in gc_obj "minor_heap_size" 0
+          ; sgc_space_overhead = int_in gc_obj "space_overhead" 0
+          ; sgc_minor_collections = int_in gc_obj "minor_collections" 0
+          ; sgc_major_collections = int_in gc_obj "major_collections" 0
+          ; sgc_compactions = int_in gc_obj "compactions" 0
+          ; sgc_forced_major_collections =
+              int_in gc_obj "forced_major_collections" 0
+          ; sgc_minor_words = float_in gc_obj "minor_words" 0.0
+          ; sgc_promoted_words = float_in gc_obj "promoted_words" 0.0
+          ; sgc_major_words = float_in gc_obj "major_words" 0.0
+          }
+  in
+  let sid_scheduler =
+    match sched_obj with
+    | None -> None
+    | Some _ ->
+        Some
+          { ssch_probe = string_in sched_obj "probe"
+          ; ssch_samples = int_in sched_obj "samples" 0
+          ; ssch_p50_ms = float_in sched_obj "p50_ms" 0.0
+          ; ssch_p95_ms = float_in sched_obj "p95_ms" 0.0
+          ; ssch_p99_ms = float_in sched_obj "p99_ms" 0.0
+          ; ssch_max_ms = float_in sched_obj "max_ms" 0.0
+          ; ssch_mean_ms = float_in sched_obj "mean_ms" 0.0
+          ; ssch_stalls = int_in sched_obj "stalls" 0
+          ; ssch_pool_domains = opt_int_in sched_obj "pool_domains"
+          }
+  in
   Ok
     { sid_version =
         (match member "version" json with
@@ -6576,6 +6672,10 @@ let decode_server_identity json =
     ; sid_masc_root = string_in paths "effective_masc_root"
     ; sid_executable_in_worktree
     ; sid_state_ready
+    ; sid_uptime
+    ; sid_sse_clients
+    ; sid_gc
+    ; sid_scheduler
     }
 ;;
 

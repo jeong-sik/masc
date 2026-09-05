@@ -1594,6 +1594,32 @@ type fleet_safety = {
     alive, its durable demand is not admissible. Collapsing the two reads a
     live fleet as a stopped one. *)
 
+type server_gc_health = {
+  sgc_heap_words : int;
+  sgc_live_words : int;
+  sgc_minor_heap_size : int;
+  sgc_space_overhead : int;
+  sgc_minor_collections : int;
+  sgc_major_collections : int;
+  sgc_compactions : int;
+  sgc_forced_major_collections : int;
+  sgc_minor_words : float;
+  sgc_promoted_words : float;
+  sgc_major_words : float;
+}
+
+type server_scheduler_health = {
+  ssch_probe : string;
+  ssch_samples : int;
+  ssch_p50_ms : float;
+  ssch_p95_ms : float;
+  ssch_p99_ms : float;
+  ssch_max_ms : float;
+  ssch_mean_ms : float;
+  ssch_stalls : int;
+  ssch_pool_domains : int option;
+}
+
 type server_identity = {
   sid_version : string;
   sid_binary_commit : string;
@@ -1608,6 +1634,14 @@ type server_identity = {
   sid_state_ready : bool option;
       (** [/health] [startup.state_ready]. [None] when the probe carries no
           startup section: neither booting nor vouched ready. *)
+  sid_uptime : string option;
+      (** [/health] [uptime] human-readable elapsed duration (e.g. "1h 42m"). *)
+  sid_sse_clients : int option;
+      (** [/health] [sse_clients] active connected SSE stream subscribers. *)
+  sid_gc : server_gc_health option;
+      (** [/health] [gc] quick GC counters and heap sizes. *)
+  sid_scheduler : server_scheduler_health option;
+      (** [/health] [scheduler] scheduler latency probe distribution and stalls. *)
 }
 (** Which server the TUI is talking to, as [/health] reports it.
 

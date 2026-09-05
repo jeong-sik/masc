@@ -57,6 +57,8 @@ let for_surface = function
   | Overview ->
       [ b Navigate "j/k" "events" ~help:"scroll events"
       ; b Navigate "h/l" "pane" ~help:"move between events and tasks"
+      ; b Navigate "m" "telemetry"
+          ~help:"system metrics and multicore engine telemetry"
       ; b Act "t" "tasks" ~help:"hand j/k to the task list"
       ; b Act "Right / Enter" "open" ~help:"open the selected task"
       ; b Act "Left / Esc" "back" ~help:"close detail / back to events"
@@ -75,7 +77,7 @@ let for_surface = function
   | Metrics ->
       [ b Navigate "j/k" "scroll"
       ; b Navigate "1-3" "section"
-          ~help:"1: Fleet Pulse & Activity · 2: Keeper Memory Resources · 3: Gate Queue"
+          ~help:"1: Engine & Scheduler · 2: Fleet & Velocity · 3: Memory & Gate Safety"
       ; b Navigate "s" "cycle" ~help:"cycle telemetry section"
       ; b Act "Esc" "overview"
       ; b Meta "r" "refresh"

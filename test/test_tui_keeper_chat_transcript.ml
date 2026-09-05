@@ -363,17 +363,186 @@ let test_reply_details_is_recorded_not_drawn () =
   let t = fresh () in
   feed t [ Live.Run_started; Live.Text "Let me look." ];
   let before = Transcript.trail t in
-  check (option (pair string string)) "no reply yet" None
-    (Option.map
-       (fun (reply, outcome) -> (reply, Masc.Keeper_turn_outcome.to_label outcome))
-       (Transcript.reply t));
+  let recorded t =
+    Option.map
+      (fun (reply : Transcript.reply) ->
+        ( reply.reply_text
+        , Masc.Keeper_turn_outcome.to_label reply.reply_outcome
+        , reply.reply_turn_ref ))
+      (Transcript.reply t)
+  in
+  check (option (triple string string string)) "no reply yet" None (recorded t);
   feed t [ reply_details () ];
-  check (option (pair string string)) "the reply and its outcome are recorded"
-    (Some ("Let me look.", "visible_reply"))
-    (Option.map
-       (fun (reply, outcome) -> (reply, Masc.Keeper_turn_outcome.to_label outcome))
-       (Transcript.reply t));
+  check (option (triple string string string))
+    "the reply, its outcome and its turn are recorded"
+    (Some ("Let me look.", "visible_reply", "trace-1#3"))
+    (recorded t);
   check int "the trail did not grow" (List.length before) (List.length (Transcript.trail t))
+;;
+
+let drawn_to_string (item : Transcript.drawn_item) =
+  let mark =
+    match item.Transcript.superseded with
+    | None -> ""
+    | Some attempt -> Printf.sprintf "[superseded %d] " attempt
+  in
+  mark
+  ^
+  match item.Transcript.drawn with
+  | Transcript.Drawn_thinking lines -> "thinking:" ^ String.concat "|" lines
+  | Transcript.Drawn_skill skill -> "skill:" ^ skill.Transcript.skill_name
+  | Transcript.Drawn_tools block -> "tools:" ^ String.concat "|" (Transcript.project_tool_block Transcript.Full block).Transcript.rows
+  | Transcript.Drawn_text text -> "text:" ^ text
+  | Transcript.Drawn_reply text -> "reply:" ^ text
+  | Transcript.Drawn_status text -> "status:" ^ text
+;;
+
+let drawn t = List.map drawn_to_string (Transcript.drawn t)
+
+let control_reply outcome =
+  Live.Reply_details
+    { reply = "recorded but not chunked"; turn_outcome = outcome; turn_ref = "trace-1#3" }
+;;
+
+(* The trail is what the pane draws while the reply equals what streamed. *)
+let test_drawn_keeps_the_trail_when_the_reply_is_what_streamed () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Thinking "look first"
+    ; tool_started "c1" "read_file"
+    ; tool_ended "c1"
+    ; Live.Text "Let me "
+    ; Live.Text "look.\n"
+    ; reply_details ~reply:"Let me look." ()
+    ];
+  check (list string) "one row per stretch, the text as it streamed"
+    [ "thinking:look first"; "tools:" ^ String.concat "|" (Transcript.tool_rows t); "text:Let me look.\n" ]
+    (drawn t)
+;;
+
+(* The recorded reply is the terminal message's text. The server strips
+   control tokens from it, so the last stretch can differ from what streamed;
+   the recorded text stands in for that stretch only. Earlier stretches are
+   the turn's earlier rounds and stay, and so does the superseded attempt. *)
+let test_drawn_replaces_the_streamed_text_with_a_differing_reply () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Text "first try"
+    ; Live.Runtime_attempt_started
+    ; Live.Text "Let me check."
+    ; tool_started "c1" "read_file"
+    ; tool_ended "c1"
+    ; Live.Text "Here it is.<|eot|>"
+    ; reply_details ~reply:"Here it is." ()
+    ];
+  check (list string) "only the last stretch gives way to the recorded reply"
+    [ "[superseded 0] text:first try"
+    ; "text:Let me check."
+    ; "tools:" ^ String.concat "|" (Transcript.tool_rows t)
+    ; "reply:Here it is."
+    ]
+    (drawn t)
+;;
+
+(* A turn that spoke before its tool round and again after records only the
+   second as its reply; the first is not taken back. *)
+let test_drawn_keeps_earlier_rounds_when_the_reply_is_the_last_stretch () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Text "Let me check."
+    ; tool_started "c1" "read_file"
+    ; tool_ended "c1"
+    ; Live.Text "Done."
+    ; reply_details ~reply:"Done." ()
+    ];
+  check (list string) "both rounds stay as they streamed"
+    [ "text:Let me check."
+    ; "tools:" ^ String.concat "|" (Transcript.tool_rows t)
+    ; "text:Done."
+    ]
+    (drawn t)
+;;
+
+(* The wire carries neither a call's duration nor whether it failed; the
+   durable transcript does. Folded in by execution id, the block says what
+   the loaded row it replaces would have said. A durable word that says less
+   than the stream saw changes nothing. *)
+let test_note_tool_outcome_folds_the_durable_facts_in () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; tool_started "c1" "read_file"
+    ; tool_ended "c1"
+    ; tool_result "c1" "exec-1"
+    ; tool_started "c2" "grep"
+    ; tool_ended "c2"
+    ; tool_result "c2" "exec-2"
+    ];
+  let outcomes () =
+    List.map
+      (fun (a : Transcript.tool_activity) -> (a.outcome, a.duration))
+      (Transcript.tool_calls t)
+  in
+  let before = Transcript.revision t in
+  check bool "an unknown execution id matches nothing" false
+    (Transcript.note_tool_outcome t ~execution_id:"exec-9" ~outcome:Transcript.Failed
+       ~duration:None);
+  check bool "the failed call is found" true
+    (Transcript.note_tool_outcome t ~execution_id:"exec-1" ~outcome:Transcript.Failed
+       ~duration:(Some "32ms"));
+  check bool "a durable word that says less leaves the stream's" true
+    (Transcript.note_tool_outcome t ~execution_id:"exec-2"
+       ~outcome:Transcript.Never_returned ~duration:(Some "5ms"));
+  check (list (pair tool_outcome (option string))) "outcome and duration per call"
+    [ (Transcript.Failed, Some "32ms"); (Transcript.Returned, Some "5ms") ]
+    (outcomes ());
+  check bool "the revision moved" true (Transcript.revision t > before)
+;;
+
+let test_drawn_appends_the_reply_when_nothing_streamed () =
+  let t = fresh () in
+  feed t [ Live.Run_started; Live.Thinking "quiet"; reply_details ~reply:"Said at the end." () ];
+  check (list string) "the reply follows what did stream"
+    [ "thinking:quiet"; "reply:Said at the end." ]
+    (drawn t)
+;;
+
+let test_drawn_ends_a_blank_visible_reply_with_a_status_row () =
+  let t = fresh () in
+  feed t [ Live.Run_started; reply_details ~reply:"   " () ];
+  check (list string) "non-text visible content is named"
+    [ "status:Turn completed with non-text visible content (turn trace-1#3)" ]
+    (drawn t)
+;;
+
+(* Each control outcome ends in the sentence the strict decode used to write,
+   and what did stream stays above it. *)
+let test_drawn_ends_each_control_outcome_with_its_status_row () =
+  List.iter
+    (fun (outcome, expected) ->
+      let t = fresh () in
+      feed t [ Live.Run_started; Live.Text "partial words"; control_reply outcome ];
+      check (list string) (Masc.Keeper_turn_outcome.to_label outcome)
+        [ "text:partial words"; "status:" ^ expected ]
+        (drawn t))
+    [ ( Masc.Keeper_turn_outcome.Continuation_checkpoint
+      , "Continuation checkpoint recorded (turn trace-1#3)" )
+    ; ( Masc.Keeper_turn_outcome.Terminal_effect_settled
+      , "Reply delivered by a terminal tool (turn trace-1#3)" )
+    ; ( Masc.Keeper_turn_outcome.Awaiting_gate_approval
+      , "승인 후 턴을 이어서 진행합니다 (turn trace-1#3)" )
+    ; ( Masc.Keeper_turn_outcome.No_visible_reply
+      , "Turn completed without a visible reply (turn trace-1#3)" )
+    ]
+;;
+
+let test_turn_status_text_is_the_reply_when_there_is_one () =
+  check string "a visible reply reads as itself" "hello"
+    (Transcript.turn_status_text ~reply:"hello" ~turn_ref:"trace-1#3"
+       Masc.Keeper_turn_outcome.Visible_reply)
 ;;
 
 
@@ -1401,6 +1570,22 @@ let () =
             test_runtime_attempt_keeps_the_earlier_attempt_superseded
         ; test_case "reply details is recorded, not drawn" `Quick
             test_reply_details_is_recorded_not_drawn
+        ; test_case "drawn keeps the trail when the reply is what streamed" `Quick
+            test_drawn_keeps_the_trail_when_the_reply_is_what_streamed
+        ; test_case "drawn replaces the streamed text with a differing reply" `Quick
+            test_drawn_replaces_the_streamed_text_with_a_differing_reply
+        ; test_case "drawn keeps earlier rounds when the reply is the last stretch" `Quick
+            test_drawn_keeps_earlier_rounds_when_the_reply_is_the_last_stretch
+        ; test_case "note_tool_outcome folds the durable facts in" `Quick
+            test_note_tool_outcome_folds_the_durable_facts_in
+        ; test_case "drawn appends the reply when nothing streamed" `Quick
+            test_drawn_appends_the_reply_when_nothing_streamed
+        ; test_case "drawn ends a blank visible reply with a status row" `Quick
+            test_drawn_ends_a_blank_visible_reply_with_a_status_row
+        ; test_case "drawn ends each control outcome with its status row" `Quick
+            test_drawn_ends_each_control_outcome_with_its_status_row
+        ; test_case "turn_status_text is the reply when there is one" `Quick
+            test_turn_status_text_is_the_reply_when_there_is_one
         ; test_case "of_log equals the incremental fold" `Quick
             test_of_log_equals_the_incremental_fold
         ] )

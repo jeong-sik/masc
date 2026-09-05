@@ -403,6 +403,40 @@ let test_rows_retain_the_exact_turn_identity () =
     (List.map (fun row -> row.History.turn_id) decoded.History.rows)
 ;;
 
+(* The operation id is the delivery key's operation, typed, on every row of
+   a direct turn -- and nothing else: an autonomous turn's rows carry their
+   turn_ref as turn identity and no operation. *)
+let test_rows_carry_the_operation_id_only_for_direct_turns () =
+  let key = operation_key "tui-turn-42" in
+  let decoded =
+    decode
+      (`List
+         [ row ~role:"user" ~delivery_key:key
+             ~transcript_slot:(transcript_slot "accepted_user") "check it"
+         ; row ~role:"tool" ~delivery_key:key
+             ~transcript_slot:(tool_transcript_slot "exec-1" 0)
+             ~tool_call_name:"Read" "{}"
+         ; row ~role:"assistant" ~delivery_key:key
+             ~transcript_slot:(transcript_slot "terminal_assistant") "done"
+         ; row ~role:"system" ~kind:"transport_failure" ~delivery_key:key
+             ~transcript_slot:(transcript_slot "failure") "the wire dropped"
+         ; autonomous_turn ~turn_ref:"trace-1#54" [ reason "look"; tool "Read" ]
+         ; row ~role:"user"
+             ~delivery_key:(`Assoc [ "kind", `String "fusion_run"; "request_id", `String "fr-1" ])
+             ~transcript_slot:(transcript_slot "accepted_user") "from a fusion run"
+         ])
+  in
+  check (list (option string))
+    "every row of the direct turn carries it; autonomous and other keys do not"
+    [ Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"
+    ; None; None; None ]
+    (List.map (fun row -> row.History.operation_id) decoded.History.rows);
+  check (list (option string)) "turn identity is unchanged beside it"
+    [ Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"
+    ; Some "trace-1#54"; Some "trace-1#54"; Some "fr-1" ]
+    (List.map (fun row -> row.History.turn_id) decoded.History.rows)
+;;
+
 let test_consecutive_tools_from_different_turns_do_not_merge () =
   let tool turn execution =
     row ~role:"tool" ~delivery_key:(operation_key turn)
@@ -1603,6 +1637,8 @@ let () =
             test_unfenced_runtime_shutdown_is_still_typed
         ; test_case "unrelated failure is not marked recovered" `Quick
             test_unrelated_failure_is_not_marked_recovered
+        ; test_case "rows carry the operation id only for direct turns" `Quick
+            test_rows_carry_the_operation_id_only_for_direct_turns
         ; test_case "rows retain the exact turn identity" `Quick
             test_rows_retain_the_exact_turn_identity
         ; test_case "different turns do not merge their tool blocks" `Quick

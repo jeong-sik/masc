@@ -28,10 +28,14 @@ val add : t -> seq:int option -> Masc_tui_keeper_chat_live.delta -> bool
     advances the attempt before it is stored, so it is the first entry of the
     new attempt. *)
 
+val hold_seq : t -> int -> unit
+(** Holds a journal position without an entry: a line the pane draws nothing
+    for still counts for {!last_seq} and for deduplication. *)
+
 val add_journaled : t -> Masc.Keeper_chat_event_log.journaled_event list -> unit
 (** Every line of a v2 page, in journal order, through {!delta_of_journaled};
     lines already held by seq are skipped. A line that maps to no delta still
-    holds its seq (see {!last_seq}). *)
+    holds its seq ({!hold_seq}). *)
 
 val delta_of_journaled :
   Masc.Keeper_chat_events.keeper_chat_event -> Masc_tui_keeper_chat_live.delta option
@@ -72,3 +76,39 @@ type events_page =
 val decode_events_page : Yojson.Safe.t -> (events_page, string) result
 (** Strict decode of a [masc.keeper_chat_events.v2] body: the schema tag must
     match and every element must decode as a journal line. *)
+
+(** Why a v2 events request did not return a page. The codes are the
+    endpoint's ([unknown_operation] 404, [journal_pruned] 410,
+    [journal_unreadable] / [journal_corrupt] 503); a body this build cannot
+    read and a request that never got an answer are the two remaining
+    shapes. *)
+type events_error =
+  | Unknown_operation  (** No operation of that id: nothing to reload. *)
+  | Journal_pruned
+      (** The turn ran and its journal has since been retained away; the v1
+          rows are all there is. *)
+  | Journal_unavailable of string
+      (** The journal exists and could not be read now; the server's message. *)
+  | Events_refused of string
+      (** 401/403: this client's credential, not the journal. One sentence
+          for the operator; the pane stops asking for journals this session. *)
+  | Events_undecodable of string
+      (** A body this build cannot read, or an error with no known code; the
+          status and what came back. *)
+  | Events_transport of string  (** The request never got an answer. *)
+
+val events_error_to_string : events_error -> string
+
+val decode_events_error : status:int -> credential_sent:bool -> string -> events_error
+(** The typed error behind a non-2xx events response: 401/403 are
+    {!Events_refused} ([credential_sent] is whether the request carried a
+    bearer), the envelope's [error] code names the journal errors, anything
+    else is {!Events_undecodable}. *)
+
+val read_whole_journal :
+  fetch:(since_seq:int -> (events_page, events_error) result) ->
+  since_seq:int ->
+  (Masc.Keeper_chat_event_log.journaled_event list, events_error) result
+(** Every line after [since_seq], page by page through [fetch], following
+    [has_more] only while [next_since_seq] advances. The first error ends the
+    read. *)

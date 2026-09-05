@@ -314,6 +314,47 @@ let test_interleaved_turns_each_open_once () =
     ]
 ;;
 
+(* A turn a settled log holds has one source. The rows the log draws itself
+   leave; the rows it draws nothing for stay, whatever request they belong
+   to. With nothing held, the rows are the rows. *)
+let test_a_held_turn_keeps_only_the_rows_the_log_does_not_draw () =
+  let rows =
+    [ user ~request_id:"held" "asked" 1.
+    ; row ~request_id:"held" ~role:Tui_types.Message_thinking
+        ~phase:Tui_types.Turn_progress ~text:"thought" 2.
+    ; tool ~request_id:"held" "read_file" 3.
+    ; row ~request_id:"held"
+        ~role:(Tui_types.Message_skill Masc_tui_keeper_chat_transcript.Skill_used)
+        ~phase:Tui_types.Turn_progress ~text:"skill" 4.
+    ; row ~request_id:"held" ~role:Tui_types.Message_status
+        ~phase:Tui_types.Turn_progress ~text:"gate approved" 5.
+    ; keeper ~request_id:"held" "answered" 6.
+    ; row ~request_id:"held" ~role:Tui_types.Message_autonomous
+        ~phase:Tui_types.Turn_output ~text:"auto" 7.
+    ; row ~request_id:"held" ~role:Tui_types.Message_error
+        ~phase:Tui_types.Turn_output ~text:"failed" 8.
+    ; row ~request_id:"held" ~role:Tui_types.Message_local
+        ~phase:Tui_types.Turn_output ~text:"/help" 9.
+    ; keeper ~request_id:"free" "another turn" 10.
+    ; memory "journal" 11.
+    ]
+  in
+  let texts rows = List.map (fun (r : Tui_types.msg_entry) -> r.me_text) rows in
+  let held ~reasoning =
+    [ { Tui_types.ht_request_id = "held"; ht_reasoning = reasoning } ]
+  in
+  Alcotest.(check (list string))
+    "held with reasoning: the keeper's words, tools, skills and reasoning leave"
+    [ "asked"; "gate approved"; "failed"; "/help"; "another turn"; "journal" ]
+    (texts (Tui_types.rows_the_logs_do_not_draw ~held:(held ~reasoning:true) rows));
+  Alcotest.(check (list string))
+    "held without reasoning: the trace row is the only record that it thought"
+    [ "asked"; "thought"; "gate approved"; "failed"; "/help"; "another turn"; "journal" ]
+    (texts (Tui_types.rows_the_logs_do_not_draw ~held:(held ~reasoning:false) rows));
+  Alcotest.(check bool) "nothing held: the same list" true
+    (rows == Tui_types.rows_the_logs_do_not_draw ~held:[] rows)
+;;
+
 let test_an_empty_conversation_has_no_edges () =
   check_edges "nothing to draw" [] []
 ;;
@@ -352,6 +393,8 @@ let () =
             test_an_interrupted_turn_still_opens_once;
           Alcotest.test_case "interleaved turns each open once" `Quick
             test_interleaved_turns_each_open_once;
+          Alcotest.test_case "a held turn keeps only the rows the log does not draw" `Quick
+            test_a_held_turn_keeps_only_the_rows_the_log_does_not_draw;
           Alcotest.test_case "an empty conversation has no edges" `Quick
             test_an_empty_conversation_has_no_edges
         ] )

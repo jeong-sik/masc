@@ -219,7 +219,10 @@ let post_keeper_chat ~(host : string) ~(port : int)
     json_headers
       (("Accept", "text/event-stream") :: auth_headers ())
   in
-  let body = Masc_tui_keeper_chat_projection.request_body request in
+  (* Whole body, no live view, no position to resume from. *)
+  let body =
+    Masc_tui_keeper_chat_projection.request_body ~since_seq:None request
+  in
   match
     Masc_http_client.post_sync ?clock:(request_clock ())
       ~timeout_sec:keeper_chat_timeout_sec ~url ~headers ~body ()
@@ -249,8 +252,11 @@ let post_keeper_chat ~(host : string) ~(port : int)
     cap. That is strictly more room than the buffered send had: a turn that
     keeps emitting is no longer cut off at all, and one that goes quiet is
     still bounded by the same number. *)
+(* [since_seq] is [None] on the first POST and the log's last seq on a
+   re-POST after the stream was cut, so the server replays only what the pane
+   missed before switching to live frames. *)
 let post_keeper_chat_streaming ~clock ~(host : string) ~(port : int)
-    ~(on_chunk : string -> unit)
+    ~(on_chunk : string -> unit) ~(since_seq : int option)
     (request : Masc_tui_keeper_chat_projection.request) :
     ( Masc_tui_keeper_chat_projection.response
     , Masc_tui_keeper_chat_projection.error )
@@ -259,7 +265,9 @@ let post_keeper_chat_streaming ~clock ~(host : string) ~(port : int)
   let headers =
     json_headers (("Accept", "text/event-stream") :: auth_headers ())
   in
-  let body = Masc_tui_keeper_chat_projection.request_body request in
+  let body =
+    Masc_tui_keeper_chat_projection.request_body ~since_seq request
+  in
   match
     Masc_http_client.post_stream ~clock
       ~idle_timeout_sec:keeper_chat_timeout_sec ~url ~headers ~body ~on_chunk ()
@@ -829,6 +837,48 @@ let fetch_lane_run_detail ~(host : string) ~(port : int) ~(run_id : string) :
     fetch already returns; the pane passes a cursor, so it is required here.
     Defined before {!fetch_keeper_context_inspector}, which reads the answer
     to a turn through it. *)
+(** One page of a turn's journal
+    ([GET /api/v1/keepers/:name/chat/events?operation_id=&since_seq=&limit=],
+    RFC-0412 §3.2). The page is checked against the operation it was asked
+    for; every failure is typed ({!Masc_tui_keeper_chat_log.events_error}) so
+    the caller decides by code, not by reading the server's sentence. *)
+let fetch_keeper_chat_events ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(operation_id : string) ~(since_seq : int)
+    ~(limit : int) :
+    ( Masc_tui_keeper_chat_log.events_page
+    , Masc_tui_keeper_chat_log.events_error )
+    result =
+  let path =
+    Printf.sprintf "/api/v1/keepers/%s/chat/events?operation_id=%s&since_seq=%d&limit=%d"
+      (percent_encode_path_segment keeper_name)
+      (percent_encode_query_value operation_id)
+      since_seq limit
+  in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error (Masc_tui_keeper_chat_log.Events_transport detail)
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error
+        (Masc_tui_keeper_chat_log.decode_events_error ~status
+           ~credential_sent:(operator_token_present ()) body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | json -> (
+          match Masc_tui_keeper_chat_log.decode_events_page json with
+          | Error detail -> Error (Masc_tui_keeper_chat_log.Events_undecodable detail)
+          | Ok page
+            when not
+                   (String.equal page.Masc_tui_keeper_chat_log.operation_id
+                      operation_id) ->
+              Error
+                (Masc_tui_keeper_chat_log.Events_undecodable
+                   (Printf.sprintf "page is for operation %s, asked for %s"
+                      page.Masc_tui_keeper_chat_log.operation_id operation_id))
+          | Ok page -> Ok page)
+      | exception Yojson.Json_error detail ->
+          Error
+            (Masc_tui_keeper_chat_log.Events_undecodable
+               ("events body was not JSON: " ^ detail)))
+
 let fetch_keeper_chat_history_page ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(before : float) :
     (Masc_tui_keeper_chat_history.page, string) result =

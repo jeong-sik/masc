@@ -167,15 +167,25 @@ let attachment_block_to_yojson attachment =
     ; "size", `Int attachment.size
     ]
 
-let request_to_yojson request =
+(* [since_seq] is where a re-POST of the same operation asks the stream to
+   resume: the last journal seq the pane holds, [-1] for the whole turn. It
+   belongs to the POST, not to the request -- the request is what the
+   operator said and keeps one identity across every resend -- so it rides
+   beside the record and is absent from a first submit. *)
+let request_to_yojson ~since_seq request =
   let base =
     [ "request_id", `String request.request_id
     ; "name", `String request.keeper_name
     ; "message", `String request.message
     ]
   in
+  let resume =
+    match since_seq with
+    | None -> []
+    | Some seq -> [ "since_seq", `Int seq ]
+  in
   match request.attachments with
-  | [] -> `Assoc base
+  | [] -> `Assoc (base @ resume)
   | attachments ->
     `Assoc
       (base
@@ -184,9 +194,11 @@ let request_to_yojson request =
            , `List
                (List.map attachment_block_to_yojson attachments
                 @ [ `Assoc [ "type", `String "text"; "text", `String request.message ] ]) )
-         ])
+         ]
+       @ resume)
 
-let request_body request = Yojson.Safe.to_string (request_to_yojson request)
+let request_body ~since_seq request =
+  Yojson.Safe.to_string (request_to_yojson ~since_seq request)
 
 let same_request_identity left right =
   String.equal left.request_id right.request_id

@@ -87,6 +87,46 @@ let decode_with_provenance events =
   events |> List.map sse_event |> String.concat ""
   |> Chat.decode_response_with_provenance ~request
 
+(* A re-POST after a cut stream says where to resume; a first submit says
+   nothing, so its body is byte-identical to what it always was. The request
+   itself does not change: identity ignores the position. *)
+let test_a_resume_position_rides_beside_the_request () =
+  let request = Chat.create_request ~keeper_name:"keeper.one" ~message:"hello" () in
+  check string "a first submit carries no position"
+    (Printf.sprintf
+       {|{"request_id":%S,"name":"keeper.one","message":"hello"}|}
+       request.request_id)
+    (Chat.request_body ~since_seq:None request);
+  check string "a resume names the last seq held"
+    (Printf.sprintf
+       {|{"request_id":%S,"name":"keeper.one","message":"hello","since_seq":5}|}
+       request.request_id)
+    (Chat.request_body ~since_seq:(Some 5) request);
+  check string "an empty log asks for the whole turn"
+    (Printf.sprintf
+       {|{"request_id":%S,"name":"keeper.one","message":"hello","since_seq":-1}|}
+       request.request_id)
+    (Chat.request_body ~since_seq:(Some (-1)) request);
+  let attachment =
+    { Chat.attachment_id = "att-1"
+    ; name = "a.png"
+    ; mime_type = "image/png"
+    ; size = 4
+    ; data = "AAAA"
+    }
+  in
+  let with_image =
+    Chat.create_request ~attachments:[ attachment ] ~keeper_name:"keeper.one"
+      ~message:"look" ()
+  in
+  check bool "the position follows the multimodal fields too" true
+    (Yojson.Safe.Util.member "since_seq"
+       (Chat.request_to_yojson ~since_seq:(Some 9) with_image)
+     = `Int 9);
+  check bool "identity does not read the position" true
+    (Chat.same_request_identity request request)
+;;
+
 let test_request_body_and_identity () =
   let request = Chat.create_request ~keeper_name:"keeper.one" ~message:"hello" () in
   check bool "request id prefix" true
@@ -98,7 +138,7 @@ let test_request_body_and_identity () =
     (Printf.sprintf
        {|{"request_id":%S,"name":"keeper.one","message":"hello"}|}
        request.request_id)
-    (Chat.request_body request);
+    (Chat.request_body ~since_seq:None request);
   let second = Chat.create_request ~keeper_name:"keeper.one" ~message:"hello" () in
   check bool "fresh id per send" false
     (String.equal request.request_id second.request_id)
@@ -1029,7 +1069,7 @@ let test_attachment_reaches_both_wire_fields () =
   let request =
     Chat.create_request ~attachments:[ attachment ] ~keeper_name:"k" ~message:"look" ()
   in
-  let json = Chat.request_to_yojson request in
+  let json = Chat.request_to_yojson ~since_seq:None request in
   let member name = Yojson.Safe.Util.member name json in
   (match member "attachments" with
    | `List [ one ] ->
@@ -1060,7 +1100,10 @@ let test_attachment_reaches_both_wire_fields () =
 (* A request with nothing staged keeps the shape it always had, so a text-only
    turn is byte-identical to what this surface sent before attachments existed. *)
 let test_no_attachment_sends_no_multimodal_fields () =
-  let json = Chat.request_to_yojson (Chat.create_request ~keeper_name:"k" ~message:"hi" ()) in
+  let json =
+    Chat.request_to_yojson ~since_seq:None
+      (Chat.create_request ~keeper_name:"k" ~message:"hi" ())
+  in
   Alcotest.(check bool)
     "no attachments key"
     true
@@ -1175,6 +1218,8 @@ let () =
     [ ( "keeper chat"
       , [ test_case "exact request body and UUIDv7" `Quick
             test_request_body_and_identity
+        ; test_case "a resume position rides beside the request" `Quick
+            test_a_resume_position_rides_beside_the_request
         ; test_case "id lines do not change the strict decode" `Quick
             test_id_lines_do_not_change_the_strict_decode
         ; test_case "matching acceptance and reply" `Quick

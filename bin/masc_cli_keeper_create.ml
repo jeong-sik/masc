@@ -25,18 +25,37 @@ let trimmed_nonempty raw =
 
 let spellings values = String.concat ", " values
 
-(* The two sentences below are the only hand-written description of what the
-   modes do; the list of spellings is rendered from the typed owner, so a
-   third mode reaches this message without an edit. They describe behaviour
-   and stop there: which of the two a keeper wants is the operator's to
-   decide, and a command that guessed it from the instructions text would be
-   guessing at exactly the field this refusal exists to stop it guessing. *)
+(* One sentence per mode, exhaustive on the variant: a mode the typed owner
+   gains has no sentence here until someone writes it, and the compiler says
+   so, where a hand-kept list of sentences keeps describing the modes it
+   knew. The sentences describe behaviour and stop there: which mode a keeper
+   wants is the operator's to decide, and a command that guessed it from the
+   instructions text would be guessing at exactly the field this refusal
+   exists to stop it guessing. *)
+let network_mode_behaviour = function
+  | Keeper_types_profile_sandbox.Network_none ->
+    "the guest has no network. A web search, a git push, or any HTTP call \
+     inside it fails."
+  | Keeper_types_profile_sandbox.Network_inherit -> "the guest uses the host network."
+  | Keeper_types_profile_sandbox.Network_policy ->
+    "the guest reaches only the destinations its egress_allow list names, \
+     through a proxy this server owns; a sandbox profile whose boundary the \
+     server cannot enforce refuses the mode."
+;;
+
+let network_mode_behaviours =
+  List.map
+    (fun mode ->
+       ( Keeper_types_profile_sandbox.network_mode_to_string mode
+       , network_mode_behaviour mode ))
+    Keeper_types_profile_sandbox.all_network_modes
+;;
+
 let network_mode_behaviour_lines =
-  [ "  none     the guest has no network. A web search, a git push, or any \
-     HTTP call inside it fails."
-  ; "  inherit  the guest uses the host network."
-  ; "Nothing was created."
-  ]
+  List.map
+    (fun (spelling, behaviour) -> Printf.sprintf "  %-8s %s" spelling behaviour)
+    network_mode_behaviours
+  @ [ "Nothing was created." ]
 ;;
 
 let missing_network_mode_message =

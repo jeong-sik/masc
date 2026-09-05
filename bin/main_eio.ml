@@ -1467,11 +1467,20 @@ let keeper_create_sandbox_profile =
   Arg.(value & opt string "" & info [ "sandbox-profile" ] ~docv:"PROFILE" ~doc)
 
 let keeper_create_network_mode =
+  (* Spellings and behaviour both come from the typed owner through
+     [Masc_cli_keeper_create.network_mode_behaviours], so a mode the owner
+     gains is in this help text without an edit here. *)
   let doc =
-    "Whether the sandbox guest reaches the network: none or inherit. Required. \
-     With none, a web search or a git push inside the guest fails; the server's \
-     own default for docker and microvm is none, which is why this command \
-     will not send a declaration that leaves it unsaid."
+    Printf.sprintf
+      "Whether the sandbox guest reaches the network: %s. Required: the \
+       server's own default for docker and microvm is none, which is why this \
+       command will not send a declaration that leaves it unsaid. %s"
+      (String.concat ", " (List.map fst Masc_cli_keeper_create.network_mode_behaviours))
+      (String.concat
+         " "
+         (List.map
+            (fun (spelling, behaviour) -> Printf.sprintf "With %s, %s" spelling behaviour)
+            Masc_cli_keeper_create.network_mode_behaviours))
   in
   Arg.(value & opt (some string) None & info [ "network-mode" ] ~docv:"MODE" ~doc)
 
@@ -1800,20 +1809,27 @@ let keeper_create_cmd =
         "--network-mode is required, on the flags and in the --edit form \
          alike. The server's default for docker and microvm is none, which \
          gives the guest no network at all, so a keeper whose work is web \
-         search or repository traffic has to say inherit here. This command \
-         refuses rather than choosing for you."
-    ; `P
-        "Naming a keeper that already exists reconfigures it instead of \
-         making a second one, and this command says so. Read what the \
-         required flags do on that path: --sandbox-profile and \
-         --network-mode are sent on every invocation, so they overwrite the \
-         existing keeper's isolation with whatever was typed. --instructions \
-         is the opposite -- left blank it is not sent, and the existing text \
-         stands. To change only the instructions, restate the profile and \
-         the network mode the keeper already has."
-    ; `S Manpage.s_examples
-    ; `Pre example
+         search or repository traffic has to say here which network it gets. \
+         This command refuses rather than choosing for you. The modes, from \
+         the server's own list:"
     ]
+    (* One item per mode, rendered from the typed owner: a mode the owner
+       gains is in this manpage without an edit here. *)
+    @ List.map
+        (fun (spelling, behaviour) -> `I (spelling, behaviour))
+        Masc_cli_keeper_create.network_mode_behaviours
+    @ [ `P
+          "Naming a keeper that already exists reconfigures it instead of \
+           making a second one, and this command says so. Read what the \
+           required flags do on that path: --sandbox-profile and \
+           --network-mode are sent on every invocation, so they overwrite the \
+           existing keeper's isolation with whatever was typed. --instructions \
+           is the opposite -- left blank it is not sent, and the existing text \
+           stands. To change only the instructions, restate the profile and \
+           the network mode the keeper already has."
+      ; `S Manpage.s_examples
+      ; `Pre example
+      ]
   in
   let info = Cmd.info "keeper-create" ~doc ~man in
   Cmd.v

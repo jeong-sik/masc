@@ -1560,7 +1560,7 @@ let test_cancel_writes_the_record_the_authority_reads () =
        | Some _ | None ->
          Alcotest.fail "the task must be awaiting a verdict on a cancellation"))
 
-(* RFC-0415 §4.2/§6.2: the operator's one click closes a cancellation. The
+(* RFC-0417 §4.2/§6.2: the operator's one click closes a cancellation. The
    evidence card must name the question it answers (intent=cancellation), and
    a single approve verdict through the same commit path completions use must
    land Cancelled — the authority on the verdict is the operator's, no system

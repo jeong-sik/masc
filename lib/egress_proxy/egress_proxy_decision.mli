@@ -64,10 +64,11 @@ val decide : rules:Egress_host.rule list -> request_line:string -> decision
     on 8443 could not use the lane at all, and the refusal read as permanent
     policy rather than as a missing feature.
 
-    The authority is split by {!Egress_host.rule_of_string}'s own splitter,
-    so one place decides which bytes are the host. A second splitter here
-    could disagree with that one, and a disagreement about that boundary is
-    what an allowlist bypass is. *)
+    The authority is split here at its last colon, and unlike a rule it must
+    carry a port: a CONNECT target without one, or with a port that is not a
+    number in range, is a malformed request rather than a default. The host
+    bytes then go to {!Egress_host.parse}, the one parser of host text, so a
+    host this proxy admits is a host the allowlist could have named. *)
 
 val response_of_decision : decision -> string
 (** The bytes written back: [200 Connection Established] for an admitted

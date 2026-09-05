@@ -87,13 +87,15 @@ stop_server() {
 
 cleanup() {
   stop_server
-  # Best-effort teardown. The server can write tool assets under
-  # $tmp/.masc/config/tools from a background fiber that outlives the main PID
-  # stop_server waited on, so a concurrent write can leave a directory non-empty
-  # as rm walks it -- "rm: cannot remove ...: Directory not empty", seen on the
-  # slower arm64 runner while linux-x64 passed the same script. A teardown race
-  # must not fail an evidence run that already verified; the CI runner reclaims
-  # the temp dir regardless.
+  # WORKAROUND (#33157): best-effort teardown. The server can still be writing
+  # tool assets under $tmp/.masc/config/tools after stop_server's kill and
+  # wait return, so a concurrent write can leave a directory non-empty as rm
+  # walks it -- "rm: cannot remove ...: Directory not empty", seen on the
+  # slower arm64 runner while linux-x64 passed the same script. A teardown
+  # race must not fail an evidence run that already verified; the CI runner
+  # reclaims the temp dir regardless. Root fix: the server joins its writer
+  # fibers on shutdown, so nothing writes once the process has exited; when
+  # that lands, drop the "2>/dev/null || true" and let an rm failure fail.
   rm -rf "$tmp" 2>/dev/null || true
 }
 trap cleanup EXIT

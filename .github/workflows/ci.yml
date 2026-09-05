@@ -65,6 +65,10 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # check-doc-truth.sh compares the release the docs name with the
+          # newest v* tag; a checkout with no tags cannot answer that.
+          fetch-tags: true
 
       - name: Check source text integrity
         run: scripts/ci/check-source-text-integrity.sh

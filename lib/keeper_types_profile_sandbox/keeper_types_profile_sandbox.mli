@@ -38,10 +38,12 @@ val network_mode_rejection : sandbox_profile -> network_mode -> string option
 (** [None] when a keeper may hold that profile and that network mode together,
     and [Some message] naming the refusal when it may not.
 
-    [Remote_ssh] with [Network_none] is the one refused pair: the SSH lane is
-    transport-only, so it cannot cut the guest off from the network, and it
-    says so rather than accepting the setting and ignoring it. Every other
-    pair is accepted.
+    Three pairs are refused. [Remote_ssh] accepts only [Network_inherit]: the
+    SSH lane is transport-only, so it can neither cut the guest off from the
+    network ([Network_none]) nor route it through a proxy masc owns
+    ([Network_policy]), and it says so rather than accepting the setting and
+    ignoring it. [Docker] refuses [Network_policy] because the Docker egress
+    boundary is unmeasured (RFC-0415). Every other pair is accepted.
 
     Both the keeper TOML loader and the keeper_up argument resolver call this,
     so a declaration is refused before it is written as well as when it is

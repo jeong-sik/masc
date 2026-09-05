@@ -87,7 +87,42 @@ let test_declaration_refuses_a_missing_network_mode () =
            (Printf.sprintf "the refusal names %s" spelling)
            true
            (contains spelling message))
-      Keeper_types_profile_sandbox.valid_network_mode_strings
+      Keeper_types_profile_sandbox.valid_network_mode_strings;
+    (* One behaviour line per mode, rendered from the typed owner. The
+       behaviour lines are the indented ones; the requirement sentence above
+       them and the "Nothing was created." below are not. A mode the owner
+       gains with no line for it is what this pins. *)
+    let behaviour_lines =
+      List.filter
+        (fun line -> String.length line > 2 && String.equal (String.sub line 0 2) "  ")
+        (String.split_on_char '\n' message)
+    in
+    check
+      int
+      "one behaviour line per network mode"
+      (List.length Keeper_types_profile_sandbox.all_network_modes)
+      (List.length behaviour_lines);
+    List.iter
+      (fun (spelling, behaviour) ->
+         check
+           bool
+           (Printf.sprintf "the %s line says what the mode does" spelling)
+           true
+           (List.exists
+              (fun line -> contains spelling line && contains behaviour line)
+              behaviour_lines))
+      C.network_mode_behaviours
+;;
+
+(* The spellings the manpage and the refusal render are the typed owner's,
+   in its order: a mode the owner gains reaches both surfaces without an
+   edit here. *)
+let test_behaviours_cover_every_network_mode () =
+  check
+    (list string)
+    "network_mode_behaviours spellings"
+    Keeper_types_profile_sandbox.valid_network_mode_strings
+    (List.map fst C.network_mode_behaviours)
 ;;
 
 (* A flag the server would reject as [turn_up_arg_unknown]. That drift is what
@@ -314,6 +349,10 @@ let () =
             "a missing network_mode is refused before any request"
             `Quick
             test_declaration_refuses_a_missing_network_mode
+        ; test_case
+            "the behaviour sentences cover every network mode"
+            `Quick
+            test_behaviours_cover_every_network_mode
         ] )
     ; ( "declaration"
       , [ test_case

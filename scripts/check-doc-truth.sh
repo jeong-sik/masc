@@ -88,6 +88,22 @@ changelog_latest_release="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.m
 [[ "$spec_baseline" == "$package_version" ]] || \
   fail "SPEC-INDEX snapshot baseline ($spec_baseline) != current package version ($package_version)"
 
+# The release the docs name is checked against git, not only against the
+# other doc. Two states are legal: the docs name the newest v* tag in this
+# checkout (the steady state), or they name the current package version (the
+# release runbook's own window: the docs and the version bump land first and
+# the tag follows). Anything else is a doc that fell behind a release. The
+# newest tag is the highest v* by version among the tags the checkout holds,
+# which is the same answer in a full clone and in a shallow CI checkout that
+# fetched tags (pr-check.yml and ci.yml do); git describe is not used
+# because a shallow checkout has no history for it to walk. No v* tag at all
+# is a checkout this comparison cannot run in, and it fails rather than
+# passes.
+latest_release_tag="$(git tag --list 'v*' --sort=-v:refname | head -n1)"
+[[ -n "$latest_release_tag" ]] || fail "no v* tag in this checkout to compare the published release against (git fetch --tags)"
+[[ "v$roadmap_published_release" == "$latest_release_tag" || "$roadmap_published_release" == "$package_version" ]] || \
+  fail "ROADMAP latest published release (v$roadmap_published_release) is neither the newest v* tag ($latest_release_tag) nor the package version ($package_version)"
+
 require_contains docs/MCP-TEMPLATE.md 'bearer_token_env_var = "MASC_TOKEN"'
 require_contains docs/MCP-TEMPLATE.md 'Authorization: Bearer ${MASC_TOKEN}'
 require_not_contains docs/MCP-TEMPLATE.md '"command": "masc-stdio"'

@@ -52,9 +52,12 @@ cleanup() {
   # Let the killed server finish exiting before removing its tree, so a
   # background tool-asset write does not race the rm.
   [ -n "$PID" ] && wait "$PID" 2>/dev/null || true
-  # Best-effort: even after the wait a late write can leave
-  # $work/.masc/config/tools non-empty as rm walks it. A teardown race must not
-  # fail a smoke that already answered /health.
+  # WORKAROUND (#33157): best-effort. Even after the wait a late write can
+  # leave $work/.masc/config/tools non-empty as rm walks it. A teardown race
+  # must not fail a smoke that already answered /health. Root fix: the server
+  # joins its writer fibers on shutdown, so nothing writes once the process
+  # has exited; when that lands, drop the "2>/dev/null || true" and let an rm
+  # failure fail.
   rm -rf "$work" 2>/dev/null || true
 }
 trap cleanup EXIT

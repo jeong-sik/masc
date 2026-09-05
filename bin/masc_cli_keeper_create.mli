@@ -36,6 +36,14 @@ type flags =
     [--skill] never passed, which leaves the keeper's selection unchanged, and
     [Some []] is [--no-skills], which selects none. *)
 
+val network_mode_behaviours : (string * string) list
+(** Each network mode's spelling and what a keeper in it can reach, one
+    sentence per mode in the typed owner's order, for the refusal messages
+    and the manpage. Built from
+    {!Keeper_types_profile_sandbox.all_network_modes} by a match exhaustive on
+    the variant, so a mode the owner gains has no sentence until one is
+    written, and the compiler says so. *)
+
 val declaration_of_flags : flags -> (Yojson.Safe.t, string) result
 (** The [keeper_up] declaration these flags describe, or the one sentence the
     operator has to act on.

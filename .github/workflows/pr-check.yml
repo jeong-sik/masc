@@ -49,9 +49,21 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # check-doc-truth.sh compares the release the docs name with the
+          # newest v* tag; a checkout with no tags cannot answer that.
+          fetch-tags: true
 
       - name: Check source text integrity
         run: scripts/ci/check-source-text-integrity.sh
+
+      # One RFC number names one document, and the index table is generated
+      # from the frontmatter. The script refuses a number that two documents
+      # claim and a table that differs from what the frontmatter says, so a
+      # "RFC-NNNN §4.1" citation in the code names exactly one file. It reads
+      # the checkout only, so it runs before the toolchain is set up.
+      - name: Check RFC index
+        run: scripts/rfc-generate-index.py --check
 
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain

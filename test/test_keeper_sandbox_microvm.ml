@@ -141,6 +141,49 @@ let test_closed_network_is_spelled_on_the_command () =
     true
     (adjacent ~flag:"--dns" ~value:"1.1.1.1" (argv ~network:Profile.Network_inherit ()))
 
+(* The policy network's two reads disagree about [--format json]: [network
+   list] answers a human table without it, while [network inspect] rejects the
+   flag outright ("Unknown option '--format'", container 1.3.1, 2026-09-05)
+   and already answers JSON. #33135 removed the flag from the inspect argv
+   after every policy boot failed at reading the gateway; an argument-
+   consistency cleanup that re-adds it would reintroduce that failure with
+   build and tests both silent, so each argv is pinned as it was measured. *)
+let test_policy_network_inspect_omits_the_flag_list_keeps_it () =
+  let keeper_name = "test-keeper" in
+  match M.policy_network_inspect_argv_for Backend.Apple_container ~keeper_name with
+  | Error detail ->
+    Alcotest.failf "Apple's policy lane refused the inspect argv: %s" detail
+  | Ok inspect ->
+    (match M.policy_network_list_argv_for Backend.Apple_container with
+     | Error detail ->
+       Alcotest.failf "Apple's policy lane refused the list argv: %s" detail
+     | Ok listing ->
+       Alcotest.(check (list string))
+         "inspect carries no --format (container rejects it)"
+         [ "container"; "network"; "inspect"; M.policy_network_name ~keeper_name ]
+         inspect;
+       Alcotest.(check (list string))
+         "list is asked for the machine form"
+         [ "container"; "network"; "list"; "--format"; "json" ]
+         listing);
+  (* The refusal is half the contract: a backend with no policy lane must
+     not grow a network argv silently. *)
+  List.iter
+    (fun backend ->
+       match M.policy_network_inspect_argv_for backend ~keeper_name with
+       | Error message ->
+         Alcotest.(check bool)
+           "non-policy backends refuse by name"
+           true
+           (Astring.String.is_infix ~affix:"microvm_policy_network_unsupported" message)
+       | Ok argv ->
+         Alcotest.failf
+           "%s has no policy lane but built a network inspect argv: %s"
+           (Backend.to_string backend)
+           (String.concat " " argv))
+    [ Backend.Microsandbox; Backend.Nerdctl_kata ]
+;;
+
 let inspect_result status stdout stderr = status, stdout, stderr
 
 let test_image_probe_uses_structured_evidence () =
@@ -1427,6 +1470,8 @@ let () =
             test_never_mounts_the_host_playground
         ; Alcotest.test_case "closed network is spelled on the command" `Quick
             test_closed_network_is_spelled_on_the_command
+        ; Alcotest.test_case "policy network inspect omits --format, list keeps it" `Quick
+            test_policy_network_inspect_omits_the_flag_list_keeps_it
         ; Alcotest.test_case "image probe uses structured evidence" `Quick
             test_image_probe_uses_structured_evidence
         ; Alcotest.test_case "the inspect shape follows the runtime" `Quick

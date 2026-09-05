@@ -166,15 +166,80 @@ let save_json_atomic_with ~strict_parent_sync path json =
 let save_json_atomic = save_json_atomic_with ~strict_parent_sync:false
 let save_json_atomic_strict = save_json_atomic_with ~strict_parent_sync:true
 
+(* The decoded snapshot, against the file it was decoded from.
+
+   The queue snapshot is rewritten whole rather than appended to, so the file
+   identity and its size and mtime together say whether the bytes on disk are
+   the bytes this state came from. Under a durable lock no writer can move
+   them between the stat and the read.
+
+   Measured 2026-09-05: an idle fleet of eighteen keepers re-read and
+   re-parsed all 6.3 MB of these snapshots about 1.5 times a second, 282 MB
+   in thirty seconds, and did the parse holding the owner's lock -- so every
+   other reader of that keeper waited behind a JSON parse of up to a
+   megabyte. The state does not change on most of those passes.
+
+   Keyed by path rather than by owner: the path is what was read, and two
+   owner values naming one file must not disagree about it. *)
+type snapshot_cache_entry =
+  { sce_stat : Unix.stats
+  ; sce_state : State.t
+  }
+
+let snapshot_cache : (string, snapshot_cache_entry) Hashtbl.t = Hashtbl.create 32
+let snapshot_cache_mutex = Stdlib.Mutex.create ()
+let snapshot_cache_hit_counter = Atomic.make 0
+let snapshot_cache_read_counter = Atomic.make 0
+
+let same_snapshot_file (left : Unix.stats) (right : Unix.stats) =
+  left.Unix.st_dev = right.Unix.st_dev
+  && left.Unix.st_ino = right.Unix.st_ino
+  && left.Unix.st_size = right.Unix.st_size
+  && Float.equal left.Unix.st_mtime right.Unix.st_mtime
+  && Float.equal left.Unix.st_ctime right.Unix.st_ctime
+;;
+
+let cached_snapshot path =
+  match Unix.stat path with
+  | exception (Unix.Unix_error _ | Sys_error _) -> None
+  | stat ->
+    Stdlib.Mutex.protect snapshot_cache_mutex (fun () ->
+      match Hashtbl.find_opt snapshot_cache path with
+      | Some entry when same_snapshot_file entry.sce_stat stat -> Some entry.sce_state
+      | None | Some _ -> None)
+;;
+
+let remember_snapshot path state =
+  (* Re-stat after the read: a write between the two would leave the cache
+     describing bytes this decode never saw. *)
+  match Unix.stat path with
+  | exception (Unix.Unix_error _ | Sys_error _) -> ()
+  | stat ->
+    Stdlib.Mutex.protect snapshot_cache_mutex (fun () ->
+      Hashtbl.replace snapshot_cache path { sce_stat = stat; sce_state = state })
+;;
+
+let forget_snapshot path =
+  Stdlib.Mutex.protect snapshot_cache_mutex (fun () -> Hashtbl.remove snapshot_cache path)
+;;
+
 let save_state_unlocked_with ~strict_parent_sync owner state =
   let keeper_name = keeper_name_of_owner owner in
   let path = snapshot_path_of_owner owner in
   let save = if strict_parent_sync then save_json_atomic_strict else save_json_atomic in
   match save path (State.to_yojson state) with
   | Ok () ->
+    (* The writer already holds the state it just wrote, so the next read is
+       a hit rather than a re-parse of bytes this process produced. An atomic
+       save renames a new file into place, so the stat recorded here is the
+       one a reader will compare against. *)
+    remember_snapshot path state;
     notify_state_change_observer ~keeper_name;
     Ok ()
   | Error message ->
+    (* The file may be half-written, gone, or untouched -- unknown is not a
+       state to answer future reads from. *)
+    forget_snapshot path;
     Error
       (Printf.sprintf
          "failed to persist keeper=%s path=%s: %s"
@@ -252,6 +317,12 @@ type primary_snapshot =
 
 let read_primary_current_unlocked owner =
   let path = snapshot_path_of_owner owner in
+  Atomic.incr snapshot_cache_read_counter;
+  match cached_snapshot path with
+  | Some state ->
+    Atomic.incr snapshot_cache_hit_counter;
+    Ok (Primary_current state)
+  | None ->
   match read_json_if_present path with
   | Error _ as error -> error
   | Ok None -> Ok Primary_absent
@@ -275,7 +346,12 @@ let read_primary_current_unlocked owner =
      | Error message -> fail_open message
      | Ok _ ->
        (match State.of_yojson json with
-        | Ok state -> Ok (Primary_current state)
+        | Ok state ->
+          remember_snapshot path state;
+          Ok (Primary_current state)
+        (* An undecodable snapshot is not cached: it is answered by
+           [fail_open] every time, which is where the WARN that records the
+           loss is written. *)
         | Error message -> fail_open message))
 ;;
 
@@ -737,6 +813,15 @@ let observe_snapshot_with_errors ~base_path ~keeper_name =
 module For_testing = struct
   let observe_snapshot_with_errors_with_interleave =
     observe_snapshot_with_errors_with
+  ;;
+
+  let snapshot_cache_reads () = Atomic.get snapshot_cache_read_counter
+  let snapshot_cache_hits () = Atomic.get snapshot_cache_hit_counter
+
+  let reset_snapshot_cache_for_testing () =
+    Stdlib.Mutex.protect snapshot_cache_mutex (fun () -> Hashtbl.reset snapshot_cache);
+    Atomic.set snapshot_cache_read_counter 0;
+    Atomic.set snapshot_cache_hit_counter 0
   ;;
 end
 

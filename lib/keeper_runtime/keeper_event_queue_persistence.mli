@@ -206,6 +206,15 @@ module For_testing : sig
     base_path:string ->
     keeper_name:string ->
     snapshot_with_errors
+
+  val snapshot_cache_reads : unit -> int
+  val snapshot_cache_hits : unit -> int
+
+  val reset_snapshot_cache_for_testing : unit -> unit
+  (** The decoded snapshot is reused while the file it came from has not
+      moved. A test asserts on these because the state being right does not
+      say whether it was parsed again: an unchanged file must be a hit, and a
+      rewritten one must not. *)
 end
 
 val load_state_result :

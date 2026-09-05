@@ -1300,10 +1300,30 @@ let confirm_requeue_outcome
 
 let reconcile_quarantines ~now ~base_path ~keeper_name =
   let* partitions = Partition.load ~base_path ~keeper_name in
-  let rec loop = function
+  (* The candidate store is read once and carried, not re-read per partition.
+     Only one branch below writes a candidate, and it re-reads for the rest;
+     every other branch leaves the store alone, so re-reading after them
+     re-parsed a ledger that had not moved.
+
+     Measured 2026-09-05 on this fleet: one keeper carries 1,219 partitions
+     against 1,216 candidates, so the loop parsed a 27 MB ledger 1,219 times
+     in a pass. That site allocated 2.1 GB in twenty-five seconds, the
+     largest single source in an otherwise idle server.
+
+     What each iteration sees is unchanged: after a write the next iteration
+     reads the store again, exactly as it did when every iteration read. *)
+  let* initial_candidates = Candidate.load_candidates ~base_path ~keeper_name in
+  let rec loop candidates = function
     | [] -> Ok ()
     | partition :: rest ->
-      let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
+      let loop_reloaded rest =
+        let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
+        loop candidates rest
+      in
+      (* Shadowed so the branches below read the same as they did: the ones
+         that changed nothing carry the list on, and the one that wrote
+         re-binds this to the reloading form. *)
+      let loop rest = loop candidates rest in
       (match
          List.find_opt
            (fun candidate ->
@@ -1354,6 +1374,9 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
                 ~expected_quarantine_id:state.quarantine.quarantine_id
                 ~requeued_at:now
             in
+            (* This branch wrote a candidate; the rest of the pass reads the
+               store again rather than the copy taken before it. *)
+            let loop rest = loop_reloaded rest in
             let* (_ : Partition.exact_transition) =
               let* outcome = Partition.requeue_blocked ~base_path ~partition in
               confirm_requeue_outcome
@@ -1420,7 +1443,7 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
           | Partition.Settled _, _ ->
             loop rest))
   in
-  loop partitions
+  loop initial_candidates partitions
 ;;
 
 let process_next_with_claim_ready_exact_current

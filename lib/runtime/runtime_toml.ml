@@ -40,8 +40,7 @@ let typed_find (kind : string) (path : string) (tbl : Otoml.t) (key : string) ge
 ;;
 
 (** [typed_find_or kind path tbl key getter ~default] is {!typed_find} for a
-    key whose absence means [default]. It replaces the bare
-    [Otoml.find_or] reads, which also let [Otoml.Type_error] escape. *)
+    key whose absence means [default]. *)
 let typed_find_or
       (kind : string)
       (path : string)
@@ -736,7 +735,7 @@ let thinking_control_token_key = "thinking-control-token"
 let exact_non_empty_string_opt_field ~(path : string) (tbl : Otoml.t) (key : string)
   : (string option, parse_error list) result
   =
-  match typed_find "string" path tbl key Otoml.get_string with
+  match typed_find "a string" path tbl key Otoml.get_string with
   | Error _ as error -> error
   | Ok None -> Ok None
   | Ok (Some value) when String.trim value = "" ->
@@ -815,7 +814,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
   let b key = typed_find_or "a boolean" path tbl key Otoml.get_boolean ~default:false in
   let b_opt key = typed_find "a boolean" path tbl key Otoml.get_boolean in
   let reasoning_streaming_format_result =
-    match typed_find "string" path tbl "reasoning-streaming-format" Otoml.get_string with
+    match typed_find "a string" path tbl "reasoning-streaming-format" Otoml.get_string with
     | Error errors -> Error errors
     | Ok None -> Ok None
     | Ok (Some raw) ->
@@ -847,7 +846,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
   in
   let thinking_control_format_result =
     match
-      ( typed_find "string" path tbl "thinking-control-format" Otoml.get_string
+      ( typed_find "a string" path tbl "thinking-control-format" Otoml.get_string
       , exact_non_empty_string_opt_field ~path tbl thinking_control_token_key )
     with
     | Error errs, _ | _, Error errs -> Error errs

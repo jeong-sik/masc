@@ -1,8 +1,8 @@
 (* A wrong-typed leaf in runtime.toml is an operator mistake, and the loader
-   has to refuse it by key path. Every row below used to let
-   [Otoml.Type_error] out of [Runtime_toml.parse_toml]: [parse_file] catches
-   only [Otoml.Parse_error] and [Sys_error], so boot, hot reload, the SSH lane
-   and the egress lane died with the exception and no path in the message. *)
+   refuses it by key path: [Runtime_toml.parse_string] returns [Error] rows
+   whose path names the leaf and whose message says which type the key
+   takes. Every row below writes one wrong-typed leaf and checks the
+   "<path>: <key> must be <kind>" prefix of that refusal. *)
 
 open Alcotest
 
@@ -17,15 +17,16 @@ let load_errors content =
   | Ok _ -> failf "expected the config to be refused, it loaded"
 ;;
 
-(* Enough of a runtime.toml to load; each row replaces one leaf of it. *)
+(* Enough of a runtime.toml to load; each row replaces one leaf of it. The
+   model id is the table key, so [models.m] is one model named "m" that
+   [runtime.default] reaches as "p.m". *)
 let config ~provider_lines ~model_lines =
   Printf.sprintf
     {|
 [providers.p]
 %s
 
-[models.p.m]
-id = "m"
+[models.m]
 %s
 
 [runtime]
@@ -40,7 +41,8 @@ let well_typed_provider =
 endpoint = "https://example.invalid/v1"|}
 ;;
 
-(* What the operator wrote, and the key path the refusal has to name. *)
+(* What the operator wrote, and the "<path>: <key> must be <kind>" prefix
+   the refusal has to carry. *)
 type case =
   { label : string
   ; toml : string
@@ -65,97 +67,111 @@ let cases =
         config
           ~provider_lines:"protocol = \"openai-compatible-http\"\nendpoint = 1"
           ~model_lines:""
-    ; refusal_names = "providers.p.endpoint"
+    ; refusal_names = "providers.p.endpoint: endpoint must be a string"
     }
   ; { label = "providers.p.command = 1"
     ; toml =
         config
           ~provider_lines:"protocol = \"openai-compatible-http\"\ncommand = 1"
           ~model_lines:""
-    ; refusal_names = "providers.p.command"
+    ; refusal_names = "providers.p.command: command must be a string"
     }
   ; { label = "providers.p.protocol = 1"
     ; toml =
         config
           ~provider_lines:"protocol = 1\nendpoint = \"https://example.invalid/v1\""
           ~model_lines:""
-    ; refusal_names = "providers.p.protocol"
+    ; refusal_names = "providers.p.protocol: protocol must be a string"
     }
-  ; provider_case "providers.p.display-name = 1" "display-name = 1" "providers.p.display-name"
+  ; provider_case
+      "providers.p.display-name = 1"
+      "display-name = 1"
+      "providers.p.display-name: display-name must be a string"
   ; provider_case
       "providers.p.provider-name = 1"
       "provider-name = 1"
-      "providers.p.provider-name"
+      "providers.p.provider-name: provider-name must be a string"
   ; provider_case
       "providers.p.is-non-interactive = \"yes\""
       "is-non-interactive = \"yes\""
-      "providers.p.is-non-interactive"
+      "providers.p.is-non-interactive: is-non-interactive must be a boolean"
   ; provider_case
       "providers.p.healthcheck.path = 1"
       "[providers.p.healthcheck]\npath = 1"
-      "providers.p.healthcheck.path"
+      "providers.p.healthcheck.path: path must be a string"
   ; provider_case
       "providers.p.credentials.type = 1"
       "[providers.p.credentials]\ntype = 1"
-      "providers.p.credentials.type"
+      "providers.p.credentials.type: type must be a string"
   ; provider_case
       "providers.p.capabilities.supports-inline-tools = 1"
       "[providers.p.capabilities]\nsupports-inline-tools = 1"
-      "providers.p.capabilities.supports-inline-tools"
-  ; model_case "models.p.m.api-name = 1" "api-name = 1" "models.p.m.api-name"
-  ; model_case "models.p.m.model-name = 1" "model-name = 1" "models.p.m.model-name"
+      "providers.p.capabilities.supports-inline-tools: supports-inline-tools must be a \
+       boolean"
   ; model_case
-      "models.p.m.tools-support = \"yes\""
+      "models.m.api-name = 1"
+      "api-name = 1"
+      "models.m.api-name: api-name must be a string"
+  ; model_case
+      "models.m.model-name = 1"
+      "model-name = 1"
+      "models.m.model-name: model-name must be a string"
+  ; model_case
+      "models.m.tools-support = \"yes\""
       "tools-support = \"yes\""
-      "models.p.m.tools-support"
+      "models.m.tools-support: tools-support must be a boolean"
   ; model_case
-      "models.p.m.thinking-support = \"yes\""
+      "models.m.thinking-support = \"yes\""
       "thinking-support = \"yes\""
-      "models.p.m.thinking-support"
+      "models.m.thinking-support: thinking-support must be a boolean"
   ; model_case
-      "models.p.m.preserve-thinking = 1"
+      "models.m.preserve-thinking = 1"
       "preserve-thinking = 1"
-      "models.p.m.preserve-thinking"
+      "models.m.preserve-thinking: preserve-thinking must be a boolean"
   ; model_case
-      "models.p.m.max-thinking-budget = \"x\""
+      "models.m.max-thinking-budget = \"x\""
       "max-thinking-budget = \"x\""
-      "models.p.m.max-thinking-budget"
-  ; model_case "models.p.m.streaming = 1" "streaming = 1" "models.p.m.streaming"
+      "models.m.max-thinking-budget: max-thinking-budget must be an integer"
   ; model_case
-      "models.p.m.reasoning-effort = 1"
+      "models.m.streaming = 1"
+      "streaming = 1"
+      "models.m.streaming: streaming must be a boolean"
+  ; model_case
+      "models.m.reasoning-effort = 1"
       "reasoning-effort = 1"
-      "models.p.m.reasoning-effort"
+      "models.m.reasoning-effort: reasoning-effort must be a string"
   ; model_case
-      "models.p.m.capabilities.supports-tool-choice = 1"
-      "[models.p.m.capabilities]\nsupports-tool-choice = 1"
-      "models.p.m.capabilities.supports-tool-choice"
+      "models.m.capabilities.supports-tool-choice = 1"
+      "[models.m.capabilities]\nsupports-tool-choice = 1"
+      "models.m.capabilities.supports-tool-choice: supports-tool-choice must be a boolean"
   ; model_case
-      "models.p.m.capabilities.supports-reasoning-budget = 1"
-      "[models.p.m.capabilities]\nsupports-reasoning-budget = 1"
-      "models.p.m.capabilities.supports-reasoning-budget"
+      "models.m.capabilities.supports-reasoning-budget = 1"
+      "[models.m.capabilities]\nsupports-reasoning-budget = 1"
+      "models.m.capabilities.supports-reasoning-budget: supports-reasoning-budget must be \
+       a boolean"
   ; model_case
-      "models.p.m.capabilities.emits-usage-tokens = 1"
-      "[models.p.m.capabilities]\nemits-usage-tokens = 1"
-      "models.p.m.capabilities.emits-usage-tokens"
+      "models.m.capabilities.emits-usage-tokens = 1"
+      "[models.m.capabilities]\nemits-usage-tokens = 1"
+      "models.m.capabilities.emits-usage-tokens: emits-usage-tokens must be a boolean"
   ; model_case
-      "models.p.m.capabilities.max-output-tokens = \"x\""
-      "[models.p.m.capabilities]\nmax-output-tokens = \"x\""
-      "models.p.m.capabilities.max-output-tokens"
+      "models.m.capabilities.max-output-tokens = \"x\""
+      "[models.m.capabilities]\nmax-output-tokens = \"x\""
+      "models.m.capabilities.max-output-tokens: max-output-tokens must be an integer"
   ; { label = "exec.ssh.endpoints.e.host = 1"
     ; toml =
         config ~provider_lines:well_typed_provider ~model_lines:""
         ^ "\n[exec.ssh.endpoints.e]\nhost = 1\nuser = \"u\"\n"
-    ; refusal_names = "exec.ssh.endpoints.e.host"
+    ; refusal_names = "exec.ssh.endpoints.e.host: host must be a string"
     }
   ; { label = "providers = 1"
-    ; toml = "providers = 1\n\n[models.p.m]\nid = \"m\"\n\n[runtime]\ndefault = \"p.m\"\n"
-    ; refusal_names = "[providers] must be a TOML table"
+    ; toml = "providers = 1\n\n[models.m]\n\n[runtime]\ndefault = \"p.m\"\n"
+    ; refusal_names = "providers: [providers] must be a TOML table"
     }
   ; { label = "models = 1"
     ; toml =
         "models = 1\n\n[providers.p]\n" ^ well_typed_provider
         ^ "\n\n[runtime]\ndefault = \"p.m\"\n"
-    ; refusal_names = "[models] must be a TOML table"
+    ; refusal_names = "models: [models] must be a TOML table"
     }
   ]
 ;;

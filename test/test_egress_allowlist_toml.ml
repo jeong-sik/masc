@@ -27,8 +27,7 @@ let base =
 protocol = "openai-compatible-http"
 endpoint = "https://example.invalid/v1"
 
-[models.p.m]
-id = "m"
+[models.m]
 
 [runtime]
 default = "p.m"

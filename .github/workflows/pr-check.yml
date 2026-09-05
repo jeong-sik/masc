@@ -20,10 +20,6 @@ on:
 
 permissions:
   contents: read
-  # The edited-test step asks the pull request API which files changed. A
-  # three-dot git diff cannot answer it here: the check job checks out at
-  # depth 1, so there is no merge base and the answer would be the tree.
-  pull-requests: read
 
 concurrency:
   group: pr-check-${{ github.event.pull_request.number }}
@@ -89,6 +85,15 @@ jobs:
     name: dune build @check
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      # Only the edited-test step below reads it, and it asks the pull
+      # request API which files changed because a three-dot git diff cannot
+      # answer that here: this job checks out at depth 1, so there is no
+      # merge base and the answer would be the whole tree. Scoped to this
+      # job so the lint job, which runs 37 scripts over pull request
+      # content, does not carry it.
+      pull-requests: read
     steps:
       - name: Free disk space
         # Same preinstalled bulk the manual CI removes for the same reason:
@@ -169,9 +174,13 @@ jobs:
       # unknown number stops pull requests that changed nothing to do with it.
       - name: Run the tests this pull request edits
         continue-on-error: true
+        # continue-on-error covers a failing step, not a job the runner
+        # cancelled: timeout-minutes above ends the job and reports it
+        # failed whatever a step says. So this bounds itself, and the script
+        # bounds each suite it runs on top of that.
+        timeout-minutes: 12
         env:
           GH_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
           DUNE_JOBS: "4"
         run: |
           bash scripts/ci/run-edited-tests.sh \

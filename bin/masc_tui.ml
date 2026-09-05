@@ -6710,8 +6710,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
          ^ " (Ctrl-N or /memory to cycle)")
   | Masc_tui_command.Open_fleet_memory ->
       Buffer.clear state.msg_input;
-      goto_surface state ~mailbox:async_messages Memory;
-      open_all_fleet_memory state ~mailbox:async_messages
+      goto_surface state ~mailbox Memory;
+      open_all_fleet_memory state ~mailbox
   | Masc_tui_command.Find_in_chat query ->
       (* A new query starts at the newest message; [Find_next] below carries on
          from wherever this landed. *)

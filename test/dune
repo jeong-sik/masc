@@ -3196,6 +3196,11 @@
  (libraries alcotest masc.egress_host masc.egress_proxy_decision masc.string_util))
 
 (test
+ (name test_egress_allow_text)
+ (modules test_egress_allow_text)
+ (libraries alcotest masc.runtime masc.string_util))
+
+(test
  (name test_egress_allowlist_toml)
  (modules test_egress_allowlist_toml)
  (libraries alcotest masc.runtime masc.egress_host masc.string_util))

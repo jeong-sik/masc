@@ -169,24 +169,12 @@ let row_prefixes =
     Printf.sprintf "\027[%d;1H\027[0m\027[2K" (row + 1))
 
 let append_row buffer row line =
-  if row < row_prefix_cache_size then
+  if row >= 0 && row < row_prefix_cache_size then
     Buffer.add_string buffer row_prefixes.(row)
   else
     Printf.bprintf buffer "\027[%d;1H\027[0m\027[2K" (row + 1);
   Buffer.add_string buffer line;
   Buffer.add_string buffer reset_style
-
-let changed_rows ~full_redraw ~(previous : snapshot option) screen =
-  let rows = Array.length screen in
-  let acc = ref [] in
-  for row = rows - 1 downto 0 do
-    if full_redraw
-       || match previous with
-          | None -> true
-          | Some prev -> not (String.equal prev.screen.(row) screen.(row))
-    then acc := row :: !acc
-  done;
-  !acc
 
 let append_cursor buffer ~terminal_rows ~terminal_cols = function
   | Hidden -> Buffer.add_string buffer hide_cursor
@@ -195,11 +183,26 @@ let append_cursor buffer ~terminal_rows ~terminal_cols = function
       let column = max 1 (min terminal_cols column) in
       Printf.bprintf buffer "\027[%d;%dH%s" row column show_cursor
 
+let lines_equal_to_screen (lines : string list) (screen : string array) ~terminal_rows =
+  let rec loop row = function
+    | [] ->
+        let rec all_empty r =
+          if r >= terminal_rows then true
+          else if String.equal screen.(r) "" then all_empty (r + 1)
+          else false
+        in
+        all_empty row
+    | _ when row >= terminal_rows -> true
+    | line :: rest ->
+        if String.equal screen.(row) line then loop (row + 1) rest
+        else false
+  in
+  loop 0 lines
+
 let present presenter ~invalidate_before ~write ~flush (frame : frame) =
   if invalidate_before then invalidate presenter;
   let terminal_rows = max 1 frame.terminal_rows in
   let terminal_cols = max 1 frame.terminal_cols in
-  let screen = screen_of_frame frame in
   let cursor_changed =
     match presenter.previous with
     | None -> true
@@ -212,28 +215,23 @@ let present presenter ~invalidate_before ~write ~flush (frame : frame) =
     | None -> true
     | Some previous -> not (same_geometry previous frame)
   in
-  let prev_screen =
-    match presenter.previous with
-    | Some previous -> Some previous.screen
-    | None -> None
+  let unchanged =
+    (not full_redraw)
+    && (not cursor_changed)
+    && (match presenter.previous with
+        | Some previous ->
+            lines_equal_to_screen frame.lines previous.screen ~terminal_rows
+        | None -> false)
   in
-  let has_changed_row =
-    if full_redraw then true
-    else
-      match prev_screen with
-      | None -> true
-      | Some prev ->
-          let changed = ref false in
-          let r = ref 0 in
-          while (!r < terminal_rows && not !changed) do
-            if not (String.equal prev.(!r) screen.(!r)) then changed := true;
-            incr r
-          done;
-          !changed
-  in
-  if (not has_changed_row) && (not cursor_changed) then
+  if unchanged then
     Unchanged
   else begin
+    let screen = screen_of_frame frame in
+    let prev_screen =
+      match presenter.previous with
+      | Some previous -> Some previous.screen
+      | None -> None
+    in
     let buffer = presenter.output_buffer in
     Buffer.clear buffer;
     if presenter.synchronized_output then

@@ -386,6 +386,50 @@ let test_repeated_identical_frames_retain_zero_alloc_unchanged () =
     (contains out "\027[281;1H")
 ;;
 
+let test_frame_lines_growing_and_shrinking_detected () =
+  let presenter = Presenter.create ~synchronized_output:true () in
+  let captured = sink () in
+  let f_base = frame ~rows:4 [ "a"; "b" ] in
+  (match present_result presenter captured f_base with
+   | Presenter.Presented -> ()
+   | Presenter.Unchanged -> fail "first frame must be presented");
+  (* Growing frame: adding "c" must be detected as change *)
+  reset_sink captured;
+  let f_grown = frame ~rows:4 [ "a"; "b"; "c" ] in
+  (match present_result presenter captured f_grown with
+   | Presenter.Presented -> ()
+   | Presenter.Unchanged -> fail "grown frame must be presented");
+  check int "grown frame writes" 1 (List.length captured.writes);
+  (* Shrinking frame: removing "c" must be detected as change *)
+  reset_sink captured;
+  (match present_result presenter captured f_base with
+   | Presenter.Presented -> ()
+   | Presenter.Unchanged -> fail "shrunk frame must be presented");
+  check int "shrunk frame writes" 1 (List.length captured.writes);
+  (* Identical frame must be unchanged *)
+  reset_sink captured;
+  (match present_result presenter captured f_base with
+   | Presenter.Unchanged -> ()
+   | Presenter.Presented -> fail "identical frame must be unchanged");
+  check int "identical frame writes 0" 0 (List.length captured.writes)
+;;
+
+let test_offscreen_lines_variation_retains_unchanged () =
+  let presenter = Presenter.create ~synchronized_output:true () in
+  let captured = sink () in
+  let f1 = frame ~rows:2 [ "visible 1"; "visible 2"; "offscreen 1" ] in
+  (match present_result presenter captured f1 with
+   | Presenter.Presented -> ()
+   | Presenter.Unchanged -> fail "first frame must be presented");
+  (* Variation only in offscreen row (row >= terminal_rows) produces identical visible screen *)
+  reset_sink captured;
+  let f2 = frame ~rows:2 [ "visible 1"; "visible 2"; "offscreen 2" ] in
+  (match present_result presenter captured f2 with
+   | Presenter.Unchanged -> ()
+   | Presenter.Presented -> fail "offscreen variation must remain Unchanged");
+  check int "offscreen variation writes 0" 0 (List.length captured.writes)
+;;
+
 let () =
   run "tui_frame_presenter"
     [ ( "differential output"
@@ -393,6 +437,10 @@ let () =
             test_first_frame_and_identical_frame
         ; test_case "repeated identical frames zero-alloc" `Quick
             test_repeated_identical_frames_retain_zero_alloc_unchanged
+        ; test_case "frame lines growing and shrinking" `Quick
+            test_frame_lines_growing_and_shrinking_detected
+        ; test_case "offscreen lines variation unchanged" `Quick
+            test_offscreen_lines_variation_retains_unchanged
         ; test_case "one changed row" `Quick test_only_changed_row_is_written
         ; test_case "input follows the presented frame" `Quick
             test_input_gate_follows_the_last_presented_frame
@@ -420,3 +468,4 @@ let () =
             test_cleanup_returns_the_background_before_the_screen
         ] )
     ]
+

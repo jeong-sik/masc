@@ -65,14 +65,22 @@ let get_terminal_size () =
   (max 1 (rows - 1), cols)
 
 let frame_lines buf =
-  let contents = Buffer.contents buf in
-  let len = String.length contents in
+  let str = Buffer.contents buf in
+  let len = String.length str in
   if len = 0 then []
-  else if len = 1 && contents.[0] = '\n' then [ "" ]
-  else if contents.[len - 1] = '\n' then
-    String.split_on_char '\n' (String.sub contents 0 (len - 1))
   else
-    String.split_on_char '\n' contents
+    let limit = if str.[len - 1] = '\n' then len - 1 else len in
+    let rec collect acc start idx =
+      if idx >= limit then
+        let last = String.sub str start (idx - start) in
+        List.rev (last :: acc)
+      else if str.[idx] = '\n' then
+        let line = String.sub str start (idx - start) in
+        collect (line :: acc) (idx + 1) (idx + 1)
+      else
+        collect acc start (idx + 1)
+    in
+    collect [] 0 0
 
 let count_frame_lines buf =
   let len = Buffer.length buf in
@@ -103,7 +111,15 @@ let listing_rows_below_the_body = 3
 let write_two_panes buf ~left_cols ~left ~right =
   let left_lines = frame_lines left in
   let right_lines = frame_lines right in
-  let blank_left = String.make left_cols ' ' in
+  let blank_left = ref None in
+  let get_blank_left () =
+    match !blank_left with
+    | Some s -> s
+    | None ->
+        let s = String.make left_cols ' ' in
+        blank_left := Some s;
+        s
+  in
   let rec loop l_list r_list =
     match l_list, r_list with
     | [], [] -> ()
@@ -113,7 +129,7 @@ let write_two_panes buf ~left_cols ~left ~right =
         Buffer.add_char buf '\n';
         loop lt rt
     | [], r :: rt ->
-        Buffer.add_string buf blank_left;
+        Buffer.add_string buf (get_blank_left ());
         Buffer.add_string buf r;
         Buffer.add_char buf '\n';
         loop [] rt

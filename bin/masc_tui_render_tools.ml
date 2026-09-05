@@ -272,6 +272,41 @@ let skill_config_line (config : Masc.Tui_decode.skill_catalog_config option) =
     ]
 ;;
 
+(* A composition skill's execution plan, as the batches it runs in.
+
+   The flow arrives decoded in full -- every node, the tool it calls, the
+   batch it sits in and how that batch runs -- and no renderer read any of
+   it, so the pane could say a composition had been invoked twelve times
+   without ever saying what it invokes.
+
+   The batches are the ordering the server recorded. The per-node dependency
+   edges are recorded too, and they are a graph; a graph does not fit a
+   summary row, so they stay for a detail view that does not exist yet.
+
+   Same arrow as the Goal stage rail and the Fusion topology row, so three
+   surfaces spell a pipeline one way. *)
+let skill_flow_line (flow : Masc.Tui_decode.skill_flow) =
+  let tool_of id =
+    List.find_map
+      (fun (node : Masc.Tui_decode.skill_flow_node) ->
+         if String.equal node.sfn_id id then Some node.sfn_tool_name else None)
+      flow.sf_nodes
+  in
+  let batch (b : Masc.Tui_decode.skill_flow_batch) =
+    match List.filter_map tool_of b.sfb_node_ids with
+    | [] -> None
+    | tools ->
+      Some
+        (Printf.sprintf "%s %s"
+           (Terminal_text.single_line b.sfb_execution_mode)
+           (String.concat " \xc2\xb7 "
+              (List.map Terminal_text.single_line tools)))
+  in
+  match List.filter_map batch flow.sf_batches with
+  | [] -> None
+  | parts -> Some (String.concat "  \xe2\x94\x80\xe2\x96\xb6  " parts)
+;;
+
 let skill_source_lines ~config ~(sources : Masc.Tui_decode.skill_catalog_source list) =
   let ready =
     List.length
@@ -1123,10 +1158,26 @@ let tools_display_lines (state : state) =
                              (skill_last_used_label row.su_last_used_at)))
                  |> String.concat " · "
                in
-               [ ( Ansi.bold,
-                   Tool_table.skill_usage_name_indent
-                   ^ Terminal_text.single_line surface.scs_name )
-               ; (Ansi.dim, Tool_table.skill_usage_keeper_indent ^ keepers) ])
+               (* Which kind a skill is says why it has a plan under it, or
+                  why it has none: only a composition runs a flow. *)
+               let named =
+                 Printf.sprintf "%s  %s"
+                   (Terminal_text.single_line surface.scs_name)
+                   (Terminal_text.single_line surface.scs_kind)
+               in
+               let flow_rows =
+                 match surface.scs_flow with
+                 | None -> []
+                 | Some flow ->
+                   (match skill_flow_line flow with
+                    | None -> []
+                    | Some line ->
+                      [ ( Ansi.dim
+                        , Tool_table.skill_usage_keeper_indent ^ line ) ])
+               in
+               [ (Ansi.bold, Tool_table.skill_usage_name_indent ^ named)
+               ; (Ansi.dim, Tool_table.skill_usage_keeper_indent ^ keepers) ]
+               @ flow_rows)
             used
         in
         let rejection_rows =

@@ -10,7 +10,11 @@ a conclusion rather than an observation, provide both rule_id and premise_ids; \
 the conclusion remains current only while one complete support set remains current. \
 When the claim was read from a Board post, pass board_post_id (and board_comment_id \
 for a comment) so the record names its source; a Board reference cannot be combined \
-with source_path or with a derivation."""
+with source_path or with a derivation. This is a terminal-contract tool: when \
+it succeeds, the turn ends. The runtime rejects any batch that places it \
+alongside another tool call — call it alone in its own turn, never batched \
+with reads, writes, or shell execution.\
+"""
 additional_properties = false
 
 [[params]]
@@ -59,6 +63,7 @@ short_description = "Persist a durable keeper memory claim."
 when_to_use = "Use when something from this turn must outlive it: every write is a durable claim later turns read back."
 key_constraints = [
   "There is no kind argument; sending one is rejected.",
+  "This is a terminal-contract tool: it must be the only tool call in its turn — a batch that mixes it with any other call is rejected whole before any effect.",
   "Do not use for transient scratch notes.",
   "A source-bound claim is discarded when its source bytes change or become unreadable.",
   "A derived claim cannot use source_path and is automatically retracted when no complete support set remains current.",

@@ -4,7 +4,7 @@
     The agent core exposes a composable [Log.sink = record -> unit] with pluggable
     fields (S/I/F/B/J) and levels (Debug/Info/Warn/Error).  The global
     sink registry starts empty, so [Log.info] / [Log.warn] calls inside
-    the core (e.g. [lib/agent/agent.ml]'s per-turn timing) are
+    the core (e.g. [packages/agent_core/lib/agent/agent.ml]'s per-turn timing) are
     silently dropped when MASC does not install a sink.
 
     This module provides a single sink that forwards every core record

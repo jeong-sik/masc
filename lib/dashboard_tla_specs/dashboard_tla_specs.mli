@@ -16,8 +16,8 @@
     @since 0.9.6 *)
 
 type spec_entry = {
-  name : string;          (** File stem without extension (e.g. ["RuntimeStrategy"]). *)
-  path : string;          (** Path relative to [specs_dir] (e.g. ["boundary/RuntimeStrategy.tla"]). *)
+  name : string;          (** File stem without extension (e.g. ["SandboxDispatch"]). *)
+  path : string;          (** Path relative to [specs_dir] (e.g. ["boundary/SandboxDispatch.tla"]). *)
   category : string;      (** ["boundary"] | ["bug-models"] | ["other"]. *)
   has_clean_cfg : bool;   (** [<name>.cfg] is present next to the [.tla]. *)
   has_buggy_cfg : bool;   (** [<name>-buggy.cfg] is present next to the [.tla]. *)

@@ -1,15 +1,14 @@
 (* RFC-0057 Phase 2 — spec types extracted into a standalone library.
 
-   Why standalone? The generator executable (bin/gen_tool_descriptors.ml)
-   must not depend on masc_tool_schemas (the consumer of the generated
-   file), otherwise dune sees a cycle: exe -> lib -> generated file -> exe.
-
-   Keeping these types in a tiny sibling library breaks the cycle:
-   exe depends on tool_schemas_specs (types only), and masc_tool_schemas
-   depends on nothing new — it just receives the generated ml. *)
+   It was standalone to keep the generator executable off masc_tool_schemas,
+   which consumed the file that executable produced: exe -> lib -> generated
+   file -> exe. The generator, its dune rule and the generated file are gone
+   (see tool_schemas_operator_surface.ml), so that cycle no longer exists.
+   The types stay here because Tool_schemas_misc, Dashboard and
+   test_operator_surface_toml_parity read them. *)
 
 (* The dashboard tool's [scope] argument. It is spelled in two places that
-   cannot see each other: the JSON Schema enum the generator emits, and the
+   cannot see each other: the JSON Schema enum the tool TOML declares, and the
    runtime parser in [Dashboard] that rejects anything outside it. Adding a
    scope to one and not the other either hides it from the model or advertises
    one the runtime refuses, and nothing failed when they drifted (#27069).
@@ -96,7 +95,8 @@ type tool_spec =
     Shared between gen_tool_descriptors.ml and tool_schemas_misc.ml without
     introducing circular dune dependencies. Mirrors the producer-side
     [Env_config_snapshot.valid_config_category_strings]; the drift guard
-    in [test/test_tool_descriptors_gen.ml :: config_category_ssot] asserts
+    in [test/test_operator_surface_toml_parity.ml ::
+    config_category_enum_matches_its_owner] asserts
     they stay identical. *)
 let config_category_enum_strings =
   [ "server"

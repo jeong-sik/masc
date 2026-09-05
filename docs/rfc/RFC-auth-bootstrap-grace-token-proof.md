@@ -1,3 +1,15 @@
+---
+rfc: "auth-bootstrap-grace-token-proof"
+title: "Auth bootstrap-grace requires proof of token possession"
+status: Implemented
+created: 2026-07-01
+updated: 2026-07-01
+author: claude
+supersedes: []
+superseded_by: null
+related: ["0292"]
+---
+
 # Auth bootstrap-grace requires proof of token possession
 
 - Status: Implemented

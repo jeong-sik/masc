@@ -152,6 +152,7 @@ let endpoint : Exec_ssh_endpoint.t =
   ; max_concurrent_sessions = 2
   ; env_allowlist = []
   ; capabilities = []
+  ; private_home = false
   }
 ;;
 

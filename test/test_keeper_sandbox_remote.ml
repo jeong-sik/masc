@@ -214,7 +214,7 @@ let test_openssh_probe_stays_one_word () =
     ; identity_file = ".masc/ssh/build-box.key"
     ; known_hosts_file = ".masc/ssh/known_hosts.d/build-box"
     ; remote_root = "/srv/masc/playground"; connect_timeout_sec = 1
-    ; max_concurrent_sessions = 1; env_allowlist = []; capabilities = [] }
+    ; max_concurrent_sessions = 1; env_allowlist = []; capabilities = []; private_home = false }
   in
   match Keeper_sandbox_ssh.create ~base_path ~keeper_name:"keeper-a" ~endpoint () with
   | Error error -> fail error

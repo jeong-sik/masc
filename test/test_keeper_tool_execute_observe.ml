@@ -8,14 +8,19 @@ module Stage = Masc.Keeper_tool_execute_observe
 module Target = Masc.Keeper_sandbox_shell_ir_target
 module Gate = Masc.Keeper_gate
 
-let boxed () = Target.Boxed (Masc_exec.Sandbox_target.host ())
+let observe_run = Keeper_types_profile_sandbox.Observe
+
+let boxed () =
+  Target.Boxed { target = Masc_exec.Sandbox_target.host (); run = observe_run }
+;;
 
 let result status =
   Ok { Masc_exec.Exec_dispatch.status; stdout = "out"; stderr = "err" }
 ;;
 
 let observation_label = function
-  | Gate.Observed_clean -> "clean"
+  | Gate.Observed_clean { run } ->
+    "clean:" ^ Keeper_types_profile_sandbox.observation_run_to_string run
   | Gate.Observed_refused { status = Unix.WEXITED code; stderr } ->
     Printf.sprintf "refused exit=%d stderr=%s" code stderr
   | Gate.Observed_refused { status = Unix.WSIGNALED signal; stderr } ->
@@ -31,7 +36,23 @@ let observation = testable (fun fmt o -> Format.pp_print_string fmt (observation
    allows on it must not run the call again. *)
 let test_a_clean_run_is_kept_for_the_caller () =
   let stage = Stage.create ~route:boxed ~dispatch:(fun _ -> result (Unix.WEXITED 0)) in
-  check observation "clean" Gate.Observed_clean (Stage.observe stage ());
+  check observation "clean, and it says which box"
+    (Gate.Observed_clean { run = observe_run })
+    (Stage.observe stage ());
+  (* The box the route named is the box the gate is told about: a guest_local
+     route answers guest_local, so the audit row can say so. *)
+  let local =
+    Stage.create
+      ~route:(fun () ->
+        Target.Boxed
+          { target = Masc_exec.Sandbox_target.host ()
+          ; run = Keeper_types_profile_sandbox.Guest_local
+          })
+      ~dispatch:(fun _ -> result (Unix.WEXITED 0))
+  in
+  check observation "guest_local travels"
+    (Gate.Observed_clean { run = Keeper_types_profile_sandbox.Guest_local })
+    (Stage.observe local ());
   match Stage.observed_result stage with
   | Some { Masc_exec.Exec_dispatch.stdout; _ } -> check string "the run's output" "out" stdout
   | None -> fail "a clean run left nothing for the caller"

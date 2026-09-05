@@ -30,6 +30,10 @@ connect_timeout_sec = 10
 max_concurrent_sessions = 8
 env_allowlist = ["LANG"]
 capabilities = []
+# 이 계정의 홈이 이 keeper 만의 것일 때만 true. keeper TOML 의
+# observation_run = "guest_local" 은 이 선언이 있는 엔드포인트에서만 상자를
+# 만들고, 없으면 그 요청은 judge 로 간다 (RFC-0422 §3.4).
+private_home = false
 ```
 
 Omitted path defaults resolve against the MASC base path:

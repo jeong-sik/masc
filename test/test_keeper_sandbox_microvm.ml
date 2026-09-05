@@ -398,6 +398,7 @@ let test_guest_target_follows_the_factory_contract () =
           ~meta
           ~cwd:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta)
           ~timeout_sec:60.0
+          ~base_path:base
           ()
       | No_factory -> Alcotest.fail "expected a guest runtime"
       | Remote_ssh_profile -> Alcotest.fail "expected a guest, not remote SSH"
@@ -443,6 +444,7 @@ let test_guest_target_refuses_a_profile_mismatch () =
           ~meta:caller_meta
           ~cwd:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config caller_meta)
           ~timeout_sec:60.0
+          ~base_path:base
           ()
       | No_factory -> Alcotest.fail "expected a guest runtime"
       | Remote_ssh_profile -> Alcotest.fail "expected a guest, not remote SSH"
@@ -717,7 +719,8 @@ let test_live_turn_runtime_cat () =
       let target =
         match
           Masc.Keeper_sandbox_shell_ir_target.guest_target
-            ~binding ~meta ~cwd:host_root ~timeout_sec:60.0 ()
+            ~binding ~meta ~cwd:host_root ~timeout_sec:60.0
+            ~base_path:config.Masc.Workspace.base_path ()
         with
         | Ok { target; _ } -> target
         | Error error -> Alcotest.failf "guest target: %s" error.message
@@ -1164,6 +1167,17 @@ let test_work_volume_is_named_and_mounted_at_its_root () =
     "keeper root sits on the volume"
     "/masc-work/lane-smith"
     (M.keeper_work_root ~keeper_name:"lane-smith")
+;;
+
+(* RFC-0422 §3.4: two spellings of the same choice, the keeper TOML's and the
+   shim request's, mapped in one place so they cannot drift. *)
+let test_the_box_the_toml_names_is_the_box_the_shim_is_asked_for () =
+  let mode run =
+    Exec_ssh_protocol.mode_to_string
+      (Masc.Keeper_sandbox_shell_ir_target.protocol_mode_of_run run)
+  in
+  Alcotest.(check string) "observe" "observe" (mode Profile.Observe);
+  Alcotest.(check string) "guest_local" "guest_local" (mode Profile.Guest_local)
 ;;
 
 let test_shim_travels_read_only_with_its_config () =
@@ -1823,6 +1837,8 @@ let () =
             test_volume_create_argv_carries_a_size
         ; Alcotest.test_case "shim travels read-only with its config" `Quick
             test_shim_travels_read_only_with_its_config
+        ; Alcotest.test_case "the box the TOML names is the box the shim is asked for" `Quick
+            test_the_box_the_toml_names_is_the_box_the_shim_is_asked_for
         ; Alcotest.test_case "keeper work root is created as root with a mode" `Quick
             test_keeper_work_root_is_created_as_root_with_a_mode
         ; Alcotest.test_case "work volume mounted probe reads /proc/mounts" `Quick

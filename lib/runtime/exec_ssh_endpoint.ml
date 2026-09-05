@@ -87,6 +87,9 @@ type t =
   ; capabilities : string list
     (** Reserved Phase 2 markers ({!known_capabilities}); unknown values are
         warned about and ignored at parse time. Default [[]]. *)
+  ; private_home : bool
+    (** The operator's declaration that this account's home is the keeper's
+        alone (RFC-0422 §3.4). Default [false]. *)
   }
 [@@deriving show, eq]
 let string_array values = Otoml.TomlArray (List.map (fun s -> Otoml.TomlString s) values)
@@ -110,6 +113,7 @@ let toml_of_endpoint (endpoint : t) : Otoml.t =
     ; ("max_concurrent_sessions", Otoml.integer endpoint.max_concurrent_sessions)
     ; ("env_allowlist", string_array endpoint.env_allowlist)
     ; ("capabilities", string_array endpoint.capabilities)
+    ; ("private_home", Otoml.boolean endpoint.private_home)
     ]
 
 (** Serialize one endpoint as the standard TOML text of its

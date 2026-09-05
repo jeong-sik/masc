@@ -66,6 +66,12 @@ type t =
   ; capabilities : string list
     (** Reserved Phase 2 markers ({!known_capabilities}); unknown values are
         warned about and ignored at parse time. Default [[]]. *)
+  ; private_home : bool
+    (** The operator's declaration that this account's home is the keeper's
+        alone: nothing else reads or writes there. Required before a keeper
+        on this endpoint may run its box as [guest_local], which lets writes
+        land inside the account without the judge (RFC-0422 §3.4). Default
+        [false]: a shared account keeps the judge for every write. *)
   }
 [@@deriving show, eq]
 

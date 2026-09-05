@@ -8732,22 +8732,40 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
           | Message_autonomous | Message_status | Message_local
           | Message_error | Message_memory -> (
               let seen = Hashtbl.create 4 in
-              let labels =
+              let urls =
                 Message_layout.bare_urls body
-                |> List.filter_map Masc_tui_link_label.label
-                |> List.filter (fun label ->
-                       if Hashtbl.mem seen label then false
+                |> List.filter (fun u ->
+                       if Hashtbl.mem seen u then false
                        else begin
-                         Hashtbl.add seen label ();
+                         Hashtbl.add seen u ();
                          true
                        end)
               in
-              match labels with
+              match urls with
               | [] -> body
-              | labels ->
-                  body ^ "\n"
-                  ^ String.concat "\n"
-                      (List.map (fun label -> "\xe2\x95\xb0 " ^ label) labels))
+              | urls -> (
+                  match state.link_previews_mode with
+                  | `Off -> body
+                  | `Compact ->
+                      let badges =
+                        List.map
+                          (fun u ->
+                             let p = Masc_tui_link_preview.get_preview u in
+                             Masc_tui_link_preview.render_compact_badge p)
+                          urls
+                      in
+                      body ^ "\n" ^ String.concat "\n" badges
+                  | `Rich ->
+                      let inner = max 24 (framed_inner_width chat_cols - 4) in
+                      let cards =
+                        List.map
+                          (fun u ->
+                             let p = Masc_tui_link_preview.get_preview u in
+                             String.concat "\n"
+                               (Masc_tui_link_preview.render_inline_card ~width:inner p))
+                          urls
+                      in
+                      body ^ "\n" ^ String.concat "\n" cards))
         in
         ({ style;
              timestamp =
@@ -17890,6 +17908,72 @@ let render_patch_modal (state : state) =
   finish_surface state ~surface_key:"patch-modal" ~rows:terminal_rows ~cols buf
 ;;
 
+let render_link_preview_modal (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  let url =
+    match state.link_modal_url with
+    | Some u -> u
+    | None ->
+        (match state.link_modal_links with
+         | first :: _ -> first
+         | [] -> "https://masc.ai")
+  in
+  let preview = Masc_tui_link_preview.get_preview url in
+  framed_shadow_top buf cols;
+  framed_shadow_line buf cols
+    (screen_title " Web Link Preview & Embed" ^ "  "
+     ^ (Theme.info ()) ^ "\xf0\x9f\x8c\x90 " ^ Ansi.reset
+     ^ Ansi.bold ^ Terminal_text.single_line (Masc_tui_link_preview.site_label preview) ^ Ansi.reset);
+  framed_shadow_divider buf cols;
+  let total_links = List.length state.link_modal_links in
+  let nav_line_count =
+    if total_links > 1 then begin
+      let nav =
+        Printf.sprintf "  %s[Link %d of %d]%s  [n] Next link   [p] Previous link   [o] Open in browser"
+          (Theme.warn ()) (state.link_modal_cursor + 1) total_links Ansi.reset
+      in
+      framed_shadow_line buf cols nav;
+      framed_shadow_divider buf cols;
+      2
+    end else 0
+  in
+  let fixed_chrome = 7 + nav_line_count in
+  let content_height = max 1 (rows - fixed_chrome) in
+  let content_lines =
+    Masc_tui_link_preview.render_modal_card
+      ~width:(framed_inner_width (cols - 1)) ~height:content_height preview
+  in
+  let total = List.length content_lines in
+  let max_scroll = max 0 (total - content_height) in
+  let scroll = max 0 (min state.link_modal_scroll max_scroll) in
+  state.link_modal_scroll <- scroll;
+  let lines_array = Array.of_list content_lines in
+  for i = 0 to content_height - 1 do
+    let idx = i + scroll in
+    if idx >= total then
+      framed_shadow_empty buf cols
+    else
+      let line = lines_array.(idx) in
+      framed_shadow_line buf cols line
+  done;
+  framed_shadow_divider buf cols;
+  framed_shadow_line buf cols
+    (Printf.sprintf "  %s[o]%s Browser   %s[y]%s Copy URL   %s[v]%s View Image   %s[j/k]%s Scroll   %s[Esc/q]%s Close"
+       (Theme.ok ()) Ansi.reset
+       (Theme.info ()) Ansi.reset
+       (Theme.info ()) Ansi.reset
+       (Theme.recede ()) Ansi.reset
+       (Theme.recede ()) Ansi.reset);
+  framed_shadow_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:(Printf.sprintf "[%s] o:browser  y:copy  v:image  n/p:cycle  j/k:scroll  Esc:close"
+                 (Masc_tui_link_preview.site_label preview)));
+  finish_surface state ~surface_key:"link-modal" ~rows:terminal_rows ~cols buf
+;;
+
 let render_help (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -18152,6 +18236,9 @@ let render (state : state) =
     (frame, clamped, None)
   else if state.patch_modal_open then
     let frame, clamped = render_patch_modal state in
+    (frame, clamped, None)
+  else if state.link_modal_open then
+    let frame, clamped = render_link_preview_modal state in
     (frame, clamped, None)
   else
     let frame, clamped = render_surface state in

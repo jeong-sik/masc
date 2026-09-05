@@ -3247,6 +3247,13 @@ type state = {
   mutable patch_modal_path: string option;
   mutable patch_modal_diff: (string * Tui_decode.git_diff) option;
   mutable patch_modal_error: string option;
+  (* Web Link Preview and Rich Embed modal & settings *)
+  mutable link_modal_open: bool;
+  mutable link_modal_scroll: int;
+  mutable link_modal_url: string option;
+  mutable link_modal_links: string list;
+  mutable link_modal_cursor: int;
+  mutable link_previews_mode: [ `Rich | `Compact | `Off ];
   (* Real-time Token Burn Velocity and Financial HUD *)
   mutable burn_hud_visible: bool;
   (* Code surface: one directory level at a time through the lazy /children
@@ -4313,6 +4320,12 @@ let create_state
   patch_modal_path = None;
   patch_modal_diff = None;
   patch_modal_error = None;
+  link_modal_open = false;
+  link_modal_scroll = 0;
+  link_modal_url = None;
+  link_modal_links = [];
+  link_modal_cursor = 0;
+  link_previews_mode = `Rich;
   burn_hud_visible = false;
   code_dir = "";
   code_entries = [];
@@ -5359,6 +5372,24 @@ let fleet_token_sparkline (state : state) =
 
 let fleet_total_cost_usd (state : state) =
   List.fold_left (fun acc (k : keeper) -> acc +. k.k_total_cost_usd) 0.0 state.keepers
+;;
+
+let conversation_urls (state : state) : string list =
+  let seen = Hashtbl.create 16 in
+  let acc = ref [] in
+  let scan (e : msg_entry) =
+    let urls = Masc_tui_message_layout.bare_urls e.me_text in
+    List.iter
+      (fun u ->
+         if not (Hashtbl.mem seen u) then begin
+           Hashtbl.add seen u ();
+           acc := u :: !acc
+         end)
+      urls
+  in
+  List.iter scan state.msg_history;
+  List.iter scan state.msg_loaded;
+  List.rev !acc
 ;;
 
 

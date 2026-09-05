@@ -6850,6 +6850,57 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       let cost = Masc_tui_types.fleet_total_cost_usd state in
       notice ~role:Message_local
         (Printf.sprintf "Token burn velocity HUD %s (fleet total: $%.4f)" status_str cost)
+  | Masc_tui_command.Open_link_preview url_opt ->
+      Buffer.clear state.msg_input;
+      let all_urls = Masc_tui_types.conversation_urls state in
+      state.link_modal_links <- all_urls;
+      let target_url =
+        match url_opt with
+        | Some u -> Some u
+        | None ->
+            (match all_urls with
+             | first :: _ -> Some first
+             | [] -> None)
+      in
+      (match target_url with
+       | Some u ->
+           state.link_modal_open <- true;
+           state.link_modal_url <- Some u;
+           state.link_modal_scroll <- 0;
+           let rec find_idx i = function
+             | [] -> 0
+             | x :: _ when String.equal x u -> i
+             | _ :: xs -> find_idx (i + 1) xs
+           in
+           state.link_modal_cursor <- find_idx 0 all_urls
+       | None ->
+           notice ~role:Message_local
+             "No web links found in this conversation to preview. Use /preview <url> to preview any link.")
+  | Masc_tui_command.Open_links_list ->
+      Buffer.clear state.msg_input;
+      let all_urls = Masc_tui_types.conversation_urls state in
+      state.link_modal_links <- all_urls;
+      (match all_urls with
+       | first :: _ ->
+           state.link_modal_open <- true;
+           state.link_modal_url <- Some first;
+           state.link_modal_scroll <- 0;
+           state.link_modal_cursor <- 0
+       | [] ->
+           notice ~role:Message_local "No web links found in this conversation.")
+  | Masc_tui_command.Set_embeds mode ->
+      Buffer.clear state.msg_input;
+      state.link_previews_mode <-
+        (match mode with
+         | `On -> `Rich
+         | `Compact -> `Compact
+         | `Off -> `Off);
+      notice ~role:Message_local
+        (Printf.sprintf "Inline link embed cards: %s"
+           (match state.link_previews_mode with
+            | `Rich -> "Rich (Full Cards)"
+            | `Compact -> "Compact (One Line)"
+            | `Off -> "Off"))
   | Masc_tui_command.Open_changes ->
       Buffer.clear state.msg_input;
       state.changes_return <- Changes_return_chat;
@@ -14281,6 +14332,71 @@ and is loaded on demand through keeper_skill.
                      state.view <- Keepers Keeper_message
                  | Some _ | None -> ())
             | _ -> ())
+       | Some k when state.link_modal_open ->
+           let close () =
+             state.link_modal_open <- false;
+             state.link_modal_scroll <- 0
+           in
+           (match k with
+            | "esc" | "q" | "Q" -> close ()
+            | "j" | "down" ->
+                state.link_modal_scroll <- state.link_modal_scroll + 1
+            | "k" | "up" ->
+                state.link_modal_scroll <- max 0 (state.link_modal_scroll - 1)
+            | "d" | "pagedown" ->
+                state.link_modal_scroll <- state.link_modal_scroll + 5
+            | "u" | "pageup" ->
+                state.link_modal_scroll <- max 0 (state.link_modal_scroll - 5)
+            | "g" | "home" ->
+                state.link_modal_scroll <- 0
+            | "G" | "end" ->
+                state.link_modal_scroll <- 9999
+            | "n" | "right" | "\t" ->
+                let count = List.length state.link_modal_links in
+                if count > 1 then begin
+                  let next_idx = (state.link_modal_cursor + 1) mod count in
+                  state.link_modal_cursor <- next_idx;
+                  state.link_modal_url <- List.nth_opt state.link_modal_links next_idx;
+                  state.link_modal_scroll <- 0
+                end
+            | "p" | "left" ->
+                let count = List.length state.link_modal_links in
+                if count > 1 then begin
+                  let prev_idx = (state.link_modal_cursor - 1 + count) mod count in
+                  state.link_modal_cursor <- prev_idx;
+                  state.link_modal_url <- List.nth_opt state.link_modal_links prev_idx;
+                  state.link_modal_scroll <- 0
+                end
+            | "o" | "O" | "\r" ->
+                (match state.link_modal_url with
+                 | Some url ->
+                     let cmd =
+                       if Sys.os_type = "Unix" && Sys.command "which open >/dev/null 2>&1" = 0 then
+                         Printf.sprintf "open %s >/dev/null 2>&1 &" (Filename.quote url)
+                       else
+                         Printf.sprintf "xdg-open %s >/dev/null 2>&1 &" (Filename.quote url)
+                     in
+                     ignore (Sys.command cmd);
+                     add_event state "system" ("Opening in browser: " ^ url)
+                 | None -> ())
+            | "y" | "Y" ->
+                (match state.link_modal_url with
+                 | Some url ->
+                     copy_reference_to_terminal render_schedule url;
+                     add_event state "system" ("Copied URL to clipboard: " ^ url)
+                 | None -> ())
+            | "v" | "V" ->
+                (match state.link_modal_url with
+                 | Some url ->
+                     let p = Masc_tui_link_preview.get_preview url in
+                     (match p.image_url with
+                      | Some img_url ->
+                          let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
+                          open_image state ~notice img_url
+                      | None ->
+                          add_event state "system" "Selected link is not an image resource")
+                 | None -> ())
+            | _ -> ())
        | Some k when state.patch_modal_open ->
            let close () =
              state.patch_modal_open <- false;
@@ -15349,6 +15465,17 @@ and is loaded on demand through keeper_skill.
            state.palette_open <- true;
            state.palette_query <- "";
            state.palette_cursor <- 0
+       | Some "\025" ->
+           let all_urls = Masc_tui_types.conversation_urls state in
+           state.link_modal_links <- all_urls;
+           (match all_urls with
+            | first :: _ ->
+                state.link_modal_open <- true;
+                state.link_modal_url <- Some first;
+                state.link_modal_scroll <- 0;
+                state.link_modal_cursor <- 0
+            | [] ->
+                chat_notice state ~role:Message_local "No web links found in this conversation to preview.")
        | Some "\023"
          when state.view = Board
               && terminal_columns >= keeper_split_threshold_cols

@@ -1288,6 +1288,7 @@ let request_record_json ?(keeper_name = "recovery-test") ?(submitted_at = 1.0)
      ; "keeper_name", `String keeper_name
      ; "base_path", `String (Fs_compat.realpath base_path)
      ; "submitted_by", `String caller
+     ; "request_context", `Null
      ; "status", `String status
      ; "submitted_at", `Float submitted_at
      ]
@@ -2301,6 +2302,7 @@ let test_keeper_msg_async_load_record_missing_status_is_unreadable () =
                 ; "keeper_name", `String "alpha"
                 ; "base_path", `String (Fs_compat.realpath base_path)
                 ; "submitted_by", `String caller
+                ; "request_context", `Null
                 ; "submitted_at", `Float 1.0
                 ]));
        match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
@@ -2332,6 +2334,7 @@ let test_keeper_msg_async_load_record_unknown_status_is_unreadable () =
                 ; "keeper_name", `String "alpha"
                 ; "base_path", `String (Fs_compat.realpath base_path)
                 ; "submitted_by", `String caller
+                ; "request_context", `Null
                 ; "status", `String "sideways"
                 ; "submitted_at", `Float 1.0
                 ]));

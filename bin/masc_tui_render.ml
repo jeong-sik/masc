@@ -13987,14 +13987,29 @@ let render_keeper_calls (state : state) =
           timestamp
           (connection_badge state)
     | Some snapshot ->
+        (* The verdict says what is wrong with the log; the reason says why,
+           and it is not always the verdict said twice. Four of the words
+           this route can send come with a reason derived from themselves --
+           "empty" arrives with "no_entries" -- but "coverage_gap" carries
+           the gap record's own message, which nothing else on this header
+           can supply.
+
+           The "ok" arm that used to open this match built the same string
+           the arm below it builds, so it decided nothing, and matched a
+           health word by its spelling to do it. *)
         let freshness =
+          let reason =
+            match snapshot.Masc.Tui_decode.kcs_stale_reason with
+            | None -> ""
+            | Some reason -> " · " ^ Terminal_text.single_line reason
+          in
           match
             (snapshot.Masc.Tui_decode.kcs_health,
              snapshot.Masc.Tui_decode.kcs_latest_age_s)
           with
-          | "ok", Some age -> Printf.sprintf "ok · latest %.0fs ago" age
-          | health, Some age -> Printf.sprintf "%s · latest %.0fs ago" health age
-          | health, None -> health
+          | health, Some age ->
+            Printf.sprintf "%s · latest %.0fs ago%s" health age reason
+          | health, None -> health ^ reason
         in
         Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 calls (%d)  %s  %s  %s"
           (Terminal_text.single_line keeper_name)

@@ -386,7 +386,7 @@ let handle_read_file_with_outcome
              Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()
            in
            let fetch_bytes = read_window_fetch_bytes ~max_bytes window in
-           let+ body =
+           match
              Keeper_sandbox_read_runner.read_file
                ?turn_sandbox_factory
                ~config
@@ -395,13 +395,24 @@ let handle_read_file_with_outcome
                ~max_bytes:fetch_bytes
                ~timeout_sec
                ()
-           in
-           let scan_complete = String.length body < fetch_bytes in
-           payload_of_slice
-             ~via:(Some Keeper_sandbox_read_runner.backend_via)
-             ~file_bytes:None
-             ~scan_complete
-             body)
+           with
+           | Error err when String_util.contains_substring err "path_not_found:" ->
+             Ok
+               (Read_failed_payload
+                  (missing_file_error_json
+                     ~cwd
+                     ~raw_path:(Some path)
+                     ~target
+                     ~error:err))
+           | Error err -> Error err
+           | Ok body ->
+             let scan_complete = String.length body < fetch_bytes in
+             Ok
+               (payload_of_slice
+                  ~via:(Some Keeper_sandbox_read_runner.backend_via)
+                  ~file_bytes:None
+                  ~scan_complete
+                  body))
          else (
            match Safe_ops.read_file_result target with
            | Error (Safe_ops.File_not_found _ as err) ->

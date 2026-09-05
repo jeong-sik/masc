@@ -213,17 +213,28 @@ terminate_rows() {
 # have files there, and the listing has to be taken before the tree is
 # killed. The nightly of 2026-09-05 named its two hung suites and nothing
 # else (#33200); this names the case.
-alcotest_outputs_at_deadline=6
 alcotest_output_tail_lines=40
 
-# "<mtime epoch> <path>" for the newest .output files under sandbox root
-# $1, oldest first, at most alcotest_outputs_at_deadline of them. GNU find:
-# the deadline path runs on the Linux runner. Symlinks are not followed, so
-# each file is listed once, under its run id.
+# "<mtime epoch> <path>" for, in every run id directory under sandbox root
+# $1, the case in flight (the newest .output) and the case that finished
+# last (the one before it, holding the assertions that preceded the hang);
+# oldest first. Grouped by run directory, not taken as the newest few
+# overall: the nightly of 2026-09-05 (run 33952796815) had two suites still
+# running, the hitl suite had written six files after the heartbeat suite's
+# last one, and a newest-six listing named hitl's cases and none of
+# heartbeat's. GNU find: the deadline path runs on the Linux runner.
+# Symlinks are not followed, so each file is listed once, under its run id.
+# Tab-separated through awk because alcotest names its files after the
+# group, which may hold spaces ("production exact flow.013.output").
 newest_alcotest_outputs() {
   [ -d "$1" ] || return 0
-  find "$1" -path '*/_build/_tests/*.output' -type f -printf '%T@ %p\n' 2>/dev/null \
-    | sort -n | tail -n "$alcotest_outputs_at_deadline"
+  find "$1" -path '*/_build/_tests/*.output' -type f -printf '%T@\t%h\t%p\n' 2>/dev/null \
+    | sort -n \
+    | awk -F'\t' '{ before[$2] = newest[$2]; newest[$2] = $1 " " $3 }
+                  END { for (dir in newest) {
+                          if (before[dir] != "") print before[dir]
+                          print newest[dir] } }' \
+    | sort -n
 }
 
 # The suite name of alcotest run directory $1: the sibling symlink to it
@@ -513,17 +524,19 @@ EOF
   printf 'started the case that hangs\n' > "$heartbeat_dir/lifecycle.005.output"
   printf 'ASSERT worker case 011 failed first\n' > "$hitl_dir/worker.011.output"
   printf 'worker case 012 in flight\n' > "$hitl_dir/worker.012.output"
-  for stale in 1 2 3; do
-    printf 'stale %s\n' "$stale" > "$hitl_dir/worker.00${stale}.output"
-    touch -t 202601010${stale}00 "$hitl_dir/worker.00${stale}.output"
+  # Six hitl files, every one written after both heartbeat files: the shape
+  # of the 2026-09-05 nightly, where a newest-few listing named only hitl.
+  for finished in 1 2 3 4; do
+    printf 'finished %s\n' "$finished" > "$hitl_dir/worker.00${finished}.output"
+    touch -t 202609050${finished}00 "$hitl_dir/worker.00${finished}.output"
   done
-  touch -t 202609050100 "$heartbeat_dir/lifecycle.004.output"
-  touch -t 202609050200 "$hitl_dir/worker.011.output"
-  touch -t 202609050300 "$heartbeat_dir/lifecycle.005.output"
-  touch -t 202609050400 "$hitl_dir/worker.012.output"
-  listing="$(newest_alcotest_outputs "$fixture_sandbox" | awk '{ print $2 }' | sed "s#^$fixture_sandbox/##" | tr '\n' ';')"
-  [ "$listing" = "bb22/default/test/_build/_tests/0D3E9B47/worker.002.output;bb22/default/test/_build/_tests/0D3E9B47/worker.003.output;aa11/default/test/_build/_tests/6A8F1C2B/lifecycle.004.output;bb22/default/test/_build/_tests/0D3E9B47/worker.011.output;aa11/default/test/_build/_tests/6A8F1C2B/lifecycle.005.output;bb22/default/test/_build/_tests/0D3E9B47/worker.012.output;" ] \
-    || { echo "[test-suite] self-test FAIL - the newest alcotest outputs are misordered or miscounted: $listing" >&2
+  touch -t 202609050030 "$heartbeat_dir/lifecycle.004.output"
+  touch -t 202609050045 "$heartbeat_dir/lifecycle.005.output"
+  touch -t 202609050500 "$hitl_dir/worker.011.output"
+  touch -t 202609050600 "$hitl_dir/worker.012.output"
+  listing="$(newest_alcotest_outputs "$fixture_sandbox" | cut -d' ' -f2- | sed "s#^$fixture_sandbox/##" | tr '\n' ';')"
+  [ "$listing" = "aa11/default/test/_build/_tests/6A8F1C2B/lifecycle.004.output;aa11/default/test/_build/_tests/6A8F1C2B/lifecycle.005.output;bb22/default/test/_build/_tests/0D3E9B47/worker.011.output;bb22/default/test/_build/_tests/0D3E9B47/worker.012.output;" ] \
+    || { echo "[test-suite] self-test FAIL - the in-flight and last-finished case of every running suite are not listed oldest first: $listing" >&2
          rm -rf "$fixture_sandbox"; exit 1; }
   rendered="$(newest_alcotest_outputs "$fixture_sandbox" | print_alcotest_outputs "$(date +%s)")"
   printf '%s\n' "$rendered" | grep -Fq 'alcotest output in flight: Heartbeat_integration/lifecycle.005.output' \

@@ -3639,7 +3639,8 @@ let planning_phase_label phase = Goal_phase.to_string phase
    form needs the rows below the list to be certain, and being one short is
    silent -- the frame drops its last row, which is the footer. #32928 carries
    that change for the three surfaces where the tail is already established. *)
-let planning_list_chrome_rows = 14
+(* One more than it was: the JUDGE legend sits under the column header. *)
+let planning_list_chrome_rows = 15
 let planning_list_verdict_rows = 2
 
 let planning_phase_column =
@@ -3664,6 +3665,56 @@ let planning_phase_color = function
   | Goal_phase.Completed -> (Theme.ok ())
   | Goal_phase.Dropped -> (Theme.muted ())
 
+(* The lifecycle as a rail, not a single word. The phase says where the goal
+   is; it never said what the stages are or which way they run, so "what does
+   [c] do here" was a question the screen could not answer. The occupied stop
+   is bracketed and keeps its colour, the rest stay dim.
+
+   [Dropped] is not a stop on this line -- it leaves the line -- so a dropped
+   goal draws what it is and how to come back instead of highlighting a stop
+   on a rail it is no longer on. *)
+let planning_stage_rail (phase : Goal_phase.t) =
+  let stop stage =
+    let label = planning_phase_label stage in
+    if stage = phase then
+      planning_phase_color stage ^ Ansi.bold ^ "[" ^ label ^ "]" ^ Ansi.reset
+    else Ansi.dim ^ " " ^ label ^ " " ^ Ansi.reset
+  in
+  let arrow = Ansi.dim ^ "\xe2\x94\x80\xe2\x96\xb6" ^ Ansi.reset in
+  match phase with
+  | Goal_phase.Dropped ->
+    planning_phase_color Goal_phase.Dropped
+    ^ Ansi.bold ^ "[dropped]" ^ Ansi.reset
+    ^ Ansi.dim ^ "  (off the line; [o] puts it back on executing)" ^ Ansi.reset
+  | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Completed ->
+    String.concat arrow
+      [ stop Goal_phase.Executing
+      ; stop Goal_phase.Verifying
+      ; stop Goal_phase.Completed
+      ]
+;;
+
+(* What moves this goal next, in one sentence, from the pair the operator can
+   see separately but had to combine themselves: the phase and the judge's
+   last word. [executing] with a refusal on the ledger is a different
+   instruction from [executing] with nothing on it, and both drew the same
+   word. Only the goal phase decides here -- the linked tasks have their own
+   surface and their own verdicts. *)
+let planning_next_step (goal : planning_goal) =
+  match goal.pg_phase, goal.pg_proof with
+  | Goal_phase.Executing, Tui_decode.Proof_refuted _ ->
+    ( (Theme.bad ())
+    , "refused - fix what the verdict names below, then [c] to resubmit" )
+  | Goal_phase.Executing, _ ->
+    ( Ansi.dim
+    , "work the linked tasks, then [c] to submit it for verification" )
+  | Goal_phase.Verifying, _ ->
+    ( (Theme.warn ())
+    , "with the completion judge - nothing to press; [c] re-arms the request" )
+  | Goal_phase.Completed, _ -> (Ansi.dim, "reached its target - [o] reopens it")
+  | Goal_phase.Dropped, _ -> (Ansi.dim, "abandoned - [o] reopens it")
+;;
+
 (* Planning is one operator workspace with three authorities behind it: Goal
    lifecycle, the Task verdict queue, and the verdicts the judge recorded.
    Keep their APIs separate, but make the hierarchy visible in the title
@@ -3687,8 +3738,14 @@ type planning_tab = Render_schedule.planning_tab =
    count pass "". *)
 let planning_workspace_title (state : state) ~(tab : planning_tab) ~(window : string) =
   let review_count = Option.map (fun s -> s.vs_total) state.verification in
+  let verifying_count =
+    Option.map
+      (fun (p : planning_snapshot) -> p.pl_rollup.pr_verifying)
+      state.planning
+  in
   let labels =
-    Render_schedule.planning_strip_plain ~tab ~review_count ~window
+    Render_schedule.planning_strip_plain ~tab ~review_count ~verifying_count
+      ~window
   in
   let stops = [ Planning_goals; Planning_task_review; Planning_verdicts ] in
   let draw stop label =
@@ -3883,6 +3940,11 @@ let render_planning_list (state : state) =
        in
        box_line_styled buf cols ~style:(Theme.recede ())
          ("  " ^ Render_schedule.planning_header_row ~phase_width ~title_width);
+       (* What the JUDGE column's marks mean, once, under the header that
+          names it. The glyphs are the only part of a row an operator cannot
+          read straight off, and every one of them changes what to do next. *)
+       box_line_styled buf cols ~style:Ansi.dim
+         ("  JUDGE  \xe2\x80\xa6 waiting  \xe2\x9c\x93 proven  \xe2\x9c\x97 refused, back in executing  ! unreadable");
        box_divider buf cols;
 
        if count = 0 then begin
@@ -4022,7 +4084,9 @@ let render_planning_list (state : state) =
    add one more when they are there, so the block is measured against them
    rather than against a constant that would push the footer off a full
    screen. *)
-let planning_detail_fixed_rows = 11
+(* One more than it was: the stage rail took the phase word's row and the
+   next-step sentence is a row of its own. Counted here, drawn below. *)
+let planning_detail_fixed_rows = 12
 
 let planning_detail_tone (tone : Planning_detail.tone) =
   match tone with
@@ -4060,10 +4124,11 @@ let planning_detail_pane (state : state)
   in
   let proof_glyph = planning_proof_mark goal.pg_proof in
   box_line buf cols
-    (Printf.sprintf "  Phase: %s[%s]%s   Priority: %sP%d%s   Proof: %s"
-       status_color status_label Ansi.reset
-       prio_color goal.pg_priority Ansi.reset
-       proof_glyph);
+    (Printf.sprintf "  Stage:   %s   %s"
+       (planning_stage_rail goal.pg_phase) proof_glyph);
+  let next_colour, next_text = planning_next_step goal in
+  box_line buf cols
+    (Printf.sprintf "  Next:    %s%s%s" next_colour next_text Ansi.reset);
   let due_text =
     match Terminal_text.optional_single_line goal.pg_due_date with
     | Some d -> d
@@ -4081,7 +4146,8 @@ let planning_detail_pane (state : state)
     | None -> "\xe2\x80\x94"
   in
   box_line buf cols
-    (Printf.sprintf "  Due: %s   Metric: %s" due_text metric_text);
+    (Printf.sprintf "  Target:  %s   Due: %s   Priority: %sP%d%s"
+       metric_text due_text prio_color goal.pg_priority Ansi.reset);
   box_line buf cols
     (Printf.sprintf "  Actions:  %s[c]%s Complete   %s[x]%s Drop   %s[o]%s Reopen"
        (Theme.ok ()) Ansi.reset
@@ -10472,7 +10538,7 @@ let render_harness_list (state : state) =
      by whom, and where a fallback answered instead of the evaluator the Gate
      names. *)
   box_line_styled buf cols ~style:(Theme.recede ())
-    "  Evaluator Verdicts = automatic Gate rulings (old Harness); not Goal proof.";
+    "  Task Verdicts = automatic Gate rulings on Tasks (old Harness); not Goal proof.";
   List.iter (box_line buf cols) (harness_ledger_lines ~cols state.harness);
   (* A ledger that quietly stopped is this screen's own failure mode: it once
      starved for a month while the judge kept running, and the stale rows

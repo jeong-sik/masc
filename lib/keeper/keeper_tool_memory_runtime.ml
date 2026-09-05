@@ -82,7 +82,8 @@ let durable_search_error_detail = function
 
 let read_current_facts ~keepers_dir ~keeper_id =
   match
-    Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id)
   with
   | Ok None -> Ok []
   | Ok (Some snapshot) -> Ok snapshot.facts
@@ -259,13 +260,14 @@ let ordinary_memory_ids (matches : fact_match list) =
    reported in the log and does not change it. *)
 let record_memory_events ~keepers_dir ~(meta : keeper_meta) ~now ~kind memory_ids =
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-  Keeper_memory_os_events.append_all
-    ~keepers_dir
-    ~keeper_id:meta.name
-    (List.map
-       (fun memory_id : Keeper_memory_os_events.event ->
-          { recorded_at = now; memory_id; trace_id; kind })
-       memory_ids)
+  Domain_pool_ref.submit_io_or_inline (fun () ->
+    Keeper_memory_os_events.append_all
+      ~keepers_dir
+      ~keeper_id:meta.name
+      (List.map
+         (fun memory_id : Keeper_memory_os_events.event ->
+            { recorded_at = now; memory_id; trace_id; kind })
+         memory_ids))
   |> List.iter (fun error ->
     Log.Keeper.warn
       ~keeper_name:meta.name
@@ -1140,3 +1142,11 @@ let keeper_memory_retract_with_outcome
          ~error_kind:Retract_persistence_failed
          [ "detail", `String detail ])
 ;;
+
+module For_testing = struct
+  let read_current_facts ~keepers_dir ~keeper_id =
+    Result.map_error
+      durable_search_error_detail
+      (read_current_facts ~keepers_dir ~keeper_id)
+  ;;
+end

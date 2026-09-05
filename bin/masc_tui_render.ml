@@ -15781,16 +15781,16 @@ let help_ascii_banner ~cols (state : state) =
     ; "  " ^ (Theme.info ()) ^ "\xe2\x95\x91\xe2\x95\x91\xe2\x95\x91\xe2\x95\xa0\xe2\x95\x90\xe2\x95\xa3\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x97\xe2\x95\x91    " ^ Ansi.reset
       ^ Ansi.dim ^ "Interactive Autonomous Fleet Workspace & Operations" ^ Ansi.reset
     ; "  " ^ (Theme.info ()) ^ "\xe2\x95\x9a \xe2\x95\xa9\xe2\x95\x9a \xe2\x95\xa9\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d" ^ Ansi.reset
-      ^ "  Active: " ^ (Theme.warn ()) ^ "[ " ^ surface_label ^ " ]" ^ Ansi.reset
-      ^ Ansi.dim ^ "  \xc2\xb7  [?] / [Esc] Close  \xc2\xb7  [h] Hints (" ^ hints_status ^ ")" ^ Ansi.reset
-    ; "  " ^ (Theme.recede ()) ^ repeat_utf8 bar_char (min 72 (inner_width - 4)) ^ Ansi.reset
+      ^ "  Active: " ^ (Theme.warn ()) ^ "[" ^ surface_label ^ "]" ^ Ansi.reset
+      ^ Ansi.dim ^ "  \xc2\xb7  [?] Close  \xc2\xb7  [h] Hints (" ^ hints_status ^ ")" ^ Ansi.reset
+    ; "  " ^ (Theme.recede ()) ^ repeat_utf8 bar_char (min 68 (inner_width - 4)) ^ Ansi.reset
     ; ""
     ]
   else
     [ "  " ^ Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "[ MASC · Multi-Agent System Coordinator ]" ^ Ansi.reset
-    ; "  Active: " ^ (Theme.warn ()) ^ "[ " ^ surface_label ^ " ]" ^ Ansi.reset
+    ; "  Active: " ^ (Theme.warn ()) ^ "[" ^ surface_label ^ "]" ^ Ansi.reset
       ^ Ansi.dim ^ " · [?] Close · [h] Hints (" ^ hints_status ^ ")" ^ Ansi.reset
-    ; "  " ^ (Theme.recede ()) ^ repeat_utf8 bar_char (max 10 (inner_width - 4)) ^ Ansi.reset
+    ; "  " ^ (Theme.recede ()) ^ repeat_utf8 bar_char (max 1 (inner_width - 4)) ^ Ansi.reset
     ; ""
     ]
 
@@ -15801,16 +15801,19 @@ let help_ascii_banner ~cols (state : state) =
 let help_lines (state : state) =
   let format_key key =
     let trimmed = String.trim key in
-    if String.starts_with ~prefix:"[" trimmed || String.starts_with ~prefix:"/" trimmed then
+    if String.starts_with ~prefix:"[" trimmed && String.ends_with ~suffix:"]" trimmed then
       trimmed
     else
       "[" ^ trimmed ^ "]"
   in
   let section (title, entries) =
-    let is_current = String.ends_with ~suffix:" (here)" title in
+    let is_current =
+      String.ends_with ~suffix:Masc_tui_keys.here_marker title
+    in
     let header_line =
       if is_current then
-        let base_title = String.sub title 0 (String.length title - 7) in
+        let marker_len = String.length Masc_tui_keys.here_marker in
+        let base_title = String.sub title 0 (String.length title - marker_len) in
         (Theme.warn ()) ^ "\xe2\x97\x88 " ^ Ansi.bold ^ (Theme.info ())
         ^ "ACTIVE: " ^ String.uppercase_ascii base_title ^ Ansi.reset
       else if String.equal title "Global" then
@@ -15831,22 +15834,18 @@ let help_lines (state : state) =
     @ [ "" ]
   in
   let slash_commands =
-    ((Theme.warn ()) ^ "\xe2\x9a\xa1 " ^ Ansi.bold ^ "SLASH COMMANDS" ^ Ansi.reset)
+    ((Theme.warn ()) ^ "\xe2\x9a\xa1 " ^ Ansi.bold ^ "SLASH COMMANDS & WORKFLOWS" ^ Ansi.reset)
     :: List.map
-         (fun line ->
-           let line = String.trim line in
-           let word, desc =
-             match String.index_opt line ' ' with
-             | Some idx ->
-                 (String.sub line 0 idx, String.sub line idx (String.length line - idx))
-             | None -> (line, "")
-           in
-           Printf.sprintf "  %s%-16s%s%s"
+         (fun (cmd : Masc_tui_command.command_help) ->
+           let text = Masc_tui_command.usage cmd in
+           let pad = String.make (max 2 (16 - String.length text)) ' ' in
+           Printf.sprintf "  %s%s%s%s%s"
              (Theme.warn ())
-             word
+             text
              Ansi.reset
-             desc)
-         Masc_tui_command.help_lines
+             pad
+             cmd.summary)
+         Masc_tui_command.catalog
     @ [ "" ]
   in
   (* The first section is the reader's own surface, and it opens the sheet.

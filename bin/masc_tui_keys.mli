@@ -119,6 +119,9 @@ val keeper_detail_tab_hint : Masc_tui_types.keeper_detail_tab -> string
     led by the tab switch. Projects {!keeper_detail_tab_bindings} so the
     strip and the help sheet cannot name different keys. *)
 
+val here_marker : string
+(** Marker appended to the current surface section title in {!help_sections}. *)
+
 val help_sections :
   ?current:Masc_tui_types.surface -> unit -> (string * (string * string) list) list
 (** Sections for the help sheet. [current] puts that surface's own section

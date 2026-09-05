@@ -4111,7 +4111,7 @@
 (test
  (name test_tui_help_scroll)
  (modules test_tui_help_scroll)
- (libraries alcotest masc_tui_frame masc_tui_help masc_tui_scroll))
+ (libraries alcotest masc_tui_frame masc_tui_help masc_tui_keys masc_tui_types masc_tui_scroll))
 
 (test
  (name test_tui_planning_detail)

@@ -1,0 +1,10 @@
+; The general Keeper sandbox recipe. No dependencies: it is a string and the
+; argv that feeds it to docker, so it can be read from a test without a daemon.
+
+(include_subdirs no)
+
+(library
+ (name keeper_sandbox_image)
+ (public_name masc.keeper_sandbox_image)
+ (wrapped false)
+ (modules keeper_sandbox_image))

@@ -2037,6 +2037,93 @@ let build_commit_cmd =
   let doc = "Print the Git commit embedded in this server binary at build time." in
   Cmd.v (Cmd.info "build-commit" ~doc) Term.(const build_commit_cmd_exit $ const ())
 
+(* Build the general sandbox image from the recipe this binary carries. The
+   Dockerfile goes to docker on stdin against a [-] context, so this works the
+   same on a host that has no checkout -- which is the whole point, since the
+   only image MASC described before was one you could build from the repository
+   and nowhere else. *)
+let sandbox_image_build_exit ~tag =
+  let argv =
+    Keeper_sandbox_runtime.docker_command_argv ()
+    @ Keeper_sandbox_image.build_argv ~tag
+  in
+  match argv with
+  | [] ->
+    prerr_endline "sandbox-image: no docker command resolved";
+    Cmd.Exit.some_error
+  | bin :: _ ->
+    (* docker exiting first would otherwise kill this process mid-write, and
+       the exit status we want to report is docker's own. *)
+    let previous_sigpipe = Sys.signal Sys.sigpipe Sys.Signal_ignore in
+    let read_fd, write_fd = Unix.pipe () in
+    Unix.set_close_on_exec write_fd;
+    let pid =
+      Unix.create_process bin (Array.of_list argv) read_fd Unix.stdout Unix.stderr
+    in
+    Unix.close read_fd;
+    let oc = Unix.out_channel_of_descr write_fd in
+    (try
+       output_string oc Keeper_sandbox_image.dockerfile;
+       close_out oc
+     with Sys_error _ -> (try close_out_noerr oc with _ -> ()));
+    let _, status = Unix.waitpid [] pid in
+    Sys.set_signal Sys.sigpipe previous_sigpipe;
+    (match status with
+     | Unix.WEXITED 0 ->
+       Printf.printf
+         "built %s\n\
+          Point a Keeper at it with sandbox_image = %S in its TOML, or set \
+          MASC_KEEPER_SANDBOX_DOCKER_IMAGE to make it that Keeper's default.\n"
+         tag
+         tag;
+       Cmd.Exit.ok
+     | Unix.WEXITED code ->
+       Printf.eprintf "sandbox-image: docker build exited %d\n" code;
+       Cmd.Exit.some_error
+     | Unix.WSIGNALED n | Unix.WSTOPPED n ->
+       Printf.eprintf "sandbox-image: docker build stopped by signal %d\n" n;
+       Cmd.Exit.some_error)
+
+let sandbox_image_cmd_exit print_only tag =
+  let tag = match tag with Some t -> t | None -> Keeper_sandbox_image.default_tag in
+  if print_only
+  then (
+    print_string Keeper_sandbox_image.dockerfile;
+    Cmd.Exit.ok)
+  else sandbox_image_build_exit ~tag
+
+let sandbox_image_cmd =
+  let doc = "Build the general Keeper sandbox image from the recipe in this binary." in
+  let man =
+    [ `S Manpage.s_description
+    ; `P
+        "A Keeper on sandbox_profile = \"docker\" runs each turn inside an \
+         image, and the image MASC develops itself in carries OCaml and this \
+         project's opam dependencies -- the wrong toolchain for anything else, \
+         and buildable only from a source checkout."
+    ; `P
+        "This builds the other one: bash, ripgrep and git on a Debian base, \
+         which is what a turn needs to read, search and edit a repository. The \
+         recipe is embedded in this binary and reaches docker on stdin, so no \
+         checkout and no registry is involved."
+    ; `P
+        "It is not polyglot on purpose. A Keeper that has to build a project \
+         needs that project's toolchain, named in its TOML with sandbox_image; \
+         the container is read-only, so a turn cannot install what is missing."
+    ]
+  in
+  let print_only =
+    let doc = "Write the Dockerfile to stdout instead of building it." in
+    Arg.(value & flag & info [ "print" ] ~doc)
+  in
+  let tag =
+    let doc = "Image tag to build (default: " ^ Keeper_sandbox_image.default_tag ^ ")." in
+    Arg.(value & opt (some string) None & info [ "tag" ] ~docv:"TAG" ~doc)
+  in
+  Cmd.v
+    (Cmd.info "sandbox-image" ~doc ~man)
+    Term.(const sandbox_image_cmd_exit $ print_only $ tag)
+
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling
      main_eio.exe showed heavy stop-the-world minor-GC pressure from JSON
@@ -2072,6 +2159,7 @@ let cmd =
     ; schedule_prune_cmd
     ; keeper_create_cmd
     ; keeper_github_cmd
+    ; sandbox_image_cmd
     ; build_commit_cmd
     ]
 

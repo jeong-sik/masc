@@ -97,6 +97,17 @@ type summary_attempt_disposition =
       summary_attempt_pre_worker_unavailable
   | Summary_attempt_settled
 
+type observed_status =
+  | Observed_exit of int
+  | Observed_signal of int
+  | Observed_stopped of int
+
+type observed_refusal =
+  { observed_status : observed_status
+  ; observed_stderr : string
+  ; observed_stderr_omitted_bytes : int
+  }
+
 type pending_approval =
   { id : string
   ; keeper_name : string
@@ -107,6 +118,7 @@ type pending_approval =
   ; requested_at : float
   ; turn_id : int option
   ; request_context : Yojson.Safe.t option
+  ; observation : observed_refusal option
   ; task_id : string option
   ; goal_id : string option
   ; continuation_channel : Keeper_continuation_channel.t
@@ -214,6 +226,97 @@ let authorization_source_of_string = function
   | "readonly_sandbox" -> Some Readonly_sandbox
   | "observed_in_box" -> Some Observed_in_box
   | _ -> None
+;;
+
+(* ── What the box refused (RFC-0422) ─────────────────────────────────── *)
+
+(* The tail of [stderr]: a refused write or socket is the last thing a
+   program reports, and what it printed before is context the bound can
+   drop. The cut lands on a UTF-8 character boundary so a multibyte
+   character is never split in half; the bytes dropped are counted rather
+   than marked in-band, so the text stays the program's own. *)
+let observed_refusal ~max_stderr_bytes ~status ~stderr =
+  let max_stderr_bytes = max 0 max_stderr_bytes in
+  let len = String.length stderr in
+  if len <= max_stderr_bytes
+  then
+    { observed_status = status
+    ; observed_stderr = stderr
+    ; observed_stderr_omitted_bytes = 0
+    }
+  else (
+    let rec character_start i =
+      if i < len && Char.code stderr.[i] land 0xC0 = 0x80
+      then character_start (i + 1)
+      else i
+    in
+    let start = character_start (len - max_stderr_bytes) in
+    { observed_status = status
+    ; observed_stderr = String.sub stderr start (len - start)
+    ; observed_stderr_omitted_bytes = start
+    })
+;;
+
+let observed_status_to_yojson = function
+  | Observed_exit code -> `Assoc [ "kind", `String "exit"; "code", `Int code ]
+  | Observed_signal signal -> `Assoc [ "kind", `String "signal"; "number", `Int signal ]
+  | Observed_stopped signal -> `Assoc [ "kind", `String "stopped"; "number", `Int signal ]
+;;
+
+let observed_status_of_yojson = function
+  | `Assoc fields ->
+    (match List.assoc_opt "kind" fields with
+     | Some (`String "exit") ->
+       (match List.assoc_opt "code" fields with
+        | Some (`Int code) -> Ok (Observed_exit code)
+        | Some _ | None -> Error "observation.status.exit requires an integer code")
+     | Some (`String "signal") ->
+       (match List.assoc_opt "number" fields with
+        | Some (`Int signal) -> Ok (Observed_signal signal)
+        | Some _ | None -> Error "observation.status.signal requires an integer number")
+     | Some (`String "stopped") ->
+       (match List.assoc_opt "number" fields with
+        | Some (`Int signal) -> Ok (Observed_stopped signal)
+        | Some _ | None -> Error "observation.status.stopped requires an integer number")
+     | Some (`String other) ->
+       Error
+         (Printf.sprintf
+            "observation.status.kind %S is not exit, signal or stopped"
+            other)
+     | Some _ | None -> Error "observation.status.kind must be a string")
+  | _ -> Error "observation.status must be an object"
+;;
+
+let observed_refusal_to_yojson refusal =
+  `Assoc
+    [ "status", observed_status_to_yojson refusal.observed_status
+    ; "stderr", `String refusal.observed_stderr
+    ; "stderr_omitted_bytes", `Int refusal.observed_stderr_omitted_bytes
+    ]
+;;
+
+let observed_refusal_of_yojson = function
+  | `Assoc fields ->
+    Result.bind
+      (match List.assoc_opt "status" fields with
+       | Some status -> observed_status_of_yojson status
+       | None -> Error "observation.status is required")
+      (fun observed_status ->
+        Result.bind
+          (match List.assoc_opt "stderr" fields with
+           | Some (`String stderr) -> Ok stderr
+           | Some _ | None -> Error "observation.stderr must be a string")
+          (fun observed_stderr ->
+            match List.assoc_opt "stderr_omitted_bytes" fields with
+            | Some (`Int omitted) when omitted >= 0 ->
+              Ok
+                { observed_status
+                ; observed_stderr
+                ; observed_stderr_omitted_bytes = omitted
+                }
+            | Some _ | None ->
+              Error "observation.stderr_omitted_bytes must be a non-negative integer"))
+  | _ -> Error "observation must be an object"
 ;;
 
 let bool_member key json ~default =

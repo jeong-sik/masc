@@ -503,12 +503,25 @@ let handle_tool_execute_typed
            gate_decision
          with
          | Keeper_gate.Deferred { approval_id; reason; audit_receipts } ->
+           (* RFC-0422 §3.3: a keeper whose request the box refused is told
+              what was refused, in the same bytes the judge reads, so it can
+              choose an observation-only path instead of waiting. *)
+           let observation_fields =
+             match Keeper_tool_execute_observe.outcome observation with
+             | Some (Keeper_gate.Observed_refused { status; stderr }) ->
+               [ ( "observation"
+                 , Keeper_approval_queue_rules_types.observed_refusal_to_yojson
+                     (Keeper_gate.observed_refusal ~status ~stderr) )
+               ]
+             | Some (Keeper_gate.Observed_clean | Keeper_gate.Observation_unavailable _)
+             | None -> []
+           in
            Keeper_gate_deferred_payload.create
              ~operation:gate_operation
              ~approval_id
              ~reason
              ~audit_receipts
-             ~context:(`Assoc typed_context_fields)
+             ~context:(`Assoc (typed_context_fields @ observation_fields))
              ()
            |> Keeper_gate_deferred_payload.to_execution
          | Keeper_gate.Unavailable reason ->

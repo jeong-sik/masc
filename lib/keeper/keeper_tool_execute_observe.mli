@@ -41,3 +41,8 @@ val observed_result : t -> Masc_exec.Exec_dispatch.dispatch_result option
 (** The clean run's result, [Some] exactly when {!observe} answered
     {!Keeper_gate.Observed_clean}. The caller returns it as the call's
     output instead of dispatching a second time. *)
+
+val outcome : t -> Keeper_gate.observation option
+(** What {!observe} answered the gate, [None] until the gate asked. A caller
+    whose request was deferred reads a refusal here to tell the keeper what
+    the box refused (RFC-0422 §3.3), with the same bytes the judge sees. *)

@@ -372,7 +372,11 @@ end
 
     [call_summary] is the producer's one-line statement of the call
     ({!Keeper_gate.request.call_summary}); it is written on the request's chat
-    row and takes no part in the request's identity. *)
+    row and takes no part in the request's identity.
+
+    [observation] is what the executor's box refused when the Gate ran the
+    request boxed before deferring it (RFC-0422): stored on the row, shown
+    to the judge, no part of the identity either. *)
 val submit_pending :
   keeper_name:string ->
   tool_name:string ->
@@ -381,6 +385,7 @@ val submit_pending :
   base_path:string ->
   ?turn_id:int ->
   ?request_context:Yojson.Safe.t ->
+  ?observation:Keeper_approval_queue_rules_types.observed_refusal ->
   ?task_id:string ->
   ?goal_id:string ->
   ?continuation_channel:Keeper_continuation_channel.t ->

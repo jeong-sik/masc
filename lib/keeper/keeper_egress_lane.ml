@@ -7,16 +7,30 @@ let runtime_config_path ~base_path =
   if Sys.file_exists workspace_path then Some workspace_path else Runtime.config_path ()
 ;;
 
-let resolve_allowlist ~base_path ~keeper_name =
-  let* config_path =
-    runtime_config_path ~base_path
-    |> Option.to_result
-         ~none:
-           (Printf.sprintf
-              "egress_runtime_config_missing: keeper %s is in the policy lane and \
-               runtime.toml is unavailable, so what it may reach is unknown"
-              keeper_name)
-  in
+(* Which file governs this keeper, decided once.
+
+   The lane re-reads its rules per request, and for a while it re-decided
+   this too. That put the workspace-or-global choice inside the window an
+   editor opens when it saves by temp-and-rename: for the moment the
+   workspace file does not exist, [Sys.file_exists] says no and the request
+   is answered by the *global* file -- different rules, reported as an
+   ordinary read, and then cached as the last set that parsed.
+
+   Which file governs a keeper is a fact about the deployment, not about the
+   request. It is settled at lane start; after that only its contents are
+   read, and a file that vanishes mid-lane is a read failure, which the
+   caller already knows how to hold. *)
+let resolve_config_path ~base_path ~keeper_name =
+  runtime_config_path ~base_path
+  |> Option.to_result
+       ~none:
+         (Printf.sprintf
+            "egress_runtime_config_missing: keeper %s is in the policy lane and \
+             runtime.toml is unavailable, so what it may reach is unknown"
+            keeper_name)
+;;
+
+let read_allowlist ~config_path ~keeper_name =
   let* runtime_config =
     Runtime_toml.parse_file config_path
     |> Result.map_error (fun errors ->

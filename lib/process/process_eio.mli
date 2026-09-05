@@ -67,7 +67,9 @@ val child_exit_grace_seconds : float
     the wait for the exit status is bounded by the same number, and only
     happens while the owning switch is still on; a switch that was cancelled
     during the grace gets no wait, its release hook reaps the child. Every
-    way out of a stopped spawn is therefore bounded by two of these. *)
+    way out of a stopped spawn is therefore bounded by two of these per
+    child; a pipeline stops its stages one after another, so its bound is
+    two per stage. *)
 
 (** {1 Observability hook (#9632)} *)
 

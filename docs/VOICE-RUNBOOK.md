@@ -40,11 +40,11 @@ capture after a change is what refuses, and each says so in its own words:
 |---|---|
 | speak, transcribe | `voice config load failed: <reason>` |
 | capture (TUI `Ctrl-Y`, `keeper_voice_listen`) | `voice config is invalid, so no capture was started: <reason>` |
-| `keeper_voice_speak` | the speak refusal, as the tool's error message. The Gate is not asked to review a speak that cannot reach a provider |
+| `keeper_voice_speak` | `<reason>` itself, as the tool's error `message`, from the one read that decided the Gate route. The Gate is not asked to review a speak that cannot reach a provider |
 | `GET /api/v1/voice/config` | 500 carrying the reason, at any time |
 
-`<reason>` is the loader's sentence and names the key, as in
-`capture.trigger_margin_db must be a number`.
+`<reason>` is the loader's sentence: the key, the type it wanted, and what it
+got, as `capture.trigger_margin_db must be a number, got string: "6"`.
 
 An endpoint declares a `kind`, and the kind decides the request that gets
 built — not a string match on the URL:

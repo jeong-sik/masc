@@ -1309,6 +1309,29 @@ let test_planning_columns_hold_their_offsets () =
     check_left_cell "DUE" "G" ~header ~row ~inner_width
   done
 
+let test_planning_columns_with_styles_hold_their_offsets () =
+  for inner_width = 80 to 240 do
+    let title_width =
+      Schedule.planning_title_width ~inner_width
+        ~phase_width:planning_phase_width
+    in
+    let header =
+      Schedule.planning_header_row ~phase_width:planning_phase_width
+        ~title_width
+    in
+    let row =
+      Schedule.planning_row ~phase_style:"\027[32m" ~priority_style:"\027[31m"
+        ~open_style:"\027[33m" ~phase_width:planning_phase_width ~title_width
+        planning_probe
+    in
+    check_left_cell "PHASE" "A" ~header ~row ~inner_width;
+    check_left_cell "PRI" "C" ~header ~row ~inner_width;
+    check_left_cell "OPEN" "D" ~header ~row ~inner_width;
+    check_left_cell "TITLE" "E" ~header ~row ~inner_width;
+    check_right_cell "AGE" "F" ~header ~row ~inner_width;
+    check_left_cell "DUE" "G" ~header ~row ~inner_width
+  done
+
 let board_probe =
   { Schedule.brow_mark = "@"
   ; brow_id = "A"
@@ -1527,6 +1550,8 @@ let () =
             test_harness_columns_hold_their_offsets
         ; test_case "planning columns hold their offsets" `Quick
             test_planning_columns_hold_their_offsets
+        ; test_case "planning columns with styles hold their offsets" `Quick
+            test_planning_columns_with_styles_hold_their_offsets
         ; test_case "board columns hold their offsets" `Quick
             test_board_columns_hold_their_offsets
         ; test_case "a board row is as wide as its header" `Quick

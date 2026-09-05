@@ -9,6 +9,18 @@
   Measured 2026-09-05: a 4.1 MB history on a 128k-token model was
   cut to 498 KB in three halvings and left on an operator recovery with 79
   messages still attached.
+- **A voice listen with no timeout waits 15 s, the number its schema says.**
+  `keeper_voice_listen` defaulted `timeout_seconds` to 60 s in the tool while
+  its schema advertised 15 and the TUI capture used 15; the tool passes
+  nothing now and the bridge's one default applies. The 60 came in with
+  #20370, which released the turn semaphore for the length of a listen;
+  #20379 removed that release the same day and kept the number, and nothing
+  releases a turn during a listen today. Whether 15 is the right window is
+  the owner's call with those two in view. A `keeper_voice_speak`
+  under a voice config that does not load is refused with the loader's
+  sentence instead of being sent to the Gate; capture config errors name
+  `capture.<key>`; a capture result with no `status` reads back as its own
+  case; the TUI's input-device probe reports why it found nothing.
 - **A cancel claim is the operator's to close; the system LLM reviews
   completion claims.** The lane records a cancel claim as `operator_routed`
   and has no review prompt for it. An operator-routed row is neither a verdict

@@ -958,15 +958,18 @@ let planning_no_values =
   ; prow_due = ""
   }
 
-let planning_cells ?(phase_style = "") ~phase_width ~title_width values =
+let planning_cells ?(phase_style = "") ?(priority_style = "") ?(open_style = "")
+    ~phase_width ~title_width values =
   [ Table.cell ~style:phase_style ~header:"PHASE" ~width:phase_width
       values.prow_phase
     (* The proof mark is a mark, like the roster's. A name would be four cells
        wider than the cell it names, and the contract folds a header that does
        not fit rather than letting it push the columns after it. *)
   ; Table.cell ~header:" " ~width:planning_proof_width values.prow_proof
-  ; Table.cell ~header:"PRI" ~width:planning_priority_width values.prow_priority
-  ; Table.cell ~header:"OPEN" ~width:planning_open_width values.prow_open
+  ; Table.cell ~style:priority_style ~header:"PRI" ~width:planning_priority_width
+      values.prow_priority
+  ; Table.cell ~style:open_style ~header:"OPEN" ~width:planning_open_width
+      values.prow_open
   ; Table.cell ~header:"TITLE" ~width:title_width values.prow_title
   ; Table.cell ~align:Table.Right ~header:"AGE" ~width:planning_age_width
       values.prow_age
@@ -983,8 +986,11 @@ let planning_title_width ~inner_width ~phase_width =
 let planning_header_row ~phase_width ~title_width =
   Table.header_row (planning_cells ~phase_width ~title_width planning_no_values)
 
-let planning_row ~phase_style ~phase_width ~title_width values =
-  Table.row (planning_cells ~phase_style ~phase_width ~title_width values)
+let planning_row ?(priority_style = "") ?(open_style = "") ~phase_style
+    ~phase_width ~title_width values =
+  Table.row
+    (planning_cells ~phase_style ~priority_style ~open_style ~phase_width
+       ~title_width values)
 
 (* Board post columns.
 

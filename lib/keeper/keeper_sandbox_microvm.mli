@@ -212,7 +212,11 @@ val turn_start_argv_for :
     would hand the keeper a weaker sandbox than the profile it declared, and
     nothing in the argv would say so. A [Lifecycle] one is recorded on the
     guest as a [masc.mcp.microvm_dropped] label and the boot continues,
-    because teardown removes the guest explicitly either way.
+    because teardown removes the guest explicitly either way. An
+    [Observation] one is recorded the same way: without its scratch the shim
+    answers observe requests with [observe_scratch_error] and the gate keeps
+    the judge for them, so the guest is usable and the label says what it
+    lacks.
 
     The booted guest also carries [masc.mcp.microvm_backend], so a listing
     can tell which runtime it came from without reading the keeper's TOML. *)
@@ -304,8 +308,13 @@ val shim_config_guest_path : string
 val shim_mount_args : host_dir:string -> string list
 
 val shim_config_content : payload_path:string -> string
-(** [remote_root=<work root>], [path=<payload_path>] and
-    [env_allowlist=<config env names>]: the lines the guest's shim reads. *)
+(** [remote_root=<work root>], [path=<payload_path>],
+    [env_allowlist=<config env names>] and
+    [scratch_root=<{!Keeper_microvm_backend.scratch_guest_root}>]: the lines
+    the guest's shim reads. The last names the in-memory filesystem the boot
+    mounts for boxed requests (RFC-0422); a shim older than protocol 3 refuses
+    it as an unknown key, and the lane's version probe refuses that shim
+    first. *)
 
 val remote_env_allowlist : string list
 val remote_connect_timeout_sec : int

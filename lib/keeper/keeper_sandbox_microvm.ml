@@ -592,7 +592,8 @@ let turn_start_argv_for
              ( expressed
              , ({ guest_constraint; reason } : constraint_refusal) :: refused
              , dropped )
-           | Backend.Lifecycle -> expressed, refused, guest_constraint :: dropped))
+           | Backend.Lifecycle | Backend.Observation ->
+             expressed, refused, guest_constraint :: dropped))
       ([], [], [])
       constraints
   in
@@ -870,13 +871,20 @@ let shim_mount_args ~host_dir =
     names the config env the endpoint injects with every request
     ({!Keeper_sandbox_runtime.config_env_names}) -- the shim drops any
     request env it was not told to accept, and the guest is given the
-    config mount, so it must be told the names that point at it. *)
+    config mount, so it must be told the names that point at it. The scratch
+    root is the in-memory filesystem the boot mounts
+    ({!Backend.scratch_guest_root}): where the shim makes a boxed request's
+    scratch (RFC-0422). A shim older than protocol 3 refuses the key as
+    unknown; the lane's probe refuses such a shim first
+    (remote_shim_version_skew), so the refusal an operator sees names the
+    binary rather than the config. *)
 let shim_config_content ~payload_path =
   Printf.sprintf
-    "remote_root=%s\npath=%s\nenv_allowlist=%s\n"
+    "remote_root=%s\npath=%s\nenv_allowlist=%s\nscratch_root=%s\n"
     work_volume_guest_root
     payload_path
     (String.concat "," Keeper_sandbox_runtime.config_env_names)
+    Backend.scratch_guest_root
 ;;
 
 (** What the guest endpoint declares to the remote runner. No caller env

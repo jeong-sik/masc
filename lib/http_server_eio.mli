@@ -112,8 +112,7 @@ module Response : sig
     | Not_modified of string
 
   val json_conditional
-    :  ?etag:string
-    -> status:Httpun.Status.t
+    :  status:Httpun.Status.t
     -> meth:Httpun.Method.t
     -> if_none_match:string option
     -> body:string

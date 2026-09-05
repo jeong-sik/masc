@@ -214,15 +214,11 @@ module Response = struct
          (fun tag -> String.equal (String.trim tag) etag)
          (String.split_on_char ',' client_tag)
 
-  let json_conditional ?etag ~status ~(meth : Httpun.Method.t) ~if_none_match ~body =
+  let json_conditional ~status ~(meth : Httpun.Method.t) ~if_none_match ~body =
     let safe_read = match meth with `GET | `HEAD -> true | _ -> false in
     if not (safe_read && status = `OK) then Untagged
     else
-      let etag_value =
-        match etag with
-        | Some tag -> tag
-        | None -> weak_etag_value body
-      in
+      let etag_value = weak_etag_value body in
       match if_none_match with
       | Some client_tag when client_tag_matches ~etag:etag_value ~client_tag ->
         Not_modified etag_value
@@ -248,19 +244,28 @@ module Response = struct
            ~content_type:json_content_type status final_body)
         final_body
     in
-    (* A client that sends no If-None-Match always receives the body: it has
-       not claimed to hold a copy. Measured on the live server, 11 of 12 polled
-       dashboard routes return byte-identical bodies across repeated polls, so
-       for a client that does present a tag the match is the common case. *)
-    match
-      json_conditional
-        ?etag
-        ~status
-        ~meth:request.Httpun.Request.meth
-        ~if_none_match:
-          (Httpun.Headers.get request.Httpun.Request.headers "if-none-match")
-        ~body
-    with
+    let outcome =
+      match etag with
+      | Some etag_value ->
+        let safe_read = match request.Httpun.Request.meth with `GET | `HEAD -> true | _ -> false in
+        if not (safe_read && status = `OK) then Untagged
+        else
+          let if_none_match =
+            Httpun.Headers.get request.Httpun.Request.headers "if-none-match"
+          in
+          (match if_none_match with
+          | Some client_tag when client_tag_matches ~etag:etag_value ~client_tag ->
+            Not_modified etag_value
+          | Some _ | None -> Tagged etag_value)
+      | None ->
+        json_conditional
+          ~status
+          ~meth:request.Httpun.Request.meth
+          ~if_none_match:
+            (Httpun.Headers.get request.Httpun.Request.headers "if-none-match")
+          ~body
+    in
+    match outcome with
     | Untagged -> send ~validator_headers:[]
     | Tagged etag_value ->
       send

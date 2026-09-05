@@ -71,10 +71,18 @@ dissenter 가 하는 말은 지우지 마라. 동의하지 않아도 그대로 �
 확인:
 
 ```bash
+# 1. 쉰네 파일이 그 블록을 하나씩 갖고 있는가. 아무것도 안 나와야 한다.
+grep -c '^dissenter 가 하는 말은' \
+  presets/world-*/keepers/{arbiter,maker,witness}.toml | grep -v ':1$'
+
+# 2. 그 블록들이 서로 같은가. 1 이어야 한다.
 for f in presets/world-*/keepers/{arbiter,maker,witness}.toml; do
   grep -A2 '^dissenter 가 하는 말은' "$f" | shasum
-done | sort -u | wc -l   # 1 이어야 한다
+done | sort -u | wc -l
 ```
+
+둘 다 필요하다. 2 번만 돌리면 블록이 아예 없는 파일에서 `grep` 이 빈 출력을 내고, 빈
+입력의 해시가 다른 파일들과 뭉쳐 통과할 수 있다.
 
 이건 실수가 아니라 통제다. 어떤 세계에서만 반대자를 막으라고 적으면 그 세계에서 반대
 발화가 줄어드는 건 관측이 아니라 지시의 결과가 된다. 어떤 세계에만 지키라고 적어도 같은

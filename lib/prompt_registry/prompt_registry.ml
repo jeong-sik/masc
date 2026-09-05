@@ -12,16 +12,15 @@
     - Version support for A/B testing and rollbacks
 
     Prompts enter the registry from markdown files, not from code: point
-    [set_markdown_dir] at the directory and call [load_prompts_from_directory],
-    which parses each [*.md] frontmatter and registers it. The in-code
-    registration API ([register] / [get] / [render] and the rest of the mutable
-    entry surface) was removed once nothing called it; do not reintroduce it to
-    add a prompt — add the markdown file instead.
+    [set_markdown_dir] at the directory and the pin loads it, parsing each
+    [*.md] frontmatter and its [### marker] slots and registering them. The
+    in-code registration API ([register] / [get] / [render] and the rest of
+    the mutable entry surface) was removed once nothing called it; do not
+    reintroduce it to add a prompt — add the markdown file instead.
 
     Usage:
     {[
       Prompt_registry.set_markdown_dir "prompts";
-      Prompt_registry.load_prompts_from_directory "prompts";
 
       (* Effective text for a key, override > file *)
       let prompt = Prompt_registry.get_prompt "code-review-v2" in
@@ -124,36 +123,6 @@ let prompts_dir = store.prompts_dir
 (** Markdown prompt source directory for operator-managed prompt text. *)
 let markdown_dir = store.markdown_dir
 
-let set_markdown_dir dir =
-  with_override_mutation_lock (fun () ->
-      with_mutex (fun () -> markdown_dir := Some dir))
-
-(* Dune-context fallback for the markdown dir (quick-suite unmasking
-   #24377, 'Prompt ... is missing' class). Production always pins the dir
-   through [Prompt_defaults.bootstrap_runtime], and an explicit
-   [set_markdown_dir] always wins. Test executables, however, run inside
-   dune's sandbox where the cwd has no [config/prompts]; every executable
-   that forgot the per-test pin resolved prompts to "missing" only in CI.
-   DUNE_SOURCEROOT is set by dune for every build/exec/runtest and absent
-   in production processes, so this is a deterministic, environment-scoped
-   branch — not a permissive default: outside dune the behaviour is
-   byte-identical to before (None). Tests that need true prompt absence pin an
-   explicit empty dir, which this never overrides. *)
-let dune_sourceroot_markdown_dir =
-  lazy
-    (match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | None -> None
-    | Some root ->
-        let dir = Filename.concat (Filename.concat root "config") "prompts" in
-        if Sys.file_exists dir && Sys.is_directory dir then Some dir else None)
-
-let effective_markdown_dir () =
-  match !markdown_dir with
-  | Some _ as pinned -> pinned
-  | None -> Lazy.force dune_sourceroot_markdown_dir
-
-let get_markdown_dir () = effective_markdown_dir ()
-
 let is_valid_prompt_key key =
   key <> ""
   && String.for_all
@@ -161,13 +130,6 @@ let is_valid_prompt_key key =
          | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '_' | '-' -> true
          | _ -> false)
        key
-
-let prompt_markdown_path key =
-  if not (is_valid_prompt_key key) then None
-  else
-    Option.map
-      (fun dir -> Filename.concat dir (key ^ ".md"))
-      (effective_markdown_dir ())
 
 (** Read a markdown file, stripping YAML frontmatter if present.
     Returns only the body after the closing [---] delimiter. *)
@@ -298,6 +260,236 @@ let slot_paragraph body marker =
   |> List.find_opt (fun (m, _, _, _) -> String.equal m marker)
   |> Option.map (fun (_, _, _, paragraph) -> paragraph)
 
+(* ── Directory scan and commit ──────────────────────────────────────
+
+   A directory scan runs outside every lock and yields registrations;
+   the commit writes them into [fragment_tbl] and [meta_tbl] inside one
+   registry-mutex section. Pinning a directory commits the pin and its
+   registrations in that same section, so no reader sees a pinned
+   directory whose slot keys are not in [fragment_tbl] yet: a slot key
+   ([judge.effect] is the [### effect] paragraph of [judge.md], not a
+   file) resolves only through [fragment_tbl]. *)
+
+type registration = {
+  reg_key : string;
+  reg_meta : prompt_meta;
+  reg_slot : (string * string) option;
+      (** [(group key, marker)] for a slot key; [None] for a file's own key *)
+}
+
+let registration ~key ~description ~category ~operator_surface
+    ~template_variables ~slot =
+  {
+    reg_key = key;
+    reg_meta =
+      {
+        description;
+        category;
+        operator_surface;
+        required_file = true;
+        template_variables = List.sort_uniq String.compare template_variables;
+      };
+    reg_slot = slot;
+  }
+
+(* Registrations one [*.md] file yields, slots first in file order and
+   then the file's own key. A file without frontmatter or without a
+   [description] yields nothing, as does one that fails to read. *)
+let registrations_of_file ~dir file =
+  if not (Filename.check_suffix file ".md") then []
+  else
+    let key = Filename.remove_extension file in
+    if not (is_valid_prompt_key key) then []
+    else
+      let path = Filename.concat dir file in
+      try
+        let content = In_channel.with_open_text path In_channel.input_all in
+        let meta_pairs, body = parse_frontmatter content in
+        match List.assoc_opt "description" meta_pairs with
+        | None -> []
+        | Some description ->
+            (* DET-OK: [category] is optional frontmatter with the
+               documented schema default [general]; the default does
+               not depend on time, environment, or iteration order. *)
+            let category =
+              match List.assoc_opt "category" meta_pairs with
+              | Some category -> category
+              | None -> "general"
+            in
+            let operator_surface =
+              match List.assoc_opt "operator_surface" meta_pairs with
+              | None -> Types.Primary
+              | Some value -> (
+                  match Types.operator_surface_of_string value with
+                  | Some surface -> surface
+                  | None ->
+                      Log.Misc.warn
+                        "prompt %s has unknown operator_surface=%S; keeping it visible as primary"
+                        key value;
+                      Types.Primary)
+            in
+            let template_variables =
+              match List.assoc_opt "template_variables" meta_pairs with
+              | Some v -> parse_list_value v
+              | None -> []
+            in
+            (* A group file registers each [### marker] paragraph as
+               <key>.<marker>, carrying the group's frontmatter surface
+               (the TUI prompt list hides fragments by default, so a
+               merged operator-facing prompt keeps its primary surface)
+               and the variables declared on the marker line. The prose
+               before the first marker is the group's own body and
+               registers under the group key when there is any; a file
+               without markers registers whole. *)
+            let split = split_body body in
+            (* [slot_paragraph] returns the first paragraph of a marker,
+               so a repeated marker is logged and its later paragraph
+               ignored — the registered variables and the text then come
+               from the same paragraph. A marker with no paragraph is
+               logged and not registered. *)
+            let _seen, slots =
+              List.fold_left
+                (fun (seen, slots)
+                     (marker, slot_vars, primary_declaration, paragraph) ->
+                  if List.mem marker seen then begin
+                    Log.Misc.error
+                      "prompt %s declares slot %s twice; the first paragraph stands and the later one is ignored"
+                      key marker;
+                    (seen, slots)
+                  end
+                  else if String.equal paragraph "" then begin
+                    Log.Misc.error
+                      "prompt %s slot %s has no paragraph; it is not registered"
+                      key marker;
+                    (marker :: seen, slots)
+                  end
+                  else
+                    let slot_key = key ^ "." ^ marker in
+                    let template_variables =
+                      match slot_vars with
+                      | None -> []
+                      | Some declared -> parse_list_value ("[" ^ declared ^ "]")
+                    in
+                    let slot_surface, slot_description =
+                      match primary_declaration with
+                      | None -> (Types.Fragment, description)
+                      | Some None -> (Types.Primary, description)
+                      | Some (Some own) -> (Types.Primary, own)
+                    in
+                    ( marker :: seen,
+                      registration ~key:slot_key ~description:slot_description
+                        ~category ~operator_surface:slot_surface
+                        ~template_variables
+                        ~slot:(Some (key, marker))
+                      :: slots ))
+                ([], []) split.slots
+            in
+            let own =
+              if split.slots = [] || split.preamble <> "" then
+                [
+                  registration ~key ~description ~category ~operator_surface
+                    ~template_variables ~slot:None;
+                ]
+              else []
+            in
+            List.rev_append slots own
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+          Log.Misc.error "prompt directory scan: failed to read %s: %s" file
+            (Printexc.to_string exn);
+          []
+
+(* Every registration under [dir], in [Sys.readdir] order; [] when [dir]
+   is not a directory. Takes no lock. *)
+let scan_prompt_directory dir =
+  if Sys.file_exists dir && Sys.is_directory dir then
+    Sys.readdir dir |> Array.to_list
+    |> List.concat_map (fun file -> registrations_of_file ~dir file)
+  else []
+
+(* Caller holds the registry mutex. *)
+let commit_registrations registrations =
+  List.iter
+    (fun { reg_key; reg_meta; reg_slot } ->
+      (match reg_slot with
+       | Some slot -> Hashtbl.replace fragment_tbl reg_key slot
+       | None -> ());
+      Hashtbl.replace meta_tbl reg_key reg_meta)
+    registrations
+
+(* Pinning a directory loads it. A pin does not unload what an earlier
+   directory registered; [clear] does. *)
+let set_markdown_dir dir =
+  let registrations = scan_prompt_directory dir in
+  with_override_mutation_lock (fun () ->
+      with_mutex (fun () ->
+          markdown_dir := Some dir;
+          commit_registrations registrations))
+
+(* Re-scans [dir] into the registry; the pin stays as it is. *)
+let load_prompts_from_directory dir =
+  let registrations = scan_prompt_directory dir in
+  with_override_mutation_lock (fun () ->
+      with_mutex (fun () -> commit_registrations registrations))
+
+(* Dune-context fallback for the markdown dir (#24377, #33239). Production
+   always pins the dir through [Prompt_defaults.bootstrap_runtime], and an
+   explicit [set_markdown_dir] always wins. Test executables run inside
+   dune's sandbox where the cwd has no [config/prompts]; DUNE_SOURCEROOT
+   is set by dune for every build/exec/runtest and absent in production
+   processes, so this is a deterministic, environment-scoped branch — not
+   a permissive default: outside dune the behaviour is byte-identical
+   (None). In a process with no pin, the first resolution pins
+   [<root>/config/prompts] and loads it, the same commit
+   [set_markdown_dir] makes for that directory, so slot keys reach
+   [fragment_tbl]. [clear] unpins, and the next resolution pins and loads
+   again — suites call [clear] between cases and then rely on this. Tests
+   that need true prompt absence pin an explicit empty dir, which this
+   never overrides.
+
+   The commit takes the registry mutex only. [validated_override] reaches
+   here through [file_value_of_key] while [set_override],
+   [set_override_persisted] and [restore_overrides] hold the mutation
+   lock, and [Eio.Mutex] does not re-enter, so taking the mutation lock
+   here would stop the first override written in an unpinned process.
+   The pin is re-read under the mutex: a pin that landed between the scan
+   and the commit wins and the scan is dropped. *)
+let dune_sourceroot_markdown_dir =
+  lazy
+    (match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | None -> None
+    | Some root ->
+        let dir = Filename.concat (Filename.concat root "config") "prompts" in
+        if Sys.file_exists dir && Sys.is_directory dir then Some dir else None)
+
+let pin_dune_sourceroot_markdown_dir () =
+  match Lazy.force dune_sourceroot_markdown_dir with
+  | None -> None
+  | Some dir ->
+      let registrations = scan_prompt_directory dir in
+      with_mutex (fun () ->
+          match !markdown_dir with
+          | Some _ as pinned -> pinned
+          | None ->
+              markdown_dir := Some dir;
+              commit_registrations registrations;
+              Some dir)
+
+let effective_markdown_dir () =
+  match !markdown_dir with
+  | Some _ as pinned -> pinned
+  | None -> pin_dune_sourceroot_markdown_dir ()
+
+let get_markdown_dir () = effective_markdown_dir ()
+
+let prompt_markdown_path key =
+  if not (is_valid_prompt_key key) then None
+  else
+    Option.map
+      (fun dir -> Filename.concat dir (key ^ ".md"))
+      (effective_markdown_dir ())
+
 (* The file a key resolves against: its own file, or its group's file. *)
 let prompt_source_path key =
   match Hashtbl.find_opt fragment_tbl key with
@@ -369,6 +561,7 @@ let clear () : unit =
     Hashtbl.clear meta_tbl;
     Hashtbl.clear fragment_tbl;
     prompts_dir := None;
+    (* Unpins; under dune the next resolution pins the fallback again. *)
     markdown_dir := None;
     (* Clear files if persistence enabled *)
     match persisted_dir with
@@ -383,12 +576,13 @@ let clear () : unit =
 
 (** {1 Simple Override API for Hardcoded Prompts} *)
 
-(* Pure assembly of a [resolved] record from pre-captured values.
-   Invariant: [file_value] must already be read by the caller — this
-   function never touches the filesystem, so it is safe to call from
-   inside a [with_mutex] block without the contention cost of disk
-   I/O under the lock (the original sin that [resolve_prompt] at the
-   bottom of this file was explicitly refactored to avoid, see #3335). *)
+(* Assembly of a [resolved] record from pre-captured values.
+   Invariant: [file_value] must already be read by the caller, and the
+   caller must not hold the registry mutex — [prompt_source_path] resolves
+   the markdown dir, and in an unpinned process that resolution pins and
+   loads the dune fallback under the mutex. Both callers run through
+   [resolved_of_snapshot] after the batch listing paths release the lock,
+   which also keeps disk I/O out of the mutex (#3335). *)
 let build_resolved_from_snapshot ~key ~override_value ~file_value =
   let file_path = prompt_source_path key in
   let source, effective =
@@ -478,125 +672,6 @@ let compare_prompt_items a b =
     | _ -> ""
   in
   String.compare (get_key a) (get_key b)
-
-let register_prompt_unlocked ~key ~description ?(category = "general")
-    ?(operator_surface = Types.Primary) ?(required_file = false)
-    ?(template_variables = []) () =
-  with_mutex (fun () ->
-      Hashtbl.replace meta_tbl key
-        {
-          description;
-          category;
-          operator_surface;
-          required_file;
-          template_variables = List.sort_uniq String.compare template_variables;
-        })
-
-let load_prompts_from_directory dir =
-  with_override_mutation_lock (fun () ->
-      if Sys.file_exists dir && Sys.is_directory dir then begin
-        let files = Sys.readdir dir in
-        Array.iter (fun file ->
-          if Filename.check_suffix file ".md" then begin
-            let key = Filename.remove_extension file in
-            if is_valid_prompt_key key then begin
-              let path = Filename.concat dir file in
-              try
-                let content = In_channel.with_open_text path In_channel.input_all in
-                let meta_pairs, body = parse_frontmatter content in
-                match List.assoc_opt "description" meta_pairs with
-                | None -> ()  (* no frontmatter or no description — skip *)
-                | Some description ->
-                    (* DET-OK: [category] is optional frontmatter with the
-                       documented schema default [general]; the default does
-                       not depend on time, environment, or iteration order. *)
-                    let category =
-                      match List.assoc_opt "category" meta_pairs with
-                      | Some category -> category
-                      | None -> "general"
-                    in
-                    let operator_surface =
-                      match List.assoc_opt "operator_surface" meta_pairs with
-                      | None -> Types.Primary
-                      | Some value ->
-                          (match Types.operator_surface_of_string value with
-                           | Some surface -> surface
-                           | None ->
-                               Log.Misc.warn
-                                 "prompt %s has unknown operator_surface=%S; keeping it visible as primary"
-                                 key value;
-                               Types.Primary)
-                    in
-                    let template_variables =
-                      match List.assoc_opt "template_variables" meta_pairs with
-                      | Some v -> parse_list_value v
-                      | None -> []
-                    in
-                    (* A group file registers each [### marker] paragraph
-                       as <key>.<marker>, carrying the group's frontmatter
-                       surface (the TUI prompt list hides fragments by
-                       default, so a merged operator-facing prompt keeps
-                       its primary surface) and the variables declared on
-                       the marker line. The prose before the
-                       first marker is the group's own body and registers
-                       under the group key when there is any; a file
-                       without markers registers whole. *)
-                    let split = split_body body in
-                    (* [slot_paragraph] returns the first paragraph of a
-                       marker, so a repeated marker is logged and its later
-                       paragraph ignored — the registered variables and the
-                       text then come from the same paragraph. A marker with
-                       no paragraph is logged and not registered. *)
-                    let (_ : string list) =
-                      List.fold_left
-                        (fun seen (marker, slot_vars, primary_declaration, paragraph) ->
-                          if List.mem marker seen then begin
-                            Log.Misc.error
-                              "prompt %s declares slot %s twice; the first paragraph stands and the later one is ignored"
-                              key marker;
-                            seen
-                          end
-                          else if String.equal paragraph "" then begin
-                            Log.Misc.error
-                              "prompt %s slot %s has no paragraph; it is not registered"
-                              key marker;
-                            marker :: seen
-                          end
-                          else begin
-                            let slot_key = key ^ "." ^ marker in
-                            let template_variables =
-                              match slot_vars with
-                              | None -> []
-                              | Some declared ->
-                                parse_list_value ("[" ^ declared ^ "]")
-                            in
-                            Hashtbl.replace fragment_tbl slot_key (key, marker);
-                            let slot_surface, slot_description =
-                              match primary_declaration with
-                              | None -> (Types.Fragment, description)
-                              | Some None -> (Types.Primary, description)
-                              | Some (Some own) -> (Types.Primary, own)
-                            in
-                            register_prompt_unlocked ~key:slot_key
-                              ~description:slot_description ~category
-                              ~operator_surface:slot_surface ~required_file:true
-                              ~template_variables ();
-                            marker :: seen
-                          end)
-                        [] split.slots
-                    in
-                    if split.slots = [] || split.preamble <> "" then
-                      register_prompt_unlocked ~key ~description ~category
-                        ~operator_surface
-                        ~required_file:true ~template_variables ()
-              with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-                Log.Misc.error
-                  "load_prompts_from_directory: failed to read %s: %s"
-                  file (Printexc.to_string exn)
-            end
-          end
-        ) files
-      end)
 
 (** Resolve a prompt. Resolution: override > file > missing. *)
 let resolve_prompt key =
@@ -744,6 +819,9 @@ let prompt_source key = (resolve_prompt key).source
    snapshot under the mutex, then read files + build resolved records
    outside.  Same refactor pattern as [list_prompts] below. *)
 let validate_prompt_templates () =
+  (* Resolving the dir first is what pins and loads the dune fallback in
+     an unpinned process, so the listing covers that directory too. *)
+  let (_ : string option) = effective_markdown_dir () in
   let snapshots =
     with_mutex (fun () ->
       Hashtbl.fold
@@ -787,6 +865,9 @@ let validate_prompt_templates () =
     Concurrent callers no longer serialize on disk I/O; the only lock
     hold is the in-memory Hashtbl fold. *)
 let list_prompts () =
+  (* Same first step as [validate_prompt_templates]: the listing covers
+     the dune fallback directory in an unpinned process. *)
+  let (_ : string option) = effective_markdown_dir () in
   let snapshots =
     with_mutex (fun () ->
       Hashtbl.fold

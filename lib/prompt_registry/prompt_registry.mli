@@ -7,9 +7,10 @@
     - {b File}: markdown file at
       [<markdown_dir>/<key>.md] (frontmatter stripped via
       [parse_frontmatter]).
-    - {b Default}: the template registered when
-      {!load_prompts_from_directory} parsed the prompt's
-      markdown frontmatter. There is no in-code default
+    - {b Default}: the template registered when the pin
+      ({!set_markdown_dir}, or the dune fallback behind
+      {!get_markdown_dir}) parsed the prompt's markdown
+      frontmatter. There is no in-code default
       registration API — prompts are added as files.
 
     Persistence: {!persist_overrides} writes a versioned,
@@ -27,7 +28,11 @@
     dedicated mutation mutex, then use [with_mutex] around
     {!Prompt_registry_store.t.mutex} for the in-memory commit.  Persistence I/O
     holds only the mutation mutex, so readers keep observing the previous
-    complete table until commit.  Other file reads
+    complete table until commit.  A directory scan ({!set_markdown_dir},
+    {!load_prompts_from_directory}) reads disk before taking either lock
+    and commits under both; the dune fallback commits under the registry
+    mutex only, because override validation reaches it while the mutation
+    mutex is held.  Other file reads
     ({!resolve_prompt}, {!list_prompts},
     {!validate_prompt_templates}) snapshot under the lock,
     release it, then read disk so concurrent readers do
@@ -43,11 +48,12 @@
     [build_resolved_from_snapshot], [resolved_of_snapshot],
     [unexpected_template_variables],
     [prompt_item_json_of_resolved], [compare_prompt_items],
-    [register_prompt], [register_prompt_unlocked],
-    [validated_override], [prompt_snapshot] type).
+    [registrations_of_file], [scan_prompt_directory],
+    [commit_registrations], [pin_dune_sourceroot_markdown_dir],
+    [validated_override], [prompt_snapshot] and [registration] types).
 
     Prompts are added by dropping a markdown file into the
-    directory read by {!load_prompts_from_directory}. *)
+    pinned directory. *)
 
 (** {1 Type re-exports} *)
 
@@ -86,22 +92,29 @@ type persisted_mutation_error =
 (** {1 Markdown directory} *)
 
 val set_markdown_dir : string -> unit
-(** Pins the directory the file-based resolution path
-    looks under for [<key>.md]. *)
+(** Pins the directory the file-based resolution path looks under for
+    [<key>.md] and loads it: every [*.md] with a [description] in its
+    frontmatter registers under its file key, and each [### marker]
+    paragraph under [<key>.<marker>], so a slot key such as
+    [judge.effect] resolves against [judge.md]. The scan reads disk
+    before taking any lock; the pin and its registrations commit in one
+    mutex section. A pin does not unload what an earlier directory
+    registered; {!clear} does. *)
 
 val get_markdown_dir : unit -> string option
 (** Returns the effective markdown dir: the {!set_markdown_dir} pin when
     one exists, else — only when DUNE_SOURCEROOT is set (dune build/test
     context, never production) and [<root>/config/prompts] exists — that
-    directory. [None] otherwise. Tests that need true prompt absence pin
-    an explicit empty directory instead of relying on the unset state. *)
+    directory, which the first such call pins and loads exactly as
+    {!set_markdown_dir} would. [None] otherwise. {!clear} unpins, and
+    the next call pins and loads again. Tests that need true prompt
+    absence pin an explicit empty directory instead of relying on the
+    unset state. *)
 
 val load_prompts_from_directory : string -> unit
-(** Auto-discovers [*.md] files under [dir], parses YAML
-    frontmatter, and registers each as a known prompt
-    via the internal [register_prompt] helper.  Files
-    without frontmatter (or without a [description]) are
-    skipped — those require explicit registration. *)
+(** Re-scans [dir] into the registry without touching the pin: the same
+    registrations {!set_markdown_dir} makes. Files without frontmatter
+    (or without a [description]) are skipped. *)
 
 (** {1 Resolution} *)
 
@@ -223,8 +236,10 @@ val validate_prompt_templates : unit -> (string * string) list
 
 val clear : unit -> unit
 (** Drops every entry from the registry / version index /
-    override table / meta table and unsets the persisted
-    directory.  Pinned at this boundary because
+    override table / meta table / slot table, unsets the
+    persisted directory and unpins the markdown dir — under
+    dune the next resolution pins and loads the fallback
+    again.  Pinned at this boundary because
     [test/test_prompt_registry_defaults.ml] calls it
     between cases for isolation; production code paths
     do not need it. *)

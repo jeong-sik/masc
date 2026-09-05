@@ -39,6 +39,21 @@ let typed_find (kind : string) (path : string) (tbl : Otoml.t) (key : string) ge
          (Printf.sprintf "%s must be %s; got %s" key kind msg))
 ;;
 
+(** [typed_find_or kind path tbl key getter ~default] is {!typed_find} for a
+    key whose absence means [default]. It replaces the bare
+    [Otoml.find_or] reads, which also let [Otoml.Type_error] escape. *)
+let typed_find_or
+      (kind : string)
+      (path : string)
+      (tbl : Otoml.t)
+      (key : string)
+      getter
+      ~default
+  : ('a, parse_error list) result
+  =
+  Result.map (Option.value ~default) (typed_find kind path tbl key getter)
+;;
+
 let strict_float_find (path : string) (tbl : Otoml.t) (key : string)
   : (float option, parse_error list) result
   =
@@ -76,10 +91,11 @@ let required_non_empty_string
       ~(message : string)
   : (string, parse_error list) result
   =
-  match Otoml.find_opt tbl Otoml.get_string [ key ] with
-  | Some value when String.trim value <> "" ->
+  match typed_find "a string" path tbl key Otoml.get_string with
+  | Error errors -> Error errors
+  | Ok (Some value) when String.trim value <> "" ->
     Ok (if trim_result then String.trim value else value)
-  | Some _ | None -> Error (error (path ^ "." ^ key) message)
+  | Ok (Some _ | None) -> Error (error (path ^ "." ^ key) message)
 ;;
 
 (* Partition a list of per-entry parse results into a single
@@ -231,18 +247,27 @@ let api_format_of_protocol (s : string)
 
 (* --- Transport extraction --- *)
 
-let transport_of_provider (tbl : Otoml.t) (id : string)
-  : (Runtime_schema.transport, string) result
+let transport_of_provider ~(path : string) (tbl : Otoml.t) (id : string)
+  : (Runtime_schema.transport, parse_error list) result
   =
-  let endpoint = Otoml.find_opt tbl Otoml.get_string [ "endpoint" ] in
-  let command = Otoml.find_opt tbl Otoml.get_string [ "command" ] in
-  match endpoint, command with
-  | Some url, None -> Ok (Runtime_schema.Http url)
-  | None, Some cmd -> Ok (Runtime_schema.Cli cmd)
-  | Some _, Some _ ->
-    Error (Printf.sprintf "provider %s: cannot specify both 'endpoint' and 'command'" id)
-  | None, None ->
-    Error (Printf.sprintf "provider %s: must specify either 'endpoint' or 'command'" id)
+  match
+    ( typed_find "a string" path tbl "endpoint" Otoml.get_string
+    , typed_find "a string" path tbl "command" Otoml.get_string )
+  with
+  | Error endpoint_errors, Error command_errors -> Error (endpoint_errors @ command_errors)
+  | Error errors, Ok _ | Ok _, Error errors -> Error errors
+  | Ok (Some url), Ok None -> Ok (Runtime_schema.Http url)
+  | Ok None, Ok (Some cmd) -> Ok (Runtime_schema.Cli cmd)
+  | Ok (Some _), Ok (Some _) ->
+    Error
+      (error
+         path
+         (Printf.sprintf "provider %s: cannot specify both 'endpoint' and 'command'" id))
+  | Ok None, Ok None ->
+    Error
+      (error
+         path
+         (Printf.sprintf "provider %s: must specify either 'endpoint' or 'command'" id))
 ;;
 
 let active_top_level_namespaces =
@@ -382,11 +407,15 @@ let parse_capabilities ~(path : string) (tbl : Otoml.t)
   if unknown_key_errors <> []
   then Error unknown_key_errors
   else (
-    let b key = Otoml.find_or ~default:false tbl Otoml.get_boolean [ key ] in
+    let b key = typed_find_or "a boolean" path tbl key Otoml.get_boolean ~default:false in
+    let ( let* ) = Result.bind in
+    let* supports_inline_tools = b "supports-inline-tools" in
+    let* argv_prompt_preflight = b "argv-prompt-preflight" in
+    let* uses_anthropic_caching = b "uses-messages-caching" in
     Ok
-      { Runtime_schema.supports_inline_tools = b "supports-inline-tools"
-      ; argv_prompt_preflight = b "argv-prompt-preflight"
-      ; uses_anthropic_caching = b "uses-messages-caching"
+      { Runtime_schema.supports_inline_tools
+      ; argv_prompt_preflight
+      ; uses_anthropic_caching
       })
 ;;
 
@@ -555,32 +584,33 @@ let parse_provider (id : string) (tbl : Otoml.t)
   let enabled_result =
     typed_find "a boolean" path tbl "enabled" Otoml.get_boolean
   in
-  let display_name =
-    match Otoml.find_opt tbl Otoml.get_string [ "display-name" ] with
-    | Some n -> n
-    | None ->
-      (match Otoml.find_opt tbl Otoml.get_string [ "provider-name" ] with
-       | Some n -> n
-       | None -> id)
+  let display_name_result =
+    match
+      ( typed_find "a string" path tbl "display-name" Otoml.get_string
+      , typed_find "a string" path tbl "provider-name" Otoml.get_string )
+    with
+    | Error errors, _ | _, Error errors -> Error errors
+    | Ok (Some name), Ok _ | Ok None, Ok (Some name) -> Ok name
+    | Ok None, Ok None -> Ok id
   in
   let protocol_result =
-    match Otoml.find_opt tbl Otoml.get_string [ "protocol" ] with
-    | Some p ->
+    match typed_find "a string" path tbl "protocol" Otoml.get_string with
+    | Error errors -> Error errors
+    | Ok None -> Error (error (path ^ ".protocol") "missing required field 'protocol'")
+    | Ok (Some p) ->
       (match api_format_of_protocol p with
        | Ok fmt ->
          (match canonical_protocol_of_protocol p with
           | Some protocol -> Ok (protocol, fmt)
-          | None -> Error (unknown_protocol_error p))
-       | Error e -> Error e)
-    | None -> Error "missing required field 'protocol'"
+          | None -> Error (error (path ^ ".protocol") (unknown_protocol_error p)))
+       | Error e -> Error (error (path ^ ".protocol") e))
   in
-  let transport_result = transport_of_provider tbl id in
-  match protocol_result, transport_result with
-  | Error e, _ -> Error (error (path ^ ".protocol") e)
-  | _, Error e -> Error (error path e)
-  | Ok (protocol, api_format), Ok transport ->
-    let is_non_interactive =
-      Otoml.find_or ~default:false tbl Otoml.get_boolean [ "is-non-interactive" ]
+  let transport_result = transport_of_provider ~path tbl id in
+  match display_name_result, protocol_result, transport_result with
+  | Error errors, _, _ | _, Error errors, _ | _, _, Error errors -> Error errors
+  | Ok display_name, Ok (protocol, api_format), Ok transport ->
+    let is_non_interactive_result =
+      typed_find_or "a boolean" path tbl "is-non-interactive" Otoml.get_boolean ~default:false
     in
     let credentials_result =
       match Otoml.find_opt tbl Fun.id [ "credentials" ] with
@@ -602,12 +632,20 @@ let parse_provider (id : string) (tbl : Otoml.t)
          match Otoml.find_opt tbl Fun.id [ "healthcheck" ] with
          | None -> Ok None
          | Some (Otoml.TomlTable _ | Otoml.TomlInlineTable _ as healthcheck_tbl) ->
-           (match Otoml.find_opt healthcheck_tbl Otoml.get_string [ "path" ] with
-            | None -> Ok None
-            | Some healthcheck_path when String.length healthcheck_path > 0
-                                      && Char.equal healthcheck_path.[0] '/' ->
+           (match
+              typed_find
+                "a string"
+                (path ^ ".healthcheck")
+                healthcheck_tbl
+                "path"
+                Otoml.get_string
+            with
+            | Error _ as error -> error
+            | Ok None -> Ok None
+            | Ok (Some healthcheck_path) when String.length healthcheck_path > 0
+                                           && Char.equal healthcheck_path.[0] '/' ->
               Ok (Some healthcheck_path)
-            | Some healthcheck_path ->
+            | Ok (Some healthcheck_path) ->
               Error
                 (error
                    (path ^ ".healthcheck.path")
@@ -631,11 +669,22 @@ let parse_provider (id : string) (tbl : Otoml.t)
          |> positive_finite_float_opt_field ~path ~key:connect_timeout_key
        in
        (match
-          capabilities_result, enabled_result, healthcheck_result, connect_timeout_result
+          ( capabilities_result
+          , enabled_result
+          , healthcheck_result
+          , connect_timeout_result
+          , is_non_interactive_result )
         with
-        | Error errs, _, _, _ | _, Error errs, _, _ | _, _, Error errs, _ | _, _, _, Error errs
-          -> Error errs
-        | Ok capabilities, Ok enabled_opt, Ok healthcheck_path, Ok connect_timeout_s ->
+        | Error errs, _, _, _, _
+        | _, Error errs, _, _, _
+        | _, _, Error errs, _, _
+        | _, _, _, Error errs, _
+        | _, _, _, _, Error errs -> Error errs
+        | ( Ok capabilities
+          , Ok enabled_opt
+          , Ok healthcheck_path
+          , Ok connect_timeout_s
+          , Ok is_non_interactive ) ->
           let enabled = match enabled_opt with Some value -> value | None -> true in
           Ok
             { Runtime_schema.id
@@ -659,8 +708,7 @@ let parse_providers (toml : Otoml.t)
   =
   match Otoml.find_opt toml Fun.id [ "providers" ] with
   | None -> Ok []
-  | Some providers_tbl ->
-    let entries = Otoml.get_table providers_tbl in
+  | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
     partition_results
       (List.map
          (fun (id, tbl) ->
@@ -674,6 +722,11 @@ let parse_providers (toml : Otoml.t)
             | Error _ as error -> error
             | Ok () -> parse_provider id tbl)
          entries)
+  | Some
+      ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+      | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+      | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ) ->
+    Error (error "providers" "[providers] must be a TOML table")
 ;;
 
 (* --- Layer 2: Models --- *)
@@ -759,8 +812,8 @@ let parse_thinking_control_format ~(path : string) ~(token : string option) (raw
 let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
   : (Runtime_schema.model_capabilities, parse_error list) result
   =
-  let b key = Otoml.find_or ~default:false tbl Otoml.get_boolean [ key ] in
-  let b_opt key = Otoml.find_opt tbl Otoml.get_boolean [ key ] in
+  let b key = typed_find_or "a boolean" path tbl key Otoml.get_boolean ~default:false in
+  let b_opt key = typed_find "a boolean" path tbl key Otoml.get_boolean in
   let reasoning_streaming_format_result =
     match typed_find "string" path tbl "reasoning-streaming-format" Otoml.get_string with
     | Error errors -> Error errors
@@ -777,17 +830,20 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
                  raw
                  Llm_provider.Capability_vocab.reasoning_streaming_format_syntax)))
   in
-  let b_default_true key = Otoml.find_or ~default:true tbl Otoml.get_boolean [ key ] in
+  let b_default_true key =
+    typed_find_or "a boolean" path tbl key Otoml.get_boolean ~default:true
+  in
   let positive_int_opt_field key =
-    match Otoml.find_opt tbl Otoml.get_integer [ key ] with
-    | None -> None
-    | Some n when n > 0 -> Some n
-    | Some n ->
+    match typed_find "an integer" path tbl key Otoml.get_integer with
+    | Error _ as error -> error
+    | Ok None -> Ok None
+    | Ok (Some n) when n > 0 -> Ok (Some n)
+    | Ok (Some n) ->
       Log.Runtime.warn "runtime_toml: %s.capabilities.%s = %d — expected positive integer, ignoring"
           path
           key
           n;
-      None
+      Ok None
   in
   let thinking_control_format_result =
     match
@@ -806,42 +862,69 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
                \"chat-template-token\""))
     | Ok (Some raw), Ok token -> parse_thinking_control_format ~path ~token raw
   in
-  match thinking_control_format_result, reasoning_streaming_format_result with
-  | Error errors, _ | _, Error errors -> Error errors
-  | Ok thinking_control_format, Ok reasoning_streaming_format ->
-    Ok
-      { Runtime_schema.max_output_tokens = positive_int_opt_field "max-output-tokens"
-      ; supports_tool_choice = b "supports-tool-choice"
-      ; supports_required_tool_choice = b "supports-required-tool-choice"
-      ; supports_named_tool_choice = b "supports-named-tool-choice"
-      ; supports_parallel_tool_calls = b "supports-parallel-tool-calls"
-      ; supports_extended_thinking = b "supports-extended-thinking"
-      ; supports_reasoning_budget = b "supports-reasoning-budget"
-      ; declared_supports_reasoning_budget = b_opt "supports-reasoning-budget"
-      ; thinking_control_format
-      ; declared_thinking_control_format =
-          (match Otoml.find_opt tbl Fun.id [ "thinking-control-format" ] with
-           | None -> None
-           | Some _ -> Some thinking_control_format)
-      ; reasoning_streaming_format
-      ; supports_image_input = b "supports-image-input"
-      ; supports_audio_input = b "supports-audio-input"
-      ; supports_video_input = b "supports-video-input"
-      ; supports_multimodal_inputs = b "supports-multimodal-inputs"
-      ; supports_response_format_json = b "supports-response-format-json"
-      ; supports_structured_output = b "supports-structured-output"
-      ; supports_system_prompt = b "supports-system-prompt"
-      ; supports_caching = b "supports-caching"
-      ; supports_prompt_caching = b "supports-prompt-caching"
-      ; prompt_cache_alignment = positive_int_opt_field "prompt-cache-alignment"
-      ; supports_top_k = b "supports-top-k"
-      ; supports_min_p = b "supports-min-p"
-      ; supports_seed = b "supports-seed"
-      ; supports_seed_with_images = b "supports-seed-with-images"
-      ; emits_usage_tokens = b_default_true "emits-usage-tokens"
-      ; supports_computer_use = b "supports-computer-use"
-      ; supports_code_execution = b "supports-code-execution"
-      }
+  let ( let* ) = Result.bind in
+  let* thinking_control_format = thinking_control_format_result in
+  let* reasoning_streaming_format = reasoning_streaming_format_result in
+  let* max_output_tokens = positive_int_opt_field "max-output-tokens" in
+  let* supports_tool_choice = b "supports-tool-choice" in
+  let* supports_required_tool_choice = b "supports-required-tool-choice" in
+  let* supports_named_tool_choice = b "supports-named-tool-choice" in
+  let* supports_parallel_tool_calls = b "supports-parallel-tool-calls" in
+  let* supports_extended_thinking = b "supports-extended-thinking" in
+  let* declared_supports_reasoning_budget = b_opt "supports-reasoning-budget" in
+  let supports_reasoning_budget =
+    Option.value ~default:false declared_supports_reasoning_budget
+  in
+  let* supports_image_input = b "supports-image-input" in
+  let* supports_audio_input = b "supports-audio-input" in
+  let* supports_video_input = b "supports-video-input" in
+  let* supports_multimodal_inputs = b "supports-multimodal-inputs" in
+  let* supports_response_format_json = b "supports-response-format-json" in
+  let* supports_structured_output = b "supports-structured-output" in
+  let* supports_system_prompt = b "supports-system-prompt" in
+  let* supports_caching = b "supports-caching" in
+  let* supports_prompt_caching = b "supports-prompt-caching" in
+  let* prompt_cache_alignment = positive_int_opt_field "prompt-cache-alignment" in
+  let* supports_top_k = b "supports-top-k" in
+  let* supports_min_p = b "supports-min-p" in
+  let* supports_seed = b "supports-seed" in
+  let* supports_seed_with_images = b "supports-seed-with-images" in
+  let* emits_usage_tokens = b_default_true "emits-usage-tokens" in
+  let* supports_computer_use = b "supports-computer-use" in
+  let* supports_code_execution = b "supports-code-execution" in
+  Ok
+    { Runtime_schema.max_output_tokens
+    ; supports_tool_choice
+    ; supports_required_tool_choice
+    ; supports_named_tool_choice
+    ; supports_parallel_tool_calls
+    ; supports_extended_thinking
+    ; supports_reasoning_budget
+    ; declared_supports_reasoning_budget
+    ; thinking_control_format
+    ; declared_thinking_control_format =
+        (match Otoml.find_opt tbl Fun.id [ "thinking-control-format" ] with
+         | None -> None
+         | Some _ -> Some thinking_control_format)
+    ; reasoning_streaming_format
+    ; supports_image_input
+    ; supports_audio_input
+    ; supports_video_input
+    ; supports_multimodal_inputs
+    ; supports_response_format_json
+    ; supports_structured_output
+    ; supports_system_prompt
+    ; supports_caching
+    ; supports_prompt_caching
+    ; prompt_cache_alignment
+    ; supports_top_k
+    ; supports_min_p
+    ; supports_seed
+    ; supports_seed_with_images
+    ; emits_usage_tokens
+    ; supports_computer_use
+    ; supports_code_execution
+    }
 ;;
 
 (* LLM sampling temperature bounds. OpenAI/Kimi/DeepSeek accept [0.0, 2.0]; a
@@ -902,9 +985,10 @@ let bounded_number_opt_field
 let reasoning_effort_opt_field ~(path : string) (tbl : Otoml.t)
   : (Llm_provider.Reasoning_effort.t option, parse_error list) result
   =
-  match Otoml.find_opt tbl Otoml.get_string [ "reasoning-effort" ] with
-  | None -> Ok None
-  | Some raw ->
+  match typed_find "a string" path tbl "reasoning-effort" Otoml.get_string with
+  | Error errors -> Error errors
+  | Ok None -> Ok None
+  | Ok (Some raw) ->
     (match Llm_provider.Reasoning_effort.of_string raw with
      | Some effort -> Ok (Some effort)
      | None ->
@@ -1048,13 +1132,14 @@ let parse_model (id : string) (tbl : Otoml.t)
   : (Runtime_schema.model_spec, parse_error list) result
   =
   let path = Printf.sprintf "models.%s" id in
-  let api_name =
-    match Otoml.find_opt tbl Otoml.get_string [ "api-name" ] with
-    | Some n -> n
-    | None ->
-      (match Otoml.find_opt tbl Otoml.get_string [ "model-name" ] with
-       | Some n -> n
-       | None -> id)
+  let api_name_result =
+    match
+      ( typed_find "a string" path tbl "api-name" Otoml.get_string
+      , typed_find "a string" path tbl "model-name" Otoml.get_string )
+    with
+    | Error errors, _ | _, Error errors -> Error errors
+    | Ok (Some name), Ok _ | Ok None, Ok (Some name) -> Ok name
+    | Ok None, Ok None -> Ok id
   in
   (* [max-context] is an explicit operator override, not a required field: a
      runtime whose model is covered by the AGENT_CORE capability catalog can leave it
@@ -1064,19 +1149,21 @@ let parse_model (id : string) (tbl : Otoml.t)
      a runtime that resolves neither source (RFC-0206 §2.1). *)
   let max_context_result = positive_int_opt_field ~path ~key:"max-context" tbl in
   (
-    let tools_support =
-      Otoml.find_or ~default:false tbl Otoml.get_boolean [ "tools-support" ]
+    let tools_support_result =
+      typed_find_or "a boolean" path tbl "tools-support" Otoml.get_boolean ~default:false
     in
-    let thinking_support =
-      Otoml.find_or ~default:false tbl Otoml.get_boolean [ "thinking-support" ]
+    let thinking_support_result =
+      typed_find_or "a boolean" path tbl "thinking-support" Otoml.get_boolean ~default:false
     in
-    let preserve_thinking =
-      Otoml.find_opt tbl Otoml.get_boolean [ "preserve-thinking" ]
+    let preserve_thinking_result =
+      typed_find "a boolean" path tbl "preserve-thinking" Otoml.get_boolean
     in
-    let max_thinking_budget =
-      Otoml.find_opt tbl Otoml.get_integer [ "max-thinking-budget" ]
+    let max_thinking_budget_result =
+      typed_find "an integer" path tbl "max-thinking-budget" Otoml.get_integer
     in
-    let streaming = Otoml.find_or ~default:true tbl Otoml.get_boolean [ "streaming" ] in
+    let streaming_result =
+      typed_find_or "a boolean" path tbl "streaming" Otoml.get_boolean ~default:true
+    in
     let capabilities_result =
       match Otoml.find_opt tbl Fun.id [ "capabilities" ] with
       | None -> Ok None
@@ -1094,6 +1181,12 @@ let parse_model (id : string) (tbl : Otoml.t)
       positive_int_opt_field ~path ~key:"max-prompt-bytes" tbl
     in
     let ( let* ) = Result.bind in
+    let* api_name = api_name_result in
+    let* tools_support = tools_support_result in
+    let* thinking_support = thinking_support_result in
+    let* preserve_thinking = preserve_thinking_result in
+    let* max_thinking_budget = max_thinking_budget_result in
+    let* streaming = streaming_result in
     let* max_context = max_context_result in
     let* capabilities = capabilities_result in
     let* temperature = temperature_result in
@@ -1132,8 +1225,12 @@ let parse_models (toml : Otoml.t)
   =
   match Otoml.find_opt toml Fun.id [ "models" ] with
   | None -> Ok []
-  | Some models_tbl ->
-    let entries = Otoml.get_table models_tbl in
+  | Some
+      ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+      | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+      | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ) ->
+    Error (error "models" "[models] must be a TOML table")
+  | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
     partition_results
       (List.map
          (fun (id, tbl) ->
@@ -1454,15 +1551,18 @@ let parse_egress_keeper ~(name : string) (tbl : Otoml.t)
   match unknown_key_errors with
   | _ :: _ as errors -> Error errors
   | [] ->
-    (match Otoml.find_opt tbl (Otoml.get_array Otoml.get_string) [ "allow" ] with
-     | None ->
+    (match
+       typed_find "an array of strings" path tbl "allow" (Otoml.get_array Otoml.get_string)
+     with
+     | Error errors -> Error errors
+     | Ok None ->
        (* An entry that declares no [allow] is almost certainly a mistake, and
           the safe reading of it -- an allowlist that admits nothing -- is
           already what omitting the whole table gives. Refusing says which of
           the two the operator meant. *)
        error path "egress keeper table has no 'allow' array"
        |> fun errors -> Error errors
-     | Some raws ->
+     | Ok (Some raws) ->
        let parsed =
          List.map
            (fun raw ->

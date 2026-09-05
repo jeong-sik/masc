@@ -30,26 +30,26 @@ type submit_request_spec =
 let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
     ~assignee ~(claim : Masc_domain.verification_claim) =
   let board_type = "verification_request" in
-  (* The Board post and the record name what was asked. A stop carries the
-     producer's reason where a completion carries its evidence references:
-     the reason is the whole claim, so the post states it for the operator
-     who closes the stop (RFC-0417 §4.1) and the record keeps it as
-     [cancel_reason]. The task contract describes work the producer says
-     should not be finished, and is not what a stop is judged on. *)
-  let board_title, board_content, evidence_refs, claim_fields =
+  (* The Board post names what was asked. A stop carries the producer's
+     reason where a completion carries its evidence references: the reason is
+     the whole claim, so the post states it for the operator who closes the
+     stop (RFC-0417 §4.1). The record keeps no copy of that sentence. Which
+     question was asked is the Task's status to answer, the authority routes
+     a stop to the operator before it opens the record's output, and the
+     operator reads the post. The task contract describes work the producer
+     says should not be finished, and is not what a stop is judged on. *)
+  let board_title, board_content, evidence_refs =
     match claim with
     | Masc_domain.Completion_evidence { evidence_refs } ->
       ( Printf.sprintf "Verify: %s" task.title
       , Printf.sprintf "Verification requested for task %s (%s) by %s"
           task.id task.title assignee
-      , evidence_refs
-      , [] )
+      , evidence_refs )
     | Masc_domain.Cancellation_reason { reason } ->
       ( Printf.sprintf "Cancel: %s" task.title
       , Printf.sprintf "Cancellation requested for task %s (%s) by %s: %s"
           task.id task.title assignee reason
-      , []
-      , [ ("cancel_reason", `String reason) ] )
+      , [] )
   in
   let criteria =
     match task.contract with
@@ -82,7 +82,6 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
       ([ ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
          ("task_title", `String task.title);
        ]
-       @ claim_fields
        @ evidence_fields)
   in
   { criteria

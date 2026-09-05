@@ -40,22 +40,23 @@ type verification_submission =
    reason reached no reader at all.
 
    Exhaustive on [task_action]: a new action must state its own wording, or
-   state which channel already carries it. [reason] rides along on the two
-   actions that stop work in progress — it is the only place the "why" reaches
-   a reader who is not polling the backlog.
+   state which channel already carries it. [stated_reason] rides along on the
+   two actions that stop work in progress — it is the only place the "why"
+   reaches a reader who is not polling the backlog.
 
    The "why" arrives on either of two arguments depending on the entry point.
    [release_task_r] takes no [reason] at all and forwards only
    [handoff_context], so the production release tool — which requires a handoff
    context for a strict release — reached this function with an empty [reason]
    and published a bare "Released <id>", dropping the explanation it was given.
-   [Masc_domain.stated_reason] owns that rule so the author wake resolves the
-   same "why" from the same task rather than reading only the status field. *)
-let transition_broadcast_content ~new_status ~task_id ~reason ~handoff_context
+   [Masc_domain.stated_reason] owns that rule. The caller resolves it once and
+   passes the result in, so this row prints the sentence the record, the
+   committed Task, the transition log row and the activity event print. *)
+let transition_broadcast_content ~new_status ~task_id ~(stated_reason : string option)
   : string option
   =
   let with_reason verb =
-    match Masc_domain.stated_reason ~reason:(Some reason) ~handoff_context with
+    match stated_reason with
     | None -> Some (Printf.sprintf "%s %s" verb task_id)
     | Some reason -> Some (Printf.sprintf "%s %s - %s" verb task_id reason)
   in
@@ -299,9 +300,9 @@ let transition_task_outcome_r
            point while [handoff_context.summary] is required for every
            exit-class action, so a caller that put the whole explanation in the
            summary — which the tool schema told it to fill — has stated one.
-           The verification record, the committed Task's note, the activity
-           event and the message log all read this value, so the operator, the
-           author's wake and the log see one sentence.
+           The verification record, the committed Task's note, the transition
+           log row, the message log and the activity event all read this value,
+           so the operator, the author's wake and the log see one sentence.
 
            Only this call's arguments. The note already on the Task is the
            previous owner's release summary, kept across the claim so the
@@ -485,7 +486,7 @@ let transition_task_outcome_r
                ~action:action_s
                ?assignee:(Masc_domain.task_assignee_of_status task.task_status)
                ?notes:(trim_opt (Some notes))
-               ?reason:(trim_opt (Some reason))
+               ?reason:stated_reason
                ?handoff_context:backlog_update.persisted_handoff_context
                ());
           (* Post-commit projection, isolated like the terminal hook below. The
@@ -496,11 +497,7 @@ let transition_task_outcome_r
              failure this change exists to remove. [Eio.Cancel.Cancelled] still
              propagates: a cancelled fiber must not be resumed. *)
           (match
-             transition_broadcast_content
-               ~new_status
-               ~task_id
-               ~reason
-               ~handoff_context:backlog_update.persisted_handoff_context
+             transition_broadcast_content ~new_status ~task_id ~stated_reason
            with
            | None -> ()
            | Some content ->

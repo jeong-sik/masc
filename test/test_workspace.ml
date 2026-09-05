@@ -1549,10 +1549,15 @@ let test_cancel_writes_the_record_the_authority_reads () =
     let verification_id = verification_id_for_task config "task-001" in
     match Verification.load_request config.Workspace.base_path verification_id with
     | Error e -> Alcotest.fail ("the authority would defer on: " ^ e)
-    | Ok request ->
-      Alcotest.(check string) "record carries the producer's reason"
-        "the defect no longer reproduces"
-        Yojson.Safe.Util.(request.output |> member "cancel_reason" |> to_string);
+    | Ok (_ : Verification.verification_request) ->
+      (* The record keeps no copy of the reason; the message log is the
+         reader this environment has. *)
+      Alcotest.(check bool) "the message log carries the producer's reason" true
+        (List.exists
+           (fun (message : Types.message) ->
+              String.equal message.content
+                "Cancellation requested for task-001 - the defect no longer reproduces")
+           (Workspace.get_all_messages_raw config ~since_seq:0));
       (* Which question was asked is the Task's to answer, not the record's. *)
       (match find_task config "task-001" with
        | Some { task_status = Masc_domain.AwaitingVerification
@@ -1642,10 +1647,13 @@ let test_cancel_takes_its_reason_from_the_handoff_summary () =
     let verification_id = verification_id_for_task config "task-001" in
     match Verification.load_request config.Workspace.base_path verification_id with
     | Error e -> Alcotest.fail ("the authority would defer on: " ^ e)
-    | Ok request ->
-      Alcotest.(check string) "the summary is what the judge is given"
-        "the premise this rests on is gone"
-        Yojson.Safe.Util.(request.output |> member "cancel_reason" |> to_string))
+    | Ok (_ : Verification.verification_request) ->
+      Alcotest.(check bool) "the summary is what the message log announces" true
+        (List.exists
+           (fun (message : Types.message) ->
+              String.equal message.content
+                "Cancellation requested for task-001 - the premise this rests on is gone")
+           (Workspace.get_all_messages_raw config ~since_seq:0)))
 
 let test_operator_verdict_boundary_is_reachable () =
   with_test_env (fun config ->

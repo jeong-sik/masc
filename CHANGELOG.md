@@ -8,9 +8,12 @@
   nor a lane failure on the Verifier lane.
 - **A cancel says whose reason it is.** A cancel resolves its reason from its
   own `reason` or `handoff_context` only, never from the previous owner's
-  release note the Task still carries, and is refused when neither is given;
-  the record the operator judges, the committed Task, the message log, the
-  activity event and the duration metric carry one sentence.
+  release note the Task still carries. A cancel of a claimed, started or
+  awaiting Task is refused when neither is given; a cancel of an unclaimed
+  Task commits without one. The Board post the operator judges, the
+  committed Task, the message log, the transition log row, the activity
+  event and the duration metric carry one sentence. The verification record
+  carries no `cancel_reason` field: nothing read it.
 - **The nightly test lane runs what it says.** It builds the root `@runtest`
   alias, so the 41 suites in `packages/agent_core/test`, the ten in
   `lib/exec/test` and the `tools/` suites run with the rest; the scheduled run

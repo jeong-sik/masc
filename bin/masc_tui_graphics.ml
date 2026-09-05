@@ -104,6 +104,18 @@ let place ~data { columns; rows } =
 
 let delete_all = Printf.sprintf "%sa=d%s" apc st
 
+type graphics_protocol =
+  | Kitty_protocol
+  | ITerm2_protocol
+  | Unsupported_protocol
+
+let iterm2_place ~data { columns; rows } =
+  let encoded = Base64.encode_string data in
+  if String.length encoded = 0 then ""
+  else
+    Printf.sprintf "\x1b]1337;File=inline=1;width=%d;height=%d;preserveAspectRatio=1:%s\x07"
+      (max 1 columns) (max 1 rows) encoded
+
 (* tmux forwards a wrapped escape to the terminal underneath, and requires
    every ESC inside the payload to be doubled so its own parser does not stop
    at the first one. *)

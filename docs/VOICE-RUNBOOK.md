@@ -26,10 +26,14 @@ One section in `runtime.toml`, read by `Voice_config`:
 paths refuse by name before any endpoint is asked. Present, each must name its
 `default_model`: a blank one fails the load naming `tts.default_model` or
 `stt.default_model`, since a blank name would reach providers as `model_id ""`.
-`[voice.capture]` is read as strictly as an endpoint is: a key it does not
-know, or a value of the wrong type, fails the load naming `capture.<key>`, and
-an absent key takes the measured default. Field errors name `<section>.<key>`;
-a section that is not a table is named `root.<section>`.
+`[voice.capture]` and `[voice.gate]` are read as strictly as an endpoint is: a
+key the section does not know, or a value of the wrong type, fails the load
+naming `capture.<key>` or `gate.<key>`, and an absent key takes the default.
+For capture that is the measured value; for gate it is `always_allow = false`
+and no exemptions, so the Gate reviews every speak. `gate.exempt_agents` is a
+list of agent ids, and an element that is not a non-blank string is refused by
+its index, as `gate.exempt_agents[1]`. Field errors name `<section>.<key>`; a
+section that is not a table is named `root.<section>`.
 
 ### A load failure is reported per call, not at boot
 

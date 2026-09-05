@@ -1490,13 +1490,85 @@ let load_keeper_config_editor ~(host : string) ~(port : int)
   | Error err -> Error ("keeper config load failed: " ^ err)
   | Ok json -> Ok (json, Masc_tui_keeper_config.editor_stem json)
 
+(* The github-identity payload is the fixed record built by
+   Keeper_github_identity.observation_to_yojson: hostname, config_dir,
+   projected_token_env_names, stored + effective (each
+   authenticated/login/error), effective_probe_scope. Read those fields into a
+   short human view rather than pretty-printing the raw JSON. Any shape surprise
+   (hostname absent, an error envelope, a field of the wrong type) falls back to
+   the raw block, so the tab never shows less than the payload carried. *)
+let github_identity_lines (json : Yojson.Safe.t) : string list =
+  let fallback () = sanitize_view_lines (json_block_lines json) in
+  match json with
+  | `Assoc fields -> (
+    let string_field key =
+      match List.assoc_opt key fields with
+      | Some (`String value) -> Some value
+      | Some _ | None -> None
+    in
+    let auth_status = function
+      | Some (`Assoc af) ->
+        let authenticated =
+          match List.assoc_opt "authenticated" af with
+          | Some (`Bool value) -> value
+          | Some _ | None -> false
+        in
+        let login =
+          match List.assoc_opt "login" af with
+          | Some (`String value) -> Some value
+          | Some _ | None -> None
+        in
+        let error =
+          match List.assoc_opt "error" af with
+          | Some (`String value) -> Some value
+          | Some _ | None -> None
+        in
+        Some
+          (match authenticated, login, error with
+           | true, Some who, _ -> "signed in as " ^ who
+           | true, None, _ -> "signed in"
+           | false, _, Some message -> "not signed in (" ^ message ^ ")"
+           | false, _, None -> "not signed in")
+      | Some _ | None -> None
+    in
+    match string_field "hostname" with
+    | None -> fallback ()
+    | Some hostname ->
+      let effective_label =
+        match string_field "effective_probe_scope" with
+        | Some "host_process_credential_only" -> "effective (this host)"
+        | Some "endpoint_process_only" -> "effective (remote endpoint)"
+        | Some _ | None -> "effective"
+      in
+      let token_env_line =
+        match List.assoc_opt "projected_token_env_names" fields with
+        | Some (`List ((_ :: _) as names)) ->
+          let names =
+            List.filter_map
+              (function `String value -> Some value | _ -> None)
+              names
+          in
+          "  token env: " ^ String.concat ", " names
+        | Some _ | None -> "  token env: (none)"
+      in
+      let line label = function Some status -> [ "  " ^ label ^ ": " ^ status ] | None -> [] in
+      let lines =
+        [ Printf.sprintf "GitHub (%s)" hostname ]
+        @ line "stored" (auth_status (List.assoc_opt "stored" fields))
+        @ line effective_label (auth_status (List.assoc_opt "effective" fields))
+        @ [ token_env_line ]
+        @ (match string_field "config_dir" with Some dir -> [ "  config: " ^ dir ] | None -> [])
+      in
+      sanitize_view_lines lines)
+  | _ -> fallback ()
+
 let load_keeper_github_identity_view ~(host : string) ~(port : int)
     ~(keeper_name : string) : (string list, string) result =
   match
     Masc_tui_http.fetch_keeper_github_identity ~host ~port ~keeper_name
   with
   | Error err -> Error ("github identity load failed: " ^ err)
-  | Ok json -> Ok (sanitize_view_lines (json_block_lines json))
+  | Ok json -> Ok (github_identity_lines json)
 
 (* What a Keeper can be attached to, and what each of those currently offers
    it. One fetch rather than two: a list of providers and a list of

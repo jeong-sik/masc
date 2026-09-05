@@ -243,6 +243,39 @@ let search_history
   |> take limit
 ;;
 
+(* The ordinary facts in a result set, by identity. Source-bound facts are
+   keyed by their file digest, not a memory id, so they carry no event. *)
+let ordinary_memory_ids (matches : fact_match list) =
+  List.filter_map
+    (fun (m : fact_match) ->
+       match m.identity with
+       | Ordinary_memory_id memory_id -> Some memory_id
+       | Source_sha256 _ -> None)
+    matches
+;;
+
+(* Append one memory use event per id to the keeper's events sidecar
+   (RFC-0418). The caller's result is already decided; a failed append is
+   reported in the log and does not change it. *)
+let record_memory_events ~keepers_dir ~(meta : keeper_meta) ~now ~kind memory_ids =
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  List.iter
+    (fun memory_id ->
+       match
+         Keeper_memory_os_events.append
+           ~keepers_dir
+           ~keeper_id:meta.name
+           { recorded_at = now; memory_id; trace_id; kind }
+       with
+       | Ok () -> ()
+       | Error error ->
+         Log.Keeper.warn
+           ~keeper_name:meta.name
+           "%s"
+           (Keeper_memory_os_events.append_error_to_string error))
+    memory_ids
+;;
+
 (* --- Unified keeper_memory_search dispatch --- *)
 
 let keeper_memory_search_with_outcome
@@ -306,13 +339,14 @@ let keeper_memory_search_with_outcome
         let no_match = matches = [] in
         let match_jsons = List.map (fun msg -> `String msg) matches in
         Ok
-          (`Assoc
+          ( `Assoc
               ([ "query", `String query
                ; "source", `String source_label
                ; "match_count", `Int (List.length matches)
                ; "matches", `List match_jsons
                ]
-               @ if no_match then [ "no_match", `Bool true ] else []))
+               @ if no_match then [ "no_match", `Bool true ] else [])
+          , [] )
       | All ->
         (match search_durable_facts ~config ~keepers_dir ~meta ~query ~limit with
          | Error _ as error -> error
@@ -336,21 +370,23 @@ let keeper_memory_search_with_outcome
                history_matches
            in
            Ok
-             (durable_json
-                ~fact_jsons:(List.map fact_match_to_json fact_matches)
-                ~fact_total
-                ~total_matches
-                ~extra_matches))
+             ( durable_json
+                 ~fact_jsons:(List.map fact_match_to_json fact_matches)
+                 ~fact_total
+                 ~total_matches
+                 ~extra_matches
+             , ordinary_memory_ids fact_matches ))
       | Memory ->
         (match search_durable_facts ~config ~keepers_dir ~meta ~query ~limit with
          | Error _ as error -> error
          | Ok (matches, total_candidates) ->
            Ok
-             (durable_json
-                ~fact_jsons:(List.map fact_match_to_json matches)
-                ~fact_total:total_candidates
-                ~total_matches:(List.length matches)
-                ~extra_matches:[]))
+             ( durable_json
+                 ~fact_jsons:(List.map fact_match_to_json matches)
+                 ~fact_total:total_candidates
+                 ~total_matches:(List.length matches)
+                 ~extra_matches:[]
+             , ordinary_memory_ids matches ))
     in
     match result with
     | Error error ->
@@ -364,7 +400,17 @@ let keeper_memory_search_with_outcome
              ; "detail", `String (durable_search_error_detail error)
              ]
            "keeper_memory_search could not read the durable memory store")
-    | Ok result ->
+    | Ok (result, matched_memory_ids) ->
+    (* Each ordinary fact the model was shown is a retrieval (RFC-0418): the
+       event is what later says this memory was used. A sidecar that cannot be
+       written does not take the results away from the model; it is said in
+       the log. *)
+    record_memory_events
+      ~keepers_dir
+      ~meta
+      ~now:(Time_compat.now ())
+      ~kind:(Keeper_memory_os_events.Retrieved { query })
+      matched_memory_ids;
     (* Day-1 search logging: append search event to decisions log. *)
     let log_match_count =
       match result with
@@ -382,6 +428,8 @@ let keeper_memory_search_with_outcome
            ; "query", `String query
            ; "source", `String source_label
            ; "match_count", `Int log_match_count
+           ; ( "matched_memory_ids"
+             , `List (List.map (fun id -> `String id) matched_memory_ids) )
            ]
        in
        Keeper_types_support.append_jsonl_line
@@ -1012,6 +1060,15 @@ let keeper_memory_retract_with_outcome
          ()
      with
      | Ok snapshot ->
+       (* The model named this fact by id and the store found it: a citation
+          (RFC-0418). The fact is gone from the snapshot from here on, and the
+          event stays as the record of its last use. *)
+       record_memory_events
+         ~keepers_dir
+         ~meta
+         ~now
+         ~kind:(Keeper_memory_os_events.Cited { tool = "keeper_memory_retract" })
+         [ memory_id ];
        Log.Keeper.info
          "explicit current Memory retracted keeper=%s revision=%d memory_id=%s support_invalidations=%d"
          meta.name

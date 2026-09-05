@@ -743,13 +743,7 @@ let test_cancel_waits_for_the_child_to_act_on_sigterm () =
          (Sys.file_exists finished))
 ;;
 
-(* How far past the grace a stop may come back before a case calls it a
-   hang. Generous on purpose: what these cases prove is that the wait ends,
-   not how promptly, and a tight bound under the nightly's four parallel
-   suites reads scheduling jitter as a regression (#33200). *)
-let grace_overrun_allowance_seconds = 5.0
-
-let test_cancel_grace_is_bounded_when_the_child_ignores_sigterm () =
+let test_cancel_grace_is_waited_out_when_the_child_ignores_sigterm () =
   with_process_runtime @@ fun ~clock ->
   let started = fresh_marker ".started" in
   Fun.protect
@@ -768,15 +762,12 @@ let test_cancel_grace_is_bounded_when_the_child_ignores_sigterm () =
        check bool
          (Printf.sprintf "the stop waited out the grace (%.2fs)" elapsed)
          true
-         (elapsed >= Process_eio.child_exit_grace_seconds);
-       (* The bound this proves is that a child holding its pipes open
-          cannot stall the cancellation indefinitely. *)
-       check bool
-         (Printf.sprintf "and not much longer (%.2fs)" elapsed)
-         true
-         (elapsed < Process_eio.child_exit_grace_seconds
-                    +. grace_overrun_allowance_seconds))
+         (elapsed >= Process_eio.child_exit_grace_seconds))
 ;;
+(* No upper bound on [elapsed]: a reap that waited on the child's pipes would
+   not come back at all here (the child ignores SIGTERM and never exits), and
+   a case that does not come back is the suite deadline's to name (#33156).
+   A hand-picked allowance above the grace would only re-time that. *)
 
 (* #33182: a timeout raced the finalizer onto the switch-off path, which
    waits for EOF on the child's pipes, and a grandchild that inherited stdout
@@ -792,43 +783,43 @@ let grandchild_timeout_budget_seconds = 0.2
    only when this sleep, the last holder of stdout, exits. *)
 let grandchild_lifetime_seconds = Process_eio.child_exit_grace_seconds
 
-(* Between the budget and the grace: five budgets of scheduling slack, and a
-   second short of the wait a pipe-bound return takes. *)
-let timeout_return_bound_seconds = 1.0
-
-let grandchild_holding_stdout_script =
-  Printf.sprintf "sleep %g; printf late" grandchild_lifetime_seconds
+(* The grandchild marks the moment it lets go of stdout. Whether that mark
+   exists when the call returns is the observation: a return that waited on
+   the pipes finds it, a return at the budget does not. No clock is read. *)
+let grandchild_holding_stdout_script ~released =
+  Printf.sprintf "sleep %g; : > %s; printf late" grandchild_lifetime_seconds
+    (Filename.quote released)
 ;;
 
-let timeout_with_a_grandchild_holding_stdout ~clock run =
-  let t0 = Eio.Time.now clock in
-  let status, stdout, _stderr =
-    run ~timeout_sec:grandchild_timeout_budget_seconds
-      [ "/bin/sh"; "-c"; grandchild_holding_stdout_script ]
-  in
-  let elapsed = Eio.Time.now clock -. t0 in
-  check bool "the call reports the timeout" true
-    (Process_eio.exit_reason_of_status status = Process_eio.Timed_out);
-  check string "nothing printed after the budget comes back" "" stdout;
-  check bool
-    (Printf.sprintf
-       "the call came back at the budget, not when the grandchild let go (%.2fs)"
-       elapsed)
-    true
-    (elapsed < timeout_return_bound_seconds)
+let timeout_with_a_grandchild_holding_stdout run =
+  let released = fresh_marker ".released" in
+  Fun.protect
+    ~finally:(fun () -> remove_if_present released)
+    (fun () ->
+       let status, stdout, _stderr =
+         run ~timeout_sec:grandchild_timeout_budget_seconds
+           [ "/bin/sh"; "-c"; grandchild_holding_stdout_script ~released ]
+       in
+       check bool "the call reports the timeout" true
+         (Process_eio.exit_reason_of_status status = Process_eio.Timed_out);
+       check string "nothing printed after the budget comes back" "" stdout;
+       check bool
+         "the call came back while the grandchild still held stdout"
+         false
+         (Sys.file_exists released))
 ;;
 
 let test_timeout_with_a_grandchild_holding_stdout_returns_at_the_budget () =
-  with_process_runtime @@ fun ~clock ->
-  timeout_with_a_grandchild_holding_stdout ~clock (fun ~timeout_sec argv ->
+  with_process_runtime @@ fun ~clock:_ ->
+  timeout_with_a_grandchild_holding_stdout (fun ~timeout_sec argv ->
     Process_eio.run_argv_with_status_split ~timeout_sec argv)
 ;;
 
 let test_timeout_with_stdin_and_a_grandchild_holding_stdout_returns_at_the_budget
     ()
   =
-  with_process_runtime @@ fun ~clock ->
-  timeout_with_a_grandchild_holding_stdout ~clock (fun ~timeout_sec argv ->
+  with_process_runtime @@ fun ~clock:_ ->
+  timeout_with_a_grandchild_holding_stdout (fun ~timeout_sec argv ->
     Process_eio.run_argv_with_stdin_and_status_split
       ~timeout_sec
       ~stdin_content:""
@@ -856,12 +847,15 @@ let operator_stop_into_grace_seconds = 0.5
 
 let watchdog_poll_interval_seconds = 0.05
 
-(* The budget, the grace the reap waits out, and the same allowance the
-   switch-off case above gives a stop to come back. *)
+(* The budget, the grace the reap waits out before the SIGKILL, and one more
+   grace: the reap's own second phase is an await bounded by that same grace
+   (it is skipped on this path, where the switch is off), so a return later
+   than this is later than anything the mechanism itself waits for. The
+   watchdog needs a deadline because an Eio timeout cannot break a wait
+   under [Cancel.protect]; this is the only clock in the mechanism. *)
 let reap_return_bound_seconds =
   grandchild_timeout_budget_seconds
-  +. Process_eio.child_exit_grace_seconds
-  +. grace_overrun_allowance_seconds
+  +. (2.0 *. Process_eio.child_exit_grace_seconds)
 ;;
 
 (* One grace longer than the watchdog bound: a child that exited on its own
@@ -1042,7 +1036,7 @@ let () =
           test_case "cancel-waits-for-the-child-to-act-on-sigterm" `Quick
             test_cancel_waits_for_the_child_to_act_on_sigterm;
           test_case "cancel-grace-is-bounded-when-the-child-ignores-sigterm" `Quick
-            test_cancel_grace_is_bounded_when_the_child_ignores_sigterm;
+            test_cancel_grace_is_waited_out_when_the_child_ignores_sigterm;
         ] );
       ( "timeout-grace",
         [

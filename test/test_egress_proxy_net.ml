@@ -257,6 +257,56 @@ let test_every_request_produces_one_event_naming_its_keeper () =
      | _ -> "none")
 ;;
 
+(* A record of "admitted" that cannot say which allowlist admitted it is not
+   evidence. The rules are re-read per request, so an operator's edit between
+   two connections is otherwise invisible in the log. *)
+let test_an_event_names_the_rules_that_judged_it () =
+  let allow = [ "github.com" ] in
+  let _, events = one_request ~allow ~line:"CONNECT github.com:443 HTTP/1.1" in
+  match events with
+  | [ event ] ->
+    check
+      (option string)
+      "the generation is the one those rules hash to"
+      (Some (Egress_host.generation (rules allow)))
+      event.Egress_proxy_net.rule_generation;
+    (* A refusal is a decision too, and tracing one back to its rules is how
+       an operator tells "I never allowed that" from "I allowed it and then
+       stopped". *)
+    let _, refused = one_request ~allow ~line:"CONNECT evil.com:443 HTTP/1.1" in
+    (match refused with
+     | [ refusal ] ->
+       check
+         (option string)
+         "a refusal carries it too"
+         (Some (Egress_host.generation (rules allow)))
+         refusal.Egress_proxy_net.rule_generation
+     | other -> failf "expected one refusal event, got %d" (List.length other))
+  | other -> failf "expected one event, got %d" (List.length other)
+;;
+
+let test_an_edited_allowlist_shows_as_a_new_generation () =
+  let before =
+    match snd (one_request ~allow:[ "github.com" ] ~line:"CONNECT github.com:443 HTTP/1.1") with
+    | [ event ] -> event.Egress_proxy_net.rule_generation
+    | other -> failf "expected one event, got %d" (List.length other)
+  in
+  let after =
+    match
+      snd
+        (one_request
+           ~allow:[ "github.com"; "pypi.org" ]
+           ~line:"CONNECT github.com:443 HTTP/1.1")
+    with
+    | [ event ] -> event.Egress_proxy_net.rule_generation
+    | other -> failf "expected one event, got %d" (List.length other)
+  in
+  check bool "the same request under different rules reads differently" true
+    (before <> after);
+  check bool "and both actually have one" true
+    (Option.is_some before && Option.is_some after)
+;;
+
 let () =
   run "egress_proxy_net"
     [ ( "refusals"
@@ -280,5 +330,9 @@ let () =
     ; ( "evidence"
       , [ test_case "every request produces one event naming its keeper" `Quick
             test_every_request_produces_one_event_naming_its_keeper
+        ; test_case "an event names the rules that judged it" `Quick
+            test_an_event_names_the_rules_that_judged_it
+        ; test_case "an edited allowlist shows as a new generation" `Quick
+            test_an_edited_allowlist_shows_as_a_new_generation
         ] )
     ]

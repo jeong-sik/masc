@@ -202,6 +202,28 @@ A keeper's own account of where it went is not evidence. These events are.
   egress proxy not started keeper=<name>: <detail> (the lane stays closed)
   ```
 
+- **Every request logs which allowlist judged it.** Each line carries a
+  short hash of the rules in force at that moment:
+
+  ```
+  egress keeper=<name> rules=a1b2c3d4 admitted github.com:443
+  egress keeper=<name> rules=a1b2c3d4 refused evil.com:443 (no rule)
+  ```
+
+  The rules are read per request, so `rules=` is what tells one policy from
+  the next. Two lines with the same value were judged by the same allowlist;
+  where it changes is where an edit took effect. Order and duplicates in the
+  file do not move it -- the same rules written differently are the same
+  policy -- and `rules=-` means nothing was judged, which is an accept that
+  failed or a client that sent no request.
+
+  To answer "when did this keeper gain that reach", grep the keeper's egress
+  lines and look for where `rules=` changes:
+
+  ```
+  rg 'egress keeper=<name>' <log> | rg -o 'rules=[a-f0-9]{8}' | uniq -c
+  ```
+
 - **This is not a complete security boundary.** Neither is any of the
   sandbox profiles. It bounds reach and records it; it does not make an
   unattended agent safe.

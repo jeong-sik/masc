@@ -541,6 +541,165 @@ let first_runtime_after_modality_reroute ~keeper_name ~assignment_id
       reason;
     to_runtime_id, target
 
+(* The dispatch view of one candidate's input. RFC-0265 media degrade projects
+   the goal, the pre-turn history and the resumed checkpoint against the input
+   capabilities of the runtime being dispatched; the caller's canonical history
+   is never rewritten, and [attempt_replay_prefix_projection] is what restores
+   a checkpoint taken on the projected prefix back onto it. *)
+type attempt_input =
+  { attempt_goal_blocks : Agent_core.Types.content_block list option
+  ; attempt_initial_messages : Agent_core.Types.message list
+  ; attempt_agent_core_checkpoint : Agent_core.Checkpoint.t option
+  ; attempt_replay_prefix_projection : Keeper_replay_prefix.projection
+  }
+
+(* RFC-0265 follow-up -- graceful media degrade floor, decided per attempt.
+   A lane walk crosses runtimes with different input capabilities, so the
+   strip is decided against the runtime actually being dispatched rather than
+   once against the lane head. With the strip bound before the walk, a lane
+   ordered [text-only; vision] handed the vision candidate a stripped turn,
+   and one ordered [vision; text-only] handed the text-only candidate the
+   images the vision candidate had just failed on -- the hard multimodal gate
+   that #33034 moved only the deferred head off.
+
+   The decision is the RFC-0265 one with no reroute candidates, so it is
+   [No_reroute_needed] (this runtime admits the turn's modality: dispatch
+   untouched) or [No_capable_runtime] (it does not: strip the unsupported
+   media from the goal, the prior [initial_messages] and the resumed
+   checkpoint, append a degraded [Runtime_routed] manifest row and inject a
+   text notice so the turn runs on text instead of the loud terminal reject in
+   [Runtime_agent.run_blocks]). [Reroute] names a target drawn from the
+   candidate list, and that list is empty here, so it has no producer on this
+   call. The drop is non-silent (WARN log + runtime manifest row + injected
+   model-input notice -- RFC-0126/0145). The stripped checkpoint is the
+   dispatch view only; the persisted checkpoint is unchanged, so a later
+   vision-capable candidate in the same walk still sees the original media.
+
+   [initial_messages] is the caller's canonical pre-turn history and is the
+   exact prefix checked later by replay persistence. A resumed checkpoint is
+   only the AGENT_CORE dispatch carrier; media degradation may project its
+   messages without changing this canonical history. *)
+let project_input_for_attempt
+    ~keeper_name
+    ~(emit_runtime_manifest :
+       ?status:string ->
+       ?decision:Yojson.Safe.t ->
+       Keeper_runtime_manifest.event_kind ->
+       unit)
+    ~goal_blocks
+    ~initial_messages
+    ~agent_core_checkpoint
+    ~runtime_id
+    (runtime : Runtime.t) =
+  let current_goal_blocks =
+    match goal_blocks with
+    | Some blocks -> blocks
+    | None -> []
+  in
+  let checkpoint_messages =
+    match agent_core_checkpoint with
+    | None -> []
+    | Some (checkpoint : Agent_core.Checkpoint.t) -> checkpoint.messages
+  in
+  let unchanged =
+    { attempt_goal_blocks = goal_blocks
+    ; attempt_initial_messages = initial_messages
+    ; attempt_agent_core_checkpoint = agent_core_checkpoint
+    ; attempt_replay_prefix_projection = Keeper_replay_prefix.unchanged
+    }
+  in
+  match
+    Runtime_agent.decide_modality_reroute_for_runtime_candidates
+      ~assigned:runtime
+      ~candidates:[]
+      ~checkpoint_messages
+      ~initial_messages
+      current_goal_blocks
+  with
+  | Runtime_agent.No_reroute_needed | Runtime_agent.Reroute _ -> unchanged
+  | Runtime_agent.No_capable_runtime { required } ->
+    let caps = Runtime_agent.input_capabilities_of_runtime runtime in
+    let stripped_goal, goal_dropped =
+      Runtime_agent.strip_unsupported_modality_blocks caps current_goal_blocks
+    in
+    let stripped_initial, initial_dropped =
+      Runtime_agent.strip_unsupported_modality_messages caps initial_messages
+    in
+    let stripped_checkpoint, checkpoint_dropped =
+      match agent_core_checkpoint with
+      | None -> None, []
+      | Some (checkpoint : Agent_core.Checkpoint.t) ->
+        let messages, dropped =
+          Runtime_agent.strip_unsupported_modality_messages
+            caps
+            checkpoint.messages
+        in
+        Some { checkpoint with messages }, dropped
+    in
+    let dropped =
+      Runtime_agent.merge_modality_counts
+        (Runtime_agent.merge_modality_counts goal_dropped initial_dropped)
+        checkpoint_dropped
+    in
+    (match Runtime_agent.media_degrade_note ~runtime_id dropped with
+     | None ->
+       (* [required] is non-empty -- that is why the decision was
+          [No_capable_runtime] -- yet nothing was strippable, so there is no
+          text-only turn to offer and the provider capability floor will reject
+          this attempt. Say so here. Falling through in silence is what left the
+          operator with a bare provider capability error and no record that
+          RFC-0265 had run and given up. Reachable when the modalities are
+          each supported but the runtime does not accept them bundled: no single
+          media block is individually unsupported, so the strip removes nothing.
+          ToolResult-nested media used to land here too, before the strip
+          learned to descend. *)
+       Log.Keeper.warn
+         "%s: RFC-0265 media degrade unavailable on %s -- required %s, nothing \
+          strippable; the capability floor rejects this attempt"
+         keeper_name
+         runtime_id
+         (String.concat "," required);
+       emit_runtime_manifest
+         ~status:"degrade_unavailable"
+         ~decision:
+           (Keeper_runtime_manifest.with_payload_role
+              ~payload_role:Keeper_runtime_manifest.Operator_evidence
+              (`Assoc
+                [ ("routing_action", `String "media_degrade_unavailable")
+                ; ("routing_reason", `String "required_media_not_strippable")
+                ; ("degraded_runtime_id", `String runtime_id)
+                ; ( "required_modalities"
+                  , `String (String.concat "," required) )
+                ]))
+         Keeper_runtime_manifest.Runtime_routed;
+       unchanged
+     | Some note ->
+       Log.Keeper.warn
+         "%s: RFC-0265 media degrade on %s -- dropped %s, continuing text-only"
+         keeper_name
+         runtime_id
+         (modality_counts_summary dropped);
+       emit_runtime_manifest
+         ~status:"degraded"
+         ~decision:(media_degrade_manifest_decision ~runtime_id dropped)
+         Keeper_runtime_manifest.Runtime_routed;
+       let goal_with_note =
+         stripped_goal @ [ Agent_core.Types.text_block note ]
+       in
+       let dispatch_prefix =
+         match stripped_checkpoint with
+         | Some (checkpoint : Agent_core.Checkpoint.t) -> checkpoint.messages
+         | None -> stripped_initial
+       in
+       { attempt_goal_blocks = Some goal_with_note
+       ; attempt_initial_messages = stripped_initial
+       ; attempt_agent_core_checkpoint = stripped_checkpoint
+       ; attempt_replay_prefix_projection =
+           Keeper_replay_prefix.media_degraded
+             ~canonical_prefix:initial_messages
+             ~dispatch_prefix
+       })
+
 type attempt_inference_policy =
   { attempt_enable_thinking : bool option
   ; attempt_preserve_thinking : bool option
@@ -719,11 +878,6 @@ let run_named
     | None -> []
     | Some (checkpoint : Agent_core.Checkpoint.t) -> checkpoint.messages
   in
-  (* [initial_messages] is the caller's canonical pre-turn history and is the
-     exact prefix checked later by replay persistence.  A resumed checkpoint is
-     only the AGENT_CORE dispatch carrier; media degradation may project its messages
-     without changing this canonical history. *)
-  let canonical_replay_prefix = initial_messages in
   let first_candidate_id, remaining_candidate_ids =
     match lane_candidate_ids with
     | first :: rest -> first, rest
@@ -742,16 +896,16 @@ let run_named
     | Some _ -> Ok []
     | None -> resolve_runtime_candidates remaining_candidate_ids
   in
-  (* RFC-0265 media handling applies to deferred lanes too, but only the degrade
-     floor — never a reroute. A deferred lane commits to a single budgeted
-     assignment, so [remaining_runtimes] is already [[]] above and
-     [decide_modality_reroute] cannot pick a [Reroute] target from an empty
-     candidate list: the decision here is only [No_reroute_needed] (the deferred
-     candidate accepts the turn's modality) or [No_capable_runtime] (it does not,
-     so the unsupported media is stripped and the turn runs text-only). The
-     earlier [Some _ -> No_reroute_needed] short-circuit skipped the degrade as
-     well, letting an image-bearing turn dispatch to a text-only deferred
-     candidate and hit the hard multimodal gate instead of degrading (#33034). *)
+  (* This decision orders the walk: a [Reroute] moves a capable candidate to
+     the head and drops the assigned one. On a deferred lane the suffix order
+     was frozen before pre-dispatch shaping, so [remaining_runtimes] is [[]]
+     above and the decision can only be [No_reroute_needed] or
+     [No_capable_runtime], neither of which moves the head. The media degrade
+     itself is not decided here for any lane: every attempt projects the input
+     against the runtime it dispatches to ([project_input_for_attempt] inside
+     [run_attempt] below), because the walk crosses runtimes with different
+     input capabilities and one strip bound here was right for the head only
+     (#33034 fixed the deferred head; the tail still received the head's view). *)
   let reroute_decision =
     lane_modality_reroute_decision
       ~checkpoint_messages
@@ -760,9 +914,10 @@ let run_named
       ~first_candidate
       ~remaining_runtimes
   in
-  let first_runtime_id, first_runtime =
-    first_runtime_after_modality_reroute ~keeper_name ~assignment_id:runtime_id
-      ~first_candidate_id ~first_candidate reroute_decision
+  let first_runtime =
+    snd
+      (first_runtime_after_modality_reroute ~keeper_name ~assignment_id:runtime_id
+         ~first_candidate_id ~first_candidate reroute_decision)
   in
   let attempt_runtimes =
     dedupe_runtimes_preserve_order (first_runtime :: remaining_runtimes)
@@ -792,101 +947,6 @@ let run_named
               ]))
        Keeper_runtime_manifest.Runtime_routed
    | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ -> ());
-  (* RFC-0265 follow-up — graceful media degrade floor. When no configured
-     runtime can accept the turn's input modality ([No_capable_runtime]), strip
-     the unsupported media blocks from the goal, prior [initial_messages], and
-     resumed checkpoint, then append a degraded [Runtime_routed] manifest row
-     and inject a text notice so the turn runs on text instead of the loud
-     terminal reject in [Runtime_agent.run_blocks]. Modality-satisfied turns and
-     reroutes are untouched. The drop is non-silent (WARN log + runtime manifest
-     row + injected model-input notice — RFC-0126/0145). The stripped checkpoint
-     is the dispatch view only; the persisted checkpoint is unchanged, so a
-     later vision-capable runtime still sees the original media. *)
-  let goal_blocks, initial_messages, agent_core_checkpoint, replay_prefix_projection =
-    match reroute_decision with
-    | Runtime_agent.No_capable_runtime { required } ->
-      let caps = Runtime_agent.input_capabilities_of_runtime first_runtime in
-      let stripped_goal, goal_dropped =
-        Runtime_agent.strip_unsupported_modality_blocks caps current_goal_blocks
-      in
-      let stripped_initial, initial_dropped =
-        Runtime_agent.strip_unsupported_modality_messages caps initial_messages
-      in
-      let stripped_checkpoint, checkpoint_dropped =
-        match agent_core_checkpoint with
-        | None -> None, []
-        | Some (checkpoint : Agent_core.Checkpoint.t) ->
-          let messages, dropped =
-            Runtime_agent.strip_unsupported_modality_messages
-              caps
-              checkpoint.messages
-          in
-          Some { checkpoint with messages }, dropped
-      in
-      let dropped =
-        Runtime_agent.merge_modality_counts
-          (Runtime_agent.merge_modality_counts goal_dropped initial_dropped)
-          checkpoint_dropped
-      in
-      (match Runtime_agent.media_degrade_note ~runtime_id:first_runtime_id dropped with
-       | None ->
-         (* [required] is non-empty — that is why the decision was
-            [No_capable_runtime] — yet nothing was strippable, so there is no
-            text-only turn to offer and the provider capability floor will reject
-            this turn. Say so here. Falling through in silence is what left the
-            operator with a bare provider capability error and no record that
-            RFC-0265 had run and given up. Reachable when the modalities are
-            each supported but the runtime does not accept them bundled: no single
-            media block is individually unsupported, so the strip removes nothing.
-            ToolResult-nested media used to land here too, before the strip
-            learned to descend. *)
-         Log.Keeper.warn
-           "%s: RFC-0265 media degrade unavailable on %s — required %s, nothing \
-            strippable; the capability floor rejects this turn"
-           keeper_name
-           first_runtime_id
-           (String.concat "," required);
-         emit_runtime_manifest
-           ~status:"degrade_unavailable"
-           ~decision:
-             (Keeper_runtime_manifest.with_payload_role
-                ~payload_role:Keeper_runtime_manifest.Operator_evidence
-                (`Assoc
-                  [ ("routing_action", `String "media_degrade_unavailable")
-                  ; ("routing_reason", `String "required_media_not_strippable")
-                  ; ("degraded_runtime_id", `String first_runtime_id)
-                  ; ( "required_modalities"
-                    , `String (String.concat "," required) )
-                  ]))
-           Keeper_runtime_manifest.Runtime_routed;
-         goal_blocks, initial_messages, agent_core_checkpoint, Keeper_replay_prefix.unchanged
-       | Some note ->
-         Log.Keeper.warn
-           "%s: RFC-0265 media degrade on %s — dropped %s, continuing text-only"
-           keeper_name
-           first_runtime_id
-           (modality_counts_summary dropped);
-         emit_runtime_manifest
-           ~status:"degraded"
-           ~decision:(media_degrade_manifest_decision ~runtime_id:first_runtime_id dropped)
-           Keeper_runtime_manifest.Runtime_routed;
-         let goal_with_note =
-           stripped_goal @ [ Agent_core.Types.text_block note ]
-         in
-         let dispatch_prefix =
-           match stripped_checkpoint with
-           | Some (checkpoint : Agent_core.Checkpoint.t) -> checkpoint.messages
-           | None -> stripped_initial
-         in
-         ( Some goal_with_note
-         , stripped_initial
-         , stripped_checkpoint
-         , Keeper_replay_prefix.media_degraded
-             ~canonical_prefix:canonical_replay_prefix
-             ~dispatch_prefix ))
-    | Runtime_agent.No_reroute_needed | Runtime_agent.Reroute _ ->
-      goal_blocks, initial_messages, agent_core_checkpoint, Keeper_replay_prefix.unchanged
-  in
   let transport_resolved =
     match transport with
     | Some t -> t
@@ -940,6 +1000,22 @@ let run_named
         , None
         , Keeper_provider_attempt_effect.No_effect_observed )
       | Resolved_runtime runtime ->
+      (* Shadows the caller's inputs with this candidate's dispatch view; the
+         originals stay bound above for the next candidate's own projection. *)
+      let { attempt_goal_blocks = goal_blocks
+          ; attempt_initial_messages = initial_messages
+          ; attempt_agent_core_checkpoint = agent_core_checkpoint
+          ; attempt_replay_prefix_projection = replay_prefix_projection
+          } =
+        project_input_for_attempt
+          ~keeper_name
+          ~emit_runtime_manifest
+          ~goal_blocks
+          ~initial_messages
+          ~agent_core_checkpoint
+          ~runtime_id:attempt_runtime_id
+          runtime
+      in
       Option.iter
         (fun observe ->
            observe
@@ -1487,6 +1563,7 @@ module For_testing = struct
   let apply_official_client_accept = apply_official_client_accept
 
 	  let media_degrade_manifest_decision = media_degrade_manifest_decision
+  let project_input_for_attempt = project_input_for_attempt
 	  let attempt_inference_policy = attempt_inference_policy
   let attempt_runtime_candidates = attempt_runtime_candidates
 

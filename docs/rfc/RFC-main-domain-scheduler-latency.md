@@ -265,6 +265,12 @@ memprof A(ready+3분) → B(+7분), 240초: 584 MB/s(이 4분에 `agent_started`
 
 memprof A → B(240초): **1,103 MB/s** — 이 4분에 `agent_started` 58건(앞 창들의 2~4배)이라 턴당으로는 4.6 GB(앞 창 5.3~7.9). live 3.86 → 4.00 GB, sites 9,994 → 13,877. 하네스 ready+7분: lag p99 315 ms, max 2.36 s, stall 2(바쁜 창). 상위(4분 차): 체크포인트 디코드 8.9 GB, `measure_message_bytes` 6.7 + 3.6 GB, 승인 큐 스냅샷 재작성 6.1 + 3.9 + 3.4 GB(#33349 표적), **`Keeper_event_queue_persistence.save_state_unlocked` 3.6 GB**(이벤트 큐 상태 파일을 변경마다 통째로 쓴다 — P4a·P4e 와 같은 부류, 다음 표적), **`Tool_misc_web_fetch.extract_title` 3.3 GB**(가져온 HTML 전체를 제목 하나 때문에 훑는다).
 
+#### 다섯 번째 재기동 — 12:49Z, #33349(P4e) 포함, 승인 저장소 v10 으로 새로 시작
+
+첫 재기동(12:41Z)은 v9 `pending.json` 을 지우지 않아 저장소가 "version 9 is unsupported" 로 unavailable 이었고 승인이 8분간 막혔다. 두 파일을 `_archive/gate-v9-20260905/` 로 옮기고 다시 올렸다. 하드컷 PR 의 재기동 절차는 PR 본문만으로 전달되지 않는다 — 병합 직후 운영자에게 다시 말해야 한다.
+
+memprof A(ready+3분) → B(+7분), 240초: **162 MB/s**(`agent_started` 29건, 턴당 1.3 GB; 앞 창들 4.6~7.9 GB). live 2.83 → 2.90 GB, sites 5,085 → 6,951. 하네스 ready+7분: lag p50 1.2 / p95 31 / p99 98 / max 281 ms, stall 0, minor 1,702/분, major 0/분(10초 창), promoted 9.7 MB/s. **승인 큐 스냅샷 재작성 행은 상위 30 에서 사라졌다**(델타 0). 로그는 2행, 스냅샷은 generation 1. 남은 상위(4분 차): `measure_message_bytes` 2.2 + 1.2 GB, `Keeper_run_tools_setup.gate_history_slice` 2.2 GB(턴 준비마다 gate 이력 슬라이스), 체크포인트 디코드 1.9 GB, `Keeper_tool_call_log.read_recent` 1.1 GB, 비밀 문자열 redaction 스캔 1.0 + 0.85 GB. 작업 조성이 다르므로 절대값 비교는 턴당으로만 한다.
+
 #### 발견: 워커 도메인 14개는 내내 2 MiB minor heap 으로 돌았다
 
 `bin/main_eio.ml` 의 `setup_gc` 는 메인 도메인에서 `Gc.set { minor_heap_size = 4M words }` 를 부른다. OCaml 5.4 런타임 소스로 확인한 사실: `caml_gc_set` 은 `Caml_state->minor_heap_wsz` — 호출한 도메인의 것 — 만 바꾸고, 새 도메인은 `domain_create(caml_params->init_minor_heap_wsz, …)` 로 만들어져 `OCAMLRUNPARAM` 의 `s` 값(기본 256k words = 2 MiB)을 받는다(`runtime/gc_ctrl.c`, `runtime/domain.c`, 2026-09-05 확인). 그래서 `Executor_pool` 의 도메인 14개는 2 MiB 로 돌았고, #33351 이 `/health` 를 전용 서빙 도메인으로 옮기자 `.gc.minor_heap_size` 가 32 MiB 에서 2 MiB 로 바뀌어 드러났다(다섯 번째 재기동). OCaml 5 의 minor 수집은 모든 도메인이 함께 멈추므로, 한 도메인이 2 MiB 를 채울 때마다 15개가 선다 — 분당 3,000~9,600회의 출처다.

@@ -1,6 +1,27 @@
 (** TUI HTTP client — Dashboard API wrapper over Masc_http_client. *)
 
 let report_err prefix msg = Printf.sprintf "(%s: %s)" prefix msg
+
+(* A request, a mailbox wait or a loop gap at least this long is written to
+   the TUI log with two clocks (RFC-0429 §3.0): wall time and process CPU
+   time. A request that took ten seconds of wall and none of CPU was waiting
+   on something; the cadence's routine polls stay under this and out of the
+   log. This is measurement, not a fix: the stall it exists to place has
+   not been placed yet. *)
+let slow_report_sec = 1.0
+
+let timed ~verb ~path (run : unit -> (int * string, string) result) =
+  let started_wall = Unix.gettimeofday () and started_cpu = Sys.time () in
+  let result = run () in
+  let wall = Unix.gettimeofday () -. started_wall in
+  if wall >= slow_report_sec then
+    Log.Transport.info "http %s %s took %.0f ms wall, %.0f ms cpu: %s" verb path
+      (wall *. 1000.)
+      ((Sys.time () -. started_cpu) *. 1000.)
+      (match result with
+       | Ok (status, _) -> Printf.sprintf "status %d" status
+       | Error detail -> detail);
+  result
 let default_timeout_sec = 10.0
 let request_timeout_sec () = default_timeout_sec
 let keeper_chat_timeout_sec = 180.0
@@ -149,6 +170,7 @@ let request_clock () = Eio_context.get_clock_opt ()
 let http_get ~(host : string) ~(port : int) ~(path : string) :
     (int * string, string) result =
   let url = url_of ~host ~port ~path in
+  timed ~verb:"GET" ~path @@ fun () ->
   match
     Masc_http_client.get_sync ?clock:(request_clock ())
       ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(auth_headers ()) ()
@@ -160,6 +182,7 @@ let http_get ~(host : string) ~(port : int) ~(path : string) :
 let http_post_with_timeout ~timeout_sec ~headers ~(host : string) ~(port : int)
     ~(path : string) ~(body : string) : (int * string, string) result =
   let url = url_of ~host ~port ~path in
+  timed ~verb:"POST" ~path @@ fun () ->
   match
     Masc_http_client.post_sync ?clock:(request_clock ())
       ~timeout_sec ~url ~headers:(json_headers headers) ~body ()

@@ -10,10 +10,19 @@
     directly to [Process_eio], and guest / SSH targets via the carried
     [runner]. *)
 
-(** A runner closure executes an argv with the given env / cwd and returns
-    the raw process status plus stdout/stderr buffers. Exceptions are
-    propagated; callers in [Exec_dispatch] catch and translate them into
-    structured dispatch results. *)
+(** Whether a runner delivered the command's own result ([Ran]), or the
+    transport failed before/instead of producing one ([Transport_failed]).
+    The remote lane used to report both as [WEXITED 1], so a lane that was
+    down read as grep's real "no match" and Grep returned an empty result
+    that never ran. A local docker/host exec has no transport that can fail
+    before an exit, so its runner is always [Ran]. *)
+type run_outcome =
+  | Ran of { status : Unix.process_status; stdout : string; stderr : string }
+  | Transport_failed of { reason : string; stdout : string; stderr : string }
+
+(** A runner closure executes an argv with the given env / cwd and returns a
+    [run_outcome]. Exceptions are propagated; callers in [Exec_dispatch] catch
+    and translate them into structured dispatch results. *)
 type runner =
   on_stdout_chunk:(string -> unit) option ->
   on_stderr_chunk:(string -> unit) option ->
@@ -21,7 +30,7 @@ type runner =
   argv:string list ->
   env:string array ->
   cwd:string option ->
-  Unix.process_status * string * string
+  run_outcome
 
 type pipeline_stage = {
   argv : string list;
@@ -33,7 +42,7 @@ type pipeline_runner =
   on_stdout_chunk:(string -> unit) option ->
   on_stderr_chunk:(string -> unit) option ->
   stages:pipeline_stage list ->
-  Unix.process_status * string * string
+  run_outcome
 
 (** SSH endpoint identity carried by an [Ssh] target.  Deliberately a
     standalone record, not [Exec_ssh_endpoint.t]: [lib/exec] stays

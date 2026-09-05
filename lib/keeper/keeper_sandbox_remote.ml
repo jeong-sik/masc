@@ -479,9 +479,21 @@ let wire_major t =
 ;;
 
 let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
+  (* A real remote exit/signal is [Ran]; a transport that failed before or
+     instead of producing one is [Transport_failed]. Every arm below that
+     used to return [Unix.WEXITED 1, _, <error>] was a transport failure the
+     old 3-tuple could not tell apart from grep's real exit 1 -- the silent
+     failure the read backend then read as "no match". *)
+  let ran status stdout stderr =
+    Masc_exec.Sandbox_target.Ran { status; stdout; stderr }
+  in
+  let transport_failed ?(stdout = "") ?(prefix_stderr = "") reason =
+    Masc_exec.Sandbox_target.Transport_failed
+      { reason; stdout; stderr = append_error prefix_stderr reason }
+  in
   fun ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd ->
     match wire_env t env with
-    | Error error -> Unix.WEXITED 1, "", error
+    | Error error -> transport_failed error
     | Ok env ->
       let injected = injected_env t in
       let env =
@@ -494,7 +506,7 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
       let stdin = Option.value stdin_content ~default:"" in
       let cwd = Option.value cwd ~default:t.remote_root in
       (match remote_cwd t cwd with
-       | Error error -> Unix.WEXITED 1, "", error
+       | Error error -> transport_failed error
        | Ok cwd ->
       let request : Exec_ssh_protocol.request =
         { v = wire_major t
@@ -508,7 +520,7 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
         }
       in
       (match Exec_ssh_protocol.encode_request request ~stdin with
-       | Error error -> Unix.WEXITED 1, "", error
+       | Error error -> transport_failed error
        | Ok frame ->
          if Atomic.compare_and_set t.shared.first_dispatch_logged false true
          then log_first_dispatch t;
@@ -558,7 +570,8 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
                then local_timeout_error t budget
                else transport_error t detail
              in
-             Unix.WEXITED 1, rewrite stdout, append_error (rewrite raw_stderr) error
+             transport_failed ~stdout:(rewrite stdout)
+               ~prefix_stderr:(rewrite raw_stderr) error
            | Ok (payload_stderr, trailer_bytes) ->
              let streamed_payload =
                match split_final_trailer stderr_stream.tail with
@@ -571,40 +584,33 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
              let payload_stderr = rewrite payload_stderr in
              (match local_timed_out, transport_failure t status with
               | true, _ ->
-                ( Unix.WEXITED 1
-                , stdout
-                , append_error payload_stderr (local_timeout_error t budget) )
+                transport_failed ~stdout ~prefix_stderr:payload_stderr
+                  (local_timeout_error t budget)
               | false, Some detail ->
-                ( Unix.WEXITED 1
-                , stdout
-                , append_error payload_stderr (transport_error t detail) )
+                transport_failed ~stdout ~prefix_stderr:payload_stderr
+                  (transport_error t detail)
               | false, None ->
                 (match Exec_ssh_protocol.parse_trailer trailer_bytes with
                  | Error error ->
-                   ( Unix.WEXITED 1
-                   , stdout
-                   , append_error payload_stderr (transport_error t error) )
+                   transport_failed ~stdout ~prefix_stderr:payload_stderr
+                     (transport_error t error)
                  | Ok trailer
                    when trailer.timed_out && status = Unix.WEXITED 0 ->
-                   ( Unix.WEXITED 1
-                   , stdout
-                   , append_error payload_stderr
-                       (remote_timeout_error t timeout_sec) )
+                   transport_failed ~stdout ~prefix_stderr:payload_stderr
+                     (remote_timeout_error t timeout_sec)
                  | Ok { shim_error = Some error; _ }
                    when status = Unix.WEXITED 1 ->
-                   Unix.WEXITED 1, stdout, append_error payload_stderr error
+                   transport_failed ~stdout ~prefix_stderr:payload_stderr error
                  | Ok { exit = Some code; signal = None; shim_error = None; _ }
                    when status = Unix.WEXITED 0 ->
-                   Unix.WEXITED code, stdout, payload_stderr
+                   ran (Unix.WEXITED code) stdout payload_stderr
                  | Ok { signal = Some signal; exit = None; shim_error = None; _ }
                    when status = Unix.WEXITED 0 ->
-                   Unix.WSIGNALED signal, stdout, payload_stderr
+                   ran (Unix.WSIGNALED signal) stdout payload_stderr
                  | Ok _ ->
-                   ( Unix.WEXITED 1
-                   , stdout
-                   , append_error payload_stderr
-                       (transport_error t
-                          "transport status and result trailer disagree") ))))))
+                   transport_failed ~stdout ~prefix_stderr:payload_stderr
+                     (transport_error t
+                        "transport status and result trailer disagree"))))))
 ;;
 
 (* ── Preflight ───────────────────────────────────────────────────────── *)

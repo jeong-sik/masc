@@ -1974,6 +1974,7 @@ type changes_return =
 type surface =
   | Overview
   | Acting
+  | Metrics
   | Keepers of keeper_mode
   | Memory
   | Lanes
@@ -2010,6 +2011,7 @@ type surface =
 let surface_ring : (surface * string) list =
   [ (Overview, "Overview");
     (Acting, "Activity");
+    (Metrics, "Metrics");
     (Keepers Keeper_list, "Keepers");
     (Memory, "Memory");
     (Approvals, "Approvals");
@@ -2117,6 +2119,8 @@ let surface_needs : surface -> surface_needs = function
      different machinery. *)
   | Approvals ->
       { nothing with needs_operator_approvals = true; needs_asks = true }
+  | Metrics ->
+      { nothing with needs_keeper_roster = true; needs_fleet_safety = true }
   | Memory | Lanes | Clients | Schedules | Verification | Harness | Fusion
   | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
   | Tools ->
@@ -2522,7 +2526,33 @@ let memory_category_filter_label = function
   | Category_source -> "source"
   | Category_dropped -> "dropped"
 
+type metrics_section =
+  | Section_fleet
+  | Section_resources
+  | Section_tools
+  | Section_latency
+
+let next_metrics_section = function
+  | Section_fleet -> Section_resources
+  | Section_resources -> Section_tools
+  | Section_tools -> Section_latency
+  | Section_latency -> Section_fleet
+
+let prev_metrics_section = function
+  | Section_fleet -> Section_latency
+  | Section_resources -> Section_fleet
+  | Section_tools -> Section_resources
+  | Section_latency -> Section_tools
+
+let metrics_section_label = function
+  | Section_fleet -> "Fleet & Velocity"
+  | Section_resources -> "Keeper Resources"
+  | Section_tools -> "Tool Invocations"
+  | Section_latency -> "Latency Waterfall"
+
 type state = {
+  mutable metrics_scroll: int;
+  mutable metrics_section: metrics_section;
   mutable agents: agent list;
   mutable tasks: task list;
   (* The full domain rows the Overview list is projected from, kept so the
@@ -3877,6 +3907,8 @@ let create_state
     ()
   =
   {
+  metrics_scroll = 0;
+  metrics_section = Section_fleet;
   agents = [];
   tasks = [];
   tasks_domain = [];
@@ -5098,7 +5130,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
      so it reports a [clamped_scroll] instead. Overview, Keepers, Board,
      Planning and Schedules move a cursor or a detail pane rather than a plain
      list. *)
-  | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
+  | Overview | Acting | Metrics | Keepers _ | Board | Approvals | Planning | Schedules
   | Fusion | Resources | Code | Tools ->
       None
 
@@ -5347,7 +5379,7 @@ let surface_row_texts (state : state) : surface -> string list option = function
      approval instead of stepping to the next match. Verification met the
      same collision and moved its rejection to [x]; until Approvals makes
      that call, the safe answer is no row search. *)
-  | Overview | Acting | Keepers _ | Approvals | Schedules
+  | Overview | Acting | Metrics | Keepers _ | Approvals | Schedules
   | Fusion | Resources | Changes | Config | Tools ->
       None
 
@@ -5569,6 +5601,8 @@ let palette_entries (state : state) =
   @ [ "go Resources", Palette_goto Resources ]
   @ [ "go Tools", Palette_goto Tools ]
   @ [ "go Logs", Palette_goto System_logs ]
+  @ [ "charts", Palette_goto Metrics ]
+  @ [ "stats", Palette_goto Metrics ]
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring

@@ -244,7 +244,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
   let current_keeper_mode =
     match state.view with
     | Keepers mode -> Some mode
-    | Overview | Acting | Memory | Lanes | Clients | Board | Approvals
+    | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
     | Planning | Schedules | Verification | Harness | Fusion | Repositories
     | Code | Changes | Connectors | Runtime | Config | Resources | Tools
     | System_logs -> None

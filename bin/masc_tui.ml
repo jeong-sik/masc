@@ -4545,7 +4545,7 @@ let search_row_cursor state =
      the key did nothing. The three matches -- the rows, this reading, and
      the write below -- have to agree, and only naming every surface makes
      the compiler say so. *)
-  | Overview | Acting | Keepers Keeper_detail | Keepers Keeper_logs
+  | Overview | Acting | Metrics | Keepers Keeper_detail | Keepers Keeper_logs
   | Keepers Keeper_calls | Keepers Keeper_message | Keepers Keeper_runtime_pick
   | Approvals | Schedules | Fusion | Changes | Config | Resources | Tools ->
       None
@@ -4648,7 +4648,7 @@ let search_land state index =
       (match state.planning_mode with
        | Planning_detail _ -> ()
        | Planning_list -> state.planning_cursor <- index)
-  | Overview | Acting | Keepers Keeper_detail | Keepers Keeper_logs
+  | Overview | Acting | Metrics | Keepers Keeper_detail | Keepers Keeper_logs
   | Keepers Keeper_calls | Keepers Keeper_message | Keepers Keeper_runtime_pick
   | Approvals | Schedules | Fusion | Changes | Config
   | Resources | Tools ->
@@ -4752,6 +4752,7 @@ let goto_surface state ~mailbox (destination : surface) =
            launch_runtime_config_load state ~mailbox)
    | Resources -> launch_resources_list state ~mailbox
    | Code -> launch_code_entries_load state ~mailbox
+   | Metrics -> launch_memory_health_load state ~mailbox
    | Overview | Acting | Keepers _ | Board | System_logs -> ());
   (* Leaving Approvals drops a half-armed decision, exactly as the old Tab
      arm did on the Approvals -> Board step. *)
@@ -6102,7 +6103,7 @@ let selected_surface_reference state =
       Option.bind
         (List.nth_opt (approval_items state) state.approval_cursor)
         approval_row_reference
-  | Acting
+  | Acting | Metrics
   | Memory | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
   | Code | System_logs -> None
 
@@ -9109,7 +9110,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                | Fusion_detail open_id when String.equal run_id open_id ->
                    launch_fusion_detail_load state ~mailbox ~run_id
                | Fusion_detail _ | Fusion_list -> ())
-           | Overview | Acting | Keepers _ | Memory | Lanes | Clients | Board
+           | Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
            | Approvals | Planning | Schedules | Verification | Harness
            | Repositories | Code | Changes | Connectors | Runtime | Config
            | Resources | Tools | System_logs ->
@@ -10980,7 +10981,7 @@ let terminal_title_visible_keeper state =
       Option.map
         (fun (keeper : keeper) -> keeper.k_name)
         (selected_keeper state)
-  | Overview | Acting | Memory | Lanes | Clients | Board | Approvals
+  | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
   | Planning | Schedules
   | Verification | Harness | Fusion | Repositories | Changes | Connectors
   | Runtime | Config | Resources | Tools | System_logs -> None
@@ -11424,7 +11425,7 @@ let main () =
   let presented_surface_reference () =
     match state.view with
     | Approvals -> Option.bind !presented_approval approval_row_reference
-    | Overview | Acting | Keepers _ | Lanes | Clients | Board | Planning
+    | Overview | Acting | Metrics | Keepers _ | Lanes | Clients | Board | Planning
     | Schedules
     | Memory | Verification | Harness | Fusion | Repositories | Changes | Connectors
     | Runtime | Config | Resources | Code | Tools | System_logs ->
@@ -12929,12 +12930,12 @@ and is loaded on demand through keeper_skill.
            if cancelled [ "x"; "X" ] then state.schedule_cancel_armed <- None
        | Verification ->
            if cancelled [ "a"; "A" ] then
-             state.verification_verdict_armed <- None
+         state.verification_verdict_armed <- None
        | Config ->
            (* A restore rewrites three surfaces; its arm must not outlive the
               keypress that set it. *)
            if cancelled [ "u"; "U" ] then state.preset_restore_armed <- None
-       | Overview | Acting | Lanes | Clients | Harness | Memory | Fusion
+       | Overview | Acting | Metrics | Lanes | Clients | Harness | Memory | Fusion
        | Repositories
        | Changes | Connectors | Runtime | Resources | Tools
        | System_logs | Code -> ());
@@ -14212,6 +14213,25 @@ and is loaded on demand through keeper_skill.
           parent, off the Tab ring. *)
        | Some ("l" | "L") when state.view = Acting ->
            goto_surface state ~mailbox:async_messages System_logs
+        (* Metrics shortcuts: 'm' from Overview navigates to visual telemetry,
+           1-4 switch sections, s/S cycles through sections. *)
+        | Some ("m" | "M") when state.view = Overview ->
+            goto_surface state ~mailbox:async_messages Metrics
+        | Some "1" when state.view = Metrics ->
+            state.metrics_section <- Section_fleet;
+            state.metrics_scroll <- 0
+        | Some "2" when state.view = Metrics ->
+            state.metrics_section <- Section_resources;
+            state.metrics_scroll <- 0
+        | Some "3" when state.view = Metrics ->
+            state.metrics_section <- Section_tools;
+            state.metrics_scroll <- 0
+        | Some "4" when state.view = Metrics ->
+            state.metrics_section <- Section_latency;
+            state.metrics_scroll <- 0
+        | Some ("s" | "S") when state.view = Metrics ->
+            state.metrics_section <- Masc_tui_types.next_metrics_section state.metrics_section;
+            state.metrics_scroll <- 0
        (* In chat, printable keys normally belong to the draft. Keep [?] as
           the documented global Help key when the draft is empty; once a
           sentence has started it remains an ordinary question mark. This
@@ -14668,7 +14688,7 @@ and is loaded on demand through keeper_skill.
                        | Board_read _ -> not state.board_detail_wide
                        | Board_list | Board_compose -> false)
                   | Code -> Option.is_some state.code_file
-                  | Acting | Keepers _ | Lanes | Clients | Approvals
+                  | Acting | Metrics | Keepers _ | Lanes | Clients | Approvals
                   | Planning
                   | Schedules | Verification | Harness | Fusion
                   | Memory | Repositories | Changes | Connectors | Runtime | Config
@@ -14686,7 +14706,7 @@ and is loaded on demand through keeper_skill.
               when Option.is_some state.code_file
                    && not state.repository_changes_open ->
                 state.code_focus_file <- focus
-            | Acting | Keepers _ | Lanes | Clients | Approvals | Planning
+            | Acting | Metrics | Keepers _ | Lanes | Clients | Approvals | Planning
             | Schedules
             | Memory | Verification | Harness | Fusion | Repositories | Changes
             | Connectors | Runtime | Config | Code | Tools
@@ -14794,7 +14814,7 @@ and is loaded on demand through keeper_skill.
                   state.preset_restore_armed <- None;
                   state.preset_save_draft <- Some ""
                 end
-            | Overview | Acting | Keepers _ | Memory | Lanes | Clients | Board
+            | Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
             | Planning
             | Verification | Harness | Fusion | Repositories | Code | Changes
             | Connectors | Runtime | Config | Resources | Tools | System_logs ->
@@ -14963,7 +14983,10 @@ and is loaded on demand through keeper_skill.
                               ~cursor:state.lane_runs_cursor ~height
                               state.lane_runs_scroll)
                  | Lanes_overview -> ())
-            | Overview | Acting | Keepers _ | Approvals | Planning
+             | Metrics ->
+                 state.metrics_scroll <-
+                   max 0 (state.metrics_scroll + (direction * page))
+             | Overview | Acting | Keepers _ | Approvals | Planning
             | Memory | Repositories | Changes | Connectors
             | Runtime | Config | Tools | Resources | System_logs -> ())
        (* On Config, s and t hop to Resources and Tools and r is the global
@@ -15085,6 +15108,8 @@ and is loaded on demand through keeper_skill.
             | Schedules -> launch_schedules_load state ~mailbox:async_messages
             | Keepers Keeper_runtime_pick ->
                 launch_runtime_catalog_load state ~mailbox:async_messages
+            | Metrics ->
+                launch_memory_health_load state ~mailbox:async_messages
             | Overview | Acting | Approvals | System_logs -> ());
            add_event state "system" "Manual refresh"
        | Some "\t" | Some "shift-tab" ->
@@ -15259,7 +15284,7 @@ and is loaded on demand through keeper_skill.
                  | Lanes_overview ->
                      (* Back to the Runtime parent it hangs off, loaded. *)
                      goto_surface state ~mailbox:async_messages Runtime)
-            | Acting | Keepers Keeper_list -> state.view <- Overview
+            | Acting | Metrics | Keepers Keeper_list -> state.view <- Overview
             | Approvals ->
                 (* Esc leaves the ask and returns to the list with the cursor
                    where it was, the way the Changes diff does. *)
@@ -15461,7 +15486,7 @@ and is loaded on demand through keeper_skill.
                 state.system_logs_detail_seq <- None;
                 state.system_logs_detail_scroll <- 0
             | Keepers Keeper_runtime_pick | Keepers Keeper_message
-            | Keepers Keeper_list | Acting | Approvals
+            | Keepers Keeper_list | Acting | Metrics | Approvals
              | Memory | Repositories | Connectors | Config | Tools | Clients -> ())
        | Some ("j" | "down" | "wheel-down") when state.repository_changes_open ->
            (match state.repository_changes_diff_path with
@@ -15827,6 +15852,7 @@ and is loaded on demand through keeper_skill.
                   if state.resources_cursor < total - 1 then
                     state.resources_cursor <- state.resources_cursor + 1
             | Acting -> state.acting_scroll <- state.acting_scroll + 1
+            | Metrics -> state.metrics_scroll <- state.metrics_scroll + 1
             | System_logs ->
                 if Option.is_some state.system_logs_detail_seq then
                   state.system_logs_detail_scroll <-
@@ -16177,6 +16203,8 @@ and is loaded on demand through keeper_skill.
                   state.resource_scroll <- max 0 (state.resource_scroll - 1)
                 else if state.resources_cursor > 0 then
                   state.resources_cursor <- state.resources_cursor - 1
+            | Metrics ->
+                state.metrics_scroll <- max 0 (state.metrics_scroll - 1)
             | Acting ->
                 if state.acting_scroll > 0 then begin
                   state.acting_scroll <- state.acting_scroll - 1;
@@ -16557,7 +16585,7 @@ and is loaded on demand through keeper_skill.
             | System_logs -> open_selected_system_log state
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
-            | Acting
+            | Acting | Metrics
              | Connectors | Config | Resources | Tools | Clients -> ())
        (* Changes reads one keeper's file writes and already binds to the
           roster cursor on entry, so it opens from a keeper surface rather
@@ -16787,7 +16815,7 @@ and is loaded on demand through keeper_skill.
                        keeper.k_name;
                      state.view <- Keepers Keeper_calls
                  | None -> ())
-            | Overview | Acting | Keepers (Keeper_logs | Keeper_calls | Keeper_message)
+            | Overview | Acting | Metrics | Keepers (Keeper_logs | Keeper_calls | Keeper_message)
             | Lanes | Board | Approvals | Planning | Schedules
             | Memory | Verification | Harness | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | Clients
             | System_logs -> ())
@@ -17092,7 +17120,7 @@ and is loaded on demand through keeper_skill.
                   ~keeper_name:keeper.k_name;
                 state.view <- Keepers Keeper_message
             | Keepers Keeper_detail | Keepers Keeper_list
-            | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
+            | Overview | Acting | Metrics | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | Clients
@@ -17318,7 +17346,7 @@ and is loaded on demand through keeper_skill.
                     add_event state "system"
                       "No lifecycle action applies to this keeper yet"
                 | None -> ())
-            | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
+            | Overview | Acting | Metrics | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | Clients
@@ -17362,7 +17390,7 @@ and is loaded on demand through keeper_skill.
                 (* Client-side re-order of the loaded goals: no refetch. *)
                 state.planning_sort <- next_planning_sort state.planning_sort;
                 clamp_planning_cursor state
-            | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
+            | Overview | Acting | Metrics | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Approvals | Schedules | Verification | Harness
              | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs | Clients -> ())
@@ -17385,7 +17413,7 @@ and is loaded on demand through keeper_skill.
             | Keepers (Keeper_list | Keeper_detail) ->
                 handle_keeper_action state ~base_path ~mailbox:async_messages
                   Keeper_control.Wakeup
-            | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
+            | Overview | Acting | Metrics | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Approvals | Planning | Schedules | Verification | Harness
              | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs | Clients
@@ -17486,7 +17514,7 @@ and is loaded on demand through keeper_skill.
                      launch_gate_external_mode_set state
                        ~mailbox:async_messages
                        ~mode:(Masc.Keeper_gate_mode.to_string next))
-            | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
+            | Overview | Acting | Metrics | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Board | Planning | Verification | Harness
              | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Resources | System_logs | Clients -> ())
@@ -17547,7 +17575,7 @@ and is loaded on demand through keeper_skill.
                 (* The approval queue owns this surface's arrows and its y/n,
                    so answering a Keeper's question opens as its own mode. *)
                 enter_ask_answering state
-            | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
+            | Overview | Acting | Metrics | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Memory | Lanes
             | Board | Planning | Schedules | Harness
             | Fusion | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs | Clients -> ())
@@ -17732,7 +17760,7 @@ and is loaded on demand through keeper_skill.
             window's date files -- seconds, not milliseconds -- and the answer
             only moves when the keeper takes a turn. [r] asks for it. *)
          | Changes
-         | Overview | Acting | Keepers Keeper_message
+         | Overview | Acting | Metrics | Keepers Keeper_message
          | Approvals | Planning | System_logs -> ());
         last_check_ns := now_ns;
         Render_schedule.request render_schedule Render_schedule.Background

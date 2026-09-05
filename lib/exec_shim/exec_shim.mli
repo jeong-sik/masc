@@ -124,7 +124,7 @@ val host_signal_number : int -> int
     [host_signal_number Sys.sigterm = 15] on Linux and macOS. *)
 
 val trailer_of_status :
-  timed_out:bool -> Unix.process_status -> Exec_ssh_protocol.trailer
+  v:Exec_ssh_protocol.major -> timed_out:bool -> Unix.process_status -> Exec_ssh_protocol.trailer
 (** Maps a reaped child status to the result trailer: [WEXITED n] →
     [exit = Some n], [WSIGNALED n] → [signal = Some] of the {b host OS}
     signal number (via {!host_signal_number} — the wire must carry 9 or
@@ -194,10 +194,11 @@ type config =
   { remote_root : string
   ; env_allowlist : string list
   ; payload_path : string list  (** [path=] entries, or {!default_payload_path}. *)
-  ; scratch_root : string option
+  ; scratch_root : string
     (** [scratch_root=] (absolute): where a boxed run gets its one writable
         directory, which is also the payload's HOME and TMPDIR and is removed
-        after the run. Absent: a boxed payload may write nowhere (RFC-0422). *)
+        after the run. Absent means {!Exec_ssh_protocol.default_scratch_root},
+        where the microvm boot mounts the guest's in-memory filesystem. *)
   }
 
 val jail_for_request

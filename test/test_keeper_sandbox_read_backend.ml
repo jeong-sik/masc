@@ -531,7 +531,7 @@ printf '%%s' '%s' >&2
 exit 0
 |}
     (Exec_ssh_protocol.render_trailer
-       { v = Exec_ssh_protocol.protocol_version
+       { v = Exec_ssh_protocol.newest
        ; exit = Some 0
        ; signal = None
        ; timed_out = false

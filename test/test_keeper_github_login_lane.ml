@@ -70,7 +70,7 @@ let stub_main () =
   let frame = header ^ read_exact Unix.stdin body_len in
   let trailer exit_code =
     Exec_ssh_protocol.render_trailer
-      { v = Exec_ssh_protocol.protocol_version
+      { v = Exec_ssh_protocol.newest
       ; exit = Some exit_code
       ; signal = None
       ; timed_out = false

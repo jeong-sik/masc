@@ -81,16 +81,23 @@ let get_mono_clock_opt () =
 let set_switch sw =
   let owner_domain = Domain.self () in
   let dispatch_stream = Eio.Stream.create 512 in
-  Atomic.set
-    current_sw
-    (Some { switch = sw; owner_domain; dispatch_stream });
+  let binding = { switch = sw; owner_domain; dispatch_stream } in
+  Atomic.set current_sw (Some binding);
+  Eio.Switch.on_release sw (fun () ->
+    let _ = Atomic.compare_and_set current_sw (Some binding) None in
+    let rec drain () =
+      match Eio.Stream.take_nonblocking dispatch_stream with
+      | Some task ->
+        (try task () with _ -> ());
+        drain ()
+      | None -> ()
+    in
+    drain ());
   Eio.Fiber.fork_daemon ~sw (fun () ->
     while true do
       let task = Eio.Stream.take dispatch_stream in
       Eio.Fiber.fork ~sw (fun () ->
-        try task () with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | _ -> ())
+        try task () with _ -> ())
     done;
     `Stop_daemon)
 
@@ -112,17 +119,14 @@ let run_on_owner_domain (type a) (f : unit -> a) : a =
       try
         let res = f () in
         Eio.Promise.resolve_ok r res
-      with
-      | Eio.Cancel.Cancelled _ as exn ->
-        Eio.Promise.resolve_error r exn;
-        raise exn
-      | exn ->
-        Eio.Promise.resolve_error r exn
+      with exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        Eio.Promise.resolve_error r (exn, bt)
     in
     Eio.Stream.add binding.dispatch_stream task;
     match Eio.Promise.await p with
     | Ok res -> res
-    | Error exn -> raise exn
+    | Error (exn, bt) -> Printexc.raise_with_backtrace exn bt
 
 let set_env env =
   Atomic.set current_env (Some env)

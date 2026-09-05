@@ -235,7 +235,29 @@ let test_run_on_owner_domain_cross_domain_dispatch () =
     Alcotest.(check bool)
       "exception on owner domain re-raised on worker domain"
       true
-      cross_domain_exception_propagated)
+      cross_domain_exception_propagated;
+    (* 4. Verify Cancelled exception propagation does NOT crash or cancel root_sw *)
+    let cancelled_propagated =
+      try
+        Eio_context.run_on_owner_domain (fun () ->
+          raise (Eio.Cancel.Cancelled (Failure "simulated cancel")));
+        false
+      with
+      | Eio.Cancel.Cancelled (Failure msg) when String.equal msg "simulated cancel" -> true
+      | _ -> false
+    in
+    Alcotest.(check bool)
+      "Cancelled exception propagated to worker domain"
+      true
+      cancelled_propagated;
+    (* Verify root_sw is still healthy and accepting work *)
+    let post_cancel_ran =
+      Eio_context.run_on_owner_domain (fun () -> 999)
+    in
+    Alcotest.(check int)
+      "root_sw still alive and operational after inner Cancelled"
+      999
+      post_cancel_ran)
 
 let () =
   Alcotest.run "eio_context_fiber_local"

@@ -867,6 +867,59 @@ let test_cross_domain_start_keepalive_and_swap () =
           fail ("cross-domain start_keepalive failed: "
                 ^ Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome)))
 
+let test_cross_domain_shutdown_submit () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  R.For_testing.clear ();
+  Masc.Keeper_process_switch.For_testing.clear ();
+  let base_dir = temp_dir "cross-domain-shutdown" in
+  let keeper_name = "cross-domain-shutdown-keeper" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
+      Masc.Keeper_process_switch.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      ensure_default_runtime ();
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
+      let meta = make_meta keeper_name in
+      seed_keeper_sandbox_profile ~base_dir keeper_name;
+      Eio.Switch.run @@ fun root_sw ->
+      Eio_context.set_switch root_sw;
+      Masc.Keeper_process_switch.set root_sw;
+      let ctx : _ Keeper_types_profile.context =
+        {
+          config;
+          agent_name = "tester";
+          sw = root_sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env root_sw config);
+        }
+      in
+      match Masc.Keeper_keepalive.start_keepalive ctx meta with
+      | Masc.Keeper_keepalive.Keepalive_started entry ->
+        Eio.Domain_manager.run (Eio.Stdenv.domain_mgr env) (fun () ->
+          check bool "worker domain does not own root switch" false
+            (Eio_context.root_switch_on_current_domain ());
+          let request : Masc.Keeper_shutdown_prepare_join.request =
+            { actor = "tester"
+            ; cleanup_intent = Masc.Keeper_shutdown_types.Purge
+            }
+          in
+          match Masc.Keeper_shutdown_runtime.submit ~config ~entry ~request with
+          | Ok _operation -> ()
+          | Error error ->
+            fail ("cross-domain shutdown submit failed: "
+                  ^ Masc.Keeper_shutdown_runtime.submit_error_to_string error))
+      | outcome ->
+        fail ("failed to start keeper before shutdown test: "
+              ^ Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome))
+
 let test_direct_start_rolls_back_when_the_launch_owner_is_already_cancelled () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -5018,6 +5071,8 @@ let () =
         test_direct_start_keepalive_resolves_done_on_stop;
       test_case "cross-domain start keepalive and swap" `Quick
         test_cross_domain_start_keepalive_and_swap;
+      test_case "cross-domain shutdown submit" `Quick
+        test_cross_domain_shutdown_submit;
       test_case "cancelled launch owner rolls back under launch reservation" `Quick
         test_direct_start_rolls_back_when_the_launch_owner_is_already_cancelled;
       test_case "stop resolves done after Librarian drain failure" `Quick

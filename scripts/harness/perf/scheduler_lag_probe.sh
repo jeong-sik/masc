@@ -28,12 +28,30 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "missing tool: $1" >&2; exit 
 need curl
 need python3
 
-health() { curl -s -m "$CURL_MAX_S" "$URL/health"; }
+# -f: a 5xx body must not be read as a probe answer. A failed request ends the
+# run here; the message names the curl exit code so a refused connection and
+# a timeout read differently.
+health() {
+  local body
+  if ! body="$(curl -sf -m "$CURL_MAX_S" "$URL/health")"; then
+    echo "   /health request failed (curl exit $?)" >&2
+    exit 1
+  fi
+  printf '%s' "$body"
+}
+# Wall-clock seconds with sub-second precision; macOS date has no %N.
+now_s() { python3 -c 'import time; print(time.time())'; }
 
 echo "== masc scheduler lag probe: $URL"
 echo "-- /health latency over $PROBES probes (gap ${GAP_S}s)"
+# One line per probe. curl still prints time_total when the transfer fails,
+# so the failure is substituted for that line rather than added to it.
 latencies="$(for _ in $(seq 1 "$PROBES"); do
-  curl -s -m "$CURL_MAX_S" -o /dev/null -w '%{time_total}\n' "$URL/health" || echo "$CURL_MAX_S"
+  if line="$(curl -s -m "$CURL_MAX_S" -o /dev/null -w '%{time_total}' "$URL/health")"; then
+    echo "$line"
+  else
+    echo "$CURL_MAX_S"
+  fi
   sleep "$GAP_S"
 done)"
 python3 - "$latencies" << 'PY'
@@ -45,15 +63,20 @@ print(f"   n={n} p50={rank(0.5):.3f}s p90={rank(0.9):.3f}s max={xs[-1]:.3f}s")
 PY
 
 echo "-- scheduler ring (.scheduler) and gc (.gc) from /health"
+# The rate denominator is the measured gap between the two answers, not the
+# configured sleep: a slow /health would otherwise inflate every rate by its
+# own latency.
 first="$(health)"
+first_at="$(now_s)"
 sleep "$RATE_WINDOW_S"
 second="$(health)"
-python3 - "$first" "$second" "$RATE_WINDOW_S" << 'PY'
+second_at="$(now_s)"
+python3 - "$first" "$second" "$(python3 -c "print($second_at - $first_at)")" << 'PY'
 import json, sys
 a, b, dt = json.loads(sys.argv[1]), json.loads(sys.argv[2]), float(sys.argv[3])
 s = b.get("scheduler")
 if s is None:
-    print("   scheduler: field absent (server predates the probe)")
+    print("   scheduler: field absent from a 2xx /health (server predates the probe)")
 else:
     keys = ["probe", "pool_domains", "samples", "p50_ms", "p95_ms", "p99_ms", "max_ms", "mean_ms", "stalls", "stopped_reason"]
     print("   scheduler: " + " ".join(f"{k}={s[k]}" for k in keys if k in s))
@@ -67,5 +90,6 @@ if "minor_collections" in gb:
           f"heap_MB={float(gb.get('heap_words', 0)) * words / 1048576:.0f} live_MB={float(gb.get('live_words', 0)) * words / 1048576:.0f} "
           f"minor_heap_MB={float(gb.get('minor_heap_size', 0)) * words / 1048576:.0f} space_overhead={gb.get('space_overhead')}")
 else:
-    print(f"   gc: counters absent (server predates the probe); heap_words={gb.get('heap_words')} live_words={gb.get('live_words')}")
+    print(f"   gc: counters absent from a 2xx /health (server predates the probe); heap_words={gb.get('heap_words')} live_words={gb.get('live_words')}")
+print(f"   gap between the two /health answers: {dt:.2f}s")
 PY

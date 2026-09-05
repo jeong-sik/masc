@@ -1,15 +1,20 @@
 (* See scheduler_lag.mli for what the probe measures and why the ring is
    atomic per slot. *)
 
+type probe_state =
+  | Not_started
+  | Running
+  | Stopped of string
+  | Cancelled
+
 type t =
   { interval_s : float
   ; slots : float Atomic.t array
   ; (* Samples recorded so far. The slot for sample [n] is [n mod window]. The
-       writer stores the slot before advancing the cursor, so a reader that
-       trusts the cursor never reads a slot the writer has not filled yet. *)
+       single writer stores the slot before advancing the cursor, so a reader
+       that trusts the cursor never reads a slot the writer has not filled. *)
     cursor : int Atomic.t
-  ; started : bool Atomic.t
-  ; failure : string option Atomic.t
+  ; state : probe_state Atomic.t
   }
 
 let default_interval_s = 0.1
@@ -23,18 +28,22 @@ let create ?(interval_s = default_interval_s) ?(window = default_window) () =
   { interval_s
   ; slots = Array.init window (fun _ -> Atomic.make 0.0)
   ; cursor = Atomic.make 0
-  ; started = Atomic.make false
-  ; failure = Atomic.make None
+  ; state = Atomic.make Not_started
   }
 ;;
 
 let global = create ()
+let probe_state t = Atomic.get t.state
 
 let record t ~lag_s =
   let n = Atomic.get t.cursor in
   Atomic.set t.slots.(n mod Array.length t.slots) lag_s;
   Atomic.incr t.cursor
 ;;
+
+module For_testing = struct
+  let record = record
+end
 
 let samples t =
   let recorded = Atomic.get t.cursor in
@@ -92,13 +101,12 @@ let summarize t =
 
 let to_fields t : (string * Yojson.Safe.t) list =
   let probe =
-    match Atomic.get t.failure with
-    | Some reason ->
+    match Atomic.get t.state with
+    | Not_started -> [ "probe", `String "not_started" ]
+    | Running -> [ "probe", `String "running" ]
+    | Stopped reason ->
       [ "probe", `String "stopped"; "stopped_reason", `String reason ]
-    | None ->
-      if Atomic.get t.started
-      then [ "probe", `String "running" ]
-      else [ "probe", `String "not_started" ]
+    | Cancelled -> [ "probe", `String "cancelled" ]
   in
   let shape =
     [ "interval_ms", `Float (t.interval_s *. milliseconds_per_second)
@@ -122,10 +130,8 @@ let to_fields t : (string * Yojson.Safe.t) list =
   probe @ shape @ stats
 ;;
 
-let to_yojson t : Yojson.Safe.t = `Assoc (to_fields t)
-
 let start ~sw ~(mono_clock : _ Eio.Time.Mono.t) t =
-  if Atomic.compare_and_set t.started false true
+  if Atomic.compare_and_set t.state Not_started Running
   then
     Eio.Fiber.fork ~sw (fun () ->
       let rec loop () =
@@ -139,6 +145,8 @@ let start ~sw ~(mono_clock : _ Eio.Time.Mono.t) t =
         loop ()
       in
       try loop () with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Atomic.set t.failure (Some (Printexc.to_string exn)))
+      | Eio.Cancel.Cancelled _ as exn ->
+        Atomic.set t.state Cancelled;
+        raise exn
+      | exn -> Atomic.set t.state (Stopped (Printexc.to_string exn)))
 ;;

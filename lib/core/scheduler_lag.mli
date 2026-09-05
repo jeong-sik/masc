@@ -33,10 +33,6 @@ val create : ?interval_s:float -> ?window:int -> unit -> t
 val global : t
 (** The process-wide probe the server starts on its main domain. *)
 
-val record : t -> lag_s:float -> unit
-(** Store one sample in seconds. Exposed so tests can drive the ring without
-    a scheduler. *)
-
 type summary =
   { samples : int
   ; p50_ms : float
@@ -51,15 +47,31 @@ val summarize : t -> summary option
 (** Percentiles (nearest rank) over the samples currently in the ring, or
     [None] when nothing has been recorded. *)
 
+type probe_state =
+  | Not_started
+  | Running
+  | Stopped of string  (** the probe raised; the message *)
+  | Cancelled  (** the switch that owned the probe was cancelled *)
+
+val probe_state : t -> probe_state
+
 val to_fields : t -> (string * Yojson.Safe.t) list
 (** Wire shape used by [/health]. Always carries [probe] ("not_started",
-    "running", or "stopped" with [stopped_reason]), [interval_ms], [window_s]
-    and [samples]; the percentile fields are present only when [samples > 0]. *)
-
-val to_yojson : t -> Yojson.Safe.t
-(** [`Assoc (to_fields t)]. *)
+    "running", "stopped" with [stopped_reason], or "cancelled"),
+    [interval_ms], [window_s], [stall_threshold_ms] and [samples]; the
+    percentile fields are present only when [samples > 0]. *)
 
 val start : sw:Eio.Switch.t -> mono_clock:_ Eio.Time.Mono.t -> t -> unit
-(** Fork the probe fiber under [sw] on the calling domain. A second call on
-    the same [t] does nothing. A failure inside the probe stops it and is
-    reported through [to_fields]; it never cancels [sw]. *)
+(** Fork the probe fiber under [sw] on the calling domain; [probe_state] is
+    [Running] when this returns. A second call on the same [t] does nothing.
+    A failure inside the probe stops it and is reported through [to_fields];
+    it never cancels [sw].
+
+    The probe fiber is the ring's only writer. Nothing else may record into a
+    started [t]: the ring stores a slot before advancing the cursor, which is
+    what lets a reader on another domain trust every slot below the cursor. *)
+
+module For_testing : sig
+  val record : t -> lag_s:float -> unit
+  (** Store one sample in seconds into a ring no probe has started. *)
+end

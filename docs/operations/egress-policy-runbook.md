@@ -217,11 +217,33 @@ A keeper's own account of where it went is not evidence. These events are.
   policy -- and `rules=-` means nothing was judged, which is an accept that
   failed or a client that sent no request.
 
+  **A `-stale` suffix means the file could not be read** and the keeper is
+  running on the last rules that parsed:
+
+  ```
+  egress keeper=<name> rules=a1b2c3d4-stale admitted github.com:443
+  ```
+
+  Those rules are real -- they are the reach you last successfully granted --
+  but they are not what the file says now. Without the suffix this line would
+  be indistinguishable from a healthy one, because a stale set hashes to an
+  ordinary generation, and the "where `rules=` changes is where the edit
+  landed" reading would then give the opposite answer in exactly the case
+  worth catching. Fix the file; the next request picks it up.
+
   To answer "when did this keeper gain that reach", grep the keeper's egress
   lines and look for where `rules=` changes:
 
   ```
   rg 'egress keeper=<name>' <log> | rg -o 'rules=[a-f0-9]{8}' | uniq -c
+  ```
+
+  That pattern matches the generation whether or not `-stale` follows it, so
+  it answers "which policy" on its own. To find where a keeper was running
+  on an unreadable file, grep the suffix instead:
+
+  ```
+  rg 'egress keeper=<name> rules=[a-f0-9]{8}-stale' <log> | head
   ```
 
 - **This is not a complete security boundary.** Neither is any of the

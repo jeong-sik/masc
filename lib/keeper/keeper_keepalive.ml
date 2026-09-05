@@ -503,13 +503,19 @@ let fork_egress_proxy
          with
          | Ok rules ->
            Atomic.set last_good rules;
-           rules
+           { Egress_proxy_net.rules; freshness = Egress_proxy_net.Fresh }
          | Error detail ->
            Log.Keeper.warn
              ~keeper_name
              "egress allowlist unreadable, serving the last rules that parsed: %s"
              detail;
-           Atomic.get last_good
+           (* The freshness travels with the rules, so every event this
+              request produces says the file could not be read. The warning
+              alone did not: a stale set hashes to an ordinary generation,
+              and a keeper with no traffic writes no warning at all. *)
+           { Egress_proxy_net.rules = Atomic.get last_good
+           ; freshness = Egress_proxy_net.Serving_last_good
+           }
        in
        Eio.Fiber.fork ~sw (fun () ->
          try
@@ -579,9 +585,10 @@ let fork_egress_proxy
                                 line says a destination was allowed and not
                                 what allowed it. [-] where nothing was
                                 judged. *)
-                             (Option.value
-                                event.Egress_proxy_net.rule_generation
-                                ~default:"-")
+                             (match event.Egress_proxy_net.rules_in_force with
+                              | None -> "-"
+                              | Some in_force ->
+                                Egress_proxy_net.rules_in_force_to_string in_force)
                              (Egress_proxy_net.outcome_to_string event.Egress_proxy_net.outcome))
                          ~socket
                          ~read_timeout_s:Keeper_egress_lane.request_line_read_timeout_s))

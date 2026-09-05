@@ -21,21 +21,52 @@ type outcome =
 
 val outcome_to_string : outcome -> string
 
+type freshness =
+  | Fresh  (** The allowlist was read for this request. *)
+  | Serving_last_good
+      (** The read failed and the caller handed back the last set that
+          parsed. The rules are real -- they are the reach an operator last
+          successfully granted -- but they are not what the file says now. *)
+
+type ruleset =
+  { rules : Egress_host.rule list
+  ; freshness : freshness
+  }
+(** What {!serve} is handed per request. The freshness travels with the rules
+    rather than being asked for separately, so a caller cannot report a
+    generation without saying whether the file behind it could be read. *)
+
+type rules_in_force =
+  { generation : string
+  ; freshness : freshness
+  }
+(** The allowlist a request was judged against, as it goes into the record. *)
+
+val rules_in_force_to_string : rules_in_force -> string
+(** [<generation>] when fresh, [<generation>-stale] when not, so a log line
+    stays greppable by generation either way. *)
+
 type event =
   { keeper_name : string
   ; at : float
   ; outcome : outcome
-  ; rule_generation : string option
-        (** {!Egress_host.generation} of the rules that judged this request,
-            or [None] where none did -- an accept that failed, or a client
-            that sent nothing to judge.
+  ; rules_in_force : rules_in_force option
+        (** The rules that judged this request, or [None] where none did --
+            an accept that failed, or a client that sent nothing to judge.
 
             The rules are read per request, so without this a record of
             "admitted" cannot say which allowlist admitted it: an operator's
             edit between two requests leaves no mark, and a destination that
             should not have been reachable cannot be traced back to the rules
             that allowed it. Two events with the same value were judged by
-            the same rules. *)
+            the same rules.
+
+            The freshness is here rather than only in a warning line because
+            a stale set hashes to a perfectly ordinary generation. Reading
+            "the generation changed here, so that is where the edit landed"
+            off a log that cannot say the file was unreadable gets the
+            opposite answer in exactly the case worth catching -- and a
+            keeper with no traffic writes no warning at all. *)
   }
 (** One request that reached the proxy. Every request produces one, admitted
     or not: the point of putting a proxy here is that a keeper's reach stops
@@ -47,12 +78,24 @@ val request_line_max_bytes : int
     and the cap is what keeps a client from holding a fiber open by never
     sending a newline. *)
 
+module For_testing : sig
+  val address_failed_to_answer : exn -> bool
+  (** Whether a failed connect earns trying the next address.
+
+      Pinned because the answer is not readable from this file: eio wraps
+      what a connect returns but creates the socket outside that wrapping, so
+      the case the address list exists for -- an AAAA record leading on a
+      machine with IPv6 off -- arrives as a bare [Unix.Unix_error] rather
+      than [Eio.Io]. Narrowing this to the readable half once already turned
+      that address into the end of the whole attempt. *)
+end
+
 val serve
   :  sw:Eio.Switch.t
   -> net:_ Eio.Net.t
   -> clock:_ Eio.Time.clock
   -> keeper_name:string
-  -> rules:(unit -> Egress_host.rule list)
+  -> rules:(unit -> ruleset)
   -> on_event:(event -> unit)
   -> socket:[> [> `Generic ] Eio.Net.listening_socket_ty ] Eio.Resource.t
   -> read_timeout_s:float

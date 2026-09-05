@@ -3251,7 +3251,8 @@
   eio_main
   masc.egress_host
   masc.egress_proxy_net
-  masc.string_util))
+  masc.string_util
+  unix))
 
 (test
  (name test_tui_gate_fold)

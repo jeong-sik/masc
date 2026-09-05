@@ -12,11 +12,31 @@ let outcome_to_string = function
   | Unreadable { detail } -> "unreadable: " ^ detail
 ;;
 
+type freshness =
+  | Fresh
+  | Serving_last_good
+
+type ruleset =
+  { rules : Egress_host.rule list
+  ; freshness : freshness
+  }
+
+type rules_in_force =
+  { generation : string
+  ; freshness : freshness
+  }
+
+let rules_in_force_to_string { generation; freshness } =
+  match freshness with
+  | Fresh -> generation
+  | Serving_last_good -> generation ^ "-stale"
+;;
+
 type event =
   { keeper_name : string
   ; at : float
   ; outcome : outcome
-  ; rule_generation : string option
+  ; rules_in_force : rules_in_force option
   }
 
 (* The request line and the header block that follows it. A CONNECT authority
@@ -47,6 +67,30 @@ let resolve_upstream ~net ~host ~port =
   | exception exn -> Error (Printexc.to_string exn)
 ;;
 
+(* Whether a failed connect says "this address did not answer" -- the only
+   thing that earns trying the next one.
+
+   Two exception types, because [Eio.Net.connect] raises both. It wraps what
+   the connect itself returns into [Eio.Io], but it creates the socket
+   outside that wrapping (eio 1.3, [lib_eio_posix/net.ml:149] sits above the
+   [try] on 150), so a family the kernel will not serve comes back as a bare
+   [Unix.Unix_error EAFNOSUPPORT]. That is exactly the case this list exists
+   for: a host whose AAAA record leads on a machine with IPv6 off. Catching
+   only [Eio.Io] left that one address ending the whole attempt.
+
+   Everything else goes up. A malformed address raises [Invalid_argument],
+   and moving on from that would report a code defect as an unreachable
+   destination and then bury it under "no address answered". *)
+let address_failed_to_answer = function
+  | Eio.Cancel.Cancelled _ -> false
+  | Eio.Io _ | Unix.Unix_error _ -> true
+  | _ -> false
+;;
+
+module For_testing = struct
+  let address_failed_to_answer = address_failed_to_answer
+end
+
 (* Try them in order and report the last failure. Reporting the first would
    name whichever address the resolver happened to put first rather than the
    one that ended the attempt. *)
@@ -58,16 +102,13 @@ let connect_first_reachable ~sw ~net addresses =
       (match Eio.Net.connect ~sw net address with
        | flow -> Ok flow
        | exception exn ->
-         (match exn with
-          (* A cancelled switch is the lane going away, not this address
-             failing; trying the next one would outlive the reason to try. *)
-          | Eio.Cancel.Cancelled _ -> raise exn
-          (* Only an I/O failure says "this address did not answer". A
-             malformed address raises [Invalid_argument], and moving on from
-             that would report a code defect as an unreachable destination
-             and then hide it behind "no address answered". *)
-          | Eio.Io _ -> attempt (Some (Printexc.to_string exn)) rest
-          | _ -> raise exn))
+         if address_failed_to_answer exn
+         then attempt (Some (Printexc.to_string exn)) rest
+         else
+           (* A cancelled switch is the lane going away, not this address
+              failing; trying the next one would outlive the reason to try.
+              Anything else is a defect, and it belongs upstairs. *)
+           raise exn)
   in
   attempt None addresses
 ;;
@@ -117,7 +158,7 @@ let handle_connection ~net ~clock ~keeper_name ~rules ~on_event ~read_timeout_s 
       { keeper_name
       ; at = Unix.gettimeofday ()
       ; outcome
-      ; rule_generation = !judged_by
+      ; rules_in_force = !judged_by
       }
   in
   let read_request_line () =
@@ -154,8 +195,8 @@ let handle_connection ~net ~clock ~keeper_name ~rules ~on_event ~read_timeout_s 
   | Ok (request_line, reader) ->
     (* Asked here, per request, so an allowlist edit reaches the next
        connection instead of waiting for a lane restart. *)
-    let rules = rules () in
-    judged_by := Some (Egress_host.generation rules);
+    let { rules; freshness } = rules () in
+    judged_by := Some { generation = Egress_host.generation rules; freshness };
     let decision = Egress_proxy_decision.decide ~rules ~request_line in
     (match decision with
      | Egress_proxy_decision.Refused refusal ->
@@ -219,7 +260,7 @@ let serve ~sw ~net ~clock ~keeper_name ~rules ~on_event ~socket ~read_timeout_s 
           ; outcome = Unreadable { detail = Printexc.to_string exn }
           (* An accept that failed never reached a request, so no allowlist
              answered for it. *)
-          ; rule_generation = None
+          ; rules_in_force = None
           })
       (fun flow _client_addr ->
         handle_connection ~net ~clock ~keeper_name ~rules ~on_event ~read_timeout_s flow);

@@ -2711,6 +2711,47 @@ let () = test "handle_done_cancelled_guidance" (fun () ->
   assert (str_contains (Tool_result.message result) "was cancelled by test-agent")
 )
 
+(* The duration metric names why the work stopped. A stop stated only in
+   handoff_context.summary — the shape the tool schema asks for — is what the
+   transition recorded; the metric read the bare [reason] argument and said
+   "Cancelled" for exactly that call. *)
+let () = test "handle_transition_cancel_metric_carries_the_stated_reason" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "Stop me") ])
+  in
+  start_task_001 ctx;
+  let previous_metric = Atomic.get Workspace_hooks.record_task_metric_fn in
+  let recorded = ref [] in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Workspace_hooks.record_task_metric_fn previous_metric)
+    (fun () ->
+       Atomic.set Workspace_hooks.record_task_metric_fn
+         (fun _config
+              ~agent_id:_
+              ~task_id:_
+              ~started_at:_
+              ~completed_at:_
+              ~success
+              ~error_message
+              ~collaborators:_
+              ~handoff_from:_
+              ~handoff_to:_ ->
+            recorded := (success, error_message) :: !recorded);
+       let result =
+         Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+           (`Assoc
+             [ ("task_id", `String "task-001")
+             ; ("action", `String "cancel")
+             ; ( "handoff_context"
+               , `Assoc [ ("summary", `String "the premise this rests on is gone") ] )
+             ])
+       in
+       if not (Tool_result.is_success result) then failwith (Tool_result.message result));
+  assert (!recorded = [ (false, Some "the premise this rests on is gone") ])
+)
+
 (* Test dispatch transition release *)
 let () = test "dispatch_transition_release" (fun () ->
   let ctx = make_test_ctx () in

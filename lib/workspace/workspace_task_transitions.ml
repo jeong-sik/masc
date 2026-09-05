@@ -294,6 +294,23 @@ let transition_task_outcome_r
         in
         let new_status = decision.Workspace_task_lifecycle.new_status in
         let set_current = decision.set_current in
+        (* The one sentence a stop states, resolved once from this call's
+           [reason] and [handoff_context]. [reason] is optional on this entry
+           point while [handoff_context.summary] is required for every
+           exit-class action, so a caller that put the whole explanation in the
+           summary — which the tool schema told it to fill — has stated one.
+           The verification record, the committed Task's note, the activity
+           event and the message log all read this value, so the operator, the
+           author's wake and the log see one sentence.
+
+           Only this call's arguments. The note already on the Task is the
+           previous owner's release summary, kept across the claim so the
+           incoming owner can read it (RFC-0365); resolving from it put that
+           owner's sentence before the operator as this owner's reason, while
+           the broadcast, reading the arguments, announced none. *)
+        let stated_reason =
+          Masc_domain.stated_reason ~reason:(Some reason) ~handoff_context
+        in
         (* The obligation the lifecycle just created, if any. A completion
            carries the evidence references parsed from the notes and handoff;
            a stop carries the producer's reason. Keyed on the produced state so
@@ -327,23 +344,7 @@ let transition_task_outcome_r
                        } ))
           | Masc_domain.AwaitingVerification
               { assignee; verification_id; intent = Masc_domain.Cancel_task; _ } ->
-            (* The why arrives on either argument of this call. [reason] is
-               optional on this entry point while [handoff_context.summary] is
-               required for every exit-class action, so a caller that put the
-               whole explanation in the summary — which the tool schema told it
-               to fill — has stated one. [stated_reason] over the same two
-               arguments is what the broadcast below publishes and what the
-               committed Task keeps as its note, so the record the operator
-               judges, the note and the message log carry one sentence.
-
-               Only this call's arguments. The note already on the Task is the
-               previous owner's release summary, kept across the claim so the
-               incoming owner can read it (RFC-0365); resolving from it put that
-               owner's sentence before the operator as this owner's reason,
-               while the broadcast, reading the arguments, announced none. *)
-            (match
-               Masc_domain.stated_reason ~reason:(Some reason) ~handoff_context
-             with
+            (match stated_reason with
              | None ->
                Error
                  (Masc_domain.Task
@@ -545,7 +546,10 @@ let transition_task_outcome_r
                ~payload:
                  (`Assoc
                      [ "task_id", `String task_id
-                     ; ("reason", if reason = "" then `Null else `String reason)
+                     ; ( "reason"
+                       , match stated_reason with
+                         | None -> `Null
+                         | Some reason -> `String reason )
                      ])
            | Masc_domain.Release ->
              emit_task_activity

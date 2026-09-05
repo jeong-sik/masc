@@ -315,8 +315,33 @@ let held_with_the_previous_owners_note ~id =
   }
 ;;
 
+(* The activity event a cancel emits, captured through the hook the emitter
+   calls; this suite has no activity store. *)
+let with_captured_activity f =
+  let previous = Atomic.get Workspace_hooks.activity_emit_fn in
+  let emitted = ref [] in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Workspace_hooks.activity_emit_fn previous)
+    (fun () ->
+       Atomic.set
+         Workspace_hooks.activity_emit_fn
+         (fun _config ~actor:_ ?subject:_ ~kind ~payload ~tags:_ () ->
+            emitted := (kind, payload) :: !emitted);
+       f (fun () -> List.rev !emitted))
+;;
+
+let cancelled_event_reasons emitted =
+  List.filter_map
+    (fun (kind, payload) ->
+       if String.equal kind (Event_kind.Task.to_string Event_kind.Task.Cancelled)
+       then Some (Yojson.Safe.Util.member "reason" payload)
+       else None)
+    (emitted ())
+;;
+
 let test_cancel_does_not_borrow_the_previous_owners_note () =
   with_test_env (fun config ~baseline_seq ->
+  with_captured_activity (fun emitted ->
     seed config (held_with_the_previous_owners_note ~id:"task-14");
     let recorded = ref None in
     let capture ~task:_ ~assignee:_ ~verification_id:_ ~claim =
@@ -347,12 +372,62 @@ let test_cancel_does_not_borrow_the_previous_owners_note () =
     Alcotest.(check (list string)) "the message log carries the same reason"
       [ "Cancellation requested for task-14 - the premise is gone" ]
       (contents config ~baseline_seq);
+    Alcotest.(check bool) "the activity event carries the same reason" true
+      (cancelled_event_reasons emitted = [ `String "the premise is gone" ]);
     match List.find_opt (fun (task : D.task) -> String.equal task.id "task-14")
             (Workspace.get_tasks_raw config) with
     | Some task ->
       Alcotest.(check bool) "the previous owner's note does not ride on the cancel" true
         (Option.is_none task.handoff_context)
-    | None -> Alcotest.fail "task-14 vanished")
+    | None -> Alcotest.fail "task-14 vanished"))
+;;
+
+(* A stop stated only in handoff_context.summary — the shape the tool schema
+   asks for — reaches every surface with that sentence. The record, the
+   message log and the committed Task already read it; the activity event
+   read the bare [reason] argument and published null for exactly this call. *)
+let test_cancel_stated_in_the_summary_reaches_every_surface () =
+  with_test_env (fun config ~baseline_seq ->
+  with_captured_activity (fun emitted ->
+    seed config
+      (make_task ~id:"task-15" ~status:(D.InProgress { assignee = owner; started_at = now }));
+    let recorded = ref None in
+    let capture ~task:_ ~assignee:_ ~verification_id:_ ~claim =
+      recorded := Some claim;
+      Ok ()
+    in
+    check_ok "cancel"
+      (Workspace.transition_task_r config ~agent_name:owner ~task_id:"task-15"
+         ~prepare_verification_request:capture ~action:D.Cancel
+         ~handoff_context:
+           { summary = "the premise this rests on is gone"
+           ; reason = None
+           ; next_step = None
+           ; failure_mode = None
+           ; reclaim_policy = None
+           ; evidence_refs = []
+           ; updated_at = None
+           ; updated_by = None
+           }
+         ());
+    (match !recorded with
+     | Some (D.Cancellation_reason { reason }) ->
+       Alcotest.(check string) "the record carries the summary"
+         "the premise this rests on is gone" reason
+     | Some (D.Completion_evidence _) -> Alcotest.fail "a cancel wrote a completion claim"
+     | None -> Alcotest.fail "the cancel wrote no record");
+    Alcotest.(check (list string)) "the message log carries the summary"
+      [ "Cancellation requested for task-15 - the premise this rests on is gone" ]
+      (contents config ~baseline_seq);
+    Alcotest.(check bool) "the activity event carries the summary, not null" true
+      (cancelled_event_reasons emitted = [ `String "the premise this rests on is gone" ]);
+    match List.find_opt (fun (task : D.task) -> String.equal task.id "task-15")
+            (Workspace.get_tasks_raw config) with
+    | Some { handoff_context = Some { summary; _ }; _ } ->
+      Alcotest.(check string) "the committed Task keeps the same note"
+        "the premise this rests on is gone" summary
+    | Some { handoff_context = None; _ } -> Alcotest.fail "the cancel's own note was dropped"
+    | None -> Alcotest.fail "task-15 vanished"))
 ;;
 
 (* The idempotent no-op returns before the commit, so it must not manufacture a
@@ -402,6 +477,8 @@ let () =
             test_release_broadcasts_a_summary_only_handoff
         ; Alcotest.test_case "cancel does not borrow the previous owner's note" `Quick
             test_cancel_does_not_borrow_the_previous_owners_note
+        ; Alcotest.test_case "cancel stated in the summary reaches every surface" `Quick
+            test_cancel_stated_in_the_summary_reaches_every_surface
         ; Alcotest.test_case "explicit reason outranks handoff context" `Quick
             test_explicit_reason_outranks_handoff_context
         ] )

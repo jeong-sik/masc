@@ -20,8 +20,9 @@ type observed_terminal =
     (** [false] when the duration was synthesised rather than measured — a
         server-restart orphan is written back as Failed with
         [now - started_at], an arbitrarily large value that must not enter
-        the latency percentile (lane audit W7). It still bounds
-        [last_terminal_at]. *)
+        the latency percentile (lane audit W7). It keeps [last_terminal_at]
+        empty too: a finish time synthesised from the restart is the
+        restart's clock, and the lane detail draws that as an age. *)
   ; selected_slot : string option
   }
 
@@ -563,10 +564,16 @@ let lane_json
       (match latest_terminal_kind with Some Failed -> "degraded" | Some _ | None -> "idle")
   in
   let last_started_at = Option.map (fun run -> run.started_at) latest in
+  (* Only a measured finish. A server-restart orphan is written back with
+     [now - started_at], so started_at + elapsed_s lands on the moment the
+     server noticed rather than the moment the run ended -- and a reader
+     drawing "last run failed 3m ago" off it is reading the restart, not the
+     run. Same reason the percentile above refuses the synthesised value. *)
   let last_terminal_at =
-    Option.map
-      (fun (run, terminal) -> run.started_at +. terminal.elapsed_s)
-      latest_terminal
+    Option.bind latest_terminal (fun (run, terminal) ->
+      if terminal.elapsed_measured
+      then Some (run.started_at +. terminal.elapsed_s)
+      else None)
   in
   `Assoc
     [ "lane_id", `String spec.lane_id

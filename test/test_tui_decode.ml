@@ -3674,6 +3674,9 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
    [configuration_state]. Decoding that word into a variant is what lets the
    detail pane say which of the two it is. *)
 let test_decode_standalone_lane_configuration_is_a_closed_set () =
+  (* All four lanes, because the snapshot decoder demands each known lane
+     exactly once and a one-lane fixture never reaches the configuration
+     word at all. Only the board lane's state varies. *)
   let snapshot configuration_state =
     `Assoc
       [ "schema", `String "masc.standalone_llm_lanes.v1"
@@ -3687,23 +3690,48 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
         , `List
             [ standalone_lane_json ~configuration_state "board_attention_exact"
                 "Board Attention"
+            ; standalone_lane_json "hitl_auto_judge" "HITL Auto Judge"
+            ; standalone_lane_json "librarian_exact" "Librarian"
+            ; standalone_lane_json "verifier_exact" "Verifier"
             ] )
       ]
   in
-  let decoded configuration_state =
+  let board configuration_state =
     match Tui_decode.decode_standalone_lanes_snapshot (snapshot configuration_state) with
-    | Ok { Tui_decode.sls_lanes = [ lane ]; _ } -> Some lane.Tui_decode.sl_configuration_state
-    | Ok _ | Error _ -> None
+    | Error detail -> Error detail
+    | Ok snapshot ->
+      (match
+         List.find_opt
+           (fun (lane : Tui_decode.standalone_lane) ->
+             String.equal lane.sl_lane_id "board_attention_exact")
+           snapshot.Tui_decode.sls_lanes
+       with
+       | Some lane -> Ok lane.Tui_decode.sl_configuration_state
+       | None -> Error "the board lane did not survive the decode")
   in
-  Alcotest.(check bool) "ready" true (decoded "ready" = Some Tui_decode.Lane_ready);
-  Alcotest.(check bool) "the server's degraded is a lane with no slot admitted" true
-    (decoded "degraded" = Some Tui_decode.Lane_slotless);
-  Alcotest.(check bool) "unconfigured stays apart from unreadable" true
-    (decoded "unconfigured" = Some Tui_decode.Lane_unconfigured);
-  Alcotest.(check bool) "unavailable is the registry, not the lane" true
-    (decoded "unavailable" = Some Tui_decode.Lane_registry_unavailable);
-  Alcotest.(check bool) "a word outside the set is refused" true
-    (decoded "half-configured" = None)
+  let reads word expected =
+    match board word with
+    | Ok state ->
+      Alcotest.(check bool) (word ^ " decodes to its own variant") true
+        (state = expected)
+    | Error detail -> Alcotest.failf "%s did not decode: %s" word detail
+  in
+  reads "ready" Tui_decode.Lane_ready;
+  (* The server's word here is "degraded", which on the status axis means a
+     lane whose last run failed. This one means configured with nothing
+     admitted, so the variant does not reuse the spelling. *)
+  reads "degraded" Tui_decode.Lane_slotless;
+  reads "unconfigured" Tui_decode.Lane_unconfigured;
+  reads "unavailable" Tui_decode.Lane_registry_unavailable;
+  (* Refused by the configuration reader specifically, not merely refused:
+     a fixture that broke for any other reason would satisfy a bare
+     "this did not decode". *)
+  match board "half-configured" with
+  | Ok _ -> Alcotest.fail "a word outside the set was accepted"
+  | Error detail ->
+    Alcotest.(check bool) "the configuration reader is what refused it" true
+      (String.starts_with
+         ~prefix:"standalone lane configuration: unknown value" detail)
 
 (* The start of the newest run. The fixture has carried it since this suite
    was written and the decoder read it into an underscore, so the field

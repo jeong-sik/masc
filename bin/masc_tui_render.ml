@@ -6033,8 +6033,9 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
 
      [configuration_state] separates "nobody configured this" from "the
      registry could not be read", which the status word beside the lane
-     collapses into one "unavailable" and which the row only hinted at
-     through the prose of an admission error.
+     collapses into one "unavailable". The block draws the admission error
+     below, and those two states each carry one, so this is the typed half
+     of a distinction that was only ever legible as prose.
 
      The last terminal run is what the totals cannot say. [ok/fail/cancel
      962/133/0] reads the same whether the failures were this morning or
@@ -6054,11 +6055,14 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
         (Terminal_text.single_line outcome)
         (Masc_tui_answering.elapsed_text ~now at)
   in
+  (* By the state alone. This block draws no glyph, so a colour that also
+     answered "is it required" would make a split nothing else in the block
+     recovers -- the row two lines up gives every colour class its own mark
+     for exactly that reason. The obligation is in the words. *)
   let state_style =
     match lane.sl_configuration_state with
     | Tui_decode.Lane_ready -> Ansi.reset
-    | Tui_decode.Lane_slotless | Tui_decode.Lane_unconfigured ->
-      if lane.sl_required then Theme.bad () else Theme.warn ()
+    | Tui_decode.Lane_slotless | Tui_decode.Lane_unconfigured -> Theme.warn ()
     | Tui_decode.Lane_registry_unavailable -> Theme.bad ()
   in
   wrap Ansi.bold

@@ -120,6 +120,18 @@ let get_bool_field field = function
 let prompt_overrides_path dir =
   Filename.concat (Filename.concat dir ".masc") "prompt_overrides.json"
 
+(* The keys the file on disk holds. The bug this pins is about the file: the
+   in-memory tables can be perfectly correct while the save path writes a set
+   that has dropped something. *)
+let saved_keys_on_disk dir =
+  match Prompt_override_persistence.load ~path:(prompt_overrides_path dir) with
+  | Error error -> Alcotest.fail (Prompt_override_persistence.error_to_string error)
+  | Ok entries ->
+    entries
+    |> List.map (fun (e : Prompt_override_persistence.entry) -> e.key)
+    |> List.sort String.compare
+;;
+
 let reload_registry prompts_dir =
   Prompt_registry.clear ();
   Prompt_registry.set_markdown_dir prompts_dir;
@@ -162,8 +174,16 @@ let with_prompts_dir files f =
 
 (* (key, operator_surface) for every registered prompt. *)
 let registered_surfaces () =
-  match Prompt_registry.prompts_json () with
-  | `Assoc [ ("prompts", `List prompts) ] ->
+  (* By field, not by shape. Matching the envelope exactly made every one of
+     these helpers answer "unregistered" the day the catalog grew a second
+     key, which reads as a registration bug rather than a test that pinned
+     the envelope's arity by accident. *)
+  match
+    match Prompt_registry.prompts_json () with
+    | `Assoc fields -> List.assoc_opt "prompts" fields
+    | _ -> None
+  with
+  | Some (`List prompts) ->
     List.filter_map
       (function
         | `Assoc fields -> (
@@ -179,8 +199,16 @@ let registered_surfaces () =
 
 (* The registered description of one key; [None] when unregistered. *)
 let registered_description key =
-  match Prompt_registry.prompts_json () with
-  | `Assoc [ ("prompts", `List prompts) ] ->
+  (* By field, not by shape. Matching the envelope exactly made every one of
+     these helpers answer "unregistered" the day the catalog grew a second
+     key, which reads as a registration bug rather than a test that pinned
+     the envelope's arity by accident. *)
+  match
+    match Prompt_registry.prompts_json () with
+    | `Assoc fields -> List.assoc_opt "prompts" fields
+    | _ -> None
+  with
+  | Some (`List prompts) ->
     List.find_map
       (function
         | `Assoc fields -> (
@@ -194,8 +222,16 @@ let registered_description key =
 
 (* The registered template_variables of one key; [None] when unregistered. *)
 let registered_variables key =
-  match Prompt_registry.prompts_json () with
-  | `Assoc [ ("prompts", `List prompts) ] ->
+  (* By field, not by shape. Matching the envelope exactly made every one of
+     these helpers answer "unregistered" the day the catalog grew a second
+     key, which reads as a registration bug rather than a test that pinned
+     the envelope's arity by accident. *)
+  match
+    match Prompt_registry.prompts_json () with
+    | `Assoc fields -> List.assoc_opt "prompts" fields
+    | _ -> None
+  with
+  | Some (`List prompts) ->
     List.find_map
       (function
         | `Assoc fields -> (
@@ -695,6 +731,67 @@ let () =
                 (Prompt_registry.get_prompt "test.templated");
               check string "variable drift source" "file"
                 (Prompt_registry.prompt_source "test.templated"));
+          (* Refusing an override is not the same as discarding it. It used
+             to be: the save path read only the live table, so the next write
+             of any key rewrote the file without the refused entry, and an
+             operator's saved prompt went from "not applied" to "gone" with
+             nothing in between (2026-09-05). *)
+          test_case "a refused override survives a write of another key" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir ~prompts_dir ->
+              (match
+                 Prompt_registry.set_override "keeper.reply_guidelines"
+                   "the operator's own reply guidelines"
+               with
+              | Ok () -> ()
+              | Error message -> fail message);
+              persist_overrides_or_fail dir;
+              (* The default body moves under it, so the restore refuses. *)
+              write_file
+                (Filename.concat prompts_dir "keeper.reply_guidelines.md")
+                (markdown_fixture "keeper.reply_guidelines" "a different contract");
+              reload_registry prompts_dir;
+              Prompt_registry.restore_overrides dir;
+              check string "the refused override is not in force" "file"
+                (Prompt_registry.prompt_source "keeper.reply_guidelines");
+              check int "but it is still what the operator has saved" 1
+                (List.length (Prompt_registry.quarantined_entries ()));
+              (* Now touch some entirely unrelated prompt. *)
+              (match Prompt_registry.set_override_persisted ~base_path:dir
+                       "test.plain" "an unrelated override" with
+               | Ok () -> ()
+               | Error _ -> fail "the unrelated override did not save");
+              check (list string) "the file on disk still holds both"
+                [ "keeper.reply_guidelines"; "test.plain" ]
+                (saved_keys_on_disk dir));
+          (* Clearing is the operator saying so, and it reaches the copy they
+             cannot see. Nothing else does. *)
+          test_case "clearing a refused override removes it" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir ~prompts_dir ->
+              (match
+                 Prompt_registry.set_override "keeper.reply_guidelines" "held text"
+               with
+              | Ok () -> ()
+              | Error message -> fail message);
+              persist_overrides_or_fail dir;
+              write_file
+                (Filename.concat prompts_dir "keeper.reply_guidelines.md")
+                (markdown_fixture "keeper.reply_guidelines" "moved again");
+              reload_registry prompts_dir;
+              Prompt_registry.restore_overrides dir;
+              check int "held before the clear" 1
+                (List.length (Prompt_registry.quarantined_entries ()));
+              (match
+                 Prompt_registry.clear_prompt_override_persisted ~base_path:dir
+                   "keeper.reply_guidelines"
+               with
+               | Ok () -> ()
+               | Error _ -> fail "the clear did not save");
+              check int "and gone after it" 0
+                (List.length (Prompt_registry.quarantined_entries ()));
+              check (list string) "with nothing left in the file on disk" []
+                (saved_keys_on_disk dir));
           test_case "malformed versioned envelopes fail closed observably" `Quick
             (fun () ->
               with_registry @@ fun ~dir ~prompts_dir:_ ->

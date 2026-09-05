@@ -375,7 +375,11 @@ let capture ~base_path ~name ~description =
         { name
         ; description
         ; created_at = now_iso ()
-        ; prompt_overrides = Prompt_registry.override_entries ()
+          (* Everything the operator saved, not only what is in force. A
+             snapshot taken while an override is refused has to carry it, or
+             the autosave a restore takes for safety is empty in exactly the
+             case it was meant for. *)
+        ; prompt_overrides = Prompt_registry.persisted_entries ()
         ; instructions = capture_instructions ~base_path
         ; assignments
         ; lanes
@@ -538,6 +542,10 @@ let restore_prompt_overrides ~base_path (entries : Override.entry list) =
           | Ok () -> { acc with applied = (e.Override.key ^ " (cleared)") :: acc.applied }
           | Error message -> { acc with skipped = (e.Override.key, message) :: acc.skipped }))
       { applied = []; skipped = [] }
+      (* What is in force, not what is saved: a preset that does not mention
+         a key must not decide the fate of a refused override the operator is
+         still holding. An explicit clear is the only thing that removes
+         one. *)
       (Prompt_registry.override_entries ())
   in
   List.fold_left

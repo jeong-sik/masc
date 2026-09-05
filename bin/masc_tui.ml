@@ -12624,6 +12624,40 @@ and is loaded on demand through keeper_skill.
                       launch_keeper_config_view state
                         ~mailbox:async_messages keeper.k_name)))))))
   in
+  (* Set the sandbox backend (sandbox_profile) in place from the Sandbox tab,
+     without the $EDITOR JSON round-trip. Each key names an absolute backend, so
+     no current-value read is needed; the server validates the profile (e.g.
+     remote_ssh without a bound endpoint is rejected as reconciliation-required)
+     and the reply is surfaced. Reuses the same config POST the Settings edit
+     uses, then refreshes the Sandbox view so the new backend shows. *)
+  let set_sandbox_backend ~profile =
+    match selected_keeper state with
+    | None -> report_action state "system" no_keeper_under_cursor
+    | Some keeper -> (
+      let patch = `Assoc [ ("sandbox_profile", `String profile) ] in
+      match
+        Masc_tui_http.post_keeper_config ~host ~port ~keeper_name:keeper.k_name
+          ~patch_json:(Yojson.Safe.to_string patch)
+      with
+      | Error error ->
+          report_action state "error"
+            (Masc_tui_http.keeper_config_post_error_to_string error);
+          state.keeper_sandbox_view <- None;
+          state.keeper_sandbox_view_error <- None;
+          launch_keeper_sandbox_view state ~mailbox:async_messages keeper.k_name
+      | Ok response ->
+          (match
+             Masc_tui_keeper_config.config_write_status_message
+               ~keeper_name:keeper.k_name response
+           with
+           | Error detail ->
+               report_action state "error"
+                 (keeper.k_name ^ ": invalid config write receipt: " ^ detail)
+           | Ok (severity, message) -> report_action state severity message);
+          state.keeper_sandbox_view <- None;
+          state.keeper_sandbox_view_error <- None;
+          launch_keeper_sandbox_view state ~mailbox:async_messages keeper.k_name)
+  in
   let handle_keeper_create () =
     match Masc_tui_editor.editor_command () with
     | None ->
@@ -14009,8 +14043,16 @@ and is loaded on demand through keeper_skill.
                 launch_identity_view state ~mailbox:async_messages keeper.k_name
             | Some _, Detail_channels ->
                 launch_connectors_load state ~mailbox:async_messages
-            | Some _, Detail_automation ->
-                launch_schedules_load state ~mailbox:async_messages
+            | Some keeper, Detail_automation ->
+                (* Bracket-switching into Automation must fetch THIS keeper's
+                   schedules (state.keeper_schedules, what automation_lines
+                   reads), not the fleet list. The old launch_schedules_load
+                   wrote state.schedules, which this tab never reads, so the
+                   panel stayed stuck on "(loading…)". Mirror open_keeper_detail. *)
+                state.keeper_schedules <- None;
+                state.keeper_schedules_error <- None;
+                launch_keeper_schedules_load state ~mailbox:async_messages
+                  ~keeper_name:keeper.k_name
             | Some _, Detail_runs ->
                 launch_fusion_runs_load state ~mailbox:async_messages
             | _, Detail_info | _, Detail_secrets | None, _ -> ())
@@ -14763,6 +14805,19 @@ and is loaded on demand through keeper_skill.
               state.keeper_sandbox_logs_error <- None;
               launch_keeper_sandbox_logs state ~mailbox:async_messages
                 keeper.k_name)
+       (* Set the sandbox backend in place from the Sandbox tab. Each key is an
+          absolute backend so no current-value read is needed; the server
+          validates (remote_ssh without a bound endpoint is rejected). Guarded to
+          the Sandbox tab, so d/m/s keep their other-surface meanings elsewhere. *)
+       | Some (("d" | "m" | "s") as backend_key)
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_sandbox ->
+           set_sandbox_backend
+             ~profile:
+               (match backend_key with
+                | "d" -> "docker"
+                | "m" -> "microvm"
+                | _ -> "remote_ssh")
        | Some ("h" | "l")
          when terminal_columns >= keeper_split_threshold_cols
               && (match state.view with

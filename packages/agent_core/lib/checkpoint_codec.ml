@@ -334,13 +334,17 @@ let tool_result_fields json =
 
 let rec content_block_of_json_strict json =
   try
-    match Llm_provider.Api_common.content_block_of_json json with
+    match
+      Llm_provider.Api_common.content_block_of_json
+        ~parse_tool_result_json:false
+        json
+    with
     | Some
         (ToolResult
            { tool_use_id
            ; content
            ; outcome = wire_outcome
-           ; json = parsed_json
+           ; json = _
            ; content_blocks = _
            }) ->
       let* fields = tool_result_fields json in
@@ -402,7 +406,7 @@ let rec content_block_of_json_strict json =
                   }))
       in
       Ok
-        (ToolResult { tool_use_id; content; outcome; json = parsed_json; content_blocks })
+        (ToolResult { tool_use_id; content; outcome; json = None; content_blocks })
     | Some (ReasoningDetails { details; _ }) ->
       let* fields =
         match json with
@@ -435,7 +439,11 @@ let rec content_block_of_json_strict json =
          The result-returning decoder next to it already names the field it
          refused, so the reason travels instead of being guessed. *)
       let detail =
-        match Llm_provider.Api_common.content_block_of_json_result json with
+        match
+          Llm_provider.Api_common.content_block_of_json_result
+            ~parse_tool_result_json:false
+            json
+        with
         | Ok _ ->
           (* [content_block_of_json] is [content_block_of_json_result] with the
              error dropped, so the two cannot disagree; this arm exists because

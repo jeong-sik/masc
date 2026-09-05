@@ -692,6 +692,33 @@ let () =
               check string "content" "Sunny 22C" content;
               check bool "is_error" false (Types.tool_result_outcome_is_error outcome)
             | _ -> fail "expected ToolResult")
+        ; test_case "ToolResult with JSON content decodes with json None" `Quick (fun () ->
+            let msgs =
+              [ { Types.role = Types.Tool
+                ; content =
+                    [ Types.ToolResult
+                        { tool_use_id = "id-json"
+                        ; content = {|{"status":"ok","items":[1,2,3]}|}
+                        ; outcome = Tool_succeeded
+                        ; json = None
+                        ; content_blocks = None
+                        }
+                    ]
+                ; name = None
+                ; tool_call_id = None
+                ; metadata = []
+                }
+              ]
+            in
+            let cp = make_checkpoint ~messages:msgs () in
+            let cp2 = Result.get_ok (Checkpoint.of_json (Checkpoint.to_json cp)) in
+            match (List.hd cp2.messages).content with
+            | [ Types.ToolResult { tool_use_id; content; outcome; json; _ } ] ->
+              check string "id" "id-json" tool_use_id;
+              check string "content" {|{"status":"ok","items":[1,2,3]}|} content;
+              check bool "json is None" true (json = None);
+              check bool "is_error" false (Types.tool_result_outcome_is_error outcome)
+            | _ -> fail "expected ToolResult")
         ; test_case "nested ToolResult provenance roundtrip" `Quick (fun () ->
             let nested_failure =
               Types.ToolResult

@@ -436,7 +436,7 @@ let parse_media_block ~block_type ~make json =
        Ok (make ~media_type ~data ~source_type))
 ;;
 
-let rec content_block_of_json_result json =
+let rec content_block_of_json_result ?(parse_tool_result_json = true) json =
   let open Yojson.Safe.Util in
   match json |> member "type" |> to_string_option with
   | Some "text" ->
@@ -486,7 +486,9 @@ let rec content_block_of_json_result json =
       match content_json with
       | `String content -> Ok (content, None)
       | `List blocks ->
-        let* blocks = content_blocks_of_json_result blocks in
+        let* blocks =
+          content_blocks_of_json_result ~parse_tool_result_json blocks
+        in
         Ok (text_blocks_to_string blocks, Some blocks)
       | other -> Ok (Yojson.Safe.to_string other, None)
     in
@@ -495,7 +497,9 @@ let rec content_block_of_json_result json =
       then Tool_failed { failure_kind = Reported_tool_error; error_class = None }
       else Tool_succeeded
     in
-    let json = Types.try_parse_json content in
+    let json =
+      if parse_tool_result_json then Types.try_parse_json content else None
+    in
     Ok (ToolResult { tool_use_id; content; outcome; json; content_blocks })
   | Some "image" ->
     parse_media_block
@@ -518,19 +522,19 @@ let rec content_block_of_json_result json =
   | Some other -> Error (Unsupported_content_block_type other)
   | None -> Error Missing_content_block_type
 
-and content_blocks_of_json_result blocks =
+and content_blocks_of_json_result ?(parse_tool_result_json = true) blocks =
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
     | block :: rest ->
-      (match content_block_of_json_result block with
+      (match content_block_of_json_result ~parse_tool_result_json block with
        | Ok parsed -> loop (parsed :: acc) rest
        | Error _ as error -> error)
   in
   loop [] blocks
 ;;
 
-let content_block_of_json json =
-  match content_block_of_json_result json with
+let content_block_of_json ?parse_tool_result_json json =
+  match content_block_of_json_result ?parse_tool_result_json json with
   | Ok block -> Some block
   | Error _ -> None
 ;;

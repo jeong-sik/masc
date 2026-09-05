@@ -5,9 +5,14 @@ let max_pending_events = 1_000_000
 let max_sites = 50_000
 let overflow_site_key = "<sites past the table bound>"
 
-(* Frames beyond this add cost per sample without telling the reader more
-   than which subsystem allocated; the top frames name the site. *)
-let callstack_frames = 16
+(* Deep enough that a masc frame is inside the window. With 16, the
+   2026-09-05 steady-state reading left 24 GB of a 203 GB window with no masc
+   caller at all: Buffer.resize under Yojson writers, Format.make_formatter
+   under output_acc, and Eio's scheduler loop each spend more than 16 frames
+   in library code before the masc caller appears, and [key_of_callstack]
+   skips those frames without seeing past them (RFC
+   main-domain-scheduler-latency §8.6). Cost is per sample at rate 1e-5. *)
+let callstack_frames = 48
 
 type block =
   { site_key : string

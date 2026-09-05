@@ -208,19 +208,28 @@ let rec take_at_most n acc = function
 
 (* What a missing journal means depends on what the store holds for the
    operation. Queued or Running: nothing journaled yet, so an empty page is
-   the truth. Terminal: the journal was written and the retention sweep has
-   since removed it (terminal rows themselves are never deleted), so an empty
-   page would draw an empty conversation with no error; the caller is told
-   the log is gone instead. No row at all: an operation nobody submitted. *)
+   the truth. Terminal: there is no journal and the row does not say why —
+   the retention sweep removes finished operations' journals, but a fail-open
+   append that never created the file (mkdir or first append failure) and an
+   operation that ran before journaling existed leave the same absence — so
+   an empty page would draw an empty conversation with no error, and the
+   caller is told only what is known: no journal. No row at all: an operation
+   nobody submitted. *)
 type missing_journal =
   | Nothing_journaled_yet
-  | Journal_pruned
+  | No_journal_for_settled_operation
   | Unknown_operation
 
 let classify_missing_journal = function
   | None -> Unknown_operation
   | Some state ->
-    if Operation.is_terminal state then Journal_pruned else Nothing_journaled_yet
+    if Operation.is_terminal state
+    then No_journal_for_settled_operation
+    else Nothing_journaled_yet
+;;
+
+let no_journal_for_settled_operation_message ~operation_id =
+  "no journal exists for Keeper chat operation " ^ operation_id ^ ", which has ended"
 ;;
 
 let chat_events_page ~operation_id ~since_seq ~limit ~redact_json entries =
@@ -230,6 +239,10 @@ let chat_events_page ~operation_id ~since_seq ~limit ~redact_json entries =
       Keeper_chat_event_log.seq_is_after since_seq entry.seq)
     |> take_at_most limit []
   in
+  (* The position to feed back: after the last event served, or the caller's
+     own position when the page is empty — [null] when that was the whole
+     journal, since a response field cannot be absent the way a request field
+     can. *)
   let next_since_seq =
     match List.rev page with
     | [] -> since_seq
@@ -240,10 +253,6 @@ let chat_events_page ~operation_id ~since_seq ~limit ~redact_json entries =
     [ "schema", `String "masc.keeper_chat_events.v2"
     ; "operation_id", `String operation_id
     ; ( "events"
-  (* The position to feed back: after the last event served, or the caller's
-     own position when the page is empty — [null] when that was the whole
-     journal, since a response field cannot be absent the way a request field
-     can. *)
       , `List
           (List.map
              (fun entry -> redact_json (Keeper_chat_event_log.journaled_event_to_json entry))
@@ -304,15 +313,17 @@ let handle_get state request reqd = function
                   (Option.map (fun (operation : Operation.t) -> operation.state) operation)
               with
               | Nothing_journaled_yet -> respond []
-              | Journal_pruned ->
+              | No_journal_for_settled_operation ->
+                (* The [journal_pruned] code is the client's contract for
+                   "nothing to reload, now or later"; the message states only
+                   what the server knows. *)
                 respond_error
                   request
                   reqd
                   (gone
                      "journal_pruned"
-                     ("the event journal of Keeper chat operation "
-                      ^ operation_id_text
-                      ^ " has aged out of retention"))
+                     (no_journal_for_settled_operation_message
+                        ~operation_id:operation_id_text))
               | Unknown_operation ->
                 respond_error
                   request
@@ -467,6 +478,8 @@ let handle_mutation state request reqd route body =
 ;;
 
 module For_testing = struct
+  let no_journal_for_settled_operation_message = no_journal_for_settled_operation_message
+
   let parse_mutation_body mutation body =
     match mutation with
     | Edit ->

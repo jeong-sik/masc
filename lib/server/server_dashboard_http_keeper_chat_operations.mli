@@ -32,9 +32,12 @@ val mutation_permission : Masc_domain.permission
 (** What a missing journal means for an operation the store may hold. *)
 type missing_journal =
   | Nothing_journaled_yet  (** Queued or Running: an empty page is the truth. *)
-  | Journal_pruned
-      (** Terminal: the journal aged out of retention while the row stayed.
-          Served as 410 [journal_pruned], never as an empty page. *)
+  | No_journal_for_settled_operation
+      (** Terminal row, no file. The server cannot tell the retention sweep
+          from a fail-open append that never created the file or an
+          operation older than journaling, so the message claims no cause.
+          Served as 410 with the [journal_pruned] code — the client's contract
+          for "nothing to reload" — never as an empty page. *)
   | Unknown_operation  (** No row: 404. *)
 
 val classify_missing_journal : Keeper_owner.Chat_operation.state option -> missing_journal
@@ -82,6 +85,10 @@ val handle_mutation
   -> unit
 
 module For_testing : sig
+  val no_journal_for_settled_operation_message : operation_id:string -> string
+  (** The 410 message for {!No_journal_for_settled_operation}: names the
+      operation and its ended state, claims no cause. *)
+
   val parse_mutation_body
     :  mutation
     -> string

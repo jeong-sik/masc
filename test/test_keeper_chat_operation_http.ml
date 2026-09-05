@@ -259,18 +259,35 @@ let test_missing_journal_is_classified_by_the_row () =
     (classify (Some (Keeper_owner.Chat_operation.Running { started_at = 1.0 }))
      = Api.Nothing_journaled_yet);
   check bool
-    "a succeeded row means the journal was pruned"
+    "a succeeded row with no journal is a settled operation without one"
     true
     (classify
        (Some
           (Keeper_owner.Chat_operation.Succeeded
              { completed_at = 2.0; outcome_ref = "outcome-1" }))
-     = Api.Journal_pruned);
+     = Api.No_journal_for_settled_operation);
   check bool
-    "a cancelled row means the journal was pruned"
+    "a cancelled row with no journal is a settled operation without one"
     true
     (classify (Some (Keeper_owner.Chat_operation.Cancelled { completed_at = 2.0 }))
-     = Api.Journal_pruned)
+     = Api.No_journal_for_settled_operation);
+  (* The server cannot tell a retention prune from an append that never
+     created the file, so the message names the operation and its ended
+     state and claims no cause. *)
+  let message =
+    Api.For_testing.no_journal_for_settled_operation_message ~operation_id:"kmsg-gone"
+  in
+  check bool
+    "the message names the operation"
+    true
+    (Astring.String.is_infix ~affix:"kmsg-gone" message);
+  List.iter
+    (fun claim ->
+       check bool
+         ("the message does not claim a cause: " ^ claim)
+         false
+         (Astring.String.is_infix ~affix:claim message))
+    [ "retention"; "aged"; "prune" ]
 ;;
 
 (* F3 from the adversarial review: pin the permission through the same

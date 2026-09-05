@@ -673,6 +673,7 @@ let test_stale_source_incarnation_has_no_receipt_or_target_effect () =
     let old_selection : State.pending_selection =
       { source = request.source
       ; admitted_revision = request.source_incarnation
+      ; checkpoint_retentions = 0
       }
     in
     Persistence.ack_pending_result

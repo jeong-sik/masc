@@ -101,6 +101,16 @@ val ack_pending_result :
   selection:Keeper_event_queue_state.pending_selection ->
   (unit, string) result
 
+val note_checkpoint_retention_result :
+  base_path:string ->
+  string ->
+  selection:Keeper_event_queue_state.pending_selection ->
+  unit ->
+  (Keeper_event_queue_state.pending_selection * int, string) result
+(** Durably count one checkpoint-yield retention of the selection. The
+    returned selection carries the new count and replaces the caller's
+    snapshot for any later ack of the same entry. *)
+
 val cancel_pending_accepted_result :
   base_path:string ->
   string ->

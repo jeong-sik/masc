@@ -1333,15 +1333,25 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
       ~ttl_s:shell_surface_cache_ttl_s
       json
   in
-  with_execution_trust_cache (fun () ->
-    Server_dashboard_http_cache.cached_surface_or_first_success_json
-      execution_trust_cache
-      ~cache_key:execution_trust_cache_key
-      ~ttl:shell_surface_cache_ttl_s
-      ~clock
-      ~timeout_sec:Env_config_runtime.Dashboard.execution_trust_timeout_sec
-      (fun () -> compute_execution_trust_json ~state ~sw ~clock))
-  |> attach_surface_envelope
+  let has_success =
+    with_execution_trust_cache (fun () ->
+      Server_dashboard_http_cache.cached_surface_has_success execution_trust_cache)
+  in
+  let json =
+    if has_success
+    then
+      with_execution_trust_cache (fun () ->
+        Server_dashboard_http_cache.cached_surface_json execution_trust_cache)
+    else
+      Server_dashboard_http_cache.cached_surface_or_first_success_json
+        execution_trust_cache
+        ~cache_key:execution_trust_cache_key
+        ~ttl:shell_surface_cache_ttl_s
+        ~clock
+        ~timeout_sec:Env_config_runtime.Dashboard.execution_trust_timeout_sec
+        (fun () -> compute_execution_trust_json ~state ~sw ~clock)
+  in
+  attach_surface_envelope json
 ;;
 
 let dashboard_transport_health_http_json ~state:_ =

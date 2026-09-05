@@ -290,7 +290,7 @@ val role_label_mark_cells : ?column:int -> style:style -> unit -> int
 
     The chat pane's role label used a tail-only cut until it met a family that
     shares its tail instead of its head: a broadcast reads
-    [<agent> Â· broadcast], and cutting it to ["â¦broadcast"] kept the word every
+    [<agent> · broadcast], and cutting it to ["…broadcast"] kept the word every
     row on the screen already had and dropped the only part that named who
     spoke.
 

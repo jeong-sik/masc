@@ -58,7 +58,13 @@ val serve
 
     [rules] is fixed for the life of the listener: an allowlist that could
     change under a connection would mean a tunnel outliving the policy that
-    opened it. A policy change restarts the listener.
+    opened it.
+
+    Nothing here reloads them. The caller forks this with the keeper's lane
+    and passes what it read then, so a change applies when that lane
+    restarts and not before -- said plainly because the docstring used to
+    claim "a policy change restarts the listener", which described a watcher
+    that does not exist.
 
     [on_event] is called once per request, before the tunnel opens rather
     than after it closes, so a long-lived tunnel is recorded when it is

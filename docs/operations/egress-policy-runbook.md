@@ -173,9 +173,25 @@ A keeper's own account of where it went is not evidence. These events are.
   never becomes a generic tunnel by omission.
 - **The proxy sees the name, not the payload.** TLS is tunnelled, not
   terminated. What a keeper sent to an allowed host is not recorded here.
-- **The allowlist is fixed for the life of a listener.** A tunnel outliving
-  the policy that opened it would be worse than a restart, so a policy
-  change restarts the listener.
+- **The allowlist is read once, when the keeper's lane starts.** The proxy
+  is forked with that lane and holds the rules it read; there is no live
+  reload. A tunnel outliving the policy that opened it would be worse, so
+  the rules a listener serves never change under it.
+
+  What applies a change is restarting the lane, and `masc_keeper_up` does
+  that when the keeper is idle — which is the same call that writes
+  `egress_allow`, so setting the allowlist through the tool applies it in one
+  step. On a busy keeper the call says so rather than pretending:
+
+  ```
+  keeper metadata was updated but the keepalive lane was not restarted:
+  a turn holds this keeper's slot. Retry masc_keeper_up when the keeper is idle.
+  ```
+
+  **Editing `runtime.toml` by hand does not apply until the lane restarts.**
+  The file will say one thing and the running listener will enforce another,
+  with nothing reporting the difference. Prefer the tool; if you edit the
+  file, restart the keeper.
 - **This is not a complete security boundary.** Neither is any of the
   sandbox profiles. It bounds reach and records it; it does not make an
   unattended agent safe.

@@ -530,13 +530,20 @@ let unix_status_of_eio_status = function
   | `Exited n -> Unix.WEXITED n
   | `Signaled n -> Unix.WSIGNALED n
 
+(** How long a child has between SIGTERM and SIGKILL, on both reap paths:
+    the ordinary reap in {!reap_proc_with_clock} and the cancellation path
+    in {!finalize_spawned_proc}. One number, so that a child stopped by a
+    timeout and a child stopped by a cancelled switch get the same chance to
+    close what they were writing. *)
+let child_exit_grace_seconds = 2.0
+
 (** Reap a child process deterministically.
 
     The Eio spawn helper registers the handle with a switch, but relying solely
     on switch finalizers leaves a window where the child keeps running after a
-    timeout/cancel.  This helper sends [SIGTERM], waits a short grace period,
-    then escalates to [SIGKILL] and awaits the final status.  It is safe to call
-    on an already-exited process. *)
+    timeout/cancel.  This helper sends [SIGTERM], waits
+    {!child_exit_grace_seconds}, then escalates to [SIGKILL] and awaits the
+    final status.  It is safe to call on an already-exited process. *)
 let reap_proc_with_clock clock proc =
   let signal_and_await sig_ =
     try
@@ -553,7 +560,7 @@ let reap_proc_with_clock clock proc =
   try
     Eio.Process.signal proc Sys.sigterm;
     (try
-       Eio.Time.with_timeout_exn clock 2.0 (fun () ->
+       Eio.Time.with_timeout_exn clock child_exit_grace_seconds (fun () ->
          Eio.Process.await proc |> ignore)
      with Eio.Time.Timeout -> signal_and_await Sys.sigkill)
   with
@@ -564,26 +571,99 @@ let reap_proc_with_clock clock proc =
       (Printexc.to_string exn);
     signal_and_await Sys.sigkill
 
-let finalize_spawned_proc ~clock proc status flows =
+let drain_chunk_size = 4096
+
+(* Read [r] to EOF and drop the bytes. The cancellation path reads for one
+   reason only: to notice the child letting go of the pipe. Nothing it says
+   from here on is returned to anyone. *)
+let rec discard_to_eof r chunk =
+  match
+    try Eio.Flow.single_read r chunk with
+    | End_of_file -> 0
+  with
+  | 0 -> ()
+  | _ -> discard_to_eof r chunk
+
+(* The cancellation path's stand-in for awaiting the exit status.
+
+   [Eio.Process.await] is not usable here: the daemon that resolves it lives in
+   the switch being cancelled and is already gone, so the await would never
+   return. Reaping the child directly is not usable either: the switch release
+   hook that follows signals and waitpids the pid it was given, and a pid this
+   side has already reaped is somebody else's by then.
+
+   What this side still holds is the read end of every pipe it gave the child.
+   A write end closes when its holder exits, so EOF on all of them is the
+   child -- and anything it handed the pipe to -- being gone, observed without
+   touching the exit status. That is the wait, bounded by the same grace the
+   ordinary reap gives. A child that was given no pipe (both streams
+   redirected to files) has nothing to observe and gets no wait, as before.
+
+   A source that reached EOF before the cancellation is already closed, which
+   Eio reports as [Invalid_argument]; that is the answer this is waiting for,
+   not a failure. *)
+let wait_for_child_to_let_go ~clock sources =
+  match sources with
+  | [] -> ()
+  | sources ->
+    let chunk = Cstruct.create drain_chunk_size in
+    (match
+       Eio.Time.with_timeout clock child_exit_grace_seconds (fun () ->
+         List.iter
+           (fun (label, r) ->
+              try discard_to_eof r chunk with
+              | Eio.Io _ | Invalid_argument _ ->
+                Log.Misc.debug
+                  "[Process_eio] %s was already gone while waiting out the cancellation grace"
+                  label)
+           sources;
+         Ok ())
+     with
+     | Ok () -> ()
+     | Error `Timeout ->
+       Log.Misc.debug
+         "[Process_eio] child kept its pipes open for %.1fs after SIGTERM; SIGKILL follows"
+         child_exit_grace_seconds)
+
+(* Runs in the [Fun.protect] finalizer of every spawn helper, so it sees three
+   states: the child exited and [status] is set; the body raised and the child
+   may still be running; or the owning switch was cancelled.
+
+   [sinks] are this side's write ends (stdin) and close first, so a child
+   blocked on its input sees EOF before it is asked to stop. [sources] are the
+   read ends; on the cancellation path they are what the grace is waited out
+   on, so they close last there. *)
+let finalize_spawned_proc ~clock proc status ~sinks ~sources =
   (* The spawned process handle owns a daemon that resolves [await]. Once the
      owning switch is cancelled that daemon is cancelled too, so awaiting it
      here would deadlock the switch before its release hook can reap the child.
      Record that state before entering the protected cleanup context. *)
   let owning_switch_cancelled = Eio.Fiber.is_cancelled () in
+  let close_all flows =
+    List.iter (fun (label, flow) -> close_flow_best_effort label flow) flows
+  in
   Eio.Cancel.protect (fun () ->
-    List.iter (fun (label, flow) -> close_flow_best_effort label flow) flows;
-    if Option.is_none !status then
-      if owning_switch_cancelled then
-        (* The owning Eio switch release hook performs the non-cancellable
-           SIGKILL/waitpid before [Switch.run] re-raises the cancellation. *)
-        (try Eio.Process.signal proc Sys.sigterm with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn ->
-           Log.Misc.warn
-             "[Process_eio] failed to request child termination during switch cancellation: %s"
-             (Printexc.to_string exn))
-      else
-        reap_proc_with_clock clock proc)
+    close_all sinks;
+    match !status, owning_switch_cancelled with
+    | Some _, _ -> close_all sources
+    | None, false ->
+      close_all sources;
+      reap_proc_with_clock clock proc
+    | None, true ->
+      (* The owning Eio switch release hook performs the non-cancellable
+         SIGKILL/waitpid before [Switch.run] re-raises the cancellation. It
+         does not wait first: until the grace below existed, the child had the
+         time between two consecutive lines of code to act on SIGTERM.
+         Measured 2026-09-04 on the voice recorder, that was a quarter second
+         of audio lost from the end of every stopped capture. *)
+      (try Eio.Process.signal proc Sys.sigterm with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Misc.warn
+           "[Process_eio] failed to request child termination during switch cancellation: %s"
+           (Printexc.to_string exn));
+      wait_for_child_to_let_go ~clock sources;
+      close_all sources)
 
 let invoke_output_chunk_callback f s =
   try f s with
@@ -592,8 +672,6 @@ let invoke_output_chunk_callback f s =
       Log.Misc.warn
         "[Process_eio] output chunk callback error, continuing: %s"
         (Printexc.to_string exn)
-
-let drain_chunk_size = 4096
 
 (* Read [r] to EOF into the bounded [acc], invoking [on_chunk] per read.
 
@@ -645,7 +723,7 @@ let spawn_and_drain_stdout ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv
      the owning Eio process hook performs the protected reap. *)
   Fun.protect
     ~finally:(fun () ->
-      finalize_spawned_proc ~clock proc status [ "stdout", stdout_r ])
+      finalize_spawned_proc ~clock proc status ~sinks:[] ~sources:[ "stdout", stdout_r ])
     (fun () ->
       drain_to_eof stdout_r stdout_buf ~on_chunk:ignore_chunk;
       let s = Eio.Process.await proc in
@@ -678,8 +756,8 @@ let spawn_and_drain_both ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv s
   (* Cancellation-protected yielding cleanup; see [spawn_and_drain_stdout]. *)
   Fun.protect
     ~finally:(fun () ->
-      finalize_spawned_proc ~clock proc status
-        [ "stdout", stdout_r; "stderr", stderr_r ])
+      finalize_spawned_proc ~clock proc status ~sinks:[]
+        ~sources:[ "stdout", stdout_r; "stderr", stderr_r ])
     (fun () ->
       Eio.Fiber.both
         (fun () -> drain_to_eof stdout_r stdout_buf ~on_chunk:ignore_chunk)
@@ -707,8 +785,8 @@ let spawn_and_drain_both_streaming ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~cl
   (* Cancellation-protected yielding cleanup; see [spawn_and_drain_stdout]. *)
   Fun.protect
     ~finally:(fun () ->
-      finalize_spawned_proc ~clock proc status
-        [ "stdout", stdout_r; "stderr", stderr_r ])
+      finalize_spawned_proc ~clock proc status ~sinks:[]
+        ~sources:[ "stdout", stdout_r; "stderr", stderr_r ])
     (fun () ->
       Eio.Fiber.both
         (fun () -> drain_to_eof stdout_r stdout_buf ~on_chunk:on_stdout_chunk)
@@ -753,10 +831,8 @@ let spawn_and_drain_both_with_stdin_held_open
   Fun.protect
     ~finally:(fun () ->
       finalize_spawned_proc ~clock proc status
-        [ "stdin", (stdin_w :> Eio.Resource.close_ty Eio.Resource.t)
-        ; "stdout", (stdout_r :> Eio.Resource.close_ty Eio.Resource.t)
-        ; "stderr", (stderr_r :> Eio.Resource.close_ty Eio.Resource.t)
-        ])
+        ~sinks:[ "stdin", stdin_w ]
+        ~sources:[ "stdout", stdout_r; "stderr", stderr_r ])
     (fun () ->
       Eio.Flow.copy_string stdin_content stdin_w;
       Eio.Fiber.both
@@ -1236,11 +1312,12 @@ let run_argv_with_redirects ?timeout_sec ?env ?cwd ~stdin ~stdout ~stderr
              let status = ref None in
              Fun.protect
                ~finally:(fun () ->
-                 finalize_spawned_proc ~clock:clk proc status
-                   (List.filter_map
-                      (fun (name, plumbing) ->
-                         Option.map (fun (reader, _) -> name, reader) plumbing.drain)
-                      [ "stdout", out; "stderr", err ]))
+                 finalize_spawned_proc ~clock:clk proc status ~sinks:[]
+                   ~sources:
+                     (List.filter_map
+                        (fun (name, plumbing) ->
+                           Option.map (fun (reader, _) -> name, reader) plumbing.drain)
+                        [ "stdout", out; "stderr", err ]))
                (fun () ->
                   Eio.Fiber.both
                     (fun () ->

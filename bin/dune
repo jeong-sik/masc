@@ -792,7 +792,7 @@
  (name masc_tui_audio_device)
  (wrapped false)
  (modules masc_tui_audio_device)
- (libraries unix))
+ (libraries unix yojson))
 
 (library
  (name masc_tui_keeper_control)

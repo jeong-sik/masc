@@ -1639,6 +1639,9 @@ type async_msg =
   | Voice_level of { keeper : string; db : float }
   | Voice_transcribed of { keeper : string; text : string }
   | Voice_silent of { keeper : string; reason : string }
+  (* The operator abandoned a recording that had speech in it. Its own row
+     rather than a silence: the microphone worked. *)
+  | Voice_discarded of { keeper : string; reason : string }
   | Voice_failed of { keeper : string; error : string }
   | Http_refresh_done of http_surface_results
   | Http_refresh_failed of string * Approval.Flow.generation option
@@ -8600,23 +8603,25 @@ let launch_voice_capture state ~mailbox ~keeper =
       | Error e -> Voice_failed { keeper; error = e }
       | Ok (Error e) -> Voice_failed { keeper; error = e }
       | Ok (Ok json) -> (
-        let field name =
-          match json with
-          | `Assoc fields -> (
-            match List.assoc_opt name fields with
-            | Some (`String v) -> Some v
-            | Some _ | None -> None)
-          | _ -> None
-        in
-        match field "status", field "text" with
-        | Some "no_audio", _ ->
+        (* Read through the bridge's own reader so every status it can write
+           has a row here. The string match this replaced caught a transcriber
+           that answered with empty text under "nothing was heard", which
+           blames the microphone for the endpoint. *)
+        match Masc.Voice_bridge.capture_outcome_of_json json with
+        | Masc.Voice_bridge.Transcript { text; _ } -> Voice_transcribed { keeper; text }
+        | Masc.Voice_bridge.Transcriber_returned_nothing { endpoint_id } ->
           Voice_silent
             { keeper
-            ; reason = Option.value (field "message") ~default:"nothing was heard"
+            ; reason =
+                (match endpoint_id with
+                 | Some endpoint -> "the transcriber (" ^ endpoint ^ ") returned no text"
+                 | None -> "the transcriber returned no text")
             }
-        | _, Some text when String.trim text <> "" ->
-          Voice_transcribed { keeper; text = String.trim text }
-        | _, _ -> Voice_silent { keeper; reason = "nothing was heard" })
+        | Masc.Voice_bridge.Nothing_heard { message } -> Voice_silent { keeper; reason = message }
+        | Masc.Voice_bridge.Discarded_recording { message } ->
+          Voice_discarded { keeper; reason = message }
+        | Masc.Voice_bridge.Unrecognized_status status ->
+          Voice_failed { keeper; error = "voice result carried an unknown status: " ^ status })
     in
     enqueue_async mailbox msg
   in
@@ -8951,6 +8956,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            level and the level speech had to clear, so this row answers "is
            the microphone working" rather than only reporting that it is
            not. *)
+        chat_notice state ~keeper_name:(Some keeper) ~role:Message_local
+          ("voice: " ^ reason);
+        state.last_action <- Some ("voice: " ^ reason, Unix.gettimeofday ()))
+  | Voice_discarded { keeper; reason } ->
+      if state.voice_capture = Some keeper then (
+        state.voice_capture <- None;
+        state.voice_level_db <- None;
+        (* Esc abandons the recording, not the mode: the capture is the
+           innermost thing it cancels, and the toggle is the way out of
+           continuous mode. So this re-arms like a silence does. *)
+        rearm_continuous_capture state ~mailbox ~keeper;
+        (* In the transcript, like a silence, and worded as what it was. An
+           operator who pressed Esc mid-sentence and then read "nothing was
+           heard" went looking for a microphone fault that was not there. *)
         chat_notice state ~keeper_name:(Some keeper) ~role:Message_local
           ("voice: " ^ reason);
         state.last_action <- Some ("voice: " ^ reason, Unix.gettimeofday ()))

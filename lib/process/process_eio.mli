@@ -52,6 +52,17 @@ val timed_out_status : Unix.process_status
     and callers that construct one; classify with [exit_reason_of_status]
     rather than comparing against it. *)
 
+val child_exit_grace_seconds : float
+(** How long a child has between SIGTERM and SIGKILL when this module stops
+    it, whether because its call timed out, its caller raised, or the switch
+    it runs under was cancelled.
+
+    On the cancellation path the wait is for the child to close the pipes
+    this side holds, since its exit status cannot be awaited there; a child
+    that hands a pipe to a grandchild is waited on until the grandchild lets
+    go too, or the grace runs out. A child given no pipe at all -- both
+    streams redirected to files -- gets no wait on that path. *)
+
 (** {1 Observability hook (#9632)} *)
 
 (** Origin at which a [run_argv*] timeout budget was exhausted.

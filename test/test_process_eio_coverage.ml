@@ -668,6 +668,109 @@ let test_exit_reason_classifies_the_timeout_status () =
     (Process_eio.exit_reason_of_status (Unix.WSIGNALED 9) = Process_eio.Signaled 9)
 ;;
 
+(* Cancelling a running child used to send SIGTERM and SIGKILL back to back:
+   the switch release hook fired before the child could act on the first.
+   Measured on the voice recorder, that cost the last quarter second of every
+   stopped capture. The cancellation path now waits, up to
+   [child_exit_grace_seconds], for the child to close the pipes this side
+   holds. Two children prove the two halves: one that traps SIGTERM and writes
+   a marker on its way out shows the wait happened; one that ignores SIGTERM
+   shows the wait is bounded.
+
+   The shape is the voice capture's: [Fiber.first] between the spawn and a
+   watcher that returns as soon as the child says it is running. *)
+let with_process_runtime f =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  f ~clock
+;;
+
+let fresh_marker suffix =
+  let path = Filename.temp_file "process-eio-grace" suffix in
+  Sys.remove path;
+  path
+;;
+
+let remove_if_present path = if Sys.file_exists path then Sys.remove path
+
+(* Runs [script] under /bin/sh and stops it as soon as [started] exists. The
+   spawn goes through the same entry point the voice recorder uses. *)
+let stop_once_started ~clock ~started script =
+  Eio.Fiber.first
+    (fun () ->
+       ignore
+         (Process_eio.run_argv_with_stdin_and_status
+            ~stdin_content:""
+            [ "/bin/sh"; "-c"; script ]);
+       `Child_exited_on_its_own)
+    (fun () ->
+       let rec wait () =
+         if not (Sys.file_exists started)
+         then (
+           Eio.Time.sleep clock 0.01;
+           wait ())
+       in
+       wait ();
+       `Stopped_by_the_watcher)
+;;
+
+let test_cancel_waits_for_the_child_to_act_on_sigterm () =
+  with_process_runtime @@ fun ~clock ->
+  let started = fresh_marker ".started" in
+  let finished = fresh_marker ".finished" in
+  Fun.protect
+    ~finally:(fun () ->
+      remove_if_present started;
+      remove_if_present finished)
+    (fun () ->
+       (* The trap is installed before the child announces itself, so the
+          SIGTERM cannot land in the gap. [sleep 0.05] rather than one long
+          sleep: sh runs a trap only once the foreground command it is waiting
+          on returns. *)
+       let script =
+         Printf.sprintf
+           "trap ': > %s; exit 0' TERM; : > %s; while :; do sleep 0.05; done"
+           (Filename.quote finished)
+           (Filename.quote started)
+       in
+       let outcome = stop_once_started ~clock ~started script in
+       check bool "the watcher stopped the child" true
+         (outcome = `Stopped_by_the_watcher);
+       check bool "the child ran its SIGTERM handler before the kill" true
+         (Sys.file_exists finished))
+;;
+
+let test_cancel_grace_is_bounded_when_the_child_ignores_sigterm () =
+  with_process_runtime @@ fun ~clock ->
+  let started = fresh_marker ".started" in
+  Fun.protect
+    ~finally:(fun () -> remove_if_present started)
+    (fun () ->
+       let script =
+         Printf.sprintf
+           "trap '' TERM; : > %s; while :; do sleep 0.05; done"
+           (Filename.quote started)
+       in
+       let t0 = Eio.Time.now clock in
+       let outcome = stop_once_started ~clock ~started script in
+       let elapsed = Eio.Time.now clock -. t0 in
+       check bool "the watcher stopped the child" true
+         (outcome = `Stopped_by_the_watcher);
+       check bool
+         (Printf.sprintf "the stop waited out the grace (%.2fs)" elapsed)
+         true
+         (elapsed >= Process_eio.child_exit_grace_seconds);
+       (* Generous on the upper side: the bound this proves is that a child
+          holding its pipes open cannot stall the cancellation indefinitely. *)
+       check bool
+         (Printf.sprintf "and not much longer (%.2fs)" elapsed)
+         true
+         (elapsed < Process_eio.child_exit_grace_seconds +. 5.0))
+;;
+
 let () =
   run "Process_eio coverage"
     [
@@ -758,4 +861,11 @@ let () =
            test_case "exit-reason-classifies-the-timeout-status" `Quick
              test_exit_reason_classifies_the_timeout_status;
          ] );
+      ( "cancellation-grace",
+        [
+          test_case "cancel-waits-for-the-child-to-act-on-sigterm" `Quick
+            test_cancel_waits_for_the_child_to_act_on_sigterm;
+          test_case "cancel-grace-is-bounded-when-the-child-ignores-sigterm" `Quick
+            test_cancel_grace_is_bounded_when_the_child_ignores_sigterm;
+        ] );
     ]

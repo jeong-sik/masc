@@ -38,8 +38,29 @@ let message_preview message =
   String_util.utf8_prefix ~max_bytes:message_preview_max_bytes message
 ;;
 
-let available_stt_endpoints (config : Voice_config.t) =
-  config.stt.endpoints |> List.filter (fun (ep : Voice_config.endpoint) -> ep.enabled)
+let available_stt_endpoints (stt : Voice_config.stt_config) =
+  stt.Voice_config.endpoints |> List.filter (fun (ep : Voice_config.endpoint) -> ep.enabled)
+;;
+
+(* The [status] field of every capture result this module returns. One closed
+   set, spelled here and read back by {!capture_outcome_of_json}, so a reader
+   cannot fall through a string it does not know into "nothing was heard". *)
+type capture_status =
+  | Transcribed
+  | No_audio
+  | Discarded
+
+let capture_status_to_string = function
+  | Transcribed -> "transcribed"
+  | No_audio -> "no_audio"
+  | Discarded -> "discarded"
+;;
+
+let capture_status_of_string = function
+  | "transcribed" -> Some Transcribed
+  | "no_audio" -> Some No_audio
+  | "discarded" -> Some Discarded
+  | _ -> None
 ;;
 
 let transcribe_audio ~audio_file ?language_code () =
@@ -52,9 +73,13 @@ let transcribe_audio ~audio_file ?language_code () =
     (* Voice is not set up in this environment: STT is explicitly
        disabled, which is not an error of the config itself. *)
     Error "no enabled STT endpoints configured"
-  | Ok config ->
-    let model = config.stt.default_model in
-    let endpoints = available_stt_endpoints config in
+  | Ok { Voice_config.stt = None; _ } ->
+    (* The config loaded and has no [stt] section. Typed absence: there is no
+       model to send, so nothing is sent. *)
+    Error "voice config has no [stt] section, so STT is not set up"
+  | Ok { Voice_config.stt = Some stt; _ } ->
+    let model = stt.Voice_config.default_model in
+    let endpoints = available_stt_endpoints stt in
     let rec try_endpoints attempted = function
       | [] ->
         Error
@@ -79,7 +104,7 @@ let transcribe_audio ~audio_file ?language_code () =
            in
            Ok
              (`Assoc
-                 [ "status", `String "transcribed"
+                 [ "status", `String (capture_status_to_string Transcribed)
                  ; "text", `String text
                  ; "language_code", `String lang
                  ; "endpoint_id", `String endpoint.id
@@ -100,16 +125,16 @@ let transcribe_audio ~audio_file ?language_code () =
     else try_endpoints [] endpoints
 ;;
 
-let available_tts_endpoints ?provider (config : Voice_config.t) =
-  Voice_runtime_overlay.select_endpoints ?provider config.tts.endpoints
+let available_tts_endpoints ?provider (tts : Voice_config.tts_config) =
+  Voice_runtime_overlay.select_endpoints ?provider tts.Voice_config.endpoints
 ;;
 
 (** Synthesize a dashboard-playable MP3 via any HTTP TTS endpoint.
     This is used as a parallel fallback when the active transport is
     [Voice_mcp], which produces audio through a local/MCP path but does not
     write a browser-fetchable file. *)
-let try_http_tts_for_dashboard ~config ~agent_id ~message ~voice ~model ~audio_device () =
-  let endpoints = available_tts_endpoints config in
+let try_http_tts_for_dashboard ~tts ~agent_id ~message ~voice ~model ~audio_device () =
+  let endpoints = available_tts_endpoints tts in
   let rec try_endpoint = function
     | [] -> None
     | endpoint :: rest ->
@@ -125,7 +150,7 @@ let try_http_tts_for_dashboard ~config ~agent_id ~message ~voice ~model ~audio_d
             (* Resolved per endpoint, not once for the chain: a voice id is
                provider vocabulary, so carrying the first endpoint's id to the
                next asks for a voice that does not exist there (#24068). *)
-            ~voice:(Voice_config.voice_for_agent_at_endpoint config endpoint agent_id)
+            ~voice:(Voice_config.voice_for_agent_at_endpoint tts endpoint agent_id)
             ~model
             ~output_file:audio_file
         with
@@ -370,7 +395,7 @@ let attempt_tts_endpoint
       ~voice
       ~model
       ~priority
-      ~config
+      ~tts
       ?audio_device
       endpoint
   =
@@ -488,7 +513,7 @@ let attempt_tts_endpoint
            let data =
              match
                try_http_tts_for_dashboard
-                 ~config
+                 ~tts
                  ~agent_id
                  ~message
                  ~voice
@@ -518,7 +543,7 @@ let try_http_tts_for_browser_audio
       ~sw
       ~clock
       ~net
-      ~config
+      ~tts
       ~agent_id
       ~message
       ~model
@@ -538,7 +563,7 @@ let try_http_tts_for_browser_audio
            endpoint
            ~message
              (* Resolved per endpoint (#24068): see the dashboard chain. *)
-           ~voice:(Voice_config.voice_for_agent_at_endpoint config endpoint agent_id)
+           ~voice:(Voice_config.voice_for_agent_at_endpoint tts endpoint agent_id)
            ~model
            ~agent_id
            ~output_file:audio_file
@@ -618,9 +643,14 @@ let agent_speak_json
       (* Voice is not set up in this environment: TTS is explicitly
          disabled, which is not an error of the config itself. *)
       Error "no configured TTS endpoint"
-    | Ok config ->
-      let endpoints = available_tts_endpoints ?provider config in
-      let model = config.tts.default_model in
+    | Ok { Voice_config.tts = None; _ } ->
+      (* The config loaded and has no [tts] section. Refused here, before any
+         endpoint is asked: there is no model to send, and the empty string
+         this used to send in its place reached providers as model_id "". *)
+      Error "voice config has no [tts] section, so TTS is not set up"
+    | Ok { Voice_config.tts = Some tts; _ } ->
+      let endpoints = available_tts_endpoints ?provider tts in
+      let model = tts.Voice_config.default_model in
       let rec try_endpoints attempted = function
         | [] ->
           Error
@@ -638,7 +668,7 @@ let agent_speak_json
                ~voice
                ~model
                ~priority
-               ~config
+               ~tts
                ?audio_device
                endpoint
            with
@@ -674,7 +704,7 @@ let agent_speak_json
                ~sw
                ~clock
                ~net
-               ~config
+               ~tts
                ~agent_id
                ~message
                ~model
@@ -737,8 +767,8 @@ let agent_speak
 (** Get voice configuration for an agent *)
 let get_agent_voice ~agent_id =
   match Voice_config.load_detailed () with
-  | Ok config ->
-    let voice = Voice_config.voice_for_agent config agent_id in
+  | Ok { Voice_config.tts = Some tts; _ } ->
+    let voice = Voice_config.voice_for_agent tts agent_id in
     Ok
       (`Assoc
           [ "agent_id", `String agent_id
@@ -747,9 +777,9 @@ let get_agent_voice ~agent_id =
             , `List
                 (List.map
                    (fun value -> `String value)
-                   (Voice_config.available_voices config)) )
+                   (Voice_config.available_voices tts)) )
           ])
-  | Error _ ->
+  | Ok { Voice_config.tts = None; _ } | Error _ ->
     let voice = get_voice_for_agent agent_id in
     Ok
       (`Assoc
@@ -786,42 +816,42 @@ let play_tone freq =
 
 (* Read per capture rather than cached: runtime.toml is hot-reloaded, and an
    operator turning a knob because captures are not starting wants the next
-   press to use it, not the next restart. [Not_configured] and a broken config
-   both fall back to the measured defaults — a capture is not the place to
-   refuse over a config the endpoint chain will refuse for. *)
+   press to use it, not the next restart.
+
+   No config at all is the measured defaults: that is not an error of the
+   config. A config that exists and does not parse is refused with its
+   reason, before a microphone is opened. It used to fall back to the
+   defaults too, which put a capture under a knob the operator had set and
+   mistyped while the dial was connected to nothing. *)
 let capture_config () =
   match Voice_config.load_detailed () with
-  | Ok config -> config.Voice_config.capture
-  | Error _ -> Voice_config.default_capture
+  | Ok config -> Ok config.Voice_config.capture
+  | Error Voice_config.Not_configured -> Ok Voice_config.default_capture
+  | Error (Voice_config.Invalid reason) ->
+    Error (Printf.sprintf "voice config is invalid, so no capture was started: %s" reason)
 ;;
 
-let calibration_seconds = Voice_config.default_capture.Voice_config.calibration_seconds
+(* How long past its own deadline a recorder's arm waits before giving up on
+   it. The watcher, or the probe's trim, is what ends a recording; this only
+   keeps one that somehow never ends from holding the microphone. *)
+let recorder_arm_grace_seconds = 5.0
 
-(* How far above the room's peak a capture must rise to start recording.
+(* The opening of a capture the room profile is taken from. sox drops leading
+   silence, so what survives at the start is this room during this capture. *)
+let noise_profile_seconds = 0.25
 
-   Measured 2026-09-04 on one workstation: an idle room peaked at 4.48% of
-   full scale and an ordinary spoken sentence clipped at 100%. That is 27 dB
-   apart, so this margin has room on both sides — it only has to clear the
-   room, not approach the voice. A live capture at the derived threshold (8%,
-   the same order as this margin gives) started and ended on speech and
-   transcribed correctly.
+(* How much of that profile sox's noisered subtracts, on its 0 to 1 scale.
+   Measured on one sample at this setting: the floor went entirely and 81% of
+   the speech stayed. *)
+let noise_reduction_amount = 0.21
 
-   Earlier numbers here were 5-6 dB, taken from RMS separation on the same
-   microphone. They are not comparable: peak and RMS are two decades apart on
-   room tone and about one on speech. The mistake this replaced was using one
-   where the other was meant. *)
-let trigger_margin_db = Voice_config.default_capture.Voice_config.trigger_margin_db
+(* A bound on each sox pass over a finished capture, which is a file
+   operation and not a recording. *)
+let sox_pass_timeout_seconds = 15.0
 
-(* What a capture must exceed, over its whole length, to be worth
-   transcribing. Below the trigger so a capture that did fire but carries only
-   room tone is still refused.
-
-   Read as RMS on both sides, unlike the trigger: this compares a whole
-   capture's average against the room's average, where peak would be decided
-   by one transient. The floor is measured as peak for the filter's sake, so
-   this gate reads its own pair of levels rather than reusing it. *)
-let speech_margin_db = Voice_config.default_capture.Voice_config.speech_margin_db
-
+(* How long a capture may run before it ends on its own, when the caller does
+   not say. *)
+let default_capture_timeout_seconds = 15.0
 
 (* Every level in the capture path is an RMS amplitude on this scale, and dB
    here is dBFS. Measured 2026-09-04 on one workstation, an idle room read
@@ -830,33 +860,42 @@ let speech_margin_db = Voice_config.default_capture.Voice_config.speech_margin_d
 let db_of_amplitude v = if v > 0.0 then 20.0 *. log10 v else neg_infinity
 let amplitude_of_db d = if d = neg_infinity then 0.0 else 10.0 ** (d /. 20.0)
 
-(* One short capture, recording the room as it is. *)
-let measure_noise_floor ?seconds ~agent_id () =
-  let calibration_seconds = Option.value seconds ~default:calibration_seconds in
-  let probe =
-    Filename.temp_file (Printf.sprintf "masc_nf_%s_" (safe_agent_id agent_id)) ".wav"
-  in
-  let cleanup () = try Sys.remove probe with Sys_error _ -> () in
-  Eio_guard.protect ~finally:cleanup (fun () ->
-       match
-         run_voice_status
-           ~timeout_sec:(calibration_seconds +. 5.0)
-           [ "rec"; "-q"; "-t"; "wav"; "-b"; "16"; "-e"; "signed-integer"; probe
-           ; "rate"; string_of_int Voice_pcm.sample_rate; "channels"; "1"
-           ; "trim"; "0"; Printf.sprintf "%.2f" calibration_seconds ]
-       with
-       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-       | Unix.WEXITED 0, _ -> (
-         (* RMS, and the whole probe rather than its tail: the capture that
-            uses this floor compares RMS against it. They were peak and RMS
-            until 2026-09-04, which made the threshold roughly a decade too
-            high on room tone. *)
+(* One short capture, recording the room as it is, for as long as a capture
+   would spend calibrating. *)
+let measure_noise_floor ~agent_id () =
+  match capture_config () with
+  | Error reason ->
+    (* The capture that follows refuses with this same reason; a probe that
+       ran anyway would measure a room for a capture that is not going to
+       happen. *)
+    Log.Transport.debug "voice noise floor not measured: %s" reason;
+    None
+  | Ok capture ->
+    let calibration_seconds = capture.Voice_config.calibration_seconds in
+    let probe =
+      Filename.temp_file (Printf.sprintf "masc_nf_%s_" (safe_agent_id agent_id)) ".wav"
+    in
+    let cleanup () = try Sys.remove probe with Sys_error _ -> () in
+    Eio_guard.protect ~finally:cleanup (fun () ->
          match
-           Voice_pcm.tail_rms ~window_seconds:calibration_seconds probe
+           run_voice_status
+             ~timeout_sec:(calibration_seconds +. recorder_arm_grace_seconds)
+             [ "rec"; "-q"; "-t"; "wav"; "-b"; "16"; "-e"; "signed-integer"; probe
+             ; "rate"; string_of_int Voice_pcm.sample_rate; "channels"; "1"
+             ; "trim"; "0"; Printf.sprintf "%.2f" calibration_seconds ]
          with
-         | Ok amplitude -> Some amplitude
-         | Error _ -> None)
-       | _ -> None)
+         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+         | Unix.WEXITED 0, _ -> (
+           (* RMS, and the whole probe rather than its tail: the capture that
+              uses this floor compares RMS against it. They were peak and RMS
+              until 2026-09-04, which made the threshold roughly a decade too
+              high on room tone. *)
+           match
+             Voice_pcm.tail_rms ~window_seconds:calibration_seconds probe
+           with
+           | Ok amplitude -> Some amplitude
+           | Error _ -> None)
+         | _ -> None)
 ;;
 
 (* Run [f] on a copy with the room subtracted; when either sox step fails,
@@ -879,15 +918,17 @@ let with_noise_reduced_audio ~audio_file ~f =
   Eio_guard.protect ~finally:cleanup (fun () ->
     match
       run_voice_status
-        ~timeout_sec:15.0
-        [ "sox"; audio_file; "-n"; "trim"; "0"; "0.25"; "noiseprof"; profile ]
+        ~timeout_sec:sox_pass_timeout_seconds
+        [ "sox"; audio_file; "-n"; "trim"; "0"; Printf.sprintf "%.2f" noise_profile_seconds
+        ; "noiseprof"; profile ]
     with
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | Unix.WEXITED 0, _ -> (
       match
         run_voice_status
-          ~timeout_sec:15.0
-          [ "sox"; audio_file; reduced; "noisered"; profile; "0.21" ]
+          ~timeout_sec:sox_pass_timeout_seconds
+          [ "sox"; audio_file; reduced; "noisered"; profile
+          ; Printf.sprintf "%.2f" noise_reduction_amount ]
       with
       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
       | Unix.WEXITED 0, _ -> f reduced
@@ -923,19 +964,25 @@ type stop_request =
   | Keep_what_was_heard
   | Discard
 
-(* Why a recording is over, which is only ever three things. What is done with
-   it does not depend on this, though -- it depends on whether speech was
-   heard. A capture the operator stopped mid-sentence carries a sentence. *)
+(* Why a recording is over. What is done with it turns on two things: whether
+   speech was heard, and whether the operator said they do not want it. A
+   capture stopped mid-sentence by the stop key carries a sentence; one
+   abandoned mid-sentence by the discard key carried one and threw it away,
+   and must say so -- reporting it as nothing heard tells an operator who
+   just said something that their microphone is dead. *)
 type capture_end =
   | Ended_after_speech
-  (* Both carry the room the capture measured, when it got that far. An
+  (* These carry the room the capture measured, when it got that far. An
      operator whose draft came back empty cannot tell a microphone that heard
      nothing from a transcriber that failed, and the two levels are the
      difference: "you were at -38, speech had to clear -32" is a thing to act
      on, where "nothing was heard" is not. [None] when the recorder never
      produced a sample to measure. *)
   | Ended_without_speech of float option
-  | Ended_by_operator of float option
+  | Stopped_before_speech of float option
+  (* The floor is always known here: speech was heard, so calibration had
+     finished. *)
+  | Discarded_after_speech of float
 
 (* Watches the recording as it is written and decides when it is over.
 
@@ -1016,13 +1063,15 @@ let end_at_operator_stop request phase =
   match request, phase with
   (* An explicit discard is the operator saying they do not want it, which no
      amount of speech overrides. Nothing else in the capture path can say
-     that: every other ending is inferred from levels. *)
-  | Discard, Speaking { floor; _ } -> Ended_by_operator (Some floor)
-  | Discard, Calibrating { floor; _ } -> Ended_by_operator floor
-  | Discard, Listening { floor } -> Ended_by_operator (Some floor)
+     that: every other ending is inferred from levels. It is its own ending
+     because what was thrown away was a sentence, and the operator is told
+     that rather than that nothing was heard. *)
+  | Discard, Speaking { floor; _ } -> Discarded_after_speech floor
+  | Discard, Calibrating { floor; _ } -> Stopped_before_speech floor
+  | Discard, Listening { floor } -> Stopped_before_speech (Some floor)
   | Keep_what_was_heard, Speaking _ -> Ended_after_speech
-  | Keep_what_was_heard, Calibrating { floor; _ } -> Ended_by_operator floor
-  | Keep_what_was_heard, Listening { floor } -> Ended_by_operator (Some floor)
+  | Keep_what_was_heard, Calibrating { floor; _ } -> Stopped_before_speech floor
+  | Keep_what_was_heard, Listening { floor } -> Stopped_before_speech (Some floor)
 ;;
 
 let watch_capture_level
@@ -1101,22 +1150,71 @@ let no_audio ~reason ~floor (capture : Voice_config.capture_config) =
        samples at all. *)
     | None -> reason ^ " — the recorder produced no audio to measure"
   in
-  `Assoc [ "status", `String "no_audio"; "text", `String ""; "message", `String detail ]
+  `Assoc
+    [ "status", `String (capture_status_to_string No_audio)
+    ; "text", `String ""
+    ; "message", `String detail
+    ]
+;;
+
+(* What a discarded capture says for itself. It heard speech -- that is what
+   separates it from {!no_audio} -- so the levels that explain a silence are
+   not the point; that a sentence was thrown away on purpose is. *)
+let discarded_json =
+  `Assoc
+    [ "status", `String (capture_status_to_string Discarded)
+    ; "text", `String ""
+    ; "message", `String "recording discarded — speech was heard and not transcribed"
+    ]
+;;
+
+(* The capture result read back as one of the things it can be. This is the
+   reader for the JSON {!record_and_transcribe} returns, kept next to the
+   writers so the two cannot drift: a status neither knows is reported as
+   such, not folded into "nothing was heard". *)
+type capture_outcome =
+  | Transcript of
+      { text : string
+      ; endpoint_id : string option
+      }
+  | Transcriber_returned_nothing of { endpoint_id : string option }
+  | Nothing_heard of { message : string }
+  | Discarded_recording of { message : string }
+  | Unrecognized_status of string
+
+let capture_outcome_of_json json =
+  let field name = Json_util.get_string json name in
+  let nonempty name = Json_util.get_string_nonempty json name in
+  let message ~fallback = Option.value (nonempty "message") ~default:fallback in
+  match field "status" with
+  | None -> Unrecognized_status "<absent>"
+  | Some raw ->
+    (match capture_status_of_string raw with
+     | None -> Unrecognized_status raw
+     | Some Transcribed ->
+       (match nonempty "text" with
+        | Some text -> Transcript { text = String.trim text; endpoint_id = nonempty "endpoint_id" }
+        | None -> Transcriber_returned_nothing { endpoint_id = nonempty "endpoint_id" })
+     | Some No_audio -> Nothing_heard { message = message ~fallback:"nothing was heard" }
+     | Some Discarded ->
+       Discarded_recording { message = message ~fallback:"recording discarded" })
 ;;
 
 let record_and_transcribe
       ~agent_id
-      ?(timeout_sec = 15.0)
+      ?(timeout_sec = default_capture_timeout_seconds)
       ?language_code
       ?noise_floor
       ?(on_level = fun (_ : float) -> ())
       ?(should_stop = fun () -> None)
       ()
   =
+  (* Refused here, before a tone is played or a microphone opened: a config
+     that exists and does not parse names its reason. *)
+  let* capture = capture_config () in
   let audio_file =
     Filename.temp_file (Printf.sprintf "masc_stt_%s_" (safe_agent_id agent_id)) ".wav"
   in
-  let capture = capture_config () in
   (* Pinned rather than left to sox, which chooses 32-bit when it is not told.
      The reader that measures this file decodes 16-bit, and a mismatch is not
      an error either side reports: it reads as noise. Measured 2026-09-04, a
@@ -1148,10 +1246,16 @@ let record_and_transcribe
       play_tone 880.0;
       (* The recorder has no end of its own now that the silence filter is
          gone, so the watcher is what stops it: when the watcher returns,
-         [Fiber.first] cancels the recording, and the reap sends SIGTERM
-         before SIGKILL. sox closes the file on SIGTERM and writes the length
-         into the header — measured 2026-09-04, a recording killed at two
-         seconds read back as 1.75 s of valid audio.
+         [Fiber.first] cancels the recording. The cancelled spawn sends sox
+         SIGTERM and then waits, up to [Process_eio.child_exit_grace_seconds],
+         for sox to close its pipes -- which it does on exit, after it has
+         written the length into the WAV header. SIGKILL follows only if the
+         grace runs out.
+
+         The wait is what keeps the tail: sox flushes its output on SIGTERM,
+         and the SIGKILL used to arrive before it could. Measured 2026-09-04
+         under that shape, a recording stopped at two seconds read back as
+         1.75 s -- the missing quarter second is about one stdio buffer.
 
          The recorder's own arm carries the same deadline so that a watcher
          that somehow never returns cannot leave a microphone open. *)
@@ -1159,7 +1263,7 @@ let record_and_transcribe
         Eio.Fiber.first
           (fun () ->
              match
-               run_voice_status ~timeout_sec:(timeout_sec +. 5.0) rec_argv
+               run_voice_status ~timeout_sec:(timeout_sec +. recorder_arm_grace_seconds) rec_argv
              with
              | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
              | exception exn ->
@@ -1185,11 +1289,16 @@ let record_and_transcribe
       on_level Float.neg_infinity;
       (match outcome with
        | Error message -> Error message
-       | Ok (Ended_by_operator floor) ->
+       | Ok (Stopped_before_speech floor) ->
          (* Stopped before anything was said. Distinct from the message below
             because nothing waited for speech here -- saying the room was too
             quiet would blame a microphone that was never given a chance. *)
          Ok (no_audio ~reason:"stopped before anything was said" ~floor capture)
+       | Ok (Discarded_after_speech _) ->
+         (* The operator abandoned a recording that had speech in it. Not a
+            silence: the microphone worked, and saying otherwise would send
+            them looking for a fault that is not there. *)
+         Ok discarded_json
        | Ok (Ended_without_speech floor) ->
          (* The gate that keeps a room away from the transcriber. It used to
             re-read the finished file and compare its average against its own

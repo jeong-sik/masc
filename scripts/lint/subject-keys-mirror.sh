@@ -36,7 +36,7 @@ extract_ocaml() {
 # the ] inside it would end the list early.
 extract_ts() {
   sed 's|//.*||' "$1" \
-    | awk '/^const '"$2"' = \[/{inside=1} inside{print} inside && /\]/{exit}' \
+    | { awk '/^const '"$2"' = \[/{inside=1} inside{print} inside && /\]/{exit}'; cat > /dev/null; } \
     | grep -o "'[a-z_]*'" | tr -d "'"
 }
 

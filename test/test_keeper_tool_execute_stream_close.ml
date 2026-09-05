@@ -60,6 +60,13 @@ let with_eio_fs f =
     ~clock:(Eio.Stdenv.clock env);
   Fun.protect ~finally:Process_eio.reset_for_testing f
 
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv key (Option.value previous ~default:""))
+    f
+
 let make_meta ~name () =
   let json =
     `Assoc
@@ -70,7 +77,7 @@ let make_meta ~name () =
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta ->
     { meta with
-      sandbox_profile = Keeper_types_profile_sandbox.Docker
+      sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh
     ; always_allow = Some true
     }
   | Error e -> Alcotest.fail e
@@ -85,14 +92,9 @@ let setup f =
   ensure_dir config_dir;
   let config = Workspace.default_config base in
   ensure_dir (Workspace.keepers_runtime_dir config);
-  let meta = make_meta ~name:"stream-close-keeper" () in
-  let factory = Keeper_sandbox_factory.create ~config ~meta () in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_sandbox_factory.cleanup factory;
-      cleanup_dir base)
-  @@ fun () ->
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.For_testing.clear ();
+  let meta = make_meta ~name:"stream-close-keeper" () in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
   let repos_toml = Filename.concat config_dir "repositories.toml" in
@@ -111,7 +113,33 @@ let setup f =
         created_at = 0\n\
         updated_at = 0\n"
        playground);
-  f ~config ~meta ~factory ~playground
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  ensure_dir keepers_dir;
+  write_file
+    (Filename.concat keepers_dir "stream-close-keeper.toml")
+    {|[keeper]
+instructions = "stream close test"
+sandbox_profile = "remote_ssh"
+remote_endpoint = "fixture"
+|};
+  write_file
+    (Filename.concat config_dir "runtime.toml")
+    (Exec_ssh_endpoint.to_toml
+       Exec_ssh_endpoint.
+         { name = "fixture"
+         ; host = "fixture.invalid"
+         ; user = "masc"
+         ; port = default_port
+         ; identity_file = default_identity_file ~name:"fixture"
+         ; known_hosts_file = default_known_hosts_file ~name:"fixture"
+         ; remote_root = "/srv/masc/playground"
+         ; connect_timeout_sec = 1
+         ; max_concurrent_sessions = 2
+         ; env_allowlist = [ "LANG" ]
+         ; capabilities = []
+         ; private_home = false
+         });
+  f ~config ~meta ~playground
 
 let typed_exec_args ~cwd =
   `Assoc
@@ -153,7 +181,8 @@ let rejected_cases =
   ]
 
 let test_rejected_branch_finalizes_stream (name, _expected_status, dispatch) () =
-  setup @@ fun ~config ~meta ~factory ~playground ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
+  setup @@ fun ~config ~meta ~playground ->
   let stream_end_status = ref None in
   Keeper_keepalive_signal.register_record_execute_stream_end
     (fun ~keeper_name:_ ~task_id:_ ~status -> stream_end_status := Some status);
@@ -167,7 +196,7 @@ let test_rejected_branch_finalizes_stream (name, _expected_status, dispatch) () 
       let raw =
         Keeper_tool_execute_runtime.handle_tool_execute
           ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
-          ~turn_sandbox_factory:(Some factory)
+          ~turn_sandbox_factory:None
           ~config
           ~meta
           ~args:(typed_exec_args ~cwd:playground)
@@ -178,7 +207,7 @@ let test_rejected_branch_finalizes_stream (name, _expected_status, dispatch) () 
        | Some false | None -> ());
       match !stream_end_status with
       | None ->
-        Alcotest.failf "%s: record_execute_stream_end was NOT invoked" name
+        Alcotest.failf "%s: record_execute_stream_end was NOT invoked: raw=%s" name raw
       | Some status ->
         let rejected =
           match Yojson.Safe.Util.member "rejected" status with

@@ -2476,6 +2476,27 @@ let load_all ~base_dir ~keeper_name : chat_message list =
         if trimmed = "" then None else parse_line ~file_path:path trimmed)
       |> List.map (redact_message redaction)
 
+(* Content equality for the [Already_present] branch of the append-once
+   paths: does the row that already holds this approval's slot say the same
+   thing as the row we were about to write? Only durable facts take part:
+   which approval, which phase, what the replay produced ([artifact_ref]),
+   and which tool when both sides know it.
+
+   [call_summary] is deliberately not compared. It is a rendering, not a
+   fact: [Keeper_approval_queue.call_summary_of_input] derives it from the
+   approval's persisted request input (first argv line, capped at 80 bytes)
+   and the store redacts it before writing. The same approval_id therefore
+   never carries two different facts under it, and two rows for the same
+   slot differ in it for exactly two reasons that are not conflicts: a
+   writer without the request in hand writes [None] (the rejection and the
+   unreadable-delivery paths in keeper_heartbeat_stimulus_intake do), and the
+   cap, the first-line rule or the redaction snapshot changed between the
+   two writes. Comparing it would turn either into
+   "conflicting content" on the append path and into a spurious correction
+   row on the replay path. The consequence accepted: a slot first written
+   without a summary is not backfilled by a later writer that has one, the
+   same way [tool_name] is not. Pinned by
+   test/test_keeper_chat_store_approval_summary.ml. *)
 let approval_lifecycle_equal left right =
   let artifact_equal left right =
     match left, right with

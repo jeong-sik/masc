@@ -53,6 +53,7 @@ import type { Keeper } from '../types'
 import type { KeeperCompositeSnapshot, KeeperRuntimeTraceResponse } from '../api/keeper'
 import { KeeperRuntimeAlertStrip } from './keeper-detail-alert-strip'
 import { KeeperCommsPanel, RepositoryCheckoutsPanel } from './keeper-detail-comms'
+import { KeeperFusionRuns } from './keeper-detail-fusion'
 import { KeeperClearContextDialog } from './keeper-detail-lifecycle'
 import { KeeperSandboxLivePanel } from './keeper-sandbox-live'
 import type { KeeperDetailEvidenceState } from './keeper-detail-hooks'
@@ -111,6 +112,7 @@ export function KeeperDetailBody({
           variant="primary"
         >
           <${KeeperCommsPanel} keeper=${keeper} />
+          <${KeeperFusionRuns} keeperName=${keeper.name} />
           <${CollapsibleSection} title="세션 활동 로그" open=${false} mountWhenOpen=${true}>
             <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperOffline=${isKeeperOffline(keeper)} />
           <//>

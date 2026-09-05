@@ -4,9 +4,13 @@
     The observer feed already reaches the TUI for the whole session, and the
     Activity surface draws it full-screen. This pane projects the same held
     events into a column on the right of any surface, so a reader in a keeper
-    chat or on the board sees the fleet move without leaving. Two blocks: the
-    fleet, one row per keeper ordered by who acted last; then the keeper the
-    cursor is on, with the calls of its current turn and the turns before it.
+    chat or on the board sees the fleet move without leaving.
+
+    Two tabs. [Tab_fleet] is the feed: one row per keeper ordered by who acted
+    last, then the keeper the cursor is on with the calls of its current turn
+    and the turns before it. [Tab_changes] is the files that keeper changed
+    in its workspace, newest first, as the Changes surface lists them, kept
+    current from the feed.
 
     Nothing here performs I/O or reads TUI state. The caller hands in the
     facts as it holds them and gets back rows of toned spans; the renderer
@@ -32,6 +36,14 @@ val toggle_hidden : hidden:bool -> cols:int -> bool option
 
 val content_cols : hidden:bool -> cols:int -> int
 (** What the surface beside the pane lays out against. *)
+
+(** Which of the pane's two readings is up. *)
+type tab =
+  | Tab_fleet
+  | Tab_changes
+
+val tab_label : tab -> string
+val next_tab : tab -> tab
 
 (** The feed's state as the header states it. *)
 type feed =
@@ -68,15 +80,50 @@ type approval = {
   approval_tool : string;
 }
 
+(** One file the selected keeper changed, as the Changes tab draws it. The
+    caller reads it out of the server's file-change record: the address the
+    Changes surface shows, what kind of write it was, whether it landed, and
+    the line range the record carries when it carries one. *)
+type file_kind =
+  | File_edited
+  | File_written
+
+type file_row = {
+  file_path : string;
+  file_kind : file_kind;
+  file_succeeded : bool;
+  file_at : float;
+  file_where : string option;  (** the range label, [L12-40], when known *)
+}
+
+(** What is known about the selected keeper's changes right now. The four
+    states are the fetch helper's four, named here so the pane answers each
+    without knowing the helper. *)
+type changes =
+  | Changes_absent  (** no keeper selected, or never asked *)
+  | Changes_loading
+  | Changes_failed of string
+  | Changes_ready of {
+      keeper : string;
+      files : file_row list;  (** newest first *)
+      fetched_at : float;
+      window_hours : float;
+      calls : int;  (** tool calls the window held, changes or not *)
+      over_budget : int;  (** changes the log kept no text for *)
+      malformed : int;
+    }
+
 type input = {
   now : float;
+  tab : tab;
   feed : feed;
   keepers : keeper list;
   selected : string option;
-      (** the keeper the cursor is on; the most recently active keeper stands
-          in when there is none *)
+      (** the keeper the cursor is on; on the fleet tab the most recently
+          active keeper stands in when there is none *)
   approvals : approval list;  (** pending, any keeper *)
   entries : Masc_tui_acting.entry list;  (** newest first, as the TUI holds them *)
+  changes : changes;  (** the selected keeper's, for the changes tab *)
 }
 
 type span = {
@@ -86,12 +133,44 @@ type span = {
 
 type line = span list
 
-val lines : rows:int -> cols:int -> input -> line list
+(** What a mouse press on a drawn row can act on. The renderer keeps the
+    targets of the last frame beside its rows, so a click answers what was
+    on screen, not what a later frame would draw. *)
+type row_target =
+  | Target_none  (** rule, indicators, padding, focus rows, status rows *)
+  | Target_next_tab  (** the header row: a press shows the other tab *)
+  | Target_keeper of string  (** a fleet row: the keeper it names *)
+  | Target_more
+      (** the fold line: the fleet rows the overview layout left out; a press
+          scrolls into the full list *)
+  | Target_file of int
+      (** a changes row: the index of the file in [Changes_ready.files] *)
+
+type rendering = {
+  rows : line list;
+  targets : row_target list;  (** one per row, in the same order *)
+  scroll_max : int;
+      (** the largest [scroll] that still shows content: zero when everything
+          fits, so a wheel over a short pane moves nothing *)
+}
+
+val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
 (** Exactly [rows] lines, each exactly [cols] display cells once its spans
     are joined: a line that would overflow is cut at the right edge, a short
-    one is padded, and rows the content does not need are blank. The fleet
-    block takes at most half the rows when the focus block has something to
-    show, so a wide fleet cannot push the current turn off the pane. *)
+    one is padded, and rows the content does not need are blank. The header
+    row carries the two tabs and the feed's state on both tabs.
+
+    Fleet tab, two layouts. At [scroll = 0] the overview: the fleet takes at
+    most half the rows below the header when the focus block has something to
+    show, a fold line counts the keepers left out, and the focus block takes
+    the rest. Any other [scroll] (clamped to [scroll_max]) is the full list --
+    every fleet row, the rule, every focus row -- windowed from that offset,
+    with an [↑ N more] row where content is above and a [↓ N more] row where
+    it is below. When everything fits the two layouts are the same list and
+    no fold or indicator draws.
+
+    Changes tab: a status row for the keeper and the fetch, then one row per
+    file, windowed the same way. *)
 
 val keeper_state_text : now:float -> approval:string option ->
   Masc_tui_acting.chunk option -> span list

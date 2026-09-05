@@ -44,7 +44,7 @@ let stub_main () =
   save frame_path frame;
   let trailer ?exit ?signal ?(timed_out = false) ?shim_error () =
     Exec_ssh_protocol.render_trailer
-      { v = Exec_ssh_protocol.protocol_version
+      { v = Exec_ssh_protocol.newest
       ; exit
       ; signal
       ; timed_out
@@ -169,8 +169,9 @@ let make_runner ~base_path ~ssh_bin =
 let run_request runner ?on_stdout_chunk ?on_stderr_chunk ?(stdin_content = Some "stdin\x00bytes")
     ?(env = [| "LANG=C"; "PATH=/host/bin" |])
     ?(cwd = Some "/srv/masc/playground/keeper-a") () =
-  runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content
-    ~argv:[ "/usr/bin/printf"; "hello" ] ~env ~cwd
+  Masc_exec.Sandbox_target.status_tuple
+    (runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content
+       ~argv:[ "/usr/bin/printf"; "hello" ] ~env ~cwd)
 ;;
 
 let read_file path =

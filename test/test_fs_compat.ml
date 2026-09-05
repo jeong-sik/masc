@@ -236,6 +236,31 @@ let test_save_file_atomic_strict_payload_sync_cancellation () =
   check (list string) "payload cancellation leaves no atomic temp" [] leftover_tmps
 ;;
 
+let test_save_file_atomic_commit_runs_off_the_fiber () =
+  Fs_compat.clear_fs ();
+  with_tmp_dir
+  @@ fun base ->
+  let target = Filename.concat base "out.json" in
+  let contexts = ref [] in
+  let record _ = contexts := Fs_compat.execution_context () :: !contexts in
+  check bool "the test itself runs in an Eio fiber" true
+    (Fs_compat.execution_context () = Fs_compat.Eio_fiber);
+  (match
+     Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+       ~sync_file:record
+       ~sync_parent:record
+       target
+       "new"
+   with
+   | Ok () -> ()
+   | Error failure ->
+     failf "atomic save failed: %s" (Fs_compat.atomic_replace_failure_to_string failure));
+  check int "payload and parent sync both ran" 2 (List.length !contexts);
+  check bool "neither sync ran on the calling fiber" true
+    (List.for_all (fun context -> context = Fs_compat.Non_eio) !contexts);
+  check string "target holds the new content" "new" (Fs_compat.load_file target)
+;;
+
 let check_save_file_atomic_strict_parent_sync_failure
       ~label
       ~exception_
@@ -603,6 +628,10 @@ let () =
             "strict parent sync cancellation is after rename"
             `Quick
             test_save_file_atomic_strict_parent_sync_cancellation
+        ; test_case
+            "commit syscalls run off the fiber"
+            `Quick
+            test_save_file_atomic_commit_runs_off_the_fiber
         ; test_case
             "temp writer uses canonical shared shape"
             `Quick

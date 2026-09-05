@@ -354,7 +354,6 @@ module For_testing : sig
   val turn_instructions_for_request : keeper_chat_stream_request -> string option
   val direct_message_of_request :
     keeper_chat_stream_request -> Keeper_invocation_contract.direct_message
-  val keeper_chat_stream_headers : string -> Httpun.Headers.t
   val canonical_reply_payload_of_body :
     redact_text:(string -> string) ->
     string ->

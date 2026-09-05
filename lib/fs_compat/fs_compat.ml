@@ -36,15 +36,11 @@ let get_fs_opt () = Atomic.get global_fs
 (** Check if Eio fs is available *)
 let has_fs () = Option.is_some (Atomic.get global_fs)
 
-type execution_context =
+type execution_context = Execution_context.t =
   | Eio_fiber
   | Non_eio
 
-let execution_context () =
-  match Eio.Fiber.is_cancelled () with
-  | true | false -> Eio_fiber
-  | exception Effect.Unhandled _ -> Non_eio
-;;
+let execution_context = Execution_context.current
 
 (** Normalize [Eio.Io] to [Sys_error] so callers only need one catch.
     Eio operations raise [Eio.Io _] on permission errors, missing files, etc.

@@ -533,39 +533,11 @@ restore_env_override() {
     fi
 }
 
-load_base_path_env_local() {
-    local base_path="$1"
-    local env_file="$base_path/.masc/config/.env.local"
-    if [ ! -f "$env_file" ]; then
-        return 0
-    fi
-
-    for env_name in \
-        MASC_KEEPER_BOOTSTRAP_ENABLED \
-        MASC_PORT \
-        MASC_HOST \
-        MASC_BASE_PATH \
-        MASC_SIDECAR_ROOT \
-        MASC_CONFIG_DIR \
-        MASC_WS_ENABLED
-    do
-        preserve_env_override "$env_name"
-    done
-
-    load_env_file "$env_file"
-
-    for env_name in \
-        MASC_KEEPER_BOOTSTRAP_ENABLED \
-        MASC_PORT \
-        MASC_HOST \
-        MASC_BASE_PATH \
-        MASC_SIDECAR_ROOT \
-        MASC_CONFIG_DIR \
-        MASC_WS_ENABLED
-    do
-        restore_env_override "$env_name"
-    done
-}
+# A workspace no longer carries its own env file. `.masc/config/.env.local` was
+# read here and written by quickstart.sh, which put provider keys on disk in a
+# second place the running server did not read -- settings live in TOML and
+# credentials live in the environment the server is started in. The repo-root
+# .env/.env.local below are a developer's own shell files and stay.
 
 REPO_ENV_ROOT="$(resolve_repo_env_root)"
 
@@ -974,11 +946,6 @@ bootstrap_base_path_config "$RESOLVED_BASE_PATH"
 if [ -z "${MASC_CONFIG_DIR:-}" ]; then
     export MASC_CONFIG_DIR="$RESOLVED_BASE_PATH/.masc/config"
 fi
-# Load provider credentials from the active workspace after base-path resolution
-# and config bootstrap. This keeps --base-path/--path starts from importing
-# another workspace's .masc/config/.env.local via the caller's current directory.
-load_base_path_env_local "$RESOLVED_BASE_PATH"
-
 # Wait for port to become available.
 # Default behavior is fail-fast on conflict to prevent duplicate server startup.
 # To preserve legacy behavior, set MASC_ALLOW_PORT_REUSE=1.

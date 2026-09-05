@@ -58,7 +58,7 @@ let stub_main () =
   let frame = header ^ read_exact Unix.stdin body_len in
   let trailer ?exit ?shim_error () =
     Exec_ssh_protocol.render_trailer
-      { v = Exec_ssh_protocol.protocol_version; exit; signal = None; timed_out = false; shim_error }
+      { v = Exec_ssh_protocol.newest; exit; signal = None; timed_out = false; shim_error }
   in
   match Exec_ssh_protocol.decode_request frame with
   | Error error ->
@@ -164,6 +164,7 @@ remote_endpoint = "build-box"
           ; "MASC_EXEC_SHIM_CONFIG=/opt/masc-exec-shim/masc-exec-shim.conf"
           ; "masc-keeper-vm-keeper-a"
           ]
+      ; probe_prefix = None
       ; container_name = "masc-keeper-vm-keeper-a"
       ; shim_path = "/opt/masc-exec-shim/masc-exec-shim"
       }

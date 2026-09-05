@@ -389,10 +389,14 @@ let () =
   let c_bin = Masc_exec.Exec_program.of_string "c" |> Result.get_ok in
   let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content ~argv ~env:_ ~cwd:_ =
     match argv, stdin_content with
-    | [ "a" ], None -> Unix.WEXITED 7, "a-out", "a-err;"
-    | [ "b" ], Some "a-out" -> Unix.WEXITED 0, "b-out", "b-err;"
-    | [ "c" ], Some "b-out" -> Unix.WEXITED 3, "c-out", "c-err;"
-    | _ -> Unix.WEXITED 99, "", "unexpected;"
+    | [ "a" ], None ->
+        Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 7; stdout = "a-out"; stderr = "a-err;" }
+    | [ "b" ], Some "a-out" ->
+        Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout = "b-out"; stderr = "b-err;" }
+    | [ "c" ], Some "b-out" ->
+        Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 3; stdout = "c-out"; stderr = "c-err;" }
+    | _ ->
+        Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 99; stdout = ""; stderr = "unexpected;" }
   in
   let docker_sandbox =
     Masc_exec.Sandbox_target.docker ~image:"pipeline-status" ~runner:mock_runner ()
@@ -510,7 +514,8 @@ let () =
     runner_argv := argv;
     runner_env := env;
     runner_cwd := cwd;
-    (Unix.WEXITED 0, "mock_stdout", "mock_stderr")
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 0; stdout = "mock_stdout"; stderr = "mock_stderr" }
   in
   let docker_sandbox =
     Masc_exec.Sandbox_target.docker ~image:"test-image" ~runner:mock_runner ()
@@ -551,7 +556,8 @@ let () =
     Masc_exec.Path_scope.classify ~raw:"/dev/null" ~cwd:"/tmp"
   in
   let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
-    Unix.WEXITED 0, "stdout", "stderr"
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 0; stdout = "stdout"; stderr = "stderr" }
   in
   let docker_sandbox =
     Masc_exec.Sandbox_target.docker ~image:"redirect-image" ~runner:mock_runner ()
@@ -587,7 +593,8 @@ let () =
     Masc_exec.Path_scope.classify ~raw:"/dev/null" ~cwd:"/tmp"
   in
   let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
-    Unix.WEXITED 0, "stdout", "stderr"
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 0; stdout = "stdout"; stderr = "stderr" }
   in
   let docker_sandbox =
     Masc_exec.Sandbox_target.docker ~image:"redirect-image" ~runner:mock_runner ()
@@ -626,7 +633,8 @@ let () =
   in
   let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     runner_called := true;
-    Unix.WEXITED 0, "stdout", "stderr"
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 0; stdout = "stdout"; stderr = "stderr" }
   in
   let docker_sandbox =
     Masc_exec.Sandbox_target.docker ~image:"redirect-image" ~runner:mock_runner ()
@@ -666,9 +674,13 @@ let () =
   let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content ~argv ~env:_ ~cwd =
     runner_calls := (argv, cwd, stdin_content) :: !runner_calls;
     match argv, stdin_content with
-    | [ "printf"; "typed" ], None -> Unix.WEXITED 0, "typed", ""
-    | [ "wc"; "-c" ], Some "typed" -> Unix.WEXITED 0, "5\n", ""
-    | _ -> Unix.WEXITED 2, "", "unexpected mock runner call"
+    | [ "printf"; "typed" ], None ->
+        Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout = "typed"; stderr = "" }
+    | [ "wc"; "-c" ], Some "typed" ->
+        Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout = "5\n"; stderr = "" }
+    | _ ->
+        Masc_exec.Sandbox_target.Ran
+          { status = Unix.WEXITED 2; stdout = ""; stderr = "unexpected mock runner call" }
   in
   let docker_sandbox =
     Masc_exec.Sandbox_target.docker ~image:"pipeline-image" ~runner:mock_runner ()
@@ -721,10 +733,12 @@ let () =
     match argv, stdin_content with
     | [ "slow" ], None ->
         Unix.sleepf 0.12;
-        Unix.WEXITED 0, "typed", ""
+        Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout = "typed"; stderr = "" }
     | [ "next" ], Some "typed" ->
-        Unix.WEXITED 0, "ok", ""
-    | _ -> Unix.WEXITED 2, "", "unexpected mock runner call"
+        Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout = "ok"; stderr = "" }
+    | _ ->
+        Masc_exec.Sandbox_target.Ran
+          { status = Unix.WEXITED 2; stdout = ""; stderr = "unexpected mock runner call" }
   in
   let docker_sandbox =
     Masc_exec.Sandbox_target.docker ~image:"pipeline-image" ~runner:mock_runner ()
@@ -760,11 +774,13 @@ let () =
   let pipeline_runner_calls = ref [] in
   let simple_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     simple_runner_called := true;
-    Unix.WEXITED 3, "", "simple runner should not be used"
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 3; stdout = ""; stderr = "simple runner should not be used" }
   in
   let pipeline_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stages =
     pipeline_runner_calls := stages :: !pipeline_runner_calls;
-    Unix.WEXITED 0, "5\n", "pipeline-stderr"
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 0; stdout = "5\n"; stderr = "pipeline-stderr" }
   in
   let docker_sandbox =
     Masc_exec.Sandbox_target.docker
@@ -824,22 +840,30 @@ let () =
   let first_simple_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content ~argv ~env:_ ~cwd:_ =
     first_simple_calls := (argv, stdin_content) :: !first_simple_calls;
     match argv, stdin_content with
-    | [ "printf"; "typed" ], None -> Unix.WEXITED 0, "typed", ""
-    | _ -> Unix.WEXITED 2, "", "unexpected first runner call"
+    | [ "printf"; "typed" ], None ->
+        Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout = "typed"; stderr = "" }
+    | _ ->
+        Masc_exec.Sandbox_target.Ran
+          { status = Unix.WEXITED 2; stdout = ""; stderr = "unexpected first runner call" }
   in
   let second_simple_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content ~argv ~env:_ ~cwd:_ =
     second_simple_calls := (argv, stdin_content) :: !second_simple_calls;
     match argv, stdin_content with
-    | [ "wc"; "-c" ], Some "typed" -> Unix.WEXITED 0, "5\n", ""
-    | _ -> Unix.WEXITED 2, "", "unexpected second runner call"
+    | [ "wc"; "-c" ], Some "typed" ->
+        Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout = "5\n"; stderr = "" }
+    | _ ->
+        Masc_exec.Sandbox_target.Ran
+          { status = Unix.WEXITED 2; stdout = ""; stderr = "unexpected second runner call" }
   in
   let first_pipeline_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stages:_ =
     first_pipeline_called := true;
-    Unix.WEXITED 3, "", "first pipeline runner should not be used"
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 3; stdout = ""; stderr = "first pipeline runner should not be used" }
   in
   let second_pipeline_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stages:_ =
     second_pipeline_called := true;
-    Unix.WEXITED 3, "", "second pipeline runner should not be used"
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 3; stdout = ""; stderr = "second pipeline runner should not be used" }
   in
   let first_docker_sandbox =
     Masc_exec.Sandbox_target.docker
@@ -898,13 +922,18 @@ let () =
   let simple_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content ~argv ~env:_ ~cwd:_ =
     simple_runner_calls := (argv, stdin_content) :: !simple_runner_calls;
     match argv, stdin_content with
-    | [ "printf"; "typed" ], None -> Unix.WEXITED 0, "typed", "hidden"
-    | [ "wc"; "-c" ], Some "typed" -> Unix.WEXITED 0, "5\n", ""
-    | _ -> Unix.WEXITED 2, "", "unexpected mock runner call"
+    | [ "printf"; "typed" ], None ->
+        Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout = "typed"; stderr = "hidden" }
+    | [ "wc"; "-c" ], Some "typed" ->
+        Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout = "5\n"; stderr = "" }
+    | _ ->
+        Masc_exec.Sandbox_target.Ran
+          { status = Unix.WEXITED 2; stdout = ""; stderr = "unexpected mock runner call" }
   in
   let pipeline_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stages:_ =
     pipeline_runner_called := true;
-    Unix.WEXITED 3, "", "pipeline runner should not be used for redirects"
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 3; stdout = ""; stderr = "pipeline runner should not be used for redirects" }
   in
   let docker_sandbox =
     Masc_exec.Sandbox_target.docker

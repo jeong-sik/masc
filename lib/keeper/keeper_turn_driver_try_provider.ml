@@ -431,10 +431,24 @@ let unmeasured_request_reserve_divisor = 10
 
 (* The canonical MASC message encoder, also used for checkpoint serialization.
    It is not the provider's encoder; [unmeasured_request_reserve_divisor]
-   carries that difference. *)
-let measure_message_bytes (message : Agent_core.Types.message) =
-  String.length
-    (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
+   carries that difference.
+
+   [Yojson.Safe.to_string] is [to_buffer] followed by [Buffer.contents], so
+   measuring through a buffer counts the same bytes and stops allocating a
+   copy of every message to read its length. Projection measures the whole
+   durable history per attempt, and a keeper turn makes 62 to 83 attempts.
+
+   One buffer per measurer. A measurer is driven by one fiber, and its pool
+   jobs run under [Eio.Executor_pool.submit_exn], which blocks until the job
+   finishes, so two domains are never inside the buffer at once. [clear] keeps
+   the capacity the largest message already paid for; the buffer dies with the
+   measurer. *)
+let message_measurer () =
+  let buffer = Buffer.create 65536 in
+  fun (message : Agent_core.Types.message) ->
+    Buffer.clear buffer;
+    Yojson.Safe.to_buffer buffer (Keeper_context_core.message_to_json message);
+    Buffer.length buffer
 ;;
 
 module Message_identity = struct
@@ -640,7 +654,7 @@ let budgeted_model_input_projection
      The message records are physically shared across a turn's requests — only
      the list spine is rebuilt — which is what makes the memo hit at all: it
      confirms every lookup with physical equality. *)
-  let measure_message_bytes = memoize_message_measurement measure_message_bytes in
+  let measure_message_bytes = memoize_message_measurement (message_measurer ()) in
   (* Scoped to the attempt, written by the one fiber that drives it. The
      closure below runs per provider request — 62 to 83 of them in one keeper
      turn on the traces this window's own comment cites — and a keeper whose
@@ -761,7 +775,7 @@ let budgeted_model_input_projection
                 offload_model_input_cpu (fun () ->
                   Runtime_model_input_tail_window.project_with_drop
                     ~measure_message_bytes:
-                      (memoize_message_measurement measure_message_bytes)
+                      (memoize_message_measurement (message_measurer ()))
                     ~capacity_bytes:ctx.model_input_capacity_bytes
                     ~reserved_bytes
                     outcome.Keeper_model_input_demotion.messages)
@@ -1454,8 +1468,8 @@ module For_testing = struct
 
   let truncation_recovery = truncation_recovery
   let persist_dropped_response = persist_dropped_response
-  let thinking_was_enabled = thinking_was_enabled
   let observe_request_wire_error = observe_request_wire_error
+  let message_measurer = message_measurer
   let memoize_message_measurement = memoize_message_measurement
   let plan_and_window_model_input = plan_and_window_model_input
   let offload_model_input_cpu = offload_model_input_cpu

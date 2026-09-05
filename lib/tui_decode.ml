@@ -139,6 +139,12 @@ type standalone_lane_status =
   | Standalone_no_retained_observation
   | Standalone_unavailable
 
+type standalone_lane_configuration =
+  | Lane_ready
+  | Lane_slotless
+  | Lane_unconfigured
+  | Lane_registry_unavailable
+
 type standalone_lane_slot_count = {
   slsc_slot_id : string;
   slsc_count : int;
@@ -150,7 +156,7 @@ type standalone_lane = {
   sl_purpose : string option;
   sl_required : bool;
   sl_status : standalone_lane_status;
-  sl_configuration_state : string;
+  sl_configuration_state : standalone_lane_configuration;
   sl_admitted_slots : string list;
   sl_cli_slots : string list;
   sl_dropped_slots : string list;
@@ -1352,26 +1358,49 @@ let verification_verdict_outcome (json : Yojson.Safe.t) :
       | Some _ | None -> Error "unexpected verdict response envelope")
   | _ -> Error "unexpected verdict response envelope"
 
-(** Decode one SGR-encoded mouse report ([CSI ?1006;1000h] mode) into a key.
+(** Which way a wheel notch turned. The two are the whole vocabulary: the
+    horizontal wheel is not a scroll and stays unclaimed. *)
+type wheel_direction =
+  | Wheel_up
+  | Wheel_down
 
-    A wheel report becomes [wheel-up] / [wheel-down] rather than the arrow keys
-    it used to share. Two things wanted to be told apart: a wheel notch moves
-    further than one row, and the chat composer answers the arrows with its own
-    history. A surface that scrolls binds both. Wheel-up is button [64],
-    wheel-down [65]; the horizontal wheel, clicks, and releases stay [None] -- the
-    terminal sends them, but nothing consumes them yet, and an unconsumed
-    report must not masquerade as a claimed key. [parameters] is the raw CSI
-    parameter span (["<64;10;5"] for a wheel-up at column 10, row 5) and
-    [final] the CSI final byte. *)
-let sgr_wheel_key (parameters : string) (final : char) : string option =
+(* The key a wheel notch becomes for a surface's scroll binding: its own,
+   not the arrow's. A notch moves further than one row, and the chat
+   composer answers the arrows with its history, so a shared key made one
+   of the two wrong. *)
+let wheel_key = function
+  | Wheel_up -> "wheel-up"
+  | Wheel_down -> "wheel-down"
+
+(** Decode one SGR-encoded mouse report ([CSI ?1006;1000h] mode) into a wheel
+    notch and where it happened.
+
+    The position travels with the notch because more than one thing on the
+    screen can scroll: the Activity pane beside a surface takes the notches
+    over its own columns, and the surface takes the rest. Wheel-up is button
+    [64], wheel-down [65]; the horizontal wheel, clicks, and releases stay
+    [None] -- the terminal sends them, but this function claims none of them,
+    and an unconsumed report must not masquerade as a claimed key.
+    [parameters] is the raw CSI parameter span (["<64;10;5"] for a wheel-up at
+    column 10, row 5) and [final] the CSI final byte. The position is 1-based,
+    the way the terminal reports it, and stays row/column ordered the way a
+    frame thinks. *)
+let sgr_wheel_report (parameters : string) (final : char)
+    : (wheel_direction * int * int) option =
   if final <> 'M' then None
   else
     match String.split_on_char ';' parameters with
-    | button :: _ ->
-        if String.equal button "<64" then Some "wheel-up"
-        else if String.equal button "<65" then Some "wheel-down"
-        else None
-    | [] -> None
+    | [ button; column; row ] -> (
+        let direction =
+          if String.equal button "<64" then Some Wheel_up
+          else if String.equal button "<65" then Some Wheel_down
+          else None
+        in
+        match direction, int_of_string_opt column, int_of_string_opt row with
+        | Some direction, Some column, Some row when column > 0 && row > 0 ->
+            Some (direction, row, column)
+        | _, _, _ -> None)
+    | _ -> None
 
 (** Decode an SGR mouse report into the position of a plain left-button press.
 
@@ -1380,7 +1409,7 @@ let sgr_wheel_key (parameters : string) (final : char) : string option =
     operator was dragging or chord-clicking rather than choosing a row. The
     position is 1-based, the way the terminal reports it, and stays row/column
     ordered the way a frame thinks. Everything else stays [None] for the same
-    reason [sgr_wheel_key] gives: an unconsumed report must not masquerade as
+    reason [sgr_wheel_report] gives: an unconsumed report must not masquerade as
     a claimed key. *)
 let sgr_left_press (parameters : string) (final : char) : (int * int) option =
   if final <> 'M' then None
@@ -2185,14 +2214,18 @@ type repository_change_snapshot = {
   rcs_total : int;
 }
 
+type memory_alert_code =
+  | Snapshot_read_error
+  | Source_snapshot_read_error
+  | Librarian_lane_busy
+  | Librarian_failures
+  | Librarian_starvation
+  | Vision_ingest_errors
+
 type memory_alert = {
-  ma_code : string;
-  ma_severity : string;
-  ma_target : string;
+  ma_code : memory_alert_code;
   ma_label : string;
   ma_message : string;
-  ma_value : float;
-  ma_threshold : float;
 }
 
 type memory_keeper_health = {
@@ -4251,47 +4284,44 @@ let require_exact_object_fields context expected = function
   | _ -> Error (context ^ " must be an object")
 ;;
 
+let memory_alert_severity = function
+  | Snapshot_read_error
+  | Source_snapshot_read_error
+  | Librarian_lane_busy
+  | Librarian_failures
+  | Vision_ingest_errors -> `Warn
+  | Librarian_starvation -> `Error
+
+let memory_alert_code_of_wire = function
+  | "snapshot_read_error" -> Some Snapshot_read_error
+  | "source_snapshot_read_error" -> Some Source_snapshot_read_error
+  | "librarian_lane_busy" -> Some Librarian_lane_busy
+  | "librarian_failures" -> Some Librarian_failures
+  | "librarian_starvation" -> Some Librarian_starvation
+  | "vision_ingest_errors" -> Some Vision_ingest_errors
+  | _ -> None
+
+let memory_alert_severity_wire code =
+  match memory_alert_severity code with `Warn -> "warn" | `Error -> "error"
+
 let decode_memory_alert json =
   let* () =
     require_exact_object_fields
       "memory alert"
-      [ "code"; "severity"; "target"; "label"; "message"; "value"; "threshold" ]
+      [ "code"; "severity"; "target"; "label"; "message" ]
       json
   in
-  let* ma_code = required_string_field json "code" in
-  let* ma_severity = required_string_field json "severity" in
-  let* ma_target = required_string_field json "target" in
+  let* code = required_string_field json "code" in
+  let* severity = required_string_field json "severity" in
+  let* target = required_string_field json "target" in
   let* ma_label = required_string_field json "label" in
   let* ma_message = required_string_field json "message" in
-  let* ma_value = require_float_field json "value" in
-  let* ma_threshold = require_float_field json "threshold" in
-  let expected_severity =
-    match ma_code with
-    | "snapshot_read_error"
-    | "source_snapshot_read_error"
-    | "librarian_lane_busy"
-    | "librarian_failures"
-    | "vision_ingest_errors" -> Some "warn"
-    | "librarian_starvation" -> Some "error"
-    | _ -> None
-  in
-  (match expected_severity with
-   | Some expected
-     when String.equal ma_code ma_target
-          && String.equal ma_severity expected
+  (match memory_alert_code_of_wire code with
+   | Some ma_code
+     when String.equal code target
+          && String.equal severity (memory_alert_severity_wire ma_code)
           && not (String.equal ma_label "")
-          && not (String.equal ma_message "")
-          && Float.is_finite ma_value
-          && Float.is_finite ma_threshold ->
-     Ok
-       { ma_code
-       ; ma_severity
-       ; ma_target
-       ; ma_label
-       ; ma_message
-       ; ma_value
-       ; ma_threshold
-       }
+          && not (String.equal ma_message "") -> Ok { ma_code; ma_label; ma_message }
    | Some _ | None -> Error "memory alert has an invalid typed code contract")
 
 let decode_memory_keeper_health json =
@@ -4639,11 +4669,23 @@ let decode_memory_health_snapshot json =
   in
   let observed_warn_alerts =
     sum (fun keeper ->
-      List.length (List.filter (fun alert -> String.equal alert.ma_severity "warn") keeper.mkh_alerts))
+      List.length
+        (List.filter
+           (fun alert ->
+              match memory_alert_severity alert.ma_code with
+              | `Warn -> true
+              | `Error -> false)
+           keeper.mkh_alerts))
   in
   let observed_error_alerts =
     sum (fun keeper ->
-      List.length (List.filter (fun alert -> String.equal alert.ma_severity "error") keeper.mkh_alerts))
+      List.length
+        (List.filter
+           (fun alert ->
+              match memory_alert_severity alert.ma_code with
+              | `Error -> true
+              | `Warn -> false)
+           keeper.mkh_alerts))
   in
   let* () =
     if
@@ -5221,6 +5263,22 @@ let decode_keeper_lanes_snapshot json =
   let* kls_lanes = decode_list "snapshots" decode_keeper_lane items in
   Ok { kls_generated_at; kls_count; kls_lanes }
 
+let standalone_lane_configuration_of_string = function
+  | "ready" -> Ok Lane_ready
+  (* The server calls this one "degraded": configured, but nothing admitted.
+     The word it shares with the status axis means something else there, so
+     the type says what the state is rather than how bad it is. *)
+  | "degraded" -> Ok Lane_slotless
+  | "unconfigured" -> Ok Lane_unconfigured
+  | "unavailable" -> Ok Lane_registry_unavailable
+  | other -> Error ("standalone lane configuration: unknown value " ^ other)
+
+let standalone_lane_configuration_to_string = function
+  | Lane_ready -> "ready"
+  | Lane_slotless -> "no slot admitted"
+  | Lane_unconfigured -> "not configured"
+  | Lane_registry_unavailable -> "registry unreadable"
+
 let standalone_lane_status_of_string = function
   | "running" -> Ok Standalone_running
   | "idle" -> Ok Standalone_idle
@@ -5257,7 +5315,10 @@ let decode_standalone_lane json =
     else Error "standalone lane row is not observation-only"
   in
   let* _configured = required_nullable_bool_field json "configured" in
-  let* sl_configuration_state = required_string_field json "configuration_state" in
+  let* configuration_state = required_string_field json "configuration_state" in
+  let* sl_configuration_state =
+    standalone_lane_configuration_of_string configuration_state
+  in
   let* admitted_slots = required_list_field json "admitted_slots" in
   let* sl_admitted_slots =
     decode_list

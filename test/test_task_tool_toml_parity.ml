@@ -104,7 +104,9 @@ let test_descriptions_are_byte_identical () =
     [ "masc_task_history", {|Fetch recent task transition history from event logs. Useful for audits or debugging transitions.|}
     ; "masc_tasks", {|List tasks in backlog with their status and assignee. Defaults to active tasks (todo/claimed/in_progress/awaiting_verification). Use include_done/include_cancelled or status to filter. awaiting_verification tasks are pending a completion-authority verdict and are not claimable agent work. Output includes task ID, title, priority, assignee, timestamps. Tip: Look for status='todo' tasks to claim.|}
     ; "masc_update_priority", {|Change the priority of a task. Priority 1 is highest (most urgent), 5 is lowest. Use this to reprioritize work based on new information or urgency changes.|}
-    ; "masc_task_set_goal", {|Assign an existing, currently goalless task to a goal. Both task_id and goal_id are required and validated against the backlog and the goal store; an unknown id is rejected (never silently ignored or auto-picked). A task that already has a goal is rejected — reassignment is out of scope.|} ]
+    ; "masc_task_set_goal", {|Assign an existing, currently goalless task to a goal.
+
+Both task_id and goal_id are required and validated against the backlog and the goal store; an unknown id is rejected (never silently ignored or auto-picked). A task that already has a goal is rejected — reassignment is out of scope.|} ]
 ;;
 
 let member (json : Yojson.Safe.t) key =

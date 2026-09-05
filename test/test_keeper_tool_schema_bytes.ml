@@ -43,10 +43,18 @@ open Alcotest
    slack that opens still sits inside a third of it is what
    [test_the_ceiling_still_tracks_the_surface] below answers.
 
+   2026-09-06: 90,000. The model-visible tool surface grew to 86,749 bytes
+   across 90 tools (+7 tools since 2026-08-30, including keeper_lane_status
+   and keeper_task_cancel). What it bought: native lane lifecycle diagnosis
+   (keeper_lane_status) and typed task cancellation (keeper_task_cancel)
+   without requiring out-of-band operator scripts. Ceiling raised to 90,000
+   to leave 3,251 bytes of deliberate headroom (well inside the 30,000 slack
+   bound enforced by [test_the_ceiling_still_tracks_the_surface]).
+
    The figure is a reading, not a constant. What the ceiling holds is the
    slack, which [test_the_ceiling_still_tracks_the_surface] below bounds;
    the numbers here say where it came from. *)
-let ceiling_bytes = 75_000
+let ceiling_bytes = 90_000
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -105,6 +113,7 @@ let all_surface_golden_names =
   ; "keeper_code_query"
   ; "keeper_context_status"
   ; "keeper_ide_annotate"
+  ; "keeper_lane_status"
   ; "keeper_library_read"
   ; "keeper_library_search"
   ; "keeper_memory_search"
@@ -117,6 +126,7 @@ let all_surface_golden_names =
   ; "keeper_spawn_wait"
   ; "keeper_surface_post"
   ; "keeper_surface_read"
+  ; "keeper_task_cancel"
   ; "keeper_task_claim"
   ; "keeper_task_create"
   ; "keeper_task_done"

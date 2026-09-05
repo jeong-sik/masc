@@ -35,6 +35,19 @@ val config_publication_rollback_of_result :
 val config_reconciliation_required_of_result :
   Keeper_types_profile.tool_result -> Yojson.Safe.t option
 
+(** Swap a live keeper's lane under the owner-domain fence: stop the old
+    lane, persist the updated meta, and start the replacement. Runs on the
+    root-switch owner domain when called from a worker domain, so the new
+    lane's fibers fork from the owning switch. Exposed for the
+    cross-domain swap integration test. *)
+val swap_keepalive_lane_fenced :
+  'a Keeper_types_profile.context ->
+  Keeper_meta_contract.keeper_meta ->
+  ( Keeper_keepalive.joined_stop_result
+    * Keeper_keepalive.start_keepalive_outcome
+  , Keeper_types_profile.tool_result )
+  result
+
 module For_testing : sig
   val composite_reconciliation_required_data :
     Keeper_turn_up_config_persistence.composite_reconciliation ->

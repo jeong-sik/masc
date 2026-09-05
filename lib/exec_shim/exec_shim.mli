@@ -124,7 +124,7 @@ val host_signal_number : int -> int
     [host_signal_number Sys.sigterm = 15] on Linux and macOS. *)
 
 val trailer_of_status :
-  timed_out:bool -> Unix.process_status -> Exec_ssh_protocol.trailer
+  v:Exec_ssh_protocol.major -> timed_out:bool -> Unix.process_status -> Exec_ssh_protocol.trailer
 (** Maps a reaped child status to the result trailer: [WEXITED n] →
     [exit = Some n], [WSIGNALED n] → [signal = Some] of the {b host OS}
     signal number (via {!host_signal_number} — the wire must carry 9 or
@@ -194,10 +194,11 @@ type config =
   { remote_root : string
   ; env_allowlist : string list
   ; payload_path : string list  (** [path=] entries, or {!default_payload_path}. *)
-  ; scratch_root : string option
+  ; scratch_root : string
     (** [scratch_root=] (absolute): where a boxed run gets its one writable
         directory, which is also the payload's HOME and TMPDIR and is removed
-        after the run. Absent: a boxed payload may write nowhere (RFC-0422). *)
+        after the run. Absent means {!Exec_ssh_protocol.default_scratch_root},
+        where the microvm boot mounts the guest's in-memory filesystem. *)
   }
 
 val jail_for_request
@@ -221,12 +222,6 @@ val observe_supported : unit -> bool
 (** Whether this kernel lets the shim box a payload: Landlock ABI >= 1 and
     seccomp filtering, read through the syscalls themselves. Always [false]
     off Linux. *)
-
-val observe_unsupported_code : string
-(** ["observe_unsupported"]: the [shim_error] prefix when a request asks for
-    a box this host cannot build. The shim refuses; it never runs unboxed. *)
-
-val observe_scratch_code : string
 
 type execution_plan =
   | Run_effect  (** unrestricted, as before v3 *)

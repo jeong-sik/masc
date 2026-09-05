@@ -71,6 +71,152 @@ REDACT_JS = r"""
 """
 
 
+# Task rows carry operator-authored prose, which is the same reason the Board is
+# not captured at all -- an id is safe to publish and a sentence someone wrote is
+# not. The Overview embeds that prose in its Tasks pane, so the frame that leads
+# the docs site was shipping real issue numbers and real titles.
+#
+# A row is drawn as ~25 spans, one per colour run, so a regex over text nodes
+# cannot see a title that crosses them. This rebuilds the row's text as one
+# string and then hands it back to the same nodes in the same lengths: the
+# colours stay where they were, and the grid does not move.
+ROW_REDACT_JS = r"""
+() => {
+  const STATE = /\((?:todo|doing|done|blocked|review|verify|paused)[)~]/;
+  const HEAD = /^(\s*[\u25cb\u25cf\u25d0\u25cc]\s*\[task-\d+\]\s*)/;
+  const TITLES = [
+    'rewrite the loader so a missing lane fails at boot',
+    'the retry counter counted attempts, not failures',
+    'drop the second copy of the palette',
+    'a cancelled turn must not settle as done',
+    'name the four states the queue can be in',
+    'the parser accepted a trailing comma and should not',
+    'move the deadline out of the request path',
+    'one writer per file, decided at open',
+  ];
+
+  // A terminal is a grid of cells, not of characters: Hangul takes two cells
+  // and ASCII takes one. Matching character counts instead of cell counts is
+  // what spread "counted" into "c o u n t e d" -- the span kept its old width
+  // and the glyphs were laid out inside it.
+  const WIDE = /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE6F\uFF00-\uFF60\uFFE0-\uFFE6]/;
+  const cells = (s) => {
+    let n = 0;
+    for (const ch of s) n += WIDE.test(ch) ? 2 : 1;
+    return n;
+  };
+  // ASCII only, so one character is one cell and the width is the length.
+  const fit = (text, width) =>
+    width <= 0 ? '' : (text.length >= width ? text.slice(0, width) : text + ' '.repeat(width - text.length));
+  // The marker has to fit the hole it fills. `(redacted)` truncated into
+  // `(redacted` in a nine-cell gap, which reads as a typo rather than a
+  // redaction, so the widest marker that fits wins.
+  const mask = (width) => {
+    for (const word of ['(redacted)', 'redacted', 'note', '--']) {
+      if (word.length <= width) return fit(word, width);
+    }
+    return ' '.repeat(Math.max(width, 0));
+  };
+
+  // Take exactly [want] cells off [s] starting at [from]; never split a wide
+  // character across two spans.
+  const take = (s, from, want) => {
+    let i = from, got = 0;
+    while (i < s.length && got < want) {
+      const w = WIDE.test(s[i]) ? 2 : 1;
+      if (got + w > want) break;
+      got += w; i += 1;
+    }
+    return [s.slice(from, i), i];
+  };
+
+  let seen = 0;
+  document.querySelectorAll('.xterm-rows > div').forEach((row) => {
+    const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    if (!nodes.length) return;
+
+    const before = nodes.map((n) => n.nodeValue).join('');
+    let after = before;
+
+    // Cut by index rather than one regex: a lazy group with an optional tail
+    // matches the empty string and leaves the title untouched, which is how
+    // the first version of this silently redacted nothing.
+    const head = before.match(HEAD);
+    if (head) {
+      const rest = before.slice(head[1].length);
+      const state = rest.match(STATE);
+      // Up to the state marker, or to the end of the drawn text when the row
+      // was truncated before one was reached.
+      const cutAt = state ? state.index : rest.replace(/\s*~?\s*$/, '').length;
+      const middle = rest.slice(0, cutAt);
+      after = head[1] + fit(TITLES[seen++ % TITLES.length], cells(middle)) + rest.slice(cutAt);
+    }
+    // A goal slug names an internal goal wherever it appears, task row or not.
+    after = after.replace(/goal-[a-z0-9-]+/g, (m) => fit('goal-demo-lane', cells(m)));
+    // An issue number points at a real thread.
+    after = after.replace(/\[#\d+\]/g, (m) => fit('[#0000]', cells(m)));
+    // Last sweep, and the one that does not need to know a row's shape: every
+    // label this TUI draws is English, so any CJK left on screen came from a
+    // person -- a task title in the agenda strip, a wake reason, a note. The
+    // rows above are the common cases; this catches the rest without a rule
+    // per surface, and over-redacting is the safe direction.
+    after = after.replace(/[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFF00-\uFF60]+(?:[ \u00b7]+[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFF00-\uFF60]+)*/g,
+      (m) => mask(cells(m)));
+
+    if (after === before || cells(after) !== cells(before)) return;
+    let at = 0;
+    for (const node of nodes) {
+      const [slice, next] = take(after, at, cells(node.nodeValue));
+      node.nodeValue = slice;
+      at = next;
+      // xterm pads a wide-character span with `letter-spacing` so each glyph
+      // fills two cells. Leaving it on a span that now holds ASCII is what
+      // spread "counted" into "c o u n t e d"; the span is one cell per
+      // character again, so the padding has to come off with the text.
+      const host = node.parentElement;
+      if (host && host.style && host.style.letterSpacing && !WIDE.test(slice)) {
+        host.style.letterSpacing = '';
+      }
+    }
+  });
+};
+"""
+
+
+# Redaction edits the DOM, and the renderer owns the DOM: any frame the server
+# pushes after the edit redraws the row from the terminal buffer, where the real
+# text still lives. That race is why a Keepers frame -- whose rows tick every
+# second -- shipped real Keeper names while the quieter Overview did not.
+#
+# ttyd feeds the terminal by calling `term.write`. Stubbing it stops the buffer
+# from advancing, so the redacted DOM is the last thing drawn.
+FREEZE_JS = r"""
+() => {
+  if (!window.term) return false;
+  if (!window.__mascWrite) {
+    window.__mascWrite = window.term.write.bind(window.term);
+    window.__mascWriteln = window.term.writeln.bind(window.term);
+  }
+  window.term.write = () => {};
+  window.term.writeln = () => {};
+  return true;
+};
+"""
+
+# Freezing is per frame, not for the run: with `write` stubbed the terminal
+# never draws the next surface either, so the walk has to hand the stream back
+# before it navigates again.
+THAW_JS = r"""
+() => {
+  if (!window.term || !window.__mascWrite) return;
+  window.term.write = window.__mascWrite;
+  window.term.writeln = window.__mascWriteln;
+};
+"""
+
+
 def placeholder_for(name: str, index: int) -> str:
     """A distinct stand-in of exactly len(name) characters."""
     # `kpr-01` needs six cells. A shorter name gets the compact `k01` form so
@@ -218,10 +364,24 @@ def main() -> int:
                 if not landed:
                     print(f"skipped {stem}: never showed {expect!r}", file=sys.stderr)
                     continue
-                page.evaluate(REDACT_JS, pairs)
+                if not page.evaluate(FREEZE_JS):
+                    print(f"skipped {stem}: terminal not reachable to freeze", file=sys.stderr)
+                    continue
                 page.wait_for_timeout(200)
+                page.evaluate(REDACT_JS, pairs)
+                page.evaluate(ROW_REDACT_JS)
+                # The frame is only publishable if nothing it was meant to hide
+                # survived. Checked rather than assumed, because the failure is
+                # silent: a leaked name looks exactly like a real screenshot.
+                leaked = [n for n in names if n in screen_text(page)]
+                if leaked:
+                    page.evaluate(THAW_JS)
+                    print(f"REFUSED {stem}: {len(leaked)} name(s) still on screen: "
+                          f"{', '.join(sorted(leaked)[:5])}", file=sys.stderr)
+                    return 2
                 target = args.out / f"{stem}.png"
                 page.locator(".xterm-screen").screenshot(path=str(target))
+                page.evaluate(THAW_JS)
                 saved.append({"file": target.name, "surface": expect, "query": query})
                 print(f"captured {target}")
         browser.close()
@@ -234,6 +394,7 @@ def main() -> int:
         "terminal": dims,
         "api_port": args.api_port,
         "keeper_names_redacted": len(names),
+        "task_titles_redacted": True,
         "frames": saved,
     }
     (args.out / "evidence.json").write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")

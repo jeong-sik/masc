@@ -409,35 +409,47 @@ let existing_operation_intent ~request (operation : Keeper_shutdown_types.t) =
   else Error (Existing_operation_intent_mismatch operation)
 ;;
 
-let submit ~config ~entry ~request =
-  match Keeper_shutdown_prepare_join.prepare ~config ~entry ~request with
-  | Ok operation ->
-    start_or_error ~config ~entry:(Some entry) operation
-  | Error (Keeper_shutdown_prepare_join.Existing_operation operation_id) ->
-    (match Keeper_shutdown_store.load ~config ~keeper_name:entry.name operation_id with
-     | Error error -> Error (Existing_operation_load_error error)
-     | Ok operation ->
-       (match existing_operation_intent ~request operation with
-        | Error _ as error -> error
-        | Ok ({ lane_ownership = Registered_lane lane_id; _ } as operation)
-          when Keeper_lane.Id.equal lane_id (Keeper_lane.id entry.lane) ->
-          start_or_error ~config ~entry:(Some entry) operation
-        | Ok operation -> Error (Existing_operation_lane_mismatch operation)))
-  | Error error -> Error (Prepare_error error)
+let rec submit ~config ~entry ~request =
+  if not (Eio_context.root_switch_on_current_domain ())
+     && Option.is_some (Eio_context.get_root_switch_opt ())
+  then
+    Eio_context.run_on_owner_domain (fun () ->
+      submit ~config ~entry ~request)
+  else
+    match Keeper_shutdown_prepare_join.prepare ~config ~entry ~request with
+    | Ok operation ->
+      start_or_error ~config ~entry:(Some entry) operation
+    | Error (Keeper_shutdown_prepare_join.Existing_operation operation_id) ->
+      (match Keeper_shutdown_store.load ~config ~keeper_name:entry.name operation_id with
+       | Error error -> Error (Existing_operation_load_error error)
+       | Ok operation ->
+         (match existing_operation_intent ~request operation with
+          | Error _ as error -> error
+          | Ok ({ lane_ownership = Registered_lane lane_id; _ } as operation)
+            when Keeper_lane.Id.equal lane_id (Keeper_lane.id entry.lane) ->
+            start_or_error ~config ~entry:(Some entry) operation
+          | Ok operation -> Error (Existing_operation_lane_mismatch operation)))
+    | Error error -> Error (Prepare_error error)
 ;;
 
-let submit_dormant ~config ~meta ~request =
-  match Keeper_shutdown_prepare_join.prepare_dormant ~config ~meta ~request with
-  | Ok operation -> start_or_error ~config ~entry:None operation
-  | Error (Keeper_shutdown_prepare_join.Existing_operation operation_id) ->
-    (match Keeper_shutdown_store.load ~config ~keeper_name:meta.name operation_id with
-     | Error error -> Error (Existing_operation_load_error error)
-     | Ok ({ lane_ownership = Dormant_meta; _ } as operation) ->
-       (match existing_operation_intent ~request operation with
-        | Error _ as error -> error
-        | Ok operation -> start_or_error ~config ~entry:None operation)
-     | Ok operation -> Error (Existing_operation_lane_mismatch operation))
-  | Error error -> Error (Prepare_error error)
+let rec submit_dormant ~config ~meta ~request =
+  if not (Eio_context.root_switch_on_current_domain ())
+     && Option.is_some (Eio_context.get_root_switch_opt ())
+  then
+    Eio_context.run_on_owner_domain (fun () ->
+      submit_dormant ~config ~meta ~request)
+  else
+    match Keeper_shutdown_prepare_join.prepare_dormant ~config ~meta ~request with
+    | Ok operation -> start_or_error ~config ~entry:None operation
+    | Error (Keeper_shutdown_prepare_join.Existing_operation operation_id) ->
+      (match Keeper_shutdown_store.load ~config ~keeper_name:meta.name operation_id with
+       | Error error -> Error (Existing_operation_load_error error)
+       | Ok ({ lane_ownership = Dormant_meta; _ } as operation) ->
+         (match existing_operation_intent ~request operation with
+          | Error _ as error -> error
+          | Ok operation -> start_or_error ~config ~entry:None operation)
+       | Ok operation -> Error (Existing_operation_lane_mismatch operation))
+    | Error error -> Error (Prepare_error error)
 ;;
 
 (* Boot recovery is the reconciliation procedure for an admission-time

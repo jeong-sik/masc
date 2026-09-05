@@ -741,14 +741,29 @@ type repository_change_snapshot = {
   rcs_total : int;
 }
 
+(** One of the six conditions the memory keeper reports. The server derives the
+    wire's [severity] and [target] from this code, and the decoder rejects a
+    payload where they disagree, so the code alone identifies the alert. *)
+type memory_alert_code =
+  | Snapshot_read_error
+  | Source_snapshot_read_error
+  | Librarian_lane_busy
+  | Librarian_failures
+  | Librarian_starvation
+  | Vision_ingest_errors
+
+(** The severity the server is contractually required to send for a code. *)
+val memory_alert_severity : memory_alert_code -> [ `Warn | `Error ]
+
+(** The wire also carries [value] and [threshold]; neither is kept. Every count
+    a [value] would report is already drawn from {!memory_keeper_health} two
+    lines above the alert, and the server pins [threshold] to [0.0] for all six
+    codes. The decoder still requires and range-checks both, so a payload that
+    starts meaning something by them fails loudly instead of passing unread. *)
 type memory_alert = {
-  ma_code : string;
-  ma_severity : string;
-  ma_target : string;
+  ma_code : memory_alert_code;
   ma_label : string;
   ma_message : string;
-  ma_value : float;
-  ma_threshold : float;
 }
 
 type memory_keeper_health = {
@@ -1078,6 +1093,18 @@ type standalone_lane_status =
   | Standalone_no_retained_observation
   | Standalone_unavailable
 
+(** Why a lane can or cannot run, as the server derived it from the registry.
+    [sl_status] collapses the last two into one word ("unavailable"); this
+    keeps them apart, because a lane nobody configured and a lane whose
+    registry could not be read are different problems with different fixes.
+    [Lane_slotless] is the server's "degraded": configured, but with no
+    catalog slot and no CLI slot admitted. *)
+type standalone_lane_configuration =
+  | Lane_ready
+  | Lane_slotless
+  | Lane_unconfigured
+  | Lane_registry_unavailable
+
 type standalone_lane_slot_count = {
   slsc_slot_id : string;
   slsc_count : int;
@@ -1091,7 +1118,7 @@ type standalone_lane = {
           read a retained v1 snapshot written before the field was added. *)
   sl_required : bool;
   sl_status : standalone_lane_status;
-  sl_configuration_state : string;
+  sl_configuration_state : standalone_lane_configuration;
   sl_admitted_slots : string list;
   sl_cli_slots : string list;
   sl_dropped_slots : string list;
@@ -1120,6 +1147,9 @@ type standalone_lanes_snapshot = {
 }
 
 val standalone_lane_status_to_string : standalone_lane_status -> string
+
+val standalone_lane_configuration_to_string :
+  standalone_lane_configuration -> string
 val decode_standalone_lanes_snapshot :
   Yojson.Safe.t -> (standalone_lanes_snapshot, string) result
 
@@ -2172,11 +2202,22 @@ val tool_envelope_outcome : Yojson.Safe.t -> (string, string) result
 val verification_verdict_outcome :
   Yojson.Safe.t -> (string * bool, string) result
 
-(** Decode one SGR mouse report into the [up]/[down] key a wheel turns
-    into, or [None] for reports nothing consumes (clicks, releases,
-    horizontal wheel). [parameters] is the raw CSI parameter span
-    (["<64;10;5"]), [final] the CSI final byte. *)
-val sgr_wheel_key : string -> char -> string option
+(** Which way a wheel notch turned. *)
+type wheel_direction =
+  | Wheel_up
+  | Wheel_down
+
+(** The key a notch becomes for a surface's scroll binding: [wheel-up] /
+    [wheel-down], its own rather than the arrow's. *)
+val wheel_key : wheel_direction -> string
+
+(** Decode one SGR mouse report into a wheel notch and its [(row, column)],
+    1-based as the terminal reports it, or [None] for reports nothing consumes
+    (clicks, releases, horizontal wheel). The position is what lets the loop
+    give the notch to the Activity pane under it and every other notch to the
+    surface. [parameters] is the raw CSI parameter span (["<64;10;5"]),
+    [final] the CSI final byte. *)
+val sgr_wheel_report : string -> char -> (wheel_direction * int * int) option
 
 (** Decode one SGR mouse report into the [(row, column)] of an unmodified
     left-button press (button [0], final [M]), 1-based as the terminal

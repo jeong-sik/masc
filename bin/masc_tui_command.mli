@@ -27,11 +27,27 @@ type t =
       (** [/settings] — open the type-aware Runtime parameters pane. *)
   | Open_diff
       (** [/diff] — open Git working-tree changes and diff for the workspace. *)
+  | Open_patch_modal
+      (** [/patch] or [/review] — open interactive 3D drop-shadow patch review modal. *)
+  | Toggle_burn_hud
+      (** [/burn] or [/cost] — toggle token burn velocity and financial telemetry HUD. *)
+  | Open_link_preview of string option
+      (** [/preview [url]] — open 3D drop-shadow OpenGraph preview and rich embed modal for a web link. *)
+  | Open_links_list
+      (** [/links] — browse and inspect all web links mentioned in the conversation. *)
+  | Set_embeds of [ `On | `Compact | `Off ]
+      (** [/embeds [on|compact|off]] — configure inline chat rich embed cards. *)
   | Open_changes
       (** [/changes] — open recorded file changes for this keeper. *)
   | Toggle_acting_pane
       (** [/activity] — show or hide the Activity pane beside this surface,
           the same toggle as Ctrl-L. *)
+  | Show_acting_pane_tab of [ `Fleet | `Changes ]
+      (** [/activity fleet], [/activity changes] — show the pane on that
+          tab: the fleet's feed, or the selected keeper's file changes. *)
+  | Acting_pane_tab_unknown of string
+      (** [/activity <word>] with a word that names no tab; reported, not
+          guessed. *)
   | Switch_keeper of string
       (** [/keeper <name>] — point this pane at another keeper. *)
   | Switch_keeper_missing_name  (** [/keeper] with no name on the line. *)

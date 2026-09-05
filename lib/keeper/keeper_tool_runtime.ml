@@ -70,6 +70,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_execute
   | Tool_search_files
   | Tool_time_now
+  | Tool_lane_status
   | Tool_tools_list
   | Tool_capability_search
   | Tool_context_status
@@ -139,6 +140,7 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_edit_file
   | Tool_write_file
   | Tool_time_now
+  | Tool_lane_status
   | Tool_tools_list
   | Tool_capability_search
   | Tool_context_status
@@ -184,6 +186,10 @@ let handle_in_process ctx descriptor args =
     Some
       (Keeper_tool_execution.success_data
          (Keeper_tool_in_process_runtime.handle_time_now ~args))
+  | Tool_lane_status ->
+    Some
+      (Keeper_tool_execution.success_data
+         (Keeper_tool_lane_status.handle ~config:ctx.config ~meta:ctx.meta ~args))
   | Tool_tools_list ->
     Some
       (match ctx.capability_authority with

@@ -225,7 +225,6 @@ module For_testing : sig
     Agent_core.Checkpoint.t -> Agent_core.Checkpoint.t option
 
   val max_tokens_truncation_error : Agent_core.Error.t -> bool
-  val thinking_was_enabled : bool option -> bool
 
   (** What a max-tokens rejection owes the checkpoint. Retrying without
       thinking is a remedy for a budget spent thinking and applies only when
@@ -269,6 +268,10 @@ module For_testing : sig
         option ->
     Agent_core.Error.t ->
     unit
+
+  val message_measurer : unit -> Agent_core.Types.message -> int
+  (** Counts the bytes [Yojson.Safe.to_string] would produce, without building
+      the string. Each call returns a measurer with its own buffer. *)
 
   val memoize_message_measurement :
     (Agent_core.Types.message -> int) -> Agent_core.Types.message -> int

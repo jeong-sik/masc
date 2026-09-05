@@ -23,6 +23,17 @@ Without a server, the keeper roster and the task backlog still render, read from
 
 ---
 
+## What it looks like
+
+Three of the surfaces, captured from a live runtime. Keeper names, task titles
+and paths are stand-ins of the same width.
+
+![Overview — one fleet status line, the Keepers needing attention, and the task list](/01-overview.png)
+
+![Keepers — one row per Keeper with health, autoboot, sandbox, runtime and current task](/02-keepers.png)
+
+![Activity — the newest-first feed of every Keeper's tool calls and turn boundaries](/06-activity.png)
+
 ## The surface ring
 
 `Tab` and `Shift+Tab` rotate in this order, and the strip along the top row shows the same order.

@@ -20,10 +20,14 @@ let published =
   , "List shared planning goals, optionally filtered by explicit lifecycle phase."
   , "{\"type\":\"object\",\"properties\":{\"phase\":{\"type\":\"string\",\"enum\":[\"executing\",\"verifying\",\"completed\",\"dropped\"],\"description\":\"Optional explicit Goal lifecycle phase filter\"}},\"additionalProperties\":false}" )
   ; ( "masc_goal_upsert"
-  , "Create or update flat Goal metadata. Creation requires a measurable success condition: metric and target_value (RFC-0387 B1). Use masc_goal_transition for lifecycle changes."
+  , "Create or update flat Goal metadata.
+
+Creation requires a measurable success condition: metric and target_value (RFC-0387 B1). Use masc_goal_transition for lifecycle changes."
   , "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},\"title\":{\"type\":\"string\"},\"metric\":{\"type\":\"string\",\"description\":\"What measures this goal, and where that measurement can be read: a file path, a recorded command output, or a URL. The completion judge opens exactly what this names — it cannot list directories or search, so a metric that names no observable is refused as unmeasurable rather than hunted for. Required (non-blank) when the upsert creates a new goal (RFC-0387 B1); optional on update.\"},\"target_value\":{\"type\":\"string\",\"description\":\"The value the metric has to reach, comparable against what the metric's source actually reads: a number, a count, a threshold. The judge approves only when it read the measurement and it reaches this. Required (non-blank) when the upsert creates a new goal (RFC-0387 B1); optional on update.\"},\"due_date\":{\"type\":\"string\"},\"priority\":{\"type\":\"integer\"}},\"additionalProperties\":false}" )
   ; ( "masc_goal_transition"
-  , "Apply an explicit Goal lifecycle transition (RFC-0387 stage 2 gate). request_complete no longer completes the Goal directly: it moves executing -> verifying and persists a durable proof request. Verifier verdicts are application-owned typed commits and are deliberately not accepted by this MCP tool. A Goal whose criterion was judged unreachable is refused on request_complete."
+  , "Apply an explicit Goal lifecycle transition (RFC-0387 stage 2 gate).
+
+request_complete no longer completes the Goal directly: it moves executing -> verifying and persists a durable proof request. Verifier verdicts are application-owned typed commits and are deliberately not accepted by this MCP tool. A Goal whose criterion was judged unreachable is refused on request_complete."
   , "{\"type\":\"object\",\"properties\":{\"goal_id\":{\"type\":\"string\"},\"action\":{\"type\":\"string\",\"enum\":[\"request_complete\",\"drop\",\"reopen\"]},\"note\":{\"type\":\"string\"}},\"required\":[\"goal_id\",\"action\"],\"additionalProperties\":false}" )
   ]
 ;;

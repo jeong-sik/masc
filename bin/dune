@@ -928,6 +928,7 @@
  (modules masc_tui_types)
  (libraries
   masc
+  masc_tui_acting_pane
   masc_tui_gate_text
   masc_tui_model_runtime_table
   masc_tui_mcp
@@ -1168,6 +1169,7 @@
   masc_tui_image_preview
   masc_tui_link
   masc_tui_link_label
+  masc_tui_link_preview
   masc_tui_markdown_render_cache
   masc_tui_message_layout
   masc_tui_paste
@@ -1302,3 +1304,9 @@
  (wrapped false)
  (modules masc_tui_link_label)
  (libraries uri))
+
+(library
+ (name masc_tui_link_preview)
+ (wrapped false)
+ (modules masc_tui_link_preview)
+ (libraries masc_tui_link_label masc_tui_lru masc_tui_message_layout uri))

@@ -576,6 +576,11 @@ type input_event =
           terminal reported it. Only surfaces that map frame rows to their own
           rows consume one; everywhere else it is inert, like a wheel notch on
           a surface with nothing to scroll. *)
+  | Mouse_wheel of Masc.Tui_decode.wheel_direction * int * int
+      (** A wheel notch and the [(row, column)] it happened at. The loop
+          gives a notch over the Activity pane to the pane and turns every
+          other one into the [wheel-up] / [wheel-down] key the surfaces bind,
+          so no surface learned a new key when the pane appeared. *)
 
 (* How long to wait for the next byte of a paste already in progress. The
    terminal writes the payload in one go behind the start marker, so this is a
@@ -663,15 +668,17 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
                              take_input_byte reader
                                ~timeout:paste_byte_timeout_seconds)))
                (* A parameter span starting with [<] is an SGR mouse report.
-                  Wheel reports become the same keys the arrows make, so every
-                  surface's scroll binding answers the wheel; an unmodified
+                  A wheel notch travels with its position, so the loop can
+                  give it to the pane under the pointer and turn the rest into
+                  the key every surface's scroll binding answers; an unmodified
                   left press travels as its own event so a surface can map the
                   row to its cursor; a report nothing consumes stays unclaimed
                   rather than leaking into a key. *)
                | Some (params, final)
                  when String.length params > 0 && params.[0] = '<' -> (
-                   match Masc.Tui_decode.sgr_wheel_key params final with
-                   | Some wheel_key -> key wheel_key
+                   match Masc.Tui_decode.sgr_wheel_report params final with
+                   | Some (direction, row, column) ->
+                       Some (Mouse_wheel (direction, row, column))
                    | None -> (
                        match Masc.Tui_decode.sgr_left_press params final with
                        | Some (row, column) ->
@@ -1889,6 +1896,12 @@ type async_msg =
   | Code_notes_loaded of
       string Masc_tui_fetched.request
       * (Masc.Tui_decode.ide_annotation list, string) result
+  (* The Activity pane's Changes tab: the selected keeper's recorded file
+     changes, stamped with the request so an answer for a keeper the
+     cursor has left is dropped. *)
+  | Acting_pane_changes_loaded of
+      string Masc_tui_fetched.request
+      * (Masc.Tui_decode.file_change_snapshot, string) result
   (* The path the margin describes; stamped so a late answer cannot caption
      another file. *)
   | Code_blame_loaded of
@@ -4379,6 +4392,71 @@ let launch_file_changes_load state ~mailbox ~keeper_name =
       enqueue_async mailbox
         (File_changes_loaded (keeper_name, Error "Eio switch is unavailable"))
 
+(* The pane's Changes tab asks for the selected keeper's changes through
+   the fetch helper, so a request already in flight is not repeated and an
+   answer for another keeper is dropped on arrival. *)
+let launch_acting_pane_changes_load state ~mailbox ~keeper_name =
+  match
+    Masc_tui_fetched.start ~equal:String.equal state.acting_pane_changes
+      ~key:keeper_name
+  with
+  | Masc_tui_fetched.Already_loading -> ()
+  | Masc_tui_fetched.Started (next, request) -> (
+      state.acting_pane_changes <- next;
+      let host = server_peer_host in
+      let port = state.port in
+      let run () =
+        let result =
+          try
+            Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
+              ~window_hours:changes_window_hours
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox (Acting_pane_changes_loaded (request, result))
+      in
+      match Eio_context.get_switch_opt () with
+      | Some sw ->
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+              run ();
+              `Stop_daemon)
+      | None ->
+          enqueue_async mailbox
+            (Acting_pane_changes_loaded
+               (request, Error "Eio switch is unavailable")))
+
+(* The Changes tab is live only while it is on screen: the pane drawn, the
+   tab up, a keeper under the cursor. [refresh] asks again whatever is
+   known; [ensure] asks only for a keeper never asked about, so the loop
+   can call it after every input without repeating a settled fetch. *)
+let acting_pane_changes_keeper (state : state) =
+  if Masc_tui_render.acting_pane_drawn_cols () <= 0 then None
+  else
+    match state.acting_pane_tab with
+    | Masc_tui_acting_pane.Tab_fleet -> None
+    | Masc_tui_acting_pane.Tab_changes ->
+        Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
+
+let refresh_acting_pane_changes state ~mailbox =
+  match acting_pane_changes_keeper state with
+  | None -> ()
+  | Some keeper_name -> launch_acting_pane_changes_load state ~mailbox ~keeper_name
+
+let ensure_acting_pane_changes state ~mailbox =
+  match acting_pane_changes_keeper state with
+  | None -> ()
+  | Some keeper_name -> (
+      match
+        Masc_tui_fetched.view_for ~equal:String.equal state.acting_pane_changes
+          ~key:keeper_name
+      with
+      | Masc_tui_fetched.Absent ->
+          launch_acting_pane_changes_load state ~mailbox ~keeper_name
+      | Masc_tui_fetched.Loading | Masc_tui_fetched.Ready _
+      | Masc_tui_fetched.Failed _ ->
+          ())
+
 let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
     ~keeper_name =
   if state.msg_tool_visibility <> Tools_full then ()
@@ -4985,13 +5063,15 @@ let goto_surface state ~mailbox (destination : surface) =
    call this; so does board compose when its handler declines the key, so
    "Tab falls through" stays true while composing. *)
 let cycle_surface state ~mailbox ~backwards =
-  let ring = Masc_tui_types.surface_ring in
+  let ring = Masc_tui_types.visible_surface_ring state in
   let count = List.length ring in
-  let step = if backwards then count - 1 else 1 in
-  let index =
-    (Masc_tui_types.surface_ring_index state.view + step) mod count
-  in
-  goto_surface state ~mailbox (fst (List.nth ring index))
+  if count > 0 then begin
+    let step = if backwards then count - 1 else 1 in
+    let index =
+      (Masc_tui_types.visible_surface_ring_index state state.view + step) mod count
+    in
+    goto_surface state ~mailbox (fst (List.nth ring index))
+  end
 
 let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
   let host = server_peer_host in
@@ -6584,7 +6664,108 @@ let toggle_acting_pane (state : state) =
            Masc_tui_acting_pane.threshold_cols)
   | Some hidden ->
       state.acting_pane_hidden <- hidden;
+      state.acting_pane_scroll <- 0;
       Ok hidden
+
+(* Show one of the pane's tabs. Where the pane cannot show, the tab is not
+   set either: a preference with no visible effect would surprise the
+   reader after a later resize, the same rule the toggle follows. *)
+let show_acting_pane_tab (state : state) tab =
+  let _rows, cols = Masc_tui_ansi.get_terminal_size () in
+  if not (Masc_tui_acting_pane.shown ~hidden:false ~cols) then
+    Error
+      (Printf.sprintf "Activity pane needs %d columns; preference unchanged"
+         Masc_tui_acting_pane.threshold_cols)
+  else begin
+    state.acting_pane_hidden <- false;
+    state.acting_pane_tab <- tab;
+    state.acting_pane_scroll <- 0;
+    Ok ()
+  end
+
+(* Where a mouse report landed, relative to the Activity pane the last frame
+   drew. The pane's columns are the render's own answer for that frame
+   ([acting_pane_reserved_cols], zero when it drew none); its rows are the
+   body rows under the surface strip. Everything else belongs to the surface,
+   as it did before the pane existed. *)
+type acting_pane_hit =
+  | Pane_miss
+  | Pane_row of int  (** 0-based line within the pane *)
+
+let acting_pane_hit (state : state) ~row ~column =
+  let pane_cols = Masc_tui_render.acting_pane_drawn_cols () in
+  if pane_cols <= 0 then Pane_miss
+  else
+    let _terminal_rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in
+    let body_rows = surface_rows state in
+    let first_col = terminal_cols - pane_cols + 1 in
+    (* Row 1 is the surface strip; the body starts on row 2. *)
+    let first_row = 2 in
+    if column >= first_col && column <= terminal_cols
+       && row >= first_row && row < first_row + body_rows
+    then Pane_row (row - first_row)
+    else Pane_miss
+
+let scroll_acting_pane (state : state) ~delta =
+  state.acting_pane_scroll
+  <- max 0
+       (min
+          (Masc_tui_render.acting_pane_scroll_limit ())
+          (state.acting_pane_scroll + delta))
+
+(* A press on the pane is the roster's cursor by another hand: a fleet row
+   lands the selection on that keeper, and a press on the keeper already
+   selected opens its chat, the way [/keeper <name>] does. The fold line
+   scrolls into the full list. Everything else on the pane is read, not
+   pressed. *)
+let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
+  match Masc_tui_render.acting_pane_target_at ~line with
+  | Masc_tui_acting_pane.Target_none -> ()
+  | Masc_tui_acting_pane.Target_next_tab ->
+      state.acting_pane_tab <- Masc_tui_acting_pane.next_tab state.acting_pane_tab;
+      state.acting_pane_scroll <- 0
+  | Masc_tui_acting_pane.Target_more -> scroll_acting_pane state ~delta:1
+  | Masc_tui_acting_pane.Target_file index -> (
+      (* The row indexes the snapshot the pane drew. The Changes surface
+         opens on that same snapshot with the row's diff up, then asks for
+         a fresh one the way [/changes] does; the loaded handler keeps the
+         open row when the fresh answer holds the same change there. *)
+      match selected_keeper state with
+      | None -> ()
+      | Some (keeper : keeper) -> (
+          match
+            Masc_tui_fetched.view_for ~equal:String.equal
+              state.acting_pane_changes ~key:keeper.k_name
+          with
+          | Masc_tui_fetched.Ready snapshot
+            when index >= 0
+                 && index < List.length snapshot.Masc.Tui_decode.fcs_changes ->
+              goto_surface state ~mailbox Changes;
+              state.changes <- Some snapshot;
+              state.changes_error <- None;
+              state.changes_cursor <- index;
+              state.changes_scroll <- 0;
+              state.changes_diff_row <- Some index;
+              state.changes_diff_scroll <- 0;
+              state.changes_tree_diff <- None;
+              state.changes_tree_diff_error <- None;
+              state.changes_tree_diff_path <- None
+          | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent
+          | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ ->
+              ()))
+  | Masc_tui_acting_pane.Target_keeper keeper_name -> (
+      match
+        List.find_index
+          (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+          state.keepers
+      with
+      | None -> ()
+      | Some index when state.keeper_cursor = index ->
+          open_message_for_keeper ~return_to:state.msg_return state keeper_name
+            ~drain_queue:(fun () -> drain_queued_message state ~base_path ~mailbox);
+          launch_keeper_history_load state ~mailbox ~keeper_name;
+          state.view <- Keepers Keeper_message
+      | Some index -> state.keeper_cursor <- index)
 
 let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   let target =
@@ -6650,6 +6831,76 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       state.repository_changes_return_chat <- true;
       open_repository_changes state ~mailbox
         ~scope:Tui_decode.Repository_change_project
+  | Masc_tui_command.Open_patch_modal ->
+      Buffer.clear state.msg_input;
+      state.patch_modal_open <- true;
+      state.patch_modal_scroll <- 0;
+      let target_path =
+        match state.repository_changes_diff_path with
+        | Some p -> p
+        | None -> "."
+      in
+      state.patch_modal_path <- Some target_path;
+      launch_repository_changes_diff_load state ~mailbox
+        ~scope:Tui_decode.Repository_change_project ~path:target_path
+  | Masc_tui_command.Toggle_burn_hud ->
+      Buffer.clear state.msg_input;
+      state.burn_hud_visible <- not state.burn_hud_visible;
+      let status_str = if state.burn_hud_visible then "enabled" else "hidden" in
+      let cost = Masc_tui_types.fleet_total_cost_usd state in
+      notice ~role:Message_local
+        (Printf.sprintf "Token burn velocity HUD %s (fleet total: $%.4f)" status_str cost)
+  | Masc_tui_command.Open_link_preview url_opt ->
+      Buffer.clear state.msg_input;
+      let all_urls = Masc_tui_types.conversation_urls state in
+      state.link_modal_links <- all_urls;
+      let target_url =
+        match url_opt with
+        | Some u -> Some u
+        | None ->
+            (match all_urls with
+             | first :: _ -> Some first
+             | [] -> None)
+      in
+      (match target_url with
+       | Some u ->
+           state.link_modal_open <- true;
+           state.link_modal_url <- Some u;
+           state.link_modal_scroll <- 0;
+           let rec find_idx i = function
+             | [] -> 0
+             | x :: _ when String.equal x u -> i
+             | _ :: xs -> find_idx (i + 1) xs
+           in
+           state.link_modal_cursor <- find_idx 0 all_urls
+       | None ->
+           notice ~role:Message_local
+             "No web links found in this conversation to preview. Use /preview <url> to preview any link.")
+  | Masc_tui_command.Open_links_list ->
+      Buffer.clear state.msg_input;
+      let all_urls = Masc_tui_types.conversation_urls state in
+      state.link_modal_links <- all_urls;
+      (match all_urls with
+       | first :: _ ->
+           state.link_modal_open <- true;
+           state.link_modal_url <- Some first;
+           state.link_modal_scroll <- 0;
+           state.link_modal_cursor <- 0
+       | [] ->
+           notice ~role:Message_local "No web links found in this conversation.")
+  | Masc_tui_command.Set_embeds mode ->
+      Buffer.clear state.msg_input;
+      state.link_previews_mode <-
+        (match mode with
+         | `On -> `Rich
+         | `Compact -> `Compact
+         | `Off -> `Off);
+      notice ~role:Message_local
+        (Printf.sprintf "Inline link embed cards: %s"
+           (match state.link_previews_mode with
+            | `Rich -> "Rich (Full Cards)"
+            | `Compact -> "Compact (One Line)"
+            | `Off -> "Off"))
   | Masc_tui_command.Open_changes ->
       Buffer.clear state.msg_input;
       state.changes_return <- Changes_return_chat;
@@ -6661,6 +6912,23 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            notice ~role:Message_local
              (if hidden then "Activity pane hidden" else "Activity pane shown")
        | Error reason -> notice ~role:Message_error reason)
+  | Masc_tui_command.Show_acting_pane_tab tab ->
+      Buffer.clear state.msg_input;
+      let tab =
+        match tab with
+        | `Fleet -> Masc_tui_acting_pane.Tab_fleet
+        | `Changes -> Masc_tui_acting_pane.Tab_changes
+      in
+      (match show_acting_pane_tab state tab with
+       | Ok () ->
+           ensure_acting_pane_changes state ~mailbox;
+           notice ~role:Message_local
+             ("Activity pane on " ^ Masc_tui_acting_pane.tab_label tab)
+       | Error reason -> notice ~role:Message_error reason)
+  | Masc_tui_command.Acting_pane_tab_unknown word ->
+      Buffer.clear state.msg_input;
+      notice ~role:Message_error
+        (Printf.sprintf "/activity takes fleet or changes, not %s" word)
   | Masc_tui_command.Open_metrics ->
       Buffer.clear state.msg_input;
       goto_surface state ~mailbox Metrics
@@ -9154,10 +9422,16 @@ let handle_composer_key state ~base_path ~mailbox key =
            state.view <- Keepers Keeper_message
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
-        | Masc_tui_command.Open_diff | Masc_tui_command.Open_changes
+        | Masc_tui_command.Open_diff | Masc_tui_command.Open_patch_modal
+        | Masc_tui_command.Toggle_burn_hud | Masc_tui_command.Open_changes
         | Masc_tui_command.Toggle_acting_pane
-        | Masc_tui_command.Open_settings | Masc_tui_command.Open_metrics
-       | Masc_tui_command.Interrupt_turn | Masc_tui_command.Steer_turn _
+         | Masc_tui_command.Show_acting_pane_tab _
+         | Masc_tui_command.Acting_pane_tab_unknown _
+         | Masc_tui_command.Open_settings | Masc_tui_command.Open_metrics
+         | Masc_tui_command.Open_link_preview _
+         | Masc_tui_command.Open_links_list
+         | Masc_tui_command.Set_embeds _
+        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Steer_turn _
        | Masc_tui_command.Steer_missing_message
        | Masc_tui_command.Set_thinking _
        | Masc_tui_command.Set_tools _ | Masc_tui_command.Cycle_memory
@@ -9415,6 +9689,23 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          rides along so an open detail only refetches when it is the run
          that moved. *)
       let fusion_status_seen = ref None in
+      (* Same shape again for the pane's Changes tab: a tool call the
+         selected keeper completed may have written a file, so the tab
+         asks once per batch. Agent-core events name their lane; the
+         roster's trace ids resolve it. *)
+      let pane_changes_keeper = acting_pane_changes_keeper state in
+      let pane_keeper_acted = ref false in
+      let traces =
+        List.map
+          (fun (keeper : keeper) -> (keeper.k_name, keeper.k_trace_id))
+          state.keepers
+      in
+      let acted_by_pane_keeper event =
+        match pane_changes_keeper with
+        | None -> false
+        | Some name ->
+            String.equal name (Masc_tui_acting.keeper_of_event ~traces event)
+      in
       List.iter
         (fun item ->
           match item with
@@ -9433,6 +9724,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               (match event with
                | Masc_tui_observer.Fusion_run_status { run_id; _ } ->
                    fusion_status_seen := Some run_id
+               | Masc_tui_observer.Keeper_tool_call _
+               | Masc_tui_observer.Agent_core { kind = Masc_tui_observer.Tool_completed; _ }
+                 when acted_by_pane_keeper event ->
+                   pane_keeper_acted := true
                | Masc_tui_observer.Agent_core _
                | Masc_tui_observer.Keeper_heartbeat _
                | Masc_tui_observer.Keeper_tool_call _
@@ -9472,6 +9767,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         state.acting <- kept;
         state.acting_dropped <- state.acting_dropped + dropped
       end;
+      if !pane_keeper_acted then refresh_acting_pane_changes state ~mailbox;
       (* The pane otherwise reloads only on open, on its own sends and on
          the operator cadence — a turn appended from anywhere else (API
          chat, another operator, a connector) stayed invisible until the
@@ -11108,7 +11404,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          | Ok diff ->
              state.repository_changes_diff <- Some (path, diff);
              state.repository_changes_diff_error <- None
-         | Error detail -> state.repository_changes_diff_error <- Some detail)
+         | Error detail -> state.repository_changes_diff_error <- Some detail);
+      if
+        state.patch_modal_open
+        && Option.equal String.equal state.patch_modal_path (Some path)
+      then
+        (match result with
+         | Ok diff ->
+             state.patch_modal_diff <- Some (path, diff);
+             state.patch_modal_error <- None
+         | Error detail -> state.patch_modal_error <- Some detail)
   | Keeper_chat_file_changes_loaded (generation, keeper_name, result) ->
       let still_current =
         generation = state.msg_file_changes_generation
@@ -11143,6 +11448,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           launch_keeper_chat_file_changes_load ~force:true state ~mailbox
             ~keeper_name
       end
+  | Acting_pane_changes_loaded (request, result) ->
+      (* An answer for a keeper the cursor has left is not this tab's
+         answer and [complete] drops it. The stamp belongs to an answer
+         that landed. *)
+      let landed =
+        Masc_tui_fetched.is_current ~equal:String.equal state.acting_pane_changes
+          request
+        && Result.is_ok result
+      in
+      state.acting_pane_changes <-
+        Masc_tui_fetched.complete ~equal:String.equal state.acting_pane_changes
+          request result;
+      if landed then state.acting_pane_changes_at <- Some (Unix.gettimeofday ())
   | File_changes_loaded (keeper_name, result) ->
       (* An answer for a keeper the surface has since left is not this
          surface's answer. Dropping it keeps one keeper's files from being
@@ -11150,15 +11468,41 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       if Option.equal String.equal state.changes_keeper (Some keeper_name) then (
         match result with
         | Ok snapshot ->
-            state.changes <- Some snapshot;
-            state.changes_error <- None;
-            state.changes_cursor <- 0;
-            state.changes_scroll <- 0;
             (* The open row indexes the snapshot it was opened against. A new
                snapshot can hold a different change at the same index, so the
-               diff closes rather than silently changing what it shows. *)
-            state.changes_diff_row <- None;
-            state.changes_diff_scroll <- 0;
+               diff stays open only when the same change still sits there,
+               and closes rather than silently changing what it shows. *)
+            let same_change_at index =
+              match state.changes with
+              | None -> false
+              | Some _ when index < 0 -> false
+              | Some (before : Masc.Tui_decode.file_change_snapshot) -> (
+                  match
+                    ( List.nth_opt before.fcs_changes index
+                    , List.nth_opt snapshot.Masc.Tui_decode.fcs_changes index )
+                  with
+                  | Some (was : Masc.Tui_decode.file_change), Some (now : Masc.Tui_decode.file_change) ->
+                      Float.equal was.fc_at now.fc_at
+                      && String.equal was.fc_keeper now.fc_keeper
+                      && Option.equal String.equal was.fc_execution_id
+                           now.fc_execution_id
+                      && was.fc_location = now.fc_location
+                  | Some _, None | None, Some _ | None, None -> false)
+            in
+            let kept_row =
+              match state.changes_diff_row with
+              | Some index when same_change_at index -> Some index
+              | Some _ | None -> None
+            in
+            state.changes <- Some snapshot;
+            state.changes_error <- None;
+            (match kept_row with
+             | Some index -> state.changes_cursor <- index
+             | None ->
+                 state.changes_cursor <- 0;
+                 state.changes_scroll <- 0;
+                 state.changes_diff_scroll <- 0);
+            state.changes_diff_row <- kept_row;
             state.changes_tree_diff <- None;
             state.changes_tree_diff_error <- None;
             state.changes_tree_diff_path <- None
@@ -13217,6 +13561,12 @@ and is loaded on demand through keeper_skill.
         else
           match input with
           | Some (Key name) -> Some name
+          (* A notch over the pane is the pane's and never becomes a key; a
+             notch anywhere else is the key it always was. *)
+          | Some (Mouse_wheel (direction, row, column)) -> (
+              match acting_pane_hit state ~row ~column with
+              | Pane_row _ -> None
+              | Pane_miss -> Some (Masc.Tui_decode.wheel_key direction))
           | Some (Pasted _) | Some (Graphics_reply _)
           | Some (Mouse_left_press _) | None -> None
       in
@@ -13331,6 +13681,32 @@ and is loaded on demand through keeper_skill.
                       (Masc_tui_attachment.error_to_string error))
             | Some _ | None ->
                 handle_paste state ~base_path ~mailbox:async_messages ~paste)
+       (* The wheel over the Activity pane scrolls the pane. The pane is drawn
+          under no modal (render reserves it no columns while one is up), so
+          the hit test alone says whether the notch is the pane's. *)
+       | Some (Mouse_wheel (direction, row, column))
+         when (not dismissed_image) && (not compact_viewport)
+              && acting_pane_hit state ~row ~column <> Pane_miss ->
+           scroll_acting_pane state
+             ~delta:
+               (match direction with
+                | Masc.Tui_decode.Wheel_up -> -wheel_notch_rows
+                | Masc.Tui_decode.Wheel_down -> wheel_notch_rows)
+       (* A left press on the Activity pane picks the keeper under it. Same
+          modal guards as the Lanes press below, for the same reason. *)
+       | Some (Mouse_left_press (row, column))
+         when (not dismissed_image) && (not compact_viewport)
+              && (not state.help_open)
+              && (not state.agenda_open)
+              && (not state.palette_open)
+              && (not state.context_inspector_open)
+              && Option.is_none state.search
+              && acting_pane_hit state ~row ~column <> Pane_miss -> (
+           match acting_pane_hit state ~row ~column with
+           | Pane_row line ->
+               handle_acting_pane_click state ~base_path ~mailbox:async_messages
+                 ~line
+           | Pane_miss -> ())
        (* A left press on the Lanes overview moves the row cursor (and opens
           the row it already named). The modals above the surface -- help,
           agenda, palette, search -- keep the press from reaching rows they
@@ -13352,9 +13728,10 @@ and is loaded on demand through keeper_skill.
           the capability probe, which does its own reading before the loop
           starts; what matters here is that it does not become keys. *)
        | Some (Pasted _) | Some (Graphics_reply _) | Some (Key _)
-       | Some (Mouse_left_press _) | None -> ());
+       | Some (Mouse_left_press _) | Some (Mouse_wheel _) | None -> ());
       if Option.is_some input then
         Render_schedule.request render_schedule Render_schedule.Input;
+      ensure_acting_pane_changes state ~mailbox:async_messages;
       let _terminal_rows, terminal_columns = get_terminal_size () in
       let message_mode =
         (not compact_viewport) && state.view = Keepers Keeper_message
@@ -13957,6 +14334,131 @@ and is loaded on demand through keeper_skill.
                        ~mailbox:async_messages ~keeper_name;
                      state.view <- Keepers Keeper_message
                  | Some _ | None -> ())
+            | _ -> ())
+       | Some k when state.link_modal_open ->
+           let close () =
+             state.link_modal_open <- false;
+             state.link_modal_scroll <- 0
+           in
+           (match k with
+            | "esc" | "q" | "Q" -> close ()
+            | "j" | "down" ->
+                state.link_modal_scroll <- state.link_modal_scroll + 1
+            | "k" | "up" ->
+                state.link_modal_scroll <- max 0 (state.link_modal_scroll - 1)
+            | "d" | "pagedown" ->
+                state.link_modal_scroll <- state.link_modal_scroll + 5
+            | "u" | "pageup" ->
+                state.link_modal_scroll <- max 0 (state.link_modal_scroll - 5)
+            | "g" | "home" ->
+                state.link_modal_scroll <- 0
+            | "G" | "end" ->
+                state.link_modal_scroll <- 9999
+            | "n" | "right" | "\t" ->
+                let count = List.length state.link_modal_links in
+                if count > 1 then begin
+                  let next_idx = (state.link_modal_cursor + 1) mod count in
+                  state.link_modal_cursor <- next_idx;
+                  state.link_modal_url <- List.nth_opt state.link_modal_links next_idx;
+                  state.link_modal_scroll <- 0
+                end
+            | "p" | "left" ->
+                let count = List.length state.link_modal_links in
+                if count > 1 then begin
+                  let prev_idx = (state.link_modal_cursor - 1 + count) mod count in
+                  state.link_modal_cursor <- prev_idx;
+                  state.link_modal_url <- List.nth_opt state.link_modal_links prev_idx;
+                  state.link_modal_scroll <- 0
+                end
+            | "o" | "O" | "\r" ->
+                (match state.link_modal_url with
+                 | Some url -> (
+                     match Masc_tui_browser.open_url url with
+                     | Ok opener ->
+                         add_event state "system" (Printf.sprintf "Opened in browser (%s): %s" opener url)
+                     | Error err ->
+                         add_event state "system" (Printf.sprintf "Could not open browser: %s" err))
+                 | None -> ())
+            | "y" | "Y" ->
+                (match state.link_modal_url with
+                 | Some url ->
+                     copy_reference_to_terminal render_schedule url;
+                     add_event state "system" ("Copied URL to clipboard: " ^ url)
+                 | None -> ())
+            | "v" | "V" ->
+                (match state.link_modal_url with
+                 | Some url ->
+                     let p = Masc_tui_link_preview.get_preview url in
+                     (match p.image_url with
+                      | Some img_url ->
+                          let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
+                          open_image state ~notice img_url
+                      | None ->
+                          add_event state "system" "Selected link is not an image resource")
+                 | None -> ())
+            | _ -> ())
+       | Some k when state.patch_modal_open ->
+           let close () =
+             state.patch_modal_open <- false;
+             state.patch_modal_scroll <- 0
+           in
+           (match k with
+            | "esc" | "q" | "Q" -> close ()
+            | "j" | "down" ->
+                state.patch_modal_scroll <- state.patch_modal_scroll + 1
+            | "k" | "up" ->
+                state.patch_modal_scroll <- max 0 (state.patch_modal_scroll - 1)
+            | "d" | "pagedown" ->
+                state.patch_modal_scroll <- state.patch_modal_scroll + 10
+            | "u" | "pageup" ->
+                state.patch_modal_scroll <- max 0 (state.patch_modal_scroll - 10)
+            | "g" | "home" ->
+                state.patch_modal_scroll <- 0
+            | "G" | "end" ->
+                let total_rows =
+                  match state.patch_modal_diff with
+                  | Some (_, d) -> List.length d.Masc.Tui_decode.gd_rows
+                  | None ->
+                      (match state.repository_changes_diff with
+                       | Some (_, d) -> List.length d.Masc.Tui_decode.gd_rows
+                       | None -> 0)
+                in
+                state.patch_modal_scroll <- max 0 (total_rows - 5)
+            | "e" | "E" ->
+                let path_opt =
+                  match state.patch_modal_path with
+                  | Some p -> Some p
+                  | None -> state.repository_changes_diff_path
+                in
+                (match path_opt with
+                 | None ->
+                     add_event state "error" "No file path associated with active patch"
+                 | Some path ->
+                     close ();
+                     match Masc_tui_editor_jump.route () with
+                     | Masc_tui_editor_jump.No_editor ->
+                         add_event state "error"
+                           "no editor: run this inside Neovim, or set $EDITOR"
+                     | Masc_tui_editor_jump.Remote_neovim { server } -> (
+                         let target =
+                           { Masc_tui_editor_jump.path; Masc_tui_editor_jump.line = 1 }
+                         in
+                         match
+                           Masc_tui_editor_jump.send_to_neovim ~server target
+                         with
+                         | Ok () ->
+                             add_event state "system"
+                               (Printf.sprintf "opened %s in Neovim" path)
+                         | Error detail -> add_event state "error" detail)
+                     | Masc_tui_editor_jump.Terminal_handoff { editor } ->
+                         restore_terminal ();
+                         let command =
+                           Printf.sprintf "%s %s" editor (Filename.quote path)
+                         in
+                         let _ : Unix.process_status = Unix.system command in
+                         reenter_terminal ();
+                         add_event state "system"
+                           (Printf.sprintf "closed %s" path))
             | _ -> ())
        (* The palette is the same kind of modal, but typed: printable keys
           build the query, arrows move the cursor, Enter runs the highlighted
@@ -14963,6 +15465,18 @@ and is loaded on demand through keeper_skill.
            state.palette_open <- true;
            state.palette_query <- "";
            state.palette_cursor <- 0
+       | Some "\025" ->
+           let all_urls = Masc_tui_types.conversation_urls state in
+           state.link_modal_links <- all_urls;
+           (match all_urls with
+            | first :: _ ->
+                state.link_modal_open <- true;
+                state.link_modal_url <- Some first;
+                state.link_modal_scroll <- 0;
+                state.link_modal_cursor <- 0
+            | [] ->
+                chat_notice state ~keeper_name:state.msg_target_keeper_name ~role:Message_local
+                  "No web links found in this conversation to preview.")
        | Some "\023"
          when state.view = Board
               && terminal_columns >= keeper_split_threshold_cols
@@ -18210,6 +18724,7 @@ and is loaded on demand through keeper_skill.
           ~scoped_refresh_inflight:http_scoped_refresh_inflight
           ~scoped_refresh_followup
           ~mailbox:async_messages;
+        refresh_acting_pane_changes state ~mailbox:async_messages;
         (* Also refresh logs / Board detail if viewing them. *)
         (match state.view with
          | Code -> ()

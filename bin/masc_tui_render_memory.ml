@@ -56,7 +56,11 @@ let memory_context_lines (k : memory_keeper_health) =
   let alert_lines =
     List.map
       (fun (a : memory_alert) ->
-        Printf.sprintf "  [%s] %s \xe2\x80\x94 %s" a.ma_severity a.ma_label
+        Printf.sprintf "  [%s] %s \xe2\x80\x94 %s"
+          (match Masc.Tui_decode.memory_alert_severity a.ma_code with
+           | `Warn -> "warn"
+           | `Error -> "error")
+          a.ma_label
           (Terminal_text.single_line a.ma_message))
       k.mkh_alerts
   in
@@ -98,7 +102,13 @@ let memory_state (k : memory_keeper_health) =
   then Memory_no_current
   else if k.mkh_librarian_failures > 0
   then Memory_degraded
-  else if List.exists (fun alert -> String.equal alert.ma_severity "warn") k.mkh_alerts
+  else if
+    List.exists
+      (fun alert ->
+        match Masc.Tui_decode.memory_alert_severity alert.ma_code with
+        | `Warn -> true
+        | `Error -> false)
+      k.mkh_alerts
   then Memory_warning
   else Memory_ordinary
 
@@ -117,7 +127,12 @@ let memory_state_cell = function
 
 let memory_deviation_style (k : memory_keeper_health) =
   let server_error =
-    List.exists (fun alert -> String.equal alert.ma_severity "error") k.mkh_alerts
+    List.exists
+      (fun alert ->
+        match Masc.Tui_decode.memory_alert_severity alert.ma_code with
+        | `Error -> true
+        | `Warn -> false)
+      k.mkh_alerts
   in
   if server_error then Some (Theme.bad ())
   else

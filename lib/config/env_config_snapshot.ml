@@ -212,8 +212,6 @@ let cache_entries =
 
 let channel_gate_entries =
   [
-    entry ~default:"3600" "MASC_CHANNEL_GATE_DEDUP_TTL_SEC"
-      "Dedup TTL (seconds, floored at 1)";
     entry ~default:"4000" "MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH"
       "Max content length (floored at 1)";
   ]

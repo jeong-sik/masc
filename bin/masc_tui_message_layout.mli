@@ -283,10 +283,16 @@ val role_label_mark_cells : ?column:int -> style:style -> unit -> int
     dropping the middle and marking the cut with ["…"].
 
     Use this for identifiers. {!fit_width} keeps the head and loses the tail
-    that tells two Keepers apart; {!fit_name} keeps the tail and loses the head
-    that says which family they share. The tail takes two thirds of the budget,
-    so a narrow column degrades into {!fit_name}'s shape rather than into
-    {!fit_width}'s.
+    that tells two Keepers apart; a tail-only cut keeps the tail and loses the
+    head that says which family they share. The tail takes two thirds of the
+    budget, so a narrow column degrades toward the tail rather than into
+    {!fit_width}'s shape.
+
+    The chat pane's role label used a tail-only cut until it met a family that
+    shares its tail instead of its head: a broadcast reads
+    [<agent> · broadcast], and cutting it to ["…broadcast"] kept the word every
+    row on the screen already had and dropped the only part that named who
+    spoke.
 
     Left-aligned and padded to [column]. *)
 (** Fit UTF-8 text to an exact terminal-cell budget without splitting a scalar

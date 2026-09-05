@@ -10,8 +10,15 @@ type t =
   | Open_metrics
   | Open_settings
   | Open_diff
+  | Open_patch_modal
+  | Toggle_burn_hud
+  | Open_link_preview of string option
+  | Open_links_list
+  | Set_embeds of [ `On | `Compact | `Off ]
   | Open_changes
   | Toggle_acting_pane
+  | Show_acting_pane_tab of [ `Fleet | `Changes ]
+  | Acting_pane_tab_unknown of string
   | Switch_keeper of string
   | Switch_keeper_missing_name
   | Interrupt_turn
@@ -66,6 +73,22 @@ let catalog =
   ; { word = "diff"
     ; args = ""
     ; summary = "open git changes and diff for the workspace"
+    }
+  ; { word = "patch"
+    ; args = ""
+    ; summary = "open 3D drop-shadow patch review modal for pending code changes"
+    }
+  ; { word = "review"
+    ; args = ""
+    ; summary = "open 3D drop-shadow patch review modal for pending code changes"
+    }
+  ; { word = "burn"
+    ; args = ""
+    ; summary = "toggle real-time token burn velocity and financial telemetry HUD"
+    }
+  ; { word = "cost"
+    ; args = ""
+    ; summary = "toggle real-time token burn velocity and financial telemetry HUD"
     }
   ; { word = "changes"
     ; args = ""
@@ -130,8 +153,21 @@ let catalog =
     ; summary = "display multicore engine telemetry, scheduler latency, and fleet health"
     }
   ; { word = "activity"
+    ; args = "[fleet|changes]"
+    ; summary =
+        "show or hide the Activity pane beside this surface, or show one of its tabs"
+    }
+  ; { word = "preview"
+    ; args = "[url]"
+    ; summary = "open 3D drop-shadow OpenGraph preview and rich embed modal for a web link"
+    }
+  ; { word = "links"
     ; args = ""
-    ; summary = "show or hide the Activity pane beside this surface"
+    ; summary = "browse and inspect all web links mentioned in the current conversation"
+    }
+  ; { word = "embeds"
+    ; args = "[on|compact|off]"
+    ; summary = "configure inline chat rich embed cards (on, compact, or off)"
     }
   ]
 
@@ -187,8 +223,24 @@ let parse text =
     | "metrics", _ | "telemetry", _ -> Open_metrics
     | "settings", _ -> Open_settings
     | "diff", _ -> Open_diff
+    | "patch", _ | "review", _ -> Open_patch_modal
+    | "burn", _ | "cost", _ -> Toggle_burn_hud
+    | "preview", arg ->
+        let trimmed = String.trim arg in
+        if String.equal trimmed "" then Open_link_preview None
+        else Open_link_preview (Some trimmed)
+    | "links", _ -> Open_links_list
+    | "embeds", arg ->
+        let trimmed = String.trim arg |> String.lowercase_ascii in
+        (match trimmed with
+         | "off" | "none" -> Set_embeds `Off
+         | "compact" -> Set_embeds `Compact
+         | "on" | "rich" | "full" | _ -> Set_embeds `On)
     | "changes", _ -> Open_changes
-    | "activity", _ -> Toggle_acting_pane
+    | "activity", "" -> Toggle_acting_pane
+    | "activity", "fleet" -> Show_acting_pane_tab `Fleet
+    | "activity", "changes" -> Show_acting_pane_tab `Changes
+    | "activity", other -> Acting_pane_tab_unknown other
     | "keeper", "" -> Switch_keeper_missing_name
     | "keeper", name -> Switch_keeper name
     | "interrupt", _ -> Interrupt_turn
@@ -454,14 +506,6 @@ let known_sub_arguments ~keeper_names word =
   | "keeper" -> keeper_names
   | _ -> []
 
-let get_siblings word =
-  if String.equal word "" then List.map (fun e -> e.word) catalog
-  else
-    let initial = String.sub word 0 1 in
-    catalog
-    |> List.filter (fun e -> String.starts_with ~prefix:initial e.word)
-    |> List.map (fun e -> e.word)
-
 let with_body body text =
   if String.equal body "" then text else text ^ "\n" ^ body
 
@@ -482,23 +526,11 @@ let autocomplete ?(direction = Next) ?(keeper_names = []) text =
       match candidates with
       | [] -> None
       | [ single ] ->
+          let suffix = if String.equal single.args "" then "" else " " in
           if String.equal line single.word then
-            let siblings = get_siblings line in
-            if List.length siblings > 1 then
-              match cycle_step ~direction ~items:siblings line with
-              | Some next_word ->
-                  let next_entry =
-                    List.find (fun e -> String.equal e.word next_word) catalog
-                  in
-                  let suffix = if String.equal next_entry.args "" then "" else " " in
-                  Some (with_body body ("/" ^ next_word ^ suffix))
-              | None -> None
-            else
-              let suffix = if String.equal single.args "" then "" else " " in
-              if String.equal suffix "" then None
-              else Some (with_body body ("/" ^ single.word ^ suffix))
+            if String.equal suffix "" then None
+            else Some (with_body body ("/" ^ single.word ^ suffix))
           else
-            let suffix = if String.equal single.args "" then "" else " " in
             Some (with_body body ("/" ^ single.word ^ suffix))
       | entries ->
           let words = List.map (fun e -> e.word) entries in
@@ -522,21 +554,8 @@ let autocomplete ?(direction = Next) ?(keeper_names = []) text =
         String.sub line (word_len + 1) (String.length line - word_len - 1)
       in
       let options = known_sub_arguments ~keeper_names word in
-      if options = [] then begin
-        if String.equal (String.trim after_space) "" then
-          let siblings = get_siblings word in
-          if List.length siblings > 1 then
-            match cycle_step ~direction ~items:siblings word with
-            | Some next_word ->
-                let next_entry =
-                  List.find (fun e -> String.equal e.word next_word) catalog
-                in
-                let suffix = if String.equal next_entry.args "" then "" else " " in
-                Some (with_body body ("/" ^ next_word ^ suffix))
-            | None -> None
-          else None
-        else None
-      end else if String.equal (String.trim after_space) "" then
+      if options = [] then None
+      else if String.equal (String.trim after_space) "" then
         let chosen =
           match direction with
           | Next -> List.hd options
@@ -587,9 +606,7 @@ let is_slash_navigable ?(keeper_names = []) text =
       | [] -> false
       | [ single ] ->
           if not (String.equal line single.word) then true
-          else
-            let siblings = get_siblings line in
-            List.length siblings > 1 || not (String.equal single.args "")
+          else not (String.equal single.args "")
       | _ :: _ -> true
     else
       let word_len = String.index line ' ' in
@@ -598,11 +615,7 @@ let is_slash_navigable ?(keeper_names = []) text =
         String.sub line (word_len + 1) (String.length line - word_len - 1)
       in
       let options = known_sub_arguments ~keeper_names word in
-      if options = [] then
-        if String.equal (String.trim after_space) "" then
-          let siblings = get_siblings word in
-          List.length siblings > 1
-        else false
+      if options = [] then false
       else if String.equal (String.trim after_space) "" then true
       else if String.ends_with ~suffix:" " after_space then false
       else

@@ -235,6 +235,7 @@ val exec_argv_for :
     command bare with [-i]. *)
 
 val shim_exec_prefix_for :
+  ?stdin:bool ->
   Keeper_microvm_backend.t ->
   container_name:string ->
   uid:int ->
@@ -249,13 +250,10 @@ val shim_exec_prefix_for :
     under. All three CLIs document the environment entry the first needs
     ([msb exec] has [-e, --env]).
 
-    [Error] for [msb]: [container exec --user] documents [name|uid[:gid]] and
-    nerdctl takes Docker's, but [msb exec --user] documents a guest user name
-    and no numeric form (0.6.16), so the mapped [uid:gid] a keeper's commands
-    run as cannot be named. Sending it would either be rejected or resolved
-    as somebody else's user name, writing to the keeper's tree as that user.
-    Naming a guest user for the lane is the change that would settle it,
-    which is a decision about identity rather than a spelling. *)
+    [container exec --user] documents [name|uid[:gid]] and nerdctl takes
+    Docker's. [msb exec --user] documents a guest user name and no numeric form,
+    so msb omits [--user]; the work volume's [uid=,gid=] mount places writes
+    at the right host uid. *)
 
 val stop_argv_for :
   Keeper_microvm_backend.t -> container_name:string -> string list
@@ -308,13 +306,12 @@ val shim_config_guest_path : string
 val shim_mount_args : host_dir:string -> string list
 
 val shim_config_content : payload_path:string -> string
-(** [remote_root=<work root>], [path=<payload_path>],
-    [env_allowlist=<config env names>] and
-    [scratch_root=<{!Keeper_microvm_backend.scratch_guest_root}>]: the lines
-    the guest's shim reads. The last names the in-memory filesystem the boot
-    mounts for boxed requests (RFC-0422); a shim older than protocol 3 refuses
-    it as an unknown key, and the lane's version probe refuses that shim
-    first. *)
+(** [remote_root=<work root>], [path=<payload_path>] and
+    [env_allowlist=<config env names>]: the lines the guest's shim reads.
+    No [scratch_root]: the boot mounts the scratch filesystem at the shim's
+    default ({!Keeper_microvm_backend.scratch_guest_root}), and a shim one
+    release behind refuses any key it does not know, failing every request
+    on the guest. *)
 
 val remote_env_allowlist : string list
 val remote_connect_timeout_sec : int

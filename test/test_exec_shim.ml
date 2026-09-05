@@ -112,7 +112,7 @@ let trailer_timed_out t = t.Exec_ssh_protocol.timed_out
 let trailer_shim_error t = t.Exec_ssh_protocol.shim_error
 
 let test_trailer_of_status_exit () =
-  let t = Exec_shim.trailer_of_status ~timed_out:false (Unix.WEXITED 7) in
+  let t = Exec_shim.trailer_of_status ~v:Exec_ssh_protocol.newest ~timed_out:false (Unix.WEXITED 7) in
   check (option int) "exit" (Some 7) (trailer_exit t);
   check (option int) "signal" None (trailer_signal t);
   check bool "timed_out" false (trailer_timed_out t);
@@ -125,7 +125,7 @@ let test_trailer_of_status_exit () =
 let test_trailer_of_status_signal_timeout () =
   (* WSIGNALED carries OCaml's abstract signal code (Sys.sigterm = -11);
      the trailer must carry the host OS number (15 on Linux/macOS). *)
-  let t = Exec_shim.trailer_of_status ~timed_out:true (Unix.WSIGNALED Sys.sigterm) in
+  let t = Exec_shim.trailer_of_status ~v:Exec_ssh_protocol.newest ~timed_out:true (Unix.WSIGNALED Sys.sigterm) in
   check (option int) "exit" None (trailer_exit t);
   check (option int) "signal" (Some 15) (trailer_signal t);
   check bool "timed_out" true (trailer_timed_out t);
@@ -193,11 +193,11 @@ let test_parse_config_scratch_root () =
   (match Exec_shim.parse_config "remote_root=/srv/masc
 scratch_root=/tmp/masc-scratch
 " with
-   | Ok c -> check (option string) "scratch_root" (Some "/tmp/masc-scratch") c.Exec_shim.scratch_root
+   | Ok c -> check string "scratch_root" "/tmp/masc-scratch" c.Exec_shim.scratch_root
    | Error e -> fail e);
   (match Exec_shim.parse_config "remote_root=/srv/masc
 " with
-   | Ok c -> check (option string) "absent scratch_root is None" None c.Exec_shim.scratch_root
+   | Ok c -> check string "absent scratch_root is the shared default" Exec_ssh_protocol.default_scratch_root c.Exec_shim.scratch_root
    | Error e -> fail e);
   (match Exec_shim.parse_config "remote_root=/srv/masc
 scratch_root=relative/dir
@@ -349,7 +349,7 @@ let test_request_root_outside_host_root_is_rejected () =
    from each other is what let #31554 sit here: both passed while the
    dispatcher still judged the cwd against the host's single root. *)
 let request_for ~remote_root ~cwd =
-  { Exec_ssh_protocol.v = Exec_ssh_protocol.protocol_version
+  { Exec_ssh_protocol.v = Exec_ssh_protocol.newest
   ; argv = [ "/bin/true" ]
   ; env = []
   ; cwd
@@ -454,9 +454,9 @@ let test_probe_identity () =
   match Exec_ssh_protocol.parse_probe (Exec_ssh_protocol.render_probe p) with
   | Error e -> fail e
   | Ok p' ->
-    check bool "major compatible with the wire protocol" true
-      (Exec_ssh_protocol.probe_major_compatible ~want:protocol_version
-         p'.Exec_ssh_protocol.version)
+    check (result int string) "the probe names the wire protocol this build speaks"
+      (Ok Exec_ssh_protocol.protocol_version)
+      (Result.map Exec_ssh_protocol.int_of_major (Exec_ssh_protocol.major_of_probe p'))
 
 let () =
   run "exec shim"

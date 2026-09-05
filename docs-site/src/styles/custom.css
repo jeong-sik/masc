@@ -300,3 +300,30 @@ pre.mermaid svg,
 	font-family: var(--sl-font) !important;
 }
 
+
+/* Terminal captures.
+   The frames are captured at 100 columns so a character is about eight pixels
+   in the prose column rather than five, which is the difference between small
+   text and unreadable text. They break out only as far as `main` -- a wider
+   pull slid the frame under the sidebar and the table of contents. */
+.sl-markdown-content img[src$="-overview.png"],
+.sl-markdown-content img[src$="-keepers.png"],
+.sl-markdown-content img[src$="-lanes.png"],
+.sl-markdown-content img[src$="-approvals.png"],
+.sl-markdown-content img[src$="-activity.png"] {
+	width: 100%;
+	max-width: none;
+	border: 1px solid #2a2520;
+	border-radius: 6px;
+}
+
+@media (min-width: 72rem) {
+	.sl-markdown-content img[src$="-overview.png"],
+	.sl-markdown-content img[src$="-keepers.png"],
+	.sl-markdown-content img[src$="-lanes.png"],
+	.sl-markdown-content img[src$="-approvals.png"],
+	.sl-markdown-content img[src$="-activity.png"] {
+		width: calc(100% + 3.5rem);
+		margin-inline: -1.75rem;
+	}
+}

@@ -31,7 +31,11 @@ val snapshot_with_additional_secret_files :
     [~redact_identity_scalars:true] — a GitHub account name is public in
     every repo URL, so an operator may turn that layer off without
     unmasking tokens. Missing or unreadable roots/files are ignored;
-    redaction must never fail a chat turn. *)
+    redaction must never fail a chat turn.
+
+    Every call stats the source files; the values are read and compiled
+    again only when a file's identity, size or mtime differs from the
+    snapshot memoised on the calling domain for the same arguments. *)
 
 val redact_text : t -> string -> string
 (** Replace exact projected secret values and generic sensitive patterns
@@ -54,3 +58,9 @@ val redact_json : t -> Yojson.Safe.t -> Yojson.Safe.t
 (** Redact a JSON value's object keys as well as its string leaves, preserving
     shape. A secret can be the key -- a header name, or a parameter a tool used
     as a dict key -- so a leaves-only traversal emits it (#22941). *)
+
+module For_testing : sig
+  val shares_compiled_patterns : t -> t -> bool
+  (** Physical equality of the two snapshots' compiled pattern lists: true
+      when the second call served the first call's memoised snapshot. *)
+end

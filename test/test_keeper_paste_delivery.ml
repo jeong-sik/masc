@@ -269,14 +269,14 @@ let stub_main () =
   let frame = header ^ read_exact Unix.stdin body_len in
   let trailer exit_code =
     Exec_ssh_protocol.render_trailer
-      { v = Exec_ssh_protocol.protocol_version; exit = Some exit_code; signal = None
+      { v = Exec_ssh_protocol.newest; exit = Some exit_code; signal = None
       ; timed_out = false; shim_error = None }
   in
   match Exec_ssh_protocol.decode_request frame with
   | Error error ->
     write_all Unix.stderr
       (Exec_ssh_protocol.render_trailer
-         { v = Exec_ssh_protocol.protocol_version; exit = None; signal = None
+         { v = Exec_ssh_protocol.newest; exit = None; signal = None
          ; timed_out = false; shim_error = Some error });
     exit 1
   | Ok (request, stdin) ->
@@ -354,6 +354,7 @@ let deliver_with_stub ~mode ~content f =
             ; "MASC_EXEC_SHIM_CONFIG=/opt/masc-exec-shim/masc-exec-shim.conf"
             ; "masc-keeper-vm-keeper-a"
             ]
+        ; probe_prefix = None
         ; container_name = "masc-keeper-vm-keeper-a"
         ; shim_path = "/opt/masc-exec-shim/masc-exec-shim"
         }

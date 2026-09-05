@@ -98,9 +98,15 @@ let turn_in_flight_rejection ~keeper_name
      path (metadata commit takes ownership of the foreign fence), and the
      concurrent-update race it also matches is absorbed by the existing
      launch-conflict arm. *)
-let swap_keepalive_lane_fenced (ctx : _ context) (updated : keeper_meta)
+let rec swap_keepalive_lane_fenced (ctx : _ context) (updated : keeper_meta)
   : (joined_stop_result * start_keepalive_outcome, tool_result) result =
-  let base_path = ctx.config.base_path in
+  if not (Eio_context.root_switch_on_current_domain ())
+     && Option.is_some (Eio_context.get_root_switch_opt ())
+  then
+    Eio_context.run_on_owner_domain (fun () ->
+      swap_keepalive_lane_fenced ctx updated)
+  else
+    let base_path = ctx.config.base_path in
   let keeper_name = updated.name in
   let rollback ~operation_id =
     match
@@ -457,6 +463,10 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
                   else Option.value ~default:"" p.profile_defaults.instructions)
                p.instructions_opt);
     sandbox_profile;
+    sandbox_image =
+      (match p.profile_defaults.sandbox_image with
+       | Some _ as img -> img
+       | None -> old.sandbox_image);
     network_mode;
     autoboot_enabled;
     paused = old.paused;

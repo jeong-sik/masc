@@ -177,7 +177,6 @@ val unsubscribe_external : string -> unit
 val external_subscriber_count : unit -> int
 val external_subscriber_count_with_prefix : string -> int
 val reap_dead_external_subscribers : unit -> int
-val remove_external_subscribers : string list -> string list * int
 
 (** {1 Event Buffer} *)
 

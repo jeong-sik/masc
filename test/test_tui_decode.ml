@@ -1388,24 +1388,47 @@ let test_tool_envelope_outcome_rejects_unexpected_shapes () =
    moves further than one row per notch, and the chat composer answers the
    arrows with its history, so a shared key made one of the two wrong. Clicks
    and releases arriving on the same encoding must still not leak into the key
-   stream. *)
+   stream. The notch travels with where it happened, so the loop can hand it
+   to the pane under the pointer. *)
+let sgr_wheel_key params final =
+  Option.map
+    (fun (direction, _, _) -> Tui_decode.wheel_key direction)
+    (Tui_decode.sgr_wheel_report params final)
+
 let test_sgr_wheel_up_is_its_own_key () =
-  match Tui_decode.sgr_wheel_key "<64;10;5" 'M' with
+  match sgr_wheel_key "<64;10;5" 'M' with
   | Some "wheel-up" -> ()
   | Some other -> Alcotest.failf "expected wheel-up, got %s" other
   | None -> Alcotest.fail "wheel up should claim a key"
 
 let test_sgr_wheel_down_is_its_own_key () =
-  match Tui_decode.sgr_wheel_key "<65;10;5" 'M' with
+  match sgr_wheel_key "<65;10;5" 'M' with
   | Some "wheel-down" -> ()
   | Some other -> Alcotest.failf "expected wheel-down, got %s" other
   | None -> Alcotest.fail "wheel down should claim a key"
+
+let test_sgr_wheel_report_carries_its_position () =
+  match Tui_decode.sgr_wheel_report "<64;10;5" 'M' with
+  | Some (Tui_decode.Wheel_up, 5, 10) -> ()
+  | Some (_, row, column) ->
+      Alcotest.failf "expected row 5 column 10, got %d;%d" row column
+  | None -> Alcotest.fail "a wheel notch should report where it happened"
+
+let test_sgr_wheel_report_needs_a_whole_position () =
+  List.iter
+    (fun (params, final) ->
+       match Tui_decode.sgr_wheel_report params final with
+       | None -> ()
+       | Some (_, row, column) ->
+           Alcotest.failf "report %S should stay unclaimed, got %d;%d" params row
+             column)
+    [ ("<64;10", 'M'); ("<64;0;5", 'M'); ("<64;x;5", 'M'); ("<64;10;5", 'm') ]
 
 let test_sgr_click_and_horizontal_wheel_stay_unclaimed () =
   let cases = [ ("<0;10;5", 'M'); ("<32;10;5", 'M'); ("<66;10;5", 'M'); ("<0;10;5", 'm') ] in
   List.iter
     (fun (params, final) ->
-       match Tui_decode.sgr_wheel_key params final with
+       match sgr_wheel_key params final with
        | None -> ()
        | Some other ->
            Alcotest.failf "report %S should stay unclaimed, got %s" params other)
@@ -1444,7 +1467,7 @@ let test_x10_and_sgr_agree_on_the_wheel () =
   List.iter
     (fun (button, params) ->
        let x10 = Tui_decode.x10_wheel_key (Char.chr (32 + button)) in
-       let sgr = Tui_decode.sgr_wheel_key params 'M' in
+       let sgr = sgr_wheel_key params 'M' in
        Alcotest.(check (option string))
          (Printf.sprintf "button %d" button) sgr x10)
     [ (64, "<64;10;5"); (65, "<65;10;5"); (0, "<0;10;5"); (66, "<66;10;5") ]
@@ -2953,8 +2976,6 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
                   ; ("label", `String "Librarian")
                   ; ( "message"
                     , `String "running memoryless and cannot leave that state" )
-                  ; ("value", `Float 4.0)
-                  ; ("threshold", `Float 0.0)
                   ]
               ]
           else `List [] )
@@ -3130,10 +3151,129 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
            Alcotest.(check int) "failures" 4
              source_only.mkh_librarian_failures;
            (match source_only.mkh_alerts with
-            | { Tui_decode.ma_code = "librarian_starvation"; ma_severity = "error"; _ }
-              :: [] -> ()
+            | [ { Tui_decode.ma_code = Tui_decode.Librarian_starvation; _ } ] ->
+                (match
+                   Tui_decode.memory_alert_severity Tui_decode.Librarian_starvation
+                 with
+                 | `Error -> ()
+                 | `Warn -> Alcotest.fail "starvation must carry error severity")
             | _ -> Alcotest.fail "expected one starvation alert")
        | [] -> Alcotest.fail "expected the source-only keeper row")
+
+(* The alert's typed code is the only field the renderer reads: the wire's
+   severity and target are functions of it, and the decoder refuses a payload
+   that disagrees rather than trusting the string it was handed. *)
+let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
+  `Assoc
+    [ ("schema", `String "keeper.memory_os.current_health.v3")
+    ; ("generated_at", `Float 1_775_000_000.0)
+    ; ("cadence_counter_entries", `Int 0)
+    ; ( "keepers"
+      , `List
+          [ `Assoc
+              [ ("keeper_id", `String "alpha")
+              ; ("revision", `Int 0)
+              ; ("facts", `Int 0)
+              ; ("observed_facts", `Int 0)
+              ; ("derived_facts", `Int 0)
+              ; ("support_invalidations", `Int 0)
+              ; ("snapshot_bytes", `Int 0)
+              ; ("added", `Int 0)
+              ; ("removed", `Int 0)
+              ; ("snapshot_present", `Bool false)
+              ; ("librarian_lane_busy", `Int 0)
+              ; ("librarian_failures", `Int 4)
+              ; ("vision_ingest_errors", `Int 0)
+              ; ("vision_ingest_error_reasons", `List [])
+              ; ("read_error", `Null)
+              ; ("source_revision", `Int 0)
+              ; ("source_facts", `Int 0)
+              ; ("source_invalidations", `Int 0)
+              ; ("source_snapshot_bytes", `Int 0)
+              ; ("source_snapshot_present", `Bool false)
+              ; ("source_read_error", `Null)
+              ; ( "alerts"
+                , `List
+                    [ `Assoc
+                        (extra_alert_fields
+                        @ [ ("code", `String code)
+                          ; ("severity", `String severity)
+                          ; ("target", `String target)
+                          ; ("label", `String "Librarian")
+                          ; ("message", `String "running memoryless")
+                          ])
+                    ] )
+              ]
+          ] )
+    ; ( "totals"
+      , `Assoc
+          [ ("facts", `Int 0)
+          ; ("observed_facts", `Int 0)
+          ; ("derived_facts", `Int 0)
+          ; ("support_invalidations", `Int 0)
+          ; ("snapshot_bytes", `Int 0)
+          ; ("added", `Int 0)
+          ; ("removed", `Int 0)
+          ; ("source_facts", `Int 0)
+          ; ("source_invalidations", `Int 0)
+          ; ("source_snapshot_bytes", `Int 0)
+          ; ("librarian_lane_busy", `Int 0)
+          ; ("librarian_failures", `Int 4)
+          ; ("vision_ingest_errors", `Int 0)
+          ; ("read_errors", `Int 0)
+          ; ("source_read_errors", `Int 0)
+          ] )
+    ; ( "alert_summary"
+      , `Assoc
+          [ ("total_alerts", `Int 1)
+          ; ("warn_alerts", `Int 0)
+          ; ("error_alerts", `Int 1)
+          ; ("keepers_with_alerts", `Int 1)
+          ; ("snapshot_read_error_keepers", `Int 0)
+          ; ("source_snapshot_read_error_keepers", `Int 0)
+          ; ("librarian_lane_busy_keepers", `Int 0)
+          ; ("librarian_starving_keepers", `Int 1)
+          ] )
+    ]
+
+let memory_alert_snapshot = memory_alert_snapshot_with_extra []
+
+let test_decode_memory_alert_keeps_the_code_contract () =
+  (match
+     Tui_decode.decode_memory_health_snapshot
+       (memory_alert_snapshot ~code:"librarian_starvation" ~severity:"error"
+          ~target:"librarian_starvation")
+   with
+   | Ok { Tui_decode.mhs_keepers =
+            [ { Tui_decode.mkh_alerts =
+                  [ { Tui_decode.ma_code = Tui_decode.Librarian_starvation; _ } ]
+              ; _
+              } ]
+        ; _
+        } -> ()
+   | Ok _ -> Alcotest.fail "starvation decoded as another code"
+   | Error err -> Alcotest.failf "a well-formed alert failed to decode: %s" err);
+  let rejected label json =
+    Alcotest.(check bool) label true
+      (Result.is_error (Tui_decode.decode_memory_health_snapshot json))
+  in
+  rejected "an unknown code has no variant to decode into"
+    (memory_alert_snapshot ~code:"librarian_on_fire" ~severity:"error"
+       ~target:"librarian_on_fire");
+  rejected "a severity the code does not carry is refused"
+    (memory_alert_snapshot ~code:"librarian_starvation" ~severity:"warn"
+       ~target:"librarian_starvation");
+  rejected "a target that disagrees with the code is refused"
+    (memory_alert_snapshot ~code:"librarian_starvation" ~severity:"error"
+       ~target:"librarian_lane_busy");
+  rejected "legacy threshold field is rejected by exact fields"
+    (memory_alert_snapshot_with_extra [ ("threshold", `Float 0.0) ]
+       ~code:"librarian_starvation" ~severity:"error"
+       ~target:"librarian_starvation");
+  rejected "legacy value field is rejected by exact fields"
+    (memory_alert_snapshot_with_extra [ ("value", `Float 4.0) ]
+       ~code:"librarian_starvation" ~severity:"error"
+       ~target:"librarian_starvation")
 
 let test_decode_memory_health_rejects_stale_schema () =
   let json =
@@ -3501,7 +3641,8 @@ let test_decode_keeper_lanes_requires_the_table_fields () =
         (String.starts_with ~prefix:"snapshots[0]: missing required field 'idle_seconds'" detail)
 
 let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
-    ?(running = 0) ?(selected_slots = []) lane_id label =
+    ?(running = 0) ?(selected_slots = []) ?(configuration_state = "ready")
+    lane_id label =
   `Assoc
     ([ "lane_id", `String lane_id
      ; "label", `String label
@@ -3510,7 +3651,7 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
      @ [ "required", `Bool true
     ; "observation_only", `Bool true
     ; "configured", `Bool true
-    ; "configuration_state", `String "ready"
+    ; "configuration_state", `String configuration_state
     ; "admitted_slots", `List [ `String "qwen-primary" ]
     ; "cli_slots", `List []
     ; "dropped_slots", `List []
@@ -3527,6 +3668,70 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ; "p50_elapsed_s", (if retained = 0 then `Null else `Float 1.)
     ; "selected_slots", `List selected_slots
     ])
+
+(* The server collapses "nobody configured this lane" and "the registry could
+   not be read" into one status word, and keeps them apart only in
+   [configuration_state]. Decoding that word into a variant is what lets the
+   detail pane say which of the two it is. *)
+let test_decode_standalone_lane_configuration_is_a_closed_set () =
+  (* All four lanes, because the snapshot decoder demands each known lane
+     exactly once and a one-lane fixture never reaches the configuration
+     word at all. Only the board lane's state varies. *)
+  let snapshot configuration_state =
+    `Assoc
+      [ "schema", `String "masc.standalone_llm_lanes.v1"
+      ; "generated_at", `String "2026-08-27T00:00:00Z"
+      ; "observed_at_unix", `Float 20.
+      ; "observation_only", `Bool true
+      ; "exact_run_projection_count", `Int 1
+      ; "exact_run_source_total", `Int 1
+      ; "exact_run_projection_truncated", `Bool false
+      ; ( "lanes"
+        , `List
+            [ standalone_lane_json ~configuration_state "board_attention_exact"
+                "Board Attention"
+            ; standalone_lane_json "hitl_auto_judge" "HITL Auto Judge"
+            ; standalone_lane_json "librarian_exact" "Librarian"
+            ; standalone_lane_json "verifier_exact" "Verifier"
+            ] )
+      ]
+  in
+  let board configuration_state =
+    match Tui_decode.decode_standalone_lanes_snapshot (snapshot configuration_state) with
+    | Error detail -> Error detail
+    | Ok snapshot ->
+      (match
+         List.find_opt
+           (fun (lane : Tui_decode.standalone_lane) ->
+             String.equal lane.sl_lane_id "board_attention_exact")
+           snapshot.Tui_decode.sls_lanes
+       with
+       | Some lane -> Ok lane.Tui_decode.sl_configuration_state
+       | None -> Error "the board lane did not survive the decode")
+  in
+  let reads word expected =
+    match board word with
+    | Ok state ->
+      Alcotest.(check bool) (word ^ " decodes to its own variant") true
+        (state = expected)
+    | Error detail -> Alcotest.failf "%s did not decode: %s" word detail
+  in
+  reads "ready" Tui_decode.Lane_ready;
+  (* The server's word here is "degraded", which on the status axis means a
+     lane whose last run failed. This one means configured with nothing
+     admitted, so the variant does not reuse the spelling. *)
+  reads "degraded" Tui_decode.Lane_slotless;
+  reads "unconfigured" Tui_decode.Lane_unconfigured;
+  reads "unavailable" Tui_decode.Lane_registry_unavailable;
+  (* Refused by the configuration reader specifically, not merely refused:
+     a fixture that broke for any other reason would satisfy a bare
+     "this did not decode". *)
+  match board "half-configured" with
+  | Ok _ -> Alcotest.fail "a word outside the set was accepted"
+  | Error detail ->
+    Alcotest.(check bool) "the configuration reader is what refused it" true
+      (String.starts_with
+         ~prefix:"lanes[0]: standalone lane configuration: unknown value" detail)
 
 (* The start of the newest run. The fixture has carried it since this suite
    was written and the decoder read it into an underscore, so the field
@@ -7546,6 +7751,10 @@ let () =
           test_decode_memory_health_keeps_ordinary_and_source_axes;
         Alcotest.test_case "memory health rejects stale schema" `Quick
           test_decode_memory_health_rejects_stale_schema;
+        Alcotest.test_case "memory alert keeps the code contract" `Quick
+          test_decode_memory_alert_keeps_the_code_contract;
+        Alcotest.test_case "standalone lane configuration is a closed set" `Quick
+          test_decode_standalone_lane_configuration_is_a_closed_set;
         Alcotest.test_case "memory facts keep both stores" `Quick
           test_decode_memory_facts_keeps_both_stores;
         Alcotest.test_case "memory fact row carries the use record" `Quick
@@ -7806,6 +8015,10 @@ let () =
         Alcotest.test_case "clicks, releases, horizontal wheel stay unclaimed"
           `Quick
           test_sgr_click_and_horizontal_wheel_stay_unclaimed;
+        Alcotest.test_case "wheel report carries its position" `Quick
+          test_sgr_wheel_report_carries_its_position;
+        Alcotest.test_case "wheel report needs a whole position" `Quick
+          test_sgr_wheel_report_needs_a_whole_position;
         Alcotest.test_case "left press reports the row and column" `Quick
           test_sgr_left_press_reports_the_row_and_column;
         Alcotest.test_case "left press ignores releases, chords and wheel"

@@ -37,6 +37,7 @@ type openssh =
 
 type container_exec =
   { prefix : string list
+  ; probe_prefix : string list option
   ; container_name : string
   ; shim_path : string
   }
@@ -55,6 +56,48 @@ let lane_prefix = function
   | Container_exec _ -> "microvm_remote"
 ;;
 
+(* ── What the lane last did (RFC-0427 D-1) ──────────────────────────────
+   Each arm below is one return branch of [runner]: the class is decided
+   where the branch is, never read back out of the message text. The record
+   is a projection kept with the endpoint's shared state for the life of
+   this process, so a keeper asking [keeper_lane_status] hears what its own
+   dispatches met; a restart empties it, and empty is reported as empty. *)
+type dispatch_failure =
+  | Local_timeout
+  | Remote_timeout
+  | Transport_failed
+  | Shim_refused
+  | Trailer_disagreement
+
+type dispatch_record =
+  | Payload_finished of
+      { at : float
+      ; status : Unix.process_status
+      }
+  | Dispatch_failed of
+      { at : float
+      ; failure : dispatch_failure
+      ; detail : string
+      }
+
+type probe_report =
+  | Probe_not_asked
+  | Probe_answered of
+      { major : Exec_ssh_protocol.major
+      ; capabilities : string list
+      }
+  | Probe_failed of
+      { at : float
+      ; detail : string
+      }
+
+type lane_report =
+  { lane : string
+  ; endpoint : string
+  ; probe : probe_report
+  ; last_dispatch : dispatch_record option
+  }
+
 type shared_state =
   { semaphore : Eio.Semaphore.t
   ; first_dispatch_logged : bool Atomic.t
@@ -63,6 +106,16 @@ type shared_state =
        this process once asked (RFC-0422). [None] until a probe has run.
        The shim is a host-installed binary, so its answer changes only when
        the operator replaces it, and that comes with a server restart. *)
+  ; probe_major : Exec_ssh_protocol.major option Atomic.t
+    (* The protocol major the shim speaks, from the same probe. Every request
+       to this endpoint is framed in it, so a shim one release behind or
+       ahead of this server keeps running instead of refusing every frame;
+       [None] until asked, and the first dispatch asks. *)
+  ; last_probe_failure : (float * string) option Atomic.t
+    (* The most recent probe that did not answer, cleared by one that did.
+       [None] and no major means no probe has run yet. *)
+  ; last_dispatch : dispatch_record option Atomic.t
+    (* The most recent dispatch that reached the wire, by class. *)
   }
 
 (* Runner values are rebuilt per typed dispatch, while the session ceiling
@@ -83,6 +136,9 @@ let shared_state ~base_path ~name ~max_concurrent_sessions =
         { semaphore = Eio.Semaphore.make max_concurrent_sessions
         ; first_dispatch_logged = Atomic.make false
         ; probe_capabilities = Atomic.make None
+        ; probe_major = Atomic.make None
+        ; last_probe_failure = Atomic.make None
+        ; last_dispatch = Atomic.make None
         }
       in
       Hashtbl.add shared_states key state;
@@ -215,7 +271,9 @@ let transport_argv t =
 let probe_argv t =
   match t.transport with
   | Openssh o -> openssh_prefix o @ [ shim_command ^ " " ^ probe_flag ]
-  | Container_exec c -> c.prefix @ [ c.shim_path; probe_flag ]
+  | Container_exec c ->
+    let prefix = Option.value c.probe_prefix ~default:c.prefix in
+    prefix @ [ c.shim_path; probe_flag ]
 ;;
 
 let host_label t =
@@ -411,10 +469,108 @@ let log_first_dispatch t =
       c.container_name c.shim_path
 ;;
 
+let preflight_timeout_sec t = float_of_int t.connect_timeout_sec +. 5.0
+
+let run_probe t =
+  let status, stdout, stderr =
+    Process_eio.run_argv_with_stdin_and_status_split
+      ~timeout_sec:(preflight_timeout_sec t)
+      ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+      ~stdin_content:""
+      (probe_argv t)
+  in
+  let outcome =
+    match status with
+  | Unix.WEXITED 0 ->
+    (match Exec_ssh_protocol.parse_probe (String.trim stdout) with
+     | Error error ->
+       Error
+         (Printf.sprintf "%s: endpoint %s: %s" (code t "probe_invalid") t.name error)
+     | Ok probe ->
+       (match Exec_ssh_protocol.major_of_probe probe with
+        | Ok major ->
+          Atomic.set t.shared.probe_major (Some major);
+          Atomic.set t.shared.probe_capabilities (Some probe.capabilities);
+          Ok major
+        | Error detail ->
+          Error
+            (Printf.sprintf
+               "remote_shim_version_skew: endpoint %s: %s (remote reports %s)"
+               t.name detail probe.version)))
+  | Unix.WEXITED exit_code ->
+    Error
+      (Printf.sprintf
+         "%s: endpoint %s host %s exited %d: %s"
+         (code t "endpoint_unreachable") t.name (host_label t) exit_code
+         (Exec_policy.truncate_for_log stderr))
+  | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+    Error
+      (Printf.sprintf
+         "%s: endpoint %s host %s signal %d"
+         (code t "endpoint_unreachable") t.name (host_label t) signal)
+  in
+  (match outcome with
+   | Ok _ -> Atomic.set t.shared.last_probe_failure None
+   | Error detail ->
+     Atomic.set t.shared.last_probe_failure (Some (Unix.gettimeofday (), detail)));
+  outcome
+;;
+
+let report t =
+  let probe =
+    match Atomic.get t.shared.probe_major, Atomic.get t.shared.probe_capabilities with
+    | Some major, Some capabilities -> Probe_answered { major; capabilities }
+    | Some major, None -> Probe_answered { major; capabilities = [] }
+    | None, _ ->
+      (match Atomic.get t.shared.last_probe_failure with
+       | Some (at, detail) -> Probe_failed { at; detail }
+       | None -> Probe_not_asked)
+  in
+  { lane = lane_prefix t.transport
+  ; endpoint = t.name
+  ; probe
+  ; last_dispatch = Atomic.get t.shared.last_dispatch
+  }
+;;
+
+(* The protocol major this endpoint's shim speaks, asked once per endpoint
+   per process and remembered beside its capabilities. A shim that answers
+   no probe -- a guest not up yet, a stub in a test -- gets this build's
+   newest version, which is what the dispatch that follows would have sent
+   anyway; the failure it is about to meet is the transport's, and it will
+   say so in its own words. *)
+let wire_major t =
+  match Atomic.get t.shared.probe_major with
+  | Some major -> major
+  | None ->
+    (match run_probe t with
+     | Ok major -> major
+     | Error detail ->
+       Log.Keeper.info
+         ~keeper_name:t.keeper_name
+         "%s probe before the first dispatch failed; framing v%d: %s"
+         (lane_prefix t.transport)
+         Exec_ssh_protocol.protocol_version
+         detail;
+       Exec_ssh_protocol.newest)
+;;
+
 let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
+  (* A real remote exit/signal is [Ran]; a transport that failed before or
+     instead of producing one is [Transport_failed]. Every arm below that
+     used to return [Unix.WEXITED 1, _, <error>] was a transport failure the
+     old 3-tuple could not tell apart from grep's real exit 1 -- the silent
+     failure the read backend then read as "no match". *)
+  let ran status stdout stderr =
+    Masc_exec.Sandbox_target.Ran { status; stdout; stderr }
+  in
+  let transport_failed ?(stdout = "") ?(prefix_stderr = "") reason =
+    Masc_exec.Sandbox_target.Transport_failed
+      { reason; stdout; stderr = append_error prefix_stderr reason }
+  in
   fun ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd ->
     match wire_env t env with
-    | Error error -> Unix.WEXITED 1, "", error
+    | Error error -> transport_failed error
     | Ok env ->
       let injected = injected_env t in
       let env =
@@ -427,10 +583,10 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
       let stdin = Option.value stdin_content ~default:"" in
       let cwd = Option.value cwd ~default:t.remote_root in
       (match remote_cwd t cwd with
-       | Error error -> Unix.WEXITED 1, "", error
+       | Error error -> transport_failed error
        | Ok cwd ->
       let request : Exec_ssh_protocol.request =
-        { v = Exec_ssh_protocol.protocol_version
+        { v = wire_major t
         ; argv
         ; env
         ; cwd
@@ -441,7 +597,7 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
         }
       in
       (match Exec_ssh_protocol.encode_request request ~stdin with
-       | Error error -> Unix.WEXITED 1, "", error
+       | Error error -> transport_failed error
        | Ok frame ->
          if Atomic.compare_and_set t.shared.first_dispatch_logged false true
          then log_first_dispatch t;
@@ -482,16 +638,26 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
            let local_timed_out =
              Process_eio.exit_reason_of_status status = Process_eio.Timed_out
            in
+           let settle record triple =
+             Atomic.set t.shared.last_dispatch (Some record);
+             triple
+           in
+           let failed failure detail =
+             Dispatch_failed { at = Unix.gettimeofday (); failure; detail }
+           in
+           let finished status = Payload_finished { at = Unix.gettimeofday (); status } in
            match split_final_trailer raw_stderr with
            | Error detail ->
              flush_stderr_payload stderr_stream stderr_stream.tail;
              Option.iter Keeper_remote_path.finish_stream stderr_path_stream;
-             let error =
+             let failure, error =
                if local_timed_out
-               then local_timeout_error t budget
-               else transport_error t detail
+               then Local_timeout, local_timeout_error t budget
+               else Transport_failed, transport_error t detail
              in
-             Unix.WEXITED 1, rewrite stdout, append_error (rewrite raw_stderr) error
+             settle (failed failure error)
+               (transport_failed ~stdout:(rewrite stdout)
+                  ~prefix_stderr:(rewrite raw_stderr) error)
            | Ok (payload_stderr, trailer_bytes) ->
              let streamed_payload =
                match split_final_trailer stderr_stream.tail with
@@ -504,40 +670,42 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
              let payload_stderr = rewrite payload_stderr in
              (match local_timed_out, transport_failure t status with
               | true, _ ->
-                ( Unix.WEXITED 1
-                , stdout
-                , append_error payload_stderr (local_timeout_error t budget) )
+                let error = local_timeout_error t budget in
+                settle (failed Local_timeout error)
+                  (transport_failed ~stdout ~prefix_stderr:payload_stderr error)
               | false, Some detail ->
-                ( Unix.WEXITED 1
-                , stdout
-                , append_error payload_stderr (transport_error t detail) )
+                let error = transport_error t detail in
+                settle (failed Transport_failed error)
+                  (transport_failed ~stdout ~prefix_stderr:payload_stderr error)
               | false, None ->
                 (match Exec_ssh_protocol.parse_trailer trailer_bytes with
                  | Error error ->
-                   ( Unix.WEXITED 1
-                   , stdout
-                   , append_error payload_stderr (transport_error t error) )
+                   let error = transport_error t error in
+                   settle (failed Transport_failed error)
+                     (transport_failed ~stdout ~prefix_stderr:payload_stderr error)
                  | Ok trailer
                    when trailer.timed_out && status = Unix.WEXITED 0 ->
-                   ( Unix.WEXITED 1
-                   , stdout
-                   , append_error payload_stderr
-                       (remote_timeout_error t timeout_sec) )
+                   let error = remote_timeout_error t timeout_sec in
+                   settle (failed Remote_timeout error)
+                     (transport_failed ~stdout ~prefix_stderr:payload_stderr error)
                  | Ok { shim_error = Some error; _ }
                    when status = Unix.WEXITED 1 ->
-                   Unix.WEXITED 1, stdout, append_error payload_stderr error
+                   settle (failed Shim_refused error)
+                     (transport_failed ~stdout ~prefix_stderr:payload_stderr error)
                  | Ok { exit = Some code; signal = None; shim_error = None; _ }
                    when status = Unix.WEXITED 0 ->
-                   Unix.WEXITED code, stdout, payload_stderr
+                   settle (finished (Unix.WEXITED code))
+                     (ran (Unix.WEXITED code) stdout payload_stderr)
                  | Ok { signal = Some signal; exit = None; shim_error = None; _ }
                    when status = Unix.WEXITED 0 ->
-                   Unix.WSIGNALED signal, stdout, payload_stderr
+                   settle (finished (Unix.WSIGNALED signal))
+                     (ran (Unix.WSIGNALED signal) stdout payload_stderr)
                  | Ok _ ->
-                   ( Unix.WEXITED 1
-                   , stdout
-                   , append_error payload_stderr
-                       (transport_error t
-                          "transport status and result trailer disagree") ))))))
+                   let error =
+                     transport_error t "transport status and result trailer disagree"
+                   in
+                   settle (failed Trailer_disagreement error)
+                     (transport_failed ~stdout ~prefix_stderr:payload_stderr error))))))
 ;;
 
 (* ── Preflight ───────────────────────────────────────────────────────── *)
@@ -577,45 +745,6 @@ let store_preflight ~now t result =
       { checked_at = now; result })
 ;;
 
-let preflight_timeout_sec t = float_of_int t.connect_timeout_sec +. 5.0
-
-let run_probe t =
-  let status, stdout, stderr =
-    Process_eio.run_argv_with_status_split
-      ~timeout_sec:(preflight_timeout_sec t)
-      ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
-      (probe_argv t)
-  in
-  match status with
-  | Unix.WEXITED 0 ->
-    (match Exec_ssh_protocol.parse_probe (String.trim stdout) with
-     | Error error ->
-       Error
-         (Printf.sprintf "%s: endpoint %s: %s" (code t "probe_invalid") t.name error)
-     | Ok probe ->
-       let want = string_of_int Exec_ssh_protocol.protocol_version in
-       if Exec_ssh_protocol.probe_major_compatible ~want probe.version
-       then (
-         Atomic.set t.shared.probe_capabilities (Some probe.capabilities);
-         Ok ())
-       else
-         Error
-           (Printf.sprintf
-              "remote_shim_version_skew: endpoint %s requires major %s but remote reports %s"
-              t.name want probe.version))
-  | Unix.WEXITED exit_code ->
-    Error
-      (Printf.sprintf
-         "%s: endpoint %s host %s exited %d: %s"
-         (code t "endpoint_unreachable") t.name (host_label t) exit_code
-         (Exec_policy.truncate_for_log stderr))
-  | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
-    Error
-      (Printf.sprintf
-         "%s: endpoint %s host %s signal %d"
-         (code t "endpoint_unreachable") t.name (host_label t) signal)
-;;
-
 (* Whether this endpoint's shim can build the box (RFC-0422). The shim says
    so itself through the probe's [capabilities], so the answer is the
    binary's rather than a guess from the profile; a guest whose shim
@@ -632,7 +761,7 @@ let observe_supported t =
   | Some capabilities -> advertised capabilities
   | None ->
     (match run_probe t with
-     | Ok () ->
+     | Ok _major ->
        (match Atomic.get t.shared.probe_capabilities with
         | Some capabilities -> advertised capabilities
         | None -> false)
@@ -662,8 +791,9 @@ let preflight_argv_for_log argv =
 let run_preflight_command t ~error_code argv =
   let run = runner ~timeout_sec:(preflight_timeout_sec t) t in
   let status, stdout, stderr =
-    run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
-      ~argv ~env:[||] ~cwd:(Some t.remote_root)
+    Masc_exec.Sandbox_target.status_tuple
+      (run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+         ~argv ~env:[||] ~cwd:(Some t.remote_root))
   in
   match status with
   | Unix.WEXITED 0 -> Ok stdout
@@ -701,8 +831,9 @@ let github_api_probe_argv =
 let github_transport t =
   let run = runner ~timeout_sec:(preflight_timeout_sec t) t in
   let status, _stdout, _stderr =
-    run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
-      ~argv:github_api_probe_argv ~env:[||] ~cwd:(Some t.remote_root)
+    Masc_exec.Sandbox_target.status_tuple
+      (run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+         ~argv:github_api_probe_argv ~env:[||] ~cwd:(Some t.remote_root))
   in
   match status with
   | Unix.WEXITED 0 -> Api_reachable
@@ -732,7 +863,7 @@ let available_kib output =
 ;;
 
 let perform_preflight t =
-  let* () = run_probe t in
+  let* (_ : Exec_ssh_protocol.major) = run_probe t in
   let* _ =
     run_preflight_command t ~error_code:"remote_git_unavailable"
       [ "git"; "--version" ]

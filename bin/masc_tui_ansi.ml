@@ -82,7 +82,34 @@ module Theme = struct
     ; quiet : string
     ; probe : string
     ; message : string
+    (* Six slots for an axis whose members are kinds, not degrees. A file
+       type, a goal phase, a sandbox: nothing in such a set outranks its
+       siblings and the reader's only job is to tell them apart, which is
+       neither what [ok]/[warn]/[bad] say nor what [tone] says. Without
+       them a surface reaches past the theme for a colour name, and a
+       constant SGR does not move when the terminal palette answers -- so
+       the rows saying "kind" were the ones a theme could not reach.
+
+       Numbered, not named. Two axes never on the same screen can hold the
+       same slot, and a global kind-to-colour map runs out of colours: the
+       theme knows seven, one of which recedes. Six is the ceiling, and an
+       axis wider than that needs a channel other than colour. RFC-0427. *)
+    ; slot_1 : string
+    ; slot_2 : string
+    ; slot_3 : string
+    ; slot_4 : string
+    ; slot_5 : string
+    ; slot_6 : string
     }
+
+  (* A slot, so the accessor below is total. *)
+  type category =
+    | Slot_1
+    | Slot_2
+    | Slot_3
+    | Slot_4
+    | Slot_5
+    | Slot_6
 
   let resolved_cache : resolved option Atomic.t = Atomic.make None
 
@@ -113,11 +140,32 @@ module Theme = struct
         ; quiet = of_colour Masc_tui_theme.Bright_black
         ; probe = of_colour Masc_tui_theme.Bright_cyan
         ; message = of_colour Masc_tui_theme.Bright_magenta
+        (* All six the theme has that are not the receding one. Red sits
+           here because a categorical surface carries no status reading --
+           the file list it first serves has no well or unwell -- and
+           dropping it would leave five slots for a six-member axis. *)
+        ; slot_1 = of_colour Masc_tui_theme.Bright_cyan
+        ; slot_2 = of_colour Masc_tui_theme.Bright_yellow
+        ; slot_3 = of_colour Masc_tui_theme.Bright_green
+        ; slot_4 = of_colour Masc_tui_theme.Bright_magenta
+        ; slot_5 = of_colour Masc_tui_theme.Bright_blue
+        ; slot_6 = of_colour Masc_tui_theme.Bright_red
         }
       in
       if Atomic.compare_and_set resolved_cache previous (Some next) then next
       else resolved ()
   ;;
+
+  (* Which slot a surface gives to which member is the surface's own
+     business; this only promises the six are distinct and that all six
+     move when the palette does. *)
+  let category = function
+    | Slot_1 -> (resolved ()).slot_1
+    | Slot_2 -> (resolved ()).slot_2
+    | Slot_3 -> (resolved ()).slot_3
+    | Slot_4 -> (resolved ()).slot_4
+    | Slot_5 -> (resolved ()).slot_5
+    | Slot_6 -> (resolved ()).slot_6
 
   let ok () = (resolved ()).ok
   let warn () = (resolved ()).warn
@@ -179,6 +227,29 @@ module Theme = struct
            (Some (generation, style))
       then style
       else recede ()
+  ;;
+
+  (* The Activity pane's ground, rebuilt only when the palette changes, for
+     the same reason [recede] is: it is read once per drawn pane row. *)
+  let side_pane_background_cache : (int * string) option Atomic.t =
+    Atomic.make None
+
+  let rec side_pane_background () =
+    let probed = Masc_tui_terminal_palette.snapshot () in
+    let generation = Masc_tui_terminal_palette.snapshot_generation probed in
+    let previous = Atomic.get side_pane_background_cache in
+    match previous with
+    | Some (cached_generation, style) when cached_generation = generation ->
+      style
+    | Some _ | None ->
+      let style =
+        Masc_tui_theme.side_pane_background
+          (Masc_tui_terminal_palette.snapshot_palette probed)
+      in
+      if Atomic.compare_and_set side_pane_background_cache previous
+           (Some (generation, style))
+      then style
+      else side_pane_background ()
   ;;
 
   module Syntax = struct

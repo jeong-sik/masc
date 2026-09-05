@@ -61,15 +61,29 @@ let add_lines value acc =
   |> String.split_on_char '\n'
   |> List.fold_left (fun acc line -> add_value line acc) acc
 
-let values_from_file path acc =
+(* A snapshot is a function of the bytes of its source files. Building one
+   reads every file and compiles one regex per value, and a fresh [Re.re]
+   starts with an empty DFA that [Re.replace_string] fills again on first
+   use. Chat loads, connector deliveries and stream projections asked for a
+   snapshot per call, and on 2026-09-05 regex compilation was 35% of the
+   main domain's busy time (RFC main-domain-scheduler-latency §8.8). The
+   walk is therefore split in two: enumerating the regular files with the
+   stat that identifies their bytes, then reading them. A call always
+   enumerates; it reads and compiles only when a stamp differs from the one
+   memoised for the same request key on the same domain. *)
+type extraction =
+  | Whole_and_lines
+  | Whole_lines_and_mapping_scalars
+
+type source =
+  { source_path : string
+  ; extraction : extraction
+  ; st : Unix.stats
+  }
+
+let regular_file_source extraction path acc =
   match lstat_opt path with
-  | Some st when st.Unix.st_kind = Unix.S_REG ->
-      (match read_regular_file path st with
-       | None -> acc
-       | Some value ->
-           acc
-           |> add_value (strip_one_final_newline value)
-           |> add_lines value)
+  | Some st when st.Unix.st_kind = Unix.S_REG -> { source_path = path; extraction; st } :: acc
   | _ -> acc
 
 let strip_matching_quotes value =
@@ -111,19 +125,7 @@ let add_mapping_scalar_values ~(redact_identity_scalars : bool) value acc =
             else acc)
        acc
 
-let values_from_structured_secret_file ~(redact_identity_scalars : bool) path acc =
-  match lstat_opt path with
-  | Some st when st.Unix.st_kind = Unix.S_REG ->
-      (match read_regular_file path st with
-       | None -> acc
-       | Some value ->
-           acc
-           |> add_value (strip_one_final_newline value)
-           |> add_lines value
-           |> add_mapping_scalar_values ~redact_identity_scalars value)
-  | _ -> acc
-
-let collect_env_values env_root acc =
+let env_sources env_root acc =
   if not (path_exists env_root) then acc
   else
     match lstat_opt env_root with
@@ -132,13 +134,14 @@ let collect_env_values env_root acc =
            Sys.readdir env_root
            |> Array.to_list
            |> List.fold_left
-                (fun acc name -> values_from_file (Filename.concat env_root name) acc)
+                (fun acc name ->
+                   regular_file_source Whole_and_lines (Filename.concat env_root name) acc)
                 acc
          with
          | Sys_error _ -> acc)
     | _ -> acc
 
-let collect_file_values files_root acc =
+let files_tree_sources files_root acc =
   let rec walk path acc =
     match lstat_opt path with
     | Some st when st.Unix.st_kind = Unix.S_DIR ->
@@ -151,10 +154,35 @@ let collect_file_values files_root acc =
          with
          | Sys_error _ -> acc)
     | Some st when st.Unix.st_kind = Unix.S_REG ->
-        values_from_file path acc
+        { source_path = path; extraction = Whole_and_lines; st } :: acc
     | _ -> acc
   in
   if path_exists files_root then walk files_root acc else acc
+
+let sources ~additional_secret_files ~base_path ~keeper_name =
+  Keeper_secret_projection.secret_roots ~base_path ~keeper_name
+  |> List.fold_left
+       (fun acc info ->
+          let env_root = Filename.concat info.Keeper_secret_projection.root "env" in
+          let files_root = Filename.concat info.Keeper_secret_projection.root "files" in
+          acc |> env_sources env_root |> files_tree_sources files_root)
+       []
+  |> regular_file_source Whole_and_lines (ssh_remote_token_file ~base_path ~keeper_name)
+  |> fun acc ->
+  List.fold_left
+    (fun acc path -> regular_file_source Whole_lines_and_mapping_scalars path acc)
+    acc
+    additional_secret_files
+
+let values_of_source ~(redact_identity_scalars : bool) { source_path; extraction; st } acc =
+  match read_regular_file source_path st with
+  | None -> acc
+  | Some value ->
+      let acc = acc |> add_value (strip_one_final_newline value) |> add_lines value in
+      (match extraction with
+       | Whole_and_lines -> acc
+       | Whole_lines_and_mapping_scalars ->
+           add_mapping_scalar_values ~redact_identity_scalars value acc)
 
 let dedupe values =
   let tbl = Hashtbl.create 32 in
@@ -167,39 +195,91 @@ let dedupe values =
   |> List.sort (fun a b ->
        compare (String.length b, b) (String.length a, a))
 
+let build ~redact_identity_scalars sources =
+  let values =
+    List.fold_left
+      (fun acc source -> values_of_source ~redact_identity_scalars source acc)
+      []
+      sources
+    |> dedupe
+  in
+  let patterns = List.map (fun value -> Re.compile (Re.str value)) values in
+  let max_exact_value_len =
+    List.fold_left (fun longest value -> max longest (String.length value)) 0 values
+  in
+  { patterns; exact_values = values; max_exact_value_len }
+
+(* The memo is per domain: a compiled [Re.re] fills its DFA tables lazily
+   while matching, so one must not be shared between domains. Fibers of one
+   domain interleave only at suspension points and matching has none. *)
+type memo_key =
+  { key_base_path : string
+  ; key_keeper_name : string
+  ; key_redact_identity_scalars : bool
+  ; key_additional_secret_files : string list
+  }
+
+type source_stamp =
+  { stamp_path : string
+  ; device : int
+  ; inode : int
+  ; size : int
+  ; mtime : float
+  }
+
+type memo_entry =
+  { key : memo_key
+  ; stamps : source_stamp list
+  ; snapshot : t
+  }
+
+let key_equal a b =
+  String.equal a.key_base_path b.key_base_path
+  && String.equal a.key_keeper_name b.key_keeper_name
+  && Bool.equal a.key_redact_identity_scalars b.key_redact_identity_scalars
+  && List.equal String.equal a.key_additional_secret_files b.key_additional_secret_files
+
+let stamp_equal a b =
+  String.equal a.stamp_path b.stamp_path
+  && Int.equal a.device b.device
+  && Int.equal a.inode b.inode
+  && Int.equal a.size b.size
+  && Float.equal a.mtime b.mtime
+
+let memo : memo_entry list ref Domain.DLS.key = Domain.DLS.new_key (fun () -> ref [])
+
+let stamp_of_source { source_path; st; extraction = _ } =
+  { stamp_path = source_path
+  ; device = st.Unix.st_dev
+  ; inode = st.Unix.st_ino
+  ; size = st.Unix.st_size
+  ; mtime = st.Unix.st_mtime
+  }
+
 let snapshot_with_additional_secret_files
       ~(redact_identity_scalars : bool)
       ~additional_secret_files
       ~base_path
       ~keeper_name
   =
-  let values =
-    Keeper_secret_projection.secret_roots ~base_path ~keeper_name
-    |> List.fold_left
-         (fun acc info ->
-            let env_root = Filename.concat info.Keeper_secret_projection.root "env" in
-            let files_root =
-              Filename.concat info.Keeper_secret_projection.root "files"
-            in
-            acc |> collect_env_values env_root |> collect_file_values files_root)
-         []
-    |> fun values ->
-    values_from_file (ssh_remote_token_file ~base_path ~keeper_name) values
-    |> fun values ->
-    List.fold_left
-      (fun acc path ->
-         values_from_structured_secret_file ~redact_identity_scalars path acc)
-      values
-      additional_secret_files
-    |> dedupe
+  let sources = sources ~additional_secret_files ~base_path ~keeper_name in
+  let key =
+    { key_base_path = base_path
+    ; key_keeper_name = keeper_name
+    ; key_redact_identity_scalars = redact_identity_scalars
+    ; key_additional_secret_files = additional_secret_files
+    }
   in
-  let patterns =
-    List.map (fun value -> Re.compile (Re.str value)) values
-  in
-  let max_exact_value_len =
-    List.fold_left (fun longest value -> max longest (String.length value)) 0 values
-  in
-  { patterns; exact_values = values; max_exact_value_len }
+  let stamps = List.map stamp_of_source sources in
+  let entries = Domain.DLS.get memo in
+  match List.find_opt (fun entry -> key_equal entry.key key) !entries with
+  | Some entry when List.equal stamp_equal entry.stamps stamps -> entry.snapshot
+  | Some _ | None ->
+      let snapshot = build ~redact_identity_scalars sources in
+      entries
+        := { key; stamps; snapshot }
+           :: List.filter (fun entry -> not (key_equal entry.key key)) !entries;
+      snapshot
 
 let snapshot ~base_path ~keeper_name =
   snapshot_with_additional_secret_files
@@ -325,3 +405,7 @@ let rec redact_json_exact t = function
 
 let redact_json t json =
   json |> redact_json_exact t |> Observability_redact.redact_json_strings
+
+module For_testing = struct
+  let shares_compiled_patterns a b = a.patterns == b.patterns
+end

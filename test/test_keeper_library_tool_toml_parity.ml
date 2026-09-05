@@ -28,11 +28,15 @@ let rec sorted (json : Yojson.Safe.t) : Yojson.Safe.t =
 (* name, description, input_schema (keys sorted) *)
 let expected =
   [ ( {|keeper_library_search|}
-    , {|Search the knowledge library by keyword. Returns matching document titles, relevance scores (0-1), and text snippets. Use to discover relevant docs before reading full content with keeper_library_read.|}
+    , {|Search the knowledge library by keyword.
+
+Returns matching document titles, relevance scores (0-1), and text snippets. Use to discover relevant docs before reading full content with keeper_library_read.|}
     , {|{"properties":{"query":{"description":"Search query string; empty or missing returns a workflow error","type":"string"}},"type":"object"}|}
     )
   ; ( {|keeper_library_read|}
-    , {|Read a full document from the knowledge library by exact topic name. Use after keeper_library_search identifies a relevant document, or with a known topic name. Returns full document text.|}
+    , {|Read a full document from the knowledge library by exact topic name.
+
+Use after keeper_library_search identifies a relevant document, or with a known topic name. Returns full document text.|}
     , {|{"properties":{"topic":{"description":"Exact document topic name (from search results or known)","type":"string"}},"required":["topic"],"type":"object"}|}
     )
   ]

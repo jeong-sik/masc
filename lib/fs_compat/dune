@@ -18,6 +18,7 @@
   publication_recovery_access
   atomic_write
   blocking_write
+  execution_context
   fd_write_all
   atomic_orphan_size_class)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)

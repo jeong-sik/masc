@@ -65,9 +65,11 @@ let guest_constraint_to_string = function
 ;;
 
 (* Where the guest's shim makes a boxed request's scratch (RFC-0422). The
-   boot mounts an in-memory filesystem here and the shim's config names the
-   same path as [scratch_root]; one value, so the two cannot drift apart. *)
-let scratch_guest_root = "/tmp"
+   boot mounts an in-memory filesystem here, and it is the shim's own
+   default when its config names no [scratch_root]; one constant on both
+   sides, so the two cannot drift apart without the host writing a key an
+   older shim would refuse. *)
+let scratch_guest_root = Exec_ssh_protocol.default_scratch_root
 
 type constraint_class =
   | Isolation

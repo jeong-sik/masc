@@ -22,10 +22,6 @@ val default_window : int
 (** Number of samples the ring keeps. With {!default_interval_s} that is the
     last minute. *)
 
-val stall_threshold_s : float
-(** A sample at or above this is counted separately as a stall: one second is
-    the order at which a two-second TUI refresh visibly misses its cadence. *)
-
 val create : ?interval_s:float -> ?window:int -> unit -> t
 (** [create ()] is an empty ring that has not started a probe.
     @raise Invalid_argument when [interval_s] or [window] is not positive. *)
@@ -40,7 +36,7 @@ type summary =
   ; p99_ms : float
   ; max_ms : float
   ; mean_ms : float
-  ; stalls : int  (** samples at or above {!stall_threshold_s} *)
+  ; stalls : int  (** samples at or above [stall_threshold_s] *)
   }
 
 val summarize : t -> summary option

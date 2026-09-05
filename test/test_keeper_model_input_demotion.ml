@@ -395,6 +395,36 @@ let plan_honours_a_monotonic_boundary () =
     demoted
 ;;
 
+(* 길이를 재려고 메시지를 문자열로 만들던 것을 재사용 버퍼로 바꿨다
+   ([message_measurer]). [Yojson.Safe.to_string] 이 곧 [to_buffer] 다음
+   [Buffer.contents] 이므로 바이트 수가 같아야 한다. 이스케이프가 필요한 문자와
+   멀티바이트에서 특히 그렇고, 버퍼를 비우지 않으면 두 번째 측정부터 커진다. *)
+let measurer_counts_the_same_bytes_as_to_string () =
+  let measure =
+    Masc.Keeper_turn_driver_try_provider.For_testing.message_measurer ()
+  in
+  let cases =
+    [ "empty body", assistant ""
+    ; "plain ascii", assistant "a plain assistant body"
+    ; "quotes and backslashes", assistant {|he said "hi\\" and left|}
+    ; "control characters", assistant "line\nbreak\ttab\r"
+    ; "multibyte", assistant "\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4, emoji \xf0\x9f\x99\x82"
+    ; "long tool result", tool_message ~id:"call-long" (String.make 5000 'x')
+    ; "short after long", assistant "short"
+    ]
+  in
+  List.iter
+    (fun (label, message) ->
+       Alcotest.(check int) label (measure_message_bytes message) (measure message))
+    cases;
+  (* 같은 measurer 로 같은 메시지를 다시 재도 같아야 한다: 버퍼가 쌓이면 깨진다. *)
+  let repeated = assistant "measured twice" in
+  Alcotest.(check int)
+    "a measurer reused on one message"
+    (measure repeated)
+    (measure repeated)
+;;
+
 (* The production pipeline measures the raw history, rewrites only atoms below
    that cut, then measures the planned list. This fixture makes every atom
    eligible so the per-projection identity cache must reuse every candidate
@@ -690,6 +720,12 @@ let () =
             "still oversized after demotion reports the true magnitude"
             `Quick
             still_oversized_after_demotion_reports_true_magnitude
+        ] )
+    ; ( "measurement"
+      , [ Alcotest.test_case
+            "the measurer counts the same bytes as to_string"
+            `Quick
+            measurer_counts_the_same_bytes_as_to_string
         ] )
     ]
 ;;

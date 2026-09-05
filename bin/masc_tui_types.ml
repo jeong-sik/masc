@@ -2664,6 +2664,19 @@ type state = {
      contract as the roster: hidden is the reader's choice and survives a
      resize; the width is the terminal's. *)
   mutable acting_pane_hidden: bool;
+  (* Rows scrolled into the pane's full list; zero is the overview. The
+     renderer clamps it to what the list holds and a toggle resets it. *)
+  mutable acting_pane_scroll: int;
+  (* Which of the pane's two readings is up. Survives a toggle: a reader
+     who put the pane away on Changes gets Changes back. *)
+  mutable acting_pane_tab: Masc_tui_acting_pane.tab;
+  (* The selected keeper's recorded file changes, keyed by keeper name, for
+     the pane's Changes tab. Refetched when the feed shows that keeper
+     complete a tool call and on the operator cadence. *)
+  mutable acting_pane_changes:
+    (string, Tui_decode.file_change_snapshot) Masc_tui_fetched.t;
+  (* When the answer on screen landed, so the tab can say how old it is. *)
+  mutable acting_pane_changes_at: float option;
   (* Derived display phase for the selected long name in the narrow roster.
      The main loop advances it only while that roster is visible. *)
   mutable roster_marquee_frame: int;
@@ -3227,6 +3240,22 @@ type state = {
   mutable repository_changes_diff_path: string option;
   mutable repository_changes_diff_scroll: int;
   mutable repository_changes_return_chat: bool;
+  (* Interactive patch review modal: 3D drop-shadow overlay for reviewing
+     and resolving pending code changes, git diffs, and approval gates. *)
+  mutable patch_modal_open: bool;
+  mutable patch_modal_scroll: int;
+  mutable patch_modal_path: string option;
+  mutable patch_modal_diff: (string * Tui_decode.git_diff) option;
+  mutable patch_modal_error: string option;
+  (* Web Link Preview and Rich Embed modal & settings *)
+  mutable link_modal_open: bool;
+  mutable link_modal_scroll: int;
+  mutable link_modal_url: string option;
+  mutable link_modal_links: string list;
+  mutable link_modal_cursor: int;
+  mutable link_previews_mode: [ `Rich | `Compact | `Off ];
+  (* Real-time Token Burn Velocity and Financial HUD *)
+  mutable burn_hud_visible: bool;
   (* Code surface: one directory level at a time through the lazy /children
      route; the file arrives whole and is lexed once at load. *)
   mutable code_dir: string;
@@ -4002,6 +4031,10 @@ let create_state
   context_inspector_turn_back = 0;
   roster_pane_hidden = false;
   acting_pane_hidden = false;
+  acting_pane_scroll = 0;
+  acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;
+  acting_pane_changes = Masc_tui_fetched.initial;
+  acting_pane_changes_at = None;
   roster_marquee_frame = 0;
   activity_frame = -1;
   keeper_detail_focus = Right_pane;
@@ -4282,6 +4315,18 @@ let create_state
   repository_changes_diff_path = None;
   repository_changes_diff_scroll = 0;
   repository_changes_return_chat = false;
+  patch_modal_open = false;
+  patch_modal_scroll = 0;
+  patch_modal_path = None;
+  patch_modal_diff = None;
+  patch_modal_error = None;
+  link_modal_open = false;
+  link_modal_scroll = 0;
+  link_modal_url = None;
+  link_modal_links = [];
+  link_modal_cursor = 0;
+  link_previews_mode = `Rich;
+  burn_hud_visible = false;
   code_dir = "";
   code_entries = [];
   code_entries_error = None;
@@ -4854,13 +4899,12 @@ let palette_starts_with ~needle haystack =
 
 let palette_contains ~needle haystack =
   let h = String.lowercase_ascii haystack in
-  let n_str = String.lowercase_ascii needle in
-  let n = String.length n_str and hl = String.length h in
+  let n = String.length needle and hl = String.length h in
   if n = 0 then true
   else begin
     let found = ref false in
     for start = 0 to hl - n do
-      if (not !found) && String.equal (String.sub h start n) n_str then
+      if (not !found) && String.equal (String.sub h start n) needle then
         found := true
     done;
     !found
@@ -5267,6 +5311,86 @@ let approval_items (state : state) =
   List.map (fun held -> Keeper_tool_row held) state.keeper_tool_approvals
   @ List.map (fun pending -> Gate_row pending) state.gate_pending
   @ List.map (fun item -> Operator_row item) (operator_approval_items state)
+
+let is_surface_active (state : state) (s : surface) =
+  match s with
+  | Metrics -> false
+  | Approvals ->
+      state.view = Approvals || List.length (approval_items state) > 0
+  | _ -> true
+;;
+
+let visible_surface_ring (state : state) : (surface * string) list =
+  List.filter (fun (s, _) -> is_surface_active state s) surface_ring
+;;
+
+let visible_surface_ring_index (state : state) (view : surface) =
+  let ring = visible_surface_ring state in
+  let family =
+    match view with
+    | Keepers _ -> Keepers Keeper_list
+    | Verification | Harness -> Planning
+    | Changes | Connectors | Schedules -> Keepers Keeper_list
+    | Lanes -> Runtime
+    | Clients -> Runtime
+    | Code -> Repositories
+    | Resources | Tools -> Config
+    | System_logs -> Acting
+    | Metrics -> Overview
+    | v -> v
+  in
+  let rec find i = function
+    | [] -> 0
+    | (surface, _) :: rest -> if surface = family then i else find (i + 1) rest
+  in
+  find 0 ring
+;;
+
+let braille_sparkline values =
+  if values = [] then "⣀⡠⠤⠶"
+  else
+    let max_v = List.fold_left max 0.0001 values in
+    let levels = [| " "; "⡀"; "⣀"; "⣄"; "⣤"; "⣦"; "⣶"; "⣷"; "⣿" |] in
+    let glyphs =
+      List.map
+        (fun v ->
+          let ratio = max 0.0 (min 1.0 (v /. max_v)) in
+          let idx = min 8 (int_of_float (ratio *. 8.0)) in
+          levels.(idx))
+        values
+    in
+    String.concat "" glyphs
+;;
+
+let fleet_token_sparkline (state : state) =
+  let tokens =
+    List.map (fun (k : keeper) -> float_of_int k.k_total_tokens) state.keepers
+  in
+  braille_sparkline tokens
+;;
+
+let fleet_total_cost_usd (state : state) =
+  List.fold_left (fun acc (k : keeper) -> acc +. k.k_total_cost_usd) 0.0 state.keepers
+;;
+
+let conversation_urls (state : state) : string list =
+  let seen = Hashtbl.create 16 in
+  let acc = ref [] in
+  let scan (e : msg_entry) =
+    let urls = Masc_tui_message_layout.bare_urls e.me_text in
+    List.iter
+      (fun u ->
+         if not (Hashtbl.mem seen u) then begin
+           Hashtbl.add seen u ();
+           acc := u :: !acc
+         end)
+      urls
+  in
+  List.iter scan state.msg_history;
+  List.iter scan state.msg_loaded;
+  List.rev !acc
+;;
+
 
 
 let surface_row_texts (state : state) : surface -> string list option = function

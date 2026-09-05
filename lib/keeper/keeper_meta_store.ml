@@ -677,57 +677,6 @@ let read_effective_meta config name
   | Error _ as err -> err
 ;;
 
-(** Read keeper meta only if the file's mtime has changed since [last_mtime].
-    Returns [Some (meta, new_mtime)] when the file changed, [None] when
-    unchanged. Avoids parsing JSON on every heartbeat cycle when no
-    operator has modified the meta file. *)
-let read_meta_if_changed config name ~(last_mtime : float) : (Keeper_meta_contract.keeper_meta * float) option =
-  let requested_name = String.trim name in
-  let read_candidate candidate =
-    let path = keeper_meta_path config candidate in
-    if not (Fs_compat.file_exists path)
-    then (
-      Problem_report_state.clear ~site:Meta_read_changed ~path;
-      None)
-    else (
-      match Fs_compat.file_mtime path with
-      | Some mtime when mtime > last_mtime ->
-        (match
-           read_meta_file_path ~ownership_root:config.Workspace.base_path path
-         with
-         | Ok (Some meta) ->
-           Problem_report_state.clear ~site:Meta_read_changed ~path;
-           Some (meta, mtime)
-         | Ok None ->
-           Problem_report_state.clear ~site:Meta_read_changed ~path;
-           None
-         | Error msg ->
-           (* Issue #8377: was [_ -> None] which silently treated a
-              read/parse failure as "no change". Now logs so an
-              operator can correlate stale UI with bad meta JSON.
-              Issue #28844: the mtime gate alone does not bound the WARN
-              when a live writer keeps touching a still-broken file, so the
-              WARN is deduped on the failure detail like the other sites. *)
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string MetaReadFailures)
-             ~labels:[("keeper", "aggregate"); ("site", "changed_parse")]
-             ();
-           if Problem_report_state.should_report
-                ~site:Meta_read_changed
-                ~path
-                ~detail:msg
-           then
-             Log.Keeper.warn
-               "read_meta_if_changed: parse failed for %s (mtime=%.0f): %s"
-               path
-               mtime
-               msg;
-           None)
-      | _ -> None)
-  in
-  read_candidate requested_name
-;;
-
 let replace_snapshot config (persisted : Keeper_meta_contract.keeper_meta) =
   let path = keeper_meta_path config persisted.name in
   persist_snapshot ~ownership_root:config.Workspace.base_path path persisted

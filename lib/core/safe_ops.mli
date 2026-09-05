@@ -126,16 +126,6 @@ val report_persistence_read_drop_counted :
     surface uses: [masc_persistence_read_drops_total] incremented with
     labels [surface] and [reason]. *)
 
-val result_to_option_logged :
-  on_drop:(unit -> unit) ->
-  surface:string ->
-  reason:Read_drop_reason.t ->
-  path:string ->
-  ('a, string) result ->
-  'a option
-(** Convert a [Result] into an option while reporting [Error] as an
-    observable persisted-read drop. *)
-
 val read_json_eio : string -> Yojson.Safe.t
 (** Read JSON file via Eio-native I/O (Fs_compat).
     Drop-in replacement for [Yojson.Safe.from_file] in Eio fiber contexts. *)

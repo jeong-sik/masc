@@ -23,6 +23,17 @@ dune build bin/masc_tui.exe
 
 ---
 
+## 화면 모습
+
+세 화면입니다. 실제 런타임에서 찍었고, Keeper 이름·작업 제목·경로는 같은 폭의
+대역으로 바꿔 두었습니다.
+
+![Overview — 함대 상태 한 줄, 주의가 필요한 Keeper, 작업 목록](/01-overview.png)
+
+![Keepers — Keeper 한 명당 한 줄로 상태, 오토부트, 샌드박스, 런타임, 맡은 작업](/02-keepers.png)
+
+![Activity — 모든 Keeper 의 도구 호출과 턴 경계를 최신순으로](/06-activity.png)
+
 ## 서피스 링
 
 `Tab` 및 `Shift+Tab`으로 아래 순서대로 순환합니다. 상단 스트립에 같은 순서로 표시됩니다.

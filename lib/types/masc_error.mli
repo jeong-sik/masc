@@ -43,7 +43,6 @@ module Auth_error : sig
     | SameOriginBlocked
     | TokenExpired of string
     | InvalidToken of string
-  val unauthorized_reason_to_string : unauthorized_reason -> string
   val to_string : t -> string
 end
 

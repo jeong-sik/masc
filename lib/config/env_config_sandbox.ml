@@ -169,9 +169,6 @@ module Shell_timeout = struct
     | Cleanup_rm -> "cleanup_rm"
     | Unknown s -> s
 
-  let known_buckets () =
-    [ Io; Read; User_max; Cleanup_rm ]
-
   let known_default_sec = function
     | Io -> Some 30.0
     | Read -> Some 15.0

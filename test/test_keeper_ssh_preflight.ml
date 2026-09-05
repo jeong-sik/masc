@@ -56,12 +56,13 @@ let stub_main () =
       write_all Unix.stderr "connection refused";
       exit 255
     | "skew" ->
-      (* One major behind whatever the host speaks: the skew is the fact
-         under test, not the number. *)
+      (* One major past whatever this build speaks: the skew is the fact
+         under test, not the number. (One behind is v2, which this build
+         still speaks, so it would not be a skew.) *)
       write_all Unix.stdout
         (Printf.sprintf
            {|{"name":"masc-exec-shim","version":"%d.0.0","capabilities":[]}|}
-           (Exec_ssh_protocol.protocol_version - 1));
+           (Exec_ssh_protocol.protocol_version + 1));
       exit 0
     | _ ->
       (* The host's own major, read from the protocol rather than typed:
@@ -85,7 +86,7 @@ let stub_main () =
     in
     let trailer exit =
       Exec_ssh_protocol.render_trailer
-        { v = Exec_ssh_protocol.protocol_version
+        { v = Exec_ssh_protocol.newest
         ; exit = Some exit
         ; signal = None
         ; timed_out = false

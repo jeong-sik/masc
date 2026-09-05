@@ -5,7 +5,7 @@
     in these cases is the one the live roster actually carried,
     "rw-e0-r9-20260820-revision-audit", drawn as "rw-e0-r9-20260820-revi~".
 
-    [fit_name] is the other half of the story — it keeps the tail and drops the
+    A tail-only cut is the other half of the story — it keeps the tail and drops the
     head, which loses the family a name belongs to. [fit_middle] keeps both
     ends, and the assertions below are about that pair of properties rather
     than about one exact rendering: pinning the precise cut would fail on any
@@ -69,7 +69,7 @@ let test_width_is_exact () =
 ;;
 
 (* As the column shrinks the head's third reaches zero, and the result becomes
-   tail-only — [fit_name]'s shape. That is the right thing to degrade into:
+   tail-only. That is the right thing to degrade into:
    between "which family" and "which one", the deciding end is the tail. *)
 let test_narrow_degrades_to_tail () =
   let cut = Layout.fit_middle 8 audit in

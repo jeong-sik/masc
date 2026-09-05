@@ -88,6 +88,43 @@ let test_store_bytes_from_walk () =
        | None -> fail "cached store sample missing"
        | Some s2 -> check (float 0.0) "cached value identical" s.value s2.value))
 
+(* The walk runs on the domain pool when one is installed. Inline (no
+   pool, no Eio) and pooled (one-domain pool inside Eio) must report the
+   same store sizes. *)
+let store_sizes samples =
+  List.filter_map
+    (fun (s : Otel_metrics.sample) ->
+      if String.equal s.name "masc_store_bytes" || String.equal s.name "masc_store_files"
+      then Some (s.name, s.labels, s.value)
+      else None)
+    samples
+;;
+
+let test_store_walk_matches_on_the_pool () =
+  with_temp_masc_root (fun root ->
+    Obs.For_testing.reset_store_cache ();
+    let inline = store_sizes (Obs.For_testing.samples ~masc_root:root ()) in
+    check bool "inline walk reports the store" true (inline <> []);
+    let pooled =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          let pool =
+            Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env)
+          in
+          Domain_pool_ref.set pool;
+          Fun.protect
+            ~finally:Domain_pool_ref.clear_for_tests
+            (fun () ->
+              Obs.For_testing.reset_store_cache ();
+              store_sizes (Obs.For_testing.samples ~masc_root:root ()))))
+    in
+    check
+      (list (triple string (list (pair string string)) (float 0.0)))
+      "pooled walk reports the same sizes"
+      inline
+      pooled)
+;;
+
 let test_fd_samples_present () =
   with_temp_masc_root (fun root ->
     Obs.For_testing.reset_store_cache ();
@@ -145,6 +182,7 @@ let () =
             test_bus_and_pool_absent_without_subsystems
         ; test_case "store bytes from walk + cache" `Quick test_store_bytes_from_walk
         ; test_case "fd samples present" `Quick test_fd_samples_present
+        ; test_case "store walk matches on the pool" `Quick test_store_walk_matches_on_the_pool
         ; test_case "store writer lands samples in cells (masc#29023)" `Quick
             test_store_writer_lands_samples_in_cells
         ] )

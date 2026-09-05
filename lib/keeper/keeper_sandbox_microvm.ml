@@ -668,24 +668,20 @@ let exec_argv_for backend ~container_name ~uid ~gid ~container_cwd ~stdin ~comma
     environment entry on the exec. All three CLIs document that entry --
     [msb exec] has [-e, --env <ENV>] the same as the other two.
 
-    What [msb] does not document is the identity the shim runs under.
+    What [msb] does not document is numeric [uid:gid] under [--user].
     [container exec --user] documents [name|uid[:gid]] and nerdctl takes
     Docker's, so the mapped [uid:gid] this lane runs the keeper's commands as
     is a value those CLIs accept. [msb exec -u, --user <USER>] documents
     "Run the command as the specified guest user" and no numeric form
-    (0.6.16, 2026-09-04). Sending [501:20] there would be a value read from
-    no help output, and if msb resolved it as a user name the shim would run
-    as somebody else on a tree owned by that uid -- a silent wrong-identity
-    write, not a failed call. So this refuses. Settling it means either msb
-    documenting the numeric form or the lane naming a guest user, which is a
-    decision about identity rather than a spelling. *)
-let shim_exec_prefix_for backend ~container_name ~uid ~gid ~remote_root ~shim_config_path =
+    (0.6.16, 2026-09-04). For msb, [--user] is omitted; the work volume's
+    [uid=,gid=] mount places writes at the right host uid. *)
+let shim_exec_prefix_for ?(stdin = true) backend ~container_name ~uid ~gid ~remote_root ~shim_config_path =
   match (backend : Backend.t) with
   | Backend.Apple_container | Backend.Nerdctl_kata ->
     Ok
       (command_argv_for backend
        @ [ "exec" ]
-       @ Backend.exec_stdin_args backend
+       @ (if stdin then Backend.exec_stdin_args backend else [])
        @ [ "--user"
          ; Printf.sprintf "%d:%d" uid gid
          ; "-w"
@@ -704,7 +700,7 @@ let shim_exec_prefix_for backend ~container_name ~uid ~gid ~remote_root ~shim_co
     Ok
       (command_argv_for backend
        @ [ "exec" ]
-       @ Backend.exec_stdin_args backend
+       @ (if stdin then Backend.exec_stdin_args backend else [])
        @ [ "-w"
          ; remote_root
          ; "--env"
@@ -907,20 +903,18 @@ let shim_mount_args ~host_dir =
     names the config env the endpoint injects with every request
     ({!Keeper_sandbox_runtime.config_env_names}) -- the shim drops any
     request env it was not told to accept, and the guest is given the
-    config mount, so it must be told the names that point at it. The scratch
-    root is the in-memory filesystem the boot mounts
-    ({!Backend.scratch_guest_root}): where the shim makes a boxed request's
-    scratch (RFC-0422). A shim older than protocol 3 refuses the key as
-    unknown; the lane's probe refuses such a shim first
-    (remote_shim_version_skew), so the refusal an operator sees names the
-    binary rather than the config. *)
+    config mount, so it must be told the names that point at it. No
+    [scratch_root] line: the boot mounts the guest's in-memory filesystem at
+    the shim's own default ({!Backend.scratch_guest_root} is that constant),
+    and a shim one release behind refuses a key it does not know, which
+    would fail every request on the guest. The host writes only the keys
+    every spoken shim reads. *)
 let shim_config_content ~payload_path =
   Printf.sprintf
-    "remote_root=%s\npath=%s\nenv_allowlist=%s\nscratch_root=%s\n"
+    "remote_root=%s\npath=%s\nenv_allowlist=%s\n"
     work_volume_guest_root
     payload_path
     (String.concat "," Keeper_sandbox_runtime.config_env_names)
-    Backend.scratch_guest_root
 ;;
 
 (** What the guest endpoint declares to the remote runner. No caller env

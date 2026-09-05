@@ -1607,6 +1607,11 @@ type preset_sink =
   | Preset_to_chat of string option
   | Preset_to_pane
 
+type identity_login_result =
+  | Login_started of { provider_id : string; label : string; url : string }
+  | Login_attached of string
+  | Login_failed of string
+
 type async_msg =
   (* A microphone capture, from the fiber that runs it. The keeper is carried
      on every one of these rather than read from the state at delivery: the
@@ -1866,9 +1871,7 @@ type async_msg =
       string * string * bool * (unit, string) result
       (** keeper, provider, the state the operator asked for, and whether
           the server took it. *)
-  | Identity_login_started of
-      string * (string * string * string, string) result
-      (** keeper, then (provider id, label, url) *)
+  | Identity_login_started of string * identity_login_result
   | Identity_refreshed of string * (unit, string) result
   | Identity_app_saved of string * (int, string) result
       (** provider id, then how many scopes were recorded *)
@@ -3761,31 +3764,42 @@ let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
           Masc_tui_http.post_keeper_oauth_login ~host ~port ~keeper_name
             ~provider_id
         with
-        | Error err -> Error err
+        | Error err -> Login_failed err
         | Ok json -> (
             match json with
             | `Assoc fields -> (
-                match List.assoc_opt "authorize_url" fields with
-                | Some (`String url) ->
-                    let provider_id =
-                      match List.assoc_opt "provider" fields with
-                      | Some (`String id) -> id
-                      | Some _ | None -> provider_id
+                match List.assoc_opt "attached" fields with
+                | Some (`Bool true) ->
+                    let msg =
+                      match List.assoc_opt "message" fields with
+                      | Some (`String m) -> m
+                      | _ -> label ^ ": credentials attached."
                     in
-                    (* Opened here, on this fiber, because the URL is about
-                       nine hundred characters and a pane truncates it -- an
-                       operator cannot select what is not on screen. It is
-                       still printed below, wrapped, for the machine that has
-                       no opener. *)
-                    (match Masc_tui_browser.open_url url with
-                    | Ok _ | Error _ -> ());
-                    Ok (provider_id, label, url)
-                | Some _ | None ->
-                    Error "the server answered without an authorize_url")
-            | _ -> Error "the server answered with something this cannot read")
+                    enqueue_async mailbox (Identity_refreshed (keeper_name, Ok ()));
+                    Login_attached msg
+                | _ -> (
+                    match List.assoc_opt "authorize_url" fields with
+                    | Some (`String url) ->
+                        let provider_id =
+                          match List.assoc_opt "provider" fields with
+                          | Some (`String id) -> id
+                          | Some _ | None -> provider_id
+                        in
+                        (* Opened here, on this fiber, because the URL is about
+                           nine hundred characters and a pane truncates it -- an
+                           operator cannot select what is not on screen. It is
+                           still printed below, wrapped, for the machine that has
+                           no opener. *)
+                        (match Masc_tui_browser.open_url url with
+                        | Ok _ | Error _ -> ());
+                        Login_started { provider_id; label; url }
+                    | Some _ | None ->
+                        Login_failed "the server answered without an authorize_url"))
+            | _ ->
+                Login_failed "the server answered with something this cannot read")
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+      | exn -> Login_failed (Printexc.to_string exn)
     in
     enqueue_async mailbox (Identity_login_started (keeper_name, result))
   in
@@ -3796,7 +3810,8 @@ let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Identity_login_started (keeper_name, Error "Eio switch is unavailable"))
+        (Identity_login_started
+           (keeper_name, Login_failed "Eio switch is unavailable"))
 
 (* Ask every attached service again what tools it has. An operator action
    rather than a timer: a stale catalog is visible and fixable, while a timer
@@ -9788,11 +9803,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Error detail -> state.identity_view_error <- Some detail)
   | Identity_login_started (keeper_name, result) -> (
       match result with
-      | Ok (provider, label, url) ->
+      | Login_started { provider_id; label; url } ->
           state.identity_login <-
             Some
               { ils_keeper = keeper_name
-              ; ils_provider = provider
+              ; ils_provider = provider_id
               ; ils_label = label
               ; ils_url = url
               };
@@ -9802,7 +9817,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          rather than instead of it -- one provider refusing is not a reason
          to take the others off the screen, and the message that matters
          most here is the one telling them what to do about it. *)
-      | Error detail -> state.identity_attempt_error <- Some (Masc_tui_types.Notice_bad, detail))
+      | Login_attached msg ->
+          state.identity_attempt_error <- Some (Masc_tui_types.Notice_ok, msg)
+      | Login_failed detail ->
+          state.identity_attempt_error <- Some (Masc_tui_types.Notice_bad, detail))
   | Identity_app_saved (provider_id, result) ->
     state.identity_attempt_error <-
       Some

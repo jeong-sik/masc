@@ -328,6 +328,28 @@ let test_two_exchanges_do_not_share_a_verifier () =
     "states differ" false
     (String.equal one.Keeper_oauth_flow.state two.Keeper_oauth_flow.state)
 
+let test_authorize_url_with_existing_query_uses_ampersand () =
+  let provider = load_or_fail atlassian_toml in
+  let discovered =
+    { (discovered_atlassian ()) with
+      Keeper_oauth_discovery.authorize_url =
+        "https://mcp.ramp.com/oauth/authorize?auth_level=auto"
+    }
+  in
+  let pending =
+    Keeper_oauth_flow.begin_authorization ~provider ~discovered
+      ~client_id:"client-abc" ~scopes:[] ~redirect_uri
+      ~keeper:"oauth-fixture"
+  in
+  let url = pending.Keeper_oauth_flow.authorize_url in
+  let question_count =
+    String.fold_left (fun acc c -> if c = '?' then acc + 1 else acc) 0 url
+  in
+  Alcotest.(check int) "exactly one question mark in authorize URL" 1 question_count;
+  let query = query_of url in
+  check str "preserved existing query param" "auto" (param query "auth_level");
+  check str "response type" "code" (param query "response_type")
+
 let recording_post answer =
   let seen = ref None in
   let post ~url ~headers ~body =
@@ -852,6 +874,34 @@ let test_discovery_names_a_resource_with_no_authorization_server () =
       Alcotest.failf "wrong refusal: %s"
         (Keeper_oauth_discovery.error_to_string other)
   | Ok _ -> Alcotest.fail "a resource naming no authorization server was accepted"
+;;
+
+let test_discovery_falls_back_to_root_when_path_scoped_404 () =
+  let get ~url =
+    if String.equal url "https://mcp.klaviyo.com/.well-known/oauth-protected-resource/mcp"
+    then Ok (404, "not found")
+    else if String.equal url "https://mcp.klaviyo.com/.well-known/oauth-protected-resource"
+    then
+      Ok
+        ( 200,
+          {|{"resource":"https://mcp.klaviyo.com","authorization_servers":["https://mcp.klaviyo.com"]}|}
+        )
+    else if String.equal url "https://mcp.klaviyo.com/.well-known/oauth-authorization-server"
+    then
+      Ok
+        ( 200,
+          {|{"issuer":"https://mcp.klaviyo.com","authorization_endpoint":"https://mcp.klaviyo.com/authorize","token_endpoint":"https://mcp.klaviyo.com/token","code_challenge_methods_supported":["S256"]}|}
+        )
+    else Error ("unexpected url: " ^ url)
+  in
+  let ask ~url:_ = None in
+  match Keeper_oauth_discovery.discover ~get ~ask ~mcp_url:"https://mcp.klaviyo.com/mcp" () with
+  | Ok d ->
+    check str "resource" "https://mcp.klaviyo.com" d.Keeper_oauth_discovery.resource;
+    check str "authorize_url" "https://mcp.klaviyo.com/authorize" d.Keeper_oauth_discovery.authorize_url
+  | Error err ->
+    Alcotest.failf "discovery should have succeeded via root fallback: %s"
+      (Keeper_oauth_discovery.error_to_string err)
 
 (* ── registering this installation as a client ───────────────────────── *)
 
@@ -1356,6 +1406,8 @@ let () =
             `Quick test_recorded_scopes_replace_the_published_ones;
           Alcotest.test_case "two exchanges share nothing" `Quick
             test_two_exchanges_do_not_share_a_verifier;
+          Alcotest.test_case "existing query parameters preserve separator"
+            `Quick test_authorize_url_with_existing_query_uses_ampersand;
         ] );
       ( "exchange",
         [ Alcotest.test_case "redeems the verifier and dates the expiry" `Quick
@@ -1398,6 +1450,8 @@ let () =
             test_a_plaintext_location_is_not_followed;
           Alcotest.test_case "a header without the parameter is not a location"
             `Quick test_a_header_without_the_parameter_is_not_a_location;
+          Alcotest.test_case "falls back to root when path-scoped endpoint is 404"
+            `Quick test_discovery_falls_back_to_root_when_path_scoped_404;
         ] );
       ( "registration",
         [ Alcotest.test_case "asks as a public client" `Quick

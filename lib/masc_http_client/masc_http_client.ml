@@ -107,7 +107,19 @@ let with_pool f =
 
 (* ── Public API ───────────────────────────────────────────────────── *)
 
+let has_header name headers =
+  let target = String.lowercase_ascii name in
+  List.exists (fun (k, _) -> String.lowercase_ascii k = target) headers
+;;
+
+let ensure_default_headers headers =
+  if has_header "user-agent" headers
+  then headers
+  else ("User-Agent", "masc/0.31.0") :: headers
+;;
+
 let post_sync ?clock ?timeout_sec ~url ~headers ~body () =
+  let headers = ensure_default_headers headers in
   with_optional_timeout ?clock ?timeout_sec @@ fun () ->
   with_pool @@ fun pool ->
   match Pool.request pool ?clock ?timeout_seconds:timeout_sec
@@ -119,6 +131,7 @@ let post_sync ?clock ?timeout_sec ~url ~headers ~body () =
     [initialize] with its session id in a header, not the body, so a caller
     opening a session has nothing to read from [post_sync]. *)
 let post_response_sync ?clock ?timeout_sec ~url ~headers ~body () =
+  let headers = ensure_default_headers headers in
   with_optional_timeout ?clock ?timeout_sec @@ fun () ->
   with_pool @@ fun pool ->
   match Pool.request pool ?clock ?timeout_seconds:timeout_sec
@@ -128,6 +141,7 @@ let post_response_sync ?clock ?timeout_sec ~url ~headers ~body () =
 
 (** PATCH with structured error handling. *)
 let patch_sync ?clock ?timeout_sec ~url ~headers ~body () =
+  let headers = ensure_default_headers headers in
   with_optional_timeout ?clock ?timeout_sec @@ fun () ->
   with_pool @@ fun pool ->
   match Pool.request pool ?clock ?timeout_seconds:timeout_sec
@@ -137,6 +151,7 @@ let patch_sync ?clock ?timeout_sec ~url ~headers ~body () =
 
 (** GET with structured error handling. *)
 let get_response_sync ?clock ?timeout_sec ~url ~headers () =
+  let headers = ensure_default_headers headers in
   with_optional_timeout ?clock ?timeout_sec @@ fun () ->
   with_pool @@ fun pool ->
   match Pool.request pool ?clock ?timeout_seconds:timeout_sec
@@ -161,6 +176,7 @@ let get_sync ?clock ?timeout_sec ~url ~headers () =
     depends on the protocol being streamed — a keeper turn goes quiet for as
     long as the tool it is running takes — and this module cannot know it. *)
 let post_stream ~clock ~idle_timeout_sec ~url ~headers ~body ~on_chunk () =
+  let headers = ensure_default_headers headers in
   with_pool @@ fun pool ->
   Pool.request_streaming pool ~clock ~idle_timeout_sec ~method_:`POST ~url
     ~headers ~body ~on_chunk ()
@@ -172,6 +188,7 @@ let post_stream ~clock ~idle_timeout_sec ~url ~headers ~body ~on_chunk () =
     silence, and the caller chooses that bound because only it knows how
     long the stream it is reading is allowed to go quiet. *)
 let get_stream ~clock ~idle_timeout_sec ~url ~headers ~on_chunk () =
+  let headers = ensure_default_headers headers in
   with_pool @@ fun pool ->
   Pool.request_streaming pool ~clock ~idle_timeout_sec ~method_:`GET ~url
     ~headers ~on_chunk ()

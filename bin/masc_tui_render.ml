@@ -6483,7 +6483,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
     Masc_tui_types.identity_preamble
       ~keeper:(Terminal_text.single_line k.k_name)
       ~notice:
-        (attempt @ Masc_tui_types.identity_app_form_rows state.identity_app_form
+        (attempt @ started @ Masc_tui_types.identity_app_form_rows state.identity_app_form
         @ filter_rows)
     @ [ Ansi.dim ^ "  Nothing here matches. esc to see them all." ^ Ansi.reset ]
   else if numbered = [] && rejected = [] then
@@ -6492,9 +6492,9 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
     Masc_tui_types.identity_preamble
       ~keeper:(Terminal_text.single_line k.k_name)
       ~notice:
-        (attempt @ Masc_tui_types.identity_app_form_rows state.identity_app_form
+        (attempt @ started @ Masc_tui_types.identity_app_form_rows state.identity_app_form
         @ filter_rows)
-    @ numbered @ rejected @ started @ attached_tool_lines
+    @ numbered @ rejected @ attached_tool_lines
 
 let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     (* Beside the roster pane the box is the pane separator; alone on the

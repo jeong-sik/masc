@@ -33,12 +33,17 @@ type t = {
 
 type get = url:string -> (int * string, string) result
 
-let default_get ~url = Masc_http_client.get_sync ~url ~headers:[] ()
+let discovery_headers =
+  [ "User-Agent", "masc/0.31.0"
+  ; "Accept", "application/json, */*"
+  ]
+
+let default_get ~url = Masc_http_client.get_sync ~url ~headers:discovery_headers ()
 
 type ask = url:string -> (string * string) list option
 
 let default_ask ~url =
-  match Masc_http_client.get_response_sync ~url ~headers:[] () with
+  match Masc_http_client.get_response_sync ~url ~headers:discovery_headers () with
   | Error _ -> None
   | Ok response -> Some response.Masc_http_client.headers
 
@@ -59,6 +64,17 @@ let well_known_url ~segment url =
     Ok (Printf.sprintf "%s/.well-known/%s%s" (Uri.to_string origin) segment path)
   | _ -> Error (Bad_mcp_url url)
 
+(* RFC 9728 §3 root fallback: if path-scoped metadata endpoint returns 404,
+   clients should retry at server origin root:
+   https://host/.well-known/<segment> *)
+let root_well_known_url ~segment url =
+  let uri = Uri.of_string url in
+  match Uri.scheme uri, Uri.host uri with
+  | Some "https", Some _ ->
+    let origin = Uri.with_path (Uri.with_query uri []) "" in
+    Ok (Printf.sprintf "%s/.well-known/%s" (Uri.to_string origin) segment)
+  | _ -> Error (Bad_mcp_url url)
+
 (* RFC 9728 5.1: a protected resource answers an unauthenticated request
    with a WWW-Authenticate header naming where its metadata is:
 
@@ -72,34 +88,31 @@ let well_known_url ~segment url =
    A plaintext location is dropped rather than followed: the answer decides
    where a token comes from, and one fetched over http could be replaced on
    the way. *)
-let resource_metadata_of_headers headers =
-  let header =
-    List.find_map
-      (fun (name, value) ->
-        if String.equal (String.lowercase_ascii name) "www-authenticate"
-        then Some value
-        else None)
-      headers
+let extract_resource_metadata value =
+  let key = "resource_metadata=\"" in
+  let rec after at =
+    if at + String.length key > String.length value then None
+    else if String.equal (String.sub value at (String.length key)) key
+    then Some (at + String.length key)
+    else after (at + 1)
   in
-  match header with
+  match after 0 with
   | None -> None
-  | Some value ->
-    let key = "resource_metadata=\"" in
-    let rec after at =
-      if at + String.length key > String.length value then None
-      else if String.equal (String.sub value at (String.length key)) key
-      then Some (at + String.length key)
-      else after (at + 1)
-    in
-    (match after 0 with
+  | Some start ->
+    (match String.index_from_opt value start '"' with
      | None -> None
-     | Some start ->
-       (match String.index_from_opt value start '"' with
-        | None -> None
-        | Some stop ->
-          let found = String.sub value start (stop - start) in
-          if String.starts_with ~prefix:"https://" found then Some found
-          else None))
+     | Some stop ->
+       let found = String.sub value start (stop - start) in
+       if String.starts_with ~prefix:"https://" found then Some found
+       else None)
+
+let resource_metadata_of_headers headers =
+  List.find_map
+    (fun (name, value) ->
+      if String.equal (String.lowercase_ascii name) "www-authenticate"
+      then extract_resource_metadata value
+      else None)
+    headers
 
 (* RFC 8414 3.1: a terminating "/" in the issuer is removed before the
    well-known segment goes in. Every Google Workspace MCP server names its
@@ -143,6 +156,18 @@ let require ~url ~key value =
   | None ->
     Error (Malformed { url; detail = Printf.sprintf "no %s" key })
 
+let fetch_with_root_fallback ~get ~url ~segment ~base_url =
+  match fetch_json ~get ~url with
+  | Ok pairs -> Ok pairs
+  | Error (Not_published _) as orig_error ->
+    (match root_well_known_url ~segment base_url with
+     | Ok root_url when not (String.equal root_url url) ->
+       (match fetch_json ~get ~url:root_url with
+        | Ok pairs -> Ok pairs
+        | Error _ -> orig_error)
+     | _ -> orig_error)
+  | Error other -> Error other
+
 let discover ?(get = default_get) ?(ask = default_ask) ~mcp_url () =
   (* Asked before computed. Of 41 live MCP servers measured on 2026-08-27,
      eleven name a location the computed URL does not reach -- they publish
@@ -160,7 +185,10 @@ let discover ?(get = default_get) ?(ask = default_ask) ~mcp_url () =
     | Some headers ->
       Option.value (resource_metadata_of_headers headers) ~default:computed
   in
-  let* resource_pairs = fetch_json ~get ~url:resource_url in
+  let* resource_pairs =
+    fetch_with_root_fallback ~get ~url:resource_url
+      ~segment:"oauth-protected-resource" ~base_url:mcp_url
+  in
   let resource =
     Option.value (string_member resource_pairs "resource") ~default:mcp_url
   in
@@ -169,11 +197,14 @@ let discover ?(get = default_get) ?(ask = default_ask) ~mcp_url () =
     | issuer :: _ -> Ok issuer
     | [] -> Error (No_authorization_server resource)
   in
+  let cleaned_issuer = issuer_for_well_known issuer in
   let* server_url =
-    well_known_url ~segment:"oauth-authorization-server"
-      (issuer_for_well_known issuer)
+    well_known_url ~segment:"oauth-authorization-server" cleaned_issuer
   in
-  let* server_pairs = fetch_json ~get ~url:server_url in
+  let* server_pairs =
+    fetch_with_root_fallback ~get ~url:server_url
+      ~segment:"oauth-authorization-server" ~base_url:cleaned_issuer
+  in
   let* authorize_url =
     require ~url:server_url ~key:"authorization_endpoint"
       (string_member server_pairs "authorization_endpoint")

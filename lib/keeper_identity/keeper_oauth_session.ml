@@ -28,9 +28,7 @@ let start_error_to_string = function
       issuer
   | No_registration issuer ->
     Printf.sprintf
-      "no client is configured and %s offers no registration endpoint; make \
-       an app with this provider and post its client id to \
-       /api/v1/keepers/oauth/client"
+      "no client is configured and %s offers no registration endpoint; in TUI press 'A' (내 앱 쓰기) to set your Client ID and Secret (or POST /api/v1/keepers/oauth/client)"
       issuer
 
 type started = {

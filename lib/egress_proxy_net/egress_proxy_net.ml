@@ -132,7 +132,7 @@ let write_all flow text = Eio.Flow.copy_string text flow
    would keep a fiber and a socket alive after the peer is gone, which on a
    lane whose whole job is to bound reach is the wrong kind of leak.
 
-   Cancellation is re-raised rather than swallowed. A bare [with _ -> ()]
+   Cancellation is re-raised rather than swallowed. A bare wildcard catch
    here caught [Eio.Cancel.Cancelled] too, so a lane being torn down waited
    on however long the tunnel lived -- and a keeper's shutdown joined on a
    connection to somewhere else. *)

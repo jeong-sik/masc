@@ -212,8 +212,12 @@ let execute_downscale ~max_dim ~media_type ~bytes =
   Fun.protect
     ~finally:(fun () ->
       close_out_noerr in_oc;
-      (try Sys.remove in_file with _ -> ());
-      (try Sys.remove out_file with _ -> ()))
+      (* Sys.remove performs no Eio operation, so Eio.Cancel.Cancelled cannot
+         originate inside these two catches. The catch stays wide because this
+         is Fun.protect's finally: an exception escaping here is re-raised as
+         Fun.Finally_raised and masks whatever the protected body raised. *)
+      (try Sys.remove in_file with _ -> ()) (* cancel-guard-ok *);
+      (try Sys.remove out_file with _ -> ()) (* cancel-guard-ok *))
     (fun () ->
       output_string in_oc bytes;
       close_out_noerr in_oc;
@@ -221,7 +225,7 @@ let execute_downscale ~max_dim ~media_type ~bytes =
       let rec try_candidates = function
         | [] -> Error Scalers_exhausted
         | (scaler, argv, expected_mt) :: rest ->
-          (try Sys.remove out_file with _ -> ());
+          (try Sys.remove out_file with Sys_error _ -> ());
           let status, _stdout, _stderr =
             Process_eio.run_argv_with_status_split ~timeout_sec:10.0 argv
           in

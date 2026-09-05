@@ -615,7 +615,14 @@ let turn_start_argv_for
        @ label_args
        @ [ "--label"; microvm_backend_label_key ^ "=" ^ Backend.to_string backend ]
        @ dropped_label_args
-       @ [ "--user"; Printf.sprintf "%d:%d" uid gid ]
+       (* msb [run] has no [--user] (0.6.16); its guest runs as root and the
+          per-mount [uid=,gid=] option on the work volume maps writes back to the
+          host uid, so identity travels with the mount rather than the process.
+          container and nerdctl take [--user uid:gid] and keep it here. *)
+       @ (match backend with
+          | Backend.Microsandbox -> []
+          | Backend.Apple_container | Backend.Nerdctl_kata ->
+            [ "--user"; Printf.sprintf "%d:%d" uid gid ])
        @ expressed
        @ [ "--memory"; memory ]
        @ (match cpus with
@@ -639,7 +646,15 @@ let exec_argv_for backend ~container_name ~uid ~gid ~container_cwd ~stdin ~comma
   command_argv_for backend
   @ [ "exec" ]
   @ (if stdin then Backend.exec_stdin_args backend else [])
-  @ [ "--user"; Printf.sprintf "%d:%d" uid gid; "-w"; container_cwd ]
+  (* msb [exec] has [--user], but it names a guest user string, not the uid:gid
+     this lane maps ownership with; sending "501:20" would be read as a user
+     name and write under the wrong identity. The work volume's [uid=,gid=]
+     mount already places writes at the right host uid, so msb runs as its guest
+     default and no per-exec [--user] is sent. *)
+  @ (match backend with
+     | Backend.Microsandbox -> [ "-w"; container_cwd ]
+     | Backend.Apple_container | Backend.Nerdctl_kata ->
+       [ "--user"; Printf.sprintf "%d:%d" uid gid; "-w"; container_cwd ])
   @ [ container_name ]
   @ Backend.command_separator backend
   @ command_argv
@@ -680,14 +695,22 @@ let shim_exec_prefix_for backend ~container_name ~uid ~gid ~remote_root ~shim_co
          ]
        @ Backend.command_separator backend)
   | Backend.Microsandbox ->
-    Error
-      "microvm_shim_exec_unsupported: msb 0.6.16 exec takes the environment \
-       entry the shim needs (-e/--env), but its --user documents a guest \
-       user name and no uid:gid form, so the identity this lane runs a \
-       keeper's commands under cannot be named. Sent anyway, msb would \
-       either reject it or resolve it as somebody else's name and write to \
-       the keeper's tree as that user. Next: name a guest user for the lane, \
-       or use a runtime whose --user takes uid:gid (RFC-0405 follow-up)."
+    (* msb [exec --user] names a guest user, not the uid:gid this lane maps
+       ownership with, so it is left off -- the work volume's [uid=,gid=] mount
+       already places the keeper's writes at the right host uid, and msb runs as
+       its guest default. The shim config still travels as [--env], which msb
+       documents the same as the other two. *)
+    Ok
+      (command_argv_for backend
+       @ [ "exec" ]
+       @ Backend.exec_stdin_args backend
+       @ [ "-w"
+         ; remote_root
+         ; "--env"
+         ; Exec_ssh_protocol.shim_config_env_var ^ "=" ^ shim_config_path
+         ; container_name
+         ]
+       @ Backend.command_separator backend)
 ;;
 
 (* The two runtimes spell removal differently -- [container delete --force]

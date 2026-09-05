@@ -2060,6 +2060,89 @@ let update_runtime_assignment_text content ~keeper_name ~runtime_id =
   join_lines updated_lines ~trailing_newline:true
 ;;
 
+(* [\[egress.keepers.<name>\]] as text, so a keeper's allowlist can be written
+   by the same call that puts the keeper in the policy lane. Two files edited
+   by hand is how the two halves come apart, and an allowlist that does not
+   match its keeper's mode fails silently in the direction that looks like
+   permission.
+
+   The table is replaced wholesale rather than merged: an allowlist is the
+   complete statement of what a keeper may reach, so a write that kept
+   unnamed entries would mean an operator could not remove one. *)
+(* Quoted, like an assignment row's key: a keeper name carries dots
+   (edgar.a.poe is live), and [egress.keepers.edgar.a.poe] would be a path
+   into nested tables rather than one keeper. Unquoted, the loader reads
+   "a" as an unknown key under keeper "edgar" and refuses the file. *)
+let egress_keepers_header keeper_name =
+  Printf.sprintf "[egress.keepers.\"%s\"]" (toml_escape_string keeper_name)
+;;
+
+let egress_allow_line allow =
+  Printf.sprintf
+    "allow = [%s]"
+    (allow
+     |> List.map (fun entry -> Printf.sprintf "\"%s\"" (toml_escape_string entry))
+     |> String.concat ", ")
+;;
+
+(* Both spellings, because the file has two authors. This writer always
+   quotes; an operator writing [egress.keepers.rondo] by hand does not, and
+   a matcher that only knew its own spelling would append a second table for
+   a keeper that already had one -- two tables for one keeper, with the
+   loader taking whichever it saw first. *)
+let is_egress_keeper_header ~keeper_name line =
+  let trimmed = String.trim line in
+  String.equal trimmed (egress_keepers_header keeper_name)
+  || String.equal
+       trimmed
+       (Printf.sprintf "[egress.keepers.%s]" (toml_escape_string keeper_name))
+;;
+
+let update_egress_allow_text content ~keeper_name ~allow =
+  let lines, _trailing_newline = split_lines content in
+  let section = [ egress_keepers_header keeper_name; egress_allow_line allow ] in
+  let updated_lines =
+    match find_index (is_egress_keeper_header ~keeper_name) lines with
+    | None ->
+      (match List.rev lines with
+       | [] -> section
+       | last :: _ when String.equal (String.trim last) "" -> lines @ section
+       | _ -> lines @ ("" :: section))
+    | Some header_index ->
+      let before, from_header = split_at header_index lines in
+      (match from_header with
+       | [] -> lines @ section
+       | _ :: after_header ->
+         let _replaced, after_section =
+           match find_index is_toml_table_header after_header with
+           | None -> after_header, []
+           | Some next -> split_at next after_header
+         in
+         before @ section @ after_section)
+  in
+  join_lines updated_lines ~trailing_newline:true
+;;
+
+let remove_egress_allow_text content ~keeper_name =
+  let lines, _trailing_newline = split_lines content in
+  let updated_lines =
+    match find_index (is_egress_keeper_header ~keeper_name) lines with
+    | None -> lines
+    | Some header_index ->
+      let before, from_header = split_at header_index lines in
+      (match from_header with
+       | [] -> lines
+       | _ :: after_header ->
+         let _dropped, after_section =
+           match find_index is_toml_table_header after_header with
+           | None -> after_header, []
+           | Some next -> split_at next after_header
+         in
+         before @ after_section)
+  in
+  join_lines updated_lines ~trailing_newline:true
+;;
+
 let update_runtime_scalar_text content ~key ~runtime_id =
   let lines, _trailing_newline = split_lines content in
   let updated_lines =
@@ -2524,6 +2607,56 @@ let commit_keeper_assignment transaction ~runtime_id =
   commit_keeper_assignment_using
     ~commit_text:(fun ~path content -> commit_runtime_config_text ~path content)
     transaction ~runtime_id
+;;
+
+(* The keeper's egress allowlist, written inside the same transaction as its
+   runtime assignment: one lock, one file, one set of source bytes. A second
+   transaction would let another admitted writer land between a keeper being
+   put in the policy lane and being told what it may reach, and the gap
+   between those two is a keeper that reaches nothing while its config says
+   otherwise.
+
+   Unlike an assignment, there is no "unchanged" fast path keyed off the
+   revision: the transaction's revision carries the assignment, not the
+   allowlist, so the comparison is on the text this write would produce. *)
+let commit_keeper_egress_allow_using ~commit_text transaction ~allow =
+  match transaction with
+  | Missing_runtime_config _ ->
+    (match allow with
+     | None -> Ok (Assignment_unchanged Runtime_config_missing)
+     | Some _ -> Error runtime_config_path_missing_message)
+  | Present_runtime_config transaction ->
+    let next =
+      match allow with
+      | None ->
+        remove_egress_allow_text transaction.source_text
+          ~keeper_name:transaction.keeper_name
+      | Some allow ->
+        update_egress_allow_text transaction.source_text
+          ~keeper_name:transaction.keeper_name ~allow
+    in
+    if String.equal next transaction.source_text
+    then Ok (Assignment_unchanged transaction.revision)
+    else
+      let* receipt = commit_text ~path:transaction.path next in
+      Ok
+        (Assignment_committed
+           { receipt
+           ; revision =
+               Runtime_config_present
+                 { source_revision = receipt.observation.source_revision
+                 ; assignment =
+                     (match transaction.revision with
+                      | Runtime_config_present { assignment; _ } -> assignment
+                      | Runtime_config_missing -> Assignment_missing)
+                 }
+           })
+;;
+
+let commit_keeper_egress_allow transaction ~allow =
+  commit_keeper_egress_allow_using
+    ~commit_text:(fun ~path content -> commit_runtime_config_text ~path content)
+    transaction ~allow
 ;;
 
 let restore_keeper_assignment_transaction_using ~commit_text transaction =

@@ -7,9 +7,7 @@
     1. Runtime enumeration: operators can query all flags and their values
     2. Consistency verification: CI lint compares registry defaults against actual get_bool calls
     3. Current lifecycle classification for supported public flags
-    4. Documentation: machine-readable flag catalog
-
-    @see <docs/design/inventory-gap-analysis-rfc.md> H5 Feature Flags *)
+    4. Documentation: machine-readable flag catalog *)
 
 open Env_config_core
 

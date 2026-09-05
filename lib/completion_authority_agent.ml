@@ -255,8 +255,10 @@ let verdict_question_of_request
                  | [] -> None
                  | descriptions -> Some descriptions)
             ; required_evidence
-              (* Filled at the review site, where the ledger is read. This
-                 function maps an intent to a question and reads no store. *)
+              (* Both filled at the review site, where the snapshot and the
+                 calibration ledger are read. This function maps an intent to
+                 a question and reads no store. *)
+            ; evidence_posture = Task.Anti_rationalization.Note_only
             ; few_shot_block = ""
             })
      | Masc_domain.Cancel_task ->
@@ -269,6 +271,29 @@ let verdict_question_of_request
       (Printf.sprintf
          "verification request output must be a JSON object, got %s"
          (Json_util.excerpt other))
+;;
+
+(* The evidence posture, computed from the fixed snapshot this request was
+   submitted with. The arithmetic is the judge prompt's rules 3 and 4 made
+   typed: an artifact the judge cannot open whole counts as nothing. An
+   unavailable snapshot is the same posture as an empty one — the judge
+   already sees the typed reason beside the question. *)
+let evidence_posture_of_snapshot
+      (snapshot : Workspace_verification_store.submitted_evidence_access) =
+  let usable =
+    match snapshot with
+    | Workspace_verification_store.Evidence_unavailable _ -> 0
+    | Workspace_verification_store.Evidence_available { request = _; items } ->
+      items
+      |> List.filter (function
+           | Workspace_verification_store.Evidence_artifact
+               { reference = _; content = _; bytes = _; truncated = false } ->
+             true
+           | _ -> false)
+      |> List.length
+  in
+  if usable = 0 then Task.Anti_rationalization.Note_only
+  else Task.Anti_rationalization.Usable_artifacts usable
 ;;
 
 type prepared_review =
@@ -727,6 +752,8 @@ let process_task_once
                       Eval_calibration.format_few_shot_block
                         (Eval_calibration.select_examples
                            ~max_examples:judge_few_shot_examples)
+                  ; evidence_posture =
+                      evidence_posture_of_snapshot prepared.evidence_access
                   }
               | Task.Anti_rationalization.Cancellation _ as stop -> stop
             in

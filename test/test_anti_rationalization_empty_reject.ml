@@ -22,7 +22,7 @@ let with_reviewer reviewer f =
 let review () =
   AR.review
     ~evaluator_runtime:"task-reviewer"
-    ~question:(AR.Completion { completion_contract = None; required_evidence = []; few_shot_block = "" })
+    ~question:(AR.Completion { completion_contract = None; required_evidence = []; evidence_posture = AR.Note_only; few_shot_block = "" })
     ~lookup:AR.No_lookup_surface
     ~base_path:(Filename.get_temp_dir_name ())
     request
@@ -41,7 +41,7 @@ let test_explicit_base_path_reaches_reviewer () =
     (fun () ->
        ignore
          (AR.review ~evaluator_runtime:"task-reviewer"
-            ~question:(AR.Completion { completion_contract = None; required_evidence = []; few_shot_block = "" })
+            ~question:(AR.Completion { completion_contract = None; required_evidence = []; evidence_posture = AR.Note_only; few_shot_block = "" })
             ~lookup:AR.No_lookup_surface ~base_path:expected request);
        match !received with
        | Some actual ->
@@ -50,8 +50,16 @@ let test_explicit_base_path_reaches_reviewer () =
 ;;
 
 let configure_prompt_registry () =
-  Prompt_registry.set_markdown_dir
-    (Filename.concat (Masc_test_deps.find_project_root ()) "config/prompts")
+  let prompt_dir =
+    Filename.concat (Masc_test_deps.find_project_root ()) "config/prompts"
+  in
+  Prompt_registry.set_markdown_dir prompt_dir;
+  (* Prompts live in config/prompts as group files; slot keys such as
+     verification.lookup.none only register when the directory is loaded
+     (#32780). A set without load leaves every slot key missing and the
+     review gate falls to evaluator_unavailable before any reviewer runs.
+     Matches the other prompt-rendering tests. *)
+  Prompt_registry.load_prompts_from_directory prompt_dir
 ;;
 
 let test_structured_tool_is_the_only_semantic_verdict () =

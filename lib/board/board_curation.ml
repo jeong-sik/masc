@@ -34,7 +34,7 @@ and curation_answer_match = {
 
 (* Caller must ensure [Mirage_crypto_rng] is seeded before the first call,
    following the same contract as board post/comment ID generation in
-   board_types/board_types.ml. *)
+   lib/board_types/board_types.ml. *)
 let generate_id () =
   Random_id.prefixed ~prefix:"cu-" ~bytes:16
 

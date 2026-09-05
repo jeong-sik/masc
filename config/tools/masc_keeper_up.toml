@@ -52,16 +52,41 @@ default: nothing fills it in for you."""
 [[params]]
 name = "network_mode"
 type = "string"
-enum = ["none", "inherit"]
+enum = ["none", "inherit", "policy"]
 description = """
-Whether the sandbox guest reaches the network. \"none\" gives it none: a web \
-search, a git push, or any HTTP call inside the guest fails. \"inherit\" \
-gives it the host's network. Omitted on create, the keeper takes its sandbox \
-profile's default, and docker and microvm both default to \"none\", so a \
-keeper whose work is web search or repository traffic has to pass \
-\"inherit\" here. remote_ssh accepts only \"inherit\": the Phase 1 SSH lane \
-carries transport only, and \"none\" on it is refused when the keeper config \
-loads."""
+Whether the sandbox guest reaches the network, and what of it. \"none\" \
+gives it none: a web search, a git push, or any HTTP call inside the guest \
+fails. \"inherit\" gives it the host's whole network. \"policy\" gives it \
+one route -- a proxy this server owns -- and that proxy admits only the \
+destinations named in egress_allow, refusing the rest and recording every \
+request either way. Prefer \"policy\" over \"inherit\" for a keeper that \
+needs a few known hosts: \"inherit\" is the whole internet because one host \
+was needed. Omitted on create, the keeper takes its sandbox profile's \
+default, and docker and microvm both default to \"none\". \"policy\" is \
+carried today only by microvm on the apple_container backend; every other \
+backend refuses it and names what has to be measured first. remote_ssh \
+accepts only \"inherit\": an endpoint's network is its own host's policy."""
+
+[[params]]
+name = "egress_allow"
+type = "array"
+items = { type = "string" }
+description = """
+What this keeper may reach when network_mode = "policy", as \
+\"host\" or \"host:port\" entries. A bare host means port 443, so an \
+ordinary web allowlist needs no \":443\" after each entry, and a service on \
+another port says so: [\"api.github.com\", \"*.githubusercontent.com\", \
+\"registry.internal:8443\"]. A leading \"*.\" admits subdomains and not the \
+apex, so \"*.github.com\" answers for api.github.com and not for github.com. \
+An address is matched as an address, so listing a name is not permission to \
+open a socket to its IP.
+
+Writes [egress.keepers.<name>] in runtime.toml, which is where the lane \
+reads it. Passing this without network_mode = \"policy\" is refused rather \
+than stored: an allowlist on a keeper that is not in the lane does nothing, \
+and silently keeping it is how an operator believes a keeper is restricted \
+when it is not. Omit to leave an existing allowlist unchanged; pass an empty \
+array to clear it, which leaves the keeper reaching nothing."""
 
 [[params]]
 name = "remote_endpoint"

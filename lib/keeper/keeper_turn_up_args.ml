@@ -21,6 +21,7 @@ type parsed_args = {
   remote_endpoint_opt : string option;
   remote_endpoint_present : bool;
   network_mode_opt : string option;
+  egress_allow_opt : string list option;
   skill_names_opt : string list option;
   skill_names_present : bool;
   native_tool_posture_opt : Runtime_native_tools.posture option;
@@ -224,6 +225,7 @@ let known_turn_up_args =
   ; "sandbox_profile"
   ; "remote_endpoint"
   ; "network_mode"
+  ; "egress_allow"
   ; "tools"
   ; "skills"
   ; "instructions"
@@ -297,6 +299,7 @@ let parse
     let sandbox_profile_opt = Safe_ops.json_string_opt "sandbox_profile" args in
     let remote_endpoint_res = parse_remote_endpoint args in
     let network_mode_opt = Safe_ops.json_string_opt "network_mode" args in
+    let egress_allow_opt_res = parse_present_string_list_opt args "egress_allow" in
     let instructions_arg = get_string_opt args "instructions" in
     match
       load_declarative_materialization_defaults
@@ -421,7 +424,37 @@ let parse
       | Ok value -> value
       | Error _ -> false, None
     in
-    Ok {
+    match egress_allow_opt_res with
+    | Error e -> Error (tool_result_error ~class_:Tool_result.Policy_rejection e)
+    | Ok egress_allow_opt ->
+    (* An allowlist on a keeper that is not in the policy lane does nothing.
+       Storing it anyway is how an operator comes to believe a keeper is
+       restricted when it reaches the whole internet, so the pair is refused
+       rather than half-applied. The effective mode is checked, not just the
+       argument: a keeper already in the lane may add hosts without repeating
+       the mode. *)
+    let effective_network_mode =
+      match network_mode_opt with
+      | Some mode -> Some (String.trim mode)
+      | None ->
+        Option.map
+          Keeper_types_profile_sandbox.network_mode_to_string
+          profile_defaults.network_mode
+    in
+    (match egress_allow_opt, effective_network_mode with
+     | Some _, Some "policy" | None, _ -> Ok ()
+     | Some _, mode ->
+       Error
+         (tool_result_error
+            ~class_:Tool_result.Policy_rejection
+            (Printf.sprintf
+               "egress_allow needs network_mode = \"policy\"; this keeper's mode \
+                is %s. An allowlist outside the policy lane is never consulted, \
+                so it is refused rather than stored."
+               (match mode with None -> "unset" | Some mode -> "\"" ^ mode ^ "\"")))
+     )
+    |> Result.map (fun () ->
+    {
       name;
       runtime_id_opt;
       autoboot_enabled_opt;
@@ -433,6 +466,7 @@ let parse
       remote_endpoint_opt;
       remote_endpoint_present;
       network_mode_opt;
+      egress_allow_opt;
       skill_names_opt;
       skill_names_present;
       native_tool_posture_opt;
@@ -441,7 +475,7 @@ let parse
       profile_defaults;
       declarative_manifest_snapshot;
       instructions_opt;
-    }
+    })
 
 (** Resolve mention targets with dedup and filtering. *)
 let resolve_mention_targets ~mention_targets_opt ~fallback_targets ~name =

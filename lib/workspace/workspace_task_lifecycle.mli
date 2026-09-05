@@ -10,6 +10,11 @@ type invalid =
           the completion-authority entry point owns its verdict. *)
   | Verdict_authority_identity_required
   | Verdict_rejection_reason_required
+  | Verdict_cancel_requires_operator
+      (** RFC-0415 §4.4: the terminal [Cancelled] record of a cancel claim may
+          carry only an operator's signature. A system-lane approval of a
+          cancel claim is refused at the commit funnel, where every verdict
+          caller converges. *)
   | Verification_id_mismatch of { expected : string; actual : string }
   | Invalid_transition
 

@@ -639,6 +639,7 @@ let test_repo_runtime_toml_all_seeded_bindings_are_keeper_dispatchable () =
   match Runtime.load_list ~config_path:path with
   | Error msg -> failf "repo runtime.toml should load: %s" msg
   | Ok (runtimes, _, _, _, _) ->
+    check int "expected 31 seeded runtimes" 31 (List.length runtimes);
     check (list string)
       "all seeded runtimes in repo config/runtime.toml are keeper-dispatchable"
       []

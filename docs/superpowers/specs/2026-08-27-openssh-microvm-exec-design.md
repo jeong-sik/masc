@@ -250,13 +250,22 @@ process table. The request is framed on stdin instead:
 ```
 
 ```json
-{ "v": 1,
+{ "v": 3,
   "argv": ["<base64>", "..."],
   "env": [["<base64 name>", "<base64 value>"]],
   "cwd": "<base64>",
+  "remote_root": "<base64>",
   "timeout_sec": 300.0,
-  "stdin_len": 0 }
+  "stdin_len": 0,
+  "mode": "effect" }
 ```
+
+`mode` (v3, RFC-0422) is one of `effect` (unrestricted), `observe` (the shim
+denies every filesystem write outside its per-run scratch with Landlock and
+every `socket(2)` with seccomp before exec) or `guest_local` (sockets only).
+A shim whose kernel cannot build the box answers with
+`shim_error = "observe_unsupported: ..."`; it never runs the payload unboxed.
+The probe advertises the `observe` capability where it can.
 
 Binary-suspect fields are base64 *inside* the JSON, so hostile bytes
 (invalid-UTF-8 filenames, arbitrary stdin) round-trip losslessly; `v` versions
@@ -276,7 +285,7 @@ the protocol. The shim:
   remote orphans, including for quiet payloads (`sleep 600`);
 - reports the result as a framed trailer appended after the child's stderr,
   delimited by `\x1e` (a control byte that cannot appear in valid UTF-8):
-  `\x1e{"masc_exec_result":{"v":1,"exit":0,"signal":null,"timed_out":false,"shim_error":null}}\x1e`.
+  `\x1e{"masc_exec_result":{"v":3,"exit":0,"signal":null,"timed_out":false,"shim_error":null}}\x1e`.
   This is how WEXITED vs WSIGNALED vs shim/transport errors stay distinct —
   ssh alone cannot tell them apart (ssh exits 255 for its own errors);
 - answers `masc-exec-shim --probe` with `{name, version, capabilities}`;

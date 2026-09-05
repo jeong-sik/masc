@@ -69,6 +69,7 @@ cp "$repo_root/lib/exec_ssh_protocol/exec_ssh_protocol.ml" \
    "$repo_root/lib/exec_shim/exec_shim.ml" \
    "$repo_root/lib/exec_shim/exec_shim.mli" \
    "$repo_root/lib/exec_shim/prctl_stub.c" \
+   "$repo_root/lib/exec_shim/observe_stub.c" \
    "$repo_root/bin/masc_exec_shim.ml" \
    "$stage/src/"
 
@@ -88,7 +89,7 @@ cat > "$stage/src/dune" <<'EOF'
  (libraries exec_ssh_protocol unix)
  (foreign_stubs
   (language c)
-  (names prctl_stub)))
+  (names prctl_stub observe_stub)))
 
 (executable
  (name masc_exec_shim)

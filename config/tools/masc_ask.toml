@@ -19,7 +19,28 @@ leaves the rest -- ask what actually blocks your next step.
 Put the reason in `context`: a reader who cannot see why you are asking \
 cannot weigh the decision. Give a `choice_id` that still means the same \
 thing after someone rewords its label: the answer names the id, never the \
-label."""
+label.
+
+Every field except `context`, `task_id` and `goal_id` belongs to a question \
+inside the `questions` array, never beside it. One ask can carry several \
+questions, and a question can offer choices and free text at once:
+
+    {"context": "the deploy window closes in an hour",
+     "questions": [
+       {"question_id": "rollout", "header": "Rollout", "mode": "single",
+        "prompt": "Ship behind a flag, or hold for the next window?",
+        "choices": [{"choice_id": "flag", "label": "Behind a flag",
+                     "description": "Off by default; we turn it on Monday"},
+                    {"choice_id": "hold", "label": "Hold"}]},
+       {"question_id": "reviewers", "header": "Reviewers", "mode": "multi",
+        "prompt": "Who should read it before it goes out?",
+        "free_text": true, "free_text_hint": "name someone else",
+        "choices": [{"choice_id": "sre", "label": "SRE"},
+                    {"choice_id": "sec", "label": "Security"}]}]}
+
+`mode` is `single` for one choice and `multi` for several. `free_text` lets \
+the operator type instead of picking; a question with no `choices` needs it, \
+and a question with choices may still offer it."""
 additional_properties = false
 # RFC-0403 후속. 이 셋은 2026-08-03 ~ 09-02 31일간 fleet 전체에서 호출 0회이고,
 # 그 사이 agent-core keeper 4곳의 요청마다 5,498 B 를 싣고 있었다. 지연의

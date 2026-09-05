@@ -167,7 +167,41 @@ scripts/build-keeper-sandbox-image.sh
 
 호스트에서 그냥 도는 선택지는 없습니다. 프로필은 `docker`, `microvm`,
 `remote_ssh` 셋뿐이라 Docker도 `container`도 SSH endpoint도 없는 호스트는
-워크스페이스는 띄워도 Keeper는 못 돌립니다.
+워크스페이스는 띄워도 Keeper는 못 돌립니다. `microvm`은 하이퍼바이저 뒤의 게스트를
+뜻하지 런타임 하나를 뜻하지 않습니다. `microvm_backend`가 `apple_container`,
+`microsandbox`, `nerdctl_kata` 중에서 고르고, 호스트에서 자동으로 정해지는 건
+기본값뿐입니다 — macOS면 Apple의 `container`, 그 밖에는 없음. 그래서 Linux
+호스트는 백엔드를 물려받는 대신 직접 적습니다. 아무것도 안 적힌 곳에서 microVM을
+요청한 Keeper는 조용히 공유 커널을 받는 대신 부팅에서 거절됩니다. 각 백엔드가
+지금 어디까지 되는지는 위 표에 있습니다.
+
+**그리고 그 이미지는 MASC 자신의 개발 환경입니다.** 범용이 아닙니다.
+`ocaml/opam:ubuntu-24.04-ocaml-5.5` 에 이 저장소의 opam 의존성을 미리 넣어 둔
+것입니다. Keeper 의 한 턴은 `docker run --rm` 으로 매번 새 컨테이너에서 돌고
+rootfs 는 읽기 전용, `--cap-drop=ALL` 입니다. 턴이 시작된 뒤에는 아무것도 설치할
+수 없으니 필요한 건 전부 이미지에 미리 있어야 합니다. TypeScript나 Python
+프로젝트를 맡은 Keeper 는 엉뚱한 툴체인을 만나고 맞는 걸 받아 올 수도 없습니다.
+
+그 일에 맞는 이미지를 Keeper 마다 TOML 에 적으세요.
+
+```toml
+[keeper]
+sandbox_profile = "docker"
+sandbox_image = "node:22-bookworm"
+network_mode = "none"
+```
+
+`MASC_KEEPER_SANDBOX_DOCKER_IMAGE` 는 이미지를 안 적은 모든 Keeper 의 기본값을
+바꿉니다. 한 턴은 `<이미지> bash -l -s` 로 돌고 도구 스크립트가 stdin 으로
+들어가므로, 어떤 이미지든 세 가지를 만족해야 합니다.
+
+- **`bash` 가 `PATH` 에 있을 것.** 턴을 받는 건 로그인 셸이라 `sh` 만 있는 Alpine
+  이미지는 턴을 못 받습니다.
+- **호스트 uid 로 돌 수 있을 것.** 컨테이너는 `--user <내 uid>:<gid>` 로 돕니다.
+  자기 전용 사용자로만 동작하는 이미지는 홈 디렉터리 없이 떨어집니다.
+- **툴체인이 이미 들어 있을 것.** rootfs 는 tmpfs 하나와 마운트된 작업 공간을 빼면
+  읽기 전용이고 `--cap-drop=ALL` 에 `no-new-privileges` 라, 턴이 없는 걸 발견해도
+  설치할 수 없습니다.
 
 **모델 제공자 키는 서버 환경에 있어야 합니다.** 변수 이름은 provider마다
 `runtime.toml`이 정합니다 — `OLLAMA_CLOUD_API_KEY`, `DEEPSEEK_API_KEY` 같은

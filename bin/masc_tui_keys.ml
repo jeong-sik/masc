@@ -216,8 +216,8 @@ let for_surface = function
   | Planning ->
       [ b Navigate "j/k" "move"
       ; b Navigate "v" "next Planning tab"
-          ~help:"1 Goals \xe2\x86\x92 2 Task Review \xe2\x86\x92 3 Evaluator \
-                 Verdicts"
+          ~help:"Goals, then the two task surfaces: Task Review and \
+                 Task Verdicts. Not stages of one flow"
       ; b Act "Right / Enter" "detail"
       ; b Act "Left / Esc" "back"
       ; b Navigate "f" "filter" ~help:"cycle all / active / completed / dropped"
@@ -251,7 +251,7 @@ let for_surface = function
   | Verification ->
       [ b Navigate "j/k" "move" ~help:"move; in details, scroll the evidence"
       ; b Navigate "v" "next Planning tab"
-          ~help:"on to 3 Evaluator Verdicts, then 1 Goals"
+          ~help:"on to Task Verdicts, then back to Goals"
       ; b Act "Right / Enter" "details" ~help:"read the request and evidence"
       ; b Act "Left / Esc" "back" ~help:"back to the verification queue"
       ; b Navigate "[ / ]" "previous / next"
@@ -266,7 +266,7 @@ let for_surface = function
       @ listing_meta
   | Harness ->
       [ b Navigate "j/k" "move" ~help:"move; in a verdict, scroll"
-      ; b Navigate "v" "next Planning tab" ~help:"back round to 1 Goals"
+      ; b Navigate "v" "next Planning tab" ~help:"back round to Goals"
       ; b Navigate "PgUp/PgDn" "page"
       ; b Act "Right / Enter" "verdict" ~help:"open the full evaluator verdict"
       ; b Act "Left / Esc" "back" ~help:"back to the verdict list"
@@ -682,7 +682,7 @@ let help_surfaces : (string * surface) list =
   ; "Approvals", Approvals
   ; "Planning / Goals", Planning
   ; "Planning / Task Review", Verification
-  ; "Planning / Verdicts", Harness
+  ; "Planning / Task Verdicts", Harness
   ; "Fusion", Fusion
   ; "Keeper detail / Automation", Schedules
   ; "Memory", Memory

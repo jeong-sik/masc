@@ -1004,7 +1004,12 @@ let harness_row ~verdict_style ~reason_width values =
    The phase carries the brackets it is drawn in, so the caller passes the
    width of the bracketed label rather than the label's own. *)
 
-let planning_proof_width = 1
+(* Wide enough for its own name. The mark had a blank header because one
+   cell holds no word, so the only column on the screen with no name was
+   the one carrying the judge's answer -- the reader saw a stripe of
+   glyphs and nothing saying what they were. Four more cells buys the
+   header; the list draws the glyph legend under it. *)
+let planning_proof_width = 5
 let planning_priority_width = 3
 let planning_open_width = 16
 let planning_age_width = 6
@@ -1035,10 +1040,7 @@ let planning_cells ?(phase_style = "") ?(priority_style = "") ?(open_style = "")
     ~phase_width ~title_width values =
   [ Table.cell ~style:phase_style ~header:"PHASE" ~width:phase_width
       values.prow_phase
-    (* The proof mark is a mark, like the roster's. A name would be four cells
-       wider than the cell it names, and the contract folds a header that does
-       not fit rather than letting it push the columns after it. *)
-  ; Table.cell ~header:" " ~width:planning_proof_width values.prow_proof
+  ; Table.cell ~header:"JUDGE" ~width:planning_proof_width values.prow_proof
   ; Table.cell ~style:priority_style ~header:"PRI" ~width:planning_priority_width
       values.prow_priority
   ; Table.cell ~style:open_style ~header:"OPEN" ~width:planning_open_width
@@ -1226,16 +1228,27 @@ type planning_tab =
   | Planning_task_review
   | Planning_verdicts
 
-let planning_strip_plain ~tab ~review_count ~window =
-  let review_label =
-    match review_count with
-    | Some total when total > 0 -> Printf.sprintf "2 Task Review\xc2\xb7%d" total
-    | Some _ | None -> "2 Task Review"
+(* The stops were numbered "1 Goals", "2 Task Review", "3 Evaluator Verdicts"
+   and the key sheet joined them with arrows, which promised a pipeline: work
+   a goal, hand it to review, read the verdict. They are not stages of one
+   thing. Goals is the goal lifecycle, judged by the goal verifier against
+   its own ledger; Review and Verdicts are the two halves of the task
+   protocol -- what is waiting for a ruling, and what was ruled -- and a goal
+   sitting in [verifying] never appears in either.
+
+   Numbers gone, and the two task stops share a word so the axis they belong
+   to is visible without a separator. Goals carries the count of goals with
+   the judge, the way Review carries the count waiting for one: the reading
+   an operator opens this screen for was the one it made them count by eye. *)
+let planning_strip_plain ~tab ~review_count ~verifying_count ~window =
+  let counted label = function
+    | Some total when total > 0 -> Printf.sprintf "%s\xc2\xb7%d" label total
+    | Some _ | None -> label
   in
   let stops =
-    [ Planning_goals, "1 Goals"
-    ; Planning_task_review, review_label
-    ; Planning_verdicts, "3 Evaluator Verdicts"
+    [ Planning_goals, counted "Goals" verifying_count
+    ; Planning_task_review, counted "Task Review" review_count
+    ; Planning_verdicts, "Task Verdicts"
     ]
   in
   List.map

@@ -477,7 +477,7 @@ let test_verdicts_is_a_planning_child () =
     (surface_ring_index Harness);
   Alcotest.(check bool) "and the help sheet files it under Planning" true
     (List.exists
-       (fun (label, _) -> String.equal label "Planning / Verdicts")
+       (fun (label, _) -> String.equal label "Planning / Task Verdicts")
        (Masc_tui_keys.help_sections ()))
 
 (* Changes reads one keeper's file writes and binds to the roster cursor on

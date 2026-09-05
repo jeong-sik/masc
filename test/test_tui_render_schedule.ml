@@ -1235,22 +1235,36 @@ let test_fusion_pipeline_diagram_stages () =
    off this row. A reader pressing 4 or 5 arrived nowhere. *)
 let test_planning_strip_names_only_its_own_stops () =
   check (list string) "three stops, and Schedules and Fusion are not among them"
-    [ "1 Goals"; "2 Task Review"; "3 Evaluator Verdicts" ]
+    [ "Goals"; "Task Review"; "Task Verdicts" ]
     (Schedule.planning_strip_plain ~tab:Schedule.Planning_goals
-       ~review_count:None ~window:"")
+       ~review_count:None ~verifying_count:None ~window:"")
+
+(* The numbers promised an order the surfaces do not have, and the key sheet
+   joined them with arrows. A goal that enters [verifying] is judged against
+   the goal ledger; it never appears on Task Review, which is the task
+   protocol's queue. The two task stops keep a shared word instead, so the
+   axis they belong to is what the strip says. *)
+let test_planning_strip_does_not_number_its_stops () =
+  let labels =
+    Schedule.planning_strip_plain ~tab:Schedule.Planning_goals
+      ~review_count:(Some 7) ~verifying_count:(Some 2) ~window:""
+  in
+  check (list string) "counts, no ordinals"
+    [ "Goals\xc2\xb72"; "Task Review\xc2\xb77"; "Task Verdicts" ]
+    labels
 
 (* The verdict page count read as a Fusion count: it was appended after the
    whole strip, and the strip ended with "5 Fusion". A window belongs to the
    tab the reader is on and to no other. *)
 let test_planning_window_rides_the_active_stop () =
   check (list string) "the window sits on Verdicts"
-    [ "1 Goals"; "2 Task Review\xc2\xb7979"; "3 Evaluator Verdicts (8 of 4223)" ]
+    [ "Goals"; "Task Review\xc2\xb7979"; "Task Verdicts (8 of 4223)" ]
     (Schedule.planning_strip_plain ~tab:Schedule.Planning_verdicts
-       ~review_count:(Some 979) ~window:" (8 of 4223)");
+       ~review_count:(Some 979) ~verifying_count:None ~window:" (8 of 4223)");
   check (list string) "and moves with the reader"
-    [ "1 Goals"; "2 Task Review\xc2\xb7979 (20 of 979)"; "3 Evaluator Verdicts" ]
+    [ "Goals"; "Task Review\xc2\xb7979 (20 of 979)"; "Task Verdicts" ]
     (Schedule.planning_strip_plain ~tab:Schedule.Planning_task_review
-       ~review_count:(Some 979) ~window:" (20 of 979)")
+       ~review_count:(Some 979) ~verifying_count:None ~window:" (20 of 979)")
 
 (* A Keeper whose schedules sit past the projection's page has none the tab can
    show, which is not the same as having none. The live store held 323 requests
@@ -1341,6 +1355,9 @@ let test_planning_columns_hold_their_offsets () =
     in
     let row = planning_row_of ~title_width planning_probe in
     check_left_cell "PHASE" "A" ~header ~row ~inner_width;
+    (* The judge's column was the one column with a blank header, so nothing
+       here could hold it in place. *)
+    check_left_cell "JUDGE" "B" ~header ~row ~inner_width;
     check_left_cell "PRI" "C" ~header ~row ~inner_width;
     check_left_cell "OPEN" "D" ~header ~row ~inner_width;
     check_left_cell "TITLE" "E" ~header ~row ~inner_width;
@@ -1364,6 +1381,9 @@ let test_planning_columns_with_styles_hold_their_offsets () =
         planning_probe
     in
     check_left_cell "PHASE" "A" ~header ~row ~inner_width;
+    (* The judge's column was the one column with a blank header, so nothing
+       here could hold it in place. *)
+    check_left_cell "JUDGE" "B" ~header ~row ~inner_width;
     check_left_cell "PRI" "C" ~header ~row ~inner_width;
     check_left_cell "OPEN" "D" ~header ~row ~inner_width;
     check_left_cell "TITLE" "E" ~header ~row ~inner_width;
@@ -1636,6 +1656,8 @@ let () =
             test_fusion_pipeline_diagram_stages
         ; test_case "planning strip names only its own stops" `Quick
             test_planning_strip_names_only_its_own_stops
+        ; test_case "planning strip does not number its stops" `Quick
+            test_planning_strip_does_not_number_its_stops
         ; test_case "planning window rides the active stop" `Quick
             test_planning_window_rides_the_active_stop
         ; test_case "a capped page cannot report an empty store" `Quick

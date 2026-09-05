@@ -225,7 +225,7 @@ module Transport = struct
   let ws_enabled () = Feature_flag_registry.get_bool "MASC_WS_ENABLED"
 
   (** Whether HTTP serving is isolated to a dedicated OCaml domain (RFC-0204 Phase 3).
-      Default: true. *)
+      Default: false. *)
   let serving_domain_enabled () =
     Feature_flag_registry.get_bool "MASC_SERVING_DOMAIN_ENABLED"
 

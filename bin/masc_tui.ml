@@ -4992,13 +4992,15 @@ let goto_surface state ~mailbox (destination : surface) =
    call this; so does board compose when its handler declines the key, so
    "Tab falls through" stays true while composing. *)
 let cycle_surface state ~mailbox ~backwards =
-  let ring = Masc_tui_types.surface_ring in
+  let ring = Masc_tui_types.visible_surface_ring state in
   let count = List.length ring in
-  let step = if backwards then count - 1 else 1 in
-  let index =
-    (Masc_tui_types.surface_ring_index state.view + step) mod count
-  in
-  goto_surface state ~mailbox (fst (List.nth ring index))
+  if count > 0 then begin
+    let step = if backwards then count - 1 else 1 in
+    let index =
+      (Masc_tui_types.visible_surface_ring_index state state.view + step) mod count
+    in
+    goto_surface state ~mailbox (fst (List.nth ring index))
+  end
 
 let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
   let host = server_peer_host in
@@ -6711,6 +6713,25 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       state.repository_changes_return_chat <- true;
       open_repository_changes state ~mailbox
         ~scope:Tui_decode.Repository_change_project
+  | Masc_tui_command.Open_patch_modal ->
+      Buffer.clear state.msg_input;
+      state.patch_modal_open <- true;
+      state.patch_modal_scroll <- 0;
+      let target_path =
+        match state.repository_changes_diff_path with
+        | Some p -> p
+        | None -> "."
+      in
+      state.patch_modal_path <- Some target_path;
+      launch_repository_changes_diff_load state ~mailbox
+        ~scope:Tui_decode.Repository_change_project ~path:target_path
+  | Masc_tui_command.Toggle_burn_hud ->
+      Buffer.clear state.msg_input;
+      state.burn_hud_visible <- not state.burn_hud_visible;
+      let status_str = if state.burn_hud_visible then "enabled" else "hidden" in
+      let cost = Masc_tui_types.fleet_total_cost_usd state in
+      notice ~role:Message_local
+        (Printf.sprintf "Token burn velocity HUD %s (fleet total: $%.4f)" status_str cost)
   | Masc_tui_command.Open_changes ->
       Buffer.clear state.msg_input;
       state.changes_return <- Changes_return_chat;
@@ -9215,7 +9236,8 @@ let handle_composer_key state ~base_path ~mailbox key =
            state.view <- Keepers Keeper_message
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
-        | Masc_tui_command.Open_diff | Masc_tui_command.Open_changes
+        | Masc_tui_command.Open_diff | Masc_tui_command.Open_patch_modal
+        | Masc_tui_command.Toggle_burn_hud | Masc_tui_command.Open_changes
         | Masc_tui_command.Toggle_acting_pane
         | Masc_tui_command.Open_settings | Masc_tui_command.Open_metrics
        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Steer_turn _
@@ -11169,7 +11191,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          | Ok diff ->
              state.repository_changes_diff <- Some (path, diff);
              state.repository_changes_diff_error <- None
-         | Error detail -> state.repository_changes_diff_error <- Some detail)
+         | Error detail -> state.repository_changes_diff_error <- Some detail);
+      if
+        state.patch_modal_open
+        && Option.equal String.equal state.patch_modal_path (Some path)
+      then
+        (match result with
+         | Ok diff ->
+             state.patch_modal_diff <- Some (path, diff);
+             state.patch_modal_error <- None
+         | Error detail -> state.patch_modal_error <- Some detail)
   | Keeper_chat_file_changes_loaded (generation, keeper_name, result) ->
       let still_current =
         generation = state.msg_file_changes_generation
@@ -14050,6 +14081,69 @@ and is loaded on demand through keeper_skill.
                        ~mailbox:async_messages ~keeper_name;
                      state.view <- Keepers Keeper_message
                  | Some _ | None -> ())
+            | _ -> ())
+       | Some k when state.patch_modal_open ->
+           let close () =
+             state.patch_modal_open <- false;
+             state.patch_modal_scroll <- 0
+           in
+           (match k with
+            | "esc" | "q" | "Q" -> close ()
+            | "j" | "down" ->
+                state.patch_modal_scroll <- state.patch_modal_scroll + 1
+            | "k" | "up" ->
+                state.patch_modal_scroll <- max 0 (state.patch_modal_scroll - 1)
+            | "d" | "pagedown" ->
+                state.patch_modal_scroll <- state.patch_modal_scroll + 10
+            | "u" | "pageup" ->
+                state.patch_modal_scroll <- max 0 (state.patch_modal_scroll - 10)
+            | "g" | "home" ->
+                state.patch_modal_scroll <- 0
+            | "G" | "end" ->
+                let total_rows =
+                  match state.patch_modal_diff with
+                  | Some (_, d) -> List.length d.Masc.Tui_decode.gd_rows
+                  | None ->
+                      (match state.repository_changes_diff with
+                       | Some (_, d) -> List.length d.Masc.Tui_decode.gd_rows
+                       | None -> 0)
+                in
+                state.patch_modal_scroll <- max 0 (total_rows - 5)
+            | "e" | "E" ->
+                let path_opt =
+                  match state.patch_modal_path with
+                  | Some p -> Some p
+                  | None -> state.repository_changes_diff_path
+                in
+                (match path_opt with
+                 | None ->
+                     add_event state "error" "No file path associated with active patch"
+                 | Some path ->
+                     close ();
+                     match Masc_tui_editor_jump.route () with
+                     | Masc_tui_editor_jump.No_editor ->
+                         add_event state "error"
+                           "no editor: run this inside Neovim, or set $EDITOR"
+                     | Masc_tui_editor_jump.Remote_neovim { server } -> (
+                         let target =
+                           { Masc_tui_editor_jump.path; Masc_tui_editor_jump.line = 1 }
+                         in
+                         match
+                           Masc_tui_editor_jump.send_to_neovim ~server target
+                         with
+                         | Ok () ->
+                             add_event state "system"
+                               (Printf.sprintf "opened %s in Neovim" path)
+                         | Error detail -> add_event state "error" detail)
+                     | Masc_tui_editor_jump.Terminal_handoff { editor } ->
+                         restore_terminal ();
+                         let command =
+                           Printf.sprintf "%s %s" editor (Filename.quote path)
+                         in
+                         let _ : Unix.process_status = Unix.system command in
+                         reenter_terminal ();
+                         add_event state "system"
+                           (Printf.sprintf "closed %s" path))
             | _ -> ())
        (* The palette is the same kind of modal, but typed: printable keys
           build the query, arrows move the cursor, Enter runs the highlighted

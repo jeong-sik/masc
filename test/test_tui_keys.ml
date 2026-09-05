@@ -633,6 +633,43 @@ let test_metrics_is_an_overview_child () =
   Alcotest.(check bool) "Overview documents the [m] hop" true
     (List.mem "m" overview_keys)
 
+let test_visible_surface_ring_declutter () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Overview;
+  let ring_empty = visible_surface_ring state in
+  Alcotest.(check bool) "Approvals hidden when empty and not active" false
+    (List.exists (fun (s, _) -> s = Approvals) ring_empty);
+  state.view <- Approvals;
+  let ring_active = visible_surface_ring state in
+  Alcotest.(check bool) "Approvals shown when active surface" true
+    (List.exists (fun (s, _) -> s = Approvals) ring_active);
+  state.view <- Overview;
+  state.keeper_tool_approvals <-
+    [ { kta_keeper = "alpha"
+      ; kta_tool_call_id = "call_1"
+      ; kta_tool = "exec"
+      ; kta_args = "{}"
+      ; kta_question = "run?"
+      ; kta_because = None
+      ; kta_asked_at = 0.0
+      ; kta_timeout_sec = 60.0
+      }
+    ];
+  let ring_with_pending = visible_surface_ring state in
+  Alcotest.(check bool) "Approvals shown when pending items exist" true
+    (List.exists (fun (s, _) -> s = Approvals) ring_with_pending)
+
+let test_braille_sparkline () =
+  Alcotest.(check string) "empty list gives base line" "⣀⡠⠤⠶"
+    (braille_sparkline []);
+  let spark = braille_sparkline [ 0.0; 0.5; 1.0 ] in
+  Alcotest.(check bool) "sparkline non-empty" true (String.length spark > 0)
+
+let test_fleet_total_cost () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  Alcotest.(check (float 0.001)) "fleet cost initially 0" 0.0
+    (fleet_total_cost_usd state)
+
 let test_config_footer_names_both_hops () =
   check str "Config names its two off-ring children"
     "j/k:select / scroll  p:runtime.toml / models / params / prompts / themes  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  Esc:overview  r:reload  Tab:next"
@@ -1414,6 +1451,12 @@ let () =
             test_logs_is_an_activity_child
         ; Alcotest.test_case "Metrics is an Overview child" `Quick
             test_metrics_is_an_overview_child
+        ; Alcotest.test_case "smart declutter hides empty approvals" `Quick
+            test_visible_surface_ring_declutter
+        ; Alcotest.test_case "braille sparkline renders levels" `Quick
+            test_braille_sparkline
+        ; Alcotest.test_case "fleet total cost sums correctly" `Quick
+            test_fleet_total_cost
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
         ; Alcotest.test_case "Keeper detail reserves u for channel unbind"

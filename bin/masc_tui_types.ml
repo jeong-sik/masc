@@ -3230,6 +3230,15 @@ type state = {
   mutable repository_changes_diff_path: string option;
   mutable repository_changes_diff_scroll: int;
   mutable repository_changes_return_chat: bool;
+  (* Interactive patch review modal: 3D drop-shadow overlay for reviewing
+     and resolving pending code changes, git diffs, and approval gates. *)
+  mutable patch_modal_open: bool;
+  mutable patch_modal_scroll: int;
+  mutable patch_modal_path: string option;
+  mutable patch_modal_diff: (string * Tui_decode.git_diff) option;
+  mutable patch_modal_error: string option;
+  (* Real-time Token Burn Velocity and Financial HUD *)
+  mutable burn_hud_visible: bool;
   (* Code surface: one directory level at a time through the lazy /children
      route; the file arrives whole and is lexed once at load. *)
   mutable code_dir: string;
@@ -4286,6 +4295,12 @@ let create_state
   repository_changes_diff_path = None;
   repository_changes_diff_scroll = 0;
   repository_changes_return_chat = false;
+  patch_modal_open = false;
+  patch_modal_scroll = 0;
+  patch_modal_path = None;
+  patch_modal_diff = None;
+  patch_modal_error = None;
+  burn_hud_visible = false;
   code_dir = "";
   code_entries = [];
   code_entries_error = None;
@@ -5271,6 +5286,68 @@ let approval_items (state : state) =
   List.map (fun held -> Keeper_tool_row held) state.keeper_tool_approvals
   @ List.map (fun pending -> Gate_row pending) state.gate_pending
   @ List.map (fun item -> Operator_row item) (operator_approval_items state)
+
+let is_surface_active (state : state) (s : surface) =
+  match s with
+  | Metrics -> false
+  | Approvals ->
+      state.view = Approvals || List.length (approval_items state) > 0
+  | _ -> true
+;;
+
+let visible_surface_ring (state : state) : (surface * string) list =
+  List.filter (fun (s, _) -> is_surface_active state s) surface_ring
+;;
+
+let visible_surface_ring_index (state : state) (view : surface) =
+  let ring = visible_surface_ring state in
+  let family =
+    match view with
+    | Keepers _ -> Keepers Keeper_list
+    | Verification | Harness -> Planning
+    | Changes | Connectors | Schedules -> Keepers Keeper_list
+    | Lanes -> Runtime
+    | Clients -> Runtime
+    | Code -> Repositories
+    | Resources | Tools -> Config
+    | System_logs -> Acting
+    | Metrics -> Overview
+    | v -> v
+  in
+  let rec find i = function
+    | [] -> 0
+    | (surface, _) :: rest -> if surface = family then i else find (i + 1) rest
+  in
+  find 0 ring
+;;
+
+let braille_sparkline values =
+  if values = [] then "⣀⡠⠤⠶"
+  else
+    let max_v = List.fold_left max 0.0001 values in
+    let levels = [| " "; "⡀"; "⣀"; "⣄"; "⣤"; "⣦"; "⣶"; "⣷"; "⣿" |] in
+    let glyphs =
+      List.map
+        (fun v ->
+          let ratio = max 0.0 (min 1.0 (v /. max_v)) in
+          let idx = min 8 (int_of_float (ratio *. 8.0)) in
+          levels.(idx))
+        values
+    in
+    String.concat "" glyphs
+;;
+
+let fleet_token_sparkline (state : state) =
+  let tokens =
+    List.map (fun (k : keeper) -> float_of_int k.k_total_tokens) state.keepers
+  in
+  braille_sparkline tokens
+;;
+
+let fleet_total_cost_usd (state : state) =
+  List.fold_left (fun acc (k : keeper) -> acc +. k.k_total_cost_usd) 0.0 state.keepers
+;;
+
 
 
 let surface_row_texts (state : state) : surface -> string list option = function

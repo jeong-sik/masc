@@ -67,6 +67,22 @@ let catalog =
     ; args = ""
     ; summary = "open git changes and diff for the workspace"
     }
+  ; { word = "patch"
+    ; args = ""
+    ; summary = "open 3D drop-shadow patch review modal for pending code changes"
+    }
+  ; { word = "review"
+    ; args = ""
+    ; summary = "open 3D drop-shadow patch review modal for pending code changes"
+    }
+  ; { word = "burn"
+    ; args = ""
+    ; summary = "toggle real-time token burn velocity and financial telemetry HUD"
+    }
+  ; { word = "cost"
+    ; args = ""
+    ; summary = "toggle real-time token burn velocity and financial telemetry HUD"
+    }
   ; { word = "changes"
     ; args = ""
     ; summary = "open recorded file changes for this keeper"
@@ -187,6 +203,8 @@ let parse text =
     | "metrics", _ | "telemetry", _ -> Open_metrics
     | "settings", _ -> Open_settings
     | "diff", _ -> Open_diff
+    | "patch", _ | "review", _ -> Open_patch_modal
+    | "burn", _ | "cost", _ -> Toggle_burn_hud
     | "changes", _ -> Open_changes
     | "activity", _ -> Toggle_acting_pane
     | "keeper", "" -> Switch_keeper_missing_name

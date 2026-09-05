@@ -3594,7 +3594,8 @@
  (libraries
   alcotest
   masc
-  masc.masc_types
+  masc_test_deps
+  masc_types
   masc_tui_chart
   masc_tui_message_layout
   masc_tui_render_metrics

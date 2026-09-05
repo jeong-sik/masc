@@ -118,7 +118,7 @@ let test_calculate_kpis_populated () =
   state.keepers <- [ k1; k2 ];
   let t1 = make_task ~id:"t1" ~title:"Task 1" ~status:(Masc_domain.Done { assignee = "keeper-alpha"; completed_at = "now"; notes = None }) in
   let t2 = make_task ~id:"t2" ~title:"Task 2" ~status:(Masc_domain.InProgress { assignee = "keeper-alpha"; started_at = "now" }) in
-  let t3 = make_task ~id:"t3" ~title:"Task 3" ~status:(Masc_domain.AwaitingVerification { assignee = "keeper-alpha"; started_at = "now"; submitted_at = "now"; intent = Masc_domain.Task_resolution; verification_id = "v1" }) in
+  let t3 = make_task ~id:"t3" ~title:"Task 3" ~status:(Masc_domain.AwaitingVerification { assignee = "keeper-alpha"; started_at = "now"; submitted_at = "now"; intent = Masc_domain.Complete_task; verification_id = "v1" }) in
   state.tasks <- [ t1; t2; t3 ];
   let kh1 = make_keeper_health ~keeper_id:"keeper-alpha" ~facts:20 ~snapshot_bytes:2048 in
   let mhs = make_memory_health ~total_facts:20 ~source_facts:5 ~keepers:[ kh1 ] in

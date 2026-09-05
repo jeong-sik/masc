@@ -2119,7 +2119,9 @@ let surface_needs : surface -> surface_needs = function
      different machinery. *)
   | Approvals ->
       { nothing with needs_operator_approvals = true; needs_asks = true }
-  | Metrics | Memory | Lanes | Clients | Schedules | Verification | Harness | Fusion
+  | Metrics ->
+      { nothing with needs_keeper_roster = true; needs_fleet_safety = true }
+  | Memory | Lanes | Clients | Schedules | Verification | Harness | Fusion
   | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
   | Tools ->
       nothing

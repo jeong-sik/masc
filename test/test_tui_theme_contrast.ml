@@ -603,7 +603,7 @@ let test_load_retro_themes_toml () =
         check string ("name matches " ^ name) name (Catalog.name scheme);
         check bool "is dark theme" false (Catalog.light scheme);
         check bool "to_palette produces palette" true (Option.is_some (Catalog.to_palette scheme)))
-    [ "dungeon-gold"; "norton"; "msx"; "pc-tools"; "msc"; "cyber" ]
+    [ "dungeon-gold"; "norton"; "msx"; "pc-tools"; "msc"; "cyber"; "cga" ]
 ;;
 
 (* The schemes above are found by name; this says they are also *measured*.
@@ -615,7 +615,7 @@ let test_contracts_cover_the_toml_themes () =
     (fun name ->
       check bool (name ^ " is under the readability contracts") true
         (List.mem name measured))
-    [ "dungeon-gold"; "norton"; "msx"; "pc-tools"; "msc"; "cyber" ]
+    [ "dungeon-gold"; "norton"; "msx"; "pc-tools"; "msc"; "cyber"; "cga" ]
 ;;
 
 let test_clean_hex_rejects_underscores () =

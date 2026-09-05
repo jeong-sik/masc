@@ -39,6 +39,8 @@ type outcome =
       ; stage : repair_stage
       ; detail : string
       }
+  | Resolution_absent of
+      { absence : Keeper_approval_queue.resolution_absence }
 
 let repair_stage_to_string = function
   | Resolution_lookup -> "resolution_lookup"
@@ -180,6 +182,10 @@ let outcome_to_string = function
       operation
       (repair_stage_to_string stage)
       (payload_fingerprint detail)
+  | Resolution_absent { absence } ->
+    Printf.sprintf
+      "resolution_absent store=%s"
+      (Keeper_approval_queue.resolution_absence_to_string absence)
 ;;
 
 (* Replay recognizes exactly the identity its producer submits; every other
@@ -691,6 +697,21 @@ let append_model_evidence ~approval_id ~user_message = function
              ])
     in
     plain_model_message (String.concat "\n" [ user_message; ""; repair_fragment ])
+  | Resolution_absent { absence } ->
+    let store = Keeper_approval_queue.resolution_absence_to_string absence in
+    let absent_fragment =
+      render_gate_replay_prompt
+        Prompt_names.keeper_gate_replay_resolution_absent
+        [ "approval_id", approval_id; "store", store ]
+        ~fallback:
+          (String.concat
+             "\n"
+             [ Printf.sprintf "- approval_id: %s" approval_id
+             ; Printf.sprintf "- store: %s" store
+             ; "- state: no durable resolution to replay; not retried"
+             ])
+    in
+    plain_model_message (String.concat "\n" [ user_message; ""; absent_fragment ])
 ;;
 
 let append_model_evidence_block evidence blocks =
@@ -871,7 +892,7 @@ let compose_model_message
           | Indeterminate _ )
           as outcome ) ) ->
     append_model_evidence ~approval_id ~user_message outcome
-  | Some (approval_id, (Repair_required _ as outcome)) ->
+  | Some (approval_id, ((Repair_required _ | Resolution_absent _) as outcome)) ->
     append_model_evidence ~approval_id ~user_message outcome
   | Some (_, Not_applicable) | None ->
     user_message_with_hitl_resolution
@@ -941,12 +962,20 @@ let replay_approved_effect_with_receipt
          ?terminal_effect_receipt
          replay_effect
      | None ->
-       replay_execution
-         (Repair_required
-            { operation = "unknown"
-            ; detail = Keeper_approval_queue.grant_error_to_string error
-            ; stage = Resolution_lookup
-            }))
+       (match Keeper_approval_queue.resolution_absence_of_grant_error error with
+        | Some absence ->
+          (* The store has no resolution behind this id and will not grow one
+             by being read again. The turn goes on with this told to the
+             model; the queue entry is retired at intake
+             ([Keeper_heartbeat_stimulus_intake.reconcile_spent_selection]). *)
+          replay_execution (Resolution_absent { absence })
+        | None ->
+          replay_execution
+            (Repair_required
+               { operation = "unknown"
+               ; detail = Keeper_approval_queue.grant_error_to_string error
+               ; stage = Resolution_lookup
+               })))
   | Ok
       { request
       ; state = Keeper_approval_queue.Resolution_consumed

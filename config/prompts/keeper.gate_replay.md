@@ -16,6 +16,9 @@ Gate resolution {{approval_id}} has an invalid durable replay state. Do not exec
 ### resolution_journal_unreadable (vars: approval_id)
 Gate resolution {{approval_id}} could not be read from its durable journal; this event will be retried.
 
+### resolution_absent (vars: approval_id, store)
+Gate resolution {{approval_id}} has no durable record to replay ({{store}}). The approved operation was not run by this replay and this event will not be retried. If the effect is still needed, issue the call again; it will ask for approval afresh.
+
 ### resolution_rejected (vars: approval_id, rationale)
 Gate resolution delivered:
 - approval_id: {{approval_id}}

@@ -276,6 +276,7 @@ let test_a_self_edge_is_refused () =
 let parsed source =
   match Mermaid.parse source with
   | Ok (Mermaid.Graph graph) -> graph
+  | Ok (Mermaid.Sequence _) -> Alcotest.fail "read as a sequence"
   | Error (Mermaid.Unsupported what) -> Alcotest.failf "unsupported: %s" what
   | Error (Mermaid.Parse_error { line; what }) -> Alcotest.failf "line %d: %s" line what
   | Error (Mermaid.Too_wide _) -> Alcotest.fail "parse does not measure"

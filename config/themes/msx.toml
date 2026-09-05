@@ -1,0 +1,20 @@
+name = "msx"
+light = false
+
+[palette]
+base00 = "1a1a2e"
+base01 = "24243e"
+base02 = "32325d"
+base03 = "5955e0"
+base04 = "b4b4c4"
+base05 = "ffffff"
+base06 = "f6ecde"
+base07 = "ffffff"
+base08 = "e74c3c"
+base09 = "e67e22"
+base0a = "f1c40f"
+base0b = "3eb845"
+base0c = "4bf0ff"
+base0d = "4352ff"
+base0e = "f64bd2"
+base0f = "9b59b6"

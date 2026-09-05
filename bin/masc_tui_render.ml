@@ -15457,11 +15457,15 @@ let render_themes (state : state) =
          (Theme.warn ()) Ansi.reset
          (Theme.bad ()) Ansi.reset
          (Theme.info ()) Ansi.reset
-         (Theme.keeper ()) Ansi.reset
-         (Theme.tool ()) Ansi.reset);
+         (Theme.keeper_origin ()) Ansi.reset
+         (Theme.tool_origin ()) Ansi.reset);
     box_line buf cols
-      (Printf.sprintf "  Text:   %sThe quick brown fox jumps over the lazy dog (0123456789)%s"
-         (Theme.text ()) Ansi.reset);
+      (Printf.sprintf "  Syntax: %slet%s x = %s\"val\"%s in %s123%s  %s(+gain)%s  %s(-loss)%s"
+         Theme.Syntax.keyword Ansi.reset
+         Theme.Syntax.string Ansi.reset
+         Theme.Syntax.code_number Ansi.reset
+         Theme.Syntax.diff_added Ansi.reset
+         Theme.Syntax.diff_removed Ansi.reset);
   end;
   box_line_styled buf cols ~style:Ansi.dim
     (match chosen with

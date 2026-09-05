@@ -573,14 +573,18 @@ base00 = "000000"
   | Error _ -> ()
 ;;
 
-let test_load_dungeon_gold_toml () =
-  let scheme_opt = Catalog.find "dungeon-gold" in
-  check bool "dungeon-gold is discovered from config/themes" true (Option.is_some scheme_opt);
-  match scheme_opt with
-  | None -> ()
-  | Some scheme ->
-    check string "name is dungeon-gold" "dungeon-gold" (Catalog.name scheme);
-    check bool "is dark theme" false (Catalog.light scheme)
+let test_load_retro_themes_toml () =
+  List.iter
+    (fun name ->
+      let scheme_opt = Catalog.find name in
+      check bool (name ^ " is discovered from config/themes") true (Option.is_some scheme_opt);
+      match scheme_opt with
+      | None -> ()
+      | Some scheme ->
+        check string ("name matches " ^ name) name (Catalog.name scheme);
+        check bool "is dark theme" false (Catalog.light scheme);
+        check bool "to_palette produces palette" true (Option.is_some (Catalog.to_palette scheme)))
+    [ "dungeon-gold"; "norton"; "msx"; "pc-tools" ]
 ;;
 
 let test_clean_hex_rejects_underscores () =
@@ -648,8 +652,8 @@ let () =
             test_of_toml_content_rejects_missing_slot
         ; Alcotest.test_case "clean_hex rejects underscores" `Quick
             test_clean_hex_rejects_underscores
-        ; Alcotest.test_case "dungeon-gold discovered from config/themes" `Quick
-            test_load_dungeon_gold_toml
+        ; Alcotest.test_case "official toml themes discovered from config/themes" `Quick
+            test_load_retro_themes_toml
         ] )
     ]
 ;;

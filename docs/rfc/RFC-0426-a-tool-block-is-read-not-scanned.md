@@ -60,7 +60,20 @@ Masc_tui_message_layout.dress_bare_links
 
 그래서 새 기전을 세울 일이 아니라 **같은 쌍을 실패 절에 적용하는 일**이다. 다만 요약 텍스트는 `Keeper_chat_diff.rows` 가 만들고 그 모듈은 스타일을 모른다. URL 과 같은 순서를 따른다 — 텍스트는 아래에서 만들고, 칠하기는 `context` 가 있는 렌더 층에서 한다.
 
-남는 결정: 실패 절을 어떻게 식별하느냐. `compact_outcome_parts` 가 이미 결과별로 절을 만들고 있으므로, 문자열을 다시 파싱하지 않고 절 목록을 결과 태그와 함께 올리면 된다.
+### 다만 칠하기는 sanitize 뒤여야 한다
+
+여기서 한 번 막힌다. 채팅 본문은 그려지기 전에 소독된다 — `project_tool_block` 이 요약 행을 `safe_line` 으로 감싼다 — 그래서 **행 텍스트 안에 ANSI 를 심는 경로는 없다.** `summary_outcome` 필드가 존재하는 이유가 그것이고, mli 가 그렇게 적어놨다:
+
+> A chat body is sanitized before it is drawn -- a row cannot carry an escape into the terminal -- so a marker inside the text cannot be coloured, and the row's own style is the only channel a reading of state has.
+
+URL dressing 이 되는 것은 그것이 **소독 뒤**, 렌더 층에서 `row.text` 에 적용되기 때문이다. 그 자리에는 `row.text` 와 `row.style` 만 있고 projection 은 없다.
+
+그래서 필요한 변경은 두 조각이다:
+
+1. **생산자**: `compact_outcome_parts` 가 절마다 어느 결과인지 함께 올리고, projection 이 실패 절을 필드로 들고 있는다. 문자열을 다시 파싱하지 않는다.
+2. **소비자**: 그 절이 레이아웃 행까지 따라와서, URL 을 칠하는 바로 그 지점에서 `~open_style:(Theme.bad ())` / `~close_style:context.inline_restore` 로 감싸진다.
+
+1만 하고 2를 안 하면 아무도 안 읽는 필드가 남는다. **둘은 같은 변경이다.** 이 RFC 를 여는 구현은 2번이 닿을 자리를 먼저 정해야 한다 — 레이아웃 행이 자기 강조 구간을 들고 다니게 할지, 아니면 도구 행만 별도 경로로 그릴지.
 
 ## 읽기 2 — 호출들 사이의 관계가 요약에 없다
 

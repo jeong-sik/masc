@@ -16,6 +16,7 @@
   (re_export uri)
   (re_export cohttp)
   (re_export cohttp-eio)
+  (re_export cstruct)
   (re_export mcp_protocol)
   (re_export digestif)
   (re_export optint)

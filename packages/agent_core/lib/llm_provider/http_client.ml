@@ -1811,11 +1811,71 @@ let with_client ?cache ~sw ~net ~origin f =
          let* result = f ~sw client in
          ok := true;
          Ok result)
+module Safe_cohttp_response_flow = struct
+  let min_chunk_read_len = 65_536
+
+  type t =
+    { source : [ `Flow | `R ] Eio.Resource.t
+    ; reusable_buf : Cstruct.t
+    ; mutable rem_off : int
+    ; mutable rem_len : int
+    }
+
+  let create (source : [> Eio.Flow.source_ty ] Eio.Resource.t) =
+    { source = (source :> [ `Flow | `R ] Eio.Resource.t)
+    ; reusable_buf = Cstruct.create min_chunk_read_len
+    ; rem_off = 0
+    ; rem_len = 0
+    }
+  ;;
+
+  let read_methods = []
+
+  let single_read t dst =
+    let dst_len = Cstruct.length dst in
+    if dst_len = 0
+    then 0
+    else if t.rem_len > 0
+    then (
+      let to_copy = min t.rem_len dst_len in
+      Cstruct.blit t.reusable_buf t.rem_off dst 0 to_copy;
+      t.rem_off <- t.rem_off + to_copy;
+      t.rem_len <- t.rem_len - to_copy;
+      to_copy)
+    else (
+      t.rem_off <- 0;
+      if dst_len >= min_chunk_read_len
+      then (
+        let count = Eio.Flow.single_read t.source dst in
+        if count <= 0 then raise End_of_file else count)
+      else (
+        let count = Eio.Flow.single_read t.source t.reusable_buf in
+        if count <= 0
+        then raise End_of_file
+        else (
+          let to_copy = min count dst_len in
+          Cstruct.blit t.reusable_buf 0 dst 0 to_copy;
+          t.rem_off <- to_copy;
+          t.rem_len <- count - to_copy;
+          to_copy)))
+  ;;
+end
+
+let safe_cohttp_response_flow (source : [> Eio.Flow.source_ty ] Eio.Resource.t)
+  : [> Eio.Flow.source_ty ] Eio.Resource.t
+  =
+  let state = Safe_cohttp_response_flow.create source in
+  let operations =
+    Eio.Resource.handler
+      (Eio.Resource.bindings (Eio.Flow.Pi.source (module Safe_cohttp_response_flow)))
+  in
+  Eio.Resource.T (state, operations)
 ;;
 
 let read_response_body resp_body =
   try
-    Ok Eio.Buf_read.(of_flow ~max_size:Api_common.max_response_body resp_body |> take_all)
+    let safe_body = safe_cohttp_response_flow resp_body in
+    Ok Eio.Buf_read.(of_flow ~max_size:Api_common.max_response_body safe_body |> take_all)
   with
   | Eio.Buf_read.Buffer_limit_exceeded ->
     Error
@@ -2256,7 +2316,9 @@ let post_stream ?cache ?clock ?connect_timeout_s ~sw ~net ~url ~headers ~body ()
              origin.uri))
     in
     match Cohttp.Response.status resp with
-    | `OK -> Ok (Eio.Buf_read.of_flow ~max_size:Api_common.max_response_body resp_body)
+    | `OK ->
+      let safe_body = safe_cohttp_response_flow resp_body in
+      Ok (Eio.Buf_read.of_flow ~max_size:Api_common.max_response_body safe_body)
     | status ->
       let code = Cohttp.Code.code_of_status status in
       let resp_headers = Cohttp.Response.headers resp in
@@ -2401,8 +2463,9 @@ let with_post_stream
              because the peer went away. The same predicate the synchronous
              path uses answers the second question. *)
           let reusable = response_connection_is_reusable ~request_headers:hdr resp in
+          let safe_body = safe_cohttp_response_flow resp_body in
           let reader =
-            Eio.Buf_read.of_flow ~max_size:Api_common.max_response_body resp_body
+            Eio.Buf_read.of_flow ~max_size:Api_common.max_response_body safe_body
           in
           Ok (origin, conn, reusable, transport_eof_seen, reader)
         | status ->

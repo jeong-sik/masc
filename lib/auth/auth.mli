@@ -147,6 +147,12 @@ val delete_credential : string -> string -> unit
 
 val list_credentials : string -> agent_credential list
 
+val orphaned_credential_stubs : string -> string list
+(** Agent names whose credential file is a redirect stub pointing at a file
+    that no longer exists. {!list_credentials} cannot show these — following
+    the redirect answers nothing, so they are skipped — which is why nothing
+    removed them until [masc token prune] did. They authenticate nothing. *)
+
 val audit_token_uniqueness : string -> (string * string list) list
 (** #9786: walk all credentials under [config] and return groups of
     agent names that share the same token hash.  Each entry is

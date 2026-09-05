@@ -999,21 +999,31 @@ let token_revoke_cmd_exit base_path agent =
 let token_prune_cmd_exit base_path dry_run =
   let base_path, creds = token_credentials base_path in
   let now = Unix.gettimeofday () in
-  match Auth_token_inventory.expired ~now creds with
+  let expired =
+    Auth_token_inventory.expired ~now creds
+    |> List.map (fun (c : Types_auth.agent_credential) -> (c.agent_name, "expired"))
+  in
+  (* A stub whose target is gone is invisible to a listing and authenticates
+     nothing, so it belongs in the same sweep rather than living forever. *)
+  let orphaned =
+    Auth.orphaned_credential_stubs base_path
+    |> List.map (fun name -> (name, "orphaned redirect"))
+  in
+  match expired @ orphaned with
   | [] ->
-    print_endline "no expired credentials";
+    print_endline "nothing to prune: no expired credentials, no orphaned stubs";
     Cmd.Exit.ok
   | doomed ->
     List.iter
-      (fun (c : Types_auth.agent_credential) ->
+      (fun (name, why) ->
          if dry_run
-         then Printf.printf "would retire %s\n" c.agent_name
+         then Printf.printf "would retire %s (%s)\n" name why
          else (
-           Auth.delete_credential base_path c.agent_name;
-           Printf.printf "retired %s\n" c.agent_name))
+           Auth.delete_credential base_path name;
+           Printf.printf "retired %s (%s)\n" name why))
       doomed;
     Printf.printf
-      "%d expired credential(s)%s\n"
+      "%d credential(s)%s\n"
       (List.length doomed)
       (if dry_run then " would be retired (--dry-run)" else " retired");
     Cmd.Exit.ok
@@ -1029,7 +1039,7 @@ let token_cmd =
       Term.(const token_revoke_cmd_exit $ base_path $ token_agent_arg)
   in
   let prune_cmd =
-    let doc = "Retire every expired credential." in
+    let doc = "Retire every expired credential and every orphaned stub." in
     let dry_run =
       let doc = "List what would be retired without removing anything." in
       Arg.(value & flag & info [ "dry-run" ] ~doc)

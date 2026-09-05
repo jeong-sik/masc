@@ -410,14 +410,18 @@ and in whatever shell you exported it into.
 masc token list             # agent, role, expiry, whether the raw secret is on disk
 masc token revoke ops       # retire one without minting a replacement
 masc token prune --dry-run  # what a prune would remove
-masc token prune            # retire every expired credential
+masc token prune            # retire every expired credential and orphaned stub
 ```
 
-`prune` only touches credentials whose expiry has passed. Those authenticate
-nothing already, so removing them is garbage collection rather than a security
-decision — which is why it needs no confirmation while `revoke` makes you name
-its target. A token minted with `--no-expiry` is never in that set; retire it by
-name when the client that used it is gone.
+`prune` touches two things, and neither of them authenticates anything: a
+credential whose expiry has passed, and a redirect stub whose target file is
+gone. Removing those is garbage collection rather than a security decision —
+which is why it needs no confirmation while `revoke` makes you name its target.
+Orphaned stubs are the ones a listing cannot show you: following the redirect
+answers nothing, so `masc token list` skips them and only `prune` finds them.
+
+A token minted with `--no-expiry` is never in that set. Retire it by name when
+the client that used it is gone.
 
 HTTP is the public MCP path. First load the worker bearer created by
 `quickstart.sh`:

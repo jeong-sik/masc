@@ -1982,6 +1982,15 @@ let cmd =
     ; build_commit_cmd
     ]
 
+(* Sampling starts before any domain is spawned so the executor pool, which
+   the main domain creates while sampling, shares the profile. The rate is
+   a tenth of the one the OCaml manual reports as having no visible effect.
+   GET /api/v1/diagnostics/memprof reads the tables. *)
+let setup_alloc_profile () =
+  Alloc_profile.start ~sampling_rate:Alloc_profile.default_sampling_rate
+;;
+
 let () =
   setup_gc ();
+  setup_alloc_profile ();
   exit (Cmd.eval' cmd)

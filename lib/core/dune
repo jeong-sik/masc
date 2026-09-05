@@ -30,7 +30,8 @@
   set_util
   read_drop_reason
   eval_tool_selector
-  heap_roots)
+  heap_roots
+  alloc_profile)
  (libraries
   (re_export masc_string_util)
   shared_types

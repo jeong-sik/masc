@@ -1106,6 +1106,11 @@
  (libraries alcotest ast_grep))
 
 (test
+ (name test_alloc_profile)
+ (modules test_alloc_profile)
+ (libraries alcotest masc.masc_core))
+
+(test
  (name test_heap_roots)
  (modules test_heap_roots)
  (libraries alcotest masc.masc_core))

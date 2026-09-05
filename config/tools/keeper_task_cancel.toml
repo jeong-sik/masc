@@ -1,7 +1,8 @@
 name = "keeper_task_cancel"
 description = """
-Ask for a task you hold to be stopped for good, because the work it asks for \
-should not be done. Use this when the premise is gone: the defect was fixed \
+Ask for a task you hold to be stopped for good, not handed back.
+
+The work it asks for should not be done. Use this when the premise is gone: the defect was fixed \
 elsewhere, the thing it describes no longer exists, or the task asks for \
 something that cannot be true. This is not for work you merely cannot finish \
 — hand that back with keeper_task_release so someone else can take it. Your \

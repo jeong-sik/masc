@@ -86,7 +86,70 @@ let test_annotate_leaves_a_non_object_alone () =
 let () =
   Alcotest.run
     "keeper_tool_definition_source"
-    [ ( "resolve"
+(* A deferred tool is chosen from one line. The listing shows
+   [Keeper_identity_tool_search.summary_of], which takes the first line of the
+   description and cuts it at the summary budget, so a description whose first
+   line runs on is offered to the model ending mid-sentence.
+
+   Twenty-nine of the fifty-five deferred tools were in that state when this
+   was written; [masc_fusion] had no newline at all, so its whole opening
+   paragraph was the first line. [keeper_code_query] was the measurable cost:
+   the fleet called it ten times in September with a search-shaped argument it
+   does not take, and every call failed.
+
+   The budget lives in the summariser, so this asks the summariser instead of
+   repeating the number here. *)
+let test_a_deferred_tool_is_offered_a_whole_sentence () =
+  let cut =
+    List.filter_map
+      (fun path ->
+         match Filename.dirname path, Filename.extension path with
+         | "tools", ".toml" ->
+           let name = Filename.remove_extension (Filename.basename path) in
+           (match Embedded_config.read path with
+            | None -> None
+            | Some contents ->
+              (match Tool_definition_toml.load ~name ~contents with
+               | Error message -> Some (name ^ ": " ^ message)
+               | Ok { Tool_definition_toml.schema; loading; _ } ->
+                 (match loading with
+                  | Tool_definition_toml.Always_loaded -> None
+                  | Tool_definition_toml.Deferrable ->
+                    let description = schema.Masc_domain.description in
+                    let first_line =
+                      match String.index_opt description '\n' with
+                      | Some newline -> String.sub description 0 newline
+                      | None -> description
+                    in
+                    let first_line = String.trim first_line in
+                    let offered =
+                      Masc.Keeper_identity_tool_search.summary_of description
+                    in
+                    if String.equal offered first_line
+                    then None
+                    else
+                      Some
+                        (Printf.sprintf
+                           "%s: first line is %d bytes, offered as %S"
+                           name
+                           (String.length first_line)
+                           offered))))
+         | _, _ -> None)
+      Embedded_config.file_list
+  in
+  match cut with
+  | [] -> ()
+  | _ ->
+    Alcotest.failf
+      "a deferred tool is chosen from its first line; these are cut:\n  %s"
+      (String.concat "\n  " cut)
+;;
+
+    [ ( "deferred summary"
+      , [ Alcotest.test_case "a whole sentence is offered" `Quick
+            test_a_deferred_tool_is_offered_a_whole_sentence
+        ] )
+    ; ( "resolve"
       , [ Alcotest.test_case "shipped tool names its toml" `Quick
             test_shipped_tool_names_its_toml
         ; Alcotest.test_case "composition tool names its skill" `Quick

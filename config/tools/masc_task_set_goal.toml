@@ -1,6 +1,8 @@
 name = "masc_task_set_goal"
 description = """
-Assign an existing, currently goalless task to a goal. Both task_id and \
+Assign an existing, currently goalless task to a goal.
+
+Both task_id and \
 goal_id are required and validated against the backlog and the goal store; \
 an unknown id is rejected (never silently ignored or auto-picked). A task \
 that already has a goal is rejected — reassignment is out of scope."""

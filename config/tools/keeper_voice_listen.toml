@@ -1,6 +1,8 @@
 name = "keeper_voice_listen"
 description = """
-Record user speech via microphone and transcribe to text. Starts recording, \
+Record user speech via microphone and transcribe to text.
+
+Starts recording, \
 waits for speech, stops on silence (2s), then returns transcribed text."""
 
 # Held back from the request until the model asks for it by name. Not

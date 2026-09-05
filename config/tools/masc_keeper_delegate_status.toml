@@ -1,6 +1,8 @@
 name = "masc_keeper_delegate_status"
 description = """
-Read one Keeper chat operation by exact target and operation_id. A Keeper \
+Read one Keeper chat operation by exact target and operation_id.
+
+A Keeper \
 that submitted the operation does not need this to receive the answer: that \
 arrives on its own queue when the turn ends. Use this to see where an \
 operation stands before then."""

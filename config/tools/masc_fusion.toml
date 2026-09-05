@@ -1,6 +1,8 @@
 name = "masc_fusion"
 description = """
-Run an out-of-band panel+judge deliberation. A panel of models from the \
+Run an out-of-band panel+judge deliberation.
+
+A panel of models from the \
 configured preset answers the prompt independently; a judge model \
 synthesises consensus, contradictions, partial coverage, unique insights, \
 and blind spots. Advisory only: this keeper turn continues immediately; when \

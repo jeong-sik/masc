@@ -1,6 +1,8 @@
 name = "keeper_voice_agent"
 description = """
-Get your own voice capability and configuration. Reports assigned voice, \
+Get your own voice capability and configuration.
+
+Reports assigned voice, \
 available voices, active voice session state, available conversation modes, \
 and voice_loop guidance. Without MASC_VOICE_REALTIME_WS_URL, operator audio \
 is transcribed to normal keeper text turns and keeper output uses \

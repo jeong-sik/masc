@@ -708,42 +708,62 @@ let recent_entry_of_line ~path ?line_number line =
     Malformed_json { path; line_number; detail }
 ;;
 
-let find_latest_line_from_channel input f =
-  let chunk_size = 8192 in
-  let rec scan position right_fragment =
-    if position <= 0
-    then
-      right_fragment
-      |> String.split_on_char '\n'
-      |> List.rev
-      |> List.find_map (fun line ->
-        if line_is_non_empty line then f line else None)
-    else
-      let read_start = max 0 (position - chunk_size) in
-      let read_len = position - read_start in
-      seek_in input read_start;
-      let chunk = Bytes.create read_len in
-      really_input input chunk 0 read_len;
-      let combined = Bytes.to_string chunk ^ right_fragment in
-      let parts = String.split_on_char '\n' combined in
-      let left_fragment, complete_lines =
-        if read_start = 0
-        then "", parts
-        else
-          match parts with
-          | [] -> "", []
-          | first :: rest -> first, rest
-      in
-      match
-        complete_lines
-        |> List.rev
-        |> List.find_map (fun line ->
-          if line_is_non_empty line then f line else None)
-      with
-      | Some _ as found -> found
-      | None -> scan read_start left_fragment
+(* One step of a backwards scan: read the chunk that ends at
+   [scan_position], join it to the fragment carried from the previous step,
+   and return the complete lines it holds, decoded, newest first, with the
+   state for the next step. Each step is one job on the domain pool through
+   [off_fiber]; the caller applies its own filter on the fiber and asks for
+   the next step only when nothing matched, so a match in the newest chunk
+   costs one job and no caller closure leaves the fiber. *)
+type scan_state =
+  { scan_position : int
+  ; right_fragment : string
+  }
+
+let scan_step input ~chunk_size ~decode { scan_position = position; right_fragment } =
+  let decode_newest_first lines =
+    List.fold_left
+      (fun acc line -> if line_is_non_empty line then decode line :: acc else acc)
+      []
+      lines
   in
-  scan (in_channel_length input) ""
+  if position <= 0
+  then decode_newest_first (String.split_on_char '\n' right_fragment), None
+  else begin
+    let read_start = max 0 (position - chunk_size) in
+    let read_len = position - read_start in
+    seek_in input read_start;
+    let chunk = Bytes.create read_len in
+    really_input input chunk 0 read_len;
+    let combined = Bytes.to_string chunk ^ right_fragment in
+    let parts = String.split_on_char '\n' combined in
+    let left_fragment, complete_lines =
+      if read_start = 0
+      then "", parts
+      else
+        match parts with
+        | [] -> "", []
+        | first :: rest -> first, rest
+    in
+    ( decode_newest_first complete_lines
+    , Some { scan_position = read_start; right_fragment = left_fragment } )
+  end
+;;
+
+let find_latest_decoded_from_channel input ~decode f =
+  let chunk_size = 8192 in
+  let rec drive state =
+    let decoded_newest_first, next =
+      off_fiber (fun () -> scan_step input ~chunk_size ~decode state)
+    in
+    match List.find_map f decoded_newest_first with
+    | Some _ as found -> found
+    | None ->
+      (match next with
+       | None -> None
+       | Some state -> drive state)
+  in
+  drive { scan_position = in_channel_length input; right_fragment = "" }
 ;;
 
 let find_latest_entry_in_file_result path f =
@@ -754,8 +774,10 @@ let find_latest_entry_in_file_result path f =
       ~finally:(fun () -> close_in_noerr input)
       (fun () ->
          match
-           find_latest_line_from_channel input (fun line ->
-             f (recent_entry_of_line ~path line))
+           find_latest_decoded_from_channel
+             input
+             ~decode:(fun line -> recent_entry_of_line ~path line)
+             f
          with
          | found -> Ok found
          | exception Sys_error detail ->
@@ -997,11 +1019,12 @@ let collect_matching_files ?(offset = 0) t n ~month_is_in_range
                  ~finally:(fun () -> close_in_noerr input)
                  (fun () ->
                     ignore
-                      (find_latest_line_from_channel input (fun line ->
-                         let parsed =
+                      (find_latest_decoded_from_channel
+                         input
+                         ~decode:(fun line ->
                            try Some (Yojson.Safe.from_string line)
-                           with Yojson.Json_error _ -> None
-                         in
+                           with Yojson.Json_error _ -> None)
+                         (fun parsed ->
                          match parsed with
                          | None -> None
                          | Some json ->

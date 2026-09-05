@@ -6,4 +6,4 @@
  (libraries exec_ssh_protocol unix)
  (foreign_stubs
   (language c)
-  (names prctl_stub)))
+  (names prctl_stub observe_stub)))

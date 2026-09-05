@@ -143,6 +143,9 @@ val trailer_of_status :
 val jail_error_code : string
 (** [= "remote_ssh_path_jail_violation"]. *)
 
+val config_error_code : string
+(** [= "remote_ssh_shim_config_error"]. *)
+
 (** [Ok ()] iff [cwd] — after [realpath] normalization of both paths —
     equals [root] or is a descendant of it (component-boundary aware).
     [Error] carries a message starting with {!jail_error_code} when [cwd]
@@ -191,6 +194,10 @@ type config =
   { remote_root : string
   ; env_allowlist : string list
   ; payload_path : string list  (** [path=] entries, or {!default_payload_path}. *)
+  ; scratch_root : string option
+    (** [scratch_root=] (absolute): where a boxed run gets its one writable
+        directory, which is also the payload's HOME and TMPDIR and is removed
+        after the run. Absent: a boxed payload may write nowhere (RFC-0422). *)
   }
 
 val jail_for_request
@@ -208,6 +215,35 @@ val jail_for_request
 val parse_config : string -> (config, string) result
 val load_config : unit -> (config, string) result
 
+(** {1 The box (RFC-0422)} *)
+
+val observe_supported : unit -> bool
+(** Whether this kernel lets the shim box a payload: Landlock ABI >= 1 and
+    seccomp filtering, read through the syscalls themselves. Always [false]
+    off Linux. *)
+
+val observe_unsupported_code : string
+(** ["observe_unsupported"]: the [shim_error] prefix when a request asks for
+    a box this host cannot build. The shim refuses; it never runs unboxed. *)
+
+val observe_scratch_code : string
+
+type execution_plan =
+  | Run_effect  (** unrestricted, as before v3 *)
+  | Run_boxed of
+      { deny_fs : bool  (** Landlock: writes only under the scratch *)
+      ; deny_net : bool  (** seccomp: [socket(2)] answers EPERM *)
+      }
+  | Refuse_observe_unsupported
+
+val plan_for_mode : supported:bool -> Exec_ssh_protocol.mode -> execution_plan
+(** [Effect] runs unboxed; [Observe] denies filesystem writes and sockets;
+    [Guest_local] denies sockets. Either box on an unsupported host is a
+    refusal. Pure, so the decision is pinned by a test on every host. *)
+
+val scratch_env : scratch:string -> (string * string) list -> (string * string) list
+(** The payload environment with HOME and TMPDIR pointing at the scratch. *)
+
 (** {1 Nonblocking drain helper} *)
 
 type drain_result =
@@ -223,10 +259,12 @@ val drain_fd : Unix.file_descr -> Buffer.t -> drain_result
 
 (** {1 Entry points} *)
 
-val probe : Exec_ssh_protocol.probe
+val probe : unit -> Exec_ssh_protocol.probe
 (** The shim identity.  Its semantic-version major is derived from
     {!Exec_ssh_protocol.protocol_version}, which is the compatibility value
-    checked by the SSH runner. *)
+    checked by the SSH runner. [capabilities] carries
+    {!Exec_ssh_protocol.observe_capability} exactly when {!observe_supported}
+    is true on this host. *)
 
 val run : unit -> unit
 (** Reads one request frame from stdin, executes it under supervision,

@@ -431,6 +431,9 @@ let runner ~timeout_sec t =
         ; remote_root = t.remote_root
         ; timeout_sec
         ; stdin_len = Int64.of_int (String.length stdin)
+          (* RFC-0422 step 1 ships the box in the shim only; the gate's
+             Observe stage (step 3) is what will ask for it. *)
+        ; mode = Exec_ssh_protocol.Effect
         }
       in
       (match Exec_ssh_protocol.encode_request request ~stdin with

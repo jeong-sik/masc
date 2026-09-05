@@ -1996,6 +1996,12 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
     Log.Server.info
       "HTTP serving domain isolation enabled (RFC-0204 Phase 3): accept loop isolated on dedicated domain";
     Eio.Domain_manager.run domain_mgr (fun () ->
+      (* This domain starts after [main_eio.ml] tuned the main one, and
+         [Gc.set]'s minor_heap_size is per-domain, so it would otherwise
+         serve every request on the 2 MB default -- the isolation this block
+         exists for would be undone by the domain collecting eight times as
+         often, and a minor collection stops every other domain with it. *)
+      Domain_pool.tune_minor_heap ();
       Eio.Switch.run (fun serving_sw ->
         Eio_context.with_turn_switch serving_sw (fun () ->
           let socket =

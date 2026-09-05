@@ -120,6 +120,28 @@ let test_submit_async_propagates_exception () =
 
 (* ── multi-domain dispatch ──────────────────────────────── *)
 
+(* [Gc.set]'s minor_heap_size is per-domain in OCaml 5, so tuning it on the
+   main domain leaves every later one at the 2 MB default. That is not only a
+   frequency: a minor collection is a stop-the-world barrier across all
+   domains, so a pool domain collecting eight times as often stops the whole
+   process that much more. *)
+let test_pool_work_runs_on_the_tuned_minor_heap () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let dm = Eio.Stdenv.domain_mgr env in
+      let pool = D.create ~sw ~domain_count:2 dm in
+      let main_domain = (Domain.self () :> int) in
+      let where, words =
+        D.submit_cpu pool (fun () ->
+          (Domain.self () :> int), (Gc.get ()).Gc.minor_heap_size)
+      in
+      check bool "the job did run off the main domain" true (where <> main_domain);
+      check bool
+        (Printf.sprintf "the worker's minor heap is the tuned size, got %d words" words)
+        true
+        (words >= 4 * 1024 * 1024)))
+;;
+
 let test_jobs_run_on_worker_domains () =
   (* The submitting fiber runs on the main Domain.  Jobs submitted to
      a 2-domain pool must execute on a different Domain.  We don't
@@ -246,6 +268,10 @@ let () =
     "multi_domain", [
       test_case "jobs run off main domain" `Quick
         test_jobs_run_on_worker_domains;
+    ];
+    "minor_heap", [
+      test_case "pool work runs on the tuned minor heap" `Quick
+        test_pool_work_runs_on_the_tuned_minor_heap;
     ];
     "escape_hatch", [
       test_case "executor_pool accessor" `Quick test_executor_pool_accessor;

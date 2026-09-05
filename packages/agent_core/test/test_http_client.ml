@@ -1009,6 +1009,60 @@ let test_safe_cohttp_response_flow_eof_on_empty () =
   Alcotest.(check bool) "empty flow raises End_of_file" true !raised_eof
 ;;
 
+let test_safe_cohttp_response_flow_zero_length_read () =
+  Eio_main.run
+  @@ fun _env ->
+  let source = Eio.Flow.string_source "hello world" in
+  let safe_flow = Http_client.safe_cohttp_response_flow source in
+  let zero_dst = Cstruct.create 0 in
+  let n = Eio.Flow.single_read safe_flow zero_dst in
+  Alcotest.(check int) "zero-length read returns 0" 0 n;
+  let dst = Cstruct.create 20 in
+  let n2 = Eio.Flow.single_read safe_flow dst in
+  Alcotest.(check string)
+    "content preserved after zero-length read"
+    "hello world"
+    (Cstruct.to_string (Cstruct.sub dst 0 n2))
+;;
+
+let test_safe_cohttp_response_flow_large_buffer_direct_read () =
+  Eio_main.run
+  @@ fun _env ->
+  let total_len = 70_000 in
+  let original_data = String.init total_len (fun i -> Char.chr (32 + (i mod 95))) in
+  let source = Eio.Flow.string_source original_data in
+  let safe_flow = Http_client.safe_cohttp_response_flow source in
+  let large_dst = Cstruct.create 80_000 in
+  let n = Eio.Flow.single_read safe_flow large_dst in
+  Alcotest.(check int) "direct read read all bytes" total_len n;
+  Alcotest.(check string)
+    "content matches on direct read"
+    original_data
+    (Cstruct.to_string (Cstruct.sub large_dst 0 n))
+;;
+
+let test_safe_cohttp_response_flow_multi_refill_large_payload () =
+  Eio_main.run
+  @@ fun _env ->
+  let total_len = 150_000 in
+  let original_data = String.init total_len (fun i -> Char.chr (32 + (i mod 95))) in
+  let source = Eio.Flow.string_source original_data in
+  let safe_flow = Http_client.safe_cohttp_response_flow source in
+  let buf = Buffer.create total_len in
+  let dst = Cstruct.create 4096 in
+  (try
+     while true do
+       let n = Eio.Flow.single_read safe_flow dst in
+       Buffer.add_string buf (Cstruct.to_string (Cstruct.sub dst 0 n))
+     done
+   with
+   | End_of_file -> ());
+  Alcotest.(check string)
+    "multi-refill payload matches exactly"
+    original_data
+    (Buffer.contents buf)
+;;
+
 (* ── Test runner ────────────────────────────────── *)
 
 let () =
@@ -1145,6 +1199,18 @@ let () =
             "eof on empty"
             `Quick
             test_safe_cohttp_response_flow_eof_on_empty
+        ; Alcotest.test_case
+            "zero length read returns 0 without advancing"
+            `Quick
+            test_safe_cohttp_response_flow_zero_length_read
+        ; Alcotest.test_case
+            "large buffer direct read"
+            `Quick
+            test_safe_cohttp_response_flow_large_buffer_direct_read
+        ; Alcotest.test_case
+            "multi refill large payload"
+            `Quick
+            test_safe_cohttp_response_flow_multi_refill_large_payload
         ] )
     ; ( "error_domain"
       , [ Alcotest.test_case "full roundtrip" `Quick test_error_domain_full_roundtrip

@@ -1845,7 +1845,9 @@ module Safe_cohttp_response_flow = struct
     else (
       t.rem_off <- 0;
       if dst_len >= min_chunk_read_len
-      then Eio.Flow.single_read t.source dst
+      then (
+        let count = Eio.Flow.single_read t.source dst in
+        if count <= 0 then raise End_of_file else count)
       else (
         let count = Eio.Flow.single_read t.source t.reusable_buf in
         if count <= 0
@@ -2314,7 +2316,9 @@ let post_stream ?cache ?clock ?connect_timeout_s ~sw ~net ~url ~headers ~body ()
              origin.uri))
     in
     match Cohttp.Response.status resp with
-    | `OK -> Ok (Eio.Buf_read.of_flow ~max_size:Api_common.max_response_body resp_body)
+    | `OK ->
+      let safe_body = safe_cohttp_response_flow resp_body in
+      Ok (Eio.Buf_read.of_flow ~max_size:Api_common.max_response_body safe_body)
     | status ->
       let code = Cohttp.Code.code_of_status status in
       let resp_headers = Cohttp.Response.headers resp in

@@ -702,8 +702,8 @@ module For_testing = struct
   ;;
 end
 
-let preflight_status ~timeout_sec =
-  Keeper_sandbox_runtime.docker_preflight ~timeout_sec ()
+let preflight_status ?image ~timeout_sec =
+  Keeper_sandbox_runtime.docker_preflight ?image ~timeout_sec ()
 
 (* [docker_preflight] already answers [ok] as a bool. Serialising the record
    and reading the field back out of an [`Assoc] meant a typo in the key, or a
@@ -853,7 +853,7 @@ let live_status_json ?(include_preflight = true)
     | Some cached -> cached
     | None ->
       if include_preflight && meta.sandbox_profile = Docker then
-        preflight_status ~timeout_sec
+        preflight_status ?image:meta.sandbox_image ~timeout_sec
       else
         None
   in

@@ -84,7 +84,7 @@ let with_test_context f =
    [docker info] on every case. [None] is what the real probe answers when
    the preflight master switch is off. The cases that pin the probe itself
    pass their own. *)
-let no_daemon_in_this_suite ~timeout_sec:_ = None
+let no_daemon_in_this_suite ?image:_ ~timeout_sec:_ = None
 
 let parse_stating_a_profile ctx json =
   let json =
@@ -1532,7 +1532,7 @@ let test_docker_profile_is_refused_when_its_preflight_fails () =
   with_test_context
   @@ fun ctx ->
   let probes = ref 0 in
-  let docker_preflight ~timeout_sec:_ =
+  let docker_preflight ?image:_ ~timeout_sec:_ =
     incr probes;
     Some (preflight_fixture ~ok:false)
   in
@@ -1555,7 +1555,7 @@ let test_docker_profile_is_admitted_when_its_preflight_passes () =
   with_test_context
   @@ fun ctx ->
   let probes = ref 0 in
-  let docker_preflight ~timeout_sec:_ =
+  let docker_preflight ?image:_ ~timeout_sec:_ =
     incr probes;
     Some (preflight_fixture ~ok:true)
   in
@@ -1574,7 +1574,7 @@ let test_docker_preflight_is_consulted_only_for_the_docker_profile () =
   with_test_context
   @@ fun ctx ->
   let probes = ref 0 in
-  let switched_off ~timeout_sec:_ =
+  let switched_off ?image:_ ~timeout_sec:_ =
     incr probes;
     None
   in
@@ -1585,7 +1585,7 @@ let test_docker_preflight_is_consulted_only_for_the_docker_profile () =
        "docker with the preflight switched off must be admitted: %s"
        (Keeper_types_profile.tool_result_body result));
   check int "docker consulted the probe" 1 !probes;
-  let failing ~timeout_sec:_ =
+  let failing ?image:_ ~timeout_sec:_ =
     incr probes;
     Some (preflight_fixture ~ok:false)
   in
@@ -1596,6 +1596,62 @@ let test_docker_preflight_is_consulted_only_for_the_docker_profile () =
        "microvm must not be judged by the docker preflight: %s"
        (Keeper_types_profile.tool_result_body result));
   check int "microvm never consulted the probe" 1 !probes
+;;
+
+let test_docker_preflight_receives_sandbox_image_from_profile_defaults () =
+  with_test_context
+  @@ fun ctx ->
+  let keeper_name = "custom-image-keeper" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:ctx.config.Workspace.base_path
+  in
+  Masc_domain.mkdir_p keepers_dir;
+  let toml_path = Filename.concat keepers_dir (keeper_name ^ ".toml") in
+  let toml_content =
+    {|
+[keeper]
+sandbox_profile = "docker"
+sandbox_image = "masc-keeper-sandbox:custom-tag"
+network_mode = "none"
+|}
+  in
+  Out_channel.with_open_bin toml_path (fun oc ->
+    Out_channel.output_string oc toml_content);
+  let probed_image = ref None in
+  let docker_preflight ?image ~timeout_sec:_ =
+    probed_image := image;
+    Some (preflight_fixture ~ok:true)
+  in
+  let args =
+    `Assoc
+      [ "name", `String keeper_name
+      ; "sandbox_profile", `String "docker"
+      ]
+  in
+  match Keeper_turn_up_args.parse ~docker_preflight ctx args with
+  | Ok parsed ->
+    check (option string) "probed image matches keeper TOML sandbox_image"
+      (Some "masc-keeper-sandbox:custom-tag")
+      !probed_image;
+    check (option string) "parsed profile_defaults retains sandbox_image"
+      (Some "masc-keeper-sandbox:custom-tag")
+      parsed.profile_defaults.sandbox_image;
+    let failing_docker_preflight ?image ~timeout_sec:_ =
+      probed_image := image;
+      Some (preflight_fixture ~ok:false)
+    in
+    (match Keeper_turn_up_args.parse ~docker_preflight:failing_docker_preflight ctx args with
+     | Ok _ -> fail "admission should fail when custom image preflight fails"
+     | Error result ->
+       let body = Keeper_types_profile.tool_result_body result in
+       check bool "rejected under docker_preflight_failed" true
+         (String.starts_with
+            ~prefix:(Keeper_sandbox_runtime.docker_preflight_failed_label ^ ":")
+            body))
+  | Error result ->
+    failf "unexpected parse error: %s"
+      (Keeper_types_profile.tool_result_body result)
 ;;
 
 (* The schema the model reads and the parse that answers it have to say the
@@ -1784,6 +1840,10 @@ let () =
             "docker preflight is consulted only for the docker profile"
             `Quick
             test_docker_preflight_is_consulted_only_for_the_docker_profile
+        ; test_case
+            "docker preflight receives sandbox_image from profile defaults"
+            `Quick
+            test_docker_preflight_receives_sandbox_image_from_profile_defaults
         ; test_case
             "remote endpoint persists and null clears"
             `Quick

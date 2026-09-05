@@ -3559,6 +3559,11 @@
  (libraries alcotest masc_tui_context_bars))
 
 (test
+ (name test_tui_chart)
+ (modules test_tui_chart)
+ (libraries alcotest masc_tui_chart masc_tui_message_layout masc_tui_theme))
+
+(test
  (name test_tui_esc_interrupt)
  (modules test_tui_esc_interrupt)
  (libraries alcotest masc_tui_esc_interrupt masc_tui_keeper_chat_transcript))

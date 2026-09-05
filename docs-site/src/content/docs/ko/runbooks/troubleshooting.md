@@ -60,3 +60,34 @@ Keeper 는 명령 격리가 필요하고, MASC 는 허용된 `sandbox_profile` �
 프로바이더가 rate-limit 오류를 주면, MASC 는 그 역할에 등록된 다른 바인딩으로
 failover 할 수 있어 진행 중인 Keeper 턴을 버리지 않습니다. 대체 슬롯을 해당 lane 에
 더 넣어 설정하세요([설정 파일](/ko/reference/config/) 참고).
+
+## TUI에 "reconnecting..." 이 반복되거나 서버 응답 지연이 길어짐
+
+TUI에 `reconnecting...` 배너가 반복되거나 서버 지연이 튀는 경우, Eio 메인 도메인의
+스케줄러가 차단성 시스템 콜 또는 대규모 GC로 인해 늦게 깨어나는 현상일 수 있습니다:
+
+1. 서버 헬스 엔드포인트에서 스케줄러 지연 및 GC 상태 확인:
+   ```bash
+   curl -s http://127.0.0.1:8935/health | jq '{scheduler: .scheduler, gc: .gc}'
+   ```
+   `.scheduler.stalls_ge_1s`(1초 이상 스톨 횟수) 및 백분위 링(`p50`, `p95`, `p99`, `max`)을
+   확인하세요. `max`가 높다면 메인 도메인의 락 획득 지연이 발생한 것입니다.
+
+2. 실시간 스케줄러 지연 프로브 실행:
+   ```bash
+   MASC_URL=http://127.0.0.1:8935 scripts/harness/perf/scheduler_lag_probe.sh
+   ```
+   실행 중인 서버에 실시간으로 붙어 최근 1분간의 링 버퍼 지연율과 `Gc.quick_stat` 누적
+   카운터를 통해 라이브 힙을 순회하지 않고도 초당 할당량(MB/s)과 GC 빈도를 진단합니다.
+
+## 힙 메모리 급증 진단 (`heap-roots`)
+
+서버 프로세스의 메모리 사용량이 예상보다 비정상적으로 높을 때:
+
+```bash
+curl -s http://127.0.0.1:8935/api/v1/diagnostics/heap-roots | jq .
+```
+
+이 진단 엔드포인트는 가비지 컬렉터의 라이브 힙 루트를 조사하여, 어떤 모듈·큐·캐시가
+메모리를 점유하고 있는지 식별합니다.
+

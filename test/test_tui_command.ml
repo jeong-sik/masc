@@ -474,7 +474,7 @@ let test_the_typed_run_is_what_was_pressed () =
      outgrew an 80-column composer, so the row says how many words it could
      not carry and points at the list that is complete by definition. *)
   check string "the bare slash highlights only itself"
-    "T[/]U[task keeper settings diff changes interrupt steer thinking]D[ +13 more (/help)]"
+    "T[/]U[task keeper settings diff changes interrupt steer thinking]D[ +14 more (/help)]"
     (spans "/")
 
 (* The row an operator types knowing nothing is the one that must not run off

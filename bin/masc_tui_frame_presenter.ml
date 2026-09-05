@@ -82,7 +82,6 @@ let set_page_colors { foreground; background } =
 
 let reset_page_colors = "\027]110\027\\\027]111\027\\"
 
-let erase_line = "\027[2K"
 let hide_cursor = "\027[?25l"
 let show_cursor = "\027[?25h"
 

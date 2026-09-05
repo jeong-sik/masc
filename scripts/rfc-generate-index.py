@@ -254,21 +254,27 @@ def collect_entries() -> tuple[dict[str, RfcEntry], list[str]]:
     for entry in entries.values():
         entry.documents.sort(key=lambda document: document.filename)
         entry.sub_docs.sort(key=lambda document: document.filename)
-        # One number, one RFC. A second document claiming a number is a
-        # clash to refuse, not a row to render: 0415 was taken twice within a
-        # day (#33069, #33113) and every "RFC-0415 §4.1" citation in the code
-        # pointed at whichever file the reader opened first.
-        held_twice = len(entry.documents) > 1
-        if held_twice and entry.display_key not in NUMBERS_HELD_TWICE:
+        # One number, one RFC: a "RFC-NNNN §4.1" citation in the code has to
+        # name exactly one file. A second document claiming a number is a
+        # clash to refuse, not a row to render, except for the numbers in
+        # NUMBERS_HELD_TWICE, which hold exactly two.
+        count = len(entry.documents)
+        filenames = ", ".join(document.filename for document in entry.documents)
+        if entry.display_key in NUMBERS_HELD_TWICE:
+            if count < 2:
+                issues.append(
+                    f"{entry.display_key}: fewer than two documents hold it "
+                    "now; drop it from NUMBERS_HELD_TWICE"
+                )
+            elif count > 2:
+                issues.append(
+                    f"{entry.display_key}: number carried by {count} documents, "
+                    f"NUMBERS_HELD_TWICE allows two: {filenames}"
+                )
+        elif count > 1:
             issues.append(
-                f"{entry.display_key}: number carried by "
-                f"{len(entry.documents)} documents: "
-                + ", ".join(document.filename for document in entry.documents)
-            )
-        if not held_twice and entry.display_key in NUMBERS_HELD_TWICE:
-            issues.append(
-                f"{entry.display_key}: one document holds it now; "
-                "drop it from NUMBERS_HELD_TWICE"
+                f"{entry.display_key}: number carried by {count} documents: "
+                f"{filenames}"
             )
 
     return entries, issues

@@ -129,9 +129,9 @@ fi
 if [ "${#keeper_names[@]}" -gt 0 ]; then
   log "keepers that will autoboot on next start: ${keeper_names[*]}"
   # The seeded keepers name no model; the live config root's runtime.toml
-  # does, under [runtime].default, and the operator owns that file. Read it
-  # rather than restate it here: the repo default moved once already and
-  # this line kept printing the old one.
+  # does, under [runtime].default, and the operator owns that file. This
+  # summary reads that file rather than restating a model name, so it prints
+  # what the keepers will actually run on.
   runtime_toml="$CONFIG_DIR/runtime.toml"
   default_runtime=""
   if [ -f "$runtime_toml" ]; then

@@ -78,7 +78,9 @@ type captured_output =
 (** Every way one scaler run can fall short. Each carries what the process
     wrote so the boundary log can show it. *)
 type attempt_failure =
-  | Executable_not_found  (** argv[0] resolved to nothing on PATH; nothing ran. *)
+  | Spawn_refused of Process_eio.spawn_refusal
+      (** No process ran: argv[0] resolved to nothing on PATH, or the spawn
+          itself was refused; the refusal says which. *)
   | Exited_nonzero of
       { code : int
       ; output : captured_output

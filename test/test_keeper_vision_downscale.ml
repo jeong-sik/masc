@@ -277,7 +277,7 @@ let check_exited_nonzero_with_refusal label (a : Vd.attempt) =
     check bool (label ^ ": stderr kept") true
       (String.equal (String.trim output.stderr) refused_stderr);
     check string (label ^ ": stdout kept and empty") "" output.stdout
-  | Vd.Executable_not_found
+  | Vd.Spawn_refused _
   | Vd.Timed_out _
   | Vd.Signaled _
   | Vd.Stopped _
@@ -350,7 +350,7 @@ let test_every_scaler_fails_lists_every_attempt_in_order () =
        check_exited_nonzero_with_refusal "sips" first;
        (match second.failure with
         | Vd.No_output_written _ -> ()
-        | Vd.Executable_not_found
+        | Vd.Spawn_refused _
         | Vd.Exited_nonzero _
         | Vd.Timed_out _
         | Vd.Signaled _
@@ -361,7 +361,7 @@ let test_every_scaler_fails_lists_every_attempt_in_order () =
        (match third.failure with
         | Vd.Output_still_too_large { dims; output = _ } ->
           check (pair int int) "convert: the oversized output's dims" (3000, 3000) (dims_pair dims)
-        | Vd.Executable_not_found
+        | Vd.Spawn_refused _
         | Vd.Exited_nonzero _
         | Vd.Timed_out _
         | Vd.Signaled _
@@ -386,10 +386,13 @@ let test_every_scaler_fails_lists_every_attempt_in_order () =
 
 let check_executable_not_found label (a : Vd.attempt) =
   match a.failure with
-  | Vd.Executable_not_found ->
-    (match a.attempted.argv with
-     | program :: _ -> check string (label ^ ": argv[0] is the absent program") missing_program program
-     | [] -> fail (label ^ ": empty argv"))
+  | Vd.Spawn_refused (Process_eio.Executable_not_found program) ->
+    check string (label ^ ": the refusal names the absent program") missing_program program
+  | Vd.Spawn_refused
+      ((Process_eio.Empty_argv | Process_eio.Spawn_failed _ | Process_eio.Child_setup_failed _) as
+       refusal) ->
+    failf "%s: expected Executable_not_found, got %s" label
+      (Process_eio.spawn_refusal_to_string refusal)
   | Vd.Exited_nonzero _
   | Vd.Timed_out _
   | Vd.Signaled _
@@ -490,7 +493,9 @@ let test_downscale_oversized_png_live () =
     List.iter
       (fun (a : Vd.attempt) ->
         match a.failure with
-        | Vd.Executable_not_found -> ()
+        | Vd.Spawn_refused (Process_eio.Executable_not_found _) -> ()
+        | Vd.Spawn_refused
+            (Process_eio.Empty_argv | Process_eio.Spawn_failed _ | Process_eio.Child_setup_failed _)
         | Vd.Exited_nonzero _
         | Vd.Timed_out _
         | Vd.Signaled _

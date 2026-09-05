@@ -137,8 +137,72 @@ let check_refusal_names_the_missing_program () =
   match Process_eio.run_argv_with_status_split_or_refusal [ missing_program ] with
   | Error (Process_eio.Executable_not_found named) ->
     check string "the refusal names argv[0] as given" missing_program named
+  | Error
+      ((Process_eio.Empty_argv | Process_eio.Spawn_failed _ | Process_eio.Child_setup_failed _) as
+       refusal) ->
+    failf "expected Executable_not_found, got %s" (Process_eio.spawn_refusal_to_string refusal)
   | Ok (status, _stdout, stderr) ->
     failf "expected a refusal, got %s with stderr %S" (status_to_string status) stderr
+
+let with_runtime_reset f =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  Fun.protect ~finally:Process_eio.reset_for_testing f
+
+(* A file that exists and is not executable: the spawn is refused, not the
+   lookup. *)
+let with_noexec_file f =
+  let path = Filename.temp_file "process-eio-noexec" ".sh" in
+  Out_channel.with_open_bin path (fun oc -> output_string oc "not a program\n");
+  Unix.chmod path 0o600;
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+    (fun () -> f path)
+
+(* Unix fallback: posix_spawnp reports the refusal with its errno at the
+   spawn call (OCaml 5.5 spawn.c:80, EACCES checked on this switch) and the
+   typed runner carries that errno as a value. *)
+let test_or_refusal_carries_the_spawn_errno () =
+  Process_eio.reset_for_testing ();
+  with_noexec_file @@ fun path ->
+  match Process_eio.run_argv_with_status_split_or_refusal [ path ] with
+  | Error (Process_eio.Spawn_failed { executable; error = Unix.EACCES }) ->
+    check string "the refusal names the file" path executable
+  | Error refusal ->
+    failf "expected Spawn_failed EACCES, got %s" (Process_eio.spawn_refusal_to_string refusal)
+  | Ok (status, _stdout, stderr) ->
+    failf "expected a refusal, got %s with stderr %S" (status_to_string status) stderr
+
+(* Eio path, same file: PATH resolution finds it, the forked child's execve
+   fails, and eio hands the parent that failure as text over its error pipe
+   (fork_action.c, low_level.ml). The text arrives as a value, unparsed. *)
+let test_or_refusal_carries_the_child_setup_text_eio () =
+  with_runtime_reset @@ fun () ->
+  with_noexec_file @@ fun path ->
+  match Process_eio.run_argv_with_status_split_or_refusal [ path ] with
+  | Error (Process_eio.Child_setup_failed { executable; detail }) ->
+    check string "the refusal names the file" path executable;
+    check bool "eio's text is carried" true (String.length detail > 0)
+  | Error refusal ->
+    failf "expected Child_setup_failed, got %s" (Process_eio.spawn_refusal_to_string refusal)
+  | Ok (status, _stdout, stderr) ->
+    failf "expected a refusal, got %s with stderr %S" (status_to_string status) stderr
+
+let check_empty_argv_is_refused () =
+  match Process_eio.run_argv_with_status_split_or_refusal [] with
+  | Error Process_eio.Empty_argv -> ()
+  | Error refusal ->
+    failf "expected Empty_argv, got %s" (Process_eio.spawn_refusal_to_string refusal)
+  | Ok (status, _stdout, stderr) ->
+    failf "an empty argv ran: %s with stderr %S" (status_to_string status) stderr
+
+let test_or_refusal_refuses_empty_argv_on_both_paths () =
+  Process_eio.reset_for_testing ();
+  check_empty_argv_is_refused ();
+  with_runtime_reset check_empty_argv_is_refused
 
 (* The typed runner hands a program the spawn cannot find back as a value.
    The tuple runners above keep folding it into exit 127 plus text. Unix
@@ -166,8 +230,8 @@ let test_run_argv_with_status_split_or_refusal_returns_status_when_it_ran () =
     Process_eio.run_argv_with_status_split_or_refusal
       [ "/bin/sh"; "-c"; "echo refused-by-fixture >&2; exit 3" ]
   with
-  | Error (Process_eio.Executable_not_found named) ->
-    failf "sh was reported missing: %s" named
+  | Error refusal ->
+    failf "sh was refused: %s" (Process_eio.spawn_refusal_to_string refusal)
   | Ok (status, stdout, stderr) ->
     check string "the child's exit status" "exited 3" (status_to_string status);
     check string "stdout stays separate" "" stdout;
@@ -1026,6 +1090,15 @@ let () =
           test_case "argv-with-status-split-or-refusal-returns-status-when-it-ran"
             `Quick
             test_run_argv_with_status_split_or_refusal_returns_status_when_it_ran;
+          test_case "argv-with-status-split-or-refusal-carries-the-spawn-errno"
+            `Quick
+            test_or_refusal_carries_the_spawn_errno;
+          test_case "argv-with-status-split-or-refusal-carries-child-setup-text-eio"
+            `Quick
+            test_or_refusal_carries_the_child_setup_text_eio;
+          test_case "argv-with-status-split-or-refusal-refuses-empty-argv-both-paths"
+            `Quick
+            test_or_refusal_refuses_empty_argv_on_both_paths;
           test_case "argv-with-status-fallback-enforces-timeout" `Quick
             test_run_argv_with_status_fallback_enforces_timeout;
           test_case "argv-with-status-fallback-observes-timeout" `Quick

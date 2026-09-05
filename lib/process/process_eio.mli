@@ -210,14 +210,46 @@ val run_argv_with_status_split :
   string list ->
   (Unix.process_status * string * string)
 (** Like [run_argv_with_status], but returns
-    [(status, stdout, stderr)] without combining stderr into stdout. *)
+    [(status, stdout, stderr)] without combining stderr into stdout.
 
+    A failure before the child exists (see {!spawn_refusal}) comes back as
+    [Unix.WEXITED 127] with a [process_eio_error:] line in the stderr slot,
+    the same shape a program that ran and exited 127 produces. This runner
+    and the other tuple runners keep folding it that way for the callers that
+    read the tuple; {!run_argv_with_status_split_or_refusal} returns the same
+    failure as a value. *)
+
+(** {1 Spawn refusal} *)
+
+(** Everything either spawn path can fail with before a child process exists.
+    The set is read from eio 1.3 and OCaml 5.5 sources; the implementation
+    cites the lines. *)
 type spawn_refusal =
+  | Empty_argv  (** No program to run. *)
   | Executable_not_found of string
-      (** argv[0], as the caller gave it, resolved to no file on [PATH], so no
-          process ran. Eio's spawner does the resolution and raises
-          [Eio.Process.Executable_not_found]; the Unix fallback gets the same
-          answer from [Unix.create_process_env] raising [ENOENT] at the spawn. *)
+      (** argv[0], as the caller gave it, resolved to no file. Eio's spawner
+          does the PATH resolution and raises
+          [Eio.Process.Executable_not_found]; the Unix fallback learns the
+          same from [Unix.create_process_env] raising [ENOENT] at the spawn. *)
+  | Spawn_failed of
+      { executable : string
+      ; error : Unix.error
+      }
+      (** A [Unix_error] before the child existed, with its errno: the
+          fallback's [posix_spawnp] refusing the program ([EACCES], [E2BIG],
+          [ENOEXEC], ...), or pipe, fork or capture-file setup failing on
+          either path. *)
+  | Child_setup_failed of
+      { executable : string
+      ; detail : string
+      }
+      (** Eio path only: the forked child could not complete its setup
+          (fchdir, dup2, execve). eio's fork actions report
+          ["<action>: <strerror>"] over a pipe and the parent raises
+          [Failure] with that text, so the errno reaches here already as
+          text. [detail] is that text, carried, not parsed. *)
+
+val spawn_refusal_to_string : spawn_refusal -> string
 
 val run_argv_with_status_split_or_refusal :
   ?timeout_sec:float ->
@@ -225,16 +257,15 @@ val run_argv_with_status_split_or_refusal :
   ?cwd:string ->
   string list ->
   (Unix.process_status * string * string, spawn_refusal) result
-(** {!run_argv_with_status_split} with the one failure that happens before a
+(** {!run_argv_with_status_split} with every failure that happens before a
     process exists returned as a value instead of folded into the status.
 
-    Every other [run_argv*] here turns a missing program into
-    [Unix.WEXITED 127] plus a synthesized stderr line, which is the same shape
-    a program that ran and exited 127 produces. A caller that tries several
-    programs in turn (an image scaler chain, a player chain) then cannot say
-    which of them was absent without reading that text. [Ok] carries exactly
-    what {!run_argv_with_status_split} returns, timeouts included; the
-    refusal is not logged here because the caller owns what it means. *)
+    A caller that tries several programs in turn (an image scaler chain, a
+    player chain) cannot otherwise say which of them was absent, or refused,
+    without reading the synthesized text. [Ok] carries exactly what
+    {!run_argv_with_status_split} returns, timeouts included, and no
+    [Error] case is ever rendered as an exit status here; the refusal is not
+    logged because the caller owns what it means. *)
 
 type output_destination =
   | Captured

@@ -81,7 +81,7 @@ type captured_output =
   }
 
 type attempt_failure =
-  | Executable_not_found
+  | Spawn_refused of Process_eio.spawn_refusal
   | Exited_nonzero of
       { code : int
       ; output : captured_output
@@ -117,7 +117,7 @@ let captured_output_to_string { stdout; stderr } =
 ;;
 
 let attempt_failure_to_string = function
-  | Executable_not_found -> "executable not found on PATH"
+  | Spawn_refused refusal -> Process_eio.spawn_refusal_to_string refusal
   | Exited_nonzero { code; output } ->
     Printf.sprintf "exited %d (%s)" code (captured_output_to_string output)
   | Timed_out output ->
@@ -266,8 +266,9 @@ let needs_downscale ?max_dimension:max_dim_opt bytes =
 ;;
 
 (* argv[0] is the bare program name: Process_eio's spawner resolves it on
-   PATH and reports a program it cannot find as [Executable_not_found], which
-   [attempt_plan] records as that attempt's outcome. *)
+   PATH and reports a program it cannot find, or cannot start, as a
+   [Process_eio.spawn_refusal], which [attempt_plan] records as that
+   attempt's outcome. *)
 let scaler_plans ~max_dim ~in_file ~out_file media_type =
   let bound = string_of_int max_dim in
   let sips =
@@ -318,7 +319,7 @@ let attempt_plan ~max_dim ~out_file (plan : scaler_plan) =
       ~timeout_sec:scaler_timeout_sec
       plan.argv
   with
-  | Error (Process_eio.Executable_not_found _) -> Error Executable_not_found
+  | Error refusal -> Error (Spawn_refused refusal)
   | Ok (status, stdout, stderr) ->
     let output = { stdout; stderr } in
     (match Process_eio.exit_reason_of_status status with

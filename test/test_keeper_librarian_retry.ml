@@ -9,6 +9,9 @@ module Keeper_chat_store = Masc.Keeper_chat_store
 module Keeper_counterpart_observation = Masc.Keeper_counterpart_observation
 module Keeper_external_attention = Masc.Keeper_external_attention
 module Surface_ref = Masc.Surface_ref
+module Events = Masc.Keeper_memory_os_events
+module Tool_memory = Masc.Keeper_tool_memory_runtime
+module Current = Masc.Keeper_memory_os_current
 
 (* Render tests resolve the real repo templates so template <-> code
    variable drift fails here instead of as a live [Prompt_render_failed]
@@ -1061,8 +1064,126 @@ let test_cadence_trace_rollover_is_fresh () =
        ~prior:(Some ("trace-a", 1)))
 ;;
 
+let test_keeper_memory_io_offload_fallback_and_domain_safety env () =
+  Eio.Switch.run (fun sw ->
+    let previous = Domain_pool_ref.get () in
+    Eio.Switch.on_release sw (fun () ->
+      match previous with
+      | None -> Domain_pool_ref.clear_for_tests ()
+      | Some pool -> Domain_pool_ref.set pool);
+    let base_dir = Filename.temp_dir "librarian-io-offload" "" in
+    let keepers_dir = Filename.concat base_dir "keepers" in
+    let keeper_id = "io-offload-keeper" in
+    Unix.mkdir keepers_dir 0o755;
+    Fun.protect
+      ~finally:(fun () -> rm_rf base_dir)
+      (fun () ->
+        (* 1. Absent pool runs inline on caller domain *)
+        Domain_pool_ref.clear_for_tests ();
+        let caller_dom = (Domain.self () :> int) in
+        let inline_dom =
+          Domain_pool_ref.submit_io_or_inline (fun () -> (Domain.self () :> int))
+        in
+        check int "inline fallback on caller domain" caller_dom inline_dom;
+
+        (* Write a chat message so counterpart observations can read it *)
+        Keeper_chat_store.append_user_message
+          ~base_dir
+          ~keeper_name:keeper_id
+          ~content:"Offload verification message"
+          ~conversation_id:"test-convo-1"
+          ~external_message_id:"ext-msg-1"
+          ();
+
+        let inline_observations =
+          Post_turn_memory.For_testing.counterpart_observations_before_offloaded
+            ~base_dir
+            ~keeper_name:keeper_id
+            ~before:(Time_compat.now () +. 1.)
+        in
+        check int "inline reads counterpart observations" 1 (List.length inline_observations);
+
+        (* 2. Install shared domain pool and verify off-main offload *)
+        let dm = Eio.Stdenv.domain_mgr env in
+        let pool = Domain_pool.create ~sw ~domain_count:1 dm in
+        Domain_pool_ref.set pool;
+
+        let offloaded_dom =
+          Domain_pool_ref.submit_io_or_inline (fun () -> (Domain.self () :> int))
+        in
+        check bool "pool submit runs off main domain" true (offloaded_dom <> caller_dom);
+
+        (* counterpart_observations_before runs through Domain_pool_ref.submit_io_or_inline *)
+        let offloaded_observations =
+          Post_turn_memory.For_testing.counterpart_observations_before_offloaded
+            ~base_dir
+            ~keeper_name:keeper_id
+            ~before:(Time_compat.now () +. 1.)
+        in
+        check int "offloaded reads counterpart observations" 1 (List.length offloaded_observations);
+
+        (* Populate an initial snapshot to test read_current_facts and record_failure with snapshot present *)
+        let fact_initial = fact ~claim:"Offloaded fact 1" in
+        let _ =
+          Current.apply_disposition
+            ~keepers_dir
+            ~keeper_id
+            ~now:1_000_000.
+            ~source:{ kind = Current.Librarian; trace_id = "trace-init" }
+            ~retained_memory_ids:[]
+            ~new_claims:[ fact_initial ]
+            ()
+        in
+
+        (* Tool_memory.For_testing.read_current_facts reads and parses the snapshot off-main *)
+        let facts_result =
+          Tool_memory.For_testing.read_current_facts ~keepers_dir ~keeper_id
+        in
+        check bool "facts read returns Ok" true (Result.is_ok facts_result);
+        let facts = Result.get_ok facts_result in
+        check int "one fact read from snapshot" 1 (List.length facts);
+
+        (* Runtime.For_testing.record_failure writes to journal off-main (with snapshot_present = true) *)
+        Runtime.For_testing.record_failure
+          ~keepers_dir
+          ~keeper_id
+          ~trace_id:"trace-failure-offload"
+          ~kind:Current.Exact_execution_failure
+          ~detail:"Testing off-main failure journal write"
+          ~cadence_deferred:false;
+
+        let journal_path =
+          Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id
+        in
+        check bool "journal file written off-main" true (Sys.file_exists journal_path);
+        let journal_content = In_channel.with_open_text journal_path In_channel.input_all in
+        check bool "journal records failure entry" true
+          (String_util.contains_substring journal_content "Testing off-main failure journal write");
+        check bool "journal records snapshot_present = true" true
+          (String_util.contains_substring journal_content "\"snapshot_present\":true");
+
+        (* Keeper_memory_os_events.append_all writes events off-main *)
+        let events_to_append : Events.event list =
+          [ { recorded_at = 1_000_000.
+            ; memory_id = "mem-test-1"
+            ; trace_id = "trace-event-offload"
+            ; kind = Events.Revised { superseded_by = "mem-test-2" }
+            }
+          ]
+        in
+        let append_errors =
+          Domain_pool_ref.submit_io_or_inline (fun () ->
+            Events.append_all ~keepers_dir ~keeper_id events_to_append)
+        in
+        check int "no append errors" 0 (List.length append_errors);
+        let read_events = Events.read ~keepers_dir ~keeper_id in
+        check int "one event read from sidecar" 1 (List.length read_events);
+
+        Domain_pool_ref.clear_for_tests ()))
+;;
+
 let () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
   run
     "keeper_librarian_current_selection"
     [ ( "selection"
@@ -1138,6 +1259,12 @@ let () =
           test_cadence_due_counter_is_due_again_without_reset
         ; test_case "trace rollover is fresh" `Quick
             test_cadence_trace_rollover_is_fresh
+        ] )
+    ; ( "domain_offload"
+      , [ test_case
+            "memory io offload fallback and domain safety"
+            `Quick
+            (test_keeper_memory_io_offload_fallback_and_domain_safety env)
         ] )
     ]
 ;;

@@ -72,6 +72,16 @@ let for_surface = function
       ; b Meta "Tab" "next"
       ; b Meta "q" "quit"
       ]
+  | Metrics ->
+      [ b Navigate "j/k" "scroll"
+      ; b Navigate "1-4" "section"
+          ~help:"1: Fleet Pulse & Activity · 2: Keeper Memory Resources · 3: Tool Distribution · 4: Latency Waterfall"
+      ; b Navigate "s" "cycle" ~help:"cycle telemetry section"
+      ; b Act "Esc" "overview"
+      ; b Meta "r" "refresh"
+      ; b Meta "Tab" "next"
+      ; b Meta "q" "quit"
+      ]
   | Keepers Keeper_list ->
       (b Navigate "j/k" "move" ~help:"move the roster cursor")
       :: (b Act "Right / Enter" "detail" ~help:"keeper detail")
@@ -649,11 +659,15 @@ let footer_hints_memory_facts =
      ]
      @ listing_meta)
 
+let footer_hints_metrics =
+  hints_of_bindings (for_surface Metrics)
+
 (* One section per surface family; the strip's spelling names it. Keepers
    sub-modes collapse into the two sections an operator thinks in. *)
 let help_surfaces : (string * surface) list =
   [ "Overview", Overview
   ; "Activity", Acting
+  ; "Metrics", Metrics
   ; "Keepers", Keepers Keeper_list
   ; "Keeper detail", Keepers Keeper_detail
   ; "Chat", Keepers Keeper_message

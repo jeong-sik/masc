@@ -70,9 +70,10 @@ type guest_constraint =
           read-only (RFC-0422). *)
 
 val scratch_guest_root : string
-(** [/tmp]: the path the boot mounts the scratch filesystem at and the
-    [scratch_root] the shim's config names. One value, because the mount flag
-    and the config are two spellings of the same place. *)
+(** {!Exec_ssh_protocol.default_scratch_root}: the path the boot mounts the
+    scratch filesystem at, and where the shim makes its scratch when its
+    config names no [scratch_root]. One constant, so the mount and the shim
+    agree without the host writing the key. *)
 
 val all_guest_constraints : guest_constraint list
 (** Every guarantee, so a caller asks for the set rather than typing it and

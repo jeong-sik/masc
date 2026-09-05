@@ -24,11 +24,37 @@
       MUST NOT fabricate an exit code (never "exit 0").
 
     - ["remote_ssh_version_error"] — a request frame or trailer whose
-      [v] field differs from {!protocol_version}. *)
+      [v] field is no {!major} this build speaks, or a v2 frame that carries
+      a [mode]. *)
+
+(** {1 Protocol major}
+
+    The shim and the server are deployed separately, so one release apart
+    they still have to talk. Every major this build reads and writes is a
+    constructor here: v2 is v3 without [mode] and means [Effect]. The newer
+    side reads the other's probe ({!major_of_probe}) and frames requests in
+    that major; a trailer echoes its request's. Closed: an integer that is
+    no constructor is a version error, never a guess. Retiring v2 is
+    deleting [V2]; the compiler then points at every arm that spoke it. *)
+type major =
+  | V2
+  | V3
+
+val newest : major
+(** [V3]: what this build speaks when nothing has told it otherwise. *)
+
+val majors : major list
+(** [[V2; V3]], every constructor, for prose that lists them. *)
+
+val int_of_major : major -> int
+(** The [v] on the wire: [V2] → [2], [V3] → [3]. *)
+
+val major_of_int : int -> major option
+(** [None] for an integer this build does not speak. *)
 
 val protocol_version : int
-(** [= 3].  Current protocol version; [v] fields are gated against it,
-    exactly: there is no older client to keep working. v3 added [mode]. *)
+(** [int_of_major newest = 3]: the shim's own version major and the number
+    the operator-facing skew messages name. v3 added [mode]. *)
 
 (** {1 Execution mode (RFC-0422)}
 
@@ -53,10 +79,18 @@ val observe_capability : string
 (** The probe capability a shim advertises when it can run [Observe] and
     [Guest_local] here: ["observe"]. *)
 
+val default_scratch_root : string
+(** [/tmp]: where a shim makes a boxed request's scratch when its config
+    names no [scratch_root]. Shared with the microvm boot, which mounts the
+    guest's in-memory filesystem here, so the host never has to write the
+    key into a config a shim one release behind would refuse as unknown. *)
+
 (** {1 Request frame} *)
 
 type request =
-  { v : int  (** protocol version; must be {!protocol_version} *)
+  { v : major
+    (** a request is framed in the receiving shim's major; a trailer echoes
+        its request's *)
   ; argv : string list  (** remote argv; each entry base64 on the wire *)
   ; env : (string * string) list
     (** environment overlay; names and values base64 on the wire *)
@@ -158,7 +192,9 @@ val decode_request : string -> (request * string, string) result
     distinct (ssh alone exits 255 for its own errors). *)
 
 type trailer =
-  { v : int  (** protocol version; must be {!protocol_version} *)
+  { v : major
+    (** a request is framed in the receiving shim's major; a trailer echoes
+        its request's *)
   ; exit : int option  (** set iff the payload exited normally *)
   ; signal : int option  (** set iff the payload died on a signal *)
   ; timed_out : bool  (** true iff the shim killed the payload on
@@ -212,11 +248,11 @@ val parse_trailer : string -> (trailer, string) result
 (** {1 Shim probe}
 
     [masc-exec-shim --probe] answers a plain JSON object
-    [{"name":..., "version":..., "capabilities":[...]}].  Preflight
-    compares major versions with {!probe_major_compatible} and, on
-    mismatch, fails with the spec-level named error
-    [remote_shim_version_skew] (fabricated by the caller — this module
-    only supplies the comparison). *)
+    [{"name":..., "version":..., "capabilities":[...]}].  The caller reads
+    the shim's major with {!major_of_probe}: a spoken major is the version
+    every request to that shim is framed in; one this build does not speak
+    is the spec-level named error [remote_shim_version_skew] (fabricated by
+    the caller — this module only supplies the reading). *)
 
 type probe =
   { name : string  (** e.g. ["masc-exec-shim"] *)
@@ -236,8 +272,8 @@ val shim_config_env_var : string
     endpoint (an Apple [container] guest with a read-only root) sets it on the
     shim's own process; it is never part of the payload environment. *)
 
-val probe_major_compatible : want:string -> string -> bool
-(** [probe_major_compatible ~want version] is [true] iff the numeric
-    major prefix of [version] equals [want] parsed as a number:
-    [want = "1"] vs ["1.4.2"] → [true]; [want = "2"] vs ["1.4.2"] →
-    [false].  Unparseable input → [false] (never raises). *)
+val major_of_probe : probe -> (major, string) result
+(** The major this build will frame requests to the probed shim in: [Ok V2]
+    for ["2.4.1"], [Ok V3] for ["3.0.0"]; [Error] naming both sides for a
+    major this build does not speak or a version with no numeric major.
+    Never raises. *)

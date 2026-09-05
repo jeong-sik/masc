@@ -90,10 +90,13 @@ let kill_policy ?(grace_sec = kill_grace_sec) = function
 
 (* {1 Waitpid status -> trailer} *)
 
-let trailer_of_status ~timed_out status : Exec_ssh_protocol.trailer =
+(* [v] is the request's own major, echoed: a v2 server reads a v2 trailer,
+   and a v3 one a v3, so the shim never answers in a version its caller did
+   not speak to it in. *)
+let trailer_of_status ~v ~timed_out status : Exec_ssh_protocol.trailer =
   match status with
   | Unix.WEXITED n ->
-    Exec_ssh_protocol.{ v = protocol_version
+    Exec_ssh_protocol.{ v
                       ; exit = Some n
                       ; signal = None
                       ; timed_out
@@ -103,7 +106,7 @@ let trailer_of_status ~timed_out status : Exec_ssh_protocol.trailer =
        WSIGNALED defensively rather than fabricating an exit code.  The
        trailer carries the host OS signal number, not OCaml's abstract
        code. *)
-    Exec_ssh_protocol.{ v = protocol_version
+    Exec_ssh_protocol.{ v
                       ; exit = None
                       ; signal = Some (host_signal_number n)
                       ; timed_out
@@ -158,7 +161,7 @@ type config =
   { remote_root : string
   ; env_allowlist : string list
   ; payload_path : string list
-  ; scratch_root : string option
+  ; scratch_root : string
   }
 
 let config_env_var = Exec_ssh_protocol.shim_config_env_var
@@ -229,11 +232,11 @@ let parse_config content =
             | Some value -> payload_path_of value in
           let scratch_root =
             match List.assoc_opt "scratch_root" entries with
-            | None -> Ok None
+            | None -> Ok Exec_ssh_protocol.default_scratch_root
             | Some "" -> err "scratch_root must not be empty"
             | Some root when not (String.starts_with ~prefix:"/" root) ->
               err "scratch_root must be an absolute path, got %S" root
-            | Some root -> Ok (Some root) in
+            | Some root -> Ok root in
           (match payload_path, scratch_root with
            | (Error _ as e), _ -> e
            | _, (Error _ as e) -> e
@@ -424,7 +427,7 @@ let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
     Unix.set_nonblock stdin_w;
     (pid, stdin_w, stdout_r, stderr_r)
 
-let supervise ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
+let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
   let deadline = Unix.gettimeofday () +. timeout_sec in
   let payload_off = ref 0 in
   let payload_len = String.length stdin_payload in
@@ -609,18 +612,21 @@ let supervise ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
       | Sigkill_pgid -> send_to_pgid Sys.sigkill
       | Wait_grace _ -> ())
     (kill_policy On_child_exit);
-  trailer_of_status ~timed_out:!timed_out st
+  trailer_of_status ~v ~timed_out:!timed_out st
 
 let emit_trailer_stderr (t : Exec_ssh_protocol.trailer) =
   let s = Exec_ssh_protocol.render_trailer t in
   try write_all Unix.stderr s 0 (String.length s) with
   | Unix.Unix_error (Unix.EPIPE, _, _) -> ()
 
-let shim_fail msg =
+(* [v] is the request's major once a request has been read; before that --
+   a frame that did not decode -- there is no caller version to echo, and
+   the newest one this build speaks is the only honest answer. *)
+let shim_fail ?(v = Exec_ssh_protocol.newest) msg =
   (* Trailer to our stderr, then exit 1: a shim failure must never be
      indistinguishable from a payload exit 0. *)
   emit_trailer_stderr
-    Exec_ssh_protocol.{ v = protocol_version
+    Exec_ssh_protocol.{ v
                       ; exit = None
                       ; signal = None
                       ; timed_out = false
@@ -648,6 +654,8 @@ let run () =
   match read_frame Unix.stdin with
   | Error e -> shim_fail e
   | Ok (req, stdin_payload) ->
+    let v = req.Exec_ssh_protocol.v in
+    let shim_fail msg = shim_fail ~v msg in
     (match load_config () with
      | Error e -> shim_fail e
      | Ok config ->
@@ -679,25 +687,17 @@ let run () =
                | Run_effect -> None
                | Run_boxed { deny_fs; deny_net } ->
                  let scratch =
-                   match config.scratch_root with
-                   | None -> None
-                   | Some root ->
-                     (match make_scratch ~root with
-                      | Ok path -> Some path
-                      | Error message -> shim_fail message) in
+                   match make_scratch ~root:config.scratch_root with
+                   | Ok path -> path
+                   | Error message -> shim_fail message in
                  Some (deny_fs, deny_net, scratch) in
              let env, before_exec, cleanup =
                match box with
                | None -> env, (fun () -> ()), (fun () -> ())
                | Some (deny_fs, deny_net, scratch) ->
-                 let scratch_path = Option.value scratch ~default:"" in
-                 let env =
-                   match scratch with
-                   | Some path -> scratch_env ~scratch:path env
-                   | None -> env in
-                 ( env
-                 , (fun () -> restrict_self scratch_path deny_fs deny_net)
-                 , (fun () -> Option.iter remove_tree scratch) ) in
+                 ( scratch_env ~scratch env
+                 , (fun () -> restrict_self scratch deny_fs deny_net)
+                 , (fun () -> remove_tree scratch) ) in
              let (pid, stdin_w, stdout_r, stderr_r) =
                try spawn ~before_exec ~argv ~env ~cwd () with
                | exn ->
@@ -706,7 +706,7 @@ let run () =
                    (Printf.sprintf "%s: spawn failed: %s" shim_error_code
                       (Printexc.to_string exn)) in
              let trailer =
-               supervise ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
+               supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
                  ~timeout_sec:req.Exec_ssh_protocol.timeout_sec in
              cleanup ();
              emit_trailer_stderr trailer;

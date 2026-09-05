@@ -64,23 +64,33 @@ let stub_main () =
     let capabilities =
       if String.equal mode "probe-observe" then [ Exec_ssh_protocol.observe_capability ] else []
     in
+    (* "probe-v2" stands in for a shim one release behind: it speaks the
+       previous major and has no box. Every other mode answers the current
+       major, so the runner frames v3 as before. *)
+    let major =
+      if String.equal mode "probe-v2"
+      then Exec_ssh_protocol.protocol_version - 1
+      else Exec_ssh_protocol.protocol_version
+    in
     write_all Unix.stdout
       (Exec_ssh_protocol.render_probe
-         { name = "masc-exec-shim"
-         ; version = string_of_int Exec_ssh_protocol.protocol_version ^ ".0.0"
-         ; capabilities
-         });
+         { name = "masc-exec-shim"; version = string_of_int major ^ ".0.0"; capabilities });
     exit 0);
   let header = read_exact Unix.stdin 8 in
   let body_len = Bytes.get_int64_be (Bytes.unsafe_of_string header) 0 |> Int64.to_int in
   let frame = header ^ read_exact Unix.stdin body_len in
   save frame_path frame;
+  (* The trailer answers in the request's own major, as the shim does. *)
+  let v =
+    match Exec_ssh_protocol.decode_request frame with
+    | Ok (request, _) -> request.v
+    | Error error -> failwith ("container stub could not read the frame: " ^ error)
+  in
   let trailer ?exit ?signal ?(timed_out = false) ?shim_error () =
-    Exec_ssh_protocol.render_trailer
-      { v = Exec_ssh_protocol.protocol_version; exit; signal; timed_out; shim_error }
+    Exec_ssh_protocol.render_trailer { v; exit; signal; timed_out; shim_error }
   in
   match mode with
-  | "exit3" | "probe-observe" | "probe-plain" ->
+  | "exit3" | "probe-observe" | "probe-plain" | "probe-v2" ->
     write_all Unix.stdout "guest-out";
     write_all Unix.stderr ("guest-err" ^ trailer ~exit:3 ());
     exit 0
@@ -303,6 +313,32 @@ let test_observe_support_is_what_the_shim_advertises () =
   check bool "a probe that fails" false (supported "cli-not-found")
 ;;
 
+(* A shim one release behind speaks v2. The runner reads that from the
+   probe before its first dispatch and frames every request to that
+   endpoint in v2 -- no mode field -- so an upgrade of the server alone
+   does not stop a single tool_execute; and a box can only be asked of a
+   shim that speaks v3, which the endpoint's probe also says. *)
+let test_a_v2_shim_is_spoken_to_in_v2 () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, frame_path = make_stub ~dir:base_path ~mode:"probe-v2" in
+  let state = make_state ~base_path ~cli in
+  let runner = Keeper_sandbox_remote.runner ~timeout_sec:2.0 state in
+  let status, stdout, _ = run_request runner ~cwd:None () in
+  check status_testable "the v2 shim's answer is read" (Unix.WEXITED 3) status;
+  check string "stdout" "guest-out" stdout;
+  (match Exec_ssh_protocol.decode_request (read_file frame_path) with
+   | Error error -> fail error
+   | Ok (request, _) ->
+     check int "framed in the shim's major" 2 (Exec_ssh_protocol.int_of_major request.v);
+     check string "and therefore unboxed" "effect" (Exec_ssh_protocol.mode_to_string request.mode));
+  check bool "no box from a v2 shim" false (Keeper_sandbox_remote.observe_supported state);
+  let boxed = Keeper_sandbox_remote.runner ~mode:Exec_ssh_protocol.Observe ~timeout_sec:2.0 state in
+  let status, _, stderr = run_request boxed ~cwd:None () in
+  check status_testable "asking a v2 shim for a box is refused before the wire" (Unix.WEXITED 1) status;
+  check bool "by name" true (contains "remote_ssh_version_error" stderr)
+;;
+
 let test_lane_error_codes () =
   with_eio @@ fun () ->
   let base_path = temp_dir () in
@@ -359,6 +395,8 @@ let () =
               test_the_requested_mode_travels_in_the_frame
           ; test_case "observe support is what the shim advertises" `Quick
               test_observe_support_is_what_the_shim_advertises
+          ; test_case "a v2 shim is spoken to in v2" `Quick
+              test_a_v2_shim_is_spoken_to_in_v2
           ; test_case "lane error codes" `Quick test_lane_error_codes
           ; test_case "preflight unreachable names the guest" `Quick
               test_preflight_unreachable_names_the_guest

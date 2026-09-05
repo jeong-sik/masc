@@ -2,13 +2,22 @@
    See the .mli — it is the SSOT contract for the wire format.
    Spec: docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md §4.2. *)
 
+(* Every wire major this build reads and writes, closed. v2 is v3 without
+   [mode] and means [Effect], so a shim and a server one release apart keep
+   talking: the newer side reads the other's probe and speaks the older
+   version to it. Retiring v2 is deleting [V2] here; the compiler then
+   points at every arm that spoke it. *)
+type major =
+  | V2
+  | V3
+
 type mode =
   | Effect
   | Observe
   | Guest_local
 
 type request =
-  { v : int
+  { v : major
   ; argv : string list
   ; env : (string * string) list
   ; cwd : string
@@ -19,7 +28,7 @@ type request =
   }
 
 type trailer =
-  { v : int
+  { v : major
   ; exit : int option
   ; signal : int option
   ; timed_out : bool
@@ -32,9 +41,44 @@ type probe =
   ; capabilities : string list
   }
 
-let protocol_version = 3
+let newest = V3
+let majors = [ V2; V3 ]
+
+let int_of_major = function
+  | V2 -> 2
+  | V3 -> 3
+
+let major_of_int = function
+  | 2 -> Some V2
+  | 3 -> Some V3
+  | _ -> None
+
+let protocol_version = int_of_major newest
+
+let majors_text () =
+  String.concat ", " (List.map (fun m -> "v" ^ string_of_int (int_of_major m)) majors)
+
+(* The numeric prefix of a dotted version: "3.0.0" -> 3. *)
+let major_int_of_version s =
+  let n = String.length s in
+  let rec stop i =
+    if i < n && s.[i] >= '0' && s.[i] <= '9' then stop (i + 1) else i
+  in
+  let e = stop 0 in
+  if e = 0 then None else int_of_string_opt (String.sub s 0 e)
+
+let major_of_probe (p : probe) : (major, string) result =
+  match major_int_of_version p.version with
+  | None -> Error (Printf.sprintf "the shim's version %S has no numeric major" p.version)
+  | Some n ->
+    (match major_of_int n with
+     | Some major -> Ok major
+     | None ->
+       Error
+         (Printf.sprintf "the shim speaks v%d and this build speaks %s" n (majors_text ())))
 
 let observe_capability = "observe"
+let default_scratch_root = "/tmp"
 
 let mode_to_string = function
   | Effect -> "effect"
@@ -74,21 +118,32 @@ let b64_decode ~what s =
 
 (* --- request frame --- *)
 
+(* The [mode] field is v3's addition; a v2 frame has no such field, and a
+   v2 shim would refuse one it did not expect. Every other field is the
+   same in both majors. *)
 let json_of_request (r : request) : Yojson.Safe.t =
   `Assoc
-    [ "v", `Int r.v
-    ; "argv", `List (List.map (fun a -> `String (b64_encode a)) r.argv)
-    ; ( "env"
-      , `List
-          (List.map
-             (fun (k, v) -> `List [ `String (b64_encode k); `String (b64_encode v) ])
-             r.env) )
-    ; "cwd", `String (b64_encode r.cwd)
-    ; "remote_root", `String (b64_encode r.remote_root)
-    ; "timeout_sec", `Float r.timeout_sec
-    ; "stdin_len", `Intlit (Int64.to_string r.stdin_len)
-    ; "mode", `String (mode_to_string r.mode)
-    ]
+    ([ "v", `Int (int_of_major r.v)
+     ; "argv", `List (List.map (fun a -> `String (b64_encode a)) r.argv)
+     ; ( "env"
+       , `List
+           (List.map
+              (fun (k, v) -> `List [ `String (b64_encode k); `String (b64_encode v) ])
+              r.env) )
+     ; "cwd", `String (b64_encode r.cwd)
+     ; "remote_root", `String (b64_encode r.remote_root)
+     ; "timeout_sec", `Float r.timeout_sec
+     ; "stdin_len", `Intlit (Int64.to_string r.stdin_len)
+     ]
+     @ (match r.v with
+        | V2 -> []
+        | V3 -> [ "mode", `String (mode_to_string r.mode) ]))
+
+(* A v2 shim has no box to build, so a v2 frame has no box to ask for. *)
+let asks_a_box_of_v2 (r : request) =
+  match r.v, r.mode with
+  | V2, (Observe | Guest_local) -> true
+  | V2, Effect | V3, (Effect | Observe | Guest_local) -> false
 
 let encode_request (r : request) ~stdin : (string, string) result =
   let stdin_bytes = String.length stdin in
@@ -96,7 +151,12 @@ let encode_request (r : request) ~stdin : (string, string) result =
   | FP_nan | FP_infinite ->
     transport_error "request timeout_sec is not finite (%F)" r.timeout_sec
   | _ ->
-    if r.stdin_len <> Int64.of_int stdin_bytes then
+    if asks_a_box_of_v2 r then
+      version_error
+        "a v2 frame cannot ask for the %s box: the endpoint's shim speaks v2 and runs \
+         every request unboxed"
+        (mode_to_string r.mode)
+    else if r.stdin_len <> Int64.of_int stdin_bytes then
       transport_error
         "request stdin_len (%Ld) does not match the stdin payload (%d bytes)"
         r.stdin_len stdin_bytes
@@ -218,14 +278,14 @@ let expect_bool ~what name : Yojson.Safe.t -> (bool, string) result = function
   | _ -> transport_error "%s field %S is not a bool" what name
 
 let check_version ~what v =
-  if v = protocol_version then Ok ()
-  else version_error "%s carries v=%d, this build speaks v=%d" what v protocol_version
+  match major_of_int v with
+  | Some major -> Ok major
+  | None -> version_error "%s carries v=%d, this build speaks %s" what v (majors_text ())
 
 let request_of_json (json : Yojson.Safe.t) : (request, string) result =
   let what = "request" in
   let* fields = expect_assoc ~what json in
-  let* v = member ~what "v" fields >>= expect_int ~what "v" in
-  let* () = check_version ~what v in
+  let* v = member ~what "v" fields >>= expect_int ~what "v" >>= check_version ~what in
   let* argv = member ~what "argv" fields >>= expect_b64_list ~what "argv" in
   let* env_json = member ~what "env" fields in
   let* env =
@@ -250,14 +310,23 @@ let request_of_json (json : Yojson.Safe.t) : (request, string) result =
   let* remote_root = b64_decode ~what:"remote_root" remote_root_json in
   let* timeout_sec = member ~what "timeout_sec" fields >>= expect_float ~what "timeout_sec" in
   let* stdin_len = member ~what "stdin_len" fields >>= expect_int64 ~what "stdin_len" in
-  let* mode_text = member ~what "mode" fields >>= expect_string ~what "mode" in
+  (* v2 has no [mode] and means [Effect]; a v2 frame that carries one is a
+     frame from a build that does not know what v2 is, refused by name. v3
+     requires it. *)
   let* mode =
-    match mode_of_string mode_text with
-    | Some mode -> Ok mode
-    | None ->
-      transport_error
-        "request field %S is %S; this build speaks effect, observe, guest_local"
-        "mode" mode_text
+    match v, List.assoc_opt "mode" fields with
+    | V2, None -> Ok Effect
+    | V2, Some _ ->
+      version_error "request carries v=2 and a mode field; a v2 frame has no box to ask for"
+    | V3, None -> transport_error "request field %S is missing" "mode"
+    | V3, Some json ->
+      let* mode_text = expect_string ~what "mode" json in
+      (match mode_of_string mode_text with
+       | Some mode -> Ok mode
+       | None ->
+         transport_error
+           "request field %S is %S; this build speaks effect, observe, guest_local"
+           "mode" mode_text)
   in
   (match classify_float timeout_sec with
    | FP_nan | FP_infinite ->
@@ -310,7 +379,7 @@ let opt_json to_json = function
 let render_trailer (t : trailer) : string =
   let body =
     `Assoc
-      [ "v", `Int t.v
+      [ "v", `Int (int_of_major t.v)
       ; "exit", opt_json (fun i -> `Int i) t.exit
       ; "signal", opt_json (fun i -> `Int i) t.signal
       ; "timed_out", `Bool t.timed_out
@@ -325,8 +394,7 @@ let trailer_of_json (json : Yojson.Safe.t) : (trailer, string) result =
   let what = "trailer" in
   let* fields = expect_assoc ~what json in
   let* wrapped = member ~what trailer_wrapper_key fields >>= expect_assoc ~what in
-  let* v = member ~what "v" wrapped >>= expect_int ~what "v" in
-  let* () = check_version ~what v in
+  let* v = member ~what "v" wrapped >>= expect_int ~what "v" >>= check_version ~what in
   let* exit = member ~what "exit" wrapped >>= expect_opt_int ~what "exit" in
   let* signal = member ~what "signal" wrapped >>= expect_opt_int ~what "signal" in
   let* timed_out = member ~what "timed_out" wrapped >>= expect_bool ~what "timed_out" in
@@ -382,15 +450,3 @@ let parse_probe (s : string) : (probe, string) result =
   in
   Ok { name; version; capabilities }
 
-let probe_major_compatible ~want version : bool =
-  let major_of s =
-    let n = String.length s in
-    let rec stop i =
-      if i < n && s.[i] >= '0' && s.[i] <= '9' then stop (i + 1) else i
-    in
-    let e = stop 0 in
-    if e = 0 then None else int_of_string_opt (String.sub s 0 e)
-  in
-  match major_of want, major_of version with
-  | Some w, Some v -> w = v
-  | _ -> false

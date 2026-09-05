@@ -68,11 +68,16 @@ CLI 를 놓고 읽으면 된다. 아래 계약 표의 항목 1·2 는 백엔드�
 shim 설정(`masc-exec-shim.conf`)은 서버가 부팅마다 같은 디렉터리에 다시
 쓴다. 내용은 `remote_root=/masc-work`, `path=<이미지의 PATH>`
 (`MASC_KEEPER_MICROVM_PAYLOAD_PATH`), `env_allowlist=MASC_BASE_PATH,
-MASC_BASE_PATH_INPUT,MASC_CONFIG_DIR`, `scratch_root=/tmp`. 손으로 고칠 것이 없다.
-마지막 줄은 프로토콜 3 shim 이 읽는 키다. 그보다 오래된 shim 은 모르는 키라며
-거부하는데, 그 전에 부팅 probe 가 `remote_shim_version_skew` 로 그 shim 을
-먼저 거부하므로, 운영자가 보는 것은 설정 오류가 아니라 "shim 을 다시 빌드하라"
-는 메시지다.
+MASC_BASE_PATH_INPUT,MASC_CONFIG_DIR`. 손으로 고칠 것이 없다. `scratch_root=` 는
+쓰지 않는다. shim 은 그 줄이 없으면 `/tmp` 를 쓰고, 부팅은 거기에 tmpfs 를 올린다.
+한 상수를 양쪽이 같이 읽는다.
+서버와 shim 은 따로 배포되므로 한 버전 차이는 서로 참는다. 서버는 첫 실행 전에
+shim 을 `--probe` 해서 그 shim 이 말하는 프로토콜 major(v2 또는 v3)로 프레임을
+보내고, shim 은 받은 major 로 답한다. 그래서 서버만 먼저 올려도, shim 만 먼저
+바꿔도 tool_execute 는 끊기지 않는다. 다만 v2 shim 은 관측 상자(RFC-0422)를
+만들 수 없어서 그 요청들은 예전처럼 judge 로 간다. shim 은 모르는 설정 키를
+거부하므로, 서버는 모든 shim 이 아는 키만 설정에 쓴다. 두 major 밖의 shim 만
+`remote_shim_version_skew` 로 거부된다.
 
 게스트가 마운트하는 것: 설정 디렉터리(읽기 전용, `/tmp/masc-runtime/.masc/config`),
 GitHub identity 스냅샷, 작업 볼륨(`masc-keeper-work-<keeper>` →

@@ -308,13 +308,12 @@ val shim_config_guest_path : string
 val shim_mount_args : host_dir:string -> string list
 
 val shim_config_content : payload_path:string -> string
-(** [remote_root=<work root>], [path=<payload_path>],
-    [env_allowlist=<config env names>] and
-    [scratch_root=<{!Keeper_microvm_backend.scratch_guest_root}>]: the lines
-    the guest's shim reads. The last names the in-memory filesystem the boot
-    mounts for boxed requests (RFC-0422); a shim older than protocol 3 refuses
-    it as an unknown key, and the lane's version probe refuses that shim
-    first. *)
+(** [remote_root=<work root>], [path=<payload_path>] and
+    [env_allowlist=<config env names>]: the lines the guest's shim reads.
+    No [scratch_root]: the boot mounts the scratch filesystem at the shim's
+    default ({!Keeper_microvm_backend.scratch_guest_root}), and a shim one
+    release behind refuses any key it does not know, failing every request
+    on the guest. *)
 
 val remote_env_allowlist : string list
 val remote_connect_timeout_sec : int

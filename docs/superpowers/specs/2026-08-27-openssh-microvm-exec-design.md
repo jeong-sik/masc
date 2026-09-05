@@ -288,8 +288,13 @@ the protocol. The shim:
   `\x1e{"masc_exec_result":{"v":3,"exit":0,"signal":null,"timed_out":false,"shim_error":null}}\x1e`.
   This is how WEXITED vs WSIGNALED vs shim/transport errors stay distinct —
   ssh alone cannot tell them apart (ssh exits 255 for its own errors);
-- answers `masc-exec-shim --probe` with `{name, version, capabilities}`;
-  preflight compares major version and fails with `remote_shim_version_skew`;
+- answers `masc-exec-shim --probe` with `{name, version, capabilities}`. The
+  server reads the major and frames every request to that shim in it: this
+  build speaks v2 and v3 (v2 is v3 without `mode`, and means `effect`), so a
+  shim one release behind or ahead of the server keeps running, and only a
+  major outside that set is `remote_shim_version_skew`. The shim echoes the
+  request's `v` in its trailer. Retiring a major is deleting its constructor from
+  `Exec_ssh_protocol.major`;
 - in Phase 2 the same shim runs *inside* each microVM unchanged.
 
 **Path mapping.** Today the path gate validates host paths under
@@ -458,7 +463,8 @@ differ:
   remote→logical on output), timeout mapping, env allowlist/denylist (wire
   `PATH`/`LD_PRELOAD` rejected; allowlisted entry survives), `network_mode =
   "none"` rejected for `remote_ssh` (`remote_ssh_no_network_mode`), shim
-  version skew (`--probe` major mismatch → `remote_shim_version_skew`), and
+  version skew (`--probe` major with no `Exec_ssh_protocol.major` constructor → `remote_shim_version_skew`;
+  a v2 shim is framed in v2), and
   cancellation. Integration test against a local Linux sshd fixture (Docker
   container running sshd + shim) exercising Execute end-to-end, including
   mid-command cancel of a QUIET payload (`sleep 600`) asserting **no remote

@@ -63,6 +63,11 @@ type shared_state =
        this process once asked (RFC-0422). [None] until a probe has run.
        The shim is a host-installed binary, so its answer changes only when
        the operator replaces it, and that comes with a server restart. *)
+  ; probe_major : Exec_ssh_protocol.major option Atomic.t
+    (* The protocol major the shim speaks, from the same probe. Every request
+       to this endpoint is framed in it, so a shim one release behind or
+       ahead of this server keeps running instead of refusing every frame;
+       [None] until asked, and the first dispatch asks. *)
   }
 
 (* Runner values are rebuilt per typed dispatch, while the session ceiling
@@ -83,6 +88,7 @@ let shared_state ~base_path ~name ~max_concurrent_sessions =
         { semaphore = Eio.Semaphore.make max_concurrent_sessions
         ; first_dispatch_logged = Atomic.make false
         ; probe_capabilities = Atomic.make None
+        ; probe_major = Atomic.make None
         }
       in
       Hashtbl.add shared_states key state;
@@ -411,6 +417,67 @@ let log_first_dispatch t =
       c.container_name c.shim_path
 ;;
 
+let preflight_timeout_sec t = float_of_int t.connect_timeout_sec +. 5.0
+
+let run_probe t =
+  let status, stdout, stderr =
+    Process_eio.run_argv_with_status_split
+      ~timeout_sec:(preflight_timeout_sec t)
+      ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+      (probe_argv t)
+  in
+  match status with
+  | Unix.WEXITED 0 ->
+    (match Exec_ssh_protocol.parse_probe (String.trim stdout) with
+     | Error error ->
+       Error
+         (Printf.sprintf "%s: endpoint %s: %s" (code t "probe_invalid") t.name error)
+     | Ok probe ->
+       (match Exec_ssh_protocol.major_of_probe probe with
+        | Ok major ->
+          Atomic.set t.shared.probe_major (Some major);
+          Atomic.set t.shared.probe_capabilities (Some probe.capabilities);
+          Ok major
+        | Error detail ->
+          Error
+            (Printf.sprintf
+               "remote_shim_version_skew: endpoint %s: %s (remote reports %s)"
+               t.name detail probe.version)))
+  | Unix.WEXITED exit_code ->
+    Error
+      (Printf.sprintf
+         "%s: endpoint %s host %s exited %d: %s"
+         (code t "endpoint_unreachable") t.name (host_label t) exit_code
+         (Exec_policy.truncate_for_log stderr))
+  | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+    Error
+      (Printf.sprintf
+         "%s: endpoint %s host %s signal %d"
+         (code t "endpoint_unreachable") t.name (host_label t) signal)
+;;
+
+(* The protocol major this endpoint's shim speaks, asked once per endpoint
+   per process and remembered beside its capabilities. A shim that answers
+   no probe -- a guest not up yet, a stub in a test -- gets this build's
+   newest version, which is what the dispatch that follows would have sent
+   anyway; the failure it is about to meet is the transport's, and it will
+   say so in its own words. *)
+let wire_major t =
+  match Atomic.get t.shared.probe_major with
+  | Some major -> major
+  | None ->
+    (match run_probe t with
+     | Ok major -> major
+     | Error detail ->
+       Log.Keeper.info
+         ~keeper_name:t.keeper_name
+         "%s probe before the first dispatch failed; framing v%d: %s"
+         (lane_prefix t.transport)
+         Exec_ssh_protocol.protocol_version
+         detail;
+       Exec_ssh_protocol.newest)
+;;
+
 let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
   fun ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd ->
     match wire_env t env with
@@ -430,7 +497,7 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
        | Error error -> Unix.WEXITED 1, "", error
        | Ok cwd ->
       let request : Exec_ssh_protocol.request =
-        { v = Exec_ssh_protocol.protocol_version
+        { v = wire_major t
         ; argv
         ; env
         ; cwd
@@ -577,45 +644,6 @@ let store_preflight ~now t result =
       { checked_at = now; result })
 ;;
 
-let preflight_timeout_sec t = float_of_int t.connect_timeout_sec +. 5.0
-
-let run_probe t =
-  let status, stdout, stderr =
-    Process_eio.run_argv_with_status_split
-      ~timeout_sec:(preflight_timeout_sec t)
-      ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
-      (probe_argv t)
-  in
-  match status with
-  | Unix.WEXITED 0 ->
-    (match Exec_ssh_protocol.parse_probe (String.trim stdout) with
-     | Error error ->
-       Error
-         (Printf.sprintf "%s: endpoint %s: %s" (code t "probe_invalid") t.name error)
-     | Ok probe ->
-       let want = string_of_int Exec_ssh_protocol.protocol_version in
-       if Exec_ssh_protocol.probe_major_compatible ~want probe.version
-       then (
-         Atomic.set t.shared.probe_capabilities (Some probe.capabilities);
-         Ok ())
-       else
-         Error
-           (Printf.sprintf
-              "remote_shim_version_skew: endpoint %s requires major %s but remote reports %s"
-              t.name want probe.version))
-  | Unix.WEXITED exit_code ->
-    Error
-      (Printf.sprintf
-         "%s: endpoint %s host %s exited %d: %s"
-         (code t "endpoint_unreachable") t.name (host_label t) exit_code
-         (Exec_policy.truncate_for_log stderr))
-  | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
-    Error
-      (Printf.sprintf
-         "%s: endpoint %s host %s signal %d"
-         (code t "endpoint_unreachable") t.name (host_label t) signal)
-;;
-
 (* Whether this endpoint's shim can build the box (RFC-0422). The shim says
    so itself through the probe's [capabilities], so the answer is the
    binary's rather than a guess from the profile; a guest whose shim
@@ -632,7 +660,7 @@ let observe_supported t =
   | Some capabilities -> advertised capabilities
   | None ->
     (match run_probe t with
-     | Ok () ->
+     | Ok _major ->
        (match Atomic.get t.shared.probe_capabilities with
         | Some capabilities -> advertised capabilities
         | None -> false)
@@ -732,7 +760,7 @@ let available_kib output =
 ;;
 
 let perform_preflight t =
-  let* () = run_probe t in
+  let* (_ : Exec_ssh_protocol.major) = run_probe t in
   let* _ =
     run_preflight_command t ~error_code:"remote_git_unavailable"
       [ "git"; "--version" ]

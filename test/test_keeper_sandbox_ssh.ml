@@ -44,7 +44,7 @@ let stub_main () =
   save frame_path frame;
   let trailer ?exit ?signal ?(timed_out = false) ?shim_error () =
     Exec_ssh_protocol.render_trailer
-      { v = Exec_ssh_protocol.protocol_version
+      { v = Exec_ssh_protocol.newest
       ; exit
       ; signal
       ; timed_out

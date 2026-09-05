@@ -926,6 +926,26 @@ let test_goal_heading_counts_what_the_block_lists () =
   check bool "no goal is counted without being named" false
     (contains ~needle:"goal-b" user)
 
+let test_task_identities_are_parsed_once_per_backlog_list () =
+  let todo = (Masc_domain.Todo : Masc_domain.task_status) in
+  let tasks =
+    [ make_task ~task_status:todo ()
+    ; { (make_task ~task_status:todo ()) with id = "task-43" }
+    ]
+  in
+  let first = Inputs.tasks_with_identities_memoized tasks in
+  let second = Inputs.tasks_with_identities_memoized tasks in
+  check bool "the same list is answered from the memo" true (first == second);
+  (match first with
+   | Ok identities -> check int "every task keeps its identity" 2 (List.length identities)
+   | Error reason -> fail reason);
+  let changed = List.tl tasks in
+  let third = Inputs.tasks_with_identities_memoized changed in
+  check bool "a different list is parsed afresh" false (third == first);
+  match third with
+  | Ok identities -> check int "and answers for that list" 1 (List.length identities)
+  | Error reason -> fail reason
+
 let () =
   init_prompt_config_for_tests ();
   init_runtime_default_for_tests ();
@@ -1005,5 +1025,10 @@ let () =
             test_repeated_text_stop_is_named_in_the_next_prompt;
           test_case "no previous stop renders no line" `Quick
             test_no_previous_stop_renders_no_line;
+        ] );
+      ( "backlog task identities",
+        [
+          test_case "parsed once per physical task list" `Quick
+            test_task_identities_are_parsed_once_per_backlog_list;
         ] );
     ]

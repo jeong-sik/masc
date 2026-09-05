@@ -96,6 +96,31 @@ let rec tasks_with_identities = function
          (tasks_with_identities rest))
 ;;
 
+(* The backlog store hands back the same decoded record while the file is
+   unchanged ([Workspace_backlog] caches by mtime and size), so the task list
+   is physically shared across observations. Validating every task id again
+   on each of them, a regex per task, was 2-3% of the main thread on a live
+   keeper (RFC main-domain-scheduler-latency section 8.8). One entry: the
+   last list seen and what it parsed to. A different list, which is what a
+   changed backlog produces, is parsed afresh. *)
+let identities_memo
+  : (Masc_domain.task list
+     * ((Masc_domain.task * Keeper_id.Task_id.t) list, string) result)
+      option
+      Atomic.t
+  =
+  Atomic.make None
+;;
+
+let tasks_with_identities_memoized tasks =
+  match Atomic.get identities_memo with
+  | Some (seen, result) when seen == tasks -> result
+  | Some _ | None ->
+    let result = tasks_with_identities tasks in
+    Atomic.set identities_memo (Some (tasks, result));
+    result
+;;
+
 (* A keeper must not treat a task it authored itself as work waiting for it.
    Without this, a Keeper whose response to "an unclaimed task exists" is to
    create a routing/report task produces a closed positive feedback loop: the
@@ -149,7 +174,7 @@ let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         recovery.primary_error;
       empty_backlog_snapshot
     | Ok { Workspace.observed_backlog = backlog; recovered_from = None } ->
-    (match tasks_with_identities backlog.tasks with
+    (match tasks_with_identities_memoized backlog.tasks with
      | Error reason ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string ObservationQueryFailures)

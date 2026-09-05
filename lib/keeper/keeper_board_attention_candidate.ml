@@ -32,7 +32,20 @@ type delivery =
   | Enqueued_to_keeper_lane
   | Not_relevant
 
-type pending_state = { last_delivery_failure : delivery_failure option }
+type judgment_material =
+  { post : Board.post
+  ; comments : Board.comment list
+  }
+
+(* 판정에 쓰이는 값은 pending 일 때만 읽힌다 ([Keeper_board_attention_exact_flow]
+   의 [prepare] 가 그 밖의 상태를 [Candidate_not_pending] 으로 거부한다). 그래서
+   후보의 필드가 아니라 이 상태가 들고 있다. 소비하면 같이 사라지고, 사라졌다는
+   사실이 그대로 파일에 쓰인다 — 캐시가 곧 쓰기의 원본이므로 메모리와 저장소가
+   같은 말을 계속 한다. RFC-0424. *)
+type pending_state =
+  { last_delivery_failure : delivery_failure option
+  ; material : judgment_material
+  }
 
 type judged_state =
   { judgment : judgment
@@ -106,7 +119,9 @@ type candidate =
   { candidate_id : string
   ; keeper_name : string
   ; signal : Board_dispatch.board_signal
-  ; judgment_request : Yojson.Safe.t
+  ; keeper_context : Yojson.Safe.t
+        (* 후보가 속한 파티션의 정체성이다 ([Context_key]). 소비된 뒤에도
+           소속을 확인하므로 상태와 함께 사라지지 않는다. *)
   ; recorded_at : float
   ; status : status
   }
@@ -132,7 +147,16 @@ type record_acceptance =
 
 exception Candidate_unavailable of string
 
-(* v5: the persisted post lost its [content] and [score] keys — [content]
+(* v6: the judgment request stopped being a stored field. Its [post] and
+   [comments] moved onto the pending state, where the judgment is the only
+   reader, and [keeper_context] became a candidate field because partition
+   identity is read in every status. [candidate_id] and [signal] are gone: they
+   restated the candidate's own fields, and the validator confirmed the two
+   agreed on all 13,297 rows measured 2026-09-06. v5 rows carry the old field and
+   lack the new one, so the decoder refuses them; v5 ledgers are retired at
+   deploy, not read. RFC-0424.
+
+   v5: the persisted post lost its [content] and [score] keys — [content]
    duplicated [body] byte for byte and [score] restated [votes_up - votes_down],
    and the decoder refused any row where the two disagreed. v4 rows carry both
    keys, so the current post decoder refuses them and the identity check they
@@ -141,7 +165,7 @@ exception Candidate_unavailable of string
    v4: post_created candidate identity became the typed event key
    (keeper, kind, post_id) — v3 rows hash volatile fields and fail the
    read-time identity check, so v3 ledgers are retired at deploy, not read. *)
-let schema_version = 5
+let schema_version = 6
 
 let quarantine_failure_category_to_string = function
   | Candidate_membership_conflict -> "candidate_membership_conflict"
@@ -182,6 +206,15 @@ let status_of_resumable = function
   | Resumable_pending pending -> Pending pending
   | Resumable_judged judged -> Judged judged
   | Resumable_consumed consumed -> Consumed consumed
+;;
+
+(* 판정 재료를 들고 있는 상태는 pending 과 pending 에서 격리된 것뿐이다. 격리는
+   [prior_status] 를 그대로 보존하므로 재투입되면 그 재료로 판정된다. *)
+let pending_judgment_material = function
+  | Pending pending -> Some pending.material
+  | Quarantine { quarantine = { prior_status = Resumable_pending pending; _ }; _ } ->
+    Some pending.material
+  | Judged _ | Consumed _ | Quarantine _ -> None
 ;;
 
 let delivery_failure_kind_to_string = function
@@ -385,22 +418,14 @@ let of_board_evidence
   | Error _ as error -> error
   | Ok keeper_context ->
     let candidate_id = candidate_id_of_signal ~keeper_name:meta.name signal in
-    let judgment_request =
-      `Assoc
-        [ "candidate_id", `String candidate_id
-        ; "signal", signal_to_yojson signal
-        ; "post", Board.post_to_yojson post
-        ; "comments", `List (List.map Board.comment_to_yojson comments)
-        ; "keeper_context", keeper_context
-        ]
-    in
     Ok
       { candidate_id
       ; keeper_name = meta.name
       ; signal
-      ; judgment_request
+      ; keeper_context
       ; recorded_at
-      ; status = Pending { last_delivery_failure = None }
+      ; status =
+          Pending { last_delivery_failure = None; material = { post; comments } }
       }
 ;;
 
@@ -452,10 +477,18 @@ let judgment_to_yojson judgment =
     ]
 ;;
 
+let judgment_material_to_yojson material =
+  `Assoc
+    [ "post", Board.post_to_yojson material.post
+    ; "comments", `List (List.map Board.comment_to_yojson material.comments)
+    ]
+;;
+
 let resumable_status_to_yojson = function
   | Resumable_pending pending ->
     `Assoc
       [ "kind", `String "pending"
+      ; "material", judgment_material_to_yojson pending.material
       ; ( "last_delivery_failure"
         , Json_util.option_to_yojson
             delivery_failure_to_yojson
@@ -533,7 +566,7 @@ let candidate_to_json candidate =
     ; "candidate_id", `String candidate.candidate_id
     ; "keeper_name", `String candidate.keeper_name
     ; "signal", signal_to_yojson candidate.signal
-    ; "judgment_request", candidate.judgment_request
+    ; "keeper_context", candidate.keeper_context
     ; "recorded_at", `Float candidate.recorded_at
     ; "status", status_to_yojson candidate.status
     ]
@@ -592,21 +625,8 @@ module Context_key = struct
     | _ -> Error "keeper_context must be an object"
   ;;
 
-  let of_candidate candidate =
-    match candidate.judgment_request with
-    | `Assoc fields ->
-      let contexts =
-        List.filter_map
-          (fun (key, value) ->
-             if String.equal key "keeper_context" then Some value else None)
-          fields
-      in
-      (match contexts with
-       | [ context ] -> of_yojson context
-       | [] -> Error "judgment request lacks keeper_context"
-       | _ -> Error "judgment request contains multiple keeper_context fields")
-    | _ -> Error "judgment request must be an object"
-  ;;
+  (* 후보가 keeper_context 를 필드로 들고 있으므로 JSON 에서 파내지 않는다. *)
+  let of_candidate candidate = of_yojson candidate.keeper_context
 
   let to_yojson context = context
   let to_canonical_string context = Yojson.Safe.to_string context
@@ -1017,6 +1037,36 @@ let judgment_of_yojson json =
   Ok judgment
 ;;
 
+let judgment_material_of_yojson json =
+  let context = "candidate.status.material" in
+  let* fields = assoc ~context json in
+  let* () = exact_fields ~context [ "post"; "comments" ] fields in
+  let* post_json = field ~context "post" fields in
+  let* post =
+    match Board.post_of_yojson post_json with
+    | Some post -> Ok post
+    | None -> Error (context ^ ".post does not match the current Board post schema")
+  in
+  let* comments_json = field ~context "comments" fields in
+  let* comments =
+    match comments_json with
+    | `List values ->
+      List.fold_left
+        (fun result value ->
+           let* decoded = result in
+           match Board.comment_of_yojson value with
+           | Some comment -> Ok (comment :: decoded)
+           | None ->
+             Error
+               (context ^ ".comments[] does not match the current Board comment schema"))
+        (Ok [])
+        values
+      |> Result.map List.rev
+    | _ -> Error (context ^ ".comments must be an array of objects")
+  in
+  Ok { post; comments }
+;;
+
 let resumable_status_of_yojson json =
   let context = "candidate.status" in
   let* fields = assoc ~context json in
@@ -1025,13 +1075,15 @@ let resumable_status_of_yojson json =
   match kind with
   | "pending" ->
     let* () =
-      exact_fields ~context [ "kind"; "last_delivery_failure" ] fields
+      exact_fields ~context [ "kind"; "material"; "last_delivery_failure" ] fields
     in
+    let* material_json = field ~context "material" fields in
+    let* material = judgment_material_of_yojson material_json in
     let* failure_json = field ~context "last_delivery_failure" fields in
     let* last_delivery_failure =
       optional_json delivery_failure_of_yojson failure_json
     in
-    Ok (Resumable_pending { last_delivery_failure })
+    Ok (Resumable_pending { last_delivery_failure; material })
   | "judged" ->
     let* () =
       exact_fields
@@ -1273,105 +1325,58 @@ let validate_keeper_context ~keeper_name json =
   Ok (Context_key.to_yojson canonical)
 ;;
 
-let canonical_judgment_request candidate =
-  let context = "candidate.judgment_request" in
-  let* () = validate_finite_json ~context candidate.judgment_request in
-  let* fields = assoc ~context candidate.judgment_request in
-  let* () =
-    exact_fields
-      ~context
-      [ "candidate_id"; "signal"; "post"; "comments"; "keeper_context" ]
-      fields
-  in
-  let* candidate_id_json = field ~context "candidate_id" fields in
-  let* candidate_id =
-    string_json ~context:(context ^ ".candidate_id") candidate_id_json
-  in
-  let* () =
-    if String.equal candidate_id candidate.candidate_id
-    then Ok ()
-    else Error (context ^ ".candidate_id does not match durable candidate identity")
-  in
-  let* signal_json = field ~context "signal" fields in
-  let* request_signal = signal_of_yojson signal_json in
-  let* () =
-    if request_signal = candidate.signal
-    then Ok ()
-    else Error (context ^ ".signal does not match durable candidate signal")
-  in
-  let* post = field ~context "post" fields in
-  let* canonical_post =
-    match Board.post_of_yojson post with
-    | None -> Error (context ^ ".post does not match the current Board post schema")
-    | Some decoded ->
-      let post_id = Board.Post_id.to_string decoded.id in
-      if String.equal post_id candidate.signal.post_id
-      then Ok (Board.post_to_yojson decoded)
-      else Error (context ^ ".post.id does not match durable signal.post_id")
-  in
-  let* comments = field ~context "comments" fields in
-  let* canonical_comments =
-    match comments with
-    | `List values ->
-      List.fold_left
-        (fun result value ->
-           let* canonical = result in
-           match Board.comment_of_yojson value with
-           | None ->
-             Error
-               (context
-                ^ ".comments[] does not match the current Board comment schema")
-           | Some decoded ->
-             let post_id = Board.Post_id.to_string decoded.post_id in
-             if String.equal post_id candidate.signal.post_id
-             then Ok (Board.comment_to_yojson decoded :: canonical)
-             else
-               Error
-                 (context
-                  ^ ".comments[].post_id does not match durable signal.post_id"))
-        (Ok [])
-        values
-      |> Result.map List.rev
-    | _ -> Error (context ^ ".comments must be an array of objects")
-  in
-  let* keeper_context = field ~context "keeper_context" fields in
-  let* canonical_keeper_context =
-    validate_keeper_context ~keeper_name:candidate.keeper_name keeper_context
-  in
-  Ok
-    (`Assoc
-       [ "candidate_id", `String candidate.candidate_id
-       ; "signal", signal_to_yojson candidate.signal
-       ; "post", canonical_post
-       ; "comments", `List canonical_comments
-       ; "keeper_context", canonical_keeper_context
-       ])
+(* 요청은 저장된 값을 검사해서 얻는 게 아니라 후보와 재료로 만든다. candidate_id
+   와 signal 이 후보에서 오므로 durable 정체성과 달라질 수 없고, 그래서 그 둘이
+   같은지 확인하던 검증이 없다 — 저장된 13,297행 전부에서 같았던 값들이다.
+   RFC-0424. *)
+let judgment_request_fields candidate material =
+  [ "candidate_id", `String candidate.candidate_id
+  ; "signal", signal_to_yojson candidate.signal
+  ; "post", Board.post_to_yojson material.post
+  ; "comments", `List (List.map Board.comment_to_yojson material.comments)
+  ]
 ;;
 
-let require_current_canonical_judgment_request candidate =
-  let* canonical = canonical_judgment_request candidate in
-  if Yojson.Safe.equal candidate.judgment_request canonical
-  then Ok canonical
+let judgment_request candidate material =
+  `Assoc
+    (judgment_request_fields candidate material
+     @ [ "keeper_context", candidate.keeper_context ])
+;;
+
+let singleton_judgment_request candidate material =
+  `Assoc
+    [ "keeper_context", candidate.keeper_context
+    ; "items", `List [ `Assoc (judgment_request_fields candidate material) ]
+    ]
+;;
+
+let validate_judgment_material ~(signal : Board_dispatch.board_signal) material =
+  let context = "candidate.status.material" in
+  let* () = validate_finite_json ~context (judgment_material_to_yojson material) in
+  let* () =
+    if String.equal (Board.Post_id.to_string material.post.id) signal.post_id
+    then Ok ()
+    else Error (context ^ ".post.id does not match durable signal.post_id")
+  in
+  let* () =
+    List.fold_left
+      (fun result (comment : Board.comment) ->
+         let* () = result in
+         if String.equal (Board.Post_id.to_string comment.post_id) signal.post_id
+         then Ok ()
+         else Error (context ^ ".comments[].post_id does not match durable signal.post_id"))
+      (Ok ())
+      material.comments
+  in
+  Ok ()
+;;
+
+let validate_candidate_keeper_context ~keeper_name keeper_context =
+  let* canonical = validate_keeper_context ~keeper_name keeper_context in
+  if Yojson.Safe.equal canonical keeper_context
+  then Ok ()
   else
-    Error
-      "candidate.judgment_request does not match the current canonical Board schema"
-;;
-
-let singleton_judgment_request candidate =
-  let context = "canonical candidate.judgment_request" in
-  let* canonical = require_current_canonical_judgment_request candidate in
-  let* fields = assoc ~context canonical in
-  let* keeper_context = field ~context "keeper_context" fields in
-  let item_fields =
-    List.filter
-      (fun (key, _) -> not (String.equal key "keeper_context"))
-      fields
-  in
-  Ok
-    (`Assoc
-       [ "keeper_context", keeper_context
-       ; "items", `List [ `Assoc item_fields ]
-       ])
+    Error "candidate.keeper_context does not match the current canonical schema"
 ;;
 
 let validate_candidate_for_persistence candidate =
@@ -1380,7 +1385,17 @@ let validate_candidate_for_persistence candidate =
       ~context:"candidate.signal"
       (signal_to_yojson candidate.signal)
   in
-  let* (_ : Yojson.Safe.t) = singleton_judgment_request candidate in
+  let* () =
+    validate_candidate_keeper_context
+      ~keeper_name:candidate.keeper_name
+      candidate.keeper_context
+  in
+  let* () =
+    match pending_judgment_material candidate.status with
+    | None -> Ok ()
+    | Some material ->
+      validate_judgment_material ~signal:candidate.signal material
+  in
   validate_candidate_state candidate
 ;;
 
@@ -1394,7 +1409,7 @@ let candidate_of_json json =
       ; "candidate_id"
       ; "keeper_name"
       ; "signal"
-      ; "judgment_request"
+      ; "keeper_context"
       ; "recorded_at"
       ; "status"
       ]
@@ -1423,7 +1438,7 @@ let candidate_of_json json =
     then Ok ()
     else Error "candidate_id does not match the exact Keeper and Board signal identity"
   in
-  let* judgment_request = field ~context "judgment_request" fields in
+  let* keeper_context = field ~context "keeper_context" fields in
   let* recorded_at_json = field ~context "recorded_at" fields in
   let* recorded_at =
     finite_float_json ~context:(context ^ ".recorded_at") recorded_at_json
@@ -1431,7 +1446,7 @@ let candidate_of_json json =
   let* status_json = field ~context "status" fields in
   let* status = status_of_yojson status_json in
   let candidate =
-    { candidate_id; keeper_name; signal; judgment_request; recorded_at; status }
+    { candidate_id; keeper_name; signal; keeper_context; recorded_at; status }
   in
   let* () = validate_candidate_for_persistence candidate in
   Ok candidate
@@ -1846,7 +1861,7 @@ let resumable_with_delivery_failure resumable failure =
     (match pending.last_delivery_failure with
      | Some existing when same_delivery_failure existing failure -> resumable
      | Some _ | None ->
-       Resumable_pending { last_delivery_failure = Some failure })
+       Resumable_pending { pending with last_delivery_failure = Some failure })
   | Resumable_judged judged ->
     (match judged.last_delivery_failure with
      | Some existing when same_delivery_failure existing failure -> resumable

@@ -49,7 +49,22 @@ type delivery =
   | Enqueued_to_keeper_lane
   | Not_relevant
 
-type pending_state = { last_delivery_failure : delivery_failure option }
+type judgment_material =
+  { post : Board.post
+  ; comments : Board.comment list
+  }
+(** The Board evidence one judgment reads. Only a pending candidate is judged —
+    [prepare] in [Keeper_board_attention_exact_flow] answers
+    [Candidate_not_pending] for every other status — so this rides on the pending
+    state instead of the candidate. Consuming a candidate drops it, and that drop
+    is what reaches the store, so the cache and the file keep saying the same
+    thing. [keeper_context] is not here: it names the candidate's partition and
+    outlives the judgment. RFC-0424. *)
+
+type pending_state =
+  { last_delivery_failure : delivery_failure option
+  ; material : judgment_material
+  }
 
 type judged_state =
   { judgment : judgment
@@ -128,7 +143,9 @@ type candidate =
   { candidate_id : string
   ; keeper_name : string
   ; signal : Board_dispatch.board_signal
-  ; judgment_request : Yojson.Safe.t
+  ; keeper_context : Yojson.Safe.t
+        (** Partition identity ([Context_key]), read for candidates in every
+            status, so it does not ride on the pending state. *)
   ; recorded_at : float
   ; status : status
   }
@@ -199,10 +216,18 @@ val candidate_id_of_signal :
     signals mint a fresh candidate per post update (#28607). Exported so test
     fixtures derive ids from this function instead of copying the formula. *)
 
-val singleton_judgment_request : candidate -> (Yojson.Safe.t, string) result
-(** Validate the current durable request schema and its outer candidate,
-    Keeper, and signal identity, then return the one-item exact-flow input.
-    Old or partial request JSON is rejected without compatibility decoding. *)
+val judgment_request : candidate -> judgment_material -> Yojson.Safe.t
+(** The judgment request as the run record carries it. *)
+
+val singleton_judgment_request : candidate -> judgment_material -> Yojson.Safe.t
+(** Build the one-item exact-flow input from the candidate and its material.
+    [candidate_id] and [signal] come from the candidate, so they cannot disagree
+    with durable identity and nothing checks that they do. *)
+
+val pending_judgment_material : status -> judgment_material option
+(** The material a status still carries: pending, or quarantined from pending
+    (its [prior_status] keeps it, so a requeue is judged from the same material).
+    Judged and consumed carry none. *)
 
 (* [of_board_evidence] is the inner step of [of_board_signal] below, which is
    the door callers use: it reads the post and comments and hands them here.

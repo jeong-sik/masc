@@ -141,24 +141,21 @@ let candidate post_id : Candidate.candidate =
   { candidate_id
   ; keeper_name
   ; signal
-  ; judgment_request =
-      `Assoc
-        [ "candidate_id", `String candidate_id
-        ; "signal", Candidate.signal_to_yojson signal
-        ; "post", Board.post_to_yojson (post_of_signal signal)
-        ; "comments", `List [ Board.comment_to_yojson (comment_of_signal signal) ]
-        ; ( "keeper_context"
-          , `Assoc
-              [ "lane_keeper_name", `String keeper_name
-              ; "keeper_record_id", `Null
-              ; "keeper_runtime_uid", `Null
-              ; "instructions", `String "continue"
-              ; "current_task_id", `Null
-              ; "mention_keeper_ids", `List [ `String keeper_name ]
-              ] )
-        ]
   ; recorded_at = 1.0
-  ; status = Candidate.Pending { last_delivery_failure = None }
+  ; keeper_context =
+      `Assoc
+        [ "lane_keeper_name", `String keeper_name
+        ; "keeper_record_id", `Null
+        ; "keeper_runtime_uid", `Null
+        ; "instructions", `String "continue"
+        ; "current_task_id", `Null
+        ; "mention_keeper_ids", `List [ `String keeper_name ]
+        ]
+  ; status =
+      Candidate.Pending
+        { last_delivery_failure = None
+        ; material = { post = post_of_signal signal; comments = [ comment_of_signal signal ] }
+        }
   }
 ;;
 
@@ -529,6 +526,11 @@ let test_missing_lane_is_setup_error_without_dispatch () =
 
 let test_prepare_resumable_status_gate () =
   let pending = candidate "board-attention-gate" in
+  let material =
+    match Candidate.pending_judgment_material pending.Candidate.status with
+    | Some material -> material
+    | None -> Alcotest.fail "pending fixture carries no judgment material"
+  in
   let quarantine : Candidate.quarantine =
     { quarantine_id = "ba-quarantine-gate"
     ; partition_id = "ba-root-gate"
@@ -538,7 +540,7 @@ let test_prepare_resumable_status_gate () =
     ; attempt_provenance = None
     ; quarantined_at = 2.0
     ; prior_status =
-        Candidate.Resumable_pending { last_delivery_failure = None }
+        Candidate.Resumable_pending { last_delivery_failure = None; material }
     }
   in
   let quarantined phase =

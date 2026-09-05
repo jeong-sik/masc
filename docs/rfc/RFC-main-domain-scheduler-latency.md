@@ -431,6 +431,8 @@ P4g-3(#33401, 스냅샷의 직렬화·해시를 pool 로)은 이 창 뒤에 병�
 
 P4g 가 겨냥한 턴 조립은 main 에서 사라졌다. 남은 것은 **날짜별 JSONL 저장소의 꼬리 읽기(`in_channel` 로 열어 줄마다 파싱)와 fsync 를 동반한 원자 쓰기가 main 도메인 위에서 도는 것**이고, 이것은 7절의 Phase 2(§7.2 `load_owned_regular_file_*_blocking`·`save_atomic`·durable directory chain)가 가리킨 바로 그 자리다.
 
+두 번째 표본(pid 38197, 같은 서버 코드, ready+3.4분, 90초, 15:02Z, 할당 344 MB/s·점유 9.2%): 하네스 p99 51.6 ms·max 215 ms, main 의 ≥10/≥50/≥100 ms 실행 130/33/8, 최대 141 ms. 긴 실행의 부류는 같다 — turn 스팬 밖에서 `openat -> switch` 24회(합 1.7초, 최대 109 ms), `fstat -> fstat` 10회(합 0.9초, 최대 141 ms), `fstat -> openat` 35회. 이 창의 40초 샘플은 조용했고(바쁜 3.7%) masc 쪽 상위는 `save_file_atomic_with_parent_sync` 2.9%, `Keeper_checkpoint_store`, `Keeper_toml_parser.parse_toml`, `Keeper_ask_store.load_events` 였다. 두 창 모두에서 turn 스팬 안의 100 ms 초과 실행은 0 이다.
+
 #### 다음 — P4h. Dated_jsonl 꼬리 읽기와 원자 쓰기를 main 에서 내린다
 
 - `Dated_jsonl.load_tail_lines_from_channel` 의 호출자는 `telemetry_unified`·`tool_usage_log`·`keeper_transition_audit`·`keeper_status_detail`·`keeper_tool_call_log`·approval `audit`·`eval_calibration`·`audit_log`·chat store·provider input 스냅샷의 dedup 이다. 파일을 열어 꼬리를 읽고 줄마다 JSON 을 파싱한다. 읽기(syscall)는 systhread 로, 파싱은 pool 로, 결과만 fiber 로 돌아온다. 호출자가 원하는 것은 "최근 N 개" 이므로 P4a 처럼 파일마다 커서를 두고 새 줄만 읽는 것이 근본 해결이다.

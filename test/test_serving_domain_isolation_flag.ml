@@ -37,7 +37,7 @@ let with_boot_override value f =
     f
 ;;
 
-let test_default_is_enabled () =
+let test_default_is_disabled () =
   let saved_env = Sys.getenv_opt key in
   Unix.unsetenv key;
   Fun.protect
@@ -46,8 +46,8 @@ let test_default_is_enabled () =
       | Some previous -> Unix.putenv key previous
       | None -> Unix.unsetenv key)
     (fun () ->
-      check bool "default is enabled in Transport reader" true (enabled ());
-      check bool "default is enabled in registry listing" true (listed ()))
+      check bool "default is disabled in Transport reader" false (enabled ());
+      check bool "default is disabled in registry listing" false (listed ()))
 ;;
 
 let test_env_disables_serving_domain () =
@@ -93,7 +93,7 @@ let () =
   run
     "serving_domain_isolation_flag"
     [ ( "serving_domain_flag"
-      , [ test_case "default is enabled" `Quick test_default_is_enabled
+      , [ test_case "default is disabled" `Quick test_default_is_disabled
         ; test_case "env disables serving domain" `Quick test_env_disables_serving_domain
         ; test_case "env enables serving domain" `Quick test_env_enables_serving_domain
         ; test_case "boot override controls flag" `Quick test_boot_override_controls_flag

@@ -396,7 +396,7 @@ let handle_read_file_with_outcome
                ~timeout_sec
                ()
            with
-           | Error err when String_util.contains_substring err "path_not_found" ->
+           | Error err when String_util.contains_substring err "path_not_found:" ->
              Ok
                (Read_failed_payload
                   (missing_file_error_json

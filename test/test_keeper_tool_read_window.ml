@@ -98,7 +98,9 @@ let with_eio_fs f =
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock:(Eio.Stdenv.clock env);
   Fun.protect
-    ~finally:Process_eio.reset_for_testing
+    ~finally:(fun () ->
+      Process_eio.reset_for_testing ();
+      Fs_compat.clear_fs ())
     (fun () -> f ~fs ~sw ())
 ;;
 

@@ -4,7 +4,6 @@
     These are sibling entry points to {!Keeper_turn_driver.run_named}:
     - [run_model_by_label]: explicit model-label variant
     - [run_named_with_masc_tools]: runtime variant + MASC tool bridging
-    - [run_model_with_masc_tools]: model-label variant + MASC tool bridging
 
     Extracted from keeper_turn_driver.ml as RFC-0048 PR-2 to reduce the
     1347-LOC hotspot file.
@@ -203,62 +202,3 @@ let run_named_with_masc_tools
       ()
   in
   selected.run_result
-
-let run_model_with_masc_tools
-    ~(model_label : string)
-    ~goal
-    ?(system_prompt = "")
-    ~(masc_tools : Masc_domain.tool_schema list)
-    ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
-    ?stream_idle_timeout_s
-    ?temperature
-    ?max_tokens
-    ?hooks
-    ?enable_thinking
-    ?provider_config_transform
-    ?raw_trace
-    ?on_event
-    ?transport
-    ?sw
-    ?net
-    ()
-  : (Runtime_agent.run_result, Agent_core.Error.t) result =
-  let* config =
-    config_for_label ~name:"agent_core-explicit-model" ~model_label ~system_prompt
-      ~tools:[] ~max_tokens ~temperature
-      ?stream_idle_timeout_s ?hooks ?enable_thinking
-      ?provider_config_transform
-      ~description:(Some (Printf.sprintf "model_label:%s" model_label))
-      ()
-  in
-  match Runtime_agent_core_runner.require_eio ?sw ?net () with
-  | Error e -> Error (Runtime_agent_core_runner.eio_context_error_to_core_error e)
-  | Ok (sw, net) ->
-      let transport_resolved = match transport with
-        | Some t -> t
-        | None -> Masc_grpc_transport.from_env ()
-      in
-      let config = { config with raw_trace; transport = transport_resolved } in
-      Inference_inflight_observation.with_observation
-          ~keeper_name:"agent_core-explicit-model"
-          ~runtime_id:model_label
-          (fun () ->
-            with_cli_preflight
-              ~scope:(Printf.sprintf "explicit_model:%s" model_label)
-              ~config ~goal
-              (fun () ->
-                Runtime_agent.run_with_masc_tools
-                  ~sw
-                  ~net
-                  ~config
-                  ~masc_tools
-                  ~dispatch
-                  ~agent_core_tool_of_masc:
-                    (fun ~name ~description ~input_schema handler ->
-                      Tool_bridge.agent_core_tool_of_masc
-                        ~name
-                        ~description
-                        ~input_schema
-                        handler)
-                  ?on_event
-                  goal))

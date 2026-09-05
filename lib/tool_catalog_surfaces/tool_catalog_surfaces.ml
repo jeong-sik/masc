@@ -150,17 +150,3 @@ let spawned_agent_surface_tools =
   ; "masc_update_priority"
   ]
 ;;
-
-let session_min_surface_tools =
-  [ "masc_status"
-  ; "masc_tasks"
-  ; "masc_plan_set_task"
-  ; "masc_transition"
-  ; "masc_add_task"
-  ; "masc_goal_list"
-  ; "masc_goal_upsert"
-  ; "masc_goal_transition"
-  ; "masc_broadcast"
-  ; "masc_heartbeat"
-  ]
-;;

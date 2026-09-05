@@ -89,18 +89,7 @@ module Attr_key = struct
 
   let registry = List.rev !registry_ref
 
-  let keys_for boundary =
-    registry
-    |> List.filter_map (fun (key, registered_boundary) ->
-      if registered_boundary = boundary then Some key else None)
-  ;;
-
   let all_known = List.map fst registry
-  let official_gen_ai = keys_for Official_gen_ai
-  let masc_extensions = keys_for Masc_extension
-
-  let is_official_gen_ai key = List.mem key official_gen_ai
-  let is_masc_extension key = List.mem key masc_extensions
 end
 
 module Metric_name = struct
@@ -118,14 +107,12 @@ end
 module Mcp_attr_key = struct
   let mcp_method_name = "mcp.method.name"
   let jsonrpc_request_id = "jsonrpc.request.id"
-  let jsonrpc_protocol_version = "jsonrpc.protocol.version"
   let mcp_protocol_version = "mcp.protocol.version"
   let mcp_session_id = "mcp.session.id"
   let network_protocol_name = "network.protocol.name"
   let network_protocol_version = "network.protocol.version"
   let network_transport = "network.transport"
   let error_type = "error.type"
-  let rpc_response_status_code = "rpc.response.status_code"
   let server_address = "server.address"
   let server_port = "server.port"
   let masc_mcp_tool_failure_class = "masc.mcp.tool.failure_class"
@@ -139,7 +126,6 @@ end
 module Mcp_metric_name = struct
   let client_operation_duration = "mcp.client.operation.duration"
   let server_operation_duration = "mcp.server.operation.duration"
-  let client_session_duration = "mcp.client.session.duration"
   let server_session_duration = "mcp.server.session.duration"
 end
 
@@ -148,7 +134,6 @@ module Event_name = struct
     "gen_ai.client.inference.operation.details"
   ;;
 
-  let client_operation_exception = "gen_ai.client.operation.exception"
 end
 
 let keeper_turn_span_name ~keeper_name = "invoke_agent " ^ keeper_name

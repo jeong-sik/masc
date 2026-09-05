@@ -89,7 +89,6 @@ val pre_turn_complete_heartbeat : turn_running:bool ref -> unit
 val post_turn_complete_heartbeat : turn_running:bool ref -> unit
 val post_wakeup_signal : wakeup:bool Atomic.t -> unit
 val post_submit_task : meta:keeper_meta -> task_id:Keeper_id.Task_id.t -> unit
-val post_heartbeat_tick : wakeup:bool Atomic.t -> unit
 
 (** Outcome of an [interruptible_sleep] call. Mirrors the three terminal
     branches of the polling loop, so callers can distinguish an exact Keeper

@@ -26,16 +26,6 @@ val protocol_mode_of_run :
     [Observe] asks for the shim's observe box, [Guest_local] for the one that
     lets writes land inside the guest. *)
 
-val observation_run_for :
-  base_path:string ->
-  keeper_name:string ->
-  (Keeper_types_profile_sandbox.observation_run, string) result
-(** Which box this keeper's operator chose (RFC-0422 §3.4), read from the
-    keeper TOML when the route is resolved — as [remote_endpoint] is — and
-    {!Keeper_types_profile_sandbox.default_observation_run} when the TOML
-    says nothing. A TOML that fails to load is the [Error], and the route
-    that asked becomes [No_box] with that reason. *)
-
 type guest_dispatch =
   { target : Masc_exec.Sandbox_target.t
   ; runtime : Keeper_turn_sandbox_runtime.t

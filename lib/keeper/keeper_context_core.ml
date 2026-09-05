@@ -106,58 +106,6 @@ let save_agent_core_checkpoint_classified
      | Ok outcome -> Ok (checkpoint, outcome)
      | Error error -> Error (Persistence_error error))
 
-let save_agent_core_checkpoint_if_source_with
-    ~save_agent_core_history
-    ~runtime_id
-    ~keeper_name
-    ~session
-    ~agent_name
-    ~ctx
-    ~expected_source_ref
-  =
-  match
-    checkpoint_for_persistence
-      ~runtime_id
-      ~keeper_name
-      ~session
-      ~agent_name
-      ~ctx
-  with
-  | Error error -> Error (Tool_history_invalid error)
-  | Ok checkpoint ->
-    (match
-       Keeper_checkpoint_store.save_agent_core_if_source
-         ~session_dir:session.session_dir
-         ~expected_source_ref
-         checkpoint
-     with
-     | Keeper_checkpoint_store.Not_installed _ as installation ->
-       Ok (checkpoint, installation)
-     | Keeper_checkpoint_store.Installed installed ->
-       let installation =
-         match
-           save_agent_core_history
-             ~session_dir:session.session_dir
-             checkpoint
-         with
-         | () -> Keeper_checkpoint_store.Installed installed
-         | exception exn ->
-           let failure = exn, Printexc.get_raw_backtrace () in
-           Keeper_checkpoint_store.Installed
-             { installed with
-               auxiliary =
-                 installed.auxiliary
-                 @ [ Keeper_checkpoint_store.History_write_failed failure ]
-             }
-       in
-       Ok (checkpoint, installation))
-
-module For_testing = struct
-  let save_agent_core_checkpoint_if_source_with_history ~save_agent_core_history =
-    save_agent_core_checkpoint_if_source_with ~save_agent_core_history
-  ;;
-end
-
 let save_agent_core_checkpoint
     ~runtime_id
     ~keeper_name

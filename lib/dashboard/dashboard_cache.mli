@@ -80,11 +80,6 @@ val get_or_compute_with_timeout :
     timeouts for the same key open a short fail-fast circuit; fresh or stale
     cache entries are still served normally. *)
 
-val get_or_compute_payload_with_timeout :
-  string -> ttl:float -> clock:_ Eio.Time.clock -> timeout_sec:float ->
-  (unit -> Yojson.Safe.t) -> cached_payload
-(** Like {!get_or_compute_payload} but wraps the compute function with an Eio timeout. *)
-
 val set_default_clock : _ Eio.Time.clock -> unit
 (** Register the process clock so every {!get_or_compute} runs under the
     default backstop timeout. Called once at boot. Until it is called,

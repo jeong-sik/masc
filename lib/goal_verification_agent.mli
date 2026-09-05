@@ -29,10 +29,6 @@ module For_testing : sig
     | Committed
     | Deferred of string
 
-  val group_pending_by_goal : pending_work list -> pending_work list list
-  (** Stable grouping used by the daemon: one group per goal, so no goal has
-      concurrent verifier transitions. *)
-
   val collect_pending :
     Workspace_utils_backend_setup.config ->
     (pending_work list, string) result

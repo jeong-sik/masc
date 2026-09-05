@@ -127,15 +127,6 @@ val read_effective_meta_resolved :
 val read_effective_meta :
   Workspace.config -> string -> (Keeper_meta_contract.keeper_meta option, string) result
 
-(** Read keeper meta only if the canonical [name] file's mtime exceeds
-    [last_mtime]. Returns [Some (meta, mtime)] when changed, [None] when
-    unchanged, missing, or unparsable (logs the parse-failure case). *)
-val read_meta_if_changed :
-  Workspace.config ->
-  string ->
-  last_mtime:float ->
-  (Keeper_meta_contract.keeper_meta * float) option
-
 (** Durably replace the complete current snapshot. The per-Keeper Owner is the
     only production caller and therefore the only write authority. Any failed
     durability stage remains an error even when the renamed bytes are visible
@@ -166,7 +157,6 @@ module Problem_report_state : sig
   }
 
   val should_report : site:site -> path:string -> detail:string -> bool
-  val note_recovered : site:site -> path:string -> bool
   val clear : site:site -> path:string -> unit
   val site_to_string : site -> string
   val snapshot : unit -> entry list

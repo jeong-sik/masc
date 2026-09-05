@@ -8,16 +8,9 @@
     function returns the original bytes and says so in the status. A media
     type this module cannot read is refused before any process is spawned. *)
 
-val default_max_dimension : int
-(** Default longest edge limit (1568px). *)
-
 val max_dimension : unit -> int
 (** Maximum dimension configured via [MASC_KEEPER_VISION_MAX_DIMENSION] or
-    {!default_max_dimension}. Clamped to [256, 8192]. *)
-
-val scaler_timeout_sec : float
-(** Wall-clock budget for one scaler process. The reasoning behind the value
-    is in the implementation next to the constant. *)
+    [default_max_dimension]. Clamped to [256, 8192]. *)
 
 type dimensions =
   { width : int
@@ -86,7 +79,7 @@ type attempt_failure =
       ; output : captured_output
       }
   | Timed_out of captured_output
-      (** Killed at {!scaler_timeout_sec}. *)
+      (** Killed at [scaler_timeout_sec]. *)
   | Signaled of
       { signal : int
       ; output : captured_output

@@ -1,13 +1,6 @@
 (** Dashboard compute-runtime bindings extracted from
     {!Server_dashboard_http_core}. *)
 
-val dashboard_runtime :
-  ?net:Eio_context.eio_net ->
-  ?mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
-  unit ->
-  Server_dashboard_http_runtime_support.runtime option
-(** Build optional dashboard runtime capabilities from server resources. *)
-
 val run_dashboard_compute :
   ?mode:Server_dashboard_http_runtime_support.dashboard_compute_mode ->
   ?net:Eio_context.eio_net ->

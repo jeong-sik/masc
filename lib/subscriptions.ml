@@ -125,14 +125,6 @@ module SubscriptionStore = struct
       (Atomic.get state).subscriptions
       []
 
-  (** Get all subscriptions for a subscriber *)
-  let get_for_subscriber (subscriber : string) : subscription list =
-    StringMap.fold
-      (fun _ sub acc ->
-        if sub.subscriber = subscriber then sub :: acc else acc)
-      (Atomic.get state).subscriptions
-      []
-
   (** Queue notification for a subscription - O(1) with Queue *)
   let queue_notification (sub_id : string) (notif : notification) : unit =
     Atomic_util.update state (fun current ->

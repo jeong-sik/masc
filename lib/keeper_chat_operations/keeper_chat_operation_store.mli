@@ -91,8 +91,6 @@ module For_testing : sig
   val fail_next_commit : commit_fault -> unit
   val clear_commit_fault : unit -> unit
   val database_file : string
-  val database_schema : string
   val database_application_id : int64
-  val database_user_version : int64
   val table_column_counts : (string * int) list
 end

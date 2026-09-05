@@ -5,9 +5,6 @@ type attr = string * [ `Bool of bool | `Int of int | `String of string ]
 module Attr_key : sig
   val gen_ai_operation_name : string
   val gen_ai_provider_name : string
-  val gen_ai_agent_name : string
-  val gen_ai_agent_id : string
-  val gen_ai_conversation_id : string
   val gen_ai_tool_name : string
   val gen_ai_request_model : string
   val gen_ai_request_stream : string
@@ -19,19 +16,12 @@ module Attr_key : sig
   val gen_ai_usage_cache_read_input_tokens : string
   val gen_ai_usage_reasoning_output_tokens : string
   val gen_ai_response_time_to_first_chunk : string
-  val masc_gen_ai_keeper_name : string
-  val masc_gen_ai_runtime_id : string
   val masc_gen_ai_response_finish_reason : string
   val masc_turn_blocks : string
   val masc_turn_profile : string
   val masc_turn_execution_ids : string
   val keeper_name : string
   val keeper_agent_name : string
-  val keeper_trace_id : string
-  val keeper_max_context : string
-  val keeper_channel : string
-  val keeper_is_retry : string
-  val keeper_current_task_id : string
 
   (** Every registered Attr_key constant exported by this module.
 
@@ -41,23 +31,17 @@ module Attr_key : sig
       disjoint partition of the registry. *)
   val all_known : string list
 
-  val official_gen_ai : string list
-  val masc_extensions : string list
-  val is_official_gen_ai : string -> bool
-  val is_masc_extension : string -> bool
 end
 
 module Mcp_attr_key : sig
   val mcp_method_name : string
   val jsonrpc_request_id : string
-  val jsonrpc_protocol_version : string
   val mcp_protocol_version : string
   val mcp_session_id : string
   val network_protocol_name : string
   val network_protocol_version : string
   val network_transport : string
   val error_type : string
-  val rpc_response_status_code : string
   val server_address : string
   val server_port : string
   val masc_mcp_tool_failure_class : string
@@ -71,7 +55,6 @@ end
 module Mcp_metric_name : sig
   val client_operation_duration : string
   val server_operation_duration : string
-  val client_session_duration : string
   val server_session_duration : string
 end
 
@@ -84,7 +67,6 @@ end
 
 module Event_name : sig
   val client_inference_operation_details : string
-  val client_operation_exception : string
 end
 
 val tool_execution_attrs : tool_name:string -> attr list

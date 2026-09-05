@@ -48,8 +48,6 @@ module For_testing : sig
   val jwt_rs256 :
     now:float -> app_id:string -> private_key_pem:string -> (string, string) result
 
-  val hosts_yml : login:string -> token:string -> string
-
   val parse_mint_response :
     string -> (string * float, string) result
   (** token, expires_at (unix seconds) from a GitHub

@@ -49,11 +49,6 @@ type execution_policy_error =
 
 val default_metadata : required_permission:Masc_domain.permission -> metadata
 
-val hidden_active :
-  ?allow_direct_call_when_hidden:bool ->
-  ?implementation_status:implementation_status ->
-  required_permission:Masc_domain.permission -> string -> metadata
-
 (** {1 Public tool surface} *)
 
 val is_public_mcp : string -> bool

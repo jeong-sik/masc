@@ -9,7 +9,7 @@
       [server_ws_standalone] passes session values to
       [read_inbound_message_frame] / {!send_dashboard_or_raw_sse} and reaches
       the live {!sessions} table directly. That module uses exactly two symbols
-      from here, {!mcp_websocket_handler} and {!max_inbound_message_bytes},
+      from here, [mcp_websocket_handler] and {!max_inbound_message_bytes},
       and [read_inbound_message_frame] is absent from the tree.
     - {b inbound size decisions}
       ({!inbound_dispatch_rejection}, {!inbound_dispatch_admission}) --
@@ -23,7 +23,7 @@
       matched at [server_runtime_bootstrap] when
       dispatching agent broadcasts.
     - {b session lifecycle}
-      ({!new_session}, {!cleanup_session}, {!close_all},
+      ({!new_session}, [cleanup_session], {!close_all},
       {!session_count}, {!sessions}, {!with_sessions_rw},
       {!next_id}).
     - {b inbound framing}
@@ -31,8 +31,8 @@
       {!try_begin_inbound_dispatch},
       {!finish_inbound_dispatch}).
     - {b dashboard JSON-RPC handlers}
-      ({!dashboard_hello}, {!dashboard_subscribe},
-      {!dashboard_unsubscribe}, {!dashboard_ping},
+      ([dashboard_hello], {!dashboard_subscribe},
+      [dashboard_unsubscribe], {!dashboard_ping},
       {!dashboard_ack}).
     - {b outbound delivery}
       ({!send_to_session_result},
@@ -211,11 +211,6 @@ val heartbeat_should_close :
 (** Refresh [last_pong_at] and reset the missed-pong counter.  Called by the
     WS frame handler on every [Pong] frame. *)
 
-val cleanup_session : string -> unit
-(** Removes the session from {!sessions} (and the
-    slice-fanout side index).  Idempotent — calling on
-    an unknown id is a silent no-op. *)
-
 val close_all : unit -> int
 (** Closes every live WS session.  Returns the number of
     sessions that were drained.  Used by the shutdown
@@ -255,24 +250,6 @@ val dispatch_inbound_message : string -> string -> unit
 (** Dispatches an inbound WebSocket message through the currently installed
     handler.  Used by both standalone WS and same-origin [/ws] upgrade paths. *)
 
-val mcp_websocket_handler :
-  ?sw:Eio.Switch.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  ?on_close_log:(session_id:string -> code:int option -> reason:string -> unit) ->
-  ?on_eof:(session_id:string -> unit) ->
-  on_message:(string -> string -> unit) ->
-  origin_label:string ->
-  Ws_direct_core.Endpoint.Wsd.t ->
-  Ws_direct_core.Endpoint.handlers
-(** Single source of truth for the MCP-over-WebSocket session protocol:
-    session registration, SSE subscription, liveness heartbeat, and message
-    handling.  Shared by the same-origin upgrade path and the standalone
-    listener — they differ only in socket attachment, not the session protocol.
-    ws-direct delivers complete (reassembled, UTF-8-validated, size-capped)
-    messages to [on_message] and auto-replies to pings, so this builds an
-    Endpoint handler rather than a frame-opcode switch.  [on_close_log] /
-    [on_eof] are observability hooks invoked before cleanup.  RFC-0287 §4.1. *)
-
 val sec_websocket_accept : string -> string
 (** [sec_websocket_accept key] computes the RFC 6455 §1.3 handshake response
     token: [base64(sha1(key ^ GUID))].  Exposed for the canonical-vector
@@ -307,7 +284,7 @@ val upgrade_connection :
   Httpun.Reqd.t ->
   (unit, string) result
 (** Handles an HTTP/1.1 [GET /ws] upgrade on the main HTTP origin using the
-    shared MCP session protocol ({!mcp_websocket_handler}) and attachment
+    shared MCP session protocol ([mcp_websocket_handler]) and attachment
     ({!respond_and_drive_upgrade}).  [upgrade] is the Gluten capability
     threaded from the route via {!Http_server_eio.Router.ws_get}.  When [sw]
     and [clock] are provided, forks the protocol-level heartbeat on a
@@ -337,17 +314,6 @@ val dashboard_event_of_external :
     no cache is needed.  [broadcast_ts] is the bus emission
     time, so every delta from one broadcast agrees. *)
 
-val dashboard_hello :
-  base_path:string ->
-  session_id:string ->
-  ?token:string ->
-  unit ->
-  (Yojson.Safe.t, string) result
-(** Authenticates the dashboard session.  [Ok payload]
-    on success carries the protocol version + capabilities;
-    [Error msg] otherwise (unknown session,
-    bad token, etc). *)
-
 val dashboard_subscribe :
   session_id:string ->
   ?route:string ->
@@ -356,16 +322,7 @@ val dashboard_subscribe :
   (Yojson.Safe.t, string) result
 (** Adds [slices] to the session's subscription set
     (after validating each slice is known).  Requires a
-    prior {!dashboard_hello}. *)
-
-val dashboard_unsubscribe :
-  session_id:string ->
-  ?slices:string list ->
-  unit ->
-  (Yojson.Safe.t, string) result
-(** Drops [slices] from the subscription set.  When
-    [?slices] is [None], unsubscribes from every slice.
-    Requires a prior {!dashboard_hello}. *)
+    prior [dashboard_hello]. *)
 
 (** {1 Test-only seams (via [module Ws =] alias)}
 

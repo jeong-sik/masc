@@ -611,16 +611,6 @@ let docker_image_present_with_class ~image ~timeout_sec =
   docker_image_present_with_class_optional ~image ~timeout_sec ()
 ;;
 
-let docker_image_present_optional ~image ?timeout_sec () =
-  match docker_image_present_with_class_optional ~image ?timeout_sec () with
-  | Ok () -> Ok ()
-  | Error classified -> Error classified.message
-;;
-
-let docker_image_present ~image ~timeout_sec =
-  docker_image_present_optional ~image ~timeout_sec ()
-;;
-
 let ensure_keeper_sandbox_image_present_with_class_optional
       ~image
       ?timeout_sec

@@ -5146,7 +5146,22 @@ let test_call_summary_of_input () =
     (`Assoc [ "input", `Assoc [ "argv", `List [ `Int 1 ] ] ]);
   check_summary "an input naming neither argv nor a provider is no summary" None
     (`Assoc [ "input", `Assoc [ "cwd", `String "/tmp" ] ]);
-  check_summary "a non-object input is no summary" None (`String "tool_execute")
+  check_summary "a non-object input is no summary" None (`String "tool_execute");
+  check_summary "top-level argv is extracted"
+    (Some "git status")
+    (`Assoc [ "argv", `List [ `String "git"; `String "status" ] ]);
+  check_summary "top-level script is extracted"
+    (Some "dune build")
+    (`Assoc [ "script", `String "dune build" ]);
+  check_summary "top-level command is extracted"
+    (Some "echo hello")
+    (`Assoc [ "command", `String "echo hello" ]);
+  check_summary "nested args with script is extracted"
+    (Some "pytest -v")
+    (`Assoc [ "args", `Assoc [ "script", `String "pytest -v" ] ]);
+  check_summary "top-level file_path is extracted"
+    (Some "lib/keeper.ml")
+    (`Assoc [ "file_path", `String "lib/keeper.ml" ])
 ;;
 
 let () =

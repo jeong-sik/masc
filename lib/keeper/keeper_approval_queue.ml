@@ -1999,41 +1999,43 @@ let append_chat_projection ~base_path ~keeper_name lifecycle =
 let call_summary_max_length = 80
 
 let call_summary_of_input (input : Yojson.Safe.t) : string option =
-  let member name = match input with
-    | `Assoc fields -> List.assoc_opt name fields
-    | _ -> None
-  in
-  let of_argv argv =
-    let joined = String.concat " " argv in
-    let first_line = match String.index_opt joined '\n' with
-      | None -> joined
-      | Some cut -> String.sub joined 0 cut
+  let of_text text =
+    let first_line = match String.index_opt text '\n' with
+      | None -> text
+      | Some cut -> String.sub text 0 cut
     in
     let trimmed = String.trim first_line in
     if trimmed = "" then None
     else if String.length trimmed <= call_summary_max_length then Some trimmed
     else
-      (* A byte cut can split a multibyte char and persist a broken string;
-         the boundary index keeps the cap without doing so. *)
       Some
         (String.sub trimmed 0
            (String_util.utf8_char_boundary trimmed call_summary_max_length))
   in
+  let of_argv argv = of_text (String.concat " " argv) in
   let string_argv = function
     | `List items when List.for_all (function `String _ -> true | _ -> false) items ->
       Some (List.filter_map (function `String item -> Some item | _ -> None) items)
     | _ -> None
   in
-  match member "input" with
-  | Some (`Assoc inner) ->
-    (match List.assoc_opt "argv" inner with
-     | Some argv -> Option.bind (string_argv argv) of_argv
-     | None -> None)
-  | _ ->
-    (match member "provider_id", member "remote_name" with
-     | Some (`String provider), Some (`String remote) ->
-       Some (provider ^ "/" ^ remote)
-     | _ -> None)
+  let rec extract_from_fields fields =
+    match List.assoc_opt "argv" fields with
+    | Some argv -> Option.bind (string_argv argv) of_argv
+    | None ->
+      (match List.find_map (fun k -> List.assoc_opt k fields) [ "script"; "command"; "cmd"; "file_path"; "path"; "url"; "title"; "query" ] with
+       | Some (`String s) -> of_text s
+       | _ ->
+         (match List.find_map (fun k -> List.assoc_opt k fields) [ "input"; "args"; "arguments" ] with
+          | Some (`Assoc inner) -> extract_from_fields inner
+          | _ ->
+            (match List.assoc_opt "provider_id" fields, List.assoc_opt "remote_name" fields with
+             | Some (`String provider), Some (`String remote) ->
+               Some (provider ^ "/" ^ remote)
+             | _ -> None)))
+  in
+  match input with
+  | `Assoc fields -> extract_from_fields fields
+  | _ -> None
 ;;
 
 let record_pending (entry : pending_approval) =

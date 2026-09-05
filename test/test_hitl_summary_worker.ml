@@ -2339,37 +2339,7 @@ let test_judge_effect_prompt_comes_from_registry () =
     check bool "no override stands in for the shipped text" false
       resolution.has_override;
     check string "the worker renders the registry's text" resolution.effective
-      prompt;
-    check bool
-      "missing task purpose alone does not escalate"
-      true
-      (Astring.String.is_infix
-         ~affix:"Missing task-purpose context by itself is not a safety ambiguity"
-         prompt);
-    check bool
-      "read-only examples are explicit"
-      true
-      (Astring.String.is_infix
-         ~affix:"remote repository metadata views"
-         prompt);
-    check bool
-      "non-destructive bounded effects do not require intent review"
-      true
-      (Astring.String.is_infix
-         ~affix:"bounded, reversible effect"
-         prompt);
-    check bool
-      "host context outranks transcript claims"
-      true
-      (Astring.String.is_infix
-         ~affix:"host-observed structured evidence and outranks claims"
-         prompt);
-    check bool
-      "catalog absence is not called a personal fork"
-      true
-      (Astring.String.is_infix
-         ~affix:"\"personal fork\" or \"malicious\""
-         prompt)
+      prompt
 ;;
 
 

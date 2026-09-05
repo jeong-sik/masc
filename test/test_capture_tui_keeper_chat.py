@@ -84,6 +84,16 @@ class CaptureTuiKeeperChatTest(unittest.TestCase):
         state.record("GET", capture.CHAT_HISTORY_GET)
         self.assertEqual(state.summary()["unexpected_chat_route_count"], 0)
 
+    def test_mcp_initialize_is_a_handshake_not_another_post(self):
+        state = capture.Fixture("causal")
+        handshake = state.record("POST", capture.MCP_POST)
+        handshake["mcp_method"] = "initialize"
+        tool_call = state.record("POST", capture.MCP_POST)
+        tool_call["mcp_method"] = "tools/call"
+        summary = state.summary()
+        self.assertEqual(summary["mcp_initialize_count"], 1)
+        self.assertEqual(summary["other_post_count"], 1)
+
     def test_keeper_meta_matches_current_strict_schema(self):
         meta = capture.current_keeper_meta()
         self.assertEqual(

@@ -1064,8 +1064,10 @@ let front_door_cmd_exit
   in
   let deployment_flags_present =
     accept_store_quarantine
-    || List.exists Option.is_some
-         [ provenance_path; provenance_sha256; provenance_device; provenance_inode ]
+    || Option.is_some provenance_path
+    || Option.is_some provenance_sha256
+    || Option.is_some provenance_device
+    || Option.is_some provenance_inode
   in
   match
     Masc_front_door.decide

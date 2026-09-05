@@ -177,12 +177,23 @@ Phase 0c 가 머지된 빌드를 재기동하고 2분 뒤와 6분 뒤에 `GET /a
 
 ### 8.5 Phase 4 설계 — 순서대로
 
-**P4a. board-attention 원장을 다시 쓰지 않는다.** 최신-행-per-id 집합을 `Keeper_board_attention_partition` 의 캐시(이미 경로별 `view` 와 mutation mutex 가 있다)에 authoritative projection 으로 두고, 갱신은 바뀐 행만 durable append 한다(`Fs_compat.append_fd_durable`). 파일이 live 행 수의 2배를 넘으면 그때만 최신 집합으로 다시 쓴다. 갱신당 비용이 O(원장) 에서 O(바뀐 행) 으로 간다. 읽기 쪽은 이미 "id 당 최신 행만" 을 취하므로 파일 형식은 그대로다. 두 번째 단계로 `judgment_request` 를 blob(`Tool_blob_store` 의 content-addressed 저장)으로 빼고 행에는 참조만 남기면 원장이 10배 줄지만, 이는 fresh-state 하드컷이 필요하다(Pending 후보는 wall-clock 만료가 없는 durable truth 라 지우는 건 운영자 결정).
+**P4a. board-attention 원장을 다시 쓰지 않는다.** — #33312 로 들어갔다. 원장은 `Fs_compat` 의 private JSONL 커서 프로토콜(파티션 저장소가 쓰는 것)로 옮겼다. `Keeper_board_attention_candidate` 가 경로마다 "id 별 최신 행" 상태를 프로세스 안에 들고, 읽기는 커서 뒤의 바이트만 읽고, 쓰기는 바뀐 행만 그 커서에 append 한다. 디코드된 행이 살아 있는 후보의 2배를 넘거나 디코드 실패 행이 있으면 다음 쓰기가 최신 집합으로 다시 쓴다(`needs_compaction`). 파일 형식은 그대로다. 설계와 다른 점: 상태는 파티션 캐시가 아니라 후보 원장 모듈에 있다(파일이 다르다). 그리고 temp+rename 계열(`rewrite_private_file_durable_locked_result`)은 같은 경로에서 커서 계열과 섞을 수 없어 읽기·쓰기·압축 셋 다 커서 계열이다. 두 번째 단계(`judgment_request` 를 blob 으로)는 그대로 운영자 결정으로 남는다.
 
-**P4b. 체크포인트를 매 턴 다시 파싱하지 않는다.** keeper 가 자기가 쓴 체크포인트를 다음 턴에 다시 읽는다. 마지막으로 쓴 값과 그 파일의 identity(크기·mtime·sha256)를 owner 가 들고, 로드 시 identity 가 같으면 파싱 없이 그 값을 쓴다. 다르면 지금처럼 읽는다. `authoritative_read_only` 는 지켜진다: 권위 있는 파일을 여전히 확인하고, 내용이 바뀌었으면 그 내용을 쓴다. 로드 쪽 5.2GB/4분과 파싱 몫이 사라진다. 저장 쪽(직렬화 2.7GB/4분)은 체크포인트를 턴 끝에만 쓰는지 확인한 뒤 다룬다.
+**P4b. 체크포인트를 매 턴 다시 파싱하지 않는다.** — 1단계가 #33319 다. 저장소가 canonical 경로마다 요약(`session_id`·`turn_count`·메시지 수)과 그 값을 읽은 파일의 identity(device·inode·size·mtime)를 들고, 저장 워터마크(`known_watermark`)와 하트비트 메시지 수(`canonical_message_count`)는 identity 가 같으면 파일을 읽지 않는다. 8.1 의 `load_canonical_bytes_strict` 5.2GB/4분은 이 워터마크 재읽기였고, 하트비트는 keepalive 마다 13~20MB 를 정수 하나 때문에 읽고 있었다. 설계와 다른 점: 체크포인트 값 전체는 캐시하지 않는다. 코덱 왕복(`to_json` → `of_json`)이 값을 그대로 돌려준다는 증명이 없고, keeper 당 20MB 값을 한 벌 더 들면 major GC 가 도는 live heap 이 그만큼 는다. 2단계(턴 시작 로드가 마지막으로 쓴 값을 재사용)는 실제 체크포인트로 왕복 동일성을 시험으로 증명한 뒤에 간다. CAS 경로(`save_agent_core_if_source`)는 sha256 비교에 바이트가 필요해 이번엔 그대로다. 재측정에서 남으면 요약에 ref 를 얹는다.
 
-**P4c. exact-lane 본문은 디스크에.** 목록 API 는 이미 요약만 보낸다(`routes_dashboard.ml:1459`). projection 에는 요약만 두고 본문은 run_id 로 파일 오프셋에서 읽는다. live −545MB.
+**P4c. exact-lane 본문은 디스크에.** 목록 API 는 이미 요약만 보낸다(`routes_dashboard.ml:1459`). 상주하는 `run` 은 입력·출력 본문(`Exact_input` 의 payload, `Completed.output`) 을 통째로 들고 있고, 그것도 두 벌이다(`Store` 항목과 `projection`). 계획: 본문은 `Tool_blob_store.put_durable` 로 content-addressed 저장하고 행에는 sha256 참조만 남긴다. 저장소 버전은 v5 → v6 하드컷이다(v4 → v5 선례처럼 새 바이너리는 v5 를 열지 않는다; 완료된 실행 이력은 컷 시점에 비워진다). `list_runs`·요약 직렬화는 참조만 들고, 상세(`run_detail_json` → `get` + `Tool_blob_store.fetch`)에서만 본문을 읽는다. 선행 조건 하나: blob 저장소에 삭제가 없다(`list_all` 뿐). prune 된 실행의 blob 을 지우는 경로가 없으면 디스크가 retention 만큼 계속 는다. 그 삭제 경로가 P4c 의 첫 PR 이다. 기대: live −545MB.
 
 **P4d. Memprof 키를 masc 프레임으로.** 8.4 의 한계 제거. 이 RFC 의 다음 PR.
 
 각 단계는 같은 하네스로 전후를 잰다. P4a 뒤 할당 −20% 이상, P4b 뒤 −25% 이상, P4c 뒤 live −500MB 이상이 기대치이고, 못 미치면 그 단계는 되돌린다.
+
+### 8.6 상태 (2026-09-05)
+
+| 단계 | PR | 상태 | 재측정 |
+|---|---|---|---|
+| P4d Memprof 키 | #33305 | merged | 재기동 뒤 `sites`·overflow 몫 |
+| P4a 원장 append | #33312 | merged | `update_ledger_many`·`rewrite_private_file_durable_locked_result` 몫 (기대 −4.5GB/4분) |
+| P4b 요약 캐시 | #33319 | Draft | `load_canonical_bytes_strict`·`read_fd` 몫 (기대 −5.2GB/4분) |
+| P4c 본문 디스크 | — | 설계만 | live −545MB |
+
+재측정은 P4b 머지 뒤 한 번의 재기동으로 P4a·P4b·P4d 를 같이 잰다. `scripts/harness/perf/scheduler_lag_probe.sh` 로 할당률·major/분, `/api/v1/diagnostics/memprof` 로 사이트 몫. 기대치에 못 미치는 단계는 되돌린다(8.5).

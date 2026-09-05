@@ -8,6 +8,8 @@ MASC is a repo-local MCP server for coordinating Keepers, MCP clients, and works
 # 1. Clone and setup
 git clone https://github.com/jeong-sik/masc.git
 cd masc
+# Enable repo hooks: pre-push refuses dune trace dumps that carry the env
+git config core.hooksPath .githooks
 
 # 2. Pin external OCaml dependencies
 chmod +x scripts/opam-pin-external-deps.sh

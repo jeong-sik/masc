@@ -1866,8 +1866,8 @@ let identity_filter_rows ~providers filter =
    do not stack two blanks and none of them leaves the list flush against
    the hint. *)
 let identity_preamble ~keeper ~notice =
-  ("  Move with the arrows and press enter to connect " ^ keeper
-   ^ ", R to ask again what tools exist, T to switch the row off or on.")
+  ("  Move with arrows, enter to connect " ^ keeper
+   ^ ", A: custom app (Client ID), /: filter, R: refresh, T: toggle on/off.")
   :: "" :: notice
 
 (** Which pane line the provider at [index] is drawn on.

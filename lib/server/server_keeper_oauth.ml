@@ -120,29 +120,55 @@ let set_client ~base_path ~provider_id ~client_id ~client_secret ~scopes =
 
 let start ~base_path ~keeper ~provider_id ~now =
   let* provider = provider_of_id provider_id in
-  let* redirect_uri = redirect_uri () in
-  let dir = identity_dir ~base_path in
-  let* configured = Store.load ~dir ~provider in
-  let* started =
-    Result.map_error Session.start_error_to_string
-      (Session.start ~provider ~configured ~client_name ~redirect_uri ~keeper
-         ~pending ~now ~ttl_sec:login_window_sec ())
-  in
-  let* () =
-    if started.Session.registered_now
-    then Store.save ~dir ~provider started.Session.credentials
-    else Ok ()
-  in
-  Ok
-    (`Assoc
-      [ "keeper", `String keeper
-      ; "provider", `String provider.Provider.id
-      ; "provider_label", `String provider.Provider.label
-      ; "authorize_url", `String started.Session.authorize_url
-      ; "state", `String started.Session.state
-      ; "registered_now", `Bool started.Session.registered_now
-      ; "expires_at", `Float (now +. login_window_sec)
-      ])
+  match provider.Provider.credential_source with
+  | Provider.Github_cli { hostname } ->
+    (match Keeper_github_identity.stored_token ~base_path ~keeper_name:keeper ~hostname with
+     | Error problem ->
+       Error
+         (Printf.sprintf
+            "GitHub uses %s's GitHub CLI token (%s). Please switch to the GitHub tab or run 'gh auth login' to authenticate this keeper."
+            keeper problem)
+     | Ok _ ->
+       let* catalog =
+         Keeper_identity_tools.refresh ~base_path ~keeper_name:keeper ~provider ~now ()
+       in
+       Ok
+         (`Assoc
+           [ "keeper", `String keeper
+           ; "provider", `String provider.Provider.id
+           ; "provider_label", `String provider.Provider.label
+           ; "attached", `Bool true
+           ; "tool_count", `Int (List.length catalog.Keeper_identity_tools.tools)
+           ; ( "message"
+             , `String
+                 (Printf.sprintf
+                    "%s GitHub CLI token attached (%d tools discovered)."
+                    keeper (List.length catalog.Keeper_identity_tools.tools)) )
+           ]))
+  | Provider.Oauth_exchange ->
+    let* redirect_uri = redirect_uri () in
+    let dir = identity_dir ~base_path in
+    let* configured = Store.load ~dir ~provider in
+    let* started =
+      Result.map_error Session.start_error_to_string
+        (Session.start ~provider ~configured ~client_name ~redirect_uri ~keeper
+           ~pending ~now ~ttl_sec:login_window_sec ())
+    in
+    let* () =
+      if started.Session.registered_now
+      then Store.save ~dir ~provider started.Session.credentials
+      else Ok ()
+    in
+    Ok
+      (`Assoc
+        [ "keeper", `String keeper
+        ; "provider", `String provider.Provider.id
+        ; "provider_label", `String provider.Provider.label
+        ; "authorize_url", `String started.Session.authorize_url
+        ; "state", `String started.Session.state
+        ; "registered_now", `Bool started.Session.registered_now
+        ; "expires_at", `Float (now +. login_window_sec)
+        ])
 ;;
 
 let refresh_tools ~base_path ~keeper ~provider_id ~now =
@@ -264,7 +290,10 @@ let finish ~base_path ~state ~code ~now =
      expires and then stops with nothing on disk to say why. *)
   let* () =
     match refresh_token with
-    | None -> Ok ()
+    | None ->
+      Keeper_secret_projection.delete_file_entry ~base_path ~keeper_name
+        ~scope:Keeper_secret_projection.Keeper_secret
+        ~container_path:provider.Provider.refresh_token_file
     | Some value ->
       Keeper_secret_projection.set_file_entry ~base_path ~keeper_name
         ~scope:Keeper_secret_projection.Keeper_secret

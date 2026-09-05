@@ -164,7 +164,7 @@ let handle_set_client request reqd =
         in
         match answer with
         | Error message ->
-          Http.Response.json_value ~compress:true ~request:req
+          Http.Response.json_value ~status:`Bad_request ~compress:true ~request:req
             (`Assoc [ "error", `String message ])
             reqd
         | Ok payload ->

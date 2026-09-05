@@ -401,10 +401,10 @@ let test_overview_footer_projects_by_focus () =
      Right/Enter and Left/Esc only act on a focused task. h/l stays visible
      because it selects either pane directly. *)
   check str "events mode keeps t and drops the task keys"
-    "j/k:events  h/l:pane  t:tasks  2:keepers  r:refresh  Tab:next  q:quit"
+    "j/k:events  h/l:pane  m:telemetry  t:tasks  2:keepers  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints_overview ~task_focus:false);
   check str "tasks mode keeps arrow/Enter/Esc and drops t"
-    "j/k:tasks  h/l:pane  Right / Enter:open  Left / Esc:back  2:keepers  r:refresh  Tab:next  q:quit"
+    "j/k:tasks  h/l:pane  m:telemetry  Right / Enter:open  Left / Esc:back  2:keepers  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints_overview ~task_focus:true)
 
 (* Reading a queue meant Esc, move, Enter for every row -- three keys to do
@@ -634,7 +634,7 @@ let test_metrics_is_an_overview_child () =
 
 let test_config_footer_names_both_hops () =
   check str "Config names its two off-ring children"
-    "j/k:select / scroll  p:runtime.toml / models / params / prompts / themes  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  Esc:overview  r:reload  Tab:next"
+    "j/k:select / scroll  p:runtime.toml / models / params / prompts / themes  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  Esc:overview  r:reload  Tab:next"
     (Masc_tui_keys.footer_hints Config)
 
 let test_system_logs_owns_only_its_real_filter_keys () =

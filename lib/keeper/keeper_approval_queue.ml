@@ -1781,20 +1781,37 @@ let read_pending_log_unlocked
       ~next_sequence
   =
   let path = pending_log_path ~base_path in
-  match
-    Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
-    |> Fs_compat.private_jsonl_snapshot_success_receipt
-  with
+  let log_result =
+    match
+      Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
+      |> Fs_compat.private_jsonl_snapshot_success_receipt
+    with
+    | Ok receipt -> Ok (receipt, false)
+    | Error (Fs_compat.Incomplete_transaction_tail _)
+    | Error
+        (Fs_compat.Transaction_settlement_failed
+          { primary = Fs_compat.Transaction_failed (Fs_compat.Incomplete_transaction_tail _); _ }) ->
+      (match
+         Fs_compat.recover_private_jsonl_durable_locked_result path
+         |> Fs_compat.private_jsonl_snapshot_success_receipt
+       with
+       | Ok receipt -> Ok (receipt, true)
+       | Error error -> Error error)
+    | Error error -> Error error
+  in
+  match log_result with
   | Error error -> Error (private_jsonl_error ~path error)
-  | Ok { Fs_compat.value = snapshot; settlement_error } ->
+  | Ok ({ Fs_compat.value = snapshot; settlement_error }, recovered_tail) ->
     Option.iter (observe_log_settlement ~path) settlement_error;
     let bytes = snapshot.Fs_compat.bytes in
     let partial_tail =
-      String.length bytes > 0 && not (Char.equal bytes.[String.length bytes - 1] '\n')
+      recovered_tail
+      || (String.length bytes > 0
+          && not (Char.equal bytes.[String.length bytes - 1] '\n'))
     in
     let lines = String.split_on_char '\n' bytes in
     let lines =
-      if partial_tail
+      if partial_tail && not recovered_tail
       then (
         match List.rev lines with
         | _partial :: complete -> List.rev complete

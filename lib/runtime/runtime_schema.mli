@@ -280,6 +280,12 @@ type config =
         registry (Phase 1 SSH lane, spec §4.2). Keeper TOML [remote_endpoint]
         names resolve against this list at keeper load/dispatch; an unknown
         name is a config-load error. *)
+  ; lsp_servers : (string * (string * string list)) list
+    (** [\[lsp.servers\]] — the command that starts a language's server, by
+        the language's wire id: [python = \["pyright-langserver", "--stdio"\]].
+        Replaces {!Lsp_process_manager.command_of_language} for that language
+        and no other. A key naming no language, or a value that is not a
+        non-empty array of strings, is refused at load. *)
   ; egress_allowlists : Egress_allowlist.t list
     (** [\[egress.keepers.<name>\]] — what a keeper in the policy lane may
         reach (RFC-0415). A keeper with no entry has an empty allowlist,

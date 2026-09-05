@@ -2,14 +2,10 @@ name = "tool_execute"
 description = """
 Run one command inside the Keeper sandbox. Give exactly one of argv or \
 script: argv is one non-empty argv process vector run without a shell, tokens \
-verbatim, and script is one line handed to a real shell, so \
-pipes, redirections, ';', '&&', '$(...)' and FOO=1 prefixes belong in script. \
-cwd is a relative path inside the path jail, and MASC never \
-interprets program or subcommand meaning: after path containment, sandbox \
-resolution and the external-effect Gate, the program owns its syntax and exit \
-result. A call runs to completion or stops at timeout_sec; there is \
-no background task lifecycle. MASC's own tools answer to argv ["masc", ...] \
-one call each, by the paths on this turn's surface."""
+verbatim, and script is one line handed to a real shell. cwd is a relative \
+path inside the path jail, and MASC never interprets program or subcommand \
+meaning. A call runs to completion or stops at timeout_sec; there is no \
+background task lifecycle."""
 additional_properties = false
 
 [[params]]
@@ -17,65 +13,38 @@ name = "argv"
 type = "array"
 items = { type = "string" }
 min_items = 1
-description = """
-Non-empty process vector: argv[0] is the executable and remaining tokens are \
-arguments, all passed verbatim. There is no shell, so a literal '|', '&&' or \
-'>' token is data, not an operator, and wildcards (*, ?, [...]) are not \
-expanded: 'foo*.ml' names a file called 'foo*.ml'. Use script for a line you \
-would have given a shell, and pass exact paths. Relative operands resolve \
-against the typed cwd; Docker cannot reach host absolute paths."""
+description = "Direct process vector: executable and arguments passed verbatim without a shell."
 
 [[params]]
 name = "script"
 type = "string"
 min_length = 1
-description = """
-Shell form: one command line, run by a real shell inside your sandbox. Write \
-whatever a shell takes -- pipes, '&&', ';', redirections, $(...), loops, \
-FOO=1 prefixes. Use this instead of putting a script in argv as 'bash -c'; \
-that spelling is read as this field. Mutually exclusive with 'argv'. Prefer \
-'argv' when you do not need a shell: it runs the program directly, so nothing \
-is word-split or expanded."""
+description = "Shell command line run by a shell. Use for pipes, redirections, and chained commands."
 
 [[params]]
 name = "shell"
 type = "string"
 enum = ["sh", "bash", "zsh", "dash", "ksh"]
 default = "sh"
-description = """
-Which shell runs 'script'. Defaults to 'sh'. Name 'bash' when the script uses \
-bash-only syntax; a container's 'sh' is often dash. Ignored unless 'script' \
-is present."""
+description = "Which shell runs script. Defaults to sh."
 
 [[params]]
 name = "cwd"
 type = "string"
-description = """
-Working directory for the command. With argv there is no shell, so 'cd' runs \
-as a program that changes only its own directory and exits; set cwd instead. \
-Must stay within the keeper sandbox or an explicit allowed path. Pass a \
-relative cwd, typically '.'. The Keeper-visible absolute root is \
-informational, not a cwd input. Docker host absolute paths are unavailable."""
+description = "Working directory for the command relative to workspace root. Defaults to '.'."
 
 [[params]]
 name = "timeout_sec"
 type = "number"
 exclusive_minimum = 0.0
-description = """
-Explicit subprocess wall-clock timeout in seconds. When absent it is 600, so \
-name one for a command that legitimately runs longer, such as a whole test \
-suite. A call that runs out of time is stopped and says so; it does not \
-continue in the background."""
+description = "Subprocess timeout in seconds. Defaults to 600."
 
 [[one_of]]
 required = ["argv"]
 forbidden = ["script"]
-description = """
-Direct form: include one non-empty 'argv'. DO NOT also include 'script' in \
-the same call."""
+description = "Direct form with argv."
 
 [[one_of]]
 required = ["script"]
 forbidden = ["argv"]
-description = """
-Shell form: include 'script'. DO NOT also include 'argv' in the same call."""
+description = "Shell form with script."

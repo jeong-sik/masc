@@ -662,7 +662,9 @@ let prompt_material_payload = function
   | Ok ({ resolution; rendered } : librarian_prompt_material) ->
     `Assoc
       [ "key", `String Prompt_names.librarian
-      ; "source", `String resolution.source
+      ; ( "source"
+        , `String
+            (Prompt_registry.prompt_source_to_string resolution.source) )
       ; ( "file_path"
         , match resolution.file_path with
           | None -> `Null

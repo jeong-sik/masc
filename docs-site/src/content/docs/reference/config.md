@@ -45,10 +45,10 @@ server's environment; the fifth is local.
 `llama_server`, `vllm` and `mlx_server` ship commented out — see
 [Local AI models](/runbooks/llama-server/).
 
-**Most of the seeded bindings cannot take a turn.** The catalog carries 31
-provider/model pairs as documented examples; the 13 that declare
-`max-request-body-bytes` are dispatchable and startup names the other 18 in a
-warning that says which key to add. `[runtime].default` is one of the 13.
+**The seeded bindings are keeper-dispatchable.** The catalog carries 31
+provider/model pairs as documented examples, all declaring
+`max-request-body-bytes` so any configured model can take a Keeper turn
+without startup warnings. `[runtime].default` is one of them.
 
 ## runtime.toml
 

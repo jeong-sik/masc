@@ -182,8 +182,8 @@ let test_docker_keeper_blocks_rg_outside () =
   Alcotest.(check bool) "rg outside playground blocked" true
     (blocked_by_sandbox_boundary raw)
 
-let test_local_keeper_rg_file_path_uses_parent_workdir () =
-  setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
+let test_docker_keeper_rg_file_path_uses_parent_workdir () =
+  setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   if not (Keeper_tool_execute_path.shell_command_available "rg") then ()
   else (
@@ -219,8 +219,8 @@ let test_local_keeper_rg_file_path_uses_parent_workdir () =
    (transport-aware) assertion: handle_tool_search_files is the function
    keeper_tool_runtime.ml returns verbatim to the keeper, so what we
    assert here is exactly what the keeper receives — no producer-only gap. *)
-let test_local_keeper_rg_invalid_type_surfaces_stderr () =
-  setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
+let test_docker_keeper_rg_invalid_type_surfaces_stderr () =
+  setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   if not (Keeper_tool_execute_path.shell_command_available "rg") then ()
   else (
@@ -563,11 +563,11 @@ let () =
             `Quick test_shell_command_available_rejects_empty_path_segment_cwd;
           Alcotest.test_case "docker keeper blocks rg outside" `Quick
             test_docker_keeper_blocks_rg_outside;
-          Alcotest.test_case "local keeper rg file path uses parent workdir"
-            `Quick test_local_keeper_rg_file_path_uses_parent_workdir;
+          Alcotest.test_case "docker keeper rg file path uses parent workdir"
+            `Quick test_docker_keeper_rg_file_path_uses_parent_workdir;
           Alcotest.test_case
-            "local keeper rg invalid type surfaces stderr to keeper"
-            `Quick test_local_keeper_rg_invalid_type_surfaces_stderr;
+            "docker keeper rg invalid type surfaces stderr to keeper"
+            `Quick test_docker_keeper_rg_invalid_type_surfaces_stderr;
           Alcotest.test_case "docker keeper invalid type rejects before docker spawn"
             `Quick test_docker_keeper_invalid_type_rejects_before_docker_spawn;
           Alcotest.test_case "docker keeper blocks second rg outside" `Quick

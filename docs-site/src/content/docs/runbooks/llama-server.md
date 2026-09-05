@@ -69,8 +69,7 @@ max-request-body-bytes = 1048576
 
 Leave `max-request-body-bytes` out and **no Keeper turn reaches that runtime.**
 Startup names it in a warning, but it is a common place to look like nothing is
-running for no visible reason: of the 31 bindings the seed ships, only the 13
-that declare this key can take a turn.
+running for no visible reason.
 
 ## Point a role at it
 

@@ -634,6 +634,20 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
                   (agent_core_provider_config runtime).model_capabilities_override))
       runtimes
 
+let test_repo_runtime_toml_all_seeded_bindings_are_keeper_dispatchable () =
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  match Runtime.load_list ~config_path:path with
+  | Error msg -> failf "repo runtime.toml should load: %s" msg
+  | Ok (runtimes, _, _, _, _) ->
+    check int "expected 31 seeded runtimes" 31 (List.length runtimes);
+    check (list string)
+      "all seeded runtimes in repo config/runtime.toml are keeper-dispatchable"
+      []
+      (List.map
+         (fun ((runtime : Runtime.t), reason) ->
+            Printf.sprintf "%s: %s" runtime.id reason)
+         (Runtime.keeper_dispatch_blocked runtimes))
+
 let test_deployment_agent_core_model_catalog_modality_priorities_resolve () =
   with_deployment_agent_core_model_catalog @@ fun catalog ->
   let rows =
@@ -3253,6 +3267,7 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []
     ; egress_allowlists = []
+    ; lsp_servers = []
     }
   in
   let binding =
@@ -4572,6 +4587,87 @@ let test_codex_app_server_rejects_declared_credentials () =
               "official Codex client owns subscription login"))
 ;;
 
+(* [lsp.servers] names the command that starts a language's server. The
+   language is a closed sum in the client, so a key that names none is a
+   typo the operator should hear about at load; a value that is not the
+   executable and its arguments cannot start anything. *)
+let lsp_probe_config tail = "[models.probe]\napi-name = \"probe\"\n" ^ tail
+
+let error_messages (errors : Runtime_toml.parse_error list) =
+  String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors)
+
+let test_lsp_servers_reads_a_command_per_language () =
+  match
+    Runtime_toml.parse_string
+      (lsp_probe_config
+         "[lsp.servers]\npython = [\"pyright-langserver\", \"--stdio\"]\nocaml = [\"ocamllsp\"]\n")
+  with
+  | Error errors -> failf "two servers must parse: %s" (error_messages errors)
+  | Ok config ->
+    check
+      (list (pair string (pair string (list string))))
+      "each entry is the executable and its argv, in the order written"
+      [ ("python", ("pyright-langserver", [ "pyright-langserver"; "--stdio" ]))
+      ; ("ocaml", ("ocamllsp", [ "ocamllsp" ]))
+      ]
+      config.Runtime_schema.lsp_servers
+;;
+
+let test_lsp_servers_absent_is_empty () =
+  match Runtime_toml.parse_string (lsp_probe_config "") with
+  | Error errors -> failf "no [lsp] must parse: %s" (error_messages errors)
+  | Ok config -> check int "no overrides" 0 (List.length config.Runtime_schema.lsp_servers)
+;;
+
+let test_lsp_servers_refuses_a_language_nobody_knows () =
+  match Runtime_toml.parse_string (lsp_probe_config "[lsp.servers]\ncobol = [\"cobol-ls\"]\n") with
+  | Ok _ -> fail "a language the client does not know must be refused at load"
+  | Error errors ->
+    check bool "the refusal names the key" true
+      (List.exists (fun (e : Runtime_toml.parse_error) -> String.equal e.path "lsp.servers.cobol") errors)
+;;
+
+let test_lsp_servers_refuses_a_value_that_starts_nothing () =
+  List.iter
+    (fun (label, tail) ->
+      match Runtime_toml.parse_string (lsp_probe_config tail) with
+      | Ok _ -> failf "%s must be refused at load" label
+      | Error errors ->
+        check bool (label ^ " is refused at its own path") true
+          (List.exists (fun (e : Runtime_toml.parse_error) -> String.equal e.path "lsp.servers.python") errors))
+    [ ("an empty array", "[lsp.servers]\npython = []\n")
+    ; ("a string", "[lsp.servers]\npython = \"pylsp\"\n")
+    ; ("an array with a number", "[lsp.servers]\npython = [\"pylsp\", 3]\n")
+    ]
+;;
+
+let test_lsp_servers_refuses_a_stray_lsp_key () =
+  match Runtime_toml.parse_string (lsp_probe_config "[lsp]\nservers = {}\ntimeout = 3\n") with
+  | Ok _ -> fail "a key under [lsp] other than servers must be refused"
+  | Error errors ->
+    check bool "the refusal names the stray key" true
+      (List.exists (fun (e : Runtime_toml.parse_error) -> String.equal e.path "lsp.timeout") errors)
+;;
+
+let test_runtime_lsp_servers_answers_the_operator_then_the_table () =
+  let seed = Filename.concat (repo_root ()) "config/runtime.toml" in
+  let text = In_channel.with_open_bin seed In_channel.input_all in
+  let path = Filename.temp_file "lsp_servers_" ".toml" in
+  Out_channel.with_open_bin path (fun oc ->
+    Out_channel.output_string oc
+      (text ^ "\n[lsp.servers]\npython = [\"pylsp\"]\n"));
+  match Runtime.init_default ~config_path:path with
+  | Error msg -> failf "the seed config plus one override should init: %s" msg
+  | Ok () ->
+    let servers = Runtime.lsp_servers () in
+    check (pair string (list string)) "the operator's command for python"
+      ("pylsp", [ "pylsp" ])
+      (servers Lsp_process_manager.Python);
+    check (pair string (list string)) "the client's own table for ocaml"
+      (Lsp_process_manager.command_of_language Lsp_process_manager.Ocaml)
+      (servers Lsp_process_manager.Ocaml)
+;;
+
 let () =
   run "runtime_config_validity"
     [ ( "runtime TOML gate",
@@ -4613,6 +4709,9 @@ let () =
           test_case
             "repo runtime bindings resolve through AGENT_CORE provider configs"
             `Quick test_repo_runtime_bindings_resolve_through_agent_core_provider_config;
+          test_case
+            "repo runtime.toml all seeded bindings are keeper-dispatchable"
+            `Quick test_repo_runtime_toml_all_seeded_bindings_are_keeper_dispatchable;
           test_case
             "deployment AGENT_CORE catalog modality priority strings resolve"
             `Quick test_deployment_agent_core_model_catalog_modality_priorities_resolve;
@@ -4824,5 +4923,16 @@ let () =
         ; test_case
             "edit_config_text edits the file's own text and commits it"
             `Quick test_edit_config_text_reads_the_file_and_commits_the_edit
+        ] )
+    ; ( "lsp servers"
+      , [ test_case "reads a command per language" `Quick test_lsp_servers_reads_a_command_per_language
+        ; test_case "absent is empty" `Quick test_lsp_servers_absent_is_empty
+        ; test_case "refuses a language nobody knows" `Quick
+            test_lsp_servers_refuses_a_language_nobody_knows
+        ; test_case "refuses a value that starts nothing" `Quick
+            test_lsp_servers_refuses_a_value_that_starts_nothing
+        ; test_case "refuses a stray [lsp] key" `Quick test_lsp_servers_refuses_a_stray_lsp_key
+        ; test_case "Runtime.lsp_servers answers the operator, then the table" `Quick
+            test_runtime_lsp_servers_answers_the_operator_then_the_table
         ] )
     ]

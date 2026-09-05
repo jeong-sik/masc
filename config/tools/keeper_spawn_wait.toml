@@ -1,5 +1,8 @@
 name = "keeper_spawn_wait"
-description = "Wait for a spawned process to exit, or for it to print something. The wait ends on the event, not on a clock, so it returns as soon as the thing happens. timeout_sec is a bound: reaching it is a failure to report, never a result to guess at. There is no way to wait a fixed length of time, because that succeeds on one machine and reports a state that has not happened on another."
+description = """
+Wait for a spawned process to exit or output matching text.
+
+The wait ends as soon as the event occurs. timeout_sec is required."""
 additional_properties = false
 
 [[params]]
@@ -13,21 +16,21 @@ name = "until"
 type = "string"
 enum = ["exit", "output_contains"]
 required = true
-description = "What to wait for."
+description = "Event to wait for: exit or output_contains."
 
 [[params]]
 name = "needle"
 type = "string"
-description = "Required when until is output_contains. Matched literally against what the stream holds."
+description = "Required when until is output_contains. Substring to match."
 
 [[params]]
 name = "stream"
 type = "string"
 enum = ["stdout", "stderr"]
-description = "Which stream output_contains watches. Defaults to stdout."
+description = "Stream to watch (stdout or stderr). Defaults to stdout."
 
 [[params]]
 name = "timeout_sec"
 type = "number"
 required = true
-description = "How long to wait before giving up. Required: a default here would be a number nobody chose."
+description = "Timeout bound in seconds."

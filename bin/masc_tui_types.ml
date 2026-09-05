@@ -2589,6 +2589,18 @@ let metrics_section_label = function
   | Section_resources -> "Fleet & Velocity"
   | Section_tools -> "Memory & Gate Safety"
 
+(* What the [:] palette is for right now. A jump lists every destination
+   the strip and roster offer; a choice lists the names on the Code
+   cursor line for one language-server question and nothing else -- a
+   task whose title happens to spell h-o-v-e-r in order is not an answer
+   to "which name?" (RFC-0429 §1.4). *)
+type palette_mode =
+  | Palette_jump
+  | Palette_choice of {
+      choice_question : string;  (* "hover", "definition", "references" *)
+      choice_line : int;  (* 1-based, what the title says *)
+    }
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -2711,6 +2723,7 @@ type state = {
   mutable palette_open: bool;
   mutable palette_query: string;
   mutable palette_cursor: int;
+  mutable palette_mode: palette_mode;
   (* [/] on the roster: a search that moves the cursor, not a filter that
      subsets the list -- every action reads the same [keepers] the rows
      draw, so nothing can act on a hidden row. [Some q] while typing;
@@ -4050,6 +4063,7 @@ let create_state
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;
+  palette_mode = Palette_jump;
   search = None;
   search_last = "";
   voice_config = None;
@@ -5867,7 +5881,14 @@ let palette_matches (state : state) =
   let needle =
     String.lowercase_ascii (String.trim state.palette_query)
   in
-  let entries = palette_entries state in
+  let entries =
+    match state.palette_mode with
+    | Palette_jump -> palette_entries state
+    | Palette_choice { choice_question; _ } ->
+        List.map
+          (fun name -> (name, Palette_lsp (choice_question, name)))
+          (code_cursor_line_symbols state)
+  in
   (* Three ranks, entry order kept inside each: a label that starts with the
      query, then one that contains it, then one that only has its characters
      in order. A K/D pre-fill of "def " therefore lists the cursor line's

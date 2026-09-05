@@ -141,6 +141,81 @@ let test_wide_glyphs_measure_by_cells () =
 let test_dotted_and_thick_keep_their_strokes () =
   Alcotest.check rows "-.-> and ==>" dotted_rows (render "graph LR\nA -.-> B\nA ==> C")
 
+let seq_basic_rows =
+  [ {|┌───────┐   ┌─────┐|}
+  ; {|│ Alice │   │ Bob │|}
+  ; {|└───┬───┘   └──┬──┘|}
+  ; {|    │          │|}
+  ; {|    │ hello    │|}
+  ; {|    ├─────────>┤|}
+  ; {|    │ hi       │|}
+  ; {|    ├<┄┄┄┄┄┄┄┄┄┤|}
+  ; {|    │          │|}
+  ]
+
+let seq_full_rows =
+  [ {| ┌───────┐   ┌─────┐|}
+  ; {| │ Alice │   │ Bob │|}
+  ; {| └───┬───┘   └──┬──┘|}
+  ; {|     │          │|}
+  ; {|     │ request  │|}
+  ; {|     ├─────────>┤|}
+  ; {|┌─ loop every 2s ────────┐|}
+  ; {|│    │          │   poll │|}
+  ; {|│    │          ├──┐     │|}
+  ; {|│    │          │<─┘     │|}
+  ; {|│    │ status   │        │|}
+  ; {|│    ├<┄┄┄┄┄┄┄┄┄┤        │|}
+  ; {|└────┼──────────┼────────┘|}
+  ; {|┌─ alt ok ──────┼────────┐|}
+  ; {|│    │ done     │        │|}
+  ; {|│    ├─────────x┤        │|}
+  ; {|├┄ else failed ┄┼┄┄┄┄┄┄┄┄┤|}
+  ; {|│┌─────────────────┐     │|}
+  ; {|││ retry later     │     │|}
+  ; {|│└─────────────────┘     │|}
+  ; {|└────┼──────────┼────────┘|}
+  ; {|     │          │|}
+  ]
+
+let test_sequence_messages_run_between_lifelines () =
+  Alcotest.check rows "two messages" seq_basic_rows
+    (render "sequenceDiagram\n  Alice->>Bob: hello\n  Bob-->>Alice: hi")
+
+let test_sequence_frames_notes_and_a_self_message () =
+  Alcotest.check rows "loop, alt/else, note, self message, cross head" seq_full_rows
+    (render
+       "sequenceDiagram\n  participant A as Alice\n  participant B as Bob\n  A->>B: request\n  loop every 2s\n    B->>B: poll\n    B-->>A: status\n  end\n  alt ok\n    A-x B: done\n  else failed\n    Note over A,B: retry later\n  end")
+
+let test_sequence_text_widens_the_gap_it_crosses () =
+  let drawn = render "sequenceDiagram\n  A->>B: a considerably longer message text\n  B->>A: ok" in
+  Alcotest.(check bool) "the text is whole" true
+    (List.exists (contains "a considerably longer message text") drawn);
+  List.iter
+    (fun row -> Alcotest.(check bool) row true (Masc_tui_message_layout.display_width row <= 80))
+    drawn
+
+let test_sequence_reads_declarations_and_skips_styling () =
+  match
+    Mermaid.parse
+      "sequenceDiagram\n  autonumber\n  participant B as Bob\n  activate B\n  A->>+B: hi\n  deactivate B"
+  with
+  | Ok (Mermaid.Sequence seq) ->
+      Alcotest.(check (list string)) "declared first, then first seen" [ "B"; "A" ]
+        (List.map (fun (p : Mermaid.participant) -> p.pid) seq.participants);
+      Alcotest.(check (list string)) "the alias is what the box says" [ "Bob"; "A" ]
+        (List.map (fun (p : Mermaid.participant) -> p.alias) seq.participants);
+      Alcotest.(check int) "one message, nothing else" 1 (List.length seq.events)
+  | Ok (Mermaid.Graph _) -> Alcotest.fail "read as a graph"
+  | Error (Mermaid.Unsupported what) -> Alcotest.failf "unsupported: %s" what
+  | Error (Mermaid.Parse_error { line; what }) -> Alcotest.failf "line %d: %s" line what
+  | Error (Mermaid.Too_wide _) -> Alcotest.fail "parse does not measure"
+
+let test_sequence_refuses_a_line_that_is_not_a_message () =
+  match failure "sequenceDiagram\n  A->>B: hi\n  this is not a message" with
+  | Mermaid.Parse_error { line; _ } -> Alcotest.(check int) "the third line" 3 line
+  | Mermaid.Unsupported _ | Mermaid.Too_wide _ -> Alcotest.fail "not a Parse_error"
+
 (* {1 Shape, not bytes} *)
 
 let test_a_long_edge_passes_through_the_layer_between () =
@@ -168,8 +243,8 @@ let test_same_source_same_bytes () =
 (* {1 Refusals} *)
 
 let test_a_diagram_of_another_kind_names_itself () =
-  match failure "sequenceDiagram\nA->>B: hi" with
-  | Mermaid.Unsupported what -> Alcotest.(check string) "the first word" "sequenceDiagram" what
+  match failure "classDiagram\n  Animal <|-- Duck" with
+  | Mermaid.Unsupported what -> Alcotest.(check string) "the first word" "classDiagram" what
   | Mermaid.Parse_error _ | Mermaid.Too_wide _ -> Alcotest.fail "not an Unsupported"
 
 let test_a_line_this_grammar_cannot_read_names_its_line () =
@@ -201,6 +276,7 @@ let test_a_self_edge_is_refused () =
 let parsed source =
   match Mermaid.parse source with
   | Ok (Mermaid.Graph graph) -> graph
+  | Ok (Mermaid.Sequence _) -> Alcotest.fail "read as a sequence"
   | Error (Mermaid.Unsupported what) -> Alcotest.failf "unsupported: %s" what
   | Error (Mermaid.Parse_error { line; what }) -> Alcotest.failf "line %d: %s" line what
   | Error (Mermaid.Too_wide _) -> Alcotest.fail "parse does not measure"
@@ -260,6 +336,18 @@ let () =
             test_wide_glyphs_measure_by_cells
         ; Alcotest.test_case "dotted and thick keep their strokes" `Quick
             test_dotted_and_thick_keep_their_strokes
+        ] )
+    ; ( "sequence"
+      , [ Alcotest.test_case "messages run between lifelines" `Quick
+            test_sequence_messages_run_between_lifelines
+        ; Alcotest.test_case "frames, notes and a self message" `Quick
+            test_sequence_frames_notes_and_a_self_message
+        ; Alcotest.test_case "text widens the gap it crosses" `Quick
+            test_sequence_text_widens_the_gap_it_crosses
+        ; Alcotest.test_case "reads declarations and skips styling" `Quick
+            test_sequence_reads_declarations_and_skips_styling
+        ; Alcotest.test_case "refuses a line that is not a message" `Quick
+            test_sequence_refuses_a_line_that_is_not_a_message
         ] )
     ; ( "shape"
       , [ Alcotest.test_case "a long edge passes through the layer between" `Quick

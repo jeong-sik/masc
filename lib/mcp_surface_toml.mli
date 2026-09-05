@@ -51,15 +51,6 @@ type surface =
   ; resource_templates : template_entry list
   }
 
-val load_resources : contents:string -> (surface, string) result
-(** [load_resources ~contents] parses [contents] as [mcp/resources.toml].
-    Accepted top-level keys, all required: [server] (a table of
-    [description]), [tool_help] (a table of [name_suffix]), [[resources]]
-    and [[resource_templates]]. Entry keys are exactly [uri] (or
-    [uri_template]), [name], [title], [description], [mime_type]; all are
-    required non-empty strings. Everything else is an [Error] naming the
-    offending key. *)
-
 val server_description : string
 val tool_help_name_suffix : string
 val resources : resource_entry list

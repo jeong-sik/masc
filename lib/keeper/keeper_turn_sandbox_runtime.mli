@@ -104,6 +104,19 @@ module For_testing : sig
       registry keeps the rule testable. *)
 end
 
+module For_testing_microvm : sig
+  val microvm_container_name
+    :  config:Workspace.config
+    -> keeper_name:string
+    -> network_mode:Keeper_types_profile_sandbox.network_mode
+    -> string
+  (** The stable per-keeper guest name. Apart from {!For_testing} because it
+      is defined below it, and exposed for the same reason its Docker sibling
+      is: a test that boots a guest has to be able to name the one it booted,
+      and the mode belongs in that name so a guest from one policy is never
+      adopted under another. *)
+end
+
 val container_path_of_host :
   t -> host_path:string -> (string, string) result
 

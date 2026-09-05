@@ -116,7 +116,7 @@ from typing import TypedDict
 ROOT = Path(__file__).resolve().parent.parent
 
 # Trees that own OCaml compilation units.
-SOURCE_ROOTS = ("lib", "bin", "test")
+SOURCE_ROOTS = ("lib", "bin", "test", "packages")
 
 # Directories that never contain authored source.
 #

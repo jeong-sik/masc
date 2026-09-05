@@ -325,10 +325,6 @@ val chat_input_prompt_prefix : string
 
 val chat_input_prompt_cells : int
 
-val message_fixed_chrome_rows : int
-(** Rows outside chat history. Shared by rendering, viewport admission, and
-    PgUp/PgDn so a page is exactly the history height that is visible. *)
-
 val message_history_height : terminal_rows:int -> status_rows:int -> int
 (** Physical transcript rows left after fixed chrome and variable status rows.
     This is both the renderer height and the PgUp/PgDn distance. *)
@@ -356,7 +352,6 @@ val continued_mark : style -> string
     a quiet vertical connection line ("│") rather than repeating the mark
     over a wide empty gutter. Reasoning keeps its own dot. *)
 
-
 val split_aligned_role_label :
   style:style -> string -> string * string * string
 (** An {!align_role_label} result taken back apart into its mark, the
@@ -371,10 +366,6 @@ val align_role_label : ?column:int -> style:style -> string -> string
     answered for the pane. A label that does not fit loses its head, not its
     tail: these read [agent · surface] and share long prefixes, so the end is
     what tells two of them apart. Remaining column cells follow the name. *)
-
-val chat_readable_body_cells : int
-(** The body-column floor the chat pane's width gate guarantees: twenty
-    cells, enough for prose to wrap at word boundaries instead of mid-word. *)
 
 val chat_min_terminal_cols : int
 (** The narrowest terminal the keeper chat pane renders at, derived from a

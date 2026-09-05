@@ -134,13 +134,6 @@ val keeper_columns_used_width : keeper_columns -> int
 
 (** {1 Memory fleet columns} *)
 
-val memory_state_width : int
-val memory_revision_width : int
-val memory_facts_width : int
-val memory_size_width : int
-val memory_source_width : int
-val memory_delta_width : int
-
 type memory_columns = {
   mcol_show_revision : bool;
   mcol_show_source : bool;
@@ -198,10 +191,6 @@ val memory_row :
 
 (** {1 Workspace repository columns} *)
 
-val workspace_name_width : int
-val workspace_branch_width : int
-val workspace_status_width : int
-val workspace_sync_width : int
 val workspace_minimum_path_width : int
 
 type workspace_row_values = {
@@ -226,11 +215,6 @@ val workspace_row : path_width:int -> workspace_row_values -> string
 
 (** {1 System log columns} *)
 
-val system_log_time_width : int
-val system_log_level_width : int
-val system_log_module_width : int
-val system_log_keeper_width : int
-val system_log_category_width : int
 val system_log_minimum_message_width : int
 
 type system_log_row_values = {
@@ -273,13 +257,6 @@ val system_log_row :
 
 (** {1 Lane run columns} *)
 
-val lane_started_width : int
-val lane_subject_width : int
-val lane_status_width : int
-val lane_elapsed_width : int
-val lane_slot_width : int
-val lane_minimum_run_id_width : int
-
 type lane_run_row_values = {
   lrow_started : string;
   lrow_subject : string;
@@ -307,13 +284,6 @@ val lane_run_row :
 
 (** {1 File change columns} *)
 
-val change_turn_width : int
-val change_task_width : int
-val change_op_width : int
-val change_result_width : int
-val change_file_width : int
-val change_minimum_summary_width : int
-
 type change_row_values = {
   crow_turn : string;
   crow_task : string;
@@ -339,12 +309,6 @@ val change_row :
 
 (** {1 Fusion run columns} *)
 
-val fusion_time_width : int
-val fusion_age_width : int
-val fusion_state_width : int
-val fusion_preset_width : int
-val fusion_minimum_run_width : int
-
 type fusion_row_values = {
   frow_time : string;
   frow_age : string;
@@ -369,13 +333,6 @@ val fusion_row :
     row. *)
 
 (** {1 Harness verdict columns} *)
-
-val harness_time_width : int
-val harness_task_width : int
-val harness_gate_width : int
-val harness_verdict_width : int
-val harness_evaluator_width : int
-val harness_minimum_reason_width : int
 
 type harness_row_values = {
   hrow_time : string;

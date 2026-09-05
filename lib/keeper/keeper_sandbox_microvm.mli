@@ -12,9 +12,6 @@
     measured cost of the Apple backend and for the Docker hardening flags
     each runtime does not accept. *)
 
-val command_argv_for : Keeper_microvm_backend.t -> string list
-(** The CLI prefix for one backend. *)
-
 val unsupported_docker_flags : string list
 (** Docker hardening flags [container run] rejects. [container] errors on an
     unknown option rather than ignoring it, so this list is what a reader
@@ -332,19 +329,6 @@ val classify_volume_probe
   -> listing:(Unix.process_status * string * string) option
   -> volume_probe_outcome
 
-val apple_volume_probe :
-  volume_name:string -> timeout_sec:float -> volume_probe_outcome
-
-(** Create the work volume when absent, for whichever runtime the keeper
-    declared. [container volume create] is not idempotent, so existence is
-    settled by the probe rather than by reading its "already exists" message.
-
-    Only Apple's grammar is established. [msb] and [nerdctl] return an
-    [Error] naming what is missing rather than a guess: for [msb] the create
-    is known and the inspect and list that settle existence are not, and
-    creating over a volume that already holds a keeper's tree is exactly what
-    that check exists to prevent; for [nerdctl] there is no size flag to
-    establish. Error codes are [microvm_work_volume_*]. *)
 val ensure_work_volume_for
   :  Keeper_microvm_backend.t
   -> volume_name:string

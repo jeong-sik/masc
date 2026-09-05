@@ -38,10 +38,6 @@ val journaled_event_of_json : Yojson.Safe.t -> (journaled_event, string) result
 val journaled_event_to_string : journaled_event -> string
 (** Single journal line payload (no trailing newline). *)
 
-val journaled_event_of_string : string -> (journaled_event, string) result
-(** Strict decode of one journal line. [Yojson.Json_error] is caught and
-    returned as [Error]. *)
-
 (** {1 Journal} *)
 
 type journal

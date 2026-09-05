@@ -12,13 +12,7 @@ type style =
   | Status of Masc_tui_theme.status
   | Tone of Masc_tui_theme.tone
 
-val render_style : style -> string
-(** Serializes a [style] into its theme ANSI SGR code. *)
-
 (** {1 Sparklines} *)
-
-val sparkline_glyphs : string array
-(** 8-level UTF-8 block character array from lowest (U+2581) to highest (U+2588). *)
 
 val sparkline : ?min:int -> ?max:int -> int list -> string
 (** [sparkline ?min ?max values] renders a single-row sparkline string.
@@ -40,9 +34,6 @@ type gauge_thresholds = {
   warn_percent : int;
   bad_percent : int;
 }
-
-val default_gauge_thresholds : gauge_thresholds
-(** [warn_percent = 70; bad_percent = 85] *)
 
 val format_compact_num : int -> string
 (** Compact number formatter: 1200 -> "1.2k", 1500000 -> "1.5M". Safe on min_int. *)
@@ -75,14 +66,6 @@ val waterfall :
     Guaranteed not to exceed [width] display cells. *)
 
 (** {1 Activity Heatmaps} *)
-
-val heatmap_row :
-  ?max_val:int ->
-  ?empty_glyph:string ->
-  int list ->
-  string
-(** [heatmap_row ?max_val ?empty_glyph buckets] maps bucket counts to 5 intensity levels:
-    empty dot, [░], [▒], [▓], [█]. When [max_val] is provided, uses it as the shared scale ceiling. *)
 
 val heatmap_24h :
   ?label:string ->

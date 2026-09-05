@@ -575,6 +575,8 @@ let chat_input_box_cells = 2
    navigation header, operational identity header, header divider, input
    divider, composer, box bottom, and footer. Rendering and PgUp/PgDn must
    subtract the same number or a page skips one transcript row. *)
+(** Rows outside chat history. Shared by rendering, viewport admission, and
+    PgUp/PgDn so a page is exactly the history height that is visible. *)
 let message_fixed_chrome_rows = 8
 
 let message_history_height ~terminal_rows ~status_rows =
@@ -812,6 +814,8 @@ let split_aligned_role_label ~style label =
    The derivation assumes the default [Origin_bare] row. [Origin_inline]'s
    clock spends six further body cells; it is a user toggle, so that spend
    is visible and self-inflicted rather than gated. *)
+(** The body-column floor the chat pane's width gate guarantees: twenty
+    cells, enough for prose to wrap at word boundaries instead of mid-word. *)
 let chat_readable_body_cells = 20
 
 let chat_min_terminal_cols =

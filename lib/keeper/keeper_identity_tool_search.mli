@@ -95,9 +95,6 @@ val summary_of : string -> string
 
 val tool_name : string
 
-val names_param : string
-(** The argument that names tools exactly. *)
-
 (** What one turn got out of the listing. *)
 type turn_discovery =
   | Listing_unused  (** The model never asked for a tool through it. *)

@@ -246,6 +246,33 @@ long-lived worker 토큰을 발급하며(`--expiring`으로 세션 한정), 고�
 맞게 endpoint·토큰·헤더를 담습니다. 아래 수동 블록은 이 명령이 다루지 않는
 클라이언트를 직접 배선할 때 쓰는 같은 형식입니다.
 
+### 토큰
+
+`masc login` 은 agent 이름 하나에 bearer 하나를 발급합니다. `masc mcp-config` 는
+같은 발급에 클라이언트 설정 블록을 씌운 것입니다. 둘 다 로컬 작업이라 서버가 떠
+있지 않아도 됩니다.
+
+**다시 발급하는 것이 곧 회전입니다.** 워크스페이스는 agent 이름당 자격증명 하나를
+들고 있어서, `masc login --agent ops` 를 두 번째로 부르면 첫 번째를 대체하고 옛
+bearer 는 다음 요청부터 통하지 않습니다. 따로 폐기할 게 없습니다. 다만 옛 값을
+export 해 둔 곳은 새 값으로 바꿔야 합니다.
+
+**저장소에는 bearer 가 없습니다.** `.masc/auth/agents/<agent>.json` 은 토큰의
+SHA-256 만 들고 있어서, 잃어버린 토큰을 거기서 읽어낼 수 없습니다. raw 는 딱 한
+군데 — `.masc/auth/<agent>.token`, 권한 `0600` — 과 export 해 둔 셸에만 남습니다.
+
+```bash
+masc token list             # agent, 역할, 만료, raw 가 디스크에 있는지
+masc token revoke ops       # 새로 발급하지 않고 하나만 폐기
+masc token prune --dry-run  # 지울 대상 미리 보기
+masc token prune            # 만료된 자격증명 전부 폐기
+```
+
+`prune` 은 만료가 지난 것만 건드립니다. 그건 이미 아무것도 인증하지 못하므로
+지우는 게 보안 판단이 아니라 청소입니다 — `revoke` 가 대상을 이름으로 받게 하면서
+`prune` 은 확인을 안 받는 이유입니다. `--no-expiry` 로 만든 토큰은 그 집합에 절대
+안 들어가니, 그 클라이언트를 더 안 쓰면 이름으로 폐기하세요.
+
 공개된 MCP 경로는 HTTP입니다. 먼저 `quickstart.sh`가 만든 worker bearer를
 불러옵니다.
 

@@ -938,6 +938,122 @@ let login_cmd_exit base_path host port agent role client_env no_expiry
       print_endline output;
       0)
 
+(* [masc token] — what bearer credentials this workspace holds, and retiring
+   one. Auth.list_credentials and Auth.delete_credential have been here all
+   along with nothing reaching them from a command line, so an operator who
+   wanted to know what tokens existed, or to retire one, edited files under
+   .masc/auth/ by hand. *)
+let token_agent_arg =
+  let doc = "Agent whose credential to retire." in
+  Arg.(required & pos 0 (some string) None & info [] ~docv:"AGENT" ~doc)
+
+let token_credentials base_path =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  (base_path, Auth.list_credentials base_path)
+
+let token_list_cmd_exit base_path =
+  let base_path, creds = token_credentials base_path in
+  let now = Unix.gettimeofday () in
+  if creds = []
+  then print_endline "no credentials in this workspace"
+  else begin
+    List.iter
+      (fun (c : Types_auth.agent_credential) ->
+         let raw_present =
+           Sys.file_exists (Auth.raw_token_file base_path c.agent_name)
+         in
+         print_endline (Auth_token_inventory.row ~now ~raw_present c))
+      (Auth_token_inventory.ordered ~now creds);
+    let expired = List.length (Auth_token_inventory.expired ~now creds) in
+    Printf.printf
+      "\n%d credential(s), %d expired.%s\n"
+      (List.length creds)
+      expired
+      (if expired > 0 then " `masc token prune` removes the expired ones." else "")
+  end;
+  Cmd.Exit.ok
+
+let token_revoke_cmd_exit base_path agent =
+  let base_path, creds = token_credentials base_path in
+  let known =
+    List.exists (fun (c : Types_auth.agent_credential) -> c.agent_name = agent) creds
+  in
+  if not known
+  then (
+    Printf.eprintf
+      "no credential named %S; `masc token list` shows what this workspace holds\n"
+      agent;
+    Cmd.Exit.some_error)
+  else (
+    Auth.delete_credential base_path agent;
+    Printf.printf
+      "retired %s. Its bearer stops validating from the next request; anything \
+       still exporting it needs a new one from `masc login --agent %s`.\n"
+      agent
+      agent;
+    Cmd.Exit.ok)
+
+(* Only expired credentials. Removing one that already authenticates nothing is
+   garbage collection rather than a security decision, which is why this needs
+   no confirmation while [revoke] names its target. *)
+let token_prune_cmd_exit base_path dry_run =
+  let base_path, creds = token_credentials base_path in
+  let now = Unix.gettimeofday () in
+  match Auth_token_inventory.expired ~now creds with
+  | [] ->
+    print_endline "no expired credentials";
+    Cmd.Exit.ok
+  | doomed ->
+    List.iter
+      (fun (c : Types_auth.agent_credential) ->
+         if dry_run
+         then Printf.printf "would retire %s\n" c.agent_name
+         else (
+           Auth.delete_credential base_path c.agent_name;
+           Printf.printf "retired %s\n" c.agent_name))
+      doomed;
+    Printf.printf
+      "%d expired credential(s)%s\n"
+      (List.length doomed)
+      (if dry_run then " would be retired (--dry-run)" else " retired");
+    Cmd.Exit.ok
+
+let token_cmd =
+  let list_cmd =
+    let doc = "List this workspace's bearer credentials." in
+    Cmd.v (Cmd.info "list" ~doc) Term.(const token_list_cmd_exit $ base_path)
+  in
+  let revoke_cmd =
+    let doc = "Retire one agent's bearer credential." in
+    Cmd.v (Cmd.info "revoke" ~doc)
+      Term.(const token_revoke_cmd_exit $ base_path $ token_agent_arg)
+  in
+  let prune_cmd =
+    let doc = "Retire every expired credential." in
+    let dry_run =
+      let doc = "List what would be retired without removing anything." in
+      Arg.(value & flag & info [ "dry-run" ] ~doc)
+    in
+    Cmd.v (Cmd.info "prune" ~doc)
+      Term.(const token_prune_cmd_exit $ base_path $ dry_run)
+  in
+  let doc = "Inspect and retire the workspace's bearer credentials." in
+  let man =
+    [ `S Manpage.s_description
+    ; `P
+        "`masc login` mints a bearer and replaces whatever that agent had, so \
+         minting again is how a token is rotated: the previous one stops \
+         validating. These are the other two halves -- seeing what exists, and \
+         retiring one without minting a replacement."
+    ; `P
+        "The store keeps a SHA-256 of each token, never the token, so a listing \
+         cannot show you a bearer you have lost. What it can show is whether \
+         the raw secret is still on disk at .masc/auth/<agent>.token, which is \
+         the only place it survives a mint."
+    ]
+  in
+  Cmd.group (Cmd.info "token" ~doc ~man) [ list_cmd; revoke_cmd; prune_cmd ]
+
 let login_cmd =
   let doc =
     "Mint a local bearer token, persist its raw token file, and print \
@@ -2161,6 +2277,7 @@ let cmd =
     ; keeper_create_cmd
     ; keeper_github_cmd
     ; sandbox_image_cmd
+    ; token_cmd
     ; build_commit_cmd
     ]
 

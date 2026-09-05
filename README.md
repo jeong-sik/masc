@@ -390,6 +390,35 @@ It mints a long-lived worker token (pass `--expiring` for a session-scoped one)
 and embeds the endpoint, token, and header for the chosen client. The manual
 pieces below are the same shapes, for wiring a client the command does not cover.
 
+### Tokens
+
+`masc login` mints one bearer for one agent name, and `masc mcp-config` is the
+same mint with a client config block around it. Both are local: they write the
+credential and print the exports, and neither needs the server to be up.
+
+**Minting again is how you rotate.** A workspace holds one credential per agent
+name, so a second `masc login --agent ops` replaces the first and the previous
+bearer stops validating from the next request. Nothing else has to be revoked,
+but anything still exporting the old value needs the new one.
+
+**The store never holds a bearer.** `.masc/auth/agents/<agent>.json` keeps a
+SHA-256 of the token, so a lost token cannot be read back out of it. The raw
+secret survives in exactly one place — `.masc/auth/<agent>.token`, mode `0600` —
+and in whatever shell you exported it into.
+
+```bash
+masc token list             # agent, role, expiry, whether the raw secret is on disk
+masc token revoke ops       # retire one without minting a replacement
+masc token prune --dry-run  # what a prune would remove
+masc token prune            # retire every expired credential
+```
+
+`prune` only touches credentials whose expiry has passed. Those authenticate
+nothing already, so removing them is garbage collection rather than a security
+decision — which is why it needs no confirmation while `revoke` makes you name
+its target. A token minted with `--no-expiry` is never in that set; retire it by
+name when the client that used it is gone.
+
 HTTP is the public MCP path. First load the worker bearer created by
 `quickstart.sh`:
 

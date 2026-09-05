@@ -133,7 +133,17 @@ val ensure_credential_alias :
     itself a direct (non-redirect) credential, since alias
     semantics require a UUID-backed canonical. *)
 
+val raw_token_file : string -> string -> string
+(** [raw_token_file base_path agent_name] is
+    [<base_path>/.masc/auth/<agent>.token]. The credential store keeps only a
+    SHA-256 of the token, so this file is the one place the bearer itself
+    survives a mint — which is what makes its presence worth reporting and its
+    removal part of {!delete_credential}. *)
+
 val delete_credential : string -> string -> unit
+(** Retire [agent_name]: the credential, its redirect stub and UUID file, and
+    the raw token file, then invalidate the credential cache. The bearer stops
+    validating from the next request. Absent files are not an error. *)
 
 val list_credentials : string -> agent_credential list
 

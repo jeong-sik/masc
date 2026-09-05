@@ -22,6 +22,7 @@
   eqaf
   masc.fs_compat
   masc.masc_log
+  masc.time_codec
   masc.masc_tool_dispatch
   masc.otel_metric_store
   masc.tool_types

@@ -12,7 +12,15 @@ let overflow_site_key = "<sites past the table bound>"
    in library code before the masc caller appears, and [key_of_callstack]
    skips those frames without seeing past them (RFC
    main-domain-scheduler-latency §8.6). Cost is per sample at rate 1e-5. *)
-let callstack_frames = 48
+let callstack_frames = 192
+
+(* What a key says when the window held no masc frame. Without it the key
+   falls back to the top library frames, and those aggregate into a row that
+   reads like a site -- a 2026-09-06 steady-state reading put 1.94 GB under
+   [Buffer.resize] with no caller, which names how the bytes were built and
+   not who asked for them. A profile that cannot answer should say so rather
+   than point somewhere plausible. *)
+let unattributed_marker = "<no masc frame in the sampled window>\n" 
 
 type block =
   { site_key : string
@@ -112,13 +120,14 @@ let key_of_callstack callstack =
     Array.to_list (Printexc.raw_backtrace_entries callstack)
     |> List.filteri (fun index _ -> index < callstack_frames)
   in
-  let kept =
+  let attributed, kept =
     match List.filter (fun entry -> not (entry_is_skipped entry)) entries with
-    | [] -> entries
-    | _ :: _ as kept -> kept
+    | [] -> false, entries
+    | _ :: _ as kept -> true, kept
   in
   let chosen = List.filteri (fun index _ -> index < frames_per_key) kept in
-  String.concat "\n" (List.concat_map frame_lines chosen) ^ "\n"
+  let body = String.concat "\n" (List.concat_map frame_lines chosen) ^ "\n" in
+  if attributed then body else unattributed_marker ^ body
 ;;
 
 let block_of (allocation : Gc.Memprof.allocation) =

@@ -23,8 +23,8 @@ screen, so it is not repeated here.
 
 What separates them: the first group lets masc register a client when it
 needs one. The second does not offer that. Google does not do it at all, and
-Figma's endpoint answers 403 to anyone who asks. Pressing Enter or `A`/`a` on
-an unconfigured service in this group opens the app configuration form directly
+Figma's endpoint answers 403 to anyone who asks. Pressing Enter displays the
+error notice, and pressing `A` or `a` opens the app configuration form directly
 in the TUI (Client ID, Client Secret, Scopes).
 
 ## The ones that just work

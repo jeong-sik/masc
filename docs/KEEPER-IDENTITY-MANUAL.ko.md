@@ -22,8 +22,9 @@ Keeper 하나에 Jira 나 Notion 같은 서비스를 붙이면, 그 서비스의
 
 갈리는 이유는 하나입니다. 앞쪽은 masc 가 필요할 때 스스로 클라이언트를 등록할 수
 있고, 뒤쪽은 그 창구를 안 열어 둡니다. Google 은 아예 안 하고, Figma 는 열어는
-뒀는데 아무나 쓰면 403 을 냅니다. 미등록 상태에서 Enter 를 누르거나 `A`/`a` 키를
-누르면 TUI 에서 즉시 앱 등록 폼(Client ID, Client Secret, Scopes)이 열립니다.
+뒀는데 아무나 쓰면 403 을 냅니다. 미등록 상태에서 Enter 를 누르면 상단 안내가
+표시되며, `A` 또는 `a` 키를 누르면 TUI 앱 등록 폼(Client ID, Client Secret, Scopes)이
+열립니다.
 
 ## 바로 되는 것
 

@@ -639,6 +639,12 @@ let run_cmd host port cli_base_path =
   Fs_compat.mkdir_p log_dir;
   Log.Ring.init_file_sink log_dir;
   Log.Ring.cleanup_old_files log_dir;
+  (* Only the server samples. Sampling starts before [Eio_main.run] so the
+     executor pool, which the main domain spawns while sampling, shares the
+     profile and the boot-time loads are in the tables. The rate is a tenth
+     of the one the OCaml manual reports as having no visible effect.
+     GET /api/v1/diagnostics/memprof reads the tables. *)
+  Alloc_profile.start ~sampling_rate:Alloc_profile.default_sampling_rate;
   Eio_main.run @@ fun env ->
   Crypto_rng.ensure_default ();
 
@@ -1982,15 +1988,6 @@ let cmd =
     ; build_commit_cmd
     ]
 
-(* Sampling starts before any domain is spawned so the executor pool, which
-   the main domain creates while sampling, shares the profile. The rate is
-   a tenth of the one the OCaml manual reports as having no visible effect.
-   GET /api/v1/diagnostics/memprof reads the tables. *)
-let setup_alloc_profile () =
-  Alloc_profile.start ~sampling_rate:Alloc_profile.default_sampling_rate
-;;
-
 let () =
   setup_gc ();
-  setup_alloc_profile ();
   exit (Cmd.eval' cmd)

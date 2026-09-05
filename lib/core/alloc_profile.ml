@@ -1,57 +1,55 @@
-(* See alloc_profile.mli for the estimator and the domain rules. *)
+(* See alloc_profile.mli for the estimator, the callback rule, and the bounds. *)
 
 let default_sampling_rate = 1e-5
+let max_pending_events = 1_000_000
+let max_sites = 20_000
+let overflow_site_key = "<sites past the table bound>"
 
 (* Frames beyond this add cost per sample without telling the reader more
    than which subsystem allocated; the top frames name the site. *)
 let callstack_frames = 16
 
-type site =
-  { site_key : string
-  ; mutable allocated_samples : int
-  ; mutable promoted_samples : int
-  ; mutable live_samples : int
-  }
-
 type block =
-  { site : site
+  { site_key : string
   ; n_samples : int
   }
 
-(* One table for every domain and thread sampling this profile. The
-   callbacks may run in parallel, so every access takes the mutex. *)
-let sites : (string, site) Hashtbl.t = Hashtbl.create 1024
-let sites_mutex = Stdlib.Mutex.create ()
+(* What a callback records. Callbacks push; only the reader pops. *)
+type event =
+  | Allocated of block
+  | Allocated_in_major of block
+  | Promoted of block
+  | Freed of block
+
+(* A Treiber stack: push is one CAS, drain is one exchange. No lock is ever
+   taken on this path, which is the whole point (see the mli). *)
+let pending : event list Atomic.t = Atomic.make []
+let pending_count = Atomic.make 0
+let dropped_samples = Atomic.make 0
 let rate = Atomic.make 0.0
 let profile : Gc.Memprof.t option Atomic.t = Atomic.make None
 
-let site_for key =
-  match Hashtbl.find_opt sites key with
-  | Some site -> site
-  | None ->
-    let site =
-      { site_key = key; allocated_samples = 0; promoted_samples = 0; live_samples = 0 }
-    in
-    Hashtbl.add sites key site;
-    site
+let push event =
+  let rec attempt () =
+    let current = Atomic.get pending in
+    if not (Atomic.compare_and_set pending current (event :: current)) then attempt ()
+  in
+  attempt ();
+  Atomic.incr pending_count
 ;;
 
-let observe_alloc ~key ~n_samples =
-  Stdlib.Mutex.protect sites_mutex (fun () ->
-    let site = site_for key in
-    site.allocated_samples <- site.allocated_samples + n_samples;
-    site.live_samples <- site.live_samples + n_samples;
-    { site; n_samples })
-;;
-
-let observe_promote block =
-  Stdlib.Mutex.protect sites_mutex (fun () ->
-    block.site.promoted_samples <- block.site.promoted_samples + block.n_samples)
-;;
-
-let observe_dealloc block =
-  Stdlib.Mutex.protect sites_mutex (fun () ->
-    block.site.live_samples <- block.site.live_samples - block.n_samples)
+(* Admission for new blocks only. A block that is already tracked always
+   gets its later events pushed, so the live table cannot inflate. *)
+let admit event block =
+  if Atomic.get pending_count >= max_pending_events
+  then begin
+    ignore (Atomic.fetch_and_add dropped_samples block.n_samples : int);
+    None
+  end
+  else begin
+    push (event block);
+    Some block
+  end
 ;;
 
 let key_of_callstack callstack =
@@ -77,28 +75,21 @@ let key_of_callstack callstack =
   Buffer.contents buffer
 ;;
 
+let block_of (allocation : Gc.Memprof.allocation) =
+  { site_key = key_of_callstack allocation.callstack; n_samples = allocation.n_samples }
+;;
+
 let tracker : (block, block) Gc.Memprof.tracker =
-  { alloc_minor =
-      (fun (allocation : Gc.Memprof.allocation) ->
-        Some
-          (observe_alloc
-             ~key:(key_of_callstack allocation.callstack)
-             ~n_samples:allocation.n_samples))
+  { alloc_minor = (fun allocation -> admit (fun block -> Allocated block) (block_of allocation))
   ; alloc_major =
-      (fun (allocation : Gc.Memprof.allocation) ->
-        let block =
-          observe_alloc
-            ~key:(key_of_callstack allocation.callstack)
-            ~n_samples:allocation.n_samples
-        in
-        observe_promote block;
-        Some block)
+      (fun allocation ->
+        admit (fun block -> Allocated_in_major block) (block_of allocation))
   ; promote =
       (fun block ->
-        observe_promote block;
+        push (Promoted block);
         Some block)
-  ; dealloc_minor = observe_dealloc
-  ; dealloc_major = observe_dealloc
+  ; dealloc_minor = (fun block -> push (Freed block))
+  ; dealloc_major = (fun block -> push (Freed block))
   }
 ;;
 
@@ -106,14 +97,81 @@ let start ~sampling_rate =
   Atomic.set rate sampling_rate;
   Atomic.set
     profile
-    (Some
-       (Gc.Memprof.start
-          ~sampling_rate
-          ~callstack_size:callstack_frames
-          tracker))
+    (Some (Gc.Memprof.start ~sampling_rate ~callstack_size:callstack_frames tracker))
 ;;
 
 let is_sampling () = Gc.Memprof.is_sampling ()
+
+let stop () =
+  match Atomic.exchange profile None with
+  | None -> ()
+  | Some started ->
+    if is_sampling () then Gc.Memprof.stop ();
+    Gc.Memprof.discard started
+;;
+
+(* The site table. Only the reader touches it, under [sites_mutex], which no
+   callback ever takes. *)
+type site =
+  { site_key : string
+  ; mutable allocated_samples : int
+  ; mutable major_samples : int
+  ; mutable direct_major_samples : int
+  ; mutable live_samples : int
+  }
+
+let sites : (string, site) Hashtbl.t = Hashtbl.create 1024
+let sites_mutex = Stdlib.Mutex.create ()
+
+let new_site site_key =
+  { site_key
+  ; allocated_samples = 0
+  ; major_samples = 0
+  ; direct_major_samples = 0
+  ; live_samples = 0
+  }
+;;
+
+let site_for key =
+  match Hashtbl.find_opt sites key with
+  | Some site -> site
+  | None ->
+    let key = if Hashtbl.length sites >= max_sites then overflow_site_key else key in
+    (match Hashtbl.find_opt sites key with
+     | Some site -> site
+     | None ->
+       let site = new_site key in
+       Hashtbl.add sites key site;
+       site)
+;;
+
+let apply = function
+  | Allocated block ->
+    let site = site_for block.site_key in
+    site.allocated_samples <- site.allocated_samples + block.n_samples;
+    site.live_samples <- site.live_samples + block.n_samples
+  | Allocated_in_major block ->
+    let site = site_for block.site_key in
+    site.allocated_samples <- site.allocated_samples + block.n_samples;
+    site.live_samples <- site.live_samples + block.n_samples;
+    site.major_samples <- site.major_samples + block.n_samples;
+    site.direct_major_samples <- site.direct_major_samples + block.n_samples
+  | Promoted block ->
+    let site = site_for block.site_key in
+    site.major_samples <- site.major_samples + block.n_samples
+  | Freed block ->
+    let site = site_for block.site_key in
+    site.live_samples <- site.live_samples - block.n_samples
+;;
+
+(* Pushes are newest first; apply oldest first so a block's Allocated
+   precedes its Freed. *)
+let drain () =
+  let events = Atomic.exchange pending [] in
+  let count = List.length events in
+  ignore (Atomic.fetch_and_add pending_count (-count) : int);
+  List.iter apply (List.rev events)
+;;
 
 type site_totals =
   { key : string
@@ -125,13 +183,18 @@ type report =
   { sampling_rate : float
   ; sampling : bool
   ; live : site_totals list
-  ; promoted : site_totals list
+  ; major : site_totals list
   ; allocated : site_totals list
   ; live_samples : int
   ; live_words : int
   ; allocated_samples : int
   ; allocated_words : int
-  ; promoted_words : int
+  ; major_samples : int
+  ; major_words : int
+  ; direct_major_samples : int
+  ; dropped_samples : int
+  ; pending_events : int
+  ; sites : int
   }
 
 let estimate_words ~sampling_rate samples =
@@ -151,33 +214,41 @@ let top_sites ~top ~sampling_rate measure snapshot =
 
 let report ~top =
   let sampling_rate = Atomic.get rate in
-  let snapshot =
+  let snapshot, site_count =
     Stdlib.Mutex.protect sites_mutex (fun () ->
-      Hashtbl.fold
-        (fun _ site acc ->
-           { site_key = site.site_key
-           ; allocated_samples = site.allocated_samples
-           ; promoted_samples = site.promoted_samples
-           ; live_samples = site.live_samples
-           }
-           :: acc)
-        sites
-        [])
+      drain ();
+      ( Hashtbl.fold
+          (fun _ site acc ->
+             { site_key = site.site_key
+             ; allocated_samples = site.allocated_samples
+             ; major_samples = site.major_samples
+             ; direct_major_samples = site.direct_major_samples
+             ; live_samples = site.live_samples
+             }
+             :: acc)
+          sites
+          []
+      , Hashtbl.length sites ))
   in
   let sum measure = List.fold_left (fun acc site -> acc + measure site) 0 snapshot in
   let live_samples = sum (fun site -> site.live_samples) in
   let allocated_samples = sum (fun site -> site.allocated_samples) in
-  let promoted_samples = sum (fun site -> site.promoted_samples) in
+  let major_samples = sum (fun site -> site.major_samples) in
   { sampling_rate
   ; sampling = is_sampling ()
   ; live = top_sites ~top ~sampling_rate (fun site -> site.live_samples) snapshot
-  ; promoted = top_sites ~top ~sampling_rate (fun site -> site.promoted_samples) snapshot
+  ; major = top_sites ~top ~sampling_rate (fun site -> site.major_samples) snapshot
   ; allocated = top_sites ~top ~sampling_rate (fun site -> site.allocated_samples) snapshot
   ; live_samples
   ; live_words = estimate_words ~sampling_rate live_samples
   ; allocated_samples
   ; allocated_words = estimate_words ~sampling_rate allocated_samples
-  ; promoted_words = estimate_words ~sampling_rate promoted_samples
+  ; major_samples
+  ; major_words = estimate_words ~sampling_rate major_samples
+  ; direct_major_samples = sum (fun site -> site.direct_major_samples)
+  ; dropped_samples = Atomic.get dropped_samples
+  ; pending_events = Atomic.get pending_count
+  ; sites = site_count
   }
 ;;
 
@@ -199,9 +270,16 @@ let report_to_yojson report : Yojson.Safe.t =
     ; "live_bytes", `Int (Heap_roots.words_to_bytes report.live_words)
     ; "allocated_samples", `Int report.allocated_samples
     ; "allocated_bytes", `Int (Heap_roots.words_to_bytes report.allocated_words)
-    ; "promoted_bytes", `Int (Heap_roots.words_to_bytes report.promoted_words)
+    ; "major_samples", `Int report.major_samples
+    ; "major_bytes", `Int (Heap_roots.words_to_bytes report.major_words)
+    ; "direct_major_samples", `Int report.direct_major_samples
+    ; "dropped_samples", `Int report.dropped_samples
+    ; "pending_events", `Int report.pending_events
+    ; "sites", `Int report.sites
+    ; "site_bound", `Int max_sites
+    ; "overflow_site_key", `String overflow_site_key
     ; "live", table report.live
-    ; "promoted", table report.promoted
+    ; "major", table report.major
     ; "allocated", table report.allocated
     ]
 ;;
@@ -209,13 +287,28 @@ let report_to_yojson report : Yojson.Safe.t =
 module For_testing = struct
   type nonrec block = block
 
-  let observe_alloc = observe_alloc
-  let observe_promote = observe_promote
-  let observe_dealloc = observe_dealloc
+  let observe_alloc ~key ~n_samples =
+    let block = { site_key = key; n_samples } in
+    push (Allocated block);
+    block
+  ;;
+
+  let observe_alloc_in_major ~key ~n_samples =
+    let block = { site_key = key; n_samples } in
+    push (Allocated_in_major block);
+    block
+  ;;
+
+  let observe_promote block = push (Promoted block)
+  let observe_dealloc block = push (Freed block)
   let set_sampling_rate sampling_rate = Atomic.set rate sampling_rate
 
   let reset () =
-    Stdlib.Mutex.protect sites_mutex (fun () -> Hashtbl.reset sites);
+    Stdlib.Mutex.protect sites_mutex (fun () ->
+      ignore (Atomic.exchange pending [] : event list);
+      Atomic.set pending_count 0;
+      Atomic.set dropped_samples 0;
+      Hashtbl.reset sites);
     Atomic.set rate 0.0
   ;;
 end

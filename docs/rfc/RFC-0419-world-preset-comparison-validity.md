@@ -91,7 +91,8 @@ between runs, but the qualitative macro-behavior of each world was consistent." 
 배정으로 돌리면 재화 효과가 아니라 모델 효과를 읽게 된다.
 
 곁가지로 GPT-5-mini 의 사인이 우리에게 직접 걸린다. 범죄가 아니라 **아무것도 안 해서**
-죽었다. `world-scarcity` 는 "남기고 멈추는 것이 옳은 결말"이라고 적혀 있다. 그 세계의 낮은
+죽었다. `world-scarcity` 는 "성공은 이득이 아니라 남아 있음이다"라고 적혀 있다
+(`keepers/arbiter.toml:23`). 그 세계의 낮은
 산출이 재화 규칙 때문인지 모델의 무행동 성향 때문인지, 모델을 고정하지 않으면 구분할 수 없다.
 
 ### 2.3 난수가 결론을 가른다 — 저자들이 "미연구"라고 부른다
@@ -284,7 +285,8 @@ MASC 에서 진짜로 희소한 것은 **운영자의 주의**다. `masc_ask` �
 | `scarcity` | 없다. 처음 준 만큼 | **묻는 것 자체가 지출** |
 
 마지막 줄은 새로 만든 것이 아니다. `world-scarcity` 프리셋에 이미
-"생각하는 것도, **묻는 것도**, 확인하는 것도 나간다"가 있다. 연결이 반쯤 되어 있었다.
+"생각하는 것도, **묻는 것도**, 확인하는 것도 눈금 한 칸이다"가 있다(`arbiter.toml:20`).
+연결이 반쯤 되어 있었다.
 
 코드는 0줄이다. `masc_board_vote`, `masc_add_task`, `masc_ask` 가 전부 배포돼 있다.
 
@@ -420,9 +422,9 @@ approval 쪽 답이다.
 준 표라서 자가 발행이라는 개념이 성립하지 않는다. 그러니 arm 간 비교값이 아니라 approval
 arm 안에서만 읽는다.
 
-**답까지 걸린 시간은 세계 간 비교에 못 쓴다.** live 에서 답한 36건 전부
-`responder.surface = {kind: dashboard}` — 대시보드 앞의 한 사람이다. 중앙값 518초, 최대
-31.4시간. base path 6개가 동시에 돌면 질문이 **한 사람의 한 줄**에 쌓이고, cell A 의 질문이
+**답까지 걸린 시간은 세계 간 비교에 못 쓴다.** live 실측(09-03~09-05): 물은 것 48, 답 온 것
+37, 거둬들인 것 11. 답한 **37건 전부** `responder.surface = {kind: dashboard}` — 대시보드 앞의
+한 사람이다. 중앙값 500초, 최대 31.4시간. base path 6개가 동시에 돌면 질문이 **한 사람의 한 줄**에 쌓이고, cell A 의 질문이
 cell B 의 답을 늦춘다. 무작위 배정으로도 안 깨지는 교란이라 이 값은 버린다.
 
 `masc_ask` 는 §5.1 표에서 양쪽 arm 이 똑같이 "묻는다"였다. 양쪽에서 동일한 변수는 두 arm 을
@@ -487,6 +489,11 @@ cell B 의 답을 늦춘다. 무작위 배정으로도 안 깨지는 교란이�
 그리고 실측이 남아 있다. 위 247표는 **그 지연된 도구로 찍힌 것**이고, 244표를 keeper 여섯이
 9일 동안 던졌다(taskmaster 167, analyst 21, sangsu 19, rondo 16, code-reviewer 11,
 lane-smith 10. 나머지 3표는 `masc-tui`, 사람 쪽이다). 지연이 호출을 막지 않는다.
+
+`masc_ask` 도 같다. 그 descriptor 주석이 호출 0회로 적은 창은 **09-02 에 닫혔고**, 그 다음
+날부터 쓰이기 시작했다. `.masc/keeper_ask/` 실측 09-03~09-05: **asked 48건, answered 37건,
+keeper 아홉**(jazz-developer 11, sangsu 8, code-reviewer 8, rondo 7, analyst 6, lane-smith 3,
+edgar.a.poe 3, pr-updater 1, msb-probe 1). 주석의 0은 지난 창의 숫자다.
 
 남는 것은 비용이다. keeper 는 스키마를 받으러 턴을 한 번 쓴다. 이것은 §5.6 의 null 결과에
 붙일 각주이지 파일럿을 세울 사유가 아니다.
@@ -580,8 +587,8 @@ base path 12개가 동시에 돈다.
 Michael Young 을 인용하며 능력주의가 **풍자로 만들어진 말**이라고 적어 두었는데, Young 이 쓴
 것이 실력이 세습 계급으로 굳는 이야기다. `standing` 은 그 예언을 규칙으로 옮긴 세계다.
 
-재는 도구도 이미 프리셋 안에 있다. `world-merit` 의 dissenter 가 "인정이 얼마나 몰려 있는지
-주기마다 확인한다. 상위 소수가 가져가는 비율이 오르면 보드에 말한다"를 지시받고 있고, 그
+재는 도구도 이미 프리셋 안에 있다. `world-merit` 의 dissenter 가 "인정이 얼마나 모여 있는지
+주기마다 확인한다. 상위 소수가 가져가는 몫이 오르면 내건다"를 지시받고 있고(`dissenter.toml:28`), 그
 쏠림이 `board_votes.jsonl` 을 글·댓글 `author` 에 조인한 **수신자** 분포다(§5.7 — `target`
 끝칸은 던진 쪽이라 그대로 세면 안 된다).
 

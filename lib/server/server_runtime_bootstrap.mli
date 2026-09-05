@@ -167,6 +167,7 @@ val initialize_owner_state_blocking
   -> env:Eio_unix.Stdenv.base
   -> base_path:string
   -> ?input_base_path:string
+  -> accept_store_quarantine:bool
   -> clock:float Eio.Time.clock_ty Eio.Resource.t
   -> mono_clock:Eio.Time.Mono.ty Eio.Resource.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -178,7 +179,11 @@ val initialize_owner_state_blocking
 (** Complete every transport-neutral, fallible owner-initialization step and
     return the still-unclaimed persistence preparation. A transport must
     pass this opaque value directly to {!activate_owner_state}; the prepared
-    ownership token is intentionally not exposed to transports. *)
+    ownership token is intentionally not exposed to transports.
+    [accept_store_quarantine] is the operator's [--accept-store-quarantine]
+    (RFC-0420): without it a keeper store this build cannot decode fails
+    initialization with [Keeper_persistence_preparation_failed
+    (Store_quarantine_refused _)] and nothing is moved aside. *)
 
 val activate_owner_state
   :  sw:Eio.Switch.t
@@ -220,6 +225,7 @@ val run :
   port:int ->
   base_path:string ->
   ?input_base_path:string ->
+  accept_store_quarantine:bool ->
   make_routes:(port:int -> host:string -> sw:Eio.Switch.t ->
                clock:float Eio.Time.clock_ty Eio.Resource.t -> 'a) ->
   make_request_handler:(trust_policy:Server_request_authority.trust_policy ->

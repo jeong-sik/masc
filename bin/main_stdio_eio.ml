@@ -86,6 +86,10 @@ let run_cmd cli_base_path =
         ~env
         ~base_path
         ~input_base_path:resolved_base_path.raw_base_path
+          (* The stdio runtime has no --accept-store-quarantine: a keeper store
+             this build cannot decode makes it refuse, and the operator strips
+             the file or starts the HTTP runtime with the flag (RFC-0420). *)
+        ~accept_store_quarantine:false
         ~clock
         ~mono_clock
         ~net

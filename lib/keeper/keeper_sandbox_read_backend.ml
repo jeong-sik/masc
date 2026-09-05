@@ -125,39 +125,14 @@ let container_name_of meta =
    [endpoint], which may start the guest it owns; a caller with no turn hands
    in [attached_guest_endpoint], which cannot. Path translation and status
    handling are the same either way, so they live here once. *)
-let run_endpoint_command_with_status
-    ~acquire_endpoint
-    ?(ok_exit_codes = [ 0 ])
-    ~(config : Workspace.config)
-    ~(meta : keeper_meta)
-    ~command_argv
-    ~max_bytes
-    ~timeout_sec
-    ()
-  =
-  let ( let* ) = Result.bind in
-  let host_root = host_playground_root ~config ~meta in
-  let* endpoint = acquire_endpoint ~cwd:host_root in
-  let* cwd =
-    Keeper_remote_path.host_to_remote ~base_path:config.base_path
-      ~remote_root:(Keeper_sandbox_remote.remote_root endpoint) ~keeper:meta.name
-      host_root
-  in
-  let runner = Keeper_sandbox_remote.runner ~timeout_sec endpoint in
-  let outcome =
-    runner ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
-      ~argv:command_argv ~env:[||] ~cwd:(Some cwd)
-  in
-  let lane =
-    Keeper_sandbox_remote.lane_prefix (Keeper_sandbox_remote.transport endpoint)
-  in
-  let endpoint_name = Keeper_sandbox_remote.name endpoint in
-  match outcome with
-  | Masc_exec.Sandbox_target.Transport_failed { reason; stderr; _ } ->
-    (* The lane failed to deliver a command result at all. Reporting it as an
-       error -- never an empty [Ok] -- is the whole point of run_outcome: a
-       down guest/SSH lane used to reach Grep as {ok:true, matches:[]}, an
-       empty search that never ran. *)
+(* The read backend's translation of a [run_outcome] into a read result.
+   [Transport_failed] is always an error -- this is what stops a down lane
+   from reading as an empty [Ok] on the Grep lane, whose [ok_exit_codes]
+   accepts exit 1. Pure and exported so the distinction is tested directly
+   (test_keeper_sandbox_read_backend, the differential test). *)
+let classify_read_outcome ~lane ~endpoint_name ~ok_exit_codes ~max_bytes outcome =
+  match (outcome : Masc_exec.Sandbox_target.run_outcome) with
+  | Transport_failed { reason; stderr; _ } ->
     Error
       (Printf.sprintf
          "%s_read_transport_failed: endpoint=%s reason=%s stderr=%s"
@@ -186,6 +161,36 @@ let run_endpoint_command_with_status
          (Printf.sprintf
             "%s_read_stopped: endpoint=%s signal=%d"
             lane endpoint_name signal))
+;;
+
+let run_endpoint_command_with_status
+    ~acquire_endpoint
+    ?(ok_exit_codes = [ 0 ])
+    ~(config : Workspace.config)
+    ~(meta : keeper_meta)
+    ~command_argv
+    ~max_bytes
+    ~timeout_sec
+    ()
+  =
+  let ( let* ) = Result.bind in
+  let host_root = host_playground_root ~config ~meta in
+  let* endpoint = acquire_endpoint ~cwd:host_root in
+  let* cwd =
+    Keeper_remote_path.host_to_remote ~base_path:config.base_path
+      ~remote_root:(Keeper_sandbox_remote.remote_root endpoint) ~keeper:meta.name
+      host_root
+  in
+  let runner = Keeper_sandbox_remote.runner ~timeout_sec endpoint in
+  let outcome =
+    runner ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+      ~argv:command_argv ~env:[||] ~cwd:(Some cwd)
+  in
+  let lane =
+    Keeper_sandbox_remote.lane_prefix (Keeper_sandbox_remote.transport endpoint)
+  in
+  let endpoint_name = Keeper_sandbox_remote.name endpoint in
+  classify_read_outcome ~lane ~endpoint_name ~ok_exit_codes ~max_bytes outcome
 ;;
 
 type read_dispatch =

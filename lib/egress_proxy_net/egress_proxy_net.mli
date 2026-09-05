@@ -41,7 +41,7 @@ val serve
   -> net:_ Eio.Net.t
   -> clock:_ Eio.Time.clock
   -> keeper_name:string
-  -> rules:Egress_host.rule list
+  -> rules:(unit -> Egress_host.rule list)
   -> on_event:(event -> unit)
   -> socket:[> [> `Generic ] Eio.Net.listening_socket_ty ] Eio.Resource.t
   -> read_timeout_s:float
@@ -56,9 +56,20 @@ val serve
     which port this keeper's guest must be pointed at, and because a test
     can then drive the real [serve] rather than a hatch opened for it.
 
-    [rules] is fixed for the life of the listener: an allowlist that could
-    change under a connection would mean a tunnel outliving the policy that
-    opened it. A policy change restarts the listener.
+    [rules] is asked once per request, not held for the life of the
+    listener, so an operator's edit applies to the next connection rather
+    than to the next lane restart. The sibling lane already works this way:
+    {!Keeper_sandbox_ssh} re-reads its endpoint registry on every dispatch,
+    and an egress allowlist that only reloaded on restart would be the same
+    file behaving two ways.
+
+    It is read per request rather than per connection because a tunnel
+    outliving the policy that opened it is the one thing worse than a slow
+    reload: the rules that admit a CONNECT are the rules in force when it is
+    admitted, and the tunnel then runs to completion under them.
+
+    What the thunk does when it cannot read is the caller's decision, not
+    this module's.
 
     [on_event] is called once per request, before the tunnel opens rather
     than after it closes, so a long-lived tunnel is recorded when it is

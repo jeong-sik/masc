@@ -45,7 +45,7 @@ let one_request ~allow ~line =
                ~net
                ~clock
                ~keeper_name:"probe"
-               ~rules:(rules allow)
+               ~rules:(fun () -> rules allow)
                ~on_event:(fun event -> collected := event :: !collected)
                ~socket
                ~read_timeout_s:5.0
@@ -103,7 +103,7 @@ let admitted_tunnel_exchange ~request =
                ~net
                ~clock
                ~keeper_name:"tunnel"
-               ~rules:(rules [ Printf.sprintf "127.0.0.1:%d" upstream_port ])
+               ~rules:(fun () -> rules [ Printf.sprintf "127.0.0.1:%d" upstream_port ])
                ~on_event:(fun event -> events := event :: !events)
                ~socket:proxy
                ~read_timeout_s:5.0
@@ -141,6 +141,64 @@ let test_an_admitted_request_tunnels_both_ways () =
     (match events with
      | [ { Egress_proxy_net.outcome = Egress_proxy_net.Admitted _; _ } ] -> true
      | _ -> false)
+;;
+
+(* The allowlist is asked per request, so an operator's edit reaches the next
+   connection. Nothing here restarts: the same listener answers both, and the
+   thunk returns something different the second time. *)
+let test_a_changed_allowlist_applies_to_the_next_request () =
+  let answers = ref [] in
+  let generation = ref 0 in
+  (try
+     Eio_main.run (fun env ->
+       Eio.Switch.run (fun sw ->
+         let net = Eio.Stdenv.net env in
+         let clock = Eio.Stdenv.clock env in
+         let socket =
+           Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:4
+             (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+         in
+         let port = port_of socket in
+         Eio.Fiber.fork ~sw (fun () ->
+           try
+             Egress_proxy_net.serve
+               ~sw
+               ~net
+               ~clock
+               ~keeper_name:"reload"
+               ~rules:(fun () ->
+                 (* First request: example.com is allowed. Second: it is not. *)
+                 incr generation;
+                 if !generation = 1 then rules [ "example.com" ] else rules [ "other.test" ])
+               ~on_event:(fun _ -> ())
+               ~socket
+               ~read_timeout_s:5.0
+           with _ -> ());
+         let ask () =
+           let flow =
+             Eio.Net.connect ~sw net (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+           in
+           Eio.Flow.copy_string "CONNECT example.com:443 HTTP/1.1\r\n\r\n" flow;
+           let reader = Eio.Buf_read.of_flow flow ~max_size:65536 in
+           let status = try Eio.Buf_read.line reader with End_of_file -> "" in
+           (try Eio.Flow.shutdown flow `Send with _ -> ());
+           status
+         in
+         let first = ask () in
+         let second = ask () in
+         answers := [ first; second ];
+         raise Exit))
+   with
+   | Exit -> ());
+  match !answers with
+  | [ first; second ] ->
+    (* The first is admitted, or fails reaching a real upstream -- either way
+       it is not a 403, which is what says the allowlist admitted it. *)
+    check bool "the first request is not refused" false
+      (String.length first >= 12 && String.equal (String.sub first 0 12) "HTTP/1.1 403");
+    check bool "the second is, with no restart in between" true
+      (String.length second >= 12 && String.equal (String.sub second 0 12) "HTTP/1.1 403")
+  | _ -> failf "expected two answers, got %d" (List.length !answers)
 ;;
 
 let is_403 status =
@@ -210,6 +268,10 @@ let () =
             test_a_nul_authority_never_opens_a_tunnel
         ; test_case "a port outside the lane is refused" `Quick
             test_a_port_outside_the_lane_is_refused
+        ] )
+    ; ( "reload"
+      , [ test_case "a changed allowlist applies to the next request" `Quick
+            test_a_changed_allowlist_applies_to_the_next_request
         ] )
     ; ( "tunnel"
       , [ test_case "an admitted request tunnels both ways" `Quick

@@ -92,7 +92,9 @@ let handle_connection ~net ~clock ~keeper_name ~rules ~on_event ~read_timeout_s 
              Printf.sprintf "request head over %d bytes" request_head_max_bytes
          })
   | Ok (request_line, reader) ->
-    let decision = Egress_proxy_decision.decide ~rules ~request_line in
+    (* Asked here, per request, so an allowlist edit reaches the next
+       connection instead of waiting for a lane restart. *)
+    let decision = Egress_proxy_decision.decide ~rules:(rules ()) ~request_line in
     (match decision with
      | Egress_proxy_decision.Refused refusal ->
        emit (Refused { detail = Egress_proxy_decision.refusal_to_string refusal });

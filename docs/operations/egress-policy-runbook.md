@@ -173,9 +173,35 @@ A keeper's own account of where it went is not evidence. These events are.
   never becomes a generic tunnel by omission.
 - **The proxy sees the name, not the payload.** TLS is tunnelled, not
   terminated. What a keeper sent to an allowed host is not recorded here.
-- **The allowlist is fixed for the life of a listener.** A tunnel outliving
-  the policy that opened it would be worse than a restart, so a policy
-  change restarts the listener.
+- **The allowlist is read per request, so an edit applies to the next
+  connection.** No restart, no reload command. The sibling SSH lane already
+  re-reads its endpoint registry on every dispatch, and one `runtime.toml`
+  behaving two ways would be worse than the cost of a parse.
+
+  It is read per request rather than per connection because a tunnel
+  outliving the policy that opened it is the one thing worse than a slow
+  reload: the rules that admit a CONNECT are the rules in force when it is
+  admitted, and that tunnel then runs to completion under them. Removing a
+  host stops the next connection, not one already open.
+
+  **A read that fails keeps the last rules that parsed**, and logs. That is
+  fail-closed-to-previous, not fail-open: a typo in `runtime.toml` leaves the
+  keeper with the reach you last successfully granted rather than widening
+  it. Watch for this line, because the file and the enforced policy have
+  diverged until it stops:
+
+  ```
+  egress allowlist unreadable, serving the last rules that parsed: <detail>
+  ```
+
+  **The first read is different.** There is no previous set to fall back to,
+  so the lane is refused rather than served an empty allowlist that would
+  read as a deliberate "reaches nothing":
+
+  ```
+  egress proxy not started keeper=<name>: <detail> (the lane stays closed)
+  ```
+
 - **This is not a complete security boundary.** Neither is any of the
   sandbox profiles. It bounds reach and records it; it does not make an
   unattended agent safe.

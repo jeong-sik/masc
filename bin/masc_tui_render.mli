@@ -61,6 +61,17 @@ type chat_markdown_identity = {
 }
 val keeper_split_threshold_cols : int
 val keeper_roster_pane_shown : Masc_tui_types.state -> cols:int -> bool
+
+(** The Activity pane as the last frame drew it, for the input layer: how
+    many columns it held on the right (zero when none was drawn), what a
+    press on one of its rows acts on, and how far its list can scroll. A
+    press or a wheel notch between frames is answered from what was on
+    screen, which is this, not from what the next frame would draw. *)
+val acting_pane_drawn_cols : unit -> int
+
+val acting_pane_target_at : line:int -> Masc_tui_acting_pane.row_target
+
+val acting_pane_scroll_limit : unit -> int
 val keeper_roster_marquee_target :
   Masc_tui_types.state -> cols:int -> string option
 val finish_surface :

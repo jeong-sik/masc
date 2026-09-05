@@ -86,12 +86,37 @@ type span = {
 
 type line = span list
 
-val lines : rows:int -> cols:int -> input -> line list
+(** What a mouse press on a drawn row can act on. The renderer keeps the
+    targets of the last frame beside its rows, so a click answers what was
+    on screen, not what a later frame would draw. *)
+type row_target =
+  | Target_none  (** header, rule, indicators, padding, focus rows *)
+  | Target_keeper of string  (** a fleet row: the keeper it names *)
+  | Target_more
+      (** the fold line: the fleet rows the overview layout left out; a press
+          scrolls into the full list *)
+
+type rendering = {
+  rows : line list;
+  targets : row_target list;  (** one per row, in the same order *)
+  scroll_max : int;
+      (** the largest [scroll] that still shows content: zero when everything
+          fits, so a wheel over a short pane moves nothing *)
+}
+
+val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
 (** Exactly [rows] lines, each exactly [cols] display cells once its spans
     are joined: a line that would overflow is cut at the right edge, a short
-    one is padded, and rows the content does not need are blank. The fleet
-    block takes at most half the rows when the focus block has something to
-    show, so a wide fleet cannot push the current turn off the pane. *)
+    one is padded, and rows the content does not need are blank.
+
+    Two layouts. At [scroll = 0] the overview: the fleet takes at most half
+    the rows below the header when the focus block has something to show, a
+    fold line counts the keepers left out, and the focus block takes the
+    rest. Any other [scroll] (clamped to [scroll_max]) is the full list -- every
+    fleet row, the rule, every focus row -- windowed from that offset, with an
+    [↑ N more] row where content is above and a [↓ N more] row where it is
+    below. When everything fits the two layouts are the same list and no fold
+    or indicator draws. *)
 
 val keeper_state_text : now:float -> approval:string option ->
   Masc_tui_acting.chunk option -> span list

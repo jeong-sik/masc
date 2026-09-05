@@ -2172,11 +2172,22 @@ val tool_envelope_outcome : Yojson.Safe.t -> (string, string) result
 val verification_verdict_outcome :
   Yojson.Safe.t -> (string * bool, string) result
 
-(** Decode one SGR mouse report into the [up]/[down] key a wheel turns
-    into, or [None] for reports nothing consumes (clicks, releases,
-    horizontal wheel). [parameters] is the raw CSI parameter span
-    (["<64;10;5"]), [final] the CSI final byte. *)
-val sgr_wheel_key : string -> char -> string option
+(** Which way a wheel notch turned. *)
+type wheel_direction =
+  | Wheel_up
+  | Wheel_down
+
+(** The key a notch becomes for a surface's scroll binding: [wheel-up] /
+    [wheel-down], its own rather than the arrow's. *)
+val wheel_key : wheel_direction -> string
+
+(** Decode one SGR mouse report into a wheel notch and its [(row, column)],
+    1-based as the terminal reports it, or [None] for reports nothing consumes
+    (clicks, releases, horizontal wheel). The position is what lets the loop
+    give the notch to the Activity pane under it and every other notch to the
+    surface. [parameters] is the raw CSI parameter span (["<64;10;5"]),
+    [final] the CSI final byte. *)
+val sgr_wheel_report : string -> char -> (wheel_direction * int * int) option
 
 (** Decode one SGR mouse report into the [(row, column)] of an unmodified
     left-button press (button [0], final [M]), 1-based as the terminal

@@ -2664,6 +2664,9 @@ type state = {
      contract as the roster: hidden is the reader's choice and survives a
      resize; the width is the terminal's. *)
   mutable acting_pane_hidden: bool;
+  (* Rows scrolled into the pane's full list; zero is the overview. The
+     renderer clamps it to what the list holds and a toggle resets it. *)
+  mutable acting_pane_scroll: int;
   (* Derived display phase for the selected long name in the narrow roster.
      The main loop advances it only while that roster is visible. *)
   mutable roster_marquee_frame: int;
@@ -4002,6 +4005,7 @@ let create_state
   context_inspector_turn_back = 0;
   roster_pane_hidden = false;
   acting_pane_hidden = false;
+  acting_pane_scroll = 0;
   roster_marquee_frame = 0;
   activity_frame = -1;
   keeper_detail_focus = Right_pane;

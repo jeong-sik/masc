@@ -1352,26 +1352,49 @@ let verification_verdict_outcome (json : Yojson.Safe.t) :
       | Some _ | None -> Error "unexpected verdict response envelope")
   | _ -> Error "unexpected verdict response envelope"
 
-(** Decode one SGR-encoded mouse report ([CSI ?1006;1000h] mode) into a key.
+(** Which way a wheel notch turned. The two are the whole vocabulary: the
+    horizontal wheel is not a scroll and stays unclaimed. *)
+type wheel_direction =
+  | Wheel_up
+  | Wheel_down
 
-    A wheel report becomes [wheel-up] / [wheel-down] rather than the arrow keys
-    it used to share. Two things wanted to be told apart: a wheel notch moves
-    further than one row, and the chat composer answers the arrows with its own
-    history. A surface that scrolls binds both. Wheel-up is button [64],
-    wheel-down [65]; the horizontal wheel, clicks, and releases stay [None] -- the
-    terminal sends them, but nothing consumes them yet, and an unconsumed
-    report must not masquerade as a claimed key. [parameters] is the raw CSI
-    parameter span (["<64;10;5"] for a wheel-up at column 10, row 5) and
-    [final] the CSI final byte. *)
-let sgr_wheel_key (parameters : string) (final : char) : string option =
+(* The key a wheel notch becomes for a surface's scroll binding: its own,
+   not the arrow's. A notch moves further than one row, and the chat
+   composer answers the arrows with its history, so a shared key made one
+   of the two wrong. *)
+let wheel_key = function
+  | Wheel_up -> "wheel-up"
+  | Wheel_down -> "wheel-down"
+
+(** Decode one SGR-encoded mouse report ([CSI ?1006;1000h] mode) into a wheel
+    notch and where it happened.
+
+    The position travels with the notch because more than one thing on the
+    screen can scroll: the Activity pane beside a surface takes the notches
+    over its own columns, and the surface takes the rest. Wheel-up is button
+    [64], wheel-down [65]; the horizontal wheel, clicks, and releases stay
+    [None] -- the terminal sends them, but this function claims none of them,
+    and an unconsumed report must not masquerade as a claimed key.
+    [parameters] is the raw CSI parameter span (["<64;10;5"] for a wheel-up at
+    column 10, row 5) and [final] the CSI final byte. The position is 1-based,
+    the way the terminal reports it, and stays row/column ordered the way a
+    frame thinks. *)
+let sgr_wheel_report (parameters : string) (final : char)
+    : (wheel_direction * int * int) option =
   if final <> 'M' then None
   else
     match String.split_on_char ';' parameters with
-    | button :: _ ->
-        if String.equal button "<64" then Some "wheel-up"
-        else if String.equal button "<65" then Some "wheel-down"
-        else None
-    | [] -> None
+    | [ button; column; row ] -> (
+        let direction =
+          if String.equal button "<64" then Some Wheel_up
+          else if String.equal button "<65" then Some Wheel_down
+          else None
+        in
+        match direction, int_of_string_opt column, int_of_string_opt row with
+        | Some direction, Some column, Some row when column > 0 && row > 0 ->
+            Some (direction, row, column)
+        | _, _, _ -> None)
+    | _ -> None
 
 (** Decode an SGR mouse report into the position of a plain left-button press.
 
@@ -1380,7 +1403,7 @@ let sgr_wheel_key (parameters : string) (final : char) : string option =
     operator was dragging or chord-clicking rather than choosing a row. The
     position is 1-based, the way the terminal reports it, and stays row/column
     ordered the way a frame thinks. Everything else stays [None] for the same
-    reason [sgr_wheel_key] gives: an unconsumed report must not masquerade as
+    reason [sgr_wheel_report] gives: an unconsumed report must not masquerade as
     a claimed key. *)
 let sgr_left_press (parameters : string) (final : char) : (int * int) option =
   if final <> 'M' then None

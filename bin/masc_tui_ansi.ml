@@ -181,6 +181,29 @@ module Theme = struct
       else recede ()
   ;;
 
+  (* The Activity pane's ground, rebuilt only when the palette changes, for
+     the same reason [recede] is: it is read once per drawn pane row. *)
+  let side_pane_background_cache : (int * string) option Atomic.t =
+    Atomic.make None
+
+  let rec side_pane_background () =
+    let probed = Masc_tui_terminal_palette.snapshot () in
+    let generation = Masc_tui_terminal_palette.snapshot_generation probed in
+    let previous = Atomic.get side_pane_background_cache in
+    match previous with
+    | Some (cached_generation, style) when cached_generation = generation ->
+      style
+    | Some _ | None ->
+      let style =
+        Masc_tui_theme.side_pane_background
+          (Masc_tui_terminal_palette.snapshot_palette probed)
+      in
+      if Atomic.compare_and_set side_pane_background_cache previous
+           (Some (generation, style))
+      then style
+      else side_pane_background ()
+  ;;
+
   module Syntax = struct
     let keyword = Masc_tui_theme.Syntax.keyword
     let string = Masc_tui_theme.Syntax.string_

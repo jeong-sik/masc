@@ -21,6 +21,11 @@ val user_message_background : Masc_tui_terminal_palette.t option -> string
     projected through the process stdout capability. Missing palette,
     disabled colours, and unsupported projection all produce [""]. *)
 
+val side_pane_background : Masc_tui_terminal_palette.t option -> string
+(** The ground a side pane sits on beside a surface: the same step off the
+    page {!user_message_background} takes, so the two things set apart from
+    the page are set apart by the same amount. Same fallbacks. *)
+
 val recede
   :  theme_mode:Masc_tui_terminal_palette.theme_mode option
   -> Masc_tui_terminal_palette.t option

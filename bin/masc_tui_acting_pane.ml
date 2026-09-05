@@ -78,6 +78,17 @@ type span = {
 
 type line = span list
 
+type row_target =
+  | Target_none
+  | Target_keeper of string
+  | Target_more
+
+type rendering = {
+  rows : line list;
+  targets : row_target list;
+  scroll_max : int;
+}
+
 (* ── Text ──────────────────────────────────────────────────────────────── *)
 
 let middle_dot = " \xc2\xb7 "
@@ -87,6 +98,8 @@ let attention_glyph = Acting.glyph_text Acting.Attention
 let quiet_glyph = Acting.glyph_text Acting.Quiet
 let rule_glyph = "\xe2\x94\x80"
 let ellipsis = "\xe2\x80\xa6"
+let up_arrow = "\xe2\x86\x91"
+let down_arrow = "\xe2\x86\x93"
 
 let age_text ~now at = Acting.elapsed_text (Float.max 0. (now -. at) *. 1000.)
 
@@ -103,6 +116,7 @@ let tokens_text = function
   | Some n, None | None, Some n -> compact_count n ^ " tok"
 
 let calls_text n = Printf.sprintf "%d call%s" n (if n = 1 then "" else "s")
+let more_text n = Printf.sprintf "%d more" n
 
 let cost_text = function
   | Some usd -> Printf.sprintf "$%.4f" usd
@@ -177,7 +191,6 @@ let fit_line ~cols spans =
 
 let blank_line ~cols = fit_line ~cols []
 let border = { text = "\xe2\x94\x82"; tone = Dim }
-
 let with_border spans = border :: spans
 
 let rule_line ~cols =
@@ -246,22 +259,28 @@ let fleet_row ~cols input newest keeper =
     | Some name -> String.equal name keeper.name
     | None -> false
   in
-  fit_line ~cols
-    (with_border
-       ([ { text = Layout.fit_width keeper.mark mark_cells; tone = keeper.mark_tone }
-        ; { text = Layout.fit_middle name_cells keeper.name
-          ; tone = (if selected then Accent else Plain)
-          }
-        ; { text = String.make gap_cells ' '; tone = Plain }
-        ]
-        @ keeper_state_text ~now:input.now ~approval chunk))
+  ( fit_line ~cols
+      (with_border
+         ([ { text = Layout.fit_width keeper.mark mark_cells; tone = keeper.mark_tone }
+          ; { text = Layout.fit_middle name_cells keeper.name
+            ; tone = (if selected then Accent else Plain)
+            }
+          ; { text = String.make gap_cells ' '; tone = Plain }
+          ]
+          @ keeper_state_text ~now:input.now ~approval chunk))
+  , Target_keeper keeper.name )
 
 let more_line ~cols n =
-  fit_line ~cols
-    (with_border [ { text = Printf.sprintf "%s %d more" ellipsis n; tone = Dim } ])
+  ( fit_line ~cols
+      (with_border [ { text = ellipsis ^ " " ^ more_text n; tone = Dim } ])
+  , Target_more )
+
+let indicator_line ~cols arrow n =
+  ( fit_line ~cols (with_border [ { text = arrow ^ " " ^ more_text n; tone = Dim } ])
+  , Target_none )
 
 (* The focus block: the selected keeper's current turn, call by call, then
-   the turns before it while rows remain. *)
+   the turns before it. *)
 let focus_keeper input newest =
   match input.selected with
   | Some name -> Some name
@@ -316,72 +335,71 @@ let turn_summary_line ~cols ~now (chunk : Acting.chunk) =
        ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Dim }
        ])
 
-let focus_lines ~cols ~rows input chunks name =
-  if rows <= 0 then []
-  else
-    let own =
-      List.filter (fun (c : Acting.chunk) -> String.equal c.Acting.ck_keeper name) chunks
-    in
-    let approval = approval_for input.approvals name in
-    let header =
-      match own with
-      | (current : Acting.chunk) :: _ ->
-          fit_line ~cols
+(* Every focus row, oldest call first, then the earlier turns. The caller
+   cuts to its budget. *)
+let focus_lines ~cols input chunks name =
+  let own =
+    List.filter (fun (c : Acting.chunk) -> String.equal c.Acting.ck_keeper name) chunks
+  in
+  let approval = approval_for input.approvals name in
+  let header =
+    match own with
+    | (current : Acting.chunk) :: _ ->
+        fit_line ~cols
+          (with_border
+             [ { text = name; tone = Accent }
+             ; { text = middle_dot ^ Acting.turn_text current.Acting.ck_turn; tone = Plain }
+             ; { text =
+                   middle_dot
+                   ^ (if current.Acting.ck_settled then "settled" else "in turn")
+               ; tone = (if current.Acting.ck_settled then Dim else Ok)
+               }
+             ])
+    | [] ->
+        fit_line ~cols
+          (with_border
+             [ { text = name; tone = Accent }
+             ; { text = middle_dot ^ "no turn on this feed yet"; tone = Dim }
+             ])
+  in
+  let approval_line =
+    match approval with
+    | Some tool ->
+        [ fit_line ~cols
             (with_border
-               [ { text = name; tone = Accent }
-               ; { text = middle_dot ^ Acting.turn_text current.Acting.ck_turn; tone = Plain }
-               ; { text =
-                     middle_dot
-                     ^ (if current.Acting.ck_settled then "settled" else "in turn")
-                 ; tone = (if current.Acting.ck_settled then Dim else Ok)
-                 }
+               [ { text = attention_glyph ^ " "; tone = Warn }
+               ; { text = "waiting on approval" ^ middle_dot ^ tool; tone = Warn }
                ])
-      | [] ->
-          fit_line ~cols
-            (with_border
-               [ { text = name; tone = Accent }
-               ; { text = middle_dot ^ "no turn on this feed yet"; tone = Dim }
-               ])
-    in
-    let approval_line =
-      match approval with
-      | Some tool ->
-          [ fit_line ~cols
-              (with_border
-                 [ { text = attention_glyph ^ " "; tone = Warn }
-                 ; { text = "waiting on approval" ^ middle_dot ^ tool; tone = Warn }
-                 ])
-          ]
-      | None -> []
-    in
-    let body =
-      match own with
-      | [] -> []
-      | current :: earlier ->
-          let tools = Acting.chunk_tools current in
-          let count = List.length tools in
-          let calls =
-            List.mapi
-              (fun index tool ->
-                tool_line ~cols ~now:input.now current tool ~is_last:(index = count - 1))
-              tools
-          in
-          let calls =
-            if calls = [] && not current.Acting.ck_settled then
-              [ fit_line ~cols
-                  (with_border
-                     [ { text = running_glyph ^ " "; tone = Ok }
-                     ; { text = "running" ^ middle_dot ^ age_text ~now:input.now current.Acting.ck_at
-                       ; tone = Ok
-                       }
-                     ])
-              ]
-            else calls
-          in
-          calls @ List.map (turn_summary_line ~cols ~now:input.now) earlier
-    in
-    let all = (header :: approval_line) @ body in
-    List.filteri (fun index _ -> index < rows) all
+        ]
+    | None -> []
+  in
+  let body =
+    match own with
+    | [] -> []
+    | current :: earlier ->
+        let tools = Acting.chunk_tools current in
+        let count = List.length tools in
+        let calls =
+          List.mapi
+            (fun index tool ->
+              tool_line ~cols ~now:input.now current tool ~is_last:(index = count - 1))
+            tools
+        in
+        let calls =
+          if calls = [] && not current.Acting.ck_settled then
+            [ fit_line ~cols
+                (with_border
+                   [ { text = running_glyph ^ " "; tone = Ok }
+                   ; { text = "running" ^ middle_dot ^ age_text ~now:input.now current.Acting.ck_at
+                     ; tone = Ok
+                     }
+                   ])
+            ]
+          else calls
+        in
+        calls @ List.map (turn_summary_line ~cols ~now:input.now) earlier
+  in
+  List.map (fun line -> (line, Target_none)) ((header :: approval_line) @ body)
 
 (* The least each block needs before the two share the rows: the fleet one
    keeper and its fold line, the focus its rule and one row. Below that the
@@ -390,42 +408,89 @@ let focus_lines ~cols ~rows input chunks name =
 let fleet_min_rows = 2
 let focus_min_rows = 2
 
-let lines ~rows ~cols input =
+(* The overview: the fleet folded to at most half the rows, the focus block
+   after a rule. What the Activity pane opens on. *)
+let overview_rows ~cols ~below input newest ordered focus focus_rows =
+  let fleet_budget =
+    match focus with
+    | Some _ when below >= fleet_min_rows + focus_min_rows ->
+        min (List.length ordered) (below / 2)
+    | Some _ | None -> min (List.length ordered) below
+  in
+  let fleet =
+    if List.length ordered > fleet_budget && fleet_budget >= 2 then
+      let shown = List.filteri (fun index _ -> index < fleet_budget - 1) ordered in
+      List.map (fleet_row ~cols input newest) shown
+      @ [ more_line ~cols (List.length ordered - (fleet_budget - 1)) ]
+    else
+      List.filteri (fun index _ -> index < fleet_budget) ordered
+      |> List.map (fleet_row ~cols input newest)
+  in
+  let after_fleet = below - List.length fleet in
+  let focus_block =
+    match focus with
+    | Some _ when after_fleet >= focus_min_rows ->
+        (rule_line ~cols, Target_none)
+        :: List.filteri (fun index _ -> index < after_fleet - 1) focus_rows
+    | Some _ | None -> []
+  in
+  fleet @ focus_block
+
+(* The full list from [scroll], one row of it given to each indicator. The
+   top indicator always draws once scrolled: it is how the reader knows the
+   header is not the first row. The bottom one draws only when content is
+   still hidden, and the row it takes counts as hidden too. *)
+let scrolled_rows ~cols ~below ~scroll body =
+  let total = List.length body in
+  let room = below - 1 in
+  let slice = List.filteri (fun index _ -> index >= scroll && index < scroll + room) body in
+  let hidden_below = total - (scroll + room) in
+  let slice =
+    if hidden_below > 0 && room >= 1 then
+      List.filteri (fun index _ -> index < room - 1) slice
+      @ [ indicator_line ~cols down_arrow (hidden_below + 1) ]
+    else slice
+  in
+  indicator_line ~cols up_arrow scroll :: slice
+
+let lines ~rows ~cols ~scroll input =
   let rows = max 0 rows in
-  if rows = 0 then []
+  if rows = 0 then { rows = []; targets = []; scroll_max = 0 }
   else
     let traces = List.map (fun keeper -> (keeper.name, keeper.trace_id)) input.keepers in
     let chunks = Acting.chunks ~traces input.entries in
     let newest = newest_chunk_by_keeper chunks in
     let focus = focus_keeper input newest in
-    let header = header_line ~cols input in
-    let chrome = 1 in
-    (* Rows below the header. With a focus block to draw, the fleet keeps at
-       most half of them; the focus block takes the rest after a rule. *)
-    let below = rows - chrome in
+    let header = (header_line ~cols input, Target_none) in
+    let below = rows - 1 in
     let ordered = fleet_order input newest in
-    let fleet_budget =
-      match focus with
-      | Some _ when below >= fleet_min_rows + focus_min_rows ->
-          min (List.length ordered) (below / 2)
-      | Some _ | None -> min (List.length ordered) below
-    in
-    let fleet_rows =
-      if List.length ordered > fleet_budget && fleet_budget >= 2 then
-        let shown = List.filteri (fun index _ -> index < fleet_budget - 1) ordered in
-        List.map (fleet_row ~cols input newest) shown
-        @ [ more_line ~cols (List.length ordered - (fleet_budget - 1)) ]
-      else
-        List.filteri (fun index _ -> index < fleet_budget) ordered
-        |> List.map (fleet_row ~cols input newest)
-    in
-    let after_fleet = below - List.length fleet_rows in
     let focus_rows =
       match focus with
-      | Some name when after_fleet >= focus_min_rows ->
-          rule_line ~cols :: focus_lines ~cols ~rows:(after_fleet - 1) input chunks name
-      | Some _ | None -> []
+      | Some name -> focus_lines ~cols input chunks name
+      | None -> []
     in
-    let drawn = (header :: fleet_rows) @ focus_rows in
-    let padding = List.init (max 0 (rows - List.length drawn)) (fun _ -> blank_line ~cols) in
-    List.filteri (fun index _ -> index < rows) (drawn @ padding)
+    (* The full list: every fleet row, then the rule and the focus block when
+       there is one. Scrolling walks this; the overview folds it. *)
+    let body =
+      List.map (fleet_row ~cols input newest) ordered
+      @ (match focus_rows with
+         | [] -> []
+         | _ :: _ -> (rule_line ~cols, Target_none) :: focus_rows)
+    in
+    let total = List.length body in
+    (* At the largest scroll the last row is on screen under the top
+       indicator alone; one row of the window belongs to that indicator. *)
+    let scroll_max = if total <= below then 0 else max 0 (total - (below - 1)) in
+    let scroll = max 0 (min scroll scroll_max) in
+    let drawn =
+      if total <= below then body
+      else if scroll = 0 then
+        overview_rows ~cols ~below input newest ordered focus focus_rows
+      else scrolled_rows ~cols ~below ~scroll body
+    in
+    let drawn = header :: drawn in
+    let padding =
+      List.init (max 0 (rows - List.length drawn)) (fun _ -> (blank_line ~cols, Target_none))
+    in
+    let drawn = List.filteri (fun index _ -> index < rows) (drawn @ padding) in
+    { rows = List.map fst drawn; targets = List.map snd drawn; scroll_max }

@@ -576,6 +576,11 @@ type input_event =
           terminal reported it. Only surfaces that map frame rows to their own
           rows consume one; everywhere else it is inert, like a wheel notch on
           a surface with nothing to scroll. *)
+  | Mouse_wheel of Masc.Tui_decode.wheel_direction * int * int
+      (** A wheel notch and the [(row, column)] it happened at. The loop
+          gives a notch over the Activity pane to the pane and turns every
+          other one into the [wheel-up] / [wheel-down] key the surfaces bind,
+          so no surface learned a new key when the pane appeared. *)
 
 (* How long to wait for the next byte of a paste already in progress. The
    terminal writes the payload in one go behind the start marker, so this is a
@@ -663,15 +668,17 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
                              take_input_byte reader
                                ~timeout:paste_byte_timeout_seconds)))
                (* A parameter span starting with [<] is an SGR mouse report.
-                  Wheel reports become the same keys the arrows make, so every
-                  surface's scroll binding answers the wheel; an unmodified
+                  A wheel notch travels with its position, so the loop can
+                  give it to the pane under the pointer and turn the rest into
+                  the key every surface's scroll binding answers; an unmodified
                   left press travels as its own event so a surface can map the
                   row to its cursor; a report nothing consumes stays unclaimed
                   rather than leaking into a key. *)
                | Some (params, final)
                  when String.length params > 0 && params.[0] = '<' -> (
-                   match Masc.Tui_decode.sgr_wheel_key params final with
-                   | Some wheel_key -> key wheel_key
+                   match Masc.Tui_decode.sgr_wheel_report params final with
+                   | Some (direction, row, column) ->
+                       Some (Mouse_wheel (direction, row, column))
                    | None -> (
                        match Masc.Tui_decode.sgr_left_press params final with
                        | Some (row, column) ->
@@ -6584,7 +6591,61 @@ let toggle_acting_pane (state : state) =
            Masc_tui_acting_pane.threshold_cols)
   | Some hidden ->
       state.acting_pane_hidden <- hidden;
+      state.acting_pane_scroll <- 0;
       Ok hidden
+
+(* Where a mouse report landed, relative to the Activity pane the last frame
+   drew. The pane's columns are the render's own answer for that frame
+   ([acting_pane_reserved_cols], zero when it drew none); its rows are the
+   body rows under the surface strip. Everything else belongs to the surface,
+   as it did before the pane existed. *)
+type acting_pane_hit =
+  | Pane_miss
+  | Pane_row of int  (** 0-based line within the pane *)
+
+let acting_pane_hit (state : state) ~row ~column =
+  let pane_cols = Masc_tui_render.acting_pane_drawn_cols () in
+  if pane_cols <= 0 then Pane_miss
+  else
+    let _terminal_rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in
+    let body_rows = surface_rows state in
+    let first_col = terminal_cols - pane_cols + 1 in
+    (* Row 1 is the surface strip; the body starts on row 2. *)
+    let first_row = 2 in
+    if column >= first_col && column <= terminal_cols
+       && row >= first_row && row < first_row + body_rows
+    then Pane_row (row - first_row)
+    else Pane_miss
+
+let scroll_acting_pane (state : state) ~delta =
+  state.acting_pane_scroll
+  <- max 0
+       (min
+          (Masc_tui_render.acting_pane_scroll_limit ())
+          (state.acting_pane_scroll + delta))
+
+(* A press on the pane is the roster's cursor by another hand: a fleet row
+   lands the selection on that keeper, and a press on the keeper already
+   selected opens its chat, the way [/keeper <name>] does. The fold line
+   scrolls into the full list. Everything else on the pane is read, not
+   pressed. *)
+let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
+  match Masc_tui_render.acting_pane_target_at ~line with
+  | Masc_tui_acting_pane.Target_none -> ()
+  | Masc_tui_acting_pane.Target_more -> scroll_acting_pane state ~delta:1
+  | Masc_tui_acting_pane.Target_keeper keeper_name -> (
+      match
+        List.find_index
+          (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+          state.keepers
+      with
+      | None -> ()
+      | Some index when state.keeper_cursor = index ->
+          open_message_for_keeper ~return_to:state.msg_return state keeper_name
+            ~drain_queue:(fun () -> drain_queued_message state ~base_path ~mailbox);
+          launch_keeper_history_load state ~mailbox ~keeper_name;
+          state.view <- Keepers Keeper_message
+      | Some index -> state.keeper_cursor <- index)
 
 let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   let target =
@@ -13217,6 +13278,12 @@ and is loaded on demand through keeper_skill.
         else
           match input with
           | Some (Key name) -> Some name
+          (* A notch over the pane is the pane's and never becomes a key; a
+             notch anywhere else is the key it always was. *)
+          | Some (Mouse_wheel (direction, row, column)) -> (
+              match acting_pane_hit state ~row ~column with
+              | Pane_row _ -> None
+              | Pane_miss -> Some (Masc.Tui_decode.wheel_key direction))
           | Some (Pasted _) | Some (Graphics_reply _)
           | Some (Mouse_left_press _) | None -> None
       in
@@ -13331,6 +13398,32 @@ and is loaded on demand through keeper_skill.
                       (Masc_tui_attachment.error_to_string error))
             | Some _ | None ->
                 handle_paste state ~base_path ~mailbox:async_messages ~paste)
+       (* The wheel over the Activity pane scrolls the pane. The pane is drawn
+          under no modal (render reserves it no columns while one is up), so
+          the hit test alone says whether the notch is the pane's. *)
+       | Some (Mouse_wheel (direction, row, column))
+         when (not dismissed_image) && (not compact_viewport)
+              && acting_pane_hit state ~row ~column <> Pane_miss ->
+           scroll_acting_pane state
+             ~delta:
+               (match direction with
+                | Masc.Tui_decode.Wheel_up -> -wheel_notch_rows
+                | Masc.Tui_decode.Wheel_down -> wheel_notch_rows)
+       (* A left press on the Activity pane picks the keeper under it. Same
+          modal guards as the Lanes press below, for the same reason. *)
+       | Some (Mouse_left_press (row, column))
+         when (not dismissed_image) && (not compact_viewport)
+              && (not state.help_open)
+              && (not state.agenda_open)
+              && (not state.palette_open)
+              && (not state.context_inspector_open)
+              && Option.is_none state.search
+              && acting_pane_hit state ~row ~column <> Pane_miss -> (
+           match acting_pane_hit state ~row ~column with
+           | Pane_row line ->
+               handle_acting_pane_click state ~base_path ~mailbox:async_messages
+                 ~line
+           | Pane_miss -> ())
        (* A left press on the Lanes overview moves the row cursor (and opens
           the row it already named). The modals above the surface -- help,
           agenda, palette, search -- keep the press from reaching rows they
@@ -13352,7 +13445,7 @@ and is loaded on demand through keeper_skill.
           the capability probe, which does its own reading before the loop
           starts; what matters here is that it does not become keys. *)
        | Some (Pasted _) | Some (Graphics_reply _) | Some (Key _)
-       | Some (Mouse_left_press _) | None -> ());
+       | Some (Mouse_left_press _) | Some (Mouse_wheel _) | None -> ());
       if Option.is_some input then
         Render_schedule.request render_schedule Render_schedule.Input;
       let _terminal_rows, terminal_columns = get_terminal_size () in

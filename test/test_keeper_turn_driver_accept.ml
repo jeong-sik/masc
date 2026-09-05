@@ -412,7 +412,7 @@ let accept_rejected_core_error
    response accept had just called unusable stayed in the checkpoint, becoming
    input on every later turn.
 
-   Measured on sangsu, 2026-09-03, thinking off throughout: collapse into one
+   Measured on a live keeper, 2026-09-03, thinking off throughout: collapse into one
    repeated word, rejected at max_tokens, message_assistant_text 136 KB ->
    308 KB over twelve turns in 30-40 KB steps -- the size of the rejected
    text each time. *)

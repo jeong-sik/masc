@@ -354,7 +354,7 @@ let test_actual_container_logs_report_no_local_stream () =
   let json =
     Yojson.Safe.from_string
       {|{
-        "keeper":"rondo",
+        "keeper":"alder",
         "backend":null,
         "state":"no_local_stream",
         "reason":"This Keeper runs on its configured SSH endpoint, so no container log stream exists on this host; read the logs on the endpoint.",
@@ -380,7 +380,7 @@ let test_actual_container_logs_report_no_local_stream () =
 let test_no_local_stream_rejects_a_backend () =
   let json =
     Yojson.Safe.from_string
-      {|{"keeper":"rondo","backend":"docker","state":"no_local_stream",
+      {|{"keeper":"alder","backend":"docker","state":"no_local_stream",
          "reason":"anything","tail":200,"instances":[]}|}
   in
   match Masc_tui_keeper_sandbox.decode_logs ~sanitize:Fun.id json with

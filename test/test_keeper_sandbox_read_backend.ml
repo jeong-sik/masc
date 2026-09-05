@@ -1281,9 +1281,9 @@ let test_a_policy_boot_points_the_guest_at_its_proxy () =
 let test_each_keeper_gets_its_own_policy_network () =
   let name keeper = Masc.Keeper_sandbox_microvm.policy_network_name ~keeper_name:keeper in
   Alcotest.(check bool) "two keepers do not share a network" false
-    (String.equal (name "rondo") (name "sangsu"));
+    (String.equal (name "alder") (name "spruce"));
   Alcotest.(check bool) "and the name says whose it is" true
-    (String_util.contains_substring (name "rondo") "rondo");
+    (String_util.contains_substring (name "alder") "alder");
   (* The boot attaches the guest to its own keeper's network and no other. *)
   let args_for keeper =
     match
@@ -1298,10 +1298,10 @@ let test_each_keeper_gets_its_own_policy_network () =
     | Ok args -> String.concat " " args
     | Error detail -> Alcotest.failf "expected a policy boot, got %s" detail
   in
-  Alcotest.(check bool) "rondo attaches to rondo's network" true
-    (String_util.contains_substring (args_for "rondo") (name "rondo"));
-  Alcotest.(check bool) "and not to sangsu's" false
-    (String_util.contains_substring (args_for "rondo") (name "sangsu"))
+  Alcotest.(check bool) "alder attaches to alder's network" true
+    (String_util.contains_substring (args_for "alder") (name "alder"));
+  Alcotest.(check bool) "and not to spruce's" false
+    (String_util.contains_substring (args_for "alder") (name "spruce"))
 
 (* The gateway is whatever container assigned the network, read rather than
    assumed: a compiled-in address is right until a host has a network on that

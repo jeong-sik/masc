@@ -1,7 +1,7 @@
 let threshold_cols = 110
 (* A 30-cell pane left 23 cells for the name after the border, health mark,
    and spacing. That cut ordinary configured names such as
-   [kidsnote-pr-jira-checker] even on a 173-column terminal, while the chat
+   [pinewood-pr-jira-checker] even on a 173-column terminal, while the chat
    beside it still had more than 130 cells. Four more cells keep that name
    whole and remain a bounded, stable split: resizing still changes message
    wrapping only when the pane itself appears or disappears. *)

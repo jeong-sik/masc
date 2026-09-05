@@ -1242,7 +1242,7 @@ let backlog_statement_of_observation
    reason the runtime ended that turn. Without the reason, a keeper whose turn
    was cut by the repeated-call guard reads its own three identical calls as
    unfinished work and makes them again. Measured 2026-09-01 from
-   turn-records: kidsnote-pr-jira-checker ended 259 of 361 turns on the same
+   turn-records: one live keeper ended 259 of 361 turns on the same
    repeated query, lane-smith 136 of 342, polisher 84 of 424, and each next
    turn repeated the call. The sentences live under [config/prompts] with the
    other prompt text and name the tool and the count so the model can match

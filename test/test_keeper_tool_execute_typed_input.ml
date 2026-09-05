@@ -535,7 +535,7 @@ let test_a_construct_outside_the_subset_runs_and_is_still_named () =
 
 (* The sentence a caller acts on names the construct their script contains.
 
-   sangsu sent this on 2026-08-30 and was told the script "uses a redirection,
+   a live keeper sent this on 2026-08-30 and was told the script "uses a redirection,
    which this tool does not run. use the stdin field". Every redirect in it is
    one the subset takes; the [$?] is what the lexer stopped on. The script runs
    now, so nobody is sent to rewrite four working redirects — but the advice

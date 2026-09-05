@@ -1512,7 +1512,7 @@ let test_board_provenance_rejects_bad_ids () =
        ; ( Types.wire_field_board
          , `Assoc
              [ Types.wire_field_post_id, `String "p-0123456789abcdef0123456789abcdef"
-             ; "author", `String "rondo"
+             ; "author", `String "alder"
              ] )
        ]);
   rejects

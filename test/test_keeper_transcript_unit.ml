@@ -569,7 +569,7 @@ let test_interrupted_tool_cycle_is_closed_and_dispatched () =
    unclosed cycle is now in the middle, not at the tail, so [close_open_tail]
    never reaches it and [partition] rejects with [Overlapping_tool_cycle] --
    at the same fixed message_index on every turn, forever. Observed on
-   lab-sangsu (5+ turns) and again on 2026-09-01, where one keeper went an
+   one lab keeper (5+ turns) and again on 2026-09-01, where one keeper went an
    hour without completing a turn. *)
 let interrupted_then_resumed =
   [ text T.User "first ask"

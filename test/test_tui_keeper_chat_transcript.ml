@@ -1476,7 +1476,7 @@ let test_full_skill_rows_show_actions_and_exact_proof () =
 
 (* The folded line has to say which tool broke.
 
-   Observed on kidsnote-pr-jira-checker (2026-09-01 20:08):
+   Observed on a live keeper (2026-09-01 20:08):
 
      x Tools 29 . Keeper 6 . keeper_artifact_read 1 .
        atlassian_searchJiraIssuesUsingJql 21 . keeper_time_now 1 . Execute 1 .

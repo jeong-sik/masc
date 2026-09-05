@@ -678,7 +678,7 @@ let test_gate_defaults_when_absent () =
     check bool "always_allow defaults to false" false config.Vc.gate.always_allow;
     check (list string) "exempt_agents defaults to empty" [] config.Vc.gate.exempt_agents;
     check bool "agent is not exempt" false
-      (Vc.voice_gate_always_allow_for_agent config "sangsu")
+      (Vc.voice_gate_always_allow_for_agent config "spruce")
 ;;
 
 let test_gate_always_allow_true () =
@@ -689,8 +689,8 @@ let test_gate_always_allow_true () =
   | Error message -> fail message
   | Ok config ->
     check bool "always_allow is true" true config.Vc.gate.always_allow;
-    check bool "sangsu is exempt" true
-      (Vc.voice_gate_always_allow_for_agent config "sangsu");
+    check bool "spruce is exempt" true
+      (Vc.voice_gate_always_allow_for_agent config "spruce");
     check bool "any agent is exempt" true
       (Vc.voice_gate_always_allow_for_agent config "other_agent")
 ;;
@@ -699,13 +699,13 @@ let test_gate_exempt_agents () =
   match
     Vc.parse_json
       (config_with
-         [ "gate", `Assoc [ "exempt_agents", `List [ `String "sangsu" ] ] ])
+         [ "gate", `Assoc [ "exempt_agents", `List [ `String "spruce" ] ] ])
   with
   | Error message -> fail message
   | Ok config ->
     check bool "always_allow is false" false config.Vc.gate.always_allow;
-    check bool "sangsu is exempt" true
-      (Vc.voice_gate_always_allow_for_agent config "sangsu");
+    check bool "spruce is exempt" true
+      (Vc.voice_gate_always_allow_for_agent config "spruce");
     check bool "other agent is not exempt" false
       (Vc.voice_gate_always_allow_for_agent config "other_agent")
 ;;
@@ -714,12 +714,12 @@ let test_gate_agents_alias () =
   match
     Vc.parse_json
       (config_with
-         [ "gate", `Assoc [ "agents", `List [ `String "sangsu" ] ] ])
+         [ "gate", `Assoc [ "agents", `List [ `String "spruce" ] ] ])
   with
   | Error message -> fail message
   | Ok config ->
-    check bool "sangsu is exempt via agents alias" true
-      (Vc.voice_gate_always_allow_for_agent config "sangsu");
+    check bool "spruce is exempt via agents alias" true
+      (Vc.voice_gate_always_allow_for_agent config "spruce");
     check bool "other agent is not exempt" false
       (Vc.voice_gate_always_allow_for_agent config "other_agent")
 ;;

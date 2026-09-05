@@ -47,19 +47,19 @@ let test_an_allowlist_loads_and_normalizes () =
     config
       (base
        ^ {|
-[egress.keepers.rondo]
+[egress.keepers.alder]
 allow = ["GitHub.COM", "*.GithubUserContent.com", "example.com."]
 |})
   in
   check (list string) "rules are stored normalized"
     [ "github.com"; "*.githubusercontent.com"; "example.com" ]
-    (allow_of config ~keeper_name:"rondo")
+    (allow_of config ~keeper_name:"alder")
 ;;
 
 let test_a_keeper_with_no_entry_has_none () =
   let config = config base in
   check bool "the registry is empty" true
-    (Egress_allowlist.for_keeper config.Runtime_schema.egress_allowlists ~keeper_name:"rondo"
+    (Egress_allowlist.for_keeper config.Runtime_schema.egress_allowlists ~keeper_name:"alder"
      = None);
   check int "and carries no entries" 0
     (List.length config.Runtime_schema.egress_allowlists)
@@ -68,18 +68,18 @@ let test_a_keeper_with_no_entry_has_none () =
 (* The load is where a bad rule has to die. *)
 let test_a_rule_a_resolver_could_reread_fails_the_load () =
   let errors =
-    load_errors (base ^ "\n[egress.keepers.rondo]\nallow = [\"evil\\u0000.example.com\"]\n")
+    load_errors (base ^ "\n[egress.keepers.alder]\nallow = [\"evil\\u0000.example.com\"]\n")
   in
   check bool "the refusal names the offending byte" true
     (String_util.contains_substring errors "\\x00");
   check bool "and the path" true
-    (String_util.contains_substring errors "egress.keepers.rondo.allow")
+    (String_util.contains_substring errors "egress.keepers.alder.allow")
 ;;
 
 let test_an_unknown_key_fails_the_load () =
   let errors =
     load_errors (base ^ {|
-[egress.keepers.rondo]
+[egress.keepers.alder]
 allow = ["github.com"]
 deny = ["evil.com"]
 |})
@@ -88,7 +88,7 @@ deny = ["evil.com"]
 ;;
 
 let test_a_table_without_allow_fails_the_load () =
-  let errors = load_errors (base ^ "\n[egress.keepers.rondo]\n") in
+  let errors = load_errors (base ^ "\n[egress.keepers.alder]\n") in
   check bool "the missing array is named" true
     (String_util.contains_substring errors "allow")
 ;;
@@ -107,22 +107,22 @@ allow = ["github.com"]
    file errors, so the exception used to take boot and hot reload down. *)
 let test_a_string_allow_fails_the_load () =
   let errors = load_errors (base ^ {|
-[egress.keepers.rondo]
+[egress.keepers.alder]
 allow = "github.com"
 |}) in
   check bool "the refusal names the key" true
-    (String_util.contains_substring errors "egress.keepers.rondo.allow");
+    (String_util.contains_substring errors "egress.keepers.alder.allow");
   check bool "and the shape it wanted" true
     (String_util.contains_substring errors "an array of strings")
 ;;
 
 let test_a_non_string_element_fails_the_load () =
   let errors = load_errors (base ^ {|
-[egress.keepers.rondo]
+[egress.keepers.alder]
 allow = [1]
 |}) in
   check bool "the refusal names the key" true
-    (String_util.contains_substring errors "egress.keepers.rondo.allow")
+    (String_util.contains_substring errors "egress.keepers.alder.allow")
 ;;
 
 let () =

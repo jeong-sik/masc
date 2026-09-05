@@ -48,7 +48,7 @@ let offered name : Identity_tools.offered_tool =
   }
 
 (* The four Confluence write tools measured at 21.3 KB on
-   kidsnote-pr-jira-checker, beside the Jira reads it actually calls. *)
+   one live keeper, beside the Jira reads it actually calls. *)
 let offering =
   List.map
     offered

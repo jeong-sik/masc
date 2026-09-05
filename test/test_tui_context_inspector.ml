@@ -130,7 +130,7 @@ let test_newest_exact_composition_wins () =
                   total + component.bytes)
                 0 attributed.Inspector.components))
 
-(* On 2026-09-01 every row of rondo's and taskmaster's 50-turn page was
+(* On 2026-09-01 every row of two keepers' 50-turn pages was
    unattributed, and the reading failed outright -- discarding the token,
    usage, wire and window readings the newest row did carry. *)
 let test_page_without_attribution_still_reads () =

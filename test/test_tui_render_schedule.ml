@@ -632,7 +632,7 @@ let memory_probe =
    a keeper name over eighteen cells and an ordinary reading over fourteen. *)
 let memory_overflowing =
   { Schedule.mrow_state = "read-error-and-then-some"
-  ; mrow_name = "kidsnote-pr-jira-checker-and-a-longer-tail"
+  ; mrow_name = "pinewood-pr-jira-checker-and-a-longer-tail"
   ; mrow_revision = "1234567890"
   ; mrow_facts = "9876543"
   ; mrow_size = "1234567.8 MB"
@@ -785,11 +785,11 @@ let workspace_probe =
   }
 
 let workspace_overflowing =
-  { Schedule.wrow_name = "kidsnote-web-store-and-a-longer-tail"
+  { Schedule.wrow_name = "pinewood-web-store-and-a-longer-tail"
   ; wrow_branch = "feature/PK-12345-a-long-branch"
   ; wrow_status = "conflicted"
   ; wrow_sync = "manual"
-  ; wrow_path = "/Users/dancer/me/workspace/kidsnote/kidsnote-web-store"
+  ; wrow_path = "/Users/dancer/me/workspace/pinewood/pinewood-web-store"
   }
 
 (* The path takes what the named columns leave, so the row fills the frame it
@@ -870,7 +870,7 @@ let system_log_overflowing =
   { Schedule.slog_time = "11:08:43.512"
   ; slog_level = "! CRITICAL"
   ; slog_module = "execution_lane_writer_and_more"
-  ; slog_keeper = "kidsnote-pr-jira-checker"
+  ; slog_keeper = "pinewood-pr-jira-checker"
   ; slog_category = "provider-router"
   ; slog_message = String.concat "" (List.init 20 (fun _ -> "message "))
   }
@@ -958,7 +958,7 @@ let lane_probe =
 
 let lane_overflowing =
   { Schedule.lrow_started = "2026-09-03 11:08:43.512"
-  ; lrow_subject = "kidsnote-pr-jira-checker"
+  ; lrow_subject = "pinewood-pr-jira-checker"
   ; lrow_elapsed = "1234.5s"
   ; lrow_status = "cancelled-by-operator"
   ; lrow_slot = "antigravity_subscription.gemini-3-8-flash-high"
@@ -1108,7 +1108,7 @@ let harness_overflowing =
   ; hrow_task = "task-1279-and-a-good-deal-more"
   ; hrow_gate = "completion-contract"
   ; hrow_verdict = "inconclusive"
-  ; hrow_evaluator = "kidsnote-pr-jira-checker-verifier"
+  ; hrow_evaluator = "pinewood-pr-jira-checker-verifier"
   ; hrow_reason = String.concat "" (List.init 20 (fun _ -> "reason "))
   }
 
@@ -1150,7 +1150,7 @@ let fusion_overflowing =
   { Schedule.frow_time = "11:08:43.512"
   ; frow_age = "1234.5s"
   ; frow_state = "cancelled-by-the-operator"
-  ; frow_keeper = "kidsnote-pr-jira-checker"
+  ; frow_keeper = "pinewood-pr-jira-checker"
   ; frow_preset = "antigravity-high"
   ; frow_run = "run-1788427841647-00000-abcdef"
   }

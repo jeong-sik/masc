@@ -349,7 +349,7 @@ let category_of_string s =
 (* Row-level provenance, declared in the row itself. [Authored]: an explicit
    keeper memory_write. [Injected]: librarian extraction — the row is a copy
    of something the keeper already saw, which is exactly the feed the
-   self-referential reinjection loop runs on (task-1032 / rondo probes).
+   self-referential reinjection loop runs on (task-1032 probes).
    [trace_id] is the committing write's trace when the writer knows one; empty
    means consult the snapshot journal. Category tokens only ever reach prompt
    renders — never a unique identity (masc#29558). *)

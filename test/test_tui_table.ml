@@ -16,7 +16,7 @@ let index_of needle text =
 
 let contains needle text = Option.is_some (index_of needle text)
 
-let columns ?(name = "kidsnote") ?(count = "139") ?(size = "94.4 KB") () =
+let columns ?(name = "pinewood") ?(count = "139") ?(size = "94.4 KB") () =
   [ Table.cell ~header:"KEEPER" ~width:16 name
   ; Table.cell ~align:Table.Right ~header:"FACTS" ~width:5 count
   ; Table.cell ~align:Table.Right ~header:"SIZE" ~width:9 size
@@ -31,7 +31,7 @@ let test_a_row_is_as_wide_as_its_header () =
   check int "a row past every width" (width header)
     (width
        (Table.row
-          (columns ~name:"kidsnote-pr-jira-checker-and-more" ~count:"1234567"
+          (columns ~name:"pinewood-pr-jira-checker-and-more" ~count:"1234567"
              ~size:"1234567.8 MB" ())));
   check int "a row of empty readings" (width header)
     (width (Table.row (columns ~name:"" ~count:"" ~size:"" ())))
@@ -114,7 +114,7 @@ let test_a_dropped_column_leaves_both_lines () =
 let test_a_styled_cell_occupies_no_extra_cells () =
   let plain = columns () in
   let dressed =
-    [ Table.cell ~header:"KEEPER" ~width:16 "kidsnote"
+    [ Table.cell ~header:"KEEPER" ~width:16 "pinewood"
     ; Table.cell ~align:Table.Right ~style:"\027[33m" ~header:"FACTS" ~width:5
         "139"
     ; Table.cell ~align:Table.Right ~header:"SIZE" ~width:9 "94.4 KB"
@@ -134,7 +134,7 @@ let test_a_styled_cell_occupies_no_extra_cells () =
 (* The header names columns; it never wears a reading's colour. *)
 let test_the_header_ignores_cell_style () =
   let dressed =
-    [ Table.cell ~style:"\027[31m" ~header:"KEEPER" ~width:16 "kidsnote" ]
+    [ Table.cell ~style:"\027[31m" ~header:"KEEPER" ~width:16 "pinewood" ]
   in
   check bool "no escape in the header" false
     (contains "\027[" (Table.header_row dressed))

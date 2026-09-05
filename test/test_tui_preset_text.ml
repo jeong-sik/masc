@@ -9,7 +9,7 @@ let morning : D.preset_manifest =
   ; pm_description = "before the campaign"
   ; pm_created_at = "2026-09-03T10:26:08Z"
   ; pm_override_count = 1
-  ; pm_keepers = [ "analyst"; "sangsu" ]
+  ; pm_keepers = [ "analyst"; "spruce" ]
   ; pm_assignment_count = 12
   ; pm_lane_count = 4
   }
@@ -40,7 +40,7 @@ let report ~skipped ~runtime : D.preset_restore_report =
   { D.prr_restored = "morning"
   ; prr_autosave = "_autosave-20260903T103201Z"
   ; prr_prompt_overrides = { D.pp_effect = "immediate"; pp_applied = [ "keeper" ]; pp_skipped = skipped }
-  ; prr_instructions = { D.pp_effect = "keeper_restart"; pp_applied = [ "analyst"; "sangsu" ]; pp_skipped = [] }
+  ; prr_instructions = { D.pp_effect = "keeper_restart"; pp_applied = [ "analyst"; "spruce" ]; pp_skipped = [] }
   ; prr_runtime = runtime
   }
 
@@ -78,7 +78,7 @@ let test_pane_row_and_detail () =
     [ "morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
     ; "before the campaign"
     ; "저장 시각 2026-09-03T10:26:08Z"
-    ; "지시문 analyst, sangsu"
+    ; "지시문 analyst, spruce"
     ]
     (Text.detail_lines ~selected:(Some morning) ~report:None);
   check (list string) "no selection says so"

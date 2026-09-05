@@ -191,7 +191,7 @@ let owner_absent_reported : (string, unit) Hashtbl.t = Hashtbl.create 4
 
 (* Same standing-condition discipline for a store we could not read: the
    durable work stays where it is either way, and the 2026-08-25
-   keeper-taskmaster-agent incident retried this ERROR 881 times in fifteen
+   stale-owner incident retried this ERROR 881 times in fifteen
    hours because every maintenance cycle re-visited the same unreadable
    owner. Say it once per process; the next distinct detail still logs. *)
 let owner_unknown_reported : (string, unit) Hashtbl.t = Hashtbl.create 4
@@ -294,7 +294,7 @@ let recover_projected_durable_demand_owner
           [Owner_absent] below already logs once per process for the same
           reason; an unreadable store deserves the same discipline, or one
           broken meta read repeats its ERROR every cycle (881 times for
-          keeper-taskmaster-agent on 2026-08-25). *)
+          one keeper on 2026-08-25). *)
        let once_key = keeper_name ^ "\000" ^ detail in
        if not (Hashtbl.mem owner_unknown_reported once_key) then (
          Hashtbl.add owner_unknown_reported once_key ();
@@ -307,7 +307,7 @@ let recover_projected_durable_demand_owner
           operator decision (register the name or remove the directory) that
           no maintenance cycle could make for it, so the recovery loop
           re-visited it every cycle -- 167/hour for one stale tenant queue on
-          2026-08-28, and 881 retained visits for keeper-taskmaster-agent on
+          2026-08-28, and 881 retained visits for one keeper on
           2026-08-25. Retention was the wrong default: the work can never
           execute under a name no keeper owns. Drain the pending entries now
           through the exact accepted-cancellation transition, say the outcome

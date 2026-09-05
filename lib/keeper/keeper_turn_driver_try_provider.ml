@@ -1318,7 +1318,7 @@ let thinking_was_enabled = function
    response is owed either way: accept judged it unusable, and a checkpoint
    that keeps it feeds it back as input on every later turn.
 
-   Measured on sangsu, 2026-09-03, with thinking off throughout: the model
+   Measured on a live keeper, 2026-09-03, with thinking off throughout: the model
    collapsed into one repeated word, accept rejected it at max_tokens, and
    message_assistant_text climbed 136 KB -> 308 KB over twelve turns, stepping
    30-40 KB on each collapse -- the size of the rejected text. Larger input

@@ -549,7 +549,7 @@ let test_an_addressed_row_says_who_sent_it_not_only_what_to_draw () =
     (is_operator (addressed ~surface:(surface "agent") "hi"));
   check bool "a named broadcast is not the operator" false
     (is_operator
-       (addressed ~speaker_authority:"external" ~speaker_name:"sangsu"
+       (addressed ~speaker_authority:"external" ~speaker_name:"spruce"
           ~surface:(surface "broadcast") "hi"));
   check bool "an unnamed external row is not the operator either" false
     (is_operator (addressed ~speaker_authority:"external" "hi"))

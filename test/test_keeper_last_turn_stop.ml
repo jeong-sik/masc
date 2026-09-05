@@ -37,7 +37,7 @@ let test_keys_do_not_cross_keepers_or_roots () =
   Cell.set ~base_path:"/t/root-a" ~keeper:"analyst"
     (Some (repeated_tool "keeper_artifact_read" 3));
   check bool "another keeper on the same root starts empty" true
-    (Cell.get ~base_path:"/t/root-a" ~keeper:"sangsu" = None);
+    (Cell.get ~base_path:"/t/root-a" ~keeper:"spruce" = None);
   check bool "the same name on another root starts empty" true
     (Cell.get ~base_path:"/t/root-b" ~keeper:"analyst" = None)
 ;;

@@ -758,7 +758,7 @@ let drain_owner_absent_pending_result ~base_path name ~applied_at ~reason =
      can make the wait productive -- the work can never execute until an
      operator registers the name. The observed outcome of retaining it was a
      913-error day for one stale tenant queue and 881 retained visits for
-     keeper-taskmaster-agent. Drain the pending entries now, through the same
+     one keeper. Drain the pending entries now, through the same
      exact accepted-cancellation transition, instead of re-visiting them
      every cycle. [pending_selections_result] refuses unregistered names, but
      an owner-absent queue is by definition unregistered, so this reads the

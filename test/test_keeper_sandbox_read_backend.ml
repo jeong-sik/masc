@@ -1176,13 +1176,13 @@ let test_docker_network_args_follow_masc_policy () =
 let network_row id = Printf.sprintf {|{"id":"%s","status":{}}|} id
 
 let present listing =
-  match Masc.Keeper_sandbox_microvm.policy_network_present ~listing with
+  match Masc.Keeper_sandbox_microvm.policy_network_present ~keeper_name:"probe" ~listing with
   | Ok answer -> answer
   | Error detail -> Alcotest.failf "expected the listing to decode: %s" detail
 ;;
 
 let test_the_policy_network_is_matched_by_id_not_substring () =
-  let name = Masc.Keeper_sandbox_microvm.policy_network_name in
+  let name = Masc.Keeper_sandbox_microvm.policy_network_name ~keeper_name:"probe" in
   Alcotest.(check bool) "an exact id matches" true
     (present (Printf.sprintf "[%s]" (network_row name)));
   Alcotest.(check bool) "a longer name does not" false
@@ -1200,7 +1200,8 @@ let test_undecodable_output_is_an_error_not_absence () =
   List.iter
     (fun (listing, label) ->
       Alcotest.(check bool) label true
-        (Result.is_error (Masc.Keeper_sandbox_microvm.policy_network_present ~listing)))
+        (Result.is_error
+           (Masc.Keeper_sandbox_microvm.policy_network_present ~keeper_name:"probe" ~listing)))
     [ "NETWORK  SUBNET\nmasc-egress-policy  192.168.128.0/24\n", "the human table is refused"
     ; "", "empty output is refused"
     ; "{\"id\":\"masc-egress-policy\"}", "a bare object is refused"
@@ -1216,6 +1217,7 @@ let test_a_policy_boot_without_its_proxy_is_refused () =
     Masc.Keeper_sandbox_microvm.network_args_for
       Masc.Keeper_microvm_backend.Apple_container
       ~dns:None
+      ~keeper_name:"probe"
       ~policy_proxy:None
       Keeper_types_profile_sandbox.Network_policy
   with
@@ -1233,6 +1235,7 @@ let test_a_policy_boot_points_the_guest_at_its_proxy () =
     Masc.Keeper_sandbox_microvm.network_args_for
       Masc.Keeper_microvm_backend.Apple_container
       ~dns:None
+      ~keeper_name:"probe"
       ~policy_proxy:(Some { Masc.Keeper_sandbox_microvm.gateway = "192.168.128.1"; port = 51234 })
       Keeper_types_profile_sandbox.Network_policy
   with
@@ -1240,8 +1243,9 @@ let test_a_policy_boot_points_the_guest_at_its_proxy () =
   | Ok args ->
     let joined = String.concat " " args in
     Alcotest.(check bool) "attached to the host-only network" true
-      (String_util.contains_substring joined
-         Masc.Keeper_sandbox_microvm.policy_network_name);
+      (String_util.contains_substring
+         joined
+         (Masc.Keeper_sandbox_microvm.policy_network_name ~keeper_name:"probe"));
     Alcotest.(check bool) "with no resolver of its own" true
       (List.mem "--no-dns" args);
     List.iter
@@ -1254,6 +1258,36 @@ let test_a_policy_boot_points_the_guest_at_its_proxy () =
        sees and cannot record. *)
     Alcotest.(check bool) "and no NO_PROXY exception list" false
       (String_util.contains_substring joined "NO_PROXY")
+
+(* Two keepers, two networks. A shared network plus a listener on every
+   interface let a guest reach a neighbour's proxy port through the common
+   gateway and go out under that keeper's allowlist, recorded as that keeper.
+   Measured 2026-09-05: separate [--internal] networks get separate subnets
+   and a guest on one cannot reach the other's gateway on any port. *)
+let test_each_keeper_gets_its_own_policy_network () =
+  let name keeper = Masc.Keeper_sandbox_microvm.policy_network_name ~keeper_name:keeper in
+  Alcotest.(check bool) "two keepers do not share a network" false
+    (String.equal (name "rondo") (name "sangsu"));
+  Alcotest.(check bool) "and the name says whose it is" true
+    (String_util.contains_substring (name "rondo") "rondo");
+  (* The boot attaches the guest to its own keeper's network and no other. *)
+  let args_for keeper =
+    match
+      Masc.Keeper_sandbox_microvm.network_args_for
+        Masc.Keeper_microvm_backend.Apple_container
+        ~dns:None
+        ~keeper_name:keeper
+        ~policy_proxy:
+          (Some { Masc.Keeper_sandbox_microvm.gateway = "192.168.128.1"; port = 51234 })
+        Keeper_types_profile_sandbox.Network_policy
+    with
+    | Ok args -> String.concat " " args
+    | Error detail -> Alcotest.failf "expected a policy boot, got %s" detail
+  in
+  Alcotest.(check bool) "rondo attaches to rondo's network" true
+    (String_util.contains_substring (args_for "rondo") (name "rondo"));
+  Alcotest.(check bool) "and not to sangsu's" false
+    (String_util.contains_substring (args_for "rondo") (name "sangsu"))
 
 (* The gateway is whatever container assigned the network, read rather than
    assumed: a compiled-in address is right until a host has a network on that
@@ -1278,7 +1312,7 @@ let test_only_the_policy_backend_has_a_policy_network () =
   Alcotest.(check bool) "apple_container answers" true
     (match
        Masc.Keeper_sandbox_microvm.policy_network_create_argv_for
-         Masc.Keeper_microvm_backend.Apple_container
+         Masc.Keeper_microvm_backend.Apple_container ~keeper_name:"probe"
      with
      | Ok argv -> List.mem "--internal" argv
      | Error _ -> false);
@@ -1286,7 +1320,7 @@ let test_only_the_policy_backend_has_a_policy_network () =
     (fun backend ->
       Alcotest.(check bool)
         (Masc.Keeper_microvm_backend.to_string backend ^ " refuses") true
-        (match Masc.Keeper_sandbox_microvm.policy_network_create_argv_for backend with
+        (match Masc.Keeper_sandbox_microvm.policy_network_create_argv_for backend ~keeper_name:"probe" with
          | Error _ -> true
          | Ok _ -> false))
     [ Masc.Keeper_microvm_backend.Microsandbox; Masc.Keeper_microvm_backend.Nerdctl_kata ]
@@ -2392,6 +2426,8 @@ let run_tests ~clock () =
             test_a_policy_boot_points_the_guest_at_its_proxy;
           Alcotest.test_case "the gateway is read from the network" `Quick
             test_the_gateway_is_read_from_the_network;
+          Alcotest.test_case "each keeper gets its own policy network" `Quick
+            test_each_keeper_gets_its_own_policy_network;
           Alcotest.test_case "docker nofile args follow config" `Quick
             test_docker_nofile_args_follow_config;
           Alcotest.test_case "docker MASC config binding pins paths" `Quick

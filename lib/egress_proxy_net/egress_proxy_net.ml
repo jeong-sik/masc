@@ -18,7 +18,11 @@ type event =
   ; outcome : outcome
   }
 
-let request_line_max_bytes = 8 * 1024
+(* The request line and the header block that follows it. A CONNECT authority
+   that needs more than this is not a hostname, and the cap is what keeps a
+   client from holding a fiber open by never sending the blank line. *)
+let request_head_max_bytes = 8 * 1024
+let request_line_max_bytes = request_head_max_bytes
 
 let resolve_upstream ~net ~host ~port =
   let name = Egress_host.to_string host in
@@ -32,26 +36,50 @@ let write_all flow text = Eio.Flow.copy_string text flow
 
 (* Both directions, and either close ends the pair. A half-closed tunnel
    would keep a fiber and a socket alive after the peer is gone, which on a
-   lane whose whole job is to bound reach is the wrong kind of leak. *)
+   lane whose whole job is to bound reach is the wrong kind of leak.
+
+   Cancellation is re-raised rather than swallowed. A bare [with _ -> ()]
+   here caught [Eio.Cancel.Cancelled] too, so a lane being torn down waited
+   on however long the tunnel lived -- and a keeper's shutdown joined on a
+   connection to somewhere else. *)
+let ignore_flow_error f =
+  try f () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | _ -> ()
+;;
+
 let splice ~client ~upstream =
   Eio.Fiber.both
     (fun () ->
-      (try Eio.Flow.copy client upstream with _ -> ());
-      try Eio.Flow.shutdown upstream `Send with _ -> ())
+      ignore_flow_error (fun () -> Eio.Flow.copy client upstream);
+      ignore_flow_error (fun () -> Eio.Flow.shutdown upstream `Send))
     (fun () ->
-      (try Eio.Flow.copy upstream client with _ -> ());
-      try Eio.Flow.shutdown client `Send with _ -> ())
+      ignore_flow_error (fun () -> Eio.Flow.copy upstream client);
+      ignore_flow_error (fun () -> Eio.Flow.shutdown client `Send))
 ;;
 
 let handle_connection ~net ~clock ~keeper_name ~rules ~on_event ~read_timeout_s flow =
   let emit outcome = on_event { keeper_name; at = Unix.gettimeofday (); outcome } in
   let read_request_line () =
-    (* The timeout is on reading the line, not on the tunnel: a client that
+    (* The whole request head, not just its first line. A CONNECT carries a
+       header block ending in a blank line, and splicing with those still
+       unread put them into the upstream stream ahead of the client's TLS
+       ClientHello -- which upstream reads as a malformed handshake, on a
+       schedule that depends on how the client segmented its write.
+
+       The timeout covers reading the head, not the tunnel: a client that
        connects and says nothing must not hold the fiber, while an admitted
        tunnel is allowed to be long-lived. *)
     Eio.Time.with_timeout clock read_timeout_s (fun () ->
-      let reader = Eio.Buf_read.of_flow flow ~max_size:request_line_max_bytes in
-      Ok (Eio.Buf_read.line reader, reader))
+      let reader = Eio.Buf_read.of_flow flow ~max_size:request_head_max_bytes in
+      let request_line = Eio.Buf_read.line reader in
+      let rec consume_headers () =
+        match Eio.Buf_read.line reader with
+        | "" | "\r" -> ()
+        | _ -> consume_headers ()
+      in
+      consume_headers ();
+      Ok (request_line, reader))
   in
   match read_request_line () with
   | Error `Timeout ->
@@ -61,9 +89,9 @@ let handle_connection ~net ~clock ~keeper_name ~rules ~on_event ~read_timeout_s 
     emit
       (Unreadable
          { detail =
-             Printf.sprintf "request line over %d bytes" request_line_max_bytes
+             Printf.sprintf "request head over %d bytes" request_head_max_bytes
          })
-  | Ok (request_line, _reader) ->
+  | Ok (request_line, reader) ->
     let decision = Egress_proxy_decision.decide ~rules ~request_line in
     (match decision with
      | Egress_proxy_decision.Refused refusal ->
@@ -96,6 +124,18 @@ let handle_connection ~net ~clock ~keeper_name ~rules ~on_event ~read_timeout_s 
               emit (Admitted { host = host_text; port });
               (try write_all flow (Egress_proxy_decision.response_of_decision decision) with
                | _ -> ());
+              (* Whatever the reader buffered past the blank line is already
+                 the tunnel's first bytes -- a client that writes its head and
+                 its ClientHello in one segment leaves them here. Dropping
+                 them stalls the handshake; the splice below reads from the
+                 flow and would never see them. *)
+              (try
+                 let buffered = Eio.Buf_read.peek reader in
+                 if Cstruct.length buffered > 0
+                 then (
+                   Eio.Flow.copy_string (Cstruct.to_string buffered) upstream;
+                   Eio.Buf_read.consume reader (Cstruct.length buffered))
+               with _ -> ());
               splice ~client:flow ~upstream)))
 ;;
 

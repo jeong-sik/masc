@@ -28,7 +28,7 @@ let probe_mount_args =
 (* Apple's runtime can spell both modes, so a refusal here is a defect in the
    fixture rather than a case the boot argv tests are about. *)
 let apple_network_args ~dns network =
-  match M.network_args_for Backend.Apple_container ~dns ~policy_proxy:None network with
+  match M.network_args_for Backend.Apple_container ~dns ~keeper_name:"probe" ~policy_proxy:None network with
   | Ok args -> args
   | Error detail ->
     Alcotest.failf "Apple's runtime refused a network mode it can spell: %s" detail

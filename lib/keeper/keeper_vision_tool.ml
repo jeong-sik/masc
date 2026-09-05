@@ -420,7 +420,7 @@ let run_vision
          | Error msg -> Vo_invalid_request msg
          | Ok media_type ->
            let media_type, bytes =
-             Keeper_vision_downscale.downscale_if_needed ~media_type ~bytes
+             Keeper_vision_downscale.downscale_if_needed ~media_type ~bytes ()
            in
            (match
               Va.make_request ~query ~image_media_type:media_type

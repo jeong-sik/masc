@@ -119,7 +119,7 @@ let test_needs_downscale () =
 let test_downscale_with_status_within_bounds () =
   let bytes = gif_header 800 600 in
   let (out_mt, out_bytes), status =
-    Vd.downscale_with_status ~max_dimension:1568 ~media_type:"image/gif" ~bytes
+    Vd.downscale_with_status ~max_dimension:1568 ~media_type:"image/gif" ~bytes ()
   in
   check string "same media type" "image/gif" out_mt;
   check string "identical bytes" bytes out_bytes;
@@ -131,7 +131,7 @@ let test_downscale_with_status_within_bounds () =
 let test_downscale_with_status_unknown () =
   let bytes = "random_unparseable_bytes" in
   let (out_mt, out_bytes), status =
-    Vd.downscale_with_status ~max_dimension:1568 ~media_type:"image/png" ~bytes
+    Vd.downscale_with_status ~max_dimension:1568 ~media_type:"image/png" ~bytes ()
   in
   check string "same media type" "image/png" out_mt;
   check string "identical bytes" bytes out_bytes;
@@ -169,7 +169,7 @@ let test_downscale_oversized_png_live () =
     | Error (`Msg msg) -> failwith ("fixture b64 decode failed: " ^ msg)
   in
   let (out_mt, out_bytes), status =
-    Vd.downscale_with_status ~max_dimension:1568 ~media_type:"image/png" ~bytes
+    Vd.downscale_with_status ~max_dimension:1568 ~media_type:"image/png" ~bytes ()
   in
   match status with
   | Vd.Downscaled { original_dims; scaled_dims; scaler = _ } ->

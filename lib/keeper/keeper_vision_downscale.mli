@@ -54,6 +54,7 @@ val downscale_with_status
   :  ?max_dimension:int
   -> media_type:string
   -> bytes:string
+  -> unit
   -> (string * string) * downscale_status
 (** Attempt downscaling. Returns [((media_type, bytes), status)].
     Original [(media_type, bytes)] is preserved on any failure or when bounds are met. *)
@@ -62,5 +63,6 @@ val downscale_if_needed
   :  ?max_dimension:int
   -> media_type:string
   -> bytes:string
+  -> unit
   -> string * string
 (** Shorthand returning [(media_type, bytes)]. *)

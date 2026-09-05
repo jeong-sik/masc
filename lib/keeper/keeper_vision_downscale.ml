@@ -251,7 +251,11 @@ let record_downscale ~result ~reason =
     ()
 ;;
 
-let downscale_with_status ?max_dimension:max_dim_opt ~media_type ~bytes =
+(* The trailing unit is what lets [?max_dimension] be erased. Without it every
+   remaining parameter is labelled, so the compiler cannot tell a partial
+   application from a complete one and warning 16 fires -- at the definition
+   and again at each call that omits the optional. *)
+let downscale_with_status ?max_dimension:max_dim_opt ~media_type ~bytes () =
   try
     let max_dim = Option.value max_dim_opt ~default:(max_dimension ()) in
     match detect_dimensions bytes with
@@ -284,7 +288,7 @@ let downscale_with_status ?max_dimension:max_dim_opt ~media_type ~bytes =
     ((media_type, bytes), Downscale_fallback_error (Scaler_exception msg))
 ;;
 
-let downscale_if_needed ?max_dimension ~media_type ~bytes =
-  let result, _ = downscale_with_status ?max_dimension ~media_type ~bytes in
+let downscale_if_needed ?max_dimension ~media_type ~bytes () =
+  let result, _ = downscale_with_status ?max_dimension ~media_type ~bytes () in
   result
 ;;

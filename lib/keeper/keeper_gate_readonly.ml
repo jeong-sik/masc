@@ -300,11 +300,33 @@ let inert_env_assignment_names =
   [ "NO_COLOR"; "CLICOLOR"; "CLICOLOR_FORCE"; "TERM"; "TZ"; "LANG"; "LC_ALL" ]
 ;;
 
+(* [true] when every assignment the command carries is inert. The names are
+   on the closed list above, and [TZ] additionally requires a value that is
+   not a tzfile reference: glibc treats a value starting with [:] (or any
+   value containing [/]) as a path to open and parse as a timezone file,
+   which turns [TZ=:/etc/passwd git log] into a file-existence oracle. A
+   bare zone name ([UTC], [Asia/Seoul] is POSIX form, but a value with [/]
+   could also be a path) — so the guard is: reject [:] prefix and [/]. *)
+let env_assignment_inert (name : string) (value : string) : bool =
+  match name with
+  | "TZ" ->
+    (* Zone abbreviations like [UTC] or [EST5EDT] are inert; anything that
+       could name a file is not. *)
+    not (String.length value > 0 && value.[0] = ':')
+    && not (String.contains value '/')
+  | name -> List.mem name inert_env_assignment_names
+;;
+
 (* [true] when every assignment the command carries is inert — the names
-   are on the closed list above, whatever their values. *)
+   are on the closed list above, whatever their values, except [TZ] whose
+   value must not be a tzfile reference (see [env_assignment_inert]). *)
 let env_assignments_inert (env : (string * Ir.arg) list) : bool =
   List.for_all
-    (fun (name, _) -> List.mem name inert_env_assignment_names)
+    (fun (name, value) ->
+      match value with
+      | Ir.Lit (v, _) -> env_assignment_inert name v
+      | Ir.Concat _ -> false
+      | Ir.Var _ -> false)
     env
 ;;
 

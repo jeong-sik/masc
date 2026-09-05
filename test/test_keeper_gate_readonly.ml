@@ -427,7 +427,15 @@ let test_script_classification_unit () =
   judged "unknown assignment name" "FOO=1 gh pr list";
   judged "PATH assignment" "PATH=. ls";
   judged "git external diff assignment" "GIT_EXTERNAL_DIFF=cat git diff";
-  judged "inert assignments alone are not a command" "NO_COLOR=1"
+  judged "inert assignments alone are not a command" "NO_COLOR=1";
+  (* [TZ] whose value could name a tzfile is not inert: glibc opens a
+     value starting with [:] (or containing [/]) as a timezone file, so
+     [TZ=:/etc/passwd git log] would be a file-existence oracle riding
+     the observation fast path. The value guard sends it to the judge
+     (code-reviewer HOLD, 2026-09-05). *)
+  judged "TZ tzfile reference via colon" "TZ=:/etc/passwd git log";
+  judged "TZ tzfile reference via slash" "TZ=/etc/localtime git log";
+  observation "TZ zone abbreviation stays inert" "TZ=UTC git log"
 ;;
 
 let test_observation_scripts_pass_the_table () =

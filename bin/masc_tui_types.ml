@@ -3026,6 +3026,7 @@ type state = {
   board_draft: Buffer.t;
   mutable board_compose_armed: bool;
   mutable board_compose_reply_to: string option;
+  mutable board_compose_hearth: string option;
   (* One send at a time: the gate a slow server needs so s-s cannot post
      the same draft twice, and the completion knows it owns the clear. *)
   mutable board_post_inflight: bool;
@@ -4110,6 +4111,7 @@ let create_state
   board_draft = Buffer.create 256;
   board_compose_armed = false;
   board_compose_reply_to = None;
+  board_compose_hearth = None;
   board_post_inflight = false;
   board_post_error = None;
   board_vote_armed = None;

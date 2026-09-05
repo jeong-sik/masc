@@ -828,6 +828,18 @@
  (libraries masc_tui_types))
 
 (library
+ (name masc_tui_board_composer)
+ (wrapped false)
+ (modules masc_tui_board_composer)
+ (libraries
+  masc_tui_types
+  masc_tui_board_hearth
+  masc_tui_message_layout
+  masc_tui_ansi
+  masc_tui_theme
+  masc.board_addressing))
+
+(library
  (name masc_tui_terminal_write_repair)
  (wrapped false)
  (modules masc_tui_terminal_write_repair)
@@ -1140,6 +1152,8 @@
   masc_tui_magnitude
   masc_tui_board_comment_thread
   masc_tui_board_hearth
+  masc_tui_board_composer
+  masc.board_addressing
   masc_tui_board_selection
   masc_tui_board_score
   masc_tui_model_runtime_table

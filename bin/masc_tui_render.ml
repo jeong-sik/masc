@@ -51,6 +51,8 @@ type memory_state = Render_memory.memory_state =
   | Memory_starving
   | Memory_read_error
 
+module Board_composer = Masc_tui_board_composer
+
 let json_assoc_member_opt = Masc_tui_json.member_opt
 
 (* Every surface lays out against a viewport one row shorter than the
@@ -2900,25 +2902,40 @@ let board_score_style votes =
 let render_board_compose (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
+  let draft_content = Buffer.contents state.board_draft in
+  let draft_chars = String.length draft_content in
+  let raw_lines = String.split_on_char '\n' draft_content in
+  let line_count = List.length raw_lines in
   let kind_line =
     match state.board_compose_reply_to with
     | Some post_id ->
-        Printf.sprintf "  comment on %s  Enter: new line"
+        Printf.sprintf "  comment on %s  Enter: newline  Ctrl-E: $EDITOR"
           (fit_width (Terminal_text.single_line post_id) 16)
-    | None -> "  first line: title   rest: body   Enter: new line"
+    | None ->
+        let hearth_label =
+          match state.board_compose_hearth with
+          | Some h -> "#" ^ h
+          | None -> "(default)"
+        in
+        Printf.sprintf "  first line: title  rest: body  hearth: %s  Enter: newline  Ctrl-E: $EDITOR"
+          hearth_label
   in
-  let header = Printf.sprintf "%s  %s[%s]%s  %s"
+  let header = Printf.sprintf "%s  %s[%s]%s  %s  %s(%d lines, %d chars)%s"
     (screen_title " MASC Board")
     (Masc_tui_theme.tone Masc_tui_theme.Accent)
     (match state.board_compose_reply_to with
      | Some _ -> "reply" | None -> "new post")
     Ansi.reset
     (connection_badge state)
+    Ansi.dim line_count draft_chars Ansi.reset
   in
+  let addressing_kind = Board_composer.analyze_addressing draft_content in
+  let addressing_line = Board_composer.format_addressing_hint ~max_cells:cols addressing_kind in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   box_line buf cols (Ansi.dim ^ kind_line ^ Ansi.reset);
+  box_line buf cols addressing_line;
   (match state.board_post_error with
    | Some err ->
        box_line buf cols
@@ -2929,13 +2946,15 @@ let render_board_compose (state : state) =
   box_divider buf cols;
   let text_width = max 10 (cols - 8) in
   let draft_lines =
-    String.split_on_char '\n' (Buffer.contents state.board_draft)
+    raw_lines
     |> List.concat_map (fun line ->
-           Message_layout.wrap_words ~max_cells:text_width
-             (Terminal_text.single_line line))
+           let w = Message_layout.wrap_words ~max_cells:text_width
+             (Terminal_text.single_line line) in
+           if w = [] then [ "" ] else w)
   in
   let error_rows = if Option.is_some state.board_post_error then 1 else 0 in
-  let content_height = max 1 (rows - 8 - error_rows) in
+  let chrome_top_rows = 5 + error_rows in
+  let content_height = max 1 (rows - (chrome_top_rows + 3)) in
   let visible_lines =
     let total = List.length draft_lines in
     if total > content_height then
@@ -2952,15 +2971,29 @@ let render_board_compose (state : state) =
   box_bottom buf cols;
   let prompt =
     if state.board_compose_armed then
-      "s:send  d:discard  esc:keep writing"
+      let hearth_hint =
+        if Option.is_none state.board_compose_reply_to then "  h:cycle hearth"
+        else ""
+      in
+      Printf.sprintf "s:send  e:edit in $EDITOR%s  d:discard  esc:keep writing" hearth_hint
     else
-      "type to write  esc:send or discard  Tab:surfaces  q:quit"
+      "type to write  Ctrl-E:$EDITOR  esc:menu  Tab:surfaces  q:quit"
   in
-  (* footer_line, not a hand-rolled dim line: the status tail (port, build,
-     worktree/generation warnings) must reach this surface too. *)
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:prompt);
-  finish_frame_with_strip state ~surface_key:"board-compose" ~cursor:Frame_presenter.Hidden ~rows
+  let cursor =
+    if state.board_compose_armed then
+      Frame_presenter.Hidden
+    else
+      let (row, column) =
+        Board_composer.compute_caret_position
+          ~chrome_top_rows:(chrome_top_rows + 1)
+          ~cols ~visible_lines
+      in
+      Frame_presenter.Visible_at { row = min (rows - 2) row; column }
+  in
+  finish_frame_with_strip state ~surface_key:"board-compose" ~cursor ~rows
     ~cols buf
+
 
 (* Rows the Board list spends before any post: the box, its title and the
    hearth census under it, the column header and its rule, then the closing

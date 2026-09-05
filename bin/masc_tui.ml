@@ -25,6 +25,7 @@ let report_editor_abort state ~action ?cancelled (abort : Masc_tui_editor.abort)
 module Approval = Masc_tui_operator_projection
 module Board_detail = Masc_tui_board_detail
 module Board_hearth = Masc_tui_board_hearth
+module Board_composer = Masc_tui_board_composer
 module Board_selection = Masc_tui_board_selection
 module Frame_presenter = Masc_tui_frame_presenter
 module Approval_authority = Masc_tui_approval_authority
@@ -8049,16 +8050,12 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
    buffer covering title and body. Trimming the title keeps a draft whose
    first line has stray spaces publishable without surprising the operator. *)
 let split_board_draft (text : string) : string * string =
-  match String.index_opt text '\n' with
-  | None -> (String.trim text, "")
-  | Some idx ->
-      ( String.trim (String.sub text 0 idx)
-      , String.sub text (idx + 1) (String.length text - idx - 1) )
+  Board_composer.split_draft text
 
 (* Post the draft through the tools endpoint. Runs in a fiber like a keeper
    action: the compose pane must keep accepting keys while the request is
    out, and the outcome lands in the same mailbox everything else does. *)
-let start_board_post state ~mailbox ~(title : string) ~(body : string) =
+let start_board_post state ~mailbox ~(title : string) ~(body : string) ?hearth () =
   state.board_post_error <- None;
   state.board_post_inflight <- true;
   add_event state "system" "posting to Board";
@@ -8069,7 +8066,7 @@ let start_board_post state ~mailbox ~(title : string) ~(body : string) =
   let port = state.port in
   let run_post () =
     let result =
-      match Masc_tui_http.post_board_new ~host ~port ~title ~body with
+      match Masc_tui_http.post_board_new ~host ~port ~title ~body ?hearth () with
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
     in
@@ -8079,6 +8076,7 @@ let start_board_post state ~mailbox ~(title : string) ~(body : string) =
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork ~sw run_post
   | None -> run_post ()
+
 
 (* Request a goal lifecycle change through the tools route. Runs in a fiber
    like the other writes; the outcome lands in the shared mailbox and the
@@ -8450,13 +8448,76 @@ let handle_verification_approve_key state ~mailbox =
           add_event state "system"
             (Printf.sprintf "press a again to approve %s" task_id))
 
-let handle_board_compose_key state ~mailbox (key : string) : bool =
+let open_board_composer_editor state ~restore ~reenter =
+  match Masc_tui_editor.editor_command () with
+  | None ->
+      state.board_post_error <- Some "no $EDITOR set; export EDITOR to edit draft";
+      state.board_compose_armed <- false;
+      add_event state "error" "no $EDITOR set; export EDITOR to edit draft"
+  | Some _ -> (
+      let current_draft = Buffer.contents state.board_draft in
+      let stem =
+        if String.length (String.trim current_draft) > 0 then current_draft
+        else if Option.is_none state.board_compose_reply_to then
+          Board_composer.template_for_new_post ()
+        else
+          ""
+      in
+      match
+        Masc_tui_editor.roundtrip ~restore ~reenter ~suffix:".md" stem
+      with
+      | Error abort ->
+          report_editor_abort state ~action:"Board compose"
+            ~cancelled:"Board draft unchanged" abort;
+          state.board_compose_armed <- false
+      | Ok edited ->
+          let trimmed = String.trim edited in
+          if Board_composer.is_untouched_template ~draft:trimmed
+             && String.length (String.trim current_draft) = 0 then begin
+            state.board_compose_armed <- false;
+            add_event state "system" "Board compose cancelled (empty draft)"
+          end else begin
+            Buffer.clear state.board_draft;
+            Buffer.add_string state.board_draft trimmed;
+            state.board_compose_armed <- false;
+            state.board_post_error <- None;
+            add_event state "system" "Board draft updated from editor"
+          end )
+;;
+
+let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : bool =
   if
     state.board_compose_armed
     && not
-         (List.mem key [ "s"; "S"; "d"; "D"; "esc" ])
+         (List.mem key [ "s"; "S"; "d"; "D"; "e"; "E"; "h"; "H"; "esc" ])
   then state.board_compose_armed <- false;
   match key with
+  | "\005" -> (
+      match restore, reenter with
+      | Some r, Some re ->
+          open_board_composer_editor state ~restore:r ~reenter:re;
+          true
+      | _ ->
+          state.board_post_error <- Some "external editor not available here";
+          true )
+  | "e" | "E" when state.board_compose_armed -> (
+      match restore, reenter with
+      | Some r, Some re ->
+          open_board_composer_editor state ~restore:r ~reenter:re;
+          true
+      | _ ->
+          state.board_post_error <- Some "external editor not available here";
+          true )
+  | "h" | "H" when state.board_compose_armed && Option.is_none state.board_compose_reply_to ->
+      state.board_compose_hearth <-
+        Board_hearth.next ~current:state.board_compose_hearth
+          ~census:state.board_hearths;
+      state.board_compose_armed <- false;
+      add_event state "system"
+        (match state.board_compose_hearth with
+         | Some h -> "Board target hearth set to #" ^ h
+         | None -> "Board target hearth set to default");
+      true
   | "esc" ->
       state.board_compose_armed <- not state.board_compose_armed;
       true
@@ -8494,11 +8555,13 @@ let handle_board_compose_key state ~mailbox (key : string) : bool =
               true
           | _ ->
               state.board_compose_armed <- false;
-              start_board_post state ~mailbox ~title ~body;
+              start_board_post state ~mailbox ~title ~body
+                ?hearth:state.board_compose_hearth ();
               true )
   | "d" | "D" when state.board_compose_armed ->
       Buffer.clear state.board_draft;
       state.board_compose_armed <- false;
+      state.board_compose_hearth <- None;
       state.board_post_error <- None;
       (match state.board_compose_reply_to with
        | Some post_id -> state.board_mode <- Board_read post_id
@@ -9219,6 +9282,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             Buffer.clear state.board_draft;
             state.board_compose_armed <- false;
             state.board_compose_reply_to <- None;
+            state.board_compose_hearth <- None;
             state.board_post_error <- None;
             match reply_to with
             | Some post_id -> state.board_mode <- Board_read post_id
@@ -14442,7 +14506,10 @@ and is loaded on demand through keeper_skill.
               printable keys belong to the draft. A key the handler declines
               (Tab) keeps its global meaning, so the cycle works mid-compose
               as this comment always claimed. *)
-           let handled = handle_board_compose_key state ~mailbox:async_messages k in
+           let handled =
+             handle_board_compose_key state ~mailbox:async_messages
+               ~restore:restore_terminal ~reenter:reenter_terminal k
+           in
            if not handled then
              (match k with
               | "\t" | "shift-tab" ->
@@ -16993,6 +17060,7 @@ and is loaded on demand through keeper_skill.
                 state.board_mode <- Board_compose;
                 state.board_compose_armed <- false;
                 state.board_compose_reply_to <- Some post_id;
+                state.board_compose_hearth <- None;
                 state.board_post_error <- None
             | Board_list | Board_compose -> ())
        | Some "v" | Some "V" when state.view = Board ->
@@ -17408,6 +17476,7 @@ and is loaded on demand through keeper_skill.
                      state.board_mode <- Board_compose;
                      state.board_compose_armed <- false;
                      state.board_compose_reply_to <- None;
+                     state.board_compose_hearth <- state.board_hearth;
                      state.board_post_error <- None
                  | Board_read _ | Board_compose -> ())
             | Keepers (Keeper_list | Keeper_detail) ->

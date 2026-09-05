@@ -263,7 +263,7 @@ let test_memory_footer_offers_the_fact_browser () =
 
 let test_memory_facts_footer_names_filter_and_way_back () =
   check str "the browser names movement, the category cycle, and Esc"
-    "j/k:move  c:category  Esc:health  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  c / C:category  s:sort  /:filter  n / N:next / previous match  Esc:close / clear  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_memory_facts
 
 let sample_memory_fact ~category ~claim : Tui_decode.memory_fact =
@@ -312,38 +312,48 @@ let memory_state_with_facts () =
       };
   state
 
+let category_filter_testable =
+  let pp fmt = function
+    | Category_all -> Format.pp_print_string fmt "Category_all"
+    | Category_ordinary s -> Format.fprintf fmt "Category_ordinary %S" s
+    | Category_source -> Format.pp_print_string fmt "Category_source"
+    | Category_dropped -> Format.pp_print_string fmt "Category_dropped"
+  in
+  Alcotest.testable pp ( = )
+
 let test_memory_fact_rows_follow_the_category_filter () =
   let state = memory_state_with_facts () in
   Alcotest.(check int) "All lists both stores plus the drops" 4
     (List.length (memory_fact_rows state));
-  state.memory_facts_category <- Some "lesson";
+  state.memory_facts_category <- Category_ordinary "lesson";
   (match memory_fact_rows state with
-   | [ Memory_row_fact fact
-     ; Memory_row_source_fact _
-     ; Memory_row_invalidation _
-     ] ->
+   | [ Memory_row_fact fact ] ->
        check str "the filter narrows ordinary facts only" "a"
          fact.Tui_decode.mf_claim
    | rows ->
        Alcotest.fail
          (Printf.sprintf "unexpected filtered shape (%d rows)"
             (List.length rows)));
-  Alcotest.(check (list string)) "categories are the loaded ones, sorted"
-    [ "blocker"; "lesson" ]
+  Alcotest.(check (list category_filter_testable)) "categories are the loaded ones, sorted"
+    [ Category_ordinary "blocker"
+    ; Category_ordinary "lesson"
+    ; Category_source
+    ; Category_dropped
+    ]
     (memory_fact_categories state)
 
 let test_memory_category_cycle_returns_to_all () =
-  let categories = [ "blocker"; "lesson" ] in
-  Alcotest.(check (option string)) "All steps to the first" (Some "blocker")
-    (next_memory_category None categories);
-  Alcotest.(check (option string)) "then to the next" (Some "lesson")
-    (next_memory_category (Some "blocker") categories);
-  Alcotest.(check (option string)) "the last returns to All" None
-    (next_memory_category (Some "lesson") categories);
-  Alcotest.(check (option string)) "a vanished category restarts at All" None
-    (next_memory_category (Some "gone") categories);
-  Alcotest.(check (option string)) "no categories keeps All" None
-    (next_memory_category None [])
+  let categories = [ Category_ordinary "blocker"; Category_ordinary "lesson" ] in
+  Alcotest.(check category_filter_testable) "All steps to the first" (Category_ordinary "blocker")
+    (next_memory_category Category_all categories);
+  Alcotest.(check category_filter_testable) "then to the next" (Category_ordinary "lesson")
+    (next_memory_category (Category_ordinary "blocker") categories);
+  Alcotest.(check category_filter_testable) "the last returns to All" Category_all
+    (next_memory_category (Category_ordinary "lesson") categories);
+  Alcotest.(check category_filter_testable) "a vanished category restarts at All" Category_all
+    (next_memory_category (Category_ordinary "gone") categories);
+  Alcotest.(check category_filter_testable) "no categories keeps All" Category_all
+    (next_memory_category Category_all [])
 
 let test_git_changes_footer_names_only_changed_file_actions () =
   check str "Git changes has one shared row footer"

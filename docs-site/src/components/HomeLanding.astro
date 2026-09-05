@@ -8,16 +8,16 @@ const isKo = lang === 'ko';
 
 const t = {
   tagline: isKo
-    ? "독립된 Keeper 에이전트와 IDE(Claude Code, Cursor)를 연결하는 로컬 퍼스트 하네스"
-    : "Local-first shared workspace and execution harness for autonomous coding agents.",
+    ? "여러 코딩 에이전트가 함께 쓰는 로컬 작업 공간"
+    : "A local workspace shared by several coding agents.",
   copyCommand: "./quickstart.sh",
 
   // Tabs for real screenshot
-  tab1: isKo ? "1. 개요 (Overview)" : "1. Overview",
-  tab2: isKo ? "2. 키퍼 (Keepers)" : "2. Keepers",
-  tab3: isKo ? "3. 런타임 (Lanes)" : "3. Lanes",
-  tab4: isKo ? "5. 승인 (Approvals)" : "5. Approvals",
-  tab5: isKo ? "6. 활동 (Activity)" : "6. Activity",
+  tab1: isKo ? "개요" : "Overview",
+  tab2: isKo ? "키퍼" : "Keepers",
+  tab3: isKo ? "런타임" : "Lanes",
+  tab4: isKo ? "승인" : "Approvals",
+  tab5: isKo ? "활동" : "Activity",
   screenCaption: isKo 
     ? "실제 터미널 런타임 캡처 (masc-tui · 2026-09-04 실측 133×28)" 
     : "Actual terminal capture from masc-tui (2026-09-04 live runtime 133×28)",
@@ -74,7 +74,6 @@ const t = {
   <header class="masthead">
     <div class="masthead-left">
       <div class="brand-row">
-        <span class="brand-name">MASC</span>
         <span class="brand-ver">v0.31.0</span>
         <span class="brand-sep">/</span>
         <span class="brand-tagline">{t.tagline}</span>
@@ -306,14 +305,6 @@ const t = {
     align-items: center;
     gap: 0.6rem;
     font-size: 0.875rem;
-  }
-
-  .brand-name {
-    font-family: var(--sl-font-mono, monospace);
-    font-weight: 800;
-    font-size: 1.125rem;
-    color: #d4a14a;
-    letter-spacing: 0.05em;
   }
 
   .brand-ver {

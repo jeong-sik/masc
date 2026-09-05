@@ -5,15 +5,15 @@
 (name masc)
 (version 0.31.0)
 
-; Format OCaml, and only OCaml. CI's formatting check runs ocamlformat over
-; **/*.ml and **/*.mli (.github/workflows/ocamlformat.yml) and says nothing
-; about dune files, but `dune fmt` formats every language it knows — so it
-; rewrote 18 dune files nobody checks, and the one blank line it added to
-; lib/dune pushed the structure ratchet's then line-count metric past its
-; baseline. The repo's own formatter broke the repo's own gate (#29253).
-; That metric now counts library modules rather than file lines, but scoping
-; formatting to the language CI enforces is still what makes `dune fmt`
-; agree with it.
+; Format OCaml, and only OCaml. Nothing enforces formatting today:
+; ocamlformat is disabled repo-wide (.ocamlformat, RFC-0010) and the
+; ocamlformat workflow this comment used to cite no longer exists. But
+; `dune fmt` formats every language it knows, so it rewrote 18 dune files
+; nobody checks, and the one blank line it added to lib/dune pushed the
+; structure ratchet's then line-count metric past its baseline. The repo's
+; own formatter broke the repo's own gate (#29253). That metric now counts
+; library modules rather than file lines, but scoping formatting to OCaml
+; alone is still what makes `dune fmt` safe to run.
 (formatting
  (enabled_for ocaml))
 

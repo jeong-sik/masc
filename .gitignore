@@ -65,6 +65,7 @@ figma-mcp-linux-x64
 .gemini/
 config/keeper.env
 logs/
+audits/*.jsonl
 
 # Campaign and deploy run outputs under reports/.
 # Hand-written audit reports live as single files directly in reports/ and stay

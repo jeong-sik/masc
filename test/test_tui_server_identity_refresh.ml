@@ -8,6 +8,10 @@ let identity base_path : Tui_decode.server_identity =
   ; sid_masc_root = base_path ^ "/.masc"
   ; sid_executable_in_worktree = Some false
   ; sid_state_ready = Some true
+  ; sid_uptime = None
+  ; sid_sse_clients = None
+  ; sid_gc = None
+  ; sid_scheduler = None
   }
 
 let test_same_endpoint_restart_replaces_a_with_b () =

@@ -8,6 +8,10 @@ let identity ~state_ready : Masc.Tui_decode.server_identity =
   ; sid_masc_root = "/tmp/base/.masc"
   ; sid_executable_in_worktree = None
   ; sid_state_ready = state_ready
+  ; sid_uptime = None
+  ; sid_sse_clients = None
+  ; sid_gc = None
+  ; sid_scheduler = None
   }
 ;;
 

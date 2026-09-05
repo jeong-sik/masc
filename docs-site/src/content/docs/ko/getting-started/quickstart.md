@@ -131,8 +131,9 @@ Keeper 는 MASC 가 직접 돌리는 에이전트입니다. 두 가지가 더 �
 - **모델 소스** — Keeper 가 한 턴을 돌릴 모델입니다. 가장 저렴한 방법은 API 키가
   필요 없는 로컬 모델입니다. Ollama 나 `llama-server` 를 띄우는 법은
   [로컬 AI 모델 연결](/ko/runbooks/llama-server/)을 보세요. 클라우드 프로바이더
-  (Anthropic, OpenAI, DeepSeek …)도 되고, 그 API 키는 1단계 마법사가
-  `.masc/config/.env.local` 에 저장합니다.
+  (Anthropic, OpenAI, DeepSeek …)도 됩니다. 그 API 키는 서버를 띄우는 셸에서
+  export 하세요. 변수 이름은 1단계 마법사가 알려 주고, 서버는 자기가 시작된
+  환경에서 그 값을 읽습니다.
 - **명령 격리(sandbox)** — Keeper 의 셸 명령은 여러분 기기가 아니라 격리된
   공간에서 돕니다. 격리가 없으면 MASC 는 Keeper 를 띄우지 않습니다. Docker 를
   설치하거나, Apple Silicon 이면 `container` CLI 를 씁니다.

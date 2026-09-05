@@ -124,8 +124,10 @@ command that starts it.
 
 After placing the binaries the installer runs a one-time setup wizard (skip it
 with `--no-wizard`). It reports what it detects on this host before writing
-anything, and the only files it writes are `.masc/config/.env.local` (one
-provider key) and `[runtime].default` in `runtime.toml`.
+anything, and the only thing it writes is `[runtime].default` in
+`runtime.toml`. It never asks for an API key and never stores one: the server
+resolves its credential from the environment it is started in, so that is where
+a key belongs and the only place the wizard checks.
 
 Two axes are reported. The **model source** is where turns get their tokens:
 
@@ -191,11 +193,12 @@ There is no host arm — the profiles are `docker`, `microvm` and `remote_ssh`
 only — so a host with no Docker, no `container`, and no SSH endpoint can run
 the workspace but cannot run a Keeper.
 
-**The provider key is not in the server's environment.** The wizard writes it
-to `.masc/config/.env.local`, and nothing reads that file for you: `source` it
-in the shell that starts the server. This is easy to miss on the TUI path,
-because the server the TUI starts with `s` inherits the TUI's environment — so
-source the file before launching the TUI, not after.
+**The provider key has to be in the server's environment.** `runtime.toml`
+names the variable per provider — `OLLAMA_CLOUD_API_KEY`, `DEEPSEEK_API_KEY`,
+and so on — and the server reads it from the environment it was started in.
+Export it in the shell you start `masc` from. On the TUI path this is easy to
+miss, because the server the TUI starts inherits the TUI's environment: export
+it before launching, not after.
 
 **Most of the seeded model catalog is not dispatchable.** The catalog ships 31
 provider/model bindings as documented examples; the 13 that declare
@@ -441,7 +444,6 @@ different config root.
 | `keepers/<name>.toml` | Everything one Keeper needs: operational settings, prompt instructions, and tool postures in `[keeper.tools]` |
 | `repositories.toml` | Registered repository identity and checkout metadata for repository workflows |
 | `keeper_repo_mappings.toml` | Keeper-to-repository preferences; these are defaults, not an authorization boundary |
-| `.env.local` | Provider environment variables written by current installer and quickstart flows |
 
 One directory below the same root is authored rather than generated:
 

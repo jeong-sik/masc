@@ -43,7 +43,7 @@ Default policy: every environment variable is `boot_static`. Live tuning goes th
 
 ### Provider API keys
 
-There is no fixed list: `[providers.<id>.credentials]` in `runtime.toml` (`type = "env"`, `key = "<name>"`) names the variable. The install and quickstart scripts write `.env.local` (mode 600).
+There is no fixed list: `[providers.<id>.credentials]` in `runtime.toml` (`type = "env"`, `key = "<name>"`) names the variable, and the server reads it from the environment it was started in. On a source checkout `quickstart.sh` writes `.env.local` (mode 600) and `start-masc.sh` loads it; a binary install has neither, so export the variable yourself.
 
 ## Rules for new environment variables
 

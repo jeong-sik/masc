@@ -40,6 +40,22 @@ let test_config () = Masc.Workspace.default_config voice_session_test_base
 
 let allow_external_effect ~operation:_ ~input:_ ~continue = continue ()
 
+(* The stdlib has no unsetenv, and [Unix.putenv key ""] leaves the variable
+   set to an empty string. The test dependency library carries a C stub for
+   the real call. *)
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
+let without_env key f =
+  let prior = Sys.getenv_opt key in
+  unsetenv key;
+  Fun.protect
+    ~finally:(fun () ->
+      match prior with
+      | Some v -> Unix.putenv key v
+      | None -> unsetenv key)
+    f
+;;
+
 let read_lines path =
   if not (Sys.file_exists path)
   then []
@@ -768,6 +784,52 @@ let with_voice_config_file contents f =
 
 let broken_config_json = "{ this is not json"
 
+(* A speak under a voice config that exists and does not parse. The Gate is
+   not asked: nothing can be played under that config, so a review would
+   approve nothing and hide why. The tool answers with the loader's reason,
+   the sentence the bridge writes, naming the key that did not parse.
+
+   [Voice_config.load_detailed] reads the config root's [runtime.toml]
+   [\[voice\]] section before the JSON file, and the root follows
+   MASC_BASE_PATH only while MASC_CONFIG_DIR is unset; the variable is
+   cleared so the config read is the one written here. *)
+let test_keeper_voice_speak_under_an_invalid_config_is_refused_without_review () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  let mono_clock = Eio.Stdenv.mono_clock env in
+  Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
+    without_env "MASC_CONFIG_DIR" @@ fun () ->
+    with_voice_config_file {|{ "capture": { "trigger_margin_db": "6" } }|} (fun () ->
+      let config = test_config () in
+      let meta = make_keeper_meta "voice-invalid-config-keeper" in
+      let refuse_review ~operation ~input:_ ~continue:_ =
+        fail ("the Gate was asked to review " ^ operation)
+      in
+      let raw =
+        Masc.Keeper_tool_voice_runtime.handle_voice_tool
+          ~config
+          ~meta
+          ~authorize_external_effect:refuse_review
+          ~name:"keeper_voice_speak"
+          ~args:(`Assoc [ "message", `String "hello under a config that does not parse" ])
+          ()
+      in
+      let json = Yojson.Safe.from_string raw in
+      check string "error status" "error"
+        Yojson.Safe.Util.(member "status" json |> to_string);
+      let message = Yojson.Safe.Util.(member "message" json |> to_string) in
+      check bool "the refusal is the loader's" true
+        (String_util.string_contains_substring ~needle:"voice config load failed" message);
+      check bool "and names the key that did not parse" true
+        (String_util.string_contains_substring
+           ~needle:"capture.trigger_margin_db"
+           message)))
+;;
+
 (* Valid config whose TTS/STT endpoints all fail deterministically without
    network: the API key env var is unset in the test process. *)
 let failover_config_json =
@@ -1108,6 +1170,10 @@ let () =
             "keeper_voice_speak surfaces TTS failure"
             `Quick
             test_keeper_voice_speak_surfaces_tts_failure
+        ; test_case
+            "keeper_voice_speak under an invalid config is refused without a Gate review"
+            `Quick
+            test_keeper_voice_speak_under_an_invalid_config_is_refused_without_review
         ; test_case
             "fallback speak reports no memory fields"
             `Quick

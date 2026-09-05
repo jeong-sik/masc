@@ -639,7 +639,7 @@ let test_an_unknown_capture_key_is_refused_by_name () =
   | Ok _ -> fail "a capture key the parser does not know must be refused"
   | Error message ->
     check bool "the rejection names the key" true
-      (String_util.string_contains_substring ~needle:"root.capture.trigger_margin" message)
+      (String_util.string_contains_substring ~needle:"capture.trigger_margin" message)
 ;;
 
 let test_a_capture_number_of_the_wrong_type_is_refused () =
@@ -651,7 +651,7 @@ let test_a_capture_number_of_the_wrong_type_is_refused () =
          check bool
            (Printf.sprintf "%s: the rejection names the key and the type wanted" key)
            true
-           (String_util.string_contains_substring ~needle:("root.capture." ^ key) message
+           (String_util.string_contains_substring ~needle:("capture." ^ key) message
             && String_util.string_contains_substring ~needle:"number" message))
     [ "trigger_margin_db", `String "6"
     ; "calibration_seconds", `Bool true
@@ -667,7 +667,7 @@ let test_a_capture_boolean_of_the_wrong_type_is_refused () =
   | Ok _ -> fail "a string where a boolean is meant must be refused"
   | Error message ->
     check bool "the rejection names the key and the type wanted" true
-      (String_util.string_contains_substring ~needle:"root.capture.noise_reduction" message
+      (String_util.string_contains_substring ~needle:"capture.noise_reduction" message
        && String_util.string_contains_substring ~needle:"boolean" message)
 ;;
 

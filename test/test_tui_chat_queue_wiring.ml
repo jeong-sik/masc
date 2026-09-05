@@ -1034,12 +1034,14 @@ let journal_log ~request_id ~started_at ?(finished = true) () =
   let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at in
   Tui_types.turn_log_add_journaled log
     ([ line 0 started_at (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" })
-     ; line 1 (started_at +. 0.1) (E.Text_delta "said") ]
+     ; line 1 (started_at +. 0.05)
+         (E.Agent_core_thinking_delta { index = 0; delta = "thought about it" })
+     ; line 2 (started_at +. 0.1) (E.Text_delta "said") ]
     @
     if finished
     then
-      [ line 2 (started_at +. 0.15) (journal_reply "said")
-      ; line 3 (started_at +. 0.2) (E.Run_finished { run_id = "r" }) ]
+      [ line 3 (started_at +. 0.15) (journal_reply "said")
+      ; line 4 (started_at +. 0.2) (E.Run_finished { run_id = "r" }) ]
     else []);
   Log.commit log.Tui_types.tl_log;
   log
@@ -1055,7 +1057,7 @@ let test_a_journal_read_resumes_after_a_partial_log () =
     (Tui_types.journal_resume_position state ~keeper_name:"alpha" "op-1");
   let partial = journal_log ~request_id:"op-1" ~started_at:1. ~finished:false () in
   Tui_types.hold_settled_log state partial;
-  check int "a partial log: after what it has" 1
+  check int "a partial log: after what it has" 2
     (Tui_types.journal_resume_position state ~keeper_name:"alpha" "op-1");
   check int "another keeper's record does not count" (-1)
     (Tui_types.journal_resume_position state ~keeper_name:"beta" "op-1");

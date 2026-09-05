@@ -1145,7 +1145,13 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                   ; structural_id = structural_id_of_fields fields "failure"
                   ; turn_sequence
                   ; turn_id
-                  ; operation_id
+                  ; (* The failure is the operation's: the key it was stored
+                       under names it even when the row carries no transcript
+                       slot for the provenance reader. *)
+                    operation_id =
+                      (match operation_id with
+                       | Some _ -> operation_id
+                       | None -> origin_request_id)
                   ; kind = Delivery_failed { origin_request_id; recovered_at = None }
                   ; text = content
                   ; attachments = []

@@ -418,8 +418,11 @@ let test_rows_carry_the_operation_id_only_for_direct_turns () =
              ~tool_call_name:"Read" "{}"
          ; row ~role:"assistant" ~delivery_key:key
              ~transcript_slot:(transcript_slot "terminal_assistant") "done"
-         ; row ~role:"system" ~kind:"transport_failure" ~delivery_key:key
-             ~transcript_slot:(transcript_slot "failure") "the wire dropped"
+           (* A failure row is stored under the operation's key and carries no
+              transcript slot, so the provenance reader gives it no turn id;
+              the operation id still comes from the key. *)
+         ; row ~role:"assistant" ~kind:"transport_failure" ~delivery_key:key
+             "the wire dropped"
          ; autonomous_turn ~turn_ref:"trace-1#54" [ reason "look"; tool "Read" ]
          ; row ~role:"user"
              ~delivery_key:(`Assoc [ "kind", `String "fusion_run"; "request_id", `String "fr-1" ])
@@ -432,7 +435,7 @@ let test_rows_carry_the_operation_id_only_for_direct_turns () =
     ; None; None; None ]
     (List.map (fun row -> row.History.operation_id) decoded.History.rows);
   check (list (option string)) "turn identity is unchanged beside it"
-    [ Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"
+    [ Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"; None
     ; Some "trace-1#54"; Some "trace-1#54"; Some "fr-1" ]
     (List.map (fun row -> row.History.turn_id) decoded.History.rows)
 ;;

@@ -10,6 +10,8 @@ type t =
   | Open_metrics
   | Open_settings
   | Open_diff
+  | Open_patch_modal
+  | Toggle_burn_hud
   | Open_changes
   | Toggle_acting_pane
   | Switch_keeper of string

@@ -1666,6 +1666,80 @@ let skills_catalog_json ?(usage = true) ?(flow = true) () =
               ] ] )
     ]
 
+(* The discovery roots ride the same response the surfaces do, and the
+   projection dropped them: a Skill that never loaded had nowhere on screen
+   to say which root was looked at, or that the root was not there. *)
+let test_decode_skills_catalog_reads_the_discovery_roots () =
+  let snapshot =
+    `Assoc
+      [ "snapshot_revision", `String "snapshot-rev1"
+      ; "catalog_revision", `String "catalog-rev1"
+      ; ( "config"
+        , `Assoc
+            [ "kind", `String "configured"
+            ; "revision", `String "4e96407eeb70ddd0"
+            ; "resource_read_max_bytes", `Int 65536
+            ] )
+      ; ( "sources"
+        , `List
+            [ `Assoc
+                [ "id", `String "project-masc"
+                ; "anchor", `String "base-path"
+                ; "path", `String ".masc/skills"
+                ; "access", `String "read-write"
+                ; ( "observation"
+                  , `Assoc
+                      [ "kind", `String "ready"; "candidates", `Int 13 ] )
+                ]
+            ; `Assoc
+                [ "id", `String "user-agents"
+                ; "anchor", `String "user-home"
+                ; "path", `String ".agents/skills"
+                ; "access", `String "read-only"
+                ; "observation", `Assoc [ "kind", `String "missing" ]
+                ]
+            ] )
+      ; "skills", `List []
+      ; "effective_skills", `List []
+      ; "shadows", `List []
+      ; "rejections", `List []
+      ]
+  in
+  let payload =
+    `Assoc
+      [ "schema", `String "masc.skill-snapshot/v1"
+      ; "state", `String "ready"
+      ; "snapshot", snapshot
+      ; "surfaces", `List []
+      ]
+  in
+  match Tui_decode.decode_skills_catalog payload with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok catalog ->
+    (match catalog.Tui_decode.sc_config with
+     | Some
+         (Tui_decode.Skill_config_configured
+            { revision; resource_read_max_bytes }) ->
+       Alcotest.(check string) "config revision" "4e96407eeb70ddd0" revision;
+       Alcotest.(check (option int))
+         "resource read cap" (Some 65536) resource_read_max_bytes
+     | _ -> Alcotest.fail "a configured Skill section was read as something else");
+    (match catalog.Tui_decode.sc_sources with
+     | [ first; second ] ->
+       Alcotest.(check string) "first root" "project-masc" first.Tui_decode.scso_id;
+       Alcotest.(check (option string))
+         "first path" (Some ".masc/skills") first.Tui_decode.scso_path;
+       Alcotest.(check string)
+         "first access" "read-write" first.Tui_decode.scso_access;
+       Alcotest.(check bool) "first is ready with its candidate count" true
+         (first.Tui_decode.scso_observation = Tui_decode.Skill_source_ready 13);
+       (* A root that is not there is the answer to "why is my Skill not
+          loaded", so it has to survive the projection too. *)
+       Alcotest.(check bool) "second is missing" true
+         (second.Tui_decode.scso_observation = Tui_decode.Skill_source_missing)
+     | sources ->
+       Alcotest.failf "expected both roots, got %d" (List.length sources))
+
 let test_decode_skills_catalog_reads_usage_and_flow () =
   match Tui_decode.decode_skills_catalog (skills_catalog_json ()) with
   | Error err -> Alcotest.failf "decode failed: %s" err
@@ -7870,6 +7944,8 @@ let () =
       [
         Alcotest.test_case "reads usage rows and the execution flow" `Quick
           test_decode_skills_catalog_reads_usage_and_flow;
+        Alcotest.test_case "reads the discovery roots and the config" `Quick
+          test_decode_skills_catalog_reads_the_discovery_roots;
         Alcotest.test_case "keeps the profile while usage and flow are empty" `Quick
           test_decode_skills_catalog_tolerates_empty_usage_and_flow;
         Alcotest.test_case "rejects a non-string kind" `Quick

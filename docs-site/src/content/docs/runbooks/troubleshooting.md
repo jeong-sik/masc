@@ -1,25 +1,64 @@
 ---
 title: Troubleshooting
-description: Diagnosing and resolving common runtime issues in MASC.
+description: Common first-run and runtime problems, and how to resolve them.
 ---
 
-## Port Conflicts (8935)
+## `masc: command not found`
 
-If port 8935 is already held by a previous instance:
+The binaries install to `~/.local/bin`, which is often not on a fresh machine's
+`PATH`. Add it to your shell's startup file and reload:
+
+```bash
+# zsh (macOS default)
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+# bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
+```
+
+See the [Quickstart](/getting-started/quickstart/) PATH step for details.
+
+## The server exits at startup instead of staying in the foreground
+
+The server prints why before it exits — read the last lines it wrote. A common
+cause is a `runtime.toml` whose `[runtime].default` points at a `<provider>.<model>`
+pair that is not fully defined (missing binding, or a dispatch limit the binding
+does not declare). Fix the pair in `<base-path>/.masc/config/runtime.toml`, or
+re-run the installer's wizard to pick a source that is ready. The
+[Configuration Reference](/reference/config/) shows the required shape.
+
+## Port 8935 is already in use
+
+Another instance (or another program) holds the default port. Find and stop it:
 
 ```bash
 lsof -i :8935
-kill -9 <PID>
+kill <PID>
 ```
 
-## Workspace State Recovery
-
-If `.masc/` state exhibits anomalies:
+Or start on a different port and point the TUI at the same one:
 
 ```bash
-scripts/verify-workspace-integrity.sh
+masc --base-path ~/masc --port 8936
+masc-tui --base-path ~/masc --port 8936
 ```
 
-## Model Rate Limits
+## `masc-tui` shows no Keepers or the wrong workspace
 
-MASC automatically fails over across registered alternative model providers without dropping the active Keeper task.
+`masc-tui` reads the workspace from `--base-path` (default: `MASC_BASE_PATH`, or
+the current directory). A second terminal starts in your home directory, so pass
+the same base path you started the server with: `masc-tui --base-path ~/masc`.
+
+## A Keeper will not start
+
+A Keeper needs a command sandbox; MASC refuses to run one without an accepted
+`sandbox_profile`. Install Docker, or on Apple Silicon the `container` CLI, then
+set the profile — see [Keeper Sandbox](/runbooks/sandbox/). A Keeper whose work is
+web search or `git push` also needs `network_mode = "inherit"`; the default,
+`none`, gives the guest no network.
+
+## Provider rate limits
+
+If a provider returns a rate-limit error, MASC can fail over to other bindings
+listed for that role, so the active Keeper turn is not dropped. Configure the
+alternates as additional slots in the relevant lane (see the
+[Configuration Reference](/reference/config/)).

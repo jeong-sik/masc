@@ -34,27 +34,26 @@ stateDiagram-v2
 
 ## Configuration Example
 
-Defined in `<base-path>/.masc/config/keepers/<name>.toml`:
+Defined in `<base-path>/.masc/config/keepers/<name>.toml`. `masc keeper-create`
+writes this for you; the fields are documented in the
+[Configuration Reference](/reference/config/):
 
 ```toml
 [keeper]
 autoboot_enabled = true
 proactive_enabled = true
-sandbox_profile = "docker" # "docker" | "microvm" | "remote_ssh" (host profile is refused)
-mention_targets = ["operator"]
-
-[keeper.tools]
-native = "read" # "none" | "read" | "full"
-
+sandbox_profile = "docker"   # "docker" | "microvm" | "remote_ssh" (host is refused)
+network_mode = "inherit"     # "none" | "inherit"
 instructions = """
 You are the review Keeper. Inspect the current change and report concrete
 evidence with file paths and commands.
 """
+
+[keeper.tools]
+native = "read"              # "none" | "read" | "full"
 ```
 
-Runtime model assignments are maintained in `runtime.toml`:
-
-```toml
-[runtime.assignments]
-reviewer = "anthropic.claude-3-7-sonnet"
-```
+Which model a Keeper's turns use comes from `runtime.toml` — `[runtime].default`,
+or a lane the Keeper's work maps to. See the
+[Configuration Reference](/reference/config/#runtimetoml) for how model bindings
+and lanes are declared.

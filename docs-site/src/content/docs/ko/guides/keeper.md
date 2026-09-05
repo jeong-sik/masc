@@ -42,30 +42,28 @@ stateDiagram-v2
 
 Keeper별 설정은 `<base-path>/.masc/config/keepers/<name>.toml`에 정의됩니다:
 
+`masc keeper-create` 가 이 파일을 대신 써 줍니다. 각 필드는
+[설정 파일](/ko/reference/config/)에 정리돼 있습니다.
+
 ```toml
 # .masc/config/keepers/reviewer.toml 예시
 [keeper]
 autoboot_enabled = true
 proactive_enabled = true
-sandbox_profile = "docker" # "docker" | "microvm" | "remote_ssh" (host 프로파일은 허용되지 않음)
-mention_targets = ["operator"]
-
-[keeper.tools]
-native = "read" # "none" | "read" | "full" (Auto 모드에서는 안전하게 read로 강등)
-
+sandbox_profile = "docker"   # "docker" | "microvm" | "remote_ssh" (host 는 거부됨)
+network_mode = "inherit"     # "none" | "inherit"
 instructions = """
 당신은 코드 리뷰 Keeper입니다. 현재 변경사항을 검사하고 구체적인 파일 경로와
 실행 증거를 보고하십시오.
 """
+
+[keeper.tools]
+native = "read"              # "none" | "read" | "full"
 ```
 
-사용할 모델 및 프로바이더 런타임 배정은 `runtime.toml`에서 관리합니다:
-
-```toml
-# .masc/config/runtime.toml 예시
-[runtime.assignments]
-reviewer = "anthropic.claude-3-7-sonnet"
-```
+Keeper 의 턴이 어떤 모델을 쓰는지는 `runtime.toml` 에서 옵니다 — `[runtime].default`,
+또는 그 Keeper 의 작업이 매핑되는 lane 입니다. 모델 바인딩과 lane 선언 방법은
+[설정 파일](/ko/reference/config/#runtimetoml)을 보세요.
 
 ---
 

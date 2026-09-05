@@ -157,14 +157,14 @@ let exec_prefix ~cli =
   ; "--env"; "MASC_EXEC_SHIM_CONFIG=" ^ shim_config_path; guest_name ]
 ;;
 
-let guest ?probe_prefix ~cli : Keeper_sandbox_remote.container_exec =
+let guest ~cli ?probe_prefix () : Keeper_sandbox_remote.container_exec =
   { prefix = exec_prefix ~cli; probe_prefix; container_name = guest_name; shim_path }
 ;;
 
 let make_state ~base_path ~cli =
   Keeper_sandbox_remote.of_container_exec ~base_path ~keeper_name:"keeper-a"
     ~remote_root ~gh_config_dir ~injected_env:[] ~env_allowlist:[ "LANG" ]
-    ~connect_timeout_sec:1 ~max_concurrent_sessions:2 (guest ~cli)
+    ~connect_timeout_sec:1 ~max_concurrent_sessions:2 (guest ~cli ())
 ;;
 
 let contains needle haystack =

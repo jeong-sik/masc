@@ -8,6 +8,14 @@ module Backend = Masc.Keeper_microvm_backend
 module Runtime = Masc.Keeper_sandbox_runtime
 module Profile = Keeper_types_profile_sandbox
 
+(* [List.ends_with] does not exist in the standard library; this is the
+   suffix check the probe-argv assertions below need. *)
+let list_ends_with suffix lst =
+  let suffix_len = List.length suffix in
+  let rec drop n l = if n <= 0 then l else drop (n - 1) (List.tl l) in
+  List.length lst >= suffix_len && drop (List.length lst - suffix_len) lst = suffix
+;;
+
 (* This file is Apple's lane. Measured against container CLI 1.3.0, and the
    per-runtime table lives in test_keeper_microvm_backend.ml, so a boot argv
    here is the Apple one made unconditional. A refusal would mean the Apple
@@ -1362,7 +1370,7 @@ let test_running_guest_is_a_remote_endpoint () =
        Alcotest.(check bool) "probe argv does not pass -i (#33431)" false
          (List.mem "-i" probe_argv);
        Alcotest.(check bool) "probe argv ends with --probe" true
-         (List.ends_with ~suffix:[ "--probe" ] probe_argv);
+         (list_ends_with [ "--probe" ] probe_argv);
        (* [create_minimal] runs as 0:0, so this is the runtime's own pair
           reaching the exec rather than a value the prefix invented. *)
        Alcotest.(check bool) "execs as the runtime's uid:gid" true
@@ -1417,7 +1425,7 @@ let test_shim_exec_prefix_for_microsandbox_probe_omits_stream () =
      Alcotest.(check bool) "probe prefix omits --stream (#33431)" false
        (List.mem "--stream" probe_prefix);
      Alcotest.(check bool) "probe prefix still ends with command separator --" true
-       (List.ends_with ~suffix:[ "--" ] probe_prefix);
+       (list_ends_with [ "--" ] probe_prefix);
      Alcotest.(check bool) "probe prefix retains remote_root" true
        (contains remote_root probe_prefix);
      Alcotest.(check bool) "probe prefix retains shim config env" true

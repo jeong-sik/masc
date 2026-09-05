@@ -120,6 +120,48 @@ let test_projection_cache_retains_last_good_and_successful_null () =
             (fun () -> failwith "cold")))
 ;;
 
+let test_activity_defaults_cache_retains_last_good () =
+  let now_value = ref 100.0 in
+  let now () = !now_value in
+  let calls = ref 0 in
+  let cache = Dashboard_snapshot.For_testing.make_activity_cache () in
+  let refresh compute =
+    Dashboard_snapshot.For_testing.refresh_activity_defaults
+      ~now ~ttl:10.0 ~cache compute
+  in
+  let dummy1 : Masc.Activity_graph.default_projections =
+    { events_default = `String "e1"
+    ; graph_default = `String "g1"
+    ; swimlane_default = `String "s1"
+    }
+  in
+  let dummy2 : Masc.Activity_graph.default_projections =
+    { events_default = `String "e2"
+    ; graph_default = `String "g2"
+    ; swimlane_default = `String "s2"
+    }
+  in
+  let first = refresh (fun () -> incr calls; dummy1) in
+  Alcotest.(check string) "first success" "e1"
+    (Yojson.Safe.Util.to_string first.events_default);
+  now_value := 105.0;
+  let hit = refresh (fun () -> incr calls; dummy2) in
+  Alcotest.(check string) "fresh hit" "e1"
+    (Yojson.Safe.Util.to_string hit.events_default);
+  Alcotest.(check int) "fresh hit skips callback" 1 !calls;
+  now_value := 111.0;
+  let fallback = refresh (fun () -> incr calls; failwith "refresh failed") in
+  Alcotest.(check string) "failed refresh keeps last good" "e1"
+    (Yojson.Safe.Util.to_string fallback.events_default);
+  let cold_cache = Dashboard_snapshot.For_testing.make_activity_cache () in
+  Alcotest.check_raises "cold failure aborts publish" (Failure "cold")
+    (fun () ->
+       ignore
+         (Dashboard_snapshot.For_testing.refresh_activity_defaults
+            ~now ~ttl:10.0 ~cache:cold_cache
+            (fun () -> failwith "cold")))
+;;
+
 let () =
   Alcotest.run "Dashboard_snapshot"
     [
@@ -140,6 +182,8 @@ let () =
             `Quick test_projection_ttl_reuse_boundaries;
           Alcotest.test_case "projection cache keeps last good and null"
             `Quick test_projection_cache_retains_last_good_and_successful_null;
+          Alcotest.test_case "activity defaults cache keeps last good"
+            `Quick test_activity_defaults_cache_retains_last_good;
         ] );
     ]
 ;;

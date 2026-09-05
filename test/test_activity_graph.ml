@@ -984,6 +984,50 @@ let test_default_projections_no_longer_build_the_aggregate () =
       check int "a filtered read still builds it" 1
         (Activity_graph.For_testing.all_events_rebuild_count ()))
 
+let test_default_projections_single_pass_matches_individual_outputs () =
+  with_config (fun config ->
+      Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+      emit_n config 25;
+      let single = Activity_graph.default_projections config in
+      let expected_events =
+        Activity_graph.json_response config ~kinds:[] ~after_seq:0 ~limit:1000 ()
+      in
+      let expected_graph =
+        Activity_graph.graph_json config ~kinds:[] ~limit:500 ~timeline_limit:80 ()
+      in
+      let expected_swimlane =
+        Activity_graph.agent_spans_json config ~limit:500 ()
+      in
+      let count_from json =
+        Yojson.Safe.Util.member "count" json |> Yojson.Safe.Util.to_int
+      in
+      check int "events count matches" (count_from expected_events)
+        (count_from single.events_default);
+      let total_from json =
+        Yojson.Safe.Util.member "total_matching_events" json
+        |> Yojson.Safe.Util.to_int
+      in
+      check int "total matching matches" (total_from expected_events)
+        (total_from single.events_default);
+      let nodes_len json =
+        Yojson.Safe.Util.member "nodes" json
+        |> Yojson.Safe.Util.to_list |> List.length
+      in
+      check int "graph nodes count matches" (nodes_len expected_graph)
+        (nodes_len single.graph_default);
+      let edges_len json =
+        Yojson.Safe.Util.member "edges" json
+        |> Yojson.Safe.Util.to_list |> List.length
+      in
+      check int "graph edges count matches" (edges_len expected_graph)
+        (edges_len single.graph_default);
+      let spans_len json =
+        Yojson.Safe.Util.member "spans" json
+        |> Yojson.Safe.Util.to_list |> List.length
+      in
+      check int "swimlane spans count matches" (spans_len expected_swimlane)
+        (spans_len single.swimlane_default))
+
 let test_same_size_rewrite_invalidates_current_day_cache () =
   with_config (fun config ->
       Activity_graph.For_testing.reset_current_day_cache_for_testing ();
@@ -1264,6 +1308,8 @@ let () =
             test_current_day_cache_rebuilds_once_per_fingerprint;
           Alcotest.test_case "unfiltered projections build no aggregate"
             `Quick test_default_projections_no_longer_build_the_aggregate;
+          Alcotest.test_case "default projections single pass matches individual outputs"
+            `Quick test_default_projections_single_pass_matches_individual_outputs;
           test_case "append reuses the past-day merge" `Quick
             test_append_reuses_the_past_day_merge;
           test_case "a new past file rebuilds the merge" `Quick

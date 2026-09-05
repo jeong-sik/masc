@@ -641,10 +641,11 @@ let footer_hints_git_diff =
 let footer_hints_memory_facts =
   hints_of_bindings
     ([ b Navigate "j/k" "move"
-     ; b Act "c" "category" ~help:"cycle the category filter (All first)"
-     ; b Search "/" "find" ~help:"jump the cursor to a matching fact"
+     ; b Act "c / C" "category" ~help:"cycle category filter (forward / backward)"
+     ; b Act "s" "sort" ~help:"cycle sort (reinforcement, recency, category, claim)"
+     ; b Search "/" "filter" ~help:"live text filter / search"
      ; b Search "n / N" "next / previous match"
-     ; b Act "Esc" "health" ~help:"close the browser, back to the table"
+     ; b Act "Esc" "close / clear" ~help:"clear filter or exit to health table"
      ]
      @ listing_meta)
 

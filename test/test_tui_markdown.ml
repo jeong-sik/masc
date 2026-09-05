@@ -365,11 +365,11 @@ let test_mermaid_fence_is_drawn () =
 let test_mermaid_fence_of_another_kind_shows_its_source () =
   check_rows "unsupported kind"
     (tagged_fence ~width:70 "mermaid"
-       [ "<c>\xe2\x94\x82 mermaid: sequenceDiagram is not drawn here; the source follows</c>"
-       ; "<c>\xe2\x94\x82 sequenceDiagram</c>"
-       ; "<c>\xe2\x94\x82 A->>B: hi</c>"
+       [ "<c>\xe2\x94\x82 mermaid: classDiagram is not drawn here; the source follows</c>"
+       ; "<c>\xe2\x94\x82 classDiagram</c>"
+       ; "<c>\xe2\x94\x82 Animal <|-- Duck</c>"
        ])
-    (render ~width:70 "```mermaid\nsequenceDiagram\nA->>B: hi\n```")
+    (render ~width:70 "```mermaid\nclassDiagram\nAnimal <|-- Duck\n```")
 
 (* {1 Fenced-code highlighting} *)
 

@@ -10,9 +10,10 @@
     What is drawn is a closed set. [graph] and [flowchart] in the four
     directions, with rectangular, rounded and diamond nodes, solid, dotted
     and thick edges, edge labels in both spellings, chains and [&] groups.
-    A diagram of any other kind, or a line this grammar cannot read, comes
-    back as a {!failure} naming the kind or the line, and the caller shows
-    the source under that name. Nothing is guessed. [subgraph] blocks are
+    [sequenceDiagram] draws participants, lifelines, messages with their
+    text, notes and the framed blocks. A diagram of any other kind, or a
+    line this grammar cannot read, comes back as a {!failure} naming the
+    kind or the line, and the caller shows the source under that name. Nothing is guessed. [subgraph] blocks are
     read and their nodes drawn, but the grouping box itself is not
     (RFC-0429 §3.3); [classDef], [class], [style], [linkStyle] and [click]
     statements are accepted and change nothing on a text canvas.
@@ -59,7 +60,49 @@ type graph = {
   edges : edge list;  (** in source order, one per source-target pair *)
 }
 
-type diagram = Graph of graph
+(** A sequence diagram: participants across the top, one lifeline each,
+    messages between them in source order. [participant X as Label] names
+    the box; a participant first seen in a message is enrolled there. Notes
+    sit over the lifelines they name; [loop], [alt]/[else], [opt], [par]/
+    [and], [critical]/[option], [break] and [rect] frame the rows they
+    hold; [box] groups are read and not drawn; [autonumber], [activate],
+    [deactivate] and [title] are accepted and change nothing here. *)
+type head =
+  | Head_arrow  (** [->], [->>], [-)] and their dotted forms *)
+  | Head_cross  (** [-x], [--x] *)
+
+type sequence_event =
+  | Message of {
+      m_from : string;
+      m_to : string;
+      m_text : string;
+      m_style : line_style;  (** [Solid] or [Dotted]; a message is never [Thick] *)
+      m_head : head;
+    }
+  | Note of {
+      n_over : string list;
+      n_text : string;
+    }
+  | Block_open of {
+      b_kind : string;  (** the keyword as written: [loop], [alt], … *)
+      b_label : string;
+    }
+  | Block_else of string
+  | Block_close
+
+type participant = {
+  pid : string;
+  alias : string;  (** what the box says *)
+}
+
+type sequence = {
+  participants : participant list;  (** in order of first appearance *)
+  events : sequence_event list;
+}
+
+type diagram =
+  | Graph of graph
+  | Sequence of sequence
 
 type failure =
   | Unsupported of string
@@ -84,3 +127,6 @@ val render : cols:int -> string -> (string list, failure) result
 
 val render_graph : cols:int -> graph -> (string list, failure) result
 (** The drawing half of {!render}, for a graph already read. *)
+
+val render_sequence : cols:int -> sequence -> (string list, failure) result
+(** The drawing half of {!render}, for a sequence diagram already read. *)

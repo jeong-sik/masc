@@ -36,7 +36,44 @@ type graph = {
   edges : edge list;
 }
 
-type diagram = Graph of graph
+(* ── Sequence diagrams ─────────────────────────────────────────────────── *)
+
+type head =
+  | Head_arrow
+  | Head_cross
+
+type sequence_event =
+  | Message of {
+      m_from : string;
+      m_to : string;
+      m_text : string;
+      m_style : line_style;
+      m_head : head;
+    }
+  | Note of {
+      n_over : string list;
+      n_text : string;
+    }
+  | Block_open of {
+      b_kind : string;
+      b_label : string;
+    }
+  | Block_else of string
+  | Block_close
+
+type participant = {
+  pid : string;
+  alias : string;
+}
+
+type sequence = {
+  participants : participant list;
+  events : sequence_event list;
+}
+
+type diagram =
+  | Graph of graph
+  | Sequence of sequence
 
 type failure =
   | Unsupported of string
@@ -296,28 +333,209 @@ let parse_statement text declared edges =
   in
   chain sources
 
-let source_statements text =
-  (* (line number, statement) with comments, blanks and [;] handled. *)
+(* (line number, line) with comments and blanks dropped. A graph splits
+   each line on [;] afterwards; a sequence diagram keeps its lines whole,
+   because a message's text may hold one. *)
+let source_lines text =
   String.split_on_char '\n' text
   |> List.mapi (fun index line -> (index + 1, line))
-  |> List.concat_map (fun (number, line) ->
+  |> List.filter_map (fun (number, line) ->
          let line =
            match String.index_opt line '\r' with
            | Some i -> String.sub line 0 i
            | None -> line
          in
          let trimmed = String.trim line in
-         if trimmed = "" || (String.length trimmed >= 2 && String.sub trimmed 0 2 = "%%") then []
-         else
-           String.split_on_char ';' trimmed
-           |> List.map String.trim
-           |> List.filter (fun s -> s <> "")
-           |> List.map (fun s -> (number, s)))
+         if trimmed = "" || (String.length trimmed >= 2 && String.sub trimmed 0 2 = "%%") then None
+         else Some (number, trimmed))
+
+let split_statements lines =
+  List.concat_map
+    (fun (number, line) ->
+      String.split_on_char ';' line
+      |> List.map String.trim
+      |> List.filter (fun s -> s <> "")
+      |> List.map (fun s -> (number, s)))
+    lines
+
+(* A sequence statement. The first word decides: a declaration, a note, a
+   block boundary, a line that only styles, or else a message. *)
+type roster = {
+  mutable roster_order : string list;  (* newest first *)
+  roster_table : (string, participant) Hashtbl.t;
+}
+
+let enrol roster pid ~alias ~explicit =
+  match Hashtbl.find_opt roster.roster_table pid with
+  | Some _ when not explicit -> ()
+  | Some _ | None ->
+      if not (Hashtbl.mem roster.roster_table pid) then
+        roster.roster_order <- pid :: roster.roster_order;
+      Hashtbl.replace roster.roster_table pid { pid; alias }
+
+let first_word line =
+  let stop =
+    let rec go i =
+      if i >= String.length line then i
+      else match line.[i] with ' ' | '\t' | ':' -> i | _ -> go (i + 1)
+    in
+    go 0
+  in
+  (String.lowercase_ascii (String.sub line 0 stop), String.trim (String.sub line stop (String.length line - stop)))
+
+let rest_after_colon text =
+  match String.index_opt text ':' with
+  | Some i -> String.trim (String.sub text (i + 1) (String.length text - i - 1))
+  | None -> ""
+
+(* [->], [-->], [->>], [-->>], [-x], [--x], [-)], [--)]. The dashes decide
+   the stroke, the head decides the glyph; an activation mark ([+] or [-])
+   after the arrow is read and dropped. *)
+let sequence_arrow c =
+  let dashes = read_while c (fun ch -> ch = '-') in
+  if dashes = "" || String.length dashes > 2 then Error "expected a message arrow"
+  else
+    let style = if String.length dashes = 2 then Dotted else Solid in
+    let head =
+      if starts c ">>" then (c.pos <- c.pos + 2; Ok Head_arrow)
+      else if starts c ">" then (c.pos <- c.pos + 1; Ok Head_arrow)
+      else if starts c ")" then (c.pos <- c.pos + 1; Ok Head_arrow)
+      else if starts c "x" then (c.pos <- c.pos + 1; Ok Head_cross)
+      else Error "expected a message arrow"
+    in
+    let* head = head in
+    if starts c "+" || starts c "-" then c.pos <- c.pos + 1;
+    Ok (style, head)
+
+let parse_message line roster =
+  let c = { text = line; pos = 0 } in
+  let from = read_while c is_id_char in
+  if from = "" then Error "expected a participant"
+  else
+    let* () = (skip_spaces c; Ok ()) in
+    let* style, head = sequence_arrow c in
+    skip_spaces c;
+    let target = read_while c is_id_char in
+    if target = "" then Error "expected a participant after the arrow"
+    else begin
+      enrol roster from ~alias:from ~explicit:false;
+      enrol roster target ~alias:target ~explicit:false;
+      skip_spaces c;
+      let text =
+        if starts c ":" then
+          String.trim (String.sub c.text (c.pos + 1) (String.length c.text - c.pos - 1))
+        else ""
+      in
+      Ok (Message { m_from = from; m_to = target; m_text = replace_breaks text; m_style = style; m_head = head })
+    end
+
+let parse_note rest roster =
+  (* [over A,B: text], [left of A: text], [right of A: text] *)
+  let lowered = String.lowercase_ascii rest in
+  let after prefix =
+    if String.length lowered >= String.length prefix
+       && String.sub lowered 0 (String.length prefix) = prefix
+    then Some (String.sub rest (String.length prefix) (String.length rest - String.length prefix))
+    else None
+  in
+  let body =
+    match after "over " with
+    | Some body -> Some body
+    | None -> (
+        match after "left of " with
+        | Some body -> Some body
+        | None -> after "right of ")
+  in
+  match body with
+  | None -> Error "a note is over, left of or right of a participant"
+  | Some body -> (
+      match String.index_opt body ':' with
+      | None -> Error "a note needs a colon before its text"
+      | Some colon ->
+          let names =
+            String.sub body 0 colon
+            |> String.split_on_char ','
+            |> List.map String.trim
+            |> List.filter (fun s -> s <> "")
+          in
+          if names = [] then Error "a note names at least one participant"
+          else begin
+            List.iter (fun pid -> enrol roster pid ~alias:pid ~explicit:false) names;
+            Ok (Note { n_over = names; n_text = replace_breaks (rest_after_colon body) })
+          end)
+
+let parse_sequence_statement line roster =
+  let word, rest = first_word line in
+  match word with
+  | "participant" | "actor" ->
+      let c = { text = rest; pos = 0 } in
+      let pid = read_while c is_id_char in
+      if pid = "" then Error "expected a participant id"
+      else begin
+        skip_spaces c;
+        let alias =
+          if starts c "as " then
+            label_text (String.sub c.text (c.pos + 3) (String.length c.text - c.pos - 3))
+          else pid
+        in
+        enrol roster pid ~alias ~explicit:true;
+        Ok None
+      end
+  | "note" ->
+      let* note = parse_note rest roster in
+      Ok (Some note)
+  | "loop" | "alt" | "opt" | "par" | "critical" | "break" | "rect" | "box" ->
+      Ok (Some (Block_open { b_kind = word; b_label = rest }))
+  | "else" | "and" | "option" -> Ok (Some (Block_else rest))
+  | "end" -> Ok (Some Block_close)
+  | "autonumber" | "activate" | "deactivate" | "title" | "accTitle" | "accDescr" | "links"
+  | "link" | "properties" | "details" ->
+      Ok None
+  | _ ->
+      let* message = parse_message line roster in
+      Ok (Some message)
+
+let parse_sequence lines =
+  let roster = { roster_order = []; roster_table = Hashtbl.create 8 } in
+  let events = ref [] in
+  let depth = ref 0 in
+  let rec go = function
+    | [] -> Ok ()
+    | (number, line) :: more -> (
+        match parse_sequence_statement line roster with
+        | Error what -> Error (Parse_error { line = number; what })
+        | Ok None -> go more
+        | Ok (Some event) ->
+            (match event with
+             | Block_open _ -> incr depth
+             | Block_close ->
+                 if !depth = 0 then () else decr depth
+             | Block_else _ | Message _ | Note _ -> ());
+            (match event with
+             | Block_close when !depth = 0 && not (List.exists (function Block_open _ -> true | _ -> false) !events) ->
+                 Error (Parse_error { line = number; what = "end closes no block" })
+             | Block_close | Block_open _ | Block_else _ | Message _ | Note _ ->
+                 events := event :: !events;
+                 go more))
+  in
+  let* () = go lines in
+  let participants =
+    List.rev roster.roster_order |> List.map (fun pid -> Hashtbl.find roster.roster_table pid)
+  in
+  Ok { participants; events = List.rev !events }
 
 let parse text =
-  match source_statements text with
+  match source_lines text with
   | [] -> Error (Parse_error { line = 1; what = "empty diagram" })
   | (header_line, header) :: rest -> (
+      let header, rest =
+        (* [graph TD; A --> B] puts the first statement on the header line. *)
+        match String.index_opt header ';' with
+        | Some i ->
+            ( String.trim (String.sub header 0 i)
+            , (header_line, String.sub header (i + 1) (String.length header - i - 1)) :: rest )
+        | None -> (header, rest)
+      in
       let words = String.split_on_char ' ' header |> List.filter (fun w -> w <> "") in
       match words with
       | ("graph" | "flowchart") :: tail ->
@@ -346,11 +564,14 @@ let parse text =
                     | Ok () -> statements more
                     | Error what -> Error (Parse_error { line = number; what })))
           in
-          let* () = statements rest in
+          let* () = statements (split_statements rest) in
           let nodes =
             List.rev declared.order |> List.map (fun id -> Hashtbl.find declared.table id)
           in
           Ok (Graph { direction; nodes; edges = List.rev !edges })
+      | [ "sequenceDiagram" ] ->
+          let* sequence = parse_sequence rest in
+          Ok (Sequence sequence)
       | word :: _ -> Error (Unsupported word)
       | [] -> Error (Parse_error { line = header_line; what = "empty header" }))
 
@@ -867,7 +1088,203 @@ let render_graph ~cols graph =
           segments;
         Ok (rows_of_canvas canvas)
 
+(* ── Sequence layout ───────────────────────────────────────────────────── *)
+
+(* A self message loops out to the right of its lifeline: the arrow row
+   reaches three cells out and back, the text sits one cell past that. *)
+let self_loop_cells = 4
+let message_text_margin = 3 (* text starts two cells past the near lifeline, one before the far *)
+
+let event_rows = function
+  | Message { m_from; m_to; _ } -> if String.equal m_from m_to then 3 else 2
+  | Note _ -> 3
+  | Block_open _ | Block_else _ | Block_close -> 1
+
+let render_sequence ~cols (seq : sequence) =
+  let participants = Array.of_list seq.participants in
+  let n = Array.length participants in
+  if n = 0 then Ok []
+  else
+    let index_of =
+      let table = Hashtbl.create 8 in
+      Array.iteri (fun i p -> Hashtbl.replace table p.pid i) participants;
+      fun pid -> Hashtbl.find table pid
+    in
+    let widths = Array.map (fun p -> Layout.display_width p.alias + (2 * box_pad)) participants in
+    (* Frames nest inward from both edges, one cell per depth. A [box] groups
+       participants in a browser and is not drawn here, so it takes no depth. *)
+    let frame_depth =
+      let depth = ref 0 and deepest = ref 0 in
+      List.iter
+        (function
+          | Block_open { b_kind; _ } when not (String.equal b_kind "box") ->
+              incr depth;
+              deepest := max !deepest !depth
+          | Block_close -> if !depth > 0 then decr depth
+          | Block_open _ | Block_else _ | Message _ | Note _ -> ())
+        seq.events;
+      !deepest
+    in
+    let gaps = Array.make (max 1 n) item_gap in
+    let extra_right = ref 0 in
+    let positions () =
+      let x = Array.make n 0 in
+      for i = 1 to n - 1 do
+        x.(i) <- x.(i - 1) + widths.(i - 1) + gaps.(i - 1)
+      done;
+      x
+    in
+    let centre x i = x.(i) + (widths.(i) / 2) in
+    (* Each message and note asks for the room its text needs between the
+       lifelines it touches; the gap before the far lifeline grows to give
+       it, the canvas grows past the last lifeline for the rest. *)
+    List.iter
+      (fun event ->
+        let x = positions () in
+        match event with
+        | Message { m_from; m_to; m_text; _ } ->
+            let a = index_of m_from and b = index_of m_to in
+            let text = Layout.display_width m_text in
+            if a = b then (
+              let needed = self_loop_cells + text + 1 in
+              if a = n - 1 then
+                extra_right := max !extra_right (centre x a + needed - (x.(a) + widths.(a)))
+              else
+                let room = x.(a + 1) - centre x a in
+                if room < needed then gaps.(a) <- gaps.(a) + (needed - room))
+            else
+              let lo = min a b and hi = max a b in
+              let span = centre x hi - centre x lo in
+              let needed = text + message_text_margin in
+              if span < needed then gaps.(hi - 1) <- gaps.(hi - 1) + (needed - span)
+        | Note { n_over; n_text } ->
+            let indices = List.map index_of n_over in
+            let lo = List.fold_left min (n - 1) indices and hi = List.fold_left max 0 indices in
+            let needed = Layout.display_width n_text + (2 * box_pad) in
+            let span = x.(hi) + widths.(hi) - x.(lo) in
+            if span < needed then
+              if hi = n - 1 then extra_right := max !extra_right (needed - span)
+              else gaps.(hi) <- gaps.(hi) + (needed - span)
+        | Block_open _ | Block_else _ | Block_close -> ())
+      seq.events;
+    let x = positions () in
+    let margin = frame_depth in
+    let width = margin + x.(n - 1) + widths.(n - 1) + !extra_right + margin in
+    let header_rows = box_height + 1 in
+    let body_rows = List.fold_left (fun acc event -> acc + event_rows event) 0 seq.events in
+    let rows = header_rows + body_rows + 1 in
+    if width > cols then Error (Too_wide { cells = width; cols })
+    else
+      let canvas = make_canvas ~rows ~cols:width in
+      let col i = margin + centre x i in
+      (* Participant boxes. *)
+      Array.iteri
+        (fun i p ->
+          let lft = margin + x.(i) and w = widths.(i) in
+          let rgt = lft + w - 1 in
+          add_bits canvas 0 lft ~style:Solid ~round:false (down lor right);
+          add_bits canvas 0 rgt ~style:Solid ~round:false (down lor left);
+          add_bits canvas 2 lft ~style:Solid ~round:false (up lor right);
+          add_bits canvas 2 rgt ~style:Solid ~round:false (up lor left);
+          for c = lft + 1 to rgt - 1 do
+            add_bits canvas 0 c ~style:Solid ~round:false (left lor right);
+            add_bits canvas 2 c ~style:Solid ~round:false (left lor right)
+          done;
+          add_bits canvas 1 lft ~style:Solid ~round:false (up lor down);
+          add_bits canvas 1 rgt ~style:Solid ~round:false (up lor down);
+          put_text canvas 1 (lft + 2) p.alias)
+        participants;
+      (* Lifelines, from under each box to the last row. *)
+      for i = 0 to n - 1 do
+        draw_line canvas ~style:Solid (2, col i) (rows - 1, col i)
+      done;
+      (* Events, top to bottom. Frames remember the row they opened on. *)
+      let frames = ref [] in
+      let depth = ref 0 in
+      let head_glyph head ~rightward =
+        match head, rightward with
+        | Head_arrow, true -> ">"
+        | Head_arrow, false -> "<"
+        | Head_cross, _ -> "x"
+      in
+      let row = ref header_rows in
+      List.iter
+        (fun event ->
+          let r = !row in
+          (match event with
+           | Message { m_from; m_to; m_text; m_style; m_head } ->
+               let a = index_of m_from and b = index_of m_to in
+               if a = b then (
+                 let c = col a in
+                 put_text canvas r (c + self_loop_cells) m_text;
+                 draw_line canvas ~style:m_style (r + 1, c) (r + 1, c + 3);
+                 draw_line canvas ~style:m_style (r + 1, c + 3) (r + 2, c + 3);
+                 draw_line canvas ~style:m_style (r + 2, c + 1) (r + 2, c + 3);
+                 put_text canvas (r + 2) (c + 1) (head_glyph m_head ~rightward:false))
+               else (
+                 let cf = col a and ct = col b in
+                 put_text canvas r (min cf ct + 2) m_text;
+                 draw_line canvas ~style:m_style (r + 1, cf) (r + 1, ct);
+                 if ct > cf then put_text canvas (r + 1) (ct - 1) (head_glyph m_head ~rightward:true)
+                 else put_text canvas (r + 1) (ct + 1) (head_glyph m_head ~rightward:false))
+           | Note { n_over; n_text } ->
+               let indices = List.map index_of n_over in
+               let lo = List.fold_left min (n - 1) indices and hi = List.fold_left max 0 indices in
+               let lft = margin + x.(lo) in
+               let rgt =
+                 max (margin + x.(hi) + widths.(hi) - 1)
+                   (lft + Layout.display_width n_text + (2 * box_pad) - 1)
+               in
+               (* A note covers the lifelines it sits over, so its border is
+                  text rather than line bits that would merge with them. *)
+               let border_row rr l m rgt_glyph =
+                 put_text canvas rr lft l;
+                 for c = lft + 1 to rgt - 1 do
+                   put_text canvas rr c m
+                 done;
+                 put_text canvas rr rgt rgt_glyph
+               in
+               border_row r "\xe2\x94\x8c" "\xe2\x94\x80" "\xe2\x94\x90";
+               border_row (r + 1) "\xe2\x94\x82" " " "\xe2\x94\x82";
+               border_row (r + 2) "\xe2\x94\x94" "\xe2\x94\x80" "\xe2\x94\x98";
+               put_text canvas (r + 1) (lft + 2) n_text
+           | Block_open { b_kind; b_label } ->
+               if not (String.equal b_kind "box") then (
+                 let d = !depth in
+                 incr depth;
+                 frames := (d, r) :: !frames;
+                 let l = d and rt = width - 1 - d in
+                 draw_line canvas ~style:Solid (r, l) (r, rt);
+                 add_bits canvas r l ~style:Solid ~round:false down;
+                 add_bits canvas r rt ~style:Solid ~round:false down;
+                 put_text canvas r (l + 2)
+                   (" " ^ b_kind ^ (if b_label = "" then "" else " " ^ b_label) ^ " "))
+               else frames := (-1, r) :: !frames
+           | Block_else label -> (
+               match !frames with
+               | (d, _) :: _ when d >= 0 ->
+                   let l = d and rt = width - 1 - d in
+                   draw_line canvas ~style:Dotted (r, l) (r, rt);
+                   put_text canvas r (l + 2)
+                     (" else" ^ (if label = "" then "" else " " ^ label) ^ " ")
+               | (_, _) :: _ | [] -> ())
+           | Block_close -> (
+               match !frames with
+               | (d, opened) :: outer ->
+                   frames := outer;
+                   if d >= 0 then (
+                     decr depth;
+                     let l = d and rt = width - 1 - d in
+                     draw_line canvas ~style:Solid (opened, l) (r, l);
+                     draw_line canvas ~style:Solid (opened, rt) (r, rt);
+                     draw_line canvas ~style:Solid (r, l) (r, rt))
+               | [] -> ()));
+          row := r + event_rows event)
+        seq.events;
+      Ok (rows_of_canvas canvas)
+
 let render ~cols text =
   let* diagram = parse text in
   match diagram with
   | Graph graph -> render_graph ~cols graph
+  | Sequence sequence -> render_sequence ~cols sequence

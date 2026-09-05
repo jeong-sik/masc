@@ -152,7 +152,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
         name = p.name;
         instructions;
         sandbox_profile;
-        sandbox_image = None;
+        sandbox_image = p.profile_defaults.sandbox_image;
         network_mode;
         (* keeper_up does not take a backend: the runtime a keeper runs on is
            declared in its TOML and reapplied by

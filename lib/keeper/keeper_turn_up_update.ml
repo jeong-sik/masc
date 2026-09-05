@@ -463,6 +463,10 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
                   else Option.value ~default:"" p.profile_defaults.instructions)
                p.instructions_opt);
     sandbox_profile;
+    sandbox_image =
+      (match p.profile_defaults.sandbox_image with
+       | Some _ as img -> img
+       | None -> old.sandbox_image);
     network_mode;
     autoboot_enabled;
     paused = old.paused;

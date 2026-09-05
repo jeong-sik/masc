@@ -6908,16 +6908,19 @@ type prompt_operator_surface =
   | Prompt_primary
   | Prompt_fragment
 
+type prompt_source =
+  | Prompt_override
+  | Prompt_file
+  | Prompt_missing
+
 type prompt_row = {
   pr_key : string;
   pr_category : string;
   pr_operator_surface : prompt_operator_surface;
   pr_description : string;
   pr_effective : string;
-  pr_has_override : bool;
-  pr_file_exists : bool;
   pr_file_path : string;
-  pr_source : string;
+  pr_source : prompt_source;
   pr_template_variables : string list;
 }
 
@@ -6951,11 +6954,6 @@ let decode_prompt_row json =
     | `String value -> value
     | _ -> ""
   in
-  let bool_or field =
-    match member field json with
-    | `Bool value -> value
-    | _ -> false
-  in
   let string_list_or_empty field =
     match member field json with
     | `Null -> Ok []
@@ -6977,16 +6975,22 @@ let decode_prompt_row json =
       Error (Printf.sprintf "unknown prompt operator_surface %S" value)
     | value -> field_type_error "operator_surface" "a string" value
   in
+  let* pr_source =
+    match member "source" json with
+    | `String "override" -> Ok Prompt_override
+    | `String "file" -> Ok Prompt_file
+    | `String "missing" -> Ok Prompt_missing
+    | `String value -> Error (Printf.sprintf "unknown prompt source %S" value)
+    | value -> field_type_error "source" "a string" value
+  in
   Ok
     { pr_key
     ; pr_category = string_or "category"
     ; pr_operator_surface
     ; pr_description = string_or "description"
     ; pr_effective = string_or "effective"
-    ; pr_has_override = bool_or "has_override"
-    ; pr_file_exists = bool_or "file_exists"
     ; pr_file_path = string_or "file_path"
-    ; pr_source = string_or "source"
+    ; pr_source
     ; pr_template_variables
     }
 ;;

@@ -1742,6 +1742,22 @@ type prompt_operator_surface =
   | Prompt_primary
   | Prompt_fragment
 
+type prompt_source =
+  | Prompt_override
+  | Prompt_file
+  | Prompt_missing
+      (** Where the effective text came from. The server resolves this once,
+          in [Prompt_registry_types.resolve_source], and it is the whole
+          answer: an operator editing an overridden prompt is editing the
+          override, and clearing it returns the file's words rather than
+          emptying the prompt.
+
+          The wire also carries [has_override] and [file_exists], the two
+          booleans resolution consumed. Decoding them here would give the TUI
+          a second way to spell the same decision, and it had one: the list
+          mark and the detail line each classified separately, in the same
+          file, fifty lines apart. *)
+
 type prompt_row = {
   pr_key : string;
   pr_category : string;
@@ -1750,14 +1766,8 @@ type prompt_row = {
   pr_effective : string;
       (** What a turn actually gets: the override when there is one, the file
           otherwise. This is the text an editor should open. *)
-  pr_has_override : bool;
-      (** Whether the effective text came from an override rather than the
-          file. The two are different facts: an operator editing an
-          overridden prompt is editing the override, and clearing it returns
-          the file's words rather than emptying the prompt. *)
-  pr_file_exists : bool;
   pr_file_path : string;
-  pr_source : string;
+  pr_source : prompt_source;
   pr_template_variables : string list;
 }
 

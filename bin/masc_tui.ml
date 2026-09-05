@@ -13234,11 +13234,12 @@ and is loaded on demand through keeper_skill.
   let handle_prompt_clear () =
     match selected_prompt () with
     | None -> add_event state "error" "prompts not loaded yet; r to reload"
-    | Some row ->
-      if not row.Tui_decode.pr_has_override then
+    | Some row -> (
+      match row.Tui_decode.pr_source with
+      | Tui_decode.Prompt_file | Tui_decode.Prompt_missing ->
         add_event state "system"
           (row.Tui_decode.pr_key ^ ": no override to clear")
-      else (
+      | Tui_decode.Prompt_override -> (
         match
           Masc_tui_http.post_prompt_clear ~host:server_peer_host
             ~port:state.port ~key:row.Tui_decode.pr_key
@@ -13249,7 +13250,7 @@ and is loaded on demand through keeper_skill.
           launch_prompts_load state ~mailbox:async_messages
         | Error detail ->
           add_event state "error"
-            (row.Tui_decode.pr_key ^ ": clear failed: " ^ detail))
+            (row.Tui_decode.pr_key ^ ": clear failed: " ^ detail)))
   in
   let handle_keeper_settings_edit () =
     match selected_keeper state with

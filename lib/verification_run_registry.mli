@@ -26,7 +26,7 @@ type outcome =
           all — the run stayed Running in memory and vanished on the next
           replay (lane audit W6). *)
   | Operator_routed
-      (** The claim's verdict belongs to the operator (RFC-0415 §4.1): a
+      (** The claim's verdict belongs to the operator (RFC-0417 §4.1): a
           cancel claim reached the system lane and was handed on without a
           review. No evaluator ran, so this is neither a verdict nor a lane
           failure; the Task waits on the operator's click. *)

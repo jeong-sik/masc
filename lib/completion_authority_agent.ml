@@ -572,7 +572,7 @@ let commit_verdict
     request record, so one field has one owner and the record cannot disagree
     with the status the verdict is applied to.
 
-    RFC-0415 §4.1: completion review is the system LLM's job; a cancellation
+    RFC-0417 §4.1: completion review is the system LLM's job; a cancellation
     is permission for work to stop existing, and that authority belongs to
     the operator's one click. No review prompt exists for a cancel claim —
     the lane records it as [Verification_run_registry.Operator_routed] and

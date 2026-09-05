@@ -113,7 +113,7 @@ val run
 
 (** The question the completion authority is asked, and the material it
     needs. Only a completion reaches this module: a cancel claim is the
-    operator's to close (RFC-0415 §4.1) and the system lane hands it on
+    operator's to close (RFC-0417 §4.1) and the system lane hands it on
     without a prompt. *)
 
 (** The evidence posture of a completion submission, as the judge sees it.

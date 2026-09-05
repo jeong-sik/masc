@@ -33,7 +33,7 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
   (* The Board post and the record name what was asked. A stop carries the
      producer's reason where a completion carries its evidence references:
      the reason is the whole claim, so the post states it for the operator
-     who closes the stop (RFC-0415 §4.1) and the record keeps it as
+     who closes the stop (RFC-0417 §4.1) and the record keeps it as
      [cancel_reason]. The task contract describes work the producer says
      should not be finished, and is not what a stop is judged on. *)
   let board_title, board_content, evidence_refs, claim_fields =

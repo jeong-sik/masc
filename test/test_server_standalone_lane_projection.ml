@@ -259,7 +259,7 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
      | _ -> false)
 ;;
 
-(* A cancel claim is the operator's to close (RFC-0415 §4.1). The lane records
+(* A cancel claim is the operator's to close (RFC-0417 §4.1). The lane records
    that it handed the claim on, and that row is not a review: no evaluator
    ran, so it is neither a success nor a failure of this lane and must not
    read as one on the panel — counting every cancel as a lane failure made

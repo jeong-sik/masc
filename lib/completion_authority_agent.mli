@@ -72,7 +72,7 @@ module For_testing : sig
       which have no key to name. Pure, so the scope rule is checkable without a
       backlog or an Eio runtime. *)
 
-  (** RFC-0415 §4.1: what the system lane does with one Task, read off its
+  (** RFC-0417 §4.1: what the system lane does with one Task, read off its
       status. A completion claim is reviewed; a cancel claim is handed to the
       operator without a prompt and recorded as
       [Verification_run_registry.Operator_routed]; any other status is not an

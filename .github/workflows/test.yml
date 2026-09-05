@@ -134,6 +134,10 @@ jobs:
           MASC_TEST_SUITE_DEADLINE: "5400"
           CI_TEST_TIMEOUT_SEC: "6000"
           CI_TEST_HEARTBEAT_SEC: "30"
+          # A fixed path so the step below can upload it. ci-run-tests.sh
+          # otherwise names the file with mktemp and only its last 120
+          # lines reach the step output.
+          CI_TEST_LOG_FILE: ${{ runner.temp }}/ci-run-tests.log
         # The runner is scripts/ci-run-test-suite.sh, NOT raw dune test:
         # nine suites in test/ci-known-failures.txt fail today, so plain
         # dune test exits 1 on every run -- permanently red, zero signal.
@@ -145,3 +149,17 @@ jobs:
         run: |
           set -euo pipefail
           scripts/ci-run-tests.sh "scripts/ci-run-test-suite.sh"
+
+      # The step output carries the heartbeat and the last 120 lines of the
+      # runner log; every per-suite verdict lives only in the file. The
+      # first root @runtest run on 2026-09-05 named its two hung suites and
+      # lost every other verdict with it (#33200). Uploaded on every
+      # outcome, since a red run is when the file is read.
+      - name: Upload the suite runner log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: suite-runner-log
+          path: ${{ runner.temp }}/ci-run-tests.log
+          if-no-files-found: warn
+          retention-days: 14

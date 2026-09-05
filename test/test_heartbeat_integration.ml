@@ -849,7 +849,9 @@ let test_cross_domain_start_keepalive_and_swap () =
         match Masc.Keeper_keepalive.start_keepalive ctx meta with
         | Masc.Keeper_keepalive.Keepalive_started entry ->
           check string "started keeper name matches" keeper_name entry.name;
-          let updated_meta = { meta with heartbeat_interval_sec = 60 } in
+          (* [keeper_meta] carries no [heartbeat_interval_sec]; [updated_at]
+             is the meta-change marker the swapped lane must pick up. *)
+          let updated_meta = { meta with updated_at = "2026-09-05T18:00:00Z" } in
           (match Masc.Keeper_turn_up_update.swap_keepalive_lane_fenced ctx updated_meta with
            | Ok (_stop_outcome, Masc.Keeper_keepalive.Keepalive_started new_entry) ->
              check string "swapped keeper name matches" keeper_name new_entry.name
@@ -908,7 +910,10 @@ let test_cross_domain_shutdown_submit () =
             (Eio_context.root_switch_on_current_domain ());
           let request : Masc.Keeper_shutdown_prepare_join.request =
             { actor = "tester"
-            ; cleanup_intent = Masc.Keeper_shutdown_types.Purge
+            ; cleanup_intent =
+              { reason = Masc.Keeper_shutdown_types.Operator_stop_remove_meta
+              ; remove_session = false
+              }
             }
           in
           match Masc.Keeper_shutdown_runtime.submit ~config ~entry ~request with

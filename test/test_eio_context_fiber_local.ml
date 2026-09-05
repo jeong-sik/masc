@@ -158,7 +158,8 @@ let test_run_on_owner_domain_inline_when_uninitialized () =
   Alcotest.(check int) "inline without root switch returns value" 42 ran;
   let raised =
     try
-      Eio_context.run_on_owner_domain (fun () -> failwith "uninitialized error");
+      Eio_context.run_on_owner_domain (fun () ->
+          (failwith "uninitialized error" : unit));
       false
     with
     | Failure msg when String.equal msg "uninitialized error" -> true
@@ -174,7 +175,8 @@ let test_run_on_owner_domain_inline_on_owner_domain () =
   Alcotest.(check int) "inline on owner domain returns value" 123 ran;
   let raised =
     try
-      Eio_context.run_on_owner_domain (fun () -> failwith "owner error");
+      Eio_context.run_on_owner_domain (fun () ->
+          (failwith "owner error" : unit));
       false
     with
     | Failure msg when String.equal msg "owner error" -> true
@@ -226,7 +228,7 @@ let test_run_on_owner_domain_cross_domain_dispatch () =
     let cross_domain_exception_propagated =
       try
         Eio_context.run_on_owner_domain (fun () ->
-          failwith "cross-domain error payload");
+          (failwith "cross-domain error payload" : unit));
         false
       with
       | Failure msg when String.equal msg "cross-domain error payload" -> true
@@ -240,7 +242,7 @@ let test_run_on_owner_domain_cross_domain_dispatch () =
     let cancelled_propagated =
       try
         Eio_context.run_on_owner_domain (fun () ->
-          raise (Eio.Cancel.Cancelled (Failure "simulated cancel")));
+          (raise (Eio.Cancel.Cancelled (Failure "simulated cancel")) : unit));
         false
       with
       | Eio.Cancel.Cancelled (Failure msg) when String.equal msg "simulated cancel" -> true

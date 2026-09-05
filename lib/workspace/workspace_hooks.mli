@@ -214,5 +214,3 @@ val verification_notify_verdict_fn :
    decision:[ `Approve of string | `Reject of string ] ->
    unit) Atomic.t
 
-val is_admin_agent_fn :
-  (base_path:string -> agent_name:string -> bool) Atomic.t

@@ -2063,8 +2063,7 @@ let call_summary_of_input (input : Yojson.Safe.t) : string option =
              | _ -> None)
   in
   match input with
-  | `Assoc fields ->
-    (try extract_from_fields ~depth:0 fields with _ -> None)
+  | `Assoc fields -> extract_from_fields ~depth:0 fields
   | _ -> None
 ;;
 

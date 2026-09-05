@@ -15263,7 +15263,16 @@ let render_presets (state : state) =
   done;
   box_divider buf cols;
   let detail =
-    Masc_tui_preset_text.detail_lines ~selected ~detail:state.preset_detail
+    Masc_tui_preset_text.detail_lines
+      ~selected
+      ~detail:
+        (match selected with
+         | None -> Masc_tui_fetched.Absent
+         | Some (m : Tui_decode.preset_manifest) ->
+           Masc_tui_fetched.view_for
+             ~equal:String.equal
+             state.preset_detail
+             ~key:m.Tui_decode.pm_name)
       ~report:state.preset_report
     @ List.map
         (fun (name, reason) -> Printf.sprintf "! %s — %s" name reason)

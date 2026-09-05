@@ -1865,7 +1865,8 @@ type async_msg =
   (* Where a preset answer goes: the chat pane that typed the command, or
      the Config pane that pressed the key. *)
   | Presets_listed of preset_sink * (Tui_decode.presets_snapshot, string) result
-  | Preset_detail_loaded of string * (Tui_decode.preset_detail, string) result
+  | Preset_detail_loaded of
+      string Masc_tui_fetched.request * (Tui_decode.preset_detail, string) result
   | Preset_saved of preset_sink * (Tui_decode.preset_manifest, string) result
   | Preset_restored of preset_sink * (Tui_decode.preset_restore_report, string) result
   | Librarian_input_loaded of string * (string list, string) result
@@ -3544,18 +3545,23 @@ let selected_preset_for_state state =
 
 (* The selected preset's contents, fetched once per selection. The pane
    redraws on every key, so the guard is the name it was last fetched for. *)
+(* The selected preset's contents. [start] answers [Already_loading] when a
+   request for the same name is already in flight, so the pane redrawing per
+   keystroke asks once per preset rather than once per frame. *)
 let ensure_preset_detail state ~mailbox =
   match selected_preset_for_state state with
   | None -> ()
   | Some (m : Tui_decode.preset_manifest) ->
     let name = m.Tui_decode.pm_name in
-    if state.preset_detail_for <> Some name
-    then (
-      state.preset_detail_for <- Some name;
-      state.preset_detail <- None;
-      launch_preset_call state ~mailbox
-        ~call:(fun ~host ~port -> Masc_tui_loader.load_preset_detail ~host ~port ~name)
-        ~wrap:(fun result -> Preset_detail_loaded (name, result)))
+    (match
+       Masc_tui_fetched.start ~equal:String.equal state.preset_detail ~key:name
+     with
+     | Masc_tui_fetched.Already_loading -> ()
+     | Masc_tui_fetched.Started (next, request) ->
+       state.preset_detail <- next;
+       launch_preset_call state ~mailbox
+         ~call:(fun ~host ~port -> Masc_tui_loader.load_preset_detail ~host ~port ~name)
+         ~wrap:(fun result -> Preset_detail_loaded (request, result)))
 ;;
 
 let prompt_rows_for_state state =
@@ -9548,18 +9554,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                   (List.length snapshot.Tui_decode.pss_presets - 1));
            (* The listing just changed, so whatever the cursor now points at
               is a fresh question. *)
-           state.preset_detail_for <- None;
+           state.preset_detail <- Masc_tui_fetched.clear state.preset_detail;
            ensure_preset_detail state ~mailbox
        | Preset_to_pane, Error detail -> state.presets_error <- Some detail)
-  | Preset_detail_loaded (name, result) ->
-      (* A late answer for a preset the cursor has already left is dropped:
-         showing it beside a different name would be worse than showing
-         nothing. *)
-      if state.preset_detail_for = Some name
-      then (
-        match result with
-        | Ok detail -> state.preset_detail <- Some detail
-        | Error _ -> state.preset_detail <- None)
+  | Preset_detail_loaded (request, result) ->
+      (* Dropping an answer the cursor has moved past is [complete]'s job
+         now, so this arm no longer has to remember to do it. *)
+      state.preset_detail <-
+        Masc_tui_fetched.complete ~equal:String.equal state.preset_detail request result
   | Preset_saved (sink, result) ->
       (match sink, result with
        | Preset_to_chat target, Ok manifest ->

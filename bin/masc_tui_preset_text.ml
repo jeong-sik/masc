@@ -113,7 +113,7 @@ let contents_lines (d : D.preset_detail) =
 ;;
 
 let detail_lines ~(selected : D.preset_manifest option)
-      ~(detail : D.preset_detail option)
+      ~(detail : D.preset_detail Masc_tui_fetched.view)
       ~(report : D.preset_restore_report option) =
   let preset =
     match selected with
@@ -136,14 +136,17 @@ let detail_lines ~(selected : D.preset_manifest option)
          | keepers -> "지시문 " ^ String.concat ", " keepers)
       ]
   in
+  (* Four states, and the type makes the pane answer for each. Two of them
+     used to be the same silence. *)
   let contents =
-    match selected, detail with
-    | Some m, Some d when String.equal m.D.pm_name d.D.pd_name ->
+    match detail with
+    | Masc_tui_fetched.Ready d ->
       (match contents_lines d with
        | [] -> []
        | lines -> "" :: lines)
-    | Some _, _ -> [ ""; "내용을 읽는 중…" ]
-    | None, _ -> []
+    | Masc_tui_fetched.Loading -> [ ""; "내용을 읽는 중…" ]
+    | Masc_tui_fetched.Failed reason -> [ ""; "내용을 읽지 못했습니다 — " ^ reason ]
+    | Masc_tui_fetched.Absent -> []
   in
   match report with
   | None -> preset @ contents

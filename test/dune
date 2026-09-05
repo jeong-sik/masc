@@ -3215,9 +3215,14 @@
  (libraries alcotest masc_tui_command masc_tui_mcp yojson))
 
 (test
+ (name test_tui_fetched)
+ (modules test_tui_fetched)
+ (libraries alcotest masc_tui_fetched))
+
+(test
  (name test_tui_preset_text)
  (modules test_tui_preset_text)
- (libraries alcotest masc masc_tui_preset_text))
+ (libraries alcotest masc masc_tui_preset_text masc_tui_fetched))
 
 (test
  (name test_tui_surface_needs)

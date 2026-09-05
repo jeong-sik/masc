@@ -374,7 +374,7 @@
  (name masc_tui_preset_text)
  (wrapped false)
  (modules masc_tui_preset_text)
- (libraries masc))
+ (libraries masc masc_tui_fetched))
 
 (library
  (name masc_tui_mcp)
@@ -806,6 +806,11 @@
  (modules masc_tui_keeper_selection))
 
 (library
+ (name masc_tui_fetched)
+ (wrapped false)
+ (modules masc_tui_fetched))
+
+(library
  (name masc_tui_board_detail)
  (wrapped false)
  (modules masc_tui_board_detail))
@@ -912,6 +917,7 @@
   masc_tui_ask_layout
   masc_tui_ask_projection
   masc_tui_board_detail
+  masc_tui_fetched
   masc_tui_attachment
   masc_tui_code_lexer
   masc_tui_keeper_chat_projection
@@ -1149,6 +1155,7 @@
   masc_tui_operator_projection
   masc_tui_approval_authority
   masc_tui_board_detail
+  masc_tui_fetched
   masc_tui_magnitude
   masc_tui_board_comment_thread
   masc_tui_board_hearth

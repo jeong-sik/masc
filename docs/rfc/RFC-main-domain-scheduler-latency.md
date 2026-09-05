@@ -348,3 +348,43 @@ memprof 상위(`try_parse_json`·`measure_message_bytes`·`gate_history_slice`·
 `Fiber.yield` 를 더 자주 넣는 것은 하지 않는다. 계산량은 그대로이고 양보 지점을 손으로 고르는 것이라 히스토리가 커지면 다시 늘어난다.
 
 판정은 같은 90초 창의 fiber 추적으로 한다: main 도메인의 ≥100 ms 실행 23 → 0, ≥50 ms 48 → 한 자리, 하네스 p99 100 ms 대 → 20 ms 아래.
+
+### 8.8 P4g 진행 — 턴 조립을 main 도메인에서 내리는 조각들 (2026-09-05 13:40Z~)
+
+#### P4g 기준선 (pid 69198, build `59dad55196`, ready+3분, 90초, 부하 높은 창)
+
+| 항목 | 값 |
+|---|---|
+| 하네스 lag p99 / max | 153 ms / 552 ms |
+| 할당 / STW minor / major | 617 MB/s / 561/min / 11.9/min |
+| main 도메인 fiber 실행 / 점유 | 103,918 / 12.6% |
+| main 의 ≥10 / ≥50 / ≥100 ms 실행 | 109 / 37 / 19 |
+| main 의 최대 실행 | 954 ms (`fstat` → 계산 → `fstat`, 안의 GC 151 ms, 부모 스위치 이름 `both`) |
+
+954 ms 짜리는 턴 스팬 밖이고 파일을 stat 하고 읽어 파싱하는 루프 부류다. 어느 코드인지는 아직 못 잡았다(fiber 추적기가 생성 지점을 모른다 — 다음 도구 개선: 생성한 fiber 의 사슬과 이름 있는 스위치를 함께 적는다). 같은 프로세스의 30초 스택 샘플(바쁜 17%)은 8.7 과 같은 상위였다.
+
+#### 한 메시지가 턴마다 몇 번 직렬화되는가 (코드 추적)
+
+| 어디서 | 몇 번 | 대상 | 도메인 |
+|---|---|---|---|
+| gate 증거 조각 `Keeper_run_tools_setup.gate_history_slice` | tool call 의 gate 마다 | **히스토리 전체** | main |
+| 바이트 예산 측정 `measure_message_bytes` | 턴 1회(attempt 메모) | 히스토리 전체 | pool (`offload_model_input_cpu`) |
+| provider 요청 본문 `Prepared_completion_request.admit_serialized_body` → `serialize_final_http_request_unadmitted` | **요청마다(턴당 62~83)** | 창 안 메시지 전체 | main (agent_core 에 pool 없음) |
+| reasoning 투영 `Complete_common.transmitted_history` | 요청마다 | 히스토리 전체 | main |
+| 턴 종료 `serialized_bytes`(post-turn·상태 상세·tool memory) | 턴 1회 + 조회마다 | system prompt + 히스토리 전체 | main |
+| provider input 스냅샷 `Keeper_provider_input_snapshot.write_best_effort` | 턴 1회 | 창 안 메시지 전체를 직렬화 + SHA-256 | main |
+| 히스토리 append `persist_message` | 새 메시지마다 | 새 메시지(두 번 sanitize) | main |
+| 체크포인트 인코드 | 턴 중 저장마다 | 전체 | pool (`offload_checkpoint_cpu`) |
+
+`message_to_json` 은 부를 때마다 `sanitize_message_utf8` 을 먼저 돌리고, `message_of_json`(체크포인트 재로드)도 돌린다. `sanitize` 는 깨끗하면 같은 값을 그대로 돌려주므로 비용은 검사 스캔이다.
+
+#### 조각
+
+- **P4g-0 (#33384)**: gate 증거 조각이 히스토리 전체가 아니라 예산 창만 직렬화한다. 고르는 결과는 같다.
+- **P4g-1 (#33387)**: `serialize_context`·`serialized_bytes` 삭제. `checkpoint_bytes` 는 저장소가 아는 파일 크기(P4b 요약 identity)이고 `int option` 이다. 뜻이 "디스크의 canonical 체크포인트 크기"로 바뀐다.
+- **P4g-2 — provider 요청 본문 직렬화를 실행기로.** agent 레코드에 `pre_dispatch_serialization_observer` 와 같은 자리로 `serialization_executor : { run : 'a. (unit -> 'a) -> 'a } option` 을 두고, `pipeline_stage_route` 의 `admit_request_body` 두 자리(동기·스트리밍)를 그것으로 감싼다. masc 는 `Domain_pool_ref.submit_cpu_or_inline` 을 넘긴다. 감싸는 부분은 `serialize_final_http_request_unadmitted` 와 admission 뿐이고, 입력(`config`·`messages`·`tools`)은 불변 값이다. 안에서 `Reasoning_history_projection.observe` 가 `Diag.info` 로 로그를 내는데 그 싱크는 `Stdlib.Mutex` 라 다른 도메인에서도 된다. `request_wire_observer` 는 그 뒤 main 에서 부른다. `Eio_context.with_turn_switch` 는 fiber-local 이라 pool 로 전파되지 않지만 이 경로는 읽지 않는다(agent_core 는 그것을 모른다). 요청마다 히스토리 크기에 비례해 main 을 붙잡던 가장 큰 덩어리가 이것이다.
+- **P4g-3 — provider input 스냅샷의 직렬화와 해시를 pool 로.** `store_artifact` 가 `message_to_json |> to_string` 과 `Digestif.SHA256` 을 메시지마다 돌린다(C 해시는 실행 중 양보가 없다). 순수한 부분(payload·sha 목록)을 `Domain_pool_ref.submit_cpu_or_inline` 으로 먼저 계산하고, 재사용 조회와 `put_durable`(파일 I/O)·append 는 main 에 남긴다.
+- **P4g-4 — `Keeper_world_observation_inputs.tasks_with_identities`.** 관찰마다 백로그 전체의 task id 를 `Task_id.of_string` 으로 다시 파싱한다(main 스레드 2~3%). 백로그 스냅샷에 revision 이 있으므로 같은 revision 이면 앞 결과를 쓴다.
+- **그 뒤**: 메시지가 히스토리에 들어올 때 한 번 sanitize 하고 그 사실을 타입으로 들고 가면(`message_to_json`·`message_of_json` 의 매번 sanitize 제거), 남는 것은 요청마다 창을 다시 인코딩하는 것뿐이다. 그것은 메시지 단위 직렬화 조각을 attempt 안에서 물리 동일성으로 메모해 이어 붙이는 일이고 agent_core 의 백엔드 직렬화기 설계라 별도 RFC 절이 필요하다.
+
+각 조각 뒤 판정은 8.7 의 도구로 같은 창을 잰다.

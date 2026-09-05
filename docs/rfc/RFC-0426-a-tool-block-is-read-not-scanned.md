@@ -41,7 +41,26 @@ Ctrl-D: full calls / schedule / diffs
 
 **제안**: 블록 마크와 라벨(`× TOOLS`)은 지금대로 최악 결과 색을 유지한다 — 블록의 성격은 그것이 맞다. 본문은 절별로 칠한다: 재고는 중립, `N returned` 는 조용하게, `N failed: …` 만 실패색. 눈이 실패 절로 내려앉고 재고는 배경이 된다.
 
-전제 작업: 행이 자기 안에 스타일 구간을 가질 수 있어야 한다. 이미 그렇게 하는 자리가 있다 (`planning_proof_mark` 는 ANSI 를 품은 문자열을 돌려준다) 므로 새 기전은 아니고, 블록 스타일이 그것을 덮어쓰지 않도록 경계를 정하는 일이다.
+### 접합부는 이미 있다
+
+행 안에서 구간을 칠하고 바깥 스타일로 되돌리는 일은 이 팬이 이미 한다. 붙여넣은 URL 이 그 경우다:
+
+```ocaml
+let context = Chat_theme.body_context theme row.style in
+Masc_tui_message_layout.dress_bare_links
+  ~open_style:(Ansi.underline ^ Theme.Syntax.link)
+  ~close_style:context.link_restore
+  rest
+```
+
+두 조각이 필요한 전부다:
+
+- `Chat_theme.body_context theme row.style` — 그 행의 스타일에 맞는 **복원 문자열**을 준다. 구간이 끝날 때 터미널 기본값으로 떨어지지 않고 블록 색으로 되돌아간다. 그 주석이 이유도 적어놨다: 여기서 reset 을 쓰면 행 꼬리와 패딩 전에 감싼 diff 배경이 잘린다.
+- `dress_*` 형태 — `~open_style` / `~close_style` 쌍을 받아 텍스트 안의 특정 구간만 감싼다.
+
+그래서 새 기전을 세울 일이 아니라 **같은 쌍을 실패 절에 적용하는 일**이다. 다만 요약 텍스트는 `Keeper_chat_diff.rows` 가 만들고 그 모듈은 스타일을 모른다. URL 과 같은 순서를 따른다 — 텍스트는 아래에서 만들고, 칠하기는 `context` 가 있는 렌더 층에서 한다.
+
+남는 결정: 실패 절을 어떻게 식별하느냐. `compact_outcome_parts` 가 이미 결과별로 절을 만들고 있으므로, 문자열을 다시 파싱하지 않고 절 목록을 결과 태그와 함께 올리면 된다.
 
 ## 읽기 2 — 호출들 사이의 관계가 요약에 없다
 

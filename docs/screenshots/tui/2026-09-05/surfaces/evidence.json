@@ -1,0 +1,38 @@
+{
+  "captured_utc": "2026-09-05T15:41:49Z",
+  "commit": "8a068e17a6e0683dd5d34d211e3e77a1650dbf34",
+  "terminal": {
+    "cols": 133,
+    "rows": 28
+  },
+  "api_port": 8935,
+  "keeper_names_redacted": 19,
+  "task_titles_redacted": true,
+  "frames": [
+    {
+      "file": "01-overview.png",
+      "surface": "MASC Overview",
+      "query": "go overview"
+    },
+    {
+      "file": "02-keepers.png",
+      "surface": "MASC Keepers",
+      "query": "go keepers"
+    },
+    {
+      "file": "03-lanes.png",
+      "surface": "MASC Lanes",
+      "query": "go lanes"
+    },
+    {
+      "file": "05-approvals.png",
+      "surface": "MASC Approvals",
+      "query": "go approvals"
+    },
+    {
+      "file": "06-activity.png",
+      "surface": "MASC Activity",
+      "query": "go activity"
+    }
+  ]
+}

@@ -2730,9 +2730,11 @@ type state = {
   mutable presets_cursor: int;
   (* What the selected preset holds, fetched from /api/v1/presets/show. The
      listing names the overridden prompts; this is the rest of what applying
-     one would change. [None] until a selection has been read. *)
-  mutable preset_detail: Tui_decode.preset_detail option;
-  mutable preset_detail_for: string option;
+     one would change.
+
+     One value rather than a pair of options: the pair could not say "asked,
+     waiting", which is the state this pane spends its first moments in. *)
+  mutable preset_detail: (string, Tui_decode.preset_detail) Masc_tui_fetched.t;
   mutable preset_save_draft: string option;
   mutable preset_restore_armed: string option;
   mutable preset_report: Tui_decode.preset_restore_report option;
@@ -3992,8 +3994,7 @@ let create_state
   presets_snapshot = None;
   presets_error = None;
   presets_cursor = 0;
-  preset_detail = None;
-  preset_detail_for = None;
+  preset_detail = Masc_tui_fetched.initial;
   preset_save_draft = None;
   preset_restore_armed = None;
   preset_report = None;

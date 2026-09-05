@@ -81,12 +81,22 @@ let test_pane_row_and_detail () =
     ; "저장 시각 2026-09-03T10:26:08Z"
     ; "프롬프트 override keeper"
     ; "지시문 analyst, spruce"
-      (* Selected but not yet answered for. Saying so beats a pane that looks
-         complete while the interesting half is still in flight. *)
+    ]
+    (Text.detail_lines ~selected:(Some morning) ~detail:Masc_tui_fetched.Absent ~report:None);
+  (* Selected and asked for. Saying so beats a pane that looks complete while
+     the interesting half is still in flight -- and this is the state the old
+     option pair had no way to reach. *)
+  check (list string) "a selection being read says so"
+    [ "morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
+    ; "before the campaign"
+    ; "저장 시각 2026-09-03T10:26:08Z"
+    ; "프롬프트 override keeper"
+    ; "지시문 analyst, spruce"
     ; ""
     ; "내용을 읽는 중…"
     ]
-    (Text.detail_lines ~selected:(Some morning) ~detail:None ~report:None);
+    (Text.detail_lines ~selected:(Some morning) ~detail:Masc_tui_fetched.Loading
+       ~report:None);
   (* A preset saved before the server named its overrides must not read as
      one that overrides nothing. *)
   check (list string) "an older preset says the keys are unknown"
@@ -95,25 +105,21 @@ let test_pane_row_and_detail () =
     ; "저장 시각 2026-09-03T10:26:08Z"
     ; "프롬프트 override 1개 — 어느 것인지는 이 프리셋에 적혀 있지 않습니다"
     ; "지시문 analyst, spruce"
-    ; ""
-    ; "내용을 읽는 중…"
     ]
     (Text.detail_lines
        ~selected:(Some { morning with D.pm_override_keys = None })
-       ~detail:None ~report:None);
+       ~detail:Masc_tui_fetched.Absent ~report:None);
   check (list string) "and one that truly overrides nothing says that"
     [ "morning · overrides 0 · keepers 2 · assignments 12 · lanes 4"
     ; "before the campaign"
     ; "저장 시각 2026-09-03T10:26:08Z"
     ; "프롬프트 override 없음"
     ; "지시문 analyst, spruce"
-    ; ""
-    ; "내용을 읽는 중…"
     ]
     (Text.detail_lines
        ~selected:
          (Some { morning with D.pm_override_keys = Some []; pm_override_count = 0 })
-       ~detail:None ~report:None);
+       ~detail:Masc_tui_fetched.Absent ~report:None);
   (* Once the server answers, the pane says what applying this would touch.
      Sizes, because the point is the decision and a 4 KB prompt does not fit
      in a pane. *)
@@ -137,9 +143,10 @@ let test_pane_row_and_detail () =
     ; "배정 analyst→glm-coding.glm-5.3"
     ; "레인 verifier_exact"
     ]
-    (Text.detail_lines ~selected:(Some morning) ~detail:(Some contents) ~report:None);
-  (* A late answer for a preset the cursor has left is not this one's. *)
-  check (list string) "contents for another preset are not shown"
+    (Text.detail_lines ~selected:(Some morning) ~detail:(Masc_tui_fetched.Ready contents) ~report:None);
+  (* Matching the answer to the selection is the fetch type's job now, so
+     what reaches here for a preset still in flight is simply Loading. *)
+  check (list string) "a selection still in flight says so"
     [ "morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
     ; "before the campaign"
     ; "저장 시각 2026-09-03T10:26:08Z"
@@ -150,13 +157,29 @@ let test_pane_row_and_detail () =
     ]
     (Text.detail_lines
        ~selected:(Some morning)
-       ~detail:(Some { contents with D.pd_name = "evening" })
+       ~detail:Masc_tui_fetched.Loading
+       ~report:None);
+  (* The state that did not exist before: the pane could say nothing when a
+     read failed, so a failure looked the same as a preset with no contents. *)
+  check (list string) "a failed read says why"
+    [ "morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
+    ; "before the campaign"
+    ; "저장 시각 2026-09-03T10:26:08Z"
+    ; "프롬프트 override keeper"
+    ; "지시문 analyst, spruce"
+    ; ""
+    ; "내용을 읽지 못했습니다 — preset detail load failed: connection refused"
+    ]
+    (Text.detail_lines
+       ~selected:(Some morning)
+       ~detail:
+         (Masc_tui_fetched.Failed "preset detail load failed: connection refused")
        ~report:None);
   check (list string) "no selection says so"
     [ "선택한 프리셋이 없습니다" ]
-    (Text.detail_lines ~selected:None ~detail:None ~report:None);
+    (Text.detail_lines ~selected:None ~detail:Masc_tui_fetched.Absent ~report:None);
   let with_report =
-    Text.detail_lines ~selected:(Some morning) ~detail:None
+    Text.detail_lines ~selected:(Some morning) ~detail:Masc_tui_fetched.Absent
       ~report:(Some (report ~skipped:[] ~runtime:D.Preset_runtime_committed))
   in
   check bool "the report follows the preset in the detail" true

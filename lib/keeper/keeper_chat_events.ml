@@ -192,18 +192,13 @@ let publish t event =
   t.next_seq <- seq + 1;
   (* One clock reading per event. The journal line and every live projection
      of this event carry this same [ts], which is what lets a replay from the
-     journal reproduce the live frames byte for byte. A raising clock falls
-     back to the real one rather than breaking the turn. *)
-  let ts =
-    try t.now () with
-    | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
-    | exn ->
-      Log.Keeper.error
-        "keeper_chat_events: clock raised seq=%d: %s; falling back to Time_compat.now"
-        seq
-        (Printexc.to_string exn);
-      Time_compat.now ()
-  in
+     journal reproduce the live frames byte for byte. The clock is either the
+     default [Time_compat.now] or the one a test injected through [create];
+     a raising clock is a defect in the caller and propagates. Substituting
+     the real clock here would hand the journal and the live frame a [ts] the
+     injected clock never produced, which is the contract this line exists
+     to keep. *)
+  let ts = t.now () in
   (match t.on_publish with
    | None -> ()
    | Some hook ->

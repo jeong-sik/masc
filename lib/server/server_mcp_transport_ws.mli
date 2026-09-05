@@ -97,7 +97,7 @@ type ws_session = {
   id : string;
   wsd : Ws_direct_core.Endpoint.Wsd.t;
   closed : bool Atomic.t;
-  write_mutex : Eio.Mutex.t;
+  write_mutex : Stdlib.Mutex.t;
   last_pong_at : float Atomic.t;
   dashboard_auth : dashboard_auth_state Atomic.t;
   dashboard_route : string option Atomic.t;

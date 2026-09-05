@@ -22,14 +22,14 @@ let max_preview_urls = 4
 let preview_timeout_sec = 0.25
 let max_html_chars = 262_144
 
-let preview_cache_mu = Eio.Mutex.create ()
+let preview_cache_mu = Stdlib.Mutex.create ()
 let preview_cache : (string, cache_payload) Hashtbl.t = Hashtbl.create 128
 
 
 let lower_trim value = String.lowercase_ascii (String.trim value)
 
 let cache_lookup key =
-  Eio.Mutex.use_rw ~protect:true preview_cache_mu (fun () ->
+  Stdlib.Mutex.protect preview_cache_mu (fun () ->
       match Hashtbl.find_opt preview_cache key with
       | Some entry when entry.expires_at > Time_compat.now () -> Some entry.preview
       | Some _ ->
@@ -38,7 +38,7 @@ let cache_lookup key =
       | None -> None)
 
 let cache_store ~ttl key preview =
-  Eio.Mutex.use_rw ~protect:true preview_cache_mu (fun () ->
+  Stdlib.Mutex.protect preview_cache_mu (fun () ->
       Hashtbl.replace preview_cache key
         { preview; expires_at = Time_compat.now () +. ttl })
 

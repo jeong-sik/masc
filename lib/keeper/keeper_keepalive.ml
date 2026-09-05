@@ -953,7 +953,7 @@ let record_lifecycle_start_denial
        reason)
 ;;
 
-let start_keepalive
+let rec start_keepalive
       ?(proactive_warmup_sec = 0)
       ?lifecycle_token
       ?intake_token

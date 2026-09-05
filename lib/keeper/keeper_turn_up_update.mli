@@ -55,3 +55,11 @@ module For_testing : sig
     Keeper_meta_contract.keeper_meta ->
     Keeper_types_profile.tool_result
 end
+
+val swap_keepalive_lane_fenced :
+  _ Keeper_types_profile.context ->
+  Keeper_meta_contract.keeper_meta ->
+  ( Keeper_keepalive.joined_stop_result
+    * Keeper_keepalive.start_keepalive_outcome,
+    Keeper_types_profile.tool_result )
+  result

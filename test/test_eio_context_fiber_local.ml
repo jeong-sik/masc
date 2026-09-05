@@ -158,7 +158,7 @@ let test_run_on_owner_domain_inline_when_uninitialized () =
   Alcotest.(check int) "inline without root switch returns value" 42 ran;
   let raised =
     try
-      Eio_context.run_on_owner_domain (fun () -> failwith "uninitialized error");
+      ignore (Eio_context.run_on_owner_domain (fun () -> failwith "uninitialized error"));
       false
     with
     | Failure msg when String.equal msg "uninitialized error" -> true
@@ -174,7 +174,7 @@ let test_run_on_owner_domain_inline_on_owner_domain () =
   Alcotest.(check int) "inline on owner domain returns value" 123 ran;
   let raised =
     try
-      Eio_context.run_on_owner_domain (fun () -> failwith "owner error");
+      ignore (Eio_context.run_on_owner_domain (fun () -> failwith "owner error"));
       false
     with
     | Failure msg when String.equal msg "owner error" -> true
@@ -225,8 +225,8 @@ let test_run_on_owner_domain_cross_domain_dispatch () =
     (* 3. Verify exception propagation across domains *)
     let cross_domain_exception_propagated =
       try
-        Eio_context.run_on_owner_domain (fun () ->
-          failwith "cross-domain error payload");
+        ignore (Eio_context.run_on_owner_domain (fun () ->
+          failwith "cross-domain error payload"));
         false
       with
       | Failure msg when String.equal msg "cross-domain error payload" -> true
@@ -239,8 +239,8 @@ let test_run_on_owner_domain_cross_domain_dispatch () =
     (* 4. Verify Cancelled exception propagation does NOT crash or cancel root_sw *)
     let cancelled_propagated =
       try
-        Eio_context.run_on_owner_domain (fun () ->
-          raise (Eio.Cancel.Cancelled (Failure "simulated cancel")));
+        ignore (Eio_context.run_on_owner_domain (fun () ->
+          raise (Eio.Cancel.Cancelled (Failure "simulated cancel"))));
         false
       with
       | Eio.Cancel.Cancelled (Failure msg) when String.equal msg "simulated cancel" -> true

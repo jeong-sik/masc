@@ -409,7 +409,7 @@ let existing_operation_intent ~request (operation : Keeper_shutdown_types.t) =
   else Error (Existing_operation_intent_mismatch operation)
 ;;
 
-let submit ~config ~entry ~request =
+let rec submit ~config ~entry ~request =
   if not (Eio_context.root_switch_on_current_domain ())
      && Option.is_some (Eio_context.get_root_switch_opt ())
   then
@@ -432,7 +432,7 @@ let submit ~config ~entry ~request =
     | Error error -> Error (Prepare_error error)
 ;;
 
-let submit_dormant ~config ~meta ~request =
+let rec submit_dormant ~config ~meta ~request =
   if not (Eio_context.root_switch_on_current_domain ())
      && Option.is_some (Eio_context.get_root_switch_opt ())
   then

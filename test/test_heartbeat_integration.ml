@@ -773,6 +773,8 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       let meta = make_meta keeper_name in
       Eio.Switch.run @@ fun sw ->
+      install_owner_inventory_exn ~sw config;
+      ensure_owner_meta_exn config meta;
       let ctx : _ Keeper_types_profile.context =
         {
           config;
@@ -830,6 +832,8 @@ let test_cross_domain_start_keepalive_and_swap () =
       seed_keeper_sandbox_profile ~base_dir keeper_name;
       Eio.Switch.run @@ fun root_sw ->
       Eio_context.set_switch root_sw;
+      install_owner_inventory_exn ~sw:root_sw config;
+      ensure_owner_meta_exn config meta;
       let ctx : _ Keeper_types_profile.context =
         {
           config;
@@ -849,7 +853,7 @@ let test_cross_domain_start_keepalive_and_swap () =
         match Masc.Keeper_keepalive.start_keepalive ctx meta with
         | Masc.Keeper_keepalive.Keepalive_started entry ->
           check string "started keeper name matches" keeper_name entry.name;
-          let updated_meta = { meta with heartbeat_interval_sec = 60 } in
+          let updated_meta = meta in
           (match Masc.Keeper_turn_up_update.swap_keepalive_lane_fenced ctx updated_meta with
            | Ok (_stop_outcome, Masc.Keeper_keepalive.Keepalive_started new_entry) ->
              check string "swapped keeper name matches" keeper_name new_entry.name
@@ -887,6 +891,8 @@ let test_cross_domain_shutdown_submit () =
       seed_keeper_sandbox_profile ~base_dir keeper_name;
       Eio.Switch.run @@ fun root_sw ->
       Eio_context.set_switch root_sw;
+      install_owner_inventory_exn ~sw:root_sw config;
+      ensure_owner_meta_exn config meta;
       Masc.Keeper_process_switch.set root_sw;
       let ctx : _ Keeper_types_profile.context =
         {
@@ -908,7 +914,10 @@ let test_cross_domain_shutdown_submit () =
             (Eio_context.root_switch_on_current_domain ());
           let request : Masc.Keeper_shutdown_prepare_join.request =
             { actor = "tester"
-            ; cleanup_intent = Masc.Keeper_shutdown_types.Purge
+            ; cleanup_intent =
+              { reason = Masc.Keeper_shutdown_types.Supervisor_cleanup
+              ; remove_session = true
+              }
             }
           in
           match Masc.Keeper_shutdown_runtime.submit ~config ~entry ~request with
@@ -1000,6 +1009,9 @@ let test_direct_stop_resolves_done_after_librarian_drain_failure () =
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       let meta = make_meta keeper_name in
       Eio.Switch.run @@ fun keeper_sw ->
+      Masc.Keeper_process_switch.set keeper_sw;
+      install_owner_inventory_exn ~sw:keeper_sw config;
+      ensure_owner_meta_exn config meta;
       let ctx : _ Keeper_types_profile.context =
         { config
         ; agent_name = "tester"

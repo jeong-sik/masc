@@ -12216,14 +12216,6 @@ let memory_fact_detail_lines ~cols (row : Masc_tui_types.memory_fact_row) =
           (Theme.recede ()) Ansi.reset (memory_fact_age_label row.mi_invalidated_at)
       ]
 
-(* One store's state for the summary strip: its rows are in the list only
-   when the reading is present, so the strip is where a failed or absent
-   store stays visible instead of passing as "remembers nothing". *)
-let memory_store_state_label name = function
-  | Masc.Tui_decode.Memory_store_read_error _ -> name ^ " read failed"
-  | Masc.Tui_decode.Memory_store_absent -> name ^ " absent"
-  | Masc.Tui_decode.Memory_store_present _ -> name ^ " ok"
-
 let render_memory_facts (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let open Masc.Tui_decode in

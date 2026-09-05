@@ -611,44 +611,47 @@ let agent_speak_json
       ?audio_device
       ()
   =
-  if is_dedup_hit ~agent_id ~message
-  then (
-    log_info
-      (Printf.sprintf
-         "voice dedup skip: agent=%s (same message within %.0fs window)"
-         agent_id
-         playback_dedup_window_sec);
-    Ok
-      (`Assoc
-          [ "status", `String "dedup_skipped"
-          ; "agent_id", `String agent_id
-          ; "reason", `String "identical message was played recently"
-          ]))
-  else (
-    let voice = get_voice_for_agent agent_id in
-    let provider =
-      provider
-      |> Option.map String.trim
-      |> function
-      | Some value when value <> "" -> Some value
-      | _ -> None
-    in
-    cleanup_old_audio_files ();
-    match Voice_config.load_detailed () with
-    | Error (Voice_config.Invalid msg) ->
-      (* An explicit voice config exists but is broken: surface the
-         load failure instead of substituting a hardcoded model. *)
-      Error (Printf.sprintf "voice config load failed: %s" msg)
-    | Error Voice_config.Not_configured ->
-      (* Voice is not set up in this environment: TTS is explicitly
-         disabled, which is not an error of the config itself. *)
-      Error "no configured TTS endpoint"
-    | Ok { Voice_config.tts = None; _ } ->
-      (* The config loaded and has no [tts] section. Refused here, before any
-         endpoint is asked: there is no model to send, and an empty string in
-         its place would reach providers as model_id "". *)
-      Error "voice config has no [tts] section, so TTS is not set up"
-    | Ok { Voice_config.tts = Some tts; _ } ->
+  (* The config is read before the dedup check: a config that does not load
+     refuses every message, including one that played a moment ago under a
+     config that did. *)
+  match Voice_config.load_detailed () with
+  | Error (Voice_config.Invalid msg) ->
+    (* An explicit voice config exists but is broken: surface the
+       load failure instead of substituting a hardcoded model. *)
+    Error (Printf.sprintf "voice config load failed: %s" msg)
+  | Error Voice_config.Not_configured ->
+    (* Voice is not set up in this environment: TTS is explicitly
+       disabled, which is not an error of the config itself. *)
+    Error "no configured TTS endpoint"
+  | Ok { Voice_config.tts = None; _ } ->
+    (* The config loaded and has no [tts] section. Refused here, before any
+       endpoint is asked: there is no model to send, and an empty string in
+       its place would reach providers as model_id "". *)
+    Error "voice config has no [tts] section, so TTS is not set up"
+  | Ok { Voice_config.tts = Some tts; _ } ->
+    if is_dedup_hit ~agent_id ~message
+    then (
+      log_info
+        (Printf.sprintf
+           "voice dedup skip: agent=%s (same message within %.0fs window)"
+           agent_id
+           playback_dedup_window_sec);
+      Ok
+        (`Assoc
+            [ "status", `String "dedup_skipped"
+            ; "agent_id", `String agent_id
+            ; "reason", `String "identical message was played recently"
+            ]))
+    else (
+      let voice = get_voice_for_agent agent_id in
+      let provider =
+        provider
+        |> Option.map String.trim
+        |> function
+        | Some value when value <> "" -> Some value
+        | _ -> None
+      in
+      cleanup_old_audio_files ();
       let endpoints = available_tts_endpoints ?provider tts in
       let model = tts.Voice_config.default_model in
       let rec try_endpoints attempted = function

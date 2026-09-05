@@ -51,12 +51,14 @@ type external_effect_authorizer =
 (* Which way a speak leaves the tool. The Gate reviews it unless the keeper
    or the voice config exempts it; a config that does not load is a third
    answer, not "not exempt": no provider can be reached under it, so a review
-   would approve nothing and hide why. That speak goes straight to the bridge,
-   which refuses it with the loader's reason. *)
+   would approve nothing and hide why. The refusal carries the loader's own
+   sentence from the one read that decided the route. A second read in the
+   bridge would decide again, and a config repaired between the two reads
+   would play without the review the first read denied. *)
 type speak_route =
   | Exempt_from_gate
   | Reviewed_by_gate
-  | Refused_by_voice_config
+  | Refused_by_voice_config of string
 
 let handle_speak_with_outcome
       ~(config : Workspace.config)
@@ -183,14 +185,17 @@ let handle_speak_with_outcome
                 then Exempt_from_gate
                 else Reviewed_by_gate
               | Error Voice_config.Not_configured -> Reviewed_by_gate
-              | Error (Voice_config.Invalid _) -> Refused_by_voice_config))
+              | Error (Voice_config.Invalid reason) -> Refused_by_voice_config reason))
       in
       (match route with
        | Exempt_from_gate -> run_speak ()
-       (* [Voice_bridge.agent_speak] loads the same config and answers with
-          the loader's reason, so the sentence the model reads is written
-          once, there. *)
-       | Refused_by_voice_config -> run_speak ()
+       | Refused_by_voice_config reason ->
+         Keeper_tool_execution.failure
+           ~class_:Tool_result.Runtime_failure
+           (Tool_args.error_response_with
+              [ "agent_id", `String meta.name
+              ; "message", `String reason
+              ])
        | Reviewed_by_gate ->
          (* Synchronous on purpose: the tool schema promises "blocks until
             playback finishes". The former fire-and-forget queue returned

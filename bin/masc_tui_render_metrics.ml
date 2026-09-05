@@ -353,7 +353,7 @@ let render_section_tools ~cols (state : state) : string list =
       Hashtbl.replace counts tool (current + 1))
     state.keeper_tool_approvals;
   if Hashtbl.length counts = 0 then
-    [ title; "  (no active gate tool operations recorded in fleet state)" ]
+    [ title; clip "  (no active gate tool operations recorded in fleet state)" ]
   else
     let items =
       Hashtbl.fold

@@ -2,7 +2,7 @@
 
 let default_sampling_rate = 1e-5
 let max_pending_events = 1_000_000
-let max_sites = 20_000
+let max_sites = 50_000
 let overflow_site_key = "<sites past the table bound>"
 
 (* Frames beyond this add cost per sample without telling the reader more
@@ -53,27 +53,50 @@ let admit event block =
   end
 ;;
 
+(* Frames of these two libraries are skipped when a key is built: they say
+   how a value was built (a lexer recursion, a Bytes copy), not who asked
+   for it, and they multiply distinct stacks past any table bound. Every
+   other frame counts, so the skip list is closed and small. *)
+let skipped_frame_name_prefixes = [ "Stdlib__"; "Stdlib."; "Yojson__"; "CamlinternalFormat" ]
+
+(* How many kept frames name a site. Deeper than this the paths converge on
+   the same keeper loop and add nothing. *)
+let frames_per_key = 6
+
+let frame_lines entry =
+  match Printexc.backtrace_slots_of_raw_entry entry with
+  | None -> [ "<unknown>" ]
+  | Some slots ->
+    Array.to_list slots
+    |> List.mapi (fun slot_index slot -> Printexc.Slot.format slot_index slot)
+    |> List.filter_map Fun.id
+;;
+
+let is_skipped_slot slot =
+  match Printexc.Slot.name slot with
+  | None -> false
+  | Some name ->
+    List.exists (fun prefix -> String.starts_with ~prefix name) skipped_frame_name_prefixes
+;;
+
+let entry_is_skipped entry =
+  match Printexc.backtrace_slots_of_raw_entry entry with
+  | None -> false
+  | Some slots -> Array.for_all is_skipped_slot slots
+;;
+
 let key_of_callstack callstack =
-  let entries = Printexc.raw_backtrace_entries callstack in
-  let buffer = Buffer.create 256 in
-  Array.iteri
-    (fun index entry ->
-       if index < callstack_frames
-       then begin
-         match Printexc.backtrace_slots_of_raw_entry entry with
-         | None -> Buffer.add_string buffer "<unknown>\n"
-         | Some slots ->
-           Array.iteri
-             (fun slot_index slot ->
-                match Printexc.Slot.format slot_index slot with
-                | Some text ->
-                  Buffer.add_string buffer text;
-                  Buffer.add_char buffer '\n'
-                | None -> ())
-             slots
-       end)
-    entries;
-  Buffer.contents buffer
+  let entries =
+    Array.to_list (Printexc.raw_backtrace_entries callstack)
+    |> List.filteri (fun index _ -> index < callstack_frames)
+  in
+  let kept =
+    match List.filter (fun entry -> not (entry_is_skipped entry)) entries with
+    | [] -> entries
+    | _ :: _ as kept -> kept
+  in
+  let chosen = List.filteri (fun index _ -> index < frames_per_key) kept in
+  String.concat "\n" (List.concat_map frame_lines chosen) ^ "\n"
 ;;
 
 let block_of (allocation : Gc.Memprof.allocation) =

@@ -2294,19 +2294,23 @@ let turn_log_keeper_name turn_log = Masc_tui_keeper_chat_log.keeper_name turn_lo
 let turn_log_request_id turn_log = Masc_tui_keeper_chat_log.request_id turn_log.tl_log
 let turn_log_started_at turn_log = Masc_tui_keeper_chat_log.started_at turn_log.tl_log
 
-(* How many loaded turns one history load asks the journal for. A load runs
-   when the chat opens, on a refresh key, when the keeper appends a turn and
-   when one settles; the turns behind the newest twenty are the ones the
-   operator scrolls back to, and each of those is asked for when its page
-   loads rather than all of them on every load. *)
-let reload_journal_fetch_cap = 20
-
 (* Which loaded turns a refresh fetches journals for: every operation the
    rows name, once, newest first by the earliest row of that operation, minus
    the turns this session already holds as logs (settled, or still streaming)
-   and the ones the server has said it cannot serve, at most [cap]. Pure, so
-   the choice is testable without a server. *)
-let journal_fetch_targets ~cap ~held ~unavailable
+   and the ones the server has said it cannot serve. The rows are the bound:
+   they are one /chat/history body, which the server cuts at the chat store's
+   tail window ([Keeper_chat_store.load]), and only direct turns carry an
+   [operation_id], so only they are candidates. Each turn is asked for on the
+   load that names it -- a load runs when the chat opens, on a refresh key,
+   when the keeper appends a turn and when one settles -- and once held it is
+   not asked for again, so every load after the first asks only for what is
+   new. The older-page path issues no journal reads, so a turn a load does
+   not ask for is not rebuilt by anything else; that is why nothing here is
+   cut short of the rows. The order is the order the reads run in (the
+   launcher reads the targets one after another), so the turns nearest the
+   bottom of the pane fill first. Pure, so the choice is testable without a
+   server. *)
+let journal_fetch_targets ~held ~unavailable
     (candidates : (string * float) list) =
   let earliest = Hashtbl.create 16 in
   List.iter
@@ -2324,7 +2328,6 @@ let journal_fetch_targets ~cap ~held ~unavailable
          match Float.compare at_b at_a with
          | 0 -> String.compare id_a id_b
          | order -> order)
-  |> List.filteri (fun index _ -> index < cap)
 ;;
 
 (* A committed log stands for its turn once the stream told it how the turn
@@ -3205,8 +3208,12 @@ type state = {
   mutable code_entries: Tui_decode.workspace_tree_node list;
   mutable code_entries_error: string option;
   mutable code_cursor: int;
-  mutable code_file: (string * (string * string) list list) option;
-  mutable code_file_error: string option;
+  (* The open file's lexed rows, keyed by its path. One value rather than a
+     pair of options: the pair could not say "reading", so a file being
+     fetched drew the same blank pane an empty file draws -- and nothing
+     matched an arriving answer against the path still on screen, so a slow
+     read of one file could replace another the operator had since opened. *)
+  mutable code_file: (string, (string * string) list list) Masc_tui_fetched.t;
   mutable code_file_scroll: int;
   (* The line the pane's cursor is on (0-based), the anchor a language-server
      question is asked at. j/k move it; the scroll follows to keep it
@@ -4245,8 +4252,7 @@ let create_state
   code_entries = [];
   code_entries_error = None;
   code_cursor = 0;
-  code_file = None;
-  code_file_error = None;
+  code_file = Masc_tui_fetched.initial;
   code_file_scroll = 0;
   code_file_cursor = 0;
   code_lsp_note = None;
@@ -5375,12 +5381,17 @@ let surface_row_texts (state : state) : surface -> string list option = function
         state.code_focus_file = Right_pane && not state.code_history_open
         && not state.code_diff_open && not state.code_notes_open
       then
-        Option.map
-          (fun (_, rows) ->
-            List.map
-              (fun segments -> String.concat "" (List.map fst segments))
-              rows)
-          state.code_file
+        (match Masc_tui_fetched.current state.code_file with
+         | Some (_, Masc_tui_fetched.Ready rows) ->
+           Some
+             (List.map
+                (fun segments -> String.concat "" (List.map fst segments))
+                rows)
+         (* Nothing to search through while the file is still being read, and
+            nothing to search through if it failed. *)
+         | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+         | Some (_, Masc_tui_fetched.Absent)
+         | None -> None)
       else
         Some
           (List.map
@@ -5576,9 +5587,8 @@ type palette_action =
    or a number -- those offer no name a language server answers about --
    rather than keeping a second keyword list that could drift. *)
 let code_cursor_line_symbols (state : state) =
-  match state.code_file with
-  | None -> []
-  | Some (_, rows) -> (
+  match Masc_tui_fetched.current state.code_file with
+  | Some (_, Masc_tui_fetched.Ready rows) -> (
       match List.nth_opt rows state.code_file_cursor with
       | None -> []
       | Some segments ->
@@ -5618,6 +5628,10 @@ let code_cursor_line_symbols (state : state) =
               end)
             segments;
           List.rev !names)
+  (* No open file, still reading, or the read failed: nothing to name. *)
+  | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+  | Some (_, Masc_tui_fetched.Absent)
+  | None -> []
 
 (* The Code pane asks the server for at most this many entries per directory
    and the server answers a bare list, so a full page is the only sign that a

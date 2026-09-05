@@ -34,7 +34,8 @@ let test_no_surface_repeats_a_key () =
           (Masc_tui_keys.for_surface surface)
       in
       Alcotest.(check int)
-        "each key appears once per surface"
+        (Printf.sprintf "each key appears once per surface (keys: %s)"
+           (String.concat ", " keys))
         (List.length keys)
         (List.length (List.sort_uniq compare keys)))
     every_surface
@@ -263,7 +264,7 @@ let test_memory_footer_offers_the_fact_browser () =
 
 let test_memory_facts_footer_names_filter_and_way_back () =
   check str "the browser names movement, the category cycle, and Esc"
-    "j/k:move  c / C:category  s:sort  /:filter  n / N:next / previous match  Esc:close / clear  r:refresh  Tab:next  q:quit"
+    "j/k:move  c / C:category  s:sort  Esc:close / clear  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_memory_facts
 
 let sample_memory_fact ~category ~claim : Tui_decode.memory_fact =
@@ -497,7 +498,7 @@ let test_keeper_operations_are_not_top_level_tabs () =
        Alcotest.(check int) (label ^ " highlights Keepers")
          (surface_ring_index (Keepers Keeper_list))
          (surface_ring_index surface))
-    [ Connectors, "Channels"; Schedules, "Automation"; Fusion, "Runs" ];
+    [ Connectors, "Channels"; Schedules, "Automation" ];
   Alcotest.(check (list string)) "Keeper operation tab labels"
     [ "Channels"; "Automation"; "Runs" ]
     (List.filter_map
@@ -1006,7 +1007,7 @@ let test_detail_tab_hint_projects_the_table () =
    GitHub tab, e for the settings form). *)
 let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   [ Detail_info, []
-  ; Detail_sandbox, [ "o"; "PgUp/PgDn"; "R" ]
+  ; Detail_sandbox, [ "o"; "d/m/s"; "PgUp/PgDn"; "R" ]
   ; Detail_instructions, [ "e" ]
   ; Detail_secrets, []
   ; Detail_github, [ "L" ]

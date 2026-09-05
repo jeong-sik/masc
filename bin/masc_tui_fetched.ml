@@ -99,6 +99,22 @@ let complete ~equal state request result =
     { state with status })
 ;;
 
+(* What this pane is about right now, and what is known about it. A pane
+   whose key comes from the fetch itself -- an open file, a selected post --
+   cannot call [view_for] without first knowing the key, and the key is what
+   it is asking for. *)
+let current state =
+  let about request view = Some (request.key, view) in
+  match state.status with
+  | Status_absent -> None
+  | Status_loading request -> about request Loading
+  | Status_ready (request, value) -> about request (Ready value)
+  | Status_refreshing (request, value) -> about request (Ready value)
+  | Status_failed (request, error) -> about request (Failed error)
+;;
+
+let current_key state = Option.map fst (current state)
+
 let view_for ~equal state ~key =
   let matches request = equal request.key key in
   match state.status with

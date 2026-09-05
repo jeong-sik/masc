@@ -55,6 +55,41 @@ TUI 와 대시보드가 느린 이유는 메인 Eio 도메인이 자기 일을 �
 ## 4. 수용 기준
 
 - Phase 0: 배포 뒤 `scheduler_lag_probe.sh` 출력 두 벌(부팅 직후 2분, 안정 후)을 이 RFC 에 붙인다. 그 값이 Phase 1~4 의 기준선이다.
+
+### 4.1 기준선 — 2026-09-05 18:03 KST, build `dd6c9861c0`, 재기동 직후
+
+Phase 0·0b·1 이 머지된 빌드. 호스트는 오후의 load 80~300 상태가 아니라 평상 부하였다(별도 측정 없음, 같은 날 저녁).
+
+| 읽기 | 부팅 직후(ready 후 36초) | 안정 후(ready 후 약 6분) |
+|---|---|---|
+| `/health` p50 / p90 / max (30회) | 27ms / 288ms / 1,833ms | 2ms / 50ms / 109ms |
+| 프로브 p50 / p95 / p99 / max | 1.5ms / 263ms / 556ms / 973ms | 1.6ms / 100ms / 191ms / 312ms |
+| 프로브 mean / 1초 이상 stall | 50.6ms / 0 | 15.8ms / 0 |
+| minor / major (분당) | 4,087 / 12.0 | 3,451 / 17.8 |
+| 할당 / 승격 (MB/s) | 304 / 24.8 | 425 / 31.9 |
+| heap / live (MB) | 2,558 / 2,457 | 2,845 / 2,673 |
+
+이 부팅의 창: 포트 열림 09:03:05Z → `Domain_pool created` 09:03:17Z → keeper loop 시작·프로브 시작 09:03:41Z (36초). ready 3초 전에 읽은 `/health` 가 이미 heap 2,663MB / live 2,649MB 였다. **live 2.6GB 는 keeper 가 돌기 전에 부팅이 만든다.**
+
+### 4.2 힙 루트 — 같은 빌드, ready 후 약 2분, 걷기 281ms
+
+| 루트 | reachable |
+|---|---|
+| `exact_lane_runs` | 545.2 MB |
+| `activity_graph_caches` | 44.6 MB |
+| `board_attention_partition_caches` | 20.4 MB |
+| `keeper_owner_pools` | 3.8 MB |
+| `dashboard_snapshot` | 3.2 MB |
+| `verification_runs` / `keeper_registry` / `telemetry_trajectory_summaries` | 0.9 / 0.8 / 0.1 MB |
+| `goal_verification_runs` / `fusion_runs` / `sse_clients` | 0 |
+
+등록 루트 합계 619MB, live 2,529MB. **약 1.9GB 는 등록된 루트에 없다.** keeper owner 가 3.8MB 인 것은 Agent Core 상태가 owner 가 아니라 keeper run fiber 의 지역 값으로 산다는 뜻이고, 그건 루트로 등록할 수 없다. 그래서 다음 계기는 루트 등록이 아니라 `Gc.Memprof` 로 할당 지점별 잔존량을 통계적으로 재는 것이다(Phase 0c).
+
+### 4.3 이 기준선이 바꾸는 것
+
+- 안정 후 메인 도메인 lag p99 191ms, stall 0. 오후의 3~10초 정지는 호스트 포화와 재시작 churn 이 만든 것이었고, 평상 부하에서는 GC 압력이 남는다.
+- 할당 425MB/s 와 major 17.8/분은 15개 도메인이 3.4초마다 2.67GB 를 마킹한다는 뜻이다. Phase 4 의 표적은 exact-lane 545MB(요약만 상주, 본문은 run_id 로 디스크에서)와 Memprof 가 가리킬 할당 상위 지점이다.
+- Phase 2(systhread 경계)는 stall 0 인 지금 기준선으로는 순서를 뒤로 미룬다. 프로브가 stall 을 보이면 다시 앞으로.
 - 이후 단계는 위 표의 기준을 같은 스크립트로 증명한다. 호스트 load 를 함께 적는다. load 가 다르면 비교하지 않는다.
 
 ## 5. 하지 않는 것

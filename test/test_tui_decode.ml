@@ -3635,8 +3635,10 @@ let test_decode_clients_rejects_unknown_status_and_schema () =
    with
    | Ok _ -> Alcotest.fail "an unknown status decoded"
    | Error detail ->
-       Alcotest.(check bool) "error names the status" true
-         (String.starts_with ~prefix:"clients: unknown status" detail));
+       (* The row decoder's message arrives behind the list position that
+          names which row: "clients[0]: clients: unknown status hibernating". *)
+       Alcotest.(check bool) "error names the row and the status" true
+         (String_util.contains_substring detail "clients[0]: clients: unknown status hibernating"));
   (match
      Tui_decode.decode_clients_snapshot
        (clients_snapshot_json
@@ -3645,8 +3647,8 @@ let test_decode_clients_rejects_unknown_status_and_schema () =
    with
    | Ok _ -> Alcotest.fail "the capital spelling decoded"
    | Error detail ->
-       Alcotest.(check bool) "error names the status" true
-         (String.starts_with ~prefix:"clients: unknown status" detail));
+       Alcotest.(check bool) "error names the row and the status" true
+         (String_util.contains_substring detail "clients[0]: clients: unknown status Active"));
   match
     Tui_decode.decode_clients_snapshot
       (`Assoc
@@ -4029,8 +4031,9 @@ let test_decode_fusion_judge_nodes () =
    with
    | Ok _ -> Alcotest.fail "an untaught judge role decoded"
    | Error detail ->
+       (* Behind the list position that names which judge node. *)
        Alcotest.(check bool) "the closed role set names what it rejected" true
-         (String.starts_with ~prefix:"unknown fusion judge role \"jury\"" detail))
+         (String_util.contains_substring detail "unknown fusion judge role \"jury\""))
 
 let test_decode_fusion_progress_and_completion_summary () =
   let running =

@@ -92,22 +92,36 @@ let test_file_outside_the_boundary_says_so () =
 
 let test_markers_cover_every_language () =
   (* The variant makes this exhaustive at compile time; the assertion is that
-     no language was given an empty list to satisfy the compiler. *)
+     no language was given an empty marker list to satisfy the compiler. A
+     language rooted at the boundary says so with its own constructor. *)
   List.iter
     (fun language ->
       let lang_id = Lsp_process_manager.lang_id_of_language language in
       check
         bool
-        (Printf.sprintf "%s has project markers" lang_id)
+        (Printf.sprintf "%s has a root rule" lang_id)
         true
-        (Lsp_process_manager.project_markers_of_language language <> []);
+        (match Lsp_process_manager.root_rule_of_language language with
+         | Lsp_process_manager.Marker_files markers -> markers <> []
+         | Lsp_process_manager.Boundary_root -> true);
       check
         bool
         (Printf.sprintf "%s has a command" lang_id)
         true
         (fst (Lsp_process_manager.command_of_language language) <> ""))
-    Lsp_process_manager.
-      [ Ocaml; Typescript; Javascript; Python; Rust; Go ]
+    Lsp_process_manager.all_languages
+;;
+
+let test_a_boundary_rooted_language_is_rooted_at_the_boundary () =
+  (* A YAML document has no project file. Its server sees the checkout. *)
+  let sandbox = temp_dir "masc-sandbox" in
+  let file = Filename.concat sandbox "deploy/config.yaml" in
+  touch file;
+  match Lsp_project_root.resolve ~language:Lsp_process_manager.Yaml ~file ~boundary:sandbox with
+  | Lsp_project_root.Project_root root ->
+    check string "the boundary itself" (Fs_compat.realpath_lenient sandbox) root
+  | Lsp_project_root.No_project_root _ -> fail "asked for markers a YAML file has none of"
+  | Lsp_project_root.Outside_boundary _ -> fail "called the file outside the sandbox"
 ;;
 
 (* --- what the pool answers when there is no server --------------------- *)
@@ -201,6 +215,10 @@ let () =
             `Quick
             test_file_outside_the_boundary_says_so
         ; test_case "every language has both" `Quick test_markers_cover_every_language
+        ; test_case
+            "a boundary-rooted language is rooted at the boundary"
+            `Quick
+            test_a_boundary_rooted_language_is_rooted_at_the_boundary
         ] )
     ; ( "no server"
       , [ test_case

@@ -231,6 +231,71 @@ let test_shutdown_signals_child_and_closes_held_pipes () =
   ignore (Eio.Time.with_timeout_exn clock 2.0 (fun () -> Eio.Process.await proc))
 ;;
 
+(* The language table is one variant and several exhaustive functions; the
+   list [all_languages] is the one thing the compiler cannot check, so these
+   walk the list against the functions and the functions against the list. *)
+let test_every_language_round_trips_its_wire_id () =
+  List.iter
+    (fun language ->
+      let id = Lsp_process_manager.lang_id_of_language language in
+      check bool (id ^ " comes back") true
+        (Lsp_process_manager.language_of_lang_id id = Some language))
+    Lsp_process_manager.all_languages;
+  check bool "an id nobody speaks is None" true
+    (Lsp_process_manager.language_of_lang_id "cobol" = None)
+;;
+
+let test_every_extension_maps_back_to_its_language () =
+  List.iter
+    (fun language ->
+      let extensions = Lsp_process_manager.extensions_of_language language in
+      check bool
+        (Lsp_process_manager.lang_id_of_language language ^ " owns an extension")
+        true (extensions <> []);
+      List.iter
+        (fun ext ->
+          check bool (ext ^ " maps back") true
+            (Lsp_process_manager.language_of_path ("dir/file" ^ ext) = Some language);
+          check bool (ext ^ " upper-case maps back") true
+            (Lsp_process_manager.language_of_path
+               ("dir/FILE" ^ String.uppercase_ascii ext)
+             = Some language))
+        extensions)
+    Lsp_process_manager.all_languages;
+  check bool "an extension nobody owns is None" true
+    (Lsp_process_manager.language_of_path "notes.cobol" = None);
+  check string "shell is shellscript on the wire" "shellscript"
+    (Lsp_process_manager.lang_of_path "deploy.sh");
+  check string "no extension is unknown" "unknown" (Lsp_process_manager.lang_of_path "Makefile")
+;;
+
+let test_every_command_names_one_executable () =
+  List.iter
+    (fun language ->
+      let id = Lsp_process_manager.lang_id_of_language language in
+      let executable, argv = Lsp_process_manager.command_of_language language in
+      check bool (id ^ " names an executable") true (executable <> "");
+      check bool (id ^ " executable is one word") false (String.contains executable ' ');
+      check (option string) (id ^ " argv starts with the executable") (Some executable)
+        (List.nth_opt argv 0);
+      check bool (id ^ " is reachable by wire id") true
+        (Lsp_process_manager.command_for_lang id = Some (executable, argv)))
+    Lsp_process_manager.all_languages
+;;
+
+let test_covered_extensions_are_the_table () =
+  let covered = Lsp_process_manager.covered_extensions () in
+  check bool "every language's extensions are covered" true
+    (List.for_all
+       (fun language ->
+         List.for_all
+           (fun ext -> List.mem ext covered)
+           (Lsp_process_manager.extensions_of_language language))
+       Lsp_process_manager.all_languages);
+  check bool "no extension is listed twice" true
+    (List.length covered = List.length (List.sort_uniq compare covered))
+;;
+
 let () =
   run
     "lsp_process_manager"
@@ -263,6 +328,16 @@ let () =
             "signals child and closes held pipes"
             `Quick
             test_shutdown_signals_child_and_closes_held_pipes
+        ] )
+    ; ( "languages"
+      , [ test_case "every listed language round-trips its wire id" `Quick
+            test_every_language_round_trips_its_wire_id
+        ; test_case "every extension maps back to its language" `Quick
+            test_every_extension_maps_back_to_its_language
+        ; test_case "every command names one executable as argv head" `Quick
+            test_every_command_names_one_executable
+        ; test_case "the covered extensions are the table read the other way" `Quick
+            test_covered_extensions_are_the_table
         ] )
     ]
 ;;

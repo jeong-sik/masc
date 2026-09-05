@@ -456,7 +456,11 @@ let keeper_context_status_json
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
   =
-  let checkpoint_bytes = Keeper_context_runtime.serialized_bytes ctx_work in
+  let checkpoint_bytes =
+    match Keeper_post_turn.durable_checkpoint_bytes ~config ~meta with
+    | Ok bytes -> bytes
+    | Error detail -> failwith ("checkpoint byte count unavailable: " ^ detail)
+  in
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path
       ~base_path:config.Workspace.base_path
@@ -499,7 +503,7 @@ let keeper_context_status_json
     (`Assoc
         ([ "name", `String meta.name
          ; "trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-         ; "checkpoint_bytes", `Int checkpoint_bytes
+         ; "checkpoint_bytes", Json_util.int_opt_to_json checkpoint_bytes
          ; "message_count", `Int (List.length (messages_of_context ctx_work))
          ]
          @ Keeper_sandbox.context_status_fields sandbox

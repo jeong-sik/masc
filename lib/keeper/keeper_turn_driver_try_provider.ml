@@ -864,8 +864,8 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                against [max_request_body_bytes]. AGENT_CORE's provider-specific
                serialization boundary reports every admitted request; a typed
                [Request_body_too_large] below carries the exact rejected size.
-               [Keeper_context_core_accessors.serialize_context] cannot stand in
-               for it — that covers [{system_prompt, messages}] and excludes
+               the canonical checkpoint's bytes cannot stand in
+               for it — they cover [{system_prompt, messages}] and exclude
                tool schemas and every provider-specific stream field. AGENT_CORE runs
                this observer after those are injected and after its own
                admission check, so the value is the exact byte count.

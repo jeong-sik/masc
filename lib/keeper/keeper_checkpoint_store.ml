@@ -388,6 +388,24 @@ let canonical_message_count ~(session_dir : string) ~(session_id : string)
        | Error Not_found -> Ok None
        | Error error -> Error error)
 
+let canonical_byte_count ~(session_dir : string) ~(session_id : string)
+  : (int option, checkpoint_load_error) result =
+  if not (leaf_is_real_segment session_id) then
+    Error (Store_error "session_id is not a real path segment")
+  else
+    let canonical_path = agent_core_checkpoint_path ~session_dir ~session_id in
+    match cached_summary ~canonical_path with
+    | Some summary -> Ok (Some summary.identity.size)
+    | None ->
+      (match Unix.stat canonical_path with
+       | stats when stats.Unix.st_kind = Unix.S_REG -> Ok (Some stats.Unix.st_size)
+       | _ -> Error (Store_error "canonical checkpoint is not a regular file")
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+       | exception Unix.Unix_error (code, _, _) ->
+         Error
+           (Store_error
+              ("canonical checkpoint stat failed: " ^ Unix.error_message code)))
+
 (* ── RFC-0225 §3.2: disk-SSOT monotonic checkpoint transaction ──────
    One stable per-session lock covers canonical disk load, comparison,
    durable publication, and history capture. The canonical file is the only

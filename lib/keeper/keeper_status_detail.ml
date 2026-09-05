@@ -364,12 +364,17 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              match ctx_opt with
              | None -> `Assoc [("has_checkpoint", `Bool false)]
              | Some c ->
-               `Assoc [
-                 ("has_checkpoint", `Bool true);
-                 ( "checkpoint_bytes"
-                 , `Int (Keeper_context_runtime.serialized_bytes c) );
-                 ("message_count", `Int (Keeper_context_runtime.message_count c));
-               ]
+               let checkpoint_bytes, byte_count_error =
+                 match Keeper_post_turn.durable_checkpoint_bytes ~config ~meta:m with
+                 | Ok bytes -> bytes, []
+                 | Error detail -> None, [ ("checkpoint_bytes_error", `String detail) ]
+               in
+               `Assoc
+                 ([ ("has_checkpoint", `Bool true);
+                    ("checkpoint_bytes", Json_util.int_opt_to_json checkpoint_bytes);
+                    ("message_count", `Int (Keeper_context_runtime.message_count c));
+                  ]
+                  @ byte_count_error)
          in
          let keepalive_running = runtime_keepalive_running config m in
          let now_ts = Time_compat.now () in

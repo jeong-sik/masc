@@ -5,8 +5,8 @@
     a refused request instead carries the same exact size in
     [Agent_core.Retry.Request_body_too_large.actual_bytes]. Nothing MASC already
     computes substitutes:
-    [Keeper_context_core_accessors.serialize_context] covers
-    [{system_prompt, messages}] and excludes tool schemas and every
+    the canonical checkpoint's bytes cover
+    [{system_prompt, messages}] and exclude tool schemas and every
     provider-specific stream field, and [last_input_tokens] is a different unit
     from a byte ceiling — measured 07-28/29, of 3,234 turns that died on the
     byte cap, 2,964 (91.7%) were under 50% token utilization at that moment.

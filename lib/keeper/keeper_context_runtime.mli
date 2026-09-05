@@ -19,7 +19,6 @@ type session_context = Keeper_types.session_context
 
 val text_of_message : Agent_core.Types.message -> string
 val message_count : working_context -> int
-val serialized_bytes : working_context -> int
 val checkpoint_of_context : working_context -> Agent_core.Checkpoint.t
 val resume_checkpoint_of_context : working_context -> Agent_core.Checkpoint.t
 val agent_core_context_of_context : working_context -> Agent_core.Context.t
@@ -40,7 +39,6 @@ val role_to_string : Agent_core.Types.role -> string
 val role_of_string_opt : string -> Agent_core.Types.role option
 val message_to_json : Agent_core.Types.message -> Yojson.Safe.t
 val message_of_json : Yojson.Safe.t -> Agent_core.Types.message
-val serialize_context : working_context -> string
 val create_session : session_id:string -> base_dir:string -> session_context
 val persist_message : ?source:string -> session_context -> Agent_core.Types.message -> unit
 
@@ -63,7 +61,7 @@ val save_agent_core_checkpoint
 type post_turn_lifecycle =
   { updated_meta : keeper_meta
   ; checkpoint : Agent_core.Checkpoint.t option
-  ; checkpoint_bytes : int
+  ; checkpoint_bytes : int option
   ; message_count : int
   }
 
@@ -96,7 +94,8 @@ val load_context_from_checkpoint
   -> session_context * working_context option
 
 val apply_post_turn_lifecycle
-  :  meta:keeper_meta
+  :  config:Workspace.config
+  -> meta:keeper_meta
   -> checkpoint:Agent_core.Checkpoint.t option
   -> post_turn_lifecycle
 

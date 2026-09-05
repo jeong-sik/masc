@@ -191,7 +191,39 @@ scripts/build-keeper-sandbox-image.sh
 
 There is no host arm — the profiles are `docker`, `microvm` and `remote_ssh`
 only — so a host with no Docker, no `container`, and no SSH endpoint can run
-the workspace but cannot run a Keeper.
+the workspace but cannot run a Keeper. On Linux that narrows to `docker` and
+`remote_ssh` in practice: `microvm` assumes Apple's `container`, which is
+macOS-only, and a Keeper that asked for a microVM on another host is refused at
+boot rather than quietly given a shared kernel.
+
+**And that image is MASC's own development environment**, not a general one. It
+is `ocaml/opam:ubuntu-24.04-ocaml-5.5` with this repository's opam dependencies
+baked in, because a Keeper turn runs in a fresh `docker run --rm` container with
+a read-only rootfs and `--cap-drop=ALL`: nothing can be installed once the turn
+starts, so everything the Keeper needs has to be in the image already. A Keeper
+pointed at a TypeScript or Python project finds the wrong toolchain and cannot
+fetch the right one.
+
+Name the image the work actually needs, per Keeper, in its TOML:
+
+```toml
+[keeper]
+sandbox_profile = "docker"
+sandbox_image = "node:22-bookworm"
+network_mode = "none"
+```
+
+`MASC_KEEPER_SANDBOX_DOCKER_IMAGE` moves the default for every Keeper that
+declares none. What any image has to satisfy, because the turn is run as
+`<image> bash -l -s` with the tool script on stdin:
+
+- **`bash` on `PATH`.** A login shell is what receives the turn, so an Alpine
+  image with only `sh` cannot take one.
+- **Usable as the host's uid.** The container runs `--user <your uid>:<gid>`, so
+  an image that only works as its own baked-in user will land without a home.
+- **The toolchain already inside.** Rootfs is read-only apart from one tmpfs and
+  the mounted workspace, and `--cap-drop=ALL` with `no-new-privileges` is set, so
+  a turn cannot install anything it finds missing.
 
 **The provider key has to be in the server's environment.** `runtime.toml`
 names the variable per provider — `OLLAMA_CLOUD_API_KEY`, `DEEPSEEK_API_KEY`,

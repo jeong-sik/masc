@@ -1425,8 +1425,12 @@ Next:
   ${c_dim}# sanity check${c_off}
   curl http://127.0.0.1:${MASC_PORT}/health
 
-  ${c_dim}# watch and steer Keepers from a terminal (needs an interactive TTY)${c_off}
+  ${c_dim}# open the fleet TUI to watch, steer, and create Keepers (needs a TTY)${c_off}
+  ${c_dim}# no Keepers yet? create your first from the Keepers view (or reinstall with --team)${c_off}
   $TUI_DEST --base-path "$BASE_PATH" --port "$MASC_PORT"
+
+  ${c_dim}# or create one non-interactively once the server is up:${c_off}
+  ${c_dim}# $DEST keeper-create --help${c_off}
 
   ${c_dim}# source the printed bearer exports in the shell that starts your MCP client${c_off}
   See: https://github.com/$REPO#mcp-client-setup

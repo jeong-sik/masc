@@ -18,7 +18,16 @@ One section in `runtime.toml`, read by `Voice_config`:
 [voice.stt]             default_model, endpoints
 [voice.session]         endpoints          # realtime; empty unless configured
 [voice.local_playback]  enabled, agents
+[voice.capture]         calibration_seconds, trigger_margin_db, trailing_silence_seconds, speech_margin_db, noise_reduction
+[voice.gate]            always_allow, exempt_agents
 ```
+
+`[voice.tts]` and `[voice.stt]` are optional. Absent, the speak and transcribe
+paths refuse by name before any endpoint is asked. Present, each must name its
+`default_model`; a blank one fails the load, because it used to reach providers
+as `model_id ""`. `[voice.capture]` is read as strictly as an endpoint is: a key
+it does not know, or a value of the wrong type, fails the load naming
+`root.capture.<key>`, and an absent key takes the measured default.
 
 An endpoint declares a `kind`, and the kind decides the request that gets
 built — not a string match on the URL:

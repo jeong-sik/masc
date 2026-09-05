@@ -63,7 +63,10 @@ val agent_speak :
     voice config surfaces its load error; when no voice config exists at
     all, TTS is reported as explicitly disabled ([Error
     "no configured TTS endpoint"]) instead of substituting a hardcoded
-    model name.
+    model name. A config that loads but has no [tts] section is refused
+    here too, before any endpoint is asked: there is no model to send, and
+    the empty string that used to stand in for one reached providers as
+    [model_id ""].
 
     This is the only speak path: the former fire-and-forget
     [enqueue_agent_speak] queue was removed after the 2026-06-10 voice
@@ -98,9 +101,10 @@ val transcribe_audio :
 (** Transcribe [audio_file] through the enabled STT endpoint chain.
     A broken explicit voice config surfaces its load error; when no
     voice config exists, STT is reported as explicitly disabled
-    ([Error "no enabled STT endpoints configured"]).  If every enabled
-    endpoint fails, the returned error names each attempted endpoint
-    and its failure. *)
+    ([Error "no enabled STT endpoints configured"]), and a config with
+    no [stt] section is refused by name before any endpoint is asked.
+    If every enabled endpoint fails, the returned error names each
+    attempted endpoint and its failure. *)
 
 (** {1 Microphone capture thresholds} *)
 

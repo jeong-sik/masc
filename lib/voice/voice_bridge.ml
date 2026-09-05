@@ -38,8 +38,8 @@ let message_preview message =
   String_util.utf8_prefix ~max_bytes:message_preview_max_bytes message
 ;;
 
-let available_stt_endpoints (config : Voice_config.t) =
-  config.stt.endpoints |> List.filter (fun (ep : Voice_config.endpoint) -> ep.enabled)
+let available_stt_endpoints (stt : Voice_config.stt_config) =
+  stt.Voice_config.endpoints |> List.filter (fun (ep : Voice_config.endpoint) -> ep.enabled)
 ;;
 
 (* The [status] field of every capture result this module returns. One closed
@@ -73,9 +73,13 @@ let transcribe_audio ~audio_file ?language_code () =
     (* Voice is not set up in this environment: STT is explicitly
        disabled, which is not an error of the config itself. *)
     Error "no enabled STT endpoints configured"
-  | Ok config ->
-    let model = config.stt.default_model in
-    let endpoints = available_stt_endpoints config in
+  | Ok { Voice_config.stt = None; _ } ->
+    (* The config loaded and has no [stt] section. Typed absence: there is no
+       model to send, so nothing is sent. *)
+    Error "voice config has no [stt] section, so STT is not set up"
+  | Ok { Voice_config.stt = Some stt; _ } ->
+    let model = stt.Voice_config.default_model in
+    let endpoints = available_stt_endpoints stt in
     let rec try_endpoints attempted = function
       | [] ->
         Error
@@ -121,16 +125,16 @@ let transcribe_audio ~audio_file ?language_code () =
     else try_endpoints [] endpoints
 ;;
 
-let available_tts_endpoints ?provider (config : Voice_config.t) =
-  Voice_runtime_overlay.select_endpoints ?provider config.tts.endpoints
+let available_tts_endpoints ?provider (tts : Voice_config.tts_config) =
+  Voice_runtime_overlay.select_endpoints ?provider tts.Voice_config.endpoints
 ;;
 
 (** Synthesize a dashboard-playable MP3 via any HTTP TTS endpoint.
     This is used as a parallel fallback when the active transport is
     [Voice_mcp], which produces audio through a local/MCP path but does not
     write a browser-fetchable file. *)
-let try_http_tts_for_dashboard ~config ~agent_id ~message ~voice ~model ~audio_device () =
-  let endpoints = available_tts_endpoints config in
+let try_http_tts_for_dashboard ~tts ~agent_id ~message ~voice ~model ~audio_device () =
+  let endpoints = available_tts_endpoints tts in
   let rec try_endpoint = function
     | [] -> None
     | endpoint :: rest ->
@@ -146,7 +150,7 @@ let try_http_tts_for_dashboard ~config ~agent_id ~message ~voice ~model ~audio_d
             (* Resolved per endpoint, not once for the chain: a voice id is
                provider vocabulary, so carrying the first endpoint's id to the
                next asks for a voice that does not exist there (#24068). *)
-            ~voice:(Voice_config.voice_for_agent_at_endpoint config endpoint agent_id)
+            ~voice:(Voice_config.voice_for_agent_at_endpoint tts endpoint agent_id)
             ~model
             ~output_file:audio_file
         with
@@ -391,7 +395,7 @@ let attempt_tts_endpoint
       ~voice
       ~model
       ~priority
-      ~config
+      ~tts
       ?audio_device
       endpoint
   =
@@ -509,7 +513,7 @@ let attempt_tts_endpoint
            let data =
              match
                try_http_tts_for_dashboard
-                 ~config
+                 ~tts
                  ~agent_id
                  ~message
                  ~voice
@@ -539,7 +543,7 @@ let try_http_tts_for_browser_audio
       ~sw
       ~clock
       ~net
-      ~config
+      ~tts
       ~agent_id
       ~message
       ~model
@@ -559,7 +563,7 @@ let try_http_tts_for_browser_audio
            endpoint
            ~message
              (* Resolved per endpoint (#24068): see the dashboard chain. *)
-           ~voice:(Voice_config.voice_for_agent_at_endpoint config endpoint agent_id)
+           ~voice:(Voice_config.voice_for_agent_at_endpoint tts endpoint agent_id)
            ~model
            ~agent_id
            ~output_file:audio_file
@@ -639,9 +643,14 @@ let agent_speak_json
       (* Voice is not set up in this environment: TTS is explicitly
          disabled, which is not an error of the config itself. *)
       Error "no configured TTS endpoint"
-    | Ok config ->
-      let endpoints = available_tts_endpoints ?provider config in
-      let model = config.tts.default_model in
+    | Ok { Voice_config.tts = None; _ } ->
+      (* The config loaded and has no [tts] section. Refused here, before any
+         endpoint is asked: there is no model to send, and the empty string
+         this used to send in its place reached providers as model_id "". *)
+      Error "voice config has no [tts] section, so TTS is not set up"
+    | Ok { Voice_config.tts = Some tts; _ } ->
+      let endpoints = available_tts_endpoints ?provider tts in
+      let model = tts.Voice_config.default_model in
       let rec try_endpoints attempted = function
         | [] ->
           Error
@@ -659,7 +668,7 @@ let agent_speak_json
                ~voice
                ~model
                ~priority
-               ~config
+               ~tts
                ?audio_device
                endpoint
            with
@@ -695,7 +704,7 @@ let agent_speak_json
                ~sw
                ~clock
                ~net
-               ~config
+               ~tts
                ~agent_id
                ~message
                ~model
@@ -758,8 +767,8 @@ let agent_speak
 (** Get voice configuration for an agent *)
 let get_agent_voice ~agent_id =
   match Voice_config.load_detailed () with
-  | Ok config ->
-    let voice = Voice_config.voice_for_agent config agent_id in
+  | Ok { Voice_config.tts = Some tts; _ } ->
+    let voice = Voice_config.voice_for_agent tts agent_id in
     Ok
       (`Assoc
           [ "agent_id", `String agent_id
@@ -768,9 +777,9 @@ let get_agent_voice ~agent_id =
             , `List
                 (List.map
                    (fun value -> `String value)
-                   (Voice_config.available_voices config)) )
+                   (Voice_config.available_voices tts)) )
           ])
-  | Error _ ->
+  | Ok { Voice_config.tts = None; _ } | Error _ ->
     let voice = get_voice_for_agent agent_id in
     Ok
       (`Assoc

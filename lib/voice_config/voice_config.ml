@@ -55,9 +55,14 @@ type gate_config = {
   exempt_agents : string list;
 }
 
+(* [tts] and [stt] are [None] when their section is absent. The record they
+   used to default to carried [default_model = ""], and that string reached
+   providers as [model_id ""] and the public config as [available_models
+   [""]]. An absent section is a typed absence here and a refusal at the
+   speak and transcribe paths, not a model with no name. *)
 type t = {
-  tts : tts_config;
-  stt : stt_config;
+  tts : tts_config option;
+  stt : stt_config option;
   session : session_config;
   capture : capture_config;
   local_playback : local_playback_config;
@@ -290,28 +295,19 @@ let parse_agent_voice_settings json =
         (Printf.sprintf "tts.agent_voice_settings must be an object, got %s: %s"
            (Json_util.kind_name other) (Json_util.excerpt other))
 
-let default_tts =
-  {
-    default_model = "";
-    default_voice = "";
-    default_voice_settings =
-      { stability = 0.5; similarity_boost = 0.75; style = 0.0 };
-    agent_voices = [];
-    agent_voice_settings = [];
-    endpoints = [];
-  }
-
 let parse_tts json =
   match Json_util.assoc_member_opt "tts" json with
-  | None | Some `Null -> Ok default_tts
+  | None | Some `Null -> Ok None
   | Some (`Assoc _ as tts_json) ->
       let open Result in
       let* default_voice =
         require_string ~ctx:"tts" ~field:"default_voice" tts_json
       in
-      let default_model =
-        Option.value ~default:""
-          (Json_util.get_string_nonempty tts_json "default_model")
+      (* Required once the section exists: every endpoint in it is asked for
+         this model by name, and a blank name is a request the provider
+         answers with an error after the audio has been sent. *)
+      let* default_model =
+        require_string ~ctx:"tts" ~field:"default_model" tts_json
       in
       let* default_voice_settings =
         parse_voice_tuning ~ctx:"tts.default_voice_settings"
@@ -325,37 +321,32 @@ let parse_tts json =
       let* endpoints_json = require_list ~ctx:"tts" ~field:"endpoints" tts_json in
       let* endpoints = parse_endpoints ~ctx:"tts.endpoints" [] endpoints_json in
       Ok
-        {
-          default_model;
-          default_voice;
-          default_voice_settings;
-          agent_voices;
-          agent_voice_settings;
-          endpoints;
-        }
+        (Some
+           {
+             default_model;
+             default_voice;
+             default_voice_settings;
+             agent_voices;
+             agent_voice_settings;
+             endpoints;
+           })
   | Some other ->
       Error
         (Printf.sprintf "root.tts must be object, got %s: %s"
            (Json_util.kind_name other) (Json_util.excerpt other))
 
-let default_stt =
-  {
-    default_model = "";
-    endpoints = [];
-  }
-
 let parse_stt json =
   match Json_util.assoc_member_opt "stt" json with
-  | None | Some `Null -> Ok default_stt
+  | None | Some `Null -> Ok None
   | Some (`Assoc _ as stt_json) ->
       let open Result in
-      let default_model =
-        Option.value ~default:""
-          (Json_util.get_string_nonempty stt_json "default_model")
+      (* Required for the same reason as [tts.default_model]. *)
+      let* default_model =
+        require_string ~ctx:"stt" ~field:"default_model" stt_json
       in
       let* endpoints_json = require_list ~ctx:"stt" ~field:"endpoints" stt_json in
       let* endpoints = parse_endpoints ~ctx:"stt.endpoints" [] endpoints_json in
-      Ok { default_model; endpoints }
+      Ok (Some { default_model; endpoints })
   | Some other ->
       Error
         (Printf.sprintf "root.stt must be object, got %s: %s"
@@ -649,21 +640,21 @@ let select_endpoint ?endpoint_id (endpoints : endpoint list) =
       | first :: _ -> Some first
       | [] -> None)
 
-let voice_for_agent config agent_id =
-  match List.assoc_opt agent_id config.tts.agent_voices with
+let voice_for_agent (tts : tts_config) agent_id =
+  match List.assoc_opt agent_id tts.agent_voices with
   | Some voice -> voice
-  | None -> config.tts.default_voice
+  | None -> tts.default_voice
 
-let voice_for_agent_at_endpoint config (endpoint : endpoint) agent_id =
+let voice_for_agent_at_endpoint (tts : tts_config) (endpoint : endpoint) agent_id =
   match endpoint.default_voice with
   | Some voice -> voice
-  | None -> voice_for_agent config agent_id
+  | None -> voice_for_agent tts agent_id
 ;;
 
-let tuning_for_agent config agent_id =
-  match List.assoc_opt agent_id config.tts.agent_voice_settings with
+let tuning_for_agent (tts : tts_config) agent_id =
+  match List.assoc_opt agent_id tts.agent_voice_settings with
   | Some tuning -> tuning
-  | None -> config.tts.default_voice_settings
+  | None -> tts.default_voice_settings
 
 let local_playback_enabled_for_agent config agent_id =
   config.local_playback.enabled
@@ -678,9 +669,9 @@ let voice_gate_always_allow_for_agent config agent_id =
 
 let unique_strings = Json_util.dedupe_keep_order
 
-let available_voices config =
-  config.tts.default_voice
-  :: List.map snd config.tts.agent_voices
+let available_voices (tts : tts_config) =
+  tts.default_voice
+  :: List.map snd tts.agent_voices
   |> unique_strings
 
 let endpoint_public_json (endpoints : endpoint list) =
@@ -705,24 +696,33 @@ let endpoint_public_json (endpoints : endpoint list) =
 let active_endpoint_json endpoints =
   endpoint_public_json endpoints
 
+(* An absent section renders as [null], not as an object of empty strings: a
+   reader that finds no model there is told there is none, rather than handed
+   a name of length zero to display or send. *)
 let public_json config =
   Tool_args.ok_assoc
     [
       ( "tts",
-        `Assoc
-          [
-            ("default_model", `String config.tts.default_model);
-            ("default_voice", `String config.tts.default_voice);
-            ("available_voices", `List (List.map (fun voice -> `String voice) (available_voices config)));
-            ("available_models", `List [ `String config.tts.default_model ]);
-            ("active_endpoint", active_endpoint_json config.tts.endpoints);
-          ] );
+        match config.tts with
+        | None -> `Null
+        | Some tts ->
+            `Assoc
+              [
+                ("default_model", `String tts.default_model);
+                ("default_voice", `String tts.default_voice);
+                ("available_voices", `List (List.map (fun voice -> `String voice) (available_voices tts)));
+                ("available_models", `List [ `String tts.default_model ]);
+                ("active_endpoint", active_endpoint_json tts.endpoints);
+              ] );
       ( "stt",
-        `Assoc
-          [
-            ("default_model", `String config.stt.default_model);
-            ("active_endpoint", active_endpoint_json config.stt.endpoints);
-          ] );
+        match config.stt with
+        | None -> `Null
+        | Some stt ->
+            `Assoc
+              [
+                ("default_model", `String stt.default_model);
+                ("active_endpoint", active_endpoint_json stt.endpoints);
+              ] );
       ( "session",
         `Assoc [ ("active_endpoint", active_endpoint_json config.session.endpoints) ] );
       ( "local_playback",

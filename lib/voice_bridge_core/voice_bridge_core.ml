@@ -74,15 +74,18 @@ let config_or_report ~what = function
     None
 ;;
 
+(* A config without a [tts] section answers these the same way no config
+   does: voice output is not set up, so there are no per-agent voices and no
+   tuning to speak of. *)
 let agent_voices () =
   match config_or_report ~what:"agent_voices" (Voice_config.load_detailed ()) with
-  | Some config -> config.tts.agent_voices
-  | None -> default_agent_voices ()
+  | Some { Voice_config.tts = Some tts; _ } -> tts.Voice_config.agent_voices
+  | Some { Voice_config.tts = None; _ } | None -> default_agent_voices ()
 
 let tuning_for_agent agent_id =
   match config_or_report ~what:"tuning_for_agent" (Voice_config.load_detailed ()) with
-  | Some config -> Voice_config.tuning_for_agent config agent_id
-  | None ->
+  | Some { Voice_config.tts = Some tts; _ } -> Voice_config.tuning_for_agent tts agent_id
+  | Some { Voice_config.tts = None; _ } | None ->
       { Voice_config.stability = 0.5; similarity_boost = 0.75; style = 0.0 }
 
 let local_playback_enabled_for_agent agent_id =
@@ -403,8 +406,8 @@ let last_resort_voice = "Sarah"
 
 let default_voice () =
   match config_or_report ~what:"default_voice" (Voice_config.load_detailed ()) with
-  | Some config -> config.tts.default_voice
-  | None -> last_resort_voice
+  | Some { Voice_config.tts = Some tts; _ } -> tts.Voice_config.default_voice
+  | Some { Voice_config.tts = None; _ } | None -> last_resort_voice
 
 (** Pick the voice for [agent_id]: the explicit per-agent mapping in
     [config.tts.agent_voices] when present, otherwise

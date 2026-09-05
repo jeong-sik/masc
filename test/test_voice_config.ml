@@ -56,16 +56,14 @@ let parse json_str =
   let json = Yojson.Safe.from_string json_str in
   Vc.parse_json json
 
-(* A document carrying every section the parser requires, with the sections a
-   test is about replaced in it.
+(* A document shaped like the live config -- [tts], [stt] and [session] all
+   present and complete -- with the sections a test is about replaced in it.
 
-   [tts], [stt] and [session] are required -- the live config carries all
-   three -- so a fixture that leaves one out is refused for that and never
-   reaches the thing the test is checking. Four capture tests and two
-   endpoint-shape tests were passing on the wrong rejection: one of them
-   asserted that a zero-length calibration is refused and was reading a
-   complaint about a missing [tts]. The check would have gone on passing with
-   that validation deleted. *)
+   [tts] and [stt] are optional sections: absent, they parse to [None].
+   Present, each requires its [default_model] and endpoints, so a fixture
+   that carries a half-written section is refused for that and never reaches
+   the thing the test is checking. Building on the full document keeps a
+   test about [capture] from passing on a complaint about [tts]. *)
 let config_with sections =
   match Yojson.Safe.from_string (minimal_config_json ~session_endpoints:"[]") with
   | `Assoc fields ->
@@ -73,6 +71,25 @@ let config_with sections =
         (List.filter (fun (key, _) -> not (List.mem_assoc key sections)) fields
         @ sections)
   | other -> other
+
+(* The same document with whole sections removed, for the absent-section
+   cases. *)
+let config_without keys =
+  match Yojson.Safe.from_string (minimal_config_json ~session_endpoints:"[]") with
+  | `Assoc fields -> `Assoc (List.filter (fun (key, _) -> not (List.mem key keys)) fields)
+  | other -> other
+
+let tts_of (config : Vc.t) =
+  match config.Vc.tts with
+  | Some tts -> tts
+  | None -> fail "the fixture carries a [tts] section, so it must parse to Some"
+;;
+
+let stt_of (config : Vc.t) =
+  match config.Vc.stt with
+  | Some stt -> stt
+  | None -> fail "the fixture carries an [stt] section, so it must parse to Some"
+;;
 
 let rec mkdir_p path =
   if path <> "" && not (Sys.file_exists path) then begin
@@ -136,7 +153,7 @@ let test_load_detailed_valid_config () =
       match Vc.load_detailed () with
       | Ok config ->
         check string "stt model from config" "scribe_v1"
-          config.stt.default_model
+          (stt_of config).Vc.default_model
       | Error Vc.Not_configured ->
         fail "expected Ok, got Not_configured"
       | Error (Vc.Invalid msg) ->
@@ -194,10 +211,11 @@ let test_tts_endpoints_reachable_when_session_empty () =
   let json = minimal_config_json ~session_endpoints:"[]" in
   match parse json with
   | Ok config ->
+    let tts = tts_of config in
     check int "tts endpoints available" 1
-      (List.length config.tts.endpoints);
+      (List.length tts.Vc.endpoints);
     let enabled =
-      List.filter (fun (ep : Vc.endpoint) -> ep.enabled) config.tts.endpoints
+      List.filter (fun (ep : Vc.endpoint) -> ep.enabled) tts.Vc.endpoints
     in
     check int "tts endpoints enabled" 1 (List.length enabled)
   | Error err ->
@@ -275,8 +293,8 @@ let two_provider_config =
 }|}
 ;;
 
-let endpoint_named config id =
-  match List.find_opt (fun (e : Vc.endpoint) -> String.equal e.id id) config.Vc.tts.endpoints with
+let endpoint_named (tts : Vc.tts_config) id =
+  match List.find_opt (fun (e : Vc.endpoint) -> String.equal e.id id) tts.Vc.endpoints with
   | Some endpoint -> endpoint
   | None -> failf "tts endpoint %S is missing from the parsed config" id
 ;;
@@ -285,26 +303,27 @@ let test_endpoint_voice_overrides_the_workspace_default () =
   match parse two_provider_config with
   | Error _ -> fail "the two-provider config must parse"
   | Ok config ->
-    let eleven = endpoint_named config "eleven" in
-    let openai = endpoint_named config "openai" in
+    let tts = tts_of config in
+    let eleven = endpoint_named tts "eleven" in
+    let openai = endpoint_named tts "openai" in
     check (option string) "the eleven endpoint declares none" None eleven.Vc.default_voice;
     check (option string) "the openai endpoint declares its own" (Some "alloy")
       openai.Vc.default_voice;
     check string
       "an endpoint without one falls back to the workspace default"
       "aEO01A4wXwd1O8GPgGlF"
-      (Vc.voice_for_agent_at_endpoint config eleven "some-agent");
+      (Vc.voice_for_agent_at_endpoint tts eleven "some-agent");
     check string
       "an endpoint with one answers for itself"
       "alloy"
-      (Vc.voice_for_agent_at_endpoint config openai "some-agent");
+      (Vc.voice_for_agent_at_endpoint tts openai "some-agent");
     (* The point of the fix: switching endpoints changes the voice asked for. *)
     check bool
       "the two endpoints do not share a voice"
       false
       (String.equal
-         (Vc.voice_for_agent_at_endpoint config eleven "some-agent")
-         (Vc.voice_for_agent_at_endpoint config openai "some-agent"))
+         (Vc.voice_for_agent_at_endpoint tts eleven "some-agent")
+         (Vc.voice_for_agent_at_endpoint tts openai "some-agent"))
 ;;
 
 let test_endpoint_voice_is_absent_when_not_declared () =
@@ -313,6 +332,7 @@ let test_endpoint_voice_is_absent_when_not_declared () =
   match parse (minimal_config_json ~session_endpoints:"[]") with
   | Error _ -> fail "the base config must parse"
   | Ok config ->
+    let tts = tts_of config in
     List.iter
       (fun (endpoint : Vc.endpoint) ->
         check (option string)
@@ -321,9 +341,114 @@ let test_endpoint_voice_is_absent_when_not_declared () =
           endpoint.Vc.default_voice;
         check string
           (Printf.sprintf "%s resolves to the workspace default" endpoint.Vc.id)
-          (Vc.voice_for_agent config "some-agent")
-          (Vc.voice_for_agent_at_endpoint config endpoint "some-agent"))
-      config.Vc.tts.endpoints
+          (Vc.voice_for_agent tts "some-agent")
+          (Vc.voice_for_agent_at_endpoint tts endpoint "some-agent"))
+      tts.Vc.endpoints
+;;
+
+(* The sections that name a model. [tts] and [stt] used to default to a
+   record whose [default_model] was [""] whenever the section or the key was
+   missing, and that string reached providers as [model_id ""] (#33073). Now
+   an absent section is [None] and a present one must name its model. *)
+let test_an_absent_tts_section_is_none () =
+  match Vc.parse_json (config_without [ "tts" ]) with
+  | Error message -> fail ("a config without [tts] must parse: " ^ message)
+  | Ok config ->
+    check bool "tts is None" true (Option.is_none config.Vc.tts);
+    check bool "and stt is untouched" true (Option.is_some config.Vc.stt)
+;;
+
+let test_an_absent_stt_section_is_none () =
+  match Vc.parse_json (config_without [ "stt" ]) with
+  | Error message -> fail ("a config without [stt] must parse: " ^ message)
+  | Ok config ->
+    check bool "stt is None" true (Option.is_none config.Vc.stt);
+    check bool "and tts is untouched" true (Option.is_some config.Vc.tts)
+;;
+
+let tts_section ?default_model () =
+  `Assoc
+    ((match default_model with
+      | Some model -> [ "default_model", `String model ]
+      | None -> [])
+     @ [ "default_voice", `String "Roger"
+       ; ( "endpoints"
+         , `List
+             [ `Assoc
+                 [ "id", `String "elevenlabs-roger"
+                 ; "kind", `String "elevenlabs_direct"
+                 ; "api_key_env", `String "ELEVENLABS_API_KEY"
+                 ; "enabled", `Bool true
+                 ]
+             ] )
+       ])
+;;
+
+let test_a_tts_section_without_a_model_is_refused () =
+  match Vc.parse_json (config_with [ "tts", tts_section () ]) with
+  | Ok _ -> fail "a [tts] section that names no model must be refused"
+  | Error message ->
+    check bool "the rejection names the field" true
+      (String_util.string_contains_substring ~needle:"tts.default_model" message)
+;;
+
+let test_a_blank_tts_model_is_refused () =
+  match Vc.parse_json (config_with [ "tts", tts_section ~default_model:"  " () ]) with
+  | Ok _ -> fail "a blank model name is the sentinel this removes; it must be refused"
+  | Error message ->
+    check bool "the rejection names the field" true
+      (String_util.string_contains_substring ~needle:"tts.default_model" message)
+;;
+
+let test_an_stt_section_without_a_model_is_refused () =
+  let stt =
+    `Assoc
+      [ ( "endpoints"
+        , `List
+            [ `Assoc
+                [ "id", `String "elevenlabs-stt"
+                ; "kind", `String "elevenlabs_direct"
+                ; "enabled", `Bool true
+                ]
+            ] )
+      ]
+  in
+  match Vc.parse_json (config_with [ "stt", stt ]) with
+  | Ok _ -> fail "an [stt] section that names no model must be refused"
+  | Error message ->
+    check bool "the rejection names the field" true
+      (String_util.string_contains_substring ~needle:"stt.default_model" message)
+;;
+
+(* What the operator-visible JSON says about an absent section. A reader
+   that finds [null] knows there is no model; one that found [""] displayed
+   and sent a model with no name. *)
+let test_public_json_renders_an_absent_section_as_null () =
+  match Vc.parse_json (config_without [ "tts"; "stt" ]) with
+  | Error message -> fail message
+  | Ok config ->
+    (match Vc.public_json config with
+     | `Assoc fields ->
+       check bool "tts is null" true (List.assoc_opt "tts" fields = Some `Null);
+       check bool "stt is null" true (List.assoc_opt "stt" fields = Some `Null)
+     | _ -> fail "public_json is an object")
+;;
+
+let test_public_json_names_the_model_when_the_section_is_present () =
+  match Vc.parse_json (config_with []) with
+  | Error message -> fail message
+  | Ok config ->
+    (match Vc.public_json config with
+     | `Assoc fields ->
+       (match List.assoc_opt "tts" fields with
+        | Some (`Assoc tts) ->
+          check bool "tts.default_model is the configured name" true
+            (List.assoc_opt "default_model" tts = Some (`String "eleven_multilingual_v2"));
+          check bool "available_models carries it and nothing blank" true
+            (List.assoc_opt "available_models" tts
+             = Some (`List [ `String "eleven_multilingual_v2" ]))
+        | _ -> fail "tts renders as an object when the section is present")
+     | _ -> fail "public_json is an object")
 ;;
 
 
@@ -364,8 +489,8 @@ let test_a_live_shaped_endpoint_parses () =
   in
   match Vc.parse_json json with
   | Ok config ->
-    check int "one tts endpoint" 1 (List.length config.Vc.tts.Vc.endpoints);
-    check int "one stt endpoint" 1 (List.length config.Vc.stt.Vc.endpoints)
+    check int "one tts endpoint" 1 (List.length (tts_of config).Vc.endpoints);
+    check int "one stt endpoint" 1 (List.length (stt_of config).Vc.endpoints)
   | Error message -> fail ("a live-shaped voice config must parse: " ^ message)
 ;;
 
@@ -459,14 +584,12 @@ let test_a_partial_capture_section_keeps_the_rest () =
       config.Vc.capture.Vc.speech_margin_db
 ;;
 
-(* A probe of no length measures nothing, and the threshold would then come
-   from an empty file rather than a room. *)
 (* Zero would end the capture on the first gap between two words, which is
    most sentences.
 
-   Built on the full fixture rather than a bare capture section: the parser
-   requires tts before it reaches capture, so a partial document is refused
-   for the wrong reason and the test would pass without proving anything. *)
+   Built on the full fixture rather than a bare capture section, so that the
+   rejection this reads is about [capture] and not about a section that
+   happens to be missing from a partial document. *)
 let test_a_zero_trailing_silence_is_refused () =
   let json =
     Yojson.Safe.from_string (minimal_config_json ~session_endpoints:"[]")
@@ -488,6 +611,8 @@ let test_a_zero_trailing_silence_is_refused () =
       (String_util.string_contains_substring ~needle:"trailing_silence_seconds" message)
 ;;
 
+(* A probe of no length measures nothing, and the threshold would then come
+   from an empty file rather than a room. *)
 let test_a_zero_calibration_is_refused () =
   match
     Vc.parse_json
@@ -620,6 +745,23 @@ let () =
             `Quick test_a_capture_number_of_the_wrong_type_is_refused;
           test_case "a capture boolean of the wrong type is refused"
             `Quick test_a_capture_boolean_of_the_wrong_type_is_refused;
+        ] );
+      ( "model sections",
+        [
+          test_case "an absent tts section is None"
+            `Quick test_an_absent_tts_section_is_none;
+          test_case "an absent stt section is None"
+            `Quick test_an_absent_stt_section_is_none;
+          test_case "a tts section without a model is refused"
+            `Quick test_a_tts_section_without_a_model_is_refused;
+          test_case "a blank tts model is refused"
+            `Quick test_a_blank_tts_model_is_refused;
+          test_case "an stt section without a model is refused"
+            `Quick test_an_stt_section_without_a_model_is_refused;
+          test_case "public json renders an absent section as null"
+            `Quick test_public_json_renders_an_absent_section_as_null;
+          test_case "public json names the model when the section is present"
+            `Quick test_public_json_names_the_model_when_the_section_is_present;
         ] );
       ( "live_shape",
         [

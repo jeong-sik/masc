@@ -76,8 +76,7 @@ type outbound_message = {
   content : string;
   structured : Yojson.Safe.t option;
       (** Optional structured content blocks (opaque JSON).
-          Gate passes this through without interpretation.
-          See [docs/spec/structured-content-schema.md] for the JSON schema. *)
+          Gate passes this through without interpretation. *)
   turn_stats : turn_stats option;
   message_request : message_request option;
       (** Optional durable request envelope for accepted-but-not-final keeper

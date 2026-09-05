@@ -3153,10 +3153,120 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
            Alcotest.(check int) "failures" 4
              source_only.mkh_librarian_failures;
            (match source_only.mkh_alerts with
-            | { Tui_decode.ma_code = "librarian_starvation"; ma_severity = "error"; _ }
-              :: [] -> ()
+            | [ { Tui_decode.ma_code = Tui_decode.Librarian_starvation; _ } ] ->
+                (match
+                   Tui_decode.memory_alert_severity Tui_decode.Librarian_starvation
+                 with
+                 | `Error -> ()
+                 | `Warn -> Alcotest.fail "starvation must carry error severity")
             | _ -> Alcotest.fail "expected one starvation alert")
        | [] -> Alcotest.fail "expected the source-only keeper row")
+
+(* The alert's typed code is the only field the renderer reads: the wire's
+   severity and target are functions of it, and the decoder refuses a payload
+   that disagrees rather than trusting the string it was handed. *)
+let memory_alert_snapshot ~code ~severity ~target =
+  `Assoc
+    [ ("schema", `String "keeper.memory_os.current_health.v3")
+    ; ("generated_at", `Float 1_775_000_000.0)
+    ; ("cadence_counter_entries", `Int 0)
+    ; ( "keepers"
+      , `List
+          [ `Assoc
+              [ ("keeper_id", `String "alpha")
+              ; ("revision", `Int 0)
+              ; ("facts", `Int 0)
+              ; ("observed_facts", `Int 0)
+              ; ("derived_facts", `Int 0)
+              ; ("support_invalidations", `Int 0)
+              ; ("snapshot_bytes", `Int 0)
+              ; ("added", `Int 0)
+              ; ("removed", `Int 0)
+              ; ("snapshot_present", `Bool false)
+              ; ("librarian_lane_busy", `Int 0)
+              ; ("librarian_failures", `Int 4)
+              ; ("vision_ingest_errors", `Int 0)
+              ; ("vision_ingest_error_reasons", `List [])
+              ; ("read_error", `Null)
+              ; ("source_revision", `Int 0)
+              ; ("source_facts", `Int 0)
+              ; ("source_invalidations", `Int 0)
+              ; ("source_snapshot_bytes", `Int 0)
+              ; ("source_snapshot_present", `Bool false)
+              ; ("source_read_error", `Null)
+              ; ( "alerts"
+                , `List
+                    [ `Assoc
+                        [ ("code", `String code)
+                        ; ("severity", `String severity)
+                        ; ("target", `String target)
+                        ; ("label", `String "Librarian")
+                        ; ("message", `String "running memoryless")
+                        ; ("value", `Float 4.0)
+                        ; ("threshold", `Float 0.0)
+                        ]
+                    ] )
+              ]
+          ] )
+    ; ( "totals"
+      , `Assoc
+          [ ("facts", `Int 0)
+          ; ("observed_facts", `Int 0)
+          ; ("derived_facts", `Int 0)
+          ; ("support_invalidations", `Int 0)
+          ; ("snapshot_bytes", `Int 0)
+          ; ("added", `Int 0)
+          ; ("removed", `Int 0)
+          ; ("source_facts", `Int 0)
+          ; ("source_invalidations", `Int 0)
+          ; ("source_snapshot_bytes", `Int 0)
+          ; ("librarian_lane_busy", `Int 0)
+          ; ("librarian_failures", `Int 4)
+          ; ("vision_ingest_errors", `Int 0)
+          ; ("read_errors", `Int 0)
+          ; ("source_read_errors", `Int 0)
+          ] )
+    ; ( "alert_summary"
+      , `Assoc
+          [ ("total_alerts", `Int 1)
+          ; ("warn_alerts", `Int 0)
+          ; ("error_alerts", `Int 1)
+          ; ("keepers_with_alerts", `Int 1)
+          ; ("snapshot_read_error_keepers", `Int 0)
+          ; ("source_snapshot_read_error_keepers", `Int 0)
+          ; ("librarian_lane_busy_keepers", `Int 0)
+          ; ("librarian_starving_keepers", `Int 1)
+          ] )
+    ]
+
+let test_decode_memory_alert_keeps_the_code_contract () =
+  (match
+     Tui_decode.decode_memory_health_snapshot
+       (memory_alert_snapshot ~code:"librarian_starvation" ~severity:"error"
+          ~target:"librarian_starvation")
+   with
+   | Ok { Tui_decode.mhs_keepers =
+            [ { Tui_decode.mkh_alerts =
+                  [ { Tui_decode.ma_code = Tui_decode.Librarian_starvation; _ } ]
+              ; _
+              } ]
+        ; _
+        } -> ()
+   | Ok _ -> Alcotest.fail "starvation decoded as another code"
+   | Error err -> Alcotest.failf "a well-formed alert failed to decode: %s" err);
+  let rejected label json =
+    Alcotest.(check bool) label true
+      (Result.is_error (Tui_decode.decode_memory_health_snapshot json))
+  in
+  rejected "an unknown code has no variant to decode into"
+    (memory_alert_snapshot ~code:"librarian_on_fire" ~severity:"error"
+       ~target:"librarian_on_fire");
+  rejected "a severity the code does not carry is refused"
+    (memory_alert_snapshot ~code:"librarian_starvation" ~severity:"warn"
+       ~target:"librarian_starvation");
+  rejected "a target that disagrees with the code is refused"
+    (memory_alert_snapshot ~code:"librarian_starvation" ~severity:"error"
+       ~target:"librarian_lane_busy")
 
 let test_decode_memory_health_rejects_stale_schema () =
   let json =
@@ -7569,6 +7679,8 @@ let () =
           test_decode_memory_health_keeps_ordinary_and_source_axes;
         Alcotest.test_case "memory health rejects stale schema" `Quick
           test_decode_memory_health_rejects_stale_schema;
+        Alcotest.test_case "memory alert keeps the code contract" `Quick
+          test_decode_memory_alert_keeps_the_code_contract;
         Alcotest.test_case "memory facts keep both stores" `Quick
           test_decode_memory_facts_keeps_both_stores;
         Alcotest.test_case "memory fact row carries the use record" `Quick

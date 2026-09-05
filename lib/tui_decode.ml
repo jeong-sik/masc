@@ -2208,14 +2208,18 @@ type repository_change_snapshot = {
   rcs_total : int;
 }
 
+type memory_alert_code =
+  | Snapshot_read_error
+  | Source_snapshot_read_error
+  | Librarian_lane_busy
+  | Librarian_failures
+  | Librarian_starvation
+  | Vision_ingest_errors
+
 type memory_alert = {
-  ma_code : string;
-  ma_severity : string;
-  ma_target : string;
+  ma_code : memory_alert_code;
   ma_label : string;
   ma_message : string;
-  ma_value : float;
-  ma_threshold : float;
 }
 
 type memory_keeper_health = {
@@ -4274,6 +4278,26 @@ let require_exact_object_fields context expected = function
   | _ -> Error (context ^ " must be an object")
 ;;
 
+let memory_alert_severity = function
+  | Snapshot_read_error
+  | Source_snapshot_read_error
+  | Librarian_lane_busy
+  | Librarian_failures
+  | Vision_ingest_errors -> `Warn
+  | Librarian_starvation -> `Error
+
+let memory_alert_code_of_wire = function
+  | "snapshot_read_error" -> Some Snapshot_read_error
+  | "source_snapshot_read_error" -> Some Source_snapshot_read_error
+  | "librarian_lane_busy" -> Some Librarian_lane_busy
+  | "librarian_failures" -> Some Librarian_failures
+  | "librarian_starvation" -> Some Librarian_starvation
+  | "vision_ingest_errors" -> Some Vision_ingest_errors
+  | _ -> None
+
+let memory_alert_severity_wire code =
+  match memory_alert_severity code with `Warn -> "warn" | `Error -> "error"
+
 let decode_memory_alert json =
   let* () =
     require_exact_object_fields
@@ -4281,40 +4305,24 @@ let decode_memory_alert json =
       [ "code"; "severity"; "target"; "label"; "message"; "value"; "threshold" ]
       json
   in
-  let* ma_code = required_string_field json "code" in
-  let* ma_severity = required_string_field json "severity" in
-  let* ma_target = required_string_field json "target" in
+  let* code = required_string_field json "code" in
+  let* severity = required_string_field json "severity" in
+  let* target = required_string_field json "target" in
   let* ma_label = required_string_field json "label" in
   let* ma_message = required_string_field json "message" in
-  let* ma_value = require_float_field json "value" in
-  let* ma_threshold = require_float_field json "threshold" in
-  let expected_severity =
-    match ma_code with
-    | "snapshot_read_error"
-    | "source_snapshot_read_error"
-    | "librarian_lane_busy"
-    | "librarian_failures"
-    | "vision_ingest_errors" -> Some "warn"
-    | "librarian_starvation" -> Some "error"
-    | _ -> None
-  in
-  (match expected_severity with
-   | Some expected
-     when String.equal ma_code ma_target
-          && String.equal ma_severity expected
+  (* [value] and [threshold] are read to hold the server to the contract and
+     then dropped: the count is already drawn from the health record, and the
+     server sends 0.0 for every threshold. *)
+  let* value = require_float_field json "value" in
+  let* threshold = require_float_field json "threshold" in
+  (match memory_alert_code_of_wire code with
+   | Some ma_code
+     when String.equal code target
+          && String.equal severity (memory_alert_severity_wire ma_code)
           && not (String.equal ma_label "")
           && not (String.equal ma_message "")
-          && Float.is_finite ma_value
-          && Float.is_finite ma_threshold ->
-     Ok
-       { ma_code
-       ; ma_severity
-       ; ma_target
-       ; ma_label
-       ; ma_message
-       ; ma_value
-       ; ma_threshold
-       }
+          && Float.is_finite value
+          && Float.is_finite threshold -> Ok { ma_code; ma_label; ma_message }
    | Some _ | None -> Error "memory alert has an invalid typed code contract")
 
 let decode_memory_keeper_health json =
@@ -4662,11 +4670,23 @@ let decode_memory_health_snapshot json =
   in
   let observed_warn_alerts =
     sum (fun keeper ->
-      List.length (List.filter (fun alert -> String.equal alert.ma_severity "warn") keeper.mkh_alerts))
+      List.length
+        (List.filter
+           (fun alert ->
+              match memory_alert_severity alert.ma_code with
+              | `Warn -> true
+              | `Error -> false)
+           keeper.mkh_alerts))
   in
   let observed_error_alerts =
     sum (fun keeper ->
-      List.length (List.filter (fun alert -> String.equal alert.ma_severity "error") keeper.mkh_alerts))
+      List.length
+        (List.filter
+           (fun alert ->
+              match memory_alert_severity alert.ma_code with
+              | `Error -> true
+              | `Warn -> false)
+           keeper.mkh_alerts))
   in
   let* () =
     if

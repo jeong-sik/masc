@@ -30,6 +30,15 @@ let request_line_max_bytes = request_head_max_bytes
    an IPv6 address on a host with no IPv6 route, a machine that is down in a
    round-robin -- failed as if the whole destination were gone, while the
    next address would have answered. *)
+(** Every address an admitted destination resolves to, in resolver order.
+    Exposed because this is the only place a name becomes an address, and
+    that ordering -- resolve after the allowlist, never before -- is what
+    keeps the matcher and the resolver from reading different names.
+
+    All of them, not the first: a host whose first record is unreachable (an
+    IPv6 address with no IPv6 route, a down machine in a round robin) would
+    otherwise fail as if the destination were gone while the next address
+    would have answered. *)
 let resolve_upstream ~net ~host ~port =
   let name = Egress_host.to_string host in
   match Eio.Net.getaddrinfo_stream net name ~service:(string_of_int port) with

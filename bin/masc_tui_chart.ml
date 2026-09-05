@@ -6,6 +6,7 @@ type style =
   | Status of Masc_tui_theme.status
   | Tone of Masc_tui_theme.tone
 
+(** Serializes a [style] into its theme ANSI SGR code. *)
 let render_style = function
   | Status s -> Masc_tui_theme.status s
   | Tone t -> Masc_tui_theme.tone t
@@ -26,6 +27,7 @@ let glyph_block_6 = "\xe2\x96\x86" (* U+2586 *)
 let glyph_block_7 = "\xe2\x96\x87" (* U+2587 *)
 let glyph_block_8 = "\xe2\x96\x88" (* U+2588 *)
 
+(** 8-level UTF-8 block character array from lowest (U+2581) to highest (U+2588). *)
 let sparkline_glyphs =
   [| glyph_block_1
    ; glyph_block_2
@@ -113,6 +115,7 @@ type gauge_thresholds = {
   bad_percent : int;
 }
 
+(** [warn_percent = 70; bad_percent = 85] *)
 let default_gauge_thresholds = {
   warn_percent = 70;
   bad_percent = 85;
@@ -243,6 +246,8 @@ let waterfall ~width ?total_ms steps =
 
 let heatmap_glyphs = [| " "; bar_light; bar_medium; bar_dark; bar_full |]
 
+(** [heatmap_row ?max_val ?empty_glyph buckets] maps bucket counts to 5 intensity levels:
+    empty dot, [░], [▒], [▓], [█]. When [max_val] is provided, uses it as the shared scale ceiling. *)
 let heatmap_row ?max_val ?(empty_glyph = dot_empty) buckets =
   if buckets = [] then ""
   else

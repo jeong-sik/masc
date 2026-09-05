@@ -559,6 +559,8 @@ let journaled_event_to_string journaled =
   Yojson.Safe.to_string (journaled_event_to_json journaled)
 ;;
 
+(** Strict decode of one journal line. [Yojson.Json_error] is caught and
+    returned as [Error]. *)
 let journaled_event_of_string line =
   try journaled_event_of_json (Yojson.Safe.from_string line) with
   | Yojson.Json_error message -> Error ("journaled_event: invalid JSON: " ^ message)

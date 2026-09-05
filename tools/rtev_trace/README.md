@@ -29,7 +29,10 @@ they covered, how many ran 10/50/100 ms or longer without giving the
 scheduler back, and the longest ones with the operation the fiber resumed
 from, the one it suspended on (an empty reason is `Fiber.yield`), the GC
 time inside the run, and how many `masc.turn` spans were open on that
-domain. Domain 0 is the main domain; a run there of 100 ms is 100 ms of
+domain. Each long run also prints the fiber's ancestry: the cancellation
+context it was forked in (kind and name when the switch was named) and the
+fiber that created that context, up to six levels, so a loop that shows up
+only as `fstat -> fstat` can be traced to the code that forked it. Domain 0 is the main domain; a run there of 100 ms is 100 ms of
 scheduler lag for every other fiber on it.
 
 Numbers from these tools are recorded in

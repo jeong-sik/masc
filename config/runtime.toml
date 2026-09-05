@@ -1215,6 +1215,11 @@ max-concurrent = 1
 # lane is exhausted. Lanes are resolved at config load; unknown candidate ids
 # abort startup. Ordering is the only semantics; a lane table carries only
 # [candidates].
+#
+# NOTE: this example lane is INACTIVE. A lane id must shadow a runtime id
+# (`<provider>.<model>`) to be reachable (see the rule below); "default" is
+# not a runtime id, so this group is never expanded. Kept only as a shape
+# example — do not copy it as-is.
 [runtime.lanes.default]
 candidates = [
   "ollama_cloud.deepseek-v4-flash",

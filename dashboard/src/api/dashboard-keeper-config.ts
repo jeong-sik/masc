@@ -348,6 +348,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     sandbox_profile: asNullableString(data.sandbox_profile) ?? UNKNOWN_SANDBOX_PROFILE,
     network_mode: asNullableString(data.network_mode) ?? UNKNOWN_NETWORK_MODE,
     remote_endpoint: asNullableString(data.remote_endpoint),
+    voice_always_allow: data.voice_always_allow !== undefined ? asLooseBoolean(data.voice_always_allow) : null,
     keeper_last_error: asNullableString(data.keeper_last_error),
     sandbox_roots: normalizeStringList(data.sandbox_roots),
     prompt: {
@@ -457,6 +458,8 @@ export type KeeperConfigUpdatePayload = {
   instructions?: string
   // Proactive
   proactive_enabled?: boolean
+  // Voice
+  voice_always_allow?: boolean
   skills?: { names?: string[] }
 }
 

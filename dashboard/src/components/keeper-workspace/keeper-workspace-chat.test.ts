@@ -6,6 +6,17 @@ import { act, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DashboardGateResponse, Keeper, KeeperApprovalQueueItem } from '../../types'
 
+const mockNavigate = vi.fn()
+vi.mock('../../router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../router')>()),
+  navigate: (...args: unknown[]) => mockNavigate(...args),
+}))
+
+vi.mock('../../keeper-actions', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../keeper-actions')>()),
+  hydrateKeeperToolApprovals: vi.fn(async () => undefined),
+}))
+
 const mockKeeper: Keeper = {
   name: 'sangsu',
   koreanName: '상수',
@@ -132,12 +143,6 @@ async function loadChat() {
   vi.doMock('../keeper-detail-state', () => ({
     keeperMobilePane: signal<'roster' | 'chat'>('chat'),
   }))
-  // Preserve the real router but capture navigate() so the compact approval
-  // badge link can be asserted.
-  vi.doMock('../../router', async (importOriginal) => ({
-    ...(await importOriginal<typeof import('../../router')>()),
-    navigate: vi.fn(),
-  }))
   // The badge reads gateData.approval_queue; inject a controllable signal in
   // place of the real computed so a test can populate the queue directly.
   vi.doMock('../gate-signals', async (importOriginal) => ({
@@ -154,12 +159,14 @@ describe('KeeperWorkspaceChat', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     mockGateData.value = undefined
+    mockNavigate.mockReset()
   })
 
   afterEach(() => {
     render(null, container)
     container.remove()
     mockGateData.value = undefined
+    mockNavigate.mockReset()
     vi.clearAllMocks()
     vi.restoreAllMocks()
     vi.resetModules()
@@ -171,13 +178,11 @@ describe('KeeperWorkspaceChat', () => {
     vi.doUnmock('../../lib/keeper-predicates')
     vi.doUnmock('../keeper-action-panel')
     vi.doUnmock('../keeper-detail-state')
-    vi.doUnmock('../../router')
     vi.doUnmock('../gate-signals')
   })
 
   it('links the compact pending-approval header badge to the approvals queue', async () => {
     const { KeeperWorkspaceChat } = await loadChat()
-    const { navigate } = await import('../../router')
     // The badge derives from the Gate approval_queue (HITL SSOT), not
     // keeper.trust.approval_state (#23678).
     mockGateData.value = gateResponse([approvalItem('appr-1', 'sangsu', 'fs_write')])
@@ -193,17 +198,17 @@ describe('KeeperWorkspaceChat', () => {
     // The in-thread design cue (keepers.jsx chat-pendcue) rides the same queue.
     const pendcue = container.querySelector('[data-testid="keeper-chat-pendcue"]') as HTMLButtonElement
     expect(pendcue).not.toBeNull()
-    expect(pendcue.textContent).toContain('승인 대기')
+    expect(pendcue.textContent).toContain('판정 중')
+    expect(pendcue.textContent).toContain('이 호출은 미뤄짐')
     expect(pendcue.textContent).toContain('fs_write')
     await act(async () => {
       queueLink.click()
     })
-    expect(navigate).toHaveBeenCalledWith('approvals')
+    expect(mockNavigate).toHaveBeenCalledWith('approvals')
   })
 
   it('links the in-thread pending-approval cue to the approvals queue', async () => {
     const { KeeperWorkspaceChat } = await loadChat()
-    const { navigate } = await import('../../router')
     mockGateData.value = gateResponse([approvalItem('appr-1', 'sangsu', 'fs_write')])
 
     await act(async () => {
@@ -219,7 +224,7 @@ describe('KeeperWorkspaceChat', () => {
     await act(async () => {
       pendcue.click()
     })
-    expect(navigate).toHaveBeenCalledWith('approvals')
+    expect(mockNavigate).toHaveBeenCalledWith('approvals')
   })
 
   it('shows why an in-chat tool approval was held', async () => {

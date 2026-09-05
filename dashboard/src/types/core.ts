@@ -644,6 +644,7 @@ export interface KeeperApprovalLifecycle {
   toolName: string | null
   phase: KeeperApprovalLifecyclePhase
   artifactSha256: string | null
+  callSummary?: string | null
 }
 
 /** Canonical actor name for system-originated entries (backend convention).
@@ -1654,6 +1655,7 @@ export interface KeeperConfig {
   sandbox_profile?: string
   network_mode?: 'none' | 'inherit' | string
   remote_endpoint?: string | null
+  voice_always_allow?: boolean | null
   keeper_last_error?: string | null
   sandbox_roots: string[]
   prompt: KeeperConfigPrompt

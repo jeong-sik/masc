@@ -2318,6 +2318,9 @@ function ApprovalLifecycleCard({ lifecycle }: { lifecycle: KeeperApprovalLifecyc
         <span class="text-sm font-semibold text-[var(--color-fg-primary)]">${spec.title}</span>
       </div>
       <p class="m-0 text-sm leading-airy text-[var(--color-fg-secondary)]">${spec.detail}</p>
+      ${lifecycle.callSummary
+        ? html`<div class="font-mono text-2xs text-[var(--color-fg-muted)]">${lifecycle.callSummary}</div>`
+        : null}
       <div class="flex flex-wrap gap-2 text-2xs text-[var(--color-fg-muted)]">
         <code>${lifecycle.approvalId}</code>
         ${lifecycle.toolName ? html`<span>${lifecycle.toolName}</span>` : null}

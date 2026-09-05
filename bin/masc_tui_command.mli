@@ -47,6 +47,8 @@ type t =
   | Cycle_memory
       (** [/memory] — cycle Librarian/Memory journal rows: summary, full,
           hidden. Ctrl-N walks the same cycle. *)
+  | Open_fleet_memory
+      (** [/fleet-memory] or [/all-memory] — browse fleet-wide knowledge facts across all keepers. *)
   | Find_in_chat of string
       (** [/find <text>] — put the pane on the newest message holding [text].
 

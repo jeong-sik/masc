@@ -88,6 +88,14 @@ let catalog =
     ; args = ""
     ; summary = "cycle Librarian/Memory journal rows: summary, full, hidden"
     }
+  ; { word = "fleet-memory"
+    ; args = ""
+    ; summary = "browse consolidated facts across the entire keeper fleet"
+    }
+  ; { word = "all-memory"
+    ; args = ""
+    ; summary = "browse consolidated facts across the entire keeper fleet"
+    }
   ; { word = "find"
     ; args = "[text]"
     ; summary = "go to the newest message holding text; again for the next"
@@ -183,6 +191,7 @@ let parse text =
     | "tools", "compact" -> Set_tools `Compact
     | "tools", "full" -> Set_tools `Full
     | "memory", _ -> Cycle_memory
+    | "fleet-memory", _ | "all-memory", _ -> Open_fleet_memory
     | "find", "" -> Find_next
     | "find", text -> Find_in_chat text
     | "context", _ -> Inspect_context

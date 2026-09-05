@@ -15,6 +15,7 @@ let every_surface =
   ; Keepers Keeper_runtime_pick; Lanes; Board; Approvals; Planning
   ; Schedules; Verification; Harness; Fusion; Repositories; Code; Changes
   ; Connectors; Runtime; Config; Resources; Tools; System_logs
+  ; Metrics; Memory
   ]
 
 let test_every_surface_answers () =
@@ -264,7 +265,7 @@ let test_memory_footer_offers_the_fact_browser () =
 
 let test_memory_facts_footer_names_filter_and_way_back () =
   check str "the browser names movement, the category cycle, and Esc"
-    "j/k:move  c / C:category  s:sort  Esc:close / clear  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  c / C:category  s:sort  a / A:all fleet  Esc:close / clear  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_memory_facts
 
 let sample_memory_fact ~category ~claim : Tui_decode.memory_fact =

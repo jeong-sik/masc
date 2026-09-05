@@ -293,13 +293,13 @@ let for_surface = function
       ]
       @ listing_meta
   | Memory ->
-      (* j/k moves the keeper row the health table draws -- the row Enter
-         reads. [ / ] was listed here for that same movement and never had a
-         handler, so the footer offered two spellings and one of them did
-         nothing. *)
       [ b Navigate "j/k" "move" ~help:"move the keeper row"
       ; b Act "Enter" "facts"
           ~help:"browse what the selected keeper actually remembers"
+      ; b Act "a / A" "all fleet"
+          ~help:"browse and search consolidated memory across the entire fleet"
+      ; b Act "s" "sort"
+          ~help:"cycle sort keepers (facts, size, delta, state, name)"
       ; b Search "/" "find" ~help:"jump the cursor to a matching keeper"
       ; b Search "n / N" "next / previous match"
       ]
@@ -656,6 +656,7 @@ let footer_hints_memory_facts =
     ([ b Navigate "j/k" "move"
      ; b Act "c / C" "category" ~help:"cycle category filter (forward / backward)"
      ; b Act "s" "sort" ~help:"cycle sort (recency, last retrieved, retrieved count, category, claim)"
+     ; b Act "a / A" "all fleet" ~help:"switch to consolidated memory across entire fleet"
      ; b Search "/" "filter" ~help:"live text filter / search"
      ; b Search "n / N" "next / previous match"
      ; b Act "Esc" "close / clear" ~help:"clear filter or exit to health table"

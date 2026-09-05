@@ -2547,6 +2547,27 @@ let memory_category_filter_label = function
   | Category_source -> "source"
   | Category_dropped -> "dropped"
 
+type memory_overview_sort =
+  | Mem_overview_facts
+  | Mem_overview_size
+  | Mem_overview_delta
+  | Mem_overview_state
+  | Mem_overview_name
+
+let memory_overview_sort_label = function
+  | Mem_overview_facts -> "Facts (Most)"
+  | Mem_overview_size -> "Size (Largest)"
+  | Mem_overview_delta -> "Delta (Recent changes)"
+  | Mem_overview_state -> "State (Attention first)"
+  | Mem_overview_name -> "Name (A-Z)"
+
+let next_memory_overview_sort = function
+  | Mem_overview_facts -> Mem_overview_size
+  | Mem_overview_size -> Mem_overview_delta
+  | Mem_overview_delta -> Mem_overview_state
+  | Mem_overview_state -> Mem_overview_name
+  | Mem_overview_name -> Mem_overview_facts
+
 type metrics_section =
   | Section_fleet
   | Section_resources
@@ -3188,6 +3209,7 @@ type state = {
   mutable memory_facts_scroll: int;
   mutable memory_facts_category: memory_category_filter;
   mutable memory_facts_sort: memory_sort_order;
+  mutable memory_overview_sort: memory_overview_sort;
   mutable repository_changes_open: bool;
   mutable repository_changes_scope: Tui_decode.repository_change_scope option;
   mutable repository_changes: Tui_decode.repository_change_snapshot option;
@@ -4241,6 +4263,7 @@ let create_state
   memory_facts_scroll = 0;
   memory_facts_category = Category_all;
   memory_facts_sort = Sort_recency;
+  memory_overview_sort = Mem_overview_facts;
   repository_changes_open = false;
   repository_changes_scope = None;
   repository_changes = None;
@@ -5666,6 +5689,8 @@ let palette_entries (state : state) =
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "charts", Palette_goto Metrics ]
   @ [ "stats", Palette_goto Metrics ]
+  @ [ "fleet memory", Palette_goto Memory ]
+  @ [ "global memory", Palette_goto Memory ]
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring

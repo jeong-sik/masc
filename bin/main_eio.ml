@@ -1069,18 +1069,28 @@ let init_cmd_exit base_path force =
       base_path
   in
   Fs_compat.mkdir_p target_root;
+  (* Same distribution/operator split the server's own config-root seed makes
+     ([Server_runtime_config_root_bootstrap.copy_missing_config_root_seed]), so
+     the two paths hand back the same workspace: keeper manifests are the
+     operator's to write, and [init] leaves the directory empty for them. *)
+  Fs_compat.mkdir_p (Filename.concat target_root Common.keepers_runtime_dirname);
   let result =
     List.fold_left
       (seed_one ~target_root ~force)
       { written = 0; skipped = 0; failed = 0 }
-      Embedded_config.file_list
+      (List.filter Common.seeds_into_fresh_config_root Embedded_config.file_list)
   in
   Printf.printf "init: %d written, %d skipped, %d failed (root=%s)\n"
     result.written result.skipped result.failed target_root;
   if result.failed > 0 then 1 else 0
 
 let init_cmd =
-  let doc = "Seed default .masc/config/ from binary-embedded assets" in
+  let doc =
+    "Seed default .masc/config/ from binary-embedded assets. Writes runtime \
+     settings, prompts, tool definitions and connector declarations, and leaves \
+     keepers/ empty for you to declare -- the same split the server makes when \
+     it creates a config root itself. Existing files are kept unless --force."
+  in
   let info = Cmd.info "init" ~doc in
   Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force)
 

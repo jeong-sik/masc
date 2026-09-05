@@ -788,7 +788,9 @@ type activated_owner_state =
 
 let owner_initialization_error_to_string = function
   | Runtime_config_path_unavailable ->
-    "no runtime config path; cannot initialize the default Runtime"
+    "no runtime config path; cannot initialize the default Runtime. Seed one \
+     with `masc init --base-path <dir>`, or point MASC_CONFIG_DIR at a config \
+     root that holds runtime.toml"
   | Runtime_config_read_failed detail ->
     "runtime config observation failed: " ^ detail
   | Run_registry_already_installed `Fusion ->

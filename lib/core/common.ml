@@ -45,6 +45,23 @@ let masc_dirname = ".masc"
    string (e.g. to "runtime/keepers"). *)
 let keepers_runtime_dirname = "keepers"
 
+(* What a fresh runtime config root may take from the distribution, keyed by an
+   asset path relative to the embedded [config/] tree (or a bare top-level entry
+   name). Keeper manifests are excluded: a workspace's roster is the operator's
+   to declare, and the shipped examples autoboot into a sandbox the host may not
+   have. The server's config-root seed has always dropped them; [masc init] did
+   not, and on 2026-09-05 that produced four keepers that could not boot on a
+   host without Docker and a hand-built sandbox image. [dune] is a build input
+   ocaml-crunch swept up with the tree, not runtime config. *)
+let seeds_into_fresh_config_root rel =
+  let first_segment =
+    match String.index_opt rel '/' with
+    | Some i -> String.sub rel 0 i
+    | None -> rel
+  in
+  (not (String.equal (Filename.basename rel) "dune"))
+  && not (String.equal first_segment keepers_runtime_dirname)
+
 let masc_dir_from_base_path ~base_path =
   Filename.concat base_path masc_dirname
 

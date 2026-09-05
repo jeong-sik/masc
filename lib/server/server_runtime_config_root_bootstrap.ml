@@ -163,14 +163,58 @@ let copy_missing_config_root_seed ~src ~dst =
   Fs_compat.mkdir_p dst;
   Sys.readdir src
   |> Array.iter (fun name ->
-    if
-      String.equal name "keepers"
-    then ()
-    else
+    if Common.seeds_into_fresh_config_root name
+    then
       copy_missing_tree
         ~src:(Filename.concat src name)
         ~dst:(Filename.concat dst name));
   Fs_compat.mkdir_p (Filename.concat dst Common.keepers_runtime_dirname)
+;;
+
+(* Write the named embedded assets that [dst] does not already hold, and answer
+   how many were written. Never overwrites: a file already on disk is the
+   operator's, whichever caller asked. *)
+let write_missing_embedded ~dst rels =
+  List.fold_left
+    (fun written rel ->
+       let target = Filename.concat dst rel in
+       if Sys.file_exists target
+       then written
+       else (
+         match Embedded_config.read rel with
+         | None -> written
+         | Some content ->
+           Fs_compat.mkdir_p (Filename.dirname target);
+           Fs_compat.save_file target content;
+           written + 1))
+    0
+    rels
+;;
+
+(* The binary embeds the repo's [config/] tree ([Embedded_config], built by
+   ocaml-crunch), and a release install has no [config/] on disk beside it:
+   [versioned_config_root_candidates] finds nothing, so before this fallback a
+   fresh base path got a scaffold with no runtime.toml and startup died on "no
+   runtime config path". Measured 2026-09-05 with the v0.31.0 binary run outside
+   its repo. Same distribution/operator split as the filesystem seed above. *)
+let seed_missing_from_embedded ~dst =
+  Fs_compat.mkdir_p dst;
+  Embedded_config.file_list
+  |> List.filter Common.seeds_into_fresh_config_root
+  |> write_missing_embedded ~dst
+;;
+
+(* An existing config root is operator-owned and is deliberately not refilled.
+   These two files are the exception, because their absence is not a preference:
+   without runtime.toml the server refuses to start at all, and the overlay is
+   what the frozen model catalog is read from. Restricted to the pair the
+   versioned backfill above already covers — this only adds a source for hosts
+   that have no repo to copy from. *)
+let backfill_startup_required_from_embedded ~config_root =
+  [ Config_dir_resolver.runtime_toml_filename
+  ; agent_core_models_overlay_toml_filename
+  ]
+  |> write_missing_embedded ~dst:config_root
 ;;
 
 let bootstrap_base_path_config_root ~base_path =
@@ -201,14 +245,28 @@ let bootstrap_base_path_config_root ~base_path =
             )
           | None -> 0, 0
         in
+        (* Last resort for a root that exists but cannot start: no repo to copy
+           from, so the startup-required pair comes out of the binary. *)
+        let backfilled_from_embedded =
+          backfill_startup_required_from_embedded ~config_root
+        in
         if backfilled_prompts + backfilled_model_catalog_overlay > 0
-        then (
+        then
           Log.Server.info
             "backfilled %d missing prompt seed file(s) and %d model catalog overlay seed file(s) into existing base-path config root: %s"
             backfilled_prompts
             backfilled_model_catalog_overlay
             config_root;
-          Config_dir_resolver.reset ())
+        if backfilled_from_embedded > 0
+        then
+          Log.Server.info
+            "backfilled %d startup-required config file(s) from binary-embedded assets into existing base-path config root: %s"
+            backfilled_from_embedded
+            config_root;
+        if backfilled_prompts + backfilled_model_catalog_overlay
+           + backfilled_from_embedded
+           > 0
+        then Config_dir_resolver.reset ()
         else
           Log.Server.info
             "preserved existing base-path config root without refilling operator-owned entries: %s"
@@ -233,9 +291,18 @@ let bootstrap_base_path_config_root ~base_path =
         Log.Server.info "bootstrapped base-path config root: %s <- %s" config_root source
       | None ->
         ensure_config_root_scaffold config_root;
-        Log.Server.warn
-          "bootstrapped minimal base-path config root without versioned source: %s"
-          config_root);
+        let seeded = seed_missing_from_embedded ~dst:config_root in
+        if seeded > 0
+        then
+          Log.Server.info
+            "bootstrapped base-path config root from binary-embedded assets (%d file(s)): %s"
+            seeded
+            config_root
+        else
+          Log.Server.warn
+            "bootstrapped minimal base-path config root without versioned source \
+             and no embedded assets: %s"
+            config_root);
     Config_dir_resolver.reset ())
 ;;
 

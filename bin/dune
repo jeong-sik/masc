@@ -981,6 +981,36 @@
   yojson))
 
 (library
+ (name masc_tui_render_metrics)
+ (wrapped false)
+ (modules masc_tui_render_metrics)
+ (libraries
+  masc
+  masc_types
+  masc_tui_ansi
+  masc_tui_chart
+  masc_tui_context_inspector
+  masc_tui_theme
+  masc_tui_types
+  masc_tui_message_layout
+  unix))
+
+(library
+ (name masc_tui_render_memory)
+ (wrapped false)
+ (modules masc_tui_render_memory)
+ (libraries
+  masc
+  masc_types
+  masc_tui_ansi
+  masc_tui_context_inspector
+  masc_tui_theme
+  masc_tui_types
+  masc_tui_message_layout
+  masc_tui_render_schedule
+  unix))
+
+(library
  (name masc_tui_json)
  (wrapped false)
  (modules masc_tui_json)
@@ -1120,6 +1150,8 @@
   masc_tui_render_schedule
   masc_tui_json
   masc_tui_render_tools
+  masc_tui_render_metrics
+  masc_tui_render_memory
   masc_tui_context_bars
   masc_tui_chart
   masc_tui_tool_tree

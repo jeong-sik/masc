@@ -1,0 +1,109 @@
+open Alcotest
+module Types = Masc_tui_types
+module Decode = Masc.Tui_decode
+module Layout = Masc_tui_message_layout
+module Render_memory = Masc_tui_render_memory
+
+let make_state () =
+  Types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
+;;
+
+let test_age_label () =
+  check string "recent" "just now" (Render_memory.memory_fact_age_label 10.0);
+  check string "minutes" "5m ago" (Render_memory.memory_fact_age_label 300.0);
+  check string "hours" "2h ago" (Render_memory.memory_fact_age_label 7200.0);
+  check string "days" "3d ago" (Render_memory.memory_fact_age_label 259200.0)
+;;
+
+let test_fact_row_line () =
+  let fact : Decode.memory_fact =
+    { mf_claim = "System uses Roger voice for Sangsu"
+    ; mf_category = "persona"
+    ; mf_origin = "manual"
+    ; mf_first_seen = 100.0
+    ; mf_last_seen = 200.0
+    ; mf_reinforcement = 3
+    ; mf_memory_id = "mem-1"
+    }
+  in
+  let row = Types.Memory_row_fact fact in
+  let line = Render_memory.memory_fact_row_line ~cols:80 row in
+  check bool "fact row line bounded" true (Layout.display_width line <= 80);
+  check bool "fact row line not empty" true (String.length line > 0)
+;;
+
+let test_source_fact_row_line () =
+  let sfact : Decode.memory_source_fact =
+    { msf_claim = "Config points to runtime.toml"
+    ; msf_first_seen = 150.0
+    ; msf_path = "config/runtime.toml"
+    ; msf_sha256 = "abc123sha"
+    }
+  in
+  let row = Types.Memory_row_source_fact sfact in
+  let line = Render_memory.memory_fact_row_line ~cols:80 row in
+  check bool "source fact row line bounded" true (Layout.display_width line <= 80)
+;;
+
+let test_invalidation_row_line () =
+  let inv : Decode.memory_invalidation =
+    { mi_source_path = "legacy_docs.md"
+    ; mi_invalidated_at = 300.0
+    ; mi_reason = "superseded by new spec"
+    }
+  in
+  let row = Types.Memory_row_invalidation inv in
+  let line = Render_memory.memory_fact_row_line ~cols:80 row in
+  check bool "invalidation row line bounded" true (Layout.display_width line <= 80)
+;;
+
+let test_detail_lines () =
+  let fact : Decode.memory_fact =
+    { mf_claim = "Constitution requires evidence for claims"
+    ; mf_category = "rule"
+    ; mf_origin = "docs/constitution.xml"
+    ; mf_first_seen = 100.0
+    ; mf_last_seen = 200.0
+    ; mf_reinforcement = 5
+    ; mf_memory_id = "mem-rule-1"
+    }
+  in
+  let row = Types.Memory_row_fact fact in
+  let lines = Render_memory.memory_fact_detail_lines ~cols:80 row in
+  check bool "detail lines non-empty" true (List.length lines > 0);
+  List.iter
+    (fun line ->
+      check bool "detail line bounded" true (Layout.display_width line <= 80))
+    lines
+;;
+
+let test_render_memory_body () =
+  let state = make_state () in
+  let count = ref 0 in
+  Render_memory.render_memory_body
+    ~cols:80
+    ~budget:20
+    state
+    ~push:(fun _ -> incr count)
+    ~push_styled:(fun ~style:_ _ -> incr count)
+    ~push_selected:(fun _ -> incr count)
+    ~push_divider:(fun () -> incr count)
+    ~push_empty:(fun () -> incr count);
+  check bool "memory body rendered" true (!count > 0 && !count <= 20)
+;;
+
+let () =
+  run "tui_render_memory"
+    [ ( "age_label"
+      , [ test_case "age_label_formatting" `Quick test_age_label ] )
+    ; ( "row_lines"
+      , [ test_case "fact_row" `Quick test_fact_row_line
+        ; test_case "source_fact_row" `Quick test_source_fact_row_line
+        ; test_case "invalidation_row" `Quick test_invalidation_row_line
+        ] )
+    ; ( "detail_lines"
+      , [ test_case "detail_lines_bounded" `Quick test_detail_lines ] )
+    ; ( "render_body"
+      , [ test_case "memory_body_budget" `Quick test_render_memory_body ] )
+    ]
+;;

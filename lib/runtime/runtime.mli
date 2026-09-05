@@ -493,6 +493,11 @@ val lanes : unit -> Runtime_lane.t list
 (** [\[runtime.lanes.<id>\]] ordered failover candidate lists. Each lane carries
     an ordered list of runtime ids validated at load. *)
 
+val lsp_servers : unit -> Lsp_process_manager.language -> string * string list
+(** [\[lsp.servers\]] applied over the client's own table: the command that
+    starts a language's server, the operator's where one was written for that
+    language. Pass it as [~servers] to the language-server pool and spawn. *)
+
 val get_lane_by_id : string -> Runtime_lane.t option
 (** Lane with the given id, or [None] if no such lane is configured. *)
 

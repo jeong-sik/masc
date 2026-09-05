@@ -418,8 +418,8 @@ let send_client_notification cs method_ params =
    executable, [null] when none is mapped) / [last_error]. *)
 let lang_status_json ~lang_id (health : lang_health) : Yojson.Safe.t =
   let command =
-    match Lsp_process_manager.command_for_lang lang_id with
-    | Some (exe, _argv) -> `String exe
+    match Lsp_process_manager.language_of_lang_id lang_id with
+    | Some language -> `String (fst (Runtime.lsp_servers () language))
     | None -> `Null
   in
   let connected, overlay_only, last_error =
@@ -684,7 +684,14 @@ let ensure_lsp_process cs lang_id =
     | Some proc -> Ok proc
     | None ->
       let workspace_root = !(cs.workspace_root) in
-      (match Lsp_process_manager.spawn ~sw:cs.sw ~lang_id ~workspace_root cs.proc_mgr with
+      (match
+         Lsp_process_manager.spawn
+           ~sw:cs.sw
+           ~servers:(Runtime.lsp_servers ())
+           ~lang_id
+           ~workspace_root
+           cs.proc_mgr
+       with
        | Error err ->
          let msg = Format.asprintf "%a" Lsp_process_manager.pp_spawn_error err in
          Log.Server.warn "LSP spawn failed for %s: %s" lang_id msg;

@@ -237,6 +237,13 @@ let language_of_extension ext =
 
 let covered_extensions () = List.concat_map extensions_of_language all_languages
 
+(* Who answers "which command starts this language's server": the table
+   above when nothing is said, the operator's [lsp.servers] entry for a
+   language when there is one. Threaded in by the caller rather than read
+   here, because this library sits below the module that reads
+   runtime.toml. *)
+type servers = language -> string * string list
+
 (** Language → command mapping. Returns [(executable, argv)] or [None]. *)
 let command_for_lang lang_id =
   Option.map command_of_language (language_of_lang_id lang_id)
@@ -345,12 +352,18 @@ let read_message (flow : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.
 
     The process is bound to [sw] — when the switch is turned off,
     the process is terminated automatically via [on_release]. *)
-let spawn ~sw ~lang_id ~workspace_root (proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t)
+let spawn
+    ~sw
+    ~(servers : servers)
+    ~lang_id
+    ~workspace_root
+    (proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t)
   : (lsp_process, spawn_error) result
   =
-  match command_for_lang lang_id with
+  match language_of_lang_id lang_id with
   | None -> Error (Command_not_found lang_id)
-  | Some (cmd, argv) ->
+  | Some language ->
+    let cmd, argv = servers language in
     if not (command_exists cmd)
     then Error (Command_not_found cmd)
     else (

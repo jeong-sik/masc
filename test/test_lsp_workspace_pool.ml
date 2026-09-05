@@ -131,6 +131,7 @@ let test_missing_command_is_not_an_empty_answer () =
     Lsp_workspace_pool.with_pool
       ~clock:(Eio.Stdenv.clock env)
       ~proc_mgr:(Eio.Stdenv.process_mgr env)
+      ~servers:Lsp_process_manager.command_of_language
       (fun pool ->
       let workspace_root = temp_dir "masc-ws" in
       with_path "" (fun () ->
@@ -160,6 +161,7 @@ let test_two_roots_do_not_share_a_server () =
     Lsp_workspace_pool.with_pool
       ~clock:(Eio.Stdenv.clock env)
       ~proc_mgr:(Eio.Stdenv.process_mgr env)
+      ~servers:Lsp_process_manager.command_of_language
       (fun pool ->
       let ensure workspace_root =
         match

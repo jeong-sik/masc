@@ -29,6 +29,9 @@
   uri
   masc.masc_log
   masc_eio_context
+  ; [lsp.servers] names languages the language-server client knows; the
+  ; client sits below this library, so the edge points down.
+  masc.lsp_client
   masc.runtime_model
   masc.tool_types
   ; The model-facing MCP outcome-unknown line is a managed prompt

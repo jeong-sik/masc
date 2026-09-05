@@ -149,7 +149,8 @@ let test_closed_network_is_spelled_on_the_command () =
    consistency cleanup that re-adds it would reintroduce that failure with
    build and tests both silent, so each argv is pinned as it was measured. *)
 let test_policy_network_inspect_omits_the_flag_list_keeps_it () =
-  match M.policy_network_inspect_argv_for Backend.Apple_container with
+  let keeper_name = "test-keeper" in
+  match M.policy_network_inspect_argv_for Backend.Apple_container ~keeper_name with
   | Error detail ->
     Alcotest.failf "Apple's policy lane refused the inspect argv: %s" detail
   | Ok inspect ->
@@ -159,7 +160,7 @@ let test_policy_network_inspect_omits_the_flag_list_keeps_it () =
      | Ok listing ->
        Alcotest.(check (list string))
          "inspect carries no --format (container rejects it)"
-         [ "container"; "network"; "inspect"; M.policy_network_name ]
+         [ "container"; "network"; "inspect"; M.policy_network_name ~keeper_name ]
          inspect;
        Alcotest.(check (list string))
          "list is asked for the machine form"
@@ -169,7 +170,7 @@ let test_policy_network_inspect_omits_the_flag_list_keeps_it () =
      not grow a network argv silently. *)
   List.iter
     (fun backend ->
-       match M.policy_network_inspect_argv_for backend with
+       match M.policy_network_inspect_argv_for backend ~keeper_name with
        | Error message ->
          Alcotest.(check bool)
            "non-policy backends refuse by name"

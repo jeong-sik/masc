@@ -47,6 +47,19 @@ val keeper_turn_record_freshness_slo_s : keepalive_interval_s:float -> float
     so the SLO covers the configured sleep cadence plus two minutes of cycle
     execution/scheduling slack while preserving the historical 300-second
     floor for short cadences. *)
+val keeper_tool_call_source_health :
+  gap_reason:string option ->
+  latest_age_s:float option ->
+  freshness_slo_s:float ->
+  string * string
+(** The same classification for a tool-call source, plus ["coverage_gap"].
+
+    A recorded telemetry gap outranks freshness: a store can be current about
+    the window it did record and still be missing an hour of it, and the gap
+    carries its own reason rather than one derived from the verdict. With no
+    gap this is {!keeper_turn_record_source_health} with the two turn-record
+    answers ([live], [incompatible]) out of reach. *)
+
 val keeper_turn_record_source_health :
   skipped_rows:int ->
   live_turn_in_progress:bool ->

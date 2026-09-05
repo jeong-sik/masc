@@ -65,6 +65,26 @@ let keeper_turn_record_source_health
   | Some _, false -> "ok", ""
 ;;
 
+(* The tool-call sources answer the same question one rung higher up. A
+   telemetry coverage gap is a fact about the pipeline that wrote the rows,
+   so it outranks how fresh the newest row is: a store can be perfectly
+   current about the window it did record and still be missing an hour.
+
+   This existed twice, copied byte for byte into two handlers in
+   server_dashboard_http_keeper_api.ml, each carrying its own inner ladder
+   that was this module's ladder minus the two cases it does not reach. Three
+   copies meant a consumer saw a vocabulary no single place listed. *)
+let keeper_tool_call_source_health ~gap_reason ~latest_age_s ~freshness_slo_s =
+  match gap_reason with
+  | Some reason -> ("coverage_gap", reason)
+  | None ->
+    (* No skipped rows and no live turn: those two answers belong to the
+       turn-record store, which knows about them. A tool-call source that
+       has rows and is inside the window is plainly "ok". *)
+    keeper_turn_record_source_health ~skipped_rows:0
+      ~live_turn_in_progress:false ~latest_age_s ~freshness_slo_s
+;;
+
 let keeper_metric_producer_active ~base_path =
   Keeper_registry.all ~base_path ()
   |> List.exists (fun (entry : Keeper_registry.registry_entry) ->

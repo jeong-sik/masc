@@ -76,6 +76,47 @@ let test_keeper_metric_freshness_tracks_runtime_cadence () =
        Telemetry_unified.Keeper_metric)
 ;;
 
+(* A recorded coverage gap outranks freshness: a store can be current about
+   the window it did record and still be missing an hour of it. Everything
+   below that is the turn-record ladder, which is the point -- the two
+   handlers that serve tool-call sources each carried their own copy of it. *)
+let test_a_coverage_gap_outranks_freshness () =
+  let health, stale_reason =
+    Masc.Keeper_status_runtime.keeper_tool_call_source_health
+      ~gap_reason:(Some "telemetry gap 02:00-03:00Z")
+      ~latest_age_s:(Some 1.0)
+      ~freshness_slo_s:420.0
+  in
+  check string "a gap is the verdict even on a fresh store" "coverage_gap"
+    health;
+  (* The gap's own message, not one derived from the word. Every other verdict
+     this pair can return restates itself; this is the one that cannot. *)
+  check string "and it carries the gap's own message"
+    "telemetry gap 02:00-03:00Z" stale_reason;
+  let with_gap = (health, stale_reason) in
+  let without_gap =
+    Masc.Keeper_status_runtime.keeper_tool_call_source_health ~gap_reason:None
+      ~latest_age_s:(Some 900.0) ~freshness_slo_s:420.0
+  in
+  check bool "a gap and no gap are not the same answer" false
+    (with_gap = without_gap);
+  check
+    (pair string string)
+    "with no gap it is the turn-record ladder, idle and not skipping rows"
+    (Masc.Keeper_status_runtime.keeper_turn_record_source_health
+       ~skipped_rows:0 ~live_turn_in_progress:false ~latest_age_s:(Some 900.0)
+       ~freshness_slo_s:420.0)
+    without_gap;
+  check
+    (pair string string)
+    "and an empty store answers the same way through both"
+    (Masc.Keeper_status_runtime.keeper_turn_record_source_health
+       ~skipped_rows:0 ~live_turn_in_progress:false ~latest_age_s:None
+       ~freshness_slo_s:420.0)
+    (Masc.Keeper_status_runtime.keeper_tool_call_source_health ~gap_reason:None
+       ~latest_age_s:None ~freshness_slo_s:420.0)
+;;
+
 let test_live_turn_keeps_turn_record_source_healthy () =
   let health, stale_reason =
     Masc.Keeper_status_runtime.keeper_turn_record_source_health
@@ -231,6 +272,8 @@ let () =
         test_keeper_metric_freshness_tracks_runtime_cadence;
       test_case "live turn keeps record source healthy" `Quick
         test_live_turn_keeps_turn_record_source_healthy;
+      test_case "a coverage gap outranks freshness" `Quick
+        test_a_coverage_gap_outranks_freshness;
       test_case "interval has one resolved SSOT" `Quick
         test_keepalive_interval_has_one_resolved_ssot;
       test_case "sleep_chunk default" `Quick test_keepalive_sleep_chunk_default;

@@ -261,6 +261,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |
+| RFC-auth-bootstrap-grace-token-proof | Auth bootstrap-grace requires proof of token possession | Implemented | - |
 | RFC-chat-references-are-recorded-not-guessed | 대화의 명시 참조와 해석된 언급을 구분해 기록한다 | Draft | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |
 | RFC-claude-code-context-overflow-bounded-restart | Admit Claude Code bootstrap input without replaying rejected episodes | Draft | - |
@@ -281,6 +282,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-keeper-vision-delegation-tool | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | - |
 | RFC-keeper-workspace-root-only | 시스템은 workspace root 만 정한다 (레이아웃 규정 폐기) | Draft | - |
 | RFC-keeper-writes-own-compositions | Keeper가 자기 composition 카탈로그를 쓴다 — 제안은 staged, 반영은 승인 뒤 | Draft | - |
+| RFC-mcp-dual-bearer-oauth | MCP dual authentication: static bearer and local OAuth 2.1 | Draft | - |
 | RFC-memory-os-bounded-context-and-librarian-curator | Memory OS 2.0 — bounded working set 전송 계약과 librarian curator 계약 | Draft | - |
 | RFC-observe-by-waking-not-polling | 관찰은 폴링이 아니라 깨움으로 — 조건 충족 시 턴을 돌려준다 | Draft | - |
 | RFC-one-provider-two-wires | One provider, two wires | Implemented | - |

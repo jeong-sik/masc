@@ -4077,18 +4077,22 @@ let planning_phase_column =
     0
     Goal_phase.all
 
-(* Verifying keeps a raw colour, and it is not the only one: a runtime badge,
-   a file-type icon, a stage heading in the Fusion flow, and the EDIT half of
-   a change badge all pick their own. Thirteen sites, and they are one
-   problem, not thirteen. Each is a member of a small closed set of *kinds*
-   where no member is better than its siblings -- the reader's job is only to
-   tell them apart. That is a categorical palette, which this theme does not
-   have: [status] is for health, [tone] is for weight, and [Syntax] is for
-   what a token is. Naming them badly here would be worse than leaving them
-   visible, so they stay visible. *)
+(* Three of the four phases are a health reading and one is not. Executing,
+   Completed and Dropped are how the goal is doing; Verifying is where it
+   is, and a goal under review is neither well nor unwell. It used to keep a
+   raw colour for want of anywhere else to put it -- the theme had [status]
+   for health, [tone] for weight and [Syntax] for what a token is, and
+   nothing for a kind.
+
+   It takes a categorical slot now (RFC-0427). Slot 4 is magenta, the hue it
+   already drew, and magenta is one of the two the status axis does not
+   claim -- which matters here, because the three phases beside it are
+   status tokens and a slot aliasing one of those would read as a verdict.
+
+   The count of these was thirteen. This is the last of them. *)
 let planning_phase_color = function
   | Goal_phase.Executing -> (Theme.info ())
-  | Goal_phase.Verifying -> Ansi.magenta
+  | Goal_phase.Verifying -> Theme.category Theme.Slot_4
   | Goal_phase.Completed -> (Theme.ok ())
   | Goal_phase.Dropped -> (Theme.muted ())
 
@@ -4322,10 +4326,14 @@ let render_planning_list (state : state) =
        let phase_counters =
          Printf.sprintf
            "%s● Exec: %d%s  %s◆ Ver: %d%s  %s✓ Done: %d%s  %s✕ Drop: %d%s"
-           (Theme.info ()) p.pl_rollup.pr_active Ansi.reset
-           Ansi.magenta p.pl_rollup.pr_verifying Ansi.reset
-           (Theme.ok ()) p.pl_rollup.pr_done Ansi.reset
-           (Theme.muted ()) p.pl_rollup.pr_dropped Ansi.reset
+           (planning_phase_color Goal_phase.Executing)
+           p.pl_rollup.pr_active Ansi.reset
+           (planning_phase_color Goal_phase.Verifying)
+           p.pl_rollup.pr_verifying Ansi.reset
+           (planning_phase_color Goal_phase.Completed)
+           p.pl_rollup.pr_done Ansi.reset
+           (planning_phase_color Goal_phase.Dropped)
+           p.pl_rollup.pr_dropped Ansi.reset
        in
        let rollup =
          Printf.sprintf "  Goals: %s%s%s %s  %s│%s  %s"
@@ -5560,7 +5568,7 @@ let keeper_flag_cell (runtime : keeper_runtime option) =
       let sandbox =
         match row.kr_sandbox_profile with
         | "docker" -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "D" ^ Ansi.reset
-        | "microvm" -> Ansi.magenta ^ "M" ^ Ansi.reset
+        | "microvm" -> (Theme.category Theme.Slot_4) ^ "M" ^ Ansi.reset
         | "local" -> Ansi.dim ^ "L" ^ Ansi.reset
         | other when String.length other > 0 ->
           (Theme.warn ()) ^ String.uppercase_ascii (String.sub other 0 1) ^ Ansi.reset
@@ -12856,7 +12864,7 @@ let change_row_summary (change : Masc.Tui_decode.file_change) =
 
 let change_kind_badge (change : Masc.Tui_decode.file_change) =
   match change.Masc.Tui_decode.fc_kind with
-  | Masc.Tui_decode.Fc_edited _ -> Ansi.magenta, "EDIT"
+  | Masc.Tui_decode.Fc_edited _ -> Theme.category Theme.Slot_4, "EDIT"
   | Masc.Tui_decode.Fc_written _ -> (Masc_tui_theme.tone Masc_tui_theme.Accent), "WRITE"
 
 let change_result_badge (change : Masc.Tui_decode.file_change) =
@@ -16562,7 +16570,7 @@ module Context_bars = Masc_tui_context_bars
 
 let context_component_style = function
   | Turn_record.Prompt_block Prompt_block_id.Memory_os_recall ->
-      Ansi.bold ^ Ansi.magenta
+      Ansi.bold ^ Theme.category Theme.Slot_4
   | Turn_record.Prompt_block _ -> Ansi.bold
   | Turn_record.Tool_schemas -> (Theme.warn ())
   | Turn_record.Message_user -> (Theme.info ())
@@ -16578,7 +16586,7 @@ let context_evidence_style = function
   | Masc_tui_context_inspector.Serialized_turn_snapshot ->
       Ansi.bold ^ Theme.info ()
   | Masc_tui_context_inspector.Producer_digest_only ->
-      Ansi.bold ^ Ansi.magenta
+      Ansi.bold ^ Theme.category Theme.Slot_4
   | Masc_tui_context_inspector.Byte_count_only ->
       Ansi.bold ^ (Theme.recede ())
 

@@ -49,6 +49,7 @@ comment_depth = 0
 in_string = False
 escaped = False
 quoted_close = None
+quoted_re = re.compile(r"\{([a-z_][A-Za-z0-9_']*)?\|")
 
 while index < len(source):
     char = source[index]
@@ -84,7 +85,6 @@ while index < len(source):
             in_string = False
         index += 1
     else:
-        quoted_match = re.match(r"\{([a-z_][A-Za-z0-9_']*)?\|", source[index:])
         if following == "(*":
             comment_depth = 1
             output.extend((" ", " "))
@@ -93,7 +93,7 @@ while index < len(source):
             in_string = True
             output.append(" ")
             index += 1
-        elif quoted_match is not None:
+        elif char == "{" and (quoted_match := quoted_re.match(source, index)) is not None:
             opener = quoted_match.group(0)
             identifier = quoted_match.group(1) or ""
             quoted_close = f"|{identifier}}}"
@@ -118,6 +118,8 @@ target = pathlib.Path(sys.argv[1])
 source = target.read_text()
 tokens = []
 index = 0
+quoted_re = re.compile(r"\{([a-z_][A-Za-z0-9_']*)?\|")
+ident_re = re.compile(r"[A-Za-z_][A-Za-z0-9_']*")
 
 while index < len(source):
     if source[index].isspace():
@@ -140,8 +142,7 @@ while index < len(source):
             raise SystemExit(f"{target}: unterminated OCaml comment")
         continue
 
-    quoted_match = re.match(r"\{([a-z_][A-Za-z0-9_']*)?\|", source[index:])
-    if quoted_match is not None:
+    if source[index] == "{" and (quoted_match := quoted_re.match(source, index)) is not None:
         identifier = quoted_match.group(1) or ""
         close = f"|{identifier}}}"
         index += len(quoted_match.group(0))
@@ -169,7 +170,7 @@ while index < len(source):
         tokens.append(("string", source[start:index], start, index))
         continue
 
-    identifier = re.match(r"[A-Za-z_][A-Za-z0-9_']*", source[index:])
+    identifier = ident_re.match(source, index)
     if identifier is not None:
         start = index
         value = identifier.group(0)
@@ -236,12 +237,97 @@ if tail_offset < len(tokens):
 PY
 }
 
+strip_targets_to_cache() {
+  local cache_dir="$1"
+  shift
+  python3 - "${cache_dir}" "$@" <<'PY'
+import pathlib
+import re
+import sys
+
+cache_dir = pathlib.Path(sys.argv[1])
+targets = sys.argv[2:]
+quoted_re = re.compile(r"\{([a-z_][A-Za-z0-9_']*)?\|")
+
+for target_str in targets:
+    target_path = pathlib.Path(target_str)
+    source = target_path.read_text()
+    output = []
+    index = 0
+    comment_depth = 0
+    in_string = False
+    escaped = False
+    quoted_close = None
+
+    while index < len(source):
+        char = source[index]
+        following = source[index:index + 2]
+
+        if comment_depth:
+            if following == "(*":
+                comment_depth += 1
+                output.extend((" ", " "))
+                index += 2
+            elif following == "*)":
+                comment_depth -= 1
+                output.extend((" ", " "))
+                index += 2
+            else:
+                output.append("\n" if char == "\n" else " ")
+                index += 1
+        elif quoted_close is not None:
+            if source.startswith(quoted_close, index):
+                output.extend(" " * len(quoted_close))
+                index += len(quoted_close)
+                quoted_close = None
+            else:
+                output.append("\n" if char == "\n" else " ")
+                index += 1
+        elif in_string:
+            output.append("\n" if char == "\n" else " ")
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            index += 1
+        else:
+            if following == "(*":
+                comment_depth = 1
+                output.extend((" ", " "))
+                index += 2
+            elif char == '"':
+                in_string = True
+                output.append(" ")
+                index += 1
+            elif char == "{" and (quoted_match := quoted_re.match(source, index)) is not None:
+                opener = quoted_match.group(0)
+                identifier = quoted_match.group(1) or ""
+                quoted_close = f"|{identifier}}}"
+                output.extend(" " * len(opener))
+                index += len(opener)
+            else:
+                output.append(char)
+                index += 1
+
+    (cache_dir / target_path.name).write_text("".join(output))
+PY
+}
+
 count_fixed() {
   local token="$1"
   local target="$2"
-  { ocaml_code "${target}" | rg -o --fixed-strings "${token}" 2>/dev/null || true; } \
-    | wc -l \
-    | tr -d ' '
+  local cached="${STRIPPED_CACHE_DIR:-}/$(basename "${target}")"
+  if [[ -n "${STRIPPED_CACHE_DIR:-}" && -f "${cached}" ]]; then
+    rg -o --fixed-strings "${token}" "${cached}" 2>/dev/null \
+      | wc -l \
+      | tr -d ' '
+  else
+    { ocaml_code "${target}" | rg -o --fixed-strings "${token}" 2>/dev/null || true; } \
+      | wc -l \
+      | tr -d ' '
+  fi
 }
 
 require_once() {
@@ -265,17 +351,28 @@ require_present() {
 matches_pattern() {
   local pattern="$1"
   shift
+  if [[ -n "${STRIPPED_CACHE_DIR:-}" && "$#" -eq "${#TARGETS[@]}" ]]; then
+    rg -q --multiline -- "${pattern}" "${CACHED_TARGETS[@]}"
+    return $?
+  fi
   local target status
   for target in "$@"; do
-    if ocaml_code "${target}" | rg --multiline -- "${pattern}" >/dev/null; then
-      return 0
+    local cached="${STRIPPED_CACHE_DIR:-}/$(basename "${target}")"
+    if [[ -n "${STRIPPED_CACHE_DIR:-}" && -f "${cached}" ]]; then
+      if rg -q --multiline -- "${pattern}" "${cached}"; then
+        return 0
+      fi
     else
-      status=$?
+      if ocaml_code "${target}" | rg --multiline -- "${pattern}" >/dev/null; then
+        return 0
+      else
+        status=$?
+      fi
+      if [[ ${status} -eq 1 ]]; then
+        continue
+      fi
+      fail "rg failed while checking: ${target}"
     fi
-    if [[ ${status} -eq 1 ]]; then
-      continue
-    fi
-    fail "rg failed while checking: ${target}"
   done
   return 1
 }
@@ -294,7 +391,13 @@ check_repo_retired_symbols() {
   local pattern='(Keeper_board_attention_failure|keeper_board_attention_failure|drain_pending_on_owner_lane|drain_board_attention_candidates_on_owner_lane|keeper\.board_attention_judgment([^_[:alnum:]-]|$))'
   found=0
   while IFS= read -r -d '' target; do
-    if matches="$(ocaml_code "${target}" | rg -n -- "${pattern}")"; then
+    local cached="${STRIPPED_CACHE_DIR:-}/$(basename "${target}")"
+    if [[ -n "${STRIPPED_CACHE_DIR:-}" && -f "${cached}" ]]; then
+      if matches="$(rg -n -- "${pattern}" "${cached}")"; then
+        printf '%s\n%s\n' "${target}" "${matches}" >&2
+        found=1
+      fi
+    elif matches="$(ocaml_code "${target}" | rg -n -- "${pattern}")"; then
       printf '%s\n%s\n' "${target}" "${matches}" >&2
       found=1
     else
@@ -355,6 +458,16 @@ check_boundary() {
     [[ -f "${target}" ]] || fail "required target not found: ${target}"
   done
 
+  local cache_dir
+  cache_dir="$(mktemp -d "${TMPDIR:-/tmp}/board-attention-cache.XXXXXX")"
+  trap 'rm -rf "${cache_dir}"' EXIT
+  strip_targets_to_cache "${cache_dir}" "${TARGETS[@]}"
+  local STRIPPED_CACHE_DIR="${cache_dir}"
+  local CACHED_TARGETS=()
+  for target in "${TARGETS[@]}"; do
+    CACHED_TARGETS+=("${cache_dir}/$(basename "${target}")")
+  done
+
   check_lane_binding "${FLOW_ML}" \
     || fail "Board attention exact lane binding contract failed"
   require_once "Exact_output.make_flow_candidate" "${FLOW_ML}"
@@ -407,6 +520,8 @@ check_boundary() {
     [[ ! -e "${target}" ]] || fail "retired Board attention failure module remains: ${target}"
   done
 
+  rm -rf "${cache_dir}"
+  trap - EXIT
   printf '[board-attention-exact-flow-boundary] OK\n'
 }
 

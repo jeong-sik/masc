@@ -10305,6 +10305,12 @@ def runtime_surface_interaction(
                         f"{catalog_detail_plain!r}"
                     )
             send_and_wait(process, master_fd, output, b"\x1b", b"All runtimes (4)")
+            # [p] from All-runtimes no longer flips straight back to this
+            # screen's own Lanes header: it is now a three-stop ring (Lanes
+            # -> All -> standalone Lanes screen, [p] there returns here --
+            # see bin/masc_tui.ml's Runtime_all -> Runtime_lanes arm). Follow
+            # the actual hop before asserting the Runtime screen's own header.
+            send_and_wait(process, master_fd, output, b"p", b"MASC Lanes")
             send_and_wait(process, master_fd, output, b"p", b"Lanes (3 lanes, 4 slots)")
 
             # The overflow scroll hint is unreachable with this fixture: it

@@ -4,8 +4,7 @@
     - 24-hour fleet activity heatmaps
     - Keeper context window & fact memory gauges
     - Turn token velocity sparklines
-    - Tool invocation distribution bars
-    - Latency waterfall breakdowns
+    - Gate queue tool distribution bars
     - Braille 2x4 dot matrix trend curves
     - Compact overview pulse indicator
 
@@ -35,7 +34,6 @@ val section_pills_line : cols:int -> active:metrics_section -> string
 val render_section_fleet : cols:int -> state -> string list
 val render_section_resources : cols:int -> state -> string list
 val render_section_tools : cols:int -> state -> string list
-val render_section_latency : cols:int -> state -> string list
 
 val render_metrics_body :
   cols:int ->

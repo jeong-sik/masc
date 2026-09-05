@@ -720,7 +720,7 @@ masc/
 ├── dashboard/    TypeScript and Preact dashboard source
 ├── assets/       built web assets
 ├── config/       default configuration seeds
-├── docs/         runbooks, contracts, specs, and historical RFCs
+├── docs/         runbooks, contracts, specs, historical RFCs, and [research records](docs/research/README.md)
 ├── scripts/      build, install, validation, and local operations
 └── test/         OCaml tests and fixtures
 ```

@@ -752,8 +752,9 @@ let runtime_id_of_masc_internal_error = function
    first on every [MaxTokens] no-progress rejection, because
    [Keeper_turn_driver_try_provider.max_tokens_truncation_error] reads the
    record, not this kind. [`Truncated_no_progress] is every other [MaxTokens]
-   shape; it has no rotation hint, so a failed continuation on it ends the
-   lane.
+   shape. It rotates like the other two: the continuation already ran on
+   this runtime, so when it fails as well the lane defers to the next
+   candidate instead of ending on the same model.
 
    Before this order, every [MaxTokens] rejection was [`Truncated_no_progress].
    On a lane whose dialect drops [enable_thinking = false] from the wire
@@ -764,7 +765,14 @@ let runtime_id_of_masc_internal_error = function
    ending with [deferred_next_runtime=none] while glm-coding.glm-5.3 stood
    second in its lane. With the shape kinds restored the failed continuation
    defers the next cycle to that sibling. The identical second generation
-   itself is the dialect's silent drop, tracked separately. *)
+   itself is the dialect's silent drop, tracked separately.
+
+   The remaining shape got the same hint on 2026-09-05 (#33260): sangsu on
+   ollama_cloud deepseek-v4-flash-0731 repeated one sentence up to the output
+   cap right after a Read tool call, the accept gate rejected the response at
+   [MaxTokens] with deliverable content, the same-run retry was deferred
+   behind the tool checkpoint, and every cycle ended with
+   [deferred_next_runtime=none] because this kind carried no hint. *)
 let accept_no_progress_retry_kind = function
   | Accept_rejected
       {
@@ -809,9 +817,10 @@ let accept_no_progress_retry_kind = function
 
 let accept_rejection_has_no_progress_retry_hint err =
   match accept_no_progress_retry_kind err with
-  | Some (`Empty_no_progress | `Thinking_only_no_progress) ->
+  | Some
+      ( `Empty_no_progress | `Thinking_only_no_progress
+      | `Truncated_no_progress ) ->
     true
-  | Some `Truncated_no_progress -> false
   | None -> false
 
 (* The typed value rides the carrier (RFC-0371 B12 §6.1(1)); the message

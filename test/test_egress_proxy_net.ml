@@ -307,6 +307,123 @@ let test_an_edited_allowlist_shows_as_a_new_generation () =
     (Option.is_some before && Option.is_some after)
 ;;
 
+(* How long a lane takes to stop while a tunnel is still open.
+
+   This is the defect the review found by reading: [serve] forks each
+   connection onto the switch it is handed, so handing it the lane's own
+   switch left the handlers alive after [Fiber.first] cancelled the accept
+   loop, and the enclosing [Switch.run] then joined on them. A keeper's
+   shutdown waited on somebody else's connection.
+
+   Both shapes are measured, because "the fix works" means nothing beside no
+   number. [give_serve_its_own_switch:false] is the old wiring, kept only for
+   that comparison. *)
+(* The fixed wiring stops in about 0.03s, measured. The ceiling is fifty
+   times that, so a loaded machine does not turn this into a flake, and the
+   old wiring's branch -- which never stops -- costs the suite this much
+   every run. That cost is the price of the assertion having two sides. *)
+let stop_latency_ceiling_s = 1.5
+
+let stop_latency_with_a_tunnel_open ~give_serve_its_own_switch =
+  let lane_finished = ref None in
+  Eio_main.run (fun env ->
+    let net = Eio.Stdenv.net env in
+    let clock = Eio.Stdenv.clock env in
+    Eio.Switch.run (fun harness_sw ->
+      (* An upstream that accepts and holds. Neither end closes, which is
+         what an ordinary long-lived connection looks like. *)
+      let upstream =
+        Eio.Net.listen net ~sw:harness_sw ~reuse_addr:true ~backlog:4
+          (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+      in
+      let upstream_port = port_of upstream in
+      Eio.Fiber.fork ~sw:harness_sw (fun () ->
+        try
+          Eio.Net.accept_fork ~sw:harness_sw upstream ~on_error:(fun _ -> ())
+            (fun flow _ ->
+               ignore
+                 (Eio.Buf_read.line (Eio.Buf_read.of_flow flow ~max_size:64) : string))
+        with _ -> ());
+      (* Bound by the caller, as the lane does it: binding is how the caller
+         learns which port the guest must be pointed at. *)
+      let socket =
+        Eio.Net.listen net ~sw:harness_sw ~reuse_addr:true ~backlog:4
+          (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+      in
+      let proxy_port = port_of socket in
+      let stop, resolve_stop = Eio.Promise.create () in
+      let started = ref 0.0 in
+      ignore
+        (Eio.Time.with_timeout clock stop_latency_ceiling_s (fun () ->
+           Eio.Fiber.both
+             (fun () ->
+                (* The lane, in the shape keeper_keepalive runs it. *)
+                Eio.Switch.run (fun proxy_sw ->
+                  Eio.Fiber.first
+                    (fun () ->
+                       let run_serve serve_sw =
+                         Egress_proxy_net.serve
+                           ~sw:serve_sw
+                           ~net
+                           ~clock
+                           ~keeper_name:"stoplatency"
+                           ~rules:(fun () ->
+                             rules [ Printf.sprintf "127.0.0.1:%d" upstream_port ])
+                           ~on_event:(fun _ -> ())
+                           ~socket
+                           ~read_timeout_s:5.0
+                       in
+                       if give_serve_its_own_switch
+                       then Eio.Switch.run (fun serve_sw -> run_serve serve_sw)
+                       else run_serve proxy_sw)
+                    (fun () -> Eio.Promise.await stop));
+                lane_finished := Some (Eio.Time.now clock -. !started))
+             (fun () ->
+                let flow =
+                  Eio.Net.connect ~sw:harness_sw net
+                    (`Tcp (Eio.Net.Ipaddr.V4.loopback, proxy_port))
+                in
+                Eio.Flow.copy_string
+                  (Printf.sprintf "CONNECT 127.0.0.1:%d HTTP/1.1\r\n\r\n" upstream_port)
+                  flow;
+                let reader = Eio.Buf_read.of_flow flow ~max_size:65536 in
+                (* Status line then the blank line. Past this the tunnel is
+                   open and nothing closes it. *)
+                let _status = Eio.Buf_read.line reader in
+                let _blank = Eio.Buf_read.line reader in
+                started := Eio.Time.now clock;
+                Eio.Promise.resolve resolve_stop ());
+           Ok ())
+         : (unit, [ `Timeout ]) result);
+      (* The harness switch holds the client and the upstream. Releasing it
+         here rather than earlier is what keeps the tunnel open across the
+         stop. *)
+      ()));
+  !lane_finished
+;;
+
+(* The lane must stop while a tunnel is open, and the old wiring must be seen
+   not to. A one-sided assertion here would pass against the defect. *)
+let test_a_stop_does_not_wait_on_an_open_tunnel () =
+  match stop_latency_with_a_tunnel_open ~give_serve_its_own_switch:true with
+  | None ->
+    failf "the lane did not stop within %.1fs with a tunnel open" stop_latency_ceiling_s
+  | Some seconds ->
+    check bool
+      (Printf.sprintf "stopped in %.3fs, under the %.1fs ceiling" seconds
+         stop_latency_ceiling_s)
+      true
+      (seconds < stop_latency_ceiling_s);
+    (* Serving on the lane's own switch is the defect. If this ever stops
+       too, the two shapes are no longer different and this test has stopped
+       proving anything. *)
+    check
+      (option (float 0.001))
+      "the old wiring does not stop at all"
+      None
+      (stop_latency_with_a_tunnel_open ~give_serve_its_own_switch:false)
+;;
+
 let () =
   run "egress_proxy_net"
     [ ( "refusals"
@@ -334,5 +451,7 @@ let () =
             test_an_event_names_the_rules_that_judged_it
         ; test_case "an edited allowlist shows as a new generation" `Quick
             test_an_edited_allowlist_shows_as_a_new_generation
+        ; test_case "a stop does not wait on an open tunnel" `Quick
+            test_a_stop_does_not_wait_on_an_open_tunnel
         ] )
     ]

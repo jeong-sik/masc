@@ -755,6 +755,10 @@ let bound_egress_proxy_port (t : t) =
   |> Option.join
 ;;
 
+module For_testing_microvm = struct
+  let microvm_container_name = microvm_container_name
+end
+
 let keeper_vm_name (t : t) =
   microvm_container_name
     ~config:t.config

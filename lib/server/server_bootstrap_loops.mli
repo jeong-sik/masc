@@ -37,6 +37,7 @@ type keeper_persistence_failure_cause =
   | Shutdown_inventory_unavailable_cause of Keeper_shutdown_store.error
   | Shutdown_admission_unavailable_cause of string
   | Unexpected_exception_cause of keeper_persistence_raised_cause
+  | Store_quarantine_refused_cause of Keeper_store_boot_reconcile.undecodable list
   | Lifecycle_invariant_cause of string
 
 type keeper_persistence_failure =
@@ -55,6 +56,10 @@ type keeper_persistence_prepare_error =
   | Preparation_already_claimed
   | Preparation_failed_previously of keeper_persistence_failure
   | Preparation_ownership_lost
+  | Store_quarantine_refused of Keeper_store_boot_reconcile.undecodable list
+      (** Boot examined the keeper stores, found some this build cannot
+          decode, and the operator did not pass [--accept-store-quarantine].
+          The files stay where they are (RFC-0420). *)
 
 type prepared_keeper_persistence
 type claimed_keeper_persistence
@@ -82,6 +87,7 @@ exception Keeper_persistence_start_failed of keeper_persistence_start_error
 
 val prepare_keeper_persistence :
   ?requested_base_path:string ->
+  accept_store_quarantine:bool ->
   config:Workspace.config ->
   unit ->
   (prepared_keeper_persistence, keeper_persistence_prepare_error) result
@@ -92,7 +98,10 @@ val prepare_keeper_persistence :
     state cannot be replaced by a second preparation. Per-record failures remain
     typed in the report and do not stop unrelated Keeper lanes.
     [requested_base_path] is diagnostic identity only; every persistence and
-    backend operation uses the canonical [config]. *)
+    backend operation uses the canonical [config]. [accept_store_quarantine]
+    is the operator's [--accept-store-quarantine]: without it a keeper store
+    this build cannot decode makes preparation fail with
+    [Store_quarantine_refused] and nothing is moved (RFC-0420). *)
 
 val keeper_persistence_prepare_error_to_string :
   keeper_persistence_prepare_error -> string

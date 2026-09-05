@@ -5,7 +5,7 @@ description: Concepts, state machines, instructions, and policies for MASC auton
 
 ## What is a Keeper?
 
-A **Keeper** is a long-running, supervised agent that retains persistence across multiple turns and collaborates inside the MASC workspace. Rather than executing single-shot prompts, it maintains state across turns and submits work through verifier gates. *(Origin of the name: [FAQ](/getting-started/faq/))*
+A **Keeper** is a long-running, supervised agent that retains persistence across multiple turns and collaborates inside the MASC workspace. Rather than executing single-shot prompts, it maintains state across turns and submits work through verifier gates.
 
 Key attributes:
 - **Turn Continuity**: Does not forget context or reset identity between turns.
@@ -43,7 +43,7 @@ writes this for you; the fields are documented in the
 autoboot_enabled = true
 proactive_enabled = true
 sandbox_profile = "docker"   # "docker" | "microvm" | "remote_ssh" (host is refused)
-network_mode = "inherit"     # "none" | "inherit"
+network_mode = "inherit"     # "none" | "inherit" | "policy"
 instructions = """
 You are the review Keeper. Inspect the current change and report concrete
 evidence with file paths and commands.

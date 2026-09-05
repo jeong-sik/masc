@@ -86,6 +86,7 @@ let pending_entry
       Q.submit_pending
         ~keeper_name
         ~tool_name:"external-effect"
+        ~call_summary:None
         ~input:
           (`Assoc
              [ "target", `String "document"
@@ -371,6 +372,29 @@ let test_a_turn_without_reasoning_reports_nothing_cut () =
   let open Yojson.Safe.Util in
   check yojson "nothing was cut" (`Int 0)
     (bundle |> member "thinking_blocks_omitted")
+
+(* RFC-0422 §3.3: what the box refused reaches the judge whole, and only when
+   a box ran -- so a judge can tell "nothing was tried" from "it was tried". *)
+let test_the_judge_sees_what_the_box_refused () =
+  with_temp_dir "hitl-observation" @@ fun base_path ->
+  install_queue base_path;
+  let entry = pending_entry ~base_path () in
+  let refusal : QT.observed_refusal =
+    { observed_status = QT.Observed_exit 2
+    ; observed_stderr = "sh: 1: cannot create w: Permission denied"
+    ; observed_stderr_omitted_bytes = 0
+    }
+  in
+  let open Yojson.Safe.Util in
+  let boxed =
+    Worker.For_testing.build_context_bundle ~entry:{ entry with observation = Some refusal }
+  in
+  check yojson "the refusal travels whole"
+    (QT.observed_refusal_to_yojson refusal)
+    (boxed |> member "observation");
+  let unboxed = Worker.For_testing.build_context_bundle ~entry in
+  check yojson "no box run, no field" `Null (unboxed |> member "observation")
+;;
 
 let test_a_context_of_another_shape_is_carried_through () =
   (* Guessing at the shape is how a field nobody meant to touch gets
@@ -2823,6 +2847,8 @@ let () =
             test_host_context_reports_a_missing_durable_task_link
         ; test_case "the judge is not shown the Keeper's reasoning" `Quick
             test_the_judge_is_not_shown_the_keepers_reasoning
+        ; test_case "the judge sees what the box refused" `Quick
+            test_the_judge_sees_what_the_box_refused
         ; test_case "a turn without reasoning reports nothing cut" `Quick
             test_a_turn_without_reasoning_reports_nothing_cut
         ; test_case "a context of another shape is carried through" `Quick

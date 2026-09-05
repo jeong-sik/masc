@@ -875,7 +875,8 @@ let test_a_fresh_token_is_left_alone () =
       ~keeper_name:"attaching-fixture" ~provider ~now:0.0 ~access_token:"still-good" ()
   with
   | Ok token -> check str "unchanged" "still-good" token
-  | Error message -> Alcotest.failf "renewed a fresh token: %s" message
+  | Error err ->
+    Alcotest.failf "renewed a fresh token: %s" (Identity_tools.renewal_error_message err)
 
 let test_no_stored_expiry_renews_nothing () =
   (* Replacing a working credential on a guess costs the refresh token and
@@ -887,7 +888,8 @@ let test_no_stored_expiry_renews_nothing () =
       ~access_token:"unknown-age" ()
   with
   | Ok token -> check str "unchanged" "unknown-age" token
-  | Error message -> Alcotest.failf "renewed on a guess: %s" message
+  | Error err ->
+    Alcotest.failf "renewed on a guess: %s" (Identity_tools.renewal_error_message err)
 
 let test_an_expiring_token_is_exchanged_and_stored () =
   let base_path = temp_base () in
@@ -938,7 +940,8 @@ let test_an_expiring_token_is_exchanged_and_stored () =
       ~keeper_name:"attaching-fixture" ~provider ~now:0.0 ~access_token:"about-to-expire"
       ()
   with
-  | Error message -> Alcotest.failf "renewal failed: %s" message
+  | Error err ->
+    Alcotest.failf "renewal failed: %s" (Identity_tools.renewal_error_message err)
   | Ok token ->
       check str "the call uses the new token" "the-new-one" token;
       check Alcotest.bool "and it was a refresh_token grant" true
@@ -967,6 +970,114 @@ let test_an_expiring_token_is_exchanged_and_stored () =
       with
       | Ok (Some value) -> check str "the rotated refresh token" "rotated" value
       | Ok None | Error _ -> Alcotest.fail "the refresh token went missing"
+
+let test_a_transient_renewal_failure_is_marked_transient () =
+  (* A network blip while renewing must not be reported as permanent: the token
+     may still be good, and reporting it as deterministic tells the model the
+     call can never work. *)
+  let base_path = temp_base () in
+  let provider = provider () in
+  store_expiry ~base_path ~provider ~at:100.0;
+  (match
+     Projection.set_file_entry ~base_path ~keeper_name:"attaching-fixture"
+       ~scope:Projection.Keeper_secret
+       ~container_path:provider.Provider.refresh_token_file ~value:"the-refresh-token"
+   with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "could not store a refresh token: %s" message);
+  let discover ~mcp_url:_ =
+    Error
+      (Keeper_oauth_discovery.Transport
+         { url = "https://auth.example.com"; detail = "connection refused" })
+  in
+  match
+    Identity_tools.renew_if_needed ~discover ~base_path ~keeper_name:"attaching-fixture"
+      ~provider ~now:0.0 ~access_token:"about-to-expire" ()
+  with
+  | Error (Identity_tools.Renew_transient _) -> ()
+  | Error (Identity_tools.Renew_permanent message) ->
+    Alcotest.failf "a network blip was marked permanent: %s" message
+  | Ok _ -> Alcotest.fail "a failed renewal handed back a token as if it worked"
+
+let test_a_401_is_cleared_by_one_reactive_refresh () =
+  (* A provider that issues no expiry never renews proactively, so a token it
+     rejects with 401 is the only signal to spend the refresh token. The call
+     must refresh once and retry, not fail with "attach it again" while a
+     spendable refresh token sits unused. *)
+  let base_path = temp_base () in
+  let provider = provider () in
+  let keeper_name = "attaching-fixture" in
+  (match
+     Projection.set_env_entry ~base_path ~keeper_name ~scope:Projection.Keeper_secret
+       ~name:provider.Provider.access_token_env ~value:"stale-token"
+   with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "could not store an access token: %s" message);
+  (match
+     Projection.set_file_entry ~base_path ~keeper_name ~scope:Projection.Keeper_secret
+       ~container_path:provider.Provider.refresh_token_file ~value:"the-refresh-token"
+   with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "could not store a refresh token: %s" message);
+  (match
+     Keeper_oauth_client_store.save
+       ~dir:(Filename.concat (Filename.concat base_path ".masc") "identity") ~provider
+       { Keeper_oauth_client_store.client_id = "client-abc"
+       ; client_secret = None
+       ; scopes = []
+       }
+   with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "could not store a client id: %s" message);
+  (* The endpoint accepts only the refreshed token; the stale one is a 401. *)
+  let mcp_post ~url:_ ~headers ~body =
+    let authorized =
+      List.assoc_opt "Authorization" headers = Some "Bearer the-new-one"
+    in
+    if not authorized then
+      Ok
+        { Masc_http_client.status = 401;
+          headers = [ ("content-type", "application/json") ];
+          body = {|{"error":"invalid_token"}|} }
+    else if Str.string_match (Str.regexp ".*initialize") body 0 then
+      Ok
+        { Masc_http_client.status = 200;
+          headers = [ ("content-type", "application/json") ];
+          body =
+            Printf.sprintf
+              {|{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":%S,"capabilities":{}}}|}
+              Mcp_transport_protocol.default_protocol_version }
+    else
+      Ok
+        { Masc_http_client.status = 200;
+          headers = [ ("content-type", "application/json") ];
+          body =
+            {|{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"PK-1"}]}}|}
+        }
+  in
+  let token_post ~url:_ ~headers:_ ~body:_ =
+    Ok (200, {|{"access_token":"the-new-one","refresh_token":"rotated","expires_in":28800}|})
+  in
+  let discover ~mcp_url:_ =
+    Ok
+      {
+        Keeper_oauth_discovery.resource = "https://mcp.example.com/v1/mcp";
+        issuer = "https://auth.example.com";
+        authorize_url = "https://auth.example.com/authorize";
+        token_url = "https://auth.example.com/oauth/token";
+        registration_url = None;
+        scopes_supported = [];
+        supports_pkce_s256 = true;
+      }
+  in
+  match
+    Identity_tools.run_call ~post:mcp_post ~token_post ~discover ~base_path ~keeper_name
+      ~provider ~remote_name:"getJiraIssue" ~arguments:(`Assoc []) ()
+  with
+  | Ok result ->
+    check str "the retry with the refreshed token succeeded" "PK-1"
+      result.Mcp_client.text
+  | Error _ -> Alcotest.fail "a 401 a refresh could clear was not retried"
 
 let () =
   Alcotest.run "keeper_identity_tools"
@@ -999,6 +1110,10 @@ let () =
             test_no_stored_expiry_renews_nothing;
           Alcotest.test_case "an expiring token is exchanged and stored" `Quick
             test_an_expiring_token_is_exchanged_and_stored;
+          Alcotest.test_case "a transient renewal failure is marked transient"
+            `Quick test_a_transient_renewal_failure_is_marked_transient;
+          Alcotest.test_case "a 401 is cleared by one reactive refresh" `Quick
+            test_a_401_is_cleared_by_one_reactive_refresh;
         ] );
       ( "the approval policy",
         [ Alcotest.test_case "the policy can place an attached tool" `Quick

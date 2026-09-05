@@ -160,6 +160,7 @@ let submit_submission_with_context
     AQ.submit_pending
       ~keeper_name
       ~tool_name:"external-effect"
+      ~call_summary:None
       ~input
       ~base_path
       ?turn_id
@@ -328,6 +329,73 @@ let test_dedup_never_merges_distinct_origins () =
        Alcotest.(check bool) "distinct origin has its own request" true
          (not (String.equal first another_channel));
        List.iter (reject_and_cleanup ~base_path) [ first; another_channel ])
+;;
+
+(* The producer's line arrives with the submission and is written on the
+   request row; every later row of the approval copies it from there. A
+   producer that states nothing leaves every row without one, whatever the
+   input holds: the queue never reads the input for a summary. *)
+let test_call_summary_is_stated_once_and_copied () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-call-summary-copy" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       ensure_keeper_exists ~base_path ~keeper_name;
+       let submit_exn ~call_summary ~input =
+         match
+           AQ.submit_pending
+             ~keeper_name
+             ~tool_name:"tool_execute"
+             ~input
+             ~call_summary
+             ~base_path
+             ()
+         with
+         | Ok submission -> submission.AQ.approval_id
+         | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
+       in
+       let stated =
+         submit_exn
+           ~call_summary:(Some "git status")
+           ~input:
+             (`Assoc
+               [ "input", `Assoc [ "argv", `List [ `String "git"; `String "status" ] ] ])
+       in
+       let unstated =
+         submit_exn
+           ~call_summary:None
+           ~input:(`Assoc [ "command", `String "echo not-a-summary" ])
+       in
+       List.iter (reject_and_cleanup ~base_path) [ stated; unstated ];
+       let rows_of approval_id =
+         Chat_store.load_all ~base_dir:base_path ~keeper_name
+         |> List.filter_map (fun (message : Chat_store.chat_message) ->
+           Option.bind message.approval_lifecycle (fun lifecycle ->
+             if String.equal lifecycle.Chat_store.approval_id approval_id
+             then
+               Some
+                 ( Chat_store.approval_lifecycle_phase_to_label
+                     lifecycle.Chat_store.phase
+                 , lifecycle.Chat_store.call_summary )
+             else None))
+       in
+       let requested =
+         Chat_store.approval_lifecycle_phase_to_label Chat_store.Approval_requested
+       in
+       let rejected =
+         Chat_store.approval_lifecycle_phase_to_label
+           Chat_store.Approval_resolved_rejected
+       in
+       Alcotest.(check (list (pair string (option string))))
+         "the stated line is on the request row and copied onto the resolution row"
+         [ requested, Some "git status"; rejected, Some "git status" ]
+         (rows_of stated);
+       Alcotest.(check (list (pair string (option string))))
+         "a producer that states nothing leaves every row without a line"
+         [ requested, None; rejected, None ]
+         (rows_of unstated))
 ;;
 
 let test_multiple_resolution_projections_keep_fifo_order () =
@@ -703,7 +771,18 @@ let exact_summary ?(context_summary = "Exact attempt summary") model_run_id :
   }
 ;;
 
+(* The durable view: the snapshot file plus the rows appended after it.
+   Mutations append rows and rewrite the snapshot only by ratio, so the file
+   alone is not what a restart loads. *)
 let read_pending_snapshot ~base_path =
+  match AQ.For_testing.durable_snapshot_json ~base_path with
+  | Ok json -> json
+  | Error reason -> Alcotest.failf "durable snapshot unreadable: %s" reason
+;;
+
+(* The snapshot file itself, for the cases about a file the store must not
+   touch. *)
+let read_pending_snapshot_file ~base_path =
   Yojson.Safe.from_file (AQ.For_testing.pending_store_path ~base_path)
 ;;
 
@@ -713,9 +792,13 @@ let read_pending_snapshot_bytes ~base_path =
     In_channel.input_all
 ;;
 
+(* A written fixture is the whole durable state: rows a previous install
+   appended describe the snapshot they extended, not this one. *)
 let write_pending_snapshot ~base_path json =
   let path = AQ.For_testing.pending_store_path ~base_path in
   ensure_dir (Filename.dirname path);
+  let log_path = AQ.For_testing.pending_log_path ~base_path in
+  if Sys.file_exists log_path then Sys.remove log_path;
   Out_channel.with_open_text path (fun channel ->
     output_string channel (Yojson.Safe.pretty_to_string json))
 ;;
@@ -743,7 +826,8 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 9
+             [ "version", `Int 10
+            ; "generation", `Int 1
             ; "next_sequence", `Int 1
             ; "pending", `List []
             ; "deliveries", `List []
@@ -1323,6 +1407,56 @@ let test_queue_writes_advance_the_projection_revision () =
          (AQ.store_revision_for_workspace ~base_path > after_enqueue))
 ;;
 
+(* RFC-0422 §3.3: what the box refused is written on the row and read back
+   after a restart, so the judge that runs later sees what the gate saw. *)
+let test_an_observation_survives_the_row_round_trip () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-observation" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       ensure_keeper_exists ~base_path ~keeper_name;
+       let refusal : Rule_types.observed_refusal =
+         { observed_status = Rule_types.Observed_exit 2
+         ; observed_stderr = "sh: 1: cannot create w: Permission denied"
+         ; observed_stderr_omitted_bytes = 0
+         }
+       in
+       let id =
+         match
+           AQ.submit_pending
+             ~keeper_name
+             ~tool_name:"external-effect"
+             ~call_summary:None
+             ~input:(`Assoc [ "argv", `List [ `String "touch"; `String "w" ] ])
+             ~base_path
+             ~observation:refusal
+             ()
+         with
+         | Ok { approval_id; _ } -> approval_id
+         | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
+       in
+       Alcotest.(check bool)
+         "the row carries the refusal"
+         true
+         ((pending_entry_exn id).observation = Some refusal);
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       Alcotest.(check bool)
+         "and still does after a restart reads it back"
+         true
+         ((pending_entry_exn id).observation = Some refusal);
+       let bare =
+         match submit ~base_path ~keeper_name ~input:(`Assoc [ "argv", `List [ `String "ls" ] ]) with
+         | id -> id
+       in
+       Alcotest.(check bool)
+         "a row with no box run carries none"
+         true
+         (Option.is_none (pending_entry_exn bare).observation))
+;;
+
 let test_delivery_wire_shape_drops_request_context () =
   let base_path = temp_dir () in
   let keeper_name = "queue-delivery-context" in
@@ -1805,6 +1939,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
        let request ~input ~task_id ~goal_ids : Gate.request =
          { keeper_name
          ; operation = "external-effect"
+         ; call_summary = None
          ; input
          ; base_path
          ; sandbox_profile = None
@@ -1834,7 +1969,8 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         | Gate.One_shot_resolution _
         | Gate.Exact_always_rule _
         | Gate.Workspace_always_allow
-        | Gate.Readonly_sandbox ->
+        | Gate.Readonly_sandbox
+        | Gate.Observed_in_box _ ->
           Alcotest.fail "different exact input consumed the grant");
        (match
           Gate.decide
@@ -1851,7 +1987,8 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         | Gate.Exact_always_rule _
         | Gate.Keeper_always_allow
         | Gate.Workspace_always_allow
-        | Gate.Readonly_sandbox ->
+        | Gate.Readonly_sandbox
+        | Gate.Observed_in_box _ ->
           Alcotest.fail "exact effect did not consume its one-shot grant");
        (match
           Gate.decide
@@ -1864,7 +2001,8 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         | Gate.One_shot_resolution _
         | Gate.Exact_always_rule _
         | Gate.Workspace_always_allow
-        | Gate.Readonly_sandbox ->
+        | Gate.Readonly_sandbox
+        | Gate.Observed_in_box _ ->
           Alcotest.fail "one-shot grant was consumed more than once");
        AQ.For_testing.reset_runtime_state ();
        let _ = install_exn ~base_path in
@@ -2006,7 +2144,7 @@ let test_exact_binding_codec_validates_entry_identity () =
          (run_exact_transition AQ.bind_summary_exact_attempt identity);
        let snapshot = read_pending_snapshot ~base_path in
        let open Yojson.Safe.Util in
-       Alcotest.(check int) "v9 snapshot" 9 (snapshot |> member "version" |> to_int);
+       Alcotest.(check int) "v10 snapshot" 10 (snapshot |> member "version" |> to_int);
        let exact_json =
          snapshot
          |> member "pending"
@@ -2619,6 +2757,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
               ~base_path
               ~keeper_name:"queue-exact-staged-before-rename"
               ~tool_name:"fs_write"
+              ~call_summary:None
               ~input:(`Assoc [ "request", `String "before-rename" ])
               ()
           with
@@ -3599,7 +3738,8 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 9
+            [ "version", `Int 10
+            ; "generation", `Int 1
             ; "next_sequence", `Int 1
             ; "pending", `String "malformed-pending-array"
             ; "deliveries", `List []
@@ -3623,18 +3763,20 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
           AQ.submit_pending
             ~keeper_name:"queue-invalid-store"
             ~tool_name:"external-effect"
+            ~call_summary:None
             ~input:(`Assoc [ "target", `String "must-not-overwrite" ])
             ~base_path
             ()
         with
         | Error _ -> ()
         | Ok _ -> Alcotest.fail "an invalid installed store must remain unavailable");
-       let persisted = read_pending_snapshot ~base_path in
+       let persisted = read_pending_snapshot_file ~base_path in
        Alcotest.(check bool) "invalid store is not overwritten" true
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 9
+               [ "version", `Int 10
+               ; "generation", `Int 1
                ; "next_sequence", `Int 1
                ; "pending", `String "malformed-pending-array"
                ; "deliveries", `List []
@@ -3701,6 +3843,7 @@ let test_partial_pending_snapshot_preserves_readable_entries () =
           AQ.submit_pending
             ~keeper_name:"queue-partial-read"
             ~tool_name:"external-effect"
+            ~call_summary:None
             ~input:(`Assoc [ "target", `String "must-not-overwrite" ])
             ~base_path
             ()
@@ -3710,7 +3853,7 @@ let test_partial_pending_snapshot_preserves_readable_entries () =
        Alcotest.(check bool)
          "partially readable source is preserved"
          true
-         (Yojson.Safe.equal original (read_pending_snapshot ~base_path));
+         (Yojson.Safe.equal original (read_pending_snapshot_file ~base_path));
        let after =
          Masc.Otel_metric_store.metric_value_or_zero
            Masc.Otel_metric_store.metric_persistence_read_drops
@@ -3741,7 +3884,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
         | Error
             (AQ.Install_storage_failed
               { reason =
-                  "gate_pending.version 8 is unsupported (current 9); reset \
+                  "gate_pending.version 8 is unsupported (current 10); reset \
                    runtime state before restarting MASC"
               ; _
               }) ->
@@ -3952,7 +4095,8 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 9
+             [ "version", `Int 10
+            ; "generation", `Int 1
             ; "next_sequence", `Int 2
             ; "pending", `List []
             ; ( "deliveries"
@@ -4273,7 +4417,8 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 9
+             [ "version", `Int 10
+            ; "generation", `Int 1
             ; "next_sequence", `Int 4
             ; "pending", `List []
             ; ( "deliveries"
@@ -4330,6 +4475,7 @@ let test_submit_surfaces_storage_failure () =
          AQ.submit_pending
            ~keeper_name:"queue-storage-error"
            ~tool_name:"external-effect"
+           ~call_summary:None
            ~input:(`Assoc [ "target", `String "x" ])
            ~base_path
            ()
@@ -4356,6 +4502,7 @@ let test_default_auto_judge_defers_without_blocking () =
        let request : Gate.request =
          { keeper_name
          ; operation = "external-effect"
+         ; call_summary = None
          ; input = `Assoc [ "target", `String "auto-judge" ]
          ; base_path
          ; sandbox_profile = None
@@ -4429,6 +4576,7 @@ let test_unavailable_cycle_grant_never_falls_through () =
        let request : Gate.request =
          { keeper_name
          ; operation = "external-effect"
+         ; call_summary = None
          ; input
          ; base_path
          ; sandbox_profile = None
@@ -4587,7 +4735,6 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
             ~keeper_name
             ~approval_id
             ~tool_name:(Some "external-effect")
-            ~call_summary:None
             ~outcome:canonical_outcome
         with
         | Ok () -> ()
@@ -4598,7 +4745,6 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
             ~keeper_name
             ~approval_id
             ~tool_name:(Some "external-effect")
-            ~call_summary:None
             ~outcome:canonical_outcome
         with
         | Ok () -> ()
@@ -4609,7 +4755,6 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
             ~keeper_name
             ~approval_id
             ~tool_name:(Some "external-effect")
-            ~call_summary:None
             ~outcome:(AQ.Replay_failed stale_ref)
         with
         | Error _ -> ()
@@ -4659,6 +4804,7 @@ let test_audit_store_failure_keeps_defer_committed_and_visible () =
        let request : Gate.request =
          { keeper_name
          ; operation = "external-effect"
+         ; call_summary = None
          ; input = `Assoc [ "target", `String "store-create" ]
          ; base_path
          ; sandbox_profile = None
@@ -4798,6 +4944,7 @@ let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
        let request : Gate.request =
          { keeper_name
          ; operation = "external-effect"
+         ; call_summary = None
          ; input
          ; base_path
          ; sandbox_profile = None
@@ -4910,6 +5057,7 @@ let test_cancelled_audit_observation_preserves_committed_allow () =
        let request : Gate.request =
          { keeper_name
          ; operation = "external-effect"
+         ; call_summary = None
          ; input = `Assoc [ "target", `String "cancelled-observer" ]
          ; base_path
          ; sandbox_profile = None
@@ -5115,92 +5263,175 @@ let test_resolved_audit_event_carries_judge_evidence () =
            (row |> member "exact_attempt"))
 ;;
 
-(* The summary is derived from the persisted input. Every shape the fleet
-   sends has to land on one line or in [None] -- never in a guess -- and the
-   cap may not split a multibyte char. *)
-let test_call_summary_of_input () =
-  let check_summary label expected input =
-    Alcotest.(check (option string)) label expected (AQ.call_summary_of_input input)
-  in
-  let argv text =
-    `Assoc [ "input", `Assoc [ "argv", `List [ `String "bash"; `String "-lc"; `String text ] ] ]
-  in
-  check_summary "argv is joined onto one line"
-    (Some "bash -lc cd repos/masc && git log --oneline -8 -- test/dune")
-    (argv "cd repos/masc && git log --oneline -8 -- test/dune");
-  check_summary "a newline ends the summary" (Some "first line")
-    (argv "first line\nsecond line");
-  check_summary "an identity call names its provider surface"
-    (Some "github/issue_write")
-    (`Assoc [ "provider_id", `String "github"; "remote_name", `String "issue_write" ]);
-  check_summary "an ascii cap cuts at the budget"
-    (Some ("bash -lc " ^ String.make 71 'a'))
-    (argv (String.make 120 'a'));
-  (* The join starts with "bash -lc " (9 bytes), so the budget lands inside the
-     24th Korean char: the boundary backs up to 78 bytes, whole chars only. *)
-  check_summary "the cap does not split a multibyte char"
-    (Some ("bash -lc " ^ String.concat "" (List.init 23 (fun _ -> "가"))))
-    (argv (String.concat "" (List.init 40 (fun _ -> "가"))));
-  check_summary "a blank argv is no summary" None (argv "   ");
-  check_summary "a non-string argv is no summary" None
-    (`Assoc [ "input", `Assoc [ "argv", `List [ `Int 1 ] ] ]);
-  check_summary "an input naming neither argv nor a provider is no summary" None
-    (`Assoc [ "input", `Assoc [ "cwd", `String "/tmp" ] ]);
-  check_summary "a non-object input is no summary" None (`String "tool_execute");
-  check_summary "top-level argv is extracted"
-    (Some "git status")
-    (`Assoc [ "argv", `List [ `String "git"; `String "status" ] ]);
-  check_summary "top-level script is extracted"
-    (Some "dune build")
-    (`Assoc [ "script", `String "dune build" ]);
-  check_summary "top-level command is extracted"
-    (Some "echo hello")
-    (`Assoc [ "command", `String "echo hello" ]);
-  check_summary "nested args with script is extracted"
-    (Some "pytest -v")
-    (`Assoc [ "args", `Assoc [ "script", `String "pytest -v" ] ]);
-  check_summary "top-level file_path is extracted"
-    (Some "lib/keeper.ml")
-    (`Assoc [ "file_path", `String "lib/keeper.ml" ]);
-  check_summary "null argv falls through to script"
-    (Some "npm test")
-    (`Assoc [ "argv", `Null; "script", `String "npm test" ]);
-  check_summary "null script falls through to command"
-    (Some "make check")
-    (`Assoc [ "script", `Null; "command", `String "make check" ]);
-  check_summary "leading blank lines in script are skipped to first non-empty line"
-    (Some "pytest -v")
-    (`Assoc [ "script", `String "\n\n  pytest -v\n" ]);
-  check_summary "production gate request envelope extracts script"
-    (Some "python -m unittest")
-    (`Assoc
-       [ "schema", `String "masc.keeper_gate.request.v1"
-       ; "input", `Assoc [ "script", `String "python -m unittest"; "cwd", `String "." ]
-       ; "cwd", `String "."
-       ]);
-  check_summary "nested arguments with query is extracted"
-    (Some "masc architecture")
-    (`Assoc [ "arguments", `Assoc [ "query", `String "masc architecture" ] ]);
-  check_summary "excessive recursion depth returns None safely"
-    None
-    (`Assoc
-       [ "input"
-       , `Assoc
-           [ "args"
-           , `Assoc
-               [ "arguments"
-               , `Assoc
-                   [ "input"
-                   , `Assoc
-                       [ "args"
-                       , `Assoc [ "script", `String "too deep" ] ] ] ] ] ])
+(* RFC main-domain-scheduler-latency §8.5 P4e: a mutation appends the rows
+   it changed instead of rewriting the snapshot. The snapshot file lags, the
+   log carries the difference, and a restart loads both. *)
+let log_row_count ~base_path =
+  let path = AQ.For_testing.pending_log_path ~base_path in
+  if not (Sys.file_exists path)
+  then 0
+  else
+    In_channel.with_open_bin path In_channel.input_all
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> not (String.equal (String.trim line) ""))
+    |> List.length
+;;
+
+let snapshot_file_ids ~base_path member_name =
+  let open Yojson.Safe.Util in
+  read_pending_snapshot_file ~base_path
+  |> member member_name
+  |> to_list
+  |> List.map (fun json ->
+    let entry = if String.equal member_name "deliveries" then json |> member "entry" else json in
+    entry |> member "id" |> to_string)
+;;
+
+let test_mutations_append_rows_and_a_restart_replays_them () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-append-log" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let first = submit ~base_path ~keeper_name ~input:(`Assoc [ "n", `Int 1 ]) in
+       (* The first write of a fresh store rewrites the snapshot; the log is empty. *)
+       Alcotest.(check int) "fresh store: no rows" 0 (log_row_count ~base_path);
+       let second = submit ~base_path ~keeper_name ~input:(`Assoc [ "n", `Int 2 ]) in
+       Alcotest.(check int) "second submit appended one row" 1 (log_row_count ~base_path);
+       Alcotest.(check (list string))
+         "snapshot file still holds only the first entry"
+         [ first ]
+         (snapshot_file_ids ~base_path "pending");
+       let open Yojson.Safe.Util in
+       let durable_ids =
+         read_pending_snapshot ~base_path
+         |> member "pending"
+         |> to_list
+         |> List.map (fun entry -> entry |> member "id" |> to_string)
+         |> List.sort String.compare
+       in
+       Alcotest.(check (list string))
+         "durable view holds both"
+         (List.sort String.compare [ first; second ])
+         durable_ids;
+       AQ.For_testing.reset_runtime_state ();
+       let report = install_exn ~base_path in
+       Alcotest.(check int) "restart replays the appended entry" 2 report.loaded_pending;
+       Alcotest.(check bool)
+         "both entries are pending after the restart"
+         true
+         (Option.is_some (AQ.For_testing.get_pending_entry_unchecked ~id:first)
+          && Option.is_some (AQ.For_testing.get_pending_entry_unchecked ~id:second)))
+;;
+
+(* Rows are bounded by the entries they describe: once they outnumber twice
+   the entries, the write rewrites the snapshot and empties the log. *)
+let test_rows_past_the_ratio_rewrite_the_snapshot () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-append-compaction" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let input = `Assoc [ "target", `String "compaction" ] in
+       let id = submit ~base_path ~keeper_name ~input in
+       Alcotest.(check int) "fresh store: no rows" 0 (log_row_count ~base_path);
+       (match aq_resolve ~base_path ~id ~decision:Rule_types.Decision.Approve with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       (* One entry moved from pending to delivery: two rows for one entry. *)
+       Alcotest.(check int) "resolution appended two rows" 2 (log_row_count ~base_path);
+       Alcotest.(check (list string))
+         "snapshot file still lists the entry as pending"
+         [ id ]
+         (snapshot_file_ids ~base_path "pending");
+       (match
+          AQ.consume_approved_resolution
+            ~base_path
+            ~id
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~input
+        with
+        | Ok (AQ.Consumption_committed _) -> ()
+        | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
+          Alcotest.fail "grant consumption did not commit"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       (* A third row for one entry crosses the ratio: the snapshot is
+          rewritten with the consumed delivery and the log is empty. *)
+       Alcotest.(check int) "log emptied by the rewrite" 0 (log_row_count ~base_path);
+       Alcotest.(check (list string))
+         "snapshot file now carries the consumption tombstone"
+         [ id ]
+         (snapshot_file_ids ~base_path "deliveries");
+       let open Yojson.Safe.Util in
+       Alcotest.(check int)
+         "second rewrite is generation 2"
+         2
+         (read_pending_snapshot_file ~base_path |> member "generation" |> to_int);
+       Alcotest.(check bool)
+         "tombstone is consumed"
+         true
+         (read_pending_snapshot_file ~base_path
+          |> member "deliveries"
+          |> to_list
+          |> List.hd
+          |> member "grant_consumed"
+          |> to_bool))
+;;
+
+(* A row whose durable append did not finish leaves a final line without its
+   newline. The install drops that line, rewrites the snapshot, and empties
+   the log; the entries before it survive. *)
+let test_partial_log_tail_is_dropped_and_the_snapshot_rewritten () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-append-partial" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let first = submit ~base_path ~keeper_name ~input:(`Assoc [ "n", `Int 1 ]) in
+       let second = submit ~base_path ~keeper_name ~input:(`Assoc [ "n", `Int 2 ]) in
+       let log_path = AQ.For_testing.pending_log_path ~base_path in
+       Out_channel.with_open_gen [ Open_append; Open_binary ] 0o600 log_path (fun channel ->
+         output_string channel "{\"kind\":\"pending_upsert\",\"generation\":1");
+       let open Yojson.Safe.Util in
+       let generation_before =
+         read_pending_snapshot_file ~base_path |> member "generation" |> to_int
+       in
+       AQ.For_testing.reset_runtime_state ();
+       let report = install_exn ~base_path in
+       Alcotest.(check int) "both complete rows survive" 2 report.loaded_pending;
+       Alcotest.(check int) "install emptied the log" 0 (log_row_count ~base_path);
+       Alcotest.(check int)
+         "install rewrote the snapshot at the next generation"
+         (generation_before + 1)
+         (read_pending_snapshot_file ~base_path |> member "generation" |> to_int);
+       Alcotest.(check (list string))
+         "rewritten snapshot holds both entries"
+         (List.sort String.compare [ first; second ])
+         (List.sort String.compare (snapshot_file_ids ~base_path "pending")))
 ;;
 
 let () =
   Alcotest.run
     "Keeper_approval_queue"
     [ ( "call summary"
-      , [ Alcotest.test_case "of input" `Quick test_call_summary_of_input ] )
+      , [ Alcotest.test_case
+            "stated once on submission and copied onto every later row"
+            `Quick
+            test_call_summary_is_stated_once_and_copied
+        ] )
     ; ( "nonhierarchical queue"
       , [ Alcotest.test_case
             "durable lock serializes Eio fibers"
@@ -5422,6 +5653,22 @@ let () =
             "queue writes advance the projection revision"
             `Quick
             test_queue_writes_advance_the_projection_revision
+        ; Alcotest.test_case
+            "mutations append rows and a restart replays them"
+            `Quick
+            test_mutations_append_rows_and_a_restart_replays_them
+        ; Alcotest.test_case
+            "rows past the ratio rewrite the snapshot"
+            `Quick
+            test_rows_past_the_ratio_rewrite_the_snapshot
+        ; Alcotest.test_case
+            "partial log tail is dropped and the snapshot rewritten"
+            `Quick
+            test_partial_log_tail_is_dropped_and_the_snapshot_rewritten
+        ; Alcotest.test_case
+            "an observation survives the row round trip"
+            `Quick
+            test_an_observation_survives_the_row_round_trip
         ] )
     ]
 ;;

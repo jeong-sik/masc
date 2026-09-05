@@ -86,6 +86,8 @@ type checkpoint_load_error =
   | Io_error of string
   | Agent_core_error of string
 
+val checkpoint_load_error_to_string : checkpoint_load_error -> string
+
 (** Project an [Agent_core.Error.t] to [checkpoint_load_error].
 
     RFC-0089 G4: this no longer classifies [Not_found] from string-matched
@@ -115,6 +117,26 @@ val load_agent_core :
   session_dir:string ->
   session_id:string ->
   (Agent_core.Checkpoint.t, checkpoint_load_error) result
+
+(** Message count of the canonical checkpoint for [session_id]. Answered
+    without reading the file while the file on disk is the one the store's
+    canonical summary was taken from (a parse or a write by this process);
+    otherwise the checkpoint is loaded and parsed once. [Ok None] when there
+    is no checkpoint. *)
+val canonical_message_count :
+  session_dir:string ->
+  session_id:string ->
+  (int option, checkpoint_load_error) result
+
+(** Byte length of the canonical checkpoint file for [session_id]: the
+    summary's identity while the file on disk is the one this process last
+    parsed or wrote, otherwise one [stat]. [Ok None] when there is no
+    checkpoint. This is the size of the durable checkpoint, not a token
+    estimate and not a provider request size. *)
+val canonical_byte_count :
+  session_dir:string ->
+  session_id:string ->
+  (int option, checkpoint_load_error) result
 
 type checkpoint_identity_error =
   | Session_id_invalid of string

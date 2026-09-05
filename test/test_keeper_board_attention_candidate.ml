@@ -447,13 +447,20 @@ let ledger_path ~base_path =
     "alpha.jsonl"
 ;;
 
+(* Fixtures replace the ledger through a sibling file and a rename, so the
+   store gets a new inode. The ledger is read through the [Fs_compat] private
+   JSONL cursor family, which treats a same-inode file that grew as appended
+   bytes; only the rename models what an operator or another process does. *)
+let replace_ledger_bytes path bytes =
+  let staged = path ^ ".replace" in
+  Out_channel.with_open_bin staged (fun channel -> output_string channel bytes);
+  Sys.rename staged path
+;;
+
 let write_ledger_rows ~base_path rows =
-  Out_channel.with_open_bin (ledger_path ~base_path) (fun channel ->
-    List.iter
-      (fun row ->
-         output_string channel (Yojson.Safe.to_string row);
-         output_char channel '\n')
-      rows)
+  replace_ledger_bytes
+    (ledger_path ~base_path)
+    (String.concat "" (List.map (fun row -> Yojson.Safe.to_string row ^ "\n") rows))
 ;;
 
 let rewrite_first_comment rewrite = function
@@ -711,8 +718,7 @@ let test_non_finite_lifecycle_times_are_rejected () =
       ~literal:"Infinity"
       (A.candidate_to_json valid)
   in
-  Out_channel.with_open_bin ledger_path (fun channel ->
-    output_string channel (non_finite_row ^ "\n"));
+  replace_ledger_bytes ledger_path (non_finite_row ^ "\n");
   (* The row must never become a candidate. It no longer fails the whole read —
      one bad row used to stop the lane and block the compaction that removes it
      — so the reason is asserted where it is now carried, in the rejection
@@ -942,9 +948,7 @@ let test_unreadable_row_does_not_hide_the_rest () =
   Alcotest.(check bool) "fixture wrote a row" true (String.length good > 0);
   (* A row the current decoder refuses, ahead of the good one — the shape a
      removed field leaves behind. *)
-  Out_channel.with_open_bin path (fun oc ->
-    Out_channel.output_string oc "{\"schema_version\":5,\"unreadable\":true}\n";
-    Out_channel.output_string oc good);
+  replace_ledger_bytes path ("{\"schema_version\":5,\"unreadable\":true}\n" ^ good);
   (match A.load_candidates ~base_path ~keeper_name:"alpha" with
    | Ok [ loaded ] ->
      Alcotest.(check bool) "readable row survives" true (loaded = persisted)
@@ -1075,6 +1079,144 @@ let test_relevant_delivery_uses_exact_candidate_identity () =
   | _ -> Alcotest.fail "relevant judgment did not enqueue one Board_attention event"
 ;;
 
+let ledger_rows ~base_path =
+  In_channel.with_open_bin (ledger_path ~base_path) In_channel.input_all
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> not (String.equal (String.trim line) ""))
+;;
+
+(* RFC main-domain-scheduler-latency §8 P4a: an update appends the rows it
+   changes after the store's end. The bytes already on disk stay in place. *)
+let test_update_appends_after_existing_rows () =
+  with_temp_base "board-attention-candidate-append" @@ fun base_path ->
+  let first = record ~base_path (candidate (signal "append-first")) in
+  let before = In_channel.with_open_bin (ledger_path ~base_path) In_channel.input_all in
+  let second = record ~base_path (candidate (signal "append-second")) in
+  let after = In_channel.with_open_bin (ledger_path ~base_path) In_channel.input_all in
+  let before_length = String.length before in
+  Alcotest.(check bool)
+    "second write kept the first row's bytes in place"
+    true
+    (String.length after > before_length
+     && String.equal (String.sub after 0 before_length) before);
+  Alcotest.(check int) "two rows on disk" 2 (List.length (ledger_rows ~base_path));
+  Alcotest.(check bool)
+    "reader answers in first-index order"
+    true
+    (ok "load" (A.load_candidates ~base_path ~keeper_name:"alpha") = [ first; second ])
+;;
+
+(* Dead rows stay bounded: once the decoded rows exceed twice the live set,
+   the next write rewrites the store as the latest set. The reader's answer
+   is the same before and after the rewrite. *)
+let test_write_compacts_when_dead_rows_exceed_the_bound () =
+  with_temp_base "board-attention-candidate-compaction" @@ fun base_path ->
+  let first = record ~base_path (candidate (signal "compact-first")) in
+  (* Five rows for one id: one live, four dead. Written behind the cache so
+     the next access must notice the store changed. *)
+  write_ledger_rows ~base_path (List.init 5 (fun _ -> A.candidate_to_json first));
+  Alcotest.(check bool)
+    "reader sees the replaced store"
+    true
+    (ok "load" (A.load_candidates ~base_path ~keeper_name:"alpha") = [ first ]);
+  let second = record ~base_path (candidate (signal "compact-second")) in
+  Alcotest.(check int)
+    "six decoded rows for two live exceed the bound, so the write rewrote the store"
+    2
+    (List.length (ledger_rows ~base_path));
+  Alcotest.(check bool)
+    "reader answers the latest set in first-index order"
+    true
+    (ok "load" (A.load_candidates ~base_path ~keeper_name:"alpha") = [ first; second ]);
+  let third = record ~base_path (candidate (signal "compact-third")) in
+  Alcotest.(check int)
+    "three decoded rows for three live are within the bound, so the write appended"
+    3
+    (List.length (ledger_rows ~base_path));
+  Alcotest.(check bool)
+    "reader after the append"
+    true
+    (ok "load" (A.load_candidates ~base_path ~keeper_name:"alpha")
+     = [ first; second; third ])
+;;
+
+(* A store replaced behind the cache (another process, or a test fixture) is
+   read again in full; the cached cursor no longer names the file's end. *)
+let test_replaced_store_is_reread_and_appended_after () =
+  with_temp_base "board-attention-candidate-replaced" @@ fun base_path ->
+  let original = record ~base_path (candidate (signal "replaced-original")) in
+  Alcotest.(check bool)
+    "cached read"
+    true
+    (ok "load" (A.load_candidates ~base_path ~keeper_name:"alpha") = [ original ]);
+  let replacement_a = candidate (signal "replaced-a") in
+  let replacement_b = candidate (signal "replaced-b") in
+  write_ledger_rows
+    ~base_path
+    [ A.candidate_to_json replacement_a; A.candidate_to_json replacement_b ];
+  Alcotest.(check bool)
+    "reader sees the replacement, not the cache"
+    true
+    (ok "load" (A.load_candidates ~base_path ~keeper_name:"alpha")
+     = [ replacement_a; replacement_b ]);
+  let appended = record ~base_path (candidate (signal "replaced-appended")) in
+  Alcotest.(check bool)
+    "write appended after the replacement"
+    true
+    (ok "load" (A.load_candidates ~base_path ~keeper_name:"alpha")
+     = [ replacement_a; replacement_b; appended ]);
+  Alcotest.(check int) "three rows on disk" 3 (List.length (ledger_rows ~base_path))
+;;
+
+(* #33322. The ledger lock is held across the store transaction, and from an
+   Eio fiber that transaction runs its Unix I/O in a systhread, so the holder
+   yields while locked. A second fiber on the same domain that reads or writes
+   the same ledger meanwhile must wait for it. With a Stdlib mutex the second
+   fiber re-locked the domain's own mutex and got
+   [Sys_error "Mutex.lock: Resource deadlock avoided"]; on 2026-09-05 four
+   keepers each lost a turn to that in the first five seconds after boot. *)
+let test_fibers_on_one_domain_share_the_ledger_lock () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.on_release sw Fs_compat.clear_fs;
+  with_temp_base "board-attention-candidate-fibers" @@ fun base_path ->
+  let first = record ~base_path (candidate (signal "fibers-first")) in
+  let read_answers = ref [] in
+  Eio.Fiber.all
+    [ (fun () ->
+        List.iter
+          (fun i ->
+             ignore
+               (record ~base_path (candidate (signal (Printf.sprintf "fibers-write-%d" i)))))
+          [ 1; 2; 3 ])
+    ; (fun () ->
+        List.iter
+          (fun _ ->
+             read_answers
+             := ok "load while a writer holds the ledger"
+                  (A.load_candidates ~base_path ~keeper_name:"alpha")
+                :: !read_answers;
+             Eio.Fiber.yield ())
+          [ 1; 2; 3 ])
+    ];
+  let final = ok "load" (A.load_candidates ~base_path ~keeper_name:"alpha") in
+  Alcotest.(check int) "every write landed" 4 (List.length final);
+  Alcotest.(check bool)
+    "the first candidate is still first"
+    true
+    (match final with
+     | head :: _ -> head = first
+     | [] -> false);
+  Alcotest.(check int) "every read answered" 3 (List.length !read_answers);
+  Alcotest.(check bool)
+    "every read answered candidates that are in the final ledger"
+    true
+    (List.for_all
+       (fun answer -> List.for_all (fun c -> List.mem c final) answer)
+       !read_answers)
+;;
+
 let () =
   Alcotest.run
     "keeper_board_attention_candidate"
@@ -1143,6 +1285,22 @@ let () =
             "relevant delivery uses exact identity"
             `Quick
             test_relevant_delivery_uses_exact_candidate_identity
+        ; Alcotest.test_case
+            "update appends after existing rows"
+            `Quick
+            test_update_appends_after_existing_rows
+        ; Alcotest.test_case
+            "write compacts when dead rows exceed the bound"
+            `Quick
+            test_write_compacts_when_dead_rows_exceed_the_bound
+        ; Alcotest.test_case
+            "replaced store is reread and appended after"
+            `Quick
+            test_replaced_store_is_reread_and_appended_after
+        ; Alcotest.test_case
+            "fibers on one domain share the ledger lock"
+            `Quick
+            test_fibers_on_one_domain_share_the_ledger_lock
         ] )
     ]
 ;;

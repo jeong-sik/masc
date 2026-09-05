@@ -13,6 +13,18 @@ external set_pdeathsig : unit -> unit = "ocaml_prctl_set_pdeathsig"
    runtime's own table. *)
 external host_signal_number : int -> int = "ocaml_shim_host_signal_number"
 
+(* The box (RFC-0422). [observe_support_abi] is the Landlock ABI the kernel
+   enforces, 0 where the shim cannot box a payload (no Landlock, no seccomp,
+   or not Linux). [restrict_self scratch deny_fs deny_net] is applied in the
+   child right before exec; see observe_stub.c for what each flag denies. *)
+external observe_support_abi : unit -> int = "ocaml_shim_observe_support"
+external restrict_self : string -> bool -> bool -> unit = "ocaml_shim_restrict_self"
+
+let observe_supported () = observe_support_abi () >= 1
+
+let observe_unsupported_code = "observe_unsupported"
+let observe_scratch_code = "observe_scratch_error"
+
 let jail_error_code = "remote_ssh_path_jail_violation"
 let config_error_code = "remote_ssh_shim_config_error"
 let shim_error_code = "remote_ssh_shim_error"
@@ -146,12 +158,13 @@ type config =
   { remote_root : string
   ; env_allowlist : string list
   ; payload_path : string list
+  ; scratch_root : string option
   }
 
 let config_env_var = Exec_ssh_protocol.shim_config_env_var
 let default_config_path = "/etc/masc-exec-shim.conf"
 
-let config_keys = [ "remote_root"; "env_allowlist"; "path" ]
+let config_keys = [ "remote_root"; "env_allowlist"; "path"; "scratch_root" ]
 
 let parse_config content =
   let err fmt = Printf.ksprintf (fun m -> Error (config_error_code ^ ": " ^ m)) fmt in
@@ -214,9 +227,18 @@ let parse_config content =
             match List.assoc_opt "path" entries with
             | None -> Ok default_payload_path
             | Some value -> payload_path_of value in
-          (match payload_path with
-           | Error _ as e -> e
-           | Ok payload_path -> Ok { remote_root = root; env_allowlist; payload_path })))
+          let scratch_root =
+            match List.assoc_opt "scratch_root" entries with
+            | None -> Ok None
+            | Some "" -> err "scratch_root must not be empty"
+            | Some root when not (String.starts_with ~prefix:"/" root) ->
+              err "scratch_root must be an absolute path, got %S" root
+            | Some root -> Ok (Some root) in
+          (match payload_path, scratch_root with
+           | (Error _ as e), _ -> e
+           | _, (Error _ as e) -> e
+           | Ok payload_path, Ok scratch_root ->
+             Ok { remote_root = root; env_allowlist; payload_path; scratch_root })))
 
 (* Read here rather than through Env_config_core: the shim is a standalone
    binary deployed to the remote host, where masc's config layer does not
@@ -305,7 +327,57 @@ let rec write_all fd s off len =
     | n -> write_all fd s (off + n) (len - n)
     | exception Unix.Unix_error (Unix.EINTR, _, _) -> write_all fd s off len
 
-let spawn ~argv ~env ~cwd =
+(* {1 Execution plan (RFC-0422)} *)
+
+type execution_plan =
+  | Run_effect
+  | Run_boxed of
+      { deny_fs : bool
+      ; deny_net : bool
+      }
+  | Refuse_observe_unsupported
+
+(* Decided from the request's mode and this kernel's answer, and nowhere
+   else: a box the kernel cannot build is a refusal, never a quiet fall
+   back to running unboxed. *)
+let plan_for_mode ~supported = function
+  | Exec_ssh_protocol.Effect -> Run_effect
+  | Exec_ssh_protocol.Observe ->
+    if supported then Run_boxed { deny_fs = true; deny_net = true }
+    else Refuse_observe_unsupported
+  | Exec_ssh_protocol.Guest_local ->
+    if supported then Run_boxed { deny_fs = false; deny_net = true }
+    else Refuse_observe_unsupported
+
+(* One directory per boxed run, the only place a boxed payload may write.
+   It is also the payload's HOME and TMPDIR so tools that cache (gh) or
+   need a temp file find somewhere that exists; it is removed after the
+   run, so nothing written there outlives the call. *)
+let make_scratch ~root =
+  let name =
+    Printf.sprintf "masc-observe-%d-%08x" (Unix.getpid ())
+      (Random.State.bits (Random.State.make_self_init ()) land 0xffffffff) in
+  let path = Filename.concat root name in
+  match Unix.mkdir path 0o700 with
+  | () -> Ok path
+  | exception Unix.Unix_error (code, call, arg) ->
+    Error
+      (Printf.sprintf "%s: cannot create scratch under %s: %s(%s): %s"
+         observe_scratch_code root call arg (Unix.error_message code))
+
+let rec remove_tree path =
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    Array.iter (fun name -> remove_tree (Filename.concat path name)) (Sys.readdir path);
+    (try Unix.rmdir path with Unix.Unix_error _ -> ())
+  | _ -> (try Unix.unlink path with Unix.Unix_error _ -> ())
+  | exception Unix.Unix_error _ -> ()
+
+let scratch_env ~scratch env =
+  let upsert (k, v) env = (k, v) :: List.remove_assoc k env in
+  env |> upsert ("HOME", scratch) |> upsert ("TMPDIR", scratch)
+
+let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
   let (stdin_r, stdin_w) = Unix.pipe () in
   let (stdout_r, stdout_w) = Unix.pipe () in
   let (stderr_r, stderr_w) = Unix.pipe () in
@@ -329,6 +401,9 @@ let spawn ~argv ~env ~cwd =
        List.iter Unix.close
          [ stdin_r; stdin_w; stdout_r; stdout_w; stderr_r; stderr_w ];
        Unix.chdir cwd;
+       (* The box goes on last, after every path the shim itself needs is
+          resolved, and before the payload has run one instruction. *)
+       before_exec ();
        Unix.execvpe (List.hd argv) (Array.of_list argv)
          (Array.of_list (List.map (fun (k, v) -> k ^ "=" ^ v) env))
      with
@@ -589,23 +664,61 @@ let run () =
                  ~base_env:(env_of_process ())
                  ~allowlist:config.env_allowlist
                  ~request_env:req.Exec_ssh_protocol.env in
+             let box =
+               match
+                 plan_for_mode ~supported:(observe_supported ())
+                   req.Exec_ssh_protocol.mode
+               with
+               | Refuse_observe_unsupported ->
+                 shim_fail
+                   (Printf.sprintf
+                      "%s: this host cannot box a payload (Landlock ABI %d); \
+                       the request asked for %s"
+                      observe_unsupported_code (observe_support_abi ())
+                      (Exec_ssh_protocol.mode_to_string req.Exec_ssh_protocol.mode))
+               | Run_effect -> None
+               | Run_boxed { deny_fs; deny_net } ->
+                 let scratch =
+                   match config.scratch_root with
+                   | None -> None
+                   | Some root ->
+                     (match make_scratch ~root with
+                      | Ok path -> Some path
+                      | Error message -> shim_fail message) in
+                 Some (deny_fs, deny_net, scratch) in
+             let env, before_exec, cleanup =
+               match box with
+               | None -> env, (fun () -> ()), (fun () -> ())
+               | Some (deny_fs, deny_net, scratch) ->
+                 let scratch_path = Option.value scratch ~default:"" in
+                 let env =
+                   match scratch with
+                   | Some path -> scratch_env ~scratch:path env
+                   | None -> env in
+                 ( env
+                 , (fun () -> restrict_self scratch_path deny_fs deny_net)
+                 , (fun () -> Option.iter remove_tree scratch) ) in
              let (pid, stdin_w, stdout_r, stderr_r) =
-               try spawn ~argv ~env ~cwd with
+               try spawn ~before_exec ~argv ~env ~cwd () with
                | exn ->
+                 cleanup ();
                  shim_fail
                    (Printf.sprintf "%s: spawn failed: %s" shim_error_code
                       (Printexc.to_string exn)) in
              let trailer =
                supervise ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
                  ~timeout_sec:req.Exec_ssh_protocol.timeout_sec in
+             cleanup ();
              emit_trailer_stderr trailer;
              exit 0)))
 
-let probe =
+(* Capabilities are what this host can do, read when asked, so a probe on a
+   kernel without Landlock says so and the runner never sends it a box. *)
+let probe () =
   Exec_ssh_protocol.
     { name = "masc-exec-shim"
     ; version = Printf.sprintf "%d.0.0" protocol_version
-    ; capabilities = []
+    ; capabilities = (if observe_supported () then [ observe_capability ] else [])
     }
 
 let main () =
@@ -616,7 +729,7 @@ let main () =
      re-arms the default disposition pre-exec. *)
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   match Array.to_list Sys.argv with
-  | [ _; "--probe" ] -> print_endline (Exec_ssh_protocol.render_probe probe)
+  | [ _; "--probe" ] -> print_endline (Exec_ssh_protocol.render_probe (probe ()))
   | [ _ ] -> run ()
   | _ ->
     prerr_endline "usage: masc-exec-shim [--probe]";

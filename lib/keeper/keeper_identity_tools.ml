@@ -275,6 +275,11 @@ type call_phase =
 
 type call_error =
   | Precondition of string
+  | Transient_precondition of string
+      (* A precondition that failed for a reason a later attempt may clear --
+         a network blip while renewing, a 5xx/429 from the token endpoint. Kept
+         apart from [Precondition] so the model is told it can retry rather than
+         that the call is permanently impossible. *)
   | Mcp of {
       phase : call_phase;
       error : Mcp_client.error;
@@ -297,6 +302,8 @@ let tool_result_of_call answer =
   | Error (Precondition message) ->
     failed ~recoverable:false ~error_class:(Some Agent_core.Types.Deterministic)
       message
+  | Error (Transient_precondition message) ->
+    failed ~recoverable:true ~error_class:(Some Agent_core.Types.Transient) message
   | Error (Mcp { error = Mcp_client.Unauthorized _; _ }) ->
     (* Not something the model can fix by trying again. Whoever attached
        this Keeper has to attach it again. *)
@@ -365,6 +372,88 @@ let stored_expires_at ~base_path ~keeper_name ~(provider : Provider.t) =
    one: a status and a body rather than a response with headers. Two wire
    contracts, two injection points, so a test can pin either without
    pretending they are the same. *)
+(* A renewal that fails does not always fail the same way. A network blip or a
+   5xx/429 from the token endpoint is worth retrying; a revoked refresh token or
+   a missing client is not. Kept apart so the caller can tell the model which
+   it is instead of reporting every renewal failure as permanent. *)
+type renewal_error =
+  | Renew_transient of string
+  | Renew_permanent of string
+
+let renewal_error_message = function
+  | Renew_transient message | Renew_permanent message -> message
+;;
+
+(* Spend the refresh token now, whatever the stored expiry says. Two callers:
+   [renew_if_needed] when the declared window has opened, and the reactive path
+   in [run_call] when the endpoint answered 401 -- the only renewal a provider
+   that issued no expiry ever gets. *)
+let force_refresh ?token_post ?discover ~base_path ~keeper_name
+      ~(provider : Provider.t) ~now () =
+  let* refresh_token =
+    match
+      Keeper_secret_projection.read_file_entry ~base_path ~keeper_name
+        ~scope:Keeper_secret_projection.Keeper_secret
+        ~container_path:provider.Provider.refresh_token_file
+    with
+    | Error message -> Error (Renew_permanent message)
+    | Ok None ->
+      Error
+        (Renew_permanent
+           "this keeper has no refresh token; attach it to the provider again")
+    | Ok (Some value) when String.trim value <> "" -> Ok (String.trim value)
+    | Ok (Some _) -> Error (Renew_permanent "this keeper's refresh token file is empty")
+  in
+  let discover =
+    match discover with
+    | Some discover -> discover
+    | None -> fun ~mcp_url -> Keeper_oauth_discovery.discover ~mcp_url ()
+  in
+  let* discovered =
+    match discover ~mcp_url:provider.Provider.mcp_url with
+    | Ok discovered -> Ok discovered
+    (* Could not reach the discovery hop -- the auth server may answer a moment
+       later. *)
+    | Error (Keeper_oauth_discovery.Transport _ as err) ->
+      Error (Renew_transient (Keeper_oauth_discovery.error_to_string err))
+    | Error err -> Error (Renew_permanent (Keeper_oauth_discovery.error_to_string err))
+  in
+  let* configured_client_id =
+    match
+      Keeper_oauth_client_store.load
+        ~dir:(Filename.concat (Common.masc_dir_from_base_path ~base_path) "identity")
+        ~provider
+    with
+    | Error message -> Error (Renew_permanent message)
+    | Ok (Some credentials) -> Ok credentials
+    | Ok None ->
+      Error (Renew_permanent "this install has no registered client; attach a keeper first")
+  in
+  let* tokens =
+    match
+      Keeper_oauth_flow.refresh ?post:token_post ~discovered
+        ~client_id:configured_client_id.Keeper_oauth_client_store.client_id
+        ?client_secret:configured_client_id.Keeper_oauth_client_store.client_secret
+        ~refresh_token ~now ()
+    with
+    | Ok tokens -> Ok tokens
+    | Error (Keeper_oauth_flow.Transport _ as err) ->
+      Error (Renew_transient (Keeper_oauth_flow.exchange_error_to_string err))
+    (* The token endpoint was reachable but answered a server-side or
+       rate-limit status; the refresh itself is not refused. *)
+    | Error (Keeper_oauth_flow.Provider_rejected { status; _ } as err)
+      when status = 429 || status >= 500 ->
+      Error (Renew_transient (Keeper_oauth_flow.exchange_error_to_string err))
+    | Error err -> Error (Renew_permanent (Keeper_oauth_flow.exchange_error_to_string err))
+  in
+  let* () =
+    match store_tokens ~base_path ~keeper_name ~provider tokens with
+    | Ok () -> Ok ()
+    | Error message -> Error (Renew_permanent message)
+  in
+  Ok tokens.Keeper_oauth_flow.access_token
+;;
+
 let renew_if_needed ?token_post ?discover ~base_path ~keeper_name
       ~(provider : Provider.t) ~now ~access_token () =
   match provider.Provider.credential_source with
@@ -375,71 +464,30 @@ let renew_if_needed ?token_post ?discover ~base_path ~keeper_name
   | Provider.Oauth_exchange ->
   match stored_expires_at ~base_path ~keeper_name ~provider with
   (* No stored expiry means nothing said this token is old. Renewing on a
-     guess would spend a refresh token to replace a working credential. *)
+     guess would spend a refresh token to replace a working credential; the
+     reactive path in [run_call] covers a token that turns out to be stale. *)
   | None -> Ok access_token
   | Some expires_at ->
     if not (Keeper_oauth_flow.needs_renewal ~provider ~expires_at ~now)
     then Ok access_token
-    else (
-      let* refresh_token =
-        match
-          Keeper_secret_projection.read_file_entry ~base_path ~keeper_name
-            ~scope:Keeper_secret_projection.Keeper_secret
-            ~container_path:provider.Provider.refresh_token_file
-        with
-        | Error message -> Error message
-        | Ok None ->
-          Error "this keeper has no refresh token; attach it to the provider again"
-        | Ok (Some value) when String.trim value <> "" -> Ok (String.trim value)
-        | Ok (Some _) -> Error "this keeper's refresh token file is empty"
-      in
-      let discover =
-        match discover with
-        | Some discover -> discover
-        | None -> fun ~mcp_url -> Keeper_oauth_discovery.discover ~mcp_url ()
-      in
-      let* discovered =
-        Result.map_error Keeper_oauth_discovery.error_to_string
-          (discover ~mcp_url:provider.Provider.mcp_url)
-      in
-      let* configured_client_id =
-        match
-          Keeper_oauth_client_store.load
-            ~dir:(Filename.concat (Common.masc_dir_from_base_path ~base_path) "identity")
-            ~provider
-        with
-        | Error message -> Error message
-        | Ok (Some credentials) -> Ok credentials
-        | Ok None ->
-          Error "this install has no registered client; attach a keeper first"
-      in
-      let* tokens =
-        Result.map_error Keeper_oauth_flow.exchange_error_to_string
-          (Keeper_oauth_flow.refresh ?post:token_post ~discovered
-             ~client_id:
-               configured_client_id.Keeper_oauth_client_store.client_id
-             ?client_secret:
-               configured_client_id.Keeper_oauth_client_store.client_secret
-             ~refresh_token ~now ())
-      in
-      let* () = store_tokens ~base_path ~keeper_name ~provider tokens in
-      Ok tokens.Keeper_oauth_flow.access_token)
+    else force_refresh ?token_post ?discover ~base_path ~keeper_name ~provider ~now ()
 ;;
 
-let run_call ?post ~base_path ~keeper_name ~(provider : Provider.t)
-      ~remote_name ~arguments () =
+let run_call_once ?post ?token_post ?discover ~base_path ~keeper_name
+      ~(provider : Provider.t) ~remote_name ~arguments () =
   match access_token_for ~base_path ~keeper_name ~provider with
   | Error message -> Error (Precondition message)
   | Ok stored_token -> (
     match
-      renew_if_needed ~base_path ~keeper_name ~provider
+      renew_if_needed ?token_post ?discover ~base_path ~keeper_name ~provider
         (* [Time_compat.now] rather than the raw clock: masc reads time
            through one module so a deterministic boundary has one place to
            look, and the determinism gate flags anything that goes around
            it. *)
         ~now:(Time_compat.now ()) ~access_token:stored_token ()
     with
-    | Error message -> Error (Precondition message)
+    | Error (Renew_permanent message) -> Error (Precondition message)
+    | Error (Renew_transient message) -> Error (Transient_precondition message)
     | Ok access_token -> (
       match
         Mcp_client.connect ?post ~url:provider.Provider.mcp_url ~access_token ()
@@ -516,6 +564,36 @@ let run_call ?post ~base_path ~keeper_name ~(provider : Provider.t)
           | Ok None | Ok (Some _) -> Error (Mcp { phase = After_send; error }))
         | Error error -> Error (Mcp { phase = After_send; error })
         | Ok result -> Ok result)))
+;;
+
+(* One reactive refresh. [run_call_once] renews proactively only when a stored
+   expiry says the token is old; a provider that issues no expiry never triggers
+   that, so a token it rejects with 401 would otherwise fail the call with
+   "attach it again" while a spendable refresh token sits unused. Force a refresh
+   and retry once. [force_refresh] stores the new token, so the retry reads it
+   back through [access_token_for]; any refresh failure keeps the original 401,
+   so the operator still learns to re-attach and there is no second retry. *)
+let run_call ?post ?token_post ?discover ~base_path ~keeper_name
+      ~(provider : Provider.t) ~remote_name ~arguments () =
+  match
+    run_call_once ?post ?token_post ?discover ~base_path ~keeper_name ~provider
+      ~remote_name ~arguments ()
+  with
+  | Error (Mcp { error = Mcp_client.Unauthorized _; _ }) as unauthorized -> (
+    match provider.Provider.credential_source with
+    (* gh owns this credential and rewrites its own file; masc holds no refresh
+       token to spend, so a 401 here is genuinely re-attach. *)
+    | Provider.Github_cli _ -> unauthorized
+    | Provider.Oauth_exchange -> (
+      match
+        force_refresh ?token_post ?discover ~base_path ~keeper_name ~provider
+          ~now:(Time_compat.now ()) ()
+      with
+      | Error _ -> unauthorized
+      | Ok _ ->
+        run_call_once ?post ?token_post ?discover ~base_path ~keeper_name ~provider
+          ~remote_name ~arguments ()))
+  | other -> other
 ;;
 
 let agent_tools ~(provider : Provider.t) catalog =

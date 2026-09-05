@@ -3,10 +3,10 @@ rfc: "0404"
 title: 관측 script 는 readonly argv 테이블을 탄다 — 메타문자 없는 단일 명령 문자열은 argv 와 동치로 판별한다
 status: Draft
 created: 2026-09-03
-updated: 2026-09-03
+updated: 2026-09-05
 author: Claude Opus 5 (1M context)
 supersedes: []
-superseded_by: null
+superseded_by: "0421"
 related: ["0335"]
 ---
 

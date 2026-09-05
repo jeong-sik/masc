@@ -52,6 +52,21 @@ val create :
     worker domains and in-flight jobs are cancelled (per
     [Eio.Executor_pool] semantics). *)
 
+val tune_minor_heap : unit -> unit
+(** Give the calling domain the tuned minor heap, once.
+
+    [Gc.set]'s [minor_heap_size] is per-domain in OCaml 5: it resizes the
+    caller's minor heap and says nothing about domains that start later.
+    The tuning in [main_eio.ml] therefore reached the main domain and no
+    other, and the pool ran on the 2 MB default.
+
+    That is not only a frequency: a minor collection is a stop-the-world
+    barrier across every domain, so one domain collecting eight times as
+    often stops the whole server that much more. The submits below apply
+    this for pool work; a domain started outside the pool calls it itself.
+
+    Idempotent, and a no-op on a domain already at or above the size. *)
+
 val domain_count : t -> int
 (** Resolved worker count.  Matches the value passed to [create] (or
     {!recommended_domain_count} when omitted). *)

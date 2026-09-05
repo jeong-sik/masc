@@ -2026,7 +2026,6 @@ type surface =
 let surface_ring : (surface * string) list =
   [ (Overview, "Overview");
     (Acting, "Activity");
-    (Metrics, "Metrics");
     (Keepers Keeper_list, "Keepers");
     (Memory, "Memory");
     (Approvals, "Approvals");
@@ -2049,7 +2048,8 @@ let surface_ring : (surface * string) list =
    is registered here", read rarely and never raced against. System logs
    collapse onto Activity (the Acting surface): tool calls settling and the
    server's own log lines are two readings of the same fleet timeline, and
-   the ring stop that answers "what happened" is one. *)
+   the ring stop that answers "what happened" is one. Metrics is a deep-dive
+   telemetry surface that collapses onto Overview, off the Tab ring. *)
 let surface_ring_index (view : surface) =
   let family =
     match view with
@@ -2061,6 +2061,7 @@ let surface_ring_index (view : surface) =
     | Code -> Repositories
     | Resources | Tools -> Config
     | System_logs -> Acting
+    | Metrics -> Overview
     | v -> v
   in
   let rec find i = function
@@ -2294,19 +2295,23 @@ let turn_log_keeper_name turn_log = Masc_tui_keeper_chat_log.keeper_name turn_lo
 let turn_log_request_id turn_log = Masc_tui_keeper_chat_log.request_id turn_log.tl_log
 let turn_log_started_at turn_log = Masc_tui_keeper_chat_log.started_at turn_log.tl_log
 
-(* How many loaded turns one history load asks the journal for. A load runs
-   when the chat opens, on a refresh key, when the keeper appends a turn and
-   when one settles; the turns behind the newest twenty are the ones the
-   operator scrolls back to, and each of those is asked for when its page
-   loads rather than all of them on every load. *)
-let reload_journal_fetch_cap = 20
-
 (* Which loaded turns a refresh fetches journals for: every operation the
    rows name, once, newest first by the earliest row of that operation, minus
    the turns this session already holds as logs (settled, or still streaming)
-   and the ones the server has said it cannot serve, at most [cap]. Pure, so
-   the choice is testable without a server. *)
-let journal_fetch_targets ~cap ~held ~unavailable
+   and the ones the server has said it cannot serve. The rows are the bound:
+   they are one /chat/history body, which the server cuts at the chat store's
+   tail window ([Keeper_chat_store.load]), and only direct turns carry an
+   [operation_id], so only they are candidates. Each turn is asked for on the
+   load that names it -- a load runs when the chat opens, on a refresh key,
+   when the keeper appends a turn and when one settles -- and once held it is
+   not asked for again, so every load after the first asks only for what is
+   new. The older-page path issues no journal reads, so a turn a load does
+   not ask for is not rebuilt by anything else; that is why nothing here is
+   cut short of the rows. The order is the order the reads run in (the
+   launcher reads the targets one after another), so the turns nearest the
+   bottom of the pane fill first. Pure, so the choice is testable without a
+   server. *)
+let journal_fetch_targets ~held ~unavailable
     (candidates : (string * float) list) =
   let earliest = Hashtbl.create 16 in
   List.iter
@@ -2324,7 +2329,6 @@ let journal_fetch_targets ~cap ~held ~unavailable
          match Float.compare at_b at_a with
          | 0 -> String.compare id_a id_b
          | order -> order)
-  |> List.filteri (fun index _ -> index < cap)
 ;;
 
 (* A committed log stands for its turn once the stream told it how the turn
@@ -2544,29 +2548,46 @@ let memory_category_filter_label = function
   | Category_source -> "source"
   | Category_dropped -> "dropped"
 
+type memory_overview_sort =
+  | Mem_overview_facts
+  | Mem_overview_size
+  | Mem_overview_delta
+  | Mem_overview_state
+  | Mem_overview_name
+
+let memory_overview_sort_label = function
+  | Mem_overview_facts -> "Facts (Most)"
+  | Mem_overview_size -> "Size (Largest)"
+  | Mem_overview_delta -> "Delta (Recent changes)"
+  | Mem_overview_state -> "State (Attention first)"
+  | Mem_overview_name -> "Name (A-Z)"
+
+let next_memory_overview_sort = function
+  | Mem_overview_facts -> Mem_overview_size
+  | Mem_overview_size -> Mem_overview_delta
+  | Mem_overview_delta -> Mem_overview_state
+  | Mem_overview_state -> Mem_overview_name
+  | Mem_overview_name -> Mem_overview_facts
+
 type metrics_section =
   | Section_fleet
   | Section_resources
   | Section_tools
-  | Section_latency
 
 let next_metrics_section = function
   | Section_fleet -> Section_resources
   | Section_resources -> Section_tools
-  | Section_tools -> Section_latency
-  | Section_latency -> Section_fleet
+  | Section_tools -> Section_fleet
 
 let prev_metrics_section = function
-  | Section_fleet -> Section_latency
+  | Section_fleet -> Section_tools
   | Section_resources -> Section_fleet
   | Section_tools -> Section_resources
-  | Section_latency -> Section_tools
 
 let metrics_section_label = function
-  | Section_fleet -> "Fleet & Velocity"
-  | Section_resources -> "Keeper Resources"
-  | Section_tools -> "Tool Invocations"
-  | Section_latency -> "Latency Waterfall"
+  | Section_fleet -> "Engine & Scheduler"
+  | Section_resources -> "Fleet & Velocity"
+  | Section_tools -> "Memory & Gate Safety"
 
 type state = {
   mutable metrics_scroll: int;
@@ -2719,6 +2740,7 @@ type state = {
      terminal -- which is why this is an option of an option: the outer one
      says whether a preview is running at all. *)
   mutable theme_before_preview: string option option;
+  mutable theme_filter: [ `All | `Dark | `Light ];
   (* The prompt catalog. One value rather than a snapshot option beside an
      error option: the pair could not say "asked, waiting", so this pane drew
      an empty catalog while its first read was in flight. *)
@@ -3188,6 +3210,7 @@ type state = {
   mutable memory_facts_scroll: int;
   mutable memory_facts_category: memory_category_filter;
   mutable memory_facts_sort: memory_sort_order;
+  mutable memory_overview_sort: memory_overview_sort;
   mutable repository_changes_open: bool;
   mutable repository_changes_scope: Tui_decode.repository_change_scope option;
   mutable repository_changes: Tui_decode.repository_change_snapshot option;
@@ -3205,8 +3228,12 @@ type state = {
   mutable code_entries: Tui_decode.workspace_tree_node list;
   mutable code_entries_error: string option;
   mutable code_cursor: int;
-  mutable code_file: (string * (string * string) list list) option;
-  mutable code_file_error: string option;
+  (* The open file's lexed rows, keyed by its path. One value rather than a
+     pair of options: the pair could not say "reading", so a file being
+     fetched drew the same blank pane an empty file draws -- and nothing
+     matched an arriving answer against the path still on screen, so a slow
+     read of one file could replace another the operator had since opened. *)
+  mutable code_file: (string, (string * string) list list) Masc_tui_fetched.t;
   mutable code_file_scroll: int;
   (* The line the pane's cursor is on (0-based), the anchor a language-server
      question is asked at. j/k move it; the scroll follows to keep it
@@ -3230,23 +3257,26 @@ type state = {
      commits and durable Keeper file changes over that repository address,
      newest first. Keyed by the path they were fetched for so opening another
      file drops a stale listing rather than captioning it. *)
-  mutable code_history: (string * code_history_listing) option;
-  mutable code_history_error: string option;
+  (* The open file's history, keyed by the scope and the path together: two
+     repositories can carry the same relative path, and a slow answer for one
+     must not caption the other. *)
+  mutable code_history:
+    (code_workspace_scope * string, code_history_listing) Masc_tui_fetched.t;
   mutable code_history_open: bool;
   mutable code_history_scroll: int;
   (* The file pane's diff view: d on an open file swaps the content for what
      the working tree holds against HEAD, keyed the same way. One overlay at
      a time -- opening this closes the history and vice versa. *)
-  mutable code_diff: (string * Tui_decode.git_diff) option;
-  mutable code_diff_error: string option;
+  (* The open file's uncommitted diff, keyed by its path. *)
+  mutable code_diff: (string, Tui_decode.git_diff) Masc_tui_fetched.t;
   mutable code_diff_open: bool;
   mutable code_diff_scroll: int;
   (* The file pane's notes view: m on an open file (repository scope only --
      the annotation routes are scoped by the server-minted codebase slug,
      which only a Repositories row carries) swaps the content for the notes
      anchored to the file. *)
-  mutable code_notes: (string * Tui_decode.ide_annotation list) option;
-  mutable code_notes_error: string option;
+  (* The notes anchored to the open file, keyed by its path. *)
+  mutable code_notes: (string, Tui_decode.ide_annotation list) Masc_tui_fetched.t;
   mutable code_notes_open: bool;
   mutable code_notes_scroll: int;
   (* The file pane's blame margin: b on an open file fetches who last touched
@@ -3256,8 +3286,11 @@ type state = {
      [b] again drops it. No [_open] flag: shown-with-nothing-loaded is not a
      state this can be in. Keyed by path like the others, so opening another
      file drops the margin rather than captioning it wrongly. *)
-  mutable code_blame: (string * Tui_decode.blame_block list) option;
-  mutable code_blame_error: string option;
+  (* Who last touched each run of the open file, keyed by its path. One
+     value: the pair could not say the blame was being read, so pressing [b]
+     on a large file left the margin blank with nothing to distinguish "still
+     reading" from "no blame here". *)
+  mutable code_blame: (string, Tui_decode.blame_block list) Masc_tui_fetched.t;
   (* Whose workspace the surface reads. One field, one value: a keeper's
      playground and a project repository at the same time is not a
      representable state. *)
@@ -3996,6 +4029,7 @@ let create_state
   theme_choice = None;
   theme_cursor = 0;
   theme_before_preview = None;
+  theme_filter = `All;
   prompts = Masc_tui_fetched.initial;
   prompts_cursor = 0;
   presets_snapshot = None;
@@ -4230,6 +4264,7 @@ let create_state
   memory_facts_scroll = 0;
   memory_facts_category = Category_all;
   memory_facts_sort = Sort_recency;
+  memory_overview_sort = Mem_overview_facts;
   repository_changes_open = false;
   repository_changes_scope = None;
   repository_changes = None;
@@ -4245,8 +4280,7 @@ let create_state
   code_entries = [];
   code_entries_error = None;
   code_cursor = 0;
-  code_file = None;
-  code_file_error = None;
+  code_file = Masc_tui_fetched.initial;
   code_file_scroll = 0;
   code_file_cursor = 0;
   code_lsp_note = None;
@@ -4254,20 +4288,16 @@ let create_state
   code_file_hscroll = 0;
   code_file_max_width = 0;
   code_focus_file = Left_pane;
-  code_history = None;
-  code_history_error = None;
+  code_history = Masc_tui_fetched.initial;
   code_history_open = false;
   code_history_scroll = 0;
-  code_diff = None;
-  code_diff_error = None;
+  code_diff = Masc_tui_fetched.initial;
   code_diff_open = false;
   code_diff_scroll = 0;
-  code_notes = None;
-  code_notes_error = None;
+  code_notes = Masc_tui_fetched.initial;
   code_notes_open = false;
   code_notes_scroll = 0;
-  code_blame = None;
-  code_blame_error = None;
+  code_blame = Masc_tui_fetched.initial;
   code_scope = Code_scope_project;
   code_target_line = None;
   changes_keeper = None;
@@ -5375,12 +5405,17 @@ let surface_row_texts (state : state) : surface -> string list option = function
         state.code_focus_file = Right_pane && not state.code_history_open
         && not state.code_diff_open && not state.code_notes_open
       then
-        Option.map
-          (fun (_, rows) ->
-            List.map
-              (fun segments -> String.concat "" (List.map fst segments))
-              rows)
-          state.code_file
+        (match Masc_tui_fetched.current state.code_file with
+         | Some (_, Masc_tui_fetched.Ready rows) ->
+           Some
+             (List.map
+                (fun segments -> String.concat "" (List.map fst segments))
+                rows)
+         (* Nothing to search through while the file is still being read, and
+            nothing to search through if it failed. *)
+         | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+         | Some (_, Masc_tui_fetched.Absent)
+         | None -> None)
       else
         Some
           (List.map
@@ -5576,9 +5611,8 @@ type palette_action =
    or a number -- those offer no name a language server answers about --
    rather than keeping a second keyword list that could drift. *)
 let code_cursor_line_symbols (state : state) =
-  match state.code_file with
-  | None -> []
-  | Some (_, rows) -> (
+  match Masc_tui_fetched.current state.code_file with
+  | Some (_, Masc_tui_fetched.Ready rows) -> (
       match List.nth_opt rows state.code_file_cursor with
       | None -> []
       | Some segments ->
@@ -5618,6 +5652,10 @@ let code_cursor_line_symbols (state : state) =
               end)
             segments;
           List.rev !names)
+  (* No open file, still reading, or the read failed: nothing to name. *)
+  | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+  | Some (_, Masc_tui_fetched.Absent)
+  | None -> []
 
 (* The Code pane asks the server for at most this many entries per directory
    and the server answers a bare list, so a full page is the only sign that a
@@ -5650,6 +5688,9 @@ let palette_entries (state : state) =
   @ [ "go Resources", Palette_goto Resources ]
   @ [ "go Tools", Palette_goto Tools ]
   @ [ "go Logs", Palette_goto System_logs ]
+  @ [ "go Metrics", Palette_goto Metrics ]
+  @ [ "metrics", Palette_goto Metrics ]
+  @ [ "telemetry", Palette_goto Metrics ]
   @ [ "charts", Palette_goto Metrics ]
   @ [ "stats", Palette_goto Metrics ]
   @ List.map

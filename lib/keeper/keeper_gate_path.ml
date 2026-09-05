@@ -8,6 +8,7 @@ let external_mode ~base_path =
   Filename.concat (dir ~base_path) "external-mode.json"
 ;;
 let pending ~base_path = Filename.concat (dir ~base_path) "pending.json"
+let pending_log ~base_path = Filename.concat (dir ~base_path) "pending.log.jsonl"
 let replay_results ~base_path =
   Filename.concat (dir ~base_path) "replay-results.json"
 ;;

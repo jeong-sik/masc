@@ -23,7 +23,7 @@ let apply_lifecycle
       (result : Keeper_agent_run.run_result)
   =
   let lifecycle : KEC.post_turn_lifecycle =
-    KEC.apply_post_turn_lifecycle ~meta ~checkpoint:result.checkpoint
+    KEC.apply_post_turn_lifecycle ~config ~meta ~checkpoint:result.checkpoint
   in
   lifecycle
 ;;
@@ -215,7 +215,7 @@ let emit_activity_graph
                         (fun reason -> `String reason)
                         (KUM.usage_trust_reasons usage_trust)) )
                ; "turn_mode", `String turn_mode_label
-               ; "checkpoint_bytes", `Int lifecycle.KEC.checkpoint_bytes
+               ; "checkpoint_bytes", Json_util.int_opt_to_json lifecycle.KEC.checkpoint_bytes
                ]
                @ (match wall_tokens_per_second with
                   | Some v -> [ "tokens_per_second", `Float v ]

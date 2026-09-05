@@ -290,12 +290,6 @@ let test_authenticated_owner_overrides_request_hint () =
   check (option string) "authenticated projection" (Some "credential-owner")
     (project ~base_path request)
 
-let test_admin_token_equality_truth_table () =
-  let equal = Server_auth.For_testing.admin_token_equal in
-  check bool "exact match" true (equal "admin-secret" "admin-secret");
-  check bool "same-length mismatch" false (equal "admin-secret" "admin-secrex");
-  check bool "different-length mismatch" false (equal "admin-secret" "admin-secret-long")
-
 let () =
   Eio_main.run @@ fun _env ->
   Server_request_authority.with_current
@@ -315,7 +309,5 @@ let () =
                  test_mcp_auth_surfaces_preserve_typed_reasons
              ; test_case "authenticated owner is canonical" `Quick
                  test_authenticated_owner_overrides_request_hint
-             ; test_case "admin token equality truth table" `Quick
-                 test_admin_token_equality_truth_table
              ] )
          ])

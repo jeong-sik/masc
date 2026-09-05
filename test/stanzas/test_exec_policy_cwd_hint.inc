@@ -4,4 +4,5 @@
 (test
  (name test_exec_policy_cwd_hint)
  (modules test_exec_policy_cwd_hint)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries masc_test_deps))

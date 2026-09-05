@@ -999,45 +999,38 @@ let () = test "handle_transition_force_release_is_not_a_public_escape_hatch"
     Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx_owner
       (`Assoc [ ("task_id", `String "task-001") ])
   in
+  (* The name is only a second agent. `force` is rejected on the argument list
+     before ownership is looked at, so no role enters this case. *)
   let ctx_admin =
     { ctx_owner with Task.Tool.agent_name = "admin-agent" }
   in
-  let previous_is_admin = Atomic.get Workspace_hooks.is_admin_agent_fn in
-  Fun.protect
-    ~finally:(fun () ->
-      Atomic.set Workspace_hooks.is_admin_agent_fn previous_is_admin)
-    (fun () ->
-       Atomic.set Workspace_hooks.is_admin_agent_fn
-         (fun ~base_path:_ ~agent_name ->
-            String.equal agent_name "admin-agent");
-       let result =
-         Task.Tool.handle_transition
-           ~tool_name:"test_tool"
-           ~start_time:0.0
-           ctx_admin
-           (`Assoc
-              [
-                ("task_id", `String "task-001");
-                ("action", `String "release");
-                ("force", `Bool true);
-              ])
-       in
-       assert (not (Tool_result.is_success result));
-       assert (str_contains (Tool_result.message result) "Unknown argument(s): force");
-       match
-         Workspace.get_tasks_raw ctx_owner.Task.Tool.config
-         |> List.find_opt (fun (task : Masc_domain.task) ->
-              String.equal task.id "task-001")
-       with
-       | Some { task_status = Masc_domain.Claimed { assignee; _ }; _ }
-         when String.equal assignee "owner-agent" -> ()
-       | Some task ->
-         failwith
-           (Printf.sprintf
-              "force must not change task ownership, got %s"
-              (Masc_domain.task_status_to_string task.task_status))
-       | None -> failwith "missing task-001 after rejected release escape hatch")
-)
+  let result =
+    Task.Tool.handle_transition
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx_admin
+      (`Assoc
+         [
+           ("task_id", `String "task-001");
+           ("action", `String "release");
+           ("force", `Bool true);
+         ])
+  in
+  assert (not (Tool_result.is_success result));
+  assert (str_contains (Tool_result.message result) "Unknown argument(s): force");
+  match
+    Workspace.get_tasks_raw ctx_owner.Task.Tool.config
+    |> List.find_opt (fun (task : Masc_domain.task) ->
+         String.equal task.id "task-001")
+  with
+  | Some { task_status = Masc_domain.Claimed { assignee; _ }; _ }
+    when String.equal assignee "owner-agent" -> ()
+  | Some task ->
+    failwith
+      (Printf.sprintf
+         "force must not change task ownership, got %s"
+         (Masc_domain.task_status_to_string task.task_status))
+  | None -> failwith "missing task-001 after rejected release escape hatch")
 
 let () = test "handle_transition_submit_does_not_have_a_disable_bypass"
     (fun () ->
@@ -1480,41 +1473,33 @@ let () = test "handle_transition_force_is_not_a_done_action" (fun () ->
   if not (Tool_result.is_success add_result)
   then failwith (Tool_result.message add_result);
   start_task_001 ctx;
-  let previous_is_admin = Atomic.get Workspace_hooks.is_admin_agent_fn in
-  Fun.protect
-    ~finally:(fun () ->
-      Atomic.set Workspace_hooks.is_admin_agent_fn previous_is_admin)
-    (fun () ->
-       Atomic.set Workspace_hooks.is_admin_agent_fn
-         (fun ~base_path:_ ~agent_name ->
-            String.equal agent_name "admin-agent");
-       let reviewer_called = ref false in
-       Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
-         (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
-            reviewer_called := true;
-            Ok (Some (Task.Anti_rationalization.Approve "")));
-       let result =
-         Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
-           (`Assoc
-             [ "task_id", `String "task-001"
-             ; "action", `String "done"
-             ; "force", `Bool true
-             ; "notes", `String ""
-             ])
-       in
-       assert (not (Tool_result.is_success result));
-       assert
-         (str_contains
-            (Tool_result.message result)
-            "Unknown argument(s): force");
-       assert (not !reviewer_called);
-       match (only_task ctx).Masc_domain.task_status with
-       | Masc_domain.InProgress { assignee; _ } ->
-         assert (String.equal assignee "admin-agent")
-       | status ->
-         failwith
-           ("force argument on done must be rejected before completion review, got "
-            ^ Masc_domain.task_status_to_string status)))
+  let reviewer_called = ref false in
+  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+       reviewer_called := true;
+       Ok (Some (Task.Anti_rationalization.Approve "")));
+  let result =
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [ "task_id", `String "task-001"
+        ; "action", `String "done"
+        ; "force", `Bool true
+        ; "notes", `String ""
+        ])
+  in
+  assert (not (Tool_result.is_success result));
+  assert
+    (str_contains
+       (Tool_result.message result)
+       "Unknown argument(s): force");
+  assert (not !reviewer_called);
+  match (only_task ctx).Masc_domain.task_status with
+  | Masc_domain.InProgress { assignee; _ } ->
+    assert (String.equal assignee "admin-agent")
+  | status ->
+    failwith
+      ("force argument on done must be rejected before completion review, got "
+       ^ Masc_domain.task_status_to_string status))
 
 let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun () ->
   (

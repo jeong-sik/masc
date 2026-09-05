@@ -117,3 +117,17 @@ val read_resolved :
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
 val resolved_to_json : resolved -> Yojson.Safe.t
+
+(** {1 Payloads} *)
+
+(** The bytes of one artifact and their SHA-256 hex digest: what the domain
+    pool computes for every message and tool schema of a snapshot before the
+    writer looks up reuse and stores what is new. *)
+type payload =
+  { payload_bytes : string
+  ; payload_sha256 : string
+  }
+
+(** The canonical message encoding as the snapshot stores it, with its
+    digest. Pure; safe on any domain. *)
+val message_payload : Agent_core.Types.message -> payload

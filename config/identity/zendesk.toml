@@ -15,5 +15,5 @@ mcp_url = "https://mcp.zendesk.com/mcp"
 
 access_token_env = "ZENDESK_ACCESS_TOKEN"
 expires_at_env = "ZENDESK_EXPIRES_AT"
-refresh_token_file = "zendesk_refresh_token"
+refresh_token_file = "/home/keeper/.zendesk/refresh_token"
 renew_before_sec = 300

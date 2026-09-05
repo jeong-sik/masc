@@ -65,7 +65,7 @@ type ws_session = {
   (** All writes to [wsd] (text frames, pings, pongs, close) are serialized
       through [write_mutex] so fibers sharing one connection cannot interleave
       frames or race with a concurrent close. *)
-  write_mutex: Eio.Mutex.t;
+  write_mutex: Stdlib.Mutex.t;
   (** Last time a WebSocket pong frame was received from the client (or the
       time the connection opened, before any pong).  The heartbeat closes the
       session once it has gone [threshold] whole intervals without a pong; a
@@ -126,9 +126,9 @@ let dashboard_auth session = Atomic.get session.dashboard_auth
 
 (** Registry of active WebSocket sessions. *)
 let sessions : (string, ws_session) Hashtbl.t = Hashtbl.create 16
-let sessions_mutex = Eio.Mutex.create ()
+let sessions_mutex = Stdlib.Mutex.create ()
 
-let with_sessions_rw f = Eio_guard.with_mutex sessions_mutex f
+let with_sessions_rw f = Stdlib.Mutex.protect sessions_mutex f
 
 (** Side index mapping each dashboard slice to the set of session IDs
     currently subscribed to it.  Phase 1 of the slice-indexed fanout RFC
@@ -215,7 +215,7 @@ let detach_session_for_close session_id =
 
 let close_detached_session_wsd ?(code : int option) ~context session =
   try
-    Eio_guard.with_mutex session.write_mutex (fun () ->
+    Stdlib.Mutex.protect session.write_mutex (fun () ->
         if not (Ws_wsd.is_closed session.wsd) then Ws_wsd.send_close ?code session.wsd ())
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -245,7 +245,7 @@ let new_session ~id ~wsd =
     id;
     wsd;
     closed = Atomic.make false;
-    write_mutex = Eio.Mutex.create ();
+    write_mutex = Stdlib.Mutex.create ();
     last_pong_at = Atomic.make now;
     dashboard_auth = Atomic.make Unauthenticated;
     dashboard_route = Atomic.make None;
@@ -284,7 +284,7 @@ let send_text_bigstring session payload =
     Atomic.set session.closed true;
     false
   end else begin
-    Eio_guard.with_mutex session.write_mutex (fun () ->
+    Stdlib.Mutex.protect session.write_mutex (fun () ->
       if is_session_closed session then false
       else begin
         try
@@ -1012,7 +1012,7 @@ let start_upgrade_heartbeat ?sw ?clock session_id session =
           else begin
             let send_failed = ref false in
             (try
-               Eio_guard.with_mutex session.write_mutex (fun () ->
+               Stdlib.Mutex.protect session.write_mutex (fun () ->
                  if not (is_session_closed session) then
                    Ws_wsd.send_ping session.wsd ())
              with

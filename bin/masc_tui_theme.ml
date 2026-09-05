@@ -437,4 +437,35 @@ module Glyph = struct
      shout — on the live Overview five of eight rows carried a red tail —
      and a mark on most rows distinguishes nothing. *)
   let priority p = if p <= 1 then "!" else ""
+
+  let braille_spinner step =
+    let frames =
+      [| "\xe2\xa3\xbe"
+       ; "\xe2\xa3\xbd"
+       ; "\xe2\xa3\xbb"
+       ; "\xe2\xa2\xbf"
+       ; "\xe2\xa1\xbf"
+       ; "\xe2\xa3\x9f"
+       ; "\xe2\xa3\xaf"
+       ; "\xe2\xa3\xb7"
+      |]
+    in
+    let len = Array.length frames in
+    let idx = ((step mod len) + len) mod len in
+    frames.(idx)
+
+  let equalizer_level lvl =
+    let levels =
+      [| " "
+       ; "\xe2\x96\x82"
+       ; "\xe2\x96\x83"
+       ; "\xe2\x96\x84"
+       ; "\xe2\x96\x85"
+       ; "\xe2\x96\x86"
+       ; "\xe2\x96\x87"
+       ; "\xe2\x96\x88"
+      |]
+    in
+    let idx = max 0 (min lvl (Array.length levels - 1)) in
+    levels.(idx)
 end

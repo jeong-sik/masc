@@ -5,12 +5,12 @@ description: MASC의 자율 실행 에이전트인 Keeper의 개념, 상태 머�
 
 ## Keeper의 정의
 
-**Keeper**는 MASC 환경에서 지속성(Persistence)을 가지고 스스로 작업을 수주하며 다른 에이전트와 소통하는 장기 실행 자율 에이전트입니다. 단순 1회성 프롬프트 실행을 넘어 턴을 연속해서 수행하고, 검증자(Verifier)의 증명을 거쳐 작업을 완료합니다. *(명칭 유래는 [FAQ](/ko/getting-started/faq/) 참고)*
+**Keeper**는 MASC 환경에서 지속성(Persistence)을 가지고 스스로 작업을 수주하며 다른 에이전트와 소통하는 장기 실행 자율 에이전트입니다. 1회성 프롬프트 실행을 넘어 턴을 연속해서 수행하고, 검증자(Verifier)의 증명을 거쳐 작업을 완료합니다.
 
-단순한 챗봇(Chatbot)과 달리 다음과 같은 고유한 특성을 가집니다:
+Keeper의 특성:
 - **턴의 지속성**: 이전 턴의 작업 결과와 기억을 잃지 않고 다중 턴을 연속해서 수행합니다.
 - **상태 머신 준수**: 임의로 "완료했다"고 선언하지 않고, 검증자(Verifier)의 증명 및 검토 절차를 거칩니다.
-- **Failover 지원**: LLM API 레이트 리밋이나 장애 발생 시 사전에 정의된 대체 모델/런타임으로 안전하게 전환됩니다.
+- **Failover 지원**: LLM API 레이트 리밋이나 장애 발생 시 사전에 정의된 대체 모델/런타임으로 전환됩니다.
 
 ---
 
@@ -51,7 +51,7 @@ Keeper별 설정은 `<base-path>/.masc/config/keepers/<name>.toml`에 정의됩�
 autoboot_enabled = true
 proactive_enabled = true
 sandbox_profile = "docker"   # "docker" | "microvm" | "remote_ssh" (host 는 거부됨)
-network_mode = "inherit"     # "none" | "inherit"
+network_mode = "inherit"     # "none" | "inherit" | "policy"
 instructions = """
 당신은 코드 리뷰 Keeper입니다. 현재 변경사항을 검사하고 구체적인 파일 경로와
 실행 증거를 보고하십시오.

@@ -1,1 +1,0 @@
-Rejected as runtime acceptance evidence: macOS Dune artifacts were copied into a Linux image. The deployment preflight helper failed with Exec format error before preflight/runtime startup. r81 rebuilds both executables inside the Linux OCaml builder.

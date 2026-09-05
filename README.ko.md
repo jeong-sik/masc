@@ -35,7 +35,12 @@ MASC(Multi-Agent Shared Context)는 여러 코딩 에이전트가 같이 쓰는 
 |---|---|---|
 | **MCP** | 내가 쓰는 에이전트를 작업 공간에 참여시킬 때. 작업을 잡고, 보드에 글을 쓰고, 기록을 남깁니다 | MCP 클라이언트로 `http://127.0.0.1:8935/mcp` 에 붙습니다 |
 | **대시보드** | 브라우저에서 전체를 보고 운영자로서 조작할 때 | 서버가 같은 프로세스에서 `/dashboard/` 로 띄웁니다 |
-| **TUI** | 터미널에서 Keeper를 지켜보고 지시할 때. 코드와 diff도 여기서 봅니다 | `masc-tui`. 설치하면 `masc` 옆에 같이 깔립니다 |
+| **TUI** | 터미널에서 Keeper를 지켜보고 지시할 때. 코드와 diff도 여기서 봅니다 | 터미널에서 `masc` 를 치면 열립니다. 이름으로 부르려면 `masc-tui` |
+
+터미널에서 `masc` 를 치면 TUI가 열리고, 포트에 아무도 응답하지 않으면 서버도
+거기서 같이 띄웁니다. 한 단어로 작업 공간이 뜹니다. 터미널이 아닌 곳에서는 같은
+`masc` 가 예전처럼 서버입니다 — 파이프, systemd 유닛, 컨테이너, CI 단계에는 TTY가
+없으니 서버가 뜹니다. 터미널이든 아니든 서버만 원하면 `masc start` 입니다.
 
 ![MASC 터미널 UI](docs/screenshots/tui/2026-09-04/surfaces/01-overview.png)
 
@@ -114,7 +119,7 @@ bash /tmp/masc-install.sh --version "$TAG"
 
 바이너리를 놓은 뒤 설치 스크립트가 일회성 설정 마법사를 실행합니다(`--no-wizard`
 로 건너뜀). 아무것도 쓰기 전에 이 호스트에서 감지한 것을 먼저 보여주고, 실제로
-쓰는 파일은 `.masc/config/.env.local`(provider 키 하나)과 `runtime.toml`의
+쓰는 것은 `runtime.toml`의
 `[runtime].default` 둘뿐입니다.
 
 두 축을 보여줍니다. **모델 소스**는 턴이 토큰을 받는 곳입니다.
@@ -140,6 +145,125 @@ subscription 로그인 확인은 독립 명령이기도 합니다. `masc runtime
 <runtime_id>`는 CLI가 로그인돼 있으면 `0`, 아니면 `1`로 끝나며, 자격증명 파일을
 읽지 않고 서버의 로그인 probe를 재사용합니다.
 
+### 설치가 끝나도 아직 없는 것
+
+설치가 끝나면 MCP와 대시보드를 서비스하는 워크스페이스가 생깁니다. 일부러 하지
+않는 일이 넷 있고, 각각이 다음 단계입니다.
+
+**Keeper가 한 명도 없습니다.** 설정 시드는 런타임 설정, 프롬프트, 도구 정의,
+커넥터 선언을 쓰고 `config/keepers/`는 비워 둡니다. 누가 일할지는 워크스페이스마다
+다르니 설치 스크립트도 서버도 대신 정하지 않습니다. TUI의 Keepers 화면에서
+만들거나, 서버가 떠 있는 상태에서 `masc keeper-create`로 만듭니다. 설치할 때
+`--team <preset>`을 주면 그 팀이 대신 들어갑니다.
+
+**샌드박스 이미지가 아직 없습니다.** Keeper는 매 턴을 이미지 안에서 돌립니다
+(`docker`도 `microvm`도 이미지를 씁니다). 없으면 매 턴이
+`docker_preflight_failed`로 멈춥니다. Keeper가 기본으로 받는 이미지를 만드세요 —
+Debian 위에 bash, ripgrep, git. 저장소를 읽고 찾고 고치는 데 한 턴이 필요로 하는
+것들입니다.
+
+```bash
+masc sandbox-image                 # masc-sandbox:general 을 만듭니다
+masc sandbox-image --print         # 먼저 레시피를 읽고 싶으면
+```
+
+레시피는 바이너리에 들어 있고 docker 에 stdin 으로 갑니다. 체크아웃이 한 번도
+없던 호스트에서도 됩니다. 일부러 다국어 이미지로 만들지 않았습니다 — 프로젝트를
+**빌드**해야 하는 Keeper 는 그 프로젝트의 툴체인이 필요하고, 그건 Keeper 마다
+TOML 에 `sandbox_image = "node:22-bookworm"` 처럼 적습니다.
+
+MASC 자신의 개발 이미지 `masc-keeper-sandbox:local`(OCaml + 이 저장소의 opam
+의존성)은 더 이상 기본값이 아닙니다. 그게 필요한 Keeper 가 이름을 적습니다. 그리고
+그 이미지는 Dockerfile 이 이 저장소의 opam 파일을 복사하므로 여전히 체크아웃이
+있어야 만들어집니다.
+
+```bash
+scripts/build-keeper-sandbox-image.sh
+```
+
+호스트에서 그냥 도는 선택지는 없습니다. 프로필은 `docker`, `microvm`,
+`remote_ssh` 셋뿐이라 Docker도 `container`도 SSH endpoint도 없는 호스트는
+워크스페이스는 띄워도 Keeper는 못 돌립니다. `microvm`은 하이퍼바이저 뒤의 게스트를
+뜻하지 런타임 하나를 뜻하지 않습니다. `microvm_backend`가 `apple_container`,
+`microsandbox`, `nerdctl_kata` 중에서 고르고, 호스트에서 자동으로 정해지는 건
+기본값뿐입니다 — macOS면 Apple의 `container`, 그 밖에는 없음. 그래서 Linux
+호스트는 백엔드를 물려받는 대신 직접 적습니다. 아무것도 안 적힌 곳에서 microVM을
+요청한 Keeper는 조용히 공유 커널을 받는 대신 부팅에서 거절됩니다. 각 백엔드가
+지금 어디까지 되는지는 위 표에 있습니다.
+
+**그리고 그 이미지는 MASC 자신의 개발 환경입니다.** 범용이 아닙니다.
+`ocaml/opam:ubuntu-24.04-ocaml-5.5` 에 이 저장소의 opam 의존성을 미리 넣어 둔
+것입니다. Keeper 의 한 턴은 `docker run --rm` 으로 매번 새 컨테이너에서 돌고
+rootfs 는 읽기 전용, `--cap-drop=ALL` 입니다. 턴이 시작된 뒤에는 아무것도 설치할
+수 없으니 필요한 건 전부 이미지에 미리 있어야 합니다. TypeScript나 Python
+프로젝트를 맡은 Keeper 는 엉뚱한 툴체인을 만나고 맞는 걸 받아 올 수도 없습니다.
+
+그 일에 맞는 이미지를 Keeper 마다 TOML 에 적으세요.
+
+```toml
+[keeper]
+sandbox_profile = "docker"
+sandbox_image = "node:22-bookworm"
+network_mode = "none"
+```
+
+`MASC_KEEPER_SANDBOX_DOCKER_IMAGE` 는 이미지를 안 적은 모든 Keeper 의 기본값을
+바꿉니다. 한 턴은 `<이미지> bash -l -s` 로 돌고 도구 스크립트가 stdin 으로
+들어가므로, 어떤 이미지든 세 가지를 만족해야 합니다.
+
+- **`bash` 가 `PATH` 에 있을 것.** 턴을 받는 건 로그인 셸이라 `sh` 만 있는 Alpine
+  이미지는 턴을 못 받습니다.
+- **호스트 uid 로 돌 수 있을 것.** 컨테이너는 `--user <내 uid>:<gid>` 로 돕니다.
+  자기 전용 사용자로만 동작하는 이미지는 홈 디렉터리 없이 떨어집니다.
+- **툴체인이 이미 들어 있을 것.** rootfs 는 tmpfs 하나와 마운트된 작업 공간을 빼면
+  읽기 전용이고 `--cap-drop=ALL` 에 `no-new-privileges` 라, 턴이 없는 걸 발견해도
+  설치할 수 없습니다.
+
+**모델 제공자 키는 서버 환경에 있어야 합니다.** 변수 이름은 provider마다
+`runtime.toml`이 정합니다 — `OLLAMA_CLOUD_API_KEY`, `DEEPSEEK_API_KEY` 같은
+것들이고, 서버는 자기가 시작된 환경에서 그 값을 읽습니다. `masc`를 띄우는 셸에서
+export 하세요. TUI로 시작할 때 놓치기 쉬운데, TUI가 띄운 서버는 TUI의 환경을 그대로
+물려받기 때문입니다. 켜기 **전에** export 하세요.
+
+**시드된 모델 카탈로그 대부분은 바로 못 씁니다.** 카탈로그에는 예시를 겸해
+provider/model 바인딩 31개가 들어 있고, 그중 `max-request-body-bytes`를 선언한
+13개만 Keeper 턴을 받습니다. 나머지는 부팅 경고에 어떤 키를 넣어야 하는지까지
+같이 찍힙니다. `[runtime].default`는 13개 안에 있습니다.
+
+### 갓 만든 Keeper가 할 수 있는 일
+
+새 Keeper가 손을 뻗는 곳은 전부 닫힌 채로 시작합니다. 그중 처음 마주치는 네 가지입니다.
+
+**승인 레인이 둘이고, 시작 위치가 다릅니다.** 워크스페이스 레인은 `auto_judge`로
+시작합니다 — 모델이 각 호출을 읽고 판단합니다. 외부 서비스 레인, 그러니까 Jira나
+GitHub나 Slack처럼 붙여 둔 바깥으로 나가는 호출은 `manual`로 시작해서 사람이 하나씩
+답합니다. 일부러 갈라 둔 것입니다. 2026-08-27 측정에서 Gate 판정 379건 중 374건이
+워크스페이스 `always_allow`를 타고 지나갔고, 그 스위치를 같이 물려받는 레인이었다면
+그날 사고의 Jira 쓰기가 감사 기록만 남긴 채 통과했을 겁니다.
+
+**`auto_judge`는 자기 모델이 따로 필요하고, 그게 fleet 기본값이 아닙니다.** 판정은
+`hitl_auto_judge` exact-output 레인에서 돌고, 그 슬롯은 `glm-coding`과
+`ollama_cloud`를 가리킵니다. 그래서 키를 하나만 넣은 설치는 대개 그 레인에 못
+닿습니다. 판정을 못 한 호출은 허용도 거부도 아니고 Approvals 대기열로 넘어갑니다 —
+`manual`이 보내는 곳과 같습니다. 첫 작업에서 Keeper가 멈춘 것처럼 보이면 대개 거기
+있습니다.
+
+**샌드박스에 네트워크가 없습니다.** `docker`와 `microvm` 게스트는
+`network_mode = "none"`으로 시작합니다. 그 안에서 웹 검색도, `git push`도, HTTP
+호출도 실패합니다. 그 Keeper의 TOML이 `inherit`(호스트 네트워크) 또는
+`policy`(서버가 소유한 프록시를 거쳐 `egress_allow`에 적힌 목적지만)라고 말해야
+열립니다. `remote_ssh`는 `inherit`으로 시작합니다 — endpoint 자체가 이미 자기
+네트워크를 가진 기계이기 때문입니다. `masc keeper-create`는 대신 골라 주지 않고
+`--network-mode`를 반드시 받습니다.
+
+**연결된 커넥터가 하나도 없습니다.** `config/identity/` 아래 선언들은 연결이 아니라
+제공자 설명입니다. 갓 설치한 상태에서 `GET /api/v1/keepers/oauth/providers`는 전부
+`has_client: false`로 답합니다. 붙이려면 클라이언트가 먼저 있어야 합니다. 등록
+endpoint를 공개하는 제공자는 그 자리에서 클라이언트를 받고, 그렇지 않은 쪽은 —
+GitHub이 그렇습니다 — 앱을 직접 만들어 그 id와 secret을 Connectors 화면에서 `A`로
+넣거나 `POST /api/v1/keepers/oauth/client`로 보냅니다. 그다음에야 Keeper가 자기
+자격증명을 붙입니다.
+
 ## MCP 클라이언트 설정
 
 한 번에 끝내는 길은 `masc mcp-config`입니다. bearer를 발급하고 클라이언트용
@@ -155,6 +279,37 @@ masc mcp-config --base-path /path/to/project --client env   # 셸 export
 long-lived worker 토큰을 발급하며(`--expiring`으로 세션 한정), 고른 클라이언트에
 맞게 endpoint·토큰·헤더를 담습니다. 아래 수동 블록은 이 명령이 다루지 않는
 클라이언트를 직접 배선할 때 쓰는 같은 형식입니다.
+
+### 토큰
+
+`masc login` 은 agent 이름 하나에 bearer 하나를 발급합니다. `masc mcp-config` 는
+같은 발급에 클라이언트 설정 블록을 씌운 것입니다. 둘 다 로컬 작업이라 서버가 떠
+있지 않아도 됩니다.
+
+**다시 발급하는 것이 곧 회전입니다.** 워크스페이스는 agent 이름당 자격증명 하나를
+들고 있어서, `masc login --agent ops` 를 두 번째로 부르면 첫 번째를 대체하고 옛
+bearer 는 다음 요청부터 통하지 않습니다. 따로 폐기할 게 없습니다. 다만 옛 값을
+export 해 둔 곳은 새 값으로 바꿔야 합니다.
+
+**저장소에는 bearer 가 없습니다.** `.masc/auth/agents/<agent>.json` 은 토큰의
+SHA-256 만 들고 있어서, 잃어버린 토큰을 거기서 읽어낼 수 없습니다. raw 는 딱 한
+군데 — `.masc/auth/<agent>.token`, 권한 `0600` — 과 export 해 둔 셸에만 남습니다.
+
+```bash
+masc token list             # agent, 역할, 만료, raw 가 디스크에 있는지
+masc token revoke ops       # 새로 발급하지 않고 하나만 폐기
+masc token prune --dry-run  # 지울 대상 미리 보기
+masc token prune            # 만료된 것과 고아 스텁 전부 폐기
+```
+
+`prune` 이 건드리는 건 둘이고, 둘 다 아무것도 인증하지 못합니다 — 만료가 지난
+자격증명과, 대상 파일이 사라진 리다이렉트 스텁입니다. 지우는 게 보안 판단이 아니라
+청소인 이유이고, `revoke` 가 대상을 이름으로 받게 하면서 `prune` 은 확인을 안 받는
+이유입니다. 고아 스텁은 목록에 안 보입니다 — 리다이렉트를 따라가면 아무것도 안
+나와서 `masc token list` 가 건너뛰고, `prune` 만 찾아냅니다.
+
+`--no-expiry` 로 만든 토큰은 그 집합에 절대 안 들어갑니다. 그 클라이언트를 더 안
+쓰면 이름으로 폐기하세요.
 
 공개된 MCP 경로는 HTTP입니다. 먼저 `quickstart.sh`가 만든 worker bearer를
 불러옵니다.
@@ -270,11 +425,27 @@ Keeper를 알려 줍니다. 둘 다 없으면 그 줄도 없습니다.
 Keeper에게 바로 넘깁니다. `masc_ask`로 질문을 던진 Keeper에게는 터미널에서 바로
 답합니다 — 입력줄 위 그 줄이 가리키는 것이 이겁니다. Code 화면에서는 `Enter`로
 파일을 열고, `d`로 HEAD 대비 지금 고친 내용을, `H`로 그 파일을 건드린 커밋을,
-`m`으로 그 파일에 달린 메모를 봅니다.
+`m`으로 그 파일에 달린 메모를 봅니다. `K`와 `D`는 커서가 놓인 이름의 타입과
+정의를 언어 서버에 물어봅니다.
+
+언어 서버는 MASC가 같이 배포하지 않습니다. 프로젝트 언어에 맞는 프로그램을
+`PATH`에서 찾아 직접 띄우고, 없으면 짐작하는 대신 `Command_not_found`로
+답합니다. OCaml은 `ocamllsp`, TypeScript와 JavaScript는
+`typescript-language-server`, Python은 `pylsp`, Rust는 `rust-analyzer`, Go는
+`gopls`입니다. Keeper의 `keeper_code_query` 도구도 같은 서버를 쓰므로, 서버가
+없는 언어를 맡은 Keeper는 파일을 글자로 읽는 데까지만 갑니다. OCaml에서
+`references`는 `dune build @ocaml-index`가 추가로 필요하고, 없으면 답이 그
+명령을 알려 줍니다.
 
 TUI와 서버가 서로 다른 작업 공간을 보고 있으면 머리글이 그렇게 말합니다 — 연결
 표시 옆 `[workspace mismatch]`, 그리고 아래 줄에 두 경로가 같이 나옵니다. 그동안
 둘을 섞을 읽기는 거절되지만, 서버가 답하는 화면은 그대로 그려집니다.
+
+포트에 아무도 응답하지 않으면 TUI가 옆에 있는 `masc` 를 자식 프로세스로 띄우고
+`/health` 를 기다립니다. TUI를 닫으면 그 서버도 같이 내려갑니다 — 다만 이미 돌고
+있던 서버는 건드리지 않습니다. 자동 시작은 세션당 한 번입니다. 안 뜨면(포트를 다른
+게 쓰고 있거나, `masc` 가 TUI 옆에 없거나) Keepers 화면에서 `s` 로 다시 시도할 수
+있고, 무엇이 실패했는지는 아래 줄에 나옵니다.
 
 서버가 꺼져 있어도 Keeper 명단, Keeper 상세, 할 일 목록은 디스크에서 읽으므로 그대로
 보입니다. Approvals, Board, Planning, Fusion, Runtime, 로그, 메시지 보내기는 서버가
@@ -318,7 +489,6 @@ MASC는 런타임 데이터를 `<base-path>/.masc` 아래에서 찾습니다. �
 | `keepers/<name>.toml` | Keeper 하나에 필요한 전부. 운영 설정, 프롬프트(`keeper.instructions`), `[keeper.tools]` 도구 포스처 |
 | `repositories.toml` | 저장소 작업에 쓰는 저장소 정보와 체크아웃 경로 |
 | `keeper_repo_mappings.toml` | Keeper–저장소 기본 연결. 권한 경계가 아니라 기본값입니다 |
-| `.env.local` | 설치와 quickstart가 써 넣는 프로바이더 환경 변수 |
 
 같은 뿌리 아래 한 디렉터리는 생성물이 아니라 사람이 씁니다.
 

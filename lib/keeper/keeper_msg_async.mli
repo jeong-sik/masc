@@ -175,6 +175,15 @@ and recovery_record_error_kind =
   | Recovery_entry_exception of string
 
 type submit_error =
+  | Submit_lane_unavailable of
+      { lane : string
+      ; wait_budget_sec : float
+      }
+      (** Lane admission exceeded the per-submit wait budget
+          ([Env_config_keeper.KeeperLaneGate.admission_wait_budget_sec]): a
+          prior durable write on this keeper lane is still in progress or
+          hung. The submit was rejected before spawning any work, so the
+          caller can retry or fail over instead of hanging (#25398). *)
   | Submit_rejected of access_rejection
   | Submit_invalid_keeper_name of { reason : string }
   | Submit_invalid_request_context of { reason : string }

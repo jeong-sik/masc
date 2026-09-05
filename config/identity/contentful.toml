@@ -15,5 +15,5 @@ mcp_url = "https://mcp.contentful.com/mcp"
 
 access_token_env = "CONTENTFUL_ACCESS_TOKEN"
 expires_at_env = "CONTENTFUL_EXPIRES_AT"
-refresh_token_file = "contentful_refresh_token"
+refresh_token_file = "/home/keeper/.contentful/refresh_token"
 renew_before_sec = 300

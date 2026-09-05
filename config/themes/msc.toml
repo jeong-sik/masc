@@ -1,0 +1,20 @@
+name = "msc"
+light = false
+
+[palette]
+base00 = "001144"
+base01 = "002266"
+base02 = "003388"
+base03 = "5577aa"
+base04 = "88bbdd"
+base05 = "ffffff"
+base06 = "e0f0ff"
+base07 = "ffffff"
+base08 = "ff5555"
+base09 = "ffaa00"
+base0a = "ffff55"
+base0b = "55ff55"
+base0c = "55ffff"
+base0d = "5599ff"
+base0e = "ff55ff"
+base0f = "ddbb88"

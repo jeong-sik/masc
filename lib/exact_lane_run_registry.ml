@@ -155,6 +155,25 @@ module Payload = struct
      compaction was indistinguishable from "never ran" (lane audit W8). *)
   let retention_group = Some (fun registration -> lane_key registration.lane)
 
+  (* The prompt and the response, dropped from the copy the store keeps.
+
+     They are 98% of this registry's bytes: the log is 347 MB across 12,079
+     rows and [registration.input] alone is 340 MB (measured 2026-09-05). The
+     store holds 2 000 completed rows per lane across four lanes, and the list
+     projection reads none of it -- [projected_run_of_entry] already sets both
+     to [`Null] -- while the detail route reads one row at a time. That was
+     498 MB of live heap, the largest single item in the server.
+
+     Nothing is lost: the row on disk still carries both, and [get] re-reads
+     it. What stays here is what a projection reads -- the lane, the actor and
+     the outcome -- so [retention_group] above and the list keep working on
+     the shed copy. *)
+  let shed_registration registration = { registration with input = Exact_input `Null }
+
+  let shed_completion (completion : completion) =
+    { completion with output = `Null }
+  ;;
+
   let registration_to_yojson registration =
     `Assoc
       [ "lane", `String (lane_key registration.lane)
@@ -257,6 +276,7 @@ type failed_completion =
 
 type t =
   { store : Store.t
+  ; path : string option
   ; failed_completions : (string * failed_completion) list Atomic.t
   ; projection : run list Atomic.t
   ; observation_mutex : Cross_context_mutex.t
@@ -309,7 +329,36 @@ let remove_failed_completion t run_id =
     (List.remove_assoc run_id (Atomic.get t.failed_completions))
 ;;
 
-let run_of_entry failed_completions (entry : Store.entry) =
+let projected_run_of_entry failed_completions (entry : Store.entry) =
+  let status =
+    match List.assoc_opt entry.id failed_completions, entry.status with
+    | Some failed, Store.Running ->
+      Completion_persistence_failed
+        { intended_outcome = failed.intended_outcome
+        ; elapsed_s = failed.elapsed_s
+        ; output = `Null
+        ; selected_slot = failed.selected_slot
+        ; failure = failed.failure
+        }
+    | None, Store.Running -> Running
+    | _, Store.Completed completion ->
+      Completed
+        { outcome = completion.outcome
+        ; elapsed_s = completion.elapsed_s
+        ; output = `Null
+        ; selected_slot = completion.selected_slot
+        }
+  in
+  { run_id = entry.id
+  ; lane = entry.registration.lane
+  ; actor = entry.registration.actor
+  ; started_at = entry.started_at
+  ; input = Exact_input `Null
+  ; status
+  }
+;;
+
+let full_run_of_entry failed_completions (entry : Store.entry) =
   let status =
     match List.assoc_opt entry.id failed_completions, entry.status with
     | Some failed, Store.Running ->
@@ -343,13 +392,14 @@ let run_of_entry failed_completions (entry : Store.entry) =
 let publish_projection t =
   let failed_completions = Atomic.get t.failed_completions in
   Store.list_entries t.store
-  |> List.map (run_of_entry failed_completions)
+  |> List.map (projected_run_of_entry failed_completions)
   |> Atomic.set t.projection
 ;;
 
-let make store =
+let make ?path store =
   let t =
     { store
+    ; path
     ; failed_completions = Atomic.make []
     ; projection = Atomic.make []
     ; observation_mutex = Cross_context_mutex.create ()
@@ -359,8 +409,8 @@ let make store =
   t
 ;;
 
-let create ?path () = make (Store.create ?path ())
-let replay path = make (Store.replay path)
+let create ?path () = make ?path (Store.create ?path ())
+let replay path = make ~path (Store.replay path)
 
 (* [Cross_context_mutex], not [Stdlib.Mutex]: this lock wraps
    [Store.register] / [Store.complete], whose critical section performs a
@@ -472,8 +522,108 @@ let recent_runs t ~limit ~before =
     { runs; total = List.length all; has_more })
 ;;
 
+let parse_disk_event_line line =
+  try
+    let json = Yojson.Safe.from_string line in
+    match json with
+    | `Assoc fields ->
+      let event = List.assoc_opt "event" fields in
+      let id = List.assoc_opt "id" fields in
+      (match event, id with
+       | Some (`String "register"), Some (`String id) ->
+         let started_at =
+           match List.assoc_opt "started_at" fields with
+           | Some (`Float f) -> f
+           | Some (`Int i) -> float_of_int i
+           | _ -> 0.0
+         in
+         (match List.assoc_opt "registration" fields with
+          | Some reg_json ->
+            (match Payload.registration_of_yojson reg_json with
+             | Ok reg -> Some (`Register (id, started_at, reg))
+             | Error _ -> None)
+          | None -> None)
+       | Some (`String "complete"), Some (`String id) ->
+         (match List.assoc_opt "completion" fields with
+          | Some comp_json ->
+            (match Payload.completion_of_yojson comp_json with
+             | Ok comp -> Some (`Complete (id, comp))
+             | Error _ -> None)
+          | None -> None)
+       | _ -> None)
+    | _ -> None
+  with
+  | Yojson.Json_error _ -> None
+;;
+
+let load_payloads_from_disk ~path ~run_id =
+  if not (Fs_compat.file_exists path)
+  then None
+  else (
+    let id_pattern = Printf.sprintf "\"id\":\"%s\"" run_id in
+    let id_pattern_spaced = Printf.sprintf "\"id\": \"%s\"" run_id in
+    let disk_input = ref None in
+    let disk_output = ref None in
+    let matches_id line =
+      String_util.contains_substring line id_pattern
+      || String_util.contains_substring line id_pattern_spaced
+    in
+    try
+      let _boundary =
+        Fs_compat.fold_appended_lines
+          ~path
+          ~from:0
+          ~init:()
+          ~f:(fun () line ->
+            if matches_id line
+            then (
+              match parse_disk_event_line line with
+              | Some (`Register (id, _started_at, reg)) when String.equal id run_id ->
+                disk_input := Some reg.input
+              | Some (`Complete (id, comp)) when String.equal id run_id ->
+                disk_output := Some comp.output
+              | _ -> ()))
+      in
+      Some (!disk_input, !disk_output)
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Log.Keeper.warn
+        "exact_lane_run_registry: disk load error for %s: %s"
+        run_id
+        (Printexc.to_string exn);
+      None)
+;;
+
 let get t ~run_id =
-  List.find_opt (fun run -> String.equal run.run_id run_id) (Atomic.get t.projection)
+  match Store.get t.store ~id:run_id with
+  | None -> None
+  | Some entry ->
+    let failed_completions = Atomic.get t.failed_completions in
+    let base_run = full_run_of_entry failed_completions entry in
+    (match t.path with
+     | None -> Some base_run
+     | Some path ->
+       (match load_payloads_from_disk ~path ~run_id with
+        | None -> Some base_run
+        | Some (disk_input, disk_output) ->
+          let input =
+            match disk_input with
+            | Some inp -> inp
+            | None -> base_run.input
+          in
+          let status =
+            match base_run.status with
+            | Completed comp ->
+              let output =
+                match disk_output with
+                | Some out -> out
+                | None -> comp.output
+              in
+              Completed { comp with output }
+            | other -> other
+          in
+          Some { base_run with input; status }))
 ;;
 
 let status_label = function

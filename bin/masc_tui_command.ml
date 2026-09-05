@@ -6,6 +6,8 @@ type t =
     }
   | Task_missing_title
   | Help
+  | About
+  | Open_metrics
   | Open_settings
   | Open_diff
   | Open_changes
@@ -17,6 +19,7 @@ type t =
   | Set_thinking of [ `Cycle | `Hidden | `Folded | `Full ]
   | Set_tools of [ `Toggle | `Compact | `Full ]
   | Cycle_memory
+  | Open_fleet_memory
   | Find_in_chat of string
   | Find_next
   | Inspect_context
@@ -87,6 +90,10 @@ let catalog =
     ; args = ""
     ; summary = "cycle Librarian/Memory journal rows: summary, full, hidden"
     }
+  ; { word = "fleet-memory"
+    ; args = ""
+    ; summary = "browse consolidated facts across the entire keeper fleet"
+    }
   ; { word = "find"
     ; args = "[text]"
     ; summary = "go to the newest message holding text; again for the next"
@@ -105,6 +112,22 @@ let catalog =
     ; summary = "list prompt presets; save the live state; restore one (autosaves first)"
     }
   ; { word = "help"; args = ""; summary = "this list" }
+  ; { word = "about"
+    ; args = ""
+    ; summary = "display MASC Horned Reaper ASCII emblem and system telemetry"
+    }
+  ; { word = "splash"
+    ; args = ""
+    ; summary = "display MASC Horned Reaper ASCII emblem and system telemetry"
+    }
+  ; { word = "metrics"
+    ; args = ""
+    ; summary = "display multicore engine telemetry, scheduler latency, and fleet health"
+    }
+  ; { word = "telemetry"
+    ; args = ""
+    ; summary = "display multicore engine telemetry, scheduler latency, and fleet health"
+    }
   ]
 
 let usage entry =
@@ -155,6 +178,8 @@ let parse text =
     | "task", "" -> Task_missing_title
     | "task", title -> Task_for_keeper { title; body }
     | "help", _ -> Help
+    | "about", _ | "splash", _ -> About
+    | "metrics", _ | "telemetry", _ -> Open_metrics
     | "settings", _ -> Open_settings
     | "diff", _ -> Open_diff
     | "changes", _ -> Open_changes
@@ -173,6 +198,7 @@ let parse text =
     | "tools", "compact" -> Set_tools `Compact
     | "tools", "full" -> Set_tools `Full
     | "memory", _ -> Cycle_memory
+    | "fleet-memory", _ -> Open_fleet_memory
     | "find", "" -> Find_next
     | "find", text -> Find_in_chat text
     | "context", _ -> Inspect_context
@@ -576,3 +602,18 @@ let is_slash_navigable ?(keeper_names = []) text =
       else
         let rest = String.trim after_space in
         List.exists (fun opt -> String.starts_with ~prefix:rest opt) options
+
+let about_banner ?(theme_name = "default") ?(active_keepers = 0) () =
+  String.concat "\n"
+    [ "   ___  ___  ___  _____ _____ "
+    ; "  |   \\/   |/ _ \\/  ___/  __ \\"
+    ; "  | /\\  / / /_\\ \\ `--.| /  \\/"
+    ; "  | | \\/| |  _  | `--. \\ |    "
+    ; "  | |   | | | | /\\__/ / \\__/\\"
+    ; "  \\_|   |_|_| |_\\____/ \\____/"
+    ; " ╭────────────────────────────────────────────────────────╮"
+    ; " │  HORNED REAPER CORE · Multi-Agent Supervised Control   │"
+    ; Printf.sprintf " │  Theme: %-22s  Keepers: %-13d │" theme_name active_keepers
+    ; " │  Treasury: 24K Gold Dungeon · Gates: All Secure        │"
+    ; " ╰────────────────────────────────────────────────────────╯"
+    ]

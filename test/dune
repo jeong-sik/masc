@@ -2143,6 +2143,10 @@
 (include stanzas/test_channel_gate_discord_state_in_process.inc)
 (include stanzas/test_discord_directory_failure.inc)
 (include stanzas/test_bootstrap_retention_warning.inc)
+(include stanzas/test_sandbox_image_recipe.inc)
+(include stanzas/test_auth_token_inventory.inc)
+(include stanzas/test_config_root_embedded_seed.inc)
+(include stanzas/test_front_door.inc)
 
 (include stanzas/test_gate_surface.inc)
 
@@ -2380,6 +2384,7 @@
 (include stanzas/test_keeper_msg_async_path_traversal.inc)
 
 (include stanzas/test_keeper_msg_async_terminal_event.inc)
+(include stanzas/test_keeper_msg_async_lane_admission.inc)
 
 (include stanzas/test_keeper_msg_async_durable_active_inventory.inc)
 
@@ -2480,6 +2485,8 @@
 (include stanzas/test_workspace_root_state_parity.inc)
 
 (include stanzas/test_http_auth_strict_flag.inc)
+
+(include stanzas/test_serving_domain_isolation_flag.inc)
 
 (include stanzas/test_keeper_approval_resolved_history.inc)
 
@@ -3304,7 +3311,7 @@
 (test
  (name test_tui_palette_matching)
  (modules test_tui_palette_matching)
- (libraries alcotest masc.masc_types masc_tui_code_lexer masc_tui_types))
+ (libraries alcotest masc.masc_types masc_tui_code_lexer masc_tui_types masc_tui_fetched))
 
 (test
  (name test_tui_workspace_entries)
@@ -4578,6 +4585,11 @@
  (name test_keeper_sandbox_remote)
  (modules test_keeper_sandbox_remote)
  (libraries masc_test_deps exec_ssh_protocol eio_main))
+
+(test
+ (name test_keeper_tool_execute_observe)
+ (modules test_keeper_tool_execute_observe)
+ (libraries masc_test_deps))
 
 (test
  (name test_keeper_github_login_lane)

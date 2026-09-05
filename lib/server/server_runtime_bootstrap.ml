@@ -788,7 +788,9 @@ type activated_owner_state =
 
 let owner_initialization_error_to_string = function
   | Runtime_config_path_unavailable ->
-    "no runtime config path; cannot initialize the default Runtime"
+    "no runtime config path; cannot initialize the default Runtime. Seed one \
+     with `masc init --base-path <dir>`, or point MASC_CONFIG_DIR at a config \
+     root that holds runtime.toml"
   | Runtime_config_read_failed detail ->
     "runtime config observation failed: " ^ detail
   | Run_registry_already_installed `Fusion ->
@@ -829,6 +831,7 @@ let initialize_owner_state_blocking
       ~env
       ~base_path
       ?input_base_path
+      ~accept_store_quarantine
       ~clock
       ~mono_clock
       ~net
@@ -1169,6 +1172,7 @@ let initialize_owner_state_blocking
     match
       Server_bootstrap_loops.prepare_keeper_persistence
         ~requested_base_path
+        ~accept_store_quarantine
         ~config:(Mcp_server.workspace_config state)
         ()
     with
@@ -1558,8 +1562,8 @@ let activate_owner_state
   }
 ;;
 
-let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_request_handler
-    ~make_h2_request_handler ~make_h2_error_handler () =
+let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantine
+    ~make_routes ~make_request_handler ~make_h2_request_handler ~make_h2_error_handler () =
   let resolved_auth_config =
     match Server_auth_config.resolve (Server_auth_config.read_env ()) with
     | Ok config -> config
@@ -1614,23 +1618,12 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
   let background_request_authority =
     Server_request_authority.projection_context request_trust_policy
   in
-  let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
-  let request_handler = make_request_handler ~trust_policy:request_trust_policy routes in
-  let h2_request_handler =
-    make_h2_request_handler
-      ~trust_policy:request_trust_policy
-      ~sw
-      ~clock
-      ~server_start_time
-  in
-  let h2_error_handler = make_h2_error_handler () in
   let http_mode =
     match configured_http_mode with
     | Env_config.Transport.H2_only -> `H2_only
     | Env_config.Transport.H1_only -> `H1_only
     | Env_config.Transport.Auto -> `Auto
   in
-  let socket = Server_bootstrap_http.listen_socket ~sw ~net config in
   Transport_metrics.set_ws_same_origin_runtime_ready false;
   clear_server_state ();
   Server_startup_state.reset ();
@@ -1661,7 +1654,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       Server_startup_state.mark_blocking ();
       let initialized_owner =
         initialize_owner_state_blocking ~sw ~env ~base_path ?input_base_path
-          ~clock ~mono_clock ~net ~domain_mgr ~proc_mgr ~fs ()
+          ~accept_store_quarantine ~clock ~mono_clock ~net ~domain_mgr ~proc_mgr ~fs ()
       in
       let activated_owner =
         activate_owner_state
@@ -1932,9 +1925,9 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
         ~clock
         ~broadcast_digest:
           Server_dashboard_http_execution_surfaces.broadcast_operator_digest;
-      (* Pre-warm shell cache in a separate fiber so it cannot block
-         lazy startup tasks or later keeper loop startup
-         (#keeper-bootstrap-stuck). *)
+      (* Pre-warm primary dashboard surfaces in parallel across worker
+         domains in a separate fiber so it cannot block lazy startup tasks
+         or later keeper loop startup (#keeper-bootstrap-stuck). *)
       Atomic.set Server_dashboard_http.shell_warming true;
       Eio.Fiber.fork ~sw (fun () ->
         let outer_timeout_sec =
@@ -1942,17 +1935,17 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
         in
         try
            match Eio.Time.with_timeout clock outer_timeout_sec (fun () ->
-             Server_dashboard_http.warm_shell_cache state;
+             Server_dashboard_http.warm_dashboard_surfaces state;
              Ok ())
            with
            | Ok () -> ()
            | Error `Timeout ->
-             Log.Dashboard.warn "shell cache pre-warm timed out (%.1fs)"
+             Log.Dashboard.warn "dashboard surfaces pre-warm timed out (%.1fs)"
                outer_timeout_sec
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
-             Log.Dashboard.warn "shell cache pre-warm failed: %s"
+             Log.Dashboard.warn "dashboard surfaces pre-warm failed: %s"
              (Printexc.to_string exn));
       ()
     with
@@ -1985,13 +1978,74 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
         (Printexc.to_string exn));
 
   (* 3. Start serving -- /health responds before init completes *)
-  let addr_label = Printf.sprintf "%s:%d" config.host config.port in
-  match http_mode with
-  | `H2_only ->
-    Server_bootstrap_http.serve_h2 ~sw ~clock ~socket ~addr_label
-      ~h2_request_handler ~h2_error_handler
-  | `H1_only ->
-    Server_bootstrap_http.serve ~sw ~clock ~socket ~addr_label ~request_handler
-  | `Auto ->
-    Server_bootstrap_http.serve_auto ~sw ~clock ~socket ~addr_label
-      ~request_handler ~h2_request_handler ~h2_error_handler
+  let run_serving ~sw ~socket ~routes:_ ~request_handler ~h2_request_handler
+      ~h2_error_handler =
+    let addr_label = Printf.sprintf "%s:%d" config.host config.port in
+    match http_mode with
+    | `H2_only ->
+      Server_bootstrap_http.serve_h2 ~sw ~clock ~socket ~addr_label
+        ~h2_request_handler ~h2_error_handler
+    | `H1_only ->
+      Server_bootstrap_http.serve ~sw ~clock ~socket ~addr_label ~request_handler
+    | `Auto ->
+      Server_bootstrap_http.serve_auto ~sw ~clock ~socket ~addr_label
+        ~request_handler ~h2_request_handler ~h2_error_handler
+  in
+  if Env_config.Transport.serving_domain_enabled ()
+  then (
+    Log.Server.info
+      "HTTP serving domain isolation enabled (RFC-0204 Phase 3): accept loop isolated on dedicated domain";
+    Eio.Domain_manager.run domain_mgr (fun () ->
+      (* This domain starts after [main_eio.ml] tuned the main one, and
+         [Gc.set]'s minor_heap_size is per-domain, so it would otherwise
+         serve every request on the 2 MB default -- the isolation this block
+         exists for would be undone by the domain collecting eight times as
+         often, and a minor collection stops every other domain with it. *)
+      Domain_pool.tune_minor_heap ();
+      Eio.Switch.run (fun serving_sw ->
+        Eio_context.with_turn_switch serving_sw (fun () ->
+          let socket =
+            Server_bootstrap_http.listen_socket ~sw:serving_sw ~net config
+          in
+          let routes =
+            make_routes ~port:config.port ~host:config.host ~sw:serving_sw ~clock
+          in
+          let request_handler =
+            make_request_handler ~trust_policy:request_trust_policy routes
+          in
+          let h2_request_handler =
+            make_h2_request_handler
+              ~trust_policy:request_trust_policy
+              ~sw:serving_sw
+              ~clock
+              ~server_start_time
+          in
+          let h2_error_handler = make_h2_error_handler () in
+          run_serving
+            ~sw:serving_sw
+            ~socket
+            ~routes
+            ~request_handler
+            ~h2_request_handler
+            ~h2_error_handler))))
+  else (
+    let socket = Server_bootstrap_http.listen_socket ~sw ~net config in
+    let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
+    let request_handler =
+      make_request_handler ~trust_policy:request_trust_policy routes
+    in
+    let h2_request_handler =
+      make_h2_request_handler
+        ~trust_policy:request_trust_policy
+        ~sw
+        ~clock
+        ~server_start_time
+    in
+    let h2_error_handler = make_h2_error_handler () in
+    run_serving
+      ~sw
+      ~socket
+      ~routes
+      ~request_handler
+      ~h2_request_handler
+      ~h2_error_handler)

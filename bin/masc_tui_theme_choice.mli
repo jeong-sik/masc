@@ -43,3 +43,6 @@ val apply : string -> bool
 
 val follow_terminal : unit -> unit
 (** Go back to the terminal's own colours. *)
+
+val invalidate_cache : unit -> unit
+(** Invalidate cached entries so the next call to [entries] reloads from disk. *)

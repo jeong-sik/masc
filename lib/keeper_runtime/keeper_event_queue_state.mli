@@ -118,6 +118,7 @@ type t
 type pending_selection =
   { source : Keeper_event_queue.stimulus
   ; admitted_revision : int64
+  ; checkpoint_retentions : int
   }
 (** One exact durable queue entry. [admitted_revision] records the durable
     transform that admitted the snapshot; entries admitted by the same
@@ -202,6 +203,15 @@ val ack_pending :
 (** Compare-and-remove the exact immutable selected stimulus snapshot.
     Unrelated queue revisions and enqueues are allowed; a missing, duplicated,
     or changed selected identity fails closed. *)
+
+val note_checkpoint_retention :
+  selection:pending_selection ->
+  t ->
+  ((t * (pending_selection * int)), string) result
+(** Count one checkpoint-yield retention on the exact selected entry and
+    rewrite it with the new count. The returned selection carries the count;
+    the caller's pre-bump snapshot no longer validates structurally and must
+    not be reused against the queue. *)
 
 val reprioritize_pending :
   selection:pending_selection ->

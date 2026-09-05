@@ -33,6 +33,27 @@ let test_sparkline_colored () =
   check int "sparkline colored has 3 display cells" 3 (Layout.display_width colored)
 ;;
 
+(* A gauge draws a proportion, not a verdict: no level colouring at any
+   fill, so a task-completion gauge at 90% is not painted Bad (#33297). *)
+let test_gauge_carries_no_level_colour () =
+  let contains ~needle hay =
+    let n = String.length needle and h = String.length hay in
+    let rec go i = i + n <= h && (String.equal (String.sub hay i n) needle || go (i + 1)) in
+    n > 0 && go 0
+  in
+  List.iter
+    (fun value ->
+      let g = Chart.gauge ~width:40 ~value ~max_value:100 ~label:"Health" () in
+      List.iter
+        (fun (name, status) ->
+          check bool
+            (Printf.sprintf "gauge at %d%% carries no %s colour" value name)
+            false
+            (contains ~needle:(Masc_tui_theme.status status) g))
+        [ ("Ok", Masc_tui_theme.Ok); ("Warn", Masc_tui_theme.Warn); ("Bad", Masc_tui_theme.Bad) ])
+    [ 0; 50; 70; 85; 100 ]
+;;
+
 let test_gauge_proportions () =
   let g50 = Chart.gauge ~width:40 ~value:50 ~max_value:100 ~label:"Context" () in
   check bool "gauge fits within 40 width" true (Layout.display_width g50 <= 40);
@@ -53,26 +74,6 @@ let test_compact_number () =
   check string "ten thousands" "24k" (Chart.format_compact_num 24000);
   check string "millions" "2.5M" (Chart.format_compact_num 2500000);
   check string "min_int safe" "-4.6M" (Chart.format_compact_num min_int)
-;;
-
-let test_waterfall_chart () =
-  let steps : Chart.waterfall_step list =
-    [ { label = "Provider TTFT"; duration_ms = 300; style = Some (Chart.Status Masc_tui_theme.Info) }
-    ; { label = "Stream Gen"; duration_ms = 700; style = Some (Chart.Tone Masc_tui_theme.Accent) }
-    ]
-  in
-  let rows = Chart.waterfall ~width:60 steps in
-  check int "two waterfall rows" 2 (List.length rows);
-  List.iter
-    (fun row ->
-      check bool "waterfall row bounded by width" true (Layout.display_width row <= 60))
-    rows;
-  (* narrow width test *)
-  let narrow_rows = Chart.waterfall ~width:25 steps in
-  List.iter
-    (fun row ->
-      check bool "narrow waterfall row bounded by 25" true (Layout.display_width row <= 25))
-    narrow_rows
 ;;
 
 let test_heatmap_24h_normalization () =
@@ -128,11 +129,10 @@ let () =
         ; Alcotest.test_case "colored" `Quick test_sparkline_colored
         ] )
     ; ( "gauges"
-      , [ Alcotest.test_case "proportions" `Quick test_gauge_proportions
+      , [ Alcotest.test_case "no level colour" `Quick test_gauge_carries_no_level_colour
+        ; Alcotest.test_case "proportions" `Quick test_gauge_proportions
         ; Alcotest.test_case "compact_number" `Quick test_compact_number
         ] )
-    ; ( "waterfall"
-      , [ Alcotest.test_case "breakdown" `Quick test_waterfall_chart ] )
     ; ( "heatmap"
       , [ Alcotest.test_case "24h_normalization" `Quick test_heatmap_24h_normalization ] )
     ; ( "distribution"

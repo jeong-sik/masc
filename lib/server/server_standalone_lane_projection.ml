@@ -327,10 +327,14 @@ let run_detail_json_with
 ;;
 
 let run_detail_json ~run_id =
+  let exact_runs =
+    match Exact_lane_run_registry.get (Exact_lane_run_registry.global ()) ~run_id with
+    | Some run -> [ run ]
+    | None -> []
+  in
   run_detail_json_with
     ~run_id
-    ~exact_runs:
-      (Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ()))
+    ~exact_runs
     ~verification_runs:
       (Verification_run_registry.list_runs (Verification_run_registry.global ()))
     ~goal_verification_runs:

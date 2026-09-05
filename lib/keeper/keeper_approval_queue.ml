@@ -76,6 +76,12 @@ type grant_error =
   | Grant_replay_not_consumed of string
   | Grant_replay_outcome_conflict of string
 
+type resolution_absence =
+  | Resolution_missing
+  | Resolution_still_pending
+  | Resolution_not_approved
+  | Resolution_workspace_mismatch of { stored_base_path : string }
+
 type approved_resolution_state =
   | Resolution_unconsumed
   | Resolution_consumed
@@ -297,6 +303,26 @@ let grant_error_to_string = function
       approval_id
 ;;
 
+let resolution_absence_of_grant_error = function
+  | Grant_resolution_missing _ -> Some Resolution_missing
+  | Grant_still_pending _ -> Some Resolution_still_pending
+  | Grant_resolution_not_approved _ -> Some Resolution_not_approved
+  | Grant_workspace_mismatch { stored_base_path; _ } ->
+    Some (Resolution_workspace_mismatch { stored_base_path })
+  | Grant_store_unavailable _
+  | Grant_replay_projection_unavailable _
+  | Grant_replay_not_consumed _
+  | Grant_replay_outcome_conflict _ -> None
+;;
+
+let resolution_absence_to_string = function
+  | Resolution_missing -> "resolution_missing"
+  | Resolution_still_pending -> "resolution_still_pending"
+  | Resolution_not_approved -> "resolution_not_approved"
+  | Resolution_workspace_mismatch { stored_base_path } ->
+    "resolution_workspace_mismatch:" ^ stored_base_path
+;;
+
 let install_error_to_string = function
   | Install_storage_failed error -> storage_error_to_string error
 ;;
@@ -306,7 +332,12 @@ let install_error_to_string = function
    field check with "contains unsupported field goal_ids" instead of the version
    check that tells an operator what to do about it. A format change the version
    does not record is a format change nobody can diagnose. *)
-let pending_store_version = 9
+(* 10: the durable state is the snapshot plus the rows of [pending.log.jsonl]
+   appended after it, and the snapshot carries [generation] so rows written
+   before its last rewrite are recognised as stale. A binary that knows only
+   v9 must not open a v10 store and show a resolved approval as pending, so
+   the version moved (RFC main-domain-scheduler-latency §8.5, P4e). *)
+let pending_store_version = 10
 let pending_store_surface = "keeper_gate_pending"
 let replay_results_store_version = 1
 let replay_results_store_surface = "keeper_gate_replay_results"
@@ -327,6 +358,51 @@ let store_revisions : int SMap.t Atomic.t = Atomic.make SMap.empty
 (** Process projection of the next value persisted in each workspace snapshot. *)
 let next_sequences : int SMap.t Atomic.t = Atomic.make SMap.empty
 let first_sequence = 1
+
+(* ── Append log beside the snapshot (RFC main-domain-scheduler-latency §8.5, P4e)
+
+   The in-memory maps are the authority; the snapshot file plus the rows of
+   [pending.log.jsonl] appended after it are the durable record of that
+   state. A mutation appends only the entries that differ from the last
+   durable state, compared by physical equality: entries are immutable
+   records, so a changed entry is a new record and an unchanged one is the
+   same pointer. The snapshot is rewritten, and the log emptied, only when
+   the rows outnumber [compaction_ratio] times the entries they describe, or
+   when the log is not what memory believes it is. Measured 2026-09-05: every
+   mutation rewrote the 23 MB pretty-printed snapshot, 12 to 14 GB allocated
+   per four minutes across the fleet. *)
+type durable_state =
+  { durable_pending : pending_approval SMap.t (* this workspace's entries *)
+  ; durable_deliveries : persisted_delivery SMap.t
+  ; snapshot_generation : int (* of the snapshot the log rows extend *)
+  ; log_cursor : Fs_compat.Private_jsonl_cursor.t
+  ; log_rows : int (* rows appended since the snapshot was written *)
+  }
+
+let durable_states : durable_state SMap.t Atomic.t = Atomic.make SMap.empty
+let compaction_ratio = 2
+let first_generation = 1
+
+type write_mode =
+  | Append_rows (* production: rows for what changed; the snapshot by ratio *)
+  | Rewrite_snapshot
+  (* test seams that inject the snapshot writer: exercise it on every write *)
+
+let durable_state_for ~base_path = SMap.find_opt base_path (Atomic.get durable_states)
+
+let set_durable_state ~base_path state =
+  Atomic.set durable_states (SMap.add base_path state (Atomic.get durable_states))
+;;
+
+let drop_durable_state ~base_path =
+  Atomic.set durable_states (SMap.remove base_path (Atomic.get durable_states))
+;;
+
+let next_generation ~base_path =
+  match durable_state_for ~base_path with
+  | Some state -> state.snapshot_generation + 1
+  | None -> first_generation
+;;
 
 (** Serialize one durable pending/delivery snapshot transition across both Eio
     fibers and non-Eio callers.  A plain [Stdlib.Mutex.protect] is invalid here:
@@ -377,6 +453,19 @@ let store_revision_for_workspace ~base_path =
 
 let pending_store_path ~base_path =
   Keeper_gate_path.pending ~base_path
+;;
+
+let pending_log_path ~base_path = Keeper_gate_path.pending_log ~base_path
+
+let private_jsonl_error ~path error =
+  { path; reason = Fs_compat.private_jsonl_transaction_error_to_string error }
+;;
+
+let observe_log_settlement ~path error =
+  Log.Server.warn
+    "gate_pending log descriptor settlement incomplete path=%s: %s"
+    path
+    (Fs_compat.private_jsonl_transaction_error_to_string error)
 ;;
 
 let replay_results_store_path ~base_path =
@@ -441,6 +530,10 @@ let pending_entry_to_yojson
     ; ( "request_context_version"
       , match request_context with
         | Some _ -> `Int exact_request_context_version
+        | None -> `Null )
+    ; ( "observation"
+      , match entry.observation with
+        | Some refusal -> observed_refusal_to_yojson refusal
         | None -> `Null )
     ; "task_id", Json_util.string_opt_to_json entry.task_id
     ; "goal_id", Json_util.string_opt_to_json entry.goal_id
@@ -512,7 +605,7 @@ let map_values_for_base ~base_path map project =
     if String.equal (project value).audit_base_path base_path then Some value else None)
 ;;
 
-let snapshot_to_yojson ~base_path ~next_sequence ~pending_map ~delivery_map =
+let snapshot_to_yojson ~base_path ~next_sequence ~generation ~pending_map ~delivery_map =
   let pending_entries =
     map_values_for_base ~base_path pending_map Fun.id
     (* Wrapped rather than passed bare: [pending_entry_to_yojson] now leads with
@@ -525,6 +618,7 @@ let snapshot_to_yojson ~base_path ~next_sequence ~pending_map ~delivery_map =
   in
   `Assoc
     [ "version", `Int pending_store_version
+    ; "generation", `Int generation
     ; "next_sequence", `Int next_sequence
     ; "pending", `List pending_entries
     ; "deliveries", `List delivery_entries
@@ -555,6 +649,7 @@ let replay_results_to_yojson ~base_path ~delivery_map =
 let save_snapshot_file_unlocked
       ~base_path
       ~next_sequence
+      ~generation
       ~pending_map
       ~delivery_map
     =
@@ -562,8 +657,8 @@ let save_snapshot_file_unlocked
     try
       Fs_compat.mkdir_p (Filename.dirname path);
       let body =
-        snapshot_to_yojson ~base_path ~next_sequence ~pending_map ~delivery_map
-        |> Yojson.Safe.pretty_to_string
+        snapshot_to_yojson ~base_path ~next_sequence ~generation ~pending_map ~delivery_map
+        |> Yojson.Safe.to_string
       in
       (match Fs_compat.save_file_atomic path body with
        | Ok () -> Ok ()
@@ -577,6 +672,7 @@ let save_snapshot_file_strict_staged_unlocked
       ~save_file_atomic_strict_staged
       ~base_path
       ~next_sequence
+      ~generation
       ~pending_map
       ~delivery_map
   =
@@ -584,8 +680,8 @@ let save_snapshot_file_strict_staged_unlocked
   try
     Fs_compat.mkdir_p (Filename.dirname path);
     let body =
-      snapshot_to_yojson ~base_path ~next_sequence ~pending_map ~delivery_map
-      |> Yojson.Safe.pretty_to_string
+      snapshot_to_yojson ~base_path ~next_sequence ~generation ~pending_map ~delivery_map
+      |> Yojson.Safe.to_string
     in
     match save_file_atomic_strict_staged path body with
     | Ok () -> Ok Fsync_completed
@@ -650,6 +746,180 @@ let publish_snapshot_outcome ~base_path result =
   result
 ;;
 
+type log_row =
+  | Pending_upsert of pending_approval
+  | Pending_remove of string
+  | Delivery_upsert of persisted_delivery
+  | Delivery_remove of string
+
+let log_row_to_yojson ~generation ~next_sequence row =
+  let base kind =
+    [ "kind", `String kind
+    ; "generation", `Int generation
+    ; "next_sequence", `Int next_sequence
+    ]
+  in
+  match row with
+  | Pending_upsert entry ->
+    `Assoc (base "pending_upsert" @ [ "entry", pending_entry_to_yojson entry ])
+  | Pending_remove id -> `Assoc (base "pending_remove" @ [ "id", `String id ])
+  | Delivery_upsert delivery ->
+    `Assoc (base "delivery_upsert" @ [ "delivery", persisted_delivery_to_yojson delivery ])
+  | Delivery_remove id -> `Assoc (base "delivery_remove" @ [ "id", `String id ])
+;;
+
+let entries_for_base ~base_path map project =
+  SMap.filter (fun _id value -> String.equal (project value).audit_base_path base_path) map
+;;
+
+(* Rows for what differs between the last durable state and the maps being
+   persisted. Physical equality: an entry a mutation did not touch is the
+   same record in both maps. *)
+let delta_rows ~before_pending ~before_deliveries ~after_pending ~after_deliveries =
+  let pending_rows =
+    SMap.merge
+      (fun id before after ->
+         match before, after with
+         | Some before, Some after when before == after -> None
+         | _, Some after -> Some (Pending_upsert after)
+         | Some _, None -> Some (Pending_remove id)
+         | None, None -> None)
+      before_pending
+      after_pending
+  in
+  let delivery_rows =
+    SMap.merge
+      (fun id before after ->
+         match before, after with
+         | Some before, Some after when before == after -> None
+         | _, Some after -> Some (Delivery_upsert after)
+         | Some _, None -> Some (Delivery_remove id)
+         | None, None -> None)
+      before_deliveries
+      after_deliveries
+  in
+  List.map snd (SMap.bindings pending_rows) @ List.map snd (SMap.bindings delivery_rows)
+;;
+
+(* Writes the snapshot at the next generation, then empties the log at its
+   current end. The snapshot holds every row, so a crash between the two
+   leaves rows of an older generation behind, and the load ignores those.
+   If emptying the log fails after the snapshot was written, the durable
+   state is still complete on disk; the state is dropped here so the next
+   write rewrites again instead of appending after an unknown cursor. *)
+let compact_unlocked ~write_snapshot ~base_path ~pending_map ~delivery_map =
+  let generation = next_generation ~base_path in
+  match write_snapshot ~generation with
+  | Error _ as error -> error
+  | Ok outcome ->
+    let path = pending_log_path ~base_path in
+    let emptied =
+      Eio_guard.run_in_systhread (fun () ->
+        match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+        | Error error -> Error error
+        | Ok snapshot ->
+          Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result
+            path
+            ~expected:snapshot.Fs_compat.cursor
+            "")
+    in
+    (match Fs_compat.private_jsonl_cursor_success_receipt emptied with
+     | Error error ->
+       Log.Server.warn
+         "gate_pending log could not be emptied after snapshot generation %d path=%s: %s"
+         generation
+         path
+         (Fs_compat.private_jsonl_transaction_error_to_string error);
+       drop_durable_state ~base_path
+     | Ok { Fs_compat.value = cursor; settlement_error } ->
+       Option.iter (observe_log_settlement ~path) settlement_error;
+       set_durable_state
+         ~base_path
+         { durable_pending = entries_for_base ~base_path pending_map Fun.id
+         ; durable_deliveries =
+             entries_for_base ~base_path delivery_map (fun delivery -> delivery.entry)
+         ; snapshot_generation = generation
+         ; log_cursor = cursor
+         ; log_rows = 0
+         });
+    Ok outcome
+;;
+
+let persist_delta_unlocked
+      ~write_mode
+      ~write_snapshot
+      ~base_path
+      ~next_sequence
+      ~pending_map
+      ~delivery_map
+  =
+  let compact () = compact_unlocked ~write_snapshot ~base_path ~pending_map ~delivery_map in
+  match write_mode, durable_state_for ~base_path with
+  | Rewrite_snapshot, _ | Append_rows, None -> compact ()
+  | Append_rows, Some durable ->
+    let after_pending = entries_for_base ~base_path pending_map Fun.id in
+    let after_deliveries =
+      entries_for_base ~base_path delivery_map (fun delivery -> delivery.entry)
+    in
+    (match
+       delta_rows
+         ~before_pending:durable.durable_pending
+         ~before_deliveries:durable.durable_deliveries
+         ~after_pending
+         ~after_deliveries
+     with
+     | [] -> Ok Fsync_completed
+     | rows ->
+       let entries = SMap.cardinal after_pending + SMap.cardinal after_deliveries in
+       let rows_after = durable.log_rows + List.length rows in
+       if rows_after > compaction_ratio * entries
+       then compact ()
+       else (
+         let path = pending_log_path ~base_path in
+         let suffix =
+           String.concat
+             ""
+             (List.map
+                (fun row ->
+                   Yojson.Safe.to_string
+                     (log_row_to_yojson
+                        ~generation:durable.snapshot_generation
+                        ~next_sequence
+                        row)
+                   ^ "\n")
+                rows)
+         in
+         match
+           Eio_guard.run_in_systhread (fun () ->
+             Fs_compat.append_private_jsonl_durable_locked_at_cursor_result
+               path
+               ~expected:durable.log_cursor
+               suffix)
+         with
+         | Error (Fs_compat.Cursor_mismatch _) ->
+           (* The log is not what memory believes; memory is the authority,
+              so rewrite both. *)
+           compact ()
+         | appended ->
+           (match Fs_compat.private_jsonl_cursor_success_receipt appended with
+            | Error error -> Error (private_jsonl_error ~path error)
+            | Ok { Fs_compat.value = cursor; settlement_error } ->
+              set_durable_state
+                ~base_path
+                { durable with
+                  durable_pending = after_pending
+                ; durable_deliveries = after_deliveries
+                ; log_cursor = cursor
+                ; log_rows = rows_after
+                };
+              Ok
+                (match settlement_error with
+                 | None -> Fsync_completed
+                 | Some error ->
+                   Visible_sync_unconfirmed
+                     (Fs_compat.private_jsonl_transaction_error_to_string error)))))
+;;
+
 let persist_snapshot_with_sequence_unlocked
       ~base_path
       ~next_sequence
@@ -659,13 +929,35 @@ let persist_snapshot_with_sequence_unlocked
   match SMap.find_opt base_path (Atomic.get unavailable_stores) with
   | Some error -> Error error
   | None ->
+    let write_snapshot ~generation =
+      Result.map
+        (fun () -> Fsync_completed)
+        (save_snapshot_file_unlocked
+           ~base_path
+           ~next_sequence
+           ~generation
+           ~pending_map
+           ~delivery_map)
+    in
     publish_snapshot_outcome
       ~base_path
-      (save_snapshot_file_unlocked
-         ~base_path
-         ~next_sequence
-         ~pending_map
-         ~delivery_map)
+      (match
+         persist_delta_unlocked
+           ~write_mode:Append_rows
+           ~write_snapshot
+           ~base_path
+           ~next_sequence
+           ~pending_map
+           ~delivery_map
+       with
+       | Error _ as error -> error
+       | Ok Fsync_completed -> Ok ()
+       | Ok (Visible_sync_unconfirmed reason) ->
+         Log.Server.warn
+           "gate_pending log append visible but durability unconfirmed workspace=%s: %s"
+           base_path
+           reason;
+         Ok ())
 ;;
 
 type store_lifecycle =
@@ -702,16 +994,27 @@ let persist_snapshot_unlocked ~base_path ~pending_map ~delivery_map =
 
 let persist_snapshot_exact_unlocked
       ~save_file_atomic_strict_staged
+      ~write_mode
       ~base_path
       ~pending_map
       ~delivery_map
   =
   match next_sequence_lifecycle ~base_path with
   | Ready next_sequence ->
+    let write_snapshot ~generation =
+      save_snapshot_file_strict_staged_unlocked
+        ~save_file_atomic_strict_staged
+        ~base_path
+        ~next_sequence
+        ~generation
+        ~pending_map
+        ~delivery_map
+    in
     publish_snapshot_outcome
       ~base_path
-      (save_snapshot_file_strict_staged_unlocked
-         ~save_file_atomic_strict_staged
+      (persist_delta_unlocked
+         ~write_mode
+         ~write_snapshot
          ~base_path
          ~next_sequence
          ~pending_map
@@ -878,6 +1181,7 @@ let pending_entry_of_yojson ~base_path json =
           ; "turn_id"
           ; "request_context"
           ; "request_context_version"
+          ; "observation"
           ; "task_id"
           ; "goal_id"
           ; "continuation_channel"
@@ -930,6 +1234,14 @@ let pending_entry_of_yojson ~base_path json =
              "%s.request_context_version must be an integer or null"
              surface)
     in
+    let* observation =
+      match List.assoc_opt "observation" fields with
+      | None | Some `Null -> Ok None
+      | Some json ->
+        (match observed_refusal_of_yojson json with
+         | Ok refusal -> Ok (Some refusal)
+         | Error detail -> Error (Printf.sprintf "%s.%s" surface detail))
+    in
     let* task_id = optional_string ~surface "task_id" fields in
     let* goal_id = optional_string ~surface "goal_id" fields in
     let* continuation_json = required_member ~surface "continuation_channel" fields in
@@ -964,6 +1276,7 @@ let pending_entry_of_yojson ~base_path json =
       ; requested_at
       ; turn_id
       ; request_context
+      ; observation
       ; task_id
       ; goal_id
       ; continuation_channel
@@ -1331,7 +1644,7 @@ let snapshot_of_yojson ~base_path json =
     let* () =
       reject_unknown_fields
         ~surface
-        ~allowed:[ "version"; "next_sequence"; "pending"; "deliveries" ]
+        ~allowed:[ "version"; "generation"; "next_sequence"; "pending"; "deliveries" ]
         fields
     in
     let* () =
@@ -1348,6 +1661,7 @@ let snapshot_of_yojson ~base_path json =
       | Some _ -> Error (surface ^ ".version must be an integer")
       | None -> Error (surface ^ ".version is required")
     in
+    let* generation = required_positive_int ~surface "generation" fields in
     let* next_sequence = required_positive_int ~surface "next_sequence" fields in
     let* pending_json = required_member ~surface "pending" fields in
     let* delivery_json = required_member ~surface "deliveries" fields in
@@ -1384,8 +1698,156 @@ let snapshot_of_yojson ~base_path json =
     let* () =
       validate_snapshot_sequences ~next_sequence pending_entries delivery_entries
     in
-    Ok (pending_map, delivery_map, next_sequence, pending_entry_errors)
+    Ok (pending_map, delivery_map, next_sequence, generation, pending_entry_errors)
   | _ -> Error "gate_pending snapshot must be a JSON object"
+;;
+
+type decoded_log_row =
+  { row : log_row
+  ; row_generation : int
+  ; row_next_sequence : int
+  }
+
+let log_row_of_yojson ~base_path json =
+  let ( let* ) = Result.bind in
+  let surface = "gate_pending.log" in
+  match json with
+  | `Assoc fields ->
+    let* () =
+      reject_unknown_fields
+        ~surface
+        ~allowed:[ "kind"; "generation"; "next_sequence"; "entry"; "delivery"; "id" ]
+        fields
+    in
+    let* kind =
+      match List.assoc_opt "kind" fields with
+      | Some (`String kind) -> Ok kind
+      | Some _ -> Error (surface ^ ".kind must be a string")
+      | None -> Error (surface ^ ".kind is required")
+    in
+    let* row_generation = required_positive_int ~surface "generation" fields in
+    let* row_next_sequence = required_positive_int ~surface "next_sequence" fields in
+    let id () =
+      match List.assoc_opt "id" fields with
+      | Some (`String id) when not (String.equal id "") -> Ok id
+      | Some _ -> Error (surface ^ ".id must be a non-empty string")
+      | None -> Error (surface ^ ".id is required")
+    in
+    let* row =
+      match kind with
+      | "pending_upsert" ->
+        let* json = required_member ~surface "entry" fields in
+        Result.map (fun entry -> Pending_upsert entry) (pending_entry_of_yojson ~base_path json)
+      | "pending_remove" -> Result.map (fun id -> Pending_remove id) (id ())
+      | "delivery_upsert" ->
+        let* json = required_member ~surface "delivery" fields in
+        Result.map
+          (fun delivery -> Delivery_upsert delivery)
+          (persisted_delivery_of_yojson ~base_path json)
+      | "delivery_remove" -> Result.map (fun id -> Delivery_remove id) (id ())
+      | other -> Error (Printf.sprintf "%s.kind %S is unknown" surface other)
+    in
+    Ok { row; row_generation; row_next_sequence }
+  | _ -> Error (surface ^ " row must be a JSON object")
+;;
+
+let apply_log_row (pending_map, delivery_map) = function
+  | Pending_upsert entry -> SMap.add entry.id entry pending_map, delivery_map
+  | Pending_remove id -> SMap.remove id pending_map, delivery_map
+  | Delivery_upsert delivery ->
+    pending_map, SMap.add delivery.entry.id delivery delivery_map
+  | Delivery_remove id -> pending_map, SMap.remove id delivery_map
+;;
+
+type log_read =
+  { log_pending : pending_approval SMap.t
+  ; log_deliveries : persisted_delivery SMap.t
+  ; log_next_sequence : int
+  ; log_end : Fs_compat.Private_jsonl_cursor.t
+  ; rows_applied : int
+  ; partial_tail : bool
+  }
+
+(* Rows of a generation older than the snapshot's were written before its
+   last rewrite and are already inside it. A newer generation cannot exist.
+   A final line without its newline is a row whose durable append did not
+   finish; it is dropped here and the install rewrites the snapshot. Any
+   other unreadable row fails closed, as an unreadable snapshot does. *)
+let read_pending_log_unlocked
+      ~base_path
+      ~snapshot_generation
+      ~pending_map
+      ~delivery_map
+      ~next_sequence
+  =
+  let path = pending_log_path ~base_path in
+  match
+    Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
+    |> Fs_compat.private_jsonl_snapshot_success_receipt
+  with
+  | Error error -> Error (private_jsonl_error ~path error)
+  | Ok { Fs_compat.value = snapshot; settlement_error } ->
+    Option.iter (observe_log_settlement ~path) settlement_error;
+    let bytes = snapshot.Fs_compat.bytes in
+    let partial_tail =
+      String.length bytes > 0 && not (Char.equal bytes.[String.length bytes - 1] '\n')
+    in
+    let lines = String.split_on_char '\n' bytes in
+    let lines =
+      if partial_tail
+      then (
+        match List.rev lines with
+        | _partial :: complete -> List.rev complete
+        | [] -> [])
+      else lines
+    in
+    let applied =
+      List.fold_left
+        (fun accumulator line ->
+           match accumulator with
+           | Error _ as error -> error
+           | Ok (pending_map, delivery_map, next_sequence, rows) ->
+             if String.equal (String.trim line) ""
+             then Ok (pending_map, delivery_map, next_sequence, rows)
+             else (
+               match Yojson.Safe.from_string line with
+               | exception Yojson.Json_error detail -> Error ("invalid JSON: " ^ detail)
+               | json ->
+                 (match log_row_of_yojson ~base_path json with
+                  | Error _ as error -> error
+                  | Ok decoded ->
+                    if decoded.row_generation < snapshot_generation
+                    then Ok (pending_map, delivery_map, next_sequence, rows)
+                    else if decoded.row_generation > snapshot_generation
+                    then
+                      Error
+                        (Printf.sprintf
+                           "row generation %d is ahead of snapshot generation %d"
+                           decoded.row_generation
+                           snapshot_generation)
+                    else (
+                      let pending_map, delivery_map =
+                        apply_log_row (pending_map, delivery_map) decoded.row
+                      in
+                      Ok
+                        ( pending_map
+                        , delivery_map
+                        , max next_sequence decoded.row_next_sequence
+                        , rows + 1 )))))
+        (Ok (pending_map, delivery_map, next_sequence, 0))
+        lines
+    in
+    (match applied with
+     | Error reason -> Error { path; reason }
+     | Ok (log_pending, log_deliveries, log_next_sequence, rows_applied) ->
+       Ok
+         { log_pending
+         ; log_deliveries
+         ; log_next_sequence
+         ; log_end = snapshot.Fs_compat.cursor
+         ; rows_applied
+         ; partial_tail
+         })
 ;;
 
 let classify_restarted_entry (entry : pending_approval) =
@@ -1455,14 +1917,53 @@ let classify_restarted_deliveries map =
     (false, SMap.empty)
 ;;
 
+(* What a restart would see: the snapshot plus the log rows after it. No
+   classification, no write. *)
+let read_durable_unlocked ~base_path =
+  let path = pending_store_path ~base_path in
+  if not (Sys.file_exists path)
+  then Ok (SMap.empty, SMap.empty, first_sequence, first_generation, [], None)
+  else (
+    match Safe_ops.read_json_file_safe path with
+    | Error reason -> Error { path; reason }
+    | Ok json ->
+      (match snapshot_of_yojson ~base_path json with
+       | Error reason -> Error { path; reason }
+       | Ok (pending_map, delivery_map, next_sequence, generation, entry_errors) ->
+         (match
+            read_pending_log_unlocked
+              ~base_path
+              ~snapshot_generation:generation
+              ~pending_map
+              ~delivery_map
+              ~next_sequence
+          with
+          | Error _ as error -> error
+          | Ok log ->
+            Ok
+              ( log.log_pending
+              , log.log_deliveries
+              , log.log_next_sequence
+              , generation
+              , entry_errors
+              , Some log ))))
+;;
+
 let load_snapshot_unlocked ~base_path :
-    (pending_approval SMap.t * persisted_delivery SMap.t * int * storage_error list,
-     storage_error)
+    ( pending_approval SMap.t
+      * persisted_delivery SMap.t
+      * int
+      * storage_error list
+      * durable_state option
+    , storage_error )
     result =
   let path = pending_store_path ~base_path in
   try
     if not (Sys.file_exists path)
-    then Ok (SMap.empty, SMap.empty, first_sequence, [])
+    then
+      (* A missing snapshot is a reset store. Rows left in the log describe
+         nothing; they are dropped when the first write rewrites both. *)
+      Ok (SMap.empty, SMap.empty, first_sequence, [], None)
     else (
       match Safe_ops.read_json_file_safe path with
       | Error reason ->
@@ -1472,12 +1973,31 @@ let load_snapshot_unlocked ~base_path :
           ~detail:reason;
         Error { path; reason }
       | Ok json ->
-        (match snapshot_of_yojson ~base_path json with
-         | Ok
-             ( loaded_pending
-             , loaded_deliveries
-             , loaded_next_sequence
-             , pending_entry_errors ) ->
+        (match
+           Result.bind (snapshot_of_yojson ~base_path json) (fun decoded ->
+             let ( pending_map
+                 , delivery_map
+                 , next_sequence
+                 , generation
+                 , pending_entry_errors )
+               =
+               decoded
+             in
+             match
+               read_pending_log_unlocked
+                 ~base_path
+                 ~snapshot_generation:generation
+                 ~pending_map
+                 ~delivery_map
+                 ~next_sequence
+             with
+             | Error error -> Error (storage_error_to_string error)
+             | Ok log -> Ok (log, generation, pending_entry_errors))
+         with
+         | Ok (log, loaded_generation, pending_entry_errors) ->
+           let loaded_pending = log.log_pending in
+           let loaded_deliveries = log.log_deliveries in
+           let loaded_next_sequence = log.log_next_sequence in
            let pending_read_errors =
              List.map (fun reason -> { path; reason }) pending_entry_errors
            in
@@ -1494,31 +2014,56 @@ let load_snapshot_unlocked ~base_path :
            let deliveries_changed, loaded_deliveries =
              classify_restarted_deliveries loaded_deliveries
            in
-           if pending_read_errors = [] && (pending_changed || deliveries_changed)
-           then
-             (match
-                save_snapshot_file_unlocked
-                  ~base_path
-                  ~next_sequence:loaded_next_sequence
-                  ~pending_map:loaded_pending
-                  ~delivery_map:loaded_deliveries
-              with
-              | Error _ as error -> error
-              | Ok () ->
-                Log.Server.warn
-                  "gate_pending restart exact-state classification workspace=%s"
-                  base_path;
-                Ok
-                  ( loaded_pending
-                  , loaded_deliveries
-                  , loaded_next_sequence
-                  , pending_read_errors ))
+           let durable =
+             { durable_pending = loaded_pending
+             ; durable_deliveries = loaded_deliveries
+             ; snapshot_generation = loaded_generation
+             ; log_cursor = log.log_end
+             ; log_rows = log.rows_applied
+             }
+           in
+           if
+             pending_read_errors = []
+             && (pending_changed || deliveries_changed || log.partial_tail)
+           then (
+             set_durable_state ~base_path durable;
+             let write_snapshot ~generation =
+               Result.map
+                 (fun () -> Fsync_completed)
+                 (save_snapshot_file_unlocked
+                    ~base_path
+                    ~next_sequence:loaded_next_sequence
+                    ~generation
+                    ~pending_map:loaded_pending
+                    ~delivery_map:loaded_deliveries)
+             in
+             match
+               compact_unlocked
+                 ~write_snapshot
+                 ~base_path
+                 ~pending_map:loaded_pending
+                 ~delivery_map:loaded_deliveries
+             with
+             | Error _ as error -> error
+             | Ok (Fsync_completed | Visible_sync_unconfirmed _) ->
+               Log.Server.warn
+                 "gate_pending restart rewrite workspace=%s classification=%b partial_log_tail=%b"
+                 base_path
+                 (pending_changed || deliveries_changed)
+                 log.partial_tail;
+               Ok
+                 ( loaded_pending
+                 , loaded_deliveries
+                 , loaded_next_sequence
+                 , pending_read_errors
+                 , durable_state_for ~base_path ))
            else
              Ok
                ( loaded_pending
                , loaded_deliveries
                , loaded_next_sequence
-               , pending_read_errors )
+               , pending_read_errors
+               , Some durable )
          | Error reason ->
            report_pending_read_drop
              ~reason:Read_drop_reason.Invalid_payload
@@ -1893,6 +2438,7 @@ let create_entry
       ~input
       ?turn_id
       ?request_context
+      ?observation
       ?task_id
       ?goal_id
       ~continuation_channel
@@ -1909,6 +2455,7 @@ let create_entry
   ; requested_at = Unix.gettimeofday ()
   ; turn_id
   ; request_context
+  ; observation
   ; task_id
   ; goal_id
     ; continuation_channel
@@ -1992,82 +2539,7 @@ let append_chat_projection ~base_path ~keeper_name lifecycle =
   |> publish_chat_projection_append ~keeper_name
 ;;
 
-(* A STATUS row answers "what was deferred", not only "which tool asked".
-   The argv join keeps the operator-facing command in the operator's own
-   words; an identity call names its provider surface. The cap is a rendering
-   budget: the pane wraps, and a summary is a pointer, not the payload. *)
-let call_summary_max_length = 80
-
-let call_summary_of_input (input : Yojson.Safe.t) : string option =
-  let of_text text =
-    let lines = String.split_on_char '\n' text in
-    let rec first_non_empty = function
-      | [] -> None
-      | line :: rest ->
-        let trimmed = String.trim line in
-        if trimmed = "" then first_non_empty rest
-        else if String.length trimmed <= call_summary_max_length then Some trimmed
-        else
-          Some
-            (String.sub trimmed 0
-               (String_util.utf8_char_boundary trimmed call_summary_max_length))
-    in
-    first_non_empty lines
-  in
-  let of_argv argv = of_text (String.concat " " argv) in
-  let string_argv = function
-    | `List items when List.for_all (function `String _ -> true | _ -> false) items ->
-      Some (List.filter_map (function `String item -> Some item | _ -> None) items)
-    | _ -> None
-  in
-  let rec extract_from_fields ~depth fields =
-    if depth > 4 then None
-    else
-      (* 1. Try argv *)
-      let from_argv =
-        match List.assoc_opt "argv" fields with
-        | Some argv -> Option.bind (string_argv argv) of_argv
-        | None -> None
-      in
-      match from_argv with
-      | Some summary -> Some summary
-      | None ->
-        (* 2. Try direct string candidate fields *)
-        let from_string =
-          List.find_map
-            (fun k ->
-              match List.assoc_opt k fields with
-              | Some (`String s) -> of_text s
-              | _ -> None)
-            [ "script"; "command"; "cmd"; "file_path"; "path"; "url"; "title"; "query" ]
-        in
-        match from_string with
-        | Some summary -> Some summary
-        | None ->
-          (* 3. Try nested objects *)
-          let from_nested =
-            List.find_map
-              (fun k ->
-                match List.assoc_opt k fields with
-                | Some (`Assoc inner) -> extract_from_fields ~depth:(depth + 1) inner
-                | _ -> None)
-              [ "input"; "args"; "arguments" ]
-          in
-          match from_nested with
-          | Some summary -> Some summary
-          | None ->
-            (* 4. Try provider_id / remote_name *)
-            (match List.assoc_opt "provider_id" fields, List.assoc_opt "remote_name" fields with
-             | Some (`String provider), Some (`String remote) ->
-               Some (provider ^ "/" ^ remote)
-             | _ -> None)
-  in
-  match input with
-  | `Assoc fields -> extract_from_fields ~depth:0 fields
-  | _ -> None
-;;
-
-let record_pending (entry : pending_approval) =
+let record_pending ~call_summary (entry : pending_approval) =
   Log.Keeper.info
     "HITL_APPROVAL_PENDING: id=%s sequence=%d keeper=%s tool=%s"
     entry.id
@@ -2090,7 +2562,10 @@ let record_pending (entry : pending_approval) =
   (* The parked call becomes visible before its answer does. The turn that
      asked keeps running, so without this row the operator sees a tool call
      and then nothing at all until the resolution lands. A projection failure
-     is logged and dropped: it must not stop the approval from being queued. *)
+     is logged and dropped: it must not stop the approval from being queued.
+     [call_summary] is the producer's own one-line statement of the call,
+     carried on the Gate request; this queue never derives one from the
+     input. *)
   (match
      append_chat_projection
        ~base_path:entry.audit_base_path
@@ -2099,7 +2574,7 @@ let record_pending (entry : pending_approval) =
        ; tool_name = Some entry.tool_name
        ; phase = Keeper_chat_store.Approval_requested
        ; artifact_ref = None
-       ; call_summary = call_summary_of_input entry.input
+       ; call_summary
        }
    with
    | Ok () -> ()
@@ -2275,6 +2750,7 @@ let exact_attempt_entry_unlocked map (candidate : exact_attempt_binding) =
 
 let persist_exact_attempt_entry_unlocked
       ~save_file_atomic_strict_staged
+      ~write_mode
       ~changed
       ~map
       ~(entry : pending_approval)
@@ -2284,6 +2760,7 @@ let persist_exact_attempt_entry_unlocked
   match
     persist_snapshot_exact_unlocked
       ~save_file_atomic_strict_staged
+      ~write_mode
       ~base_path:entry.audit_base_path
       ~pending_map:updated
       ~delivery_map:(Atomic.get deliveries)
@@ -2295,6 +2772,7 @@ let persist_exact_attempt_entry_unlocked
 ;;
 
 let bind_summary_exact_attempt_with
+      ~write_mode
       ~save_file_atomic_strict_staged
       ~id
       ~input_hash
@@ -2346,6 +2824,7 @@ let bind_summary_exact_attempt_with
                | Exact_unbound ->
                  persist_exact_attempt_entry_unlocked
                    ~save_file_atomic_strict_staged
+                   ~write_mode
                    ~changed:true
                    ~map
                    ~entry
@@ -2370,6 +2849,7 @@ let bind_summary_exact_attempt_with
                    | Exact_dispatch_uncertain ->
                      persist_exact_attempt_entry_unlocked
                        ~save_file_atomic_strict_staged
+                       ~write_mode
                        ~changed:false
                        ~map
                        ~entry
@@ -2386,6 +2866,7 @@ let bind_summary_exact_attempt_with
                     ({ status = Exact_released_before_dispatch; _ } as _existing) ->
                   persist_exact_attempt_entry_unlocked
                     ~save_file_atomic_strict_staged
+                    ~write_mode
                     ~changed:true
                     ~map
                     ~entry
@@ -2404,10 +2885,12 @@ let bind_summary_exact_attempt_with
 
 let bind_summary_exact_attempt =
   bind_summary_exact_attempt_with
+    ~write_mode:Append_rows
     ~save_file_atomic_strict_staged:Fs_compat.save_file_atomic_strict_staged
 ;;
 
 let release_summary_exact_attempt_before_dispatch_with
+      ~write_mode
       ~save_file_atomic_strict_staged
       ~id
       ~input_hash
@@ -2455,6 +2938,7 @@ let release_summary_exact_attempt_before_dispatch_with
                 in
                 persist_exact_attempt_entry_unlocked
                     ~save_file_atomic_strict_staged
+                    ~write_mode
                     ~changed:true
                     ~map
                     ~entry
@@ -2462,6 +2946,7 @@ let release_summary_exact_attempt_before_dispatch_with
                 | Exact_released_before_dispatch ->
                   persist_exact_attempt_entry_unlocked
                     ~save_file_atomic_strict_staged
+                    ~write_mode
                     ~changed:false
                     ~map
                     ~entry
@@ -2479,10 +2964,12 @@ let release_summary_exact_attempt_before_dispatch_with
 
 let release_summary_exact_attempt_before_dispatch =
   release_summary_exact_attempt_before_dispatch_with
+    ~write_mode:Append_rows
     ~save_file_atomic_strict_staged:Fs_compat.save_file_atomic_strict_staged
 ;;
 
 let quarantine_summary_exact_attempt_with
+      ~write_mode
       ~save_file_atomic_strict_staged
       ~id
       ~input_hash
@@ -2531,6 +3018,7 @@ let quarantine_summary_exact_attempt_with
                 in
                 persist_exact_attempt_entry_unlocked
                     ~save_file_atomic_strict_staged
+                    ~write_mode
                     ~changed:true
                     ~map
                     ~entry
@@ -2548,6 +3036,7 @@ let quarantine_summary_exact_attempt_with
                   in
                   persist_exact_attempt_entry_unlocked
                     ~save_file_atomic_strict_staged
+                    ~write_mode
                     ~changed:disposition_changed
                     ~map
                     ~entry
@@ -2566,6 +3055,7 @@ let quarantine_summary_exact_attempt_with
                   in
                   persist_exact_attempt_entry_unlocked
                     ~save_file_atomic_strict_staged
+                    ~write_mode
                     ~changed:true
                     ~map
                     ~entry
@@ -2589,10 +3079,12 @@ let quarantine_summary_exact_attempt_with
 
 let quarantine_summary_exact_attempt =
   quarantine_summary_exact_attempt_with
+    ~write_mode:Append_rows
     ~save_file_atomic_strict_staged:Fs_compat.save_file_atomic_strict_staged
 ;;
 
 let complete_summary_exact_attempt_with
+      ~write_mode
       ~save_file_atomic_strict_staged
       ~id
       ~input_hash
@@ -2648,6 +3140,7 @@ let complete_summary_exact_attempt_with
                   in
                   persist_exact_attempt_entry_unlocked
                     ~save_file_atomic_strict_staged
+                    ~write_mode
                     ~changed:true
                     ~map
                     ~entry
@@ -2669,6 +3162,7 @@ let complete_summary_exact_attempt_with
                     in
                     persist_exact_attempt_entry_unlocked
                       ~save_file_atomic_strict_staged
+                      ~write_mode
                       ~changed:disposition_changed
                       ~map
                       ~entry
@@ -2699,6 +3193,7 @@ let complete_summary_exact_attempt_with
 
 let complete_summary_exact_attempt =
   complete_summary_exact_attempt_with
+    ~write_mode:Append_rows
     ~save_file_atomic_strict_staged:Fs_compat.save_file_atomic_strict_staged
 ;;
 
@@ -3103,12 +3598,24 @@ let deliver_resolution ~base_path (entry : pending_approval) decision =
     ~channel:entry.continuation_channel
 ;;
 
+(* Every phase row after the request copies the request row's line. The
+   producer stated it once, on the Gate request, and only [record_pending] had
+   it in hand; a resolution, replay, or continuation writer has the approval id
+   and nothing of the producer, so it reads the stored statement back rather
+   than deriving one from the input. [None] when the request row is absent or
+   carried none. *)
+let requested_call_summary ~base_path ~keeper_name ~approval_id =
+  Keeper_chat_store.approval_request_call_summary
+    ~base_dir:base_path
+    ~keeper_name
+    ~approval_id
+;;
+
 let ensure_resolution_chat_projection
       ~base_path
       ~keeper_name
       ~approval_id
       ~tool_name
-      ~call_summary
       ~decision
   =
   let phase =
@@ -3123,7 +3630,7 @@ let ensure_resolution_chat_projection
     ; tool_name
     ; phase
     ; artifact_ref = None
-    ; call_summary
+    ; call_summary = requested_call_summary ~base_path ~keeper_name ~approval_id
     }
 ;;
 
@@ -3132,9 +3639,9 @@ let ensure_replay_chat_projection
       ~keeper_name
       ~approval_id
       ~tool_name
-      ~call_summary
       ~outcome
   =
+  let call_summary = requested_call_summary ~base_path ~keeper_name ~approval_id in
   let phase, artifact_ref =
     match outcome with
     | Replay_applied artifact_ref ->
@@ -3164,7 +3671,6 @@ let ensure_continuation_chat_projection
       ~keeper_name
       ~approval_id
       ~tool_name
-      ~call_summary
   =
   append_chat_projection
     ~base_path
@@ -3173,7 +3679,7 @@ let ensure_continuation_chat_projection
     ; tool_name
     ; phase = Keeper_chat_store.Approval_continuation_recorded
     ; artifact_ref = None
-    ; call_summary
+    ; call_summary = requested_call_summary ~base_path ~keeper_name ~approval_id
     }
 ;;
 
@@ -3201,7 +3707,7 @@ let ensure_settled_continuation_chat_projection
   let approval_id = resolution.approval_id in
   let ready_projection =
     match resolution.decision with
-    | Keeper_event_queue.Hitl_rejected _ -> Ok (Some (None, None))
+    | Keeper_event_queue.Hitl_rejected _ -> Ok (Some None)
     | Keeper_event_queue.Hitl_approved ->
       (match approved_resolution_delivery ~base_path ~id:approval_id with
        | Ok
@@ -3209,9 +3715,7 @@ let ensure_settled_continuation_chat_projection
            ; state = Resolution_consumed
            ; replay_outcome = Some _
            } ->
-         Ok
-           (Some
-              (Some request.tool_name, call_summary_of_input request.input))
+         Ok (Some (Some request.tool_name))
        | Ok
            { state = (Resolution_unconsumed | Resolution_consumed)
            ; replay_outcome = None
@@ -3228,15 +3732,14 @@ let ensure_settled_continuation_chat_projection
   match ready_projection with
   | Error _ as error -> error
   | Ok None -> Ok Continuation_projection_not_ready
-  | Ok (Some (tool_name, call_summary)) ->
+  | Ok (Some tool_name) ->
     Result.map
       (fun () -> Continuation_projection_recorded)
       (ensure_continuation_chat_projection
          ~base_path
          ~keeper_name
          ~approval_id
-         ~tool_name
-         ~call_summary)
+         ~tool_name)
 ;;
 
 let resolve_entry
@@ -3280,7 +3783,6 @@ let resolve_entry
          ~keeper_name:entry.keeper_name
          ~approval_id:entry.id
          ~tool_name:(Some entry.tool_name)
-         ~call_summary:(call_summary_of_input entry.input)
          ~decision
      with
      | Ok () -> ()
@@ -3422,9 +3924,11 @@ let submit_pending
       ~keeper_name
       ~tool_name
       ~input
+      ~call_summary
       ~base_path
       ?turn_id
       ?request_context
+      ?observation
       ?task_id
       ?goal_id
       ?continuation_channel
@@ -3490,6 +3994,7 @@ let submit_pending
                  ~input
                  ?turn_id
               ?request_context
+              ?observation
               ?task_id
               ?goal_id
               ~continuation_channel
@@ -3520,7 +4025,7 @@ let submit_pending
   | Ok (`Folded_onto_unconsumed_grant approval_id) ->
     Ok { approval_id; disposition = Folded_onto_unconsumed_grant }
   | Ok (`Created entry) ->
-    let audit_receipt = record_pending entry in
+    let audit_receipt = record_pending ~call_summary entry in
     Ok
       { approval_id = entry.id
       ; disposition = Pending_created audit_receipt
@@ -3859,7 +4364,11 @@ let install_persistence_internal ~after_load ~base_path =
             ( loaded_pending
             , loaded_deliveries
             , loaded_next_sequence
-            , pending_read_errors ) ->
+            , pending_read_errors
+            , loaded_durable ) ->
+          (match loaded_durable with
+           | Some durable -> set_durable_state ~base_path durable
+           | None -> drop_durable_state ~base_path);
           let loaded_deliveries, replay_projection_error =
             load_replay_results_unlocked
               ~base_path
@@ -4013,7 +4522,8 @@ module For_testing = struct
       Atomic.set pending_read_errors SMap.empty;
       Atomic.set replay_projection_errors SMap.empty;
       Atomic.set store_revisions SMap.empty;
-      Atomic.set next_sequences SMap.empty)
+      Atomic.set next_sequences SMap.empty;
+      Atomic.set durable_states SMap.empty)
   ;;
 
   let install_persistence_with_after_load_hook ~base_path ~after_load =
@@ -4024,18 +4534,38 @@ module For_testing = struct
   let replay_results_store_path = replay_results_store_path
   let always_allowed_store_path ~base_path = rules_path ~base_path ()
 
-  let bind_summary_exact_attempt_with_writer = bind_summary_exact_attempt_with
+  (* The injected writer stands in for the snapshot write, so these seams
+     rewrite the snapshot on every write instead of appending rows. *)
+  let bind_summary_exact_attempt_with_writer =
+    bind_summary_exact_attempt_with ~write_mode:Rewrite_snapshot
+  ;;
 
   let release_summary_exact_attempt_before_dispatch_with_writer =
-    release_summary_exact_attempt_before_dispatch_with
+    release_summary_exact_attempt_before_dispatch_with ~write_mode:Rewrite_snapshot
   ;;
 
   let quarantine_summary_exact_attempt_with_writer =
-    quarantine_summary_exact_attempt_with
+    quarantine_summary_exact_attempt_with ~write_mode:Rewrite_snapshot
   ;;
 
   let complete_summary_exact_attempt_with_writer =
-    complete_summary_exact_attempt_with
+    complete_summary_exact_attempt_with ~write_mode:Rewrite_snapshot
+  ;;
+
+  let pending_log_path = pending_log_path
+
+  let durable_snapshot_json ~base_path =
+    with_pending_store_lock (fun () ->
+      match read_durable_unlocked ~base_path with
+      | Error error -> Error (storage_error_to_string error)
+      | Ok (pending_map, delivery_map, next_sequence, generation, _errors, _log) ->
+        Ok
+          (snapshot_to_yojson
+             ~base_path
+             ~next_sequence
+             ~generation
+             ~pending_map
+             ~delivery_map))
   ;;
 end
 

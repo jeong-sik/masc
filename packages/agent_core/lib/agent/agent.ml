@@ -613,6 +613,7 @@ let run_handoff_target ~sw ?clock agent (target : Handoff.handoff_target) prompt
       ~context_fit_admission:agent.context_fit_admission
       ?model_input_projection:agent.model_input_projection
       ?pre_dispatch_serialization_observer:agent.pre_dispatch_serialization_observer
+      ?serialization_executor:agent.serialization_executor
       ~options:
         { default_options with
           transport = agent.options.transport
@@ -694,6 +695,7 @@ let resume
       ?(context_fit_admission = Body_only)
       ?model_input_projection
       ?pre_dispatch_serialization_observer
+      ?serialization_executor
       ?checkpoint_sink
       ?config
       ()
@@ -711,6 +713,7 @@ let resume
   ; context_fit_admission
   ; model_input_projection
   ; pre_dispatch_serialization_observer
+  ; serialization_executor
   ; checkpoint_sink
   }
 ;;

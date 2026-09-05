@@ -1,0 +1,3 @@
+(executables
+ (names rtev_watch rtev_fibers)
+ (libraries runtime_events eio.runtime_events unix))

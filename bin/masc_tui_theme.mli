@@ -352,6 +352,12 @@ module Glyph : sig
 
   val priority : int -> string
   (** ["!!!"] / ["!!"] / ["!"] / [""] for priorities 1, 2, 3, and lower. *)
+
+  val braille_spinner : int -> string
+  (** 8-step live braille spinner: ⣾ ⣽ ⣻ ⢿ ⡿ ⣟ ⣯ ⣷ *)
+
+  val equalizer_level : int -> string
+  (** 8-level audio equalizer bars:   ▂ ▃ ▄ ▅ ▆ ▇ █ *)
 end
 
 val set_lift_enabled : bool -> unit

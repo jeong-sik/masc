@@ -392,6 +392,7 @@ let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
             AQ.submit_pending
               ~keeper_name
               ~tool_name:"test_pending_gate_request"
+              ~call_summary:None
               ~input:(`Assoc [])
               ~base_path:config.base_path
               ()
@@ -1395,6 +1396,7 @@ let test_sweep_reports_pending_hitl_approval () =
           AQ.submit_pending
             ~keeper_name:name
             ~tool_name:"test_pending_gate_request"
+            ~call_summary:None
             ~input:(`Assoc [ ("kind", `String "visibility_probe") ])
             ~base_path:config.base_path
             ()

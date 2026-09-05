@@ -154,9 +154,7 @@ let test_section_pills_line () =
   let line_res = Render_metrics.section_pills_line ~cols:100 ~active:Types.Section_resources in
   check bool "res line bounded" true (Layout.display_width line_res <= 100);
   let line_tools = Render_metrics.section_pills_line ~cols:100 ~active:Types.Section_tools in
-  check bool "tools line bounded" true (Layout.display_width line_tools <= 100);
-  let line_latency = Render_metrics.section_pills_line ~cols:100 ~active:Types.Section_latency in
-  check bool "latency line bounded" true (Layout.display_width line_latency <= 100)
+  check bool "tools line bounded" true (Layout.display_width line_tools <= 100)
 ;;
 
 let test_section_fleet_lines () =
@@ -189,16 +187,6 @@ let test_section_tools_lines () =
     lines
 ;;
 
-let test_section_latency_lines () =
-  let state = make_state () in
-  let lines = Render_metrics.render_section_latency ~cols:90 state in
-  check bool "latency section produces lines" true (List.length lines > 0);
-  List.iter
-    (fun line ->
-      check bool "latency line bounded" true (Layout.display_width line <= 90))
-    lines
-;;
-
 let test_narrow_and_wide_terminals () =
   let state = make_state () in
   let widths = [ 40; 55; 65; 80; 100; 120 ] in
@@ -213,9 +201,7 @@ let test_narrow_and_wide_terminals () =
       let res = Render_metrics.render_section_resources ~cols state in
       List.iter (fun l -> check bool "res line bounded" true (Layout.display_width l <= cols)) res;
       let tools = Render_metrics.render_section_tools ~cols state in
-      List.iter (fun l -> check bool "tools line bounded" true (Layout.display_width l <= cols)) tools;
-      let lat = Render_metrics.render_section_latency ~cols state in
-      List.iter (fun l -> check bool "lat line bounded" true (Layout.display_width l <= cols)) lat)
+      List.iter (fun l -> check bool "tools line bounded" true (Layout.display_width l <= cols)) tools)
     widths
 ;;
 
@@ -271,7 +257,7 @@ let test_render_metrics_body_budget () =
 
 let test_render_metrics_body_all_sections () =
   let state = make_state () in
-  let sections = [ Types.Section_fleet; Types.Section_resources; Types.Section_tools; Types.Section_latency ] in
+  let sections = [ Types.Section_fleet; Types.Section_resources; Types.Section_tools ] in
   List.iter
     (fun sec ->
       state.metrics_section <- sec;
@@ -304,7 +290,6 @@ let () =
       , [ test_case "fleet" `Quick test_section_fleet_lines
         ; test_case "resources" `Quick test_section_resources_lines
         ; test_case "tools" `Quick test_section_tools_lines
-        ; test_case "latency" `Quick test_section_latency_lines
         ; test_case "fleet_populated" `Quick test_section_fleet_populated
         ; test_case "resources_populated" `Quick test_section_resources_populated
         ; test_case "tools_populated" `Quick test_section_tools_populated

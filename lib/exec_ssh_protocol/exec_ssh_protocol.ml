@@ -2,6 +2,11 @@
    See the .mli — it is the SSOT contract for the wire format.
    Spec: docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md §4.2. *)
 
+type mode =
+  | Effect
+  | Observe
+  | Guest_local
+
 type request =
   { v : int
   ; argv : string list
@@ -10,6 +15,7 @@ type request =
   ; remote_root : string
   ; timeout_sec : float
   ; stdin_len : int64
+  ; mode : mode
   }
 
 type trailer =
@@ -26,7 +32,20 @@ type probe =
   ; capabilities : string list
   }
 
-let protocol_version = 2
+let protocol_version = 3
+
+let observe_capability = "observe"
+
+let mode_to_string = function
+  | Effect -> "effect"
+  | Observe -> "observe"
+  | Guest_local -> "guest_local"
+
+let mode_of_string = function
+  | "effect" -> Some Effect
+  | "observe" -> Some Observe
+  | "guest_local" -> Some Guest_local
+  | _ -> None
 
 let shim_config_env_var = "MASC_EXEC_SHIM_CONFIG"
 
@@ -68,6 +87,7 @@ let json_of_request (r : request) : Yojson.Safe.t =
     ; "remote_root", `String (b64_encode r.remote_root)
     ; "timeout_sec", `Float r.timeout_sec
     ; "stdin_len", `Intlit (Int64.to_string r.stdin_len)
+    ; "mode", `String (mode_to_string r.mode)
     ]
 
 let encode_request (r : request) ~stdin : (string, string) result =
@@ -230,6 +250,15 @@ let request_of_json (json : Yojson.Safe.t) : (request, string) result =
   let* remote_root = b64_decode ~what:"remote_root" remote_root_json in
   let* timeout_sec = member ~what "timeout_sec" fields >>= expect_float ~what "timeout_sec" in
   let* stdin_len = member ~what "stdin_len" fields >>= expect_int64 ~what "stdin_len" in
+  let* mode_text = member ~what "mode" fields >>= expect_string ~what "mode" in
+  let* mode =
+    match mode_of_string mode_text with
+    | Some mode -> Ok mode
+    | None ->
+      transport_error
+        "request field %S is %S; this build speaks effect, observe, guest_local"
+        "mode" mode_text
+  in
   (match classify_float timeout_sec with
    | FP_nan | FP_infinite ->
      transport_error "request timeout_sec is not finite (%F)" timeout_sec
@@ -237,7 +266,7 @@ let request_of_json (json : Yojson.Safe.t) : (request, string) result =
      if Int64.compare stdin_len 0L < 0 then
        transport_error "request stdin_len is negative (%Ld)" stdin_len
      else
-       Ok { v; argv; env; cwd; remote_root; timeout_sec; stdin_len })
+       Ok { v; argv; env; cwd; remote_root; timeout_sec; stdin_len; mode })
 
 let decode_request (frame : string) : (request * string, string) result =
   let n = String.length frame in

@@ -637,10 +637,27 @@ let test_max_tokens_without_content_keeps_rotation_kind () =
     (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next
        thinking_only);
   Alcotest.(check bool)
-    "partial-content max_tokens does not rotate"
-    false
+    "partial-content max_tokens can try the next candidate"
+    true
     (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next
        partial);
+  Alcotest.(check (option string))
+    "partial-content max_tokens defers with the truncation reason"
+    (Some "truncated_no_progress")
+    (direct_no_progress_retry_reason_string partial);
+  let partial_route =
+    Keeper_runtime_failure_route.route_of_error
+      ~boundary:Keeper_runtime_failure_route.Masc_execution
+      partial
+  in
+  Alcotest.(check string)
+    "partial-content max_tokens routes to rotation"
+    "rotate_now"
+    (Keeper_runtime_failure_route.route_kind_label partial_route);
+  Alcotest.(check string)
+    "partial-content max_tokens carries the truncation rotation class"
+    "no_progress_truncated"
+    (Keeper_runtime_failure_route.route_class_label partial_route);
   List.iter
     (fun (label, err) ->
        Alcotest.(check bool)
@@ -1686,8 +1703,8 @@ let test_max_tokens_text_is_rejected_for_checkpoint_continuation () =
     (Some "truncated_no_progress")
     (accept_no_progress_retry_kind_string err);
   Alcotest.(check bool)
-    "truncation is handled by same-runtime continuation, not lane rotation"
-    false
+    "truncation keeps the rotation hint for when the continuation fails"
+    true
     (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next err);
   Alcotest.(check bool)
     "provider helper recognizes the continuation trigger"

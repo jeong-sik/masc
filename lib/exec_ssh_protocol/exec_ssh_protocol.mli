@@ -27,7 +27,31 @@
       [v] field differs from {!protocol_version}. *)
 
 val protocol_version : int
-(** [= 1].  Current protocol version; [v] fields are gated against it. *)
+(** [= 3].  Current protocol version; [v] fields are gated against it,
+    exactly: there is no older client to keep working. v3 added [mode]. *)
+
+(** {1 Execution mode (RFC-0422)}
+
+    How the shim boxes the payload. [Effect] is unrestricted. [Observe]
+    denies every filesystem write outside the shim's per-run scratch
+    directory (Landlock) and every [socket(2)] (seccomp), so a payload that
+    exits 0 has provably landed nothing anywhere. [Guest_local] denies only
+    sockets: writes stay inside the box the payload runs in. Both boxes are
+    applied by the shim to itself before exec, unprivileged under
+    no_new_privs; a shim on a kernel without Landlock refuses them with
+    [shim_error = "observe_unsupported: ..."] rather than running unboxed.
+    The closed set on the wire is ["effect" | "observe" | "guest_local"]. *)
+type mode =
+  | Effect
+  | Observe
+  | Guest_local
+
+val mode_to_string : mode -> string
+val mode_of_string : string -> mode option
+
+val observe_capability : string
+(** The probe capability a shim advertises when it can run [Observe] and
+    [Guest_local] here: ["observe"]. *)
 
 (** {1 Request frame} *)
 
@@ -51,6 +75,7 @@ type request =
     (** payload wall-clock budget, enforced server-side by the shim *)
   ; stdin_len : int64
     (** declared byte length of the raw stdin payload *)
+  ; mode : mode  (** how the shim boxes the payload; ["mode"] on the wire *)
   }
 
 (** Wire layout (§4.2):
@@ -68,12 +93,14 @@ type request =
 
     The request JSON is a compact object:
     {[
-      { "v": 1,
+      { "v": 3,
         "argv": ["<base64>", "..."],
         "env": [["<base64 name>", "<base64 value>"]],
         "cwd": "<base64>",
+        "remote_root": "<base64>",
         "timeout_sec": 300.0,
-        "stdin_len": 0 }
+        "stdin_len": 0,
+        "mode": "effect" }
     ]}
 
     Binary-suspect fields ([argv] entries, [env] names and values,
@@ -107,7 +134,8 @@ val decode_request : string -> (request * string, string) result
     - non-finite [timeout_sec] on the wire (e.g. [1e999], [nan]) →
       [remote_ssh_transport_error] — a timer must never receive
       [infinity];
-    - [v <> 1] → [remote_ssh_version_error].
+    - a [mode] outside the closed set → [remote_ssh_transport_error];
+    - [v <> 3] → [remote_ssh_version_error].
 
     The [stdin_len] check happens BEFORE the payload is handed back, so
     a truncated frame can never be mistaken for a valid request.
@@ -122,7 +150,7 @@ val decode_request : string -> (request * string, string) result
     UTF-8):
 
     {v
-    \x1e{"masc_exec_result":{"v":1,"exit":0,"signal":null,
+    \x1e{"masc_exec_result":{"v":3,"exit":0,"signal":null,
                              "timed_out":false,"shim_error":null}}\x1e
     v}
 

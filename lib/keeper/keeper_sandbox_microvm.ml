@@ -592,7 +592,8 @@ let turn_start_argv_for
              ( expressed
              , ({ guest_constraint; reason } : constraint_refusal) :: refused
              , dropped )
-           | Backend.Lifecycle -> expressed, refused, guest_constraint :: dropped))
+           | Backend.Lifecycle | Backend.Observation ->
+             expressed, refused, guest_constraint :: dropped))
       ([], [], [])
       constraints
   in
@@ -615,7 +616,14 @@ let turn_start_argv_for
        @ label_args
        @ [ "--label"; microvm_backend_label_key ^ "=" ^ Backend.to_string backend ]
        @ dropped_label_args
-       @ [ "--user"; Printf.sprintf "%d:%d" uid gid ]
+       (* msb [run] has no [--user] (0.6.16); its guest runs as root and the
+          per-mount [uid=,gid=] option on the work volume maps writes back to the
+          host uid, so identity travels with the mount rather than the process.
+          container and nerdctl take [--user uid:gid] and keep it here. *)
+       @ (match backend with
+          | Backend.Microsandbox -> []
+          | Backend.Apple_container | Backend.Nerdctl_kata ->
+            [ "--user"; Printf.sprintf "%d:%d" uid gid ])
        @ expressed
        @ [ "--memory"; memory ]
        @ (match cpus with
@@ -639,7 +647,15 @@ let exec_argv_for backend ~container_name ~uid ~gid ~container_cwd ~stdin ~comma
   command_argv_for backend
   @ [ "exec" ]
   @ (if stdin then Backend.exec_stdin_args backend else [])
-  @ [ "--user"; Printf.sprintf "%d:%d" uid gid; "-w"; container_cwd ]
+  (* msb [exec] has [--user], but it names a guest user string, not the uid:gid
+     this lane maps ownership with; sending "501:20" would be read as a user
+     name and write under the wrong identity. The work volume's [uid=,gid=]
+     mount already places writes at the right host uid, so msb runs as its guest
+     default and no per-exec [--user] is sent. *)
+  @ (match backend with
+     | Backend.Microsandbox -> [ "-w"; container_cwd ]
+     | Backend.Apple_container | Backend.Nerdctl_kata ->
+       [ "--user"; Printf.sprintf "%d:%d" uid gid; "-w"; container_cwd ])
   @ [ container_name ]
   @ Backend.command_separator backend
   @ command_argv
@@ -680,14 +696,22 @@ let shim_exec_prefix_for backend ~container_name ~uid ~gid ~remote_root ~shim_co
          ]
        @ Backend.command_separator backend)
   | Backend.Microsandbox ->
-    Error
-      "microvm_shim_exec_unsupported: msb 0.6.16 exec takes the environment \
-       entry the shim needs (-e/--env), but its --user documents a guest \
-       user name and no uid:gid form, so the identity this lane runs a \
-       keeper's commands under cannot be named. Sent anyway, msb would \
-       either reject it or resolve it as somebody else's name and write to \
-       the keeper's tree as that user. Next: name a guest user for the lane, \
-       or use a runtime whose --user takes uid:gid (RFC-0405 follow-up)."
+    (* msb [exec --user] names a guest user, not the uid:gid this lane maps
+       ownership with, so it is left off -- the work volume's [uid=,gid=] mount
+       already places the keeper's writes at the right host uid, and msb runs as
+       its guest default. The shim config still travels as [--env], which msb
+       documents the same as the other two. *)
+    Ok
+      (command_argv_for backend
+       @ [ "exec" ]
+       @ Backend.exec_stdin_args backend
+       @ [ "-w"
+         ; remote_root
+         ; "--env"
+         ; Exec_ssh_protocol.shim_config_env_var ^ "=" ^ shim_config_path
+         ; container_name
+         ]
+       @ Backend.command_separator backend)
 ;;
 
 (* The two runtimes spell removal differently -- [container delete --force]
@@ -835,6 +859,19 @@ let apple_volume_create_argv ~volume_name ~size =
   @ [ "volume"; "create"; "-s"; size; volume_name ]
 ;;
 
+(** msb's work volume is a directory-backed named volume ([volume create
+    --kind dir], no size). Two facts force the kind, both measured 0.6.16:
+    [--size] is rejected on a dir volume ("only supported with --kind disk
+    until directory quotas are enforced"), and a disk volume cannot be
+    mounted as a named work root -- [-v] and [--mount-named] both request a
+    dir and refuse a disk one ("already exists as disk, but this sandbox
+    requested dir"). So RFC-0400's size ceiling has no msb spelling, the way
+    it has no nerdctl one; the dir volume mounts over virtiofs and the mount
+    args are the shared [--volume NAME:DEST] form. *)
+let msb_volume_create_argv ~volume_name =
+  command_argv_for Backend.Microsandbox @ [ "volume"; "create"; "--kind"; "dir"; volume_name ]
+;;
+
 let work_volume_name ~keeper_name =
   if valid_volume_segment keeper_name
   then Ok ("masc-keeper-work-" ^ keeper_name)
@@ -870,13 +907,20 @@ let shim_mount_args ~host_dir =
     names the config env the endpoint injects with every request
     ({!Keeper_sandbox_runtime.config_env_names}) -- the shim drops any
     request env it was not told to accept, and the guest is given the
-    config mount, so it must be told the names that point at it. *)
+    config mount, so it must be told the names that point at it. The scratch
+    root is the in-memory filesystem the boot mounts
+    ({!Backend.scratch_guest_root}): where the shim makes a boxed request's
+    scratch (RFC-0422). A shim older than protocol 3 refuses the key as
+    unknown; the lane's probe refuses such a shim first
+    (remote_shim_version_skew), so the refusal an operator sees names the
+    binary rather than the config. *)
 let shim_config_content ~payload_path =
   Printf.sprintf
-    "remote_root=%s\npath=%s\nenv_allowlist=%s\n"
+    "remote_root=%s\npath=%s\nenv_allowlist=%s\nscratch_root=%s\n"
     work_volume_guest_root
     payload_path
     (String.concat "," Keeper_sandbox_runtime.config_env_names)
+    Backend.scratch_guest_root
 ;;
 
 (** What the guest endpoint declares to the remote runner. No caller env
@@ -1003,22 +1047,90 @@ let ensure_apple_work_volume ~volume_name ~size ~timeout_sec =
             (output_for_log ~stdout ~stderr)))
 ;;
 
+(** Volume names in an [msb volume list --format json] payload: each row
+    carries [name] at top level (measured 0.6.16 against a real volume:
+    [{ "name": ..., "kind": "dir", "capacity_bytes": ..., ... }]). Apple's
+    [id]/[configuration.name] shape belongs to another runtime and is not
+    read here, the way the two inspect parsers are kept apart. *)
+let msb_volume_names_of_json = function
+  | `List entries ->
+    let open Yojson.Safe.Util in
+    Ok
+      (List.filter_map
+         (fun entry ->
+           match member "name" entry with
+           | `String name -> Some name
+           | _ -> None)
+         entries)
+  | _ -> Error "msb volume list did not return a JSON array"
+;;
+
+(** msb settles existence from the listing alone. [msb volume list --format
+    json] is the machine form (measured: an array, [[]] on an empty host);
+    [msb volume inspect] carries no [--format] so there is no second machine
+    source, and none is needed. A non-zero list is a probe failure, never
+    "absent": reading a stopped runtime as absent would create over a volume
+    that already holds a keeper's tree, which is the failure the check exists
+    to prevent. *)
+let msb_volume_probe ~volume_name ~timeout_sec =
+  let list_argv =
+    command_argv_for Backend.Microsandbox @ [ "volume"; "list"; "--format"; "json" ]
+  in
+  match Process_eio.run_argv_with_status_split ~timeout_sec list_argv with
+  | Unix.WEXITED 0, stdout, _ ->
+    (match Yojson.Safe.from_string stdout with
+     | exception Yojson.Json_error message ->
+       Volume_probe_failed ("msb volume list emitted invalid JSON: " ^ message)
+     | json ->
+       (match msb_volume_names_of_json json with
+        | Error message -> Volume_probe_failed message
+        | Ok names ->
+          if List.exists (String.equal volume_name) names
+          then Volume_present
+          else Volume_absent))
+  | status, stdout, stderr ->
+    Volume_probe_failed
+      (Printf.sprintf
+         "msb volume list: %s (%s)"
+         (match status with
+          | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+          | Unix.WSIGNALED n -> Printf.sprintf "signalled %d" n
+          | Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n)
+         (output_for_log ~stdout ~stderr))
+;;
+
+(** Create the msb work volume when the listing shows it absent. [msb volume
+    create] errors "volume already exists" rather than clobbering (measured),
+    so the listing is the guard and the create is the normal-path action. *)
+let ensure_msb_work_volume ~volume_name ~timeout_sec =
+  match msb_volume_probe ~volume_name ~timeout_sec with
+  | Volume_present -> Ok `Already_present
+  | Volume_probe_failed message ->
+    Error (Printf.sprintf "microvm_work_volume_probe_failed: %s" message)
+  | Volume_absent ->
+    let argv = msb_volume_create_argv ~volume_name in
+    (match Process_eio.run_argv_with_status_split ~timeout_sec argv with
+     | Unix.WEXITED 0, _, _ -> Ok `Created
+     | status, stdout, stderr ->
+       Error
+         (Printf.sprintf
+            "microvm_work_volume_create_failed: %s (%s; %s)"
+            volume_name
+            (match status with
+             | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+             | Unix.WSIGNALED n -> Printf.sprintf "signalled %d" n
+             | Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n)
+            (output_for_log ~stdout ~stderr)))
+;;
+
 (** The work volume, for whichever runtime this keeper declared.
 
-    Only Apple's grammar is established here, so the other two refuse instead
-    of guessing at one.
-
-    For [msb] the create is known ([volume create --kind disk --size],
-    measured 0.6.16, [-s] rejected), and so is half of the existence check:
-    [msb volume list --format json] is documented and answers an array
-    (measured, [[]] on a host with no volumes). The other half is not.
-    [msb volume inspect] carries no [--format], so it answers a human table,
-    and this probe is written as inspect-then-listing the way Apple's is:
-    a create over a volume that already holds a keeper's working tree is the
-    failure the check exists for, and human prose is not a protocol to settle
-    it on. Establishing the row shape of the listing -- which needs an msb
-    volume to observe, and this host has none -- is what would let the pair
-    be rewritten as a listing-only check.
+    Apple and msb are established; nerdctl still refuses. Apple takes a sized
+    disk volume; msb takes a directory-backed named volume with no size (see
+    {!msb_volume_create_argv} for why the kind is forced), so RFC-0400's size
+    ceiling reaches Apple and is dropped for msb, the way it is for nerdctl.
+    Existence: Apple probes inspect-then-listing; msb settles from the listing
+    alone because its [volume inspect] has no machine form.
 
     For [nerdctl] there is nothing to establish -- its [volume create]
     documents [--label] and no size flag (nerdctl command reference), so the
@@ -1026,17 +1138,7 @@ let ensure_apple_work_volume ~volume_name ~size ~timeout_sec =
 let ensure_work_volume_for backend ~volume_name ~size ~timeout_sec =
   match (backend : Backend.t) with
   | Backend.Apple_container -> ensure_apple_work_volume ~volume_name ~size ~timeout_sec
-  | Backend.Microsandbox ->
-    Error
-      "microvm_work_volume_unsupported: msb 0.6.16 creates a sized volume \
-       with `volume create --kind disk --size` (-s is rejected), and `msb \
-       volume list --format json` is machine-readable, but `msb volume \
-       inspect` carries no --format and answers a human table, so the \
-       inspect half of the existence check this provisioning runs has no \
-       machine form. Creating over a volume that already holds a keeper's \
-       working tree is the failure that check exists for. Next: settle \
-       existence from the listing alone, which needs the row shape of `msb \
-       volume list --format json` observed against a real volume."
+  | Backend.Microsandbox -> ensure_msb_work_volume ~volume_name ~timeout_sec
   | Backend.Nerdctl_kata ->
     Error
       "microvm_work_volume_unsupported: nerdctl volume create documents \

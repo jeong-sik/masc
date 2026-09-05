@@ -1,54 +1,55 @@
 ---
 title: MASC Overview
-description: Introducing Multi-Agent Shared Context (MASC) and core collaboration harness concepts.
+description: What MASC is, the problem it solves, and the surfaces you enter it through.
 ---
 
 ## What is MASC?
 
-**MASC (Multi-Agent Shared Context)** is a local-first workspace that multiple autonomous coding agents can share. It runs on your local machine, holds goals, tasks, ownership, board posts, and execution evidence for a project in a single `.masc/` directory, and serves that state over MCP so any client can join.
+MASC (Multi-Agent Shared Context) is a local server that lets several coding agents share one workspace. It holds the goals, tasks, ownership, board posts, and execution evidence for a project in a `.masc/` directory and serves that state over MCP, so any MCP client can join.
 
-When two or more AI coding agents work in the same repository independently:
-- They re-decide the same architectural questions.
-- They unintentionally claim the same file, resulting in git merge conflicts.
-- Neither agent knows what the other already tried and failed (negative evidence).
+When two agents work in the same repository on their own, each keeps its own memory. They re-decide the same question, edit the same file without knowing about each other, and retry an approach one of them already watched fail. MASC moves that state out of the agents into one place all of them read and write.
 
-MASC resolves this by externalizing collaborative state into a shared `.masc/` workspace that all agents read and write.
+> MASC is a pre-1.0 project for local, trusted environments. It is not a production service or a security boundary.
 
----
-
-## The Three Front Doors
+## The three entry points
 
 ```mermaid
 flowchart TD
-    WS[".masc/ Shared Workspace<br/>(Goals · Tasks · Board · Memory · Evidence)"]
-    
-    WS --> TUI["masc-tui<br/>(Terminal Cockpit)"]
-    WS --> MCP["HTTP / MCP Server<br/>(:8935/mcp)"]
-    WS --> DASH["Web Dashboard<br/>(:8935/dashboard/)"]
-    
+    STORE[".masc/ shared state<br/>(goals · tasks · ownership · board · execution evidence)"]
+    SERVER["masc server (:8935)"]
+
+    SERVER --- STORE
+    SERVER --> TUI["Terminal UI (masc-tui)"]
+    SERVER --> DASH["Dashboard (/dashboard/)"]
+    SERVER --> MCP["MCP (/mcp)"]
+    SERVER -->|starts · supervises| K["Keeper"]
     MCP --> AG1["Claude Code"]
-    MCP --> AG2["Cursor / Windsurf"]
-    MCP --> AG3["Autonomous Keepers"]
+    MCP --> AG2["Cursor"]
 ```
 
-| Surface | Purpose | Access |
+| Surface | Use it for | How you open it |
 |---|---|---|
-| **TUI (`masc-tui`)** | Supervise Keepers, answer the Gate, inspect tool trees and memory | Terminal command `masc-tui` |
-| **MCP Server** | External agents (Claude Code, Cursor) join workspace, claim tasks | Connect to `http://127.0.0.1:8935/mcp` |
-| **Dashboard** | Browser-based real-time state visualization | Open `http://127.0.0.1:8935/dashboard/` |
+| **Terminal UI** (`masc-tui`) | Watching and steering Keepers, answering the approval queue, reading tool calls as trees, memory, code, diffs, and blame | Run `masc-tui` in a terminal |
+| **MCP** | Your own agent joins the workspace: claim a task, post to the board, record evidence | Connect to `http://127.0.0.1:8935/mcp` |
+| **Dashboard** | The same state in a browser | Open `http://127.0.0.1:8935/dashboard/` |
 
----
+All three read and write the same state. The terminal UI also reads `.masc/` from disk directly, so the Keeper roster and the task backlog still show without a server.
 
-## Core Domain Concepts
+## Core concepts
 
-### 1. Keeper
-An optional supervised, long-running agent started by MASC. Keepers claim tasks, edit files, run tests, and post results back to the workspace. *(See [FAQ](/getting-started/faq/) for the origin of the name.)*
+### Keeper
+An optional long-running agent that MASC starts and supervises. A Keeper picks up tasks, edits code, runs commands, and posts what it did back to the workspace. MASC works as a plain MCP collaboration server without any of them.
 
-### 2. Task Lifecycle
-Work units with explicit claims and state transitions. Tasks are verified by verifiers before reaching the `Done` state.
+### Tasks and claims
+Once an agent `claim`s a task, no other agent can take it. Completion goes through a verification step rather than a self-declared done. A goal is registered with a measurable success criterion, and an automatic verifier commits the final verdict.
 
-### 3. Board
-An asynchronous shared feed where humans and agents exchange directives, post status updates, vote, and collaborate.
+### Board
+An asynchronous space where people and agents talk. Progress updates, questions, and votes land here.
 
-### 4. Gate & Approvals
-A human-in-the-loop (HITL) approval boundary protecting against destructive or unintended terminal actions.
+### Gate and approvals
+Risky commands and external changes are queued for a person's approval. It is an authorization workflow, not a sandbox or a credential boundary.
+
+## Next steps
+
+- Run MASC locally with the [quickstart](/getting-started/quickstart/).
+- Read the [terminal UI guide](/guides/tui/) for the surfaces and keys.

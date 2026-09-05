@@ -1,7 +1,7 @@
 # Keeper Continuity Production Runbook
 
 **Status**: production release gate
-**Updated**: 2026-07-10
+**Updated**: 2026-09-05
 
 Keeper continuity means that one ordered Keeper lane can restore its agent core
 checkpoint, consume typed wake events, and keep making observable progress
@@ -49,6 +49,35 @@ Monitor per Keeper lane:
 
 A failure in one lane must not pause the fleet. Preserve the failed event and
 surface its error; let unrelated lanes continue.
+
+## Undecodable Stores at Boot
+
+Boot decodes every keeper meta (`<base>/.masc/keepers/<name>.json`) and every
+current Memory OS snapshot (`<base>/.masc/config/keepers/<name>.memory-current.json`)
+before any Keeper lane starts. When a file does not decode with this build, the
+process does not start. It exits 1 and the startup log carries one line per
+file:
+
+```
+[FATAL] Critical startup failed before readiness; refusing partial BasePath ownership: Keeper persistence preparation failed: boot refused: 1 store(s) this build cannot read
+  memory_current keeper=sound path=<base>/.masc/config/keepers/sound.memory-current.json: <path>: invalid JSON: ...
+strip or repair the files and run `deployment_preflight_helper validate-stores` against this base path, or start with --accept-store-quarantine to move them aside and start those keepers with empty stores
+```
+
+The files are not touched. Two ways forward:
+
+1. Repair or strip the files, then confirm with
+   `deployment_preflight_helper validate-stores --base-path=<base>` and start
+   again. This keeps the keeper's memory.
+2. Start with `--accept-store-quarantine`. Each refused file moves to
+   `<path>.rejected-<timestamp>` (kept as bytes), the snapshot's journal gets
+   a `quarantined` line, and the keeper starts with an empty store. The flag is
+   for one start; do not put it in a launcher.
+
+`scripts/deploy.sh` never reaches this refusal: its `validate-stores` preflight
+stops the deploy on the same files before the executable starts. A refusal
+after a `deploy.sh` start means the preflight and boot disagree, which is a
+defect to report, not a reason to pass the flag. Design: RFC-0420.
 
 ## Containment and Rollback
 

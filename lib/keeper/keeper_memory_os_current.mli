@@ -261,26 +261,20 @@ val to_json : t -> Yojson.Safe.t
 
 (** {1 Boot-time reconcile} *)
 
-type boot_reconcile_outcome =
-  | Snapshot_absent
-  | Snapshot_readable
-  | Snapshot_quarantined of
-      { rejection : string
-      ; rejected_path : string
-      }
-
-(** Decode one keeper's current snapshot with this build's decoder and, when
-    it is refused, move the bytes to a fresh [.rejected-<now>] path and
-    journal the quarantine -- exactly what a writer would do on its next
-    commit, done once at boot under the same locks. [Error] names a snapshot
-    that was refused but could not be moved aside; it stays in place. *)
-val quarantine_undecodable_for_keepers_dir
+(** Move one keeper's current snapshot, which this build's decoder has already
+    refused with [rejection], to a fresh [.rejected-<now>] path and journal the
+    quarantine -- exactly what a writer would do on its next commit, done once
+    at boot under the same locks after the operator accepted it (RFC-0420).
+    [Ok] carries the path the bytes went to. [Error] names a snapshot that
+    could not be moved; it stays in place. *)
+val move_aside_for_keepers_dir
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> keepers_dir:string
   -> keeper_id:string
   -> now:float
+  -> rejection:string
   -> unit
-  -> (boot_reconcile_outcome, string) result
+  -> (string, string) result
 
 (** How the basis of a claim seen again combines with the stored one: an
     observation outranks a derivation, a Board reference outranks the

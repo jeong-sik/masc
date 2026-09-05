@@ -2,6 +2,16 @@
 
 val assoc_upsert : string -> Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
 val typed_input_command_text : Keeper_tool_execute_typed_input.execute_input -> string
+
+val typed_input_call_summary
+  :  Keeper_tool_execute_typed_input.execute_input
+  -> string option
+(** The one line an Execute approval is about: the first non-blank line of
+    {!typed_input_command_text}, whole. This is the Execute tool's declared
+    call summary; the Gate request carries it and the replay engine recovers
+    it from the approved input through the same function. [None] when the
+    command text is blank. *)
+
 val default_timeout_sec : float
 (** Wall-clock budget for an Execute call whose caller named none. *)
 

@@ -377,37 +377,30 @@ let warn_cooldown_sec = 300.0
 let stale_token_warn_log_max_entries = 1024
 
 let stale_token_warn_log : (string, float) Hashtbl.t = Hashtbl.create 16
-let stale_token_warn_mu = Eio.Mutex.create ()
+let stale_token_warn_mu = Stdlib.Mutex.create ()
 
 let record_dashboard_actor_fallback
     (fb : Auth_error_kind.dashboard_actor_fallback) =
   let now = Time_compat.now () in
   let should_log =
-    Eio.Mutex.use_ro stale_token_warn_mu @@ fun () ->
-    match Hashtbl.find_opt stale_token_warn_log fb.token_hash_prefix with
-    | Some last_ts -> now -. last_ts >= warn_cooldown_sec
-    | None -> true
-  in
-  if should_log then begin
-    Eio.Mutex.use_rw ~protect:true stale_token_warn_mu @@ fun () ->
-    (* Re-check under the write lock; another fiber may have just logged. *)
-    let really_should_log =
+    Stdlib.Mutex.protect stale_token_warn_mu (fun () ->
       match Hashtbl.find_opt stale_token_warn_log fb.token_hash_prefix with
-      | Some last_ts -> now -. last_ts >= warn_cooldown_sec
-      | None -> true
-    in
-    if really_should_log then (
-      (* Bound the dedup table before inserting a new prefix. Guard on absence
-         so refreshing an existing prefix after cooldown does not evict an
-         unrelated entry. Reuses the same helper as the dashboard caches. *)
-      (if not (Hashtbl.mem stale_token_warn_log fb.token_hash_prefix) then
-         Server_utils.evict_oldest_if_full
-           ~max_entries:stale_token_warn_log_max_entries ~age_of:Fun.id
-           stale_token_warn_log);
-      Hashtbl.replace stale_token_warn_log fb.token_hash_prefix now;
-      Log.Auth.warn "%s"
-        (Auth_error_kind.dashboard_actor_fallback_log_message fb));
-  end;
+      | Some last_ts ->
+        if now -. last_ts >= warn_cooldown_sec then begin
+          Hashtbl.replace stale_token_warn_log fb.token_hash_prefix now;
+          true
+        end else false
+      | None ->
+        if not (Hashtbl.mem stale_token_warn_log fb.token_hash_prefix) then
+          Server_utils.evict_oldest_if_full
+            ~max_entries:stale_token_warn_log_max_entries ~age_of:Fun.id
+            stale_token_warn_log;
+        Hashtbl.replace stale_token_warn_log fb.token_hash_prefix now;
+        true)
+  in
+  if should_log then
+    Log.Auth.warn "%s"
+      (Auth_error_kind.dashboard_actor_fallback_log_message fb);
   Otel_metric_store.inc_counter
     Otel_metric_store.metric_silent_dashboard_actor_fallback
     ~labels:(Auth_error_kind.dashboard_actor_fallback_metric_labels fb)
@@ -416,8 +409,8 @@ let record_dashboard_actor_fallback
 (* Exposed for testing: current size of the dedup table, used to assert the
    bound holds under churn. *)
 let stale_token_warn_log_entry_count () =
-  Eio.Mutex.use_ro stale_token_warn_mu @@ fun () ->
-  Hashtbl.length stale_token_warn_log
+  Stdlib.Mutex.protect stale_token_warn_mu (fun () ->
+    Hashtbl.length stale_token_warn_log)
 
 type dashboard_actor_resolution =
   | Authenticated_actor of string
@@ -918,32 +911,6 @@ let check_agent_rate_limit request reqd =
         Error ()
       end
 
-(** Admin-only access - requires MASC_ADMIN_TOKEN.
-    Delegates timing-resistant comparison to Eqaf. *)
-let admin_token_equal = Eqaf.equal
-
-let with_admin_auth handler request reqd =
-  match current_server_state () with
-  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
-  | Some state ->
-      let admin_token = Env_config_core.admin_token_opt () in
-      let provided = auth_token_from_request request in
-      match admin_token, provided with
-      | None, _ ->
-          Http_server_eio.Response.json ~status:`Forbidden
-            {|{"error":"MASC_ADMIN_TOKEN not configured"}|} reqd
-      | Some _, None ->
-          Http_server_eio.Response.json
-            ~status:`Unauthorized
-            ~extra_headers:(auth_error_headers ~status:`Unauthorized ~cors:[])
-            {|{"error":"Admin token required"}|} reqd
-      | Some expected, Some given ->
-          if admin_token_equal expected given then
-            handler state request reqd
-          else
-            Http_server_eio.Response.json ~status:`Forbidden
-              {|{"error":"Invalid admin token"}|} reqd
-
 (** Public read access - no auth required (dashboard, health) *)
 let is_public_read_path path =
   String.equal path "/health"
@@ -1205,7 +1172,6 @@ and with_token_permission_auth ~permission handler request reqd =
       | Error err -> respond_auth_error request reqd err)
 
 module For_testing = struct
-  let admin_token_equal = admin_token_equal
   let snapshot_server_state = current_server_state
   let restore_server_state state = Atomic.set server_state state
 

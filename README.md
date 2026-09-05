@@ -28,14 +28,19 @@ collaboration server without any of them.
 
 ## The terminal is the front door
 
-`masc-tui` is the primary way in. It reads `.masc/` from disk, talks to the
-server for everything that only exists over HTTP, and can start that server
-itself. The same workspace also answers to MCP clients and to a web dashboard;
-all three read and write the same state.
+Typing `masc` on a terminal opens the TUI. It reads `.masc/` from disk, talks to
+the server for everything that only exists over HTTP, and starts that server
+itself when nothing is answering the port — so one word gets you a running
+workspace. The same workspace also answers to MCP clients and to a web
+dashboard; all three read and write the same state.
+
+Away from a terminal the same `masc` is the server it has always been: a pipe,
+a unit file, a container, or a CI step has no TTY and gets the server. `masc
+start` is the explicit spelling when you want the server regardless.
 
 | Surface | Use it for | How you get it |
 |---|---|---|
-| **TUI** | Watching and steering Keepers, answering the Gate, reading tool calls as trees, browsing code, diffs, blame, and memory | `masc-tui`, installed beside `masc` or built from source |
+| **TUI** | Watching and steering Keepers, answering the Gate, reading tool calls as trees, browsing code, diffs, blame, and memory | `masc` on a terminal, or `masc-tui` by name |
 | **MCP** | Your own agent joins the workspace: claim a task, post to the board, record evidence | Any MCP client over `http://127.0.0.1:8935/mcp` |
 | **Dashboard** | The same state in a browser, for when a terminal is not at hand | Served at `/dashboard/` by the same process |
 
@@ -119,8 +124,10 @@ command that starts it.
 
 After placing the binaries the installer runs a one-time setup wizard (skip it
 with `--no-wizard`). It reports what it detects on this host before writing
-anything, and the only files it writes are `.masc/config/.env.local` (one
-provider key) and `[runtime].default` in `runtime.toml`.
+anything, and the only thing it writes is `[runtime].default` in
+`runtime.toml`. It never asks for an API key and never stores one: the server
+resolves its credential from the environment it is started in, so that is where
+a key belongs and the only place the wizard checks.
 
 Two axes are reported. The **model source** is where turns get their tokens:
 
@@ -162,6 +169,131 @@ The subscription sign-in check is also a standalone command:
 when it is not, reusing the server's login probe instead of reading credential
 files.
 
+### What a finished install still does not have
+
+The install ends with a workspace that serves MCP and a dashboard. Four things
+it deliberately does not do, each of which is a step you take next.
+
+**No Keeper exists.** The config seed writes runtime settings, prompts, tool
+definitions and connector declarations, and leaves `config/keepers/` empty. A
+roster is per workspace, so neither the installer nor the server invents one.
+Create the first from the TUI's Keepers surface, or with `masc keeper-create`
+against a running server. `--team <preset>` at install time seeds one instead.
+
+**No sandbox image is built yet.** A Keeper runs each turn inside an image —
+both the `docker` and the `microvm` profiles resolve one — and until it exists
+every turn stops at `docker_preflight_failed`. Build the one a Keeper gets by
+default: bash, ripgrep and git on a Debian base, which is what a turn needs to
+read, search and edit a repository:
+
+```bash
+masc sandbox-image                 # builds masc-sandbox:general
+masc sandbox-image --print         # the recipe, if you would rather read it first
+```
+
+The recipe is embedded in the binary and reaches docker on stdin, so this works
+on a host that never had a checkout. It is deliberately not polyglot: a Keeper
+that has to *build* a project needs that project's toolchain, named per Keeper
+in its TOML as `sandbox_image = "node:22-bookworm"` or whatever the work is.
+
+MASC's own development image — `masc-keeper-sandbox:local`, OCaml plus this
+repository's opam dependencies — is no longer what a Keeper gets by default; a
+Keeper that wants it names it. It is also the one that still needs a checkout,
+because its Dockerfile copies this repository's opam files:
+
+```bash
+scripts/build-keeper-sandbox-image.sh
+```
+
+There is no host arm — the profiles are `docker`, `microvm` and `remote_ssh`
+only — so a host with no Docker, no `container`, and no SSH endpoint can run
+the workspace but cannot run a Keeper. `microvm` names a guest behind a
+hypervisor, not one runtime: `microvm_backend` picks between `apple_container`,
+`microsandbox` and `nerdctl_kata`, and only the assumed default is host-derived
+— Apple's `container` on macOS, nothing elsewhere. So a Linux host names its
+backend rather than inheriting one, and a Keeper that asked for a microVM where
+none is named is refused at boot rather than quietly given a shared kernel. The
+table above is where each backend stands as measured.
+
+**And that image is MASC's own development environment**, not a general one. It
+is `ocaml/opam:ubuntu-24.04-ocaml-5.5` with this repository's opam dependencies
+baked in, because a Keeper turn runs in a fresh `docker run --rm` container with
+a read-only rootfs and `--cap-drop=ALL`: nothing can be installed once the turn
+starts, so everything the Keeper needs has to be in the image already. A Keeper
+pointed at a TypeScript or Python project finds the wrong toolchain and cannot
+fetch the right one.
+
+Name the image the work actually needs, per Keeper, in its TOML:
+
+```toml
+[keeper]
+sandbox_profile = "docker"
+sandbox_image = "node:22-bookworm"
+network_mode = "none"
+```
+
+`MASC_KEEPER_SANDBOX_DOCKER_IMAGE` moves the default for every Keeper that
+declares none. What any image has to satisfy, because the turn is run as
+`<image> bash -l -s` with the tool script on stdin:
+
+- **`bash` on `PATH`.** A login shell is what receives the turn, so an Alpine
+  image with only `sh` cannot take one.
+- **Usable as the host's uid.** The container runs `--user <your uid>:<gid>`, so
+  an image that only works as its own baked-in user will land without a home.
+- **The toolchain already inside.** Rootfs is read-only apart from one tmpfs and
+  the mounted workspace, and `--cap-drop=ALL` with `no-new-privileges` is set, so
+  a turn cannot install anything it finds missing.
+
+**The provider key has to be in the server's environment.** `runtime.toml`
+names the variable per provider — `OLLAMA_CLOUD_API_KEY`, `DEEPSEEK_API_KEY`,
+and so on — and the server reads it from the environment it was started in.
+Export it in the shell you start `masc` from. On the TUI path this is easy to
+miss, because the server the TUI starts inherits the TUI's environment: export
+it before launching, not after.
+
+**Most of the seeded model catalog is not dispatchable.** The catalog ships 31
+provider/model bindings as documented examples; the 13 that declare
+`max-request-body-bytes` can take a Keeper turn and the rest are named in a
+startup warning that says exactly which key to add. `[runtime].default` is one
+of the 13.
+
+### What a Keeper may do on its first day
+
+Everything a new Keeper reaches for starts closed, and the four defaults below
+are the ones people meet first.
+
+**Two approval lanes, in different positions.** The workspace lane starts in
+`auto_judge`: a model reads each gated call and decides. The external-services
+lane — anything leaving for an attached service such as Jira, GitHub or Slack —
+starts in `manual`, so a person answers every one. The split is deliberate: on
+2026-08-27, 374 of 379 Gate decisions rode workspace `always_allow`, and a lane
+that inherited that switch would have let an incident's Jira writes through with
+only an audit row.
+
+**`auto_judge` needs a model of its own**, and it is not the fleet default. The
+judgement runs on the `hitl_auto_judge` exact-output lane, whose slots name
+`glm-coding` and `ollama_cloud` — so an install carrying one provider key
+usually cannot reach it. A call it cannot judge is neither allowed nor refused:
+it is deferred to the Approvals queue for a person, the same place `manual`
+sends one. A Keeper that looks stuck on its first task is often waiting there.
+
+**The sandbox has no network.** `docker` and `microvm` guests start on
+`network_mode = "none"`, so a web search, a `git push`, or any HTTP call inside
+one fails until that Keeper's TOML says `inherit` (the host's network) or
+`policy` (only the destinations its `egress_allow` list names, through a proxy
+this server owns). `remote_ssh` starts on `inherit`, because the endpoint is
+already a machine with its own network. `masc keeper-create` refuses to pick for
+you and requires `--network-mode`.
+
+**No connector is connected.** The declarations under `config/identity/` are
+provider descriptions, not connections:
+`GET /api/v1/keepers/oauth/providers` answers `has_client: false` for every one
+of them on a fresh install. Attaching one needs a client first. A provider that
+publishes a registration endpoint gets one on the spot, and the rest — GitHub
+among them — need an app you make by hand, whose id and secret go in through the
+Connectors surface (`A`) or `POST /api/v1/keepers/oauth/client`. Only then does
+a Keeper attach its own credential.
+
 ## Terminal UI
 
 A release install puts `masc-tui` on `PATH` next to `masc`; from a source
@@ -176,11 +308,15 @@ dune build --root . bin/masc_tui.exe
 `MASC_BASE_PATH` and then the current directory. `dune install` or an opam
 install puts the same program on `PATH` as `masc-tui`.
 
-When no server is answering on the port, the Keepers surface offers `s` to
-start one here: it launches the sibling `masc` binary as a child process,
-waits for `/health`, and stops that server again when the TUI exits. A server
-that was already running is left alone. This is the path a fresh install takes:
-start the TUI, press `s`, and the workspace is up.
+When nothing answers the port, the TUI starts a server itself: it launches the
+sibling `masc` binary as a child process, waits for `/health`, and stops that
+server again when the TUI exits. A server that was already running is left
+alone — the TUI never stops one it merely connected to. So a fresh install is
+one word: type `masc`, and the workspace is up.
+
+That happens once per session. If it does not come up — a port already taken by
+something else, a `masc` that is not beside the TUI — the Keepers surface still
+offers `s` to try again, and the footer says what failed.
 
 ### Surfaces
 
@@ -240,6 +376,25 @@ margin, `m` shows the notes anchored to it, and `K`/`D` ask the language server
 for hover text or the definition under the cursor. Changes, the Keeper's own
 file writes, opens the same viewer with `v`.
 
+MASC ships no language server. It starts the one the project's language names
+and expects that program on `PATH`; an absent one answers `Command_not_found`
+rather than a guess.
+
+| Language | Program | Project marker |
+|---|---|---|
+| OCaml | `ocamllsp` | `dune-project`, `dune-workspace` |
+| TypeScript | `typescript-language-server` | `tsconfig.json`, `package.json` |
+| JavaScript | `typescript-language-server` | `jsconfig.json`, `package.json` |
+| Python | `pylsp` | `pyproject.toml`, `setup.py`, `setup.cfg` |
+| Rust | `rust-analyzer` | `Cargo.toml` |
+| Go | `gopls` | `go.mod` |
+
+The same servers back the Keeper's `keeper_code_query` tool, so a Keeper asked
+about a language whose server is missing falls back to reading text. For OCaml,
+`references` also needs `dune build @ocaml-index`; without it the answer names
+that command rather than returning a short list. The other five declare no
+index precondition this client checks.
+
 ### When the server is not there
 
 The header says when the TUI and the server disagree about which workspace
@@ -271,6 +426,39 @@ masc mcp-config --base-path /path/to/project --client env   # shell exports
 It mints a long-lived worker token (pass `--expiring` for a session-scoped one)
 and embeds the endpoint, token, and header for the chosen client. The manual
 pieces below are the same shapes, for wiring a client the command does not cover.
+
+### Tokens
+
+`masc login` mints one bearer for one agent name, and `masc mcp-config` is the
+same mint with a client config block around it. Both are local: they write the
+credential and print the exports, and neither needs the server to be up.
+
+**Minting again is how you rotate.** A workspace holds one credential per agent
+name, so a second `masc login --agent ops` replaces the first and the previous
+bearer stops validating from the next request. Nothing else has to be revoked,
+but anything still exporting the old value needs the new one.
+
+**The store never holds a bearer.** `.masc/auth/agents/<agent>.json` keeps a
+SHA-256 of the token, so a lost token cannot be read back out of it. The raw
+secret survives in exactly one place — `.masc/auth/<agent>.token`, mode `0600` —
+and in whatever shell you exported it into.
+
+```bash
+masc token list             # agent, role, expiry, whether the raw secret is on disk
+masc token revoke ops       # retire one without minting a replacement
+masc token prune --dry-run  # what a prune would remove
+masc token prune            # retire every expired credential and orphaned stub
+```
+
+`prune` touches two things, and neither of them authenticates anything: a
+credential whose expiry has passed, and a redirect stub whose target file is
+gone. Removing those is garbage collection rather than a security decision —
+which is why it needs no confirmation while `revoke` makes you name its target.
+Orphaned stubs are the ones a listing cannot show you: following the redirect
+answers nothing, so `masc token list` skips them and only `prune` finds them.
+
+A token minted with `--no-expiry` is never in that set. Retire it by name when
+the client that used it is gone.
 
 HTTP is the public MCP path. First load the worker bearer created by
 `quickstart.sh`:
@@ -381,7 +569,6 @@ different config root.
 | `keepers/<name>.toml` | Everything one Keeper needs: operational settings, prompt instructions, and tool postures in `[keeper.tools]` |
 | `repositories.toml` | Registered repository identity and checkout metadata for repository workflows |
 | `keeper_repo_mappings.toml` | Keeper-to-repository preferences; these are defaults, not an authorization boundary |
-| `.env.local` | Provider environment variables written by current installer and quickstart flows |
 
 One directory below the same root is authored rather than generated:
 

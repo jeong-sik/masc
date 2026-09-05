@@ -43,12 +43,23 @@ let observation_commands =
   ; "which"; "basename"; "dirname"; "realpath"; "readlink"
   ; "md5sum"; "sha1sum"; "sha256sum"; "sha512sum"
   ; "cmp"; "column"; "nl"; "tac"; "cut"; "tr"; "grep"
+    (* Added 2026-09-05 from two days of judged requests: [true] closes a
+       [read || true] line (6), [base64] decodes or encodes what it is given
+       (4), [jq] has no builtin that writes a file (2), [id] and [uptime]
+       print (1 each). None takes an argument that writes. *)
+  ; "true"; "false"; "base64"; "jq"; "id"; "uptime"
   ]
 
-(* git subcommands that read only, in every argument shape they accept. *)
+(* git subcommands that read only, in every argument shape they accept.
+   [merge-base], [rev-list] and [cherry] were added 2026-09-05: over the two
+   days before, 21 judged requests carried one of them as a stage, and
+   [git -C clone-probe rev-list --count HEAD..origin/main] was the first call
+   a microvm keeper sent to the judge after the RFC-0421 restart. None of the
+   three has a flag that writes. *)
 let git_read_subcommands =
   [ "status"; "diff"; "log"; "show"; "blame"; "annotate"; "reflog"
-  ; "describe"; "shortlog"; "rev-parse"; "ls-files"; "ls-remote"
+  ; "describe"; "shortlog"; "rev-parse"; "rev-list"; "merge-base"; "cherry"
+  ; "ls-files"; "ls-remote"; "ls-tree"
   ; "whatchanged"; "cat-file"; "name-rev"; "grep"
   ]
 
@@ -194,54 +205,118 @@ let classify_argv argv =
 
 (* ── Gate request decoding ───────────────────────────────────────────── *)
 
-(* ── Script→argv equivalence (RFC-0404) ─────────────────────────────── *)
+(* ── Script classification through the shell IR (RFC-0421) ─────────── *)
 
-(* Characters a shell could act on. A script line carrying none of them has
-   no quoting, expansion, redirection, or composition, so its whitespace
-   split is exactly the argv the shell would hand the command — and since
-   the tool still executes the script through a shell, that identity is
-   what makes classifying the split as safe as classifying a real array.
-   Anything else — quotes, a pipe, command substitution, a second line —
-   stays with the judge.
+module Shell_gate = Masc_exec_command_gate.Shell_command_gate
+module Ir = Masc_exec.Shell_ir
 
-   A tab is on the list even though it quotes nothing: the shell's field
-   splitting treats it as a word boundary, so a tab can split one token of
-   ours into two of the shell's — and the flag guards below examine whole
-   tokens. "sed -e\t-i s/a/b/ f" classifies as ["-e\t-i"] (not in-place,
-   observation) while the shell executes ["-e"; "-i"] (in-place write). A
-   tab anywhere moves the whole line to the judge; the same reasoning
-   closes the bracket of a character class glob, which also reshapes argv
-   when a matching file exists. Blocking the characters — rather than
-   splitting on them ourselves — is also the only choice that holds under
-   an inherited non-default IFS in the executing environment: we cannot
-   know which separators that shell would use, so the line keeps its
-   judgment instead. *)
-let shell_primitive_chars =
-  [ ';'; '|'; '&'; '>'; '<'; '$'; '`'; '\\'
-  ; '('; ')'; '{'; '}'; '*'; '?'; '~'; '#'
-  ; '\''; '"'; '\t'; '['
-  ]
+(* A script is classified on the IR the same bash-subset parser gives the
+   dispatcher, never on the text. The parser resolves what the shell would
+   resolve before any program runs — quotes, word boundaries (space and tab
+   alike), connectors, pipes, redirects — and names what it cannot decide:
+   a glob, a variable, a substitution, a subshell, a heredoc. Each of those
+   is a place where the argv a command receives depends on the guest at run
+   time, so each keeps the judge. Everything the IR does show is judged by
+   the same closed tables as a real argv. RFC-0404 refused the whole line
+   whenever one of those characters appeared; 2026-09-04..05 that sent 94
+   scripts whose every stage was an observation command to the judge. *)
+
+(* Only a literal the shell will hand over unchanged counts. A glob may
+   expand into flags a guard below inspects; a variable's value is not on
+   the line; a concatenation is literal only when every part is. *)
+let rec literal_of_arg = function
+  | Ir.Lit (_, { Ir.glob = true; _ }) -> None
+  | Ir.Lit (text, _) -> Some text
+  | Ir.Var _ -> None
+  | Ir.Concat parts ->
+    let rec join acc = function
+      | [] -> Some (String.concat "" (List.rev acc))
+      | part :: rest ->
+        (match literal_of_arg part with
+         | Some text -> join (text :: acc) rest
+         | None -> None)
+    in
+    join [] parts
 ;;
 
-(* [Some argv] only when the script line is provably equivalent to that
-   argv: single line, no shell primitive anywhere, at least one token. The
-   argv table above then decides; it does not decide here. *)
-let script_argv_equivalent (script : string) : string list option =
-  if String.contains script '\n'
-     || String.contains script '\r'
-     || List.exists (fun c -> String.contains script c) shell_primitive_chars
-  then None
-  else
-    let argv = List.filter (fun t -> t <> "") (String.split_on_char ' ' script) in
-    if argv = [] then None else Some argv
+let rec literals_of_args = function
+  | [] -> Some []
+  | arg :: rest ->
+    (match literal_of_arg arg, literals_of_args rest with
+     | Some text, Some texts -> Some (text :: texts)
+     | None, _ | _, None -> None)
 ;;
 
-(* Mirrors [Keeper_tool_execute_runtime.execute_gate_input]: argv lives
-   under the nested [input]. The sandbox labels that sit at the top level of
-   the same envelope are display/audit data only — the sandbox decision
+(* A redirect is observation when nothing lands on a file: an fd joined to
+   another fd (2>&1), a file read as stdin, or bytes discarded into the
+   sink. A write or append to any other target is a filesystem effect. *)
+let redirect_is_observation = function
+  | Masc_exec.Redirect_scope.Fd_to_fd _ -> true
+  | Masc_exec.Redirect_scope.File { mode = Masc_exec.Redirect_scope.Read; _ } -> true
+  | Masc_exec.Redirect_scope.File
+      { mode = Masc_exec.Redirect_scope.Write | Masc_exec.Redirect_scope.Append
+      ; target
+      ; _
+      } ->
+    (match target with
+     | Masc_exec.Redirect_scope.In_command_namespace scope
+     | Masc_exec.Redirect_scope.On_this_host { as_written = scope; _ } ->
+       Masc_exec.Path_scope.is_discard_sink scope)
+  | Masc_exec.Redirect_scope.Literal _ -> false
+;;
+
+(* [cd] is the shell's own step: it moves the directory of the shell that
+   runs the rest of the line and of nothing else, so a line that changes
+   directory before observing is still an observation. *)
+let shell_directory_step = "cd"
+
+let classify_simple (simple : Ir.simple) =
+  simple.Ir.env = []
+  && List.for_all redirect_is_observation simple.Ir.redirects
+  &&
+  match literals_of_args simple.Ir.args with
+  | None -> false
+  | Some args ->
+    let bin = Masc_exec.Exec_program.to_string simple.Ir.bin in
+    String.equal bin shell_directory_step || classify_argv (bin :: args)
+;;
+
+(* Every stage of a pipeline and every command of a sequence must classify:
+   [a && b], [a; b], [a || b] and [a | b] each run every named command in
+   some path, and the connector decides nothing about effects. *)
+let rec classify_ir = function
+  | Ir.Simple simple -> classify_simple simple
+  | Ir.Pipeline stages -> stages <> [] && List.for_all classify_ir stages
+  | Ir.Sequence { head; tail } ->
+    classify_ir head && List.for_all (fun (_, part) -> classify_ir part) tail
+;;
+
+(* The dispatcher's own syntax policy: pipes and redirects are representable,
+   and the tables above decide what each stage may do with them. The sandbox
+   context is evidence only inside the parser; the sandbox decision for this
+   request is the typed [sandbox_profile] the caller checks. [decide_raw]
+   writes no log line, so classifying here leaves no trace of a dispatch
+   that did not happen. *)
+let classify_script script =
+  match
+    Shell_gate.decide_raw
+      ~text:script
+      ~syntax_policy:{ Shell_gate.redirect_allowed = true; allow_pipes = true }
+      ~sandbox:Shell_gate.host_sandbox
+  with
+  | Shell_gate.Allow { Shell_gate.ast; _ } -> classify_ir ast
+  | Shell_gate.Reject _ | Shell_gate.Cannot_parse _ | Shell_gate.Too_complex _ -> false
+;;
+
+(* Mirrors [Keeper_tool_execute_runtime.execute_gate_input]: the command
+   lives under the nested [input] as [argv] or [script]. An argv whose
+   program is a shell with [-c] is a script in an argv costume
+   ([Keeper_tooling.Shell_costume]) and is classified as the script it is,
+   because that is what the dispatcher runs. The sandbox labels at the top
+   level of the envelope are display/audit data only — the sandbox decision
    reads the typed [sandbox_profile] the request carries, never these
    strings. *)
-let argv_of_gate_input input =
+let command_is_observation input =
   match input with
   | `Assoc fields ->
     (match List.assoc_opt "input" fields with
@@ -253,17 +328,17 @@ let argv_of_gate_input input =
               (function `String value when value <> "" -> Some value | _ -> None)
               items
           in
-          if List.length strings = List.length items then Some strings else None
+          List.length strings = List.length items
+          &&
+          (match Keeper_tooling.Shell_costume.of_argv strings with
+           | Some costume -> classify_script costume.Keeper_tooling.Shell_costume.script
+           | None -> classify_argv strings)
         | _ ->
-          (* Keepers also observe through one-line shell scripts. A line
-             with no shell primitive splits into exactly the argv above, so
-             it answers to the same table; a script the equivalence cannot
-             see whole returns [None] and the request keeps its judgment. *)
           (match List.assoc_opt "script" inner with
-           | Some (`String script) -> script_argv_equivalent script
-           | _ -> None))
-     | _ -> None)
-  | _ -> None
+           | Some (`String script) -> classify_script script
+           | _ -> false))
+     | _ -> false)
+  | _ -> false
 ;;
 
 (* ── network_read ────────────────────────────────────────────────────── *)
@@ -304,9 +379,7 @@ let observation_only_request ~operation ~sandbox_profile ~input =
    && (match sandbox_profile with
        | Some profile -> Keeper_types_profile_sandbox.runs_in_disposable_guest profile
        | None -> false)
-   && (match argv_of_gate_input input with
-       | Some argv -> classify_argv argv
-       | None -> false))
+   && command_is_observation input)
   || (String.equal operation "network_read"
       && (match network_capability_of_gate_input input with
           | Some capability ->

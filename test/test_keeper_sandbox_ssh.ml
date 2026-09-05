@@ -125,6 +125,7 @@ let endpoint : Exec_ssh_endpoint.t =
   ; max_concurrent_sessions = 2
   ; env_allowlist = [ "LANG"; "PATH" ]
   ; capabilities = []
+  ; private_home = false
   }
 ;;
 
@@ -374,6 +375,7 @@ remote_endpoint = "build-box"
          ; max_concurrent_sessions = 2
          ; env_allowlist = [ "LANG" ]
          ; capabilities = []
+         ; private_home = false
          });
   let ssh_bin, _ = make_stub ~dir:base_path ~mode:"exit3" in
   let meta =

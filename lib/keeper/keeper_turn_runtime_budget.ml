@@ -158,14 +158,17 @@ let direct_no_progress_retry_reason err =
     (match Keeper_turn_driver.accept_no_progress_retry_kind internal_error with
      | Some `Empty_no_progress -> Some EC.Empty_no_progress
      | Some `Thinking_only_no_progress -> Some EC.Thinking_only_no_progress
-     | Some `Truncated_no_progress -> None
+     | Some `Truncated_no_progress -> Some EC.Truncated_no_progress
      | None -> None)
   | None -> None
 
 let retry_reason_is_direct_no_progress (retry : EC.degraded_retry) =
   match retry.fallback_reason with
-  | EC.Empty_no_progress | EC.Thinking_only_no_progress -> true
-  | _ -> false
+  | EC.Empty_no_progress | EC.Thinking_only_no_progress
+  | EC.Truncated_no_progress -> true
+  | EC.Hard_quota | EC.Resumable_cli_session | EC.Runtime_candidates_filtered
+  | EC.Runtime_exhausted | EC.Capacity_backpressure | EC.Rate_limit
+  | EC.Server_error | EC.Auth_error | EC.Deferred_runtime_lane -> false
 
 let direct_no_progress_retry_decision
     ~base_runtime
@@ -174,7 +177,9 @@ let direct_no_progress_retry_decision
     err =
   match direct_no_progress_retry_reason err with
   | None -> No_degraded_retry
-  | Some (EC.Empty_no_progress | EC.Thinking_only_no_progress) ->
+  | Some
+      ( EC.Empty_no_progress | EC.Thinking_only_no_progress
+      | EC.Truncated_no_progress ) ->
     (match
        decide_degraded_retry
          ~base_runtime
@@ -185,7 +190,11 @@ let direct_no_progress_retry_decision
      | Degraded_retry_allowed retry when retry_reason_is_direct_no_progress retry
        -> Degraded_retry_allowed retry
      | _ -> No_degraded_retry)
-  | Some _ -> No_degraded_retry
+  | Some
+      ( EC.Hard_quota | EC.Resumable_cli_session
+      | EC.Runtime_candidates_filtered | EC.Runtime_exhausted
+      | EC.Capacity_backpressure | EC.Rate_limit | EC.Server_error
+      | EC.Auth_error | EC.Deferred_runtime_lane ) -> No_degraded_retry
 
 let run_direct_no_progress_retry_loop
       ~keeper_name

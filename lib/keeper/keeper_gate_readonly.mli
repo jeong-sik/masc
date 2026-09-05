@@ -35,11 +35,15 @@
     sandbox labels inside the execute envelope are display/audit data and
     are never read here.
 
-    An execute request may carry its command as [argv] or as a one-line
-    [script]. A script line with no shell primitive character anywhere and
-    a non-empty token list splits into exactly the argv the shell would
-    produce, so the same closed table judges it (RFC-0404); quotes, pipes,
-    substitution, or a second line return [false] and keep the judge. *)
+    An execute request may carry its command as [argv], as a [script], or as
+    a script in an argv costume ([sh -c "..."]). A script is parsed by the
+    same bash-subset parser the dispatcher lowers it with, and every command
+    of the resulting IR — each pipeline stage, each part of a sequence — is
+    judged by the same closed tables as a real argv; [cd] is the shell's own
+    directory step and passes. A glob, a variable, a substitution, a
+    subshell, a heredoc, a write or append redirect to anything but the
+    discard sink, an environment prefix, or a line the parser refuses
+    returns [false] and keeps the judge (RFC-0421). *)
 val observation_only_request
   :  operation:string
   -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile option
@@ -48,13 +52,12 @@ val observation_only_request
 
 val observation_network_capabilities : string list
 
-val script_argv_equivalent : string -> string list option
-(** [Some argv] exactly when the script line is provably that argv: single
-    line, no shell primitive character anywhere, at least one non-empty
-    token. The split is the identity — a shell handed this line produces
-    the same argv — so the observation table may judge the result with the
-    authority it has over real arrays. Anything else is [None] and the
-    request keeps its judgment (RFC-0404). *)
+val classify_script : string -> bool
+(** The script classifier alone: [true] exactly when the bash-subset parser
+    accepts the text and every command in its IR classifies as observation
+    under {!classify_argv}, with [cd] admitted as the shell's directory step
+    and redirects limited to fd joins, stdin reads, and the discard sink.
+    Exposed for tests. *)
 
 (** Exposed for tests: the argv classifier alone. *)
 val classify_argv : string list -> bool

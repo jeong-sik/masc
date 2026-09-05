@@ -84,7 +84,7 @@ let warm_shell_cache (state : Mcp_server.server_state) =
 
 (* Delta-push: track last broadcast hash per event_type to skip unchanged payloads. *)
 let last_broadcast_hash : (string, Digestif.SHA256.t) Hashtbl.t = Hashtbl.create 8
-let broadcast_hash_mu = Eio.Mutex.create ()
+let broadcast_hash_mu = Stdlib.Mutex.create ()
 
 (** Broadcast a single cached surface to all Observer SSE sessions.
     [event_type] becomes the SSE event "type" field.
@@ -94,7 +94,7 @@ let broadcast_cached_surface ~event_type (json : Yojson.Safe.t) : unit =
   let serialized = Yojson.Safe.to_string json in
   let hash = Digestif.SHA256.digest_string serialized in
   let should_broadcast =
-    Eio.Mutex.use_rw ~protect:true broadcast_hash_mu (fun () ->
+    Stdlib.Mutex.protect broadcast_hash_mu (fun () ->
       let changed =
         match Hashtbl.find_opt last_broadcast_hash event_type with
         | Some prev -> not (Digestif.SHA256.equal prev hash)
@@ -290,10 +290,10 @@ let execution_trust_cache : cached_surface =
         ])
 ;;
 
-let execution_trust_cache_mu = Eio.Mutex.create ()
+let execution_trust_cache_mu = Stdlib.Mutex.create ()
 
 let with_execution_trust_cache f =
-  Eio.Mutex.use_rw ~protect:true execution_trust_cache_mu f
+  Stdlib.Mutex.protect execution_trust_cache_mu f
 ;;
 
 (** Invalidate the execution surface cache so the next
@@ -1333,15 +1333,25 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
       ~ttl_s:shell_surface_cache_ttl_s
       json
   in
-  with_execution_trust_cache (fun () ->
-    Server_dashboard_http_cache.cached_surface_or_first_success_json
-      execution_trust_cache
-      ~cache_key:execution_trust_cache_key
-      ~ttl:shell_surface_cache_ttl_s
-      ~clock
-      ~timeout_sec:Env_config_runtime.Dashboard.execution_trust_timeout_sec
-      (fun () -> compute_execution_trust_json ~state ~sw ~clock))
-  |> attach_surface_envelope
+  let has_success =
+    with_execution_trust_cache (fun () ->
+      Server_dashboard_http_cache.cached_surface_has_success execution_trust_cache)
+  in
+  let json =
+    if has_success
+    then
+      with_execution_trust_cache (fun () ->
+        Server_dashboard_http_cache.cached_surface_json execution_trust_cache)
+    else
+      Server_dashboard_http_cache.cached_surface_or_first_success_json
+        execution_trust_cache
+        ~cache_key:execution_trust_cache_key
+        ~ttl:shell_surface_cache_ttl_s
+        ~clock
+        ~timeout_sec:Env_config_runtime.Dashboard.execution_trust_timeout_sec
+        (fun () -> compute_execution_trust_json ~state ~sw ~clock)
+  in
+  attach_surface_envelope json
 ;;
 
 let dashboard_transport_health_http_json ~state:_ =

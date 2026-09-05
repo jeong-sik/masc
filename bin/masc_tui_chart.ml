@@ -110,17 +110,6 @@ let sparkline_colored ?min ?max ~style_of_level values =
     Buffer.contents buf
 ;;
 
-type gauge_thresholds = {
-  warn_percent : int;
-  bad_percent : int;
-}
-
-(** [warn_percent = 70; bad_percent = 85] *)
-let default_gauge_thresholds = {
-  warn_percent = 70;
-  bad_percent = 85;
-}
-
 let format_compact_num n =
   if n = min_int then "-4.6M"
   else
@@ -135,18 +124,21 @@ let format_compact_num n =
       string_of_int n
 ;;
 
-let gauge ~width ~value ~max_value ?(thresholds = default_gauge_thresholds) ?label () =
+(* A gauge states a proportion and nothing else. It used to colour the bar
+   Warn past 70% and Bad past 85%; no caller ever passed other levels and no
+   domain the three callers draw from (task completion, fact count, snapshot
+   bytes) defines a level of its own, so the colours were a judgement with no
+   owner -- and on the task-completion gauge an inverted one, where a fleet
+   90% done read as Bad (#33297). Fill and remainder are told apart by glyph
+   and by dimming the remainder; a level, when a domain declares one, is the
+   caller's to draw beside the bar. *)
+let gauge ~width ~value ~max_value ?label () =
   if width <= 0 then ""
   else
     let clamped_val = Stdlib.max 0 (if max_value > 0 then Stdlib.min value max_value else value) in
     let pct =
       if max_value <= 0 then 0
       else Stdlib.min 100 ((clamped_val * 100) / max_value)
-    in
-    let status_style =
-      if pct >= thresholds.bad_percent then Masc_tui_theme.status Bad
-      else if pct >= thresholds.warn_percent then Masc_tui_theme.status Warn
-      else Masc_tui_theme.status Ok
     in
     let prefix = match label with Some l -> l ^ " " | None -> "" in
     let prefix_cells = Layout.display_width prefix in
@@ -160,7 +152,7 @@ let gauge ~width ~value ~max_value ?(thresholds = default_gauge_thresholds) ?lab
         else Stdlib.max 1 (Stdlib.min bar_width ((clamped_val * bar_width) / max_value))
       in
       let unfilled = Stdlib.max 0 (bar_width - filled) in
-      prefix ^ "[" ^ status_style ^ repeat bar_full filled ^ Masc_tui_theme.Sgr.dim
+      prefix ^ "[" ^ repeat bar_full filled ^ Masc_tui_theme.Sgr.dim
       ^ repeat bar_light unfilled ^ Masc_tui_theme.Sgr.reset ^ "]" ^ full_suffix
     else
       let short_suffix = Printf.sprintf " %d%%" pct in
@@ -172,76 +164,10 @@ let gauge ~width ~value ~max_value ?(thresholds = default_gauge_thresholds) ?lab
           else Stdlib.max 1 (Stdlib.min bar_width ((clamped_val * bar_width) / max_value))
         in
         let unfilled = Stdlib.max 0 (bar_width - filled) in
-        prefix ^ "[" ^ status_style ^ repeat bar_full filled ^ Masc_tui_theme.Sgr.dim
+        prefix ^ "[" ^ repeat bar_full filled ^ Masc_tui_theme.Sgr.dim
         ^ repeat bar_light unfilled ^ Masc_tui_theme.Sgr.reset ^ "]" ^ short_suffix
       else
         Layout.fit_width (Printf.sprintf "%s%d%%" prefix pct) width
-;;
-
-type waterfall_step = {
-  label : string;
-  duration_ms : int;
-  style : style option;
-}
-
-let waterfall ~width ?total_ms steps =
-  if width <= 0 || steps = [] then []
-  else
-    let computed_total =
-      match total_ms with
-      | Some t when t > 0 -> t
-      | _ ->
-        let sum = List.fold_left (fun acc s -> acc + Stdlib.max 0 s.duration_ms) 0 steps in
-        if sum <= 0 then 1 else sum
-    in
-    let len = List.length steps in
-    let max_label_len =
-      List.fold_left (fun acc s -> Stdlib.max acc (Layout.display_width s.label)) 0 steps
-    in
-    let label_col_width = Stdlib.min 20 (Stdlib.max 6 max_label_len) in
-    (* fixed cells: indent (2) + tree (3) + label (label_col_width) + " : " (3) + "  " (2) + duration (7) + " " (1) + pct (6) = label_col_width + 24 *)
-    let fixed_cols = 2 + 3 + label_col_width + 3 + 2 + 7 + 1 + 6 in
-    let bar_width = Stdlib.max 0 (width - fixed_cols) in
-    List.mapi
-      (fun i step ->
-        let is_last = (i = len - 1) in
-        let tree = if is_last then "\xe2\x94\x94\xe2\x94\x80 " else "\xe2\x94\x9c\xe2\x94\x80 " in (* └─ vs ├─ *)
-        let duration = Stdlib.max 0 step.duration_ms in
-        let pct = (duration * 100) / computed_total in
-        let color_start =
-          match step.style with
-          | Some s -> render_style s
-          | None -> Masc_tui_theme.tone Accent
-        in
-        let duration_str =
-          if duration >= 1000 then
-            Printf.sprintf "%5.2fs" (float_of_int duration /. 1000.0)
-          else
-            Printf.sprintf "%5dms" duration
-        in
-        let padded_label = Layout.fit_width step.label label_col_width in
-        if bar_width <= 0 then
-          Layout.fit_width
-            (Printf.sprintf "  %s%s : %s %s (%2d%%)"
-               tree padded_label color_start duration_str pct)
-            width
-        else
-          let filled =
-            if duration <= 0 then 0
-            else Stdlib.max 1 (Stdlib.min bar_width ((duration * bar_width) / computed_total))
-          in
-          let unfilled = Stdlib.max 0 (bar_width - filled) in
-          Printf.sprintf "  %s%s : %s%s%s%s%s  %s (%2d%%)"
-            tree
-            padded_label
-            color_start
-            (repeat bar_full filled)
-            Masc_tui_theme.Sgr.dim
-            (repeat bar_light unfilled)
-            Masc_tui_theme.Sgr.reset
-            duration_str
-            pct)
-      steps
 ;;
 
 let heatmap_glyphs = [| " "; bar_light; bar_medium; bar_dark; bar_full |]

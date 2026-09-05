@@ -93,6 +93,7 @@ type outbox_entry =
 type pending_selection =
   { source : Keeper_event_queue.stimulus
   ; admitted_revision : int64
+  ; checkpoint_retentions : int
   }
 
 type t =
@@ -112,7 +113,7 @@ type transfer_projection_result =
   | Transfer_projected
   | Transfer_already_projected
 
-let schema = "keeper.event_queue.state.v17"
+let schema = "keeper.event_queue.state.v18"
 
 let empty =
   { revision = 0L
@@ -373,6 +374,7 @@ let project_accepted_transfer (transfer : accepted_transfer) state =
                state.pending_entries
                @ [ { source = transfer.source
                    ; admitted_revision = state.revision
+                   ; checkpoint_retentions = 0
                    }
                  ]
            ; accepted_transfer_projections =
@@ -437,7 +439,7 @@ let with_pending pending state =
       let entry =
         match existing with
         | Some entry -> entry
-        | None -> { source; admitted_revision = state.revision }
+        | None -> { source; admitted_revision = state.revision; checkpoint_retentions = 0 }
       in
       reconcile available (entry :: acc) rest
   in
@@ -528,6 +530,27 @@ let ack_pending ~(selection : pending_selection) state =
     Ok { state with pending_entries }
 ;;
 
+(* A checkpoint-yield turn retains Connector_attention entries instead of
+   acking them (see [Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome]).
+   That retention is a typed fact about delivery, so it is counted on the
+   entry itself — durably, because the retention decision spans cycles and a
+   server restart must not reset it. The returned selection carries the new
+   count: validation is structural, so the caller's pre-bump snapshot is
+   spent and must not be reused for a later ack or defer of this entry. *)
+let note_checkpoint_retention ~(selection : pending_selection) state =
+  match validate_pending_selection ~selection state with
+  | Error _ as error -> error
+  | Ok () ->
+    let retentions = selection.checkpoint_retentions + 1 in
+    let updated = { selection with checkpoint_retentions = retentions } in
+    let pending_entries =
+      List.map
+        (fun entry -> if entry = selection then updated else entry)
+        state.pending_entries
+    in
+    Ok ({ state with pending_entries }, (updated, retentions))
+;;
+
 let reprioritize_pending
       ~(selection : pending_selection)
       ~urgency
@@ -545,6 +568,7 @@ let reprioritize_pending
       let updated =
         { source = { selection.source with urgency }
         ; admitted_revision = next_revision
+        ; checkpoint_retentions = selection.checkpoint_retentions
         }
       in
       let pending_entries =
@@ -788,12 +812,15 @@ let cancel_pending_accepted
   | Ok None ->
     let* () = validate_accepted_cancellation cancellation in
     let* () =
-      validate_pending_selection
-        ~selection:
-          { source = cancellation.source
-          ; admitted_revision = cancellation.source_incarnation
-          }
+      (* Identity and admission revision, not full structural equality:
+         a live entry can carry checkpoint retentions the receipt cannot
+         know, so exact-selection comparison would fail against a retained
+         entry. *)
+      resolve_pending_selection
+        ~source_ref:(source_snapshot_ref cancellation.source)
+        ~source_incarnation:cancellation.source_incarnation
         state
+      |> Result.map (fun _ -> ())
     in
     let* () =
       if transition_outbox_blocked state
@@ -858,12 +885,15 @@ let transfer_pending_accepted
   | Ok None ->
     let* () = validate_accepted_transfer transfer in
     let* () =
-      validate_pending_selection
-        ~selection:
-          { source = transfer.source
-          ; admitted_revision = transfer.source_incarnation
-          }
+      (* Identity and admission revision, not full structural equality:
+         a live entry can carry checkpoint retentions the receipt cannot
+         know, so exact-selection comparison would fail against a retained
+         entry. *)
+      resolve_pending_selection
+        ~source_ref:(source_snapshot_ref transfer.source)
+        ~source_incarnation:transfer.source_incarnation
         state
+      |> Result.map (fun _ -> ())
     in
     let* () =
       if transition_outbox_blocked state
@@ -942,12 +972,15 @@ let ack_pending_source_terminal
   | Ok None ->
     let* () = validate_accepted_source_terminal source_terminal in
     let* () =
-      validate_pending_selection
-        ~selection:
-          { source = source_terminal.source
-          ; admitted_revision = source_terminal.source_incarnation
-          }
+      (* Identity and admission revision, not full structural equality:
+         a live entry can carry checkpoint retentions the receipt cannot
+         know, so exact-selection comparison would fail against a retained
+         entry. *)
+      resolve_pending_selection
+        ~source_ref:(source_snapshot_ref source_terminal.source)
+        ~source_incarnation:source_terminal.source_incarnation
         state
+      |> Result.map (fun _ -> ())
     in
     let* () =
       if transition_outbox_blocked state
@@ -1227,6 +1260,13 @@ let int64_field ~context name fields =
      | Some value -> Ok value
      | None -> Error (Printf.sprintf "%s.%s must be an int64" context name))
   | _ -> Error (Printf.sprintf "%s.%s must be an int64" context name)
+;;
+
+let int_field ~context name fields =
+  let* value = required_field ~context name fields in
+  match value with
+  | `Int value -> Ok value
+  | _ -> Error (Printf.sprintf "%s.%s must be an int" context name)
 ;;
 
 let list_field ~context name parse fields =
@@ -1746,6 +1786,7 @@ let pending_entry_to_yojson entry =
   `Assoc
     [ "source", Keeper_event_queue.stimulus_to_yojson entry.source
     ; "admitted_revision", int64_json entry.admitted_revision
+    ; "checkpoint_retentions", `Int entry.checkpoint_retentions
     ]
 ;;
 
@@ -1755,7 +1796,7 @@ let pending_entry_of_yojson json =
   let* () =
     exact_fields
       ~context
-      ~expected:[ "source"; "admitted_revision" ]
+      ~expected:[ "source"; "admitted_revision"; "checkpoint_retentions" ]
       fields
   in
   let* source_json = required_field ~context "source" fields in
@@ -1763,9 +1804,14 @@ let pending_entry_of_yojson json =
   let* admitted_revision =
     int64_field ~context "admitted_revision" fields
   in
+  let* checkpoint_retentions =
+    int_field ~context "checkpoint_retentions" fields
+  in
   if Int64.compare admitted_revision 0L < 0
   then Error "event queue pending admission revision must not be negative"
-  else Ok { source; admitted_revision }
+  else if checkpoint_retentions < 0 then
+    Error "event queue pending checkpoint retentions must not be negative"
+  else Ok { source; admitted_revision; checkpoint_retentions }
 ;;
 
 let to_yojson state =

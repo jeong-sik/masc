@@ -1,3 +1,0 @@
-/app/.masc/runtime/host-run/masc-8080.pid
-/app/.masc/runtime/host-run/masc-base-path-leases-v1-999/masc-base-path-owner-v1-f53b52ad6d21cceb72dfa78fb67614fe14f110c58e68412b01508d6a485501c3.lease
-/app/.masc/runtime/host-run/7.events

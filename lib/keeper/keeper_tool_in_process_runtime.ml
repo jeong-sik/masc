@@ -133,6 +133,7 @@ let external_gate_decision
       ?gate_grant
       ~operation
       ~input
+      ~call_summary
       ()
   =
   match
@@ -142,6 +143,7 @@ let external_gate_decision
       { keeper_name = meta.name
       ; operation
       ; input
+      ; call_summary
       ; sandbox_profile = None
       ; base_path = config.Workspace.base_path
       ; causal_context = Option.map (fun current -> current ()) gate_context
@@ -198,6 +200,7 @@ let with_external_gate_tool_result
       ?gate_grant
       ~operation
       ~input
+      ~call_summary
       continue
   =
   match
@@ -209,6 +212,7 @@ let with_external_gate_tool_result
       ?gate_grant
       ~operation
       ~input
+      ~call_summary
       ()
   with
   | Ok authorization ->
@@ -233,6 +237,7 @@ let with_external_gate_tool_result_option
       ?gate_grant
       ~operation
       ~input
+      ~call_summary
       continue
   =
   match
@@ -244,6 +249,7 @@ let with_external_gate_tool_result_option
       ?gate_grant
       ~operation
       ~input
+      ~call_summary
       ()
   with
   | Ok authorization ->
@@ -272,6 +278,7 @@ let with_external_gate_execution
       ?gate_grant
       ~operation
       ~input
+      ~call_summary
       continue
   =
   match
@@ -283,6 +290,7 @@ let with_external_gate_execution
       ?gate_grant
       ~operation
       ~input
+      ~call_summary
       ()
   with
   | Ok authorization ->
@@ -345,6 +353,24 @@ let network_read_replay_of_gate_input = function
   | _ -> Error "approved network_read input must be an object"
 ;;
 
+(* What a network_read approval is about, in one line. Each leaf names the
+   one argument its call is for: WebSearch its [query], WebFetch its [url].
+   Read as the leaf's own typed argument, not found by searching the
+   arguments; an argument that is absent or not a string leaves the call
+   with nothing to state, so the row carries no line rather than a guess. *)
+let network_read_call_summary replay =
+  let leaf_string_argument key = function
+    | `Assoc fields ->
+      (match List.assoc_opt key fields with
+       | Some (`String value) -> String_util.first_nonblank_line value
+       | Some _ | None -> None)
+    | _ -> None
+  in
+  match replay with
+  | Replay_web_search args -> leaf_string_argument "query" args
+  | Replay_web_fetch args -> leaf_string_argument "url" args
+;;
+
 let handle_web_search_with_outcome
       ~config
       ~(meta : keeper_meta)
@@ -363,6 +389,7 @@ let handle_web_search_with_outcome
     ?gate_grant
     ~operation:network_read_gate_operation
     ~input
+    ~call_summary:(network_read_call_summary (Replay_web_search args))
   @@ fun () ->
   let tool_name = "masc_web_search" in
   let start_time = Time_compat.now () in
@@ -392,6 +419,7 @@ let handle_web_fetch_with_outcome
     ?gate_grant
     ~operation:network_read_gate_operation
     ~input
+    ~call_summary:(network_read_call_summary (Replay_web_fetch args))
   @@ fun () ->
   Tool_misc_web_fetch.handle
     ~tool_name:"masc_web_fetch"
@@ -1191,6 +1219,22 @@ let connector_post_replay_target = function
       { channel_id; thread_ts; blocks = Some blocks }
 ;;
 
+(* What a connector_post approval is about, in one line: where the post
+   goes and the first line of what it says, both from the typed request. *)
+let connector_post_call_summary replay =
+  let line ~connector ~channel_id ~content =
+    Option.map
+      (fun first_line ->
+         Printf.sprintf "%s %s: %s" connector channel_id first_line)
+      (String_util.first_nonblank_line content)
+  in
+  match replay with
+  | Replay_discord_post { channel_id; content; _ } ->
+    line ~connector:Keeper_surface_post.discord_label ~channel_id ~content
+  | Replay_slack_post { channel_id; content; _ } ->
+    line ~connector:Keeper_surface_post.slack_label ~channel_id ~content
+;;
+
 let with_connector_post_gate_execution
       ~config
       ~(meta : keeper_meta)
@@ -1198,6 +1242,7 @@ let with_connector_post_gate_execution
       ?gate_context
       ?gate_grant
       ~input
+      ~call_summary
       continue
   =
   with_external_gate_execution
@@ -1208,6 +1253,7 @@ let with_connector_post_gate_execution
     ?gate_grant
     ~operation:connector_post_gate_operation
     ~input
+    ~call_summary
     continue
 ;;
 
@@ -1241,7 +1287,8 @@ let replay_connector_post_with_outcome
       (Keeper_surface_post.error_json
          (Printf.sprintf "%s send applied: %s" connector detail))
   in
-  function
+  fun replay ->
+  match replay with
   | Replay_discord_post { input; channel_id; content; mention_user_ids } ->
     with_connector_post_gate_execution
       ~config
@@ -1250,6 +1297,7 @@ let replay_connector_post_with_outcome
       ?gate_context
       ?gate_grant
       ~input
+      ~call_summary:(connector_post_call_summary replay)
     @@ fun () ->
     (match
        Channel_gate_discord_state.send_message ~channel_id ~content
@@ -1312,6 +1360,7 @@ let replay_connector_post_with_outcome
       ?gate_context
       ?gate_grant
       ~input
+      ~call_summary:(connector_post_call_summary replay)
     @@ fun () ->
     (match slack_token_opt () with
      | None ->
@@ -1621,7 +1670,7 @@ let handle_voice_with_outcome
       ~args
       ()
   =
-  let authorize_external_effect ~operation ~input ~continue =
+  let authorize_external_effect ~operation ~input ~call_summary ~continue =
     with_external_gate_execution
       ~config
       ~meta
@@ -1630,6 +1679,7 @@ let handle_voice_with_outcome
       ?gate_grant
       ~operation
       ~input
+      ~call_summary
       continue
   in
   Keeper_tool_voice_runtime.handle_voice_tool_with_outcome
@@ -2079,6 +2129,9 @@ let handle_masc_local_runtime_with_outcome
       ~args
       ()
   =
+  (* The local-runtime leaves behind this authorizer (runtime verify, the
+     Ollama probe) are not host-replayed and declare no call summary, so their
+     approval rows name the tool and nothing else. *)
   let authorize_external_effect ~operation ~input ~continue =
     with_external_gate_tool_result
       ~config
@@ -2088,6 +2141,7 @@ let handle_masc_local_runtime_with_outcome
       ?gate_grant
       ~operation
       ~input
+      ~call_summary:None
       continue
   in
   Tool_local_runtime.dispatch
@@ -2125,6 +2179,9 @@ let handle_masc_keeper_with_outcome
       ~args
       ()
   =
+  (* The keeper-management tools behind the dispatch reference are not
+     host-replayed and declare no call summary, so their approval rows name
+     the tool and nothing else. *)
   let authorize_external_effect ~operation ~input ~continue =
     with_external_gate_tool_result_option
       ~config
@@ -2134,6 +2191,7 @@ let handle_masc_keeper_with_outcome
       ?gate_grant
       ~operation
       ~input
+      ~call_summary:None
       continue
   in
   !Keeper_dispatch_ref.dispatch

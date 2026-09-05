@@ -10,11 +10,12 @@ let check = Alcotest.check
 let str = Alcotest.string
 
 let every_surface =
-  [ Overview; Acting; Keepers Keeper_list; Keepers Keeper_detail
+  [ Overview; Acting; Metrics; Keepers Keeper_list; Keepers Keeper_detail
   ; Keepers Keeper_logs; Keepers Keeper_calls; Keepers Keeper_message
   ; Keepers Keeper_runtime_pick; Lanes; Board; Approvals; Planning
   ; Schedules; Verification; Harness; Fusion; Repositories; Code; Changes
   ; Connectors; Runtime; Config; Resources; Tools; System_logs
+  ; Metrics; Memory
   ]
 
 let test_every_surface_answers () =
@@ -34,7 +35,8 @@ let test_no_surface_repeats_a_key () =
           (Masc_tui_keys.for_surface surface)
       in
       Alcotest.(check int)
-        "each key appears once per surface"
+        (Printf.sprintf "each key appears once per surface (keys: %s)"
+           (String.concat ", " keys))
         (List.length keys)
         (List.length (List.sort_uniq compare keys)))
     every_surface
@@ -253,7 +255,7 @@ let test_memory_footer_offers_the_fact_browser () =
   (* One spelling for the keeper row. [ / ] was listed beside j/k for the
      same movement and no arm answered it. *)
   check str "the health table names the way into the facts"
-    "j/k:move  Enter:facts  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  Enter:facts  a / A:all fleet  s:sort  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Memory);
   check Alcotest.bool "the dead bracket hint is gone" false
     (List.exists
@@ -263,7 +265,7 @@ let test_memory_footer_offers_the_fact_browser () =
 
 let test_memory_facts_footer_names_filter_and_way_back () =
   check str "the browser names movement, the category cycle, and Esc"
-    "j/k:move  c / C:category  s:sort  /:filter  n / N:next / previous match  Esc:close / clear  r:refresh  Tab:next  q:quit"
+    "j/k:move  c / C:category  s:sort  a / A:all fleet  Esc:close / clear  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_memory_facts
 
 let sample_memory_fact ~category ~claim : Tui_decode.memory_fact =
@@ -400,10 +402,10 @@ let test_overview_footer_projects_by_focus () =
      Right/Enter and Left/Esc only act on a focused task. h/l stays visible
      because it selects either pane directly. *)
   check str "events mode keeps t and drops the task keys"
-    "j/k:events  h/l:pane  t:tasks  2:keepers  r:refresh  Tab:next  q:quit"
+    "j/k:events  h/l:pane  m:telemetry  t:tasks  2:keepers  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints_overview ~task_focus:false);
   check str "tasks mode keeps arrow/Enter/Esc and drops t"
-    "j/k:tasks  h/l:pane  Right / Enter:open  Left / Esc:back  2:keepers  r:refresh  Tab:next  q:quit"
+    "j/k:tasks  h/l:pane  m:telemetry  Right / Enter:open  Left / Esc:back  2:keepers  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints_overview ~task_focus:true)
 
 (* Reading a queue meant Esc, move, Enter for every row -- three keys to do
@@ -476,7 +478,7 @@ let test_verdicts_is_a_planning_child () =
     (surface_ring_index Harness);
   Alcotest.(check bool) "and the help sheet files it under Planning" true
     (List.exists
-       (fun (label, _) -> String.equal label "Planning / Verdicts")
+       (fun (label, _) -> String.equal label "Planning / Task Verdicts")
        (Masc_tui_keys.help_sections ()))
 
 (* Changes reads one keeper's file writes and binds to the roster cursor on
@@ -497,7 +499,7 @@ let test_keeper_operations_are_not_top_level_tabs () =
        Alcotest.(check int) (label ^ " highlights Keepers")
          (surface_ring_index (Keepers Keeper_list))
          (surface_ring_index surface))
-    [ Connectors, "Channels"; Schedules, "Automation"; Fusion, "Runs" ];
+    [ Connectors, "Channels"; Schedules, "Automation" ];
   Alcotest.(check (list string)) "Keeper operation tab labels"
     [ "Channels"; "Automation"; "Runs" ]
     (List.filter_map
@@ -615,9 +617,25 @@ let test_logs_is_an_activity_child () =
   Alcotest.(check bool) "Activity documents the [l] hop" true
     (List.mem "l" acting_keys)
 
+(* Telemetry and multicore engine metrics hang off Overview under [m]
+   instead of holding a top-level Tab stop of their own. *)
+let test_metrics_is_an_overview_child () =
+  Alcotest.(check bool) "Metrics is not a top-level ring entry" false
+    (List.exists (fun (surface, _) -> surface = Metrics) surface_ring);
+  Alcotest.(check int) "Metrics highlights Overview"
+    (surface_ring_index Overview)
+    (surface_ring_index Metrics);
+  let overview_keys =
+    List.map
+      (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
+      (Masc_tui_keys.for_surface Overview)
+  in
+  Alcotest.(check bool) "Overview documents the [m] hop" true
+    (List.mem "m" overview_keys)
+
 let test_config_footer_names_both_hops () =
   check str "Config names its two off-ring children"
-    "j/k:select / scroll  p:runtime.toml / models / params / prompts / themes  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  Esc:overview  r:reload  Tab:next"
+    "j/k:select / scroll  p:runtime.toml / models / params / prompts / themes  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  Esc:overview  r:reload  Tab:next"
     (Masc_tui_keys.footer_hints Config)
 
 let test_system_logs_owns_only_its_real_filter_keys () =
@@ -1006,7 +1024,7 @@ let test_detail_tab_hint_projects_the_table () =
    GitHub tab, e for the settings form). *)
 let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   [ Detail_info, []
-  ; Detail_sandbox, [ "o"; "PgUp/PgDn"; "R" ]
+  ; Detail_sandbox, [ "o"; "d/m/s"; "PgUp/PgDn"; "R" ]
   ; Detail_instructions, [ "e" ]
   ; Detail_secrets, []
   ; Detail_github, [ "L" ]
@@ -1394,6 +1412,8 @@ let () =
             test_config_footer_names_both_hops
         ; Alcotest.test_case "Logs is an Activity child" `Quick
             test_logs_is_an_activity_child
+        ; Alcotest.test_case "Metrics is an Overview child" `Quick
+            test_metrics_is_an_overview_child
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
         ; Alcotest.test_case "Keeper detail reserves u for channel unbind"

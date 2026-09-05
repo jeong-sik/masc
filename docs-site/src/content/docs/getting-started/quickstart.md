@@ -81,40 +81,60 @@ masc --help
 
 Opening a new terminal window has the same effect as `source`.
 
-## 3. Start the server
+## 3. Start it
 
-Start the server with the same base path you installed with. It runs in the
-**foreground** — the terminal stays busy with the server as long as it runs:
+One command, from the second terminal you will keep using:
 
 ```bash
 masc --base-path ~/masc
 ```
 
-Because the server holds this terminal, **open a second terminal window** for the
-steps below. In the second terminal, check that the server answered:
+`masc` with no subcommand is the front door. In a terminal it hands over to the
+Terminal UI, and the TUI starts the server behind it the first time it finds
+nothing listening. You do not start the server yourself and you do not run two
+commands.
 
-```bash
-curl http://127.0.0.1:8935/health
-```
+It behaves differently where a person is not watching, and that is deliberate:
 
-A healthy server replies `{"status":"ok",...}`. You can also open the dashboard
-at `http://127.0.0.1:8935/dashboard/` in a browser.
+| Where you run it | What happens |
+| --- | --- |
+| A terminal | The Terminal UI opens; the server starts behind it |
+| A pipe, a systemd unit, a CI step | The server runs in the foreground |
+| With `--host` other than `127.0.0.1` | The server runs in the foreground |
 
-## 4. Open the Terminal UI
+So the same command is both the operator's cockpit and the service entry point.
+To watch the server directly instead, pipe it: `masc --base-path ~/masc | cat`.
 
-The Terminal UI is the operator cockpit — it needs an interactive terminal. Pass
-the same base path, because a second terminal starts in your home directory, not
-the workspace:
-
-```bash
-masc-tui --base-path ~/masc --port 8935
-```
+In the TUI:
 
 - `Tab` / `Shift-Tab` move between surfaces (Keepers, Board, Approvals, …).
 - `:` opens the command palette.
 - `q` twice exits.
 
 See the [Terminal UI Guide](/guides/tui/) for the full surface set and keys.
+
+## 4. Check the server answered
+
+From a third terminal, or after quitting the TUI:
+
+```bash
+curl http://127.0.0.1:8935/health
+```
+
+A healthy server replies `{"status":"ok",...}`. The dashboard is at
+`http://127.0.0.1:8935/dashboard/`.
+
+If you installed by hand rather than with `install.sh`, seed the workspace once
+before any of this:
+
+```bash
+masc init --base-path ~/masc
+```
+
+That writes the configuration tree — runtime settings, prompts, tool
+definitions, themes, connector declarations — out of the binary itself, so it
+works on a machine that never had a checkout. It writes 271 files and leaves
+`config/keepers/` empty on purpose; see below.
 
 ## 5. Connect an AI tool (level 1 is done)
 
@@ -125,21 +145,78 @@ a bearer token; the installer prints the `masc login` command that mints one.
 
 Follow [Connecting External Tools](/guides/mcp-clients/) for the client setup.
 
+The workspace keeps only a SHA-256 of each token, so the file
+`.masc/auth/<agent>.token` (mode `0600`) is the one place the bearer itself
+survives. To see what exists and retire one:
+
+```bash
+masc token list                 # agent, role, expiry, whether the secret is still on disk
+masc token revoke --agent NAME  # delete a credential
+masc token prune                # delete only the expired ones
+```
+
+Minting the same agent name again replaces the credential — that is how you
+rotate. An unreadable expiry stamp counts as live, so a prune can never delete a
+token that still works.
+
 ## 6. Enable autonomous Keepers (optional)
 
-Keepers are agents MASC runs itself. Two extra pieces are needed:
+Keepers are agents MASC runs itself. A finished install has **no Keeper at all**
+— the roster is per workspace, so neither the installer nor the server invents
+one. Three things are missing on day one, and a Keeper needs all three.
 
-- **A model source** for the Keeper's turns. The cheapest is a local model with
-  no API key — see [Local Models](/runbooks/llama-server/) to run Ollama or
-  `llama-server`. A cloud provider (Anthropic, OpenAI, DeepSeek, …) works too;
-  the setup wizard from step 1 stores its API key in `.masc/config/.env.local`.
-- **A command sandbox**, because a Keeper's shell commands run isolated, not on
-  your host. MASC does not run a Keeper without one. Install Docker, or on Apple
-  Silicon the `container` CLI — see [Docker Sandbox](/runbooks/sandbox/).
+**A model source.** The seeded catalog carries five providers, and only one of
+them works without a key:
 
-With both in place, create your first Keeper from the TUI's **Keepers** surface,
-or on the command line with `masc keeper-create --help`. The
+| Provider | Endpoint | Environment variable |
+| --- | --- | --- |
+| `ollama_cloud` | `ollama.com/v1` | `OLLAMA_CLOUD_API_KEY` |
+| `deepseek` | `api.deepseek.com` | `DEEPSEEK_API_KEY` |
+| `glm-coding` | `api.z.ai/api/coding/paas/v4` | `ZAI_API_KEY_SB` |
+| `kimi_coding` | `api.kimi.com/coding/v1` | `KIMI_API_KEY` |
+| `ollama` | `localhost:11434` | none — see [Local Models](/runbooks/llama-server/) |
+
+The variable is read from the environment **the server was started in**, not
+from a config file. MASC never asks for a key and never writes one to disk.
+
+The catalog ships 31 provider/model bindings as documented examples; the 13 that
+declare `max-request-body-bytes` can take a Keeper turn, and startup names the
+rest in a warning that says exactly which key to add. `[runtime].default` is one
+of the 13, so the default works as soon as its key is present.
+
+**A sandbox image.** A Keeper runs every turn inside one, and MASC ships none:
+
+```bash
+masc sandbox-image
+```
+
+That builds `masc-sandbox:general` — Debian slim with `bash`, `ripgrep`, `git`,
+`curl` and the handful of tools a shell turn reaches for. It is piped to
+`docker build -` with no build context, so it builds the same from an installed
+binary as from a checkout. A Keeper that has to *build* a project needs that
+project's toolchain instead: point it at another image with `sandbox_image` in
+its TOML.
+
+**A sandbox runtime.** Docker, a microVM, or a remote host over SSH. There is no
+option to run a Keeper on your own machine. See [Sandbox](/runbooks/sandbox/).
+
+With all three in place, create the first Keeper from the TUI's **Keepers**
+surface, or with `masc keeper-create --help`. The
 [Running Keepers](/guides/keeper/) guide walks through it.
+
+### Language servers are separate
+
+A Keeper reaching for hover text or a definition needs a language server on the
+sandbox `PATH`. MASC bundles none and starts none for you; when the program is
+absent the tool reports it rather than failing quietly.
+
+| Language | Program |
+| --- | --- |
+| OCaml | `ocamllsp` |
+| TypeScript, JavaScript | `typescript-language-server` |
+| Python | `pylsp` |
+| Rust | `rust-analyzer` |
+| Go | `gopls` |
 
 ## If something goes wrong
 

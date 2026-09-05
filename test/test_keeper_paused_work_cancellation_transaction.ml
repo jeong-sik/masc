@@ -266,6 +266,7 @@ let test_reinserted_source_rejects_old_pending_incarnation () =
        let old_selection : State.pending_selection =
          { source = request.source
          ; admitted_revision = request.source_incarnation
+         ; checkpoint_retentions = 0
          }
        in
        Persistence.ack_pending_result

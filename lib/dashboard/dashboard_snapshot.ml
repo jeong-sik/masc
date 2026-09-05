@@ -68,6 +68,36 @@ let refresh_projection ~now ~ttl ~(cache : projection_cache) compute =
         | None -> raise exn))
 ;;
 
+type activity_defaults_entry =
+  { refreshed_at : float
+  ; value : Activity_graph.default_projections
+  }
+
+type activity_defaults_cache = activity_defaults_entry option Atomic.t
+
+let make_activity_defaults_cache () : activity_defaults_cache = Atomic.make None
+
+let refresh_activity_defaults ~now ~ttl ~(cache : activity_defaults_cache) compute =
+  let started_at = now () in
+  match Atomic.get cache with
+  | Some entry
+    when should_reuse_projection
+           ~now:started_at
+           ~ttl
+           ~refreshed_at:entry.refreshed_at ->
+    entry.value
+  | previous ->
+    (match compute () with
+     | value ->
+       Atomic.set cache (Some { refreshed_at = now (); value });
+       value
+     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+     | exception exn ->
+       (match previous with
+        | Some entry -> entry.value
+        | None -> raise exn))
+;;
+
 let dashboard_shell_payload_json_ref :
   (?light:bool -> Workspace.config -> Yojson.Safe.t) ref =
   ref (fun ?light:_ _config -> `Null)
@@ -108,9 +138,35 @@ let refresh_loop
   let tools_cache = make_projection_cache () in
   let telemetry_cache = make_projection_cache () in
   let namespace_truth_cache = make_projection_cache () in
-  let activity_events_cache = make_projection_cache () in
-  let activity_graph_cache = make_projection_cache () in
-  let activity_swimlane_cache = make_projection_cache () in
+  let activity_defaults_cache = make_activity_defaults_cache () in
+  let cached_activity_defaults ~ttl ~cache label f =
+    (* NDT-OK: wall time only gates cache freshness; it is not durable output. *)
+    refresh_activity_defaults ~now:Unix.gettimeofday ~ttl ~cache (fun () ->
+      (* NDT-OK: wall time only measures operator diagnostics. *)
+      let started_at = Unix.gettimeofday () in
+      let allocated_before = Gc.allocated_bytes () in
+      match f () with
+      | value ->
+        (* NDT-OK: elapsed time only selects diagnostic log severity. *)
+        let elapsed_s = Unix.gettimeofday () -. started_at in
+        let allocated_mb =
+          (Gc.allocated_bytes () -. allocated_before) /. 1_048_576.0
+        in
+        if elapsed_s >= 5.0 || allocated_mb >= 256.0
+        then
+          Log.Dashboard.warn
+            "dashboard_snapshot heavy refresh: component=%s elapsed_s=%.3f allocated_mb=%.1f ttl_s=%.0f"
+            label elapsed_s allocated_mb ttl
+        else
+          Log.Dashboard.debug
+            "dashboard_snapshot refreshed: component=%s elapsed_s=%.3f allocated_mb=%.1f ttl_s=%.0f"
+            label elapsed_s allocated_mb ttl;
+        value
+      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+      | exception exn ->
+        log_failure label exn;
+        raise exn)
+  in
   let cached_projection ~ttl ~cache label f =
     (* NDT-OK: wall time only gates cache freshness; it is not durable output. *)
     refresh_projection ~now:Unix.gettimeofday ~ttl ~cache (fun () ->
@@ -189,37 +245,13 @@ let refresh_loop
              | Some json -> json
              | None -> `Null))
     in
-    let activity_events_default =
-      (* RFC-0201 Step 1.  Snapshot the dashboard panel's default
-         query at the API max [limit=1000]; handlers slice this list
-         down to their requested limit per call.  The cost is paid
-         once per [interval_sec] in this background fiber, not on the
-         request path. *)
-      cached_projection ~ttl:10.0 ~cache:activity_events_cache
-        "activity_events_default" (fun () ->
-        Activity_graph.json_response config ~kinds:[] ~after_seq:0
-          ~limit:1000 ())
-    in
-    let activity_graph_default =
-      (* RFC-0201 Step 2.  Dashboard panel calls
-         [fetchActivityGraph()] without query params (see
-         dashboard/src/api/actions.ts:54), so the server applies the
-         compute defaults: [kinds=[]], [limit=500],
-         [timeline_limit=80], [since_ms=None].  Snapshot that
-         exact shape; handlers return it as-is for matching queries
-         (the result is aggregated and not sliceable). *)
-      cached_projection ~ttl:10.0 ~cache:activity_graph_cache
-        "activity_graph_default" (fun () ->
-        Activity_graph.graph_json config ~kinds:[] ~limit:500
-          ~timeline_limit:80 ())
-    in
-    let activity_swimlane_default =
-      (* RFC-0201 Step 3.  Same shape as activity_graph_default —
-         dashboard's [fetchSwimlane()] sends no params (actions.ts:77),
-         so snapshot [limit=500], [since_ms=None]. *)
-      cached_projection ~ttl:10.0 ~cache:activity_swimlane_cache
-        "activity_swimlane_default" (fun () ->
-        Activity_graph.agent_spans_json config ~limit:500 ())
+    let activity_defaults =
+      (* RFC-0201 / RFC-0204: compute all three default activity projections
+         (events, graph, swimlane) in a single pass over the recent events store,
+         avoiding 3x redundant re-parsing and scanning on every 10s tick. *)
+      cached_activity_defaults ~ttl:10.0 ~cache:activity_defaults_cache
+        "activity_defaults" (fun () ->
+        Activity_graph.default_projections config)
     in
     {
       generated_at = Unix.gettimeofday ();
@@ -228,9 +260,9 @@ let refresh_loop
       tools;
       namespace_truth;
       telemetry_summary;
-      activity_events_default;
-      activity_graph_default;
-      activity_swimlane_default;
+      activity_events_default = activity_defaults.events_default;
+      activity_graph_default = activity_defaults.graph_default;
+      activity_swimlane_default = activity_defaults.swimlane_default;
     }
   in
   let rec loop () =
@@ -285,8 +317,11 @@ let reset_for_test () = Atomic.set slot None
 
 module For_testing = struct
   type cache = projection_cache
+  type activity_cache = activity_defaults_cache
 
   let make_cache = make_projection_cache
   let refresh_projection = refresh_projection
+  let make_activity_cache = make_activity_defaults_cache
+  let refresh_activity_defaults = refresh_activity_defaults
   let should_reuse_projection = should_reuse_projection
 end

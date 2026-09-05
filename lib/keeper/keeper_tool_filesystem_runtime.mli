@@ -49,6 +49,26 @@ val handle_owned_read_file_with_outcome :
     downgrading the approved semantics. *)
 val replay_args_of_gate_input : Yojson.Safe.t -> (Yojson.Safe.t, string) result
 
+type approved_write =
+  { target : string  (** the resolved path the approval names *)
+  ; mode : Keeper_tool_write_mode.t
+  ; carried : (string * Yojson.Safe.t) list
+        (** the payload fields the approval carried, verbatim *)
+  }
+(** A recorded write approval, decoded. {!replay_args_of_gate_input} is this
+    decode re-encoded for the write handler. *)
+
+val approved_write_of_gate_input : Yojson.Safe.t -> (approved_write, string) result
+(** Strict decode of a stored [filesystem_write] Gate input. An input with no
+    string [requested_target] or with an effect this module cannot reproduce
+    is an error, never a guess. *)
+
+val write_call_summary : requested_target:string -> string option
+(** The one line a write approval is about: the path it would write. This is
+    the write tool's declared call summary; the submitting handler states it
+    from the target it resolved, and the replay engine states it from
+    {!approved_write_of_gate_input}. [None] when the target is blank. *)
+
 (** The opaque Gate operation identity this module submits for local writes.
     Consumers that must recognise the same effect read it here rather than
     repeating the literal. *)

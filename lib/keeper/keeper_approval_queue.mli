@@ -88,6 +88,23 @@ type grant_error =
   | Grant_replay_not_consumed of string
   | Grant_replay_outcome_conflict of string
 
+(** What the durable Gate store says when a queued approved resolution has
+    nothing behind it. Each constructor is a fact about the store, not a read
+    failure: reading again on the next turn returns the same answer, so the
+    queued resolution has nothing to replay and is retired. Read failures
+    stay in [grant_error] and remain actionable. *)
+type resolution_absence =
+  | Resolution_missing
+      (** neither a delivery row nor a pending row carries the id; the store
+          was reset or the row was removed after the resolution was queued *)
+  | Resolution_still_pending
+      (** the store holds the id unresolved while the queue already carries
+          its resolution *)
+  | Resolution_not_approved
+      (** the store recorded a rejection for an id the queue carries as
+          approved *)
+  | Resolution_workspace_mismatch of { stored_base_path : string }
+
 type approved_resolution_state =
   | Resolution_unconsumed
   | Resolution_consumed
@@ -160,6 +177,13 @@ val summary_owner_retirement_error_to_string :
   summary_owner_retirement_error -> string
 val exact_attempt_error_to_string : exact_attempt_error -> string
 val grant_error_to_string : grant_error -> string
+
+val resolution_absence_of_grant_error : grant_error -> resolution_absence option
+(** [Some] for the store answers that say there is no resolution behind an
+    approval id; [None] for read failures and for producer-side replay
+    conflicts, which are not statements about the resolution's existence. *)
+
+val resolution_absence_to_string : resolution_absence -> string
 val install_error_to_string : install_error -> string
 
 (** Install one workspace's persisted Gate queue. The file is parsed as one
@@ -221,22 +245,20 @@ val record_consumed_resolution_replay :
   outcome:resolution_replay_outcome ->
   (replay_recording, grant_error) result
 
-(** One line naming what a gated call asked for, taken from its persisted
-    input. [None] when the input names no argv and no provider surface: the
-    row then reads as it did before the field existed, rather than from a
-    guess. *)
-val call_summary_of_input : Yojson.Safe.t -> string option
-
 (** Idempotently project durable approval truth into the originating Keeper's
     visible chat. These receipts never authorize or replay an effect; they are
     the presentation acknowledgement required before the wake event may be
-    drained. *)
+    drained.
+
+    Each row's [call_summary] is copied from the approval's request row
+    ({!Keeper_chat_store.approval_request_call_summary}): the producer stated
+    that line once, on the Gate request ({!Keeper_gate.request}), and this
+    queue never derives one from the stored input. *)
 val ensure_resolution_chat_projection :
   base_path:string ->
   keeper_name:string ->
   approval_id:string ->
   tool_name:string option ->
-  call_summary:string option ->
   decision:decision ->
   (unit, string) result
 
@@ -245,7 +267,6 @@ val ensure_replay_chat_projection :
   keeper_name:string ->
   approval_id:string ->
   tool_name:string option ->
-  call_summary:string option ->
   outcome:resolution_replay_outcome ->
   (unit, string) result
 
@@ -282,7 +303,12 @@ module For_testing : sig
     after_load:(unit -> unit) ->
     (install_report, install_error) result
   val pending_store_path : base_path:string -> string
+  val pending_log_path : base_path:string -> string
   val replay_results_store_path : base_path:string -> string
+
+  val durable_snapshot_json : base_path:string -> (Yojson.Safe.t, string) result
+  (** What a restart would load: the snapshot plus the log rows after it,
+      in the snapshot's JSON shape. Reads only. *)
   val always_allowed_store_path : base_path:string -> string
 
   val bind_summary_exact_attempt_with_writer :
@@ -342,14 +368,24 @@ end
     entry but is not part of the request's identity: a next-turn retry of the
     same call folds onto the approval already in flight instead of opening a
     second one (#28866). A deduplicated or folded request does not consume a
-    durable queue sequence or emit a new pending audit event. *)
+    durable queue sequence or emit a new pending audit event.
+
+    [call_summary] is the producer's one-line statement of the call
+    ({!Keeper_gate.request.call_summary}); it is written on the request's chat
+    row and takes no part in the request's identity.
+
+    [observation] is what the executor's box refused when the Gate ran the
+    request boxed before deferring it (RFC-0422): stored on the row, shown
+    to the judge, no part of the identity either. *)
 val submit_pending :
   keeper_name:string ->
   tool_name:string ->
   input:Yojson.Safe.t ->
+  call_summary:string option ->
   base_path:string ->
   ?turn_id:int ->
   ?request_context:Yojson.Safe.t ->
+  ?observation:Keeper_approval_queue_rules_types.observed_refusal ->
   ?task_id:string ->
   ?goal_id:string ->
   ?continuation_channel:Keeper_continuation_channel.t ->

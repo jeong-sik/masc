@@ -41,6 +41,13 @@ let typed_input_command_text
   | Keeper_tool_execute_typed_input.Argv argv -> typed_stage_command_text argv
 ;;
 
+(* What an Execute approval is about, in one line: the first line of the
+   command the caller wrote, whole. A multi-line script is named by its first
+   command; fitting the line into a pane is the renderer's decision. *)
+let typed_input_call_summary input =
+  String_util.first_nonblank_line (typed_input_command_text input)
+;;
+
 (* Execute's callable surface is synchronous: the call holds the Keeper's only
    turn slot until the process ends, so a caller that names no budget is asking
    the Keeper to wait for however long the command happens to take. Nothing

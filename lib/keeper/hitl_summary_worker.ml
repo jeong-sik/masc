@@ -246,6 +246,16 @@ let build_context_bundle ~(entry : pending_approval) =
     ; "goal_id", Json_util.string_opt_to_json entry.goal_id
     ; "input", entry.input
     ]
+    @
+    (* RFC-0422 §3.3: when the Gate ran the request boxed first, the judge is
+       shown what the box refused -- the status and the program's own stderr
+       -- rather than left to infer what the request would do. Absent when no
+       box ran, so a judge can tell "nothing was tried" from "it was tried
+       and said nothing". *)
+    match entry.observation with
+    | Some refusal ->
+      [ "observation", Keeper_approval_queue_rules_types.observed_refusal_to_yojson refusal ]
+    | None -> []
   in
   let host_context = Keeper_gate_host_context.for_approval entry in
   match entry.request_context with
@@ -1809,6 +1819,11 @@ let spawn_with
            ; "task_id", Json_util.string_opt_to_json entry.task_id
            ; "goal_id", Json_util.string_opt_to_json entry.goal_id
                   ; "partial_context", `Bool (Option.is_none entry.request_context)
+           ; ( "observation"
+             , match entry.observation with
+               | Some refusal ->
+                 Keeper_approval_queue_rules_types.observed_refusal_to_yojson refusal
+               | None -> `Null )
            ]));
     let complete outcome output =
       match

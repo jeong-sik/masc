@@ -1,49 +1,37 @@
-# Starlight Starter Kit: Basics
+# MASC docs-site
 
-[![Built with Starlight](https://astro.badg.es/v2/built-with-starlight/tiny.svg)](https://starlight.astro.build)
+이 디렉터리는 MASC 사용자 문서 사이트(Astro + Starlight)입니다. 한국어와
+영어 두 판을 같은 트리에서 관리합니다.
 
-```
-pnpm create astro@latest -- --template starlight
-```
-
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
-
-## 🚀 Project Structure
-
-Inside of your Astro + Starlight project, you'll see the following folders and files:
+## 구조
 
 ```
-.
-├── public/
-├── src/
-│   ├── assets/
-│   ├── content/
-│   │   └── docs/
-│   └── content.config.ts
-├── astro.config.mjs
-├── package.json
-└── tsconfig.json
+src/content/docs/          영어 문서 (기본 언어)
+src/content/docs/ko/       한국어 문서 (영어와 같은 구조로 대응)
+src/components/            랜딩 페이지(HomeLanding.astro) 등 공용 컴포넌트
+astro.config.mjs           사이드바·언어 설정
 ```
 
-Starlight looks for `.md` or `.mdx` files in the `src/content/docs/` directory. Each file is exposed as a route based on its file name.
+- 페이지 추가·수정 시 영어와 한국어(`ko/`)를 같이 고친다. 한쪽만 고치면
+  미러가 어긋난다.
+- 사이드바 항목은 `astro.config.mjs`의 `sidebar`에 직접 등록한다.
+- 문서의 사실(키 바인딩, 명령, 파일 경로, 버전)은 repo의 소스코드가
+  근원이다. 문서를 먼저 믿지 않는다.
 
-Images can be added to `src/assets/` and embedded in Markdown with a relative link.
+## 명령
 
-Static assets, like favicons, can be placed in the `public/` directory.
+패키지 매니저는 pnpm이다. npm을 쓰면 잠금 파일이 어긋난다.
 
-## 🧞 Commands
+| 명령 | 동작 |
+| :--- | :--- |
+| `pnpm install` | 의존성 설치 |
+| `pnpm dev` | 로컬 개발 서버 `localhost:4321` |
+| `pnpm build` | `./dist/`에 프로덕션 빌드 |
+| `pnpm preview` | 빌드 결과 미리보기 |
 
-All commands are run from the root of the project, from a terminal:
+## 문서 수정 원칙
 
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `pnpm install`             | Installs dependencies                            |
-| `pnpm dev`             | Starts local dev server at `localhost:4321`      |
-| `pnpm build`           | Build your production site to `./dist/`          |
-| `pnpm preview`         | Preview your build locally, before deploying     |
-| `pnpm astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `pnpm astro -- --help` | Get help using the Astro CLI                     |
-
-## 👀 Want to learn more?
-
-Check out [Starlight’s docs](https://starlight.astro.build/), read [the Astro documentation](https://docs.astro.build), or jump into the [Astro Discord server](https://astro.build/chat).
+- 담백한 기술 문서체로 쓴다. 동작을 설명하고 가치를 주장하지 않는다.
+- 화면의 키·명령은 `bin/masc_tui_keys.ml`, `bin/masc_tui_types.ml` 등
+  소스에서 확인한 뒤 쓴다.
+- 근거가 repo에 없는 주장(유래 설화, 검증 안 된 수치)은 넣지 않는다.

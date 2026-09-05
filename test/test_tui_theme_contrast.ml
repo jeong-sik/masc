@@ -28,15 +28,21 @@ type scheme =
   ; palette : Palette.t
   }
 
+(* [all], not [bundled]. A scheme in config/themes shadows a bundled one of the
+   same name, so [bundled] is the copy and [all] is what a reader gets. masc's
+   own schemes live only in config/themes and would sit outside every contract
+   below if this read the other list. If that directory is not found, [all]
+   quietly narrows to [bundled] -- test_load_retro_themes_toml names the six
+   and fails loudly, which is what keeps this coverage from shrinking in
+   silence. *)
 let schemes =
   List.map
-    (fun bundled ->
-      match Catalog.to_palette bundled with
-      | Some palette -> { name = Catalog.name bundled; palette }
+    (fun shipped ->
+      match Catalog.to_palette shipped with
+      | Some palette -> { name = Catalog.name shipped; palette }
       | None ->
-        Alcotest.failf "bundled scheme %s has malformed hex"
-          (Catalog.name bundled))
-    Catalog.bundled
+        Alcotest.failf "shipped scheme %s has malformed hex" (Catalog.name shipped))
+    (Catalog.all ())
 ;;
 
 
@@ -529,6 +535,102 @@ let test_picker_orders_native_first_then_by_cost_and_name () =
       rest
 ;;
 
+let test_of_toml_content_parses_valid_theme () =
+  let content =
+    {|
+name = "custom-test"
+light = true
+
+[palette]
+base00 = "000000"
+base01 = "111111"
+base02 = "222222"
+base03 = "333333"
+base04 = "444444"
+base05 = "555555"
+base06 = "666666"
+base07 = "777777"
+base08 = "888888"
+base09 = "999999"
+base0a = "aaaaaa"
+base0b = "bbbbbb"
+base0c = "cccccc"
+base0d = "dddddd"
+base0e = "eeeeee"
+base0f = "ffffff"
+|}
+  in
+  match Catalog.of_toml_content content with
+  | Error msg -> Alcotest.fail ("Failed to parse valid TOML theme: " ^ msg)
+  | Ok scheme ->
+    check string "name matches" "custom-test" (Catalog.name scheme);
+    check bool "light matches" true (Catalog.light scheme);
+    check bool "to_palette produces palette" true (Option.is_some (Catalog.to_palette scheme))
+;;
+
+let test_of_toml_content_rejects_missing_slot () =
+  let content = {|
+name = "broken"
+[palette]
+base00 = "000000"
+|} in
+  match Catalog.of_toml_content content with
+  | Ok _ -> Alcotest.fail "Expected error for missing slots"
+  | Error _ -> ()
+;;
+
+let test_load_retro_themes_toml () =
+  List.iter
+    (fun name ->
+      let scheme_opt = Catalog.find name in
+      check bool (name ^ " is discovered from config/themes") true (Option.is_some scheme_opt);
+      match scheme_opt with
+      | None -> ()
+      | Some scheme ->
+        check string ("name matches " ^ name) name (Catalog.name scheme);
+        check bool "is dark theme" false (Catalog.light scheme);
+        check bool "to_palette produces palette" true (Option.is_some (Catalog.to_palette scheme)))
+    [ "dungeon-gold"; "norton"; "msx"; "pc-tools"; "msc"; "cyber" ]
+;;
+
+(* The schemes above are found by name; this says they are also *measured*.
+   [schemes] is the list every contract in this file iterates, so a theme
+   missing here is a theme masc draws and never checks. *)
+let test_contracts_cover_the_toml_themes () =
+  let measured = List.map (fun s -> s.name) schemes in
+  List.iter
+    (fun name ->
+      check bool (name ^ " is under the readability contracts") true
+        (List.mem name measured))
+    [ "dungeon-gold"; "norton"; "msx"; "pc-tools"; "msc"; "cyber" ]
+;;
+
+let test_clean_hex_rejects_underscores () =
+  let content = {|
+name = "bad-hex"
+[palette]
+base00 = "1_2_3_"
+base01 = "010101"
+base02 = "020202"
+base03 = "030303"
+base04 = "040404"
+base05 = "050505"
+base06 = "060606"
+base07 = "070707"
+base08 = "080808"
+base09 = "090909"
+base0a = "0a0a0a"
+base0b = "0b0b0b"
+base0c = "0c0c0c"
+base0d = "0d0d0d"
+base0e = "0e0e0e"
+base0f = "0f0f0f"
+|} in
+  match Catalog.of_toml_content content with
+  | Ok _ -> Alcotest.fail "Expected clean_hex to reject underscores"
+  | Error _ -> ()
+;;
+
 let () =
   Alcotest.run "masc-tui-theme-contrast"
     [ ( "lift_colours"
@@ -560,6 +662,18 @@ let () =
         ; Alcotest.test_case
             "keeper action colours stay apart without red and green" `Quick
             test_keeper_action_colours_stay_apart_without_red_and_green
+        ] )
+    ; ( "toml theme loading"
+      , [ Alcotest.test_case "of_toml_content parses valid theme" `Quick
+            test_of_toml_content_parses_valid_theme
+        ; Alcotest.test_case "of_toml_content rejects missing slot" `Quick
+            test_of_toml_content_rejects_missing_slot
+        ; Alcotest.test_case "clean_hex rejects underscores" `Quick
+            test_clean_hex_rejects_underscores
+        ; Alcotest.test_case "official toml themes discovered from config/themes" `Quick
+            test_load_retro_themes_toml
+        ; Alcotest.test_case "readability contracts cover the toml themes" `Quick
+            test_contracts_cover_the_toml_themes
         ] )
     ]
 ;;

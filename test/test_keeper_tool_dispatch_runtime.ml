@@ -2948,6 +2948,7 @@ let test_durable_connector_replay_settles_terminal_turn () =
            Masc.Keeper_approval_queue.submit_pending
              ~keeper_name:meta.name
              ~tool_name:"connector_post"
+             ~call_summary:None
              ~input
              ~base_path:config.base_path
              ()
@@ -3388,6 +3389,7 @@ let test_consumed_without_outcome_is_terminal_indeterminate () =
        let request : Masc.Keeper_gate.request =
          { keeper_name = meta.name
          ; operation = "network_read"
+         ; call_summary = None
          ; input =
              `Assoc
                [ "capability", `String "web_search"
@@ -3471,6 +3473,7 @@ let test_unsupported_approved_operation_retains_exact_model_issued_path () =
        let request : Masc.Keeper_gate.request =
          { keeper_name = meta.name
          ; operation = "unreplayed_operation"
+         ; call_summary = None
          ; input = `Assoc [ "message", `String exact_tail ]
          ; base_path = config.base_path
          ; sandbox_profile = None

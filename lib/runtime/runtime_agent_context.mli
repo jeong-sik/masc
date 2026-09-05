@@ -73,14 +73,15 @@ type config = {
   runtime_id : string option;
   initial_messages : Agent_core.Types.message list;
   model_input_projection : Agent_core.Agent.model_input_projection option;
+  serialization_executor : Agent_core.Agent.serialization_executor option;
   pre_dispatch_serialization_observer :
     Agent_core.Agent.pre_dispatch_serialization_observer option;
       (** Observer for the exact serialized request body, invoked by AGENT_CORE after
           stream-field injection and after the serialized-body admission check.
           This is the only reading of the byte quantity admitted against
           [max_request_body_bytes]:
-          [Keeper_context_core_accessors.serialize_context] covers
-          [{system_prompt, messages}] and excludes tool schemas, and only a
+          the canonical checkpoint's bytes cover
+          [{system_prompt, messages}] and exclude tool schemas, and only a
           refused request reports its size today. Diagnostic and
           non-authoritative — a rejection or raised callback becomes typed
           failure evidence and does not rewrite the provider result. *)

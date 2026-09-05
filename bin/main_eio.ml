@@ -19,6 +19,7 @@ module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_memory = Masc.Keeper_memory
 module Keeper_execution = Masc.Keeper_execution
 module Keeper_runtime = Masc.Keeper_runtime
+module Keeper_sandbox_runtime = Masc.Keeper_sandbox_runtime
 module Keeper_github_identity = Masc.Keeper_github_identity
 module Keeper_github_login_lane = Masc.Keeper_github_login_lane
 module Tool_operator = Masc.Tool_operator
@@ -365,7 +366,7 @@ let make_extended_handler ~trust_policy routes =
              | None -> try_internal_error_response reqd msg)))
 
 (** Main server loop *)
-let run_server ~sw ~env ~host ~port ~base_path ~input_base_path =
+let run_server ~sw ~env ~host ~port ~base_path ~input_base_path ~accept_store_quarantine =
   (* Use the parent switch directly so that ALL fibers spawned by
      Server_runtime_bootstrap (background maintenance, keeper loops,
      dashboard refresh, etc.) are children of this switch.  Graceful
@@ -375,7 +376,7 @@ let run_server ~sw ~env ~host ~port ~base_path ~input_base_path =
      the 10s force-exit timeout. *)
   try
     Server_runtime_bootstrap.run ~sw ~env ~host ~port ~base_path
-      ~input_base_path ~make_routes
+      ~input_base_path ~accept_store_quarantine ~make_routes
       ~make_request_handler:make_extended_handler
       ~make_h2_request_handler:Server_h2_gateway.make_request_handler
       ~make_h2_error_handler:Server_h2_gateway.make_error_handler
@@ -422,6 +423,12 @@ let run_base_path =
     "Workspace root for MASC data. Runtime state lives under <base-path>/.masc; do not pass the .masc directory itself."
   in
   Arg.(value & opt (some string) None & info ["base-path"] ~docv:"PATH" ~doc)
+
+let accept_store_quarantine =
+  let doc =
+    "Let boot move aside every keeper store this build cannot decode and start those keepers with empty stores. Without this flag boot refuses to start while such a store exists and prints each path with its rejection (RFC-0420). The deploy script never passes it: its preflight refuses the same files before the executable starts."
+  in
+  Arg.(value & flag & info ["accept-store-quarantine"] ~doc)
 
 let build_provenance_path =
   let doc = "Absolute content-addressed executable provenance sidecar path" in
@@ -548,7 +555,7 @@ let acquire_base_path_lock ~run_dir base_path =
            (Server_startup_takeover.base_path_lock_rejection_to_string rejection));
       exit 1
 
-let run_cmd host port cli_base_path =
+let run_cmd host port cli_base_path accept_store_quarantine =
   Printexc.record_backtrace true;
   let resolved_base_path =
     Server_base_path_guard.resolve_startup_base_path ~cli_base_path
@@ -639,6 +646,12 @@ let run_cmd host port cli_base_path =
   Fs_compat.mkdir_p log_dir;
   Log.Ring.init_file_sink log_dir;
   Log.Ring.cleanup_old_files log_dir;
+  (* Only the server samples. Sampling starts before [Eio_main.run] so the
+     executor pool, which the main domain spawns while sampling, shares the
+     profile and the boot-time loads are in the tables. The rate is a tenth
+     of the one the OCaml manual reports as having no visible effect.
+     GET /api/v1/diagnostics/memprof reads the tables. *)
+  Alloc_profile.start ~sampling_rate:Alloc_profile.default_sampling_rate;
   Eio_main.run @@ fun env ->
   Crypto_rng.ensure_default ();
 
@@ -807,7 +820,8 @@ let run_cmd host port cli_base_path =
                 ~host
                 ~port
                 ~base_path:canonical_base_path
-                ~input_base_path:raw_base_path)
+                ~input_base_path:raw_base_path
+                ~accept_store_quarantine)
             await_shutdown_signal;
             (* Server stopped; close SSE connections after server is down. *)
             (try close_all_sse_connections ()
@@ -880,15 +894,15 @@ let run_cmd host port cli_base_path =
             Masc.Shutdown.await_deadline_watchdog watchdog));
   Log.Server.info "MASC MCP: Shutdown complete."
 
-let run_cmd_exit host port base_path provenance_path provenance_sha256 provenance_device provenance_inode =
+let run_cmd_exit host port base_path accept_store_quarantine provenance_path provenance_sha256 provenance_device provenance_inode =
   match provenance_path, provenance_sha256, provenance_device, provenance_inode with
   | None, None, None, None ->
-    run_cmd host port base_path;
+    run_cmd host port base_path accept_store_quarantine;
     Cmd.Exit.ok
   | Some path, Some sha256, Some device, Some inode ->
     (match Build_identity.bind_executable_provenance ~path ~sha256 ~device ~inode with
      | Ok () ->
-       run_cmd host port base_path;
+       run_cmd host port base_path accept_store_quarantine;
        Cmd.Exit.ok
      | Error message ->
        Printf.eprintf "invalid build provenance: %s\n" message;
@@ -923,6 +937,132 @@ let login_cmd_exit base_path host port agent role client_env no_expiry
       in
       print_endline output;
       0)
+
+(* [masc token] — what bearer credentials this workspace holds, and retiring
+   one. Auth.list_credentials and Auth.delete_credential have been here all
+   along with nothing reaching them from a command line, so an operator who
+   wanted to know what tokens existed, or to retire one, edited files under
+   .masc/auth/ by hand. *)
+let token_agent_arg =
+  let doc = "Agent whose credential to retire." in
+  Arg.(required & pos 0 (some string) None & info [] ~docv:"AGENT" ~doc)
+
+let token_credentials base_path =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  (base_path, Auth.list_credentials base_path)
+
+let token_list_cmd_exit base_path =
+  let base_path, creds = token_credentials base_path in
+  let now = Unix.gettimeofday () in
+  if creds = []
+  then print_endline "no credentials in this workspace"
+  else begin
+    List.iter
+      (fun (c : Types_auth.agent_credential) ->
+         let raw_present =
+           Sys.file_exists (Auth.raw_token_file base_path c.agent_name)
+         in
+         print_endline (Auth_token_inventory.row ~now ~raw_present c))
+      (Auth_token_inventory.ordered ~now creds);
+    let expired = List.length (Auth_token_inventory.expired ~now creds) in
+    Printf.printf
+      "\n%d credential(s), %d expired.%s\n"
+      (List.length creds)
+      expired
+      (if expired > 0 then " `masc token prune` removes the expired ones." else "")
+  end;
+  Cmd.Exit.ok
+
+let token_revoke_cmd_exit base_path agent =
+  let base_path, creds = token_credentials base_path in
+  let known =
+    List.exists (fun (c : Types_auth.agent_credential) -> c.agent_name = agent) creds
+  in
+  if not known
+  then (
+    Printf.eprintf
+      "no credential named %S; `masc token list` shows what this workspace holds\n"
+      agent;
+    Cmd.Exit.some_error)
+  else (
+    Auth.delete_credential base_path agent;
+    Printf.printf
+      "retired %s. Its bearer stops validating from the next request; anything \
+       still exporting it needs a new one from `masc login --agent %s`.\n"
+      agent
+      agent;
+    Cmd.Exit.ok)
+
+(* Only expired credentials. Removing one that already authenticates nothing is
+   garbage collection rather than a security decision, which is why this needs
+   no confirmation while [revoke] names its target. *)
+let token_prune_cmd_exit base_path dry_run =
+  let base_path, creds = token_credentials base_path in
+  let now = Unix.gettimeofday () in
+  let expired =
+    Auth_token_inventory.expired ~now creds
+    |> List.map (fun (c : Types_auth.agent_credential) -> (c.agent_name, "expired"))
+  in
+  (* A stub whose target is gone is invisible to a listing and authenticates
+     nothing, so it belongs in the same sweep rather than living forever. *)
+  let orphaned =
+    Auth.orphaned_credential_stubs base_path
+    |> List.map (fun name -> (name, "orphaned redirect"))
+  in
+  match expired @ orphaned with
+  | [] ->
+    print_endline "nothing to prune: no expired credentials, no orphaned stubs";
+    Cmd.Exit.ok
+  | doomed ->
+    List.iter
+      (fun (name, why) ->
+         if dry_run
+         then Printf.printf "would retire %s (%s)\n" name why
+         else (
+           Auth.delete_credential base_path name;
+           Printf.printf "retired %s (%s)\n" name why))
+      doomed;
+    Printf.printf
+      "%d credential(s)%s\n"
+      (List.length doomed)
+      (if dry_run then " would be retired (--dry-run)" else " retired");
+    Cmd.Exit.ok
+
+let token_cmd =
+  let list_cmd =
+    let doc = "List this workspace's bearer credentials." in
+    Cmd.v (Cmd.info "list" ~doc) Term.(const token_list_cmd_exit $ base_path)
+  in
+  let revoke_cmd =
+    let doc = "Retire one agent's bearer credential." in
+    Cmd.v (Cmd.info "revoke" ~doc)
+      Term.(const token_revoke_cmd_exit $ base_path $ token_agent_arg)
+  in
+  let prune_cmd =
+    let doc = "Retire every expired credential and every orphaned stub." in
+    let dry_run =
+      let doc = "List what would be retired without removing anything." in
+      Arg.(value & flag & info [ "dry-run" ] ~doc)
+    in
+    Cmd.v (Cmd.info "prune" ~doc)
+      Term.(const token_prune_cmd_exit $ base_path $ dry_run)
+  in
+  let doc = "Inspect and retire the workspace's bearer credentials." in
+  let man =
+    [ `S Manpage.s_description
+    ; `P
+        "`masc login` mints a bearer and replaces whatever that agent had, so \
+         minting again is how a token is rotated: the previous one stops \
+         validating. These are the other two halves -- seeing what exists, and \
+         retiring one without minting a replacement."
+    ; `P
+        "The store keeps a SHA-256 of each token, never the token, so a listing \
+         cannot show you a bearer you have lost. What it can show is whether \
+         the raw secret is still on disk at .masc/auth/<agent>.token, which is \
+         the only place it survives a mint."
+    ]
+  in
+  Cmd.group (Cmd.info "token" ~doc ~man) [ list_cmd; revoke_cmd; prune_cmd ]
 
 let login_cmd =
   let doc =
@@ -1011,14 +1151,81 @@ let mcp_config_cmd =
       const mcp_config_cmd_exit $ base_path $ host $ port $ mcp_config_agent
       $ mcp_config_client_env $ mcp_config_expiring $ mcp_config_client)
 
+(* `masc` with no subcommand is the product's front door, and the front door is
+   the terminal: the TUI is where Keepers are watched and steered, and it starts
+   this same binary as its server when nothing answers the port. So an
+   interactive bare invocation hands over to [masc-tui] instead of serving.
+
+   Every condition has to hold, because the same bare invocation is how service
+   managers and containers start the server:
+
+   - a terminal on both stdin and stdout — a pipe, a unit file or a CI step has
+     neither;
+   - the default loopback host — `--host 0.0.0.0` is a deployment asking for a
+     server, and the TUI carries no --host to hand it;
+   - no server-deployment flag — build provenance and the store-quarantine
+     override are passed by the deploy path and by nothing else;
+   - a `masc-tui` beside this binary or on PATH — the layout install.sh creates.
+     A source checkout builds `masc_tui.exe` under a different name and the
+     container image ships no TUI at all, so both keep the server they had.
+
+   `masc start` always serves, whatever the terminal looks like. The rule itself
+   lives in [Masc_front_door] so it runs under a test without a TTY; what stays
+   here is the effects it reads and the handover it performs. *)
+let stdio_is_a_terminal () =
+  match Unix.isatty Unix.stdin && Unix.isatty Unix.stdout with
+  | answer -> answer
+  | exception Unix.Unix_error _ -> false
+
+let path_is_executable candidate =
+  match Unix.access candidate [ Unix.X_OK ] with
+  | () -> true
+  | exception Unix.Unix_error _ -> false
+
+let front_door_cmd_exit
+      host port base_path accept_store_quarantine
+      provenance_path provenance_sha256 provenance_device provenance_inode =
+  let serve () =
+    run_cmd_exit host port base_path accept_store_quarantine provenance_path
+      provenance_sha256 provenance_device provenance_inode
+  in
+  let deployment_flags_present =
+    accept_store_quarantine
+    || Option.is_some provenance_path
+    || Option.is_some provenance_sha256
+    || Option.is_some provenance_device
+    || Option.is_some provenance_inode
+  in
+  match
+    Masc_front_door.decide
+      ~interactive:(stdio_is_a_terminal ())
+      ~host
+      ~default_host:(Env_config.masc_host ())
+      ~deployment_flags_present
+      ~port
+      ~base_path
+      ~executable_name:Sys.executable_name
+      ~path_env:(Sys.getenv_opt "PATH")
+      ~is_executable:path_is_executable
+  with
+  | Masc_front_door.Serve -> serve ()
+  | Masc_front_door.Open_tui { binary; argv } ->
+    Printf.printf "masc: opening %s — `masc start` runs the server alone\n%!" binary;
+    (try Unix.execv binary (Array.of_list argv) with
+     | Unix.Unix_error (err, _, _) ->
+       Printf.eprintf "masc: could not run %s (%s); starting the server instead\n%!"
+         binary (Unix.error_message err);
+       serve ())
+
 let start_cmd =
   let doc =
-    "Start the MASC MCP server (HTTP/SSE). Same as running `masc` with no \
-     subcommand; exposed as an explicit name for quick-start guides."
+    "Start the MASC MCP server (HTTP/SSE). What `masc` with no subcommand does \
+     everywhere except an interactive terminal, where the bare name opens the \
+     fleet TUI instead. Use this name whenever the server is what you want."
   in
   let info = Cmd.info "start" ~doc in
   Cmd.v info
-    Term.(const run_cmd_exit $ host $ port $ run_base_path $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode)
+    Term.(const run_cmd_exit $ host $ port $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode)
 
 let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in
@@ -1056,18 +1263,28 @@ let init_cmd_exit base_path force =
       base_path
   in
   Fs_compat.mkdir_p target_root;
+  (* Same distribution/operator split the server's own config-root seed makes
+     ([Server_runtime_config_root_bootstrap.copy_missing_config_root_seed]), so
+     the two paths hand back the same workspace: keeper manifests are the
+     operator's to write, and [init] leaves the directory empty for them. *)
+  Fs_compat.mkdir_p (Filename.concat target_root Common.keepers_runtime_dirname);
   let result =
     List.fold_left
       (seed_one ~target_root ~force)
       { written = 0; skipped = 0; failed = 0 }
-      Embedded_config.file_list
+      (List.filter Common.seeds_into_fresh_config_root Embedded_config.file_list)
   in
   Printf.printf "init: %d written, %d skipped, %d failed (root=%s)\n"
     result.written result.skipped result.failed target_root;
   if result.failed > 0 then 1 else 0
 
 let init_cmd =
-  let doc = "Seed default .masc/config/ from binary-embedded assets" in
+  let doc =
+    "Seed default .masc/config/ from binary-embedded assets. Writes runtime \
+     settings, prompts, tool definitions and connector declarations, and leaves \
+     keepers/ empty for you to declare -- the same split the server makes when \
+     it creates a config root itself. Existing files are kept unless --force."
+  in
   let info = Cmd.info "init" ~doc in
   Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force)
 
@@ -1127,7 +1344,8 @@ let runtime_wizard_credential_key (provider : Runtime_schema.provider) =
   | Some (Runtime_schema.File _ | Runtime_schema.Inline _) ->
       Error
         (Printf.sprintf
-           "provider %s uses a non-env credential; install wizard cannot write .env.local"
+           "provider %s uses a non-env credential; the setup wizard reports only \
+            environment-variable keys"
            provider.id)
 
 let runtime_wizard_binding_for_provider (cfg : Runtime_schema.config)
@@ -1946,6 +2164,93 @@ let build_commit_cmd =
   let doc = "Print the Git commit embedded in this server binary at build time." in
   Cmd.v (Cmd.info "build-commit" ~doc) Term.(const build_commit_cmd_exit $ const ())
 
+(* Build the general sandbox image from the recipe this binary carries. The
+   Dockerfile goes to docker on stdin against a [-] context, so this works the
+   same on a host that has no checkout -- which is the whole point, since the
+   only image MASC described before was one you could build from the repository
+   and nowhere else. *)
+let sandbox_image_build_exit ~tag =
+  let argv =
+    Keeper_sandbox_runtime.docker_command_argv ()
+    @ Keeper_sandbox_image.build_argv ~tag
+  in
+  match argv with
+  | [] ->
+    prerr_endline "sandbox-image: no docker command resolved";
+    Cmd.Exit.some_error
+  | bin :: _ ->
+    (* docker exiting first would otherwise kill this process mid-write, and
+       the exit status we want to report is docker's own. *)
+    let previous_sigpipe = Sys.signal Sys.sigpipe Sys.Signal_ignore in
+    let read_fd, write_fd = Unix.pipe () in
+    Unix.set_close_on_exec write_fd;
+    let pid =
+      Unix.create_process bin (Array.of_list argv) read_fd Unix.stdout Unix.stderr
+    in
+    Unix.close read_fd;
+    let oc = Unix.out_channel_of_descr write_fd in
+    (try
+       output_string oc Keeper_sandbox_image.dockerfile;
+       close_out oc
+     with Sys_error _ -> (try close_out_noerr oc with _ -> ()));
+    let _, status = Unix.waitpid [] pid in
+    Sys.set_signal Sys.sigpipe previous_sigpipe;
+    (match status with
+     | Unix.WEXITED 0 ->
+       Printf.printf
+         "built %s\n\
+          Point a Keeper at it with sandbox_image = %S in its TOML, or set \
+          MASC_KEEPER_SANDBOX_DOCKER_IMAGE to make it that Keeper's default.\n"
+         tag
+         tag;
+       Cmd.Exit.ok
+     | Unix.WEXITED code ->
+       Printf.eprintf "sandbox-image: docker build exited %d\n" code;
+       Cmd.Exit.some_error
+     | Unix.WSIGNALED n | Unix.WSTOPPED n ->
+       Printf.eprintf "sandbox-image: docker build stopped by signal %d\n" n;
+       Cmd.Exit.some_error)
+
+let sandbox_image_cmd_exit print_only tag =
+  let tag = match tag with Some t -> t | None -> Keeper_sandbox_image.default_tag in
+  if print_only
+  then (
+    print_string Keeper_sandbox_image.dockerfile;
+    Cmd.Exit.ok)
+  else sandbox_image_build_exit ~tag
+
+let sandbox_image_cmd =
+  let doc = "Build the general Keeper sandbox image from the recipe in this binary." in
+  let man =
+    [ `S Manpage.s_description
+    ; `P
+        "A Keeper on sandbox_profile = \"docker\" runs each turn inside an \
+         image, and the image MASC develops itself in carries OCaml and this \
+         project's opam dependencies -- the wrong toolchain for anything else, \
+         and buildable only from a source checkout."
+    ; `P
+        "This builds the other one: bash, ripgrep and git on a Debian base, \
+         which is what a turn needs to read, search and edit a repository. The \
+         recipe is embedded in this binary and reaches docker on stdin, so no \
+         checkout and no registry is involved."
+    ; `P
+        "It is not polyglot on purpose. A Keeper that has to build a project \
+         needs that project's toolchain, named in its TOML with sandbox_image; \
+         the container is read-only, so a turn cannot install what is missing."
+    ]
+  in
+  let print_only =
+    let doc = "Write the Dockerfile to stdout instead of building it." in
+    Arg.(value & flag & info [ "print" ] ~doc)
+  in
+  let tag =
+    let doc = "Image tag to build (default: " ^ Keeper_sandbox_image.default_tag ^ ")." in
+    Arg.(value & opt (some string) None & info [ "tag" ] ~docv:"TAG" ~doc)
+  in
+  Cmd.v
+    (Cmd.info "sandbox-image" ~doc ~man)
+    Term.(const sandbox_image_cmd_exit $ print_only $ tag)
+
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling
      main_eio.exe showed heavy stop-the-world minor-GC pressure from JSON
@@ -1963,11 +2268,13 @@ let setup_gc () =
         Gc.set { gc with minor_heap_size = desired_minor_words }
 
 let cmd =
-  let doc = "MASC MCP Server and operator diagnostics" in
+  let doc =
+    "MASC workspace: the fleet TUI on a terminal, the MCP server everywhere else"
+  in
   let info = Cmd.info "masc" ~version:Runtime_build_version.current ~doc in
   Cmd.group
     ~default:
-      Term.(const run_cmd_exit $ host $ port $ run_base_path $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode)
+      Term.(const front_door_cmd_exit $ host $ port $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode)
     info
     [ init_cmd
     ; start_cmd
@@ -1979,18 +2286,11 @@ let cmd =
     ; schedule_prune_cmd
     ; keeper_create_cmd
     ; keeper_github_cmd
+    ; sandbox_image_cmd
+    ; token_cmd
     ; build_commit_cmd
     ]
 
-(* Sampling starts before any domain is spawned so the executor pool, which
-   the main domain creates while sampling, shares the profile. The rate is
-   a tenth of the one the OCaml manual reports as having no visible effect.
-   GET /api/v1/diagnostics/memprof reads the tables. *)
-let setup_alloc_profile () =
-  Alloc_profile.start ~sampling_rate:Alloc_profile.default_sampling_rate
-;;
-
 let () =
   setup_gc ();
-  setup_alloc_profile ();
   exit (Cmd.eval' cmd)

@@ -61,13 +61,6 @@ val message_of_json : Yojson.Safe.t -> Agent_core.Types.message
     history classification. *)
 val text_of_history_jsonl_json : Yojson.Safe.t -> string
 
-(** {1 Context (de)serialization} *)
-
-val serialize_context : working_context -> string
-val serialized_bytes : working_context -> int
-(** Exact byte length of {!serialize_context}. This is structural observation,
-    not a token estimate or provider context-window admission signal. *)
-
 (** {1 Session lifecycle} *)
 
 val create_session : session_id:string -> base_dir:string -> session_context

@@ -114,6 +114,7 @@ val register_namespace_truth_snapshot :
 
 module For_testing : sig
   type cache
+  type activity_cache
 
   val make_cache : unit -> cache
 
@@ -123,6 +124,15 @@ module For_testing : sig
     cache:cache ->
     (unit -> Yojson.Safe.t) ->
     Yojson.Safe.t
+
+  val make_activity_cache : unit -> activity_cache
+
+  val refresh_activity_defaults :
+    now:(unit -> float) ->
+    ttl:float ->
+    cache:activity_cache ->
+    (unit -> Activity_graph.default_projections) ->
+    Activity_graph.default_projections
 
   val should_reuse_projection :
     now:float -> ttl:float -> refreshed_at:float -> bool

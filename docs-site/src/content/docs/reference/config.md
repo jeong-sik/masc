@@ -12,13 +12,16 @@ file** rather than write one from scratch.
 ```text
 .masc/config/
 ├── runtime.toml    # provider catalog, model bindings, [runtime].default, lanes
-├── .env.local      # provider API keys, written by the installer (chmod 600)
+├── .env.local      # provider API keys; written by quickstart.sh and read by
+│                   # start-masc.sh — the source-checkout pair. A binary install
+│                   # has neither: export the key in your shell instead.
 └── keepers/        # per-Keeper profiles, one <name>.toml each
     └── reviewer.toml
 ```
 
-Other files (`connectors.toml` for Slack/Discord bindings, `repositories.toml`,
-`keeper_repo_mappings.toml`) appear once you use those features.
+Connector settings (Discord, Slack) are not a separate file: they are tables
+inside `runtime.toml` (e.g. `[discord]`). `repositories.toml` and
+`keeper_repo_mappings.toml` appear once you use those features.
 
 ---
 
@@ -81,7 +84,7 @@ A Keeper's profile. The installer does not write these; create them with
 autoboot_enabled = true
 proactive_enabled = false
 sandbox_profile = "docker"   # "docker" | "microvm" | "remote_ssh"; host is refused
-network_mode = "none"        # "none" | "inherit"; "none" blocks all guest network
+network_mode = "none"        # "none" | "inherit" | "policy"; "none" blocks all guest network
 instructions = """
 You are the review Keeper. Inspect the current change and report concrete
 evidence with file paths and commands.

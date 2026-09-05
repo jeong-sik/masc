@@ -1981,14 +1981,14 @@ let test_keeper_persistence_ready_rejects_second_preparation () =
          ~status:"running"
          ~status_fields:[]
          ();
-       (match Server_bootstrap_loops.prepare_keeper_persistence ~config:config_a () with
+       (match Server_bootstrap_loops.prepare_keeper_persistence ~accept_store_quarantine:false ~config:config_a () with
         | Ok _ -> ()
         | Error error ->
           Alcotest.failf
             "first persistence preparation failed: %s"
             (Server_bootstrap_loops.keeper_persistence_prepare_error_to_string
                error));
-       (match Server_bootstrap_loops.prepare_keeper_persistence ~config:config_b () with
+       (match Server_bootstrap_loops.prepare_keeper_persistence ~accept_store_quarantine:false ~config:config_b () with
         | Error Server_bootstrap_loops.Preparation_awaiting_claim -> ()
         | Error error ->
           Alcotest.failf
@@ -2029,6 +2029,7 @@ let test_keeper_persistence_canonical_start_token_is_affine () =
          match
            Server_bootstrap_loops.prepare_keeper_persistence
              ~requested_base_path:alias
+             ~accept_store_quarantine:false
              ~config:canonical_config
              ()
          with
@@ -2153,7 +2154,7 @@ let test_keeper_persistence_claim_is_one_shot_for_process () =
        let config_a = Workspace.default_config base_a in
        let config_b = Workspace.default_config base_b in
        let prepare config =
-         match Server_bootstrap_loops.prepare_keeper_persistence ~config () with
+         match Server_bootstrap_loops.prepare_keeper_persistence ~accept_store_quarantine:false ~config () with
          | Ok prepared -> prepared
          | Error error ->
            Alcotest.failf
@@ -2183,7 +2184,7 @@ let test_keeper_persistence_claim_is_one_shot_for_process () =
         with
         | Error Server_bootstrap_loops.Claim_already_claimed -> ()
         | _ -> Alcotest.fail "second claim was not rejected");
-       match Server_bootstrap_loops.prepare_keeper_persistence ~config:config_b () with
+       match Server_bootstrap_loops.prepare_keeper_persistence ~accept_store_quarantine:false ~config:config_b () with
        | Error Server_bootstrap_loops.Preparation_already_claimed -> ()
        | Error error ->
          Alcotest.failf

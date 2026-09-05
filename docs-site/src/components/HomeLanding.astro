@@ -8,38 +8,38 @@ const isKo = lang === 'ko';
 
 const t = {
   tagline: isKo
-    ? "독립된 Keeper 에이전트와 IDE(Claude Code, Cursor)를 연결하는 로컬 퍼스트 하네스"
-    : "Local-first shared workspace and execution harness for autonomous coding agents.",
+    ? "여러 코딩 에이전트가 함께 쓰는 로컬 작업 공간"
+    : "A local workspace shared by several coding agents.",
   copyCommand: "./quickstart.sh",
 
   // Tabs for real screenshot
-  tab1: isKo ? "1. 개요 (Overview)" : "1. Overview",
-  tab2: isKo ? "2. 키퍼 (Keepers)" : "2. Keepers",
-  tab3: isKo ? "3. 런타임 (Lanes)" : "3. Lanes",
-  tab4: isKo ? "5. 승인 (Approvals)" : "5. Approvals",
-  tab5: isKo ? "6. 활동 (Activity)" : "6. Activity",
+  tab1: isKo ? "개요" : "Overview",
+  tab2: isKo ? "키퍼" : "Keepers",
+  tab3: isKo ? "런타임" : "Lanes",
+  tab4: isKo ? "승인" : "Approvals",
+  tab5: isKo ? "활동" : "Activity",
   screenCaption: isKo 
     ? "실제 터미널 런타임 캡처 (masc-tui · 2026-09-04 실측 133×28)" 
     : "Actual terminal capture from masc-tui (2026-09-04 live runtime 133×28)",
 
   // Invariants
-  invariantsTag: isKo ? "핵심 불변식" : "CORE INVARIANTS",
-  invariantsTitle: isKo ? "4대 런타임 불변식" : "Four Runtime Invariants",
+  invariantsTag: isKo ? "핵심 기능" : "CAPABILITIES",
+  invariantsTitle: isKo ? "MASC가 하는 일" : "What MASC does",
 
-  card1Title: isKo ? "파일 락 기반 작업 선점 (Claim)" : "File-Locked Task Claiming",
+  card1Title: isKo ? "작업 선점 (Claim)" : "Task Claiming",
   card1Desc: isKo
-    ? ".masc/ 작업 저장소의 파일 락을 통해 Task 소유권을 확정하여 복수 에이전트 간 중복 작업을 분할합니다."
-    : "Tasks are exclusively claimed via .masc/ file locks to coordinate work partitions across multiple agents.",
+    ? "작업을 한 에이전트가 claim하면 스토어가 다른 에이전트의 claim을 거절합니다. 소유권과 진행 상태가 공용 저장소에 남습니다."
+    : "Once an agent claims a task, the store rejects any other claim. Ownership and progress stay in the shared store.",
 
   card2Title: isKo ? "단일 MCP 게이트웨이" : "Unified MCP Gateway",
   card2Desc: isKo
-    ? "Claude Code, Cursor 등 외부 도구가 HTTP SSE 엔드포인트(:8935/mcp)로 연결되며 masc mcp-config로 즉시 설정합니다."
-    : "Exposes HTTP SSE endpoint (:8935/mcp) for external tools with instant masc mcp-config generation.",
+    ? "Claude Code, Cursor 같은 MCP 클라이언트가 :8935/mcp 엔드포인트로 접속합니다. masc mcp-config가 토큰과 설정 블록을 만들어 줍니다."
+    : "MCP clients such as Claude Code and Cursor connect to the :8935/mcp endpoint; masc mcp-config mints the token and config block.",
 
-  card3Title: isKo ? "인과 장기 기억 (Memory OS)" : "Causal Memory OS",
+  card3Title: isKo ? "장기 기억 (Memory OS)" : "Memory OS",
   card3Desc: isKo
-    ? "트리거, 의사결정, 결과 노드를 인과 그래프로 영속화하여 세션 종료 후에도 작업 맥락을 유지합니다."
-    : "Persists trigger-decision-outcome graph nodes across sessions without loss of context.",
+    ? "Keeper가 학습한 사실을 저장하고 다음 턴에 다시 씁니다. 사실이 언제 회수되고 인용됐는지 사건으로 기록합니다."
+    : "Facts a Keeper learns are stored and reused on later turns. Retrieval and citation land as recorded events.",
 
   card4Title: isKo ? "샌드박스 격리 & 오퍼레이터 승인" : "Sandbox Isolation & Operator Approvals",
   card4Desc: isKo
@@ -51,10 +51,10 @@ const t = {
   quickTitle: isKo ? "3단계로 즉시 실행" : "Up and Running in 3 Steps",
   step1: isKo ? "1. 작업 공간 서버 기동" : "1. Launch Workspace Server",
   step1Desc: isKo ? "스크립트로 .masc 디렉터리를 초기화하고 포트 8935 서버를 기동합니다." : "Initializes local .masc state and starts server on port 8935.",
-  step2: isKo ? "2. 터미널 조종석 접속" : "2. Launch Terminal UI",
-  step2Desc: isKo ? "masc-tui로 에이전트 궤적, 툴 트리, 작업 상태를 실시간 관측합니다." : "Supervises live agent trajectories, tool calls, and state in masc-tui.",
+  step2: isKo ? "2. 터미널 UI 접속" : "2. Open the Terminal UI",
+  step2Desc: isKo ? "masc-tui로 키퍼 활동, 도구 호출 트리, 작업 상태를 봅니다." : "Watch keeper activity, tool-call trees, and task state in masc-tui.",
   step3: isKo ? "3. MCP 클라이언트 연동" : "3. Connect MCP Client",
-  step3Desc: isKo ? "원클릭으로 Claude Code, Cursor용 베어러 토큰 및 설정 블록을 생성합니다." : "Generates ready configuration snippet with long-lived worker bearer.",
+  step3Desc: isKo ? "masc mcp-config가 Claude Code, Cursor용 토큰과 설정 블록을 만들어 줍니다." : "masc mcp-config mints the token and config block for Claude Code or Cursor.",
 
   // Quick links
   docsTitle: isKo ? "문서 둘러보기" : "Documentation Matrix",
@@ -74,7 +74,6 @@ const t = {
   <header class="masthead">
     <div class="masthead-left">
       <div class="brand-row">
-        <span class="brand-name">MASC</span>
         <span class="brand-ver">v0.31.0</span>
         <span class="brand-sep">/</span>
         <span class="brand-tagline">{t.tagline}</span>
@@ -120,7 +119,7 @@ const t = {
     </div>
   </section>
 
-  {/* 4 HARDENED INVARIANTS */}
+  {/* Four capability cards */}
   <section class="sec-block">
     <div class="sec-hdr">
       <span class="sec-tag">{t.invariantsTag}</span>
@@ -306,14 +305,6 @@ const t = {
     align-items: center;
     gap: 0.6rem;
     font-size: 0.875rem;
-  }
-
-  .brand-name {
-    font-family: var(--sl-font-mono, monospace);
-    font-weight: 800;
-    font-size: 1.125rem;
-    color: #d4a14a;
-    letter-spacing: 0.05em;
   }
 
   .brand-ver {

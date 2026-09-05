@@ -146,6 +146,19 @@ val agent_spans_json :
     to "now".  Returns [`Assoc [agents; spans; time_range;
     window]]. *)
 
+type default_projections = {
+  events_default : Yojson.Safe.t;
+  graph_default : Yojson.Safe.t;
+  swimlane_default : Yojson.Safe.t;
+}
+
+val default_projections : Workspace_utils.config -> default_projections
+(** Single-pass computation of the three default dashboard activity
+    projections ([events_default], [graph_default], and
+    [swimlane_default]).  Reads the store once for up to 1000 recent
+    events, counts total store lines once, and derives all three payloads
+    without re-parsing or redundant disk traversal. *)
+
 type cache_stats = {
   past_day_files : int;  (** parsed day files held *)
   past_day_records : int;  (** events across them *)
@@ -175,6 +188,12 @@ module For_testing : sig
   (** Clears the per-path, full-fingerprint event-list past-day cache. *)
 
   val current_day_rebuild_count : unit -> int
+
+  val current_day_append_count : unit -> int
+  (** How often the current-day file was read from where the last read
+      stopped rather than from zero. A test that appends to a file and reads
+      it again asserts on this: the events being right does not say which
+      path produced them. *)
 
   val all_events_rebuild_count : unit -> int
   (** Number of full retained-list aggregate rebuilds since the current-day

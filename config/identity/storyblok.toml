@@ -15,5 +15,5 @@ mcp_url = "https://mcp.storyblok.com/mcp"
 
 access_token_env = "STORYBLOK_ACCESS_TOKEN"
 expires_at_env = "STORYBLOK_EXPIRES_AT"
-refresh_token_file = "storyblok_refresh_token"
+refresh_token_file = "/home/keeper/.storyblok/refresh_token"
 renew_before_sec = 300

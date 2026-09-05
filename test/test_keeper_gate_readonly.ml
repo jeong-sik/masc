@@ -47,8 +47,14 @@ let test_observation_table_is_fully_read () =
   passes "git log" [ "git"; "log"; "--oneline"; "-5" ];
   passes "git diff with global -c" [ "git"; "-c"; "core.pager=cat"; "diff" ];
   passes "git branch listing" [ "git"; "branch"; "-a" ];
+  passes "git rev-list count against upstream"
+    [ "git"; "-C"; "clone-probe"; "rev-list"; "--count"; "HEAD..origin/main" ];
+  passes "git merge-base" [ "git"; "merge-base"; "origin/main"; "HEAD" ];
+  passes "git cherry" [ "git"; "cherry"; "-v"; "origin/main" ];
   passes "git tag bare list" [ "git"; "tag" ];
   passes "git remote -v" [ "git"; "remote"; "-v" ];
+  passes "git ls-tree recursive" [ "git"; "ls-tree"; "-r"; "origin/main"; "--name-only" ];
+  passes "git ls-tree through -C" [ "git"; "-C"; "masc"; "ls-tree"; "HEAD" ];
   passes "rg plain" [ "rg"; "-n"; "pattern"; "." ];
   passes "rg --pretty stays allowed" [ "rg"; "--pretty"; "x" ];
   passes "grep" [ "grep"; "-r"; "x"; "." ];
@@ -60,6 +66,11 @@ let test_observation_table_is_fully_read () =
   passes "hostname flag" [ "hostname"; "-f" ];
   passes "env bare" [ "env" ];
   passes "printenv bare" [ "printenv" ];
+  passes "true closes an or-line" [ "true" ];
+  passes "base64 decode" [ "base64"; "-d"; "blob.b64" ];
+  passes "jq filter" [ "jq"; "-r"; ".files[].path"; "pr.json" ];
+  passes "id" [ "id"; "-un" ];
+  passes "uptime" [ "uptime" ];
   List.iter (fun command -> passes ("table entry " ^ command) [ command ]) Readonly.observation_commands;
   List.iter
     (fun sub -> passes ("git table entry " ^ sub) [ "git"; sub ])
@@ -158,6 +169,7 @@ let executes_script ~operation ~sandbox_profile script =
 let script_gate_request ?profile ?target ~sandbox_profile base_path script =
   { Keeper_gate.keeper_name = "alpha"
   ; operation = "tool_execute"
+  ; call_summary = None
   ; input = script_gate_input ?profile ?target script
   ; base_path
   ; sandbox_profile
@@ -294,6 +306,7 @@ let rec remove_tree path =
 let gate_request ?profile ?target ~sandbox_profile base_path argv =
   { Keeper_gate.keeper_name = "alpha"
   ; operation = "tool_execute"
+  ; call_summary = None
   ; input = gate_input ?profile ?target argv
   ; base_path
   ; sandbox_profile
@@ -307,6 +320,7 @@ let gate_request ?profile ?target ~sandbox_profile base_path argv =
 let network_gate_request base_path ~capability =
   { Keeper_gate.keeper_name = "alpha"
   ; operation = "network_read"
+  ; call_summary = None
   ; input =
       `Assoc
         [ "capability", `String capability
@@ -341,52 +355,61 @@ let with_auto_judge f =
   f base_path
 ;;
 
-(* ── script→argv equivalence (RFC-0404) ─────────────────────────────── *)
+(* ── script classification through the shell IR (RFC-0421) ─────────── *)
 
-let equivalent label script argv =
-  check (list string) label argv (Option.get (Readonly.script_argv_equivalent script))
+let observation label script =
+  check bool (label ^ " is observation") true (Readonly.classify_script script)
 ;;
 
-let not_equivalent label script =
-  check bool (label ^ " is not equivalent") true
-    (Option.is_none (Readonly.script_argv_equivalent script))
+let judged label script =
+  check bool (label ^ " keeps the judge") false (Readonly.classify_script script)
 ;;
 
-let test_script_equivalence_unit () =
-  equivalent "bare ls" "ls" [ "ls" ];
-  equivalent "ls with flags" "ls -la /tmp" [ "ls"; "-la"; "/tmp" ];
-  equivalent "git status through -C" "git -C repos/masc status"
-    [ "git"; "-C"; "repos/masc"; "status" ];
-  equivalent "repeated spaces collapse to the same argv" "uname  -a" [ "uname"; "-a" ];
-  (* A tab is not quoting but the shell splits on it, so a tab can split a
-     guarded flag out of a token we classified whole — "sed -e\t-i" reads
-     as one harmless token here and as ["-e"; "-i"] in-place edit in the
-     shell. Every tab moves the line to the judge. *)
-  not_equivalent "tab field-splits past the sed in-place guard" "sed -e\t-i s/a/b/ f";
-  not_equivalent "tab field-splits past the rg preprocessor guard" "rg --pre\trm x";
-  not_equivalent "tab field-splits past the sort output guard" "sort -o\tout f";
-  not_equivalent "tab field-splits past the uniq operand guard" "uniq -c\ta b";
-  not_equivalent "bare tab" "ls\t-la";
-  not_equivalent "bracket glob" "ls [a-z]*";
-  not_equivalent "newline carries a second command" "ls\nrm -rf /";
-  not_equivalent "carriage return" "ls -la\r";
-  not_equivalent "command separator" "ls; rm -rf /";
-  not_equivalent "pipe" "cat a | wc -l";
-  not_equivalent "logical and" "git log && git diff";
-  not_equivalent "redirect out" "cat f > out";
-  not_equivalent "redirect in" "wc -l < f";
-  not_equivalent "command substitution" "echo $(whoami)";
-  not_equivalent "variable expansion" "echo $HOME";
-  not_equivalent "backtick" "echo `whoami`";
-  not_equivalent "single quote" "grep 'x y' f";
-  not_equivalent "double quote" "echo \"hello world\"";
-  not_equivalent "glob" "ls *.ml";
-  not_equivalent "brace expansion" "cat {a,b}";
-  not_equivalent "subshell parens" "(ls)";
-  not_equivalent "comment" "ls -la # listing";
-  not_equivalent "tilde expansion" "cat ~/notes";
-  not_equivalent "whitespace only" "   ";
-  not_equivalent "empty" ""
+let test_script_classification_unit () =
+  (* Every command the IR shows is judged by the argv tables. *)
+  observation "bare ls" "ls";
+  observation "ls with flags" "ls -la /tmp";
+  observation "git status through -C" "git -C repos/masc status";
+  observation "repeated spaces" "uname  -a";
+  observation "a tab is a word boundary, like the shell reads it" "ls\t-la";
+  observation "quoted argument" "grep 'x y' f";
+  observation "double-quoted argument" "grep -n \"a b\" notes.txt";
+  observation "pipeline of reads" "git show HEAD:f | sed -n '10,20p'";
+  observation "pipeline with head" "ls repos | head -5";
+  observation "cd before observing" "cd repos/masc && git log --oneline -3";
+  observation "sequence of reads" "pwd; ls -la; echo ---";
+  observation "newline-separated reads" "cat a\ncat b";
+  observation "or-connector of reads" "ls /masc-work || echo none";
+  observation "stderr joined to stdout" "ls x 2>&1 | head";
+  observation "stderr discarded" "ls repos/_build 2>/dev/null | head -5";
+  observation "stdin from a file" "wc -l < f";
+  observation "tilde is a path the read resolves" "cat ~/notes";
+  (* The tab cases RFC-0404 refused by character: the parser splits the
+     flag out, so the guards see it. *)
+  judged "tab splits the sed in-place flag out" "sed -e\t-i s/a/b/ f";
+  judged "tab splits the rg preprocessor flag out" "rg --pre\trm x";
+  judged "tab splits the sort output flag out" "sort -o\tout f";
+  judged "tab splits the uniq second operand out" "uniq -c\ta b";
+  (* Where the argv depends on the guest at run time. *)
+  judged "glob" "ls *.ml";
+  judged "bracket glob" "ls [a-z]*";
+  judged "brace expansion" "cat {a,b}";
+  judged "variable" "echo $HOME";
+  judged "command substitution" "echo $(whoami)";
+  judged "backtick" "echo `whoami`";
+  judged "subshell" "(ls)";
+  judged "environment prefix" "PAGER=cat git log";
+  (* Effects, wherever they sit on the line. *)
+  judged "write redirect" "cat f > out";
+  judged "append redirect" "cat f >> out";
+  judged "a write after a read" "ls; rm -rf /";
+  judged "a write inside a pipeline" "cat f | tee out";
+  judged "fetch behind cd" "cd repos/masc && git fetch origin main";
+  judged "export then read" "export X=1; ls";
+  judged "a command outside the table" "curl https://example.com";
+  judged "a shell inside the script" "bash -c ls";
+  judged "whitespace only" "   ";
+  judged "empty" ""
 ;;
 
 let test_observation_scripts_pass_the_table () =
@@ -403,17 +426,33 @@ let test_observation_scripts_pass_the_table () =
     false
     (executes_script ~operation:"tool_execute" ~sandbox_profile:remote_ssh "ls -la");
   check bool
-    "compound script still faces the judge"
-    false
+    "compound script of reads passes (id joined the table)"
+    true
     (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "uname -a && id && pwd");
+  check bool
+    "compound script with one write still faces the judge"
+    false
+    (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "uname -a && id && rm -rf x");
   check bool
     "command outside the table still faces the judge"
     false
     (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "curl https://example.com");
   check bool
-    "quoted observation still faces the judge"
-    false
+    "quoted observation reads without judgment"
+    true
     (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "grep 'pattern' notes.txt");
+  check bool
+    "argv costume of an observation reads without judgment"
+    true
+    (executes ~operation:"tool_execute" ~sandbox_profile:microvm [ "bash"; "-lc"; "ls -la repos" ]);
+  check bool
+    "argv costume of a write still faces the judge"
+    false
+    (executes ~operation:"tool_execute" ~sandbox_profile:microvm [ "bash"; "-c"; "ls && rm -rf repos" ]);
+  check bool
+    "pipeline script under remote_ssh still faces the judge"
+    false
+    (executes_script ~operation:"tool_execute" ~sandbox_profile:remote_ssh "cd repos && git log | head");
   check bool
     "empty script never matches"
     false
@@ -484,6 +523,117 @@ let test_auto_judge_allows_microvm_observation_without_queueing () =
       (Keeper_gate.authorization_source_to_string source)
   | Keeper_gate.Deferred _ -> fail "microvm observation request was deferred instead of fast-pathed"
   | Keeper_gate.Unavailable _ -> fail "microvm observation request made the queue unavailable"
+;;
+
+(* ── the box between the tables and the judge (RFC-0422) ──────────────── *)
+
+(* An argv the tables do not answer, on the profile the fleet runs. *)
+let boxed_request base_path =
+  gate_request ~sandbox_profile:microvm base_path [ "python3"; "-c"; "print(1)" ]
+;;
+
+let deferred_to_the_judge label = function
+  | Keeper_gate.Deferred { reason = Judge_requested; _ }
+  | Keeper_gate.Deferred { reason = Auto_judge_unavailable _; _ } -> ()
+  | Keeper_gate.Allow { source; _ } ->
+    failf "%s was allowed through %s" label (Keeper_gate.authorization_source_to_string source)
+  | Keeper_gate.Deferred { reason = Human_requested; _ } ->
+    failf "%s went to the human queue, not the judge lane" label
+  | Keeper_gate.Deferred { reason = Mode_state_invalid detail; _ } ->
+    failf "%s: mode_state_invalid: %s" label detail
+  | Keeper_gate.Unavailable _ -> failf "%s made the queue unavailable" label
+;;
+
+(* Exit 0 in the box is the whole criterion: the kernel refused every write
+   outside the scratch and every socket, so the run left nothing behind and
+   its output is the answer. No queue entry, and the source says the box. *)
+let test_auto_judge_allows_a_clean_observe_run () =
+  with_auto_judge @@ fun base_path ->
+  let asked = ref 0 in
+  match
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      ~observe:(fun () ->
+        incr asked;
+        Keeper_gate.Observed_clean { run = Keeper_types_profile_sandbox.Observe })
+      (boxed_request base_path)
+  with
+  | Keeper_gate.Allow { source = Observed_in_box Keeper_types_profile_sandbox.Observe; _ } ->
+    check int "the box was asked exactly once" 1 !asked
+  | Keeper_gate.Allow { source; _ } ->
+    failf "a clean observe run was allowed through the wrong source: %s"
+      (Keeper_gate.authorization_source_to_string source)
+  | Keeper_gate.Deferred _ -> fail "a clean observe run was deferred"
+  | Keeper_gate.Unavailable _ -> fail "a clean observe run made the queue unavailable"
+;;
+
+(* A write the box refused ends non-zero. That is not an effect, and it is
+   not an answer either: the request keeps the judge it would have had. *)
+let test_auto_judge_defers_a_refused_observe_run () =
+  with_auto_judge @@ fun base_path ->
+  let stderr = "sh: 1: cannot create w: Permission denied" in
+  let decision =
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      ~observe:(fun () ->
+        Keeper_gate.Observed_refused { status = Unix.WEXITED 2; stderr })
+      (boxed_request base_path)
+  in
+  deferred_to_the_judge "a refused observe run" decision;
+  (* And the judge is shown what the box refused: the row the deferral wrote
+     carries the status and the program's own stderr (RFC-0422 §3.3). *)
+  match decision with
+  | Keeper_gate.Deferred { approval_id; _ } ->
+    (match Keeper_approval_queue.get_pending_entry_for_workspace ~base_path ~id:approval_id with
+     | Ok (Some { observation = Some refusal; _ }) ->
+       check bool "exit 2 on the row" true
+         (refusal.observed_status = Keeper_approval_queue_rules_types.Observed_exit 2);
+       check string "the program's stderr on the row" stderr refusal.observed_stderr;
+       check int "nothing cut at this size" 0 refusal.observed_stderr_omitted_bytes
+     | Ok (Some { observation = None; _ }) -> fail "the row carries no observation"
+     | Ok None -> fail "the deferral wrote no row"
+     | Error error -> fail (Keeper_approval_queue.storage_error_to_string error))
+  | Keeper_gate.Allow _ | Keeper_gate.Unavailable _ -> ()
+;;
+
+(* No box -- a Docker guest, a shim that predates it -- is the world before
+   this stage: the judge, never an unboxed run. *)
+let test_auto_judge_defers_when_no_box_can_be_built () =
+  with_auto_judge @@ fun base_path ->
+  Keeper_gate.decide
+    ~keeper_always_allow:false
+    ~observe:(fun () ->
+      Keeper_gate.Observation_unavailable
+        "docker_observe_unsupported: a Docker guest runs no masc-exec-shim")
+    (boxed_request base_path)
+  |> deferred_to_the_judge "a request with no box"
+;;
+
+(* The order is the point. A table answer costs nothing and comes first; an
+   always-allowed keeper never pays a box run at all. *)
+let test_the_box_is_asked_only_after_the_tables_decline () =
+  with_auto_judge @@ fun base_path ->
+  let never () = fail "the box was asked for a request the tables already answered" in
+  (match
+     Keeper_gate.decide
+       ~keeper_always_allow:false
+       ~observe:never
+       (gate_request ~sandbox_profile:microvm base_path [ "ls"; "-la" ])
+   with
+   | Keeper_gate.Allow { source = Readonly_sandbox; _ } -> ()
+   | Keeper_gate.Allow { source; _ } ->
+     failf "table observation allowed through %s" (Keeper_gate.authorization_source_to_string source)
+   | Keeper_gate.Deferred _ -> fail "table observation was deferred"
+   | Keeper_gate.Unavailable _ -> fail "table observation made the queue unavailable");
+  match
+    Keeper_gate.decide ~keeper_always_allow:true ~observe:never (boxed_request base_path)
+  with
+  | Keeper_gate.Allow { source = Keeper_always_allow; _ } -> ()
+  | Keeper_gate.Allow { source; _ } ->
+    failf "an always-allowed keeper was allowed through %s"
+      (Keeper_gate.authorization_source_to_string source)
+  | Keeper_gate.Deferred _ -> fail "an always-allowed keeper was deferred"
+  | Keeper_gate.Unavailable _ -> fail "an always-allowed keeper made the queue unavailable"
 ;;
 
 (* Remote_ssh is transport-only and inherits the host network, so even an
@@ -571,8 +721,8 @@ let () =
             `Quick
             test_network_observation_capabilities
         ] )
-    ; ( "script equivalence"
-      , [ test_case "equivalence unit" `Quick test_script_equivalence_unit
+    ; ( "script classification"
+      , [ test_case "classification unit" `Quick test_script_classification_unit
         ; test_case
             "observation scripts pass the table"
             `Quick
@@ -591,6 +741,22 @@ let () =
             "auto_judge allows microvm observation without queueing"
             `Quick
             test_auto_judge_allows_microvm_observation_without_queueing
+        ; test_case
+            "auto_judge allows a clean observe run"
+            `Quick
+            test_auto_judge_allows_a_clean_observe_run
+        ; test_case
+            "auto_judge defers a refused observe run"
+            `Quick
+            test_auto_judge_defers_a_refused_observe_run
+        ; test_case
+            "auto_judge defers when no box can be built"
+            `Quick
+            test_auto_judge_defers_when_no_box_can_be_built
+        ; test_case
+            "the box is asked only after the tables decline"
+            `Quick
+            test_the_box_is_asked_only_after_the_tables_decline
         ; test_case
             "auto_judge defers remote_ssh observation to the judge"
             `Quick

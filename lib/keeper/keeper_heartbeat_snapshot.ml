@@ -8,7 +8,6 @@
 open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
-open Keeper_execution
 
 let keepalive_interval_sec () =
   Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
@@ -26,13 +25,28 @@ let write_heartbeat_snapshot
     Keeper_types_support.keeper_metrics_store ctx.config meta_current.name
   in
   let base_dir = session_base_dir ctx.config in
-  let _session, ctx_opt =
-    load_context_from_checkpoint
-      ~trace_id:(Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)
-      ~base_dir
-  in
+  let session_id = Keeper_id.Trace_id.to_string meta_current.runtime.trace_id in
+  let session_dir = Filename.concat base_dir session_id in
+  (* RFC main-domain-scheduler-latency §8 P4b: the count comes from the
+     store's canonical summary while the file on disk is the one the summary
+     was taken from, so a heartbeat no longer reads and parses the whole
+     checkpoint (13-20 MB per keeper, every keepalive interval) for one
+     integer. *)
   let message_count =
-    Option.map Keeper_context_runtime.message_count ctx_opt
+    match
+      Keeper_checkpoint_store.canonical_message_count ~session_dir ~session_id
+    with
+    | Ok count -> count
+    | Error Keeper_checkpoint_store.Not_found -> None
+    | Error
+        Keeper_checkpoint_store.(
+          Store_error detail | Parse_error detail | Io_error detail | Agent_core_error detail)
+      ->
+      Log.Keeper.warn
+        "keeper:%s heartbeat message count unavailable: %s"
+        session_id
+        detail;
+      None
   in
     let snapshot =
       `Assoc

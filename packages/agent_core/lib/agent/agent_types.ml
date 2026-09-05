@@ -36,6 +36,11 @@ type context_fit_admission =
 type model_input_projection = message list -> (message list, Error.t) result
 type pre_dispatch_serialization_observer = Llm_provider.Request_wire_observer.try_observe
 
+(* Runs the serialisation of an admitted provider body. The closure reads
+   immutable request values and returns a value; a caller whose scheduler
+   must stay responsive supplies one that runs it on another domain. *)
+type serialization_executor = { run : 'a. (unit -> 'a) -> 'a }
+
 type options =
   { provider_config : Llm_provider.Provider_config.t option
   ; stream_idle_timeout_s : float option
@@ -156,6 +161,7 @@ type t =
   ; context_fit_admission : context_fit_admission
   ; model_input_projection : model_input_projection option
   ; pre_dispatch_serialization_observer : pre_dispatch_serialization_observer option
+  ; serialization_executor : serialization_executor option
   ; checkpoint_sink : checkpoint_sink option
   }
 
@@ -320,6 +326,7 @@ let create
       ?(context_fit_admission = Body_only)
       ?model_input_projection
       ?pre_dispatch_serialization_observer
+      ?serialization_executor
       ?checkpoint_sink
       ()
   =
@@ -345,6 +352,7 @@ let create
   ; context_fit_admission
   ; model_input_projection
   ; pre_dispatch_serialization_observer
+  ; serialization_executor
   ; checkpoint_sink
   }
 ;;
@@ -368,6 +376,7 @@ let clone ?(copy_context = false) agent =
   ; context_fit_admission = agent.context_fit_admission
   ; model_input_projection = agent.model_input_projection
   ; pre_dispatch_serialization_observer = agent.pre_dispatch_serialization_observer
+  ; serialization_executor = agent.serialization_executor
   ; checkpoint_sink = agent.checkpoint_sink
   }
 ;;

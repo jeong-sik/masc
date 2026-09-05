@@ -35,7 +35,9 @@ lsof -i :8935
 kill <PID>
 ```
 
-Or start on a different port and point the TUI at the same one:
+Or start on a different port and point the TUI at the same one. The server's
+default port comes from `MASC_HTTP_PORT`, or pass `masc --port` on the
+command line:
 
 ```bash
 masc --base-path ~/masc --port 8936
@@ -72,9 +74,11 @@ Eio main domain event loop may be experiencing scheduler delays:
    ```bash
    curl -s http://127.0.0.1:8935/health | jq '{scheduler: .scheduler, gc: .gc}'
    ```
-   Check `.scheduler.stalls_ge_1s` (count of stalls >= 1s) and the percentile ring
-   (`p50`, `p95`, `p99`, `max`). If `max` is elevated, long-running syscalls or
-   major GC cycles are contending for the main domain lock.
+   Check `.scheduler.stalls` (count of stalls >= 1s) and the percentiles
+   (`p50_ms`, `p95_ms`, `p99_ms`, `max_ms`). These are the last minute's ring
+   measurements; elevated values mean the main domain could not run a ready
+   fiber on time (a fiber computing without yielding, a stop-the-world GC
+   section, a blocking call on the scheduler thread).
 
 2. Run the real-time scheduler lag probe:
    ```bash

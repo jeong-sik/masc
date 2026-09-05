@@ -73,6 +73,30 @@ let test_exact_ack_removes_only_selected_identity () =
     (post_ids (State.pending acked))
 ;;
 
+(* 2026-09-05 sangsu incident: a checkpoint-yield turn retains a
+   Connector_attention entry instead of acking it, and that retention is a
+   durable, countable fact — the count is what bounds the retention (see
+   [Keeper_heartbeat_loop.connector_attention_retention_bound]). *)
+let test_checkpoint_retention_spends_the_caller_snapshot () =
+  let state = State.with_pending (queue [ stimulus "discord-a" 1.0 ]) State.empty in
+  let selected = select state in
+  let bumped, (updated, retentions) =
+    State.note_checkpoint_retention ~selection:selected state
+    |> require_ok "note retention"
+  in
+  Alcotest.(check int) "count is one" 1 retentions;
+  Alcotest.(check int) "entry carries the count" 1
+    (List.hd (State.pending_selections bumped)).checkpoint_retentions;
+  (match State.validate_pending_selection ~selection:selected bumped with
+   | Error _ -> () (* the pre-bump snapshot is structurally spent *)
+   | Ok () -> Alcotest.fail "pre-bump snapshot still validates");
+  let acked =
+    State.ack_pending ~selection:updated bumped |> require_ok "ack updated"
+  in
+  Alcotest.(check (list string)) "ack with updated selection" []
+    (post_ids (State.pending acked))
+;;
+
 (* #31597: Low never competes with a fresh Normal entry before it has aged
    past the threshold — this is the pre-existing strict-priority behaviour,
    kept as a regression baseline so the aging tests below can't pass by
@@ -644,6 +668,59 @@ let test_current_schema_round_trip () =
      Alcotest.fail "duplicate pending source identity was accepted")
 ;;
 
+(* v18 hard cut: an old-shape pending entry (no [checkpoint_retentions]) must
+   not decode — a default would silently resurrect an uncounted retention. *)
+let test_pending_entry_hard_cut_rejects_pre_v19_shape () =
+  let strip_retention_field (json : Yojson.Safe.t) : Yojson.Safe.t =
+    match json with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              if not (String.equal key "pending") then key, value
+              else
+                ( key
+                , match value with
+                  | `List entries ->
+                    `List
+                      (List.map
+                         (fun entry ->
+                            match entry with
+                            | `Assoc entry_fields ->
+                              `Assoc
+                                (List.filter
+                                   (fun (name, _) ->
+                                      not
+                                        (String.equal
+                                           name
+                                           "checkpoint_retentions"))
+                                   entry_fields)
+                            | other -> other)
+                         entries)
+                  | other -> other ))
+           fields)
+    | other -> other
+  in
+  let state = State.with_pending (queue [ stimulus "legacy" 1.0 ]) State.empty in
+  let stripped = strip_retention_field (State.to_yojson state) in
+  (match State.of_yojson stripped with
+   | Error _ -> () (* exact-field decode refuses the pre-v19 shape *)
+   | Ok _ -> Alcotest.fail "pre-v19 pending entry decoded");
+  let round_tripped =
+    State.to_yojson
+      (State.with_pending (queue [ stimulus "counted" 1.0 ]) State.empty)
+    |> fun json ->
+    (match State.of_yojson json with
+     | Ok state -> state
+     | Error detail -> Alcotest.failf "round trip failed: %s" detail)
+  in
+  (match State.pending_selections round_tripped with
+   | [ entry ] ->
+     Alcotest.(check int) "fresh entry round-trips with zero retentions" 0
+       entry.checkpoint_retentions
+   | _ -> Alcotest.fail "round trip lost the pending entry")
+;;
+
 let with_temp_dir prefix f =
   let path = Filename.temp_file prefix "" in
   Sys.remove path;
@@ -801,6 +878,58 @@ let test_durable_peek_ack_restart () =
     Alcotest.(check (list string)) "restart sees only unacked source" [ "two" ] (post_ids restarted))
 ;;
 
+let test_durable_checkpoint_retention_counts_and_acks_with_updated () =
+  with_temp_dir "keeper-retention-v19" (fun base_path ->
+    let keeper_name = "retention-keeper" in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending (stimulus "discord-ambient" 1.0))
+    |> require_ok "seed durable pending";
+    let pending_selection () =
+      Persistence.select_when_result
+        ~base_path
+        ~keeper_name
+        ~now:(Unix.gettimeofday ())
+        ~ready:(fun _ -> true)
+      |> require_ok "durable peek"
+      |> require_some "durable selection"
+    in
+    let first = pending_selection () in
+    let updated, retentions =
+      Persistence.note_checkpoint_retention_result
+        ~base_path
+        ~keeper_name
+        ~selection:first
+        ()
+      |> require_ok "first retention"
+    in
+    Alcotest.(check int) "first retention counts" 1 retentions;
+    (match
+       Persistence.note_checkpoint_retention_result
+         ~base_path
+         ~keeper_name
+         ~selection:first
+         ()
+     with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "spent snapshot accepted by the durable store");
+    let updated2, retentions2 =
+      Persistence.note_checkpoint_retention_result
+        ~base_path
+        ~keeper_name
+        ~selection:updated
+        ()
+      |> require_ok "second retention"
+    in
+    Alcotest.(check int) "second retention counts from durable state" 2 retentions2;
+    Persistence.ack_pending_result ~base_path ~keeper_name ~selection:updated2 ()
+    |> require_ok "retire with the updated selection";
+    let remaining =
+      Persistence.load_pending_result ~base_path ~keeper_name
+      |> require_ok "load after retirement"
+    in
+    Alcotest.(check (list string)) "retired entry left the durable queue" []
+      (post_ids remaining))
+;;
 (* Observed 2026-08-22: two Immediate completion_authority_rejected
    stimuli sat at queue_index 41 and 48 behind forty Normal entries because
    enqueue only appended. Urgency is a property of the pending list. *)
@@ -1222,12 +1351,64 @@ let test_owner_terminalizes_consecutive_turns_without_projection_gap () =
       (List.length (State.transition_outbox settled)))
 ;;
 
+(* The snapshot is rewritten whole rather than appended to, so an unchanged
+   file is the same bytes and the decoded state can stand. Re-reading it was
+   282 MB of allocation every thirty seconds on an idle fleet, done holding
+   the owner's lock (measured 2026-09-05). *)
+let test_unchanged_snapshot_is_not_reparsed () =
+  with_temp_dir "queue_snapshot_cache_" (fun base_path ->
+    let keeper_name = "cached" in
+    Persistence.For_testing.reset_snapshot_cache_for_testing ();
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending (stimulus "p-1" 1.0))
+    |> require_ok "seed the queue";
+    let read () =
+      Persistence.load_state_result ~base_path ~keeper_name |> require_ok "load"
+    in
+    let first = read () in
+    let hits_after_first = Persistence.For_testing.snapshot_cache_hits () in
+    let second = read () in
+    Alcotest.(check bool)
+      "the second read is a hit"
+      true
+      (Persistence.For_testing.snapshot_cache_hits () > hits_after_first);
+    Alcotest.(check bool)
+      "and it is the same state"
+      true
+      (post_ids (State.pending first) = post_ids (State.pending second));
+    (* A write moves the file, and the state that comes back after it is the
+       written one -- not the one the cache was holding. *)
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending (stimulus "p-2" 2.0))
+    |> require_ok "write again";
+    let reads_before = Persistence.For_testing.snapshot_cache_reads () in
+    let hits_before = Persistence.For_testing.snapshot_cache_hits () in
+    let third = read () in
+    Alcotest.(check bool)
+      "a write is visible through the cache"
+      true
+      (post_ids (State.pending third) <> post_ids (State.pending second));
+    (* And it is visible without paying for the parse: the writer holds the
+       state it wrote, so the read after a write is a hit rather than a
+       decode of bytes this process just produced. *)
+    Alcotest.(check int)
+      "the read after a write is a hit"
+      (hits_before + 1)
+      (Persistence.For_testing.snapshot_cache_hits ());
+    Alcotest.(check int)
+      "and it was one read"
+      (reads_before + 1)
+      (Persistence.For_testing.snapshot_cache_reads ()))
+;;
+
 let () =
   Alcotest.run
     "keeper pending queue current schema"
     [ ( "state"
       , [ Alcotest.test_case "peek keeps pending authoritative" `Quick test_peek_keeps_pending_authoritative
         ; Alcotest.test_case "exact ack preserves distinct source" `Quick test_exact_ack_removes_only_selected_identity
+        ; Alcotest.test_case "an unchanged snapshot is not reparsed" `Quick
+            test_unchanged_snapshot_is_not_reparsed
         ; Alcotest.test_case
             "unaged Low still loses to fresh Normal"
             `Quick
@@ -1281,6 +1462,14 @@ let () =
     ; ( "persistence"
       , [ Alcotest.test_case "durable peek ack restart" `Quick test_durable_peek_ack_restart
         ; Alcotest.test_case
+            "checkpoint retention spends the caller snapshot"
+            `Quick
+            test_checkpoint_retention_spends_the_caller_snapshot
+        ; Alcotest.test_case
+            "durable checkpoint retention counts and acks with updated"
+            `Quick
+            test_durable_checkpoint_retention_counts_and_acks_with_updated
+        ; Alcotest.test_case
             "Immediate arrival precedes pending Normal entries"
             `Quick
             test_immediate_arrival_precedes_pending_normal_entries
@@ -1308,6 +1497,10 @@ let () =
             "snapshot commit observer is exact and isolated"
             `Quick
             test_snapshot_commit_observer_exactly_once_and_failure_isolated
+        ; Alcotest.test_case
+            "pending entry hard cut rejects pre-v19 shape"
+            `Quick
+            test_pending_entry_hard_cut_rejects_pre_v19_shape
         ; Alcotest.test_case
             "transition WAL observer notifies exactly once"
             `Quick

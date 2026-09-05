@@ -1307,12 +1307,17 @@ let fs_write_mode_of_gate_effect_operation raw =
   else None
 ;;
 
-(* Rebuild the write arguments from a recorded Gate input. The Gate input
-   carries the resolved target under [requested_target] and the mode inside
-   the effect; the handler reads both from the argument object. Only fields
-   the approval carried are emitted, so a content write cannot gain edit
-   fields. *)
-let replay_args_of_gate_input input =
+type approved_write =
+  { target : string
+  ; mode : fs_write_mode
+  ; carried : (string * Yojson.Safe.t) list
+  }
+
+(* Decode a recorded Gate input back into the write it approved. The Gate
+   input carries the resolved target under [requested_target] and the mode
+   inside the effect. Only fields the approval carried are kept, so a content
+   write cannot gain edit fields. *)
+let approved_write_of_gate_input input =
   let ( let* ) = Result.bind in
   match input with
   | `Assoc fields ->
@@ -1340,12 +1345,26 @@ let replay_args_of_gate_input input =
         (fun name -> Option.map (fun value -> name, value) (field name))
         [ "content"; "old_string"; "new_string"; "replace_all" ]
     in
-    Ok
-      (`Assoc
+    Ok { target; mode; carried }
+  | _ -> Error "approved Gate input is not a JSON object"
+;;
+
+(* Rebuild the write arguments the handler reads from the approved write. *)
+let replay_args_of_gate_input input =
+  Result.map
+    (fun { target; mode; carried } ->
+       `Assoc
          (("path", `String target)
           :: ("mode", `String (fs_write_mode_to_string mode))
           :: carried))
-  | _ -> Error "approved Gate input is not a JSON object"
+    (approved_write_of_gate_input input)
+;;
+
+(* What a write approval is about, in one line: the path it would write. The
+   submitting handler states it from the target it resolved; replay states it
+   from [approved_write_of_gate_input]. *)
+let write_call_summary ~requested_target =
+  String_util.first_nonblank_line requested_target
 ;;
 
 (* The opaque Gate operation identity for every local write this module
@@ -1386,6 +1405,7 @@ let decide_file_write
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ~requested_target
       ~input
       ()
   =
@@ -1395,6 +1415,7 @@ let decide_file_write
     { keeper_name = meta.name
     ; operation = gate_operation
     ; input
+    ; call_summary = write_call_summary ~requested_target
     ; sandbox_profile = None
     ; base_path = config.Workspace.base_path
     ; causal_context = Option.map (fun current -> current ()) gate_context
@@ -2214,6 +2235,7 @@ let handle_file_write_with_outcome
           ?continuation_channel
           ?gate_context
           ?gate_grant
+          ~requested_target:target
           ~input
           ()
       with

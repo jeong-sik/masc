@@ -284,6 +284,7 @@ type degraded_retry_reason =
   | Deferred_runtime_lane
   | Empty_no_progress
   | Thinking_only_no_progress
+  | Truncated_no_progress
 
 let degraded_retry_reason_to_string = function
   | Hard_quota -> "hard_quota"
@@ -297,6 +298,7 @@ let degraded_retry_reason_to_string = function
   | Deferred_runtime_lane -> "deferred_runtime_lane"
   | Empty_no_progress -> "empty_no_progress"
   | Thinking_only_no_progress -> "thinking_only_no_progress"
+  | Truncated_no_progress -> "truncated_no_progress"
 
 let accept_rejection_degraded_retry_reason err =
   match Keeper_turn_driver.classify_masc_internal_error err with
@@ -304,7 +306,7 @@ let accept_rejection_degraded_retry_reason err =
     (match Keeper_turn_driver.accept_no_progress_retry_kind internal_error with
      | Some `Empty_no_progress -> Some Empty_no_progress
      | Some `Thinking_only_no_progress -> Some Thinking_only_no_progress
-     | Some `Truncated_no_progress -> None
+     | Some `Truncated_no_progress -> Some Truncated_no_progress
      | None -> None)
   | None -> None
 
@@ -476,7 +478,8 @@ let default_degraded_rotation_candidates
     dedupe_keep_order (default_candidates @ catalog_runtimes)
   in
   match fallback_reason with
-  | Some (Empty_no_progress | Thinking_only_no_progress) ->
+  | Some (Empty_no_progress | Thinking_only_no_progress | Truncated_no_progress)
+    ->
     let tool_capable =
       Runtime.get_runtimes ()
       |> List.filter (fun (runtime : Runtime.t) -> runtime.model.tools_support)

@@ -1,1 +1,0 @@
-Rejected as acceptance evidence: event files were serialized as two lines (path plus stat), but the harness treated wc -l as file count. Runtime observations are retained for diagnosis only; r78 uses separate file-count and metadata fields.

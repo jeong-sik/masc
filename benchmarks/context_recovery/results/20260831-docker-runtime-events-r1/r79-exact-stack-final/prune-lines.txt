@@ -1,4 +1,0 @@
-[2026-08-30 19:26:51] [INFO] [Runtime] removed stale dump 7.events (pid 7 no longer exists)
-[2026-08-30 19:26:57] [INFO] [Runtime] removed stale dump 6.events (pid 6 no longer exists)
-[2026-08-30 19:27:21] [INFO] [Runtime] removed stale dump 7.events (pid 7 no longer exists)
-[2026-08-30 19:27:33] [INFO] [Runtime] removed stale dump 6.events (pid 6 no longer exists)

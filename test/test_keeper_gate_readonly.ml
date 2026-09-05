@@ -49,6 +49,8 @@ let test_observation_table_is_fully_read () =
   passes "git branch listing" [ "git"; "branch"; "-a" ];
   passes "git tag bare list" [ "git"; "tag" ];
   passes "git remote -v" [ "git"; "remote"; "-v" ];
+  passes "git ls-tree recursive" [ "git"; "ls-tree"; "-r"; "origin/main"; "--name-only" ];
+  passes "git ls-tree through -C" [ "git"; "-C"; "masc"; "ls-tree"; "HEAD" ];
   passes "rg plain" [ "rg"; "-n"; "pattern"; "." ];
   passes "rg --pretty stays allowed" [ "rg"; "--pretty"; "x" ];
   passes "grep" [ "grep"; "-r"; "x"; "." ];

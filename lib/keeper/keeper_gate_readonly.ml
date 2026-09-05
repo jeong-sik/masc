@@ -48,7 +48,7 @@ let observation_commands =
 (* git subcommands that read only, in every argument shape they accept. *)
 let git_read_subcommands =
   [ "status"; "diff"; "log"; "show"; "blame"; "annotate"; "reflog"
-  ; "describe"; "shortlog"; "rev-parse"; "ls-files"; "ls-remote"
+  ; "describe"; "shortlog"; "rev-parse"; "ls-files"; "ls-remote"; "ls-tree"
   ; "whatchanged"; "cat-file"; "name-rev"; "grep"
   ]
 

@@ -111,7 +111,37 @@ let version_index = store.version_index
 let override_tbl = store.override_tbl
 let meta_tbl = store.meta_tbl
 
+(* Overrides the operator saved that this process will not apply.
+
+   A persisted override is bound to the default body it was authored against,
+   and when that body changes the entry is refused at restore. Refusing is
+   right -- the text was written for a different prompt. Forgetting it is
+   not, and forgetting is what happened: the live table was the only record
+   the save path read, so the next write of any key -- a preset restore, an
+   unrelated override -- rewrote the file without it. An operator's 4.4 KB
+   prompt went from "not applied" to "gone" with nothing in between and no
+   way to tell the two apart (2026-09-05).
+
+   So the two questions are kept apart. [override_tbl] answers what is in
+   force; this answers what the operator saved. The file is written from
+   both. *)
+let quarantine_tbl : (string, Prompt_override_persistence.entry) Hashtbl.t =
+  Hashtbl.create 8
+;;
+
 let with_mutex f = Prompt_registry_store.with_lock store f
+
+(* What the operator saved for a key this process will not apply. Read by the
+   catalog so an operator can see that the file holds a prompt the server is
+   not using -- the state that used to be visible only as one ERROR line at
+   boot. *)
+let quarantined_entries () =
+  with_mutex (fun () ->
+      Hashtbl.fold
+        (fun key entry acc ->
+          if Hashtbl.mem override_tbl key then acc else entry :: acc)
+        quarantine_tbl
+        [])
 
 let with_override_mutation_lock f =
   Prompt_registry_store.with_override_mutation_lock store f
@@ -366,6 +396,7 @@ let clear () : unit =
     Hashtbl.clear registry;
     Hashtbl.clear version_index;
     Hashtbl.clear override_tbl;
+    Hashtbl.clear quarantine_tbl;
     Hashtbl.clear meta_tbl;
     Hashtbl.clear fragment_tbl;
     prompts_dir := None;
@@ -811,6 +842,16 @@ let list_prompts () =
 let prompts_json () =
   `Assoc [
     ("prompts", `List (list_prompts ()));
+    (* Saved, on disk, and not in force. Empty in the ordinary case. *)
+    ( "held_back",
+      `List
+        (List.map
+           (fun (entry : Prompt_override_persistence.entry) ->
+             `Assoc
+               [ ("key", `String entry.key);
+                 ("bytes", `Int (String.length entry.value));
+                 ("contract_revision", `String entry.contract_revision) ])
+           (quarantined_entries ())) );
   ]
 
 (** Persist overrides to JSON file *)
@@ -833,6 +874,20 @@ let override_entries () =
   with_mutex (fun () ->
       Hashtbl.fold (fun _ entry acc -> entry :: acc) override_tbl [])
 
+(* What the operator has saved, applied or not. This is what the file holds
+   and what a preset captures: an entry this process refuses is still the
+   operator's, and a snapshot taken while it is refused has to carry it or it
+   is not a snapshot of their configuration. *)
+let persisted_entries () =
+  with_mutex (fun () ->
+      let live = Hashtbl.fold (fun _ entry acc -> entry :: acc) override_tbl [] in
+      Hashtbl.fold
+        (fun key entry acc ->
+          if Hashtbl.mem override_tbl key then acc else entry :: acc)
+        quarantine_tbl
+        live)
+
+
 let replace_override_entries entries =
   with_mutex (fun () ->
       Hashtbl.clear override_tbl;
@@ -851,24 +906,31 @@ let upsert_override_entry
 
 let persist_overrides base_path =
   with_override_mutation_lock (fun () ->
-      save_override_entries base_path (override_entries ()))
+      save_override_entries base_path (persisted_entries ()))
 
 let set_override_persisted ?expected_contract_revision ~base_path key value =
   with_override_mutation_lock (fun () ->
       match validated_override ?expected_contract_revision key value with
       | Error message -> Error (Validation_error message)
       | Ok entry ->
-          let candidate = upsert_override_entry entry (override_entries ()) in
+          let candidate = upsert_override_entry entry (persisted_entries ()) in
           (match save_override_entries base_path candidate with
            | Error message -> Error (Persistence_error message)
            | Ok () ->
+               (* Writing a key answers the question its quarantined version
+                  was waiting on, so that copy is superseded rather than
+                  kept beside the new one. *)
+               with_mutex (fun () -> Hashtbl.remove quarantine_tbl key);
                replace_override_entries candidate;
                Ok ()))
 
+(* An explicit clear is an explicit intent, so it reaches the quarantined
+   copy too. Nothing else removes one: a write of some other key must not
+   decide the fate of a prompt the operator never mentioned. *)
 let clear_prompt_override_persisted ~base_path key =
   with_override_mutation_lock (fun () ->
       let candidate =
-        override_entries ()
+        persisted_entries ()
         |> List.filter
              (fun (entry : Prompt_override_persistence.entry) ->
                not (String.equal entry.key key))
@@ -876,6 +938,7 @@ let clear_prompt_override_persisted ~base_path key =
       match save_override_entries base_path candidate with
       | Error _ as error -> error
       | Ok () ->
+          with_mutex (fun () -> Hashtbl.remove quarantine_tbl key);
           replace_override_entries candidate;
           Ok ())
 
@@ -896,33 +959,45 @@ let restore_overrides base_path =
       "prompt_overrides.json"
   in
   with_override_mutation_lock (fun () ->
-      let candidate, failures =
-        if not (Sys.file_exists path) then ([], [])
+      let candidate, failures, rejected_entries =
+        if not (Sys.file_exists path) then ([], [], [])
         else
           match Prompt_override_persistence.load ~path with
           | Error error ->
+              (* The file itself did not parse, so there are no entries to
+                 hold. Nothing is written back from here, so what is on disk
+                 stays for an operator to look at. *)
               ( [],
                 [
                   ( None,
                     Prompt_override_persistence.error_to_string error );
-                ] )
+                ],
+                [] )
           | Ok entries ->
               List.fold_left
-                (fun (accepted, rejected)
+                (fun (accepted, rejected, held)
                      (entry : Prompt_override_persistence.entry) ->
                   match
                     validated_override
                       ~expected_contract_revision:entry.contract_revision
                       entry.key entry.value
                   with
-                  | Ok validated -> (validated :: accepted, rejected)
+                  | Ok validated -> (validated :: accepted, rejected, held)
                   | Error reason ->
-                      (accepted, (Some entry.key, reason) :: rejected))
-                ([], []) entries
+                      ( accepted,
+                        (Some entry.key, reason) :: rejected,
+                        entry :: held ))
+                ([], [], []) entries
       in
       (* Commit the fully validated candidate before invoking observers.  A
          faulty observer must not leave a pre-existing stale override live. *)
       replace_override_entries candidate;
+      with_mutex (fun () ->
+          Hashtbl.clear quarantine_tbl;
+          List.iter
+            (fun (entry : Prompt_override_persistence.entry) ->
+              Hashtbl.replace quarantine_tbl entry.key entry)
+            rejected_entries);
       List.iter
         (fun (key, reason) ->
           record_override_restore_failure ();

@@ -176,6 +176,21 @@ val clear_prompt_override_persisted :
     memory.  A persistence failure leaves the live table unchanged. *)
 
 val override_entries : unit -> Prompt_override_persistence.entry list
+(** The overrides in force. *)
+
+val persisted_entries : unit -> Prompt_override_persistence.entry list
+(** Everything the operator saved, applied or not.
+
+    An override authored against a default body that has since changed is
+    refused at restore, and refusing it is right. It is still theirs, so this
+    is what the file is written from and what a snapshot has to capture:
+    writing only the entries in force turned "not applied" into "deleted" on
+    the next write of any key, and a preset autosave taken in that state
+    captured nothing to restore. *)
+
+val quarantined_entries : unit -> Prompt_override_persistence.entry list
+(** The saved overrides this process is not applying, so a caller can say so
+    rather than leaving one boot-time ERROR line as the only evidence. *)
 (** The live override table as persistence entries, in no particular order.
     A preset captures these — the durable operator layer — rather than the
     managed prompt files, which boot re-syncs from the binary. *)

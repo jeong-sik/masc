@@ -14,6 +14,7 @@
  (libraries
   fs_compat
   jsonl_writer
+  masc_core
   masc.config
   masc.config_dir_resolver
   otel_metric_store

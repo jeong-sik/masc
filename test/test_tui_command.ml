@@ -583,25 +583,21 @@ let test_autocomplete_cycles_ambiguous_prefix () =
   check (option string) "/to -> /tools " (Some "/tools ") (Command.autocomplete "/to");
   check (option string) "/st -> /steer " (Some "/steer ") (Command.autocomplete "/st")
 
-(* A finished command word is not the end of the road. #33071 made Tab walk the
-   commands sharing its first letter, so /settings steps to the next s word
-   instead of standing still, and only a letter with one command behind it has
-   nowhere to go. A trailing space walks the same ring when the command takes
-   free text, because there is no argument list to offer in its place.
-
-   Written down because the behaviour surprises: a fully typed command plus a
-   habitual Tab becomes a different command. Whether that is the right trade is
-   asked in #33405, not settled here. *)
-let test_autocomplete_walks_siblings_of_a_finished_word () =
-  check (option string) "/settings steps to the next s word" (Some "/steer ")
+(* A fully typed command word does not switch to a different command (#33405).
+   A command taking arguments appends a trailing space if not yet present;
+   a command taking no arguments stays as None so Tab is a no-op instead of
+   jumping to an unintended command sharing the first letter. A trailing space
+   with no known subarguments is also None. *)
+let test_autocomplete_finished_word_does_not_switch_command () =
+  check (option string) "/settings (no args) is already complete, so it stays" None
     (Command.autocomplete "/settings");
-  check (option string) "/memory steps to metrics" (Some "/metrics")
+  check (option string) "/memory (no args) is already complete, so it stays" None
     (Command.autocomplete "/memory");
-  check (option string) "/help is the only h word, so it stays" None
+  check (option string) "/help (no args) is already complete, so it stays" None
     (Command.autocomplete "/help");
-  check (option string) "/task steps to the next t word" (Some "/thinking ")
+  check (option string) "/task (takes args) appends space" (Some "/task ")
     (Command.autocomplete "/task");
-  check (option string) "a trailing space walks the same ring" (Some "/thinking ")
+  check (option string) "a trailing space with no subarguments stays" None
     (Command.autocomplete "/task ")
 
 let test_autocomplete_preserves_multiline_body () =
@@ -649,10 +645,10 @@ let test_autocomplete_sub_arguments () =
 let test_autocomplete_prev_direction () =
   check (option string) "prev on /t wraps to last candidate"
     (Some "/telemetry") (Command.autocomplete ~direction:Command.Prev "/t");
-  check (option string) "prev on /tools cycles to thinking"
-    (Some "/thinking ") (Command.autocomplete ~direction:Command.Prev "/tools");
-  check (option string) "prev on /thinking cycles to task"
-    (Some "/task ") (Command.autocomplete ~direction:Command.Prev "/thinking");
+  check (option string) "prev on complete word /tools does not cycle to thinking"
+    (Some "/tools ") (Command.autocomplete ~direction:Command.Prev "/tools");
+  check (option string) "prev on complete word /thinking appends space"
+    (Some "/thinking ") (Command.autocomplete ~direction:Command.Prev "/thinking");
   check (option string) "prev on /thinking  wraps to full"
     (Some "/thinking full") (Command.autocomplete ~direction:Command.Prev "/thinking ");
   check (option string) "prev on /thinking full cycles to folded"
@@ -672,7 +668,11 @@ let test_is_slash_navigable () =
     (Command.is_slash_navigable "/");
   check bool "/t prefix is navigable" true
     (Command.is_slash_navigable "/t");
-  check bool "/task with empty space is navigable (cycles siblings)" true
+  check bool "/settings (complete, no args) is not navigable" false
+    (Command.is_slash_navigable "/settings");
+  check bool "/task (complete, takes args) is navigable to append space" true
+    (Command.is_slash_navigable "/task");
+  check bool "/task with empty space is not navigable (no subarguments)" false
     (Command.is_slash_navigable "/task ");
   check bool "/task with free text is not navigable" false
     (Command.is_slash_navigable "/task Buy milk at store");
@@ -690,8 +690,8 @@ let test_autocomplete_sequential_cycling () =
   let step1 = Command.autocomplete step0 in
   check (option string) "step 1: /t -> /task " (Some "/task ") step1;
   let step2 = Command.autocomplete (Option.get step1) in
-  check (option string) "step 2: /task  -> /thinking " (Some "/thinking ") step2;
-  let step3 = Command.autocomplete (Option.get step2) in
+  check (option string) "step 2: /task with trailing space does not cycle to thinking" None step2;
+  let step3 = Command.autocomplete "/thinking " in
   check (option string) "step 3: /thinking  -> /thinking hidden" (Some "/thinking hidden") step3;
   let step4 = Command.autocomplete (Option.get step3) in
   check (option string) "step 4: /thinking hidden -> /thinking folded" (Some "/thinking folded") step4;
@@ -795,8 +795,8 @@ let () =
             test_autocomplete_unique_prefix
         ; test_case "autocomplete cycles ambiguous prefix" `Quick
             test_autocomplete_cycles_ambiguous_prefix
-        ; test_case "autocomplete walks siblings of a finished word" `Quick
-            test_autocomplete_walks_siblings_of_a_finished_word
+        ; test_case "autocomplete finished word does not switch command" `Quick
+            test_autocomplete_finished_word_does_not_switch_command
         ; test_case "autocomplete preserves multiline body" `Quick
             test_autocomplete_preserves_multiline_body
         ; test_case "autocomplete utf8 lcp safety" `Quick

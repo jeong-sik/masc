@@ -82,6 +82,10 @@ let () =
   let last_reason : (int, string) Hashtbl.t = Hashtbl.create 4096 in
   let names : (int, string) Hashtbl.t = Hashtbl.create 256 in
   let parent : (int, int) Hashtbl.t = Hashtbl.create 4096 in
+  (* Who was running when an object was created: [Create] is emitted on the
+     creating fiber's domain, so the fiber current there is the creator. *)
+  let created_by : (int, int) Hashtbl.t = Hashtbl.create 4096 in
+  let cc_kind : (int, string) Hashtbl.t = Hashtbl.create 4096 in
   let lost = ref 0 in
   let close d ts ended_by =
     let s = state d in
@@ -118,7 +122,16 @@ let () =
       close d ts reason
     | `Suspend_domain RE.Type.Begin -> close d ts "domain idle"
     | `Exit_fiber _ -> close d ts "exit"
-    | `Create (id, `Fiber_in cc) -> Hashtbl.replace parent id cc
+    | `Create (id, `Fiber_in cc) ->
+      Hashtbl.replace parent id cc;
+      (match (state d).cur with
+       | Some (creator, _, _) -> Hashtbl.replace created_by id creator
+       | None -> ())
+    | `Create (id, `Cc ty) ->
+      Hashtbl.replace cc_kind id (EE.cc_ty_to_string ty);
+      (match (state d).cur with
+       | Some (creator, _, _) -> Hashtbl.replace created_by id creator
+       | None -> ())
     | `Name (id, n) -> Hashtbl.replace names id n
     | _ -> ()
   in
@@ -181,6 +194,31 @@ let () =
         | None -> Printf.sprintf "cc#%d" cc)
       | None -> "-")
   in
+  (* fiber <- its cc (kind, name) <- the fiber that created it <- ... *)
+  let ancestry fiber =
+    let buf = Buffer.create 128 in
+    let rec go fiber depth =
+      if depth < 6 then begin
+        match Hashtbl.find_opt parent fiber with
+        | None -> ()
+        | Some cc ->
+          let kind = Option.value ~default:"?" (Hashtbl.find_opt cc_kind cc) in
+          let name = Option.value ~default:"" (Hashtbl.find_opt names cc) in
+          Buffer.add_string buf
+            (Printf.sprintf " <- cc#%d(%s%s)" cc kind (if name = "" then "" else ":" ^ name));
+          (match Hashtbl.find_opt created_by cc with
+           | None -> ()
+           | Some creator ->
+             Buffer.add_string buf (Printf.sprintf " <- fiber %d" creator);
+             (match Hashtbl.find_opt names creator with
+              | Some n -> Buffer.add_string buf (Printf.sprintf "(%s)" n)
+              | None -> ());
+             go creator (depth + 1))
+      end
+    in
+    go fiber 0;
+    Buffer.contents buf
+  in
   let all_runs = List.concat_map (fun d -> (state d).long_runs) domains in
   let by_len =
     List.sort
@@ -193,8 +231,8 @@ let () =
       if i < 40 then begin
         let dur = Int64.sub r.end_ns r.start_ns in
         let gc = union_ms (state r.domain).gc r.start_ns r.end_ns in
-        Printf.printf "%-3d %-7d %8.1f %6.1f %4d %-34s -> %-34s [%s]\n" r.domain r.fiber (ms dur) gc
-          r.turn_depth r.resumed_from r.ended_by (label_of r.fiber)
+        Printf.printf "%-3d %-7d %8.1f %6.1f %4d %-34s -> %-34s [%s]%s\n" r.domain r.fiber (ms dur) gc
+          r.turn_depth r.resumed_from r.ended_by (label_of r.fiber) (ancestry r.fiber)
       end)
     by_len;
   Printf.printf "\ndomain 0 runs >= 10ms grouped by (resumed_from -> ended_by): count total_ms max_ms\n";

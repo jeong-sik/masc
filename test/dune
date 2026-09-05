@@ -1220,6 +1220,11 @@
  (modules test_fusion_metrics)
  (libraries masc_test_deps masc.fusion_core))
 
+(test
+ (name test_fusion_judge_role_kind)
+ (modules test_fusion_judge_role_kind)
+ (libraries alcotest masc masc.fusion_core yojson))
+
 ; RFC cli-runtimes-as-lane-slots — the per-slot cli one-shot executor:
 ; schema sentence parity with Agent Core, strict JSON parse, ordered walk.
 

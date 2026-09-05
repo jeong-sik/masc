@@ -174,9 +174,11 @@ val context_overflow_shrink_sequence :
 (** Provider-oracle retry policy shared by AGENT_CORE and official-client
     runtimes. [default_capacity_bytes] is the policy's ordinary halved value;
     a custom [shrink_capacity] can replace only exceptional starting values
-    without copying the shared divisor. On the last permitted retry,
-    [final_shrink_capacity] may replace that ordinary target with a measured
-    structural floor. A custom value that does not strictly decrease
+    without copying the shared divisor. The walk carries no attempt count:
+    it ends where no strictly smaller view exists. [final_shrink_capacity]
+    names a measured structural floor; once the ordinary target would reach
+    or pass it, the floor itself is attempted, and its refusal ends the
+    sequence. A custom value that does not strictly decrease
     [capacity_bytes] terminates the sequence without another provider attempt.
 
     [shrink_admits_history] answers whether a proposed capacity leaves room
@@ -278,6 +280,4 @@ module For_testing : sig
 
   val offload_model_input_cpu : (unit -> 'a) -> 'a
 
-  val context_overflow_shrink_max_attempts : int
-  val context_overflow_shrink_divisor : int
 end

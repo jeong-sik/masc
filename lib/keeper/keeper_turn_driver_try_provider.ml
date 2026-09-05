@@ -1082,8 +1082,6 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
    request was malformed: a smaller window of the SAME conversation can
    still answer the same turn, so this retries the same candidate rather
    than rotating runtimes immediately. *)
-let context_overflow_shrink_max_attempts = 3
-
 (* Halving needs no token/byte conversion constant: the provider is the
    oracle for whether a window fits. Each retry is a content-free mechanical
    convergence step consulted only after a typed overflow, not a size
@@ -1098,8 +1096,8 @@ let default_context_overflow_shrink_capacity ~capacity_bytes =
    rather than calling [run_try_provider] directly, so it stays testable
    without an Eio-backed provider: [run_try_provider_with_context_overflow_shrink]
    below wires the real attempt for production; tests can inject a canned
-   Ok/Error sequence to verify the halving sequence, the attempt cap, and the
-   same-run-retry-authority gate on their own.
+   Ok/Error sequence to verify the halving sequence, the walk to the floor,
+   and the same-run-retry-authority gate on their own.
 
    Classifies with [Keeper_turn_driver_try_runtime.context_overflow_should_try_next]
    rather than [Keeper_error_classify.is_context_overflow]: the latter
@@ -1134,7 +1132,6 @@ let context_overflow_shrink_sequence
     | Error error as failed ->
       if Keeper_turn_driver_try_runtime.context_overflow_should_try_next error
          && same_run_retry_authorized ()
-         && shrink_attempt < context_overflow_shrink_max_attempts
       then (
         let default_capacity_bytes =
           default_context_overflow_shrink_capacity ~capacity_bytes
@@ -1142,13 +1139,22 @@ let context_overflow_shrink_sequence
         let ordinary_capacity_bytes =
           shrink_capacity ~capacity_bytes ~default_capacity_bytes
         in
+        (* The walk carries no attempt count: it ends where no strictly
+           smaller view exists. A lane that has measured its floor names it
+           through [final_shrink_capacity]; once the ordinary target would
+           reach or pass that floor, the floor itself is the next attempt,
+           and its refusal is the floor verdict. Measured 2026-09-05 on
+           keeper geek-scout: a 4.1 MB history against a 128k-token model was
+           refused at 1.9 MB, 507 KB and 498 KB and then committed as
+           [Bootstrap_floor_exceeded] with 79 messages still attached; the
+           floor had never been asked, and the keeper sat on an operator
+           recovery it could have walked out of in two more attempts. *)
         let shrunk_capacity_bytes =
-          if shrink_attempt + 1 = context_overflow_shrink_max_attempts
-          then
-            Option.value
-              (final_shrink_capacity ~capacity_bytes)
-              ~default:ordinary_capacity_bytes
-          else ordinary_capacity_bytes
+          match final_shrink_capacity ~capacity_bytes with
+          | Some floor_capacity_bytes
+            when ordinary_capacity_bytes <= floor_capacity_bytes ->
+            floor_capacity_bytes
+          | Some _ | None -> ordinary_capacity_bytes
         in
         (* Halving is a bet that the same request fits once less history
            rides along. The bet is void when the part that cannot be cut --
@@ -1178,7 +1184,7 @@ let context_overflow_shrink_sequence
 
 (** Same as [run_try_provider], except a typed provider context overflow
     retries the SAME candidate with the model-input windowing capacity
-    halved (bounded by [context_overflow_shrink_max_attempts]) before
+    halved down to the floor the reserve leaves before
     returning to the caller, which still owns declared-lane candidate
     rotation and cascade fallback for every other error and for an overflow
     that survives every shrink attempt.
@@ -1398,6 +1404,4 @@ module For_testing = struct
   let memoize_message_measurement = memoize_message_measurement
   let plan_and_window_model_input = plan_and_window_model_input
   let offload_model_input_cpu = offload_model_input_cpu
-  let context_overflow_shrink_max_attempts = context_overflow_shrink_max_attempts
-  let context_overflow_shrink_divisor = context_overflow_shrink_divisor
 end

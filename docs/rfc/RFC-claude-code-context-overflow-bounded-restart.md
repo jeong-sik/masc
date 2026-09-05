@@ -90,7 +90,8 @@ terminal provider rejection은 official-client session을 `Recovery_required`로
 ### 3.3 The current prototype is bounded only inside one call
 
 PR #28284의 첫 prototype은 exact Claude 400을 typed `ContextOverflow`로 보존하고
-한 `run` 안에서 최대 세 번 history capacity를 줄인다. 이는 필요한 adapter 수리지만
+한 `run` 안에서 history capacity를 줄인다(처음에는 고정 세 번, 2026-09-05부터는 더 작은
+view가 없을 때까지). 이는 필요한 adapter 수리지만
 다음 조건을 아직 보장하지 않는다.
 
 - 최대 횟수 전에 진짜 최소 view를 시도했는가
@@ -178,7 +179,8 @@ full
 - view는 항상 strictly smaller여야 한다.
 - 중복 boundary는 건너뛴다.
 - floor와 현재 view가 같으면 provider를 다시 호출하지 않는다.
-- 최대 provider dispatch 수는 episode당 4회다.
+- provider dispatch 수는 strictly smaller view의 수로 bounded다. halving이면 history
+  바이트의 log2 이고, view마다 atom을 하나 이상 버리므로 atom 수를 넘지 않는다.
 - 마지막 dispatch가 floor가 아니면 “attempts exhausted”를 선언할 수 없다.
 
 floor 성공은 durable history가 불필요하다는 뜻이 아니다. 그 turn의 provider bootstrap
@@ -223,7 +225,10 @@ safe overflow 뒤 더 작은 view가 존재할 때만 현재 process가 exact re
 - `tool_effect_attempted = false`
 - `response_emitted = false`
 - next view가 current view보다 strictly smaller다.
-- retry budget 안이다.
+- next view가 있다. walk는 attempt 횟수가 아니라 더 작은 view가 없는 floor에서 끝나고,
+  floor rejection이 마지막이다. (2026-09-05 geek-scout 실측: 4.1MB history가 1.9MB, 507KB,
+  498KB에서 거절된 뒤 floor를 묻지 않은 채 `Bootstrap_floor_exceeded`로 commit됐고,
+  keeper는 두 번만 더 줄이면 빠져나올 자리에서 operator recovery에 멈춰 있었다.)
 
 final floor rejection에는 다음 retry authority를 만들지 않고 `Input_rejected`를
 commit한다.

@@ -500,6 +500,51 @@ let test_contended_submitters_admitted_fifo () =
         Keeper_msg_async.For_testing.clear ())))
 ;;
 
+(** 6. Reservation cleanup is finally-guaranteed: a durable write that
+    *raises* (not times out) still drops the fresh reservation. *)
+let test_raising_durable_write_cleans_reservation () =
+  with_temp_base (fun base_path ->
+    Eio_main.run (fun env ->
+      Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
+      Eio.Switch.run (fun sw ->
+        set_budget 5.0;
+        let baseline = Keeper_msg_async.For_testing.reserved_request_id_count () in
+        let raising_ops =
+          Keeper_msg_async.For_testing.make_request_ops
+            ~before_durable_write:(fun _stage -> failwith "synthetic write crash")
+            ()
+        in
+        (match
+           Keeper_msg_async.For_testing.submit
+             raising_ops
+             ~background_sw:sw
+             ~base_path
+             ~caller
+             ~f:(fun _request_sw -> Keeper_types_profile.tool_result_ok "x")
+             ~keeper_name:"lane-raise"
+             ()
+         with
+         | Ok outcome ->
+           (* A caught write failure is also acceptable — the point is the
+              reservation must not leak either way. *)
+           Printf.eprintf
+             "note: raising hook was caught into %s\n%!"
+             (Keeper_msg_async.submit_outcome_to_json outcome
+              |> Yojson.Safe.to_string)
+         | Error error ->
+           Printf.eprintf
+             "note: raising hook surfaced as %s\n%!"
+             (Keeper_msg_async.submit_error_to_json error
+              |> Yojson.Safe.to_string)
+         | exception Failure _ -> ());
+        check
+          int
+          "reservation cleaned up even when the write raises"
+          baseline
+          (Keeper_msg_async.For_testing.reserved_request_id_count ());
+        Keeper_msg_async.For_testing.clear ())))
+;;
+
 let () =
   Alcotest.run
     "keeper_msg_async_lane_admission"
@@ -514,6 +559,8 @@ let () =
             test_settlement_path_waits_without_rejection
         ; test_case "contended submitters admitted FIFO" `Quick
             test_contended_submitters_admitted_fifo
+        ; test_case "raising durable write cleans reservation" `Quick
+            test_raising_durable_write_cleans_reservation
         ] )
     ]
 ;;

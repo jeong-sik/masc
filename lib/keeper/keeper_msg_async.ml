@@ -2361,6 +2361,16 @@ let submit_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
     with
     | Error rejection -> Error (Submit_rejected rejection)
     | Ok (request_id, entry, key, transition_lock) ->
+    (* Any exceptional exit before the request is durably accepted must not
+       leak the fresh reservation: the finally below drops it exactly like
+       the [Not_published] rollback path. Once the worker daemon is forked
+       and the caller gets [Durably_accepted], ownership has moved to the
+       active request and the finally must stand down. *)
+    let durably_accepted = ref false in
+    Fun.protect
+      ~finally:(fun () ->
+        if not !durably_accepted then remove_runtime_if_owned key transition_lock)
+      (fun () ->
     let reconciliation_outcome reason =
       Ok
         { request_id
@@ -2642,17 +2652,20 @@ let submit_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
         with
         | () ->
           if Atomic.get worker_started
-          then Ok { request_id; acceptance = Durably_accepted }
+          then (
+            durably_accepted := true;
+            Ok { request_id; acceptance = Durably_accepted })
           else (
             match Eio.Switch.get_error background_sw with
             | None ->
               (* Eio accepted the daemon. A child can remain unscheduled here,
                  but Eio only drops it when the target switch is already
                  cancelling. *)
+              durably_accepted := true;
               Ok { request_id; acceptance = Durably_accepted }
             | Some cause -> background_start_failed (Printexc.to_string cause))
         | exception exn ->
-          background_start_failed (Printexc.to_string exn)))))
+          background_start_failed (Printexc.to_string exn))))))
      with
      | Lane_admission_timeout lane ->
        (* Submission-lane admission expired before any reservation existed,

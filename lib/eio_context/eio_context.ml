@@ -11,6 +11,7 @@ type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
 type root_switch_binding =
   { switch : Eio.Switch.t
   ; owner_domain : Domain.id
+  ; dispatch_stream : (unit -> unit) Eio.Stream.t
   }
 
 type state_snapshot = {
@@ -78,9 +79,20 @@ let get_mono_clock_opt () =
   Atomic.get current_mono_clock
 
 let set_switch sw =
+  let owner_domain = Domain.self () in
+  let dispatch_stream = Eio.Stream.create 512 in
   Atomic.set
     current_sw
-    (Some { switch = sw; owner_domain = Domain.self () })
+    (Some { switch = sw; owner_domain; dispatch_stream });
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    while true do
+      let task = Eio.Stream.take dispatch_stream in
+      Eio.Fiber.fork ~sw (fun () ->
+        try task () with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | _ -> ())
+    done;
+    `Stop_daemon)
 
 let get_root_switch_opt () =
   Option.map (fun binding -> binding.switch) (Atomic.get current_sw)
@@ -89,6 +101,28 @@ let root_switch_on_current_domain () =
   match Atomic.get current_sw with
   | Some binding -> binding.owner_domain = Domain.self ()
   | None -> false
+
+let run_on_owner_domain (type a) (f : unit -> a) : a =
+  match Atomic.get current_sw with
+  | None -> f ()
+  | Some binding when binding.owner_domain = Domain.self () -> f ()
+  | Some binding ->
+    let p, r = Eio.Promise.create () in
+    let task () =
+      try
+        let res = f () in
+        Eio.Promise.resolve_ok r res
+      with
+      | Eio.Cancel.Cancelled _ as exn ->
+        Eio.Promise.resolve_error r exn;
+        raise exn
+      | exn ->
+        Eio.Promise.resolve_error r exn
+    in
+    Eio.Stream.add binding.dispatch_stream task;
+    match Eio.Promise.await p with
+    | Ok res -> res
+    | Error exn -> raise exn
 
 let set_env env =
   Atomic.set current_env (Some env)

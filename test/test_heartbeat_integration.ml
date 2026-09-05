@@ -812,6 +812,61 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
            fail ("expected stopped promise, got crashed: " ^ reason)
          | None -> fail "expected done_p to resolve on stop"))
 
+let test_cross_domain_start_keepalive_and_swap () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  R.For_testing.clear ();
+  let base_dir = temp_dir "cross-domain-keepalive" in
+  let keeper_name = "cross-domain-keeper" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
+      cleanup_dir base_dir)
+    (fun () ->
+      ensure_default_runtime ();
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
+      let meta = make_meta keeper_name in
+      seed_keeper_sandbox_profile ~base_dir keeper_name;
+      Eio.Switch.run @@ fun root_sw ->
+      Eio_context.set_switch root_sw;
+      let ctx : _ Keeper_types_profile.context =
+        {
+          config;
+          agent_name = "tester";
+          sw = root_sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env root_sw config);
+        }
+      in
+      Eio.Domain_manager.run (Eio.Stdenv.domain_mgr env) (fun () ->
+        check bool "worker domain does not own root switch" false
+          (Eio_context.root_switch_on_current_domain ());
+        match Masc.Keeper_keepalive.start_keepalive ctx meta with
+        | Masc.Keeper_keepalive.Keepalive_started entry ->
+          check string "started keeper name matches" keeper_name entry.name;
+          let updated_meta = { meta with heartbeat_interval_sec = 60 } in
+          (match Masc.Keeper_turn_up_update.swap_keepalive_lane_fenced ctx updated_meta with
+           | Ok (_stop_outcome, Masc.Keeper_keepalive.Keepalive_started new_entry) ->
+             check string "swapped keeper name matches" keeper_name new_entry.name
+           | Ok (_, rejected) ->
+             fail ("swap keepalive rejected: " ^ Masc.Keeper_keepalive.start_keepalive_outcome_to_string rejected)
+           | Error error ->
+             fail ("swap keepalive tool error: " ^ Tool_result.message error));
+          (match Masc.Keeper_keepalive.stop_keepalive_and_await ~base_path:config.base_path keeper_name with
+           | Masc.Keeper_keepalive.Keeper_joined { terminal = `Stopped; _ } -> ()
+           | Masc.Keeper_keepalive.Keeper_joined { terminal = `Crashed reason; _ } ->
+             fail ("joined stop resolved as crashed: " ^ reason)
+           | Masc.Keeper_keepalive.Keeper_not_registered ->
+             fail "keeper disappeared before joined stop")
+        | outcome ->
+          fail ("cross-domain start_keepalive failed: "
+                ^ Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome)))
+
 let test_direct_start_rolls_back_when_the_launch_owner_is_already_cancelled () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -4961,6 +5016,8 @@ let () =
     "direct_keepalive", [
       test_case "stop resolves done after lane exit" `Quick
         test_direct_start_keepalive_resolves_done_on_stop;
+      test_case "cross-domain start keepalive and swap" `Quick
+        test_cross_domain_start_keepalive_and_swap;
       test_case "cancelled launch owner rolls back under launch reservation" `Quick
         test_direct_start_rolls_back_when_the_launch_owner_is_already_cancelled;
       test_case "stop resolves done after Librarian drain failure" `Quick

@@ -6492,6 +6492,30 @@ let draw_image state ~refuse ~title data =
             (Message_layout.fit_width "  any key: back" (max 1 (columns - 1))));
       state.image_open <- true
 
+let ensure_img_cache_dir () =
+  let dir = Filename.concat (Filename.get_temp_dir_name ()) "masc_img_cache" in
+  (try Unix.mkdir dir 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  dir
+
+let download_remote_image url =
+  let cache_dir = ensure_img_cache_dir () in
+  let hash = Digest.to_hex (Digest.string url) in
+  let target_file = Filename.concat cache_dir ("img_" ^ hash) in
+  if Sys.file_exists target_file && (Unix.stat target_file).st_size > 0 then
+    Ok target_file
+  else
+    let cmd =
+      Printf.sprintf "curl -s -L --max-time 5 -o %s %s"
+        (Filename.quote target_file)
+        (Filename.quote url)
+    in
+    match Unix.system cmd with
+    | Unix.WEXITED 0 when Sys.file_exists target_file && (Unix.stat target_file).st_size > 0 ->
+        Ok target_file
+    | _ ->
+        (try Sys.remove target_file with _ -> ());
+        Error "could not download remote image"
+
 (* Put a picture on the terminal, or say why not. The refusal is text for the
    pane: there is nothing to draw, and taking the screen away from the frame
    to say so would hide the only surface that can say it. *)
@@ -6499,13 +6523,50 @@ let open_image state ~notice path =
   let refuse reason =
     notice ~role:Message_error (Printf.sprintf "/image %s: %s" path reason)
   in
-  match !terminal_draws_images with
-  | Some false -> refuse terminal_draws_no_images
-  | Some true | None -> (
-      match read_file_bytes path with
-      | Error detail -> refuse detail
-      | Ok data when String.length data = 0 -> refuse "the file is empty"
-      | Ok data -> draw_image state ~refuse ~title:path data)
+  let is_remote =
+    String.starts_with ~prefix:"http://" path
+    || String.starts_with ~prefix:"https://" path
+  in
+  if is_remote && !terminal_draws_images = Some false then
+    match Masc_tui_browser.open_url path with
+    | Ok opener ->
+        notice ~role:Message_local
+          (Printf.sprintf "Opened in browser (%s): %s" opener path)
+    | Error err ->
+        refuse (Printf.sprintf "Could not open browser: %s" err)
+  else
+    let local_path_res =
+      if is_remote then download_remote_image path else Ok path
+    in
+    match local_path_res with
+    | Error dl_err ->
+        (match Masc_tui_browser.open_url path with
+         | Ok opener ->
+             notice ~role:Message_local
+               (Printf.sprintf "Image download failed. Opened in browser (%s): %s" opener path)
+         | Error _ ->
+             refuse dl_err)
+    | Ok local_path -> (
+        match !terminal_draws_images with
+        | Some false -> refuse terminal_draws_no_images
+        | Some true | None -> (
+            match read_file_bytes local_path with
+            | Error detail -> refuse detail
+            | Ok data when String.length data = 0 -> refuse "the file is empty"
+            | Ok data ->
+                match Masc.Keeper_vision_tool.sniff_image_media_type data with
+                | Ok media when String.equal media Masc_tui_graphics.payload_media_type ->
+                    draw_image state ~refuse ~title:path data
+                | _ ->
+                    if is_remote then
+                      match Masc_tui_browser.open_url path with
+                      | Ok opener ->
+                          notice ~role:Message_local
+                            (Printf.sprintf "Terminal draws PNG only. Opened image in browser (%s): %s" opener path)
+                      | Error _ ->
+                          draw_image state ~refuse ~title:path data
+                    else
+                      draw_image state ~refuse ~title:path data))
 
 (* The staged door. Ctrl-V leaves the image in the attachment as base64 for
    the wire to the endpoint; the terminal wants the PNG's own bytes, so they
@@ -14411,12 +14472,12 @@ and is loaded on demand through keeper_skill.
                 (match state.link_modal_url with
                  | Some url ->
                      let p = Masc_tui_link_preview.get_preview url in
+                     let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
                      (match p.image_url with
                       | Some img_url ->
-                          let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
                           open_image state ~notice img_url
                       | None ->
-                          add_event state "system" "Selected link is not an image resource")
+                          open_image state ~notice url)
                  | None -> ())
             | _ -> ())
        | Some k when state.patch_modal_open ->

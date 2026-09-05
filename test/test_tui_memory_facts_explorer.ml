@@ -53,8 +53,12 @@ let category_filter_testable =
   testable pp ( = )
 ;;
 
+let make_state () =
+  Types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
+;;
+
 let test_category_navigation () =
-  let state = Types.init_state () in
+  let state = make_state () in
   let f1 = make_fact ~category:"rule" ~claim:"No local dune" "1" in
   let f2 = make_fact ~category:"persona" ~claim:"Voice is Roger" "2" in
   let f3 = make_fact ~category:"rule" ~claim:"Always test" "3" in
@@ -95,7 +99,7 @@ let test_category_navigation () =
 ;;
 
 let test_category_filtering_isolation () =
-  let state = Types.init_state () in
+  let state = make_state () in
   let f_ord_source = make_fact ~category:"source" ~claim:"Ordinary fact named source" "1" in
   let f_ord_other = make_fact ~category:"rule" ~claim:"Ordinary rule" "2" in
   let sf = make_source_fact ~path:"src.ml" ~claim:"Source file fact" "sha" in
@@ -132,7 +136,7 @@ let test_category_filtering_isolation () =
 ;;
 
 let test_sorting_orders () =
-  let state = Types.init_state () in
+  let state = make_state () in
   let f_low_reinf = make_fact ~category:"rule" ~reinf:1 ~last:100.0 ~claim:"C_low" "1" in
   let f_high_reinf = make_fact ~category:"persona" ~reinf:15 ~last:50.0 ~claim:"A_high" "2" in
   let f_newest = make_fact ~category:"config" ~reinf:3 ~last:500.0 ~claim:"B_newest" "3" in
@@ -173,7 +177,7 @@ let test_sorting_orders () =
 ;;
 
 let test_search_filtering () =
-  let state = Types.init_state () in
+  let state = make_state () in
   let f1 = make_fact ~category:"rule" ~claim:"Dune 로컬 빌드 금지" "1" in
   let f2 = make_fact ~category:"persona" ~claim:"Roger 음성 모델" "2" in
   let f3 = make_fact ~category:"config" ~claim:"CI Dune 검사 필수" "3" in

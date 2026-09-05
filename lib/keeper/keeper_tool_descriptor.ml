@@ -103,6 +103,7 @@ type runtime_handler =
   | Tool_edit_file
   | Tool_write_file
   | Tool_time_now
+  | Tool_lane_status
   | Tool_tools_list
   | Tool_capability_search
   | Tool_context_status
@@ -223,6 +224,7 @@ let runtime_handler_to_string = function
   | Tool_edit_file -> "tool_edit_file"
   | Tool_write_file -> "tool_write_file"
   | Tool_time_now -> "tool_time_now"
+  | Tool_lane_status -> "tool_lane_status"
   | Tool_tools_list -> "tool_tools_list"
   | Tool_capability_search -> "tool_capability_search"
   | Tool_context_status -> "tool_context_status"
@@ -434,6 +436,7 @@ let descriptor
       | Tool_edit_file
       | Tool_write_file
       | Tool_time_now
+      | Tool_lane_status
       | Tool_tools_list
       | Tool_capability_search
       | Tool_context_status
@@ -895,6 +898,12 @@ let time_now_schema =
   | None -> invalid_arg "missing base tool schema for keeper_time_now"
 ;;
 
+let lane_status_schema =
+  match find_base_schema_opt "keeper_lane_status" with
+  | Some schema -> schema
+  | None -> invalid_arg "missing base tool schema for keeper_lane_status"
+;;
+
 let context_status_schema =
   match find_base_schema_opt "keeper_context_status" with
   | Some schema -> schema
@@ -1102,6 +1111,22 @@ let time_now_output_schema =
       ; "now_unix", `Assoc [ "type", `String "number" ]
       ]
     ~required:[ "now_iso"; "now_unix" ]
+;;
+
+(* Producer: Keeper_tool_lane_status.json_of_report. [lane], [endpoint] and
+   [operator_action] are null when unknown; [probe] and [last_dispatch] are
+   the typed report's variants spelled out. *)
+let lane_status_output_schema =
+  object_output_schema
+    ~properties:
+      [ "profile", `Assoc [ "type", `String "string" ]
+      ; "lane", `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
+      ; "endpoint", `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
+      ; "probe", `Assoc [ "type", `List [ `String "object"; `String "null" ] ]
+      ; "last_dispatch", `Assoc [ "type", `List [ `String "object"; `String "null" ] ]
+      ; "operator_action", `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
+      ]
+    ~required:[ "profile"; "lane"; "endpoint"; "operator_action" ]
 ;;
 
 (* Producer: Snapshot_protocol.to_yojson via dispatch_board_list
@@ -1904,6 +1929,19 @@ let internal_descriptors : t list =
        ~handler:Tool_time_now
        ()
      |> with_composable_output (Json_output { schema = time_now_output_schema }))
+  ; (in_process_descriptor_with_schema_source
+       ~capability_identity:Internal_name_identity
+       ~keeper_model_projection:Internal_name
+       ~input_schema_source:Canonical_registry
+       ~id:"keeper.lane.status"
+       ~name:"keeper_lane_status"
+       ~description:lane_status_schema.description
+       ~input_schema:lane_status_schema.input_schema
+       ~ordinary_execution_mode:Concurrent
+       ~policy:(read_only_in_process_policy ())
+       ~handler:Tool_lane_status
+       ()
+     |> with_composable_output (Json_output { schema = lane_status_output_schema }))
   ; (in_process_descriptor_with_schema_source
        ~capability_identity:Internal_name_identity
        ~keeper_model_projection:Internal_name

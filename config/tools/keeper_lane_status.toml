@@ -1,0 +1,6 @@
+name = "keeper_lane_status"
+
+# Reachable inside a keeper's shell line: `masc lane status`.
+shell_command = "lane status"
+description = "Read how your execution lane stands, from what the server already knows: the lane (microvm_remote, remote_ssh, or docker), its endpoint, what the endpoint's shim answered to the last probe (protocol major, capabilities), how the last Execute that reached the wire ended (payload_finished with its status, or lane_failed with a class and the detail you saw), and, when the lane itself failed, the operator action that fixes it. Nothing here changes state, and a server restart empties it. Call it once when Execute fails with a lane error, before retrying or posting: it says whether the failure is your payload's or the lane's."
+additional_properties = false

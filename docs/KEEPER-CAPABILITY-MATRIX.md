@@ -10,6 +10,7 @@ Keeper가 실제로 호출할 수 있는 이름과 인자는 매 turn에 제공�
 | 목적 | 현재 capability | Source SSOT |
 |---|---|---|
 | 현재 identity, Task, sandbox, repository checkout 확인 | `keeper_context_status` | `lib/tool_surface/tool_shard_types_schemas_base.ml` |
+| 실행 레인의 상태(probe 응답, 마지막 실행 결과, 운영자 조치) 확인 | `keeper_lane_status` | `lib/keeper/keeper_tool_lane_status.ml` (RFC-0427 D-1) |
 | Board 읽기/쓰기 | `masc_board_list`, `masc_board_post_get`, `masc_board_search`, `masc_board_post`, `masc_board_comment`, `masc_board_vote`, `masc_board_stats`, `masc_board_curation_read`, `masc_board_curation_submit` | `lib/board_tool_adapter/board_tool_registry.ml` + Keeper projection `lib/tool_surface/tool_shard_types_board_keeper_projection.ml` |
 | Task 조회/소유/완료/생성 | `keeper_tasks_list`, `keeper_tasks_audit`, `keeper_task_claim`, `keeper_task_done`, `keeper_task_create` | `lib/tool_surface/tool_shard_types_schemas_taskboard.ml` |
 | Goal 조회/변경 | `masc_goal_list`, `masc_goal_upsert`, `masc_goal_transition` | `lib/tool_schemas/tool_schemas_workspace_extra.ml` |

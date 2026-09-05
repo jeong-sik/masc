@@ -102,6 +102,55 @@ val observe_supported : t -> bool
     the endpoint's shared state. A probe that fails, or a shim that predates
     the box, is [false]; the caller then leaves the request with the judge. *)
 
+(** {1 Lane report (RFC-0427 D-1)}
+
+    What this process knows about the endpoint from its own probes and
+    dispatches: a projection kept with the endpoint's shared state, never
+    stored, empty after a restart. Each [dispatch_failure] is one return
+    branch of {!runner}; the class is decided at the branch, not read out of
+    the message. *)
+
+type dispatch_failure =
+  | Local_timeout  (** the host budget ran out before the shim answered *)
+  | Remote_timeout  (** the shim's own timer killed the payload *)
+  | Transport_failed
+      (** no readable trailer: the connection, the transport's exit, or a
+          trailer this build cannot read; a version error names itself in
+          the detail *)
+  | Shim_refused  (** the shim answered a [shim_error]: jail, config, box *)
+  | Trailer_disagreement  (** transport status and trailer contradict *)
+
+type dispatch_record =
+  | Payload_finished of
+      { at : float
+      ; status : Unix.process_status
+      }
+  | Dispatch_failed of
+      { at : float
+      ; failure : dispatch_failure
+      ; detail : string
+      }
+
+type probe_report =
+  | Probe_not_asked
+  | Probe_answered of
+      { major : Exec_ssh_protocol.major
+      ; capabilities : string list
+      }
+  | Probe_failed of
+      { at : float
+      ; detail : string
+      }
+
+type lane_report =
+  { lane : string  (** {!lane_prefix} of the transport *)
+  ; endpoint : string  (** {!name} *)
+  ; probe : probe_report
+  ; last_dispatch : dispatch_record option
+  }
+
+val report : t -> lane_report
+
 val runner :
   ?mode:Exec_ssh_protocol.mode -> timeout_sec:float -> t -> Masc_exec.Sandbox_target.runner
 (** Construct a Shell IR runner. [mode] is the box the request asks the shim

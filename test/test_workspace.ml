@@ -2539,6 +2539,41 @@ let test_absent_backlog_is_not_reported_as_malformed () =
   let _ = Workspace.reset config in
   ()
 
+(* The backlog's cache-miss path (read, parse, decode) runs on the domain
+   pool when one is installed. The same file read inline and through a
+   one-domain pool must decode to the same backlog. *)
+let test_backlog_miss_path_decodes_the_same_on_the_pool () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let tmp_dir = temp_workspace_dir () in
+  let config = workspace_config tmp_dir in
+  let _ = Workspace.init config ~agent_name:None in
+  let _ = Workspace.add_task config ~title:"Pooled decode" ~priority:1 ~description:"" in
+  let _ = Workspace.add_task config ~title:"Second task" ~priority:2 ~description:"" in
+  let read () =
+    match Workspace_backlog.read_backlog_observation_with_source_r config with
+    | Ok { Workspace_backlog.observed_backlog; recovered_from = None } -> observed_backlog
+    | Ok { Workspace_backlog.recovered_from = Some _; _ } ->
+      Alcotest.fail "the backlog was read from the recovery mirror"
+    | Error message -> Alcotest.failf "backlog read failed: %s" message
+  in
+  let inline = read () in
+  (* A new mtime misses the (mtime, size) cache without changing the bytes. *)
+  let path = Workspace.backlog_path config in
+  let stamp = Unix.gettimeofday () +. 2.0 in
+  Unix.utimes path stamp stamp;
+  let pooled =
+    Eio.Switch.run (fun sw ->
+      let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Domain_pool_ref.set pool;
+      Fun.protect ~finally:Domain_pool_ref.clear_for_tests read)
+  in
+  Alcotest.(check int) "same task count" (List.length inline.Masc_domain.tasks)
+    (List.length pooled.Masc_domain.tasks);
+  Alcotest.(check bool) "same tasks" true (inline.Masc_domain.tasks = pooled.Masc_domain.tasks);
+  let _ = Workspace.reset config in
+  ()
+
 let test_malformed_backlog_still_reports_the_schema () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2780,6 +2815,7 @@ let () =
     "backlog_absence", [
       Alcotest.test_case "absent backlog is not reported as malformed" `Quick test_absent_backlog_is_not_reported_as_malformed;
       Alcotest.test_case "malformed backlog still reports the schema" `Quick test_malformed_backlog_still_reports_the_schema;
+        Alcotest.test_case "backlog miss path decodes the same on the pool" `Quick test_backlog_miss_path_decodes_the_same_on_the_pool;
     ];
 
     (* === Idle loop stop signal tests === *)

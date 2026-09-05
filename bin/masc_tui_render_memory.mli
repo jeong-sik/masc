@@ -8,6 +8,15 @@
 
 open Masc_tui_types
 
+type memory_state =
+  | Memory_ordinary
+  | Memory_warning
+  | Memory_degraded
+  | Memory_no_current
+  | Memory_source_only
+  | Memory_starving
+  | Memory_read_error
+
 val memory_fact_age_label : float -> string
 val memory_fact_row_line : cols:int -> memory_fact_row -> string
 val memory_fact_detail_lines : cols:int -> memory_fact_row -> string list

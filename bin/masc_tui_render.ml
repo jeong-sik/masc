@@ -42,6 +42,15 @@ module Chart = Masc_tui_chart
 module Render_metrics = Masc_tui_render_metrics
 module Render_memory = Masc_tui_render_memory
 
+type memory_state = Render_memory.memory_state =
+  | Memory_ordinary
+  | Memory_warning
+  | Memory_degraded
+  | Memory_no_current
+  | Memory_source_only
+  | Memory_starving
+  | Memory_read_error
+
 let json_assoc_member_opt = Masc_tui_json.member_opt
 
 (* Every surface lays out against a viewport one row shorter than the

@@ -1,6 +1,8 @@
 name = "keeper_webmcp_list"
 description = """
-List the WebMCP tools a browser page has registered on document.modelContext. \
+List the WebMCP tools a browser page has registered on document.modelContext.
+
+\
 Requires an operator-run headed Chrome with --enable-features=WebMCP and \
 --remote-debugging-port, and the target page already open; when either is \
 missing the call fails immediately with the reason instead of retrying. \

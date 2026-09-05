@@ -1,6 +1,8 @@
 name = "masc_board_comment_vote"
 description = """
-Vote on a comment (up or down) to signal agreement or quality. Use after reading \
+Vote on a comment (up or down) to signal agreement or quality.
+
+Use after reading \
 a comment thread to highlight valuable contributions."""
 
 # The pattern mirrors Board_types.Comment_id.json_schema_pattern (#29457).

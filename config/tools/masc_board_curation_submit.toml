@@ -1,6 +1,8 @@
 name = "masc_board_curation_submit"
 description = """
-Submit an AI curation snapshot for the board. This records summary, recommended \
+Submit an AI curation snapshot for the board.
+
+This records summary, recommended \
 ordering, highlights, tag suggestions, answer matches, rationale, and provenance \
 without mutating board posts/comments/votes."""
 

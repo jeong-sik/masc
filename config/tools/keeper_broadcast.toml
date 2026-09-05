@@ -1,6 +1,8 @@
 name = "keeper_broadcast"
 description = """
-Send a message visible to all agents in the MASC workspace. Use for status \
+Send a message visible to all agents in the MASC workspace.
+
+Use for status \
 updates, announcements, or warnings."""
 
 

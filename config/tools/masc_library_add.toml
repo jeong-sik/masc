@@ -1,6 +1,8 @@
 name = "masc_library_add"
 description = """
-Add a new document to the agent knowledge library. Use when recording a new \
+Add a new document to the agent knowledge library.
+
+Use when recording a new \
 finding, experiment result, or pattern that other agents should know about."""
 
 # Held back from the request until the model asks for it by name.

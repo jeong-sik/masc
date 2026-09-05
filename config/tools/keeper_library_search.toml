@@ -1,6 +1,8 @@
 name = "keeper_library_search"
 description = """
-Search the knowledge library by keyword. Returns matching document titles, \
+Search the knowledge library by keyword.
+
+Returns matching document titles, \
 relevance scores (0-1), and text snippets. Use to discover relevant docs before \
 reading full content with keeper_library_read."""
 

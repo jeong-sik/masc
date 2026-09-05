@@ -1,6 +1,8 @@
 name = "keeper_library_read"
 description = """
-Read a full document from the knowledge library by exact topic name. Use after \
+Read a full document from the knowledge library by exact topic name.
+
+Use after \
 keeper_library_search identifies a relevant document, or with a known topic \
 name. Returns full document text."""
 

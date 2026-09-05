@@ -1,6 +1,8 @@
 name = "keeper_voice_session_start"
 description = """
-Start a voice session for this keeper. Defaults to turn_based batch STT/TTS. \
+Start a voice session for this keeper.
+
+Defaults to turn_based batch STT/TTS. \
 conversation_mode=realtime_bridge is accepted only when \
 MASC_VOICE_REALTIME_WS_URL points at a configured realtime audio bridge; \
 otherwise the tool fails closed instead of pretending a duplex stream \

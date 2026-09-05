@@ -1,6 +1,8 @@
 name = "keeper_memory_retract"
 description = """
-Retract one exact ordinary-current Memory OS fact. Use the memory_id returned \
+Retract one exact ordinary-current Memory OS fact.
+
+Use the memory_id returned \
 by memory write or search and state the concrete reason. The same atomic commit \
 removes every derived fact that no longer has a complete support path and \
 records both the direct reason and the support invalidations for inspection."""

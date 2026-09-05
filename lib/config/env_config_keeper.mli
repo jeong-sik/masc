@@ -140,6 +140,16 @@ module KeeperVision : sig
   val max_dimension : unit -> int
 end
 
+(** {1 Keeper lane gate} *)
+
+module KeeperLaneGate : sig
+  (** Total admission budget shared by one submit's submission-lane and
+      persistence-lane acquisitions, clamped to (0, 600] seconds. Default
+      60.0. On expiry submit fails with [Submit_lane_unavailable] instead of
+      hanging behind a stuck durable write (#25398). *)
+  val admission_wait_budget_sec : unit -> float
+end
+
 (** {1 Keeper generated media} *)
 
 module KeeperGeneratedMedia : sig

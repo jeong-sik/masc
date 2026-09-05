@@ -146,6 +146,10 @@ and recovery_record_error_kind =
   | Recovery_entry_exception of string
 
 type submit_error =
+  | Submit_lane_unavailable of
+      { lane : string
+      ; wait_budget_sec : float
+      }
   | Submit_rejected of access_rejection
   | Submit_invalid_keeper_name of { reason : string }
   | Submit_invalid_request_context of { reason : string }
@@ -283,6 +287,18 @@ type store_transition_lock =
   ; mutable users : int
   }
 
+(** Per-Keeper lane gate, deliberately distinct from [store_transition_lock].
+    The gate is an [Eio.Semaphore] with one token so admission can be bounded
+    by a deadline: [Eio.Semaphore.acquire] is cancellation-safe (a cancelled
+    waiter returns its token via the [Sem_state] handoff protocol) and resumes
+    waiters FIFO. [Eio.Mutex.lock] offers no bounded wait at all, which is how
+    a hung durable write used to leak the lane permanently and hang every
+    later submit for that keeper (#25398). *)
+type lane_gate =
+  { sem : Eio.Semaphore.t
+  ; mutable users : int
+  }
+
 let mu = Eio.Mutex.create ()
 let pending : entry Request_table.t = Request_table.create 16
 let transition_locks : Eio.Mutex.t Request_table.t = Request_table.create 16
@@ -291,9 +307,9 @@ let store_transition_locks : store_transition_lock Store_transition_table.t =
   Store_transition_table.create 16
 let reserved_request_ids : unit Store_transition_table.t =
   Store_transition_table.create 16
-let keeper_submission_locks : store_transition_lock Keeper_lane_table.t =
+let keeper_submission_locks : lane_gate Keeper_lane_table.t =
   Keeper_lane_table.create 16
-let keeper_persistence_locks : store_transition_lock Keeper_lane_table.t =
+let keeper_persistence_locks : lane_gate Keeper_lane_table.t =
   Keeper_lane_table.create 16
 
 type request_ops =
@@ -418,24 +434,58 @@ let elapsed_seconds started =
   Mtime.Span.to_float_ns (Mtime.span started (Mtime_clock.now ())) /. 1e9
 ;;
 
-let with_lane_gate ~on_wait mutex f =
-  let acquired_without_wait = Eio.Mutex.try_lock mutex in
-  if not acquired_without_wait
-  then (
-    on_wait ();
-    Eio.Mutex.lock mutex);
+(** Raised when a bounded lane admission expires (or cannot be bounded because
+    no ambient monotonic clock is installed). Only the submit path passes a
+    budget, so only it can raise this; status-settlement acquisitions are
+    unbounded and never see it. *)
+exception Lane_admission_timeout of string
+
+let with_lane_gate ~on_wait ~wait_budget ~lane_label sem f =
+  let acquired =
+    if Eio.Semaphore.get_value sem > 0
+    then (
+      (* Fast path: a free token means [acquire] cannot suspend. *)
+      Eio.Semaphore.acquire sem;
+      true)
+    else (
+      on_wait ();
+      match wait_budget with
+      | None ->
+        Eio.Semaphore.acquire sem;
+        true
+      | Some budget_sec ->
+        (match Eio_context.get_mono_clock_opt () with
+         | None ->
+           (* No ambient monotonic clock (pre-boot): the wait cannot be
+              bounded honestly, so refuse instead of hanging. *)
+           false
+         | Some clock ->
+           if budget_sec <= 0.0
+           then false
+           else (
+             match
+               Eio.Time.Timeout.run
+                 (Eio.Time.Timeout.seconds clock budget_sec)
+                 (fun () ->
+                    Eio.Semaphore.acquire sem;
+                    Ok ())
+             with
+             | Ok () -> true
+             | Error `Timeout -> false)))
+  in
+  if not acquired then raise (Lane_admission_timeout lane_label);
   (* A started durable systhread cannot be cancelled. Keep the lane held until
-     its transaction and lock release finish. Deliberately do not re-check the
+     its transaction and gate release finish. Deliberately do not re-check the
      parent cancellation here: the caller must first settle the committed
      receipt/status, matching [Keeper_event_queue_owner_lock.with_durable_lock]. *)
-  (* fun-protect-finally-ok: [Eio.Mutex.unlock] is non-suspending and releases
-     only the lane gate acquired immediately above. *)
+  (* fun-protect-finally-ok: [Eio.Semaphore.release] is non-suspending and
+     releases only the lane gate acquired immediately above. *)
   Fun.protect
-    ~finally:(fun () -> Eio.Mutex.unlock mutex)
+    ~finally:(fun () -> Eio.Semaphore.release sem)
     (fun () -> Eio.Cancel.protect f)
 ;;
 
-let with_keeper_lane_lock observation table ~base_path ~keeper_name f =
+let with_keeper_lane_lock observation table ~lane_label ?wait_budget ~base_path ~keeper_name f =
   let key : Keeper_lane_key.t = { base_path; keeper_name } in
   let lock =
     Eio.Mutex.use_rw ~protect:true mu (fun () ->
@@ -444,7 +494,7 @@ let with_keeper_lane_lock observation table ~base_path ~keeper_name f =
         lock.users <- lock.users + 1;
         lock
       | None ->
-        let lock = { mutex = Eio.Mutex.create (); users = 1 } in
+        let lock = { sem = Eio.Semaphore.make 1; users = 1 } in
         Keeper_lane_table.add table key lock;
         lock)
   in
@@ -467,7 +517,7 @@ let with_keeper_lane_lock observation table ~base_path ~keeper_name f =
   in
   let run () =
     match
-      with_lane_gate ~on_wait lock.mutex (fun () ->
+      with_lane_gate ~on_wait ~wait_budget ~lane_label lock.sem (fun () ->
         leave_pending ();
         match observation with
         | Unobserved_lane -> `Unobserved (f ())
@@ -515,19 +565,23 @@ let with_keeper_lane_lock observation table ~base_path ~keeper_name f =
     run
 ;;
 
-let with_keeper_submission_lock ~base_path ~keeper_name f =
+let with_keeper_submission_lock ?wait_budget ~base_path ~keeper_name f =
   with_keeper_lane_lock
     Unobserved_lane
     keeper_submission_locks
+    ~lane_label:"submission"
+    ?wait_budget
     ~base_path
     ~keeper_name
     f
 ;;
 
-let with_keeper_persistence_lock ~base_path ~keeper_name f =
+let with_keeper_persistence_lock ?wait_budget ~base_path ~keeper_name f =
   with_keeper_lane_lock
     Persistence_lane
     keeper_persistence_locks
+    ~lane_label:"persistence"
+    ?wait_budget
     ~base_path
     ~keeper_name
     f
@@ -695,6 +749,18 @@ let canonical_terminal_error_to_string = function
 let durable_terminal_entry proof = proof.terminal_entry
 
 let submit_error_to_json = function
+  | Submit_lane_unavailable { lane; wait_budget_sec } ->
+    `Assoc
+      [ "error", `String "lane_unavailable"
+      ; "lane", `String lane
+      ; "wait_budget_sec", `Float wait_budget_sec
+      ; ( "message"
+        , `String
+            (Printf.sprintf
+               "keeper_msg %s lane admission exceeded the %.3fs budget; a prior durable write is still in progress or hung"
+               lane
+               wait_budget_sec) )
+      ]
   | Submit_rejected rejection -> access_rejection_to_json rejection
   | Submit_invalid_keeper_name { reason } ->
     `Assoc
@@ -2270,7 +2336,21 @@ let submit_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
      | Error reason -> Error (Submit_invalid_keeper_name { reason })
      | Ok keeper_name_id ->
     let keeper_name = Keeper_id.Keeper_name.to_string keeper_name_id in
-    with_keeper_submission_lock ~base_path ~keeper_name:keeper_name_id (fun () ->
+    (* One admission deadline per submit, shared by the submission-lane and
+       persistence-lane acquisitions below (RFC-0348 PR-1, #25398). *)
+    let wait_budget_sec =
+      Env_config_keeper.KeeperLaneGate.admission_wait_budget_sec ()
+    in
+    let admission_started = Mtime_clock.now () in
+    let remaining_budget () =
+      Float.max 0.0 (wait_budget_sec -. elapsed_seconds admission_started)
+    in
+    (try
+       with_keeper_submission_lock
+         ~wait_budget:(remaining_budget ())
+         ~base_path
+         ~keeper_name:keeper_name_id
+         (fun () ->
     match
       reserve_new_request
         ~ops
@@ -2288,10 +2368,12 @@ let submit_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
         }
     in
     let initial_persistence =
-      with_keeper_persistence_lock
-        ~base_path
-        ~keeper_name:keeper_name_id
-        (fun () ->
+      try
+        with_keeper_persistence_lock
+          ~wait_budget:(remaining_budget ())
+          ~base_path
+          ~keeper_name:keeper_name_id
+          (fun () ->
            match
              persist_entry_unlocked ~ops entry
              |> observe_persist_error ~operation:"initial" entry
@@ -2335,6 +2417,13 @@ let submit_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
               | Write_failed (Not_published _) | Integrity_failed _ ->
                 remove_runtime_if_owned key transition_lock;
                 `Settled (Error (Initial_persistence_failed { reason }))))
+      with
+      | Lane_admission_timeout lane ->
+        (* Admission expired before the initial durable write started: the
+           reservation was never persisted, so drop it exactly like the
+           [Not_published] rollback path above. *)
+        remove_runtime_if_owned key transition_lock;
+        `Settled (Error (Submit_lane_unavailable { lane; wait_budget_sec }))
     in
     (match initial_persistence with
      | `Settled result -> result
@@ -2563,7 +2652,12 @@ let submit_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
               Ok { request_id; acceptance = Durably_accepted }
             | Some cause -> background_start_failed (Printexc.to_string cause))
         | exception exn ->
-          background_start_failed (Printexc.to_string exn))))))
+          background_start_failed (Printexc.to_string exn)))))
+     with
+     | Lane_admission_timeout lane ->
+       (* Submission-lane admission expired before any reservation existed,
+          so there is nothing to clean up here. *)
+       Error (Submit_lane_unavailable { lane; wait_budget_sec })))
 ;;
 
 let submit_with_request_id = submit_with_ops production_request_ops

@@ -418,6 +418,36 @@ module KeeperVision = struct
   ;;
 end
 
+(** {1 Keeper Lane Gate Configuration} *)
+
+module KeeperLaneGate = struct
+  let clamp_float ~min_value ~max_value value =
+    Float.max min_value (Float.min max_value value)
+  ;;
+
+  let admission_wait_budget_sec_default = 60.0
+  let admission_wait_budget_sec_ceiling = 600.0
+
+  (** Total admission budget (seconds) shared by the submission-lane and
+      persistence-lane acquisitions of one [Keeper_msg_async] submit. While a
+      durable write is in progress the lane gate is held; before this bound a
+      hung durable write used to leak the lane permanently and every later
+      submit for that keeper hung with it (#25398). On expiry the submit fails
+      with [Submit_lane_unavailable] instead of waiting. Only submit is
+      bounded; status-settlement lane acquisitions stay unbounded so a
+      committed write can always settle. Range: (0, 600] seconds.
+
+      @category Timeouts @ops_class operator *)
+  let admission_wait_budget_sec () =
+    get_float_nonneg
+      ~default:admission_wait_budget_sec_default
+      "MASC_KEEPER_LANE_ADMISSION_WAIT_BUDGET_SEC"
+    |> clamp_float
+         ~min_value:0.001
+         ~max_value:admission_wait_budget_sec_ceiling
+  ;;
+end
+
 (** {1 Keeper Generated Media Configuration} *)
 
 module KeeperGeneratedMedia = struct

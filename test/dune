@@ -2380,6 +2380,7 @@
 (include stanzas/test_keeper_msg_async_path_traversal.inc)
 
 (include stanzas/test_keeper_msg_async_terminal_event.inc)
+(include stanzas/test_keeper_msg_async_lane_admission.inc)
 
 (include stanzas/test_keeper_msg_async_durable_active_inventory.inc)
 

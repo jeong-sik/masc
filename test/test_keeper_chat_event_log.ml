@@ -216,6 +216,12 @@ let rec remove_tree path =
     end
     else Sys.remove path
 
+let read_ok = function
+  | Ok entries -> entries
+  | Error L.Journal_missing -> Alcotest.fail "journal missing"
+  | Error (L.Journal_unreadable detail) -> Alcotest.fail ("journal unreadable: " ^ detail)
+  | Error (L.Journal_corrupt detail) -> Alcotest.fail ("journal corrupt: " ^ detail)
+
 let scripted_clock timestamps =
   let remaining = ref timestamps in
   fun () ->
@@ -239,7 +245,7 @@ let test_journal_round_trip () =
          ~seq:1
          ~ts:1_762_300_000.25
          (E.Agent_core_thinking_delta { index = 0; delta = "hmm" });
-       let journaled = L.read_journal journal in
+       let journaled = read_ok (L.read_journal journal) in
        Alcotest.(check int) "two lines" 2 (List.length journaled);
        List.iteri
          (fun i (entry : L.journaled_event) ->
@@ -311,9 +317,64 @@ let test_journal_skips_non_finite_floats () =
             ; message_text = "x"
             ; duration_sec = Some Float.nan
             });
-       let journaled = L.read_journal journal in
+       let journaled = read_ok (L.read_journal journal) in
        Alcotest.(check int) "only the valid line was journaled" 1 (List.length journaled);
        Alcotest.(check int) "seq of the surviving line" 2 (List.nth journaled 0).seq)
+
+(* The writer's framing rule, applied by the reader: a final fragment with no
+   newline is an append that never completed — not a row, not corruption. The
+   complete rows before it are the journal. A bad complete row still is. *)
+let test_journal_torn_tail_reads_complete_rows () =
+  let base_dir = temp_base_path "keeper-chat-event-log-torn" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let keeper_name = "torn-keeper" in
+       let operation_id = "op-torn" in
+       let journal = L.open_journal ~base_dir ~keeper_name ~operation_id () in
+       L.append journal ~seq:0 ~ts:1_762_300_000.0 (E.Text_delta "one");
+       L.append journal ~seq:1 ~ts:1_762_300_000.25 (E.Text_delta "two");
+       let path = L.journal_path ~base_dir ~keeper_name ~operation_id in
+       let append_raw bytes =
+         let oc = open_out_gen [ Open_append; Open_wronly; Open_binary ] 0o600 path in
+         output_string oc bytes;
+         close_out oc
+       in
+       let seqs entries = List.map (fun (entry : L.journaled_event) -> entry.seq) entries in
+       (* The first bytes of a large envelope, cut before its newline. *)
+       append_raw "{\"v\":1,\"seq\":2,\"ts\":1762300000.5,\"event\":{\"type\":\"text_del";
+       (match L.read_journal_path_result path with
+        | Ok entries ->
+          Alcotest.(check (list int)) "the complete rows are the journal" [ 0; 1 ] (seqs entries)
+        | Error L.Journal_missing -> Alcotest.fail "torn tail read as missing"
+        | Error (L.Journal_unreadable detail) ->
+          Alcotest.fail ("torn tail read as unreadable: " ^ detail)
+        | Error (L.Journal_corrupt detail) ->
+          Alcotest.fail ("torn tail read as corrupt: " ^ detail));
+       (* A file holding only a fragment has no row yet. *)
+       let fragment_only = Filename.concat (Filename.dirname path) "op-fragment.jsonl" in
+       let oc = open_out_bin fragment_only in
+       output_string oc "{\"v\":1,\"seq\":0";
+       close_out oc;
+       (match L.read_journal_path_result fragment_only with
+        | Ok [] -> ()
+        | Ok entries ->
+          Alcotest.failf "a fragment-only file yielded %d entries" (List.length entries)
+        | Error _ -> Alcotest.fail "a fragment-only file must read as no rows");
+       (* The newline arrives: the row is complete and joins the journal. *)
+       append_raw "ta\",\"delta\":\"three\"}}\n";
+       (match L.read_journal_path_result path with
+        | Ok entries -> Alcotest.(check (list int)) "the completed row joins" [ 0; 1; 2 ] (seqs entries)
+        | Error _ -> Alcotest.fail "a completed tail must read");
+       (* A bad complete row in the middle is corruption, not a fragment. *)
+       append_raw "this complete line is not an envelope\n";
+       L.append journal ~seq:3 ~ts:1_762_300_001.0 (E.Text_delta "four");
+       (match L.read_journal_path_result path with
+        | Error (L.Journal_corrupt _) -> ()
+        | Error L.Journal_missing -> Alcotest.fail "corrupt read as missing"
+        | Error (L.Journal_unreadable detail) ->
+          Alcotest.fail ("corrupt read as unreadable: " ^ detail)
+        | Ok _ -> Alcotest.fail "a bad complete row decoded"))
 
 let test_journal_path_sanitizes_segments () =
   let path =
@@ -350,7 +411,7 @@ let test_journal_files_age_out_with_shared_prune () =
     (fun () ->
        let masc_root = Common.masc_dir_from_base_path ~base_path:base_dir in
        let keeper_dir =
-         Filename.concat (Filename.concat masc_root "keeper_chat_events") "keeper-a"
+         Filename.concat (L.events_dir ~base_dir) "keeper-a"
        in
        Fs_compat.mkdir_p keeper_dir;
        let write path =
@@ -481,7 +542,7 @@ let test_bus_journal_integration_records_all_events () =
          Masc.Keeper_chat_events.create ~on_publish:(L.append journal) ()
        in
        List.iter (Masc.Keeper_chat_events.publish bus) all_events;
-       let journaled = L.read_journal journal in
+       let journaled = read_ok (L.read_journal journal) in
        Alcotest.(check int)
          "every published event is journaled"
          (List.length all_events)
@@ -657,7 +718,7 @@ let test_golden_replay_matches_live_stream_bytes () =
        List.iter (Masc.Keeper_chat_events.publish bus) golden_events;
        (* Replay: decode the journal, re-fold from [initial] with the
           journaled ts. *)
-       let journaled = L.read_journal journal in
+       let journaled = read_ok (L.read_journal journal) in
        Alcotest.(check int)
          "journal holds the whole turn"
          (List.length golden_events)
@@ -731,6 +792,10 @@ let () =
             "skips non-finite floats"
             `Quick
             test_journal_skips_non_finite_floats
+        ; Alcotest.test_case
+            "torn tail reads the complete rows"
+            `Quick
+            test_journal_torn_tail_reads_complete_rows
         ; Alcotest.test_case
             "path sanitizes both segments"
             `Quick

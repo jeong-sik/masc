@@ -364,6 +364,63 @@ let test_private_jsonl_slice_missing_store_contract () =
   | _ -> fail "missing non-origin cursor was not rejected"
 ;;
 
+(* The rows reader applies the writer's framing: complete rows come back as
+   bytes, a fragment after the last newline is reported by offset only, and a
+   missing store is its own value rather than the empty stream. *)
+let test_private_jsonl_rows_reads_complete_rows_and_reports_torn_tail () =
+  let row1 = "{\"row\":1}\n" in
+  let row2 = "{\"row\":2}\n" in
+  let fragment = "{\"row\":3" in
+  (with_temp_jsonl (row1 ^ row2) @@ fun path ->
+   match Fs_compat.read_private_jsonl_rows_locked_result path with
+   | Fs_compat.Private_file_succeeded
+       (Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset }) ->
+     check string "complete store: every row" (row1 ^ row2) rows;
+     check int "complete store: rows end at the end" end_offset rows_end;
+     check int "complete store: end offset is the length" (String.length (row1 ^ row2)) end_offset
+   | Fs_compat.Private_file_succeeded Fs_compat.Private_jsonl_rows.Rows_missing ->
+     fail "a present store read as missing"
+   | Fs_compat.Private_file_failed error ->
+     fail (Fs_compat.Private_jsonl_rows.error_to_string error)
+   | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+   | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+     fail "unexpected descriptor settlement failure");
+  (with_temp_jsonl (row1 ^ row2 ^ fragment) @@ fun path ->
+   match Fs_compat.read_private_jsonl_rows_locked_result path with
+   | Fs_compat.Private_file_succeeded
+       (Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset }) ->
+     check string "torn store: the complete rows only" (row1 ^ row2) rows;
+     check int "torn store: rows end before the fragment" (String.length (row1 ^ row2)) rows_end;
+     check int
+       "torn store: end offset counts the fragment"
+       (String.length (row1 ^ row2 ^ fragment))
+       end_offset
+   | Fs_compat.Private_file_succeeded Fs_compat.Private_jsonl_rows.Rows_missing ->
+     fail "a torn store read as missing"
+   | Fs_compat.Private_file_failed error ->
+     fail (Fs_compat.Private_jsonl_rows.error_to_string error)
+   | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+   | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+     fail "unexpected descriptor settlement failure");
+  (with_temp_jsonl fragment @@ fun path ->
+   match Fs_compat.read_private_jsonl_rows_locked_result path with
+   | Fs_compat.Private_file_succeeded
+       (Fs_compat.Private_jsonl_rows.Rows_present { rows = ""; rows_end = 0; end_offset }) ->
+     check int "fragment-only store: no rows, the fragment counted" (String.length fragment) end_offset
+   | _ -> fail "a fragment-only store must read as zero rows");
+  (with_temp_jsonl "" @@ fun path ->
+   match Fs_compat.read_private_jsonl_rows_locked_result path with
+   | Fs_compat.Private_file_succeeded
+       (Fs_compat.Private_jsonl_rows.Rows_present { rows = ""; rows_end = 0; end_offset = 0 }) ->
+     ()
+   | _ -> fail "an empty store must read as zero rows at offset zero");
+  let missing = Filename.temp_file "masc_private_jsonl_rows_missing_" ".jsonl" in
+  Sys.remove missing;
+  match Fs_compat.read_private_jsonl_rows_locked_result missing with
+  | Fs_compat.Private_file_succeeded Fs_compat.Private_jsonl_rows.Rows_missing -> ()
+  | _ -> fail "a missing store must read as Rows_missing"
+;;
+
 let test_private_jsonl_slice_rejects_incomplete_tail () =
   with_temp_jsonl "{\"row\":1}" @@ fun path ->
   match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
@@ -1140,6 +1197,10 @@ let () =
             "private JSONL cursor read rejects incomplete tail"
             `Quick
             test_private_jsonl_slice_rejects_incomplete_tail
+        ; test_case
+            "private JSONL rows read keeps complete rows and reports a torn tail"
+            `Quick
+            test_private_jsonl_rows_reads_complete_rows_and_reports_torn_tail
         ; test_case
             "private JSONL append rejects incomplete tail"
             `Quick

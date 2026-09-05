@@ -1,7 +1,7 @@
 (* RFC-0412 stage 2 — dual-write consistency auditor: every verdict class of
    the pure comparison core, the IO shell over a real journal file and real
-   keeper_chat_store rows, and the sweep's grace-window / canonical-stem
-   gating. *)
+   keeper_chat_store rows, and the sweep's liveness / audited-once /
+   canonical-stem gating. *)
 
 module Audit = Masc.Keeper_chat_journal_audit
 module E = Masc.Keeper_chat_events
@@ -380,36 +380,129 @@ let test_journal_path_round_trips_operation_ids () =
 let sorted_dir_entries dir = Sys.readdir dir |> Array.to_list |> List.sort String.compare
 
 (* No terminal event: the shape of a turn still streaming (or already
-   crashed). The grace bound is what separates the two. *)
+   crashed). The registry's answer is what separates the two. *)
 let in_flight_events =
   [ E.Run_started { run_id = "run-1"; thread_id = "thread-1" }
   ; E.Text_delta "half-finis"
   ]
 
-let test_sweep_skips_in_flight_journal () =
-  let base_dir = temp_base_path "keeper-chat-journal-audit-grace" in
+let settled ~keeper_name:_ ~operation_id:_ = Audit.Turn_settled
+let running ~keeper_name:_ ~operation_id:_ = Audit.Turn_running
+
+let sweep ?(audited = Audit.Audited.empty) ~liveness base_dir =
+  Audit.sweep ~base_dir ~lookback_sec:3600. ~liveness ~audited ()
+
+let test_sweep_reads_by_registry_liveness_not_file_age () =
+  let base_dir = temp_base_path "keeper-chat-journal-audit-liveness" in
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
        let keeper_name = "sweep-keeper" in
        let operation_id = "op-live" in
        write_journal ~base_dir ~keeper_name ~operation_id in_flight_events;
-       let sweep_now () = Audit.sweep ~base_dir ~window_sec:3600. () in
-       Alcotest.(check int)
-         "a journal younger than grace_sec is in flight, not truncated"
-         0
-         (List.length (sweep_now ()));
+       (* Fresh on disk and, per the registry, still running: left alone. *)
+       let results, audited = sweep ~liveness:running base_dir in
+       Alcotest.(check int) "a running turn's journal is not read" 0 (List.length results);
+       Alcotest.(check bool) "nor marked audited" true (Audit.Audited.is_empty audited);
+       (* Same fresh file, registry says the turn ended: the missing terminal
+          event is a truncated journal, whatever the file's age. *)
+       (match sweep ~liveness:settled base_dir with
+        | [ (keeper, op, Audit.Journal_truncated) ], audited ->
+          Alcotest.(check string) "keeper" keeper_name keeper;
+          Alcotest.(check string) "operation id" operation_id op;
+          Alcotest.(check bool)
+            "the settled operation is marked audited"
+            true
+            (Audit.Audited.mem (keeper_name, operation_id) audited)
+        | other, _ ->
+          Alcotest.failf
+            "expected one Journal_truncated, got %d verdicts"
+            (List.length other)))
+
+let test_sweep_audits_each_operation_once () =
+  let base_dir = temp_base_path "keeper-chat-journal-audit-once" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let keeper_name = "once-keeper" in
+       let operation_id = "op-once" in
+       write_journal ~base_dir ~keeper_name ~operation_id match_events;
+       write_store_rows ~base_dir ~keeper_name ~delivery_key:(delivery_key_of operation_id);
+       let first, audited = sweep ~liveness:settled base_dir in
+       Alcotest.(check int) "first pass reports the operation" 1 (List.length first);
+       (match first with
+        | [ (_, _, Audit.Match) ] -> ()
+        | _ -> Alcotest.fail "expected Match on the first pass");
+       let second, audited = sweep ~audited ~liveness:settled base_dir in
+       Alcotest.(check int) "second pass with the same set reports nothing" 0 (List.length second);
+       Alcotest.(check bool)
+         "the set carries the operation forward"
+         true
+         (Audit.Audited.mem (keeper_name, operation_id) audited))
+
+let test_sweep_reports_unanswered_registry_and_retries () =
+  let base_dir = temp_base_path "keeper-chat-journal-audit-unanswered" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let keeper_name = "fenced-keeper" in
+       let operation_id = "op-fenced" in
+       write_journal ~base_dir ~keeper_name ~operation_id match_events;
+       let unanswered ~keeper_name:_ ~operation_id:_ =
+         Audit.Registry_unanswered "owner fenced"
+       in
+       (match sweep ~liveness:unanswered base_dir with
+        | [ (_, _, Audit.Liveness_unknown "owner fenced") ], audited ->
+          Alcotest.(check bool)
+            "an unanswered operation is not marked audited"
+            true
+            (Audit.Audited.is_empty audited)
+        | other, _ ->
+          Alcotest.failf "expected one Liveness_unknown, got %d verdicts" (List.length other));
+       (* Once the registry answers, the same file is audited. *)
+       match sweep ~liveness:settled base_dir with
+       | [ (_, _, verdict) ], _ ->
+         Alcotest.(check bool)
+           "a later pass reads the journal"
+           true
+           (match verdict with
+            | Audit.Liveness_unknown _ -> false
+            | Audit.Match | Audit.Mismatch _ | Audit.Journal_missing
+            | Audit.Journal_unreadable _ | Audit.Journal_truncated
+            | Audit.Journal_corrupt _ | Audit.Store_unreadable _ -> true)
+       | other, _ ->
+         Alcotest.failf "expected one verdict, got %d" (List.length other))
+
+let test_sweep_reports_unreadable_journal () =
+  let base_dir = temp_base_path "keeper-chat-journal-audit-unreadable" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let keeper_name = "eacces-keeper" in
+       let operation_id = "op-eacces" in
+       write_journal ~base_dir ~keeper_name ~operation_id match_events;
        let path = L.journal_path ~base_dir ~keeper_name ~operation_id in
-       let cold = Unix.gettimeofday () -. 900. in
-       Unix.utimes path cold cold;
-       match sweep_now () with
-       | [ (keeper, op, Audit.Journal_truncated) ] ->
-         Alcotest.(check string) "keeper" keeper_name keeper;
-         Alcotest.(check string) "operation id" operation_id op
-       | other ->
-         Alcotest.failf
-           "expected one Journal_truncated, got %d verdicts"
-           (List.length other))
+       (* root reads a 0o000 file, so the verdict cannot be observed there. *)
+       if Unix.geteuid () <> 0
+       then begin
+         Unix.chmod path 0o000;
+         Fun.protect
+           ~finally:(fun () -> try Unix.chmod path 0o600 with _ -> ())
+           (fun () ->
+              (match Audit.audit_operation ~base_dir ~keeper_name ~operation_id with
+               | Audit.Journal_unreadable _ -> ()
+               | other ->
+                 Alcotest.failf
+                   "audit_operation: expected Journal_unreadable, got %s"
+                   (Audit.show_verdict other));
+              match sweep ~liveness:settled base_dir with
+              | [ (_, op, Audit.Journal_unreadable _) ], _ ->
+                Alcotest.(check string) "sweep names the operation" operation_id op
+              | other, _ ->
+                Alcotest.failf
+                  "sweep: expected one Journal_unreadable, got %d verdicts"
+                  (List.length other))
+       end)
 
 let test_sweep_skips_non_canonical_stem () =
   let base_dir = temp_base_path "keeper-chat-journal-audit-noncanonical" in
@@ -433,15 +526,11 @@ let test_sweep_skips_non_canonical_stem () =
             output_char oc '\n')
          match_events;
        close_out oc;
-       (* Inside the audit window, past the grace bound: only the
-          non-canonical stem can keep it out of the verdicts. *)
-       let cold = Unix.gettimeofday () -. 900. in
-       Unix.utimes path cold cold;
        let before = sorted_dir_entries dir in
-       Alcotest.(check int)
-         "a non-canonical stem is outside the audit"
-         0
-         (List.length (Audit.sweep ~base_dir ~window_sec:3600. ()));
+       (* Settled per the registry: only the non-canonical stem can keep it
+          out of the verdicts. *)
+       let results, _ = sweep ~liveness:settled base_dir in
+       Alcotest.(check int) "a non-canonical stem is outside the audit" 0 (List.length results);
        Alcotest.(check (list string))
          "the sweep created no junk directory or file"
          before
@@ -497,9 +586,21 @@ let () =
         ] )
     ; ( "sweep"
       , [ Alcotest.test_case
-            "in-flight journals are skipped by the grace bound"
+            "reads by registry liveness, not file age"
             `Quick
-            test_sweep_skips_in_flight_journal
+            test_sweep_reads_by_registry_liveness_not_file_age
+        ; Alcotest.test_case
+            "audits each operation once"
+            `Quick
+            test_sweep_audits_each_operation_once
+        ; Alcotest.test_case
+            "reports an unanswered registry and retries"
+            `Quick
+            test_sweep_reports_unanswered_registry_and_retries
+        ; Alcotest.test_case
+            "reports an unreadable journal"
+            `Quick
+            test_sweep_reports_unreadable_journal
         ; Alcotest.test_case
             "non-canonical stems are skipped without side effects"
             `Quick

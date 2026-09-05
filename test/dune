@@ -3589,6 +3589,32 @@
  (libraries alcotest masc_tui_chart masc_tui_message_layout masc_tui_theme))
 
 (test
+ (name test_tui_render_metrics)
+ (modules test_tui_render_metrics)
+ (libraries
+  alcotest
+  masc
+  masc_test_deps
+  masc_types
+  masc_tui_chart
+  masc_tui_message_layout
+  masc_tui_render_metrics
+  masc_tui_theme
+  masc_tui_types))
+
+(test
+ (name test_tui_render_memory)
+ (modules test_tui_render_memory)
+ (libraries
+  alcotest
+  masc
+  masc_tui_message_layout
+  masc_tui_render_memory
+  masc_tui_theme
+  masc_tui_types  unix
+))
+
+(test
  (name test_tui_memory_facts_explorer)
  (modules test_tui_memory_facts_explorer)
  (libraries alcotest masc masc_tui_types))

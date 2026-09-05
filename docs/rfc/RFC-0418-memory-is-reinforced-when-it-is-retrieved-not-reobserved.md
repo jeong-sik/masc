@@ -86,6 +86,14 @@ reinforcement 로 센다" 고 적었지만 구현은 그 문장을 지키지 않
 새 맥락에서 불려 나오는 것이 강화이고, 같은 문장이 같은 자리에 다시 적히는 것은
 강화가 아니다.
 
+이 저장소의 6월 연구(`docs/research/2026-06-23-what-to-forget-keeper-memory-forgetting-policy.md`
+§5, §6)가 같은 선을 먼저 그었다: "재주입은 재관측이 아니다(ACT-R 함정)", "점수와 감쇠
+상수는 이론에서 나오지 않으니 넣지 않는다". 기성 제품과 2025–2026 논문이 강화를 무엇으로
+판단하는지는 `docs/research/2026-09-05-memory-reinforcement-signals-in-research-and-products.md`
+에 따로 정리했다. 요지는 둘이다. 회수를 사실 단위로 기록하는 제품은 거의 없고(MemoryBank
+만), "같은 뜻 다른 문장" 은 어디서나 쓰기 시점의 LLM 통합이 처리한다. masc 의 librarian 이
+그 자리다.
+
 masc 에 대응시키면:
 
 | 사람 | masc 의 사건 | 성격 |

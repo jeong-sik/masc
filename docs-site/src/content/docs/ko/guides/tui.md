@@ -8,12 +8,13 @@ description: masc-tui의 화면 구성, 네비게이션 단축키, 주요 서피
 ## 기본 실행
 
 ```bash
-# 바이너리 실행
-masc-tui
+# 바이너리 실행 — 서버가 쓰는 base-path 를 넘기세요
+# (새 터미널은 작업 공간이 아니라 홈에서 시작합니다)
+masc-tui --base-path ~/masc --port 8935
 
-# 소스 체크아웃 빌드 실행
-dune build --root . bin/masc_tui.exe
-./_build/default/bin/masc_tui.exe --base-path /path/to/project
+# 소스 체크아웃에서 빌드해 실행
+dune build bin/masc_tui.exe
+./_build/default/bin/masc_tui.exe --base-path ~/masc --port 8935
 ```
 
 서버가 실행되어 있지 않을 때 Keepers 화면에서 `s` 키를 누르면 로컬 `masc` 프로세스를 즉시 기동합니다.

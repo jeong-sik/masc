@@ -8,12 +8,13 @@ description: Surfaces, navigation keys, and operations in masc-tui.
 ## Launching
 
 ```bash
-# Installed binary
-masc-tui
+# Installed binary — pass the base path the server uses (a second terminal
+# starts in your home directory, not the workspace)
+masc-tui --base-path ~/masc --port 8935
 
-# Or from source checkout
-dune build --root . bin/masc_tui.exe
-./_build/default/bin/masc_tui.exe --base-path /path/to/project
+# Or from a source checkout
+dune build bin/masc_tui.exe
+./_build/default/bin/masc_tui.exe --base-path ~/masc --port 8935
 ```
 
 When no server is answering on port 8935, pressing `s` on the Keepers surface launches a child server process immediately.

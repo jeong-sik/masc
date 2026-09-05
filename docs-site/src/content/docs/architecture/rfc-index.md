@@ -16,7 +16,7 @@ The MASC architecture evolved through ~260 internal RFCs and empirical test runs
 
 ## 2. Concurrency Control & Atomic Claiming
 
-* **Atomic Claiming**: Secures exclusive task ownership through SQLite WAL transactions, preventing concurrent file overwrites across agents.
+* **Atomic Claiming**: Secures exclusive task ownership through compare-and-swap writes guarded by an `expected_version` on the append-only ledger, preventing concurrent file overwrites across agents.
 * **Shared Event Feed (Board)**: Asynchronous broadcast channel exchanging state, directives, and decision evidence between agents and operators.
 
 ---

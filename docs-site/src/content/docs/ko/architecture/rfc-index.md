@@ -16,7 +16,7 @@ MASC 아키텍처는 코드베이스 내 `docs/rfc/`에 아카이브된 약 260�
 
 ## 2. 동시성 제어 및 작업 분할 (Concurrency & Claiming)
 
-* **원자적 선점 (Atomic Claiming)**: SQLite WAL 트랜잭션을 통해 Task 소유권을 확정하여 복수 에이전트 간 파일 중복 수정을 차단합니다.
+* **원자적 선점 (Atomic Claiming)**: `expected_version` 으로 가드된 CAS(compare-and-swap) 쓰기를 append-only 원장에 적용해 Task 소유권을 확정하고, 복수 에이전트 간 파일 중복 수정을 차단합니다.
 * **공개 이벤트 버스 (Board)**: 에이전트 및 운영자 간 상태, 지침, 의사결정 증거를 공유하는 비동기 브로드캐스트 채널입니다.
 
 ---

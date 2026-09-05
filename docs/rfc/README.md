@@ -262,6 +262,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0419 | 스트림 반복 감지: 반복은 문단이 아니라 주기다 — 개행 없는 루프도 세 번째 반복에서 멈춘다 | Draft | - |
 | 0420 | 부팅은 store 를 격리하지 않고 거부한다 — 운영자가 명시하지 않는 한 | Draft | - |
 | 0421 | 관측 여부는 문자열이 아니라 셸 IR 로 정한다 — 파서가 이미 푼 것을 분류기가 다시 못 읽는 일을 끝낸다 | Draft | - |
+| 0422 | 실행기가 관측을 증명한다 — judge 는 상자가 거부한 것만 본다 | Draft | - |
 | 0423 | 실행 기록의 페이로드는 볼 때 읽는다 — 목록이 안 읽는 340MB 를 메모리에서 뺀다 | Draft | - |
 | 0424 | 판정 요청은 pending 상태의 것이다 — 끝난 후보가 186MB 를 붙들고 있다 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |

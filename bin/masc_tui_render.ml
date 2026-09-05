@@ -14562,11 +14562,16 @@ let render_code (state : state) =
           (* A folder keeps the "▸" it has always drawn; a file takes a
              type mark by extension. The colour is dropped on the selected
              row, where the selection band already owns the whole line and a
-             mid-line reset would tear a hole in it. *)
+             mid-line reset would tear a hole in it.
+
+             The folder mark takes the same slot as a code file, which is
+             the cyan it always had: both were bright cyan to the byte until
+             one of them started resolving through the theme and the other
+             did not, leaving two cyans in one column. *)
           let marker =
             if node.Masc.Tui_decode.wt_has_children then
               if selected then "\xe2\x96\xb8 "
-              else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "\xe2\x96\xb8 " ^ Ansi.reset
+              else (Theme.category Theme.Slot_1) ^ "\xe2\x96\xb8 " ^ Ansi.reset
             else
               let kind =
                 File_icon.kind_of_name node.Masc.Tui_decode.wt_label
@@ -14580,20 +14585,24 @@ let render_code (state : state) =
                      a theme could not reach: everything around it moved when
                      the terminal answered with its palette and these did not.
 
-                     Script and Media used to be magenta and bright magenta,
-                     one hue apart in a column where telling them apart is
-                     the whole job. They are now two slots apart.
+                     Six kinds and five slots, so Script and Media share
+                     one. They did before too -- magenta and bright magenta,
+                     a hue apart -- and the honest form of that is the same
+                     hue with two marks rather than two hues a reader cannot
+                     separate. Media had red for one commit, which is [bad]
+                     to the byte: a .png in the listing drew the same escape
+                     as the blame failure on its own half of the row.
 
-                     Plain keeps [dim] rather than a slot. It is the member
-                     that recedes, which is a weight and not a kind. *)
+                     Plain recedes through the theme rather than a constant
+                     [dim], for the same reason the six above it do. *)
                   match kind with
                   | File_icon.Code -> Theme.category Theme.Slot_1
                   | File_icon.Data -> Theme.category Theme.Slot_2
                   | File_icon.Prose -> Theme.category Theme.Slot_3
-                  | File_icon.Script -> Theme.category Theme.Slot_4
+                  | File_icon.Script | File_icon.Media ->
+                    Theme.category Theme.Slot_4
                   | File_icon.Web -> Theme.category Theme.Slot_5
-                  | File_icon.Media -> Theme.category Theme.Slot_6
-                  | File_icon.Plain -> Ansi.dim
+                  | File_icon.Plain -> Theme.recede ()
                 in
                 colour ^ glyph ^ Ansi.reset ^ " "
           in

@@ -151,8 +151,25 @@ let reserved_status_color_path_violations structure =
    masc_tui_ansi.ml still names them where the slots are built. *)
 let categorical_hue_segments =
   [ "blue"; "bright_blue"; "bright_cyan"; "bright_magenta"; "bright_yellow"
-  ; "bright_green"
+  ; "bright_green"; "bright_red"
   ]
+;;
+
+(* Deliberately open: [magenta] is still named at six sites in render.ml --
+   a goal phase, a sandbox, a change badge and two context readings -- and
+   each is an axis RFC-0427 has not moved yet. Closing the segment before
+   moving them would fail the guard rather than the code. *)
+let test_the_categorical_guard_rejects_a_raw_hue () =
+  let violations source =
+    source
+    |> parse_status_color_fixture
+    |> colour_path_violations ~reserved:(fun segment ->
+         List.mem segment categorical_hue_segments)
+  in
+  if violations "let _ = Ansi.bright_blue" = [] then
+    failf "the categorical guard let a raw hue through";
+  if violations "let _ = Theme.category Theme.Slot_5" <> [] then
+    failf "the categorical guard rejected a theme slot"
 ;;
 
 let test_tui_render_asks_the_theme_for_a_categorical_hue () =
@@ -2252,6 +2269,10 @@ let () =
           "TUI render asks the theme for a categorical hue"
           `Quick
           test_tui_render_asks_the_theme_for_a_categorical_hue;
+        test_case
+          "the categorical guard rejects a raw hue"
+          `Quick
+          test_the_categorical_guard_rejects_a_raw_hue;
         test_case
           "TUI ANSI status helpers use semantic Theme tokens"
           `Quick

@@ -29,9 +29,19 @@ type surface_snapshot = {
 (** One consistent view of a surface. The three timestamp triples are paired
     (ISO + Unix) so callers do not have to re-format on every render. *)
 
-type cached_surface = { mutable current : surface_snapshot }
-(** The cell that holds the current {!surface_snapshot}. Concrete because
-    dashboard tests construct and read surfaces directly
+type cached_surface_payload = {
+  json : Yojson.Safe.t;
+  raw_json : string;
+  etag : string;
+}
+(** Pre-rendered JSON AST, pre-serialized raw JSON string, and weak ETag for a surface. *)
+
+type cached_surface = {
+  mutable current : surface_snapshot;
+  mutable memoized_payload : (surface_snapshot * cached_surface_payload) option;
+}
+(** The cell that holds the current {!surface_snapshot} and an optional memoized
+    payload. Concrete because dashboard tests construct and read surfaces directly
     ({!Test_dashboard_namespace_truth}, {!Test_dashboard_http_core}).
     Every mutator replaces the whole snapshot in one write, so a reader can
     never observe a half-applied update. *)
@@ -97,6 +107,12 @@ val cached_surface_json : cached_surface -> Yojson.Safe.t
     surface — dashboard CSS keys off the literal [["initializing"]]
     / [["stale"]] / [["fresh"]] strings. *)
 
+
+val cached_surface_payload : cached_surface -> cached_surface_payload
+(** [cached_surface_payload s] returns the {!cached_surface_payload} for [s],
+    memoizing the serialized JSON and ETag across requests until the surface
+    transitions state. *)
+
 val cached_surface_or_first_success_json :
   cached_surface ->
   cache_key:string ->
@@ -115,6 +131,16 @@ val cached_surface_or_first_success_json :
     [Eio.Cancel.Cancelled] is re-raised verbatim (no error
     tracking) so a fiber cancellation does not pollute the surface
     with a synthetic error. *)
+
+val cached_surface_or_first_success_payload :
+  cached_surface ->
+  cache_key:string ->
+  ttl:float ->
+  clock:_ Eio.Time.clock ->
+  timeout_sec:float ->
+  (unit -> Yojson.Safe.t) ->
+  cached_surface_payload
+(** Like {!cached_surface_or_first_success_json} but returns the full {!cached_surface_payload}. *)
 
 (** {1 Assoc-list helper}
 

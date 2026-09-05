@@ -15,7 +15,7 @@ let dashboard_namespace_truth_http_json =
   Server_dashboard_http_namespace_truth.dashboard_namespace_truth_http_json
 ;;
 
-let dashboard_board_json
+let dashboard_board_payload
       ?config
       ?hearth
       ?author_filter
@@ -26,7 +26,7 @@ let dashboard_board_json
       ?(offset = 0)
       ?voter
       ()
-  : Yojson.Safe.t
+  : Dashboard_cache.cached_payload
   =
   let limit = clamp ~min_v:1 ~max_v:500 limit in
   let offset = clamp ~min_v:0 ~max_v:5000 offset in
@@ -49,7 +49,7 @@ let dashboard_board_json
       config_key
       (Option.value ~default:"-" voter)
   in
-  Dashboard_cache.get_or_compute cache_key ~ttl:dashboard_projection_cache_ttl_s (fun () ->
+  Dashboard_cache.get_or_compute_payload cache_key ~ttl:dashboard_projection_cache_ttl_s (fun () ->
     (* /api/v1/dashboard/board was measured at 30-44s on hot keeper
        fleets.  The compute below scans the post store, fetches the
        karma map, and per-post enriches with vote + contributor
@@ -114,7 +114,8 @@ let dashboard_board_json
         ]))
 ;;
 
-let dashboard_memory_http_json ?config request : Yojson.Safe.t =
+
+let dashboard_memory_http_payload ?config request : Dashboard_cache.cached_payload =
   let hearth = query_param request "hearth" in
   let author_filter =
     query_param request "author"
@@ -130,7 +131,7 @@ let dashboard_memory_http_json ?config request : Yojson.Safe.t =
     int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000
   in
   let voter = board_voter_query request in
-  dashboard_board_json
+  dashboard_board_payload
     ?config
     ?hearth
     ?author_filter
@@ -141,6 +142,10 @@ let dashboard_memory_http_json ?config request : Yojson.Safe.t =
     ~offset
     ?voter
     ()
+;;
+
+let dashboard_memory_http_json ?config request : Yojson.Safe.t =
+  (dashboard_memory_http_payload ?config request).json
 ;;
 
 

@@ -174,6 +174,7 @@ let execution_cache : cached_surface =
 
 let execution_default_light_cache_key = "execution:default:light"
 let execution_default_light_http_body : string option Atomic.t = Atomic.make None
+let execution_default_light_http_payload : (string * string) option Atomic.t = Atomic.make None
 let execution_publication_mu = Stdlib.Mutex.create ()
 let execution_publication_generation = ref 0
 let execution_publication_epoch =
@@ -190,7 +191,8 @@ let with_execution_publication_lock f =
 ;;
 
 let clear_execution_default_light_http_body () =
-  Atomic.set execution_default_light_http_body None
+  Atomic.set execution_default_light_http_body None;
+  Atomic.set execution_default_light_http_payload None
 ;;
 
 let execution_surface_has_fresh_success_unlocked () =
@@ -572,10 +574,12 @@ let execution_default_light_response_json ~config =
 
 let cache_execution_default_light_http_body_unlocked response_json =
   if execution_surface_has_fresh_success_unlocked ()
-  then
-    Atomic.set
-      execution_default_light_http_body
-      (Some (Yojson.Safe.to_string response_json))
+  then begin
+    let body = Yojson.Safe.to_string response_json in
+    let etag = Http_server_eio.Response.weak_etag_value body in
+    Atomic.set execution_default_light_http_body (Some body);
+    Atomic.set execution_default_light_http_payload (Some (body, etag))
+  end
   else clear_execution_default_light_http_body ()
 ;;
 
@@ -1063,6 +1067,22 @@ let dashboard_execution_cached_http_body ~state request =
     with_execution_publication_lock (fun () ->
       match Atomic.get execution_default_light_http_body with
       | Some body when execution_surface_has_fresh_success_unlocked () -> Some body
+      | Some _ | None -> None)
+  | _ -> None
+;;
+
+let dashboard_execution_cached_http_body_and_etag ~state request =
+  let config = Mcp_server.workspace_config state in
+  let fixture = query_param request "fixture" in
+  let actor = execution_actor_for_request ~base_path:config.base_path request in
+  let full_mode = bool_query_param request "full" ~default:false in
+  let force = bool_query_param request "force" ~default:false in
+  match fixture, actor, full_mode, force with
+  | None, None, false, false ->
+    with_execution_publication_lock (fun () ->
+      match Atomic.get execution_default_light_http_payload with
+      | Some (body, etag) when execution_surface_has_fresh_success_unlocked () ->
+          Some (body, etag)
       | Some _ | None -> None)
   | _ -> None
 ;;

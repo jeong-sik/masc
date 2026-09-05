@@ -27,8 +27,9 @@ related: []
 시켜서 tribute 의 재화를 생산한다. 두 arm 이 **대비가 지워지는 방향으로** 서로를 오염시킨다.
 여기에 모델을 고정할 수단이 없고 주입할 태스크 집합도 없다.
 
-그래서 이 문서의 결론은 설계가 아니라 **선행 조건 넷**이다(§5.7). 넷 다 파일을 고쳐서 되는
-일이고, 기능을 늘리는 것은 하나도 없다. 그 전에는 아무것도 seed 하지 않는다.
+그래서 이 문서의 결론은 설계가 아니라 **선행 조건 셋**이다(§5.7). 셋 다 파일을 고쳐서 되는
+일이고, 기능을 늘리는 것은 하나도 없다 — 받은 표를 세는 코드는 이미 있고 엔드포인트까지
+붙어 있다(§5.5). 그 전에는 아무것도 seed 하지 않는다.
 
 ## 1. 문제 — 실측
 
@@ -372,14 +373,52 @@ base path 6개 × keeper 4 = 24 keeper 가 공유 쿼터를 때리면 failover �
 
 | 값 | 출처 | 쓸 수 있나 |
 |---|---|---|
-| 던진 표 / 받은 표 | `board_votes.jsonl` `voter`, `target` | **주된 값** |
+| 던진 표 | `board_votes.jsonl` `voter` | **주된 값** |
+| 받은 표 | `GET /api/v1/karma` · `/api/v1/board/karma/ledger` | **주된 값** |
+| 자가 발행 비율 | 위 둘의 차 | **주된 값 — 아래** |
 | 태스크 착수 대비 완료 | `tasks-archive.json` | 보조 |
 | 물어본 횟수 | `.masc/keeper_ask/` `asked_at` | 보조 |
 | ~~답까지 걸린 시간~~ | ~~`answered_at - asked_at`~~ | **못 쓴다 — 아래** |
 
-`target` 은 글쓴이가 아니라 중복방지 키다. 실제 받은 쪽을 알려면 `board_posts.jsonl` 에
-조인해야 한다. 조인하면 live store 의 247표는 cross-vote 205, self-vote 3, 미해결 39(글 만료)
-로 갈린다. 조인 없이 읽으면 전부 self-vote 로 보인다.
+**받은 표를 세는 코드를 새로 쓰지 않는다. 이미 있다.**
+
+`board_votes.jsonl` 의 `target` 끝칸은 글쓴이가 아니라 던진 쪽이다(§5.7). 받은 쪽은 글과 댓글
+두 파일의 `author` 에 조인해야 나오는데, 그 조인이 `lib/board/board_votes.ml` 의
+`build_karma_ledger` 다. 그리고 그것을 두 엔드포인트가 이미 서빙한다 —
+`server_h2_gateway_routes_extra.mli:49-51`. base path 마다 `curl` 한 번이면 된다.
+
+맞는지 실측으로 맞춰 봤다. 손으로 두 파일 조인한 결과와 live `GET /api/v1/karma` 가 **에이전트
+단위로 전부 일치**한다.
+
+| | rondo | verifier_exact | code-reviewer | lane-smith | 합 |
+|---|---|---|---|---|---|
+| 손 조인(cross만) | 85 | 57 | 36 | 19 | 231 |
+| `/api/v1/karma` | 85 | 57 | 36 | 19 | 231 |
+
+**그리고 karma 는 자기 표를 안 쳐준다.** `board_votes.ml:885-888` 이 `recipient = voter` 일 때
+`None` 을 돌려주며 적어 둔다 — "content score 는 그 표를 그대로 세지만, karma 는 peer
+recognition 이라 self-upvote 는 평판을 만들지 않는다."
+
+이 구분이 approval 세계에 그대로 걸린다. 두 읽기가 갈린다:
+
+- 글 행의 `votes_up` — **자기 표가 들어간다.** 형제 문서 `world-presets-measurement.md:94` 가
+  가리킨 값이 이쪽이다.
+- karma — **빠진다.**
+
+live 실측: 247표 중 self-vote 16건(6.5%), 그중 **13건이 댓글 표**다(code-reviewer 6,
+lane-smith 4, rondo 3, analyst 2, taskmaster 1). 재화 유인이 하나도 없는 지금도 6.5% 가
+자연발생한다. 경로도 열려 있다 — `tool_catalog.ml:362-363` 이
+`masc_board_comment_vote` 를 `masc_board_vote` 와 같은 `vote_tool` 로 묶어서, 자기 글에 댓글을
+달고 그 댓글에 표를 주면 `votes_up` 이 는다.
+
+`world-approval` 은 받은 표를 값으로 삼는 세계이고 §5.2 는 잔고 검사를 안 두는 것이 실험
+자체라고 못 박았다. 그래서 **파일럿은 karma 를 주된 값으로 읽고, `votes_up` 과의 차를 자가
+발행 비율로 따로 적는다.** 그 비율 자체가 §5.2 가 물으려던 "지킬 수 있는 규칙을 지키는가"의
+approval 쪽 답이다.
+
+다만 이 지표는 **두 arm 에 비대칭**이다. tribute 쪽에는 대응물이 없다 — 준 표는 자기에게 줘도
+준 표라서 자가 발행이라는 개념이 성립하지 않는다. 그러니 arm 간 비교값이 아니라 approval
+arm 안에서만 읽는다.
 
 **답까지 걸린 시간은 세계 간 비교에 못 쓴다.** live 에서 답한 36건 전부
 `responder.surface = {kind: dashboard}` — 대시보드 앞의 한 사람이다. 중앙값 518초, 최대
@@ -430,8 +469,12 @@ cell B 의 답을 늦춘다. 무작위 배정으로도 안 깨지는 교란이�
 | `board_posts.jsonl` 만 | 205 | 3 | 39 (전부 댓글 표) |
 | `+ board_comments.jsonl` | 231 | 16 | **0** |
 
-247행 전부 받은 쪽이 붙는다. 상위 수신자는 rondo 80, verifier_exact 57, code-reviewer 33.
-그러니 "받은 표를 못 잰다"는 틀렸다. 조인이 필요할 뿐이고, 그것은 스크립트 한 장이다.
+247행 전부 받은 쪽이 붙는다(cross 기준 rondo 85, verifier_exact 57, code-reviewer 36).
+그러니 "받은 표를 못 잰다"는 틀렸다.
+
+**스크립트조차 필요 없다.** 그 조인이 `board_votes.ml` 의 `build_karma_ledger` 이고
+`GET /api/v1/karma` 가 이미 서빙한다. 손 조인 결과와 에이전트 단위로 전부 일치했다(§5.5).
+덤으로 그 코드는 self-vote 를 빼고 센다.
 §3.1 의 `approval` 행이 처음부터 "실재하나 읽는 법이 다름"이라고 맞게 적어 두었는데,
 앞선 판의 §5.7 이 자기 문서의 표와 어긋나게 썼다.
 
@@ -471,12 +514,14 @@ lane-smith 10. 나머지 3표는 `masc-tui`, 사람 쪽이다). 지연이 호출
 따르는 keeper 가 표를 0번 던지고, §5.6 이 그것을 "persona 가 재화를 눌렀다"로 적는다. 간판
 결론이 위양성으로 찍힌다 — §4 가 경고한 물건이 정확히 그것이다.
 
-먼저 있어야 하는 것, 순서대로. 넷 다 파일을 고치는 일이고 새 기능은 없다.
+먼저 있어야 하는 것. 셋 다 파일을 고치는 일이고 새 기능은 없다 — 넷째였던 조인 스크립트는
+확인해 보니 이미 있었다.
 
 1. 계측기 프리셋 두 개(`pilot-recv`/`pilot-give`). 도구 이름을 본문에 적고, 산문 없이, 한
    조항만 다르게.
-2. 받은 표 조인 스크립트. 표·댓글 두 파일을 물리고 base path 여럿을 한 번에 읽는다(§5.5).
-   위 실측이 그 스크립트의 첫 판이다.
+2. ~~받은 표 조인 스크립트~~ — **필요 없다.** `build_karma_ledger` 가 그 조인이고
+   `GET /api/v1/karma` 가 그것을 서빙한다. 손 조인과 에이전트 단위로 일치하는 것을
+   확인했다(§5.5). base path 마다 `curl` 한 번이다.
 3. base path 마다 `runtime.toml` 을 단일 슬롯으로 고정하는 절차. `scripts/seed-team.sh:81`
    이 keeper TOML 만 복사하므로 손으로 한다.
 4. 주입할 태스크 목록. 6개 base path 에 같은 것을 넣는다.

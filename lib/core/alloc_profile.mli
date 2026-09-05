@@ -86,9 +86,16 @@ val report : top:int -> report
 val report_to_yojson : report -> Yojson.Safe.t
 
 val key_of_callstack : Printexc.raw_backtrace -> string
-(** The site key for a call stack: at most {!callstack_frames} frames,
-    each formatted as [Printexc.Slot.format] does, one per line; a frame
+(** The site key for a call stack: of the top {!callstack_frames} frames,
+    the first {!frames_per_key} that are not Stdlib or Yojson frames, each
+    formatted as [Printexc.Slot.format] does, one per line. Those two
+    libraries are skipped because their frames say how a value was built
+    (a lexer recursion, a Bytes copy), not who asked for it, and they
+    multiply distinct stacks past any table bound; every other frame counts.
+    A stack made only of skipped frames keeps its top frames; a frame
     without debug information reads [<unknown>]. *)
+
+val frames_per_key : int
 
 val callstack_frames : int
 

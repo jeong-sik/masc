@@ -12080,7 +12080,7 @@ let memory_fact_row_line ~cols (row : Masc_tui_types.memory_fact_row) =
       let cat_style =
         match fact.mf_category with
         | "rule" | "rules" -> Theme.warn ()
-        | "persona" | "identity" -> Theme.accent ()
+        | "persona" | "identity" -> Theme.info ()
         | "preference" | "user" -> Theme.ok ()
         | "architecture" | "system" -> Theme.info ()
         | _ -> Theme.recede ()
@@ -12127,7 +12127,7 @@ let memory_fact_row_line ~cols (row : Masc_tui_types.memory_fact_row) =
         else path_raw
       in
       let pad = String.make (max 0 (16 - Message_layout.display_width path_str)) ' ' in
-      let path_badge = Printf.sprintf "%s%s%s%s" (Theme.accent ()) path_str pad Ansi.reset in
+      let path_badge = Printf.sprintf "%s%s%s%s" (Theme.info ()) path_str pad Ansi.reset in
       let prefix = Printf.sprintf "  %s   -   %s %s " cat_badge age_badge path_badge in
       let prefix_cells = 2 + 12 + 1 + 5 + 1 + 6 + 1 + 16 + 1 in
       let claim_budget = max 4 (inner_width - prefix_cells) in
@@ -12183,7 +12183,7 @@ let memory_fact_detail_lines ~cols (row : Masc_tui_types.memory_fact_row) =
         else if fact.mf_reinforcement >= 3 then " (Confirmed)"
         else " (Provisional)"
       in
-      [ Printf.sprintf "  %s%sFact Detail%s" Ansi.bold (Theme.accent ()) Ansi.reset ]
+      [ Printf.sprintf "  %s%sFact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
       @ claim_lines
       @ [ Printf.sprintf "    %sCategory:%s   %-15s %sReinforced:%s \xc3\x97%d%s"
             (Theme.recede ()) Ansi.reset fact.mf_category
@@ -12307,7 +12307,7 @@ let render_memory_facts (state : state) =
             let all_categories = Masc_tui_types.memory_fact_categories state in
             let pill_of_filter filt count is_active =
               let marker = if is_active then "\xe2\x97\x8f" else "\xe2\x97\x8b" in
-              let style = if is_active then Ansi.bold ^ Theme.accent () else Theme.recede () in
+              let style = if is_active then Ansi.bold ^ Theme.info () else Theme.recede () in
               let label = Masc_tui_types.memory_category_filter_label filt in
               Printf.sprintf "%s[%s %s: %d]%s" style marker label count Ansi.reset
             in

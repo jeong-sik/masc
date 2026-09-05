@@ -14,6 +14,12 @@ type error =
   | Bad_mcp_url of string
   | Transport of { url : string; detail : string }
   | Not_published of { url : string; status : int }
+      (** the endpoint answered 404: the metadata document is genuinely absent,
+          so the RFC 9728 §3 root fallback is worth trying *)
+  | Rejected of { url : string; status : int }
+      (** the endpoint answered a non-404 error (400/401/403/429/5xx…): it is
+          reachable and answered, but refused this request. The document is not
+          known to be absent, so "publishes no such metadata" would misread it *)
   | Malformed of { url : string; detail : string }
   | No_authorization_server of string
       (** the resource published metadata but named no authorization server *)

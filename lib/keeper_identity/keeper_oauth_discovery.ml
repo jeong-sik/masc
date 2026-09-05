@@ -5,6 +5,7 @@ type error =
   | Bad_mcp_url of string
   | Transport of { url : string; detail : string }
   | Not_published of { url : string; status : int }
+  | Rejected of { url : string; status : int }
   | Malformed of { url : string; detail : string }
   | No_authorization_server of string
 
@@ -15,6 +16,11 @@ let error_to_string = function
   | Not_published { url; status } ->
     Printf.sprintf "%s answered %d; this server publishes no such metadata" url
       status
+  | Rejected { url; status } ->
+    Printf.sprintf
+      "%s answered %d to the metadata request; it refused the request rather \
+       than reporting the document absent (a 404 would mean absent)"
+      url status
   | Malformed { url; detail } ->
     Printf.sprintf "%s answered with something unreadable: %s" url detail
   | No_authorization_server resource ->
@@ -114,8 +120,13 @@ let issuer_for_well_known issuer =
 let fetch_json ~get ~url =
   match get ~url with
   | Error detail -> Error (Transport { url; detail })
+  (* 404 is the one status RFC 9728 §3 treats as "not here, try the root". Every
+     other non-2xx means the server answered and refused the request, which is
+     not the document being absent -- keeping them apart stops a 400/401/5xx from
+     being reported as "publishes no such metadata". *)
+  | Ok (404, _) -> Error (Not_published { url; status = 404 })
   | Ok (status, _) when status < 200 || status >= 300 ->
-    Error (Not_published { url; status })
+    Error (Rejected { url; status })
   | Ok (_, body) ->
     (match Yojson.Safe.from_string body with
      | exception Yojson.Json_error detail -> Error (Malformed { url; detail })
@@ -151,9 +162,12 @@ let fetch_with_root_fallback ~get ~url ~segment ~base_url =
        else
          (match fetch_json ~get ~url:root_url with
           | Ok pairs -> Ok pairs
-          | Error (Not_published _ | Transport _ | Malformed _
+          | Error (Not_published _ | Rejected _ | Transport _ | Malformed _
                  | Bad_mcp_url _ | No_authorization_server _) ->
             orig_error))
+  (* A non-404 answer is not the "try the root" case: the endpoint is there and
+     refused this request, so retrying the root would only repeat it. *)
+  | Error (Rejected _ as err) -> Error err
   | Error (Bad_mcp_url _ as err) -> Error err
   | Error (Transport _ as err) -> Error err
   | Error (Malformed _ as err) -> Error err

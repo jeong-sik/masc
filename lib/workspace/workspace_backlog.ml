@@ -119,9 +119,19 @@ let read_backlog_with_source_r config =
          passed, poisoning hits until the next write. Stat before the read
          too and only register when nothing changed across it. *)
       let stat_before = file_stat_opt path in
-      match read_json_result config path with
-      | Ok json ->
-          let decoded = decode_backlog ~path json in
+      (* The miss path — the read, the JSON parse and the typed decode of a
+         file that is 2 MB on a live root — runs as one job on the domain
+         pool when one is installed and inline otherwise. Every keeper wake
+         reads the backlog and every writer's commit clears this cache, so on
+         a busy fleet most reads miss; on the calling fiber each miss held
+         the main domain about 60 ms (RFC main-domain-scheduler-latency
+         §8.8). The stats stay on the fiber: they order the cache
+         registration against a concurrent commit, not the decode. *)
+      match
+        Domain_pool_ref.submit_cpu_or_inline (fun () ->
+          Result.map (fun json -> decode_backlog ~path json) (read_json_result config path))
+      with
+      | Ok decoded ->
           (match decoded with
           | Ok backlog ->
               (match (stat_before, file_stat_opt path) with

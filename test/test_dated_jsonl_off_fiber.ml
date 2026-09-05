@@ -44,12 +44,7 @@ let read_everything store day_file =
       | _ -> None)
   in
   let tail = Dated_jsonl.load_tail_lines day_file ~max_lines:2 in
-  let tail_strict =
-    match Dated_jsonl.load_tail_lines_result day_file ~max_lines:2 with
-    | Ok lines -> lines
-    | Error error -> [ "error:" ^ Dated_jsonl.read_error_to_string error ]
-  in
-  [ recent; offset; strict; filtered; tail; tail_strict ]
+  [ recent; offset; strict; filtered; tail ]
 ;;
 
 let with_pool env f =
@@ -74,7 +69,7 @@ let test_pool_and_inline_read_the_same () =
   let pooled = with_pool env (fun () -> read_everything store day_file) in
   check (list (list string)) "pooled reads equal inline reads" inline pooled;
   (match inline with
-   | [ recent; _; strict; filtered; tail; _ ] ->
+   | [ recent; _; strict; filtered; tail ] ->
      check (list string) "newest two parsed rows, oldest first"
        [ {|{"n":2}|}; {|{"n":3}|} ] recent;
      check int "strict read counts the malformed row" 4 (List.length strict);

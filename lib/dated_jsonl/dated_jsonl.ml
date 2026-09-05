@@ -701,10 +701,6 @@ let load_tail_lines_result_inline path ~max_lines =
              Error (Io_error { operation = Read_file; path; detail }))
 ;;
 
-let load_tail_lines_result path ~max_lines =
-  off_fiber (fun () -> load_tail_lines_result_inline path ~max_lines)
-;;
-
 let recent_entry_of_line ~path ?line_number line =
   match Yojson.Safe.from_string line with
   | json -> Parsed json

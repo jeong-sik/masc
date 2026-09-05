@@ -78,6 +78,22 @@ val microvm_guest_absence_reason :
     microvm -- in each of those the caller keeps its own error rather than
     replacing it with a guess. *)
 
+val is_microvm_guest_booted :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  unit ->
+  bool
+(** Pure in-memory check: returns true if this server process has booted the
+    microVM guest and prepared its work volume root. Returns false if the keeper
+    is not Micro_vm or has not been booted yet in this process lifetime. *)
+
+val forget_microvm_guest_booted :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  unit ->
+  unit
+(** Evicts the guest from the booted set (e.g. after it was observed stopped or dead). *)
+
 module For_testing : sig
   val create_minimal
     :  config:Workspace.config
@@ -115,6 +131,12 @@ module For_testing_microvm : sig
       is: a test that boots a guest has to be able to name the one it booted,
       and the mode belongs in that name so a guest from one policy is never
       adopted under another. *)
+
+  val mark_microvm_guest_booted
+    :  config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> unit
+    -> unit
 end
 
 val container_path_of_host :

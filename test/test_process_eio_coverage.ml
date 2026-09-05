@@ -1071,6 +1071,33 @@ let test_parent_cancel_during_the_reap_grace_returns () =
       (elapsed < reap_return_bound_seconds)
 ;;
 
+let test_run_argv_with_stdin_held_open_handles_early_closed_pipe () =
+  with_runtime_reset @@ fun () ->
+  let stdin_content = String.make 65536 'x' in
+  let status, _stdout, stderr =
+    Process_eio.run_argv_with_stdin_held_open_and_status_split
+      ~stdin_content
+      [ "/bin/sh"; "-c"; "echo reader_died >&2; exit 2" ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> -1 in
+  check int "exit status preserved on early reader exit" 2 code;
+  check bool "stderr captured from early-exiting child" true
+    (contains stderr "reader_died")
+;;
+
+let test_run_argv_with_stdin_held_open_preserves_open_pipe () =
+  with_runtime_reset @@ fun () ->
+  let status, stdout, stderr =
+    Process_eio.run_argv_with_stdin_held_open_and_status_split
+      ~stdin_content:"hello_stream\n"
+      [ "/bin/sh"; "-c"; "read line; echo \"got:$line\"" ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> -1 in
+  check int "exit status 0" 0 code;
+  check string "stderr empty" "" stderr;
+  check bool "stdout captured" true (contains stdout "got:hello_stream")
+;;
+
 let () =
   run "Process_eio coverage"
     [
@@ -1182,6 +1209,12 @@ let () =
              test_capture_leaves_small_stdout_untouched;
            test_case "exit-reason-classifies-the-timeout-status" `Quick
              test_exit_reason_classifies_the_timeout_status;
+            test_case "run_argv_with_stdin_held_open-handles-early-closed-pipe"
+              `Quick
+              test_run_argv_with_stdin_held_open_handles_early_closed_pipe;
+            test_case "run_argv_with_stdin_held_open-preserves-open-pipe"
+              `Quick
+              test_run_argv_with_stdin_held_open_preserves_open_pipe;
          ] );
       ( "cancellation-grace",
         [

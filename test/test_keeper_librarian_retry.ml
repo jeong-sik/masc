@@ -70,6 +70,14 @@ let new_claim ?(claim = "add C") () =
     ]
 ;;
 
+let superseding_claim ?(claim = "B, corrected") supersedes () =
+  `Assoc
+    [ Librarian.wire_field_claim, `String claim
+    ; Librarian.wire_field_category, `String "fact"
+    ; Librarian.wire_field_supersedes, supersedes
+    ]
+;;
+
 let dropped_json ?(reason = "superseded by newer state") id =
   `Assoc
     [ Librarian.wire_field_memory_id, `String id
@@ -115,6 +123,55 @@ let test_omission_deletes_and_retention_preserves_exact_fact () =
     check string "drop statement carries the reason"
       "superseded by newer state"
       (List.hd selection.dropped).reason
+;;
+
+(* RFC-0418: a new claim that continues a dropped memory names it with
+   [supersedes]; the parser translates the short id and pairs the two by exact
+   memory id. The old memory must be in [dropped] in the same answer, and it
+   must exist. Null or absent is a claim that continues nothing. *)
+let test_supersedes_links_a_new_claim_to_the_memory_it_drops () =
+  match parse (selection_json ~new_claims:[ superseding_claim (`String "m2") () ] ()) with
+  | Error error -> failf "supersede rejected: %s" (Librarian.parse_error_to_string error)
+  | Ok selection ->
+    let expected_new = Memory.memory_id (fact ~claim:"B, corrected") in
+    check (list (pair string string)) "one revision, old id to new id"
+      [ current_b_id, expected_new ]
+      (List.map
+         (fun (r : Librarian.revision) -> r.superseded, r.superseded_by)
+         selection.revisions);
+    check int "the new claim is still materialized" 2 (List.length selection.facts)
+;;
+
+let test_supersedes_without_a_link_records_no_revision () =
+  match parse (selection_json ~new_claims:[ superseding_claim `Null () ] ()) with
+  | Error error -> failf "null supersedes rejected: %s" (Librarian.parse_error_to_string error)
+  | Ok selection -> check int "no revision" 0 (List.length selection.revisions)
+;;
+
+let test_supersedes_must_name_a_dropped_memory () =
+  match parse (selection_json ~new_claims:[ superseding_claim (`String "m1") () ] ()) with
+  | Error (Librarian.Supersedes_not_dropped identity) ->
+    check string "names the retained memory by exact id" current_a_id identity
+  | Error error ->
+    failf "wrong rejection: %s" (Librarian.parse_error_to_string error)
+  | Ok _ -> fail "a supersede of a retained memory must be rejected"
+;;
+
+let test_supersedes_must_name_a_known_memory () =
+  match parse (selection_json ~new_claims:[ superseding_claim (`String "m9") () ] ()) with
+  | Error (Librarian.Supersedes_unknown_memory_id token) ->
+    check string "names the token it could not translate" "m9" token
+  | Error error ->
+    failf "wrong rejection: %s" (Librarian.parse_error_to_string error)
+  | Ok _ -> fail "an unknown short id must be rejected"
+;;
+
+let test_supersedes_must_be_a_string_or_null () =
+  match parse (selection_json ~new_claims:[ superseding_claim (`Int 2) () ] ()) with
+  | Error Librarian.Claim_schema_mismatch -> ()
+  | Error error ->
+    failf "wrong rejection: %s" (Librarian.parse_error_to_string error)
+  | Ok _ -> fail "a non-string supersedes must reject the claim"
 ;;
 
 let test_new_claim_is_materialized_after_retained_facts () =
@@ -1015,6 +1072,16 @@ let () =
             test_omission_deletes_and_retention_preserves_exact_fact
         ; test_case "new claim materialized" `Quick
             test_new_claim_is_materialized_after_retained_facts
+        ; test_case "supersedes links a new claim to the memory it drops" `Quick
+            test_supersedes_links_a_new_claim_to_the_memory_it_drops
+        ; test_case "null supersedes records no revision" `Quick
+            test_supersedes_without_a_link_records_no_revision
+        ; test_case "supersedes must name a dropped memory" `Quick
+            test_supersedes_must_name_a_dropped_memory
+        ; test_case "supersedes must name a known memory" `Quick
+            test_supersedes_must_name_a_known_memory
+        ; test_case "supersedes must be a string or null" `Quick
+            test_supersedes_must_be_a_string_or_null
         ; test_case "new claim names the board post it was read from" `Quick
             test_new_claim_carries_board_provenance
         ; test_case "a board id the Board would not accept rejects the claim" `Quick

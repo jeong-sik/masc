@@ -259,21 +259,18 @@ let ordinary_memory_ids (matches : fact_match list) =
    reported in the log and does not change it. *)
 let record_memory_events ~keepers_dir ~(meta : keeper_meta) ~now ~kind memory_ids =
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-  List.iter
-    (fun memory_id ->
-       match
-         Keeper_memory_os_events.append
-           ~keepers_dir
-           ~keeper_id:meta.name
-           { recorded_at = now; memory_id; trace_id; kind }
-       with
-       | Ok () -> ()
-       | Error error ->
-         Log.Keeper.warn
-           ~keeper_name:meta.name
-           "%s"
-           (Keeper_memory_os_events.append_error_to_string error))
-    memory_ids
+  Keeper_memory_os_events.append_all
+    ~keepers_dir
+    ~keeper_id:meta.name
+    (List.map
+       (fun memory_id : Keeper_memory_os_events.event ->
+          { recorded_at = now; memory_id; trace_id; kind })
+       memory_ids)
+  |> List.iter (fun error ->
+    Log.Keeper.warn
+      ~keeper_name:meta.name
+      "%s"
+      (Keeper_memory_os_events.append_error_to_string error))
 ;;
 
 (* --- Unified keeper_memory_search dispatch --- *)

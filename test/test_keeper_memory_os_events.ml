@@ -212,6 +212,25 @@ let test_append_refuses_what_read_would_refuse () =
     (Sys.file_exists (Events.path_for_keepers_dir ~keepers_dir ~keeper_id))
 ;;
 
+let test_append_all_returns_only_the_failures () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let keeper_id = "keeper" in
+  let failures =
+    Events.append_all ~keepers_dir ~keeper_id
+      [ retrieved ~at:1. "first"
+      ; retrieved ~memory_id:"not-an-id" ~at:2. "bad"
+      ; cited ~at:3. "keeper_memory_retract"
+      ]
+  in
+  check int "one failure back" 1 (List.length failures);
+  (match failures with
+   | [ Events.Invalid_event error ] ->
+     check_names "the failure names the field" "memory_id" (Types.wire_error_to_string error)
+   | _ -> fail "expected the invalid event's own rejection");
+  check int "the valid ones were written" 2
+    (List.length (events_only (Events.read ~keepers_dir ~keeper_id)))
+;;
+
 (* ---------- projection ---------- *)
 
 let test_summary_counts_only_this_fact () =
@@ -261,6 +280,8 @@ let () =
         ; test_case "an unreadable line stays in the list" `Quick test_unreadable_line_stays_in_the_list
         ; test_case "append refuses what read would refuse" `Quick
             test_append_refuses_what_read_would_refuse
+        ; test_case "append_all returns only the failures" `Quick
+            test_append_all_returns_only_the_failures
         ] )
     ; ( "projection"
       , [ test_case "the summary counts only this fact" `Quick test_summary_counts_only_this_fact

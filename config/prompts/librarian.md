@@ -196,7 +196,8 @@ category에서 생략합니다. 범위 결정, 대기 방침, "언급될 때만 
       "claim": "사실을 담은 한 문장.",
       "category": "code_change|fact|preference|blocker|goal|constraint|validated_approach|lesson",
       "board_post_id": "이 claim 을 읽은 Board 글의 post_id (도구 결과에 있는 p-… 값 그대로). Board 에서 읽은 지식이 아니면 null.",
-      "board_comment_id": "그 글의 댓글에서 읽었으면 comment_id, 아니면 null. board_post_id 가 null 이면 이것도 null."
+      "board_comment_id": "그 글의 댓글에서 읽었으면 comment_id, 아니면 null. board_post_id 가 null 이면 이것도 null.",
+      "supersedes": "이 claim 이 고쳐 잇는 옛 기억의 짧은 기억 ID (예: m2). 그 ID 는 dropped 에도 있어야 합니다. 잇는 기억이 없으면 null."
     }
   ],
   "dropped": [
@@ -209,6 +210,10 @@ category에서 생략합니다. 범위 결정, 대기 방침, "언급될 때만 
 
 기존 기억 ID는 각각 retained_memory_ids 또는 dropped 중 정확히 한 곳에
 들어갑니다. 버릴 것이 없으면 "dropped"는 빈 배열입니다.
+
+새 claim 이 옛 기억을 고친 것(같은 사실의 새 상태)이면 그 옛 기억을 dropped 에
+넣고, 새 claim 의 supersedes 에 그 짧은 ID 를 적습니다. 기록은 그 둘이 이어진
+것으로 남습니다. 옛 기억을 그대로 두면서 supersedes 를 적는 답은 거부됩니다.
 
 당신이 기억을 선별해 주는 Keeper의 instructions:
 {{keeper_instructions}}

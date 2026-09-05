@@ -13,6 +13,7 @@ let wire_field_origin = "origin"
 let wire_field_memory_id = "memory_id"
 let wire_field_reason = "reason"
 let wire_field_basis = "basis"
+let wire_field_supersedes = "supersedes"
 let wire_field_kind = "kind"
 let wire_field_derivations = "derivations"
 let wire_field_board = "board"
@@ -249,6 +250,7 @@ let wire_librarian_claim_fields =
   ; wire_field_category
   ; wire_field_board_post_id
   ; wire_field_board_comment_id
+  ; wire_field_supersedes
   ]
 ;;
 

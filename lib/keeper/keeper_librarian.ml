@@ -32,11 +32,20 @@ type input =
   ; counterpart_observations : Keeper_counterpart_observation.t list
   }
 
+(* A new claim that continues a dropped memory: the librarian said so with
+   [supersedes], and the parser checked that the old id exists and is in
+   [dropped]. Recorded as a [Revised] event on the old id (RFC-0418). *)
+type revision =
+  { superseded : string
+  ; superseded_by : string
+  }
+
 type selection =
   { retained_memory_ids : string list
   ; new_claims : fact list
   ; dropped : dropped_statement list
   ; facts : fact list
+  ; revisions : revision list
   }
 
 let wire_field_retained_memory_ids = "retained_memory_ids"
@@ -46,6 +55,7 @@ let wire_field_claim = Keeper_memory_os_types.wire_field_claim
 let wire_field_category = Keeper_memory_os_types.wire_field_category
 let wire_field_memory_id = Keeper_memory_os_types.wire_field_memory_id
 let wire_field_reason = Keeper_memory_os_types.wire_field_reason
+let wire_field_supersedes = Keeper_memory_os_types.wire_field_supersedes
 let wire_claim_fields = Keeper_memory_os_types.wire_librarian_claim_fields
 let wire_dropped_fields = Keeper_memory_os_types.wire_librarian_dropped_fields
 let wire_current_fields =
@@ -238,6 +248,8 @@ type parse_error =
   | Duplicate_dropped_memory_id of string
   | Dropped_memory_id_also_retained of string
   | Missing_disposition of string
+  | Supersedes_unknown_memory_id of string
+  | Supersedes_not_dropped of string
 
 let parse_error_to_string = function
   | Top_level_not_object -> "top_level_not_object"
@@ -259,6 +271,8 @@ let parse_error_to_string = function
   | Dropped_memory_id_also_retained identity ->
     "dropped_memory_id_also_retained: " ^ identity
   | Missing_disposition identity -> "missing_disposition: " ^ identity
+  | Supersedes_unknown_memory_id token -> "supersedes_unknown_memory_id: " ^ token
+  | Supersedes_not_dropped identity -> "supersedes_not_dropped: " ^ identity
 ;;
 
 let fact_of_json ~now (json : Yojson.Safe.t) : fact option =
@@ -319,6 +333,26 @@ let fact_of_json ~now (json : Yojson.Safe.t) : fact option =
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 
+(* [supersedes] names, by its short id, the dropped memory this claim
+   continues. Absent or null is a claim that continues nothing. Any other
+   value that is not a non-blank string rejects the claim like any other
+   malformed field. Whether the id exists and was dropped is checked once the
+   ids are translated, where that answer lives. *)
+let new_claim_of_json ~now (json : Yojson.Safe.t) : (fact * string option) option =
+  match fact_of_json ~now json, json with
+  | Some fact, `Assoc fields ->
+    (match List.assoc_opt wire_field_supersedes fields with
+     | None | Some `Null -> Some (fact, None)
+     | Some (`String raw) ->
+       (match trim_nonempty raw with
+        | Some token -> Some (fact, Some token)
+        | None -> None)
+     | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _) -> None)
+  | None, _ -> None
+  | Some _, (`Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _) ->
+    None
+;;
+
 let claim_field_error = function
   | `Assoc fields -> first_object_field_error ~allowed:wire_claim_fields fields
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
@@ -376,6 +410,31 @@ let translate_dropped_ids ~by_surrogate dropped =
        | None -> Error (Unknown_dropped_memory_id statement.memory_id))
   in
   loop [] dropped
+;;
+
+(* A revision pairs the dropped memory with the claim that continues it. The
+   old id has to be one the librarian saw and dropped in this same answer: a
+   supersede of a retained memory would keep both versions, and one of an
+   unknown id names nothing. *)
+let translate_revisions ~by_surrogate ~(dropped : dropped_statement list) pairs =
+  let dropped_ids =
+    List.fold_left
+      (fun set (statement : dropped_statement) -> String_set.add statement.memory_id set)
+      String_set.empty
+      dropped
+  in
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | (_, None) :: rest -> loop acc rest
+    | (fact, Some token) :: rest ->
+      (match String_map.find_opt token by_surrogate with
+       | None -> Error (Supersedes_unknown_memory_id token)
+       | Some superseded ->
+         if String_set.mem superseded dropped_ids
+         then loop ({ superseded; superseded_by = memory_id fact } :: acc) rest
+         else Error (Supersedes_not_dropped superseded))
+  in
+  loop [] pairs
 ;;
 
 let current_facts inp =
@@ -484,10 +543,11 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
                 Error (Duplicate_field field)
               | None ->
                 (match
-                   traverse (fact_of_json ~now) claim_items
+                   traverse (new_claim_of_json ~now) claim_items
                    , traverse dropped_statement_of_json dropped_items
                  with
-                 | Some new_claims, Some dropped ->
+                 | Some new_claim_pairs, Some dropped ->
+                   let new_claims = List.map fst new_claim_pairs in
                    let by_surrogate =
                      surrogate_identity_map (current_facts inp)
                    in
@@ -506,12 +566,18 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
                           ~dropped
                       with
                       | Ok facts ->
-                        Ok
-                          { retained_memory_ids
-                          ; new_claims
-                          ; dropped
-                          ; facts
-                          }
+                        (match
+                           translate_revisions ~by_surrogate ~dropped new_claim_pairs
+                         with
+                         | Ok revisions ->
+                           Ok
+                             { retained_memory_ids
+                             ; new_claims
+                             ; dropped
+                             ; facts
+                             ; revisions
+                             }
+                         | Error _ as error -> error)
                     | Error _ as error -> error)
                    | (Error _ as error), _ | _, (Error _ as error) -> error)
                  | Some _, None -> Error Dropped_schema_mismatch

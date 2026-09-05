@@ -46,6 +46,8 @@ type context_fit_admission = Agent_types.context_fit_admission =
 type model_input_projection = Agent_types.model_input_projection
 type pre_dispatch_serialization_observer = Agent_types.pre_dispatch_serialization_observer
 
+type serialization_executor = Agent_types.serialization_executor = { run : 'a. (unit -> 'a) -> 'a }
+
 type options = Agent_types.options =
   { provider_config : Llm_provider.Provider_config.t option
   ; stream_idle_timeout_s : float option
@@ -136,7 +138,11 @@ val agent_core_version : string
 
     [pre_dispatch_serialization_observer] receives metadata-only evidence for
     the admitted provider body before built-in HTTP dispatch is attempted. It
-    does not prove that transport dispatch started or completed. *)
+    does not prove that transport dispatch started or completed.
+
+    [serialization_executor] runs the serialisation of each admitted provider
+    body, which walks every message in the request. Supply one that runs on
+    another domain to keep the caller's scheduler free of that walk. *)
 val create
   :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> config:Types.agent_config
@@ -146,6 +152,7 @@ val create
   -> ?context_fit_admission:context_fit_admission
   -> ?model_input_projection:model_input_projection
   -> ?pre_dispatch_serialization_observer:pre_dispatch_serialization_observer
+  -> ?serialization_executor:serialization_executor
   -> ?checkpoint_sink:checkpoint_sink
   -> unit
   -> t
@@ -605,6 +612,7 @@ val resume
   -> ?context_fit_admission:context_fit_admission
   -> ?model_input_projection:model_input_projection
   -> ?pre_dispatch_serialization_observer:pre_dispatch_serialization_observer
+  -> ?serialization_executor:serialization_executor
   -> ?checkpoint_sink:checkpoint_sink
   -> ?config:Types.agent_config
   -> unit

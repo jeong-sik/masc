@@ -872,6 +872,13 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                Diagnostic only: AGENT_CORE reports a rejection or a raised callback as
                typed failure evidence and does not rewrite the provider
                result. *)
+            (* Serialising the admitted body walks every message in the request,
+               on every provider request of the turn; on a live keeper that held
+               the main domain for 168-229 ms at a time (RFC
+               main-domain-scheduler-latency section 8.8). The pool runs it; the
+               closure reads immutable request values only. *)
+          ; serialization_executor =
+              Some { Agent_core.Agent.run = Domain_pool_ref.submit_cpu_or_inline }
           ; pre_dispatch_serialization_observer =
               Some
                 (fun observation ->

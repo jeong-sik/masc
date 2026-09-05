@@ -394,42 +394,77 @@ let default_capture =
   }
 ;;
 
+(* The keys [\[voice.capture\]] accepts. Anything else is refused by name,
+   the way an endpoint's fields are: a misspelt knob that parsed as "absent,
+   so the default" left an operator turning a dial that was not connected. *)
+let capture_fields =
+  [ "calibration_seconds"
+  ; "trigger_margin_db"
+  ; "trailing_silence_seconds"
+  ; "speech_margin_db"
+  ; "noise_reduction"
+  ]
+
 let parse_capture json =
+  let ctx = "root.capture" in
   match Json_util.assoc_member_opt "capture" json with
   | Some (`Assoc _ as capture_json) ->
+      let open Result in
+      let* () = reject_unknown_fields ~ctx ~allowed:capture_fields capture_json in
+      (* Absent means the measured default. Present means it must be the
+         type the key takes: a string where a number is meant, or a null, is
+         not a value this can act on and is not silently the default. An int
+         where a float is meant is what an operator types and is accepted. *)
       let number key ~default =
         match Json_util.assoc_member_opt key capture_json with
-        | Some (`Float v) -> v
-        | Some (`Int v) -> float_of_int v
-        | Some _ | None -> default
+        | None -> Ok default
+        | Some (`Float v) -> Ok v
+        | Some (`Int v) -> Ok (float_of_int v)
+        | Some other ->
+            Error
+              (Printf.sprintf "%s.%s must be a number, got %s: %s" ctx key
+                 (Json_util.kind_name other) (Json_util.excerpt other))
       in
-      let calibration_seconds =
+      let boolean key ~default =
+        match Json_util.assoc_member_opt key capture_json with
+        | None -> Ok default
+        | Some (`Bool v) -> Ok v
+        | Some other ->
+            Error
+              (Printf.sprintf "%s.%s must be a boolean, got %s: %s" ctx key
+                 (Json_util.kind_name other) (Json_util.excerpt other))
+      in
+      let* calibration_seconds =
         number "calibration_seconds" ~default:default_capture.calibration_seconds
       in
-      (* A probe of zero length measures nothing and would hand the filter a
-         threshold derived from an empty file. *)
-      let trailing_silence_seconds =
+      let* trailing_silence_seconds =
         number
           "trailing_silence_seconds"
           ~default:default_capture.trailing_silence_seconds
       in
+      let* trigger_margin_db =
+        number "trigger_margin_db" ~default:default_capture.trigger_margin_db
+      in
+      let* speech_margin_db =
+        number "speech_margin_db" ~default:default_capture.speech_margin_db
+      in
+      let* noise_reduction =
+        boolean "noise_reduction" ~default:default_capture.noise_reduction
+      in
+      (* A probe of zero length measures nothing and would hand the capture a
+         threshold derived from an empty file. *)
       if calibration_seconds <= 0.0 then
-        Error "root.capture.calibration_seconds must be greater than zero"
+        Error (ctx ^ ".calibration_seconds must be greater than zero")
       else if trailing_silence_seconds <= 0.0 then
         (* Zero would stop the capture on the first gap between two words. *)
-        Error "root.capture.trailing_silence_seconds must be greater than zero"
+        Error (ctx ^ ".trailing_silence_seconds must be greater than zero")
       else
         Ok
           { calibration_seconds
           ; trailing_silence_seconds
-          ; trigger_margin_db =
-              number "trigger_margin_db" ~default:default_capture.trigger_margin_db
-          ; speech_margin_db =
-              number "speech_margin_db" ~default:default_capture.speech_margin_db
-          ; noise_reduction =
-              Option.value
-                ~default:default_capture.noise_reduction
-                (Json_util.get_bool capture_json "noise_reduction")
+          ; trigger_margin_db
+          ; speech_margin_db
+          ; noise_reduction
           }
   | None | Some `Null -> Ok default_capture
   | Some other ->

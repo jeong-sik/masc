@@ -502,6 +502,50 @@ let test_a_zero_calibration_is_refused () =
       (String_util.string_contains_substring ~needle:"calibration_seconds" message)
 ;;
 
+(* The section is read as strictly as an endpoint is. It used to take any
+   value it could not read as "absent, so the default": a knob spelt
+   [trigger_margin] instead of [trigger_margin_db], or given as the string
+   "6", parsed clean and changed nothing, and the operator turning it had no
+   way to tell. *)
+let test_an_unknown_capture_key_is_refused_by_name () =
+  match
+    Vc.parse_json (config_with [ "capture", `Assoc [ "trigger_margin", `Float 6.0 ] ])
+  with
+  | Ok _ -> fail "a capture key the parser does not know must be refused"
+  | Error message ->
+    check bool "the rejection names the key" true
+      (String_util.string_contains_substring ~needle:"root.capture.trigger_margin" message)
+;;
+
+let test_a_capture_number_of_the_wrong_type_is_refused () =
+  List.iter
+    (fun (key, value) ->
+       match Vc.parse_json (config_with [ "capture", `Assoc [ key, value ] ]) with
+       | Ok _ -> failf "%s given as %s must be refused" key (Yojson.Safe.to_string value)
+       | Error message ->
+         check bool
+           (Printf.sprintf "%s: the rejection names the key and the type wanted" key)
+           true
+           (String_util.string_contains_substring ~needle:("root.capture." ^ key) message
+            && String_util.string_contains_substring ~needle:"number" message))
+    [ "trigger_margin_db", `String "6"
+    ; "calibration_seconds", `Bool true
+    ; "trailing_silence_seconds", `Null
+    ; "speech_margin_db", `List [ `Float 4.0 ]
+    ]
+;;
+
+let test_a_capture_boolean_of_the_wrong_type_is_refused () =
+  match
+    Vc.parse_json (config_with [ "capture", `Assoc [ "noise_reduction", `String "yes" ] ])
+  with
+  | Ok _ -> fail "a string where a boolean is meant must be refused"
+  | Error message ->
+    check bool "the rejection names the key and the type wanted" true
+      (String_util.string_contains_substring ~needle:"root.capture.noise_reduction" message
+       && String_util.string_contains_substring ~needle:"boolean" message)
+;;
+
 let test_gate_defaults_when_absent () =
   match Vc.parse_json (config_with []) with
   | Error message -> fail message
@@ -570,6 +614,12 @@ let () =
             `Quick test_a_partial_capture_section_keeps_the_rest;
           test_case "a zero calibration is refused"
             `Quick test_a_zero_calibration_is_refused;
+          test_case "an unknown capture key is refused by name"
+            `Quick test_an_unknown_capture_key_is_refused_by_name;
+          test_case "a capture number of the wrong type is refused"
+            `Quick test_a_capture_number_of_the_wrong_type_is_refused;
+          test_case "a capture boolean of the wrong type is refused"
+            `Quick test_a_capture_boolean_of_the_wrong_type_is_refused;
         ] );
       ( "live_shape",
         [

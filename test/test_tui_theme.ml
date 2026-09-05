@@ -317,6 +317,9 @@ let test_strip_sgr_removes_only_styles () =
        ("   " ^ "\027[32m\xe2\x97\x8f healthy\027[0m \027[1malpha\027[0m"));
   check str "an unterminated escape drops without eating the row" "tail"
     (Masc_tui_theme.strip_sgr "tail\027[31");
+  check str "selection line with prefix strips styles for box_line_selected"
+    "> red text"
+    (Masc_tui_theme.strip_sgr ("> \027[31mred\027[0m text"));
   check str "empty stays empty" "" (Masc_tui_theme.strip_sgr "")
 
 (* Diff backgrounds are content, so they carry a reading's name and not a

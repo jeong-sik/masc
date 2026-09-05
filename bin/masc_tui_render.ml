@@ -1668,12 +1668,10 @@ let render_overview (state : state) =
       if idx < List.length state.tasks then begin
         let t = List.nth state.tasks idx in
         let is_selected = state.task_focus = Right_pane && idx = state.task_cursor in
-        let content =
-          if is_selected then
-            Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ task_line t
-          else "  " ^ task_line t
-        in
-        box_line buf cols content
+        if is_selected then
+          box_line_selected buf cols (Masc_tui_theme.strip_sgr ("> " ^ task_line t))
+        else
+          box_line buf cols ("  " ^ task_line t)
       end
     done
   end;
@@ -2392,25 +2390,28 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
                 (fit_width (Terminal_text.single_line a.ap_summary) (cols - 22))
                 Ansi.reset
           | _ ->
-              Printf.sprintf "  %s%s%s"
-                Ansi.dim
-                (fit_width (Terminal_text.single_line a.ap_summary) (cols - 6))
-                Ansi.reset)
+              let summary =
+                fit_width (Terminal_text.single_line a.ap_summary) (max 8 (cols - 34))
+              in
+              Printf.sprintf "  %s%s%s  %s[y] Approve  [n] Reject%s"
+                Ansi.dim summary Ansi.reset
+                (Theme.info ()) Ansi.reset)
     | Some (Keeper_tool_row held) ->
         (* One press answers a held call, matching the chat pane's [y]. The
            question is the whole ask, so it is the row the eye lands on;
            the because is why this call was held at all — an operator
            repeating the same yes needs the reason visible, not the name
            of a policy table they cannot open. *)
-        (* Two rows. This carried a literal "\\n" -- backslash and n, printed as
+        (* Two rows. This carried a literal "\n" -- backslash and n, printed as
            those two characters -- because a real newline would have drawn a
            row nobody had budgeted for. [detail_extra_rows] above budgets it. *)
-        Printf.sprintf "  %s%s%s\n  %swhy: %s%s"
+        Printf.sprintf "  %s%s%s  %s[y] Allow  [n] Deny%s\n  %swhy: %s%s"
           (Theme.warn ())
           (fit_width
              (Terminal_text.single_line held.kta_question)
-             (max 8 (cols - 8)))
+             (max 8 (cols - 28)))
           Ansi.reset
+          (Theme.info ()) Ansi.reset
           Ansi.dim
           (fit_width
              (Terminal_text.single_line_or ~default:"(not provided)"
@@ -2439,16 +2440,18 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
           | Gate_human_required -> "HUMAN REQUIRED", (Theme.warn ())
           | Gate_blocked -> "AUTO JUDGE BLOCKED", (Theme.bad ())
         in
+        let actions = "  " ^ (Theme.info ()) ^ "[y] Approve  [n] Reject" ^ Ansi.reset in
         let headline =
-          Printf.sprintf "  %s%s → %s · %s%s"
+          Printf.sprintf "  %s%s → %s · %s%s%s"
             tone
             keeper
             (fit_width
                (Terminal_text.single_line pending.Tui_decode.gp_display_tool)
-               (max 8 (cols - 32 - Message_layout.display_width keeper
+               (max 8 (cols - 56 - Message_layout.display_width keeper
                        - Message_layout.display_width phase)))
             phase
             Ansi.reset
+            actions
         in
         (match pending.gp_phase with
          | Gate_blocked ->
@@ -2747,13 +2750,10 @@ let render_approvals (state : state) =
                    pending.Tui_decode.gp_input_preview)
         in
         let is_selected = idx = state.approval_cursor in
-        let content =
-          if is_selected then
-            Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
-          else
-            "  " ^ line
-        in
-        box_line buf cols content
+        if is_selected then
+          box_line_selected buf cols (Masc_tui_theme.strip_sgr ("> " ^ line))
+        else
+          box_line buf cols ("  " ^ line)
       end else
         box_empty buf cols
     done
@@ -17143,9 +17143,11 @@ let render_palette (state : state) =
   let cursor = max 0 (min state.palette_cursor (total - 1)) in
   framed_top buf cols;
   framed_line buf cols
-    (Printf.sprintf "%s:%s %s%s" Ansi.bold Ansi.reset
-       (Terminal_text.single_line state.palette_query)
-       ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "\xe2\x96\x8c" ^ Ansi.reset));
+    (screen_title " Quick Jump & Navigation" ^ "  "
+     ^ (Theme.warn ()) ^ "\xe2\x9a\xa1" ^ Ansi.reset ^ "  "
+     ^ Ansi.bold ^ ":" ^ Ansi.reset ^ " "
+     ^ (Terminal_text.single_line state.palette_query)
+     ^ ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "\xe2\x96\x8c" ^ Ansi.reset));
   framed_divider buf cols;
   let content_height = framed_content_height ~rows in
   let first =
@@ -17156,23 +17158,17 @@ let render_palette (state : state) =
   |> List.filteri (fun i _ -> i >= first && i < first + content_height)
   |> List.iteri (fun visible_index (label, _) ->
        let selected = first + visible_index = cursor in
-       let line =
-         if selected then
-           Theme.selection ^ " " ^ label
-           ^ String.make
-               (max 0 (cols - 5 - Message_layout.display_width label))
-               ' '
-           ^ Ansi.reset
-         else " " ^ label
-       in
-       framed_line buf cols line);
+       if selected then
+         framed_line_styled buf cols ~style:Theme.selection (" \xe2\x96\xb8 " ^ label)
+       else
+         framed_line buf cols ("   " ^ label));
   if total = 0 then
-    framed_line buf cols (Ansi.dim ^ "  (no match)" ^ Ansi.reset);
+    framed_line buf cols (Ansi.dim ^ "   (no match)" ^ Ansi.reset);
   framed_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Printf.sprintf "%d/%d  Enter:jump  Esc:close"
+         (Printf.sprintf "%d/%d · [Enter] Jump · [Up/Down] Navigate · [Esc] Close"
             (if total = 0 then 0 else cursor + 1)
             total));
   finish_surface state ~surface_key:"palette" ~rows:terminal_rows ~cols buf
@@ -17255,7 +17251,9 @@ let render_answering (state : state) =
   framed_line
     buf
     cols
-    (screen_title " Answering");
+    (screen_title " Live Keeper Turns & Answering" ^ "  "
+     ^ (Theme.info ()) ^ "\xe2\x97\x90" ^ Ansi.reset ^ "  "
+     ^ Ansi.dim ^ "· [Enter] Chat · [Esc] Close" ^ Ansi.reset);
   framed_divider buf cols;
   let lines = answering_lines state in
   let content_height =
@@ -17338,7 +17336,7 @@ let render_answering (state : state) =
   framed_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:move  Enter:open chat  Esc:close");
+       ~hints:"[j/k] Move · [Enter] Open Chat · [Esc] Close");
   finish_surface state ~surface_key:"answering" ~rows:terminal_rows ~cols buf
 ;;
 
@@ -17350,7 +17348,7 @@ let render_agenda (state : state) =
   framed_line
     buf
     cols
-    (screen_title " Agenda");
+    (screen_title " Agenda & Upcoming Timers" ^ "  " ^ Ansi.dim ^ "· [j/k] Scroll · [Esc] Close" ^ Ansi.reset);
   framed_divider buf cols;
   let lines =
     Agenda.overlay
@@ -17378,7 +17376,7 @@ let render_agenda (state : state) =
   |> List.iter (fun line -> framed_line buf cols (paint line));
   framed_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  Esc:close");
+    (footer_line state ~max_cells:cols ~hints:"[j/k] Scroll · [Esc] Close");
   finish_surface state ~surface_key:"agenda" ~rows:terminal_rows ~cols buf
 ;;
 

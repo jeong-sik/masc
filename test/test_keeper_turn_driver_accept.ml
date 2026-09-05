@@ -466,6 +466,58 @@ let test_a_rejected_response_leaves_the_checkpoint_either_way () =
   | Masc.Keeper_turn_driver_try_provider.For_testing.Recovery_not_applicable ->
     Alcotest.fail "the rejected response must leave the checkpoint"
 
+(* The cut has to reach the durable checkpoint, or the rejected text is back
+   as input next turn: sangsu carried the same 31 KB collapse four times,
+   2026-09-05 (#33267). The drop is persisted through the keeper's own sink
+   under its own stage, at the turn count of the checkpoint it replaces. *)
+let test_a_dropped_response_is_written_through_the_sink () =
+  let checkpoint = assistant_ended_checkpoint () in
+  let cut =
+    match
+      truncation_recovery ~enable_thinking:(Some false)
+        ~result:(max_tokens_rejection ()) ~checkpoint:(Some checkpoint)
+    with
+    | Masc.Keeper_turn_driver_try_provider.For_testing.Drop_rejected_response cut -> cut
+    | Masc.Keeper_turn_driver_try_provider.For_testing.Retry_without_thinking _
+    | Masc.Keeper_turn_driver_try_provider.For_testing.Recovery_not_applicable ->
+      Alcotest.fail "thinking off and max_tokens: the response must be dropped"
+  in
+  let written = ref None in
+  let sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
+    written := Some snapshot;
+    Ok ()
+  in
+  (match
+     Masc.Keeper_turn_driver_try_provider.For_testing.persist_dropped_response
+       ~checkpoint_sink:(Some sink) ~now:42.0 cut
+   with
+   | Ok () -> ()
+   | Error reason -> Alcotest.failf "an accepting sink must not refuse: %s" reason);
+  (match !written with
+   | None -> Alcotest.fail "the cut never reached the sink"
+   | Some snapshot ->
+     Alcotest.(check bool) "written under its own stage" true
+       (snapshot.stage = Agent_core.Agent.After_rejected_response_dropped);
+     Alcotest.(check int) "at the turn count it replaces" checkpoint.turn_count
+       snapshot.turn;
+     Alcotest.(check int) "without the rejected response" 1
+       (List.length snapshot.checkpoint.Agent_core.Checkpoint.messages);
+     Alcotest.(check (float 0.0)) "stamped with the caller's clock" 42.0
+       snapshot.timestamp);
+  (match
+     Masc.Keeper_turn_driver_try_provider.For_testing.persist_dropped_response
+       ~checkpoint_sink:(Some (fun _ -> Error "disk full")) ~now:42.0 cut
+   with
+   | Error "disk full" -> ()
+   | Error other -> Alcotest.failf "the sink's own reason must come back, got %s" other
+   | Ok () -> Alcotest.fail "a refusing sink must not read as installed");
+  match
+    Masc.Keeper_turn_driver_try_provider.For_testing.persist_dropped_response
+      ~checkpoint_sink:None ~now:42.0 cut
+  with
+  | Ok () -> ()
+  | Error reason -> Alcotest.failf "no sink means nothing to refuse: %s" reason
+
 let test_recovery_is_scoped_to_max_tokens_rejections () =
   let checkpoint = assistant_ended_checkpoint () in
   let not_applicable name plan =
@@ -2177,5 +2229,9 @@ let () =
             "truncation recovery is scoped to max-tokens rejections"
             `Quick
             test_recovery_is_scoped_to_max_tokens_rejections;
+          Alcotest.test_case
+            "a dropped response is written through the sink"
+            `Quick
+            test_a_dropped_response_is_written_through_the_sink;
         ] );
     ]

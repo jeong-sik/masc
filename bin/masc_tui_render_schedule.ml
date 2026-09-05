@@ -853,6 +853,79 @@ let fusion_row ~state_style ~keeper_width ~run_width values =
   Table.row
     (fusion_cells ~state_style ~keeper_width ~run_width values)
 
+let fusion_sidebar_label ~status ~time ~keeper ~run_id =
+  Printf.sprintf "[%s] %s @%s %s" status time keeper run_id
+
+let fusion_pipeline_diagram
+    ?(glyph_done = "●")
+    ?(glyph_active = "◐")
+    ?(glyph_waiting = "○")
+    ?(glyph_failed = "×")
+    ?(arrow = " ▸ ")
+    ~status
+    ~stage
+    ~panel_answered
+    ~panel_expected
+    () =
+  let step_question = glyph_done ^ " 1 Question" in
+  let step_panel, step_judge, step_evidence =
+    match status with
+    | `Completed ->
+        ( glyph_done ^ " 2 Panel"
+        , glyph_done ^ " 3 Judge"
+        , glyph_done ^ " 4 Evidence" )
+    | `Failed ->
+        (match stage with
+         | `Accepted
+         | `Panel ->
+             ( glyph_failed ^ " 2 Panel"
+             , glyph_waiting ^ " 3 Judge"
+             , glyph_waiting ^ " 4 Evidence" )
+         | `Judge ->
+             ( glyph_done ^ " 2 Panel"
+             , glyph_failed ^ " 3 Judge"
+             , glyph_waiting ^ " 4 Evidence" )
+         | `Evidence ->
+             ( glyph_done ^ " 2 Panel"
+             , glyph_done ^ " 3 Judge"
+             , glyph_failed ^ " 4 Evidence" )
+         | `Completed ->
+             ( glyph_done ^ " 2 Panel"
+             , glyph_done ^ " 3 Judge"
+             , glyph_done ^ " 4 Evidence" )
+         | `Failed ->
+             ( glyph_failed ^ " 2 Panel"
+             , glyph_failed ^ " 3 Judge"
+             , glyph_failed ^ " 4 Evidence" ))
+    | `Running ->
+        (match stage with
+         | `Accepted ->
+             ( glyph_waiting ^ " 2 Panel"
+             , glyph_waiting ^ " 3 Judge"
+             , glyph_waiting ^ " 4 Evidence" )
+         | `Panel ->
+             ( Printf.sprintf "%s 2 Panel(%d)" glyph_active panel_expected
+             , glyph_waiting ^ " 3 Judge"
+             , glyph_waiting ^ " 4 Evidence" )
+         | `Judge ->
+             ( Printf.sprintf "%s 2 Panel(%d/%d)" glyph_done panel_answered panel_expected
+             , glyph_active ^ " 3 Judge"
+             , glyph_waiting ^ " 4 Evidence" )
+         | `Evidence ->
+             ( Printf.sprintf "%s 2 Panel(%d/%d)" glyph_done panel_answered panel_expected
+             , glyph_done ^ " 3 Judge"
+             , glyph_active ^ " 4 Evidence" )
+         | `Completed ->
+             ( glyph_done ^ " 2 Panel"
+             , glyph_done ^ " 3 Judge"
+             , glyph_done ^ " 4 Evidence" )
+         | `Failed ->
+             ( glyph_failed ^ " 2 Panel"
+             , glyph_failed ^ " 3 Judge"
+             , glyph_failed ^ " 4 Evidence" ))
+  in
+  step_question ^ arrow ^ step_panel ^ arrow ^ step_judge ^ arrow ^ step_evidence
+
 (* Harness verdict columns.
 
    Six widths in the header and the same six in the rows. The header called

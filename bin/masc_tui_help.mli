@@ -11,6 +11,8 @@
 
     Both sides ask this module now, so they answer with the same number. *)
 
-val sheet : cols:int -> string list -> string list
-(** The rows drawn at this width: the lines as written, or pairs of them
-    fitted side by side once a terminal is wide enough to hold two. *)
+val sheet : ?header:string list -> cols:int -> string list -> string list
+(** The rows drawn at this width: optional full-width header rows, followed by
+    the lines as written, or pairs of them fitted side by side once a terminal
+    is wide enough to hold two. *)
+

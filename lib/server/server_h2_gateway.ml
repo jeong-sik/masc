@@ -1132,6 +1132,12 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             let json = dashboard_transport_health_http_json ~state in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
+      | `GET, "/api/v1/diagnostics/heap-roots" ->
+          with_h2_token_permission_auth h2_reqd ~permission:Masc_domain.CanAdmin
+            (fun _state _agent_name ->
+               let json = Server_diagnostics_heap_roots.report_json () in
+               h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
       | `GET, "/api/v1/dashboard/perf" ->
           with_h2_public_read h2_reqd (fun state ->
             let json = dashboard_perf_http_json (Mcp_server.workspace_config state) in

@@ -1621,6 +1621,18 @@ type http_surface_results = {
   http_server_identity: (Tui_decode.server_identity, string) result;
 }
 
+(* What one full refresh came back with. A booting server answers the probe
+   and nothing else, so there are no surfaces to carry. *)
+type http_refresh_outcome =
+  | Refresh_surfaces of http_surface_results
+  | Refresh_server_booting of
+      { identity : (Tui_decode.server_identity, string) result
+      ; (* The generation [start_http_refresh] reserved before the probe went
+           out. Carried so the approvals panel learns why its rows are stale,
+           the same way a failed refresh tells it. *)
+        approval_generation : Approval.Flow.generation option
+      }
+
 type preset_sink =
   | Preset_to_chat of string option
   | Preset_to_pane
@@ -1644,7 +1656,7 @@ type async_msg =
      rather than a silence: the microphone worked. *)
   | Voice_discarded of { keeper : string; reason : string }
   | Voice_failed of { keeper : string; error : string }
-  | Http_refresh_done of http_surface_results
+  | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of string * Approval.Flow.generation option
   | Http_scoped_refresh_done of http_scoped_surface_results
   | Http_scoped_refresh_failed of
@@ -1859,6 +1871,7 @@ type async_msg =
   (* Where a preset answer goes: the chat pane that typed the command, or
      the Config pane that pressed the key. *)
   | Presets_listed of preset_sink * (Tui_decode.presets_snapshot, string) result
+  | Preset_detail_loaded of string * (Tui_decode.preset_detail, string) result
   | Preset_saved of preset_sink * (Tui_decode.preset_manifest, string) result
   | Preset_restored of preset_sink * (Tui_decode.preset_restore_report, string) result
   | Librarian_input_loaded of string * (string list, string) result
@@ -3534,6 +3547,22 @@ let preset_rows_for_state state =
 let selected_preset_for_state state =
   let rows = preset_rows_for_state state in
   List.nth_opt rows (max 0 (min state.presets_cursor (List.length rows - 1)))
+
+(* The selected preset's contents, fetched once per selection. The pane
+   redraws on every key, so the guard is the name it was last fetched for. *)
+let ensure_preset_detail state ~mailbox =
+  match selected_preset_for_state state with
+  | None -> ()
+  | Some (m : Tui_decode.preset_manifest) ->
+    let name = m.Tui_decode.pm_name in
+    if state.preset_detail_for <> Some name
+    then (
+      state.preset_detail_for <- Some name;
+      state.preset_detail <- None;
+      launch_preset_call state ~mailbox
+        ~call:(fun ~host ~port -> Masc_tui_loader.load_preset_detail ~host ~port ~name)
+        ~wrap:(fun result -> Preset_detail_loaded (name, result)))
+;;
 
 let prompt_rows_for_state state =
   match state.prompts_snapshot with
@@ -7044,28 +7073,35 @@ let load_http_scoped_surfaces ~host ~port ~approval_generation ~board_sort
 
 let load_http_surfaces ~host ~port ~approval_generation ~board_sort
     ~board_hearth ~system_log_level ~(needs : Masc_tui_types.surface_needs) =
-  let http_overview = load_overview ~host ~port in
-  let http_approvals =
-    Option.map
-      (fun ao_generation ->
-         { ao_generation; ao_result = load_approvals ~host ~port })
-      approval_generation
-  in
   (* A process can disappear and another bind the same endpoint between two
      successful ticks. The compact /health identity is therefore revalidated
-     on every refresh rather than inferred from connection failure. *)
+     on every refresh rather than inferred from connection failure. It goes
+     first: a server still booting behind an open port says so here, and every
+     surface asked of it would only wait out its timeout. *)
   let http_server_identity = load_server_identity ~host ~port in
-  let http_scoped =
-    (* Asks ride every refresh, not just the Approvals surface. A question that
-       arrives while the operator is elsewhere has to be read to be announced,
-       so the periodic refresh always fetches them; the surface still decides
-       whether the panel renders, only the fetch is unconditional. Targeted
-       scoped refreshes keep their own needs. *)
-    load_http_scoped_surfaces ~host ~port ~approval_generation:None ~board_sort
-      ~board_hearth ~system_log_level
-      ~needs:{ needs with needs_asks = true }
-  in
-  { http_overview; http_approvals; http_scoped; http_server_identity }
+  if Masc_tui_types.server_is_booting http_server_identity
+  then Refresh_server_booting { identity = http_server_identity; approval_generation }
+  else begin
+    let http_overview = load_overview ~host ~port in
+    let http_approvals =
+      Option.map
+        (fun ao_generation ->
+           { ao_generation; ao_result = load_approvals ~host ~port })
+        approval_generation
+    in
+    let http_scoped =
+      (* Asks ride every refresh, not just the Approvals surface. A question
+         that arrives while the operator is elsewhere has to be read to be
+         announced, so the periodic refresh always fetches them; the surface
+         still decides whether the panel renders, only the fetch is
+         unconditional. Targeted scoped refreshes keep their own needs. *)
+      load_http_scoped_surfaces ~host ~port ~approval_generation:None
+        ~board_sort ~board_hearth ~system_log_level
+        ~needs:{ needs with needs_asks = true }
+    in
+    Refresh_surfaces
+      { http_overview; http_approvals; http_scoped; http_server_identity }
+  end
 
 let apply_http_scoped_surfaces state results =
   Option.iter (apply_transport_load state) results.http_transport;
@@ -7078,24 +7114,28 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_fleet_safety_load state) results.http_fleet_safety;
   Option.iter (apply_keeper_roster_load state) results.http_keeper_roster
 
+(* This is a current reading, not a last-known cache. A failed probe makes
+   the projection unread; every following refresh asks again, so a same-port
+   replacement still moves A -> B as soon as /health succeeds. The local
+   workspace follows the reading in the same step: a mismatch clears it, a
+   match reloads it, so a screen never shows rows from a workspace the server
+   just stopped serving. *)
+let apply_server_identity_reading state reading =
+  state.server_identity <- Masc_tui_types.server_identity_of_refresh reading;
+  state.workspace_identity <-
+    Masc_tui_types.workspace_identity_of_refresh
+      ~local_base_path:state.local_base_path reading;
+  match state.workspace_identity with
+  | Masc_tui_types.Workspace_identity_mismatch _ -> clear_local_workspace state
+  | Masc_tui_types.Workspace_identity_match ->
+    load_from_masc_dir state state.local_base_path
+  | Masc_tui_types.Workspace_identity_unread -> ()
+
 let apply_http_surfaces state results =
   apply_overview_load state results.http_overview;
   Option.iter (apply_approval_observation state) results.http_approvals;
   apply_http_scoped_surfaces state results.http_scoped;
-  (* This is a current reading, not a last-known cache. A failed probe makes
-     the projection unread; every following refresh asks again, so a same-port
-     replacement still moves A -> B as soon as /health succeeds. *)
-  state.server_identity <-
-    Masc_tui_types.server_identity_of_refresh results.http_server_identity;
-  state.workspace_identity <-
-    Masc_tui_types.workspace_identity_of_refresh
-      ~local_base_path:state.local_base_path
-      results.http_server_identity;
-  (match state.workspace_identity with
-   | Masc_tui_types.Workspace_identity_mismatch _ -> clear_local_workspace state
-   | Masc_tui_types.Workspace_identity_match ->
-     load_from_masc_dir state state.local_base_path
-   | Masc_tui_types.Workspace_identity_unread -> ());
+  apply_server_identity_reading state results.http_server_identity;
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
   in
@@ -7112,6 +7152,24 @@ let apply_http_surfaces state results =
             (fun observation -> reached observation.ao_result)
             results.http_approvals
           |> Option.to_list))
+
+let apply_server_booting state ~identity ~approval_generation =
+  (* The identity is read the same way a full refresh reads it, so a same-port
+     replacement is noticed even while the new process is still booting. No
+     surface was asked. The approvals panel is told why its rows are stale,
+     as a failed refresh tells it; nothing else changes. *)
+  apply_server_identity_reading state identity;
+  Option.iter
+    (fun ao_generation ->
+       apply_approval_observation state
+         { ao_generation; ao_result = Error "server booting" })
+    approval_generation;
+  state.connection_status <- Masc_tui_types.Booting
+
+let apply_http_refresh_outcome state = function
+  | Refresh_surfaces results -> apply_http_surfaces state results
+  | Refresh_server_booting { identity; approval_generation } ->
+    apply_server_booting state ~identity ~approval_generation
 
 let load_local_workspace_if_safe state base_path =
   match state.workspace_identity with
@@ -7320,7 +7378,7 @@ let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
   | (Connected | Degraded), Observer_closed _ when retry_closed ->
       launch_observer state ~host ~port ~mailbox
   | (Connected | Degraded), (Observer_closed _ | Observer_opening | Observer_live _)
-  | (Disconnected | Connecting | Reconnecting), _ ->
+  | (Disconnected | Connecting | Booting | Reconnecting), _ ->
       ()
 
 let start_http_refresh state ~host ~port ~intent ~refresh_inflight
@@ -7336,9 +7394,19 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
       Approval.Flow.reserve_refresh state.approval_flow
     in
     state.approval_flow <- flow;
+    (* Read before the label below moves. While the last probe said the
+       server is booting, only the probe goes out this tick: the side loads
+       below would each wait out a timeout against a process that has not
+       finished replaying its stores. *)
+    let was_booting =
+      match state.connection_status with
+      | Booting -> true
+      | Disconnected | Connecting | Reconnecting | Degraded | Connected -> false
+    in
     state.connection_status <-
       (match state.connection_status with
        | Connected | Degraded -> Masc_tui_types.Reconnecting
+       | Booting -> Masc_tui_types.Booting
        | Disconnected | Connecting | Reconnecting -> Masc_tui_types.Connecting);
     let needs =
       Masc_tui_types.full_refresh_needs
@@ -7349,7 +7417,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        pane read once on open and a message that arrived after that waited for
        the operator to leave and come back. *)
     (if
-       needs.Masc_tui_types.needs_keeper_chat
+       (not was_booting)
+       && needs.Masc_tui_types.needs_keeper_chat
        (* Not while reading back: the reload replaces the transcript with the
           newest window, which throws away every older page the operator
           fetched and snaps the view to the bottom mid-read. The next tick
@@ -7368,7 +7437,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        reason: a pane that read once on open showed a fact that had since
        changed. *)
     (if
-       state.view = Keepers Keeper_detail
+       (not was_booting)
+       && state.view = Keepers Keeper_detail
        && state.detail_tab = Detail_identity
        && state.identity_login <> None
      then
@@ -7381,12 +7451,12 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        durable Gate rides with them for the same badge — its rows are the
        ones that keep when nobody is watching, which is exactly when the
        badge is how an operator finds out. The server caches the snapshot. *)
-    launch_keeper_tool_approvals_load state ~mailbox;
-    launch_gate_snapshot_load state ~mailbox;
+    if not was_booting then launch_keeper_tool_approvals_load state ~mailbox;
+    if not was_booting then launch_gate_snapshot_load state ~mailbox;
     (* The "answering now" badge rides every tick for the same reason as the
        approvals above: it is drawn from every surface, and its whole point
        is the operator who walked away from the chat pane. *)
-    launch_keeper_turns_load state ~mailbox;
+    if not was_booting then launch_keeper_turns_load state ~mailbox;
     (* The schedule list rides for the same reason, now that the agenda strip
        names the next wake from every surface. Fetched only on the Schedules
        surface it was empty everywhere else, and a strip that says nothing is
@@ -7396,7 +7466,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        to serve, against a two-second cadence. The projection sorts the active
        rows ahead of the settled ones and cuts at twenty, so the earliest wake
        is in the payload whether or not the tail is. *)
-    launch_schedules_load state ~mailbox;
+    if not was_booting then launch_schedules_load state ~mailbox;
 
     let run_refresh () =
       try
@@ -7424,7 +7494,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         Fun.protect
           ~finally:(fun () -> refresh_inflight := false)
           (fun () ->
-             apply_http_surfaces state
+             apply_http_refresh_outcome state
                (load_http_surfaces ~host ~port ~approval_generation
                   ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
@@ -9073,7 +9143,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         chat_notice state ~keeper_name:(Some keeper) ~role:Message_error
           ("voice failed: " ^ error);
         state.last_action <- Some ("voice failed: " ^ error, Unix.gettimeofday ()))
-  | Http_refresh_done results ->
+  | Http_refresh_done (Refresh_server_booting { identity; approval_generation }) ->
+      http_refresh_inflight := false;
+      (* Nothing else was asked of a booting server, so nothing else follows:
+         no held-call listing, no observer. The scoped follow-up is left
+         queued on purpose -- draining it now would send surface loads to the
+         booting server -- and the first non-booting completion drains it. *)
+      apply_server_booting state ~identity ~approval_generation
+  | Http_refresh_done (Refresh_surfaces results) ->
       http_refresh_inflight := false;
       apply_http_surfaces state results;
       (* The held-call listing rides the same cadence as the surface that
@@ -9485,8 +9562,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.presets_cursor <-
              max 0
                (min state.presets_cursor
-                  (List.length snapshot.Tui_decode.pss_presets - 1))
+                  (List.length snapshot.Tui_decode.pss_presets - 1));
+           (* The listing just changed, so whatever the cursor now points at
+              is a fresh question. *)
+           state.preset_detail_for <- None;
+           ensure_preset_detail state ~mailbox
        | Preset_to_pane, Error detail -> state.presets_error <- Some detail)
+  | Preset_detail_loaded (name, result) ->
+      (* A late answer for a preset the cursor has already left is dropped:
+         showing it beside a different name would be worse than showing
+         nothing. *)
+      if state.preset_detail_for = Some name
+      then (
+        match result with
+        | Ok detail -> state.preset_detail <- Some detail
+        | Error _ -> state.preset_detail <- None)
   | Preset_saved (sink, result) ->
       (match sink, result with
        | Preset_to_chat target, Ok manifest ->
@@ -12624,6 +12714,40 @@ and is loaded on demand through keeper_skill.
                       launch_keeper_config_view state
                         ~mailbox:async_messages keeper.k_name)))))))
   in
+  (* Set the sandbox backend (sandbox_profile) in place from the Sandbox tab,
+     without the $EDITOR JSON round-trip. Each key names an absolute backend, so
+     no current-value read is needed; the server validates the profile (e.g.
+     remote_ssh without a bound endpoint is rejected as reconciliation-required)
+     and the reply is surfaced. Reuses the same config POST the Settings edit
+     uses, then refreshes the Sandbox view so the new backend shows. *)
+  let set_sandbox_backend ~profile =
+    match selected_keeper state with
+    | None -> report_action state "system" no_keeper_under_cursor
+    | Some keeper -> (
+      let patch = `Assoc [ ("sandbox_profile", `String profile) ] in
+      match
+        Masc_tui_http.post_keeper_config ~host ~port ~keeper_name:keeper.k_name
+          ~patch_json:(Yojson.Safe.to_string patch)
+      with
+      | Error error ->
+          report_action state "error"
+            (Masc_tui_http.keeper_config_post_error_to_string error);
+          state.keeper_sandbox_view <- None;
+          state.keeper_sandbox_view_error <- None;
+          launch_keeper_sandbox_view state ~mailbox:async_messages keeper.k_name
+      | Ok response ->
+          (match
+             Masc_tui_keeper_config.config_write_status_message
+               ~keeper_name:keeper.k_name response
+           with
+           | Error detail ->
+               report_action state "error"
+                 (keeper.k_name ^ ": invalid config write receipt: " ^ detail)
+           | Ok (severity, message) -> report_action state severity message);
+          state.keeper_sandbox_view <- None;
+          state.keeper_sandbox_view_error <- None;
+          launch_keeper_sandbox_view state ~mailbox:async_messages keeper.k_name)
+  in
   let handle_keeper_create () =
     match Masc_tui_editor.editor_command () with
     | None ->
@@ -14009,8 +14133,16 @@ and is loaded on demand through keeper_skill.
                 launch_identity_view state ~mailbox:async_messages keeper.k_name
             | Some _, Detail_channels ->
                 launch_connectors_load state ~mailbox:async_messages
-            | Some _, Detail_automation ->
-                launch_schedules_load state ~mailbox:async_messages
+            | Some keeper, Detail_automation ->
+                (* Bracket-switching into Automation must fetch THIS keeper's
+                   schedules (state.keeper_schedules, what automation_lines
+                   reads), not the fleet list. The old launch_schedules_load
+                   wrote state.schedules, which this tab never reads, so the
+                   panel stayed stuck on "(loading…)". Mirror open_keeper_detail. *)
+                state.keeper_schedules <- None;
+                state.keeper_schedules_error <- None;
+                launch_keeper_schedules_load state ~mailbox:async_messages
+                  ~keeper_name:keeper.k_name
             | Some _, Detail_runs ->
                 launch_fusion_runs_load state ~mailbox:async_messages
             | _, Detail_info | _, Detail_secrets | None, _ -> ())
@@ -14763,6 +14895,19 @@ and is loaded on demand through keeper_skill.
               state.keeper_sandbox_logs_error <- None;
               launch_keeper_sandbox_logs state ~mailbox:async_messages
                 keeper.k_name)
+       (* Set the sandbox backend in place from the Sandbox tab. Each key is an
+          absolute backend so no current-value read is needed; the server
+          validates (remote_ssh without a bound endpoint is rejected). Guarded to
+          the Sandbox tab, so d/m/s keep their other-surface meanings elsewhere. *)
+       | Some (("d" | "m" | "s") as backend_key)
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_sandbox ->
+           set_sandbox_backend
+             ~profile:
+               (match backend_key with
+                | "d" -> "docker"
+                | "m" -> "microvm"
+                | _ -> "remote_ssh")
        | Some ("h" | "l")
          when terminal_columns >= keeper_split_threshold_cols
               && (match state.view with
@@ -15693,7 +15838,8 @@ and is loaded on demand through keeper_skill.
                 if state.presets_cursor < count - 1 then begin
                   state.presets_cursor <- state.presets_cursor + 1;
                   state.config_scroll <- 0;
-                  state.preset_restore_armed <- None
+                  state.preset_restore_armed <- None;
+                  ensure_preset_detail state ~mailbox:async_messages
                 end
             | Config when state.config_pane = Config_prompts ->
                 let count = prompt_catalog_count_for_state state in
@@ -16066,7 +16212,8 @@ and is loaded on demand through keeper_skill.
                 if next <> state.presets_cursor then begin
                   state.presets_cursor <- next;
                   state.config_scroll <- 0;
-                  state.preset_restore_armed <- None
+                  state.preset_restore_armed <- None;
+                  ensure_preset_detail state ~mailbox:async_messages
                 end
             | Config when state.config_pane = Config_prompts ->
                 let next = max 0 (state.prompts_cursor - 1) in
@@ -17454,7 +17601,7 @@ and is loaded on demand through keeper_skill.
                            ~refresh_inflight:http_refresh_inflight
                            ~scoped_refresh_inflight:http_scoped_refresh_inflight
                            ~scoped_refresh_followup ~mailbox:async_messages)
-                 | Connecting | Reconnecting | Degraded | Connected ->
+                 | Connecting | Booting | Reconnecting | Degraded | Connected ->
                      handle_keeper_action state ~base_path
                        ~mailbox:async_messages Keeper_control.Shutdown)
             | Board ->

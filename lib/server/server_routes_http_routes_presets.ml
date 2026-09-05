@@ -1,6 +1,7 @@
 (* HTTP routes for prompt presets (#32777).
 
    GET  /api/v1/presets          — manifests under <base>/.masc/presets
+   GET  /api/v1/presets/show     — ?name=<n>: everything that preset would change
    POST /api/v1/presets          — {name, description?}: snapshot the live state
    POST /api/v1/presets/restore  — {name}: autosave, then apply the preset
 
@@ -75,6 +76,45 @@ let add_routes router =
              request
              reqd
              (listing_json (Prompt_preset.list ~base_path:(base_path_of state))))
+         request
+         reqd)
+  (* A manifest counts what a preset holds; this names it. Deciding whether
+     to apply one otherwise means applying it and reading the result, which
+     is the decision itself. *)
+  |> Http.Router.get "/api/v1/presets/show" (fun request reqd ->
+       with_read_auth
+         (fun state _req reqd ->
+           match
+             Server_mcp_transport_http_session.query_param request "name"
+           with
+           | None ->
+             respond_json_value_with_cors
+               ~status:`Bad_request
+               request
+               reqd
+               (error_json "name is required")
+           | Some raw ->
+             let name = String.trim raw in
+             if not (Prompt_preset.is_valid_name name)
+             then
+               respond_json_value_with_cors
+                 ~status:`Bad_request
+                 request
+                 reqd
+                 (error_json ("invalid preset name: " ^ raw))
+             else (
+               match Prompt_preset.load ~base_path:(base_path_of state) name with
+               | Ok snapshot ->
+                 respond_json_value_with_cors
+                   request
+                   reqd
+                   (ok_json [ "preset", Prompt_preset.snapshot_to_json snapshot ])
+               | Error message ->
+                 respond_json_value_with_cors
+                   ~status:`Not_found
+                   request
+                   reqd
+                   (error_json message)))
          request
          reqd)
   |> Http.Router.post "/api/v1/presets" (fun request reqd ->

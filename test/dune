@@ -1106,6 +1106,11 @@
  (libraries alcotest ast_grep))
 
 (test
+ (name test_heap_roots)
+ (modules test_heap_roots)
+ (libraries alcotest masc.masc_core))
+
+(test
  (name test_keeper_tool_error_text_bounded)
  (modules test_keeper_tool_error_text_bounded)
  (libraries alcotest ast_grep masc_test_deps masc.masc_core))
@@ -2839,6 +2844,11 @@
 ; must not become a live keeper/runtime routing gate or tool policy surface.
 
 (test
+ (name test_scheduler_lag)
+ (modules test_scheduler_lag)
+ (libraries alcotest eio eio_main masc.masc_core))
+
+(test
  (name test_eval_tool_selector_boundary)
  (modules test_eval_tool_selector_boundary)
  (libraries alcotest masc.string_util masc_core yojson)
@@ -3057,6 +3067,11 @@
  (libraries alcotest masc_tui_runtime_config_receipt yojson))
 
 (test
+ (name test_tui_connection_status)
+ (modules test_tui_connection_status)
+ (libraries alcotest masc masc_tui_types))
+
+(test
  (name test_tui_chat_gate_row)
  (modules test_tui_chat_gate_row)
  (libraries alcotest ast_grep masc_tui_types)
@@ -3237,7 +3252,7 @@
 (test
  (name test_egress_allow_text)
  (modules test_egress_allow_text)
- (libraries alcotest masc.runtime masc.string_util))
+ (libraries alcotest masc.runtime masc.string_util masc.toml_line_editor))
 
 (test
  (name test_egress_lane_config_pinning)
@@ -4101,7 +4116,7 @@
 (test
  (name test_tui_help_scroll)
  (modules test_tui_help_scroll)
- (libraries alcotest masc_tui_frame masc_tui_help masc_tui_scroll))
+ (libraries alcotest masc_tui_frame masc_tui_help masc_tui_keys masc_tui_types masc_tui_scroll))
 
 (test
  (name test_tui_planning_detail)

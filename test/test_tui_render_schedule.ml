@@ -1191,6 +1191,45 @@ let test_fusion_keeper_growth_comes_out_of_the_run_id () =
     (Masc_tui_message_layout.display_width
        (Schedule.fusion_header_row ~keeper_width:26 ~run_width:wide))
 
+let test_fusion_sidebar_label_format () =
+  let label =
+    Schedule.fusion_sidebar_label ~status:"done" ~time:"14:20:05"
+      ~keeper:"edgar" ~run_id:"fusion-target-501"
+  in
+  check string "label starts with status, time, keeper, and run id"
+    "[done] 14:20:05 @edgar fusion-target-501" label
+
+let test_fusion_pipeline_diagram_stages () =
+  let running_judge =
+    Schedule.fusion_pipeline_diagram
+      ~status:`Running ~stage:`Judge ~panel_answered:3 ~panel_expected:3 ()
+  in
+  check string "running judge diagram"
+    "● 1 Question ▸ ● 2 Panel(3/3) ▸ ◐ 3 Judge ▸ ○ 4 Evidence"
+    running_judge;
+  let running_panel =
+    Schedule.fusion_pipeline_diagram
+      ~status:`Running ~stage:`Panel ~panel_answered:0 ~panel_expected:3 ()
+  in
+  check string "running panel diagram"
+    "● 1 Question ▸ ◐ 2 Panel(3) ▸ ○ 3 Judge ▸ ○ 4 Evidence"
+    running_panel;
+  let completed =
+    Schedule.fusion_pipeline_diagram
+      ~status:`Completed ~stage:`Completed ~panel_answered:3 ~panel_expected:3 ()
+  in
+  check string "completed diagram"
+    "● 1 Question ▸ ● 2 Panel ▸ ● 3 Judge ▸ ● 4 Evidence"
+    completed;
+  let failed =
+    Schedule.fusion_pipeline_diagram
+      ~status:`Failed ~stage:`Failed ~panel_answered:0 ~panel_expected:0 ()
+  in
+  check string "failed diagram"
+    "● 1 Question ▸ × 2 Panel ▸ × 3 Judge ▸ × 4 Evidence"
+    failed
+
+
 (* The strip named five stops while the Planning walk had three: Schedules and
    Fusion had become tabs of the selected Keeper and nothing took their names
    off this row. A reader pressing 4 or 5 arrived nowhere. *)
@@ -1591,6 +1630,10 @@ let () =
             test_fusion_columns_hold_their_offsets
         ; test_case "fusion keeper growth comes out of the run id" `Quick
             test_fusion_keeper_growth_comes_out_of_the_run_id
+        ; test_case "fusion sidebar label format" `Quick
+            test_fusion_sidebar_label_format
+        ; test_case "fusion pipeline diagram stages" `Quick
+            test_fusion_pipeline_diagram_stages
         ; test_case "planning strip names only its own stops" `Quick
             test_planning_strip_names_only_its_own_stops
         ; test_case "planning window rides the active stop" `Quick

@@ -710,18 +710,118 @@ let test_gate_exempt_agents () =
       (Vc.voice_gate_always_allow_for_agent config "other_agent")
 ;;
 
-let test_gate_agents_alias () =
+(* The section is read the way [capture] is. A mistyped field has to come
+   back as a refusal naming the field: a gate that quietly reviews every
+   speak while the operator reads a config that says otherwise is a gate
+   with no sentence saying why. *)
+let test_an_empty_gate_section_takes_the_defaults () =
+  match Vc.parse_json (config_with [ "gate", `Assoc [] ]) with
+  | Error message -> fail message
+  | Ok config ->
+    check bool "always_allow" false config.Vc.gate.always_allow;
+    check (list string) "exempt_agents" [] config.Vc.gate.exempt_agents
+;;
+
+let test_exempt_agents_are_trimmed_and_kept_in_order () =
   match
     Vc.parse_json
       (config_with
-         [ "gate", `Assoc [ "agents", `List [ `String "spruce" ] ] ])
+         [ ( "gate"
+           , `Assoc
+               [ "exempt_agents", `List [ `String " spruce "; `String "willow" ] ]
+           )
+         ])
   with
   | Error message -> fail message
   | Ok config ->
-    check bool "spruce is exempt via agents alias" true
-      (Vc.voice_gate_always_allow_for_agent config "spruce");
-    check bool "other agent is not exempt" false
-      (Vc.voice_gate_always_allow_for_agent config "other_agent")
+    check (list string) "trimmed, in order" [ "spruce"; "willow" ]
+      config.Vc.gate.exempt_agents
+;;
+
+let test_exempt_agents_of_the_wrong_type_are_refused () =
+  List.iter
+    (fun (value, kind) ->
+       match
+         Vc.parse_json (config_with [ "gate", `Assoc [ "exempt_agents", value ] ])
+       with
+       | Ok _ ->
+         failf "exempt_agents given as %s must be refused"
+           (Yojson.Safe.to_string value)
+       | Error message ->
+         check bool
+           (Printf.sprintf
+              "%s: the rejection names the field, the type wanted and the type found"
+              kind)
+           true
+           (String_util.string_contains_substring ~needle:"gate.exempt_agents" message
+            && String_util.string_contains_substring ~needle:"array" message
+            && String_util.string_contains_substring ~needle:("got " ^ kind) message))
+    [ `String "spruce", "string"
+    ; `Assoc [ "spruce", `Bool true ], "object"
+    ; `Int 1, "int"
+    ; `Null, "null"
+    ]
+;;
+
+let test_an_exempt_agent_that_is_not_a_name_is_refused_by_index () =
+  List.iter
+    (fun (items, index) ->
+       match
+         Vc.parse_json
+           (config_with [ "gate", `Assoc [ "exempt_agents", `List items ] ])
+       with
+       | Ok _ -> failf "element %d must be refused" index
+       | Error message ->
+         check bool
+           (Printf.sprintf "element %d: the rejection names the index" index)
+           true
+           (String_util.string_contains_substring
+              ~needle:(Printf.sprintf "gate.exempt_agents[%d]" index)
+              message))
+    [ [ `String "spruce"; `Int 7 ], 1
+    ; [ `String "   " ], 0
+    ; [ `String "spruce"; `String "willow"; `Null ], 2
+    ]
+;;
+
+let test_a_gate_boolean_of_the_wrong_type_is_refused () =
+  match
+    Vc.parse_json
+      (config_with [ "gate", `Assoc [ "always_allow", `String "true" ] ])
+  with
+  | Ok _ -> fail "a string where a boolean is meant must be refused"
+  | Error message ->
+    check bool "the rejection names the key and the type wanted" true
+      (String_util.string_contains_substring ~needle:"gate.always_allow" message
+       && String_util.string_contains_substring ~needle:"boolean" message)
+;;
+
+let test_an_unknown_gate_key_is_refused_by_name () =
+  match
+    Vc.parse_json
+      (config_with [ "gate", `Assoc [ "agents", `List [ `String "spruce" ] ] ])
+  with
+  | Ok _ -> fail "a gate key the parser does not know must be refused"
+  | Error message ->
+    check bool "the rejection names the key" true
+      (String_util.string_contains_substring ~needle:"gate.agents" message)
+;;
+
+(* The speak tool routes on one [load_detailed] read and reports its
+   [Invalid] reason as the tool's error message, so a gate refusal has to
+   arrive there as [Invalid] and not as a config that loaded with fewer
+   names. *)
+let test_a_gate_error_is_invalid_at_load () =
+  with_explicit_voice_config
+    (Yojson.Safe.to_string
+       (config_with [ "gate", `Assoc [ "exempt_agents", `String "spruce" ] ]))
+    (fun () ->
+      match Vc.load_detailed () with
+      | Error (Vc.Invalid msg) ->
+        check bool "the reason names the field" true
+          (String_util.string_contains_substring ~needle:"gate.exempt_agents" msg)
+      | Error Vc.Not_configured -> fail "expected Invalid, got Not_configured"
+      | Ok _ -> fail "expected Invalid, got Ok")
 ;;
 
 let () =
@@ -778,8 +878,20 @@ let () =
             `Quick test_gate_always_allow_true;
           test_case "exempt_agents exempts listed agent"
             `Quick test_gate_exempt_agents;
-          test_case "agents alias works for exempt_agents"
-            `Quick test_gate_agents_alias;
+          test_case "an empty section takes the defaults"
+            `Quick test_an_empty_gate_section_takes_the_defaults;
+          test_case "exempt_agents are trimmed and kept in order"
+            `Quick test_exempt_agents_are_trimmed_and_kept_in_order;
+          test_case "exempt_agents of the wrong type are refused"
+            `Quick test_exempt_agents_of_the_wrong_type_are_refused;
+          test_case "an exempt agent that is not a name is refused by index"
+            `Quick test_an_exempt_agent_that_is_not_a_name_is_refused_by_index;
+          test_case "a gate boolean of the wrong type is refused"
+            `Quick test_a_gate_boolean_of_the_wrong_type_is_refused;
+          test_case "an unknown gate key is refused by name"
+            `Quick test_an_unknown_gate_key_is_refused_by_name;
+          test_case "a gate error is Invalid at load"
+            `Quick test_a_gate_error_is_invalid_at_load;
         ] );
       ( "load_detailed",
         [

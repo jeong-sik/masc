@@ -142,9 +142,17 @@ type local_playback_config = {
 
 type gate_config = {
   always_allow : bool;
+      (** Every agent bypasses Gate approval for voice speak. Absent from the
+          section, [false]: the Gate reviews each speak. Present, it must be a
+          boolean; the load refuses anything else naming [gate.always_allow]. *)
   exempt_agents : string list;
       (** Allow-list of agent ids permitted to bypass Gate approval for voice speak.
-          When [always_allow = true], all agents bypass Gate approval. *)
+          When [always_allow = true], all agents bypass Gate approval.
+
+          Absent, empty. Present, every element must be a non-blank string;
+          the load refuses any other element naming its index, as
+          [gate.exempt_agents\[1\]]. A key the section does not know is refused
+          by name, the way [capture] refuses one. *)
 }
 
 (** {1 Composite config} *)

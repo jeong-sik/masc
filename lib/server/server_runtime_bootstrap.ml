@@ -1685,6 +1685,21 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       (match mark_owner_state_ready () with
        | Ok () -> ()
        | Error error -> raise (Owner_initialization_failed error));
+      (* The lag probe forks here, on the main domain, so its ring reports
+         the scheduler every handler on this domain shares. It starts at the
+         readiness boundary rather than at process start so the boot replay
+         is not counted as steady-state lag. *)
+      (match Eio_context.get_mono_clock_opt () with
+       | Some mono_clock ->
+         Scheduler_lag.start ~sw ~mono_clock Scheduler_lag.global;
+         Log.Server.info
+           "scheduler lag probe started on the main domain: interval=%.0fms window=%.0fs"
+           (Scheduler_lag.default_interval_s *. 1000.0)
+           (Scheduler_lag.default_interval_s
+            *. Float.of_int Scheduler_lag.default_window)
+       | None ->
+         Log.Server.warn
+           "scheduler lag probe not started: Eio_context has no monotonic clock");
       (* Full-health has its own off-domain worker, timeout, and warm delay.
          Start it at the owner-readiness boundary so post-ready lanes and
          auxiliary prewarms cannot leave current diagnostics requested-but-idle. *)
@@ -1692,6 +1707,32 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
         ~sw
         ~clock
         ~request_authority:background_request_authority;
+      (* Roots for GET /api/v1/diagnostics/heap-roots. Registered here, after
+         owner readiness, because every store named below is installed by
+         now; a walk before that would size the empty initial registries. *)
+      List.iter
+        (fun (name, value) ->
+           match Heap_roots.register ~name value with
+           | Ok () -> ()
+           | Error `Duplicate ->
+             Log.Server.warn
+               "heap root %S was already registered; the first registration stands"
+               name)
+        [ ("exact_lane_runs", fun () -> Some (Obj.repr (Exact_lane_run_registry.global ())))
+        ; ("verification_runs", fun () -> Some (Obj.repr (Verification_run_registry.global ())))
+        ; ( "goal_verification_runs"
+          , fun () -> Some (Obj.repr (Goal_verification_run_registry.global ())) )
+        ; ("fusion_runs", fun () -> Some (Obj.repr (Fusion_run_registry.global ())))
+        ; ("sse_clients", fun () -> Some (Obj.repr (Atomic.get Sse.clients)))
+        ; ("dashboard_snapshot", fun () -> Option.map Obj.repr (Dashboard_snapshot.current ()))
+        ; ( "keeper_registry"
+          , fun () -> Some (Obj.repr (Atomic.get Keeper_registry_setup.registry)) )
+        ; ("keeper_owner_pools", fun () -> Some (Keeper_owner_registry.heap_root ()))
+        ; ( "board_attention_partition_caches"
+          , fun () -> Some (Keeper_board_attention_partition.heap_root ()) )
+        ; ("activity_graph_caches", fun () -> Some (Activity_graph.heap_root ()))
+        ; ("telemetry_trajectory_summaries", fun () -> Some (Telemetry_unified.heap_root ()))
+        ];
       let path_diagnostics = activated_owner.path_diagnostics in
       let resolved_base, masc_dir =
         start_post_ready_owner_lanes ~sw ~clock ~env state

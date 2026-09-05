@@ -27,6 +27,10 @@ type manifest =
   ; preset_description : string
   ; preset_created_at : string
   ; override_count : int
+  ; override_keys : string list option
+        (** Which prompts the preset overrides. [None] on a manifest written
+            before this field existed, which is not the same as [Some []]:
+            one means unknown, the other means none. *)
   ; keepers : string list
   ; assignment_count : int
   ; lane_count : int
@@ -102,4 +106,11 @@ val runtime_of_text : string -> ((string * string) list * lane list, string) res
 
 val manifest_of_snapshot : snapshot -> manifest
 val manifest_to_json : manifest -> Yojson.Safe.t
+
+val snapshot_to_json : snapshot -> Yojson.Safe.t
+(** Everything a preset would change, named rather than counted.
+
+    A manifest says "one override, ten keepers". That is not enough to decide
+    whether to apply it: which override, and which ten. Restoring is the only
+    way to find out, and restoring is the thing being decided. *)
 val report_to_json : restore_report -> Yojson.Safe.t

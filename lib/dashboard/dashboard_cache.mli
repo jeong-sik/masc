@@ -13,6 +13,16 @@
     and [Eio_context.set_switch] before using the cache. Background
     stale-while-revalidate fibers are forked via [Eio_context.get_switch_opt]. *)
 
+type cached_payload = {
+  json : Yojson.Safe.t;
+  raw_json : string;
+  etag : string;
+}
+(** Cached dashboard payload carrying the Yojson AST, pre-serialized JSON string,
+    and weak entity tag. Precomputing string and tag on cache fill enables
+    sub-millisecond HTTP conditional revalidation without serializing or hashing
+    on repeat requests. *)
+
 val get_or_compute : string -> ttl:float -> (unit -> Yojson.Safe.t) -> Yojson.Safe.t
 (** [get_or_compute key ~ttl f] returns a cached value if [key] exists and
     has not expired, otherwise calls [f ()] and stores the result for [ttl]
@@ -26,11 +36,21 @@ val get_or_compute : string -> ttl:float -> (unit -> Yojson.Safe.t) -> Yojson.Sa
     deadlocking.  Concurrent requests for the same key are serialised — only
     one [f] runs; others wait for the result (stampede protection). *)
 
+val get_or_compute_payload :
+  string -> ttl:float -> (unit -> Yojson.Safe.t) -> cached_payload
+(** [get_or_compute_payload key ~ttl f] returns the {!cached_payload} for [key].
+    Calls [f ()] on cache miss, and memoizes both the JSON AST and the serialized
+    string + ETag. *)
+
 val peek : string -> Yojson.Safe.t option
 (** [peek key] returns the currently cached value for [key] when a fresh or
     stale-ready entry exists. Unlike [get_or_compute], it never triggers a
     synchronous compute. Returns [None] on cache miss or when the key is
     currently computing without any stale fallback. *)
+
+val peek_payload : string -> cached_payload option
+(** [peek_payload key] returns the currently cached payload for [key] when a
+    fresh or stale-ready entry exists. *)
 
 exception Compute_timeout of string * bool
 (** Raised internally when the compute function exceeds [timeout_sec].
@@ -59,6 +79,11 @@ val get_or_compute_with_timeout :
     data, returns a timeout-error JSON without caching it.  Repeated no-stale
     timeouts for the same key open a short fail-fast circuit; fresh or stale
     cache entries are still served normally. *)
+
+val get_or_compute_payload_with_timeout :
+  string -> ttl:float -> clock:_ Eio.Time.clock -> timeout_sec:float ->
+  (unit -> Yojson.Safe.t) -> cached_payload
+(** Like {!get_or_compute_payload} but wraps the compute function with an Eio timeout. *)
 
 val set_default_clock : _ Eio.Time.clock -> unit
 (** Register the process clock so every {!get_or_compute} runs under the

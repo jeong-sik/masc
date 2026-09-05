@@ -182,6 +182,12 @@ val dashboard_execution_cached_http_body :
     fixture, full, force, initializing, or stale/error requests so callers
     fall back to {!dashboard_execution_http_json}. *)
 
+val dashboard_execution_cached_http_body_and_etag :
+  state:Mcp_server.server_state -> Httpun.Request.t -> (string * string) option
+(** Returns both the pre-serialized response body and its weak ETag for the default
+    light [/api/v1/dashboard/execution] request when the proactive execution cache has
+    a fresh successful snapshot. *)
+
 val dashboard_execution_http_json :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->

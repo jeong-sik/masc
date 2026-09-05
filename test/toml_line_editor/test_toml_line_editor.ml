@@ -117,6 +117,117 @@ let test_scalar_edit_is_table_scoped () =
   Alcotest.(check bool) "[fusion] scalar untouched" true
     (has_line out "enabled = true")
 
+(* ── table headers ─────────────────────────────────────────────────────── *)
+
+let header =
+  Alcotest.testable
+    (fun fmt -> function
+      | Toml_line_editor.Table path -> Format.fprintf fmt "[%s]" (String.concat "." path)
+      | Toml_line_editor.Table_array path ->
+        Format.fprintf fmt "[[%s]]" (String.concat "." path))
+    (fun a b ->
+      match a, b with
+      | Toml_line_editor.Table x, Toml_line_editor.Table y
+      | Toml_line_editor.Table_array x, Toml_line_editor.Table_array y ->
+        List.equal String.equal x y
+      | Toml_line_editor.Table _, Toml_line_editor.Table_array _
+      | Toml_line_editor.Table_array _, Toml_line_editor.Table _ -> false)
+
+(* The header is what the grammar reads, so every spelling TOML allows for
+   one table is that table: the editor and the loader must not disagree on
+   which line opens it. *)
+let test_header_spellings_read_as_one_path () =
+  let expected = Some (Toml_line_editor.Table [ "egress"; "keepers"; "alder" ]) in
+  List.iter
+    (fun line ->
+      Alcotest.(check (option header)) line expected (Toml_line_editor.header_of_line line))
+    [ "[egress.keepers.alder]"
+    ; {|[egress.keepers."alder"]|}
+    ; "[ egress . keepers . alder ]"
+    ; "[egress.keepers.'alder']"
+    ; "[egress.keepers.alder] # written by hand"
+    ; "  [egress.keepers.alder]  "
+    ]
+
+(* A quoted segment is one key; the loader reads it the same way. *)
+let test_a_quoted_dotted_key_is_one_segment () =
+  Alcotest.(check (option header))
+    "edgar.a.poe is one key"
+    (Some (Toml_line_editor.Table [ "egress"; "keepers"; "edgar.a.poe" ]))
+    (Toml_line_editor.header_of_line {|[egress.keepers."edgar.a.poe"]|})
+
+let test_an_array_of_tables_is_told_apart () =
+  Alcotest.(check (option header))
+    "[[a.b]] is an array-of-tables header"
+    (Some (Toml_line_editor.Table_array [ "a"; "b" ]))
+    (Toml_line_editor.header_of_line "[[a.b]]");
+  Alcotest.(check bool) "and still ends a section" true
+    (Toml_line_editor.is_table_header "[[a.b]]");
+  Alcotest.(check bool) "but is not the standard table [a.b]" false
+    (Toml_line_editor.is_table ~path:"a.b" "[[a.b]]")
+
+(* Lines that are not headers: assignments (dotted ones build a nested table
+   in the same shape a header does, but the leaf is a value), inline tables,
+   blanks, comments, a continuation line of a multi-line array, and a header
+   with trailing content the grammar refuses. *)
+let test_non_header_lines_are_none () =
+  List.iter
+    (fun line ->
+      Alcotest.(check (option header)) (Printf.sprintf "%S" line) None
+        (Toml_line_editor.header_of_line line))
+    [ {|allow = ["x"]|}
+    ; "a.b = 1"
+    ; "a.b = {}"
+    ; "a = { b = 1 }"
+    ; ""
+    ; "# [not.a.header] in a comment"
+    ; {|  "provider.a",|}
+    ; "[a.b] c = 1"
+    ; "[a.b"
+    ]
+
+let test_is_table_reads_both_sides_by_path () =
+  Alcotest.(check bool) "spaced and commented header opens the path" true
+    (Toml_line_editor.is_table ~path:"fusion.presets.trio"
+       {|[ fusion . presets . "trio" ]  # operator note|});
+  Alcotest.(check bool) "a quoted path names the same table as a bare one" true
+    (Toml_line_editor.is_table ~path:{|runtime.lanes."fast"|} "[runtime.lanes.fast]");
+  Alcotest.(check bool) "a longer path is another table" false
+    (Toml_line_editor.is_table ~path:"fusion.presets.trio" "[fusion.presets.trio.extra]");
+  Alcotest.(check bool) "a name that extends the last segment is another table" false
+    (Toml_line_editor.is_table ~path:"fusion.presets.trio" "[fusion.presets.trio2]")
+
+(* The edit lands on the table however the operator spelled its header, and
+   does not append a second one. *)
+let test_an_edit_finds_a_hand_spelled_header () =
+  let hand_spelled =
+    {|[fusion]
+enabled = true
+
+[ fusion . presets . 'trio' ] # kept by hand
+judge = "old-judge"
+
+[fusion.presets.duo]
+judge = "duo-judge"
+|}
+  in
+  let out =
+    Toml_line_editor.edit_table_scalar hand_spelled ~path:"fusion.presets.trio"
+      ~key:"judge" ~value:(Some "new-judge")
+  in
+  check_comments_unchanged hand_spelled out;
+  Alcotest.(check int) "one header for trio" 1
+    (List.length
+       (List.filter
+          (Toml_line_editor.is_table ~path:"fusion.presets.trio")
+          (fst (Toml_line_editor.split_lines out))));
+  Alcotest.(check bool) "the hand-spelled header line is kept as written" true
+    (has_line out "[ fusion . presets . 'trio' ] # kept by hand");
+  Alcotest.(check bool) "judge replaced under it" true (has_line out {|judge = "new-judge"|});
+  Alcotest.(check bool) "old value gone" false (has_line out {|judge = "old-judge"|});
+  Alcotest.(check bool) "the next table is untouched" true
+    (has_line out {|judge = "duo-judge"|})
+
 let () =
   Alcotest.run "toml_line_editor"
     [ ( "comment-preserving edits"
@@ -129,5 +240,19 @@ let () =
             test_scalar_edit_is_table_scoped
         ; Alcotest.test_case "a bracket inside a comment does not close the array" `Quick
             test_multiline_array_close_ignores_bracket_in_comment
+        ] )
+    ; ( "table headers"
+      , [ Alcotest.test_case "header spellings read as one path" `Quick
+            test_header_spellings_read_as_one_path
+        ; Alcotest.test_case "a quoted dotted key is one segment" `Quick
+            test_a_quoted_dotted_key_is_one_segment
+        ; Alcotest.test_case "an array of tables is told apart" `Quick
+            test_an_array_of_tables_is_told_apart
+        ; Alcotest.test_case "non-header lines are none" `Quick
+            test_non_header_lines_are_none
+        ; Alcotest.test_case "is_table reads both sides by path" `Quick
+            test_is_table_reads_both_sides_by_path
+        ; Alcotest.test_case "an edit finds a hand-spelled header" `Quick
+            test_an_edit_finds_a_hand_spelled_header
         ] )
     ]

@@ -2207,13 +2207,9 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/provider-logs" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let cache_key = "provider_logs" in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               Provider_logs.dashboard_provider_logs_json ()))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         respond_cached_read ~request:req ~reqd ~cache_key:"provider_logs"
+           ~ttl:live_cache_ttl_s
+           Provider_logs.dashboard_provider_logs_json
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/provider-logs/tail" (fun request reqd ->
          with_public_read (fun _state req reqd ->
@@ -2268,13 +2264,9 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/config" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let cache_key = "config_introspect" in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:config_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               Env_config_introspect.to_json ()))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         respond_cached_read ~request:req ~reqd ~cache_key:"config_introspect"
+           ~ttl:config_cache_ttl_s
+           Env_config_introspect.to_json
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/project-snapshot" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -2297,8 +2289,9 @@ let add_routes ~sw ~clock router =
             domain that accepts health/chat/keeper requests; serve identity JSON
             here and keep the compute/cache policy in
             [dashboard_execution_http_json]. *)
-         match dashboard_execution_cached_http_body ~state request with
-         | Some body -> Http.Response.json ~compress:false ~request:req body reqd
+         match dashboard_execution_cached_http_body_and_etag ~state request with
+         | Some (body, etag) ->
+           Http.Response.json_lazy ~compress:false ~request:req ~etag (fun () -> body) reqd
          | None ->
            let json = dashboard_execution_http_json ~state ~sw ~clock request in
            Http.Response.json_value ~compress:false ~request:req json reqd
@@ -2312,10 +2305,11 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/board" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json =
-           dashboard_memory_http_json ~config:(Mcp_server.workspace_config state) req
+         let payload =
+           dashboard_memory_http_payload ~config:(Mcp_server.workspace_config state) req
          in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         Http.Response.json_lazy ~compress:true ~request:req ~etag:payload.etag
+           (fun () -> payload.raw_json) reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/link-previews" (fun request reqd ->
        with_permission_auth ~permission:Masc_domain.CanReadState
@@ -2326,14 +2320,12 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/dashboard/keeper-memory-health" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_path = (Mcp_server.workspace_config state).base_path in
-         let cache_key = Printf.sprintf "keeper_memory_health:%s" base_path in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
+         respond_cached_read ~request:req ~reqd
+           ~cache_key:(Printf.sprintf "keeper_memory_health:%s" base_path)
+           ~ttl:standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Server_dashboard_http_keeper_memory_health.keeper_memory_health_http_json
                  ~base_path))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/runtime-observables" (fun request reqd ->
        with_public_read (fun _state req reqd ->
@@ -2715,6 +2707,15 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/diagnostics/heap-roots" (fun request reqd ->
+       (* Operator diagnostic, never cached and never public: the walk stalls
+          the process, so only an admin token may ask for it, and each call
+          must walk afresh to say what the heap holds now. *)
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name req reqd ->
+            let json = Server_diagnostics_heap_roots.report_json () in
+            Http.Response.json_value ~compress:true ~request:req json reqd)
+         request reqd)
   |> Http.Router.get "/api/v1/dashboard/transport-health" (fun request reqd ->
        with_public_read (fun state req reqd ->
          (* No route cache here. The producer is not a computation — it reads a

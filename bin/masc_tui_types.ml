@@ -11,12 +11,13 @@ type agent = Tui_decode.agent
 type task = Tui_decode.task
 
 (** Event for the event log *)
-(* The five states the refresh loop can put the TUI in. It was a string
+(* The six states the refresh loop can put the TUI in. It was a string
    with a catch-all at each of the five render sites, so a typo rendered
    as [disconnected] and a new state would have too. *)
 type connection_status =
   | Disconnected
   | Connecting
+  | Booting
   | Reconnecting
   | Degraded
   | Connected
@@ -25,6 +26,7 @@ let connection_status_label = function
   | Connected -> "connected"
   | Degraded -> "degraded"
   | Connecting -> "connecting..."
+  | Booting -> "server booting..."
   | Reconnecting -> "reconnecting..."
   | Disconnected -> "disconnected"
 ;;
@@ -38,6 +40,19 @@ let server_identity_of_refresh
   match reading with
   | Ok current -> Some current
   | Error _ -> None
+;;
+
+(* A probe that answered but says [state_ready = false] is a server still
+   replaying its stores behind an open port. Surfaces asked of it wait out
+   their timeouts and come back as failures, which reads as a dead server.
+   The honest reading is "booting", and the honest action is to ask nothing
+   but the probe until it says ready. A probe without the field is an older
+   server: neither booting nor vouched for, so it is served as before. *)
+let server_is_booting
+    (reading : (Tui_decode.server_identity, string) result) =
+  match reading with
+  | Ok { Tui_decode.sid_state_ready = Some false; _ } -> true
+  | Ok { Tui_decode.sid_state_ready = Some true | None; _ } | Error _ -> false
 ;;
 
 type workspace_identity =
@@ -2713,6 +2728,11 @@ type state = {
   mutable presets_snapshot: Tui_decode.presets_snapshot option;
   mutable presets_error: string option;
   mutable presets_cursor: int;
+  (* What the selected preset holds, fetched from /api/v1/presets/show. The
+     listing names the overridden prompts; this is the rest of what applying
+     one would change. [None] until a selection has been read. *)
+  mutable preset_detail: Tui_decode.preset_detail option;
+  mutable preset_detail_for: string option;
   mutable preset_save_draft: string option;
   mutable preset_restore_armed: string option;
   mutable preset_report: Tui_decode.preset_restore_report option;
@@ -3972,6 +3992,8 @@ let create_state
   presets_snapshot = None;
   presets_error = None;
   presets_cursor = 0;
+  preset_detail = None;
+  preset_detail_for = None;
   preset_save_draft = None;
   preset_restore_armed = None;
   preset_report = None;

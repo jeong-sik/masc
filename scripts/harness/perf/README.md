@@ -359,3 +359,17 @@ Scaling was measured at 4 vs 8 keepers, but only the heap axis is comparable: th
 had a baseline p95 of 22.1ms against 3.2ms for the 8-keeper run, so its latency numbers carry
 host contention. Heap grew 682.8MB -> 1005.5MB as keepers doubled. The baseline control added
 after that run rejects such a run outright.
+
+## Main-domain scheduler lag: one server, three readings
+
+`scheduler_lag_probe.sh` attaches to a running server (`MASC_URL`) and prints
+`/health` latency percentiles, the server's own scheduler-lag ring
+(`/health` `.scheduler`: how late a ready fiber on the main domain ran over the
+last minute, with the count of samples at or above one second), and GC rates
+computed from two `/health` readings (`.gc`: collections per minute,
+allocation MB/s, heap and live size). It builds nothing and boots nothing.
+
+It is the before/after instrument for
+`docs/rfc/RFC-main-domain-scheduler-latency.md`: run it against the current
+binary, deploy, run it again, paste both readings into the PR. It has no
+threshold on purpose — a gate needs the baseline this script produces first.

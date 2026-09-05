@@ -160,6 +160,46 @@ let test_peek_returns_cached_value () =
   check_json "peeked value" seeded
     (Option.value ~default:`Null peeked)
 
+let test_get_or_compute_payload () =
+  Dashboard_cache.invalidate_all ();
+  let counter = ref 0 in
+  let compute () = incr counter; `Assoc [ ("count", `Int !counter) ] in
+  let p1 = Dashboard_cache.get_or_compute_payload "payload-hit" ~ttl:5.0 compute in
+  Alcotest.(check int) "compute once" 1 !counter;
+  check_json "payload json" (`Assoc [ ("count", `Int 1) ]) p1.json;
+  Alcotest.(check string) "raw json string" "{\"count\":1}" p1.raw_json;
+  Alcotest.(check bool) "etag is non-empty" true (String.length p1.etag > 0);
+  Alcotest.(check bool) "etag is weak" true (String.starts_with ~prefix:"W/\"" p1.etag);
+  let p2 = Dashboard_cache.get_or_compute_payload "payload-hit" ~ttl:5.0 compute in
+  Alcotest.(check int) "still computed once" 1 !counter;
+  Alcotest.(check string) "same raw_json" p1.raw_json p2.raw_json;
+  Alcotest.(check string) "same etag" p1.etag p2.etag
+
+let test_peek_payload () =
+  Dashboard_cache.invalidate_all ();
+  Alcotest.(check bool) "peek missing is none" true
+    (Option.is_none (Dashboard_cache.peek_payload "missing"));
+  let p =
+    Dashboard_cache.get_or_compute_payload "peek-p" ~ttl:5.0 (fun () ->
+        `String "cached_payload")
+  in
+  match Dashboard_cache.peek_payload "peek-p" with
+  | None -> Alcotest.fail "expected peek_payload to return Some"
+  | Some peeked ->
+    Alcotest.(check string) "peeked raw_json" p.raw_json peeked.raw_json;
+    Alcotest.(check string) "peeked etag" p.etag peeked.etag
+
+let test_server_dashboard_cached_surface_payload () =
+  let surface = Server_dashboard_http_cache.create_cached_surface (`Assoc []) in
+  Server_dashboard_http_cache.mark_cached_surface_success surface (`Assoc [ ("metric", `Int 42) ]);
+  let p1 = Server_dashboard_http_cache.cached_surface_payload surface in
+  Alcotest.(check bool) "payload has etag" true (String.length p1.etag > 0);
+  let p2 = Server_dashboard_http_cache.cached_surface_payload surface in
+  Alcotest.(check bool) "memoized payload physically equal" true (p1 == p2);
+  Server_dashboard_http_cache.invalidate_cached_surface surface;
+  let p3 = Server_dashboard_http_cache.cached_surface_payload surface in
+  Alcotest.(check bool) "payload after invalidate is different" true (p1 != p3)
+
 let test_seed_stale_if_missing_refreshes_in_background ~clock () =
   Dashboard_cache.invalidate_all ();
   Dashboard_cache.seed_stale_if_missing "seeded" ~stale_for:30.0
@@ -947,6 +987,12 @@ let () =
             (test_seed_stale_if_missing_refreshes_in_background ~clock);
           test_case "peek returns cached value" `Quick
             test_peek_returns_cached_value;
+          test_case "get_or_compute_payload returns payload with raw_json and etag" `Quick
+            test_get_or_compute_payload;
+          test_case "peek_payload returns cached payload" `Quick
+            test_peek_payload;
+          test_case "cached_surface_payload memoizes and invalidates" `Quick
+            test_server_dashboard_cached_surface_payload;
           test_case "projection snapshot helper reuses actor cache" `Quick
             test_projection_snapshot_cache_reuses_actor_key;
           test_case "projection digest helper separates actors" `Quick

@@ -712,3 +712,6 @@ module For_testing = struct
     | Ok pool -> Eio.Mutex.use_ro pool.owners_mu (fun () -> Hashtbl.length pool.owners)
   ;;
 end
+
+(* For [Heap_roots]: the value the diagnostic walks. *)
+let heap_root () = Obj.repr pools

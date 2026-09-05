@@ -18,6 +18,10 @@ type checkpoint_stage =
   | After_assistant_collected
   | After_tool_results_appended
   | After_context_injection
+  | After_rejected_response_dropped
+  (** Written by the caller, not the pipeline: the checkpoint that stood after
+      the assistant's response was collected, with that response removed
+      because accept refused it. Same turn count as the one it replaces. *)
 
 val checkpoint_stage_to_string : checkpoint_stage -> string
 

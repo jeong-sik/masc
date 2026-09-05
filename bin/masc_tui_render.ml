@@ -1172,7 +1172,7 @@ let connection_status_badge : Masc_tui_types.connection_status -> string =
   function
   | Connected as status ->
       (Theme.ok ()) ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
-  | (Degraded | Connecting | Reconnecting) as status ->
+  | (Degraded | Connecting | Reconnecting | Booting) as status ->
       (Theme.warn ()) ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
   | Disconnected as status ->
       (Theme.bad ()) ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
@@ -5246,7 +5246,7 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
              rather than shutting a keeper down, so the hint follows suit. *)
           ; (match state.connection_status with
              | Disconnected -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "s" ^ Ansi.reset ^ " start server"
-             | Connecting | Reconnecting | Degraded | Connected ->
+             | Connecting | Booting | Reconnecting | Degraded | Connected ->
                  hint Keeper_control.Shutdown "shutdown")
           ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "e" ^ Ansi.reset ^ " settings"
           ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "a" ^ Ansi.reset ^ " new"
@@ -11134,27 +11134,73 @@ let fusion_tool_trace_lines ~width (trace : Tui_decode.fusion_tool_trace) =
       in
       (coverage :: observed) @ gaps @ events
 
+let fusion_pipeline_diagram (run : Tui_decode.fusion_run) =
+  let glyph_done = (Theme.ok ()) ^ "\xe2\x97\x8f" ^ Ansi.reset in
+  let glyph_active = (Theme.warn ()) ^ "\xe2\x97\x90" ^ Ansi.reset in
+  let glyph_waiting = Ansi.dim ^ "\xe2\x97\x8b" ^ Ansi.reset in
+  let glyph_failed = (Theme.bad ()) ^ "\xc3\x97" ^ Ansi.reset in
+  let arrow = " " ^ (Theme.recede ()) ^ "\xe2\x96\xb8" ^ Ansi.reset ^ " " in
+  let status =
+    match run.fur_status with
+    | Fusion_completed -> `Completed
+    | Fusion_running -> `Running
+    | Fusion_failed _ -> `Failed
+  in
+  let stage, panel_answered, panel_expected =
+    match run.fur_stage with
+    | Fusion_stage_accepted -> `Accepted, 0, 0
+    | Fusion_stage_panel { frs_expected } -> `Panel, 0, frs_expected
+    | Fusion_stage_judge { frs_expected; frs_answered; _ } -> `Judge, frs_answered, frs_expected
+    | Fusion_stage_computed { frs_answered; frs_expected; _ }
+    | Fusion_stage_recording_evidence { frs_answered; frs_expected; _ } -> `Evidence, frs_answered, frs_expected
+    | Fusion_stage_completed -> `Completed, 0, 0
+    | Fusion_stage_failed -> `Failed, 0, 0
+  in
+  Render_schedule.fusion_pipeline_diagram
+    ~glyph_done ~glyph_active ~glyph_waiting ~glyph_failed ~arrow
+    ~status ~stage ~panel_answered ~panel_expected ()
+
 let fusion_detail_lines ~width (detail : fusion_detail) =
   let run = detail.fud_run in
   let status = fusion_run_status_to_string run.fur_status in
+  let now = Unix.gettimeofday () in
+  let tm = Unix.localtime run.fur_started_at in
+  let date_time =
+    Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
+      (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+      tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+  in
+  let age = fusion_run_age ~now run in
+  let started_text = Printf.sprintf "%s (%s ago)" date_time age in
+  let pipeline = fusion_pipeline_diagram run in
   let run_lines =
     [ Ansi.bold, "  RUN"
     ; (Masc_tui_theme.tone Masc_tui_theme.Accent), "  Flow: Question \xe2\x86\x92 Panel \xe2\x86\x92 Judge \xe2\x86\x92 Evidence"
+    ; Ansi.reset, "  Pipeline: " ^ pipeline
+    ; ( Ansi.reset
+      , Printf.sprintf "  Actions: %s[Y]%s Copy Link   %s[PgUp/PgDn]%s Page   %s[Esc]%s Back to Runs"
+          (Theme.info ()) Ansi.reset
+          (Theme.info ()) Ansi.reset
+          (Theme.info ()) Ansi.reset )
     ; ( Ansi.dim
       , "  Link: "
         ^ Link.reference Fusion_run
             (Terminal_text.single_line run.fur_run_id) )
-    ; ( Ansi.dim
-      , "  Keeper link: "
-        ^ Link.reference Keeper
-            (Terminal_text.single_line run.fur_keeper) )
+    ; ( Ansi.reset
+      , Printf.sprintf "  Caller: %s@%s%s %s[Keeper]%s  \xc2\xb7  %s"
+          (Masc_tui_theme.tone Masc_tui_theme.Accent)
+          (Terminal_text.single_line run.fur_keeper)
+          Ansi.reset
+          (Theme.warn ())
+          Ansi.reset
+          (Link.reference Keeper (Terminal_text.single_line run.fur_keeper)) )
     ; fusion_run_status_color run.fur_status, "  Status: " ^ status
     ; (Masc_tui_theme.tone Masc_tui_theme.Accent), "  Stage: " ^ fusion_run_stage_to_string run.fur_stage
     ; Ansi.dim, "  Progress: " ^ fusion_run_progress_text run.fur_stage
     ; ( Ansi.reset
     , "  Configuration: " ^ Terminal_text.single_line run.fur_preset ^ " \xc2\xb7 "
       ^ Fusion_types.fusion_topology_to_string run.fur_topology )
-    ; Ansi.dim, "  Started: " ^ fusion_run_clock run
+    ; Ansi.dim, "  Started: " ^ started_text
     ]
     @
     match run.fur_status with
@@ -11447,12 +11493,23 @@ let render_fusion_detail (state : state) run_id =
       fusion_detail_pane state ~rows ~cols run_id buf
     else begin
       let left_cols = keeper_roster_pane_cols in
+      let format_sidebar_fusion (row : Tui_decode.fusion_run) =
+        let status =
+          match row.fur_status with
+          | Tui_decode.Fusion_running -> "run "
+          | Tui_decode.Fusion_completed -> "done"
+          | Tui_decode.Fusion_failed _ -> "fail"
+        in
+        let time = fusion_run_clock row in
+        let keeper = Terminal_text.single_line row.fur_keeper in
+        let run_id = Terminal_text.single_line row.fur_run_id in
+        Render_schedule.fusion_sidebar_label ~status ~time ~keeper ~run_id
+      in
       let labels =
         match state.fusion_runs with
         | None -> []
         | Some snapshot ->
-          List.map (fun (row : Tui_decode.fusion_run) -> row.Tui_decode.fur_run_id)
-            snapshot.Tui_decode.fus_runs
+          List.map format_sidebar_fusion snapshot.Tui_decode.fus_runs
       in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
@@ -15206,7 +15263,8 @@ let render_presets (state : state) =
   done;
   box_divider buf cols;
   let detail =
-    Masc_tui_preset_text.detail_lines ~selected ~report:state.preset_report
+    Masc_tui_preset_text.detail_lines ~selected ~detail:state.preset_detail
+      ~report:state.preset_report
     @ List.map
         (fun (name, reason) -> Printf.sprintf "! %s — %s" name reason)
         unreadable
@@ -15689,24 +15747,105 @@ let render_surface (state : state) =
        | Some seq -> render_system_log_detail state seq)
   | Schedules -> render_schedules state
 
+let help_surface_name (surface : surface) =
+  match surface with
+  | Overview -> "Overview"
+  | Acting -> "Activity"
+  | Metrics -> "Metrics"
+  | Keepers _ -> "Keepers"
+  | Memory -> "Memory"
+  | Approvals -> "Approvals"
+  | Board -> "Board"
+  | Planning | Verification | Harness -> "Planning"
+  | Fusion -> "Fusion"
+  | Repositories | Code | Changes -> "Workspace"
+  | Runtime | Lanes | Clients -> "Runtime"
+  | Config | Resources | Tools -> "Config"
+  | Connectors | Schedules -> "Keepers"
+  | System_logs -> "Activity"
+
+let help_ascii_banner ~cols (state : state) =
+  let inner_width = max 1 (framed_inner_width cols) in
+  let surface_label = help_surface_name state.view in
+  let hints_status = if state.hints_visible then "on" else "off" in
+  let bar_char = "\xe2\x94\x80" in
+  let repeat_utf8 str count =
+    let buf = Buffer.create (String.length str * count) in
+    for _ = 1 to count do Buffer.add_string buf str done;
+    Buffer.contents buf
+  in
+  if inner_width >= 72 then
+    [ "  " ^ (Theme.info ()) ^ "\xe2\x95\x94\xe2\x95\xa6\xe2\x95\x97\xe2\x95\x94\xe2\x95\x90\xe2\x95\x97\xe2\x95\x94\xe2\x95\x90\xe2\x95\x97\xe2\x95\x94\xe2\x95\x90\xe2\x95\x97" ^ Ansi.reset
+      ^ "  " ^ Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "M A S C" ^ Ansi.reset
+      ^ "  \xc2\xb7  " ^ Ansi.bold ^ "Multi-Agent System Coordinator" ^ Ansi.reset
+    ; "  " ^ (Theme.info ()) ^ "\xe2\x95\x91\xe2\x95\x91\xe2\x95\x91\xe2\x95\xa0\xe2\x95\x90\xe2\x95\xa3\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x97\xe2\x95\x91    " ^ Ansi.reset
+      ^ Ansi.dim ^ "Interactive Autonomous Fleet Workspace & Operations" ^ Ansi.reset
+    ; "  " ^ (Theme.info ()) ^ "\xe2\x95\x9a \xe2\x95\xa9\xe2\x95\x9a \xe2\x95\xa9\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d" ^ Ansi.reset
+      ^ "  Active: " ^ (Theme.warn ()) ^ "[" ^ surface_label ^ "]" ^ Ansi.reset
+      ^ Ansi.dim ^ "  \xc2\xb7  [?] Close  \xc2\xb7  [h] Hints (" ^ hints_status ^ ")" ^ Ansi.reset
+    ; "  " ^ (Theme.recede ()) ^ repeat_utf8 bar_char (min 68 (inner_width - 4)) ^ Ansi.reset
+    ; ""
+    ]
+  else
+    [ "  " ^ Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "[ MASC · Multi-Agent System Coordinator ]" ^ Ansi.reset
+    ; "  Active: " ^ (Theme.warn ()) ^ "[" ^ surface_label ^ "]" ^ Ansi.reset
+      ^ Ansi.dim ^ " · [?] Close · [h] Hints (" ^ hints_status ^ ")" ^ Ansi.reset
+    ; "  " ^ (Theme.recede ()) ^ repeat_utf8 bar_char (max 1 (inner_width - 4)) ^ Ansi.reset
+    ; ""
+    ]
+
 (* The [?] help screen: every binding, grouped by the surface that answers
    it. The rows come from Masc_tui_keys -- the same table the footers read --
    so the two displays cannot drift apart. A key added to the dispatch gets
    its row there, once. *)
 let help_lines (state : state) =
+  let format_key key =
+    let trimmed = String.trim key in
+    if String.starts_with ~prefix:"[" trimmed && String.ends_with ~suffix:"]" trimmed then
+      trimmed
+    else
+      "[" ^ trimmed ^ "]"
+  in
   let section (title, entries) =
-    (Ansi.bold ^ title ^ Ansi.reset)
+    let is_current =
+      String.ends_with ~suffix:Masc_tui_keys.here_marker title
+    in
+    let header_line =
+      if is_current then
+        let marker_len = String.length Masc_tui_keys.here_marker in
+        let base_title = String.sub title 0 (String.length title - marker_len) in
+        (Theme.warn ()) ^ "\xe2\x97\x88 " ^ Ansi.bold ^ (Theme.info ())
+        ^ "ACTIVE: " ^ String.uppercase_ascii base_title ^ Ansi.reset
+      else if String.equal title "Global" then
+        (Theme.info ()) ^ "\xe2\x97\x88 " ^ Ansi.bold
+        ^ "GLOBAL NAVIGATION" ^ Ansi.reset
+      else
+        Ansi.dim ^ "\xe2\x97\x87 " ^ Ansi.reset ^ Ansi.bold ^ title ^ Ansi.reset
+    in
+    header_line
     :: List.map
          (fun (key, action) ->
-           Printf.sprintf "  %s%-18s%s %s" (Masc_tui_theme.tone Masc_tui_theme.Accent) key Ansi.reset action)
+           Printf.sprintf "  %s%-16s%s %s"
+             (Masc_tui_theme.tone Masc_tui_theme.Accent)
+             (format_key key)
+             Ansi.reset
+             action)
          entries
     @ [ "" ]
   in
   let slash_commands =
-    (Ansi.bold ^ "Slash commands" ^ Ansi.reset)
+    ((Theme.warn ()) ^ "\xe2\x9a\xa1 " ^ Ansi.bold ^ "SLASH COMMANDS & WORKFLOWS" ^ Ansi.reset)
     :: List.map
-         (fun line -> "  " ^ (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ line ^ Ansi.reset)
-         Masc_tui_command.help_lines
+         (fun (cmd : Masc_tui_command.command_help) ->
+           let text = Masc_tui_command.usage cmd in
+           let pad = String.make (max 2 (16 - String.length text)) ' ' in
+           Printf.sprintf "  %s%s%s%s%s"
+             (Theme.warn ())
+             text
+             Ansi.reset
+             pad
+             cmd.summary)
+         Masc_tui_command.catalog
     @ [ "" ]
   in
   (* The first section is the reader's own surface, and it opens the sheet.
@@ -16988,7 +17127,8 @@ let render_context_inspector state =
 let help_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  ( List.length (Masc_tui_help.sheet ~cols (help_lines state))
+  let header = help_ascii_banner ~cols state in
+  ( List.length (Masc_tui_help.sheet ~header ~cols (help_lines state))
   , framed_content_height ~rows )
 
 (* The [:] palette: a typed filter over every jump the strip and roster
@@ -17043,13 +17183,14 @@ let render_help (state : state) =
   let buf = Buffer.create 4096 in
   framed_top buf cols;
   framed_line buf cols
-    (screen_title " Help" ^ "  " ^ Ansi.dim
+    (screen_title " MASC Cheat Sheet" ^ "  " ^ Ansi.dim
     ^ "hints "
     ^ (if state.hints_visible then "on" else "off")
-    ^ " \xc2\xb7 persist: [tui] hints_visible in runtime.toml" ^ Ansi.reset);
+    ^ " \xc2\xb7 [h] toggle \xc2\xb7 [Esc] close" ^ Ansi.reset);
   framed_divider buf cols;
+  let header = help_ascii_banner ~cols state in
   let lines = help_lines state in
-  let rendered_rows = Masc_tui_help.sheet ~cols lines in
+  let rendered_rows = Masc_tui_help.sheet ~header ~cols lines in
   let content_height = framed_content_height ~rows in
   let scroll =
     Masc_tui_scroll.normalize

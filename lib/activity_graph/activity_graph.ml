@@ -1232,3 +1232,6 @@ module For_testing = struct
     (cache_stats ()).past_day_files
   let current_day_path = day_path
 end
+
+(* For [Heap_roots]: the value the diagnostic walks. *)
+let heap_root () = Obj.repr all_events_workspace_caches

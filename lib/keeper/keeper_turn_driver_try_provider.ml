@@ -1349,6 +1349,30 @@ let truncation_recovery ~enable_thinking ~result ~checkpoint =
   | Error _, _ | Ok _, _ -> Recovery_not_applicable
 ;;
 
+(* A cut checkpoint is worth nothing unless the next turn loads it. The agent
+   core's sink already persisted the checkpoint that carries the rejected
+   response, at [After_assistant_collected]; this write, at the same turn
+   count, replaces it. The lane's callers do not persist what this function
+   returns: the Error branch drops [checkpoint_after], so the durable state
+   would otherwise still hold the refused text. Measured on sangsu,
+   2026-09-05: the same 31 KB collapse sat in the checkpoint four times, one
+   copy per rejected turn (#33267). *)
+let persist_dropped_response
+      ~(checkpoint_sink : Agent_core.Agent.checkpoint_sink option)
+      ~now
+      (cut : Agent_core.Checkpoint.t)
+  =
+  match checkpoint_sink with
+  | None -> Ok ()
+  | Some sink ->
+    sink
+      { Agent_core.Agent.stage = Agent_core.Agent.After_rejected_response_dropped
+      ; turn = cut.turn_count
+      ; checkpoint = cut
+      ; timestamp = now
+      }
+;;
+
 let run_try_provider_with_truncation_recovery
       (ctx : try_provider_ctx)
       candidate
@@ -1377,13 +1401,36 @@ let run_try_provider_with_truncation_recovery
       { ctx with enable_thinking = Some false; preserve_thinking = Some false }
       candidate
   | Drop_rejected_response cut ->
+    let persisted =
+      persist_dropped_response
+        ~checkpoint_sink:ctx.checkpoint_sink
+        ~now:(Unix.gettimeofday ())
+        cut
+    in
+    (match persisted with
+     | Ok () -> ()
+     | Error reason ->
+       Log.Keeper.warn
+         ~keeper_name:ctx.keeper_name
+         "rejected response could not be dropped from the checkpoint and returns as \
+          input next turn: %s"
+         reason);
     emit_runtime_manifest ctx
       ~status:"max_tokens_rejected_response_dropped"
       ~decision:
         (`Assoc
-          [ "continuation", `String "none"
-          ; "thinking", `String "already_disabled"
-          ])
+          ([ "continuation", `String "none"
+           ; "thinking", `String "already_disabled"
+           ; ( "checkpoint_write"
+             , `String
+                 (match persisted with
+                  | Ok () -> "installed"
+                  | Error _ -> "refused") )
+           ]
+           @
+           match persisted with
+           | Ok () -> []
+           | Error reason -> [ "refusal", `String reason ]))
       Keeper_runtime_manifest.Provider_lane_resolved;
     first_result, Some cut, success_sample
 ;;
@@ -1399,6 +1446,7 @@ module For_testing = struct
     | Drop_rejected_response of Agent_core.Checkpoint.t
 
   let truncation_recovery = truncation_recovery
+  let persist_dropped_response = persist_dropped_response
   let thinking_was_enabled = thinking_was_enabled
   let observe_request_wire_error = observe_request_wire_error
   let memoize_message_measurement = memoize_message_measurement

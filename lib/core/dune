@@ -21,6 +21,7 @@
   executor_pool_ref
   domain_pool
   domain_pool_ref
+  scheduler_lag
   masc_runtime_events
   system_error_class
   executable_path
@@ -28,7 +29,8 @@
   list_util
   set_util
   read_drop_reason
-  eval_tool_selector)
+  eval_tool_selector
+  heap_roots)
  (libraries
   (re_export masc_string_util)
   shared_types
@@ -38,6 +40,7 @@
   re.pcre
   eio
   eio.unix
+  mtime
   time_compat
   fs_compat
   masc_log

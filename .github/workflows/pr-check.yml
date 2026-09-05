@@ -36,22 +36,31 @@ jobs:
   #
   # It is a job of its own rather than a step in `check` because it needs no
   # OCaml toolchain -- checkout, ripgrep, jq and python3 are the whole
-  # dependency -- so it answers in about a minute instead of waiting behind
-  # the opam switch, and a lint failure and a compile failure are reported
-  # independently.
+  # dependency -- so it runs beside the build instead of behind the opam
+  # switch, and a lint failure and a compile failure are reported
+  # independently. Measured on the two PRs that introduced this job: lint
+  # 5m31s and 5m28s, build 6m16s and 6m4s, in parallel. The saving is not
+  # the lint job's own speed; it is that a lint verdict does not queue
+  # behind a toolchain it never uses.
   #
-  # Mode is `blocking`: 37 lints, measured green on ff7ff135bd. The six extra
-  # `blocking-pr` diff guards are NOT wired here yet, because one of them
-  # (lint-cancel-guard.sh) reports five hits on main -- one of which is the
-  # lint reading a code span inside a comment. Wiring them before that is
-  # settled would red-wall every PR. Tracked in #33211.
+  # Mode is `blocking-pr`: the 37 whole-tree lints plus six guards that read
+  # the diff against the PR's base -- Fun.protect finalizers, ignore
+  # justification on new sites, the RFC-0235 stale-base revert guard, and
+  # the cancel guard. Those six were left out when this job landed because
+  # lint-cancel-guard.sh reported five hits on main; #33229 closed them, so
+  # they run now. The diff guards need the base commit present, hence
+  # fetch-depth: 0.
   lint:
     name: lint suite
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Checkout
+        # Full history: the blocking-pr guards diff HEAD against the PR's
+        # base sha, and a depth-1 checkout does not contain that commit.
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Install the tools the lints call
         # 29 of the 40 lints call rg or jq, and yaml-syntax.sh imports PyYAML.
@@ -63,7 +72,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends ripgrep jq python3-yaml
 
       - name: Blocking lints
-        run: bash scripts/ci/run-lint-suite.sh blocking
+        run: |
+          bash scripts/ci/run-lint-suite.sh blocking-pr \
+            "${{ github.event.pull_request.base.sha }}"
 
       - name: Advisory lints
         # Recorded, not enforced -- the driver's own contract for this mode.

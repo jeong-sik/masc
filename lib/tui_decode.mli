@@ -1587,6 +1587,9 @@ type server_identity = {
           (health [build.executable_in_worktree]). [None] on an older server
           that does not carry the field — unknown, so no warning and no
           all-clear. *)
+  sid_state_ready : bool option;
+      (** [/health] [startup.state_ready]. [None] when the probe carries no
+          startup section: neither booting nor vouched ready. *)
 }
 (** Which server the TUI is talking to, as [/health] reports it.
 
@@ -1647,6 +1650,9 @@ type preset_manifest = {
   pm_description : string;
   pm_created_at : string;
   pm_override_count : int;
+  pm_override_keys : string list option;
+      (** Which prompts the preset overrides. [None] on a manifest written
+          before the server named them -- unknown, not none. *)
   pm_keepers : string list;
   pm_assignment_count : int;
   pm_lane_count : int;
@@ -1657,6 +1663,19 @@ type presets_snapshot = {
   pss_unreadable : (string * string) list;
       (** directory name, why its manifest did not read *)
 }
+
+type preset_detail = {
+  pd_name : string;
+  pd_overrides : (string * int) list;  (** prompt key, bytes *)
+  pd_instructions : (string * int) list;  (** keeper TOML file name, bytes *)
+  pd_assignments : (string * string) list;  (** keeper, runtime id *)
+  pd_lanes : string list;
+}
+(** What a preset holds, from [/api/v1/presets/show]. Sizes rather than
+    bodies: the pane is for deciding whether to apply one, and a 4 KB prompt
+    does not fit in it. *)
+
+val decode_preset_detail : Yojson.Safe.t -> (preset_detail, string) result
 
 type preset_part = {
   pp_effect : string;  (** when the surface takes effect, as the server names it *)

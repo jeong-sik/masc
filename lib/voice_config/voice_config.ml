@@ -141,6 +141,46 @@ let require_list ~ctx ~field json =
         (Printf.sprintf "%s.%s must be array, got %s: %s" ctx field
            (Json_util.kind_name raw) (Json_util.excerpt raw))
 
+(* A field that takes a boolean. Absent is the default the caller names;
+   present, it is a boolean or a refusal naming the key, the type wanted and
+   what was found. A string "yes" where a boolean is meant is not silently
+   the default: the operator typed a value and the load acted on a different
+   one. *)
+let optional_boolean ~ctx ~field ~default json =
+  match Json_util.assoc_member_opt field json with
+  | None -> Ok default
+  | Some (`Bool v) -> Ok v
+  | Some other ->
+      Error
+        (Printf.sprintf "%s.%s must be a boolean, got %s: %s" ctx field
+           (Json_util.kind_name other) (Json_util.excerpt other))
+
+(* A field that takes a list of names. Absent is the empty list; present, it
+   is an array or a refusal naming the key. Every element is a string with
+   something in it once trimmed, or a refusal naming its index the way
+   [tts.endpoints[0]] is named: a number in the list, or a blank, is not
+   silently one fewer name. *)
+let optional_string_list ~ctx ~field json =
+  match Json_util.assoc_member_opt field json with
+  | None -> Ok []
+  | Some (`List items) ->
+      let rec loop index acc = function
+        | [] -> Ok (List.rev acc)
+        | item :: rest -> (
+            match trim_nonempty_json item with
+            | Some value -> loop (index + 1) (value :: acc) rest
+            | None ->
+                Error
+                  (Printf.sprintf "%s.%s[%d] must be a non-empty string, got %s: %s"
+                     ctx field index (Json_util.kind_name item)
+                     (Json_util.excerpt item)))
+      in
+      loop 0 [] items
+  | Some other ->
+      Error
+        (Printf.sprintf "%s.%s must be an array, got %s: %s" ctx field
+           (Json_util.kind_name other) (Json_util.excerpt other))
+
 let reject_unknown_fields ~ctx ~allowed = function
   | `Assoc fields -> (
     match
@@ -419,15 +459,6 @@ let parse_capture json =
               (Printf.sprintf "%s.%s must be a number, got %s: %s" ctx key
                  (Json_util.kind_name other) (Json_util.excerpt other))
       in
-      let boolean key ~default =
-        match Json_util.assoc_member_opt key capture_json with
-        | None -> Ok default
-        | Some (`Bool v) -> Ok v
-        | Some other ->
-            Error
-              (Printf.sprintf "%s.%s must be a boolean, got %s: %s" ctx key
-                 (Json_util.kind_name other) (Json_util.excerpt other))
-      in
       let* calibration_seconds =
         number "calibration_seconds" ~default:default_capture.calibration_seconds
       in
@@ -443,7 +474,8 @@ let parse_capture json =
         number "speech_margin_db" ~default:default_capture.speech_margin_db
       in
       let* noise_reduction =
-        boolean "noise_reduction" ~default:default_capture.noise_reduction
+        optional_boolean ~ctx ~field:"noise_reduction"
+          ~default:default_capture.noise_reduction capture_json
       in
       (* A probe of zero length measures nothing and would hand the capture a
          threshold derived from an empty file. *)
@@ -484,24 +516,35 @@ let parse_local_playback json =
         (Printf.sprintf "root.local_playback must be an object, got %s: %s"
            (Json_util.kind_name other) (Json_util.excerpt other))
 
+(* Absent, the Gate reviews every speak: nobody is exempt and no agent is
+   named. *)
+let default_gate = { always_allow = false; exempt_agents = [] }
+
+(* The keys [\[voice.gate\]] accepts, refused by name the way [capture_fields]
+   are. *)
+let gate_fields = [ "always_allow"; "exempt_agents" ]
+
 let parse_gate json =
+  (* Read the way [parse_capture] reads: a key this does not know, or a value
+     of another type, fails the load naming [gate.<key>]. A mistyped
+     [exempt_agents] read as "no exemptions", or a non-boolean [always_allow]
+     read as [false], would leave an operator whose speak is still being
+     reviewed with a gate behaving as if the section were absent, and no
+     sentence saying why. *)
+  let ctx = "gate" in
   match Json_util.assoc_member_opt "gate" json with
   | Some (`Assoc _ as gate_json) ->
-      let always_allow =
-        Option.value ~default:false (Json_util.get_bool gate_json "always_allow")
+      let open Result in
+      let* () = reject_unknown_fields ~ctx ~allowed:gate_fields gate_json in
+      let* always_allow =
+        optional_boolean ~ctx ~field:"always_allow"
+          ~default:default_gate.always_allow gate_json
       in
-      let exempt_agents =
-        let from_field key =
-          match Json_util.assoc_member_opt key gate_json with
-          | Some (`List values) -> List.filter_map trim_nonempty_json values
-          | _ -> []
-        in
-        match from_field "exempt_agents" with
-        | [] -> from_field "agents"
-        | list -> list
+      let* exempt_agents =
+        optional_string_list ~ctx ~field:"exempt_agents" gate_json
       in
       Ok { always_allow; exempt_agents }
-  | None | Some `Null -> Ok { always_allow = false; exempt_agents = [] }
+  | None | Some `Null -> Ok default_gate
   | Some other ->
       Error
         (Printf.sprintf "root.gate must be an object, got %s: %s"

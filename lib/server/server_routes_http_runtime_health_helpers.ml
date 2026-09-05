@@ -19,7 +19,11 @@
       summary keyed by listener.
     - [quick_gc_json] — operator-facing GC counter summary. Uses
       [Gc.quick_stat] (not [Gc.stat]) so health probes don't trigger
-      a full major-cycle sync under live keeper load. *)
+      a full major-cycle sync under live keeper load. Carries the
+      cumulative collection and word counters so two probes give
+      collection and allocation rates.
+    - [scheduler_json] — the main-domain scheduler-lag ring
+      ([Scheduler_lag.global]) plus the worker-domain count. *)
 
 open Server_routes_http_common
 
@@ -70,12 +74,34 @@ let protocol_json ~listener =
 let quick_gc_json () =
   (* Keep health probes cheap under live keeper load. [Gc.stat] can force a
      full major-cycle sync across domains; [Gc.quick_stat] exposes the same
-     operator-facing counters without walking the heap. *)
+     operator-facing counters without walking the heap. The word and
+     collection counters are cumulative since process start: a reader takes
+     two probes and divides by the gap to get rates. *)
   let s = Gc.quick_stat () in
+  let control = Gc.get () in
   `Assoc
     [
       ("compactions", `Int s.compactions);
       ("heap_words", `Int s.heap_words);
       ("live_words", `Int s.live_words);
-      ("minor_heap_size", `Int (let c = Gc.get () in c.minor_heap_size));
+      ("minor_heap_size", `Int control.minor_heap_size);
+      ("space_overhead", `Int control.space_overhead);
+      ("minor_collections", `Int s.minor_collections);
+      ("major_collections", `Int s.major_collections);
+      ("forced_major_collections", `Int s.forced_major_collections);
+      ("minor_words", `Float s.minor_words);
+      ("promoted_words", `Float s.promoted_words);
+      ("major_words", `Float s.major_words);
     ]
+
+let scheduler_json () =
+  (* The probe fiber runs on the main domain; its ring says how late a ready
+     fiber there ran over the last minute. [pool_domains] is carried next to
+     it because a stall on the main domain while the pool is idle and a stall
+     while every worker is busy are different findings. *)
+  let pool_domains =
+    match Domain_pool_ref.domain_count_opt () with
+    | Some count -> `Int count
+    | None -> `Null
+  in
+  `Assoc (("pool_domains", pool_domains) :: Scheduler_lag.to_fields Scheduler_lag.global)

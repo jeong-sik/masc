@@ -36,15 +36,48 @@ let rec atomic_update atomic f =
 let token_counter = Atomic.make 0
 let next_token () = Atomic.fetch_and_add token_counter 1
 
+type cached_payload = {
+  json : Yojson.Safe.t;
+  raw_json : string;
+  etag : string;
+}
+
+let etag_hex_chars = 12
+
+let weak_etag_of_string s =
+  let hash = Digest.string s |> Digest.to_hex in
+  let sub = String.sub hash 0 (min etag_hex_chars (String.length hash)) in
+  "W/\"" ^ sub ^ "\""
+
 type entry = {
   value : Yojson.Safe.t;
+  raw : (string * string) option Atomic.t;
   expires_at : float;
   stale_until : float;
 }
 
 type slot =
   | Ready of entry
-  | Computing of { token : int; started_at : float; stale : Yojson.Safe.t option }
+  | Computing of { token : int; started_at : float; stale : entry option }
+
+let ensure_raw entry =
+  match Atomic.get entry.raw with
+  | Some pair -> pair
+  | None ->
+      let raw_json = Yojson.Safe.to_string entry.value in
+      let etag = weak_etag_of_string raw_json in
+      let pair = (raw_json, etag) in
+      Atomic.set entry.raw (Some pair);
+      pair
+
+let payload_of_entry entry =
+  let (raw_json, etag) = ensure_raw entry in
+  { json = entry.value; raw_json; etag }
+
+let payload_of_json json =
+  let raw_json = Yojson.Safe.to_string json in
+  let etag = weak_etag_of_string raw_json in
+  { json; raw_json; etag }
 
 let table : slot SMap.t Atomic.t = Atomic.make SMap.empty
 
@@ -337,10 +370,10 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
       let map = maybe_evict map in
       match SMap.find_opt key map with
       | Some (Ready entry) when entry.expires_at > now () ->
-        (`Hit entry.value, map)
+        (`Hit entry, map)
       | Some (Ready entry) when entry.stale_until > now () ->
         let token = next_token () in
-        (`Stale (entry.value, token), SMap.add key (Computing { token; started_at = now (); stale = Some entry.value }) map)
+        (`Stale (entry, token), SMap.add key (Computing { token; started_at = now (); stale = Some entry }) map)
       | Some (Computing { stale = Some stale_value; _ }) ->
         (`Hit stale_value, map)
       | Some (Computing { token; started_at; stale = None }) ->
@@ -365,16 +398,16 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
           (`Wait token, map)
       | Some (Ready entry) ->
         let token = next_token () in
-        (`Compute token, SMap.add key (Computing { token; started_at = now (); stale = Some entry.value }) map)
+        (`Compute token, SMap.add key (Computing { token; started_at = now (); stale = Some entry }) map)
       | None ->
         let token = next_token () in
         (`Compute token, SMap.add key (Computing { token; started_at = now (); stale = None }) map)
     ) in
     match action with
-    | `Hit v ->
+    | `Hit entry ->
       (* PR-0.2.A: cache hit observation (no logic change). *)
       inc_cache_hit ();
-      v
+      entry
     | `Timed_out -> raise (Compute_timeout (key, true))
     | `Wait token ->
       (* Per-fiber ±20% jitter on the poll interval. Concurrent waiters
@@ -390,7 +423,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
          here (unlike the deterministic [jittered_ttl]). *)
       Time_compat.sleep (wait_poll_interval_sec *. (0.8 +. Random.float 0.4));
       try_get ~waited:(waited +. wait_poll_interval_sec) ~watching_token:(Some token)
-    | `Stale (stale_value, token) ->
+    | `Stale (stale_entry, token) ->
       (* PR-0.2.A: stale-served-from-cache counts as a hit (caller gets
          data without blocking on compute; bg recompute is incidental). *)
       inc_cache_hit ();
@@ -398,10 +431,16 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
         match compute () with
         | value ->
           let ts = now () in
+          let new_entry = {
+            value;
+            raw = Atomic.make None;
+            expires_at = ts +. jittered_ttl ~key ttl;
+            stale_until = ts +. jittered_ttl ~key ttl +. stale_grace;
+          } in
           atomic_update table (fun map ->
             match SMap.find_opt key map with
             | Some (Computing { token = c; _ }) when c = token ->
-              ((), SMap.add key (Ready { value; expires_at = ts +. jittered_ttl ~key ttl; stale_until = ts +. jittered_ttl ~key ttl +. stale_grace }) map)
+              ((), SMap.add key (Ready new_entry) map)
             | _ ->
               Log.Dashboard.info "cache: bg-revalidate discarded for %s (slot replaced)" key;
               ((), map)
@@ -422,7 +461,12 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
               let expires_at =
                 if Cancel_safe.is_internal_race_cancel exn then ts else ts +. backoff_grace
               in
-              ((), SMap.add key (Ready { value = stale_value; expires_at; stale_until = ts +. backoff_grace }) map)
+              let refreshed = {
+                stale_entry with
+                expires_at;
+                stale_until = ts +. backoff_grace;
+              } in
+              ((), SMap.add key (Ready refreshed) map)
             | _ -> ((), map)
           )
       and restore_stale_ready () =
@@ -431,9 +475,12 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
           | Some (Computing { token = c; _ }) when c = token ->
               let ts = now () in
               let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
-              ((), SMap.add key
-                (Ready { value = stale_value; expires_at = ts; stale_until = ts +. backoff_grace })
-                map)
+              let restored = {
+                stale_entry with
+                expires_at = ts;
+                stale_until = ts +. backoff_grace;
+              } in
+              ((), SMap.add key (Ready restored) map)
           | _ -> ((), map)
         )
       in
@@ -453,7 +500,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
        | None ->
            Log.Dashboard.warn "cache: no switch for background revalidation, computing inline";
            do_bg_compute ());
-      stale_value
+      stale_entry
     | `Compute token ->
       (* PR-0.2.A: cache miss observation (this fiber must compute). *)
       inc_cache_miss ();
@@ -475,9 +522,12 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
         atomic_update table (fun map ->
           match SMap.find_opt key map with
           | Some (Computing { token = c; stale = Some s; _ }) when c = token ->
-              ((), SMap.add key
-                (Ready { value = s; expires_at = ts; stale_until = ts +. backoff_grace })
-                map)
+              let restored = {
+                s with
+                expires_at = ts;
+                stale_until = ts +. backoff_grace;
+              } in
+              ((), SMap.add key (Ready restored) map)
           | Some (Computing { token = c; stale = None; _ }) when c = token ->
               ((), SMap.remove key map)
           | _ -> ((), map))
@@ -502,15 +552,21 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
       let ts = now () in
       (match !result_ref with
        | Some (Ok value) ->
+           let new_entry = {
+             value;
+             raw = Atomic.make None;
+             expires_at = ts +. jittered_ttl ~key ttl;
+             stale_until = ts +. jittered_ttl ~key ttl +. stale_grace;
+           } in
            atomic_update table (fun map ->
              match SMap.find_opt key map with
              | Some (Computing { token = c; _ }) when c = token ->
-               ((), SMap.add key (Ready { value; expires_at = ts +. jittered_ttl ~key ttl; stale_until = ts +. jittered_ttl ~key ttl +. stale_grace }) map)
+               ((), SMap.add key (Ready new_entry) map)
              | _ ->
                Log.Dashboard.info "cache: compute result discarded for %s (slot replaced)" key;
                ((), map)
            );
-           value
+           new_entry
        | Some (Error exn) ->
            let fallback_val = ref None in
            if not (Cancel_safe.is_internal_race_cancel exn || is_compute_timeout exn) then
@@ -518,21 +574,22 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
            atomic_update table (fun map ->
              match SMap.find_opt key map with
              | Some (Computing { token = c; stale = Some stale_value; _ }) when c = token ->
-                 fallback_val := Some stale_value;
                  let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
-                 ((), SMap.add key
-                   (Ready { value = stale_value; expires_at = ts; stale_until = ts +. backoff_grace })
-                   map)
+                 let refreshed = {
+                   stale_value with
+                   expires_at = ts;
+                   stale_until = ts +. backoff_grace;
+                 } in
+                 fallback_val := Some refreshed;
+                 ((), SMap.add key (Ready refreshed) map)
              | Some (Computing { token = c; stale = None; _ }) when c = token ->
                  ((), SMap.remove key map)
              | _ -> ((), map)
            );
-           if should_restore_stale_after_failure exn then
-             match !fallback_val with
-             | Some value -> value
-             | None -> raise exn
-           else
-             raise exn
+           (match !fallback_val with
+            | Some entry when should_restore_stale_after_failure exn ->
+                entry
+            | _ -> raise exn)
        | None ->
            let fallback_val = ref None in
            atomic_update table (fun map ->
@@ -540,23 +597,24 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
              | Some (Computing { token = c; stale; _ }) when c = token ->
                  (match stale with
                   | Some s ->
-                      fallback_val := Some s;
-                      let cooldown = { value = s; expires_at = ts +. 5.0; stale_until = ts +. 10.0 } in
+                      let cooldown = { s with expires_at = ts +. 5.0; stale_until = ts +. 10.0 } in
+                      fallback_val := Some cooldown;
                       ((), SMap.add key (Ready cooldown) map)
                   | None ->
                       let err_json =
                         timeout_error_json ~timeout_kind:"compute" key
                           (max_wait_sec ())
                       in
-                      fallback_val := Some err_json;
-                      let cooldown = { value = err_json; expires_at = ts +. 5.0; stale_until = ts +. 5.0 } in
+                      let cooldown = { value = err_json; raw = Atomic.make None; expires_at = ts +. 5.0; stale_until = ts +. 5.0 } in
+                      fallback_val := Some cooldown;
                       ((), SMap.add key (Ready cooldown) map))
              | _ -> ((), map)
            );
            (match !fallback_val with
-            | Some v -> v
+            | Some entry -> entry
             | None ->
-                timeout_error_json ~timeout_kind:"compute" key (max_wait_sec ())))
+                let err_json = timeout_error_json ~timeout_kind:"compute" key (max_wait_sec ()) in
+                { value = err_json; raw = Atomic.make None; expires_at = ts +. 5.0; stale_until = ts +. 5.0 }))
     | `Retry_stuck (elapsed, _ceiling) ->
       (* Pair the watchdog with an SLO-actionable signal: if this counter
          climbs sustainedly, [release_on_cancel] is not firing and the
@@ -577,28 +635,34 @@ let get_or_compute_simple key ~ttl compute =
     let map = maybe_evict map in
     match SMap.find_opt key map with
     | Some (Ready entry) when entry.stale_until > ts ->
-      (`Hit entry.value, map)
+      (`Hit entry, map)
     | _ ->
       let token = next_token () in
       (`Compute token, SMap.add key (Computing { token; started_at = ts; stale = None }) map)
   ) with
-  | `Hit v ->
+  | `Hit entry ->
     (* PR-0.2.A: cache hit observation. *)
     inc_cache_hit ();
-    v
+    entry
   | `Compute token ->
     (* PR-0.2.A: cache miss observation. *)
     inc_cache_miss ();
     (match compute () with
      | value ->
        let ts_after = now () in
+       let entry = {
+         value;
+         raw = Atomic.make None;
+         expires_at = ts_after +. jittered_ttl ~key ttl;
+         stale_until = ts_after +. jittered_ttl ~key ttl +. stale_grace;
+       } in
        atomic_update table (fun map ->
          match SMap.find_opt key map with
          | Some (Computing { token = c; _ }) when c = token ->
-           ((), SMap.add key (Ready { value; expires_at = ts_after +. jittered_ttl ~key ttl; stale_until = ts_after +. jittered_ttl ~key ttl +. stale_grace }) map)
+           ((), SMap.add key (Ready entry) map)
          | _ -> ((), map)
        );
-       value
+       entry
      | exception exn ->
        atomic_update table (fun map ->
          match SMap.find_opt key map with
@@ -607,21 +671,26 @@ let get_or_compute_simple key ~ttl compute =
        );
        raise exn)
 
-let get_or_compute key ~ttl compute =
-  let value =
+let get_or_compute_entry key ~ttl compute =
+  let entry =
     if Eio_guard.is_ready () then get_or_compute_eio key ~ttl compute
     else get_or_compute_simple key ~ttl compute
   in
   clear_timeout_circuit key;
-  value
+  entry
 
-let peek key =
+let peek_payload key =
   let ts = now () in
   let map = Atomic.get table in
   match SMap.find_opt key map with
-  | Some (Ready entry) when entry.stale_until > ts -> Some entry.value
-  | Some (Computing { stale = Some stale_value; _ }) -> Some stale_value
+  | Some (Ready entry) when entry.stale_until > ts -> Some (payload_of_entry entry)
+  | Some (Computing { stale = Some stale_entry; _ }) -> Some (payload_of_entry stale_entry)
   | _ -> None
+
+let peek key =
+  match peek_payload key with
+  | Some payload -> Some payload.json
+  | None -> None
 
 (* RFC-0372 Phase 5 — a bounded compute is still not a yielding compute.
 
@@ -660,13 +729,13 @@ let peek key =
    many computes run at once, so no separate concurrency gate is added. *)
 let offloaded compute () = Executor_pool_ref.submit_or_inline compute
 
-let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
+let get_or_compute_payload_with_timeout key ~ttl ~clock ~timeout_sec compute =
   if Option.is_none (peek key) && timeout_circuit_is_open key then
-    timeout_error_json ~timeout_kind:"circuit_open" key timeout_sec
+    payload_of_json (timeout_error_json ~timeout_kind:"circuit_open" key timeout_sec)
   else
     let compute = offloaded compute in
     try
-      let value =
+      let entry =
         if Eio_guard.is_ready () then
           get_or_compute_eio ~wait_timeout_sec:timeout_sec key ~ttl (fun () ->
             match
@@ -689,11 +758,14 @@ let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
               raise (Compute_timeout (key, false)))
       in
       clear_timeout_circuit key;
-      value
+      payload_of_entry entry
     with
     | Compute_timeout (key, waiting) ->
         record_timeout_circuit key;
-        timeout_error_json ~waiting key timeout_sec
+        payload_of_json (timeout_error_json ~waiting key timeout_sec)
+
+let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
+  (get_or_compute_payload_with_timeout key ~ttl ~clock ~timeout_sec compute).json
 
 (* RFC-0372 Phase 3 — make the timeout the default rather than the opt-in.
 
@@ -726,14 +798,20 @@ let set_default_clock clock =
    their own [timeout_sec]. *)
 let default_compute_timeout_sec = 30.0
 
-let get_or_compute_unbounded = get_or_compute
+let get_or_compute_unbounded_payload key ~ttl compute =
+  let entry = get_or_compute_entry key ~ttl compute in
+  payload_of_entry entry
 
-let get_or_compute key ~ttl compute =
+
+let get_or_compute_payload key ~ttl compute =
   match Atomic.get default_clock with
   | Some clock ->
-    get_or_compute_with_timeout key ~ttl ~clock
+    get_or_compute_payload_with_timeout key ~ttl ~clock
       ~timeout_sec:default_compute_timeout_sec compute
-  | None -> get_or_compute_unbounded key ~ttl compute
+  | None -> get_or_compute_unbounded_payload key ~ttl compute
+
+let get_or_compute key ~ttl compute =
+  (get_or_compute_payload key ~ttl compute).json
 ;;
 
 let seed_stale_if_missing key ~stale_for value =
@@ -743,7 +821,7 @@ let seed_stale_if_missing key ~stale_for value =
       | Some _ -> ((), map)
       | None ->
           ((), SMap.add key
-            (Ready { value; expires_at = ts; stale_until = ts +. stale_for })
+            (Ready { value; raw = Atomic.make None; expires_at = ts; stale_until = ts +. stale_for })
             map));
   clear_timeout_circuit key
 

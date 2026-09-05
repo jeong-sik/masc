@@ -63,7 +63,9 @@ let test_every_prompt_renders () =
          bool
          (key ^ ": resolves from a real source")
          true
-         (not (String.equal (Prompt_registry.prompt_source key) "missing"));
+         (match Prompt_registry.prompt_source key with
+          | Prompt_registry.Missing -> false
+          | Prompt_registry.Override | Prompt_registry.File -> true);
        let vars = List.map (fun name -> (name, marker name)) variables in
        match Prompt_registry.render_prompt_template key vars with
        | Error detail -> failf "%s: does not render: %s" key detail
@@ -104,7 +106,9 @@ let test_every_prompt_file_registers () =
          bool
          (file ^ ": registers as key " ^ key)
          true
-         (not (String.equal (Prompt_registry.prompt_source key) "missing")))
+         (match Prompt_registry.prompt_source key with
+          | Prompt_registry.Missing -> false
+          | Prompt_registry.Override | Prompt_registry.File -> true))
     files
 ;;
 

@@ -63,9 +63,9 @@ let language_of ~path =
   | None ->
     Error
       (Printf.sprintf
-         "no language server covers %s; %s"
+         "no language server covers %s; this answers about %s"
          (Filename.extension path)
-         "this answers about .ml, .mli, .ts, .tsx, .js, .jsx, .py, .rs and .go")
+         (String.concat ", " (Lsp_process_manager.covered_extensions ())))
 ;;
 
 let project_root_of ~language ~path ~boundary =

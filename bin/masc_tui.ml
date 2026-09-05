@@ -4967,7 +4967,6 @@ let show_lanes_action_error state detail =
   state.lanes_action_error <- Some detail
 
 let search_jump ?(backwards = false) state ~query ~after =
-  let query = String.lowercase_ascii query in
   match surface_row_texts state state.view with
   | None -> ()
   | Some texts ->
@@ -6656,7 +6655,7 @@ let seek_in_chat state ~target ~restart =
          echoes back to them. *)
       match
         Masc_tui_render.keeper_message_find_scroll state ~keeper_name
-          ~needle:(String.lowercase_ascii (String.trim state.msg_find))
+          ~needle:(String.trim state.msg_find)
           ~older_than
       with
       | Some (scroll, anchor) ->
@@ -9799,11 +9798,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         state.acting_dropped <- state.acting_dropped + dropped
       end;
       if !pane_keeper_acted then refresh_acting_pane_changes state ~mailbox;
-      (* The pane otherwise reloads only on open, on its own sends and on
-         the operator cadence — a turn appended from anywhere else (API
-         chat, another operator, a connector) stayed invisible until the
-         operator left and re-entered.  Same guard as the cadence reload:
-         an operator scrolled into the past keeps their place. *)
+      (* The pane otherwise reloads only on open and on its own sends — a
+         turn appended from anywhere else (API chat, another operator, a
+         connector) stayed invisible until the operator left and re-entered.
+         Same guard the cadence reload used: an operator scrolled into the
+         past keeps their place. *)
       (if !open_chat_gained_turn && state.msg_scroll = 0 then
          match state.msg_target_keeper_name with
          | Some keeper_name ->
@@ -9838,6 +9837,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          zombie under) a surface it was not opened on. *)
       state.help_open <- false;
       state.palette_open <- false;
+      state.palette_mode <- Masc_tui_types.Palette_jump;
       state.palette_query <- "";
       state.palette_cursor <- 0;
       state.search <- None;
@@ -13254,11 +13254,12 @@ and is loaded on demand through keeper_skill.
   let handle_prompt_clear () =
     match selected_prompt () with
     | None -> add_event state "error" "prompts not loaded yet; r to reload"
-    | Some row ->
-      if not row.Tui_decode.pr_has_override then
+    | Some row -> (
+      match row.Tui_decode.pr_source with
+      | Tui_decode.Prompt_file | Tui_decode.Prompt_missing ->
         add_event state "system"
           (row.Tui_decode.pr_key ^ ": no override to clear")
-      else (
+      | Tui_decode.Prompt_override -> (
         match
           Masc_tui_http.post_prompt_clear ~host:server_peer_host
             ~port:state.port ~key:row.Tui_decode.pr_key
@@ -13269,7 +13270,7 @@ and is loaded on demand through keeper_skill.
           launch_prompts_load state ~mailbox:async_messages
         | Error detail ->
           add_event state "error"
-            (row.Tui_decode.pr_key ^ ": clear failed: " ^ detail))
+            (row.Tui_decode.pr_key ^ ": clear failed: " ^ detail)))
   in
   let handle_keeper_settings_edit () =
     match selected_keeper state with
@@ -14510,6 +14511,7 @@ and is loaded on demand through keeper_skill.
          when text_input_target state ~compact_viewport = Some Text_palette ->
            let close () =
              state.palette_open <- false;
+             state.palette_mode <- Masc_tui_types.Palette_jump;
              state.palette_query <- "";
              state.palette_cursor <- 0
            in
@@ -15506,6 +15508,7 @@ and is loaded on demand through keeper_skill.
               | [] -> 0)
        | Some ":" ->
            state.palette_open <- true;
+           state.palette_mode <- Masc_tui_types.Palette_jump;
            state.palette_query <- "";
            state.palette_cursor <- 0
        | Some "\025" ->
@@ -15593,11 +15596,11 @@ and is loaded on demand through keeper_skill.
               candidates: one name is asked about at once, several open the
               palette with each as an entry (typing still narrows, and a
               typed "def <name>" keeps working), and none says so. *)
-           let question, prefix =
+           let question =
              match key_name with
-             | "K" -> ("hover", "hover ")
-             | "R" -> ("references", "refs ")
-             | "D" | _ -> ("definition", "def ")
+             | "K" -> "hover"
+             | "R" -> "references"
+             | "D" | _ -> "definition"
            in
            (match Masc_tui_types.code_cursor_line_symbols state with
             | [] ->
@@ -15608,7 +15611,12 @@ and is loaded on demand through keeper_skill.
                   ~question ~symbol
             | _ :: _ :: _ ->
                 state.palette_open <- true;
-                state.palette_query <- prefix;
+                state.palette_mode <-
+                  Masc_tui_types.Palette_choice
+                    { choice_question = question
+                    ; choice_line = state.code_file_cursor + 1
+                    };
+                state.palette_query <- "";
                 state.palette_cursor <- 0)
        | Some "w" when state.view = Code && state.code_notes_open ->
            (* Adding a note lives inside the notes view: the view proves the
@@ -18767,7 +18775,18 @@ and is loaded on demand through keeper_skill.
           ~scoped_refresh_inflight:http_scoped_refresh_inflight
           ~scoped_refresh_followup
           ~mailbox:async_messages;
-        refresh_acting_pane_changes state ~mailbox:async_messages;
+        (* The Changes tab is not reloaded here. Its answer comes from
+           [GET /api/v1/keepers/<name>/file-changes], which parses every row
+           in the date files the window touches -- that endpoint's own
+           comment records 4.4s for 24h, and this server answered 1.8-8.8s
+           per call on 2026-09-06. On the cadence, an open tab kept one of
+           those in flight continuously and the whole server felt it.
+
+           The observer already reloads the tab when the feed shows the
+           selected keeper finish a tool call, which is when the list can
+           change; opening the tab or moving the cursor loads it too. What
+           this line added was coverage for a change with no feed event, and
+           that is not worth a seconds-long scan on a timer. *)
         (* Also refresh logs / Board detail if viewing them. *)
         (match state.view with
          | Code -> ()

@@ -151,14 +151,15 @@ let reserved_status_color_path_violations structure =
    masc_tui_ansi.ml still names them where the slots are built. *)
 let categorical_hue_segments =
   [ "blue"; "bright_blue"; "bright_cyan"; "bright_magenta"; "bright_yellow"
-  ; "bright_green"; "bright_red"
+  ; "bright_green"; "bright_red"; "magenta"
   ]
 ;;
 
-(* Deliberately open: [magenta] is still named at six sites in render.ml --
-   a goal phase, a sandbox, a change badge and two context readings -- and
-   each is an axis RFC-0427 has not moved yet. Closing the segment before
-   moving them would fail the guard rather than the code. *)
+(* [magenta] closed with RFC-0427 step three: the goal phase, the sandbox
+   mark, the change badge and the two context readings all take a slot now,
+   and render.ml names no raw hue at all. [cyan] stays open -- the theme's
+   own [tone Accent] resolves to it and some twenty sites still read that,
+   which is an axis question rather than a hue one. *)
 let test_the_categorical_guard_rejects_a_raw_hue () =
   let violations source =
     source

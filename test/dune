@@ -2240,6 +2240,7 @@
 
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)
+(include stanzas/test_posix_spawn_process_mgr.inc)
 
 (include stanzas/test_distributed_lock_acquire_failed_counter.inc)
 

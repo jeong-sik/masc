@@ -265,6 +265,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0422 | 실행기가 관측을 증명한다 — judge 는 상자가 거부한 것만 본다 | Draft | - |
 | 0423 | 실행 기록의 페이로드는 볼 때 읽는다 — 목록이 안 읽는 340MB 를 메모리에서 뺀다 | Draft | - |
 | 0424 | 판정 요청은 pending 상태의 것이다 — 끝난 후보가 186MB 를 붙들고 있다 | Draft | - |
+| 0426 | 열여덟 세계는 지금 상태로 비교할 수 없다 — 재화 열이 실재하지 않고, 두 세계는 서로의 재화를 시킨다 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |

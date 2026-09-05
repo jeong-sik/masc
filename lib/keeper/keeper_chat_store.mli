@@ -121,6 +121,14 @@ type approval_lifecycle =
             the field existed. *)
   }
 
+val approval_lifecycle_phase_to_label : approval_lifecycle_phase -> string
+(** The durable label one phase is persisted under. *)
+
+val approval_lifecycle_phase_of_label : string -> approval_lifecycle_phase option
+(** The phase a persisted label names. [None] for a label this vocabulary
+    does not hold: a reader treats such a row as undecodable rather than as a
+    phase it can draw. *)
+
 type append_once_result =
   | Appended of { row_id : string }
   | Already_present of { row_id : string }

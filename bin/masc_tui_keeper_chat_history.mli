@@ -121,12 +121,15 @@ type kind =
           to draw as an empty line; this is what was behind it. *)
   | Gate_activity of
       { approval_id : string
-      ; phase : string
+      ; phase : Masc.Keeper_chat_store.approval_lifecycle_phase
       ; tool : string option
       ; summary : string option
       }
       (** One durable step of an external-effect approval, read off the row's
           typed [approval_lifecycle] rather than off prose the store composed.
+          The phase is the store's own closed sum, parsed once here: a row
+          whose label the store does not know, or that names no approval, is
+          undecodable and counted in [dropped] rather than filed under Memory.
           [summary] names what the gated call asked for, so a row answers
           "what was deferred" without the pane going back to the request. The
           wording belongs to whoever draws it; the row carries the fact. *)

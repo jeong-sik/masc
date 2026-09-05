@@ -1256,14 +1256,20 @@ type fusion_judge_node = {
   fjn_outcome : fusion_judge_node_outcome;
 }
 
+(** A tool-trace actor's phase. A judge actor carries the same closed role
+    sum as a judge node; the server writes both from one projection. *)
 type fusion_tool_phase =
   | Fusion_tool_panel
-  | Fusion_tool_judge of string
+  | Fusion_tool_judge of fusion_judge_role
 
 type fusion_tool_actor =
   { fta_phase : fusion_tool_phase
   ; fta_identity : string
   }
+
+val fusion_judge_role_label : fusion_judge_role -> string
+(** The label the server projects a role under, for drawing the role
+    beside an actor. *)
 
 type fusion_tool_preview =
   { ftp_text : string

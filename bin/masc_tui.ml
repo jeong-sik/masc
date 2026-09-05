@@ -3,6 +3,11 @@ open Masc_tui_ansi
 open Masc_tui_render
 open Masc_tui_loader
 
+(* How long the pane waits on [gh pr view --web] before reporting it. The
+   call is a lookup and a browser hand-off; a network that answers slower
+   than this is reported rather than held. *)
+let gh_open_timeout_sec = 15.0
+
 (* One place decides how an aborted $EDITOR form reads. Only the cancel
    differs by caller, because only the action's own name belongs in it; an
    editor that never ran and a temp file that could not be read are the same
@@ -3200,29 +3205,6 @@ let pr_number_of_subject subject =
     else scan (i + 1) best
   in
   scan 0 None
-
-(* A GitHub pull-request URL from the registered remote. Only GitHub: other
-   forges spell the path differently, and guessing would link to a 404. *)
-let github_pr_url ~remote ~number =
-  let remote = String.trim remote in
-  let https =
-    if String.starts_with ~prefix:"git@github.com:" remote then
-      Some
-        ("https://github.com/"
-        ^ String.sub remote 15 (String.length remote - 15))
-    else if String.starts_with ~prefix:"https://github.com/" remote then
-      Some remote
-    else None
-  in
-  Option.map
-    (fun base ->
-      let base =
-        if String.ends_with ~suffix:".git" base then
-          String.sub base 0 (String.length base - 4)
-        else base
-      in
-      Printf.sprintf "%s/pull/%d" base number)
-    https
 
 (* The codebase slug for the surface's scope, when it has one. Only a
    repository row carries the server-minted slug (RFC-0378: the client
@@ -16269,7 +16251,8 @@ and is loaded on demand through keeper_skill.
                                          number
                                    | Some remote -> (
                                        match
-                                         github_pr_url ~remote ~number
+                                         Masc_tui_pr_ref.github_pr_url ~remote
+                                           ~number
                                        with
                                        | Some url -> url
                                        | None ->
@@ -17084,12 +17067,11 @@ and is loaded on demand through keeper_skill.
            let change_ctx =
              Masc_tui_render.resolve_change_context state ~path_opt
            in
-           let pr_number_opt =
-             match change_ctx.Masc_tui_render.ctx_pr_number with
-             | Some s -> int_of_string_opt s
-             | None -> None
-           in
-           let remote_opt =
+           (* Only the scope's own repository names a remote. A project-wide
+              scope spans every registered repository, and picking the first
+              one opened a PR-N token in whichever repo happened to be
+              registered first. *)
+           let scope_remote =
              match state.repository_changes_scope with
              | Some (Tui_decode.Repository_change_repository repo_id) -> (
                  match state.repositories with
@@ -17101,39 +17083,60 @@ and is loaded on demand through keeper_skill.
                             String.equal r.rp_id repo_id)
                           snapshot.rs_repositories)
                  | None -> None)
-             | _ -> (
-                 match state.repositories with
-                 | Some snapshot ->
-                     (match snapshot.rs_repositories with
-                      | r :: _ -> Some r.rp_url
-                      | [] -> None)
-                 | None -> None)
+             | Some Tui_decode.Repository_change_project | None -> None
            in
-           let opened =
-             match pr_number_opt, remote_opt with
-             | Some number, Some remote -> (
-                 match github_pr_url ~remote ~number with
-                 | Some url -> (
-                     match Masc_tui_browser.open_url url with
-                     | Ok _ ->
-                         add_event state "git"
-                           (Printf.sprintf "opening PR #%d in browser..." number);
-                         true
-                     | Error _ -> false)
-                 | None -> false)
-             | _ -> false
-           in
-           if not opened then
-             (match pr_number_opt with
-              | Some number ->
-                  add_event state "git"
-                    (Printf.sprintf "opening PR #%d via gh..." number);
-                  ignore
-                    (Unix.system
-                       (Printf.sprintf "gh pr view %d --web 2>/dev/null &" number))
-              | None ->
-                  add_event state "git" "opening branch PR via gh...";
-                  ignore (Unix.system "gh pr view --web 2>/dev/null &"))
+           (match change_ctx.Masc_tui_render.ctx_pr with
+            | None ->
+                add_event state "git"
+                  "no PR to open: this change names no github.com/…/pull/N link or PR-N token"
+            | Some reference -> (
+                let number = Masc_tui_pr_ref.number reference in
+                (* A pull link says which repository; a token leaves that to
+                   the scope. *)
+                let slug =
+                  match reference with
+                  | Masc_tui_pr_ref.Pull_url { slug; _ } -> Some slug
+                  | Masc_tui_pr_ref.Pr_token _ ->
+                      Option.bind scope_remote Masc_tui_pr_ref.github_slug_of_remote
+                in
+                match slug with
+                | None ->
+                    add_event state "error"
+                      (Printf.sprintf
+                         "PR-%d: the scope has no GitHub remote to open it in"
+                         number)
+                | Some slug -> (
+                    match
+                      Masc_tui_browser.open_url
+                        (Masc_tui_pr_ref.pull_url ~slug ~number)
+                    with
+                    | Ok opener ->
+                        add_event state "git"
+                          (Printf.sprintf "opened %s#%d with %s" slug number opener)
+                    | Error _ ->
+                        (* No opener on this machine; gh may still have one
+                           configured. Named repository, waited on, reported
+                           after the fact: run in the TUI's cwd and detached,
+                           it opened the wrong checkout's PR and the pane
+                           said "opening" whether or not it did. *)
+                        let status, _stdout, stderr =
+                          Process_eio.run_argv_with_status_split
+                            ~timeout_sec:gh_open_timeout_sec
+                            [ "gh"; "pr"; "view"; string_of_int number; "--web"
+                            ; "-R"; slug ]
+                        in
+                        (match status with
+                         | Unix.WEXITED 0 ->
+                             add_event state "git"
+                               (Printf.sprintf "opened %s#%d with gh" slug number)
+                         | Unix.WEXITED code ->
+                             add_event state "error"
+                               (Printf.sprintf "gh pr view %d -R %s exited %d: %s"
+                                  number slug code (String.trim stderr))
+                         | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+                             add_event state "error"
+                               (Printf.sprintf "gh pr view %d -R %s stopped by signal %d"
+                                  number slug signal)))))
        | Some "p" | Some "P"
          when state.view = Runtime
               && Option.is_none state.runtime_detail_target ->

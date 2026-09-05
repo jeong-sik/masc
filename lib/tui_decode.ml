@@ -307,7 +307,7 @@ type fusion_judge_node = {
 
 type fusion_tool_phase =
   | Fusion_tool_panel
-  | Fusion_tool_judge of string
+  | Fusion_tool_judge of fusion_judge_role
 
 type fusion_tool_actor =
   { fta_phase : fusion_tool_phase
@@ -5512,9 +5512,10 @@ let decode_fusion_judge json =
       Ok (Fusion_judge_failed { fj_failure_code; fj_error })
   | other -> Error (Printf.sprintf "unknown fusion judge status %S" other)
 
-let decode_fusion_judge_role json =
-  let* role = required_string_field json "role" in
-  match role with
+(* The one place the server's judge_role_projection labels turn into the
+   closed sum: judge nodes read it off ["role"], tool-trace actors off
+   ["judge_role"]. *)
+let fusion_judge_role_of_label = function
   | "single" -> Ok Judge_single
   | "refine" -> Ok Judge_refine
   | "first" -> Ok Judge_first
@@ -5522,6 +5523,18 @@ let decode_fusion_judge_role json =
   | "stage_meta" -> Ok Judge_stage_meta
   | "final_meta" -> Ok Judge_final_meta
   | other -> Error (Printf.sprintf "unknown fusion judge role %S" other)
+
+let fusion_judge_role_label = function
+  | Judge_single -> "single"
+  | Judge_refine -> "refine"
+  | Judge_first -> "first"
+  | Judge_meta -> "meta"
+  | Judge_stage_meta -> "stage_meta"
+  | Judge_final_meta -> "final_meta"
+
+let decode_fusion_judge_role json =
+  let* role = required_string_field json "role" in
+  fusion_judge_role_of_label role
 
 let decode_fusion_judge_node json =
   let* fjn_role = decode_fusion_judge_role json in
@@ -5573,14 +5586,11 @@ let decode_fusion_tool_actor json =
   let* judge_role = optional_string_field json "judge_role" in
   match phase, judge_role with
   | "panel", None -> Ok { fta_phase = Fusion_tool_panel; fta_identity }
-  | "judge", Some role
-    when List.mem role
-           [ "single"; "refine"; "first"; "meta"; "stage_meta"; "final_meta" ] ->
+  | "judge", Some role ->
+      let* role = fusion_judge_role_of_label role in
       Ok { fta_phase = Fusion_tool_judge role; fta_identity }
   | "panel", Some _ -> Error "fusion panel tool actor cannot carry judge_role"
   | "judge", None -> Error "fusion judge tool actor requires judge_role"
-  | "judge", Some role ->
-      Error (Printf.sprintf "unknown fusion tool judge_role %S" role)
   | phase, _ -> Error (Printf.sprintf "unknown fusion tool phase %S" phase)
 
 let decode_fusion_tool_preview json =
@@ -5741,10 +5751,9 @@ let decode_fusion_evidence ~run_id json =
   let* judge_json = required_object_field meta "judge" in
   let* fe_judge = decode_fusion_judge judge_json in
   let* fe_judges =
-    (* Additive RFC-0284 key: a post recorded before it carries no array,
-       and the empty list optional_list_field answers for an absent key keeps
-       such evidence rendering exactly as it already did. *)
-    let* nodes = optional_list_field meta "judges" in
+    (* The sink writes the array on every post (fusion_sink.ml, the meta
+       encoder), so an absent key is a shape this decoder does not know. *)
+    let* nodes = required_list_field meta "judges" in
     decode_list "judges" decode_fusion_judge_node nodes
   in
   let* tool_trace_json = required_object_field meta "tool_trace" in

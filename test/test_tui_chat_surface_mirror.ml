@@ -1,10 +1,10 @@
 (** [Masc_tui_keeper_chat_history.Surface] mirrors [Surface_ref.t].
 
-    The TUI chat-history decoder is a small library with no [masc] dependency,
-    so it cannot name the server's type and keeps its own copy of the
-    vocabulary. A copy drifts silently: a surface added to [Surface_ref] would
-    reach the pane as a row with no origin, which is the state this whole
-    change came out of — 92 rows from 23 speakers all drawn as "you".
+    The TUI chat-history decoder keeps its own copy of the surface vocabulary,
+    holding only the parts a label needs. A copy drifts silently: a surface
+    added to [Surface_ref] would reach the pane as a row with no origin, which
+    is the state this whole change came out of — 92 rows from 23 speakers all
+    drawn as "you".
 
     So drive the real encoder. Every [Surface_ref.t] variant is serialised with
     its own [to_json] and pushed through the decoder; a kind the copy was not

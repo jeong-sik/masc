@@ -78,6 +78,30 @@ let create_keeper_exn ~config name =
        fail (Keeper_owner_registry.command_error_to_string error))
 ;;
 
+(* Intake reconciliation runs inside a live keeper's turn entry, so the
+   keeper has to be present in the registry, not only in metadata. *)
+let register_keeper_exn ~config name =
+  let json =
+    `Assoc [ "name", `String name; "trace_id", `String ("trace-" ^ name) ]
+  in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Error detail -> fail detail
+  | Ok meta ->
+    (match
+       Keeper_owner_registry.create_meta
+         ~base_path:config.Workspace_utils.base_path
+         meta
+     with
+     | Ok _ -> ()
+     | Error error ->
+       fail (Keeper_owner_registry.command_error_to_string error));
+    ignore
+      (Keeper_registry.For_testing.register
+         ~base_path:config.Workspace_utils.base_path
+         name
+         meta)
+;;
+
 (* Submit + approve one grant. Resolving an approval for a keeper with no
    live lane durably enqueues its [Hitl_resolved] wake, which is exactly the
    queue state the projection and preemption read. *)
@@ -387,7 +411,7 @@ let test_reconcile_retires_resolution_without_record () =
   @@ fun config ->
   let base_path = config.Workspace_utils.base_path in
   let keeper_name = "hitl-absent-retire-keeper" in
-  create_keeper_exn ~config keeper_name;
+  register_keeper_exn ~config keeper_name;
   let approval_id = enqueue_resolution_without_record ~config ~keeper_name in
   let selection =
     match

@@ -14088,7 +14088,7 @@ and is loaded on demand through keeper_skill.
              state.patch_modal_scroll <- 0
            in
            (match k with
-            | "esc" | "q" -> close ()
+            | "esc" | "q" | "Q" -> close ()
             | "j" | "down" ->
                 state.patch_modal_scroll <- state.patch_modal_scroll + 1
             | "k" | "up" ->
@@ -14097,26 +14097,18 @@ and is loaded on demand through keeper_skill.
                 state.patch_modal_scroll <- state.patch_modal_scroll + 10
             | "u" | "pageup" ->
                 state.patch_modal_scroll <- max 0 (state.patch_modal_scroll - 10)
-            | "g" ->
+            | "g" | "home" ->
                 state.patch_modal_scroll <- 0
-            | "G" ->
-                state.patch_modal_scroll <- 999999
-            | "y" | "Y" ->
-                close ();
-                (match approval_items state with
-                 | item :: _ ->
-                     commit_presented_approval (Some item);
-                     answer_presented_approval Confirm
-                 | [] ->
-                     add_event state "system" "Patch accepted (no pending approval gates)")
-            | "n" | "N" ->
-                close ();
-                (match approval_items state with
-                 | item :: _ ->
-                     commit_presented_approval (Some item);
-                     answer_presented_approval Deny
-                 | [] ->
-                     add_event state "system" "Patch review closed")
+            | "G" | "end" ->
+                let total_rows =
+                  match state.patch_modal_diff with
+                  | Some (_, d) -> List.length d.Masc.Tui_decode.gd_rows
+                  | None ->
+                      (match state.repository_changes_diff with
+                       | Some (_, d) -> List.length d.Masc.Tui_decode.gd_rows
+                       | None -> 0)
+                in
+                state.patch_modal_scroll <- max 0 (total_rows - 5)
             | "e" | "E" ->
                 let path_opt =
                   match state.patch_modal_path with
@@ -15158,17 +15150,6 @@ and is loaded on demand through keeper_skill.
            state.palette_open <- true;
            state.palette_query <- "";
            state.palette_cursor <- 0
-       | Some "\004" | Some "%" ->
-           state.patch_modal_open <- true;
-           state.patch_modal_scroll <- 0;
-           let target_path =
-             match state.repository_changes_diff_path with
-             | Some p -> p
-             | None -> "."
-           in
-           state.patch_modal_path <- Some target_path;
-           launch_repository_changes_diff_load state ~mailbox:async_messages
-             ~scope:Tui_decode.Repository_change_project ~path:target_path
        | Some "\023"
          when state.view = Board
               && terminal_columns >= keeper_split_threshold_cols

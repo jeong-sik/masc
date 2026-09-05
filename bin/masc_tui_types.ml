@@ -3239,7 +3239,6 @@ type state = {
   mutable patch_modal_error: string option;
   (* Real-time Token Burn Velocity and Financial HUD *)
   mutable burn_hud_visible: bool;
-  mutable burn_history: float list;
   (* Code surface: one directory level at a time through the lazy /children
      route; the file arrives whole and is lexed once at load. *)
   mutable code_dir: string;
@@ -4302,7 +4301,6 @@ let create_state
   patch_modal_diff = None;
   patch_modal_error = None;
   burn_hud_visible = false;
-  burn_history = [];
   code_dir = "";
   code_entries = [];
   code_entries_error = None;
@@ -5294,13 +5292,6 @@ let is_surface_active (state : state) (s : surface) =
   | Metrics -> false
   | Approvals ->
       state.view = Approvals || List.length (approval_items state) > 0
-  | Fusion ->
-      state.view = Fusion || state.fusion_runs <> []
-  | Planning ->
-      state.view = Planning
-      || (match state.verification with
-          | Some s -> s.Tui_decode.vs_total > 0
-          | None -> false)
   | _ -> true
 ;;
 
@@ -5344,6 +5335,13 @@ let braille_sparkline values =
         values
     in
     String.concat "" glyphs
+;;
+
+let fleet_token_sparkline (state : state) =
+  let tokens =
+    List.map (fun (k : keeper) -> float_of_int k.k_total_tokens) state.keepers
+  in
+  braille_sparkline tokens
 ;;
 
 let fleet_total_cost_usd (state : state) =

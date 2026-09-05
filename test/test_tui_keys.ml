@@ -644,7 +644,17 @@ let test_visible_surface_ring_declutter () =
   Alcotest.(check bool) "Approvals shown when active surface" true
     (List.exists (fun (s, _) -> s = Approvals) ring_active);
   state.view <- Overview;
-  state.pending_operator_actions <- [ "action_1" ];
+  state.keeper_tool_approvals <-
+    [ { kta_keeper = "alpha"
+      ; kta_tool_call_id = "call_1"
+      ; kta_tool = "exec"
+      ; kta_args = "{}"
+      ; kta_question = "run?"
+      ; kta_because = None
+      ; kta_asked_at = 0.0
+      ; kta_timeout_sec = 60.0
+      }
+    ];
   let ring_with_pending = visible_surface_ring state in
   Alcotest.(check bool) "Approvals shown when pending items exist" true
     (List.exists (fun (s, _) -> s = Approvals) ring_with_pending)

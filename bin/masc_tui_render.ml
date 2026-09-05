@@ -491,15 +491,16 @@ let split_last_space s =
 ;;
 
 let split_on_middle_dot (s : string) : string list =
-  let dot = " \xc2\xb7 " in
-  let dot_len = String.length dot in
   let len = String.length s in
   let rec scan last_pos pos acc =
-    if pos + dot_len > len then
+    if pos + 4 > len then
       List.rev (String.sub s last_pos (len - last_pos) :: acc)
-    else if String.sub s pos dot_len = dot then
+    else if Char.equal s.[pos] ' '
+            && Char.equal s.[pos + 1] '\xc2'
+            && Char.equal s.[pos + 2] '\xb7'
+            && Char.equal s.[pos + 3] ' ' then
       let piece = String.sub s last_pos (pos - last_pos) in
-      scan (pos + dot_len) (pos + dot_len) (piece :: acc)
+      scan (pos + 4) (pos + 4) (piece :: acc)
     else
       scan last_pos (pos + 1) acc
   in
@@ -512,9 +513,14 @@ let contains_sub s sub =
   if len_sub = 0 then true
   else if len_s < len_sub then false
   else
+    let rec check i j =
+      if j >= len_sub then true
+      else if Char.equal s.[i + j] sub.[j] then check i (j + 1)
+      else false
+    in
     let rec loop i =
       if i + len_sub > len_s then false
-      else if String.sub s i len_sub = sub then true
+      else if check i 0 then true
       else loop (i + 1)
     in
     loop 0
@@ -531,19 +537,6 @@ let tool_marker_color = function
   | "▶" | "?" -> Theme.warn ()
   | "◌" -> Theme.info ()
   | _ -> Ansi.reset
-;;
-
-let is_tool_row text =
-  let t = String.trim text in
-  let has_marker = Option.is_some (extract_tool_marker t) in
-  let has_dot = contains_sub t "\xc2\xb7" in
-  (has_marker && (String.contains t ' ' || has_dot))
-  || String.starts_with ~prefix:"Tools " t
-  || (has_dot
-     && (String.ends_with ~suffix:"folded" t
-        || String.ends_with ~suffix:"returned" t
-        || contains_sub t "failed"
-        || contains_sub t "awaiting result"))
 ;;
 
 let dress_tool_clause (clause : string) : string =
@@ -646,8 +639,9 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
          made a busy turn look like a table. *)
       let text = row.text in
       let context = Chat_theme.body_context theme row.style in
+      let is_tool = match row.style with Message_layout.Tool -> true | _ -> false in
       let dress rest =
-        if is_tool_row rest then
+        if is_tool then
           dress_tool_summary rest
         else
           Masc_tui_message_layout.dress_bare_links
@@ -726,7 +720,6 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
           | _, Message_layout.Shade_quoted ->
               Printf.sprintf "%s\xe2\x94\x82%s " (Theme.recede ()) Ansi.reset
         in
-        let is_tool = is_tool_row rest in
         let body_style =
           if is_tool then Ansi.reset
           else Chat_theme.body row.style
@@ -739,7 +732,6 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
             (Printf.sprintf "%s%s%s%s%s" margin rail
                body_style (dress rest) Ansi.reset))
       else
-        let is_tool = is_tool_row text in
         box_line_styled buf cols
           ~style:(if is_tool then Ansi.reset else context.opening)
           (dress text)
@@ -1091,16 +1083,9 @@ let composer_cursor state ~rows ~cols =
    precedence that picks its glyph, so the mark and the colour agree. A block
    holding a failure is a failure; one still waiting is attention; one that
    returned is the ordinary tool row it was before. *)
-let tool_block_style (projection : Keeper_chat_transcript.tool_projection) =
-  match projection.Keeper_chat_transcript.summary_outcome with
-  | None | Some Keeper_chat_transcript.Returned -> Message_layout.Tool
-  | Some Keeper_chat_transcript.Failed -> Message_layout.Error
-  | Some
-      ( Keeper_chat_transcript.Awaiting_result
-      | Keeper_chat_transcript.Started
-      | Keeper_chat_transcript.Never_returned
-      | Keeper_chat_transcript.Outcome_unrecorded ) ->
-    Message_layout.Status
+let tool_block_style (_projection : Keeper_chat_transcript.tool_projection) =
+  Message_layout.Tool
+;;
 
 let skill_tone_of_state :
     Keeper_chat_transcript.skill_state -> Message_layout.skill_tone = function
@@ -1204,7 +1189,7 @@ let surface_strip (state : state) ~cols =
       (Printf.sprintf " %s%d\xe2\x80\xba%s" Ansi.dim (n - 1 - hi) Ansi.reset);
   if state.burn_hud_visible then begin
     let total_cost = Masc_tui_types.fleet_total_cost_usd state in
-    let spark = Masc_tui_types.braille_sparkline state.burn_history in
+    let spark = Masc_tui_types.fleet_token_sparkline state in
     let hud =
       Printf.sprintf "%s[HUD $%.2f %s%s%s]%s"
         (Theme.recede ()) total_cost (Theme.info ()) spark (Theme.recede ()) Ansi.reset
@@ -17746,18 +17731,6 @@ let render_patch_modal (state : state) =
      ^ (Theme.info ()) ^ "\xe2\x9a\xa1 " ^ Ansi.reset
      ^ Ansi.bold ^ Terminal_text.single_line path_label ^ Ansi.reset);
   framed_shadow_divider buf cols;
-  let pending_count = List.length (Masc_tui_types.approval_items state) in
-  let approval_header_rows =
-    if pending_count > 0 then begin
-      let alert_line =
-        Printf.sprintf "  %s[APPROVAL GATE · %d item(s) pending]%s  %sRequires Operator Consent%s"
-          (Theme.warn ()) pending_count Ansi.reset (Theme.recede ()) Ansi.reset
-      in
-      framed_shadow_line buf cols alert_line;
-      framed_shadow_divider buf cols;
-      2
-    end else 0
-  in
   framed_shadow_line_styled buf cols ~style:(Theme.recede ())
     "  old   new     diff preview (syntax colored)";
   framed_shadow_divider buf cols;
@@ -17772,10 +17745,11 @@ let render_patch_modal (state : state) =
     | None -> []
   in
   let total = List.length diff_rows in
-  let fixed_chrome = 7 + approval_header_rows in
+  let fixed_chrome = 9 in
   let content_height = max 1 (rows - fixed_chrome) in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.patch_modal_scroll max_scroll) in
+  state.patch_modal_scroll <- scroll;
   if total = 0 then begin
     let msg =
       match state.patch_modal_error with
@@ -17790,27 +17764,30 @@ let render_patch_modal (state : state) =
       framed_shadow_empty buf cols
     done
   end else begin
+    let diff_array = Array.of_list diff_rows in
     for i = 0 to content_height - 1 do
-      match List.nth_opt diff_rows (i + scroll) with
-      | None -> framed_shadow_empty buf cols
-      | Some row ->
-          let inner = framed_inner_width (cols - 1) in
-          let span = tree_diff_row_span ~width:inner row in
-          let rendered_line = Masc_tui_span.render span in
-          framed_shadow_line buf cols (fit_width rendered_line inner)
+      let idx = i + scroll in
+      if idx >= total then
+        framed_shadow_empty buf cols
+      else
+        let row = diff_array.(idx) in
+        let inner = framed_inner_width (cols - 1) in
+        let span = tree_diff_row_span ~width:inner row in
+        let rendered_line = Masc_tui_span.render span in
+        framed_shadow_line buf cols (fit_width rendered_line inner)
     done
   end;
   framed_shadow_divider buf cols;
   framed_shadow_line buf cols
-    (Printf.sprintf "  %s[y]%s Approve & Apply   %s[n]%s Reject   %s[e]%s Edit ($EDITOR)   %s[Esc]%s Close"
-       (Theme.ok ()) Ansi.reset
-       (Theme.bad ()) Ansi.reset
+    (Printf.sprintf "  %s[e]%s Edit ($EDITOR)   %s[j/k]%s Scroll   %s[g/G]%s Top/Bottom   %s[Esc/q]%s Close"
+       (Theme.info ()) Ansi.reset
+       (Theme.info ()) Ansi.reset
        (Theme.info ()) Ansi.reset
        (Theme.recede ()) Ansi.reset);
   framed_shadow_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Printf.sprintf "[%d lines, scroll %d]  y:approve  n:reject  e:edit  j/k:scroll  Esc:close" total scroll));
+       ~hints:(Printf.sprintf "[%d lines, scroll %d]  e:edit  j/k:scroll  g/G:top/bottom  Esc/q:close" total scroll));
   finish_surface state ~surface_key:"patch-modal" ~rows:terminal_rows ~cols buf
 ;;
 
@@ -18076,12 +18053,7 @@ let render (state : state) =
     (frame, clamped, None)
   else if state.patch_modal_open then
     let frame, clamped = render_patch_modal state in
-    let presented_approval =
-      match Masc_tui_types.approval_items state with
-      | [] -> None
-      | first :: _ -> Some first
-    in
-    (frame, clamped, presented_approval)
+    (frame, clamped, None)
   else
     let frame, clamped = render_surface state in
     let presented_approval =

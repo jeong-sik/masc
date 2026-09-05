@@ -12,7 +12,11 @@
 - **A voice listen with no timeout waits 15 s, the number its schema says.**
   `keeper_voice_listen` defaulted `timeout_seconds` to 60 s in the tool while
   its schema advertised 15 and the TUI capture used 15; the tool passes
-  nothing now and the bridge's one default applies. A `keeper_voice_speak`
+  nothing now and the bridge's one default applies. The 60 came in with
+  #20370, which released the turn semaphore for the length of a listen;
+  #20379 removed that release the same day and kept the number, and nothing
+  releases a turn during a listen today. Whether 15 is the right window is
+  the owner's call with those two in view. A `keeper_voice_speak`
   under a voice config that does not load is refused with the loader's
   sentence instead of being sent to the Gate; capture config errors name
   `capture.<key>`; a capture result with no `status` reads back as its own

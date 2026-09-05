@@ -836,7 +836,19 @@ let test_keeper_voice_speak_under_an_invalid_config_is_refused_without_review ()
            ~needle:"capture.trigger_margin_db"
            message);
       check bool "and the type it wanted" true
-        (String_util.string_contains_substring ~needle:"must be a number" message)))
+        (String_util.string_contains_substring ~needle:"must be a number" message);
+      (* Exactly the loader's sentence, with nothing in front of it. The
+         bridge answers "voice config load failed: <sentence>", so an exact
+         match also pins that the refusal came from the tool's one read and
+         the bridge, with its second read, was not reached. *)
+      let loaders_sentence =
+        match Voice_config.load_detailed () with
+        | Error (Voice_config.Invalid reason) -> reason
+        | Error Voice_config.Not_configured -> fail "the fixture was not read"
+        | Ok _ -> fail "the fixture must not load"
+      in
+      check string "the message is the loader's sentence, unprefixed" loaders_sentence
+        message))
 ;;
 
 (* Valid config whose TTS/STT endpoints all fail deterministically without

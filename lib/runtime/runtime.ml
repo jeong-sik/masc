@@ -2086,7 +2086,7 @@ let egress_allow_line allow =
 ;;
 
 (* Both spellings, because the file has two authors. This writer always
-   quotes; an operator writing [egress.keepers.rondo] by hand does not, and
+   quotes; an operator writing [egress.keepers.alder] by hand does not, and
    a matcher that only knew its own spelling would append a second table for
    a keeper that already had one -- two tables for one keeper, with the
    loader taking whichever it saw first. *)

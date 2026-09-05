@@ -2521,7 +2521,7 @@ let connector_json ?(id = "slack") ?(available = `Bool true)
       `List
         [ `Assoc
             [ ("channel_id", `String "C09TK9L4DV4")
-            ; ("keeper_name", `String "kidsnote-pr-jira-checker")
+            ; ("keeper_name", `String "pinewood-pr-jira-checker")
             ]
         ])
     () =
@@ -2601,7 +2601,7 @@ let test_decode_connector_snapshot_reads_the_live_shape () =
                 Alcotest.(check (option string)) "bound channel name"
                   None binding.Tui_decode.cb_channel_name;
                 Alcotest.(check string) "bound keeper"
-                  "kidsnote-pr-jira-checker" binding.Tui_decode.cb_keeper_name
+                  "pinewood-pr-jira-checker" binding.Tui_decode.cb_keeper_name
             | bindings ->
                 Alcotest.failf "expected one binding, got %d"
                   (List.length bindings))
@@ -2683,7 +2683,7 @@ let test_decode_connector_rejects_a_malformed_binding () =
              ~bindings:
                (`List
                  [ `Assoc
-                     [ ("keeper_name", `String "kidsnote-pr-jira-checker") ]
+                     [ ("keeper_name", `String "pinewood-pr-jira-checker") ]
                  ])
              ()
          ])
@@ -5202,7 +5202,7 @@ let presets_payload : Yojson.Safe.t =
               ; ("description", `String "before the campaign")
               ; ("created_at", `String "2026-09-03T10:26:08Z")
               ; ("override_count", `Int 1)
-              ; ("keepers", `List [ `String "analyst"; `String "sangsu" ])
+              ; ("keepers", `List [ `String "analyst"; `String "spruce" ])
               ; ("assignment_count", `Int 12)
               ; ("lane_count", `Int 4)
               ]
@@ -5240,7 +5240,7 @@ let test_decode_presets_reads_manifests_and_unreadable () =
     let first = List.hd snapshot.Tui_decode.pss_presets in
     Alcotest.(check string) "name" "morning" first.Tui_decode.pm_name;
     Alcotest.(check int) "assignments" 12 first.Tui_decode.pm_assignment_count;
-    Alcotest.(check (list string)) "keepers" [ "analyst"; "sangsu" ] first.Tui_decode.pm_keepers;
+    Alcotest.(check (list string)) "keepers" [ "analyst"; "spruce" ] first.Tui_decode.pm_keepers;
     Alcotest.(check (list (pair string string))) "unreadable"
       [ "torn", "manifest.json missing" ] snapshot.Tui_decode.pss_unreadable
 

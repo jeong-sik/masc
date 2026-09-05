@@ -1002,7 +1002,7 @@ let test_owner_absent_pending_demand_is_drained_not_retained () =
   (* Owner-absent termination (task-370 contract item 1): durable pending
      work under a name the Keeper store does not know used to be retained and
      re-visited every maintenance cycle -- 881 retained visits for
-     keeper-taskmaster-agent on 2026-08-25, surviving restarts. No cycle can
+     one keeper on 2026-08-25, surviving restarts. No cycle can
      make that wait productive: the work can never execute until the name is
      registered. The recovery loop must drain it through the exact
      accepted-cancellation transition instead of retaining it. *)

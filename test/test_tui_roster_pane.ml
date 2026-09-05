@@ -71,7 +71,7 @@ let test_the_pane_fits_inside_the_threshold () =
     (Pane.content_cols ~hidden:false ~cols:Pane.threshold_cols > 0)
 
 let test_the_pane_keeps_an_ordinary_configured_name_whole () =
-  let name = "kidsnote-pr-jira-checker" in
+  let name = "pinewood-pr-jira-checker" in
   let width = Pane.pane_cols - 7 in
   check_string "ordinary configured name is not ellipsized" name
     (String.trim

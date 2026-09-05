@@ -228,7 +228,7 @@ let user_message ?turn_decision ?current_task ?active_goal_summaries
 
 (* --- Previous turn stop: the loop guard's reason reaches the next turn --- *)
 
-(* The live shape from 2026-09-01: kidsnote-pr-jira-checker ended 259 of 361
+(* The live shape from 2026-09-01: one live keeper ended 259 of 361
    turns on the same repeated Jira query and repeated it next turn. The line
    has to name the tool and the count, because that is what the model can
    match against its own history. *)

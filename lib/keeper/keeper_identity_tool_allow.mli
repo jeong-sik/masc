@@ -2,7 +2,7 @@
     tools the Keeper's profile named (RFC-0403).
 
     A Keeper that attaches a service is handed that service's whole list.
-    Measured 2026-09-02: [kidsnote-pr-jira-checker] carried 122 tools and
+    Measured 2026-09-02: one live keeper carried 122 tools and
     140 KB of schema, of which 84 tools and 94.4 KB had not been called in
     eight days of logs -- including four Confluence write tools, 21.3 KB,
     with zero calls in the whole tool-call record for a Keeper that reads.

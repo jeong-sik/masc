@@ -364,7 +364,7 @@ let interrupted_closer tool_use_id : T.message =
    unclosed cycle is in the middle of the history: [partition] reports
    [Overlapping_tool_cycle] and rejects before any repair runs. The result is
    a keeper that fails at the same fixed [message_index] on every turn
-   forever -- issue #31595, observed on lab-sangsu (5+ turns), and again on
+   forever -- issue #31595, observed on one lab keeper (5+ turns), and again on
    2026-09-01 where one keeper went an hour without a single completed turn
    and another logged 585 of these in a day.
 

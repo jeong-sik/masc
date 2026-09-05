@@ -524,7 +524,7 @@ let test_terminal_generic_deferral_keeps_durable_stimulus_stop () =
       fail "generic deferral did not retain its durable-stimulus terminal stop")
 ;;
 
-(* kidsnote, 2026-09-02: six host-stopped turns recorded output_tokens = 0
+(* A live keeper, 2026-09-02: six host-stopped turns recorded output_tokens = 0
    and "usage telemetry missing" because this projection hardcoded
    [usage = None]. The adapter now hands over what it measured, and the
    observation scope has to say so, or the turn record keeps reporting the

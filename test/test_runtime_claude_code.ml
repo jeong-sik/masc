@@ -904,7 +904,7 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
       | Ok _ -> fail "dynamic tool abort did not stop the Claude turn")
 ;;
 
-(* kidsnote, 2026-09-02: every host-stopped turn recorded output_tokens = 0
+(* A live keeper, 2026-09-02: every host-stopped turn recorded output_tokens = 0
    because the stop was built with usage = None. The result frame never
    arrives after a host stop, so the sum of the assistant frames seen so far
    is the turn's measurement, deduplicated by message id. *)

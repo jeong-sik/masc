@@ -89,9 +89,9 @@ let test_severity_follows_the_outcome () =
 let test_fields_stay_in_order () =
   Alcotest.(check string)
     "action, name, actor, outcome, duration, then reason last"
-    "keeper lifecycle shutdown name=rondo actor=dashboard \
+    "keeper lifecycle shutdown name=alder actor=dashboard \
      outcome=dispatch_none duration_ms=17"
-    (line ~action:"shutdown" ~name:"rondo" ~actor:"dashboard" ~duration_ms:17
+    (line ~action:"shutdown" ~name:"alder" ~actor:"dashboard" ~duration_ms:17
        P.Dispatch_none)
 
 let () =

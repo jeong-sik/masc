@@ -429,6 +429,15 @@ let all =
       ~category:"media"
       "Maximum delay between vision runtime candidates"
   ; setting
+      ~range:(int_range ~min:256 ~max:8192 ())
+      ~env_name:"MASC_KEEPER_VISION_MAX_DIMENSION"
+      ~exposure:(Toml_and_env "vision.max_dimension")
+      ~value_kind:Integer
+      ~default:"1568"
+      ~consumers:[ "Keeper_vision_downscale" ]
+      ~category:"media"
+      "Maximum image dimension (longest edge) sent to vision models before downscaling"
+  ; setting
       ~range:(int_range ~min:1 ~max:52428800 ())
       ~env_name:"MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES"
       ~exposure:Env_only

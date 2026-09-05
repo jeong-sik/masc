@@ -2,6 +2,7 @@
    keeps a row per phase; drawn one row per phase, a single approval took four
    lines of the conversation pane and repeated the tool name on each. *)
 
+open Masc.Keeper_chat_store
 open Alcotest
 module Types = Masc_tui_types
 module Gate_text = Masc_tui_gate_text
@@ -46,21 +47,22 @@ let test_one_approval_is_one_row () =
   check (list string) "the whole run says where the effect ended up"
     [ "Execute · 미뤘던 호출 적용됨 · 턴 이어서 진행" ]
     (fold
-       [ step "requested"
-       ; step "resolved_approved"
-       ; step "replay_applied"
-       ; step "continuation_recorded"
+       [ step Approval_requested
+       ; step Approval_resolved_approved
+       ; step Approval_replay_applied
+       ; step Approval_continuation_recorded
        ])
 
 let test_the_summary_names_the_deferred_call () =
   (* Every step row of one approval carries the same summary, so the folded
      line says what was gated even though the request row itself is gone. *)
+  let summary = Some "git reflog --date=iso | head -30" in
   check (list string) "the folded line keeps the call's own words"
     [ "tool_execute · git reflog --date=iso | head -30 · 미뤘던 호출 적용됨" ]
     (fold
-       [ step ~summary:(Some "git reflog --date=iso | head -30") "requested"
-       ; step ~summary:(Some "git reflog --date=iso | head -30") "resolved_approved"
-       ; step ~summary:(Some "git reflog --date=iso | head -30") "replay_applied"
+       [ step ~tool:"tool_execute" ~summary Approval_requested
+       ; step ~tool:"tool_execute" ~summary Approval_resolved_approved
+       ; step ~tool:"tool_execute" ~summary Approval_replay_applied
        ])
 
 let test_a_correction_supersedes_the_row_it_corrects () =
@@ -70,12 +72,19 @@ let test_a_correction_supersedes_the_row_it_corrects () =
   check (list string) "the canonical phase is the one drawn"
     [ "Execute · 미뤘던 호출 적용됨" ]
     (fold
-       [ step "resolved_approved"; step "replay_failed"; step "replay_applied" ])
+       [ step Approval_resolved_approved
+       ; step Approval_replay_failed
+       ; step Approval_replay_applied
+       ])
 
 let test_a_replay_outranks_the_resolution_before_it () =
   check (list string) "the outcome, not how the Gate answered"
     [ "Execute · 적용 여부 불명 · 대상을 직접 확인하세요" ]
-    (fold [ step "requested"; step "resolved_approved"; step "replay_indeterminate" ])
+    (fold
+       [ step Approval_requested
+       ; step Approval_resolved_approved
+       ; step Approval_replay_indeterminate
+       ])
 
 let test_a_problem_outranks_a_later_step () =
   (* continuation_recorded is the newest row, but an operator scanning the pane
@@ -84,9 +93,9 @@ let test_a_problem_outranks_a_later_step () =
   check (list string) "the failure is the outcome, not the newest step"
     [ "Execute · 적용 실패 · 턴 이어서 진행" ]
     (fold
-       [ step "resolved_approved"
-       ; step "replay_failed"
-       ; step "continuation_recorded"
+       [ step Approval_resolved_approved
+       ; step Approval_replay_failed
+       ; step Approval_continuation_recorded
        ])
 
 let test_a_waiting_request_keeps_its_own_row () =
@@ -95,24 +104,32 @@ let test_a_waiting_request_keeps_its_own_row () =
     ; "말"
     ; "Execute · 미뤘던 호출 적용됨"
     ]
-    (fold [ step "requested"; said "말"; step "resolved_approved"; step "replay_applied" ])
+    (fold
+       [ step Approval_requested
+       ; said "말"
+       ; step Approval_resolved_approved
+       ; step Approval_replay_applied
+       ])
 
 let test_two_approvals_stay_two_rows () =
   check (list string) "back to back approvals do not merge"
     [ "Execute · 미뤘던 호출 적용됨"; "Write · 승인 거절" ]
     (fold
-       [ step ~approval:"appr_1" "resolved_approved"
-       ; step ~approval:"appr_1" "replay_applied"
-       ; step ~approval:"appr_2" ~tool:"Write" "resolved_rejected"
+       [ step ~approval:"appr_1" Approval_resolved_approved
+       ; step ~approval:"appr_1" Approval_replay_applied
+       ; step ~approval:"appr_2" ~tool:"Write" Approval_resolved_rejected
        ])
 
 let test_rows_that_are_not_gate_rows_are_untouched () =
   check (list string) "nothing else folds" [ "가"; "나" ] (fold [ said "가"; said "나" ])
 
-let test_an_unknown_phase_still_draws () =
-  check (list string) "a phase this build does not know is named"
-    [ "Execute · 알 수 없는 승인 단계 invented" ]
-    (fold [ step "invented" ])
+(* The continuation says the turn resumed, which no outcome says. A run that
+   holds only that fact -- the outcome rows are outside the loaded window --
+   draws it as its whole line rather than folding to nothing. *)
+let test_a_run_of_only_continuations_still_draws () =
+  check (list string) "the continuation is the line"
+    [ "Execute · 턴 이어서 진행" ]
+    (fold [ step Approval_continuation_recorded ])
 
 let () =
   run "tui_gate_fold"
@@ -132,7 +149,7 @@ let () =
             test_two_approvals_stay_two_rows
         ; test_case "rows that are not gate rows are untouched" `Quick
             test_rows_that_are_not_gate_rows_are_untouched
-        ; test_case "an unknown phase still draws" `Quick
-            test_an_unknown_phase_still_draws
+        ; test_case "a run of only continuations still draws" `Quick
+            test_a_run_of_only_continuations_still_draws
         ] )
     ]

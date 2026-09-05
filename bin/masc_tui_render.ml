@@ -5602,7 +5602,8 @@ let lane_run_status_style = function
   | Tui_decode.Lane_run_not_reviewed
   | Tui_decode.Lane_run_commit_failed
   | Tui_decode.Lane_run_raised -> Theme.bad ()
-  | Tui_decode.Lane_run_running -> Theme.info ()
+  | Tui_decode.Lane_run_running
+  | Tui_decode.Lane_run_operator_routed -> Theme.info ()
   | Tui_decode.Lane_run_other _ -> Theme.muted ()
 
 let lane_run_clock started_at =
@@ -6526,7 +6527,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
     Masc_tui_types.identity_preamble
       ~keeper:(Terminal_text.single_line k.k_name)
       ~notice:
-        (attempt @ Masc_tui_types.identity_app_form_rows state.identity_app_form
+        (attempt @ started @ Masc_tui_types.identity_app_form_rows state.identity_app_form
         @ filter_rows)
     @ [ Ansi.dim ^ "  Nothing here matches. esc to see them all." ^ Ansi.reset ]
   else if numbered = [] && rejected = [] then
@@ -6535,9 +6536,9 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
     Masc_tui_types.identity_preamble
       ~keeper:(Terminal_text.single_line k.k_name)
       ~notice:
-        (attempt @ Masc_tui_types.identity_app_form_rows state.identity_app_form
+        (attempt @ started @ Masc_tui_types.identity_app_form_rows state.identity_app_form
         @ filter_rows)
-    @ numbered @ rejected @ started @ attached_tool_lines
+    @ numbered @ rejected @ attached_tool_lines
 
 let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     (* Beside the roster pane the box is the pane separator; alone on the
@@ -10753,7 +10754,7 @@ let fusion_tool_actor_text actor =
   match actor.fta_phase with
   | Fusion_tool_panel -> "panel/" ^ Terminal_text.single_line actor.fta_identity
   | Fusion_tool_judge role ->
-      Printf.sprintf "judge/%s/%s" (Terminal_text.single_line role)
+      Printf.sprintf "judge/%s/%s" (fusion_judge_role_label role)
         (Terminal_text.single_line actor.fta_identity)
 
 let fusion_tool_agent_suffix actor agent_name =
@@ -11356,7 +11357,10 @@ type change_context = {
   ctx_goal_title : string option;
   ctx_turn : int option;
   ctx_comment : string option;
-  ctx_pr_number : string option;
+  ctx_pr : Masc_tui_pr_ref.t option;
+      (** An explicit PR reference -- a pull link or a PR-N token -- found in
+          the task title, then its description, then the chat note. A bare
+          [#n] is a list item as often as a PR and is not read as one. *)
 }
 
 let file_change_matches_path (path : string) (fc : Masc.Tui_decode.file_change) =
@@ -11365,31 +11369,6 @@ let file_change_matches_path (path : string) (fc : Masc.Tui_decode.file_change) 
   | Masc.Tui_decode.Fc_in_bundle { bundle_path } -> String.equal bundle_path path
   | Masc.Tui_decode.Fc_at_absolute_path { path = p } ->
       String.equal p path || String.equal (Filename.basename p) (Filename.basename path)
-
-let extract_pr_number (s : string) : string option =
-  let n = String.length s in
-  let rec scan i =
-    if i >= n then None
-    else if s.[i] = '#' && i + 1 < n && s.[i + 1] >= '0' && s.[i + 1] <= '9' then
-      let start_digits = i + 1 in
-      let rec digits j =
-        if j < n && s.[j] >= '0' && s.[j] <= '9' then digits (j + 1)
-        else j
-      in
-      let end_digits = digits start_digits in
-      Some (String.sub s start_digits (end_digits - start_digits))
-    else if (i + 3 <= n && (String.sub s i 3 = "PR-" || String.sub s i 3 = "pr-"))
-            && i + 3 < n && s.[i + 3] >= '0' && s.[i + 3] <= '9' then
-      let start_digits = i + 3 in
-      let rec digits j =
-        if j < n && s.[j] >= '0' && s.[j] <= '9' then digits (j + 1)
-        else j
-      in
-      let end_digits = digits start_digits in
-      Some (String.sub s start_digits (end_digits - start_digits))
-    else scan (i + 1)
-  in
-  scan 0
 
 let first_line_summary ?(max_len = 34) (s : string) : string =
   let lines = String.split_on_char '\n' s in
@@ -11504,13 +11483,10 @@ let resolve_change_context (state : state) ~(path_opt : string option) : change_
     | Some c -> Some c
     | None -> task_description
   in
-  let pr_number =
-    match Option.bind task_title extract_pr_number with
-    | Some _ as p -> p
-    | None ->
-        (match Option.bind task_description extract_pr_number with
-         | Some _ as p -> p
-         | None -> Option.bind comment extract_pr_number)
+  let pr =
+    List.find_map
+      (fun text -> Option.bind text Masc_tui_pr_ref.find)
+      [ task_title; task_description; comment ]
   in
   { ctx_keeper = keeper
   ; ctx_task_id = task_id
@@ -11520,7 +11496,7 @@ let resolve_change_context (state : state) ~(path_opt : string option) : change_
   ; ctx_goal_title = goal_title
   ; ctx_turn = turn
   ; ctx_comment = effective_comment
-  ; ctx_pr_number = pr_number
+  ; ctx_pr = pr
   }
 
 let build_change_context_lines (change_ctx : change_context) : string list =
@@ -11546,8 +11522,9 @@ let build_change_context_lines (change_ctx : change_context) : string list =
   in
   let line2_items = [] in
   let line2_items =
-    match change_ctx.ctx_pr_number with
-    | Some pr -> ("PR: #" ^ pr) :: line2_items
+    match change_ctx.ctx_pr with
+    | Some pr ->
+        Printf.sprintf "PR: #%d" (Masc_tui_pr_ref.number pr) :: line2_items
     | None -> line2_items
   in
   let line2_items =
@@ -11602,24 +11579,46 @@ let tree_diff_row_span ~width (row : Masc.Tui_decode.git_diff_row) =
   in
   Span.pad_to width background (Span.truncate width composed)
 
-let render_repository_changes_diff (state : state) ~path =
+(* The two diff readings -- a Git Changes file against HEAD, and a change on
+   the Changes tree -- draw one frame from different state. What differs is
+   listed once here and the frame is drawn once below; each copy used to
+   count its own chrome by hand. *)
+type diff_surface =
+  { ds_title : string  (** the screen title *)
+  ; ds_address : string  (** what the header names beside "vs HEAD" *)
+  ; ds_context_lines : string list
+        (** drawn under the header, each followed by a divider *)
+  ; ds_diff : Masc.Tui_decode.git_diff option  (** [None] until the tree is read *)
+  ; ds_error : string option
+  ; ds_scroll : int  (** the stored scroll, clamped here and reported back *)
+  ; ds_unchanged : string  (** the empty line when the tree reports no change *)
+  ; ds_esc_hint : string  (** what esc does on this surface *)
+  ; ds_footer_hints : string
+  ; ds_surface_key : string
+  ; ds_clamped : int -> clamped_scroll
+  }
+
+(* Rows the frame spends outside the diff body: top border, header, its
+   divider, the column caption, its divider, the status line, bottom border.
+   A context line and the error line each add themselves plus a divider. *)
+let diff_surface_fixed_chrome_rows = 7
+let diff_surface_rows_per_context_line = 2
+let diff_surface_error_rows = 2
+
+let render_diff_surface (state : state) (ds : diff_surface) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let diff_rows =
-    match state.repository_changes_diff with
-    | Some (p, diff) when String.equal p path -> diff.Masc.Tui_decode.gd_rows
-    | _ -> []
+    match ds.ds_diff with
+    | None -> []
+    | Some diff -> diff.Masc.Tui_decode.gd_rows
   in
   let total = List.length diff_rows in
   let header =
-    Printf.sprintf "%s %s  vs HEAD  %s"
-      (screen_title " MASC Git Diff")
-      (Terminal_text.single_line path)
+    Printf.sprintf "%s %s  vs HEAD  %s" (screen_title ds.ds_title) ds.ds_address
       (connection_badge state)
   in
-  let change_ctx = resolve_change_context state ~path_opt:(Some path) in
-  let context_lines = build_change_context_lines change_ctx in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
@@ -11627,33 +11626,35 @@ let render_repository_changes_diff (state : state) ~path =
     (fun ctx_line ->
       box_line buf cols ctx_line;
       box_divider buf cols)
-    context_lines;
+    ds.ds_context_lines;
   box_line_styled buf cols ~style:(Theme.recede ())
     "  old   new     what the working tree holds, against its last commit";
   box_divider buf cols;
-  (match state.repository_changes_diff_error with
+  (match ds.ds_error with
    | None -> ()
    | Some detail ->
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
   let chrome_rows =
-    7
-    + (List.length context_lines * 2)
-    + if Option.is_some state.repository_changes_diff_error then 2 else 0
+    diff_surface_fixed_chrome_rows
+    + (List.length ds.ds_context_lines * diff_surface_rows_per_context_line)
+    + if Option.is_some ds.ds_error then diff_surface_error_rows else 0
   in
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (total - content_height) in
-  let scroll = max 0 (min state.repository_changes_diff_scroll max_scroll) in
+  let scroll = max 0 (min ds.ds_scroll max_scroll) in
   if total = 0 then begin
+    (* Three different facts, and none of them is the others: not read yet, a
+       failed read, and a file that matches its last commit. *)
     let empty =
-      match (state.repository_changes_diff, state.repository_changes_diff_error) with
-      | _, Some _ -> "  (the read failed; nothing here is a reading)"
+      match (ds.ds_diff, ds.ds_error) with
+      | (Some _ | None), Some _ -> "  (the read failed; nothing here is a reading)"
       | None, None -> "  (reading the tree)"
-      | Some (_, diff), None ->
+      | Some diff, None ->
           if diff.Masc.Tui_decode.gd_has_changes then
             "  (the tree reports a change and sent no lines)"
-          else "  (this file matches its last commit, or is untracked)"
+          else ds.ds_unchanged
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
@@ -11669,13 +11670,33 @@ let render_repository_changes_diff (state : state) ~path =
     done;
   box_line_styled buf cols ~style:(Theme.recede ())
     (if total > content_height then
-       Printf.sprintf "[%d lines, scroll %d]  esc back to files" total scroll
-     else "  esc back to files");
+       Printf.sprintf "[%d lines, scroll %d]  %s" total scroll ds.ds_esc_hint
+     else "  " ^ ds.ds_esc_hint);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:Masc_tui_keys.footer_hints_git_diff);
-  finish_surface state
-    ~surface_key:"repository-changes-diff" ~rows:terminal_rows ~cols buf
+    (footer_line state ~max_cells:cols ~hints:ds.ds_footer_hints);
+  finish_surface state ~clamped:(ds.ds_clamped scroll)
+    ~surface_key:ds.ds_surface_key ~rows:terminal_rows ~cols buf
+
+let render_repository_changes_diff (state : state) ~path =
+  let change_ctx = resolve_change_context state ~path_opt:(Some path) in
+  render_diff_surface state
+    { ds_title = " MASC Git Diff"
+    ; ds_address = Terminal_text.single_line path
+    ; ds_context_lines = build_change_context_lines change_ctx
+    ; ds_diff =
+        (* A diff held for another path is not this file's reading. *)
+        (match state.repository_changes_diff with
+         | Some (p, diff) when String.equal p path -> Some diff
+         | Some _ | None -> None)
+    ; ds_error = state.repository_changes_diff_error
+    ; ds_scroll = state.repository_changes_diff_scroll
+    ; ds_unchanged = "  (this file matches its last commit, or is untracked)"
+    ; ds_esc_hint = "esc back to files"
+    ; ds_footer_hints = Masc_tui_keys.footer_hints_git_diff
+    ; ds_surface_key = "repository-changes-diff"
+    ; ds_clamped = (fun scroll -> Repository_changes_diff_scroll scroll)
+    }
 
 let render_repository_changes (state : state) =
   match state.repository_changes_diff_path with
@@ -12662,72 +12683,19 @@ let render_changes_list (state : state) =
    whichever it drew look like the whole answer. *)
 let render_changes_tree_diff (state : state)
     (change : Masc.Tui_decode.file_change) =
-  let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
-  let diff_rows =
-    match state.changes_tree_diff with
-    | None -> []
-    | Some diff -> diff.Masc.Tui_decode.gd_rows
-  in
-  let total = List.length diff_rows in
-  let header =
-    Printf.sprintf "%s %s  vs HEAD  %s"
-      (screen_title " MASC Tree")
-      (Terminal_text.single_line (change_row_address change))
-      (connection_badge state)
-  in
-  box_top buf cols;
-  box_line buf cols header;
-  box_divider buf cols;
-  box_line_styled buf cols ~style:(Theme.recede ())
-    "  old   new     what the working tree holds, against its last commit";
-  box_divider buf cols;
-  (match state.changes_tree_diff_error with
-   | None -> ()
-   | Some detail ->
-       box_line_styled buf cols ~style:(Theme.bad ())
-         ("  " ^ Keeper_chat.terminal_safe_text detail);
-       box_divider buf cols);
-  let chrome_rows =
-    7 + if Option.is_some state.changes_tree_diff_error then 2 else 0
-  in
-  let content_height = max 1 (rows - chrome_rows) in
-  let max_scroll = max 0 (total - content_height) in
-  let scroll = max 0 (min state.changes_diff_scroll max_scroll) in
-  if total = 0 then begin
-    (* Three different facts, and none of them is the others: not read yet, a
-       failed read, and a file that matches its last commit. *)
-    let empty =
-      match (state.changes_tree_diff, state.changes_tree_diff_error) with
-      | _, Some _ -> "  (the read failed; nothing here is a reading)"
-      | None, None -> "  (reading the tree)"
-      | Some diff, None ->
-          if diff.Masc.Tui_decode.gd_has_changes then
-            "  (the tree reports a change and sent no lines)"
-          else "  (this file matches its last commit)"
-    in
-    box_line_styled buf cols ~style:(Theme.recede ()) empty;
-    for _ = 1 to content_height - 1 do
-      box_empty buf cols
-    done
-  end
-  else
-    for i = 0 to content_height - 1 do
-      match List.nth_opt diff_rows (i + scroll) with
-      | None -> box_empty buf cols
-      | Some row ->
-          box_line_span buf cols (tree_diff_row_span ~width:(framed_inner_width cols) row)
-    done;
-  box_line_styled buf cols ~style:(Theme.recede ())
-    (if total > content_height then
-       Printf.sprintf "[%d lines, scroll %d]  esc closes" total scroll
-     else "  esc closes");
-  box_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  left/esc:back  o:open in editor  q:quit");
-  finish_surface state ~clamped:(Changes_diff_scroll scroll)
-    ~surface_key:"changes" ~rows:terminal_rows ~cols buf
+  render_diff_surface state
+    { ds_title = " MASC Tree"
+    ; ds_address = Terminal_text.single_line (change_row_address change)
+    ; ds_context_lines = []
+    ; ds_diff = state.changes_tree_diff
+    ; ds_error = state.changes_tree_diff_error
+    ; ds_scroll = state.changes_diff_scroll
+    ; ds_unchanged = "  (this file matches its last commit)"
+    ; ds_esc_hint = "esc closes"
+    ; ds_footer_hints = "j/k:scroll  left/esc:back  o:open in editor  q:quit"
+    ; ds_surface_key = "changes"
+    ; ds_clamped = (fun scroll -> Changes_diff_scroll scroll)
+    }
 
 (* The surface has two readings: the list, and one change opened. The open row
    is held as an index, so a refresh that shortens the list closes the diff

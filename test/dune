@@ -2996,6 +2996,11 @@
  (libraries alcotest masc))
 
 (test
+ (name test_keeper_vision_downscale)
+ (modules test_keeper_vision_downscale)
+ (libraries alcotest masc base64))
+
+(test
  (name test_keeper_vision_ingest)
  (modules test_keeper_vision_ingest)
  (libraries alcotest masc masc.runtime masc.tool_types))
@@ -3138,6 +3143,7 @@
  (modules test_tui_keeper_chat_history)
  (libraries
   alcotest
+  masc
   masc_tui_keeper_chat_history
   masc_tui_keeper_chat_transcript
   yojson))
@@ -3196,7 +3202,12 @@
 (test
  (name test_tui_gate_text)
  (modules test_tui_gate_text)
- (libraries alcotest masc_tui_gate_text))
+ (libraries alcotest masc masc_tui_gate_text))
+
+(test
+ (name test_tui_pr_ref)
+ (modules test_tui_pr_ref)
+ (libraries alcotest masc_tui_pr_ref))
 
 (test
  (name test_egress_host)
@@ -3232,7 +3243,7 @@
 (test
  (name test_tui_gate_fold)
  (modules test_tui_gate_fold)
- (libraries alcotest masc_tui_types masc_tui_gate_text))
+ (libraries alcotest masc masc_tui_types masc_tui_gate_text))
 
 (test
  (name test_tui_server_identity_refresh)

@@ -68,6 +68,7 @@ let all_outcomes : (string * E.outcome) list =
   ; "raised", E.Raised { detail = "Failure(\"boom\")" }
   ; ( "review_cancelled"
     , E.Review_cancelled { detail = "review fiber cancelled: shutdown" } )
+  ; "operator_routed", E.Operator_routed
   ]
 ;;
 

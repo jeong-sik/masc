@@ -3644,17 +3644,12 @@ let empty_fusion_tool_trace_json =
 let fusion_recorded_detail_json ?(source = "fusion")
     ?(origin_run_id = "fusion-recorded-501")
     ?(tool_trace = empty_fusion_tool_trace_json)
-    ?(judges = None) () =
+    ?(judges = []) () =
   let run_id = "fusion-recorded-501" in
   let tool_trace_fields = [ "tool_trace", tool_trace ] in
-  (* RFC-0284 의 additive 배열. [None]이면 키 자체를 실어 보내지 않는다 -- 그
-     이전의 post 가 실제로 그렇게 생겼고, 디코더가 [] 로 답하는 호환을 여기서
-     핀으로 잡는다. *)
-  let judges_fields =
-    match judges with
-    | None -> []
-    | Some nodes -> [ ("judges", `List nodes) ]
-  in
+  (* The sink writes the RFC-0284 array on every post, so the fixture always
+     carries the key; a post without it is the shape the decoder rejects. *)
+  let judges_fields = [ ("judges", `List judges) ] in
   `Assoc
     [ "generated_at", `String "2026-08-24T09:00:00Z"
     ; "run", fusion_run_json run_id
@@ -3813,18 +3808,40 @@ let test_decode_fusion_list_and_exact_detail () =
            ~prefix:"runs[0]: unknown fusion topology \"recursive\""
            detail)
 
-(* RFC-0284 judge nodes: pre-RFC posts carry no array and decode as [],
-   JoJ nodes keep role/identity/outcome, and an untaught role fails its
-   node instead of passing as something it is not. *)
+(* Every occurrence of [key], at any depth, removed. The fixture holds one
+   ["judges"], under the post's meta. *)
+let rec without_key key = function
+  | `Assoc fields ->
+      `Assoc
+        (List.filter_map
+           (fun (name, value) ->
+             if String.equal name key then None
+             else Some (name, without_key key value))
+           fields)
+  | `List items -> `List (List.map (without_key key) items)
+  | (`Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _) as leaf -> leaf
+
+(* RFC-0284 judge nodes: the sink writes the array on every post, so a post
+   without it is a decode error rather than an empty panel; JoJ nodes keep
+   role/identity/outcome, and an untaught role fails its node instead of
+   passing as something it is not. *)
 let test_decode_fusion_judge_nodes () =
+  (match
+     Tui_decode.decode_fusion_detail
+       (without_key "judges" (fusion_recorded_detail_json ()))
+   with
+   | Ok _ -> Alcotest.fail "a post with no judges array decoded"
+   | Error detail ->
+       Alcotest.(check bool) "the missing key is named" true
+         (String_util.contains_substring detail "judges"));
   (match
      Tui_decode.decode_fusion_detail (fusion_recorded_detail_json ())
    with
-   | Error err -> Alcotest.failf "old-post detail decode failed: %s" err
+   | Error err -> Alcotest.failf "an empty judges array failed: %s" err
    | Ok detail ->
        (match detail.Tui_decode.fud_evidence with
         | Some evidence ->
-            Alcotest.(check int) "a post from before the RFC has no nodes" 0
+            Alcotest.(check int) "an empty array is no nodes" 0
               (List.length evidence.Tui_decode.fe_judges)
         | None -> Alcotest.fail "recorded evidence lost its Board post"));
   let joj_nodes =
@@ -3863,7 +3880,7 @@ let test_decode_fusion_judge_nodes () =
   in
   (match
      Tui_decode.decode_fusion_detail
-       (fusion_recorded_detail_json ~judges:(Some joj_nodes) ())
+       (fusion_recorded_detail_json ~judges:joj_nodes ())
    with
    | Error err -> Alcotest.failf "JoJ detail decode failed: %s" err
    | Ok detail ->
@@ -3926,7 +3943,7 @@ let test_decode_fusion_judge_nodes () =
   in
   (match
      Tui_decode.decode_fusion_detail
-       (fusion_recorded_detail_json ~judges:(Some [ untaught_role ]) ())
+       (fusion_recorded_detail_json ~judges:[ untaught_role ] ())
    with
    | Ok _ -> Alcotest.fail "an untaught judge role decoded"
    | Error detail ->
@@ -4103,6 +4120,57 @@ let test_decode_fusion_actual_tool_trace () =
   | Error detail ->
       Alcotest.(check bool) "coverage disagreement is explicit" true
         (String_util.contains_substring detail "disagrees with drops/gaps")
+
+(* A judge actor on the Tool trace carries the same closed role sum as a
+   judge node: the sink writes both from one projection, and a role this
+   build was not taught fails the trace instead of drawing as a string. *)
+let test_decode_fusion_tool_judge_actor () =
+  let judge_event ~judge_role =
+    `Assoc
+      [ "event", `String "called"
+      ; "phase", `String "judge"
+      ; "actor", `String "stage-1"
+      ; "judge_role", `String judge_role
+      ; "agent_name", `String "stage-1"
+      ; "tool_use_id", `String "tool-j1"
+      ; "turn", `Int 1
+      ; "planned_index", `Int 0
+      ; "tool_name", `String "masc_web_search"
+      ; "input", fusion_tool_preview_json {|{"query":"x"}|} 13 false
+      ]
+  in
+  let detail ~judge_role =
+    fusion_recorded_detail_json
+      ~tool_trace:
+        (fusion_tool_trace_json ~events:[ judge_event ~judge_role ] ())
+      ()
+  in
+  (match Tui_decode.decode_fusion_detail (detail ~judge_role:"stage_meta") with
+   | Error detail -> Alcotest.fail detail
+   | Ok
+       { Tui_decode.fud_evidence =
+           Some
+             { fe_tool_trace =
+                 { ftt_events = [ Tui_decode.Fusion_tool_called called ]; _ }
+             ; _
+             }
+       ; _
+       } ->
+       (match called.fte_actor.fta_phase with
+        | Tui_decode.Fusion_tool_judge Tui_decode.Judge_stage_meta -> ()
+        | Tui_decode.Fusion_tool_judge
+            ( Tui_decode.Judge_single | Tui_decode.Judge_refine
+            | Tui_decode.Judge_first | Tui_decode.Judge_meta
+            | Tui_decode.Judge_final_meta ) ->
+            Alcotest.fail "stage_meta decoded as another judge role"
+        | Tui_decode.Fusion_tool_panel ->
+            Alcotest.fail "a judge actor decoded as a panel actor")
+   | Ok _ -> Alcotest.fail "the judge call did not come back as one event");
+  match Tui_decode.decode_fusion_detail (detail ~judge_role:"jury") with
+  | Ok _ -> Alcotest.fail "an untaught judge_role decoded"
+  | Error detail ->
+      Alcotest.(check bool) "the closed role set names what it rejected" true
+        (String_util.contains_substring detail "unknown fusion judge role \"jury\"")
 
 (* Harness verdicts. Shape is [Dashboard_harness_health.verdict_item_json]. *)
 let harness_verdict_json ?(fallback = `Null) () =
@@ -5486,6 +5554,7 @@ let test_decode_lane_run_status_is_typed () =
             ; lane_run_summary_json ~status:"completion_durability_unknown"
                 "lib-dubious"
             ; lane_run_summary_json ~status:"exploded" "lib-new"
+            ; lane_run_summary_json ~status:"operator_routed" "lib-routed"
             ] )
       ]
   in
@@ -5493,7 +5562,7 @@ let test_decode_lane_run_status_is_typed () =
   | Error detail -> Alcotest.fail detail
   | Ok page ->
       (match page.Tui_decode.lrpg_runs with
-       | [ ok; dubious; novel ] ->
+       | [ ok; dubious; novel; routed ] ->
            Alcotest.(check string) "known label" "succeeded"
              (Tui_decode.lane_run_status_label ok.Tui_decode.lrs_status);
            Alcotest.(check bool) "durability variant" true
@@ -5502,8 +5571,18 @@ let test_decode_lane_run_status_is_typed () =
            (* A label the producer adds later must survive the decode, not
               vanish into a default. *)
            Alcotest.(check string) "unknown label is preserved" "exploded"
-             (Tui_decode.lane_run_status_label novel.Tui_decode.lrs_status)
-       | _ -> Alcotest.fail "expected three runs")
+             (Tui_decode.lane_run_status_label novel.Tui_decode.lrs_status);
+           (* A claim the lane handed to the operator is typed, and it is not
+              a decision this lane failed to reach: the operator's click is
+              the verdict. *)
+           Alcotest.(check bool) "operator-routed variant" true
+             (routed.Tui_decode.lrs_status = Tui_decode.Lane_run_operator_routed);
+           Alcotest.(check bool) "operator-routed is not a decision" true
+             (Tui_decode.lane_run_decision
+                ~run_kind:Tui_decode.Lane_run_task_verification
+                ~status:routed.Tui_decode.lrs_status
+              = Tui_decode.Lane_run_not_a_decision)
+       | _ -> Alcotest.fail "expected four runs")
 
 let test_decode_verifier_lane_summary_keeps_subject_and_verdict () =
   let listing =
@@ -7300,6 +7379,8 @@ let () =
           test_decode_fusion_progress_and_completion_summary;
         Alcotest.test_case "keeps actual Tool events and coverage gaps" `Quick
           test_decode_fusion_actual_tool_trace;
+        Alcotest.test_case "a judge actor carries the closed role sum" `Quick
+          test_decode_fusion_tool_judge_actor;
       ] );
     ( "decode_harness",
       [

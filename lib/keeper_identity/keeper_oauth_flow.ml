@@ -79,20 +79,27 @@ let begin_authorization
     | scopes -> [ "scope", String.concat " " scopes ]
   in
   let parameters =
-    [ "response_type", "code"
-    ; "client_id", client_id
-    ; "redirect_uri", redirect_uri
-    ]
-    @ scope
-    @ [ "state", state
-    ; "code_challenge", Auth_oauth.pkce_s256 verifier
-    ; "code_challenge_method", "S256"
-      (* RFC 8707: name the resource the token is for, so a token minted for
-         one MCP server cannot be presented to another. *)
-    ; "resource", discovered.Keeper_oauth_discovery.resource
-    ; "prompt", "consent"
-    ]
-    @ provider.Provider.authorize_params
+    let base =
+      [ "response_type", "code"
+      ; "client_id", client_id
+      ; "redirect_uri", redirect_uri
+      ]
+      @ scope
+      @ [ "state", state
+      ; "code_challenge", Auth_oauth.pkce_s256 verifier
+      ; "code_challenge_method", "S256"
+        (* RFC 8707: name the resource the token is for, so a token minted for
+           one MCP server cannot be presented to another. *)
+      ; "resource", discovered.Keeper_oauth_discovery.resource
+      ; "prompt", "consent"
+      ]
+    in
+    let overrides = provider.Provider.authorize_params in
+    let overridden_keys = List.map fst overrides in
+    let filtered_base =
+      List.filter (fun (k, _) -> not (List.mem k overridden_keys)) base
+    in
+    filtered_base @ overrides
   in
   { provider_id = provider.Provider.id
   ; keeper
@@ -100,8 +107,14 @@ let begin_authorization
   ; state
   ; redirect_uri
   ; authorize_url =
-      Printf.sprintf "%s?%s"
+      let sep =
+        if String.contains discovered.Keeper_oauth_discovery.authorize_url '?'
+        then "&"
+        else "?"
+      in
+      Printf.sprintf "%s%s%s"
         discovered.Keeper_oauth_discovery.authorize_url
+        sep
         (query parameters)
   }
 
@@ -133,6 +146,7 @@ let tokens_of_response ~now body =
          match member "expires_in" with
          | Some (`Int seconds) -> Some (float_of_int seconds)
          | Some (`Float seconds) -> Some seconds
+         | Some (`String s) -> (try Some (float_of_string s) with _ -> None)
          | Some _ | None -> None
        in
        (* RFC 6749 5.1 makes both optional, and neither absence is a failure

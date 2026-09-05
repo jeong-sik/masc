@@ -119,8 +119,6 @@ type verification_claim =
   | Completion_evidence of { evidence_refs : string list }
   | Cancellation_reason of { reason : string }
 
-val verification_intent_of_claim : verification_claim -> verification_intent
-
 type task_status =
   | Todo
   | Claimed of { assignee : string; claimed_at : string }

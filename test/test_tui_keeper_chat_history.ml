@@ -88,7 +88,8 @@ let kind_to_string : History.kind -> string = function
   | History.Reasoning lines ->
       Printf.sprintf "thinking[%s]" (String.concat " | " lines)
   | History.Gate_activity { approval_id; phase; tool; _ } ->
-      Printf.sprintf "gate[%s %s%s]" approval_id phase
+      Printf.sprintf "gate[%s %s%s]" approval_id
+        (Masc.Keeper_chat_store.approval_lifecycle_phase_to_label phase)
         (match tool with None -> "" | Some tool -> " " ^ tool)
   | History.Memory_activity _ -> "memory"
 
@@ -168,8 +169,9 @@ let decode json =
 
 (* A Gate row is drawn from its typed phase, so it has to reach the pane as one.
    The approval id is what folds a run of steps back into the one approval they
-   describe; a lifecycle without it is not a step this pane can place, and
-   stays in the neutral lane rather than being drawn as a lone approval. *)
+   describe; a lifecycle without it is not a step this pane can place, and is
+   dropped as undecodable rather than drawn as a lone approval or filed under
+   Memory. *)
 let gate_row ~ts ~slot ?approval_id ~phase ?tool ?summary content =
   `Assoc
     [ "id", `String ("gate-" ^ slot)
@@ -227,16 +229,56 @@ let test_a_gate_row_carries_its_approval () =
     [ "gate[appr_01a requested Execute]"; "gate[appr_01a replay_applied Execute]" ]
     (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
 
-let test_a_lifecycle_without_an_approval_id_is_not_a_gate_row () =
+(* A lifecycle payload that is present but not a step this pane can place is
+   an undecodable row: it is dropped and counted, like any other row this
+   build cannot read. It used to be filed under Memory, where a malformed
+   gate row hid in the journal lane. *)
+let test_a_lifecycle_without_an_approval_id_is_dropped () =
   let decoded =
     decode
       (`List
          [ gate_row ~ts:1.0 ~slot:"approval_replay" ~phase:"replay_applied"
              ~tool:"Execute" "적용 완료"
+         ; gate_row ~ts:2.0 ~slot:"approval_replay" ~approval_id:"  "
+             ~phase:"replay_applied" ~tool:"Execute" "적용 완료"
          ])
   in
-  check (list string) "it stays in the neutral lane" [ "memory" ]
+  check int "both rows are counted as dropped" 2 decoded.History.dropped;
+  check (list string) "and neither is drawn" []
     (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
+
+let test_an_unknown_phase_label_is_a_decode_error () =
+  let decoded =
+    decode
+      (`List
+         [ gate_row ~ts:1.0 ~slot:"approval_request" ~approval_id:"appr_01u"
+             ~phase:"quarantined" ~tool:"Execute" ""
+         ; gate_row ~ts:2.0 ~slot:"approval_request" ~approval_id:"appr_01u"
+             ~phase:"requested" ~tool:"Execute" ""
+         ])
+  in
+  check int "the unknown label is counted as dropped" 1 decoded.History.dropped;
+  check (list string) "the row with a known label still reads"
+    [ "gate[appr_01u requested Execute]" ]
+    (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
+
+(* The payload key present with a shape that is not a lifecycle object is
+   the same undecodable row, not a neutral system row. *)
+let test_a_lifecycle_that_is_not_an_object_is_dropped () =
+  let decoded =
+    decode
+      (`List
+         [ `Assoc
+             [ "id", `String "row"
+             ; "role", `String "system"
+             ; "content", `String "승인됨 · Execute"
+             ; "ts", `Float 1.0
+             ; "approval_lifecycle", `String "requested"
+             ]
+         ])
+  in
+  check int "dropped" 1 decoded.History.dropped;
+  check int "no rows" 0 (List.length decoded.History.rows)
 
 let test_roles_map_to_what_the_pane_draws () =
   let decoded =
@@ -1628,8 +1670,12 @@ let () =
             test_a_gate_row_carries_its_approval
         ; test_case "a gate row carries its call summary" `Quick
             test_a_gate_row_carries_its_call_summary
-        ; test_case "a lifecycle without an approval id is not a gate row"
-            `Quick test_a_lifecycle_without_an_approval_id_is_not_a_gate_row
+        ; test_case "a lifecycle without an approval id is dropped" `Quick
+            test_a_lifecycle_without_an_approval_id_is_dropped
+        ; test_case "an unknown phase label is a decode error" `Quick
+            test_an_unknown_phase_label_is_a_decode_error
+        ; test_case "a lifecycle that is not an object is dropped" `Quick
+            test_a_lifecycle_that_is_not_an_object_is_dropped
         ; test_case "a failed turn names the request it came from" `Quick
             test_a_failed_turn_names_the_request_it_came_from
         ; test_case "runtime interruption becomes a recovered lifecycle" `Quick

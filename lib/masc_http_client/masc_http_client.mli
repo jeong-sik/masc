@@ -17,14 +17,14 @@ type response = {
   headers : (string * string) list;
   body : string;
 }
+(** Structured response returned by {!get_response_sync}. Body is
+    fully read into memory; size capped at 8 MB
+    (see {!post_sync} / {!get_response_sync} for the cap details). *)
 
 val default_request_timeout_sec : float
 (** Shared outbound HTTP request deadline used by connector delivery clients.
     This bounds the full request/response exchange, unlike the pool's separate
     connection-establishment timeout. *)
-(** Structured response returned by {!get_response_sync}.  Body is
-    fully read into memory; size capped at 8 MB
-    (see {!post_sync} / {!get_response_sync} for the cap details). *)
 
 (** {1 Synchronous request helpers}
 

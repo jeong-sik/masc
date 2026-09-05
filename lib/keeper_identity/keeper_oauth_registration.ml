@@ -1,5 +1,4 @@
-(** See keeper_oauth_registration.mli, in particular why the client secret an
-    answer may carry is dropped rather than stored. *)
+(** See keeper_oauth_registration.mli. *)
 
 type error =
   | Transport of string

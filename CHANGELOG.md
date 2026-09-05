@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **A cancel claim is the operator's to close.** The system LLM lane records
+  a cancel claim as `operator_routed` and builds no review prompt for it: the
+  cancellation prompt sections, their names and the question arm behind them
+  are gone (#33113 had closed the path #33059 opened). An operator-routed row
+  is neither a verdict nor a lane failure on the Verifier lane.
+- **A cancel says whose reason it is.** A cancel resolves its reason from its
+  own `reason` or `handoff_context` only, never from the previous owner's
+  release note the Task still carries, and is refused when neither is given;
+  the record the operator judges, the committed Task and the message log
+  carry one sentence.
+
 ## [0.31.0] - 2026-09-04
 
 - **Voice input, end to end.** A Keeper chat can be dictated: the capture decides

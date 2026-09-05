@@ -32,6 +32,7 @@ module Backend = Keeper_microvm_backend
 (* The backend a call builds argv for. Every builder below takes it, so the
    choice travels with the call instead of sitting in module state that a
    second keeper on a second backend would race. *)
+(** The CLI prefix for one backend. *)
 let command_argv_for backend = [ Backend.cli_name backend ]
 
 (** Flags Docker takes that [container run] rejects outright.
@@ -950,6 +951,16 @@ let classify_volume_probe ~volume_name ~inspect ~listing =
   | outcome -> Volume_probe_failed (described "inspect" outcome)
 ;;
 
+(** Create the work volume when absent, for whichever runtime the keeper
+    declared. [container volume create] is not idempotent, so existence is
+    settled by the probe rather than by reading its "already exists" message.
+
+    Only Apple's grammar is established. [msb] and [nerdctl] return an
+    [Error] naming what is missing rather than a guess: for [msb] the create
+    is known and the inspect and list that settle existence are not, and
+    creating over a volume that already holds a keeper's tree is exactly what
+    that check exists to prevent; for [nerdctl] there is no size flag to
+    establish. Error codes are [microvm_work_volume_*]. *)
 let apple_volume_probe ~volume_name ~timeout_sec =
   let cli = command_argv_for Backend.Apple_container in
   let inspect_argv = cli @ [ "volume"; "inspect"; volume_name ] in

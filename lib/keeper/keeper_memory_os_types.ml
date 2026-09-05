@@ -18,6 +18,7 @@ let wire_field_kind = "kind"
 let wire_field_derivations = "derivations"
 let wire_field_board = "board"
 let wire_field_post_id = "post_id"
+(** Optional librarian claim fields naming a Board source. *)
 let wire_field_comment_id = "comment_id"
 let wire_field_board_post_id = "board_post_id"
 let wire_field_board_comment_id = "board_comment_id"

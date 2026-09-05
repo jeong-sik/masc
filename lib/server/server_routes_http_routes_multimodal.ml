@@ -107,6 +107,10 @@ let list_response ?kind_filter ?created_by_filter ?query () =
 
 let parse_id id_str = Aid.of_string id_str
 
+(** Single-artifact lookup by string id.
+    - Malformed id → 400 [{error}]
+    - Not found → 404 [{error, id}]
+    - Found → 200 [{...artifact JSON...}]. *)
 let artifact_response ~id_str =
   let ws = Atomic.get workspace_getter () in
   match parse_id id_str with
@@ -132,6 +136,9 @@ let artifact_response ~id_str =
 let aid_list_to_json lst =
   `List (List.map (fun a -> `String (Aid.to_string a)) lst)
 
+(** Provenance neighbors:
+    [{ id, origins: [aid...], descendants: [aid...] }].
+    Returns empty arrays if the id is unknown to the workspace. *)
 let provenance_response ~id_str =
   let ws = Atomic.get workspace_getter () in
   match parse_id id_str with

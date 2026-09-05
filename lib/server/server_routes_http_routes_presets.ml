@@ -32,6 +32,7 @@ let object_of_body body =
   | exception Yojson.Json_error message -> Error ("invalid JSON: " ^ message)
 ;;
 
+(** Exposed for tests: [{name, description?}] with a valid preset name. *)
 let decode_save body =
   match object_of_body body with
   | Error _ as error -> error

@@ -52,19 +52,6 @@ val list_response :
     - [query]: case-insensitive substring against [id], [kind],
       [created_by], and [metadata]'s top-level keys *)
 
-val artifact_response :
-  id_str:string -> Yojson.Safe.t * Httpun.Status.t
-(** Single-artifact lookup by string id.
-    - Malformed id → 400 [{error}]
-    - Not found → 404 [{error, id}]
-    - Found → 200 [{...artifact JSON...}]. *)
-
-val provenance_response :
-  id_str:string -> Yojson.Safe.t * Httpun.Status.t
-(** Provenance neighbors:
-    [{ id, origins: [aid...], descendants: [aid...] }].
-    Returns empty arrays if the id is unknown to the workspace. *)
-
 val add_routes :
   Http_server_eio.Router.t -> Http_server_eio.Router.t
 (** Register the three GET routes under

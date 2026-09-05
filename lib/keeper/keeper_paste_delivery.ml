@@ -27,6 +27,10 @@ let retain_reason_to_string = function
     Printf.sprintf "endpoint write reported success but read-back disagreed: %s" detail
 ;;
 
+(** Basenames of the regular files sitting directly under [staging_dir] that
+    parse as spilled-paste names ([Keeper_paste_naming]), sorted. A missing
+    or unreadable staging directory means nothing was ever staged, not an
+    error. *)
 let staged_file_names ~staging_dir =
   match Sys.readdir staging_dir with
   | exception Sys_error _ -> []

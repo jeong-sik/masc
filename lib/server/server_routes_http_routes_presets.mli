@@ -8,7 +8,3 @@ type save_request =
   ; description : string
   }
 
-val decode_save : string -> (save_request, string) result
-(** Exposed for tests: [{name, description?}] with a valid preset name. *)
-
-val decode_restore : string -> (string, string) result

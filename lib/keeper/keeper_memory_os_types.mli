@@ -218,9 +218,6 @@ val board_ref_of_ids
 
 val wire_field_board : string
 val wire_field_post_id : string
-val wire_field_comment_id : string
-
-(** Optional librarian claim fields naming a Board source. *)
 val wire_field_board_post_id : string
 val wire_field_board_comment_id : string
 

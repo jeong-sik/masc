@@ -63,7 +63,3 @@ val classify_argv : string list -> bool
 val observation_commands : string list
 val git_read_subcommands : string list
 
-val gh_read_verbs_by_family : (string * string list) list
-(** The gh verbs that only read, keyed by family. Closed on purpose: a verb
-    that is not listed goes to the judge, and admitting one is a reviewed
-    change here rather than a configuration knob. *)

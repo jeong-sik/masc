@@ -195,6 +195,13 @@ let surface_of_pairs pairs =
   Ok { server_description; tool_help_name_suffix; resources; resource_templates }
 ;;
 
+(** [load_resources ~contents] parses [contents] as [mcp/resources.toml].
+    Accepted top-level keys, all required: [server] (a table of
+    [description]), [tool_help] (a table of [name_suffix]), [[resources]]
+    and [[resource_templates]]. Entry keys are exactly [uri] (or
+    [uri_template]), [name], [title], [description], [mime_type]; all are
+    required non-empty strings. Everything else is an [Error] naming the
+    offending key. *)
 let load_resources ~contents =
   match Otoml.Parser.from_string_result contents with
   | Error message -> Error (sprintf "mcp/resources.toml: TOML parse error: %s" message)

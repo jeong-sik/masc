@@ -1,5 +1,6 @@
 open Masc_tui_types
 open Masc_tui_ansi
+module Decode = Masc.Tui_decode
 module Chart = Masc_tui_chart
 module Layout = Masc_tui_message_layout
 

@@ -1,7 +1,9 @@
 (* Pins the decision written on [Keeper_chat_store.approval_lifecycle_equal]:
-   [call_summary] is a rendering of the approval's request input, not a fact
-   about the approval, so it takes no part in deciding whether a second row
-   for the same approval slot is the same row. Two rows that differ only in
+   [call_summary] is the producing tool's one-line statement of its call,
+   written on the request row and copied onto every later row of the
+   approval; it is a rendering, not a fact about the approval, so it takes no
+   part in deciding whether a second row for the same approval slot is the
+   same row. Two rows that differ only in
    the summary are one row; the first one written is the one that stays. The
    durable fields keep their strictness, which the last case shows. *)
 

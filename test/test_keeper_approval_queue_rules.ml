@@ -148,6 +148,7 @@ let test_gate_allows_only_the_exact_persisted_rule () =
        let request : Gate.request =
          { keeper_name = "keeper"
          ; operation = "external-effect"
+         ; call_summary = None
          ; input
          ; base_path
          ; sandbox_profile = None
@@ -337,6 +338,7 @@ let test_duplicate_persisted_rules_reject_whole_store () =
 let gate_request ~base_path : Gate.request =
   { keeper_name = "keeper"
   ; operation = "external-effect"
+  ; call_summary = None
   ; input = `Assoc [ "target", `String "exact" ]
   ; base_path
   ; sandbox_profile = None
@@ -398,6 +400,7 @@ let submit_eligibility_entry ~base_path ~keeper_name label =
     AQ.submit_pending
       ~keeper_name
       ~tool_name:"external-effect"
+      ~call_summary:None
       ~input:(`Assoc [ "request", `String label ])
       ~base_path
       ()

@@ -920,6 +920,153 @@ let test_deferred_payload_promises_only_what_replay_spends () =
     (Astring.String.is_infix ~affix:"one-shot authorization" on_approve)
 ;;
 
+(* Each producer states what its approval is about from its own typed decode
+   of the stored Gate input. Nothing here searches the input for a field
+   name: a field the model happens to call "command" belongs to whichever
+   tool owns it, and only that tool's declared summary decides what the row
+   says. The line comes back whole; the pane decides how much of it fits. *)
+let summary = Alcotest.(option string)
+
+let test_write_summary_is_the_target () =
+  match
+    Masc.Keeper_tool_filesystem_runtime.approved_write_of_gate_input
+      approved_content_input
+  with
+  | Error detail -> Alcotest.fail detail
+  | Ok write ->
+    Alcotest.check
+      summary
+      "a write states the path it would write"
+      (Some "/playground/executor/repos/masc/a.ml")
+      (Masc.Keeper_tool_filesystem_runtime.write_call_summary
+         ~requested_target:write.Masc.Keeper_tool_filesystem_runtime.target)
+;;
+
+let execute_summary input =
+  match Masc.Keeper_tool_execute_runtime.replay_args_of_gate_input input with
+  | Error detail -> Alcotest.fail detail
+  | Ok args ->
+    (match Masc.Keeper_tool_execute_typed_input.of_json args with
+     | Error detail -> Alcotest.fail detail
+     | Ok typed -> Masc.Keeper_tool_execute_input.typed_input_call_summary typed)
+;;
+
+let test_execute_summary_is_the_first_command_line () =
+  Alcotest.check
+    summary
+    "argv joins onto one line"
+    (Some "git status")
+    (execute_summary approved_execute_input);
+  let script text =
+    `Assoc
+      [ "schema", `String "masc.keeper_gate.request.v1"
+      ; "input", `Assoc [ "script", `String text; "cwd", `String "/repo" ]
+      ; "cwd", `String "/repo"
+      ]
+  in
+  Alcotest.check
+    summary
+    "a script is named by its first command, blank lines skipped"
+    (Some "cd repos/masc && git log --oneline -8 -- test/dune")
+    (execute_summary
+       (script "\n  cd repos/masc && git log --oneline -8 -- test/dune\n  dune build\n"));
+  let long_line = "echo " ^ String.make 300 'a' in
+  Alcotest.check
+    summary
+    "the line is not cut by the store"
+    (Some long_line)
+    (execute_summary (script (long_line ^ "\nsecond")))
+;;
+
+let test_network_read_summary_is_the_leaf_argument () =
+  let open Masc.Keeper_tool_in_process_runtime in
+  let stated input =
+    match network_read_replay_of_gate_input input with
+    | Ok replay -> network_read_call_summary replay
+    | Error detail -> Alcotest.fail detail
+  in
+  Alcotest.check
+    summary
+    "web_search states its query"
+    (Some "approved exact search")
+    (stated approved_web_search_input);
+  Alcotest.check
+    summary
+    "web_fetch states its url, not a field named command"
+    (Some "https://example.com/page")
+    (stated
+       (`Assoc
+         [ "capability", `String "web_fetch"
+         ; ( "input"
+           , `Assoc
+               [ "url", `String "https://example.com/page"
+               ; "command", `String "curl https://elsewhere.invalid"
+               ] )
+         ]));
+  Alcotest.check
+    summary
+    "a fetch whose arguments name no url states nothing"
+    None
+    (network_read_call_summary
+       (Replay_web_fetch (`Assoc [ "command", `String "curl x" ])))
+;;
+
+let test_connector_post_summary_names_where_and_what () =
+  let open Masc.Keeper_tool_in_process_runtime in
+  match
+    connector_post_replay_of_gate_input
+      (`Assoc
+        [ "connector", `String "discord"
+        ; "channel_id", `String "D-exact"
+        ; "content", `String "first line\nsecond line"
+        ; "mention_user_ids", `List []
+        ])
+  with
+  | Error detail -> Alcotest.fail detail
+  | Ok replay ->
+    Alcotest.check
+      summary
+      "a post states its connector, channel and first line"
+      (Some "discord D-exact: first line")
+      (connector_post_call_summary replay)
+;;
+
+let test_identity_summary_is_the_provider_surface () =
+  let input =
+    Masc.Keeper_identity_gate.gate_input
+      ~provider_id:"github"
+      ~remote_name:"issue_write"
+      ~arguments:
+        (`Assoc [ "command", `String "rm -rf /"; "title", `String "a title" ])
+  in
+  match Masc.Keeper_identity_gate.replay_of_gate_input input with
+  | Error detail -> Alcotest.fail detail
+  | Ok call ->
+    Alcotest.check
+      summary
+      "an identity call states provider/remote; its arguments are the remote's"
+      (Some "github/issue_write")
+      (Masc.Keeper_identity_gate.call_summary call)
+;;
+
+let test_speak_summary_is_the_first_line_of_the_message () =
+  let open Masc.Keeper_tool_voice_runtime in
+  (match
+     speak_message_of_args
+       (`Assoc [ "message", `String "  Hello team.\nSecond sentence." ])
+   with
+   | Error detail -> Alcotest.fail detail
+   | Ok message ->
+     Alcotest.check
+       summary
+       "a speak states the first line of what it would say"
+       (Some "Hello team.")
+       (speak_call_summary ~message));
+  match speak_message_of_args (`Assoc [ "command", `String "say hello" ]) with
+  | Ok message -> Alcotest.fail ("a speak without a message decoded: " ^ message)
+  | Error _ -> ()
+;;
+
 let () =
   Alcotest.run
     "keeper_gate_replay"
@@ -1029,6 +1176,32 @@ let () =
             "deferred payload promises only what replay spends"
             `Quick
             test_deferred_payload_promises_only_what_replay_spends
+        ] )
+    ; ( "declared call summaries"
+      , [ Alcotest.test_case
+            "a write states its target"
+            `Quick
+            test_write_summary_is_the_target
+        ; Alcotest.test_case
+            "an execute states its first command line, whole"
+            `Quick
+            test_execute_summary_is_the_first_command_line
+        ; Alcotest.test_case
+            "a network read states the leaf's own argument"
+            `Quick
+            test_network_read_summary_is_the_leaf_argument
+        ; Alcotest.test_case
+            "a connector post states where and what"
+            `Quick
+            test_connector_post_summary_names_where_and_what
+        ; Alcotest.test_case
+            "an identity call states its provider surface, not its arguments"
+            `Quick
+            test_identity_summary_is_the_provider_surface
+        ; Alcotest.test_case
+            "a speak states the first line of its message"
+            `Quick
+            test_speak_summary_is_the_first_line_of_the_message
         ] )
     ]
 ;;

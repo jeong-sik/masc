@@ -38,7 +38,8 @@ let () =
 
 let test_config () = Masc.Workspace.default_config voice_session_test_base
 
-let allow_external_effect ~operation:_ ~input:_ ~continue = continue ()
+let allow_external_effect ~operation:_ ~input:_ ~call_summary:_ ~continue =
+  continue ()
 
 (* The stdlib has no unsetenv, and [Unix.putenv key ""] leaves the variable
    set to an empty string. The test dependency library carries a C stub for
@@ -338,7 +339,7 @@ let test_keeper_voice_speak_surfaces_tts_failure () =
     (* No config at all is not a config that failed to load: the Gate still
        reviews this speak, and the bridge refuses it afterwards. *)
     let reviewed = ref false in
-    let review_then_continue ~operation:_ ~input:_ ~continue =
+    let review_then_continue ~operation:_ ~input:_ ~call_summary:_ ~continue =
       reviewed := true;
       continue ()
     in

@@ -86,6 +86,7 @@ let pending_entry
       Q.submit_pending
         ~keeper_name
         ~tool_name:"external-effect"
+        ~call_summary:None
         ~input:
           (`Assoc
              [ "target", `String "document"

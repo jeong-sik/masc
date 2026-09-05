@@ -90,6 +90,7 @@ let approved_grant_fixture ~base_path ~keeper_name ~input =
       Keeper_approval_queue.submit_pending
         ~keeper_name
         ~tool_name:"external-effect"
+        ~call_summary:None
         ~input
         ~base_path
         ()
@@ -268,6 +269,7 @@ let test_peek_skips_resolution_still_pending () =
       Keeper_approval_queue.submit_pending
         ~keeper_name
         ~tool_name:"external-effect"
+        ~call_summary:None
         ~input:(`Assoc [ "target", `String "hitl-unready" ])
         ~base_path
         ()

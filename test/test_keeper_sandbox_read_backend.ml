@@ -2669,6 +2669,12 @@ let run_tests ~clock () =
     ]
 
 let () =
+  (* Keeper VMs export MASC_CONFIG_DIR (their own runtime config); a bare
+     docker_config_host_root honours it, so an inherited value silently points
+     the config mount at a directory no fixture in this file ever created.
+     Scrub it for the whole suite: every docker-run mount assertion must see
+     the fixture's own config dir, exactly like a clean CI runner. *)
+  with_env "MASC_CONFIG_DIR" "" @@ fun () ->
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let clock = Eio.Stdenv.clock env in

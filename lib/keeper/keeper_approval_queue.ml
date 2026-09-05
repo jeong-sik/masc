@@ -1781,16 +1781,30 @@ let read_pending_log_unlocked
       ~next_sequence
   =
   let path = pending_log_path ~base_path in
-  match
-    Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
-    |> Fs_compat.private_jsonl_snapshot_success_receipt
-  with
+  let log_read_outcome =
+    match
+      Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
+    with
+    | Error (Fs_compat.Incomplete_transaction_tail _) ->
+      (* A final line without its newline is a row whose durable append did not
+         finish. Process recovery truncates it to the last complete row and
+         flags partial_tail so install rewrites the snapshot. *)
+      Fs_compat.recover_private_jsonl_durable_locked_result path
+      |> Fs_compat.private_jsonl_snapshot_success_receipt
+      |> Result.map (fun receipt -> receipt, true)
+    | Error error -> Error error
+    | Ok snapshot ->
+      Fs_compat.private_jsonl_snapshot_success_receipt (Ok snapshot)
+      |> Result.map (fun receipt -> receipt, false)
+  in
+  match log_read_outcome with
   | Error error -> Error (private_jsonl_error ~path error)
-  | Ok { Fs_compat.value = snapshot; settlement_error } ->
+  | Ok ({ Fs_compat.value = snapshot; settlement_error }, recovered_partial_tail) ->
     Option.iter (observe_log_settlement ~path) settlement_error;
     let bytes = snapshot.Fs_compat.bytes in
     let partial_tail =
-      String.length bytes > 0 && not (Char.equal bytes.[String.length bytes - 1] '\n')
+      recovered_partial_tail
+      || (String.length bytes > 0 && not (Char.equal bytes.[String.length bytes - 1] '\n'))
     in
     let lines = String.split_on_char '\n' bytes in
     let lines =

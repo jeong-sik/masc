@@ -46,6 +46,14 @@ let rec ensure_dir path =
     if parent <> path then ensure_dir parent;
     Unix.mkdir path 0o755)
 
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv key (Option.value previous ~default:""))
+    f
+;;
+
 let write_file path content =
   let oc = open_out_bin path in
   Fun.protect ~finally:(fun () -> close_out oc) @@ fun () ->
@@ -76,6 +84,7 @@ let make_meta ~name () =
   | Error e -> Alcotest.fail e
 
 let setup f =
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
   ensure_dir (Filename.concat base Common.masc_dirname);
@@ -83,6 +92,8 @@ let setup f =
     Filename.concat (Filename.concat base Common.masc_dirname) "config"
   in
   ensure_dir config_dir;
+  let keepers_config_dir = Filename.concat config_dir "keepers" in
+  ensure_dir keepers_config_dir;
   let config = Workspace.default_config base in
   ensure_dir (Workspace.keepers_runtime_dir config);
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -106,6 +117,30 @@ let setup f =
         created_at = 0\n\
         updated_at = 0\n"
        playground);
+  write_file
+    (Filename.concat keepers_config_dir "stream-close-keeper.toml")
+    {|[keeper]
+instructions = "stream close test"
+sandbox_profile = "remote_ssh"
+remote_endpoint = "fixture"
+|};
+  write_file
+    (Filename.concat config_dir "runtime.toml")
+    (Exec_ssh_endpoint.to_toml
+       Exec_ssh_endpoint.
+         { name = "fixture"
+         ; host = "fixture.invalid"
+         ; user = "masc"
+         ; port = default_port
+         ; identity_file = default_identity_file ~name:"fixture"
+         ; known_hosts_file = default_known_hosts_file ~name:"fixture"
+         ; remote_root = "/srv/masc/playground"
+         ; connect_timeout_sec = 1
+         ; max_concurrent_sessions = 2
+         ; env_allowlist = [ "LANG" ]
+         ; capabilities = []
+         ; private_home = false
+         });
   f ~config ~meta ~playground
 
 let typed_exec_args ~cwd =

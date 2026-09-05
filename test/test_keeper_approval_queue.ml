@@ -1515,7 +1515,9 @@ let test_delivery_wire_shape_drops_request_context () =
             "delivery drops the context version marker"
             `Null
             (delivery_entry |> member "request_context_version"));
-       let snapshot_bytes = String.length (read_pending_snapshot_bytes ~base_path) in
+       let snapshot_bytes =
+         String.length (Yojson.Safe.to_string (read_pending_snapshot ~base_path))
+       in
        Alcotest.(check bool)
          (Printf.sprintf
             "resolved snapshot (%d bytes) stays under the dropped context (%d bytes)"
@@ -2661,6 +2663,9 @@ let test_exact_attempt_bind_storage_failure_is_not_success () =
        let store_path = AQ.For_testing.pending_store_path ~base_path in
        Sys.remove store_path;
        Unix.mkdir store_path 0o755;
+       let log_path = AQ.For_testing.pending_log_path ~base_path in
+       if Sys.file_exists log_path then Sys.remove log_path;
+       Unix.mkdir log_path 0o755;
        (match run_exact_transition AQ.bind_summary_exact_attempt identity with
         | Error (AQ.Exact_attempt_storage_error _) -> ()
         | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
@@ -3817,7 +3822,7 @@ let test_partial_pending_snapshot_preserves_readable_entries () =
          | _ -> Alcotest.fail "pending snapshot object expected"
        in
        write_pending_snapshot ~base_path snapshot;
-       let original = read_pending_snapshot ~base_path in
+       let original = read_pending_snapshot_file ~base_path in
        AQ.For_testing.reset_runtime_state ();
        let before =
          Masc.Otel_metric_store.metric_value_or_zero

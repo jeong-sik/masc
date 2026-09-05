@@ -127,19 +127,23 @@ let section_pills_line ~cols ~(active : metrics_section) : string =
     Layout.take_cells line inner_width
   else line
 
+let repeat_glyph glyph count =
+  if count <= 0 then "" else String.concat "" (List.init count (fun _ -> glyph))
+;;
+
 let render_kpi_cards ~cols (kpis : metrics_kpis) : string list =
   let inner_width = max 20 (framed_inner_width cols) in
   let card_w = max 18 ((inner_width - 10) / 4) in
   let format_card title line1 line2 tone_style =
-    let title_line = Printf.sprintf "%s%s%s" tone_style title Ansi.reset in
-    let box_t = "\xe2\x94\x8c" ^ String.make (max 0 (card_w - 2)) '\xe2\x94\x80' ^ "\xe2\x94\x90" in
-    let box_b = "\xe2\x94\x94" ^ String.make (max 0 (card_w - 2)) '\xe2\x94\x80' ^ "\xe2\x94\x98" in
+    let h_rule = repeat_glyph "\xe2\x94\x80" (max 0 (card_w - 2)) in
+    let box_t = "\xe2\x94\x8c" ^ h_rule ^ "\xe2\x94\x90" in
+    let box_b = "\xe2\x94\x94" ^ h_rule ^ "\xe2\x94\x98" in
     let pad_line s =
       let w = Layout.display_width s in
       if w >= card_w - 4 then Layout.take_cells s (card_w - 4)
       else s ^ String.make (card_w - 4 - w) ' '
     in
-    let l_t = "\xe2\x94\x82 " ^ pad_line title_line ^ " \xe2\x94\x82" in
+    let l_t = "\xe2\x94\x82 " ^ tone_style ^ pad_line title ^ Ansi.reset ^ " \xe2\x94\x82" in
     let l_1 = "\xe2\x94\x82 " ^ pad_line line1 ^ " \xe2\x94\x82" in
     let l_2 = "\xe2\x94\x82 " ^ pad_line line2 ^ " \xe2\x94\x82" in
     (box_t, l_t, l_1, l_2, box_b)
@@ -192,16 +196,12 @@ let render_kpi_cards ~cols (kpis : metrics_kpis) : string list =
         (Masc_tui_context_inspector.format_bytes kpis.snapshot_bytes)
         (Theme.bad ()) Ansi.reset kpis.gate_pending_count kpis.held_approvals_count
     ]
+    |> List.map (fun line -> if Layout.display_width line > inner_width then Layout.take_cells line inner_width else line)
 
 let render_section_fleet ~cols (state : state) : string list =
   let inner_width = max 20 (framed_inner_width cols) in
   let hourly_activity =
     let hours = Array.make 24 0 in
-    List.iter
-      (fun (t : task) ->
-        let h = (int_of_float t.created_at / 3600) mod 24 in
-        if h >= 0 && h < 24 then hours.(h) <- hours.(h) + 1)
-      state.tasks;
     List.iter
       (fun (_, ts) ->
         let h = (int_of_float ts / 3600) mod 24 in
@@ -249,7 +249,7 @@ let render_section_fleet ~cols (state : state) : string list =
 
 let render_section_resources ~cols (state : state) : string list =
   let inner_width = max 20 (framed_inner_width cols) in
-  let gauge_w = max 15 (min 30 (inner_width / 3)) in
+  let gauge_w = max 15 (min 26 (max 15 ((inner_width - 36) / 2))) in
   let keeper_rows =
     match state.memory_health with
     | None ->
@@ -257,8 +257,8 @@ let render_section_resources ~cols (state : state) : string list =
           (fun (k : keeper) ->
             let g = Chart.gauge ~width:gauge_w ~value:20 ~max_value:100 ~label:"Facts" () in
             let status_str = if k.k_paused then "paused" else "active" in
-            Printf.sprintf "  %-18s  %s  %s(status: %s)%s"
-              (Layout.take_cells k.k_name 18)
+            Printf.sprintf "  %s  %s  %s(status: %s)%s"
+              (Layout.fit_width k.k_name 16)
               g
               (Theme.recede ()) status_str Ansi.reset)
           state.keepers
@@ -273,8 +273,8 @@ let render_section_resources ~cols (state : state) : string list =
             let byte_g =
               Chart.gauge ~width:gauge_w ~value:k.mkh_snapshot_bytes ~max_value:max_b ~label:"Bytes" ()
             in
-            Printf.sprintf "  %-16s  %s  %s  %s%4d ord · %s%s"
-              (Layout.take_cells k.mkh_keeper_id 16)
+            Printf.sprintf "  %s  %s  %s  %s%4d ord · %s%s"
+              (Layout.fit_width k.mkh_keeper_id 16)
               fact_g
               byte_g
               (Theme.recede ()) k.mkh_facts
@@ -282,12 +282,19 @@ let render_section_resources ~cols (state : state) : string list =
               Ansi.reset)
           mhs.mhs_keepers
   in
-  [ Printf.sprintf "  %s%sKeeper Memory & Context Capacity Gauges%s"
-      Ansi.bold (Theme.info ()) Ansi.reset
-  ; Printf.sprintf "  %-16s  %-30s  %-30s  %s"
-      "KEEPER" "FACT CAPACITY" "SNAPSHOT BYTES" "METRICS"
-  ]
-  @ keeper_rows
+  let header =
+    [ Printf.sprintf "  %s%sKeeper Memory & Context Capacity Gauges%s"
+        Ansi.bold (Theme.info ()) Ansi.reset
+    ; Printf.sprintf "  %-16s  %-26s  %-26s  %s"
+        "KEEPER" "FACT CAPACITY" "SNAPSHOT BYTES" "METRICS"
+    ]
+  in
+  List.map
+    (fun line ->
+      if Layout.display_width line > inner_width then
+        Layout.take_cells line inner_width
+      else line)
+    (header @ keeper_rows)
 
 let render_section_tools ~cols (_state : state) : string list =
   let inner_width = max 20 (framed_inner_width cols) in
@@ -354,9 +361,11 @@ let render_metrics_body ~cols ~budget (state : state)
     | Section_latency -> render_section_latency ~cols state
   in
   let fixed_rows = 1 + 1 + List.length card_lines + 1 in
-  let available = max 1 (budget - fixed_rows) in
+  let room = max 0 (budget - fixed_rows) in
   let total_lines = List.length section_lines in
-  let overflowing = total_lines > available in
+  let overflowing = total_lines > room in
+  let hint_rows = if overflowing && room >= 2 then 1 else 0 in
+  let available = max 0 (room - hint_rows) in
   let max_scroll = max 0 (total_lines - available) in
   let scroll = max 0 (min state.metrics_scroll max_scroll) in
   for i = 0 to available - 1 do
@@ -365,6 +374,6 @@ let render_metrics_body ~cols ~budget (state : state)
     | Some line -> push line
     | None -> push_empty ()
   done;
-  if overflowing then
+  if hint_rows > 0 then
     push_styled ~style:(Theme.recede ())
       (Printf.sprintf "  [%d rows, scroll %d · j/k to scroll · 1-4 to switch section]" total_lines scroll)

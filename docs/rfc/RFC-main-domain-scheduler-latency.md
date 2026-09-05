@@ -185,6 +185,8 @@ Phase 0c 가 머지된 빌드를 재기동하고 2분 뒤와 6분 뒤에 `GET /a
 
 **P4d. Memprof 키를 masc 프레임으로.** 8.4 의 한계 제거. 이 RFC 의 다음 PR.
 
+**P4e. 승인 큐 스냅샷을 다시 쓰지 않는다.** `gate/pending.json` 은 23 MB(deliveries 4,937건, pending 0, 중앙값 4.4 KB·최대 106 KB)인데, `persist_pending_entry_unlocked`·`persist_exact_attempt_entry_unlocked` 가 승인 항목 하나가 바뀔 때마다 `Yojson.Safe.pretty_to_string` 으로 통째로 다시 쓴다. 두 번째 재기동의 4분 창에서 12.4 GB, 이 창의 가장 큰 단일 묶음이다. P4a 와 같은 부류이고 같은 처방이다: 항목 단위 append 로그 + 프로세스 안 상태, 압축은 비율로. 그 전에 제품 판단 하나 — deliveries 는 replay·grant 소비·remember 규칙을 위해 남는데, 지워지는 경로가 하나(`SMap.remove`, :3567)뿐이라 끝없이 자란다. 감사 원장(`audit-approvals/`, 75 MB dated)이 따로 있으니 deliveries 는 projection 이고 retention 을 가질 수 있는지 확인한다.
+
 각 단계는 같은 하네스로 전후를 잰다. P4a 뒤 할당 −20% 이상, P4b 뒤 −25% 이상, P4c 뒤 live −500MB 이상이 기대치이고, 못 미치면 그 단계는 되돌린다.
 
 ### 8.6 상태와 재측정 (2026-09-05)
@@ -234,3 +236,23 @@ live 3.59 → 4.06 GB(4분에 +0.47 GB). 힙 루트: `exact_lane_runs` 564 MB(�
 - 그다음: remote-path 2차식(#33329), 이벤트 큐 스냅샷 재읽기(3.3 GB — `snapshot_result` 가 registry 에 없는 키퍼마다·`durable_state_result` 가 매번 파일을 읽는다), 반응 원장 전체 스캔(2.1 GB), 귀속 안 된 19 GB(#33332 뒤 다시 읽는다).
 - live 가 기준선보다 1.2 GB 크고 4분에 0.47 GB 늘었지만, 세 번째 읽기(+7분 → +20분, 801초)에서 4.06 → 3.64 GB 로 내려왔다. 누수가 아니라 그 4분의 버스트다. 같은 13분의 할당은 453 MB/s 로 기준선 수준이고, 이 창의 상위는 `try_parse_json` 17.7 GB, masc 프레임 없음 20 GB, Yojson 쓰기 24 GB, `Dated_jsonl.recent_entry_of_line` 7.8 GB, 이벤트 큐 스냅샷 7.1 GB 순이다. `Keeper_remote_path.consume` 은 원격 lane 이 조용해지자 상위에서 빠졌다. 즉 4분 창의 848 MB/s 는 원격 lane 두 키퍼의 버스트였고, 스테디는 기준선과 같은 자리에서 조성만 바뀌었다.
 - 계기 한계 하나 더: `sites` 가 8,031 → 11,962 → 16,814 로 3분에 약 1천씩 는다. 이대로면 두 시간 안에 50,000 상한에 닿아 overflow 묶음이 다시 생긴다. 키 6 프레임 안에서 무엇이 갈리는지(Eio 프레임·클로저 줄 번호)는 보고서가 상위 30 만 주어 지금은 못 본다. 다음 읽기에서 `sites` 와 overflow 를 먼저 보고, 갈리면 키에서 Eio 프레임도 빼는 것을 검토한다.
+
+
+#### 두 번째 재기동 — 11:47Z, #33329(remote-path 커서)·#33332(48 프레임) 포함
+
+ready 11:49:07Z 이전. memprof A(ready+3분) → B(+7분), 239초: **428 MB/s**, live 3.92 → 3.03 GB, sites 9,826 → 12,066(4분에 +2.2k, 계속 는다), dropped 0. 하네스 ready+7분: `/health` p50 2 ms·max 143 ms, lag p50 1.6 / p95 94 / p99 165 / max 420 ms, stall 0, minor 4,375/분, major 6.0/분, promoted 26 MB/s, live 2,967 MB. 이 4분의 `agent_core:agent_started` 13건.
+
+| 할당 지점 (48 프레임) | 4분간 |
+|---|---|
+| `Keeper_approval_queue.persist_snapshot_{exact,with_sequence}_unlocked` 6행 합 | 12.4 GB |
+| Eio 프레임이 키를 다 차지한 행 | 6.5 GB |
+| 체크포인트 디코드 `content_block_of_json` 3.5 + `validate_checkpoint_json` 1.8 | 5.3 GB |
+| `measure_message_bytes` 2.5 + 1.4, `serialized_bytes ← apply_post_turn_lifecycle` 1.8 | 5.7 GB |
+| `Keeper_reaction_ledger` 전체 스캔 | 2.5 GB |
+| 이벤트 큐 스냅샷 재읽기 | 2.4 GB |
+
+`Keeper_remote_path.consume` 은 상위에서 사라졌다(#33329; 원격 lane 이 조용했을 가능성은 남는다). `keeper_owner_pools` 는 2 MB 로 돌아왔다 — 앞 재기동의 67 MB 는 P4a 가 아니라 그때의 키퍼 상태였다. Eio 프레임 문제는 #33339(키 skip 목록에 Eio 접두어).
+
+#### GC 파라미터 실험 (8.5 의 "카운터를 본 뒤 결정")
+
+카운터가 나왔다. minor 4,000~6,000/분은 초당 70~100회의 stop-the-world 이고, OCaml 5 는 minor 수집에 모든 도메인이 함께 멈춘다. 현재 값은 minor heap 4M words(32 MiB)/도메인(`bin/main_eio.ml`), space_overhead 100(`MASC_GC_SPACE_OVERHEAD`, 부트스트랩), 둘 다 `OCAMLRUNPARAM` 이 있으면 적용하지 않는다. 실험: `OCAMLRUNPARAM='s=32M,o=200'` (s 는 도메인당 words, 32M words = 256 MiB; o 는 space_overhead; OCaml 5.4 manual runtime 장에서 확인) 로 재기동해 같은 하네스로 minor/분·major/분·promoted·lag p99 를 비교한다. 기대: minor 1/8, promoted 감소, major 1/2, RSS +4~6 GB(128 GB 호스트). p99 가 안 내려가면 되돌린다.

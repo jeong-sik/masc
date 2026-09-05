@@ -1,0 +1,19 @@
+# Prismic's remote MCP server.
+#
+# Only the server is named. Its endpoints, the scopes it publishes and whether
+# a client has to be registered by hand come from the two well-known documents
+# it serves, so none of that can go stale here.
+#
+# Measured 2026-09-05: unauthenticated requests answer 401 with WWW-Authenticate
+# naming https://mcp.prismic.io/.well-known/oauth-protected-resource/mcp,
+# authorization server (https://mcp.prismic.io/) offers S256 PKCE and dynamic
+# client registration (HTTP 201).
+
+id = "prismic"
+label = "Prismic"
+mcp_url = "https://mcp.prismic.io/mcp"
+
+access_token_env = "PRISMIC_ACCESS_TOKEN"
+expires_at_env = "PRISMIC_EXPIRES_AT"
+refresh_token_file = "prismic_refresh_token"
+renew_before_sec = 300

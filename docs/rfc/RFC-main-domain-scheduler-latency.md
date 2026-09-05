@@ -551,3 +551,34 @@ pool 도메인의 긴 작업은 이 창에서 최대 475 ms 다. 무거운 창�
 `Fs_compat.load_file` 의 Eio 경로는 `Eio.Path.load` 다. `with_open_in`(worker 스레드의 `openat`, 그래서 재개 사유가 `openat`) 안에서 파일을 fiber 위에서 끝까지 복사하고 `Switch.run` 이 닫히며 끝난다(종료 사유 `switch`). keeper 의 정본 체크포인트 `traces/<trace>/<trace>.json` 은 13~35 MB 이고 턴마다 이 경로로 읽혔다. 디코드는 이미 pool 에 있었지만 바이트 복사는 아니었다. 같은 디렉터리의 history 스냅샷 `agent-core-snapshot-*.json` 은 한 시간에 117개·1,350 MB 가 쓰였다. 쓰기는 `Keeper_fs.save_bytes_durable_atomic_core` 가 이미 `Eio_guard.run_in_systhread` 안에서 한다.
 
 P4h-5 는 두 읽기(정본·history)를 `Fs_compat.load_owned_regular_file ~ownership_root:(dirname session_dir)` 로 바꾼다. 쓰는 쪽과 같은 소유 경계이고, Eio 파일시스템이 있으면 systhread 에서 읽는다. 심볼릭 링크와 바뀐 부모 체인은 `Io_error` 로 거절한다(전에는 따라갔다). 더 깊은 고침은 체크포인트 크기 자체다 — 35 MB 를 턴마다 읽고 쓰는 구조(§8.6 의 P4c, exact-lane 본문을 blob 참조로).
+
+#### P4h-5 라이브의 부팅 폭풍과 Instruments 가 보여준 것 (pid 79601, 17:09:28Z 기동)
+
+P4h-5(#33453) 라이브의 첫 두 창은 지금까지 가장 무거웠다. ready+3분: 하네스 p99 5,877 ms·max 14,834 ms, main 점유 57.8%, ≥100 ms 실행 212회, `openat -> switch` 198회·34,069 ms/90초. ready+4.5분: p99 192 ms·max 2,894 ms, 점유 42.4%, ≥100 ms 120회. 호스트 부하는 16~44 로 낮았다. 이 부팅에는 antigravity official client 를 쓰는 keeper 둘(lane-smith, jazz-developer)이 활발했고, 그 외부 CLI 가 12분에 파일 636개를 썼다. 파일 churn 은 자식 프로세스의 것이다.
+
+`openat -> switch` 의 정체는 앞 절보다 넓다. P4h-5 의 체크포인트 읽기는 systhread 로 갔고(샘플에서 `load_owned_regular_file` 0), main 의 `readv`·`writev` 는 213·384 샘플뿐이다. 이 부류는 "Eio 로 파일을 연 뒤 fiber 에서 하는 계산"이고 본체는 JSON 파싱이다(`Yojson` 렉서 2,198 샘플).
+
+`sample` 은 프레임 포인터로 되감기 때문에 OCaml fiber 스택의 호출자를 못 본다. Instruments 의 Time Profiler(`xcrun xctrace record --template 'Time Profiler' --attach <pid> --time-limit 30s`, `xctrace export --xpath '/trace-toc/run[@number="1"]/data/table[@schema="time-profile"]'`) 도 같은 한계를 보였지만 main 스레드의 leaf 는 분명하다(30초, running 4,930 샘플).
+
+| leaf | 샘플 | 뜻 |
+|---|---|---|
+| `_xzm_foreach_lock` | 993 (20%) | `fork()` 의 부모 쪽 malloc zone 잠금 — 프로세스 스폰 |
+| `__open_nocancel` | 270 | fiber 위 Stdlib `open` |
+| `md5_do_chunk` | 226 | `Digest.string` |
+| `caml_lex_engine` | 226 | Yojson 파싱 |
+| `do_some_marking` | 132 | major GC 마킹 |
+| `Yojson.write_string_body` | 126 | JSON 직렬화 |
+| `Llm_provider.Secret_redactor` | 159 | 제공자 쪽 비밀 스캔(문자 단위) |
+
+#### P4i — 프로세스 스폰을 `posix_spawn(2)` 로 (#33483)
+
+앞 절의 세 방향 중 첫 번째다. eio 의 프로세스 층은 작다: `lib_eio_posix/process.ml` 52줄이 `Eio_unix.Process.Make_mgr` 위에 `spawn_unix`(fork 액션 셋)를 얹고, `Low_level.Process` 가 pid·exit promise·`Eio_unix.Process.sigchld`(공개) 로 `waitpid` 한다. `Posix_spawn_process_mgr` 는 같은 모양으로 `spawn_unix` 만 C 스텁의 `posix_spawn` 으로 바꾼다. cwd 는 `posix_spawn_file_actions_addchdir_np`(glibc 2.29+·macOS 10.15+ 공통 표기), fd 맵은 `adddup2`(같은 번호는 macOS 의 `addinherit_np`), 나머지 fd 는 `POSIX_SPAWN_CLOEXEC_DEFAULT` 로 닫힘, 시그널 마스크는 비움, 호출 동안 런타임 락 해제. 서버 부트스트랩만 이 매니저를 쓴다.
+
+CI 는 C 스텁을 컴파일하지 않고 테스트도 돌리지 않으므로 같은 소스를 레포 밖 dune 프로젝트로 빌드해 확인했다. 패리티 테스트(stdout 캡처·종료 코드·cwd·env·없는 실행 파일·switch 해제 시 kill)는 두 매니저 모두 통과했다. `tools/spawn_bench`(라이브 힙 1,515 MB, 20회):
+
+| 매니저 | p50 | p90 | max |
+|---|---|---|---|
+| fork (eio_posix) | 43.7 ms | 47.3 ms | 75.6 ms |
+| posix_spawn | 1.2 ms | 1.3 ms | 1.4 ms |
+
+라이브 서버의 fork 는 malloc 상태가 더 커서 약 141 ms 였다. 판정은 재기동 뒤 샘플에서 `caml_eio_posix_spawn`·`_xzm_foreach_lock` 이 사라지는지다.

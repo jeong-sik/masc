@@ -31,8 +31,18 @@ The MASC architecture evolved through ~260 internal RFCs and empirical test runs
 ## 4. Causal Persistence (Memory OS)
 
 * **Causal Graph Nodes**: Tracks trigger, decision, and outcome edges instead of flat vector embeddings.
+* **Usage-Driven Reinforcement (RFC-0418)**: Replaced stagnant re-observation counters with typed event sidecars logging retrievals, retractions with citation chains, and revisions.
 * **Weight Decay**: Decays transient debug logs over time while permanently retaining constitutional invariants and core decisions.
 
 ---
 
+## 5. Performance & Sub-Millisecond Diagnostics
+
+* **Main-Domain Scheduler Lag & GC Monitoring**: 100ms probe fiber tracking event loop execution delays in a 1-minute ring buffer alongside GC quick stats on `/health`.
+* **Zero-Allocation TUI & Differential Rendering**: Precomputed row prefixes, single-pass terminal slicing, and buffer reuse for flicker-free 60fps terminal updates.
+* **Sub-Millisecond 304 Fast-Path**: Server-side weak ETag caching and client conditional browser revalidation cutting polling overhead to 0 payload bytes and 0ms compute.
+
+---
+
 > Technical proposals are preserved in the repository's `docs/rfc/` directory.
+

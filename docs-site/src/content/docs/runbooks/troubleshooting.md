@@ -62,3 +62,35 @@ If a provider returns a rate-limit error, MASC can fail over to other bindings
 listed for that role, so the active Keeper turn is not dropped. Configure the
 alternates as additional slots in the relevant lane (see the
 [Configuration Reference](/reference/config/)).
+
+## TUI shows "reconnecting..." or high server latency
+
+If the TUI shows recurring `reconnecting...` banners or response times spike, the
+Eio main domain event loop may be experiencing scheduler delays:
+
+1. Inspect the server health payload:
+   ```bash
+   curl -s http://127.0.0.1:8935/health | jq '{scheduler: .scheduler, gc: .gc}'
+   ```
+   Check `.scheduler.stalls_ge_1s` (count of stalls >= 1s) and the percentile ring
+   (`p50`, `p95`, `p99`, `max`). If `max` is elevated, long-running syscalls or
+   major GC cycles are contending for the main domain lock.
+
+2. Run the real-time scheduler lag probe:
+   ```bash
+   MASC_URL=http://127.0.0.1:8935 scripts/harness/perf/scheduler_lag_probe.sh
+   ```
+   This polls the lag ring alongside cumulative `Gc.quick_stat` metrics to measure
+   allocation rates (MB/s) and collection cycles without walking the live heap.
+
+## Diagnosing heap bloat (`heap-roots`)
+
+When the server process footprint grows unexpectedly:
+
+```bash
+curl -s http://127.0.0.1:8935/api/v1/diagnostics/heap-roots | jq .
+```
+
+This diagnostic endpoint inventories live heap roots, identifying which modules,
+event queues, or in-memory caches retain heap allocations.
+

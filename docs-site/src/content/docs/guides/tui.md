@@ -67,6 +67,8 @@ Selecting any Keeper and pressing `Enter` opens the 9-tab detail inspection surf
   - `m`: Instantly switch backend to **MicroVM** hypervisor isolation
   - `s`: Instantly switch backend to **Remote SSH** worker host
   *(Directly dispatches configuration update and reloads the Sandbox view without editing raw files)*
+- **GitHub Tab**:
+  - Structured PR, commit, checks, and review comment cards replacing raw JSON dumps.
 - **Automation Tab**:
   - Real-time monitoring of active Keeper cron/interval schedules and execution timers.
 
@@ -84,10 +86,28 @@ Inspect long-term memory facts extracted by Keepers:
 - **Recency-first Default**: Displays latest learned facts and operational constraints first.
 - **Sort/Filter Cycling**: Press `c` to cycle ordering:
   - `Recency` ➔ `Category` ➔ `Claim text`
+- **Dynamic Usage**: Reflects active memory retrievals and citation chains (RFC-0418) rather than obsolete static counts.
+
+### 5. Presets Surface
+Inspect available Keeper preset definitions:
+
+- **Constituent Name Inspection**: Rather than showing mere component counts, the Presets pane details the concrete components a preset provides:
+  - Explicitly lists included **Skills**, **Tools**, **Rules**, and **Runtime Profiles**.
 
 ---
 
-## Global Navigation Keys
+## Server Booting Gate
+
+When launching `masc-tui` before or during server startup, the TUI displays a `server booting...` status screen. It probes the `/health` readiness endpoint until the server is fully initialized, preventing premature request failures or broken views.
+
+---
+
+## Global Navigation & Help Overlay
+
+Press `?` on any surface to display the context-sensitive help modal:
+- **ASCII Header & Badges**: Clean ASCII art banner with bracketed key chips (e.g. `[?]`, `[/]`, `[Tab]`).
+- **Active Surface Indicator**: Highlights the currently active surface with `◈ ACTIVE: <SURFACE>`.
+- **Slash Commands Directory**: Complete catalog and usage syntax for Keeper prompt commands.
 
 | Key | Effect |
 |---|---|
@@ -106,3 +126,4 @@ The bottom input row sends instructions directly to the active Keeper:
 - `/task <title>`: Calls `masc_add_task` to create a task and hands the Task ID to the Keeper.
 - `/help`: Lists available slash commands (interrupt stream, switch Keeper, attach image).
 - `masc_ask`: Answering interactive questions posed by the Keeper directly from the same row.
+

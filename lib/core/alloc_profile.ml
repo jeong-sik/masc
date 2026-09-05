@@ -58,11 +58,28 @@ let admit event block =
   end
 ;;
 
-(* Frames of these two libraries are skipped when a key is built: they say
-   how a value was built (a lexer recursion, a Bytes copy), not who asked
-   for it, and they multiply distinct stacks past any table bound. Every
-   other frame counts, so the skip list is closed and small. *)
-let skipped_frame_name_prefixes = [ "Stdlib__"; "Stdlib."; "Yojson__"; "CamlinternalFormat" ]
+(* Frames of these libraries are skipped when a key is built: they say how
+   a value was built (a lexer recursion, a Bytes copy, a fiber resumed by the
+   scheduler), not who asked for it, and they multiply distinct stacks past
+   any table bound. Every other frame counts, so the skip list is closed and
+   small. Eio was added after the 2026-09-05 reading in which
+   [Eio__Executor_pool.run_worker] and [Eio_posix__Sched.with_sched] headed
+   14.5 GB and 4.8 GB with no masc frame inside the six the key keeps (RFC
+   main-domain-scheduler-latency §8.6). The prefixes name Eio's own
+   libraries; masc modules that start with [Eio_] (Eio_guard, Eio_context)
+   keep counting. *)
+let skipped_frame_name_prefixes =
+  [ "Stdlib__"
+  ; "Stdlib."
+  ; "Yojson__"
+  ; "CamlinternalFormat"
+  ; "Eio__"
+  ; "Eio_posix__"
+  ; "Eio_unix__"
+  ; "Eio_linux__"
+  ; "Eio_main."
+  ]
+;;
 
 (* How many kept frames name a site. Deeper than this the paths converge on
    the same keeper loop and add nothing. *)

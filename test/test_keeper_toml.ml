@@ -641,6 +641,17 @@ let test_profile_absent_tools_native_is_none () =
      | Ok d ->
        check bool "absent native is None" true (d.native_tool_posture = None))
 
+let test_profile_parses_voice_always_allow () =
+  let input = "[keeper]\nvoice_always_allow = true\n" in
+  match TL.parse_toml input with
+  | Error error -> fail error
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Error e -> fail e
+     | Ok d ->
+       check bool "voice_always_allow parses" true (d.voice_always_allow = Some true))
+
+
 let test_profile_rejects_invalid_tools_native () =
   let input = "[keeper.tools]\nnative = \"yolo\"\n" in
   match TL.parse_toml input with
@@ -1673,6 +1684,8 @@ let () =
             test_profile_rejects_a_typo_in_the_tools_table;
           test_case "absent tools.native is None" `Quick
             test_profile_absent_tools_native_is_none;
+          test_case "parses voice_always_allow" `Quick
+            test_profile_parses_voice_always_allow;
           test_case "rejects invalid tools.native" `Quick
             test_profile_rejects_invalid_tools_native;
           test_case "rejects unknown [keeper.tools] sibling" `Quick

@@ -261,6 +261,8 @@ let keeper_meta_overlay_drift_categories
          <> target.telemetry_feedback_window_hours);
       drift_if "always_allow"
         (current.always_allow <> target.always_allow);
+      drift_if "voice_always_allow"
+        (current.voice_always_allow <> target.voice_always_allow);
     ]
 
 let emit_keeper_meta_overlay_drift ~keeper_name categories =
@@ -347,6 +349,9 @@ let ensure_keeper_meta_with_cause config name =
     let target_always_allow =
       apply_default_opt defaults.always_allow meta.always_allow
     in
+    let target_voice_always_allow =
+      apply_default_opt defaults.voice_always_allow meta.voice_always_allow
+    in
     (* --- AGENT_CORE Env --- *)
     let target_agent_core_env =
       match defaults.agent_core_env with
@@ -367,6 +372,7 @@ let ensure_keeper_meta_with_cause config name =
         telemetry_feedback_enabled = target_tf_enabled;
         telemetry_feedback_window_hours = target_tf_window;
         always_allow = target_always_allow;
+        voice_always_allow = target_voice_always_allow;
         agent_core_env = target_agent_core_env;
       }
     in
@@ -414,6 +420,7 @@ let ensure_keeper_meta_with_cause config name =
              ; telemetry_feedback_window_hours =
                  persisted_updated.telemetry_feedback_window_hours
              ; always_allow = persisted_updated.always_allow
+             ; voice_always_allow = persisted_updated.voice_always_allow
              ; agent_core_env = persisted_updated.agent_core_env
              ; updated_at = persisted_updated.updated_at
              })

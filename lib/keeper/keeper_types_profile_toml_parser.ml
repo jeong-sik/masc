@@ -35,6 +35,7 @@ let keeper_toml_fields =
   ; "telemetry_feedback_enabled", Field_bool
   ; "telemetry_feedback_window_hours", Field_int
   ; "always_allow", Field_bool
+  ; "voice_always_allow", Field_bool
     (* RFC-0390. The [keeper.tools] key is declared, so any
        other key in that table is unknown and fails the load rather than
        being a silently ignored sibling. A prefix rule would accept
@@ -305,6 +306,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
         always_allow = bool_ "always_allow";
+        voice_always_allow = bool_ "voice_always_allow";
         native_tool_posture =
           Option.bind (str "tools.native") Runtime_native_tools.of_string;
         skill_names;
@@ -355,6 +357,7 @@ let merge_keeper_profile_defaults
       prefer overlay.telemetry_feedback_window_hours
         base.telemetry_feedback_window_hours;
     always_allow = prefer overlay.always_allow base.always_allow;
+    voice_always_allow = prefer overlay.voice_always_allow base.voice_always_allow;
     native_tool_posture =
       prefer overlay.native_tool_posture base.native_tool_posture;
     skill_names = prefer overlay.skill_names base.skill_names;

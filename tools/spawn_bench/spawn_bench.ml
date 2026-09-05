@@ -14,7 +14,7 @@ let () =
     let samples =
       List.init rounds (fun _ ->
         let t0 = Unix.gettimeofday () in
-        (* ignore: the sample measures spawn latency only; /usr/bin/true emits nothing worth consuming *)
+        (* fire-and-forget: the sample measures spawn latency only; /usr/bin/true emits nothing worth consuming *)
         ignore (Eio.Process.parse_out mgr Eio.Buf_read.take_all [ "/usr/bin/true" ]);
         (Unix.gettimeofday () -. t0) *. 1000.0)
       |> List.sort compare
@@ -26,5 +26,5 @@ let () =
   time Posix_spawn_process_mgr.mgr "posix_spawn";
   time (Eio.Stdenv.process_mgr env) "fork";
   time Posix_spawn_process_mgr.mgr "posix_spawn";
-  (* ignore: keeps [keep] reachable so the live heap survives to the end of the benchmark *)
+  (* fire-and-forget: keeps [keep] reachable so the live heap survives to the end of the benchmark *)
   ignore (Sys.opaque_identity keep)

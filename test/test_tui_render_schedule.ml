@@ -1360,6 +1360,29 @@ let test_board_columns_hold_their_offsets () =
     check_left_cell "REPLIES" "G" ~header ~row ~inner_width
   done
 
+let test_board_columns_with_styles_hold_their_offsets () =
+  let styles =
+    { Schedule.bstyle_id = "\027[36m"
+    ; bstyle_hearth = "\027[34m"
+    ; bstyle_author = "\027[36m"
+    ; bstyle_age = "\027[2m"
+    ; bstyle_score = "\027[32m"
+    ; bstyle_replies = "\027[33m"
+    }
+  in
+  for inner_width = 80 to 240 do
+    let title_width = Schedule.board_title_width ~inner_width in
+    let header = Schedule.board_header_row ~title_width in
+    let row = Schedule.board_row ~styles ~title_width board_probe in
+    check_left_cell "ID" "A" ~header ~row ~inner_width;
+    check_left_cell "HEARTH" "B" ~header ~row ~inner_width;
+    check_left_cell "AUTHOR" "C" ~header ~row ~inner_width;
+    check_left_cell "TITLE" "D" ~header ~row ~inner_width;
+    check_right_cell "AGE" "E" ~header ~row ~inner_width;
+    check_left_cell "SCORE" "F" ~header ~row ~inner_width;
+    check_left_cell "REPLIES" "G" ~header ~row ~inner_width
+  done
+
 (* The defect this closes. The rows sized the title to the terminal minus a
    hand-summed constant and the header claimed its own, so at eighty columns
    the header ran long, pushed SCORE into the frame and REPLIES off it. Both
@@ -1554,6 +1577,8 @@ let () =
             test_planning_columns_with_styles_hold_their_offsets
         ; test_case "board columns hold their offsets" `Quick
             test_board_columns_hold_their_offsets
+        ; test_case "board columns with styles hold their offsets" `Quick
+            test_board_columns_with_styles_hold_their_offsets
         ; test_case "a board row is as wide as its header" `Quick
             test_a_board_row_is_as_wide_as_its_header
         ; test_case "board spaces its columns like every other table" `Quick

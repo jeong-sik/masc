@@ -2881,7 +2881,7 @@ let board_title_width ~cols =
 
 let board_kind_mark = function
   | Some Post_by_person -> Ansi.bold ^ (Theme.info ()) ^ "@" ^ Ansi.reset
-  | Some Post_by_automation -> Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset
+  | Some Post_by_automation -> (Theme.warn ()) ^ "\xe2\x97\x90" ^ Ansi.reset
   | Some Post_by_system -> " "
   | Some (Post_kind_unknown _) -> (Theme.warn ()) ^ "?" ^ Ansi.reset
   | None -> " "
@@ -3154,27 +3154,41 @@ let render_board_list (state : state) =
            only be read off the order the rows happened to arrive in. Spelled
            with the same ladder the Approvals queue uses, so a span reads the
            same on both. *)
+        let hearth_text =
+          match Terminal_text.optional_single_line p.bp_hearth with
+          | Some h -> "#" ^ h
+          | None -> ""
+        in
+        let score_text =
+          if p.bp_votes > 0 then Printf.sprintf "▲%+d" p.bp_votes
+          else if p.bp_votes < 0 then Printf.sprintf "▼%d" p.bp_votes
+          else " 0"
+        in
+        let replies_text =
+          if p.bp_comment_count > 0 then Printf.sprintf "💬%d" p.bp_comment_count
+          else "c0"
+        in
         let values =
           { Render_schedule.brow_mark = board_kind_mark p.bp_kind
           ; brow_id = Terminal_text.single_line p.bp_id
-          ; brow_hearth =
-              Option.value ~default:""
-                (Terminal_text.optional_single_line p.bp_hearth)
+          ; brow_hearth = hearth_text
           ; brow_author = Terminal_text.single_line p.bp_author
           ; brow_title = Terminal_text.single_line p.bp_title
           ; brow_age = Message_layout.span_text (now_unix -. p.bp_updated_at)
-          ; brow_score = Masc_tui_board_score.text p.bp_votes
-          ; brow_replies = Printf.sprintf "c%d" p.bp_comment_count
+          ; brow_score = score_text
+          ; brow_replies = replies_text
           }
         in
         let styles =
           { Render_schedule.bstyle_id =
               Masc_tui_theme.tone Masc_tui_theme.Accent
-          ; bstyle_hearth = Ansi.dim
+          ; bstyle_hearth =
+              if String.equal hearth_text "" then Ansi.dim else (Theme.info ())
           ; bstyle_author = Masc_tui_theme.tone Masc_tui_theme.Accent
           ; bstyle_age = Ansi.dim
           ; bstyle_score = board_score_style p.bp_votes
-          ; bstyle_replies = Ansi.dim
+          ; bstyle_replies =
+              if p.bp_comment_count > 0 then (Theme.ok ()) else Ansi.dim
           }
         in
         let content =
@@ -3215,21 +3229,45 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
         list_post
   in
 
-  let header = Printf.sprintf "%s  %s[%s]%s  by %s  +%d  c%d"
-    (screen_title " MASC Board")
-    (Masc_tui_theme.tone Masc_tui_theme.Accent)
-    (fit_width (Terminal_text.single_line post.bp_id) 12)
-    Ansi.reset
-    (Terminal_text.single_line post.bp_author)
-    post.bp_votes post.bp_comment_count
+  let hearth_tag =
+    match Terminal_text.optional_single_line post.bp_hearth with
+    | Some h when not (String.equal h "") ->
+        Printf.sprintf "  %s#%s%s" (Theme.info ()) h Ansi.reset
+    | _ -> ""
+  in
+  let score_chip =
+    if post.bp_votes > 0 then
+      Printf.sprintf "%s▲%+d%s" (board_score_style post.bp_votes) post.bp_votes Ansi.reset
+    else if post.bp_votes < 0 then
+      Printf.sprintf "%s▼%d%s" (board_score_style post.bp_votes) post.bp_votes Ansi.reset
+    else
+      Printf.sprintf "%s 0%s" (board_score_style post.bp_votes) Ansi.reset
+  in
+  let replies_chip =
+    if post.bp_comment_count > 0 then
+      Printf.sprintf "%s💬%d%s" (Theme.ok ()) post.bp_comment_count Ansi.reset
+    else
+      Printf.sprintf "%sc0%s" Ansi.dim Ansi.reset
+  in
+  let header =
+    Printf.sprintf "%s  %s[%s]%s%s  %s  %s"
+      (screen_title " MASC Board")
+      (Masc_tui_theme.tone Masc_tui_theme.Accent)
+      (fit_width (Terminal_text.single_line post.bp_id) 12)
+      Ansi.reset
+      hearth_tag
+      score_chip
+      replies_chip
   in
 
   box_top buf cols;
   box_line buf cols header;
-  box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  show %s · order %s"
-       (planning_filter_explanation state.planning_filter)
-       (planning_sort_explanation state.planning_sort));
+  box_line buf cols
+    (Printf.sprintf "  Actions:  %s[c]%s Reply   %s[v/V]%s Vote (+/-)   %s[Y]%s Copy Link   %s[Esc]%s Back"
+       (Theme.ok ()) Ansi.reset
+       (Theme.warn ()) Ansi.reset
+       (Theme.info ()) Ansi.reset
+       (Theme.recede ()) Ansi.reset);
   box_divider buf cols;
 
   let title_line = Printf.sprintf "  %s%s%s"
@@ -3238,13 +3276,38 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
     Ansi.reset
   in
   box_line buf cols title_line;
+  let author_chip =
+    let author_name = Terminal_text.single_line post.bp_author in
+    match post.bp_kind with
+    | Some Post_by_automation ->
+        Printf.sprintf "%s@%s%s %s[Keeper]%s"
+          (Masc_tui_theme.tone Masc_tui_theme.Accent)
+          author_name
+          Ansi.reset
+          (Theme.warn ())
+          Ansi.reset
+    | Some Post_by_person ->
+        Printf.sprintf "%s@%s%s %s[Author]%s"
+          (Masc_tui_theme.tone Masc_tui_theme.Accent)
+          author_name
+          Ansi.reset
+          (Theme.info ())
+          Ansi.reset
+    | _ ->
+        Printf.sprintf "%s@%s%s"
+          (Masc_tui_theme.tone Masc_tui_theme.Accent)
+          author_name
+          Ansi.reset
+  in
   box_line buf cols
-    (Ansi.dim ^ "  "
-    ^ fit_width
-        (Terminal_text.single_line post.bp_created_at ^ "  \xc2\xb7  "
-         ^ Link.reference Board_post (Terminal_text.single_line post.bp_id))
-        (max 1 (cols - 6))
-    ^ Ansi.reset);
+    (Printf.sprintf "  %s  %s\xc2\xb7%s  %s  %s\xc2\xb7%s  %s%s%s"
+       author_chip
+       Ansi.dim Ansi.reset
+       (Terminal_text.single_line post.bp_created_at)
+       Ansi.dim Ansi.reset
+       Ansi.dim
+       (Link.reference Board_post (Terminal_text.single_line post.bp_id))
+       Ansi.reset);
   box_divider buf cols;
 
   (* Body lines *)
@@ -3339,12 +3402,32 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
         Board_comment_thread.order comments
         |> List.concat_map
           (fun (depth, c) ->
-             let rail = Board_comment_thread.rail ~depth in
+             let rail =
+               if depth <= 0 then ""
+               else
+                 let bar = (Theme.recede ()) ^ "\xe2\x94\x82 " ^ Ansi.reset in
+                 let indent = String.make (2 * (min depth 4 - 1)) ' ' in
+                 indent ^ bar
+             in
              let author = Terminal_text.single_line c.bc_author in
              let created_at = Terminal_text.single_line c.bc_created_at in
+             let author_role =
+               if String.equal author (Terminal_text.single_line post.bp_author) then
+                 " " ^ (Theme.info ()) ^ "[Author]" ^ Ansi.reset
+               else if List.exists (fun (k : Tui_decode.keeper) -> String.equal k.k_name author) state.keepers then
+                 " " ^ (Theme.warn ()) ^ "[Keeper]" ^ Ansi.reset
+               else ""
+             in
              let heading =
-               Printf.sprintf "  %s%s@%s%s%s  %s%s" rail (Masc_tui_theme.tone Masc_tui_theme.Accent) author
-                 Ansi.reset Ansi.dim created_at Ansi.reset
+               Printf.sprintf "  %s%s@%s%s%s  %s%s%s"
+                 rail
+                 (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                 author
+                 Ansi.reset
+                 author_role
+                 Ansi.dim
+                 created_at
+                 Ansi.reset
              in
              let body =
                Message_layout.wrap_body ~markdown:board_document_markdown
@@ -3406,9 +3489,23 @@ let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
     in
     find 0 state.board_posts
   in
+  let format_sidebar_post (post : board_post) =
+    let hearth_prefix =
+      match Terminal_text.optional_single_line post.bp_hearth with
+      | Some h when not (String.equal h "") -> "#" ^ h ^ " "
+      | _ -> ""
+    in
+    let vote_prefix =
+      if post.bp_votes > 0 then Printf.sprintf "+%d " post.bp_votes
+      else if post.bp_votes < 0 then Printf.sprintf "%d " post.bp_votes
+      else ""
+    in
+    Printf.sprintf "%s%s%s" hearth_prefix vote_prefix
+      (Terminal_text.single_line post.bp_title)
+  in
   write_list_sidebar buf ~rows ~cols ~title:"Board"
     ~focused:(state.board_focus = Left_pane)
-    ~labels:(List.map (fun (post : board_post) -> post.bp_title) state.board_posts)
+    ~labels:(List.map format_sidebar_post state.board_posts)
     ~selected
 
 let render_board_read (state : state) (list_post : board_post) =

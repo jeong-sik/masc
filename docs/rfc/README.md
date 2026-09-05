@@ -259,6 +259,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0416 | 중단 요청은 이미 기록된다 — 새 상태 대신 그 기록을 배포하고 보여준다 | Draft | - |
 | 0417 | 취소 판정의 주인은 운영자의 클릭 하나다 — 시스템 레인은 심사를 거절한다 | Draft | - |
 | 0418 | Memory OS: 기억은 다시 꺼내 쓸 때 굳는다 — reinforcement 카운터를 걷어내고 회수·인용·개정 사건을 기록한다 | Draft | - |
+| 0420 | 부팅은 store 를 격리하지 않고 거부한다 — 운영자가 명시하지 않는 한 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |

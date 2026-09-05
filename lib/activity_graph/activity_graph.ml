@@ -931,10 +931,8 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
 (* JSON response                                                    *)
 (* ================================================================ *)
 
-let json_response config ?(kinds = []) ~after_seq ~limit () =
-  let events, total_matching, latest_store_seq, latest_matching_seq =
-    list_events_with_meta config ~kinds ~after_seq ~limit ()
-  in
+let build_json_response config ~events ~total_matching ~latest_store_seq
+    ~latest_matching_seq ~after_seq ~limit ~kinds =
   let next_after_seq =
     match List.rev events with
     | last :: _ -> last.seq
@@ -974,16 +972,22 @@ let json_response config ?(kinds = []) ~after_seq ~limit () =
       ("latest_seq", `Int latest_store_seq);
       ("latest_matching_seq", `Int latest_matching_seq);
     ]
+;;
+
+let json_response config ?(kinds = []) ~after_seq ~limit () =
+  let events, total_matching, latest_store_seq, latest_matching_seq =
+    list_events_with_meta config ~kinds ~after_seq ~limit ()
+  in
+  build_json_response config ~events ~total_matching ~latest_store_seq
+    ~latest_matching_seq ~after_seq ~limit ~kinds
+;;
 
 (* ================================================================ *)
 (* Graph building                                                   *)
 (* ================================================================ *)
 
-let graph_json config ?(kinds = []) ?(limit = 500)
-    ?(timeline_limit = 80) ?since_ms () =
-  let events, events_store_total =
-    list_events_with_total config ~kinds ~after_seq:0 ~limit ?since_ms ()
-  in
+let build_graph_json ~events ~events_store_total ~limit ~timeline_limit
+    ?(kinds = []) () =
   let kind_counts_json =
     let counts =
       List.fold_left
@@ -1161,6 +1165,15 @@ let graph_json config ?(kinds = []) ?(limit = 500)
       ("edges", `List edges_json);
       ("timeline", `List (List.map event_to_yojson timeline));
     ]
+;;
+
+let graph_json config ?(kinds = []) ?(limit = 500)
+    ?(timeline_limit = 80) ?since_ms () =
+  let events, events_store_total =
+    list_events_with_total config ~kinds ~after_seq:0 ~limit ?since_ms ()
+  in
+  build_graph_json ~events ~events_store_total ~limit ~timeline_limit ~kinds ()
+;;
 
 (* ================================================================ *)
 (* Agent spans                                                      *)
@@ -1189,10 +1202,7 @@ let span_end_classification = function
 
 
 
-let agent_spans_json config ?(limit = 500) ?since_ms () =
-  let events, events_store_total =
-    list_events_with_total config ~kinds:[] ~after_seq:0 ~limit ?since_ms ()
-  in
+let build_agent_spans_json ~events ~events_store_total ~limit =
   let now_ms = now_ts_ms () in
   let open_spans : (string * string option, int * string * string) Hashtbl.t =
     Hashtbl.create 32
@@ -1280,9 +1290,45 @@ let agent_spans_json config ?(limit = 500) ?since_ms () =
      window_meta ~limit
        ~events_shown:(List.length events)
        ~events_store_total
-       ~extra:[("spans_count", `Int (List.length all_spans))]
+        ~extra:[("spans_count", `Int (List.length all_spans))]
        ());
   ]
+;;
+
+let agent_spans_json config ?(limit = 500) ?since_ms () =
+  let events, events_store_total =
+    list_events_with_total config ~kinds:[] ~after_seq:0 ~limit ?since_ms ()
+  in
+  build_agent_spans_json ~events ~events_store_total ~limit
+;;
+
+type default_projections = {
+  events_default : Yojson.Safe.t;
+  graph_default : Yojson.Safe.t;
+  swimlane_default : Yojson.Safe.t;
+}
+
+let default_projections config : default_projections =
+  let events_1000, total, latest_store_seq, latest_matching_seq =
+    list_events_with_meta config ~kinds:[] ~after_seq:0 ~limit:1000 ()
+  in
+  let events_default =
+    build_json_response config ~events:events_1000 ~total_matching:total
+      ~latest_store_seq ~latest_matching_seq ~after_seq:0 ~limit:1000 ~kinds:[]
+  in
+  let count_1000 = List.length events_1000 in
+  let events_500 =
+    if count_1000 > 500 then List.drop (count_1000 - 500) events_1000 else events_1000
+  in
+  let graph_default =
+    build_graph_json ~events:events_500 ~events_store_total:total ~limit:500
+      ~timeline_limit:80 ~kinds:[] ()
+  in
+  let swimlane_default =
+    build_agent_spans_json ~events:events_500 ~events_store_total:total ~limit:500
+  in
+  { events_default; graph_default; swimlane_default }
+;;
 
 module For_testing = struct
   let reset_current_day_cache_for_testing = reset_current_day_cache_for_testing

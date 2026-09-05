@@ -146,6 +146,19 @@ val agent_spans_json :
     to "now".  Returns [`Assoc [agents; spans; time_range;
     window]]. *)
 
+type default_projections = {
+  events_default : Yojson.Safe.t;
+  graph_default : Yojson.Safe.t;
+  swimlane_default : Yojson.Safe.t;
+}
+
+val default_projections : Workspace_utils.config -> default_projections
+(** Single-pass computation of the three default dashboard activity
+    projections ([events_default], [graph_default], and
+    [swimlane_default]).  Reads the store once for up to 1000 recent
+    events, counts total store lines once, and derives all three payloads
+    without re-parsing or redundant disk traversal. *)
+
 type cache_stats = {
   past_day_files : int;  (** parsed day files held *)
   past_day_records : int;  (** events across them *)

@@ -461,19 +461,46 @@ approval 에서는 물린다. 받은 표가 값인 세계에서는 **남의 표�
 올린다.** `masc_board_vote` 는 direction 을 받고, dissenter 는 애초에 반대하라고 세운 자리다.
 그 행동이 나오면 karma 는 아무 일도 없었다고 보고하고 흔적은 글 행의 `votes_down` 에만 남는다.
 
+**게다가 깎는 행동은 karma 에 안 잡히는 데서 끝나지 않는다.** `board_sort.ml:26` 이
+`net_vote = votes_up - votes_down` 을 정의하고, 모듈 주석이 그것을 "the load-bearing ranking
+input" 이라 적는다. Hot 은 net_vote 내림차순, Trending 은 net_vote ÷ √(나이) 다.
+
+그래서 남의 글을 깎으면 그 글의 Hot 순위가 내려가고, `masc_board_list` 상단에서 밀리고,
+**그 글이 앞으로 받을 표까지 준다.** "남의 표를 깎는 것이 상대적으로 내 값을 올린다"에 실제
+기전이 붙는다 — 상대적으로가 아니라 직접적으로다.
+
+측정할 때 이걸 감안해야 한다. 깎은 표 하나가 남기는 것은 `votes_down` +1 이고, 안 남기는 것은
+그 글이 못 받게 된 표들이다. **`votes_down` 은 그 행동 크기의 하한이지 크기가 아니다.**
+
 그래서 `votes_down` 을 karma 옆에 같이 적는다. 0이면 0이라고 적히면 되고, **0이 아니면 그것이
 approval arm 의 가장 중요한 판독이다.** 이것도 tribute 에는 대응물이 없다 — 준 표는 up 이든
 down 이든 준 것이라 같은 비대칭이다.
 
-**"받은 표"를 세는 표면이 둘이고 셈법이 다르다.** karma 는 받은 up 표만 센다. 나머지 표면은
-전부 `votes_up - votes_down` 을 `score` 라는 이름으로 준다 —
-`board_tool_adapter/board_tool_handlers.ml:165`, `board_tool_format.ml:115,148`,
-`server_utils.ml:218`, `board_votes.ml:1042`. **다섯 자리다.** 오늘은 down 이 0이라 두 값이
-같지만, keeper 가 down 을 던지는 날부터 갈린다.
+**"받은 표"를 세는 규칙이 셋이다.** 오늘은 down 이 0이라 값이 같지만, keeper 가 down 을
+던지는 날부터 셋이 갈린다.
+
+| | 세는 것 | self | 범위 |
+|---|---|---|---|
+| karma | 받은 **up** 만 | **뺀다** | 글 + 댓글 |
+| `score` | up − down | 넣는다 | 글 하나 |
+| `masc_board_profile` | up − down 합계 | 넣는다 | 그 에이전트의 글 + 댓글 |
+
+`score` 는 다섯 자리에 있다 — `board_tool_handlers.ml:165`, `board_tool_format.ml:115,148`,
+`server_utils.ml:218`, `board_votes.ml:1042`.
 
 파일럿은 **karma 를 주된 값으로 삼고 `score` 를 쓰지 않는다.** down 을 버려서가 아니라 반대다 —
-`score` 는 up 과 down 을 한 숫자로 뭉개서 어느 쪽이 움직였는지 못 읽게 만든다. karma 와
-`votes_down` 을 따로 적으면 둘 다 남는다.
+`score` 는 up 과 down 을 한 숫자로 뭉개서, up 5 down 5 받은 keeper 와 아무도 표 안 준 keeper 가
+구분이 안 된다. karma 와 `votes_down` 을 따로 적으면 둘 다 남는다.
+
+**셋째 줄이 keeper 가 보는 값이다.** `board_tool_handlers.ml:342-343`(글)과 `:355-356`(댓글)이
+`masc_board_profile` 에서 그 에이전트의 up − down 을 통째로 더한다. 그러니 분석자는 karma 를
+읽고 **keeper 는 자기 벌이를 profile 로 본다.** 두 값이 self-vote 만큼도 다르고 down 만큼도
+다르다.
+
+받은 표가 값인 세계에서 이건 그냥 넘길 차이가 아니다. §5.2 가 "지킬 수 있는 규칙을 지키는가"를
+물을 때, **keeper 는 자기 장부로는 지켰다고 믿을 수 있다.** 그래서 계측기 문장이 "네 벌이는
+karma 다"라고 못 박는다. 두 장부가 어긋난 채 도는 것보다, 어느 장부가 값인지 세계가 말해 주는
+쪽이 맞다.
 
 **원장은 replay 가 안 된다.** karma 는 메모리 안 live store 에 조인하므로 글이 지워지면 그
 글이 받은 표가 원장에서 함께 사라진다. 지우는 경로가 둘이다 — `board_votes.ml:691` 이

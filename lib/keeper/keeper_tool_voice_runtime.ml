@@ -182,7 +182,7 @@ let handle_speak_with_outcome
         authorize_external_effect
           ~operation:(command_to_string Speak)
           ~input:args
-          ~continue:run_speak)
+          ~continue:run_speak
     | _ ->
       Keeper_tool_execution.success
         (Yojson.Safe.to_string

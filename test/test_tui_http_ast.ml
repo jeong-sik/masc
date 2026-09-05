@@ -23,7 +23,7 @@ let owns_colour_channels = function
   | _ -> false
 ;;
 
-let reserved_status_color_path_violations structure =
+let colour_path_violations ~reserved structure =
   let violations = ref [] in
   let inspect_path ({ txt; loc } : Longident.t Location.loc) =
     let path = Ast_grep.longident_to_string txt in
@@ -31,12 +31,12 @@ let reserved_status_color_path_violations structure =
       (* Unqualified: the module was opened, so the colour is in scope by its
          bare name and this is the same reach for a raw token. *)
       | Longident.Lident segment ->
-        if is_reserved_status_color_segment segment then
+        if reserved segment then
           violations := (loc, path, segment) :: !violations
       | Longident.Ldot (prefix, segment) ->
         inspect prefix.txt;
         if
-          is_reserved_status_color_segment segment.txt
+          reserved segment.txt
           && not (owns_colour_channels (Ast_grep.longident_leaf prefix.txt))
         then violations := (loc, path, segment.txt) :: !violations
       | Longident.Lapply (left, right) ->
@@ -137,6 +137,40 @@ let status_color_violation_to_string (location, path, segment) =
 
    This counts; it does not prove Enter reaches the second one. The key press
    itself is not automated. *)
+let reserved_status_color_path_violations structure =
+  colour_path_violations ~reserved:is_reserved_status_color_segment structure
+;;
+
+(* The file list used to reach past the theme for all six of its type marks,
+   and RFC-0427 moved them onto categorical slots. Zero is the count now, so
+   it is the count from here: a surface that wants one of these hues asks the
+   theme for a slot, which is the only form that moves when the terminal
+   answers with its palette.
+
+   Not folded into the status set above -- these are not status colours, and
+   masc_tui_ansi.ml still names them where the slots are built. *)
+let categorical_hue_segments =
+  [ "blue"; "bright_blue"; "bright_cyan"; "bright_magenta"; "bright_yellow"
+  ; "bright_green"
+  ]
+;;
+
+let test_tui_render_asks_the_theme_for_a_categorical_hue () =
+  let violations =
+    Ast_grep.parse_implementation_or_fail "bin/masc_tui_render.ml"
+    |> colour_path_violations ~reserved:(fun segment ->
+         List.mem segment categorical_hue_segments)
+  in
+  match violations with
+  | [] -> ()
+  | _ ->
+    failf
+      "bin/masc_tui_render.ml names a categorical hue instead of a Theme slot:\n%s"
+      (violations
+       |> List.map status_color_violation_to_string
+       |> String.concat "\n")
+;;
+
 let test_theme_apply_is_boot_and_the_surface () =
   check int "boot, the surface, and the preview's two" 4
     (Ast_grep.count_calls ~module_path:"bin/masc_tui.ml"
@@ -2214,6 +2248,10 @@ let () =
           "TUI status colors use semantic Theme tokens"
           `Quick
           test_tui_status_colors_use_theme_tokens;
+        test_case
+          "TUI render asks the theme for a categorical hue"
+          `Quick
+          test_tui_render_asks_the_theme_for_a_categorical_hue;
         test_case
           "TUI ANSI status helpers use semantic Theme tokens"
           `Quick

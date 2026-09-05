@@ -76,45 +76,56 @@ let test_keeper_metric_freshness_tracks_runtime_cadence () =
        Telemetry_unified.Keeper_metric)
 ;;
 
-(* A recorded coverage gap outranks freshness: a store can be current about
-   the window it did record and still be missing an hour of it. Everything
-   below that is the turn-record ladder, which is the point -- the two
-   handlers that serve tool-call sources each carried their own copy of it. *)
-let test_a_coverage_gap_outranks_freshness () =
-  let health, stale_reason =
-    Masc.Keeper_status_runtime.keeper_tool_call_source_health
-      ~gap_reason:(Some "telemetry gap 02:00-03:00Z")
-      ~latest_age_s:(Some 1.0)
-      ~freshness_slo_s:420.0
-  in
-  check string "a gap is the verdict even on a fresh store" "coverage_gap"
-    health;
-  (* The gap's own message, not one derived from the word. Every other verdict
-     this pair can return restates itself; this is the one that cannot. *)
-  check string "and it carries the gap's own message"
-    "telemetry gap 02:00-03:00Z" stale_reason;
-  let with_gap = (health, stale_reason) in
-  let without_gap =
-    Masc.Keeper_status_runtime.keeper_tool_call_source_health ~gap_reason:None
-      ~latest_age_s:(Some 900.0) ~freshness_slo_s:420.0
-  in
-  check bool "a gap and no gap are not the same answer" false
-    (with_gap = without_gap);
-  check
-    (pair string string)
-    "with no gap it is the turn-record ladder, idle and not skipping rows"
-    (Masc.Keeper_status_runtime.keeper_turn_record_source_health
-       ~skipped_rows:0 ~live_turn_in_progress:false ~latest_age_s:(Some 900.0)
-       ~freshness_slo_s:420.0)
-    without_gap;
-  check
-    (pair string string)
-    "and an empty store answers the same way through both"
-    (Masc.Keeper_status_runtime.keeper_turn_record_source_health
-       ~skipped_rows:0 ~live_turn_in_progress:false ~latest_age_s:None
-       ~freshness_slo_s:420.0)
-    (Masc.Keeper_status_runtime.keeper_tool_call_source_health ~gap_reason:None
-       ~latest_age_s:None ~freshness_slo_s:420.0)
+(* An unrecovered coverage gap outranks freshness: a store can be current
+   about the window it did record and still be missing an hour of it. A gap
+   the store has caught up past is history, and that half is what kept two
+   surfaces over the same store from agreeing. *)
+let verdict = Alcotest.pair string string
+
+let tool_call_health ?gap ?latest_ts ~latest_age_s () =
+  Masc.Keeper_status_runtime.keeper_tool_call_source_health ~gap ~latest_ts
+    ~latest_age_s ~freshness_slo_s:420.0
+
+let test_an_unrecovered_gap_outranks_freshness () =
+  check verdict "a gap wins over a store that is otherwise current"
+    ("coverage_gap", "telemetry gap 02:00-03:00Z")
+    (tool_call_health
+       ~gap:(Some 1000.0, "telemetry gap 02:00-03:00Z")
+       ~latest_ts:999.0 ~latest_age_s:(Some 1.0) ());
+  (* The newest row is at the gap, so the store has caught up and the gap is
+     history. Without this, tool-calls reported coverage_gap while the
+     tool-quality aggregate over the same store reported ok. *)
+  check verdict "a row at the gap has caught up" ("ok", "")
+    (tool_call_health
+       ~gap:(Some 1000.0, "telemetry gap 02:00-03:00Z")
+       ~latest_ts:1000.0 ~latest_age_s:(Some 1.0) ());
+  check verdict "and a row past it too" ("ok", "")
+    (tool_call_health
+       ~gap:(Some 1000.0, "recovered")
+       ~latest_ts:1010.0 ~latest_age_s:(Some 1.0) ());
+  (* Nothing to compare against, so the gap stands. Refusing to judge is the
+     safer of the two answers. *)
+  check verdict "a gap with no timestamp cannot be shown recovered"
+    ("coverage_gap", "no ts")
+    (tool_call_health ~gap:(None, "no ts") ~latest_ts:1010.0
+       ~latest_age_s:(Some 1.0) ());
+  check verdict "nor can one be, with no row to compare"
+    ("coverage_gap", "no rows")
+    (tool_call_health ~gap:(Some 1000.0, "no rows") ~latest_age_s:None ())
+;;
+
+(* The arms below the gap. Every one of these was reachable through the two
+   handler ladders this replaced, and none was covered. *)
+let test_the_no_gap_arms_are_the_freshness_ladder () =
+  check verdict "no rows at all" ("empty", "no_entries")
+    (tool_call_health ~latest_age_s:None ());
+  check verdict "inside the window" ("ok", "")
+    (tool_call_health ~latest_age_s:(Some 419.0) ());
+  (* The comparison is strictly greater, so the SLO itself is still ok. *)
+  check verdict "exactly at the window" ("ok", "")
+    (tool_call_health ~latest_age_s:(Some 420.0) ());
+  check verdict "past the window" ("stale", "freshness_slo_exceeded")
+    (tool_call_health ~latest_age_s:(Some 420.001) ())
 ;;
 
 let test_live_turn_keeps_turn_record_source_healthy () =
@@ -272,8 +283,10 @@ let () =
         test_keeper_metric_freshness_tracks_runtime_cadence;
       test_case "live turn keeps record source healthy" `Quick
         test_live_turn_keeps_turn_record_source_healthy;
-      test_case "a coverage gap outranks freshness" `Quick
-        test_a_coverage_gap_outranks_freshness;
+      test_case "an unrecovered gap outranks freshness" `Quick
+        test_an_unrecovered_gap_outranks_freshness;
+      test_case "the no-gap arms are the freshness ladder" `Quick
+        test_the_no_gap_arms_are_the_freshness_ladder;
       test_case "interval has one resolved SSOT" `Quick
         test_keepalive_interval_has_one_resolved_ssot;
       test_case "sleep_chunk default" `Quick test_keepalive_sleep_chunk_default;

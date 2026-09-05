@@ -48,17 +48,27 @@ val keeper_turn_record_freshness_slo_s : keepalive_interval_s:float -> float
     execution/scheduling slack while preserving the historical 300-second
     floor for short cadences. *)
 val keeper_tool_call_source_health :
-  gap_reason:string option ->
+  gap:(float option * string) option ->
+  latest_ts:float option ->
   latest_age_s:float option ->
   freshness_slo_s:float ->
   string * string
-(** The same classification for a tool-call source, plus ["coverage_gap"].
+(** Classify a tool-call source: ["coverage_gap"] when the newest recorded
+    gap is one the store has not caught up past, otherwise
+    {!keeper_turn_record_source_health} with the two turn-record answers
+    ([live], [incompatible]) out of reach.
 
-    A recorded telemetry gap outranks freshness: a store can be current about
-    the window it did record and still be missing an hour of it, and the gap
-    carries its own reason rather than one derived from the verdict. With no
-    gap this is {!keeper_turn_record_source_health} with the two turn-record
-    answers ([live], [incompatible]) out of reach. *)
+    [gap] is that newest gap as its timestamp and its own reason. A gap is
+    recovered, and so not a verdict, when the newest row is at or after it —
+    the rule
+    [Dashboard_tool_source_freshness.active_coverage_gaps] applies to these
+    same stores. A gap with no timestamp cannot be shown recovered and
+    stands.
+
+    Not the whole of what the [health] wire field can say. ["missing"],
+    ["error"], ["not_yet"], ["incomplete"] and ["partial"] are produced
+    elsewhere for other stores and other questions; this covers the
+    freshness-and-gap axis for the two tool-call routes. *)
 
 val keeper_turn_record_source_health :
   skipped_rows:int ->

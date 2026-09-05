@@ -1067,13 +1067,14 @@ let handle_keeper_get_subroutes state req request reqd =
             in
             let health, stale_reason =
               Keeper_status_runtime.keeper_tool_call_source_health
-                ~gap_reason:
+                ~gap:
                   (Option.map
                      (fun gap ->
-                        Safe_ops.json_string ~default:"coverage_gap" "stale_reason"
-                          gap)
+                        ( Safe_ops.json_float_opt "ts" gap,
+                          Safe_ops.json_string ~default:"coverage_gap"
+                            "stale_reason" gap ))
                      latest_gap)
-                ~latest_age_s ~freshness_slo_s
+                ~latest_ts ~latest_age_s ~freshness_slo_s
             in
             `Assoc [
               ("keeper", `String name);
@@ -1193,13 +1194,14 @@ let handle_keeper_get_subroutes state req request reqd =
               in
               let health, stale_reason =
                 Keeper_status_runtime.keeper_tool_call_source_health
-                  ~gap_reason:
+                  ~gap:
                     (Option.map
                        (fun gap ->
-                          Safe_ops.json_string ~default:"coverage_gap" "stale_reason"
-                            gap)
+                          ( Safe_ops.json_float_opt "ts" gap,
+                            Safe_ops.json_string ~default:"coverage_gap"
+                              "stale_reason" gap ))
                        latest_gap)
-                  ~latest_age_s ~freshness_slo_s
+                  ~latest_ts ~latest_age_s ~freshness_slo_s
               in
               `Assoc [
                 ("keeper", `String name);

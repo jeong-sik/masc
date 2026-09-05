@@ -70,13 +70,31 @@ let keeper_turn_record_source_health
    so it outranks how fresh the newest row is: a store can be perfectly
    current about the window it did record and still be missing an hour.
 
+   A gap the store has since caught up past is history, not a verdict. That
+   test is [source_ts >= gap_ts], and it is the rule
+   Dashboard_tool_source_freshness.active_coverage_gaps applies to the same
+   stores. It is here rather than left to callers because the two surfaces
+   disagreed while it was: an append that failed and recovered ten seconds
+   later left /api/v1/keepers/:name/tool-calls reporting coverage_gap while
+   the tool-quality aggregate over the same store reported ok, for as long
+   as the gap row stayed in the window.
+
    This existed twice, copied byte for byte into two handlers in
    server_dashboard_http_keeper_api.ml, each carrying its own inner ladder
-   that was this module's ladder minus the two cases it does not reach. Three
-   copies meant a consumer saw a vocabulary no single place listed. *)
-let keeper_tool_call_source_health ~gap_reason ~latest_age_s ~freshness_slo_s =
-  match gap_reason with
-  | Some reason -> ("coverage_gap", reason)
+   that was this module's ladder minus the two cases it does not reach. *)
+let keeper_tool_call_source_health ~gap ~latest_ts ~latest_age_s
+      ~freshness_slo_s
+  =
+  let unrecovered =
+    match gap, latest_ts with
+    (* A gap with no timestamp cannot be shown to be recovered, so it
+       stands. Refusing to judge is the safer of the two answers here. *)
+    | Some (Some gap_ts, _), Some source_ts
+      when Float.compare source_ts gap_ts >= 0 -> None
+    | gap, _ -> gap
+  in
+  match unrecovered with
+  | Some (_, reason) -> ("coverage_gap", reason)
   | None ->
     (* No skipped rows and no live turn: those two answers belong to the
        turn-record store, which knows about them. A tool-call source that

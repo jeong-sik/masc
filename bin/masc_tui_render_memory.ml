@@ -515,8 +515,8 @@ let render_memory_facts_body ~cols ~budget (state : state)
   let sort_label = memory_sort_order_label state.memory_facts_sort in
   let fleet_banner =
     if is_fleet then
-      Printf.sprintf "  %s%s[GLOBAL FLEET KNOWLEDGE BASE \xe2\x80\x94 ALL KEEPERS CONSOLIDATED]%s"
-        Ansi.bold (Theme.accent ()) Ansi.reset
+      Printf.sprintf "  %s%s[GLOBAL FLEET KNOWLEDGE BASE — ALL KEEPERS CONSOLIDATED]%s"
+        Ansi.bold (Theme.info ()) Ansi.reset
     else ""
   in
   if fleet_banner <> "" then push fleet_banner;

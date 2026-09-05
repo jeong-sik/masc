@@ -723,6 +723,8 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
   | Detail_github -> [ b Act "L" "login" ~help:"start the gh device-flow login" ]
   | Detail_sandbox ->
       [ b Act "o" "actual logs"
+      ; b Act "d/m/s" "backend"
+          ~help:"set the sandbox backend in place: docker / microvm / remote_ssh"
       ; b Navigate "PgUp/PgDn" "detail page"
       ; b Meta "R" "refresh"
       ]

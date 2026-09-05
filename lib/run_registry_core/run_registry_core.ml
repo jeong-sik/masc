@@ -487,21 +487,23 @@ module Make (Payload : Payload) = struct
         (Printexc.to_string exn)
   ;;
 
-  let fold_replay_events path =
+  let fold_replay_entries path =
     if not (Fs_compat.file_exists path)
     then [], [], false, 0
     else (
       try
-        let (events, malformed, line_no), boundary =
+        let (entries, malformed, line_no), boundary =
           Fs_compat.fold_appended_lines
             ~path
             ~from:0
             ~init:([], [], 1)
-            ~f:(fun (events, malformed, line_no) line ->
+            ~f:(fun (entries, malformed, line_no) line ->
               match parse_event_line ~path ~line_no line with
-              | Ok None -> events, malformed, line_no + 1
-              | Ok (Some event) -> event :: events, malformed, line_no + 1
-              | Error message -> events, message :: malformed, line_no + 1)
+              | Ok None -> entries, malformed, line_no + 1
+              | Ok (Some event) ->
+                let entries = apply_event entries event in
+                entries, malformed, line_no + 1
+              | Error message -> entries, message :: malformed, line_no + 1)
         in
         let reached_end =
           match Fs_compat.file_size path with
@@ -518,7 +520,8 @@ module Make (Payload : Payload) = struct
             Log.Misc.warn "%s: replay stat failed after streaming %s" Payload.name path;
             false
         in
-        List.rev events, List.rev malformed, reached_end, line_no - 1
+        let entries = settle_replayed_running entries |> prune in
+        entries, List.rev malformed, reached_end, line_no - 1
       with
       | exn ->
         Log.Misc.warn
@@ -529,12 +532,8 @@ module Make (Payload : Payload) = struct
         [], [], false, 0)
   ;;
 
-  let entries_of_events events =
-    List.fold_left apply_event [] events |> settle_replayed_running |> prune
-  ;;
-
   let replay path =
-    let events, malformed, reached_end, _lines_read = fold_replay_events path in
+    let entries, malformed, reached_end, _lines_read = fold_replay_entries path in
     (match malformed with
      | [] -> ()
      | first :: _ as errors ->
@@ -543,7 +542,6 @@ module Make (Payload : Payload) = struct
          Payload.name
          (List.length errors)
          first);
-    let entries = entries_of_events events in
     if reached_end && malformed = [] && Payload.completed_retention <> `All
     then compact_replay_log path entries;
     { entries = Atomic.make entries
@@ -564,8 +562,7 @@ module Make (Payload : Payload) = struct
      unterminated-tail guard still holds: a partial read must not become a
      truncating rewrite. *)
   let cut_replay_log ~execute path =
-    let events, malformed, reached_end, lines_read = fold_replay_events path in
-    let entries = entries_of_events events in
+    let entries, malformed, reached_end, lines_read = fold_replay_entries path in
     let rewritten = execute && reached_end in
     if rewritten then compact_replay_log path entries;
     { lines_read

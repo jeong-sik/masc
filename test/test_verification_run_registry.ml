@@ -407,6 +407,81 @@ let test_completed_runs_are_pruned () =
     (Option.is_none (R.get t ~verification_id:"vrf-001"))
 ;;
 
+let test_stream_replay_large_history () =
+  let path = fresh_path ".stream-large.jsonl" in
+  let total = 350 in
+  let out = open_out path in
+  for i = 1 to total do
+    let id = Printf.sprintf "vrf-stream-%03d" i in
+    let started_at = float_of_int i in
+    let reg_line =
+      Printf.sprintf
+        {|{"event":"register","id":"%s","started_at":%.1f,"registration":{"task_id":"task-%d","producer":"p","authority_kind":"system_llm_agent","authority_actor":"reviewer"}}|}
+        id started_at i
+    in
+    let comp_line =
+      Printf.sprintf
+        {|{"event":"complete","id":"%s","completion":{"outcome":"approved","elapsed_s":0.5,"tools":[]}}|}
+        id
+    in
+    output_string out (reg_line ^ "\n" ^ comp_line ^ "\n")
+  done;
+  close_out out;
+  let replayed = R.replay path in
+  let runs = R.list_runs replayed in
+  check int "retained bounded to max_completed_retained" R.max_completed_retained (List.length runs);
+  check bool "newest run retained" true
+    (Option.is_some (R.get replayed ~verification_id:(Printf.sprintf "vrf-stream-%03d" total)));
+  check bool "old run evicted" true
+    (Option.is_none (R.get replayed ~verification_id:"vrf-stream-001"));
+  remove_if_exists path
+;;
+
+let test_stream_replay_retries_and_running_backfill () =
+  let path = fresh_path ".stream-backfill.jsonl" in
+  let total = 100 in
+  let out = open_out path in
+  for i = 1 to total do
+    let id = Printf.sprintf "vrf-bk-%03d" i in
+    let started_at = float_of_int i in
+    let reg_line =
+      Printf.sprintf
+        {|{"event":"register","id":"%s","started_at":%.1f,"registration":{"task_id":"task-%d","producer":"p","authority_kind":"system_llm_agent","authority_actor":"reviewer"}}|}
+        id started_at i
+    in
+    let comp_line =
+      Printf.sprintf
+        {|{"event":"complete","id":"%s","completion":{"outcome":"approved","elapsed_s":0.5,"tools":[]}}|}
+        id
+    in
+    output_string out (reg_line ^ "\n" ^ comp_line ^ "\n")
+  done;
+  (* The newest 10 runs are retried as Running and left uncompleted before EOF *)
+  for i = 91 to total do
+    let id = Printf.sprintf "vrf-bk-%03d" i in
+    let started_at = float_of_int (i + 100) in
+    let retry_line =
+      Printf.sprintf
+        {|{"event":"register","id":"%s","started_at":%.1f,"registration":{"task_id":"task-%d","producer":"p","authority_kind":"system_llm_agent","authority_actor":"reviewer"}}|}
+        id started_at i
+    in
+    output_string out (retry_line ^ "\n")
+  done;
+  close_out out;
+  let replayed = R.replay path in
+  let runs = R.list_runs replayed in
+  (* All 10 running entries are dropped on replay, and the remaining completed entries
+     backfill so that exactly max_completed_retained (64) are retained *)
+  check int "backfills to exactly max_completed_retained" R.max_completed_retained (List.length runs);
+  check bool "newest non-running completed retained (vrf-bk-090)" true
+    (Option.is_some (R.get replayed ~verification_id:"vrf-bk-090"));
+  check bool "oldest backfilled completed retained (vrf-bk-027)" true
+    (Option.is_some (R.get replayed ~verification_id:"vrf-bk-027"));
+  check bool "evicted beyond retention window (vrf-bk-026)" true
+    (Option.is_none (R.get replayed ~verification_id:"vrf-bk-026"));
+  remove_if_exists path
+;;
+
 let test_global_lifecycle_rejects_reinstallation () =
   check int "pre-boot registry" 0 (Lifecycle.current ());
   (match Lifecycle.install 1 with
@@ -519,6 +594,11 @@ let () =
             `Quick
             test_missing_outcome_payload_is_an_error
         ; test_case "completed runs are pruned" `Quick test_completed_runs_are_pruned
+        ; test_case "stream replay large history" `Quick test_stream_replay_large_history
+        ; test_case
+            "stream replay retries and running backfill"
+            `Quick
+            test_stream_replay_retries_and_running_backfill
         ; test_case
             "tool evidence keeps input and typed disposition"
             `Quick

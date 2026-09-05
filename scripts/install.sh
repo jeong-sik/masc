@@ -40,6 +40,9 @@
 #   MASC_RUNTIME_EVENTS=0/1  Override OCaml Runtime_events. When unset, the
 #                  generated server command keeps the binary's default.
 #   MASC_WIZARD=0/1  Same as --no-wizard / --wizard
+#   MASC_INSTALL_NO_PING=1  Skip the non-interactive wizard's connectivity check
+#                  (air-gapped/offline installs). The check is report-only and
+#                  never fails the install; this only silences it.
 #   <PROVIDER_API_KEY>  Provider key env declared by runtime.toml credentials.key
 #   MASC_API_KEY   Used only when the selected provider declares
 #                  credentials.key = "MASC_API_KEY" in runtime.toml.
@@ -778,6 +781,23 @@ run_wizard() {
   fi
 
   if ! is_tty; then
+    # No terminal to prompt, so run the same connectivity check the interactive
+    # path offers below -- but report-only. A first-run install must not fail on
+    # an unreachable provider; it only surfaces the result so the operator learns
+    # it here rather than at the first turn. This is the connectivity signal the
+    # zero-config auto-select (RFC-0408) and any scripted --provider install
+    # otherwise never got: the interactive path pinged, the non-TTY path returned
+    # blind. A cloud provider is the case this most helps -- its "green" is only
+    # "key is present", never "key works", so a wrong key used to surface only at
+    # the first turn. Opt out with MASC_INSTALL_NO_PING=1 (air-gapped installs).
+    if [ "${MASC_INSTALL_NO_PING:-0}" = "1" ]; then
+      return 0
+    fi
+    if ping_provider "$provider_idx" "$key"; then
+      log "provider connectivity: ok"
+    else
+      warn "provider connectivity check did not pass; masc will retry at first turn"
+    fi
     return 0
   fi
 

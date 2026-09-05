@@ -112,8 +112,11 @@ let for_surface = function
   | Keepers Keeper_message ->
       [ b Navigate "Left" "roster" ~help:"focus the visible Keeper roster"
       ; b Navigate "Right / Esc" "chat" ~help:"return focus to the chat composer"
-      ; b Navigate "Up / Down" "roster move"
-          ~help:"move while the roster has focus"
+      ; (* One key, two focuses: the roster when it holds focus, the history
+           when the chat is scrolled back. Listed once so the table keeps the
+           one-key-one-row contract (#33236). *)
+        b Navigate "Up / Down" "roster move / scroll"
+          ~help:"roster focused: move; chat scrolled back: adjust by one line"
       ; b Act "Enter" "send / open"
           ~help:"send from chat, or open the selected Keeper from the roster"
       ; b Act "Ctrl-J" "newline" ~help:"newline in the draft"
@@ -122,8 +125,6 @@ let for_surface = function
       ; b Act "Ctrl-K / Ctrl-P" "queued line"
           ~help:"cancel / edit the last queued line"
       ; b Navigate "PgUp / PgDn" "history" ~help:"scroll history by a page"
-      ; b Navigate "Up / Down" "adjust"
-          ~help:"when scrolled back, adjust by one line"
       ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
       ; b Act "Ctrl-D" "tool detail" ~help:"toggle compact / full tool-call detail"
       ; b Act "Ctrl-N" "memory detail"

@@ -1172,7 +1172,6 @@ and with_token_permission_auth ~permission handler request reqd =
       | Error err -> respond_auth_error request reqd err)
 
 module For_testing = struct
-  let admin_token_equal = admin_token_equal
   let snapshot_server_state = current_server_state
   let restore_server_state state = Atomic.set server_state state
 

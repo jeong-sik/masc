@@ -389,7 +389,6 @@ val with_token_permission_auth :
     handler so the handler can audit the call. *)
 
 module For_testing : sig
-  val admin_token_equal : string -> string -> bool
   val snapshot_server_state : unit -> Mcp_server.server_state option
   val restore_server_state : Mcp_server.server_state option -> unit
   val snapshot_auth_config : unit -> Server_auth_config.t option

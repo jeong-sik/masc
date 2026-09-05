@@ -378,9 +378,33 @@ let latest_snapshot_for_reuse store =
   | Ok (Some (Error error)) -> Error error
 ;;
 
-let store_artifact store ~reusable ~mime bytes =
+(* What the pool computes for one artifact: the bytes and their digest. The
+   digest is a C routine that does not yield, and a turn's snapshot hashes
+   every message in the request; until 2026-09-05 that ran on the main
+   domain once per turn (RFC main-domain-scheduler-latency section 8.8). *)
+type payload =
+  { payload_bytes : string
+  ; payload_sha256 : string
+  }
+
+let payload_of_string payload_bytes =
+  { payload_bytes
+  ; payload_sha256 = Digestif.SHA256.(digest_string payload_bytes |> to_hex)
+  }
+;;
+
+let message_payload (message : Agent_core.Types.message) =
+  Keeper_context_core_message_json.message_to_json message
+  |> Yojson.Safe.to_string
+  |> payload_of_string
+;;
+
+let tool_schema_payload (tool : Agent_core.Tool.t) =
+  Agent_core.Tool.schema_to_json tool |> Yojson.Safe.to_string |> payload_of_string
+;;
+
+let store_artifact store ~reusable ~mime { payload_bytes = bytes; payload_sha256 = sha256 } =
   let bytes_length = String.length bytes in
-  let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
   match Artifact_map.find_opt (sha256, mime) reusable with
   | Some artifact when artifact.art_bytes = bytes_length -> artifact, reusable
   | Some _ | None ->
@@ -408,6 +432,15 @@ let write_best_effort
   =
   let turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn in
   let write () =
+    (* Serialising and hashing every message and tool schema is pure, so the
+       pool does it. The reuse lookup, the blob writes and the append stay on
+       this fiber, which owns the file I/O. *)
+    let system_payload, message_payloads, tool_payloads =
+      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        ( (if String.equal system_prompt "" then None else Some (payload_of_string system_prompt))
+        , List.map message_payload messages
+        , List.map tool_schema_payload tools ))
+    in
     let blob_store = Tool_blob_store.create ~base_path:config.base_path in
     let reusable =
       let store = Keeper_types_support.keeper_provider_input_store config keeper in
@@ -422,9 +455,9 @@ let write_best_effort
         Artifact_map.empty
     in
     let system_prompt, reusable =
-      if String.equal system_prompt ""
-      then None, reusable
-      else
+      match system_payload with
+      | None -> None, reusable
+      | Some payload ->
         let artifact, reusable =
           store_artifact
             blob_store
@@ -434,17 +467,13 @@ let write_best_effort
                and make_artifact_ref now rejects such a media type outright
                rather than writing a marker that cannot be read back. *)
             ~mime:"text/plain;charset=utf-8"
-            system_prompt
+            payload
         in
         Some artifact, reusable
     in
     let (reusable, _), messages =
       List.fold_left_map
-        (fun (reusable, index) (message : Agent_core.Types.message) ->
-           let payload =
-             Keeper_context_core_message_json.message_to_json message
-             |> Yojson.Safe.to_string
-           in
+        (fun (reusable, index) ((message : Agent_core.Types.message), payload) ->
            let artifact, reusable =
              store_artifact
                blob_store
@@ -458,12 +487,11 @@ let write_best_effort
              ; msg_artifact = artifact
              } ))
         (reusable, 0)
-        messages
+        (List.combine messages message_payloads)
     in
     let _, tool_schemas =
       List.fold_left_map
-        (fun (reusable, index) (tool : Agent_core.Tool.t) ->
-           let payload = Agent_core.Tool.schema_to_json tool |> Yojson.Safe.to_string in
+        (fun (reusable, index) ((tool : Agent_core.Tool.t), payload) ->
            let artifact, reusable =
              store_artifact
                blob_store
@@ -477,7 +505,7 @@ let write_best_effort
              ; ts_artifact = artifact
              })
         (reusable, 0)
-        tools
+        (List.combine tools tool_payloads)
     in
     let snapshot =
       { keeper

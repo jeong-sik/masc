@@ -43,6 +43,11 @@ let observation_commands =
   ; "which"; "basename"; "dirname"; "realpath"; "readlink"
   ; "md5sum"; "sha1sum"; "sha256sum"; "sha512sum"
   ; "cmp"; "column"; "nl"; "tac"; "cut"; "tr"; "grep"
+    (* Added 2026-09-05 from two days of judged requests: [true] closes a
+       [read || true] line (6), [base64] decodes or encodes what it is given
+       (4), [jq] has no builtin that writes a file (2), [id] and [uptime]
+       print (1 each). None takes an argument that writes. *)
+  ; "true"; "false"; "base64"; "jq"; "id"; "uptime"
   ]
 
 (* git subcommands that read only, in every argument shape they accept.

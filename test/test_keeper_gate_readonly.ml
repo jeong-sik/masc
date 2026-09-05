@@ -66,6 +66,11 @@ let test_observation_table_is_fully_read () =
   passes "hostname flag" [ "hostname"; "-f" ];
   passes "env bare" [ "env" ];
   passes "printenv bare" [ "printenv" ];
+  passes "true closes an or-line" [ "true" ];
+  passes "base64 decode" [ "base64"; "-d"; "blob.b64" ];
+  passes "jq filter" [ "jq"; "-r"; ".files[].path"; "pr.json" ];
+  passes "id" [ "id"; "-un" ];
+  passes "uptime" [ "uptime" ];
   List.iter (fun command -> passes ("table entry " ^ command) [ command ]) Readonly.observation_commands;
   List.iter
     (fun sub -> passes ("git table entry " ^ sub) [ "git"; sub ])
@@ -421,9 +426,13 @@ let test_observation_scripts_pass_the_table () =
     false
     (executes_script ~operation:"tool_execute" ~sandbox_profile:remote_ssh "ls -la");
   check bool
-    "compound script still faces the judge"
-    false
+    "compound script of reads passes (id joined the table)"
+    true
     (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "uname -a && id && pwd");
+  check bool
+    "compound script with one write still faces the judge"
+    false
+    (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "uname -a && id && rm -rf x");
   check bool
     "command outside the table still faces the judge"
     false

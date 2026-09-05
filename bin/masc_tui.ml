@@ -1621,6 +1621,12 @@ type http_surface_results = {
   http_server_identity: (Tui_decode.server_identity, string) result;
 }
 
+(* What one full refresh came back with. A booting server answers the probe
+   and nothing else, so there are no surfaces to carry. *)
+type http_refresh_outcome =
+  | Refresh_surfaces of http_surface_results
+  | Refresh_server_booting of (Tui_decode.server_identity, string) result
+
 type preset_sink =
   | Preset_to_chat of string option
   | Preset_to_pane
@@ -1644,7 +1650,7 @@ type async_msg =
      rather than a silence: the microphone worked. *)
   | Voice_discarded of { keeper : string; reason : string }
   | Voice_failed of { keeper : string; error : string }
-  | Http_refresh_done of http_surface_results
+  | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of string * Approval.Flow.generation option
   | Http_scoped_refresh_done of http_scoped_surface_results
   | Http_scoped_refresh_failed of
@@ -7061,28 +7067,35 @@ let load_http_scoped_surfaces ~host ~port ~approval_generation ~board_sort
 
 let load_http_surfaces ~host ~port ~approval_generation ~board_sort
     ~board_hearth ~system_log_level ~(needs : Masc_tui_types.surface_needs) =
-  let http_overview = load_overview ~host ~port in
-  let http_approvals =
-    Option.map
-      (fun ao_generation ->
-         { ao_generation; ao_result = load_approvals ~host ~port })
-      approval_generation
-  in
   (* A process can disappear and another bind the same endpoint between two
      successful ticks. The compact /health identity is therefore revalidated
-     on every refresh rather than inferred from connection failure. *)
+     on every refresh rather than inferred from connection failure. It goes
+     first: a server still booting behind an open port says so here, and every
+     surface asked of it would only wait out its timeout. *)
   let http_server_identity = load_server_identity ~host ~port in
-  let http_scoped =
-    (* Asks ride every refresh, not just the Approvals surface. A question that
-       arrives while the operator is elsewhere has to be read to be announced,
-       so the periodic refresh always fetches them; the surface still decides
-       whether the panel renders, only the fetch is unconditional. Targeted
-       scoped refreshes keep their own needs. *)
-    load_http_scoped_surfaces ~host ~port ~approval_generation:None ~board_sort
-      ~board_hearth ~system_log_level
-      ~needs:{ needs with needs_asks = true }
-  in
-  { http_overview; http_approvals; http_scoped; http_server_identity }
+  if Masc_tui_types.server_is_booting http_server_identity
+  then Refresh_server_booting http_server_identity
+  else begin
+    let http_overview = load_overview ~host ~port in
+    let http_approvals =
+      Option.map
+        (fun ao_generation ->
+           { ao_generation; ao_result = load_approvals ~host ~port })
+        approval_generation
+    in
+    let http_scoped =
+      (* Asks ride every refresh, not just the Approvals surface. A question
+         that arrives while the operator is elsewhere has to be read to be
+         announced, so the periodic refresh always fetches them; the surface
+         still decides whether the panel renders, only the fetch is
+         unconditional. Targeted scoped refreshes keep their own needs. *)
+      load_http_scoped_surfaces ~host ~port ~approval_generation:None
+        ~board_sort ~board_hearth ~system_log_level
+        ~needs:{ needs with needs_asks = true }
+    in
+    Refresh_surfaces
+      { http_overview; http_approvals; http_scoped; http_server_identity }
+  end
 
 let apply_http_scoped_surfaces state results =
   Option.iter (apply_transport_load state) results.http_transport;
@@ -7129,6 +7142,20 @@ let apply_http_surfaces state results =
             (fun observation -> reached observation.ao_result)
             results.http_approvals
           |> Option.to_list))
+
+let apply_server_booting state identity =
+  (* The identity is read the same way a full refresh reads it, so a same-port
+     replacement is noticed even while the new process is still booting. No
+     surface was asked, so nothing else changes. *)
+  state.server_identity <- Masc_tui_types.server_identity_of_refresh identity;
+  state.workspace_identity <-
+    Masc_tui_types.workspace_identity_of_refresh
+      ~local_base_path:state.local_base_path identity;
+  state.connection_status <- Masc_tui_types.Booting
+
+let apply_http_refresh_outcome state = function
+  | Refresh_surfaces results -> apply_http_surfaces state results
+  | Refresh_server_booting identity -> apply_server_booting state identity
 
 let load_local_workspace_if_safe state base_path =
   match state.workspace_identity with
@@ -7337,7 +7364,7 @@ let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
   | (Connected | Degraded), Observer_closed _ when retry_closed ->
       launch_observer state ~host ~port ~mailbox
   | (Connected | Degraded), (Observer_closed _ | Observer_opening | Observer_live _)
-  | (Disconnected | Connecting | Reconnecting), _ ->
+  | (Disconnected | Connecting | Booting | Reconnecting), _ ->
       ()
 
 let start_http_refresh state ~host ~port ~intent ~refresh_inflight
@@ -7353,9 +7380,19 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
       Approval.Flow.reserve_refresh state.approval_flow
     in
     state.approval_flow <- flow;
+    (* Read before the label below moves. While the last probe said the
+       server is booting, only the probe goes out this tick: the side loads
+       below would each wait out a timeout against a process that has not
+       finished replaying its stores. *)
+    let was_booting =
+      match state.connection_status with
+      | Booting -> true
+      | Disconnected | Connecting | Reconnecting | Degraded | Connected -> false
+    in
     state.connection_status <-
       (match state.connection_status with
        | Connected | Degraded -> Masc_tui_types.Reconnecting
+       | Booting -> Masc_tui_types.Booting
        | Disconnected | Connecting | Reconnecting -> Masc_tui_types.Connecting);
     let needs =
       Masc_tui_types.full_refresh_needs
@@ -7398,12 +7435,12 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        durable Gate rides with them for the same badge — its rows are the
        ones that keep when nobody is watching, which is exactly when the
        badge is how an operator finds out. The server caches the snapshot. *)
-    launch_keeper_tool_approvals_load state ~mailbox;
-    launch_gate_snapshot_load state ~mailbox;
+    if not was_booting then launch_keeper_tool_approvals_load state ~mailbox;
+    if not was_booting then launch_gate_snapshot_load state ~mailbox;
     (* The "answering now" badge rides every tick for the same reason as the
        approvals above: it is drawn from every surface, and its whole point
        is the operator who walked away from the chat pane. *)
-    launch_keeper_turns_load state ~mailbox;
+    if not was_booting then launch_keeper_turns_load state ~mailbox;
     (* The schedule list rides for the same reason, now that the agenda strip
        names the next wake from every surface. Fetched only on the Schedules
        surface it was empty everywhere else, and a strip that says nothing is
@@ -7413,7 +7450,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        to serve, against a two-second cadence. The projection sorts the active
        rows ahead of the settled ones and cuts at twenty, so the earliest wake
        is in the payload whether or not the tail is. *)
-    launch_schedules_load state ~mailbox;
+    if not was_booting then launch_schedules_load state ~mailbox;
 
     let run_refresh () =
       try
@@ -7441,7 +7478,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         Fun.protect
           ~finally:(fun () -> refresh_inflight := false)
           (fun () ->
-             apply_http_surfaces state
+             apply_http_refresh_outcome state
                (load_http_surfaces ~host ~port ~approval_generation
                   ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
@@ -9090,7 +9127,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         chat_notice state ~keeper_name:(Some keeper) ~role:Message_error
           ("voice failed: " ^ error);
         state.last_action <- Some ("voice failed: " ^ error, Unix.gettimeofday ()))
-  | Http_refresh_done results ->
+  | Http_refresh_done (Refresh_server_booting identity) ->
+      http_refresh_inflight := false;
+      (* Nothing else was asked of a booting server, so nothing else follows:
+         no held-call listing, no observer, no scoped follow-up. The next tick
+         probes again. *)
+      apply_server_booting state identity
+  | Http_refresh_done (Refresh_surfaces results) ->
       http_refresh_inflight := false;
       apply_http_surfaces state results;
       (* The held-call listing rides the same cadence as the surface that
@@ -17541,7 +17584,7 @@ and is loaded on demand through keeper_skill.
                            ~refresh_inflight:http_refresh_inflight
                            ~scoped_refresh_inflight:http_scoped_refresh_inflight
                            ~scoped_refresh_followup ~mailbox:async_messages)
-                 | Connecting | Reconnecting | Degraded | Connected ->
+                 | Connecting | Booting | Reconnecting | Degraded | Connected ->
                      handle_keeper_action state ~base_path
                        ~mailbox:async_messages Keeper_control.Shutdown)
             | Board ->

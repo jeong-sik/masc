@@ -5121,6 +5121,27 @@ let test_decode_server_identity_survives_a_bare_health () =
       "an absent worktree verdict is unknown, not a lane" None
       identity.Tui_decode.sid_executable_in_worktree
 
+let test_decode_server_identity_reads_the_startup_readiness () =
+  let with_ready value =
+    `Assoc [ ("startup", `Assoc [ ("state_ready", `Bool value) ]) ]
+  in
+  (match Tui_decode.decode_server_identity (with_ready false) with
+   | Error detail -> Alcotest.fail detail
+   | Ok identity ->
+     Alcotest.(check (option bool)) "a booting server says so" (Some false)
+       identity.Tui_decode.sid_state_ready);
+  (match Tui_decode.decode_server_identity (with_ready true) with
+   | Error detail -> Alcotest.fail detail
+   | Ok identity ->
+     Alcotest.(check (option bool)) "a ready server says so" (Some true)
+       identity.Tui_decode.sid_state_ready);
+  match Tui_decode.decode_server_identity (`Assoc [ ("status", `String "ok") ]) with
+  | Error detail -> Alcotest.fail detail
+  | Ok identity ->
+    Alcotest.(check (option bool))
+      "no startup section is unknown, not booting" None
+      identity.Tui_decode.sid_state_ready
+
 let test_decode_server_identity_reads_the_worktree_verdict () =
   let with_flag value =
     `Assoc [ ("build", `Assoc [ ("executable_in_worktree", `Bool value) ]) ]
@@ -7624,6 +7645,8 @@ let () =
           test_decode_server_identity_takes_an_integer_age;
         Alcotest.test_case "reads the worktree verdict" `Quick
           test_decode_server_identity_reads_the_worktree_verdict;
+        Alcotest.test_case "reads the startup readiness" `Quick
+          test_decode_server_identity_reads_the_startup_readiness;
       ] );
     ( "bounded_parent_depth",
       [

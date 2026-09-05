@@ -1587,6 +1587,9 @@ type server_identity = {
           (health [build.executable_in_worktree]). [None] on an older server
           that does not carry the field — unknown, so no warning and no
           all-clear. *)
+  sid_state_ready : bool option;
+      (** [/health] [startup.state_ready]. [None] when the probe carries no
+          startup section: neither booting nor vouched ready. *)
 }
 (** Which server the TUI is talking to, as [/health] reports it.
 

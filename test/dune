@@ -3062,6 +3062,11 @@
  (libraries alcotest masc_tui_runtime_config_receipt yojson))
 
 (test
+ (name test_tui_connection_status)
+ (modules test_tui_connection_status)
+ (libraries alcotest masc masc_tui_types))
+
+(test
  (name test_tui_chat_gate_row)
  (modules test_tui_chat_gate_row)
  (libraries alcotest ast_grep masc_tui_types)

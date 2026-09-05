@@ -572,8 +572,16 @@ let fork_egress_proxy
                          ~rules
                          ~on_event:(fun event ->
                            Log.Keeper.info
-                             "egress keeper=%s %s"
+                             "egress keeper=%s rules=%s %s"
                              event.Egress_proxy_net.keeper_name
+                             (* Which allowlist judged it. An operator can
+                                edit between two requests, so without this the
+                                line says a destination was allowed and not
+                                what allowed it. [-] where nothing was
+                                judged. *)
+                             (Option.value
+                                event.Egress_proxy_net.rule_generation
+                                ~default:"-")
                              (Egress_proxy_net.outcome_to_string event.Egress_proxy_net.outcome))
                          ~socket
                          ~read_timeout_s:Keeper_egress_lane.request_line_read_timeout_s))

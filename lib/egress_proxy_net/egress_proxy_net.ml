@@ -16,6 +16,7 @@ type event =
   { keeper_name : string
   ; at : float
   ; outcome : outcome
+  ; rule_generation : string option
   }
 
 (* The request line and the header block that follows it. A CONNECT authority
@@ -52,15 +53,27 @@ let connect_first_reachable ~sw ~net addresses =
           (* A cancelled switch is the lane going away, not this address
              failing; trying the next one would outlive the reason to try. *)
           | Eio.Cancel.Cancelled _ -> raise exn
-          | _ -> attempt (Some (Printexc.to_string exn)) rest))
+          (* Only an I/O failure says "this address did not answer". A
+             malformed address raises [Invalid_argument], and moving on from
+             that would report a code defect as an unreachable destination
+             and then hide it behind "no address answered". *)
+          | Eio.Io _ -> attempt (Some (Printexc.to_string exn)) rest
+          | _ -> raise exn))
   in
   attempt None addresses
 ;;
 
+(* A peer that closed mid-copy is the ordinary end of a tunnel, not a
+   failure worth propagating. That is [Eio.Io _] on a write and [End_of_file]
+   on a read, and those two are what this drops.
+
+   Everything else goes up. A bare [_] here read as "ignore the flow error"
+   while also erasing [Invalid_argument] and [Not_found] -- code defects in
+   this file, reported as a peer hanging up. *)
 let ignore_flow_error f =
   try f () with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | _ -> ()
+  | Eio.Io _ | End_of_file -> ()
 ;;
 
 let write_all flow text = Eio.Flow.copy_string text flow
@@ -85,7 +98,19 @@ let splice ~client ~upstream =
 ;;
 
 let handle_connection ~net ~clock ~keeper_name ~rules ~on_event ~read_timeout_s flow =
-  let emit outcome = on_event { keeper_name; at = Unix.gettimeofday (); outcome } in
+  (* The generation of whatever judged this request, or [None] where nothing
+     was judged. It is set from the very list [decide] was given, not read a
+     second time: rules are asked per request, so a second read could answer
+     a different allowlist than the one that decided. *)
+  let judged_by = ref None in
+  let emit outcome =
+    on_event
+      { keeper_name
+      ; at = Unix.gettimeofday ()
+      ; outcome
+      ; rule_generation = !judged_by
+      }
+  in
   let read_request_line () =
     (* The whole request head, not just its first line. A CONNECT carries a
        header block ending in a blank line, and splicing with those still
@@ -120,7 +145,9 @@ let handle_connection ~net ~clock ~keeper_name ~rules ~on_event ~read_timeout_s 
   | Ok (request_line, reader) ->
     (* Asked here, per request, so an allowlist edit reaches the next
        connection instead of waiting for a lane restart. *)
-    let decision = Egress_proxy_decision.decide ~rules:(rules ()) ~request_line in
+    let rules = rules () in
+    judged_by := Some (Egress_host.generation rules);
+    let decision = Egress_proxy_decision.decide ~rules ~request_line in
     (match decision with
      | Egress_proxy_decision.Refused refusal ->
        emit (Refused { detail = Egress_proxy_decision.refusal_to_string refusal });
@@ -181,6 +208,9 @@ let serve ~sw ~net ~clock ~keeper_name ~rules ~on_event ~socket ~read_timeout_s 
           { keeper_name
           ; at = Unix.gettimeofday ()
           ; outcome = Unreadable { detail = Printexc.to_string exn }
+          (* An accept that failed never reached a request, so no allowlist
+             answered for it. *)
+          ; rule_generation = None
           })
       (fun flow _client_addr ->
         handle_connection ~net ~clock ~keeper_name ~rules ~on_event ~read_timeout_s flow);

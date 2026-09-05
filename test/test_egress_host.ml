@@ -223,6 +223,59 @@ let test_rules_round_trip_their_spelling () =
   check string "a wildcard rule" "*.example.com" (H.rule_to_string (rule "*.Example.COM"))
 ;;
 
+(* Rules are read per request, so the record of a decision has to say which
+   allowlist made it. These pin what "the same rules" means. *)
+
+let gen entries = H.generation (List.map rule entries)
+
+let test_the_same_rules_are_the_same_generation () =
+  check string
+    "order does not make a different policy"
+    (gen [ "github.com"; "*.githubusercontent.com"; "api.anthropic.com:443" ])
+    (gen [ "api.anthropic.com"; "github.com"; "*.githubusercontent.com" ]);
+  check string
+    "neither does a repeat"
+    (gen [ "github.com" ])
+    (gen [ "github.com"; "github.com" ]);
+  check string
+    "nor a spelling the parser normalizes"
+    (gen [ "github.com" ])
+    (gen [ "GitHub.com." ])
+;;
+
+let test_an_edit_moves_the_generation () =
+  let before = gen [ "github.com" ] in
+  check bool "adding a host" true (before <> gen [ "github.com"; "pypi.org" ]);
+  check bool "removing one" true (before <> gen []);
+  (* The port is part of what a rule permits, so a rule that moved to another
+     port is a different rule and must not read as the same policy. *)
+  check bool "moving the port" true (before <> gen [ "github.com:8443" ]);
+  check bool "widening to a wildcard" true (before <> gen [ "*.github.com" ])
+;;
+
+let test_the_generation_is_short_and_printable () =
+  let value = gen [ "github.com"; "*.example.com:8443" ] in
+  check int "eight characters" 8 (String.length value);
+  check bool
+    "hex, so it survives any log format"
+    true
+    (String.for_all
+       (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))
+       value);
+  (* An empty allowlist reaches nothing, which is a policy like any other and
+     needs a name in the record. *)
+  check int "an empty allowlist still has one" 8 (String.length (gen []))
+;;
+
+let generation_cases =
+  [ test_case "the same rules are the same generation" `Quick
+      test_the_same_rules_are_the_same_generation
+  ; test_case "an edit moves the generation" `Quick test_an_edit_moves_the_generation
+  ; test_case "the generation is short and printable" `Quick
+      test_the_generation_is_short_and_printable
+  ]
+;;
+
 let () =
   run "egress_host"
     [ ( "bypasses"
@@ -260,4 +313,5 @@ let () =
         ; test_case "rules round trip their spelling" `Quick
             test_rules_round_trip_their_spelling
         ] )
+    ; "generation", generation_cases
     ]

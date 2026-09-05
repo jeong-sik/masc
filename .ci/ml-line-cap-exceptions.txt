@@ -1,5 +1,4 @@
 # Manual line-cap exceptions for generated code.
-lib/masc_pb.ml
 # Legacy process/sidecar godfiles touched by the shell-free sidecar start fix.
 # Follow-up: extract detached process spawn and sidecar lifecycle routing into
 # focused modules so these no longer need changed-file line-cap exceptions.
@@ -15,7 +14,6 @@ lib/keeper/keeper_turn_driver_try_runtime.ml
 lib/keeper/keeper_unified_turn_execution.ml
 # Context budgeting regression harness grew during PR #22925; keep new tests
 # focused here until the provider-timeout strike harness is split.
-test/test_agent_core_timeout_budget_strike.ml
 # Fusion core test monolith pre-dates the current line cap. Full extraction
 # should happen separately from this schema deletion.
 test/fusion_core/test_fusion.ml

@@ -37,7 +37,6 @@ bin/main_eio.ml
 # These are one-shot CLI binaries; their stdout/stderr is the tool's user
 # interface, not structured server logging.
 bin/masc_trace.ml
-bin/trace_to_tla.ml
 bin/masc_tui_loader.ml
 bin/masc_cost.ml
 
@@ -69,7 +68,6 @@ lib/config_dir_resolver/config_dir_resolver.ml
 # (keeper_event_bridge.ml previously appeared here for ~module_name:"agent_core:event";
 #  that is a static literal and is now the Agent_core_event module — a module name
 #  string may contain a colon even though the OCaml identifier cannot.)
-lib/agent_core_log_bridge.ml
 
 # --- Operator CLI harnesses (bin/) ---
 # These binaries are run by a person at a terminal and their stdout/stderr is

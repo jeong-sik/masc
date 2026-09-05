@@ -1172,7 +1172,7 @@ let connection_status_badge : Masc_tui_types.connection_status -> string =
   function
   | Connected as status ->
       (Theme.ok ()) ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
-  | (Degraded | Connecting | Reconnecting) as status ->
+  | (Degraded | Connecting | Reconnecting | Booting) as status ->
       (Theme.warn ()) ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
   | Disconnected as status ->
       (Theme.bad ()) ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
@@ -5246,7 +5246,7 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
              rather than shutting a keeper down, so the hint follows suit. *)
           ; (match state.connection_status with
              | Disconnected -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "s" ^ Ansi.reset ^ " start server"
-             | Connecting | Reconnecting | Degraded | Connected ->
+             | Connecting | Booting | Reconnecting | Degraded | Connected ->
                  hint Keeper_control.Shutdown "shutdown")
           ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "e" ^ Ansi.reset ^ " settings"
           ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "a" ^ Ansi.reset ^ " new"

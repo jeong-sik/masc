@@ -6490,6 +6490,7 @@ type server_identity = {
   sid_base_path : string;
   sid_masc_root : string;
   sid_executable_in_worktree : bool option;
+  sid_state_ready : bool option;
 }
 
 (* [/health] answers before the workspace is fully up, so every field here is
@@ -6499,6 +6500,7 @@ type server_identity = {
 let decode_server_identity json =
   let* build = optional_object_field json "build" in
   let* paths = optional_object_field json "paths" in
+  let* startup = optional_object_field json "startup" in
   (* A section the probe did not carry leaves its fields unread. Standing an
      empty object in for it would read the same here and mean something else:
      absent is what the footer draws as unread. *)
@@ -6520,6 +6522,13 @@ let decode_server_identity json =
     | Some (`Bool value) -> Some value
     | Some _ | None -> None
   in
+  let sid_state_ready =
+    (* Three-valued like the worktree verdict: [None] is a probe without a
+       startup section, so the TUI neither waits on it nor calls it ready. *)
+    match Option.map (member "state_ready") startup with
+    | Some (`Bool value) -> Some value
+    | Some _ | None -> None
+  in
   Ok
     { sid_version =
         (match member "version" json with
@@ -6530,6 +6539,7 @@ let decode_server_identity json =
     ; sid_base_path = string_in paths "effective_base_path"
     ; sid_masc_root = string_in paths "effective_masc_root"
     ; sid_executable_in_worktree
+    ; sid_state_ready
     }
 ;;
 

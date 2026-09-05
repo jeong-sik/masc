@@ -35,7 +35,7 @@ val verification_evidence_posture_note_only : string
 (** Rendered into a completion question whose fixed snapshot holds zero
     artifacts the judge can open — every item a note or an unusable
     reference. The clause that keeps note-only silence from reading as
-    assent (task-785, RFC-0415 §4.3). *)
+    assent (task-785, RFC-0417 §4.3). *)
 val verification_evidence_posture_usable : string
 (** Rendered into a completion question whose snapshot holds [n] readable,
     untruncated artifacts. Variable: [usable_artifact_count]. *)

@@ -92,7 +92,7 @@ let operator_evidence_json ~config ~operator_id ~task_id =
   let open Result.Syntax in
   let* task, producer, verification_id = awaiting_task config task_id in
   let authority = Masc_domain.Human_operator { operator_id } in
-  (* RFC-0415 §4.2: the operator clicks with the question in view. A cancel
+  (* RFC-0417 §4.2: the operator clicks with the question in view. A cancel
      claim and a completion claim are different questions about the same
      evidence card, so the card names which one it answers. The intent is read
      off the Task status — the same source the authority reads (#33046), one

@@ -433,7 +433,7 @@ let test_scan_scope_limits_a_submission_to_its_own_verification () =
     (names (For_testing.entries_in_scope ~scope:(For_testing.Targets []) entries))
 
 
-(* RFC-0415 §4.1/§6.3: the system lane's authority ends where a cancellation
+(* RFC-0417 §4.1/§6.3: the system lane's authority ends where a cancellation
    begins. The routing is pure and read off the status; the runtime path
    consults it before any review starts, records a cancel claim as
    [Operator_routed], and leaves the Task pending for the operator's one

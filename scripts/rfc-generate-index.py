@@ -29,6 +29,11 @@ RFC_REFERENCE_RE = re.compile(
     r"^(?:RFC-)?(?P<number>\d{4})(?:-phase-(?P<phase>[A-Za-z0-9]+))?$"
 )
 RFC_REFERENCE_SLUG_RE = re.compile(r"^(?:RFC-)?(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)$")
+# Numbers that two documents hold, measured on 2026-09-05. Each renders as one
+# row naming both files; their citations in the code are split by meaning
+# already, so renumbering is a separate change. The set is exact: a new clash
+# is refused, and a number that returns to one document has to leave it.
+NUMBERS_HELD_TWICE = frozenset({"0037", "0108", "0235"})
 
 
 @dataclass(frozen=True)
@@ -249,6 +254,22 @@ def collect_entries() -> tuple[dict[str, RfcEntry], list[str]]:
     for entry in entries.values():
         entry.documents.sort(key=lambda document: document.filename)
         entry.sub_docs.sort(key=lambda document: document.filename)
+        # One number, one RFC. A second document claiming a number is a
+        # clash to refuse, not a row to render: 0415 was taken twice within a
+        # day (#33069, #33113) and every "RFC-0415 §4.1" citation in the code
+        # pointed at whichever file the reader opened first.
+        held_twice = len(entry.documents) > 1
+        if held_twice and entry.display_key not in NUMBERS_HELD_TWICE:
+            issues.append(
+                f"{entry.display_key}: number carried by "
+                f"{len(entry.documents)} documents: "
+                + ", ".join(document.filename for document in entry.documents)
+            )
+        if not held_twice and entry.display_key in NUMBERS_HELD_TWICE:
+            issues.append(
+                f"{entry.display_key}: one document holds it now; "
+                "drop it from NUMBERS_HELD_TWICE"
+            )
 
     return entries, issues
 

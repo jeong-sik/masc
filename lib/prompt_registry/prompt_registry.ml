@@ -530,6 +530,13 @@ let prompt_source_path key =
    other key its file's body — the preamble alone when the file carries
    slots, so a group key never returns its slots' text. *)
 let file_value_of_key key =
+  (* Resolve the directory before consulting the slot table: in an unpinned
+     process the first resolution is what pins the dune fallback and loads
+     its slot keys. Asked before that, a slot key such as judge.effect is
+     absent from [fragment_tbl], reads as a whole-file key, and finds no
+     judge.effect.md, so an override on it is refused for a contract body
+     that the pin would have supplied a moment later. *)
+  let (_ : string option) = effective_markdown_dir () in
   match Hashtbl.find_opt fragment_tbl key with
   | Some (group_key, marker) -> (
     match Option.bind (prompt_markdown_path group_key) read_file_if_exists with

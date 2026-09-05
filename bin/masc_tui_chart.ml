@@ -243,7 +243,7 @@ let waterfall ~width ?total_ms steps =
 
 let heatmap_glyphs = [| " "; bar_light; bar_medium; bar_dark; bar_full |]
 
-let heatmap_row ?max_val ?(empty_glyph = dot_empty) ~buckets =
+let heatmap_row ?max_val ?(empty_glyph = dot_empty) buckets =
   if buckets = [] then ""
   else
     let effective_max =
@@ -272,7 +272,7 @@ let heatmap_row ?max_val ?(empty_glyph = dot_empty) ~buckets =
     Buffer.contents buf
 ;;
 
-let heatmap_24h ?label ~hours =
+let heatmap_24h ?label hours =
   let arr = Array.make 24 0 in
   List.iteri (fun i h -> if i < 24 then arr.(i) <- Stdlib.max 0 h) hours;
   let global_peak = Array.fold_left Stdlib.max 0 arr in
@@ -283,8 +283,8 @@ let heatmap_24h ?label ~hours =
     | Some l -> [ Printf.sprintf "  %s%s%s (Peak: %d/h)" Masc_tui_theme.Sgr.bold l Masc_tui_theme.Sgr.reset global_peak ]
     | None -> []
   in
-  let row1 = "  00:00 " ^ heatmap_row ~max_val:global_peak ~buckets:first_12 ^ " 12:00" in
-  let row2 = "  12:00 " ^ heatmap_row ~max_val:global_peak ~buckets:last_12 ^ " 24:00" in
+  let row1 = "  00:00 " ^ heatmap_row ~max_val:global_peak first_12 ^ " 12:00" in
+  let row2 = "  12:00 " ^ heatmap_row ~max_val:global_peak last_12 ^ " 24:00" in
   header @ [ row1; row2 ]
 ;;
 

@@ -79,16 +79,16 @@ val waterfall :
 val heatmap_row :
   ?max_val:int ->
   ?empty_glyph:string ->
-  buckets:int list ->
+  int list ->
   string
-(** [heatmap_row ?max_val ?empty_glyph ~buckets] maps bucket counts to 5 intensity levels:
+(** [heatmap_row ?max_val ?empty_glyph buckets] maps bucket counts to 5 intensity levels:
     empty dot, [░], [▒], [▓], [█]. When [max_val] is provided, uses it as the shared scale ceiling. *)
 
 val heatmap_24h :
   ?label:string ->
-  hours:int list ->
+  int list ->
   string list
-(** [heatmap_24h ?label ~hours] renders a 2-line 24-hour activity widget normalized across
+(** [heatmap_24h ?label hours] renders a 2-line 24-hour activity widget normalized across
     the entire 24-hour peak. *)
 
 (** {1 Distribution Bars} *)

@@ -35,13 +35,13 @@ let test_sparkline_colored () =
 
 let test_gauge_proportions () =
   let g50 = Chart.gauge ~width:40 ~value:50 ~max_value:100 ~label:"Context" () in
-  check int "gauge fits within 40 width" true (Layout.display_width g50 <= 40);
+  check bool "gauge fits within 40 width" true (Layout.display_width g50 <= 40);
   (* zero max_value handles gracefully without divide-by-zero *)
   let g_zero = Chart.gauge ~width:30 ~value:10 ~max_value:0 () in
-  check int "zero max fits within 30 width" true (Layout.display_width g_zero <= 30);
+  check bool "zero max fits within 30 width" true (Layout.display_width g_zero <= 30);
   (* narrow width strictly enforced *)
   let g_narrow = Chart.gauge ~width:10 ~value:75 ~max_value:100 () in
-  check int "narrow gauge fits within 10 width" true (Layout.display_width g_narrow <= 10);
+  check bool "narrow gauge fits within 10 width" true (Layout.display_width g_narrow <= 10);
   (* zero width produces empty string *)
   let g_empty = Chart.gauge ~width:0 ~value:10 ~max_value:100 () in
   check string "empty width produces empty" "" g_empty
@@ -78,10 +78,10 @@ let test_waterfall_chart () =
 let test_heatmap_24h_normalization () =
   (* Morning peak: 2, Afternoon peak: 1000. Shared normalization must not show morning 2 as peak *)
   let hours = List.init 24 (fun i -> if i = 5 then 2 else if i = 18 then 1000 else 0) in
-  let rows = Chart.heatmap_24h ~label:"Keeper Fleet" ~hours in
+  let rows = Chart.heatmap_24h ~label:"Keeper Fleet" hours in
   check int "heatmap 24h produces 3 lines" 3 (List.length rows);
-  check int "row1 has 24 display cells" 24 (Layout.display_width (List.nth rows 1));
-  check int "row2 has 24 display cells" 24 (Layout.display_width (List.nth rows 2))
+  check int "row1 has 26 display cells" 26 (Layout.display_width (List.nth rows 1));
+  check int "row2 has 26 display cells" 26 (Layout.display_width (List.nth rows 2))
 ;;
 
 let test_distribution_bars () =

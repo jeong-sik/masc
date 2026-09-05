@@ -65,9 +65,33 @@ let get_terminal_size () =
   (max 1 (rows - 1), cols)
 
 let frame_lines buf =
-  match List.rev (String.split_on_char '\n' (Buffer.contents buf)) with
-  | "" :: reversed -> List.rev reversed
-  | reversed -> List.rev reversed
+  let str = Buffer.contents buf in
+  let len = String.length str in
+  if len = 0 then []
+  else
+    let limit = if str.[len - 1] = '\n' then len - 1 else len in
+    let rec collect acc start idx =
+      if idx >= limit then
+        let last = String.sub str start (idx - start) in
+        List.rev (last :: acc)
+      else if str.[idx] = '\n' then
+        let line = String.sub str start (idx - start) in
+        collect (line :: acc) (idx + 1) (idx + 1)
+      else
+        collect acc start (idx + 1)
+    in
+    collect [] 0 0
+
+let count_frame_lines buf =
+  let len = Buffer.length buf in
+  if len = 0 then 0
+  else
+    let n = ref 0 in
+    for i = 0 to len - 1 do
+      if Buffer.nth buf i = '\n' then incr n
+    done;
+    if Buffer.nth buf (len - 1) = '\n' then !n
+    else !n + 1
 
 (* What a boxed listing draws under its rows: the scroll line -- a row whether
    or not there is anything to report, so a list that overflows does not push
@@ -85,19 +109,36 @@ let listing_rows_below_the_body = 3
    which reads as the detail having changed panes. Five surfaces had copied
    this loop; a sixth copy is how the padding rule drifts. *)
 let write_two_panes buf ~left_cols ~left ~right =
-  let blank_left = String.make left_cols ' ' in
-  let rec zip left right =
-    match left, right with
-    | [], [] -> []
-    | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
-    | [], r :: rt -> (blank_left ^ r) :: zip [] rt
-    | l :: lt, [] -> l :: zip lt []
+  let left_lines = frame_lines left in
+  let right_lines = frame_lines right in
+  let blank_left = ref None in
+  let get_blank_left () =
+    match !blank_left with
+    | Some s -> s
+    | None ->
+        let s = String.make left_cols ' ' in
+        blank_left := Some s;
+        s
   in
-  List.iter
-    (fun line ->
-      Buffer.add_string buf line;
-      Buffer.add_char buf '\n')
-    (zip (frame_lines left) (frame_lines right))
+  let rec loop l_list r_list =
+    match l_list, r_list with
+    | [], [] -> ()
+    | l :: lt, r :: rt ->
+        Buffer.add_string buf l;
+        Buffer.add_string buf r;
+        Buffer.add_char buf '\n';
+        loop lt rt
+    | [], r :: rt ->
+        Buffer.add_string buf (get_blank_left ());
+        Buffer.add_string buf r;
+        Buffer.add_char buf '\n';
+        loop [] rt
+    | l :: lt, [] ->
+        Buffer.add_string buf l;
+        Buffer.add_char buf '\n';
+        loop lt []
+  in
+  loop left_lines right_lines
 ;;
 
 (* A narrow list beside an open detail: which row you are on, and what else
@@ -5455,7 +5496,7 @@ let render_keeper_list (state : state) =
      reading, the roster's health and the metadata error, so a second
      arithmetic copy of its height would drift from what was just emitted and
      scroll the frame. *)
-  let chrome_rows = List.length (frame_lines buf) in
+  let chrome_rows = count_frame_lines buf in
   let footer_rows = 3 in
   let keeper_rows = max 0 (rows - chrome_rows - footer_rows) in
   let keeper_count = List.length state.keepers in
@@ -5776,7 +5817,7 @@ let render_lanes_overview (state : state) =
        in
        let available =
          max 0
-           (rows - List.length (frame_lines buf) - action_error_rows - 3)
+           (rows - count_frame_lines buf - action_error_rows - 3)
        in
        if available > 0 then begin
          box_divider buf cols;
@@ -5799,7 +5840,7 @@ let render_lanes_overview (state : state) =
    | Some detail ->
        box_line_styled buf cols ~style:(Theme.warn ())
          ("  " ^ Keeper_chat.terminal_safe_text detail));
-  let used_rows = List.length (frame_lines buf) in
+  let used_rows = count_frame_lines buf in
   for _ = 1 to max 0 (rows - used_rows - 2) do
     box_empty buf cols
   done;
@@ -9488,7 +9529,7 @@ let render_keeper_message (state : state) =
        queued line was drawn and not counted, so the prompt moved down and the
        caret did not. Reading the rows already in the frame, with the same
        [frame_lines] that builds it, cannot disagree with it. *)
-    let rows_above_composer = List.length (frame_lines chat_buf) in
+    let rows_above_composer = count_frame_lines chat_buf in
     List.iteri
       (fun index line ->
         (* Only the first line carries the prompt; the rest line up under it so
@@ -12276,7 +12317,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
      rows plus the notes, which left the surface one row over its budget --
      and the row [finish_surface] then dropped was the footer, so the diff was
      the one screen that did not say how to leave it. *)
-  let chrome_rows = List.length (frame_lines buf) + listing_rows_below_the_body in
+  let chrome_rows = count_frame_lines buf + listing_rows_below_the_body in
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.changes_diff_scroll max_scroll) in
@@ -13367,7 +13408,7 @@ let render_keeper_calls (state : state) =
   let shown = List.length entries in
   (* The error row and the mismatch row are drawn above; counting the buffer
      asks what was drawn rather than restating the two conditions. *)
-  let chrome_rows = List.length (frame_lines buf) + listing_rows_below_the_body in
+  let chrome_rows = count_frame_lines buf + listing_rows_below_the_body in
   let content_height = max 1 (rows - chrome_rows) in
   (* The scroll unit is one rendered row, not one call. A canonical proposal
      identity plus its input and output cannot fit a two-row short viewport;
@@ -13635,7 +13676,7 @@ let render_acting (state : state) =
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
-  let chrome_rows = List.length (frame_lines buf) + listing_rows_below_the_body in
+  let chrome_rows = count_frame_lines buf + listing_rows_below_the_body in
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.acting_scroll max_scroll) in

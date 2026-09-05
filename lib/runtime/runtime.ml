@@ -1418,9 +1418,13 @@ let load_list_internal_text ~(config_path : string) ~content ~validate_max_conte
   materialize_config ~validate_max_context ~config_path cfg
 ;;
 
+(* The public five-tuple stays as its callers destructure it; the operator's
+   language-server commands travel inside this module only and are read
+   back through [lsp_servers]. *)
 let load_list ~config_path =
   load_list_internal ~config_path ~validate_max_context:true
-  |> Result.map fst
+  |> Result.map (fun ((runtimes, rt, assignments, media_failover, lanes, _lsp_servers), _) ->
+       (runtimes, rt, assignments, media_failover, lanes))
 ;;
 
 (* ---- Lazy default runtime singleton ---- *)

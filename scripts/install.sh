@@ -551,6 +551,15 @@ update_runtime_default() {
   log "set [runtime].default = \"$runtime_id\" in $runtime_file"
 }
 
+# Whether a ping would test anything. A provider with no key variable has a
+# public healthcheck; one with a key variable can only be reached with the key,
+# and the installer only has it when the operator exported it.
+provider_ping_possible() {
+  local idx="$1" key="$2" key_var
+  key_var=$(provider_key_var "$idx")
+  [ -z "$key_var" ] || [ -n "$key" ]
+}
+
 ping_provider() {
   local idx="$1" key="$2"
   local endpoint="${PROVIDER_ENDPOINTS[$idx]}"
@@ -594,10 +603,11 @@ ping_provider() {
     fi
   fi
 
-  if [ -z "$key" ]; then
-    warn "$key_var is not set in this shell; skipping the authenticated ping for $(provider_name "$idx")"
-    return 0
-  fi
+  # Callers decide whether a ping is possible ([provider_ping_possible]); an
+  # empty key here would mean this one answered yes for a provider that needs a
+  # key and has none, and a "ping" that tested nothing must not be reported as
+  # either a pass or a failure.
+  [ -n "$key" ] || die "internal: authenticated ping for $key_var without a key"
 
   # Feed the bearer header through an anonymous fd so the key is not written to
   # disk and does not appear in curl's process arguments.
@@ -686,11 +696,18 @@ run_wizard() {
     if [ "${MASC_INSTALL_NO_PING:-0}" = "1" ]; then
       return 0
     fi
-    if ping_provider "$provider_idx" "$key"; then
+    if ! provider_ping_possible "$provider_idx" "$key"; then
+      log "no key in this environment to reach $(provider_name "$provider_idx") with; skipping the connectivity check"
+    elif ping_provider "$provider_idx" "$key"; then
       log "provider connectivity: ok"
     else
       warn "provider connectivity check did not pass; masc will retry at first turn"
     fi
+    return 0
+  fi
+
+  if ! provider_ping_possible "$provider_idx" "$key"; then
+    log "no key in this environment to reach $(provider_name "$provider_idx") with; skipping the connectivity check"
     return 0
   fi
 

@@ -97,7 +97,11 @@ let test_agent_type_checkpoint_stage_labels () =
   check_string
     "context injection"
     "after_context_injection"
-    (Internal_agent.checkpoint_stage_to_string After_context_injection)
+    (Internal_agent.checkpoint_stage_to_string After_context_injection);
+  check_string
+    "rejected response dropped"
+    "after_rejected_response_dropped"
+    (Internal_agent.checkpoint_stage_to_string After_rejected_response_dropped)
 ;;
 
 let test_agent_type_accessors_card_and_state_mutators () =

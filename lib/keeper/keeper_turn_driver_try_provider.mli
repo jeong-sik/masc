@@ -243,6 +243,14 @@ module For_testing : sig
     checkpoint:Agent_core.Checkpoint.t option ->
     truncation_recovery
 
+  (** Write the cut checkpoint through the keeper's sink under
+      [After_rejected_response_dropped]; [Ok ()] with no sink. *)
+  val persist_dropped_response
+    :  checkpoint_sink:Agent_core.Agent.checkpoint_sink option
+    -> now:float
+    -> Agent_core.Checkpoint.t
+    -> (unit, string) result
+
   val apply_accept :
     runtime_id:string ->
     accept:(Agent_core.Types.api_response -> bool) ->

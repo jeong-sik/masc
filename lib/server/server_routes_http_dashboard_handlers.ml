@@ -93,13 +93,10 @@ let handle_dashboard_task_history state req reqd =
       Printf.sprintf "task_history:%s:%s:%d"
         (Mcp_server.workspace_config state).base_path task_id limit
     in
-    let json =
-      Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
-        Domain_pool_ref.submit_io_or_inline (fun () ->
-          Task.Tool.task_history_events_json (Mcp_server.workspace_config state)
-            ~task_id ~limit))
-    in
-    Http.Response.json_value ~compress:true ~request:req json reqd
+    Server_routes_http_common.respond_cached_read ~request:req ~reqd ~cache_key
+      ~ttl:standard_cache_ttl_s (fun () ->
+        Task.Tool.task_history_events_json (Mcp_server.workspace_config state)
+          ~task_id ~limit)
 
 let handle_dashboard_workspace state req reqd =
   let limit =

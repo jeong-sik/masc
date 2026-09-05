@@ -103,13 +103,17 @@ module Response : sig
       {!etag_hex_chars}. One policy for every response that carries a tag,
       {!json} and {!html_cached} alike. *)
 
+  val weak_etag_value : string -> string
+  (** Weak ETag value formatted as [W/"<hash>"] derived from the body string. *)
+
   type json_conditional =
     | Untagged
     | Tagged of string
     | Not_modified of string
 
   val json_conditional
-    :  status:Httpun.Status.t
+    :  ?etag:string
+    -> status:Httpun.Status.t
     -> meth:Httpun.Method.t
     -> if_none_match:string option
     -> body:string
@@ -119,8 +123,9 @@ module Response : sig
       [Untagged] when the response is not a [`OK] answer to [`GET]/[`HEAD]: a
       validator there would invite revalidation of something that should not be
       reused. Otherwise [Not_modified] when [if_none_match] equals the body's
-      weak tag, and [Tagged] with that tag when it does not — including when the
-      client sent nothing, since it has not claimed to hold a copy.
+      weak tag (or caller-supplied [?etag]), and [Tagged] with that tag when it
+      does not — including when the client sent nothing, since it has not claimed
+      to hold a copy.
 
       Exposed so the rule is testable in full without constructing a
       [Httpun.Reqd.t]. *)
@@ -146,7 +151,22 @@ module Response : sig
     -> ?compress:bool
     -> ?extra_headers:(string * string) list
     -> ?request:Httpun.Request.t
+    -> ?etag:string
     -> string
+    -> Httpun.Reqd.t
+    -> unit
+
+  (** Zero-cost conditional JSON response with a lazy body.
+      When the client supplies [If-None-Match] matching [etag], returns
+      [`Not_modified] immediately without evaluating the [lazy_body] closure,
+      avoiding any JSON string allocation or compression entirely. *)
+  val json_lazy
+    :  ?status:Httpun.Status.t
+    -> ?compress:bool
+    -> ?extra_headers:(string * string) list
+    -> ?request:Httpun.Request.t
+    -> etag:string
+    -> (unit -> string)
     -> Httpun.Reqd.t
     -> unit
 

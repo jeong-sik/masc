@@ -206,17 +206,29 @@ module Response = struct
     | Not_modified of string
     (** The client's tag matches; it already holds this body. *)
 
-  let json_conditional ~status ~(meth : Httpun.Method.t) ~if_none_match ~body =
+  let client_tag_matches ~etag ~client_tag =
+    let client_tag = String.trim client_tag in
+    String.equal client_tag etag
+    || String.equal client_tag "*"
+    || List.exists
+         (fun tag -> String.equal (String.trim tag) etag)
+         (String.split_on_char ',' client_tag)
+
+  let json_conditional ?etag ~status ~(meth : Httpun.Method.t) ~if_none_match ~body =
     let safe_read = match meth with `GET | `HEAD -> true | _ -> false in
     if not (safe_read && status = `OK) then Untagged
     else
-      let etag_value = weak_etag_value body in
+      let etag_value =
+        match etag with
+        | Some tag -> tag
+        | None -> weak_etag_value body
+      in
       match if_none_match with
-      | Some client_tag when String.equal (String.trim client_tag) etag_value ->
+      | Some client_tag when client_tag_matches ~etag:etag_value ~client_tag ->
         Not_modified etag_value
       | Some _ | None -> Tagged etag_value
 
-  let json ?(status = `OK) ?(compress = true) ?(extra_headers = []) ?request body reqd =
+  let json ?(status = `OK) ?(compress = true) ?(extra_headers = []) ?request ?etag body reqd =
     let request =
       match request with
       | Some req -> req
@@ -242,6 +254,7 @@ module Response = struct
        for a client that does present a tag the match is the common case. *)
     match
       json_conditional
+        ?etag
         ~status
         ~meth:request.Httpun.Request.meth
         ~if_none_match:
@@ -259,14 +272,58 @@ module Response = struct
          came from the dashboard cache. *)
       let headers =
         Httpun.Headers.of_list
-          [ ("content-length", "0");
-            ("etag", etag_value);
-            ("cache-control", json_revalidate_cache_control);
-          ]
+          (extra_headers
+          @ [ ("content-length", "0");
+              ("etag", etag_value);
+              ("cache-control", json_revalidate_cache_control);
+            ])
       in
       safe_respond_with_string reqd
         (Httpun.Response.create ~headers `Not_modified)
         ""
+
+  let json_lazy ?(status = `OK) ?(compress = true) ?(extra_headers = []) ?request
+      ~etag (lazy_body : unit -> string) reqd =
+    let request =
+      match request with
+      | Some req -> req
+      | None -> Httpun.Reqd.request reqd
+    in
+    let safe_read = match request.Httpun.Request.meth with `GET | `HEAD -> true | _ -> false in
+    if not (safe_read && status = `OK) then
+      let body = lazy_body () in
+      json ~status ~compress ~extra_headers ~request ~etag body reqd
+    else
+      let if_none_match =
+        Httpun.Headers.get request.Httpun.Request.headers "if-none-match"
+      in
+      match if_none_match with
+      | Some client_tag when client_tag_matches ~etag ~client_tag ->
+        let headers =
+          Httpun.Headers.of_list
+            (extra_headers
+            @ [ ("content-length", "0");
+                ("etag", etag);
+                ("cache-control", json_revalidate_cache_control);
+              ])
+        in
+        safe_respond_with_string reqd
+          (Httpun.Response.create ~headers `Not_modified)
+          ""
+      | _ ->
+        let body = lazy_body () in
+        let final_body, compression_headers =
+          Http_response_payload.compress_body
+            ~compress
+            ~accept_encoding:(Httpun.Headers.get request.headers "accept-encoding")
+            body
+        in
+        safe_respond_with_string reqd
+          (response
+             ~before_headers:(extra_headers @ [ ("etag", etag); ("cache-control", json_revalidate_cache_control) ])
+             ~tail_headers:compression_headers
+             ~content_type:json_content_type status final_body)
+          final_body
 
   let json_value ?status ?compress ?extra_headers ?request value reqd =
     json ?status ?compress ?extra_headers ?request (Yojson.Safe.to_string value) reqd

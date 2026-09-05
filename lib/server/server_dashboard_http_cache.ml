@@ -11,7 +11,16 @@ type surface_snapshot = {
   last_error_unix : float option;
 }
 
-type cached_surface = { mutable current : surface_snapshot }
+type cached_surface_payload = {
+  json : Yojson.Safe.t;
+  raw_json : string;
+  etag : string;
+}
+
+type cached_surface = {
+  mutable current : surface_snapshot;
+  mutable memoized_payload : (surface_snapshot * cached_surface_payload) option;
+}
 
 let snapshot surface = surface.current
 
@@ -28,6 +37,7 @@ let create_cached_surface json =
         last_error_at = None;
         last_error_unix = None;
       };
+    memoized_payload = None;
   }
 
 let now_cache_stamp () =
@@ -70,6 +80,7 @@ let mark_cached_surface_error surface exn =
 ;;
 
 let invalidate_cached_surface surface =
+  surface.memoized_payload <- None;
   surface.current <-
     { surface.current with
       last_success_at = None
@@ -113,9 +124,7 @@ let extend_projection_diagnostics json extra_fields =
            (List.remove_assoc "projection_diagnostics" fields))
   | other -> other
 
-let cached_surface_json cache =
-  (* One read of the cell, so every field below comes from the same view. *)
-  let surface = snapshot cache in
+let surface_snapshot_json surface =
   let now_ts = Unix.gettimeofday () in
   let cache_state, stale_reason, stale_age_ms =
     match surface.last_success_unix, surface.last_error_unix with
@@ -136,13 +145,34 @@ let cached_surface_json cache =
       ( "stale_age_ms", Json_util.int_opt_to_json stale_age_ms );
     ]
 
+let cached_surface_json cache =
+  surface_snapshot_json (snapshot cache)
+
 let cached_surface_has_success cache =
   Option.is_some (snapshot cache).last_success_unix
 
-let cached_surface_or_first_success_json surface ~cache_key ~ttl ~clock
+let cached_surface_payload cache =
+  let surface = snapshot cache in
+  let is_stale =
+    match surface.last_success_unix, surface.last_error_unix with
+    | Some success_ts, Some error_ts -> error_ts > success_ts
+    | _ -> false
+  in
+  match cache.memoized_payload with
+  | Some (prev_surface, payload) when prev_surface == surface && not is_stale ->
+      payload
+  | _ ->
+      let json = surface_snapshot_json surface in
+      let raw_json = Yojson.Safe.to_string json in
+      let etag = Http_server_eio.Response.weak_etag_value raw_json in
+      let payload = { json; raw_json; etag } in
+      if not is_stale then cache.memoized_payload <- Some (surface, payload);
+      payload
+
+let cached_surface_or_first_success_payload surface ~cache_key ~ttl ~clock
     ~timeout_sec compute =
   if cached_surface_has_success surface then
-    cached_surface_json surface
+    cached_surface_payload surface
   else
     let compute_and_track () =
       mark_cached_surface_attempt surface;
@@ -156,9 +186,13 @@ let cached_surface_or_first_success_json surface ~cache_key ~ttl ~clock
           mark_cached_surface_error surface exn;
           raise exn
     in
-    let json =
+    let _ =
       Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl ~clock
         ~timeout_sec compute_and_track
     in
-    if cached_surface_has_success surface then cached_surface_json surface
-    else json
+    cached_surface_payload surface
+
+let cached_surface_or_first_success_json surface ~cache_key ~ttl ~clock
+    ~timeout_sec compute =
+  (cached_surface_or_first_success_payload surface ~cache_key ~ttl ~clock
+     ~timeout_sec compute).json

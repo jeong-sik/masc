@@ -763,6 +763,228 @@ let test_json_response_matching_tag_sends_no_body () =
        (String.split_on_char '\n' response))
 ;;
 
+let test_json_lazy_matching_tag_skips_body_evaluation () =
+  Eio_main.run (fun _env ->
+    let response_buf = Buffer.create 1024 in
+    let body_called = ref false in
+    let test_body = "{\"lazy\":\"evaluated\"}" in
+    let etag = Response.weak_etag_value test_body in
+    let conn =
+      Httpun.Server_connection.create (fun reqd ->
+        Response.json_lazy
+          ~request:(Httpun.Reqd.request reqd)
+          ~etag
+          (fun () -> body_called := true; test_body)
+          reqd)
+    in
+    let headers = [ ("host", "127.0.0.1"); ("if-none-match", etag) ] in
+    let request =
+      Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/lazy-probe"
+    in
+    let request_head =
+      Printf.sprintf
+        "%s %s HTTP/1.1\r\n%s"
+        (Httpun.Method.to_string request.Httpun.Request.meth)
+        request.Httpun.Request.target
+        (Httpun.Headers.to_string request.Httpun.Request.headers)
+    in
+    let bytes =
+      Bigstringaf.of_string ~off:0 ~len:(String.length request_head) request_head
+    in
+    let rec feed off =
+      let remaining = Bigstringaf.length bytes - off in
+      if remaining > 0
+      then (
+        let consumed = Httpun.Server_connection.read conn bytes ~off ~len:remaining in
+        if consumed <= 0 then Alcotest.fail "httpun test feed made no progress";
+        feed (off + consumed))
+    in
+    feed 0;
+    let rec flush () =
+      match Httpun.Server_connection.next_write_operation conn with
+      | `Write iovecs ->
+        List.iter
+          (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
+             Buffer.add_string
+               response_buf
+               (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len))
+          iovecs;
+        let written =
+          List.fold_left
+            (fun total (iov : Bigstringaf.t Httpun.IOVec.t) -> total + iov.len)
+            0
+            iovecs
+        in
+        Httpun.Server_connection.report_write_result conn (`Ok written);
+        flush ()
+      | `Yield | `Close _ -> ()
+    in
+    flush ();
+    let response = Buffer.contents response_buf in
+    Alcotest.(check string)
+      "status is 304 Not Modified"
+      "HTTP/1.1 304 Not Modified"
+      (response_status_line response);
+    Alcotest.(check bool)
+      "lazy body generator closure was NEVER called"
+      false
+      !body_called;
+    Alcotest.(check (option string))
+      "etag matches in 304 response"
+      (Some etag)
+      (response_header response "etag"))
+;;
+
+let test_json_lazy_unmatched_tag_evaluates_body () =
+  Eio_main.run (fun _env ->
+    let response_buf = Buffer.create 1024 in
+    let body_called = ref false in
+    let test_body = "{\"lazy\":\"evaluated\"}" in
+    let etag = Response.weak_etag_value test_body in
+    let conn =
+      Httpun.Server_connection.create (fun reqd ->
+        Response.json_lazy
+          ~request:(Httpun.Reqd.request reqd)
+          ~etag
+          (fun () -> body_called := true; test_body)
+          reqd)
+    in
+    let headers = [ ("host", "127.0.0.1"); ("if-none-match", "W/\"mismatched\"") ] in
+    let request =
+      Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/lazy-probe"
+    in
+    let request_head =
+      Printf.sprintf
+        "%s %s HTTP/1.1\r\n%s"
+        (Httpun.Method.to_string request.Httpun.Request.meth)
+        request.Httpun.Request.target
+        (Httpun.Headers.to_string request.Httpun.Request.headers)
+    in
+    let bytes =
+      Bigstringaf.of_string ~off:0 ~len:(String.length request_head) request_head
+    in
+    let rec feed off =
+      let remaining = Bigstringaf.length bytes - off in
+      if remaining > 0
+      then (
+        let consumed = Httpun.Server_connection.read conn bytes ~off ~len:remaining in
+        if consumed <= 0 then Alcotest.fail "httpun test feed made no progress";
+        feed (off + consumed))
+    in
+    feed 0;
+    let rec flush () =
+      match Httpun.Server_connection.next_write_operation conn with
+      | `Write iovecs ->
+        List.iter
+          (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
+             Buffer.add_string
+               response_buf
+               (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len))
+          iovecs;
+        let written =
+          List.fold_left
+            (fun total (iov : Bigstringaf.t Httpun.IOVec.t) -> total + iov.len)
+            0
+            iovecs
+        in
+        Httpun.Server_connection.report_write_result conn (`Ok written);
+        flush ()
+      | `Yield | `Close _ -> ()
+    in
+    flush ();
+    let response = Buffer.contents response_buf in
+    Alcotest.(check string)
+      "status is 200 OK"
+      "HTTP/1.1 200 OK"
+      (response_status_line response);
+    Alcotest.(check bool)
+      "lazy body generator closure was called on miss"
+      true
+      !body_called;
+    Alcotest.(check (option string))
+      "etag is returned"
+      (Some etag)
+      (response_header response "etag"))
+;;
+
+let test_json_lazy_preserves_extra_headers_and_matches_wildcard () =
+  Eio_main.run (fun _env ->
+    let response_buf = Buffer.create 1024 in
+    let body_called = ref false in
+    let test_body = "{\"lazy\":\"evaluated\"}" in
+    let etag = Response.weak_etag_value test_body in
+    let extra_headers = [ ("access-control-allow-origin", "*"); ("x-custom", "preserved") ] in
+    let conn =
+      Httpun.Server_connection.create (fun reqd ->
+        Response.json_lazy
+          ~extra_headers
+          ~request:(Httpun.Reqd.request reqd)
+          ~etag
+          (fun () -> body_called := true; test_body)
+          reqd)
+    in
+    let headers = [ ("host", "127.0.0.1"); ("if-none-match", Printf.sprintf "W/\"old\", %s, W/\"other\"" etag) ] in
+    let request =
+      Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/lazy-probe"
+    in
+    let request_head =
+      Printf.sprintf
+        "%s %s HTTP/1.1\r\n%s"
+        (Httpun.Method.to_string request.Httpun.Request.meth)
+        request.Httpun.Request.target
+        (Httpun.Headers.to_string request.Httpun.Request.headers)
+    in
+    let bytes =
+      Bigstringaf.of_string ~off:0 ~len:(String.length request_head) request_head
+    in
+    let rec feed off =
+      let remaining = Bigstringaf.length bytes - off in
+      if remaining > 0
+      then (
+        let consumed = Httpun.Server_connection.read conn bytes ~off ~len:remaining in
+        if consumed <= 0 then Alcotest.fail "httpun test feed made no progress";
+        feed (off + consumed))
+    in
+    feed 0;
+    let rec flush () =
+      match Httpun.Server_connection.next_write_operation conn with
+      | `Write iovecs ->
+        List.iter
+          (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
+             Buffer.add_string
+               response_buf
+               (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len))
+          iovecs;
+        let written =
+          List.fold_left
+            (fun total (iov : Bigstringaf.t Httpun.IOVec.t) -> total + iov.len)
+            0
+            iovecs
+        in
+        Httpun.Server_connection.report_write_result conn (`Ok written);
+        flush ()
+      | `Yield | `Close _ -> ()
+    in
+    flush ();
+    let response = Buffer.contents response_buf in
+    Alcotest.(check string)
+      "status is 304 Not Modified"
+      "HTTP/1.1 304 Not Modified"
+      (response_status_line response);
+    Alcotest.(check bool)
+      "lazy body generator closure was NEVER called"
+      false
+      !body_called;
+    Alcotest.(check (option string))
+      "access-control-allow-origin header preserved on 304"
+      (Some "*")
+      (response_header response "access-control-allow-origin");
+    Alcotest.(check (option string))
+      "x-custom header preserved on 304"
+      (Some "preserved")
+      (response_header response "x-custom"))
+;;
+
 let response_tests =
   [ ( "content_headers preserve all header segments"
     , `Quick
@@ -773,6 +995,15 @@ let response_tests =
   ; ( "matching If-None-Match is 304"
     , `Quick
     , test_json_conditional_matching_tag_is_not_modified )
+  ; ( "json_lazy matching If-None-Match skips body closure"
+    , `Quick
+    , test_json_lazy_matching_tag_skips_body_evaluation )
+  ; ( "json_lazy unmatched If-None-Match evaluates body closure"
+    , `Quick
+    , test_json_lazy_unmatched_tag_evaluates_body )
+  ; ( "json_lazy preserves extra headers and matches wildcard/list"
+    , `Quick
+    , test_json_lazy_preserves_extra_headers_and_matches_wildcard )
   ; ( "stale If-None-Match sends the body"
     , `Quick
     , test_json_conditional_stale_tag_sends_the_body )

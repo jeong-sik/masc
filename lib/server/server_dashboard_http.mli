@@ -50,6 +50,9 @@ val approval_resolve_http_error_to_string :
 val dashboard_memory_http_json :
   ?config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t
 
+val dashboard_memory_http_payload :
+  ?config:Workspace.config -> Httpun.Request.t -> Dashboard_cache.cached_payload
+
 val dashboard_gate_http_json :
   Httpun.Request.t -> base_path:string -> Yojson.Safe.t
 

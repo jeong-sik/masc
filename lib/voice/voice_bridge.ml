@@ -816,16 +816,42 @@ let play_tone freq =
 
 (* Read per capture rather than cached: runtime.toml is hot-reloaded, and an
    operator turning a knob because captures are not starting wants the next
-   press to use it, not the next restart. [Not_configured] and a broken config
-   both fall back to the measured defaults — a capture is not the place to
-   refuse over a config the endpoint chain will refuse for. *)
+   press to use it, not the next restart.
+
+   No config at all is the measured defaults: that is not an error of the
+   config. A config that exists and does not parse is refused with its
+   reason, before a microphone is opened. It used to fall back to the
+   defaults too, which put a capture under a knob the operator had set and
+   mistyped while the dial was connected to nothing. *)
 let capture_config () =
   match Voice_config.load_detailed () with
-  | Ok config -> config.Voice_config.capture
-  | Error _ -> Voice_config.default_capture
+  | Ok config -> Ok config.Voice_config.capture
+  | Error Voice_config.Not_configured -> Ok Voice_config.default_capture
+  | Error (Voice_config.Invalid reason) ->
+    Error (Printf.sprintf "voice config is invalid, so no capture was started: %s" reason)
 ;;
 
-let calibration_seconds = Voice_config.default_capture.Voice_config.calibration_seconds
+(* How long past its own deadline a recorder's arm waits before giving up on
+   it. The watcher, or the probe's trim, is what ends a recording; this only
+   keeps one that somehow never ends from holding the microphone. *)
+let recorder_arm_grace_seconds = 5.0
+
+(* The opening of a capture the room profile is taken from. sox drops leading
+   silence, so what survives at the start is this room during this capture. *)
+let noise_profile_seconds = 0.25
+
+(* How much of that profile sox's noisered subtracts, on its 0 to 1 scale.
+   Measured on one sample at this setting: the floor went entirely and 81% of
+   the speech stayed. *)
+let noise_reduction_amount = 0.21
+
+(* A bound on each sox pass over a finished capture, which is a file
+   operation and not a recording. *)
+let sox_pass_timeout_seconds = 15.0
+
+(* How long a capture may run before it ends on its own, when the caller does
+   not say. *)
+let default_capture_timeout_seconds = 15.0
 
 (* Every level in the capture path is an RMS amplitude on this scale, and dB
    here is dBFS. Measured 2026-09-04 on one workstation, an idle room read
@@ -834,33 +860,42 @@ let calibration_seconds = Voice_config.default_capture.Voice_config.calibration_
 let db_of_amplitude v = if v > 0.0 then 20.0 *. log10 v else neg_infinity
 let amplitude_of_db d = if d = neg_infinity then 0.0 else 10.0 ** (d /. 20.0)
 
-(* One short capture, recording the room as it is. *)
-let measure_noise_floor ?seconds ~agent_id () =
-  let calibration_seconds = Option.value seconds ~default:calibration_seconds in
-  let probe =
-    Filename.temp_file (Printf.sprintf "masc_nf_%s_" (safe_agent_id agent_id)) ".wav"
-  in
-  let cleanup () = try Sys.remove probe with Sys_error _ -> () in
-  Eio_guard.protect ~finally:cleanup (fun () ->
-       match
-         run_voice_status
-           ~timeout_sec:(calibration_seconds +. 5.0)
-           [ "rec"; "-q"; "-t"; "wav"; "-b"; "16"; "-e"; "signed-integer"; probe
-           ; "rate"; string_of_int Voice_pcm.sample_rate; "channels"; "1"
-           ; "trim"; "0"; Printf.sprintf "%.2f" calibration_seconds ]
-       with
-       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-       | Unix.WEXITED 0, _ -> (
-         (* RMS, and the whole probe rather than its tail: the capture that
-            uses this floor compares RMS against it. They were peak and RMS
-            until 2026-09-04, which made the threshold roughly a decade too
-            high on room tone. *)
+(* One short capture, recording the room as it is, for as long as a capture
+   would spend calibrating. *)
+let measure_noise_floor ~agent_id () =
+  match capture_config () with
+  | Error reason ->
+    (* The capture that follows refuses with this same reason; a probe that
+       ran anyway would measure a room for a capture that is not going to
+       happen. *)
+    Log.Transport.debug "voice noise floor not measured: %s" reason;
+    None
+  | Ok capture ->
+    let calibration_seconds = capture.Voice_config.calibration_seconds in
+    let probe =
+      Filename.temp_file (Printf.sprintf "masc_nf_%s_" (safe_agent_id agent_id)) ".wav"
+    in
+    let cleanup () = try Sys.remove probe with Sys_error _ -> () in
+    Eio_guard.protect ~finally:cleanup (fun () ->
          match
-           Voice_pcm.tail_rms ~window_seconds:calibration_seconds probe
+           run_voice_status
+             ~timeout_sec:(calibration_seconds +. recorder_arm_grace_seconds)
+             [ "rec"; "-q"; "-t"; "wav"; "-b"; "16"; "-e"; "signed-integer"; probe
+             ; "rate"; string_of_int Voice_pcm.sample_rate; "channels"; "1"
+             ; "trim"; "0"; Printf.sprintf "%.2f" calibration_seconds ]
          with
-         | Ok amplitude -> Some amplitude
-         | Error _ -> None)
-       | _ -> None)
+         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+         | Unix.WEXITED 0, _ -> (
+           (* RMS, and the whole probe rather than its tail: the capture that
+              uses this floor compares RMS against it. They were peak and RMS
+              until 2026-09-04, which made the threshold roughly a decade too
+              high on room tone. *)
+           match
+             Voice_pcm.tail_rms ~window_seconds:calibration_seconds probe
+           with
+           | Ok amplitude -> Some amplitude
+           | Error _ -> None)
+         | _ -> None)
 ;;
 
 (* Run [f] on a copy with the room subtracted; when either sox step fails,
@@ -883,15 +918,17 @@ let with_noise_reduced_audio ~audio_file ~f =
   Eio_guard.protect ~finally:cleanup (fun () ->
     match
       run_voice_status
-        ~timeout_sec:15.0
-        [ "sox"; audio_file; "-n"; "trim"; "0"; "0.25"; "noiseprof"; profile ]
+        ~timeout_sec:sox_pass_timeout_seconds
+        [ "sox"; audio_file; "-n"; "trim"; "0"; Printf.sprintf "%.2f" noise_profile_seconds
+        ; "noiseprof"; profile ]
     with
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | Unix.WEXITED 0, _ -> (
       match
         run_voice_status
-          ~timeout_sec:15.0
-          [ "sox"; audio_file; reduced; "noisered"; profile; "0.21" ]
+          ~timeout_sec:sox_pass_timeout_seconds
+          [ "sox"; audio_file; reduced; "noisered"; profile
+          ; Printf.sprintf "%.2f" noise_reduction_amount ]
       with
       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
       | Unix.WEXITED 0, _ -> f reduced
@@ -1165,17 +1202,19 @@ let capture_outcome_of_json json =
 
 let record_and_transcribe
       ~agent_id
-      ?(timeout_sec = 15.0)
+      ?(timeout_sec = default_capture_timeout_seconds)
       ?language_code
       ?noise_floor
       ?(on_level = fun (_ : float) -> ())
       ?(should_stop = fun () -> None)
       ()
   =
+  (* Refused here, before a tone is played or a microphone opened: a config
+     that exists and does not parse names its reason. *)
+  let* capture = capture_config () in
   let audio_file =
     Filename.temp_file (Printf.sprintf "masc_stt_%s_" (safe_agent_id agent_id)) ".wav"
   in
-  let capture = capture_config () in
   (* Pinned rather than left to sox, which chooses 32-bit when it is not told.
      The reader that measures this file decodes 16-bit, and a mismatch is not
      an error either side reports: it reads as noise. Measured 2026-09-04, a
@@ -1224,7 +1263,7 @@ let record_and_transcribe
         Eio.Fiber.first
           (fun () ->
              match
-               run_voice_status ~timeout_sec:(timeout_sec +. 5.0) rec_argv
+               run_voice_status ~timeout_sec:(timeout_sec +. recorder_arm_grace_seconds) rec_argv
              with
              | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
              | exception exn ->

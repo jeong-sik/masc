@@ -122,9 +122,11 @@ val amplitude_of_db : float -> float
 
 (** {1 Microphone record + transcribe} *)
 
-val measure_noise_floor : ?seconds:float -> agent_id:string -> unit -> float option
-(** One short capture, returning the room's RMS amplitude. [None] when the
-    recorder could not run.
+val measure_noise_floor : agent_id:string -> unit -> float option
+(** One short capture, as long as the configured
+    {!Voice_config.calibration_seconds}, returning the room's RMS amplitude.
+    [None] when the recorder could not run, or when the voice config exists
+    and does not parse -- the capture that follows refuses with that reason.
 
     Exposed for a caller that captures repeatedly: the room does not change
     between two utterances the way it changes across a session, and re-probing
@@ -251,6 +253,11 @@ val record_and_transcribe :
 
     [noise_floor] reuses an RMS level already measured, skipping calibration.
     Omitted, the room is read from the capture's own opening.
+
+    The thresholds come from [\[voice.capture\]], read at each call. No
+    config at all is the measured defaults. A config that exists and does not
+    parse is refused with its reason before a tone is played or a microphone
+    opened; it does not capture on defaults the operator did not set.
 
     Returns transcription JSON on success, or a [no_audio] status when nothing
     rose above the room — a recording of a room must not reach the endpoint,

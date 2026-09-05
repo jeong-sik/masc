@@ -9,6 +9,7 @@
  (libraries
   masc
   masc_front_door
+  masc.keeper_sandbox_image
   masc.auth
   masc.http_client
   masc_cli_keeper_create

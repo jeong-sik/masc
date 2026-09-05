@@ -180,10 +180,26 @@ roster is per workspace, so neither the installer nor the server invents one.
 Create the first from the TUI's Keepers surface, or with `masc keeper-create`
 against a running server. `--team <preset>` at install time seeds one instead.
 
-**The Docker sandbox image is not built.** A Keeper on `sandbox_profile =
-"docker"` runs in `masc-keeper-sandbox:local`, which is built locally and is
-published to no registry. Without it every turn stops at
-`docker_preflight_failed`. From a source checkout:
+**No sandbox image is built yet.** A Keeper runs each turn inside an image —
+both the `docker` and the `microvm` profiles resolve one — and until it exists
+every turn stops at `docker_preflight_failed`. Build the one a Keeper gets by
+default: bash, ripgrep and git on a Debian base, which is what a turn needs to
+read, search and edit a repository:
+
+```bash
+masc sandbox-image                 # builds masc-sandbox:general
+masc sandbox-image --print         # the recipe, if you would rather read it first
+```
+
+The recipe is embedded in the binary and reaches docker on stdin, so this works
+on a host that never had a checkout. It is deliberately not polyglot: a Keeper
+that has to *build* a project needs that project's toolchain, named per Keeper
+in its TOML as `sandbox_image = "node:22-bookworm"` or whatever the work is.
+
+MASC's own development image — `masc-keeper-sandbox:local`, OCaml plus this
+repository's opam dependencies — is no longer what a Keeper gets by default; a
+Keeper that wants it names it. It is also the one that still needs a checkout,
+because its Dockerfile copies this repository's opam files:
 
 ```bash
 scripts/build-keeper-sandbox-image.sh

@@ -219,16 +219,16 @@ let judge_meta (judge : (Fusion_types.judge_synthesis, Fusion_types.judge_failur
    model과 대칭), [Stage_meta n]이면 stage-n. 프론트는 role로 노드 종류를, identity로 1차
    심판·stage를 구분해 위상 이름 없이 배열 shape만으로 구조를 렌더한다. *)
 let judge_role_projection (role : Fusion_types.judge_role) =
-  let kind, identity =
+  let identity =
     match role with
-    | Fusion_types.Single -> ("single", "single")
-    | Fusion_types.Refine_pass -> ("refine", "refine")
-    | Fusion_types.First id -> ("first", id)
-    | Fusion_types.Meta -> ("meta", "meta")
-    | Fusion_types.Stage_meta n -> ("stage_meta", Printf.sprintf "stage-%d" n)
-    | Fusion_types.Final_meta -> ("final_meta", "final")
+    | Fusion_types.Single -> "single"
+    | Fusion_types.Refine_pass -> "refine"
+    | Fusion_types.First id -> id
+    | Fusion_types.Meta -> "meta"
+    | Fusion_types.Stage_meta n -> Printf.sprintf "stage-%d" n
+    | Fusion_types.Final_meta -> "final"
   in
-  kind, identity
+  Fusion_types.judge_role_kind_label (Fusion_types.judge_role_kind role), identity
 
 let judge_role_fields role : (string * Yojson.Safe.t) list =
   let kind, identity = judge_role_projection role in

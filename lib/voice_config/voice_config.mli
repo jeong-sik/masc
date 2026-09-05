@@ -95,11 +95,10 @@ type capture_config = {
 
           Read as RMS, the same as {!speech_margin_db} and the same as the
           level the meter draws, so what an operator watches and what the
-          decision uses are one number. They were two until 2026-09-04: this
-          margin was applied to a peak because it was handed to sox's silence
-          filter, which reads peak. Peak on room tone moved 1.9x across five
-          probes a minute apart while RMS moved 1.2x, so the threshold derived
-          from it wandered on a room that had not changed.
+          decision uses are one number. Peak is not that number: on room tone
+          it moves 1.9x across five probes a minute apart while RMS moves
+          1.2x, so a threshold derived from it wanders on a room that has not
+          changed.
 
           A capture in which no reading ever clears this is not sent at all.
           Whisper answers a room with a sentence: three captures of an empty
@@ -153,9 +152,9 @@ type gate_config = {
 type t = {
   tts : tts_config option;
       (** [None] when the config has no [tts] section: voice output is not
-          set up. The speak path refuses before any endpoint is asked. It
-          used to be a record whose [default_model] was [""], and that
-          reached providers as [model_id ""]. *)
+          set up. The speak path refuses before any endpoint is asked; a
+          record with [default_model = ""] in its place would reach
+          providers as [model_id ""]. *)
   stt : stt_config option;
       (** [None] when the config has no [stt] section; the transcribe path
           refuses the same way. *)
@@ -202,7 +201,7 @@ val parse_json : Yojson.Safe.t -> (t, string) result
     [default_voice]) and a non-empty [endpoints] list. [capture] is
     optional and defaults per key to {!default_capture}; a key it does not
     know, or a key of the wrong type, is an [Error] naming
-    [root.capture.<key>], the same way an unknown endpoint field is. *)
+    [capture.<key>], the same way an unknown endpoint field is. *)
 
 (** {1 Typed load status} *)
 

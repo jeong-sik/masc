@@ -48,6 +48,16 @@ type external_effect_authorizer =
   continue:(unit -> Keeper_tool_execution.t) ->
   Keeper_tool_execution.t
 
+(* Which way a speak leaves the tool. The Gate reviews it unless the keeper
+   or the voice config exempts it; a config that does not load is a third
+   answer, not "not exempt": no provider can be reached under it, so a review
+   would approve nothing and hide why. That speak goes straight to the bridge,
+   which refuses it with the loader's reason. *)
+type speak_route =
+  | Exempt_from_gate
+  | Reviewed_by_gate
+  | Refused_by_voice_config
+
 let handle_speak_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -160,29 +170,37 @@ let handle_speak_with_outcome
                ; "message", `String err
                ])
       in
-      let is_voice_gate_exempt =
+      let route =
         match meta.always_allow with
-        | Some true -> true
-        | _ ->
+        | Some true -> Exempt_from_gate
+        | Some false | None ->
           (match meta.voice_always_allow with
-           | Some true -> true
-           | _ ->
+           | Some true -> Exempt_from_gate
+           | Some false | None ->
              (match Voice_config.load_detailed () with
-              | Ok vcfg -> Voice_config.voice_gate_always_allow_for_agent vcfg meta.name
-              | Error _ -> false))
+              | Ok vcfg ->
+                if Voice_config.voice_gate_always_allow_for_agent vcfg meta.name
+                then Exempt_from_gate
+                else Reviewed_by_gate
+              | Error Voice_config.Not_configured -> Reviewed_by_gate
+              | Error (Voice_config.Invalid _) -> Refused_by_voice_config))
       in
-      if is_voice_gate_exempt
-      then run_speak ()
-      else
-        (* Synchronous on purpose: the tool schema promises "blocks until
-           playback finishes". The former fire-and-forget queue returned
-           status="queued" immediately, so the model never saw playback
-           complete and re-spoke the same content every sub-turn
-           (2026-06-10 live voice-repeat incident). *)
-        authorize_external_effect
-          ~operation:(command_to_string Speak)
-          ~input:args
-          ~continue:run_speak
+      (match route with
+       | Exempt_from_gate -> run_speak ()
+       (* [Voice_bridge.agent_speak] loads the same config and answers with
+          the loader's reason, so the sentence the model reads is written
+          once, there. *)
+       | Refused_by_voice_config -> run_speak ()
+       | Reviewed_by_gate ->
+         (* Synchronous on purpose: the tool schema promises "blocks until
+            playback finishes". The former fire-and-forget queue returned
+            status="queued" immediately, so the model never saw playback
+            complete and re-spoke the same content every sub-turn
+            (2026-06-10 live voice-repeat incident). *)
+         authorize_external_effect
+           ~operation:(command_to_string Speak)
+           ~input:args
+           ~continue:run_speak)
     | _ ->
       Keeper_tool_execution.success
         (Yojson.Safe.to_string
@@ -190,18 +208,22 @@ let handle_speak_with_outcome
 
 (* Listen opens the user's microphone window, so it never becomes a Gate
    request. An approval cycle outlives the recording window (auto_judge
-   resolution is measured in tens of seconds against a 60s default timeout),
-   and a post-approval replay would open the microphone after the user has
-   stopped talking. Inbound speech is input collection, not an outbound
-   effect; speak is the voice leaf the Gate still reviews. *)
+   resolution is measured in tens of seconds, and a capture the model gave
+   no timeout waits [Voice_bridge.default_capture_timeout_seconds] for
+   speech), and a post-approval replay would open the microphone after the
+   user has stopped talking. Inbound speech is input collection, not an
+   outbound effect; speak is the voice leaf the Gate still reviews. *)
 let handle_listen_with_outcome ~(meta : keeper_meta) ~(args : Yojson.Safe.t) ()
   =
-  let timeout_sec = Safe_ops.json_float ~default:60.0 "timeout_seconds" args in
+  (* No timeout named is the bridge's default, which is the number the tool
+     schema advertises; a second default here would be a second number for
+     the same knob. *)
+  let timeout_sec = Safe_ops.json_float_opt "timeout_seconds" args in
   let language_code = Safe_ops.json_string_opt "language_code" args in
   match
     Voice_bridge.record_and_transcribe
       ~agent_id:meta.name
-      ~timeout_sec
+      ?timeout_sec
       ?language_code
       ()
   with

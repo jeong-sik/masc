@@ -2322,7 +2322,19 @@ let launch_voice_config_load state ~mailbox =
          default, which is what an unset AUDIODEV means. *)
       match Sys.getenv_opt "AUDIODEV" with
       | Some device when String.trim device <> "" -> Some (String.trim device)
-      | Some _ | None -> Masc_tui_audio_device.default_input ()
+      | Some _ | None ->
+        (match Masc_tui_audio_device.default_input () with
+         | Masc_tui_audio_device.Default_input name -> Some name
+         (* The panel shows "unknown" for each of these; the log keeps them
+            apart, because a machine with no input selected and a probe
+            that could not read the report call for different fixes. *)
+         | Masc_tui_audio_device.No_default_input ->
+           Log.Transport.info "voice: the audio report marks no device as the default input";
+           None
+         | Masc_tui_audio_device.Probe_failed reason ->
+           Log.Transport.warn "voice: the default input device could not be read: %s" reason;
+           None
+         | Masc_tui_audio_device.No_probe_on_this_platform -> None)
     in
     enqueue_async mailbox (Voice_config_loaded (config, device))
   in
@@ -8612,9 +8624,9 @@ let launch_voice_capture state ~mailbox ~keeper =
       | Ok (Error e) -> Voice_failed { keeper; error = e }
       | Ok (Ok json) -> (
         (* Read through the bridge's own reader so every status it can write
-           has a row here. The string match this replaced caught a transcriber
-           that answered with empty text under "nothing was heard", which
-           blames the microphone for the endpoint. *)
+           has a row here: a string match folds a transcriber that answered
+           with empty text into "nothing was heard", which blames the
+           microphone for the endpoint. *)
         match Masc.Voice_bridge.capture_outcome_of_json json with
         | Masc.Voice_bridge.Transcript { text; _ } -> Voice_transcribed { keeper; text }
         | Masc.Voice_bridge.Transcriber_returned_nothing { endpoint_id } ->
@@ -8629,7 +8641,9 @@ let launch_voice_capture state ~mailbox ~keeper =
         | Masc.Voice_bridge.Discarded_recording { message } ->
           Voice_discarded { keeper; reason = message }
         | Masc.Voice_bridge.Unrecognized_status status ->
-          Voice_failed { keeper; error = "voice result carried an unknown status: " ^ status })
+          Voice_failed { keeper; error = "voice result carried an unknown status: " ^ status }
+        | Masc.Voice_bridge.Status_absent ->
+          Voice_failed { keeper; error = "voice result carried no status" })
     in
     enqueue_async mailbox msg
   in

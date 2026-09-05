@@ -248,7 +248,8 @@ let test_a_discard_reads_back_as_a_discard () =
   | Bridge.Transcript _
   | Bridge.Transcriber_returned_nothing _
   | Bridge.Nothing_heard _
-  | Bridge.Unrecognized_status _ -> fail "a discard must read back as a discard"
+  | Bridge.Unrecognized_status _
+  | Bridge.Status_absent -> fail "a discard must read back as a discard"
 ;;
 
 let test_an_empty_transcript_names_the_transcriber () =
@@ -262,7 +263,8 @@ let test_an_empty_transcript_names_the_transcriber () =
   | Bridge.Transcript _
   | Bridge.Discarded_recording _
   | Bridge.Nothing_heard _
-  | Bridge.Unrecognized_status _ ->
+  | Bridge.Unrecognized_status _
+  | Bridge.Status_absent ->
     fail "an empty transcript is the transcriber's answer, not a silence"
 ;;
 
@@ -277,7 +279,8 @@ let test_a_transcript_reads_back_trimmed () =
   | Bridge.Transcriber_returned_nothing _
   | Bridge.Discarded_recording _
   | Bridge.Nothing_heard _
-  | Bridge.Unrecognized_status _ -> fail "a transcript must read back as one"
+  | Bridge.Unrecognized_status _
+  | Bridge.Status_absent -> fail "a transcript must read back as one"
 ;;
 
 let test_a_silence_reads_back_with_its_levels () =
@@ -291,18 +294,28 @@ let test_a_silence_reads_back_with_its_levels () =
   | Bridge.Transcript _
   | Bridge.Transcriber_returned_nothing _
   | Bridge.Discarded_recording _
-  | Bridge.Unrecognized_status _ -> fail "a silence must read back as one"
+  | Bridge.Unrecognized_status _
+  | Bridge.Status_absent -> fail "a silence must read back as one"
 ;;
 
 let test_an_unknown_status_is_reported_not_folded () =
-  (match Bridge.capture_outcome_of_json (outcome_json "queued") with
-   | Bridge.Unrecognized_status status -> check string "the status is named" "queued" status
-   | Bridge.Transcript _
-   | Bridge.Transcriber_returned_nothing _
-   | Bridge.Discarded_recording _
-   | Bridge.Nothing_heard _ -> fail "an unknown status must not become any known one");
+  match Bridge.capture_outcome_of_json (outcome_json "queued") with
+  | Bridge.Unrecognized_status status -> check string "the status is named" "queued" status
+  | Bridge.Transcript _
+  | Bridge.Transcriber_returned_nothing _
+  | Bridge.Discarded_recording _
+  | Bridge.Nothing_heard _
+  | Bridge.Status_absent -> fail "an unknown status must not become any known one"
+;;
+
+(* No status at all is not a status with a made-up name: it is a result this
+   module did not write, and the reader says that rather than inventing a
+   word for it or reading the text as a transcript. *)
+let test_a_result_with_no_status_is_its_own_answer () =
   match Bridge.capture_outcome_of_json (`Assoc [ "text", `String "hello" ]) with
-  | Bridge.Unrecognized_status _ -> ()
+  | Bridge.Status_absent -> ()
+  | Bridge.Unrecognized_status status ->
+    failf "a missing status must not be reported as the status %S" status
   | Bridge.Transcript _
   | Bridge.Transcriber_returned_nothing _
   | Bridge.Discarded_recording _
@@ -479,6 +492,10 @@ let () =
             "an unknown status is reported, not folded"
             `Quick
             test_an_unknown_status_is_reported_not_folded
+        ; test_case
+            "a result with no status is its own answer"
+            `Quick
+            test_a_result_with_no_status_is_its_own_answer
         ] )
     ]
 ;;

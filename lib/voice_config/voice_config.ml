@@ -55,11 +55,11 @@ type gate_config = {
   exempt_agents : string list;
 }
 
-(* [tts] and [stt] are [None] when their section is absent. The record they
-   used to default to carried [default_model = ""], and that string reached
-   providers as [model_id ""] and the public config as [available_models
-   [""]]. An absent section is a typed absence here and a refusal at the
-   speak and transcribe paths, not a model with no name. *)
+(* [tts] and [stt] are [None] when their section is absent: a typed absence
+   here and a refusal at the speak and transcribe paths, not a model with no
+   name. A record with [default_model = ""] in its place would reach
+   providers as [model_id ""] and the public config as
+   [available_models [""]]. *)
 type t = {
   tts : tts_config option;
   stt : stt_config option;
@@ -397,7 +397,10 @@ let capture_fields =
   ]
 
 let parse_capture json =
-  let ctx = "root.capture" in
+  (* Field errors name [capture.<key>], the form [tts.<field>] and
+     [stt.<field>] take; the shape error at the end names [root.capture] the
+     way the other sections' shape errors do. *)
+  let ctx = "capture" in
   match Json_util.assoc_member_opt "capture" json with
   | Some (`Assoc _ as capture_json) ->
       let open Result in

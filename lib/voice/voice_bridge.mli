@@ -65,7 +65,7 @@ val agent_speak :
     "no configured TTS endpoint"]) instead of substituting a hardcoded
     model name. A config that loads but has no [tts] section is refused
     here too, before any endpoint is asked: there is no model to send, and
-    the empty string that used to stand in for one reached providers as
+    an empty string standing in for one would reach providers as
     [model_id ""].
 
     This is the only speak path: the former fire-and-forget
@@ -221,6 +221,12 @@ val end_at_operator_stop : stop_request -> level_phase -> capture_end
     says a sentence was thrown away; before any speech it is the same
     [Stopped_before_speech] as the other key. *)
 
+val default_capture_timeout_seconds : float
+(** How long {!record_and_transcribe} runs before it ends on its own when
+    the caller passes no [timeout_sec]. The one number for that knob: the
+    TUI and the keeper listen tool both pass nothing, and the listen tool's
+    schema advertises this value. *)
+
 val record_and_transcribe :
   agent_id:string ->
   ?timeout_sec:float ->
@@ -284,5 +290,9 @@ type capture_outcome =
   | Unrecognized_status of string
       (** A status neither side of this module knows. Reported rather than
           folded into any of the above. *)
+  | Status_absent
+      (** The JSON carries no [status] field at all, so it is not a result
+          this module wrote. Its own answer rather than an unrecognized
+          status with an invented name. *)
 
 val capture_outcome_of_json : Yojson.Safe.t -> capture_outcome

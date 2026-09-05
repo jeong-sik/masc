@@ -24,10 +24,27 @@ One section in `runtime.toml`, read by `Voice_config`:
 
 `[voice.tts]` and `[voice.stt]` are optional. Absent, the speak and transcribe
 paths refuse by name before any endpoint is asked. Present, each must name its
-`default_model`; a blank one fails the load, because it used to reach providers
-as `model_id ""`. `[voice.capture]` is read as strictly as an endpoint is: a key
-it does not know, or a value of the wrong type, fails the load naming
-`root.capture.<key>`, and an absent key takes the measured default.
+`default_model`: a blank one fails the load naming `tts.default_model` or
+`stt.default_model`, since a blank name would reach providers as `model_id ""`.
+`[voice.capture]` is read as strictly as an endpoint is: a key it does not
+know, or a value of the wrong type, fails the load naming `capture.<key>`, and
+an absent key takes the measured default. Field errors name `<section>.<key>`;
+a section that is not a table is named `root.<section>`.
+
+### A load failure is reported per call, not at boot
+
+Nothing reads `[voice]` when the server starts. The first speak, transcribe or
+capture after a change is what refuses, and each says so in its own words:
+
+| Path | Refusal |
+|---|---|
+| speak, transcribe | `voice config load failed: <reason>` |
+| capture (TUI `Ctrl-Y`, `keeper_voice_listen`) | `voice config is invalid, so no capture was started: <reason>` |
+| `keeper_voice_speak` | the speak refusal, as the tool's error message. The Gate is not asked to review a speak that cannot reach a provider |
+| `GET /api/v1/voice/config` | 500 carrying the reason, at any time |
+
+`<reason>` is the loader's sentence and names the key, as in
+`capture.trigger_margin_db must be a number`.
 
 An endpoint declares a `kind`, and the kind decides the request that gets
 built — not a string match on the URL:
@@ -150,13 +167,15 @@ Stopping the recording is a cancel. The cancelled spawn sends sox `SIGTERM`,
 then waits for sox to close its pipes — up to
 `Process_eio.child_exit_grace_seconds` (2 s) — and only then lets `SIGKILL`
 follow. sox flushes and closes the WAV on `SIGTERM`, writing the length into
-the header, so the recording read back is the whole capture.
+the header. The wait is what keeps the tail: a `SIGKILL` in the same instant
+as the `SIGTERM` loses about one stdio buffer, a quarter second of a
+two-second recording (measured 2026-09-04). That the recording read back is
+the whole capture with the wait in place has not been measured on a live
+microphone.
 
-Before the wait existed the `SIGKILL` arrived in the same instant as the
-`SIGTERM`: a recording stopped at two seconds read back as 1.75 s, and the
-missing quarter second matches sox's unflushed stdio buffer. The 1.75 s figure
-was measured 2026-09-04 under that shape; the full-length claim for the current
-shape has not been re-measured on a live microphone.
+`Esc` pays the same wait although the recording is deleted right after:
+`Process_eio` stops a cancelled spawn one way, and a kill that skips the grace
+is not a path it offers.
 
 ### Why the gate exists
 
@@ -185,15 +204,34 @@ fails and `trim -0.4` needs a length that header does not yet have. Reading
 the bytes also keeps a subprocess out of a loop that runs ten times a second;
 it agrees with sox to six decimal places on a finished file.
 
+### What a capture answers
+
+Every capture — `Ctrl-Y` in the TUI and `keeper_voice_listen` — returns one
+JSON object whose `status` is one of three words, spelled in
+`Voice_bridge.capture_status` and read back by `capture_outcome_of_json`:
+
+| `status` | `text` | `message` |
+|---|---|---|
+| `transcribed` | the transcript, with `endpoint_id` naming the endpoint that answered; empty when it answered with nothing | — |
+| `no_audio` | `""` | why nothing was sent: the room level and the level speech had to clear, when they were measured, or that the recorder produced no audio |
+| `discarded` | `""` | the operator discarded a recording that had speech in it |
+
+`/api/v1/voice/transcribe` takes audio it did not record and answers only
+`transcribed`. A reader that meets any other word, or no `status` at all, has
+a result the bridge did not write, and says so rather than reading it as a
+silence.
+
 ## TUI
 
 `Ctrl-Y` in a focused composer row starts a capture, and pressing it again
 stops one, keeping what was said up to that point -- the usual reason to stop
 is that the sentence is finished and the trailing-silence wait is two seconds
-away. `Esc` abandons the recording instead, which is the only place in the
+away. `Esc` discards the recording instead, which is the only place in the
 capture path where the operator says what they want rather than the levels
-inferring it. Either key before any speech aborts and yields nothing, so
-reaching for the wrong one costs nothing. The transcript is appended to the
+inferring it; after speech the result is `discarded`, so the transcript says a
+sentence was thrown away rather than that nothing was heard. Either key before
+any speech aborts and yields `no_audio`, so reaching for the wrong one costs
+nothing. The transcript is appended to the
 draft, not sent. A meter runs in the prompt while it records, because a
 dead input device and a quiet room both end as an empty draft and nothing else
 separates them.

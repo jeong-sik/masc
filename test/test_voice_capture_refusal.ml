@@ -1,25 +1,37 @@
 (** A capture under a voice config that exists and does not parse.
 
-    It used to run on the measured defaults, the same as when no config exists
-    at all. Those are two different situations: no config is voice not set up,
-    and a config that does not parse is a knob the operator set and mistyped,
-    with the capture then running under a dial connected to nothing. The
-    second is refused with its reason before a tone is played or a microphone
-    opened, so an operator turning [\[voice.capture\]] finds out from the
-    capture they just asked for and not from a threshold that did not move. *)
+    No config is voice not set up, and a capture runs on the measured
+    defaults. A config that does not parse is a knob the operator set and
+    mistyped, and a capture run on the defaults under it would be a dial
+    connected to nothing. So it is refused with its reason before a tone is
+    played or a microphone opened, and an operator turning
+    [\[voice.capture\]] finds out from the capture they just asked for, not
+    from a threshold that did not move. *)
 
 open Alcotest
 module Bridge = Masc.Voice_bridge
 
+(* The stdlib has no unsetenv, and [Unix.putenv key ""] leaves the variable
+   set to an empty string, which a reader that tests presence sees as set.
+   The test dependency library carries a C stub for the real call. *)
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
+let restore key prior =
+  match prior with
+  | Some v -> Unix.putenv key v
+  | None -> unsetenv key
+;;
+
 let with_env key value f =
   let prior = Sys.getenv_opt key in
   Unix.putenv key value;
-  Fun.protect
-    ~finally:(fun () ->
-      match prior with
-      | Some v -> Unix.putenv key v
-      | None -> Unix.putenv key "")
-    f
+  Fun.protect ~finally:(fun () -> restore key prior) f
+;;
+
+let without_env key f =
+  let prior = Sys.getenv_opt key in
+  unsetenv key;
+  Fun.protect ~finally:(fun () -> restore key prior) f
 ;;
 
 let with_temp_dir prefix f =
@@ -51,9 +63,17 @@ let write_file path contents =
 ;;
 
 (* MASC_BASE_PATH at a fresh directory, so the only voice config is the one
-   written here. *)
+   written here.
+
+   [Voice_config.load_detailed] reads the [\[voice\]] section of the config
+   root's [runtime.toml] before it looks for the JSON file, and the config
+   root follows MASC_BASE_PATH only while MASC_CONFIG_DIR is unset. A runner
+   whose MASC_CONFIG_DIR carries a [\[voice\]] section would read that
+   config in place of this one, so the variable is cleared for the
+   duration. *)
 let with_explicit_voice_config contents f =
   with_temp_dir "voice-capture-refusal-" @@ fun root ->
+  without_env "MASC_CONFIG_DIR" @@ fun () ->
   with_env "MASC_BASE_PATH" root @@ fun () ->
   with_env "MASC_BASE_PATH_INPUT" root @@ fun () ->
   let path = Voice_config.config_path () in
@@ -82,7 +102,7 @@ let test_a_capture_under_an_invalid_config_is_refused_by_name () =
       check bool "the refusal says the config is invalid" true
         (contains ~needle:"voice config is invalid" message);
       check bool "and names the key that did not parse" true
-        (contains ~needle:"root.capture.trigger_margin_db" message))
+        (contains ~needle:"capture.trigger_margin_db" message))
 ;;
 
 (* The probe a repeating caller takes before its first capture answers the

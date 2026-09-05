@@ -645,8 +645,8 @@ let agent_speak_json
       Error "no configured TTS endpoint"
     | Ok { Voice_config.tts = None; _ } ->
       (* The config loaded and has no [tts] section. Refused here, before any
-         endpoint is asked: there is no model to send, and the empty string
-         this used to send in its place reached providers as model_id "". *)
+         endpoint is asked: there is no model to send, and an empty string in
+         its place would reach providers as model_id "". *)
       Error "voice config has no [tts] section, so TTS is not set up"
     | Ok { Voice_config.tts = Some tts; _ } ->
       let endpoints = available_tts_endpoints ?provider tts in
@@ -820,9 +820,9 @@ let play_tone freq =
 
    No config at all is the measured defaults: that is not an error of the
    config. A config that exists and does not parse is refused with its
-   reason, before a microphone is opened. It used to fall back to the
-   defaults too, which put a capture under a knob the operator had set and
-   mistyped while the dial was connected to nothing. *)
+   reason, before a microphone is opened. Running it on the defaults instead
+   would put the capture under a knob the operator set and mistyped, with
+   the dial connected to nothing. *)
 let capture_config () =
   match Voice_config.load_detailed () with
   | Ok config -> Ok config.Voice_config.capture
@@ -850,7 +850,8 @@ let noise_reduction_amount = 0.21
 let sox_pass_timeout_seconds = 15.0
 
 (* How long a capture may run before it ends on its own, when the caller does
-   not say. *)
+   not say. The keeper listen tool passes nothing when the model names no
+   timeout, and its schema advertises this number. *)
 let default_capture_timeout_seconds = 15.0
 
 (* Every level in the capture path is an RMS amplitude on this scale, and dB
@@ -887,9 +888,8 @@ let measure_noise_floor ~agent_id () =
          | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
          | Unix.WEXITED 0, _ -> (
            (* RMS, and the whole probe rather than its tail: the capture that
-              uses this floor compares RMS against it. They were peak and RMS
-              until 2026-09-04, which made the threshold roughly a decade too
-              high on room tone. *)
+              uses this floor compares RMS against it. A peak floor under an
+              RMS level sits roughly a decade too high on room tone. *)
            match
              Voice_pcm.tail_rms ~window_seconds:calibration_seconds probe
            with
@@ -1171,7 +1171,8 @@ let discarded_json =
 (* The capture result read back as one of the things it can be. This is the
    reader for the JSON {!record_and_transcribe} returns, kept next to the
    writers so the two cannot drift: a status neither knows is reported as
-   such, not folded into "nothing was heard". *)
+   such, and a result with no status at all is its own answer; neither is
+   folded into "nothing was heard". *)
 type capture_outcome =
   | Transcript of
       { text : string
@@ -1181,13 +1182,14 @@ type capture_outcome =
   | Nothing_heard of { message : string }
   | Discarded_recording of { message : string }
   | Unrecognized_status of string
+  | Status_absent
 
 let capture_outcome_of_json json =
   let field name = Json_util.get_string json name in
   let nonempty name = Json_util.get_string_nonempty json name in
   let message ~fallback = Option.value (nonempty "message") ~default:fallback in
   match field "status" with
-  | None -> Unrecognized_status "<absent>"
+  | None -> Status_absent
   | Some raw ->
     (match capture_status_of_string raw with
      | None -> Unrecognized_status raw
@@ -1244,18 +1246,19 @@ let record_and_transcribe
     | Error message -> Error (Printf.sprintf "voice capture has no clock: %s" message)
     | Ok clock ->
       play_tone 880.0;
-      (* The recorder has no end of its own now that the silence filter is
-         gone, so the watcher is what stops it: when the watcher returns,
-         [Fiber.first] cancels the recording. The cancelled spawn sends sox
-         SIGTERM and then waits, up to [Process_eio.child_exit_grace_seconds],
-         for sox to close its pipes -- which it does on exit, after it has
-         written the length into the WAV header. SIGKILL follows only if the
-         grace runs out.
+      (* The recorder has no end of its own, so the watcher is what stops it:
+         when the watcher returns, [Fiber.first] cancels the recording. The
+         cancelled spawn sends sox SIGTERM and then waits, up to
+         [Process_eio.child_exit_grace_seconds], for sox to close its pipes
+         -- which it does on exit, after it has written the length into the
+         WAV header. SIGKILL follows only if the grace runs out.
 
-         The wait is what keeps the tail: sox flushes its output on SIGTERM,
-         and the SIGKILL used to arrive before it could. Measured 2026-09-04
-         under that shape, a recording stopped at two seconds read back as
-         1.75 s -- the missing quarter second is about one stdio buffer.
+         The wait is what keeps the tail: sox flushes about one stdio buffer
+         on SIGTERM, and a SIGKILL in the same instant loses it -- a quarter
+         second of a two-second recording, measured 2026-09-04. A discard
+         pays the same wait although the file is removed right after:
+         [Process_eio] stops a cancelled spawn one way, and a kill that skips
+         the grace is not a path it offers.
 
          The recorder's own arm carries the same deadline so that a watcher
          that somehow never returns cannot leave a microphone open. *)

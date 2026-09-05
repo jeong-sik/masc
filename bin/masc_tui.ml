@@ -11380,9 +11380,10 @@ let toggle_mouse_tracking_key = "\020"
 let toggle_roster_pane_key = "\002"
 
 (* Ctrl-L, beside Ctrl-B: the Activity pane is the side bar on the other
-   edge. It costs the surface 44 columns for the fleet's live feed, and a
-   reader who wants the width back, or the feed beside a chat, toggles it.
-   A letter would not do -- in the composer every letter is text. *)
+   edge. It costs the surface [Masc_tui_acting_pane.pane_cols] columns for
+   the fleet's live feed, and a reader who wants the width back, or the feed
+   beside a chat, toggles it. A letter would not do -- in the composer every
+   letter is text. *)
 let toggle_acting_pane_key = "\012"
 
 let terminal_title_visible_keeper state =

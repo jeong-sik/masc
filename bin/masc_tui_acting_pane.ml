@@ -5,13 +5,17 @@ module Layout = Masc_tui_message_layout
 
    The pane is a column of fleet rows. A row is a border cell, the health
    mark and its gap, a name, a gap, and the reading. Sixteen name cells keep
-   the configured names whole that the roster's window keeps whole; the
-   reading needs room for [▶ network_read · 3 calls · 12.4s]. *)
+   the configured names whole that the roster's window keeps whole. The
+   reading's budget is set by the longest reading a row states in full:
+   [▶ network_read · 3 calls · 12.4s] is 32 cells, and a settled
+   [■ 5 calls · 38.2k tok · 41.0s] or a waiting [? approval · tool_execute]
+   fits inside it. A budget of 24 cut the tool name off every waiting row and
+   the age off every settled one. *)
 let border_cells = 1
 let mark_cells = 2
 let name_cells = 16
 let gap_cells = 1
-let reading_cells = 24
+let reading_cells = 32
 let pane_cols = border_cells + mark_cells + name_cells + gap_cells + reading_cells
 
 (* What the roster pane leaves a surface is the least a surface lays out

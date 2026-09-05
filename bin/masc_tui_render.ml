@@ -1132,11 +1132,21 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
   ; selected =
       Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
   ; approvals =
+      (* Every kind of pending approval the Approvals surface lists, read to
+         the two facts the pane states: whose, and for which tool. *)
       List.map
-        (fun (item : approval_item) ->
-          { Pane.approval_keeper = item.ap_actor
-          ; approval_tool = item.ap_delegated_tool
-          })
+        (fun (row : approval_row) ->
+          match row with
+          | Keeper_tool_row held ->
+              { Pane.approval_keeper = held.kta_keeper; approval_tool = held.kta_tool }
+          | Gate_row pending ->
+              { Pane.approval_keeper = pending.gp_keeper
+              ; approval_tool = pending.gp_display_tool
+              }
+          | Operator_row item ->
+              { Pane.approval_keeper = item.ap_actor
+              ; approval_tool = item.ap_delegated_tool
+              })
         (Masc_tui_types.approval_items state)
   ; entries = state.acting
   }

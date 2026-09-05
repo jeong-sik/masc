@@ -2659,9 +2659,10 @@ type state = {
      list the reader may already know. Hidden is a choice they make, not a
      width the terminal forces, so it survives resizing. *)
   mutable roster_pane_hidden: bool;
-  (* The Activity pane on the right edge costs a surface 44 columns for the
-     fleet's live feed. Same contract as the roster: hidden is the reader's
-     choice and survives a resize; the width is the terminal's. *)
+  (* The Activity pane on the right edge costs a surface
+     [Masc_tui_acting_pane.pane_cols] columns for the fleet's live feed. Same
+     contract as the roster: hidden is the reader's choice and survives a
+     resize; the width is the terminal's. *)
   mutable acting_pane_hidden: bool;
   (* Derived display phase for the selected long name in the narrow roster.
      The main loop advances it only while that roster is visible. *)

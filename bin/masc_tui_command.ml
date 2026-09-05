@@ -71,10 +71,6 @@ let catalog =
     ; args = ""
     ; summary = "open recorded file changes for this keeper"
     }
-  ; { word = "activity"
-    ; args = ""
-    ; summary = "show or hide the Activity pane beside this surface"
-    }
   ; { word = "interrupt"
     ; args = ""
     ; summary = "signal the streaming turn to stop"
@@ -132,6 +128,10 @@ let catalog =
   ; { word = "telemetry"
     ; args = ""
     ; summary = "display multicore engine telemetry, scheduler latency, and fleet health"
+    }
+  ; { word = "activity"
+    ; args = ""
+    ; summary = "show or hide the Activity pane beside this surface"
     }
   ]
 

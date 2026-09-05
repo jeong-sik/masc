@@ -416,3 +416,23 @@ memprof 상위(`try_parse_json`·`measure_message_bytes`·`gate_history_slice`·
 이 창은 앞 둘보다 조용하다(할당 29.7 MB/s, 점유 4.0%). 그래서 p99 는 부하가 오른 창에서 다시 재야 하고, 남는 판정 근거는 꼬리의 모양이다: 100 ms 를 넘는 실행이 없고, 50 ms 를 넘는 것이 4개, 최대가 57 ms 다. main 의 10 ms 이상 실행 46개 중 33개가 `openat` 뒤 최대 57 ms 계산하고 양보하는 한 부류다(파일을 열어 읽고 파싱하는 루프, 아직 귀속 안 됨 — #33403 의 생성 사슬로 잡는다). pool 도메인의 긴 실행은 여전히 `Executor_pool` 작업 하나(최대 511 ms)와 private JSONL 읽기 루프(최대 255 ms)이고 main 의 lag 와 무관하다.
 
 P4g-3(#33401, 스냅샷의 직렬화·해시를 pool 로)은 이 창 뒤에 병합됐고 아직 라이브가 아니다. P4g 의 코드 조각 0~4 는 전부 main 에 있다.
+
+#### 전체 P4g 라이브 (pid 35053, #33401 포함, ready+3.7분, 90초, 14:52Z)
+
+| 항목 | 기준선 | P4g-0·1 | P4g-2·4(조용한 창) | 전체 P4g |
+|---|---|---|---|---|
+| 하네스 lag p99 / max | 153 / 552 ms | 68 / 417 ms | 15.8 / 33.9 ms | 70.8 / 409 ms |
+| main 도메인 점유 | 12.6% | 20.6% | 4.0% | 15.6% |
+| main 의 ≥10 / ≥50 / ≥100 ms 실행 | 109 / 37 / 19 | 244 / 138 / 8 | 46 / 4 / 0 | 191 / 106 / 11 |
+| main 의 최대 실행 | 954 ms | 133 ms | 57 ms | 427 ms |
+| 할당 / STW minor / major | 617 MB/s / 561 / 11.9 | 205 / 263 / 0 | 29.7 / 24 / 0 | 62 / 48 / 0 |
+
+부하가 다시 오른 창에서 꼬리가 돌아왔다. 다만 **부류가 바뀌었다**. 기준선의 긴 실행은 turn 스팬 안에서 `Fiber.yield` 뒤 `openat` 으로 끝나는 턴 조립이었고, 이 창의 긴 실행은 turn 스팬 밖(깊이 0)의 오래 사는 fiber 가 `fstat`·`openat` 사이에서 계산하는 것이다: `openat -> switch` 79회 합 5.0초(최대 141 ms), `fstat -> fstat` 16회(최대 427 ms), `fstat -> Mutex.lock` 3회(최대 156 ms). 같은 창의 main 스레드 40초 샘플(바쁜 13.3%)에서 masc 쪽 상위는 `Dated_jsonl.loop` 4.0% + `load_tail_lines_from_channel` 3.4% + 나머지 `Dated_jsonl` 3%(합 약 10%), `Fs_compat_internal.Atomic_write.save_file_atomic_with_parent_sync` 2.7% + `fsync_path_with` 0.4%, `Keeper_chat_store.parse_line`·`load_all` 0.9%, `Keeper_memory_os_current.read_journal_tail_*` 0.9%, `Keeper_ask_store.load_events` 0.4%, `Keeper_wire_capture.redact_json_strings` 0.3% 이고, 그 아래 공통 프레임은 Yojson 렉서와 `Re` 매칭이다.
+
+P4g 가 겨냥한 턴 조립은 main 에서 사라졌다. 남은 것은 **날짜별 JSONL 저장소의 꼬리 읽기(`in_channel` 로 열어 줄마다 파싱)와 fsync 를 동반한 원자 쓰기가 main 도메인 위에서 도는 것**이고, 이것은 7절의 Phase 2(§7.2 `load_owned_regular_file_*_blocking`·`save_atomic`·durable directory chain)가 가리킨 바로 그 자리다.
+
+#### 다음 — P4h. Dated_jsonl 꼬리 읽기와 원자 쓰기를 main 에서 내린다
+
+- `Dated_jsonl.load_tail_lines_from_channel` 의 호출자는 `telemetry_unified`·`tool_usage_log`·`keeper_transition_audit`·`keeper_status_detail`·`keeper_tool_call_log`·approval `audit`·`eval_calibration`·`audit_log`·chat store·provider input 스냅샷의 dedup 이다. 파일을 열어 꼬리를 읽고 줄마다 JSON 을 파싱한다. 읽기(syscall)는 systhread 로, 파싱은 pool 로, 결과만 fiber 로 돌아온다. 호출자가 원하는 것은 "최근 N 개" 이므로 P4a 처럼 파일마다 커서를 두고 새 줄만 읽는 것이 근본 해결이다.
+- `Fs_compat_internal.Atomic_write.save_file_atomic_with_parent_sync` 는 temp 쓰기·fsync·rename·부모 fsync 를 main fiber 에서 한다. §7.3 의 `Blocking_syscall.t` 로 syscall 만 넘긴다.
+- 판정: 같은 창에서 main 의 `openat -> switch`·`fstat -> fstat` 부류 합계(이번 창 6.4초/90초)와 ≥100 ms 실행 11 → 0.

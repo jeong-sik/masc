@@ -377,14 +377,17 @@ let render_section_latency ~cols (_state : state) : string list =
     else line
   in
   let title =
-    clip
-      (Printf.sprintf "  %s%sTurn Execution Latency Waterfall%s  %s(telemetry tracer)%s"
-         Ansi.bold (Theme.info ()) Ansi.reset (Theme.recede ()) Ansi.reset)
+    Printf.sprintf "  %s%sTurn Execution Latency Waterfall%s  %s(telemetry tracer)%s"
+      Ansi.bold (Theme.info ()) Ansi.reset (Theme.recede ()) Ansi.reset
   in
-  [ title
-  ; "  (turn execution timing waterfall breakdown unavailable — requires backend latency tracer)"
-  ; "  (individual keeper turn latency samples are recorded in Keeper details)"
-  ]
+  (* Every line goes through [clip], not only the title: the second body line
+     is 91 cells and the section contract is one line per row within
+     [inner_width]. *)
+  List.map clip
+    [ title
+    ; "  (turn execution timing waterfall breakdown unavailable — requires backend latency tracer)"
+    ; "  (individual keeper turn latency samples are recorded in Keeper details)"
+    ]
 
 let render_metrics_body ~cols ~budget (state : state)
     ~(push : string -> unit)

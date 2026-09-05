@@ -16,6 +16,19 @@
     to repeat it. *)
 val should_route_read : meta:Keeper_meta_contract.keeper_meta -> bool
 
+(** Translate a runner's [run_outcome] into a read result. A
+    [Transport_failed] is always an [Error]; a [Ran] result applies
+    [ok_exit_codes] to its exit status. Exposed for the differential test that
+    pins the distinction: a down lane must not read as an empty [Ok] on the
+    Grep lane (whose [ok_exit_codes] accepts exit 1). *)
+val classify_read_outcome :
+  lane:string ->
+  endpoint_name:string ->
+  ok_exit_codes:int list ->
+  max_bytes:int ->
+  Masc_exec.Sandbox_target.run_outcome ->
+  (Unix.process_status * string, string) result
+
 (** [container_path_of_host ~config ~meta ~host_path] maps a host-side
     absolute playground path to its selected backend counterpart (container or
     SSH endpoint). Returns [Error _] when [host_path] is not inside the

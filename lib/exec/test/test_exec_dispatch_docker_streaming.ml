@@ -53,7 +53,8 @@ let test_docker_simple_runner_callback_is_live () =
     sleep 0.30;
     Option.iter (fun f -> f "second") on_stdout_chunk;
     Option.iter (fun f -> f "err") on_stderr_chunk;
-    Unix.WEXITED 0, "firstsecond", "err"
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 0; stdout = "firstsecond"; stderr = "err" }
   in
   let docker_sandbox =
     Masc_exec.Sandbox_target.docker ~image:"fake-docker" ~runner ()
@@ -86,14 +87,16 @@ let test_docker_pipeline_runner_callback_is_live () =
     | `Stderr _ -> ()
   in
   let runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
-    Unix.WEXITED 9, "", "simple runner should not be used"
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 9; stdout = ""; stderr = "simple runner should not be used" }
   in
   let pipeline_runner ~on_stdout_chunk ~on_stderr_chunk:_ ~stages =
     assert (List.length stages = 2);
     Option.iter (fun f -> f "pipe-first") on_stdout_chunk;
     sleep 0.30;
     Option.iter (fun f -> f "pipe-second") on_stdout_chunk;
-    Unix.WEXITED 0, "pipe-firstpipe-second", ""
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 0; stdout = "pipe-firstpipe-second"; stderr = "" }
   in
   let docker_sandbox =
     Masc_exec.Sandbox_target.docker
@@ -135,13 +138,18 @@ let test_docker_decomposed_fallback_callback_is_live () =
     | [ "printf"; "mid" ], None ->
         Option.iter (fun f -> f "mid") on_stdout_chunk;
         Option.iter (fun f -> f "stage1-err") on_stderr_chunk;
-        Unix.WEXITED 0, "mid", "stage1-err"
+        Masc_exec.Sandbox_target.Ran
+          { status = Unix.WEXITED 0; stdout = "mid"; stderr = "stage1-err" }
     | [ "cat" ], Some "mid" ->
         Option.iter (fun f -> f "final-first") on_stdout_chunk;
         sleep 0.30;
         Option.iter (fun f -> f "final-second") on_stdout_chunk;
         Option.iter (fun f -> f "stage2-err") on_stderr_chunk;
-        Unix.WEXITED 0, "final-firstfinal-second", "stage2-err"
+        Masc_exec.Sandbox_target.Ran
+          { status = Unix.WEXITED 0
+          ; stdout = "final-firstfinal-second"
+          ; stderr = "stage2-err"
+          }
     | _ -> fail "unexpected decomposed fallback stage"
   in
   let docker_sandbox =
@@ -189,13 +197,15 @@ let test_docker_decomposed_final_redirect_does_not_stream_dropped_stdout () =
     | [ "printf"; "mid" ], None ->
         Option.iter (fun f -> f "mid") on_stdout_chunk;
         Option.iter (fun f -> f "stage1-err") on_stderr_chunk;
-        Unix.WEXITED 0, "mid", "stage1-err"
+        Masc_exec.Sandbox_target.Ran
+          { status = Unix.WEXITED 0; stdout = "mid"; stderr = "stage1-err" }
     | [ "cat" ], Some "mid" ->
         (match on_stdout_chunk with
          | None -> ()
          | Some _ -> fail "redirected final stage received live stdout callback");
         Option.iter (fun f -> f "final-err") on_stderr_chunk;
-        Unix.WEXITED 0, "dropped-final-stdout", "final-err"
+        Masc_exec.Sandbox_target.Ran
+          { status = Unix.WEXITED 0; stdout = "dropped-final-stdout"; stderr = "final-err" }
     | _ -> fail "unexpected redirected decomposed fallback stage"
   in
   let docker_sandbox =
@@ -240,7 +250,8 @@ let test_docker_simple_redirect_does_not_stream_dropped_stdout () =
     (match on_stderr_chunk with
      | None -> ()
      | Some _ -> fail "simple redirected command received live stderr callback");
-    Unix.WEXITED 0, "dropped-simple-stdout", "simple-err"
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 0; stdout = "dropped-simple-stdout"; stderr = "simple-err" }
   in
   let docker_sandbox =
     Masc_exec.Sandbox_target.docker ~image:"fake-docker" ~runner ()
@@ -271,7 +282,8 @@ let test_docker_simple_fd_redirect_replays_stderr_as_stdout () =
     (match on_stderr_chunk with
      | None -> ()
      | Some _ -> fail "simple fd redirect received live stderr callback");
-    Unix.WEXITED 0, "", "redirected-simple-err"
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 0; stdout = ""; stderr = "redirected-simple-err" }
   in
   let docker_sandbox =
     Masc_exec.Sandbox_target.docker ~image:"fake-docker" ~runner ()
@@ -298,7 +310,8 @@ let test_docker_simple_runner_captured_error_is_streamed () =
     | `Stderr chunk -> stderr_chunks := chunk :: !stderr_chunks
   in
   let runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
-    Unix.WEXITED 1, "", "setup-error"
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 1; stdout = ""; stderr = "setup-error" }
   in
   let docker_sandbox =
     Masc_exec.Sandbox_target.docker ~image:"fake-docker" ~runner ()
@@ -321,7 +334,8 @@ let test_docker_simple_runner_replays_unstreamed_stderr () =
   in
   let runner ~on_stdout_chunk ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     Option.iter (fun f -> f "live-out") on_stdout_chunk;
-    Unix.WEXITED 1, "live-out", "buffered-err"
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 1; stdout = "live-out"; stderr = "buffered-err" }
   in
   let docker_sandbox =
     Masc_exec.Sandbox_target.docker ~image:"fake-docker" ~runner ()
@@ -353,7 +367,8 @@ let test_docker_simple_runner_callback_exception_is_not_replayed () =
        try f "live-out" with
        | Failure _ -> ()
        | exn -> raise exn));
-    Unix.WEXITED 0, "live-out", ""
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 0; stdout = "live-out"; stderr = "" }
   in
   let docker_sandbox =
     Masc_exec.Sandbox_target.docker ~image:"fake-docker" ~runner ()
@@ -376,10 +391,12 @@ let test_docker_pipeline_runner_captured_output_is_streamed () =
     | `Stderr chunk -> stderr_chunks := chunk :: !stderr_chunks
   in
   let runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
-    Unix.WEXITED 9, "", "simple runner should not be used"
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 9; stdout = ""; stderr = "simple runner should not be used" }
   in
   let pipeline_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stages:_ =
-    Unix.WEXITED 0, "buffered-out", "buffered-err"
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 0; stdout = "buffered-out"; stderr = "buffered-err" }
   in
   let docker_sandbox =
     Masc_exec.Sandbox_target.docker
@@ -411,7 +428,8 @@ let test_docker_decomposed_timeout_stdout_is_streamed () =
     match argv, stdin_content with
     | [ "printf"; "slow" ], None ->
         Option.iter (fun f -> f "partial") on_stdout_chunk;
-        Unix.WEXITED 124, "partial", "timeout"
+        Masc_exec.Sandbox_target.Ran
+          { status = Unix.WEXITED 124; stdout = "partial"; stderr = "timeout" }
     | _ -> fail "unexpected stage after timeout"
   in
   let docker_sandbox =

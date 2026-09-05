@@ -739,13 +739,14 @@ let test_live_turn_runtime_cat () =
         | _ -> Alcotest.fail "a microvm binding must build a Micro_vm target"
       in
       match
-        runner
-          ~on_stdout_chunk:None
-          ~on_stderr_chunk:None
-          ~stdin_content:None
-          ~argv:[ "sh"; "-c"; "printf hello-from-microvm > probe.txt && cat probe.txt" ]
-          ~env:[||]
-          ~cwd:(Some host_root)
+        Masc_exec.Sandbox_target.status_tuple
+          (runner
+             ~on_stdout_chunk:None
+             ~on_stderr_chunk:None
+             ~stdin_content:None
+             ~argv:[ "sh"; "-c"; "printf hello-from-microvm > probe.txt && cat probe.txt" ]
+             ~env:[||]
+             ~cwd:(Some host_root))
       with
       | Unix.WEXITED 0, out, _ ->
         if not (Astring.String.is_infix ~affix:"hello-from-microvm" out)

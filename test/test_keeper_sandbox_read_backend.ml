@@ -1957,13 +1957,14 @@ let test_typed_guest_target_leaves_image_preflight_to_runtime_creation () =
     | Error error -> Alcotest.fail error.message
     | Ok { target = Masc_exec.Sandbox_target.Docker { runner; _ }; _ } ->
       let status, _stdout, stderr =
-        runner
-          ~on_stdout_chunk:None
-          ~on_stderr_chunk:None
-          ~stdin_content:None
-          ~argv:[ "true" ]
-          ~env:[||]
-          ~cwd:None
+        Masc_exec.Sandbox_target.status_tuple
+          (runner
+             ~on_stdout_chunk:None
+             ~on_stderr_chunk:None
+             ~stdin_content:None
+             ~argv:[ "true" ]
+             ~env:[||]
+             ~cwd:None)
       in
       (match status with
        | Unix.WEXITED 0 -> ()
@@ -2454,6 +2455,57 @@ let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
       Alcotest.(check bool) "relaxed runtime keeps tmpfs mount" true
         (String_util.contains_substring line "/tmp:rw,nosuid,nodev,size=")
 
+(* Differential test ("차등탐지기") for the run_outcome silent-failure fix.
+   A transport failure and grep's real "no match" were both Unix.WEXITED 1,
+   so a down guest/SSH lane read as an empty search result on the Grep lane
+   (ok_exit_codes = [0;1]). run_outcome makes the two distinguishable, and
+   classify_read_outcome must turn a transport failure into an Error even
+   there. *)
+let test_transport_failure_is_error_not_empty () =
+  let outcome =
+    Masc_exec.Sandbox_target.Transport_failed
+      { reason = "remote_ssh_version_error: trailer carries v=2"
+      ; stdout = ""
+      ; stderr = "remote_ssh_version_error"
+      }
+  in
+  match
+    Keeper_sandbox_read_backend.classify_read_outcome ~lane:"microvm_remote"
+      ~endpoint_name:"guest" ~ok_exit_codes:[ 0; 1 ] ~max_bytes:4096 outcome
+  with
+  | Ok _ ->
+    Alcotest.fail
+      "REGRESSION: a down lane read as a successful (empty) result -- the \
+       silent-failure bug the run_outcome type exists to prevent"
+  | Error _ -> ()
+
+let test_real_no_match_is_ok () =
+  let outcome =
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 1; stdout = ""; stderr = "" }
+  in
+  match
+    Keeper_sandbox_read_backend.classify_read_outcome ~lane:"microvm_remote"
+      ~endpoint_name:"guest" ~ok_exit_codes:[ 0; 1 ] ~max_bytes:4096 outcome
+  with
+  | Ok (_, output) -> Alcotest.(check string) "grep no-match empty output" "" output
+  | Error message ->
+    Alcotest.failf "grep real no-match (exit 1) should be Ok, got: %s" message
+
+let test_read_lane_still_rejects_exit_1 () =
+  (* Read's ok_exit_codes is [0] only: a real exit 1 stays an error. The fix
+     must not weaken that. *)
+  let outcome =
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 1; stdout = ""; stderr = "boom" }
+  in
+  match
+    Keeper_sandbox_read_backend.classify_read_outcome ~lane:"microvm_remote"
+      ~endpoint_name:"guest" ~ok_exit_codes:[ 0 ] ~max_bytes:4096 outcome
+  with
+  | Ok _ -> Alcotest.fail "exit 1 must not be ok when ok_exit_codes = [0]"
+  | Error _ -> ()
+
 let run_tests ~clock () =
   Alcotest.run "Keeper_sandbox_read_backend"
     [
@@ -2604,6 +2656,15 @@ let run_tests ~clock () =
         [
           Alcotest.test_case "label args include owner scope" `Quick
             test_sandbox_container_label_args_include_owner_scope;
+        ] );
+      ( "run_outcome classification",
+        [
+          Alcotest.test_case "transport failure is an error, not empty" `Quick
+            test_transport_failure_is_error_not_empty;
+          Alcotest.test_case "grep real no-match stays ok" `Quick
+            test_real_no_match_is_ok;
+          Alcotest.test_case "read lane still rejects exit 1" `Quick
+            test_read_lane_still_rejects_exit_1;
         ] );
     ]
 

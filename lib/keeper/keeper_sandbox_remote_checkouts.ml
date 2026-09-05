@@ -16,11 +16,11 @@ let probe_script =
   {|\
 import os, sys, json, subprocess
 
-catalog_raw = sys.argv[1] if len(sys.argv) > 1 else '[]'
-try:
-    catalog = json.loads(catalog_raw)
-except Exception:
-    catalog = []
+# The three arguments are built by the OCaml side; a malformed one is its
+# defect and ends the probe with a traceback the caller reports.
+catalog = json.loads(sys.argv[1])
+checkout_budget = int(sys.argv[2])
+entry_budget = int(sys.argv[3])
 
 def canon_url(u):
     if not u: return ''
@@ -45,7 +45,9 @@ def inspect_git(path):
         try:
             r = subprocess.run(['git', '-C', path] + list(args), capture_output=True, text=True, timeout=5)
             return r.stdout.strip() if r.returncode == 0 else None
-        except Exception:
+        except (subprocess.TimeoutExpired, OSError):
+            # No git on the endpoint, or one call past its budget: that
+            # field is unavailable, the rest of the row still reports.
             return None
 
     origin = git('config', '--get', 'remote.origin.url')
@@ -96,8 +98,6 @@ root = '.'
 checkouts = []
 queue = ['']
 scanned = 0
-max_scanned = 8192
-max_checkouts = 12
 limit = None
 
 git_root = os.path.join(root, '.git')
@@ -111,7 +111,9 @@ if os.path.exists(git_root):
         **info
     })
 else:
-    while queue and len(checkouts) < max_checkouts and scanned < max_scanned:
+    # Past either budget by one, as the host walk is: the extra find is
+    # what says the budget was exhausted rather than exactly met.
+    while queue and len(checkouts) <= checkout_budget and scanned <= entry_budget:
         rel = queue.pop(0)
         full = os.path.join(root, rel) if rel else root
         scanned += 1
@@ -128,7 +130,7 @@ else:
             continue
         try:
             entries = sorted(os.listdir(full))
-        except Exception:
+        except OSError:
             continue
         for e in entries:
             if e in ('.', '..', '.git'): continue
@@ -137,12 +139,13 @@ else:
                 c_rel = os.path.join(rel, e) if rel else e
                 queue.append(c_rel)
 
-if len(checkouts) >= max_checkouts:
-    limit = {'kind': 'checkout_budget_exhausted', 'budget': max_checkouts}
-elif scanned >= max_scanned:
-    limit = {'kind': 'entry_budget_exhausted', 'scanned': scanned, 'budget': max_scanned}
+if len(checkouts) > checkout_budget:
+    limit = {'kind': 'checkout_budget_exhausted', 'budget': checkout_budget}
+elif scanned > entry_budget:
+    limit = {'kind': 'entry_budget_exhausted', 'scanned': scanned, 'budget': entry_budget}
 
 checkouts.sort(key=lambda c: c['relative_path'])
+checkouts = checkouts[:checkout_budget]
 
 result = {
     'checkouts': checkouts,
@@ -152,57 +155,85 @@ result = {
 print(json.dumps(result))
 |}
 
-let string_member_opt key json =
-  match Yojson.Safe.Util.member key json with
-  | `String s -> Some s
-  | _ -> None
+let ( let* ) = Result.bind
 
-let int_member_opt key json =
-  match Yojson.Safe.Util.member key json with
-  | `Int i -> Some i
-  | _ -> None
+let json_kind : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "a boolean"
+  | `Int _ | `Intlit _ -> "an integer"
+  | `Float _ -> "a number"
+  | `String _ -> "a string"
+  | `List _ -> "a list"
+  | `Assoc _ -> "an object"
 
-let bool_member_opt key json =
-  match Yojson.Safe.Util.member key json with
-  | `Bool b -> Some b
-  | _ -> None
+let wrong_shape key expected json =
+  Error (Printf.sprintf "%s: expected %s, got %s" key expected (json_kind json))
 
-let parse_limit = function
-  | `Assoc fields ->
-    (match List.assoc_opt "kind" fields with
-     | Some (`String "entry_budget_exhausted") ->
-       let scanned =
-         match List.assoc_opt "scanned" fields with
-         | Some (`Int s) -> s
-         | _ -> 0
-       in
-       let budget =
-         match List.assoc_opt "budget" fields with
-         | Some (`Int b) -> b
-         | _ -> 8_192
-       in
-       Some
-         (Keeper_playground_checkouts.Entry_budget_exhausted
-            { scanned; budget })
-     | Some (`String "checkout_budget_exhausted") ->
-       let budget =
-         match List.assoc_opt "budget" fields with
-         | Some (`Int b) -> b
-         | _ -> Keeper_playground_checkouts.max_reported_checkouts
-       in
-       Some (Keeper_playground_checkouts.Checkout_budget_exhausted { budget })
-     | _ -> None)
-  | _ -> None
+let object_fields what : Yojson.Safe.t -> ((string * Yojson.Safe.t) list, string) result
+  = function
+  | `Assoc fields -> Ok fields
+  | other -> wrong_shape what "an object" other
+
+let field key fields = Option.value (List.assoc_opt key fields) ~default:`Null
+
+let string_field key fields =
+  match field key fields with
+  | `String s -> Ok s
+  | other -> wrong_shape key "a string" other
+
+let int_field key fields =
+  match field key fields with
+  | `Int i -> Ok i
+  | other -> wrong_shape key "an integer" other
+
+(* The probe prints [null] for what a git call could not answer. *)
+let optional_string_field key fields =
+  match field key fields with
+  | `String s -> Ok (Some s)
+  | `Null -> Ok None
+  | other -> wrong_shape key "a string or null" other
+
+let optional_int_field key fields =
+  match field key fields with
+  | `Int i -> Ok (Some i)
+  | `Null -> Ok None
+  | other -> wrong_shape key "an integer or null" other
+
+let optional_bool_field key fields =
+  match field key fields with
+  | `Bool b -> Ok (Some b)
+  | `Null -> Ok None
+  | other -> wrong_shape key "a boolean or null" other
+
+(* The two spellings the probe prints for how [.git] is linked. *)
+let git_link_of_string = function
+  | "directory" -> Ok Keeper_playground_checkouts.Git_directory
+  | "pointer_file" -> Ok Keeper_playground_checkouts.Git_pointer_file
+  | other -> Error (Printf.sprintf "git_link: unknown value %S" other)
+
+let parse_limit : Yojson.Safe.t -> (Keeper_playground_checkouts.limit option, string) result
+  = function
+  | `Null -> Ok None
+  | json ->
+    let* fields = object_fields "limit" json in
+    let* kind = string_field "kind" fields in
+    (match kind with
+     | "entry_budget_exhausted" ->
+       let* scanned = int_field "scanned" fields in
+       let* budget = int_field "budget" fields in
+       Ok (Some (Keeper_playground_checkouts.Entry_budget_exhausted { scanned; budget }))
+     | "checkout_budget_exhausted" ->
+       let* budget = int_field "budget" fields in
+       Ok (Some (Keeper_playground_checkouts.Checkout_budget_exhausted { budget }))
+     | other -> Error (Printf.sprintf "limit: unknown kind %S" other))
 
 let parse_checkout ~root json =
-  let open Yojson.Safe.Util in
-  let relative_path = member "relative_path" json |> to_string in
-  let name = member "name" json |> to_string in
-  let git_link_str = member "git_link" json |> to_string in
-  let git_link =
-    if String.equal git_link_str "directory"
-    then Keeper_playground_checkouts.Git_directory
-    else Keeper_playground_checkouts.Git_pointer_file
+  let* fields = object_fields "checkout" json in
+  let* relative_path = string_field "relative_path" fields in
+  let* name = string_field "name" fields in
+  let* git_link =
+    let* raw = string_field "git_link" fields in
+    git_link_of_string raw
   in
   let absolute_path =
     if String.equal relative_path "."
@@ -212,51 +243,67 @@ let parse_checkout ~root json =
   let checkout : Keeper_playground_checkouts.checkout =
     { relative_path; absolute_path; name; git_link }
   in
-  let origin_url = string_member_opt "origin" json in
-  let branch =
-    match string_member_opt "branch" json with
-    | Some b -> Ok b
-    | None -> Error "branch unavailable"
+  let* origin_url = optional_string_field "origin" fields in
+  let* branch =
+    let* branch = optional_string_field "branch" fields in
+    Ok (Option.to_result ~none:"branch unavailable" branch)
   in
-  let head =
-    match string_member_opt "head" json with
-    | Some h -> Ok h
-    | None -> Error "head unavailable"
+  let* head =
+    let* head = optional_string_field "head" fields in
+    Ok (Option.to_result ~none:"head unavailable" head)
   in
-  let dirty =
-    match bool_member_opt "dirty" json, int_member_opt "changed_files" json with
-    | Some d, Some c -> Ok (d, c)
-    | Some d, None -> Ok (d, if d then 1 else 0)
-    | None, _ -> Error "status unavailable"
+  (* Both come from the one status read, so the probe prints both or neither. *)
+  let* dirty =
+    let* dirty = optional_bool_field "dirty" fields in
+    let* changed_files = optional_int_field "changed_files" fields in
+    match dirty, changed_files with
+    | Some dirty, Some changed_files -> Ok (Ok (dirty, changed_files))
+    | None, None -> Ok (Error "status unavailable")
+    | Some _, None | None, Some _ ->
+      Error "dirty and changed_files come from one status read; only one is present"
   in
-  let target_ref = string_member_opt "target_ref" json in
-  let upstream_head = string_member_opt "upstream_head" json in
-  let ahead = int_member_opt "ahead" json in
-  let behind = int_member_opt "behind" json in
-  { checkout
-  ; origin_url
-  ; branch
-  ; head
-  ; dirty
-  ; target_ref
-  ; upstream_head
-  ; ahead
-  ; behind
-  }
+  let* target_ref = optional_string_field "target_ref" fields in
+  let* upstream_head = optional_string_field "upstream_head" fields in
+  let* ahead = optional_int_field "ahead" fields in
+  let* behind = optional_int_field "behind" fields in
+  Ok
+    { checkout
+    ; origin_url
+    ; branch
+    ; head
+    ; dirty
+    ; target_ref
+    ; upstream_head
+    ; ahead
+    ; behind
+    }
 
 let parse_probe_json ~root raw_json =
   match Yojson.Safe.from_string raw_json with
   | exception Yojson.Json_error msg ->
     Error (Printf.sprintf "invalid probe json: %s" msg)
   | json ->
-    let open Yojson.Safe.Util in
-    let checkouts_json =
-      match member "checkouts" json with
-      | `List l -> l
-      | _ -> []
+    let* fields = object_fields "probe output" json in
+    let* checkouts_json =
+      match field "checkouts" fields with
+      | `List rows -> Ok rows
+      | other -> wrong_shape "checkouts" "a list" other
     in
-    let limit = parse_limit (member "limit" json) in
-    let inspections = List.map (parse_checkout ~root) checkouts_json in
+    let* limit = parse_limit (field "limit" fields) in
+    let* inspections =
+      List.fold_left
+        (fun acc (index, row) ->
+           let* acc = acc in
+           let* inspection =
+             parse_checkout ~root row
+             |> Result.map_error (fun detail ->
+                    Printf.sprintf "checkouts[%d]: %s" index detail)
+           in
+           Ok (inspection :: acc))
+        (Ok [])
+        (List.mapi (fun index row -> index, row) checkouts_json)
+      |> Result.map List.rev
+    in
     let found = List.map (fun (i : inspected_checkout) -> i.checkout) inspections in
     let discovery : Keeper_playground_checkouts.discovery =
       match limit with
@@ -302,7 +349,17 @@ let discover_and_inspect
     let root = Keeper_sandbox_remote.remote_keeper_root endpoint in
     let runner = Keeper_sandbox_remote.runner ~timeout_sec endpoint in
     let catalog_arg = catalog_to_json_arg catalog in
-    let argv = [ "python3"; "-c"; probe_script; catalog_arg ] in
+    (* The probe takes both budgets from here so the endpoint walk and the
+       host walk in [Keeper_playground_checkouts] stop at the same numbers. *)
+    let argv =
+      [ "python3"
+      ; "-c"
+      ; probe_script
+      ; catalog_arg
+      ; string_of_int Keeper_playground_checkouts.max_reported_checkouts
+      ; string_of_int Keeper_playground_checkouts.max_scanned_entries
+      ]
+    in
     let status, stdout, stderr =
       runner
         ~on_stdout_chunk:None

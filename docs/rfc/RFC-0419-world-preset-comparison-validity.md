@@ -442,6 +442,26 @@ approval 에서는 물린다. 받은 표가 값인 세계에서는 **남의 표�
 approval arm 의 가장 중요한 판독이다.** 이것도 tribute 에는 대응물이 없다 — 준 표는 up 이든
 down 이든 준 것이라 같은 비대칭이다.
 
+**"받은 표"를 세는 표면이 둘이고 셈법이 다르다.** karma 는 받은 up 표만 센다. 나머지 표면은
+전부 `votes_up - votes_down` 을 `score` 라는 이름으로 준다 —
+`board_tool_adapter/board_tool_handlers.ml:165`, `board_tool_format.ml:115,148`,
+`server_utils.ml:218`, `board_votes.ml:1042`. **다섯 자리다.** 오늘은 down 이 0이라 두 값이
+같지만, keeper 가 down 을 던지는 날부터 갈린다.
+
+파일럿은 **karma 를 주된 값으로 삼고 `score` 를 쓰지 않는다.** down 을 버려서가 아니라 반대다 —
+`score` 는 up 과 down 을 한 숫자로 뭉개서 어느 쪽이 움직였는지 못 읽게 만든다. karma 와
+`votes_down` 을 따로 적으면 둘 다 남는다.
+
+**원장은 replay 가 안 된다.** karma 는 메모리 안 live store 에 조인하므로 글이 지워지면 그
+글이 받은 표가 원장에서 함께 사라진다. 지우는 경로가 둘이다 — `board_votes.ml:691` 이
+`delete_post` 에서 그 글의 vote key 를 `store.vote_log` 에서 걷어내고,
+`board_core_persist.ml:240` 이 TTL 청소에서 고아 vote key 를 걷어낸다. 디스크는 다음 스냅샷에서
+압축된다.
+
+손 조인이 247/247 을 낸 것은 아직 아무것도 안 지워져서다. 며칠짜리 파일럿에서는 **분모가
+도중에 줄 수 있고, 한쪽 arm 만 줄 수도 있다.** 그래서 파일럿 동안 base path 마다 raw
+`board_votes.jsonl` 을 주기적으로 떠 둔다. 스크립트가 아니라 파일 복사다.
+
 **그리고 글에 TTL 을 걸지 않는다.** `board_core_persist.ml:203-213` 의 청소가 대상이 사라진
 표 행을 회수하고 다음 스냅샷에서 디스크를 압축한다. 즉 글이 만료되면 그 글이 받은 표가
 `board_votes.jsonl` 에서 없어진다. `world-approval` 산문이 만료를 소재로 깔아 두었으니
@@ -530,6 +550,11 @@ edgar.a.poe 3, pr-updater 1, msb-probe 1). 주석의 0은 지난 창의 숫자�
 
 남는 것은 비용이다. keeper 는 스키마를 받으러 턴을 한 번 쓴다. 이것은 §5.6 의 null 결과에
 붙일 각주이지 파일럿을 세울 사유가 아니다.
+
+**두 철회에 같은 실수가 들어 있다.** 기전은 원본에서 확인하고 결과는 안 쟀다. `defer_loading`
+의 정의를 읽고 호출 수를 안 셌고, 주석의 측정 창을 현재값으로 읽었다. 결과를 재는 것이 과제인
+문서에서 그랬다. descriptor 주석의 숫자는 **그 창의 스냅샷이지 현재값이 아니다** — 이 라운드에
+검수 두 갈래와 이 문서가 같이 빠졌다.
 
 **성립하는 것 — 프리셋 쪽.**
 

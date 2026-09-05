@@ -267,6 +267,16 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
             (Theme.recede ()) Ansi.reset
             (memory_fact_age_label fact.mf_first_seen)
             (memory_fact_age_label fact.mf_last_seen)
+        ; Printf.sprintf
+            "    %sUse:%s        Retrieved %d · %d day(s) · last %s · Cited %d · Revised from %d"
+            (Theme.recede ()) Ansi.reset
+            fact.mf_events.mfe_retrieved_count
+            fact.mf_events.mfe_retrieved_distinct_days
+            (match fact.mf_events.mfe_last_retrieved_at with
+             | None -> "never"
+             | Some at -> memory_fact_age_label at)
+            fact.mf_events.mfe_cited_count
+            (List.length fact.mf_events.mfe_revised_from)
         ; Printf.sprintf "    %sMemory ID:%s  %s"
             (Theme.recede ()) Ansi.reset fact.mf_memory_id
         ]

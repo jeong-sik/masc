@@ -1285,6 +1285,28 @@ let handle_keeper_get_subroutes state req request reqd =
     else (
       let config = Mcp_server.workspace_config state in
       let keepers_dir = memory_os_keepers_dir config in
+      (* What the keeper did with each fact (RFC-0418): retrievals, citations
+         and revisions, projected from the events sidecar at read time and
+         stored nowhere. A line the reader could not decode is counted, not
+         dropped. *)
+      let event_rows = Keeper_memory_os_events.read ~keepers_dir ~keeper_id:name in
+      let events =
+        List.filter_map
+          (fun (_, row) ->
+             match row with
+             | Ok event -> Some event
+             | Error _ -> None)
+          event_rows
+      in
+      let events_unreadable_lines =
+        List.length
+          (List.filter
+             (fun (_, row) ->
+                match row with
+                | Ok _ -> false
+                | Error _ -> true)
+             event_rows)
+      in
       let fact_json (fact : Keeper_memory_os_types.fact) =
         `Assoc
           [ "claim", `String fact.claim
@@ -1299,6 +1321,11 @@ let handle_keeper_get_subroutes state req request reqd =
           ; "last_seen", `Float fact.last_seen
           ; "memory_id", `String (Keeper_memory_os_types.memory_id fact)
           ; "basis", Keeper_memory_os_types.basis_to_json fact.basis
+          ; ( "events"
+            , Keeper_memory_os_events.summary_to_json
+                (Keeper_memory_os_events.summary_for
+                   ~memory_id:(Keeper_memory_os_types.memory_id fact)
+                   events) )
           ]
       in
       let support_invalidation_json
@@ -1382,6 +1409,7 @@ let handle_keeper_get_subroutes state req request reqd =
            ; "dashboard_surface", `String "/api/v1/keepers/:name/memory-facts"
            ; "ordinary", ordinary
            ; "source_bound", source_bound
+           ; "events_unreadable_lines", `Int events_unreadable_lines
            ])
         reqd)
   else if ends_with "/memory-journal" then

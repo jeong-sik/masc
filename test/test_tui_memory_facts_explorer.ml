@@ -3,13 +3,23 @@ module Types = Masc_tui_types
 module Decode = Masc.Tui_decode
 
 let make_fact ?(category = "general") ?(origin = "chat") ?(first = 100.0)
-    ?(last = 200.0) ~claim id : Decode.memory_fact =
+    ?(last = 200.0) ?(events = Decode.no_memory_fact_events) ~claim id : Decode.memory_fact =
   { mf_claim = claim
   ; mf_category = category
   ; mf_origin = origin
   ; mf_first_seen = first
   ; mf_last_seen = last
   ; mf_memory_id = id
+  ; mf_events = events
+  }
+
+let used ?(retrieved = 0) ?(days = 0) ?last ?(cited = 0) ?(revised_from = []) () :
+  Decode.memory_fact_events =
+  { mfe_retrieved_count = retrieved
+  ; mfe_retrieved_distinct_days = days
+  ; mfe_last_retrieved_at = last
+  ; mfe_cited_count = cited
+  ; mfe_revised_from = revised_from
   }
 
 let make_source_fact ~path ~claim sha : Decode.memory_source_fact =
@@ -162,12 +172,53 @@ let test_sorting_orders () =
     List.map (function Types.Memory_row_fact f -> f.mf_claim | _ -> "") rows_claim
   in
   check (list string) "claim sort" [ "A_high"; "B_newest"; "C_low" ] claims_sorted;
-  (* 4. Cycle sort order: recency -> category -> claim -> recency *)
-  check string "order label recency" "Recency (Newest)" (Types.memory_sort_order_label Types.Sort_recency);
-  let next = Types.next_memory_sort Types.Sort_recency in
-  check string "order label category" "Category (A-Z)" (Types.memory_sort_order_label next);
-  check string "cycle wraps to recency" "Recency (Newest)"
-    (Types.memory_sort_order_label (Types.next_memory_sort (Types.next_memory_sort next)))
+  (* 4. Cycle: recency -> last retrieved -> retrieved count -> category -> claim -> recency *)
+  let labels_from start steps =
+    let rec go order n acc =
+      if n = 0 then List.rev acc
+      else go (Types.next_memory_sort order) (n - 1) (Types.memory_sort_order_label order :: acc)
+    in
+    go start steps []
+  in
+  check (list string) "the cycle visits every order once and wraps"
+    [ "Recency (Newest)"
+    ; "Last retrieved (Newest)"
+    ; "Retrieved (Most)"
+    ; "Category (A-Z)"
+    ; "Claim (A-Z)"
+    ; "Recency (Newest)"
+    ]
+    (labels_from Types.Sort_recency 6)
+;;
+
+(* RFC-0418: the two use-based orders read the record. A fact never retrieved
+   sorts after the retrieved ones, and source and dropped rows, which have no
+   record, stay last in their own recency order. *)
+let test_use_based_sorting () =
+  let state = make_state () in
+  let often = make_fact ~last:100.0 ~claim:"often" ~events:(used ~retrieved:5 ~days:3 ~last:1_000.0 ()) "1" in
+  let latest = make_fact ~last:900.0 ~claim:"latest" ~events:(used ~retrieved:2 ~days:1 ~last:5_000.0 ()) "2" in
+  let never = make_fact ~last:800.0 ~claim:"never" "3" in
+  state.memory_facts <-
+    Some (make_snapshot ~ordinary_facts:[ never; often; latest ]
+            ~source_facts:[ make_source_fact ~path:"docs/x.md" ~claim:"bound" "sha" ]
+            ~invalidations:[]);
+  let claims rows =
+    List.map
+      (function
+        | Types.Memory_row_fact f -> f.Decode.mf_claim
+        | Types.Memory_row_source_fact f -> f.Decode.msf_claim
+        | Types.Memory_row_invalidation f -> f.Decode.mi_reason)
+      rows
+  in
+  state.memory_facts_sort <- Types.Sort_last_retrieved;
+  check (list string) "last retrieved first, never-retrieved next, source last"
+    [ "latest"; "often"; "never"; "bound" ]
+    (claims (Types.memory_fact_rows state));
+  state.memory_facts_sort <- Types.Sort_retrieved_count;
+  check (list string) "most retrieved first, ties and zero by recency, source last"
+    [ "often"; "latest"; "never"; "bound" ]
+    (claims (Types.memory_fact_rows state))
 ;;
 
 let test_search_filtering () =
@@ -203,7 +254,9 @@ let () =
         ; test_case "category filtering isolation" `Quick test_category_filtering_isolation
         ] )
     ; ( "sorting"
-      , [ test_case "sorting orders" `Quick test_sorting_orders ] )
+      , [ test_case "sorting orders" `Quick test_sorting_orders
+        ; test_case "use-based sorting reads the record" `Quick test_use_based_sorting
+        ] )
     ; ( "search"
       , [ test_case "search filtering" `Quick test_search_filtering ] )
     ]

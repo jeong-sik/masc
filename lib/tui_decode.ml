@@ -2240,6 +2240,22 @@ type memory_health_snapshot = {
   mhs_starving_keepers : int;
 }
 
+type memory_fact_events = {
+  mfe_retrieved_count : int;
+  mfe_retrieved_distinct_days : int;
+  mfe_last_retrieved_at : float option;
+  mfe_cited_count : int;
+  mfe_revised_from : string list;
+}
+
+let no_memory_fact_events =
+  { mfe_retrieved_count = 0
+  ; mfe_retrieved_distinct_days = 0
+  ; mfe_last_retrieved_at = None
+  ; mfe_cited_count = 0
+  ; mfe_revised_from = []
+  }
+
 type memory_fact = {
   mf_claim : string;
   mf_category : string;
@@ -2247,6 +2263,7 @@ type memory_fact = {
   mf_first_seen : float;
   mf_last_seen : float;
   mf_memory_id : string;
+  mf_events : memory_fact_events;
 }
 
 type memory_source_fact = {
@@ -4534,6 +4551,22 @@ let decode_memory_health_snapshot json =
     ; mhs_starving_keepers
     }
 
+(* The server computes these from the keeper's memory-events sidecar and
+   never stores them (RFC-0418). This side shows the record as it is. *)
+let decode_memory_fact_events json =
+  let* mfe_retrieved_count = required_int_field json "retrieved_count" in
+  let* mfe_retrieved_distinct_days = required_int_field json "retrieved_distinct_days" in
+  let* mfe_last_retrieved_at = optional_float_field json "last_retrieved_at" in
+  let* mfe_cited_count = required_int_field json "cited_count" in
+  let* mfe_revised_from = require_string_list json "revised_from" in
+  Ok
+    { mfe_retrieved_count
+    ; mfe_retrieved_distinct_days
+    ; mfe_last_retrieved_at
+    ; mfe_cited_count
+    ; mfe_revised_from
+    }
+
 let decode_memory_fact json =
   let* mf_claim = required_string_field json "claim" in
   let* mf_category = required_string_field json "category" in
@@ -4541,6 +4574,8 @@ let decode_memory_fact json =
   let* mf_first_seen = require_float_field json "first_seen" in
   let* mf_last_seen = require_float_field json "last_seen" in
   let* mf_memory_id = required_string_field json "memory_id" in
+  let* events_json = required_object_field json "events" in
+  let* mf_events = decode_memory_fact_events events_json in
   Ok
     { mf_claim
     ; mf_category
@@ -4548,6 +4583,7 @@ let decode_memory_fact json =
     ; mf_first_seen
     ; mf_last_seen
     ; mf_memory_id
+    ; mf_events
     }
 
 let decode_memory_source_fact json =

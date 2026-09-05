@@ -8,6 +8,14 @@ let make_state () =
   Types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
 ;;
 
+let contains needle haystack =
+  let n = String.length needle
+  and h = String.length haystack in
+  let rec go i = i + n <= h && (String.equal (String.sub haystack i n) needle || go (i + 1)) in
+  go 0
+;;
+
+
 (* Two things this had wrong, and CI could see neither: the check here is
    [dune build @check] and runs no tests.
 
@@ -32,6 +40,7 @@ let test_fact_row_line () =
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-1"
+    ; mf_events = Decode.no_memory_fact_events
     }
   in
   let row = Types.Memory_row_fact fact in
@@ -65,6 +74,37 @@ let test_invalidation_row_line () =
   check bool "invalidation row line bounded" true (Layout.display_width line <= 80)
 ;;
 
+(* RFC-0418: the detail names what the keeper did with the fact, straight
+   from the record; nothing is scored. *)
+let test_detail_names_the_use_record () =
+  let fact : Decode.memory_fact =
+    { mf_claim = "the deploy needs assets"
+    ; mf_category = "lesson"
+    ; mf_origin = "authored"
+    ; mf_first_seen = 100.0
+    ; mf_last_seen = 200.0
+    ; mf_memory_id = "mem-1"
+    ; mf_events =
+        { mfe_retrieved_count = 4
+        ; mfe_retrieved_distinct_days = 2
+        ; mfe_last_retrieved_at = Some (Unix.gettimeofday () -. 7200.0)
+        ; mfe_cited_count = 1
+        ; mfe_revised_from = [ "mem-0" ]
+        }
+    }
+  in
+  let lines =
+    Render_memory.memory_fact_detail_lines ~cols:120 (Types.Memory_row_fact fact)
+    |> List.map Masc_tui_theme.strip_sgr
+  in
+  match List.find_opt (fun line -> contains "Use:" line) lines with
+  | None -> fail "the detail has no Use line"
+  | Some line ->
+    check bool "retrieval count and days" true (contains "Retrieved 4 · 2 day(s)" line);
+    check bool "last retrieval as an age" true (contains "last 2h" line);
+    check bool "citations and predecessors" true (contains "Cited 1 · Revised from 1" line)
+;;
+
 let test_detail_lines () =
   let fact : Decode.memory_fact =
     { mf_claim = "Constitution requires evidence for claims"
@@ -73,6 +113,7 @@ let test_detail_lines () =
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-rule-1"
+    ; mf_events = Decode.no_memory_fact_events
     }
   in
   let row = Types.Memory_row_fact fact in
@@ -245,6 +286,7 @@ let test_render_memory_facts_body () =
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-fact-1"
+    ; mf_events = Decode.no_memory_fact_events
     }
   in
   let store : Decode.memory_ordinary_store =
@@ -276,13 +318,6 @@ let test_render_memory_facts_body () =
   check bool "facts body rendered" true (!count > 0 && !count <= 20)
 ;;
 
-let contains needle haystack =
-  let n = String.length needle
-  and h = String.length haystack in
-  let rec go i = i + n <= h && (String.equal (String.sub haystack i n) needle || go (i + 1)) in
-  go 0
-;;
-
 (* The three row kinds and the column header share one grid: badge in cells
    2-13, age right-aligned in cells 15-20, text from cell 22. #33237 removed the
    reinforcement column from fact rows but left its five cells and a "-"
@@ -298,6 +333,7 @@ let test_rows_and_header_share_one_grid () =
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-1"
+    ; mf_events = Decode.no_memory_fact_events
     }
   in
   let sfact : Decode.memory_source_fact =
@@ -362,6 +398,7 @@ let () =
         ; test_case "source_fact_row" `Quick test_source_fact_row_line
         ; test_case "invalidation_row" `Quick test_invalidation_row_line
         ; test_case "rows_and_header_share_one_grid" `Quick test_rows_and_header_share_one_grid
+        ; test_case "detail_names_the_use_record" `Quick test_detail_names_the_use_record
         ] )
     ; ( "detail_lines"
       , [ test_case "detail_lines_bounded" `Quick test_detail_lines

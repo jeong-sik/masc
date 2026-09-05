@@ -273,6 +273,7 @@ let sample_memory_fact ~category ~claim : Tui_decode.memory_fact =
   ; mf_first_seen = 0.
   ; mf_last_seen = 0.
   ; mf_memory_id = claim
+  ; mf_events = Tui_decode.no_memory_fact_events
   }
 
 let memory_state_with_facts () =

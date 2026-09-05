@@ -256,6 +256,27 @@ let test_summary_counts_only_this_fact () =
   check (list string) "revised from both predecessors, once each" [ id_b; id_c ] s.revised_from
 ;;
 
+let test_summary_json_names_every_field () =
+  let s =
+    Events.summary_for ~memory_id:id_a
+      [ retrieved ~at:(10. *. day) "q"; revised ~memory_id:id_b ~at:1. id_a ]
+  in
+  let json = Events.summary_to_json s in
+  let field k =
+    match json with
+    | `Assoc fields -> List.assoc k fields
+    | _ -> fail "summary json is not an object"
+  in
+  check bool "retrieved_count" true (field "retrieved_count" = `Int 1);
+  check bool "retrieved_distinct_days" true (field "retrieved_distinct_days" = `Int 1);
+  check bool "last_retrieved_at is the time" true (field "last_retrieved_at" = `Float (10. *. day));
+  check bool "cited_count" true (field "cited_count" = `Int 0);
+  check bool "revised_from lists the predecessor" true (field "revised_from" = `List [ `String id_b ]);
+  match Events.summary_to_json (Events.summary_for ~memory_id:id_c []) with
+  | `Assoc fields -> check bool "never retrieved is null, not zero" true (List.assoc "last_retrieved_at" fields = `Null)
+  | _ -> fail "summary json is not an object"
+;;
+
 let test_summary_of_an_unused_fact_is_empty () =
   let s = Events.summary_for ~memory_id:id_c [ retrieved ~at:1. "q"; cited ~at:2. "t" ] in
   check int "no retrievals" 0 s.retrieved_count;
@@ -287,6 +308,8 @@ let () =
       , [ test_case "the summary counts only this fact" `Quick test_summary_counts_only_this_fact
         ; test_case "an unused fact has an empty summary" `Quick
             test_summary_of_an_unused_fact_is_empty
+        ; test_case "the summary json names every field" `Quick
+            test_summary_json_names_every_field
         ] )
     ]
 ;;

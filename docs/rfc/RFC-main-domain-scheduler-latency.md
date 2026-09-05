@@ -278,3 +278,73 @@ memprof A(ready+3분) → B(+7분), 240초: **162 MB/s**(`agent_started` 29건, 
 #### GC 파라미터 실험 (8.5 의 "카운터를 본 뒤 결정")
 
 두 단계. 첫째는 설정 오류의 교정이라 변수 하나만 바꾼다: `OCAMLRUNPARAM='s=4M,o=100'` 로 재기동해 모든 도메인이 코드가 의도했던 32 MiB 를 받게 한다(`o=100` 은 부트스트랩이 `OCAMLRUNPARAM` 이 있으면 적용하지 않는 space_overhead 100 을 그대로 두기 위함). 기대: minor/분이 1/10 이하, lag p99 감소. 둘째는 튜닝: `s=32M,o=200`(도메인당 256 MiB, 15개면 3.8 GB; space_overhead 200 으로 major 절반). 코드 쪽 후속: 도메인마다 `Gc.set` 을 부르는 초기화(서빙 도메인 클로저 첫 줄, 풀은 weight 1.0 작업 `domain_count` 개를 latch 로 묶어 도메인마다 하나씩) 를 기본값으로 넣어 환경 변수 없이도 맞게 한다.
+### 8.7 GC 실험 1 과 링 버퍼 실측 — main 도메인을 붙잡는 것은 GC 가 아니라 턴 조립이다 (2026-09-05 13:00Z~13:27Z)
+
+#### GC 실험 1 — 변화 없음
+
+`OCAMLRUNPARAM='s=4M,o=100'` 으로 재기동했다(13:01:56Z, build `9d6cac6551`). 이 빌드는 서빙 도메인을 따로 사이징하지 않는데 `/health` 가 32 MB 를 읽었으므로 환경변수가 새 도메인에 적용됐다. 같은 하네스 두 번:
+
+| | 다섯 번째 재기동(P4e, 워커 2 MB) | 실험 1(모든 도메인 32 MB) |
+|---|---|---|
+| ready+36초: lag p99 / minor/min / alloc | 111 ms / 1,571 / 247 MB/s | 117 ms / 1,790 / 144 MB/s |
+| ready+7분: lag p99 / minor/min / alloc | 98 ms / 1,702 / 139 MB/s | 144 ms / 1,782 / 202 MB/s |
+| memprof A→B 4분 | 162 MB/s, 턴당 1.3 GB | 160 MB/s, major 직행 43%, live 3.08→3.04 GB |
+
+minor heap 을 16배 키워도 STW minor 횟수가 같다. 힙이 차서 도는 것이 아니다. 실험 2(`s=32M,o=200`)는 하지 않는다 — 같은 이유로 움직일 것이 없다. #33360 이 같은 사이징을 코드로 넣었고(제출 경로마다 도메인 진입 시 한 번, 서빙 도메인 포함) 그것으로 충분하다.
+
+#### OCaml 5.5.0 런타임 원문으로 확인한 것
+
+- `/health` 의 `minor_collections` 는 `caml_minor_collections_count` 이고 STW 의 setup 콜백에서 STW 당 한 번 오른다(`runtime/minor_gc.c` `caml_empty_minor_heap_setup`). 하네스의 minor/min 은 STW 횟수 그대로다.
+- 2 KB 를 넘는 블록은 major heap 으로 바로 가고, 도메인당 그 양이 minor heap 의 1/5 를 넘을 때마다 전역 major 슬라이스를 요청한다(`runtime/memory.c` `caml_alloc_shr`). 이것은 모든 도메인이 참여하는 STW 구간이다(`runtime/domain.c` `stw_global_major_slice`). 할당의 43% 가 major 직행이라 이 STW 가 minor STW 만큼 잦다(아래 90초 창: STW 리더 704회 중 minor 325회).
+- 256 워드보다 큰 배열을 젊은 블록으로 채우면(`Array.make`·`Array.of_list`·`Array.init`) 그 자리에서 minor GC 를 강제한다(`runtime/array.c` `caml_uniform_array_make`, 카운터 `EV_C_FORCE_MINOR_MAKE_VECT`). remembered set 임계도 같다(`runtime/minor_gc.c` `realloc_generic_table`).
+- masc 코드에는 `Gc.stat`·`Gc.full_major`·`Gc.compact`·`Domain.spawn` 이 없다. `/health` 는 `Gc.quick_stat` 이다.
+
+#### 링 버퍼 실측
+
+masc 는 runtime events 를 기본으로 켠다(`Masc_runtime_events.start_listener`, `MASC_RUNTIME_EVENTS` 기본 true). 링은 서버 cwd 의 `<pid>.events` 다. stdlib `runtime_events` 와 `eio.runtime_events` 만으로 소비 프로그램 둘을 만들어 붙였다(별도 PR 로 `scripts/harness/perf/` 에 넣는다). 하나는 GC 구간·카운터와 "STW 에 마지막으로 도착한 도메인", 다른 하나는 도메인별 fiber 의 연속 실행 시간과 그 앞뒤 suspend 이유다. Eio 는 링이 켜져 있으면 fiber 전환과 suspend 를 그대로 내보낸다.
+
+90초 창(13:23:26Z~, build `718a0df327`, 같은 창에서 하네스: lag p99 68 ms·max 321 ms, minor/min 66, major/min 6, alloc 77 MB/s):
+
+| GC 구간(15 도메인 합) | 횟수 | 합계 | 평균 | p99 | 최대 |
+|---|---|---|---|---|---|
+| `stw_handler` | 9,856 | 8.7 s | 0.9 ms | 9.4 ms | 19 ms |
+| `minor_leave_barrier` | 4,875 | 6.6 s | 1.3 ms | 9.3 ms | 12.5 ms |
+| `major`(슬라이스) | 9,817 | 2.3 s | 0.24 ms | 5.4 ms | 30 ms |
+| `stw_api_barrier`(리더가 기다린 시간) | 5,055 | 1.9 s | 0.38 ms | 4.3 ms | 14.5 ms |
+
+도메인 하나가 GC 에 쓴 시간은 90초 중 1.3초(1.4%)이고 한 번의 멈춤은 최대 30 ms 다. STW 에 마지막으로 도착한 도메인의 지연은 최대 10 ms. 목록의 맨 위에 오는 `domain_condition_wait`(최대 340 ms)는 GC 가 아니라 systhread 의 `Condition.wait` 다(`runtime/sync.c`). 100 ms 를 넘는 lag 는 GC 로 만들 수 없다.
+
+같은 창의 fiber 실행:
+
+| 도메인 | fiber 실행 | 점유 | ≥10 ms | ≥50 ms | ≥100 ms | 최대 |
+|---|---|---|---|---|---|---|
+| 0(main) | 129,692 | 11.2% | 121 | 48 | 23 | 229 ms |
+| 1~14(pool) | 1.8k~8.2k | 0.7~3.6% | 6~15 | 1~9 | 1~7 | 1,114 ms |
+
+main 도메인에서 가장 긴 실행 여섯 개는 전부 turn 스팬 안의 fiber 가 168~229 ms 계산한 뒤 `openat` 으로 멈춘 것이고, 그 안의 GC 는 17~52 ms 다. 그 fiber 는 직전에 `Fiber.yield` 로 물러났던 것이라(Eio 의 빈 suspend 이유가 그것이다) 턴 코드는 양보를 하긴 하지만 양보 사이에 200 ms 를 계산한다. 다음은 `fstat` 뒤 최대 141 ms 계산하고 다시 `fstat`(파일을 stat 하고 읽어 파싱하는 루프). pool 도메인의 1초짜리 실행은 `Executor_pool` 작업 하나가 통째로 도는 것이라 main 의 lag 와 무관하다.
+
+같은 프로세스의 main 스레드를 macOS `sample` 로 20초(1 ms 간격, 15,706 샘플) 찍었다. 71% 는 `Iomux.Poll.poll`(유휴). 나머지에서 포함 시간이 큰 함수(전체 샘플 대비, 같은 줄의 함수들은 서로 중첩된다):
+
+| 함수 | 비율 |
+|---|---|
+| `Keeper_world_observation_inputs.tasks_with_identities` | 3.0% |
+| `Yojson.Safe.write_string_body` 2.9%, `__ocaml_lex_finish_string_rec` 2.6%, `iter2_aux` 1.5%, `read_json` 1.1% | 직렬화·파싱 |
+| `Bytes.sub` | 2.6% |
+| `Llm_provider.Utf8_sanitize.is_clean` 1.8%, `sanitize` 1.3%, `Inference_utils.sanitize_content_blocks_utf8` 0.7%, `sanitize_message_utf8` 0.4%, `Bytes.get_utf_8_uchar` 0.9% | 히스토리 UTF-8 검사 |
+| `Re.Compile.loop` 1.7%, `make_match_str` 1.7% | 정규식 매칭 |
+| `Keeper_context_core_message_json.message_to_json` 1.5%, `content_block_to_history_json` 1.2%, `content_blocks_to_json` 1.1%, `Api_common.content_block_to_json_with` 1.2% | 히스토리를 JSON 으로 |
+| `Keeper_run_tools_setup`(gate history) | 1.5% |
+| `Otel_runtime_observables.go` | 0.9% |
+
+memprof 상위(`try_parse_json`·`measure_message_bytes`·`gate_history_slice`·`Buffer.resize`·`secret_patterns`)와 같은 자리다. 결론: **main 도메인의 p99 는 턴 조립 — 히스토리 전체의 JSON 재직렬화·UTF-8 재검사·정규식·gate history — 이 main 도메인 위에서 한 번에 200 ms 씩 도는 것**이고, GC 파라미터로는 움직이지 않는다.
+
+#### 다음 — P4g. 턴 조립을 main 도메인에서 내린다
+
+둘을 같이 한다. 둘 다 히스토리가 지금보다 몇 배 커져도 main 의 lag 가 그만큼 늘지 않게 하는 쪽이다.
+
+1. **직렬화와 sanitize 는 메시지가 히스토리에 들어올 때 한 번만.** 지금은 매 턴 전체 히스토리를 다시 JSON 으로 만들고 다시 UTF-8 검사한다. 메시지 레코드에 직렬화 결과를 붙여 두면 턴은 새 메시지 것만 만든다(P4b 2단계의 코덱 왕복 증명이 선행). sanitize 는 쓰기 시점에 한다. 읽을 때마다 검사하는 것은 경계 강제가 아니다.
+2. **턴 조립(요청 본문·redaction·gate history)을 `Domain_pool` 로.** 턴 fiber 는 promise 를 기다리고 main 은 다른 fiber 를 돈다. HTTP 라우트가 `Domain_pool_ref` 로 이미 하는 방식이다. 넘기는 값은 불변 레코드와 문자열이어야 한다(#33353 의 도메인 간 mutex 규칙).
+
+`Fiber.yield` 를 더 자주 넣는 것은 하지 않는다. 계산량은 그대로이고 양보 지점을 손으로 고르는 것이라 히스토리가 커지면 다시 늘어난다.
+
+판정은 같은 90초 창의 fiber 추적으로 한다: main 도메인의 ≥100 ms 실행 23 → 0, ≥50 ms 48 → 한 자리, 하네스 p99 100 ms 대 → 20 ms 아래.

@@ -591,7 +591,20 @@ supports-image-input = true
   })
 
   describe('isReservedRuntimeTomlId', () => {
-    it.each(['providers', 'models', 'runtime', 'system', 'routes', 'profiles', 'web_search'])(
+    it.each([
+      'providers',
+      'models',
+      'runtime',
+      'system',
+      'routes',
+      'profiles',
+      'web_search',
+      'exec',
+      'egress',
+      'skills',
+      'voice',
+      'vision',
+    ])(
       'flags reserved top-level namespace %s',
       id => {
         expect(isReservedRuntimeTomlId(id)).toBe(true)

@@ -1160,6 +1160,28 @@ describe('thread history merge & persistence', () => {
     expect(entries.every(isDefaultVisibleConversationEntry)).toBe(true)
   })
 
+  it('normalizes call_summary from Gate activity wire rows', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'system',
+        content: '',
+        ts: 1_780_000_000,
+        delivery_provenance: {
+          delivery_key: { kind: 'approval_lifecycle', approval_id: 'appr_summary' },
+          transcript_slot: { kind: 'approval_request' },
+        },
+        delivery_provenance_status: 'valid',
+        approval_lifecycle: {
+          approval_id: 'appr_summary',
+          tool_name: 'tool_execute',
+          phase: 'requested',
+          call_summary: 'git log --oneline -8 -- test/dune',
+        },
+      },
+    ])
+    expect(entries[0]?.approvalLifecycle?.callSummary).toBe('git log --oneline -8 -- test/dune')
+  })
+
   it('drops a row that is empty and carries nothing of its own', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       { role: 'system', content: '', ts: 1_780_000_000 },

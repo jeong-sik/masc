@@ -245,4 +245,32 @@ describe('keeper config source projection', () => {
     respond(body({ sandbox_profile: 'docker' }))
     expect((await fetchKeeperConfig('rtprobe')).remote_endpoint).toBeNull()
   })
+
+  it('reads voice_always_allow, and yields null when omitted', async () => {
+    const body = (extra: Record<string, unknown>) => JSON.stringify({
+      name: 'sangsu',
+      config_revision: {
+        manifest: { state: 'sha256', value: 'a'.repeat(64) },
+        runtime_assignment: { state: 'runtime_config_missing' },
+      },
+      max_context_override: null,
+      skills: { names: null },
+      ...extra,
+    })
+    const respond = (payload: string) => vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(payload, {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    respond(body({ voice_always_allow: true }))
+    expect((await fetchKeeperConfig('sangsu')).voice_always_allow).toBe(true)
+
+    respond(body({ voice_always_allow: false }))
+    expect((await fetchKeeperConfig('sangsu')).voice_always_allow).toBe(false)
+
+    respond(body({}))
+    expect((await fetchKeeperConfig('sangsu')).voice_always_allow).toBeNull()
+  })
 })

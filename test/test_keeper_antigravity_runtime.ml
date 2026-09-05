@@ -788,7 +788,13 @@ let test_spawn_failure_is_pre_dispatch () =
                       ~base_path
                       ~goal:"spawn should fail"
                       ~goal_blocks:None
-                      ~system_prompt:""
+                      (* Non-empty on purpose. The keeper mainline refuses a
+                         composed system prompt that comes out blank before
+                         it spawns, so [""] would fail on config here instead
+                         of reaching the spawn failure this case asserts. The
+                         text is a don't-care; only its non-emptiness is
+                         load-bearing. *)
+                      ~system_prompt:"pre-dispatch fixture system prompt"
                       ~tools:[]
                       ~initial_messages:[]
                       ~model_input_projection:None
@@ -821,6 +827,96 @@ let test_spawn_failure_is_pre_dispatch () =
                      bytes -- the reading masc#32995 exists to stop. *)
                   check int
                     "a turn that never prepared reports no input"
+                    0
+                    (List.length !reports))))))
+;;
+
+(* A blank composed system prompt must be refused before the CLI is spawned.
+   [prompt_for_turn] renders the system-instructions section only when the
+   prompt trims non-empty, so a blank one would open the conversation with the
+   goal alone under the CLI's own harness prompt while masc's tool surface
+   stayed projected. The refusal is checked on the typed [InvalidConfig] field
+   rather than a substring of the detail, and against the working CLI fixture:
+   the refusal has to land before spawn, so reaching the fixture here would
+   mean the check ran too late. The transmitted-input reporter must stay
+   silent too -- a refused turn transmits nothing (masc#32995). Same case as
+   the Codex and Claude Code lanes (#33086). *)
+let test_blank_system_prompt_is_refused_not_defaulted () =
+  let base_path = temp_workspace () |> Unix.realpath in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+      Unix.mkdir (Filename.concat base_path ".masc") 0o700;
+      let oauth_source = Filename.concat base_path "operator-oauth-token" in
+      write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
+      let cli_path = fixture_script ~base_path in
+      let runtime_path = Filename.concat base_path "runtime.toml" in
+      write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
+      let runtime_snapshot = Runtime.For_testing.snapshot () in
+      Fun.protect
+        ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+        (fun () ->
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              Eio_context.set_env env;
+              Eio_context.with_test_env
+                ~net:(Eio.Stdenv.net env)
+                ~clock:(Eio.Stdenv.clock env)
+                ~mono_clock:(Eio.Stdenv.mono_clock env)
+                ~sw
+                (fun () ->
+                  Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+                  let config =
+                    match Runtime.get_runtime_by_id "antigravity.gemini" with
+                    | Some
+                        { Runtime.execution =
+                            Runtime_execution.Antigravity_cli config
+                        ; _
+                        } ->
+                      config
+                    | Some _ | None -> fail "Antigravity runtime fixture did not resolve"
+                  in
+                  let reports = ref [] in
+                  let attempt =
+                    Keeper_antigravity_runtime.run
+                      ~pre_tool_rejects:(ref [])
+                      ~runtime_id:"antigravity.gemini"
+                      ~keeper_name:"antigravity-blank-prompt"
+                      ~base_path
+                      ~goal:"the prompt is blank"
+                      ~goal_blocks:None
+                      ~system_prompt:"   "
+                      ~tools:[]
+                      ~initial_messages:[]
+                      ~model_input_projection:None
+                      ~on_transmitted_model_input:
+                        (fun report -> reports := report :: !reports)
+                      ~hooks:None
+                      ~context_injector:None
+                      ~context:None
+                      ~event_bus:None
+                      ~raw_trace:None
+                      ~on_event:None
+                      ~config
+                      ()
+                  in
+                  (match attempt.result with
+                   | Error
+                       (Agent_core.Error.Config
+                          (Agent_core.Error.InvalidConfig { field; _ })) ->
+                     check string "refused field" "system_prompt" field
+                   | Error error ->
+                     fail
+                       ("blank system prompt produced the wrong error: "
+                        ^ Agent_core.Error.to_string error)
+                   | Ok _ -> fail "blank system prompt ran under the client default");
+                  check string
+                    "the refusal is pre-dispatch"
+                    "no_effect_observed"
+                    (Keeper_provider_attempt_effect.to_string
+                       attempt.effect_disposition);
+                  check int
+                    "a refused turn reports no transmitted input"
                     0
                     (List.length !reports))))))
 ;;
@@ -1122,6 +1218,10 @@ let () =
               "spawn failure is pre-dispatch"
               `Quick
               test_spawn_failure_is_pre_dispatch
+          ; test_case
+              "blank system prompt is refused not defaulted"
+              `Quick
+              test_blank_system_prompt_is_refused_not_defaulted
         ] )
     ; ( "prompt capacity"
         , [ test_case

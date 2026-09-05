@@ -200,6 +200,13 @@ val prepare_turn :
 (** [configured_reasoning_effort] seeds the turn params the
     [before_turn_params] hook receives, so a hook can still override it.
 
+    The system prompt is refused when it trims to nothing, after a hook's
+    [system_prompt_override] has been applied, as
+    [InvalidConfig { field = "system_prompt" }]. Every official client runs
+    its own built-in instructions when masc names none, with masc's tool
+    surface still attached, so a blank composition is a configuration defect
+    named here once rather than in each lane (#33165).
+
     The hook's [extra_system_context] is appended as a raw [System] message
     carrying {!Agent_core.Types.Extra_system_context_provenance}. Official
     adapters must keep that message on their provider instruction surface; it

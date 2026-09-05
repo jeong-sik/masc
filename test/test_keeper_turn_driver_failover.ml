@@ -922,6 +922,243 @@ let routed_rows_with_status status manifests =
        && String.equal manifest.status status)
     manifests
 
+let image_count_in_blocks blocks =
+  List.length
+    (List.filter
+       (function
+         | Agent_core.Types.Image _ -> true
+         | _ -> false)
+       blocks)
+
+let image_count_in_messages (messages : Agent_core.Types.message list) =
+  List.fold_left
+    (fun count (entry : Agent_core.Types.message) ->
+       count + image_count_in_blocks entry.content)
+    0
+    messages
+
+let synthetic_image () =
+  Agent_core.Types.image_block
+    ~media_type:"image/png"
+    ~data:(Base64.encode_string "synthetic-image")
+    ()
+
+(* Per-attempt RFC-0265 projection: one image turn projected for the text-only
+   candidate loses its images in the goal and the history and records the
+   degrade against that runtime; projected for the vision candidate it is
+   untouched and records nothing. The view is a property of the runtime being
+   dispatched, not of the lane head. *)
+let test_attempt_input_is_projected_per_runtime () =
+  with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
+    let runtime id =
+      match Runtime.get_runtime_by_id id with
+      | Some runtime -> runtime
+      | None -> Alcotest.failf "missing runtime %s" id
+    in
+    let image = synthetic_image () in
+    let history =
+      [ message
+          ~role:Agent_core.Types.User
+          [ Agent_core.Types.Text "earlier image turn"; image ]
+      ]
+    in
+    let project runtime_id =
+      let events = ref [] in
+      let projected =
+        Driver.For_testing.project_input_for_attempt
+          ~keeper_name:"per-attempt-projection"
+          ~emit_runtime_manifest:(emit_manifest_collector events)
+          ~goal_blocks:(Some [ Agent_core.Types.Text "describe"; image ])
+          ~initial_messages:history
+          ~agent_core_checkpoint:None
+          ~runtime_id
+          (runtime runtime_id)
+      in
+      projected, List.rev !events
+    in
+    let text_view, text_events = project "primary.text_model" in
+    (match text_view.Driver.attempt_goal_blocks with
+     | None -> Alcotest.fail "the degraded goal must stay present"
+     | Some blocks ->
+       Alcotest.(check int)
+         "text-only goal loses the image"
+         0
+         (image_count_in_blocks blocks);
+       Alcotest.(check int)
+         "text-only goal is the text plus the degrade notice"
+         2
+         (List.length blocks));
+    Alcotest.(check int)
+      "text-only history loses the image"
+      0
+      (image_count_in_messages text_view.Driver.attempt_initial_messages);
+    (match text_events with
+     | [ (Runtime_manifest.Runtime_routed, Some "degraded", Some decision) ] ->
+       Alcotest.(check string)
+         "the degrade names the text-only runtime"
+         "primary.text_model"
+         (string_member "degraded_runtime_id" decision)
+     | events ->
+       Alcotest.failf "expected one degraded row, got %d" (List.length events));
+    let vision_view, vision_events = project "lanevision.vision_model" in
+    (match vision_view.Driver.attempt_goal_blocks with
+     | None -> Alcotest.fail "the vision goal must stay present"
+     | Some blocks ->
+       Alcotest.(check int)
+         "vision goal keeps the image"
+         1
+         (image_count_in_blocks blocks);
+       Alcotest.(check int) "vision goal is untouched" 2 (List.length blocks));
+    Alcotest.(check int)
+      "vision history keeps the image"
+      1
+      (image_count_in_messages vision_view.Driver.attempt_initial_messages);
+    Alcotest.(check int)
+      "the vision projection records nothing"
+      0
+      (List.length vision_events))
+
+(* Drives a two-candidate deferred lane through [run_named] on an image turn
+   and records, per dispatched candidate, whether the history the provider
+   request was built from still carried the image. Both endpoints refuse the
+   connection, so each attempt fails at the wire and the walk moves on; under
+   test is the view each candidate was handed before that. The projection
+   runs when Agent Core prepares the request, after the multimodal gate, so a
+   candidate that hit the gate leaves no observation at all. *)
+let run_deferred_lane_with_image ~next_runtime_id ~later_runtime_ids =
+  with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
+    Eio_main.run
+    @@ fun env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    Masc_test_deps.init_eio_clock ~sw env;
+    let manifests = ref [] in
+    let context : Runtime_manifest.turn_context =
+      { manifest_keeper_name = "deferred-per-candidate"
+      ; manifest_trace_id = "deferred-per-candidate-trace"
+      ; manifest_keeper_turn_id = Some 1
+      }
+    in
+    let image = synthetic_image () in
+    let history =
+      [ message
+          ~role:Agent_core.Types.User
+          [ Agent_core.Types.Text "earlier image turn"; image ]
+      ]
+    in
+    let current_attempt = ref None in
+    let observed = ref [] in
+    let deferred_runtime_lane =
+      Driver.For_testing.make_deferred_runtime_lane
+        ~assignment_id:"resilient"
+        ~failed_runtime_id:"previous.test_model"
+        ~next_runtime_id
+        ~later_runtime_ids
+        ~failure:(retryable_network_error "previous cycle failed")
+    in
+    let result =
+      Driver.run_named
+        ~runtime_id:"resilient"
+        ~keeper_name:"deferred-per-candidate"
+        ~base_path:(Filename.get_temp_dir_name ())
+        ~agent_core_tools:[]
+        ~goal:"describe the image"
+        ~goal_blocks:[ Agent_core.Types.Text "describe the image"; image ]
+        ~initial_messages:history
+        ~model_input_projection:(fun messages ->
+          observed :=
+            (!current_attempt, image_count_in_messages messages > 0) :: !observed;
+          Ok messages)
+        ~on_runtime_attempt:(fun attempt ->
+          current_attempt := Some attempt.Driver.runtime_id)
+        ~runtime_manifest_context:context
+        ~runtime_manifest_append:(fun manifest -> manifests := manifest :: !manifests)
+        ~deferred_runtime_lane
+        ~body_timeout_s:0.5
+        ~sw
+        ~net:env#net
+        ()
+    in
+    result, List.rev !observed, !manifests)
+
+let check_deferred_lane_views ~order (result, observed, manifests) =
+  let saw_image runtime_id =
+    match
+      List.filter_map
+        (fun (attempt, has_image) ->
+           match attempt with
+           | Some id when String.equal id runtime_id -> Some has_image
+           | Some _ | None -> None)
+        observed
+    with
+    | [] -> Alcotest.failf "no provider request was built for %s" runtime_id
+    | first :: rest ->
+      if List.for_all (Bool.equal first) rest
+      then first
+      else Alcotest.failf "%s was handed inconsistent views" runtime_id
+  in
+  let first_seen =
+    List.fold_left
+      (fun seen (attempt, _) ->
+         match attempt with
+         | Some id when not (List.mem id seen) -> seen @ [ id ]
+         | Some _ | None -> seen)
+      []
+      observed
+  in
+  Alcotest.(check (list string))
+    "requests were built for the candidates in lane order"
+    order
+    first_seen;
+  Alcotest.(check bool)
+    "the vision candidate keeps the image"
+    true
+    (saw_image "lanevision.vision_model");
+  Alcotest.(check bool)
+    "the text-only candidate loses the image"
+    false
+    (saw_image "primary.text_model");
+  (match routed_rows_with_status "degraded" manifests with
+   | [ manifest ] ->
+     let decision =
+       Runtime_manifest.public_projection_of_decision manifest.decision
+     in
+     Alcotest.(check string)
+       "the one degrade names the text-only candidate"
+       "primary.text_model"
+       (string_member "degraded_runtime_id" decision)
+   | rows -> Alcotest.failf "expected one degraded row, got %d" (List.length rows));
+  match result with
+  | Error
+      (Agent_core.Error.Config
+         (Agent_core.Error.InvalidConfig { field = "multimodal_input"; detail })) ->
+    Alcotest.failf
+      "a candidate hit the multimodal gate instead of its own degrade: %s"
+      detail
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "connection-refused endpoints cannot complete a turn"
+
+(* Order [vision; text-only]: the vision head admits the image, so nothing is
+   stripped for it; when it fails over, the text-only tail must receive its own
+   degraded view rather than the head's images (which hit the multimodal gate
+   #33034 moved the deferred head off). *)
+let test_deferred_lane_vision_then_text_projects_per_candidate () =
+  run_deferred_lane_with_image
+    ~next_runtime_id:"lanevision.vision_model"
+    ~later_runtime_ids:[ "primary.text_model" ]
+  |> check_deferred_lane_views
+       ~order:[ "lanevision.vision_model"; "primary.text_model" ]
+
+(* Order [text-only; vision]: the text-only head is degraded; when it fails
+   over, the vision tail must receive the original image, not the head's
+   stripped view. *)
+let test_deferred_lane_text_then_vision_projects_per_candidate () =
+  run_deferred_lane_with_image
+    ~next_runtime_id:"primary.text_model"
+    ~later_runtime_ids:[ "lanevision.vision_model" ]
+  |> check_deferred_lane_views
+       ~order:[ "primary.text_model"; "lanevision.vision_model" ]
+
 let run_checkpoint_lane_turn ~history_messages ~on_manifests =
   with_runtime_config runtime_toml_checkpoint_lane (fun () ->
     Eio_main.run
@@ -2412,6 +2649,18 @@ let () =
             "run_named media degrade emits typed manifest"
             `Quick
             test_run_named_media_degrade_emits_typed_manifest;
+          Alcotest.test_case
+            "attempt input is projected per runtime"
+            `Quick
+            test_attempt_input_is_projected_per_runtime;
+          Alcotest.test_case
+            "deferred lane vision then text projects per candidate"
+            `Quick
+            test_deferred_lane_vision_then_text_projects_per_candidate;
+          Alcotest.test_case
+            "deferred lane text then vision projects per candidate"
+            `Quick
+            test_deferred_lane_text_then_vision_projects_per_candidate;
           Alcotest.test_case
             "AGENT_CORE checkpoint preserves official-client history"
             `Quick

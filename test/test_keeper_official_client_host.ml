@@ -931,6 +931,65 @@ let prepare messages =
     ~configured_reasoning_effort:None
 ;;
 
+let prepare_prompt ?(hooks = None) system_prompt =
+  Host.prepare_turn
+    ~runtime_label:"Fixture"
+    ~keeper_name:"prompt-fixture"
+    ~turn_count:1
+    ~system_prompt
+    ~tools:[]
+    ~initial_messages:[ msg Agent_core.Types.User "history" ]
+    ~model_input_projection:None
+    ~hooks
+    ~configured_reasoning_effort:None
+;;
+
+(* The refusal is checked on the typed [InvalidConfig] field, not on a
+   substring of the detail. *)
+let check_refused_system_prompt what result =
+  match result with
+  | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; _ })) ->
+    check string (what ^ " names the prompt field") "system_prompt" field
+  | Error error ->
+    fail (what ^ " failed elsewhere: " ^ Agent_core.Error.to_string error)
+  | Ok _ -> fail (what ^ " was admitted")
+;;
+
+let test_blank_system_prompt_is_refused () =
+  check_refused_system_prompt "a whitespace prompt" (prepare_prompt " \n\t ");
+  check_refused_system_prompt "an empty prompt" (prepare_prompt "")
+;;
+
+(* The override is applied before the check, so a hook cannot blank the
+   prompt past it either. *)
+let test_hook_override_to_blank_system_prompt_is_refused () =
+  let hooks =
+    { Agent_core.Hooks.empty with
+      before_turn_params =
+        Some
+          (fun _ ->
+             Agent_core.Hooks.AdjustParams
+               { Agent_core.Hooks.default_turn_params with
+                 system_prompt_override = Some "   "
+               })
+    }
+  in
+  check_refused_system_prompt
+    "a hook override to whitespace"
+    (prepare_prompt ~hooks:(Some hooks) "SYS")
+;;
+
+let test_non_blank_system_prompt_reaches_the_lane_unchanged () =
+  match prepare_prompt "  SYS with edges  " with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok prepared ->
+    check
+      string
+      "the prompt is passed through as given"
+      "  SYS with edges  "
+      prepared.Host.system_prompt
+;;
+
 let test_extra_system_context_keeps_typed_provenance () =
   let initial_messages = [ msg Agent_core.Types.User "history" ] in
   let projected_messages = ref None in
@@ -1697,6 +1756,17 @@ let () =
             "seed reaches the provider whole"
             `Quick
             test_seed_reaches_the_provider_whole
+        ] )
+    ; ( "system prompt refusal (masc#33165)"
+      , [ test_case "a blank prompt is refused" `Quick test_blank_system_prompt_is_refused
+        ; test_case
+            "a hook override to blank is refused"
+            `Quick
+            test_hook_override_to_blank_system_prompt_is_refused
+        ; test_case
+            "a non-blank prompt reaches the lane unchanged"
+            `Quick
+            test_non_blank_system_prompt_reaches_the_lane_unchanged
         ] )
     ; ( "pre_tool_use settles through one gate"
       , [ test_case

@@ -494,6 +494,9 @@ let run_without_lifecycle ~runtime_id ~keeper_name
              ~field:"reasoning_effort"
              "Antigravity effort must be declared by its runtime provider")
     in
+    (* [prompt_for_turn] renders [prepared.system_prompt] as the
+       system-instructions section; [Host.prepare_turn] has already refused a
+       blank one, so the section is always present on a start (#33165). *)
     (* Reported from [prepared.messages], which is post-carrier-append and
        post-window: the admission contract runs inside [Host.prepare_turn], so
        this list is the last shape masc holds before rendering.

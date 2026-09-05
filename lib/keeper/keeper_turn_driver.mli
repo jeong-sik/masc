@@ -89,6 +89,21 @@ type runtime_attempt =
 (** Exact materialized candidate selected immediately before dispatch. Lane
     assignment ids and later runtime-table lookups are not attempt authority. *)
 
+type attempt_input =
+  { attempt_goal_blocks : Agent_core.Types.content_block list option
+  ; attempt_initial_messages : Agent_core.Types.message list
+  ; attempt_agent_core_checkpoint : Agent_core.Checkpoint.t option
+  ; attempt_replay_prefix_projection : Keeper_replay_prefix.projection
+  }
+(** One candidate's dispatch view of the turn input. RFC-0265 media degrade
+    projects the goal, the pre-turn history and the resumed checkpoint against
+    the input capabilities of the runtime being dispatched; the caller's
+    canonical history is never rewritten, and
+    [attempt_replay_prefix_projection] restores a checkpoint taken on the
+    projected prefix back onto it. Decided per attempt inside the lane walk,
+    so two candidates with different capabilities receive different views of
+    the same turn. *)
+
 val run_named :
   runtime_id:string ->
   ?keeper_name:string ->
@@ -279,6 +294,25 @@ module For_testing : sig
 
   val media_degrade_manifest_decision :
     runtime_id:string -> (string * int) list -> Yojson.Safe.t
+
+  val project_input_for_attempt :
+    keeper_name:string ->
+    emit_runtime_manifest:
+      (?status:string ->
+      ?decision:Yojson.Safe.t ->
+      Keeper_runtime_manifest.event_kind ->
+      unit) ->
+    goal_blocks:Agent_core.Types.content_block list option ->
+    initial_messages:Agent_core.Types.message list ->
+    agent_core_checkpoint:Agent_core.Checkpoint.t option ->
+    runtime_id:string ->
+    Runtime.t ->
+    attempt_input
+  (** The per-attempt RFC-0265 decision for one resolved candidate: unchanged
+      when the runtime admits the turn's modalities, otherwise the stripped
+      view plus the degraded manifest row emitted through
+      [emit_runtime_manifest]. [Reroute] has no producer here because the
+      decision is taken with no reroute candidates. *)
 
   val attempt_inference_policy :
     runtime_id:string ->

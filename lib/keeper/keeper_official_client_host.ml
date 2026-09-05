@@ -453,6 +453,25 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
   let system_prompt =
     Option.value turn_params.system_prompt_override ~default:system_prompt
   in
+  (* Every official client runs its own built-in instructions when masc names
+     none: Codex omits developerInstructions, Claude Code has taken its
+     coding-agent prompt since #33072, Antigravity renders the goal alone. A
+     blank composition would run the turn under that vendor default with
+     masc's tool surface still attached, a failure that looks like it is
+     working. It is refused here, once, after a hook override has been
+     applied. A check inside a lane, on the text it has already joined with
+     its own notes, cannot see a blank keeper prompt behind them: Codex's
+     default posture note is never blank (#33165). *)
+  let* () =
+    match String_util.trim_nonempty system_prompt with
+    | Some _ -> Ok ()
+    | None ->
+      Error
+        (config_error
+           ~field:"system_prompt"
+           "the composed keeper system prompt is empty; the turn would run \
+            under the client's built-in instructions")
+  in
   (* No preemptive cut of the seed. The provider owns its own window and says
      so in a typed terminal — glm code 1261, Codex "Context overflow" — which
      [Keeper_turn_driver_try_provider.context_overflow_shrink_sequence] already

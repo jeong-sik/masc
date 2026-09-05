@@ -1415,6 +1415,59 @@ let test_volume_probe_refuses_to_guess () =
        (M.classify_volume_probe ~volume_name:"v" ~inspect:(wexited 3 "" "") ~listing:None))
 ;;
 
+(* Adoption is what makes a guest cheap: one VM per keeper, reused across
+   turns. For a policy guest that reuse is only sound while the proxy port in
+   its environment is still the one the lane holds, and the two have separate
+   lifetimes -- so these say when a guest must be replaced instead. *)
+let route = Masc.Keeper_turn_sandbox_runtime.For_testing.policy_route_holds
+
+(* The lane's proxy fiber raised and the port was cleared, but the keeper's
+   lane ran on and the guest booted under it is still up. Adopting it points
+   the keeper at a port nothing holds, and nothing reports that: the guest's
+   connections fail at the socket, so the keeper reads as idle. *)
+let test_a_policy_guest_is_not_adopted_once_its_listener_is_gone () =
+  Alcotest.(check bool)
+    "no listener, no adoption"
+    false
+    (route ~network_mode:Profile.Network_policy ~booted_port:(Some 51_022)
+       ~bound_port:None)
+;;
+
+(* The lane restarted inside this process and rebound. The registry entry is
+   the same one, so the guest is still "ours" by every other test -- but the
+   port moved and its environment did not. *)
+let test_a_rebound_lane_replaces_the_guest_it_no_longer_matches () =
+  Alcotest.(check bool)
+    "a moved port is a different route"
+    false
+    (route ~network_mode:Profile.Network_policy ~booted_port:(Some 51_022)
+       ~bound_port:(Some 51_099));
+  Alcotest.(check bool)
+    "the same port is the same route"
+    true
+    (route ~network_mode:Profile.Network_policy ~booted_port:(Some 51_022)
+       ~bound_port:(Some 51_022));
+  (* A guest this process did not boot has no recorded port. It may be intact,
+     but what it was told is unknown, and unknown is not adoptable. *)
+  Alcotest.(check bool)
+    "an unrecorded guest is not adoptable"
+    false
+    (route ~network_mode:Profile.Network_policy ~booted_port:None
+       ~bound_port:(Some 51_022))
+;;
+
+(* The other two modes carry no proxy address, so there is no route to go
+   stale and this question must not cost them their adoption. *)
+let test_the_other_modes_are_untouched_by_the_route_check () =
+  List.iter
+    (fun mode ->
+       Alcotest.(check bool)
+         (Profile.network_mode_to_string mode ^ " adopts regardless")
+         true
+         (route ~network_mode:mode ~booted_port:None ~bound_port:None))
+    [ Profile.Network_none; Profile.Network_inherit ]
+;;
+
 let () =
   Alcotest.run
     "keeper_sandbox_microvm"
@@ -1445,6 +1498,14 @@ let () =
             test_leaves_guests_it_cannot_account_for
         ; Alcotest.test_case "skips listing when CLI is unavailable" `Quick
             test_sweep_skips_listing_when_cli_is_unavailable
+        ] )
+    ; ( "adoption"
+      , [ Alcotest.test_case "a policy guest is not adopted once its listener is gone"
+            `Quick test_a_policy_guest_is_not_adopted_once_its_listener_is_gone
+        ; Alcotest.test_case "a rebound lane replaces the guest it no longer matches"
+            `Quick test_a_rebound_lane_replaces_the_guest_it_no_longer_matches
+        ; Alcotest.test_case "the other modes are untouched by the route check"
+            `Quick test_the_other_modes_are_untouched_by_the_route_check
         ] )
     ; ( "refusal"
       , [ Alcotest.test_case "docker shell entrypoint refuses" `Quick

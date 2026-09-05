@@ -91,6 +91,17 @@ module For_testing : sig
   (** The stable per-keeper container name, so the naming contract (stable
       across turns, split by network mode, bound to the base path) is
       testable without a docker daemon. *)
+
+  val policy_route_holds
+    :  network_mode:Keeper_types_profile_sandbox.network_mode
+    -> booted_port:int option
+    -> bound_port:int option
+    -> bool
+  (** Whether a running guest may be adopted rather than replaced, on the
+      question of its network route alone. A [Network_policy] guest carries
+      the lane's proxy port in its environment; the port is ephemeral and the
+      guest is not, so the two can part. Answering this without a guest or a
+      registry keeps the rule testable. *)
 end
 
 val container_path_of_host :

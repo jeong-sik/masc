@@ -153,6 +153,26 @@ let test_a_refusal_never_echoes_the_offending_byte_raw () =
   check bool "and not present raw" false (String.exists (Char.equal '\x00') refused)
 ;;
 
+(* An admitted destination that will not connect is not the client's fault.
+   403 says "you may not"; 502 says "what you asked for did not answer", and
+   answering the second with the first sends an operator to the allowlist for
+   a problem that is not there. *)
+let test_an_unreachable_upstream_is_502_not_403 () =
+  let refusal =
+    D.Upstream_unreachable
+      { host = "api.github.com"; port = 443; detail = "Connection refused" }
+  in
+  let response = D.response_of_decision (D.Refused refusal) in
+  check bool "the status is 502" true
+    (String.length response >= 12
+     && String.equal (String.sub response 0 12) "HTTP/1.1 502");
+  check bool "and it names the destination, not the request" true
+    (String_util.contains_substring response "api.github.com:443");
+  check bool "a policy refusal is still 403" true
+    (let policy = D.response_of_decision (decide [ "github.com" ] "CONNECT evil.com:443 HTTP/1.1") in
+     String.length policy >= 12 && String.equal (String.sub policy 0 12) "HTTP/1.1 403")
+;;
+
 let () =
   run "egress_proxy_decision"
     [ ( "allowlist"
@@ -172,7 +192,9 @@ let () =
             test_a_refusal_never_echoes_the_offending_byte_raw
         ] )
     ; ( "protocol"
-      , [ test_case "the port comes from the rule" `Quick test_the_port_comes_from_the_rule
+      , [ test_case "an unreachable upstream is 502 not 403" `Quick
+            test_an_unreachable_upstream_is_502_not_403
+        ; test_case "the port comes from the rule" `Quick test_the_port_comes_from_the_rule
         ; test_case "a wrong port is not an unlisted host" `Quick
             test_a_wrong_port_is_not_an_unlisted_host
         ; test_case "the request line is parsed strictly" `Quick

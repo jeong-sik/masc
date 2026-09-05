@@ -555,8 +555,17 @@ let fork_egress_proxy
                     (List.length initial_rules);
                   Eio.Fiber.first
                     (fun () ->
+                       (* Its own switch, not [proxy_sw]. [serve] forks each
+                          connection onto the switch it is given, so handing
+                          it the outer one left open tunnels alive after
+                          [stop] cancelled the accept loop -- and the outer
+                          [Switch.run] then joined on them, so a keeper's
+                          shutdown waited on a connection to somewhere else.
+                          Cancelling this branch cancels this switch, which
+                          cancels the handlers with it. *)
+                       Eio.Switch.run (fun serve_sw ->
                        Egress_proxy_net.serve
-                         ~sw:proxy_sw
+                         ~sw:serve_sw
                          ~net
                          ~clock:ctx.clock
                          ~keeper_name
@@ -567,7 +576,7 @@ let fork_egress_proxy
                              event.Egress_proxy_net.keeper_name
                              (Egress_proxy_net.outcome_to_string event.Egress_proxy_net.outcome))
                          ~socket
-                         ~read_timeout_s:Keeper_egress_lane.request_line_read_timeout_s)
+                         ~read_timeout_s:Keeper_egress_lane.request_line_read_timeout_s))
                     (fun () -> Eio.Promise.await stop)))
          with
          | Eio.Cancel.Cancelled _ -> ()

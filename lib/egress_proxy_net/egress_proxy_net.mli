@@ -79,8 +79,13 @@ val resolve_upstream
   :  net:_ Eio.Net.t
   -> host:Egress_host.t
   -> port:int
-  -> (Eio.Net.Sockaddr.stream, string) result
-(** Resolve an admitted destination. Exposed because this is the only place
-    a name becomes an address, and that ordering -- resolve after the
-    allowlist, never before -- is what keeps the matcher and the resolver
-    from reading different names. *)
+  -> (Eio.Net.Sockaddr.stream list, string) result
+(** Every address an admitted destination resolves to, in resolver order.
+    Exposed because this is the only place a name becomes an address, and
+    that ordering -- resolve after the allowlist, never before -- is what
+    keeps the matcher and the resolver from reading different names.
+
+    All of them, not the first: a host whose first record is unreachable (an
+    IPv6 address with no IPv6 route, a down machine in a round robin) would
+    otherwise fail as if the destination were gone while the next address
+    would have answered. *)

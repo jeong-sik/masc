@@ -18,6 +18,7 @@ module Keeper_sandbox_runtime = Masc.Keeper_sandbox_runtime
 module Keeper_sandbox_remote_lane = Masc.Keeper_sandbox_remote_lane
 module Keeper_sandbox_remote = Masc.Keeper_sandbox_remote
 module Keeper_sandbox_microvm = Masc.Keeper_sandbox_microvm
+module Keeper_microvm_backend = Masc.Keeper_microvm_backend
 module Fd_accountant = Fd_accountant
 module Env_config_keeper = Env_config_keeper
 
@@ -408,10 +409,14 @@ let test_run_command_rejects_factory_profile_drift_in_both_directions () =
    guest outlives the turn that booted it. What the old test was really
    protecting -- that a microvm read never quietly becomes a Docker or host
    read -- is asserted here on the route and the endpoint instead. *)
-let expected_guest_name ~config ~keeper_name =
+(* Three pieces, matching the name the runtime builds: the network mode sits
+   between the keeper and the base-path hash so a guest booted under one mode
+   is never adopted under another. *)
+let expected_guest_name ~config ~keeper_name ~network_mode =
   Printf.sprintf
-    "masc-keeper-vm-%s-%s"
+    "masc-keeper-vm-%s-%s-%s"
     keeper_name
+    (Keeper_types_profile_sandbox.network_mode_to_string network_mode)
     (String.sub
        (Keeper_sandbox_runtime.base_path_hash
           (config : Workspace.config).base_path)
@@ -443,7 +448,13 @@ let test_microvm_without_a_turn_factory_routes_to_the_attached_guest () =
 let test_attached_guest_endpoint_names_the_derived_guest () =
   let base, config, docker = setup_config "read-microvm-attach" in
   let microvm =
-    { docker with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm }
+    (* A backend, because attaching means building that runtime's exec argv.
+       This fixture predates the field and had been declaring a microvm
+       keeper with no runtime under it, which the endpoint now refuses. *)
+    { docker with
+      sandbox_profile = Keeper_types_profile_sandbox.Micro_vm
+    ; microvm_backend = Some Keeper_microvm_backend.Apple_container
+    }
   in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
@@ -453,7 +464,10 @@ let test_attached_guest_endpoint_names_the_derived_guest () =
   | Ok endpoint ->
     Alcotest.(check string)
       "the guest name comes from the keeper and the base path"
-      (expected_guest_name ~config ~keeper_name:microvm.name)
+      (expected_guest_name
+         ~config
+         ~keeper_name:microvm.name
+         ~network_mode:microvm.network_mode)
       (Keeper_sandbox_remote.name endpoint);
     (match Keeper_sandbox_remote.transport endpoint with
      | Keeper_sandbox_remote.Container_exec _ -> ()

@@ -6,6 +6,11 @@ type refusal =
       ; port : int
       ; allowed : int list
       }
+  | Upstream_unreachable of
+      { host : string
+      ; port : int
+      ; detail : string
+      }
   | Not_in_allowlist of { host : string }
 
 let refusal_to_string = function
@@ -19,6 +24,8 @@ let refusal_to_string = function
       host
       (String.concat ", " (List.map string_of_int allowed))
       port
+  | Upstream_unreachable { host; port; detail } ->
+    Printf.sprintf "%s:%d is allowed and did not answer: %s" host port detail
   | Not_in_allowlist { host } -> Printf.sprintf "%s is not in this keeper's allowlist" host
 ;;
 
@@ -102,17 +109,29 @@ let decide ~rules ~request_line =
             | allowed -> Refused (Port_not_allowed { host = host_text; port; allowed }))))
 ;;
 
+(* 403 says the client asked for something it may not have; 502 says the
+   request was fine and what is behind the proxy did not answer. An admitted
+   destination that will not connect is the second, and answering it with the
+   first sends an operator to the allowlist for a problem that is not
+   there. *)
+let status_line_of_refusal = function
+  | Upstream_unreachable _ -> "HTTP/1.1 502 Bad Gateway"
+  | Malformed_request _ | Unparsable_host _ | Port_not_allowed _ | Not_in_allowlist _ ->
+    "HTTP/1.1 403 Forbidden"
+;;
+
 let response_of_decision = function
   | Admitted _ -> "HTTP/1.1 200 Connection Established\r\n\r\n"
   | Refused refusal ->
     let body = refusal_to_string refusal ^ "\n" in
     Printf.sprintf
-      "HTTP/1.1 403 Forbidden\r\n\
+      "%s\r\n\
        Content-Type: text/plain; charset=utf-8\r\n\
        Content-Length: %d\r\n\
        Connection: close\r\n\
        \r\n\
        %s"
+      (status_line_of_refusal refusal)
       (String.length body)
       body
 ;;

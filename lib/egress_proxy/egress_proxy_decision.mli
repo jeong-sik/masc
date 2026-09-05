@@ -23,6 +23,17 @@ type refusal =
           because this refusal is an operator's rule missing a port and
           reporting it as an unlisted host sends them looking for the wrong
           mistake. *)
+  | Upstream_unreachable of
+      { host : string
+      ; port : int
+      ; detail : string
+      }
+      (** The allowlist admitted the destination and the connection to it did
+          not open. Not a refusal by policy, and kept apart from one for that
+          reason: answering an admitted request with {!Malformed_request}
+          told a client its own request was wrong when the request was fine
+          and the network was not, which sends an operator to the allowlist
+          for a problem that is not there. *)
   | Not_in_allowlist of { host : string }
       (** The destination parsed and no rule names it at all. [host] is the
           normalized spelling, safe to record. *)

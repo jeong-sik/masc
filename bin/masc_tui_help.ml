@@ -14,17 +14,20 @@ let rec zip left right =
   | [], r :: rt -> ("", r) :: zip [] rt
   | l :: lt, r :: rt -> (l, r) :: zip lt rt
 
-let sheet ~cols lines =
-  if cols < two_column_minimum_cols then lines
-  else begin
-    (* The split point keeps groups readable by cutting at the overall middle
-       rather than balancing exact heights. *)
-    let half = (List.length lines + 1) / 2 in
-    let left = List.filteri (fun i _ -> i < half) lines in
-    let right = List.filteri (fun i _ -> i >= half) lines in
-    let width = column_width ~cols in
-    List.map
-      (fun (l, r) ->
-        Message_layout.fit_width l width ^ "  " ^ Message_layout.fit_width r width)
-      (zip left right)
-  end
+let sheet ?(header = []) ~cols lines =
+  let body =
+    if cols < two_column_minimum_cols then lines
+    else begin
+      (* The split point keeps groups readable by cutting at the overall middle
+         rather than balancing exact heights. *)
+      let half = (List.length lines + 1) / 2 in
+      let left = List.filteri (fun i _ -> i < half) lines in
+      let right = List.filteri (fun i _ -> i >= half) lines in
+      let width = column_width ~cols in
+      List.map
+        (fun (l, r) ->
+          Message_layout.fit_width l width ^ "  " ^ Message_layout.fit_width r width)
+        (zip left right)
+    end
+  in
+  header @ body

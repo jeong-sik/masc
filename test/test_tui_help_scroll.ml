@@ -11,6 +11,7 @@
 
 let check_int = Alcotest.(check int)
 let check_bool = Alcotest.(check bool)
+let check_string = Alcotest.(check string)
 
 (* Stand-ins for the real sections: the fold cares about how many lines there
    are, not what they say. *)
@@ -29,6 +30,13 @@ let test_narrow_terminal_draws_one_line_per_row () =
   let sheet = Masc_tui_help.sheet ~cols:80 (lines 76) in
   check_int "an 80-column terminal draws every line on its own row" 76
     (List.length sheet)
+
+let test_header_prepends_full_width_without_folding () =
+  let header = [ "banner line 1"; "banner line 2" ] in
+  let sheet = Masc_tui_help.sheet ~header ~cols:120 (lines 76) in
+  check_int "header rows (2) + folded body (38) = 40 rows" 40 (List.length sheet);
+  check_string "first row is banner line 1" "banner line 1" (List.hd sheet);
+  check_string "second row is banner line 2" "banner line 2" (List.nth sheet 1)
 
 (* The frame's rows, asked of the module that draws it. *)
 let test_content_height_leaves_room_for_the_frame () =
@@ -70,6 +78,8 @@ let () =
             test_odd_line_count_keeps_the_tail
         ; Alcotest.test_case "narrow terminal draws one line per row" `Quick
             test_narrow_terminal_draws_one_line_per_row
+        ; Alcotest.test_case "header prepends full width without folding" `Quick
+            test_header_prepends_full_width_without_folding
         ; Alcotest.test_case "content height leaves room for the frame" `Quick
             test_content_height_leaves_room_for_the_frame
         ] )

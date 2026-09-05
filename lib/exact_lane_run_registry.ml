@@ -155,6 +155,25 @@ module Payload = struct
      compaction was indistinguishable from "never ran" (lane audit W8). *)
   let retention_group = Some (fun registration -> lane_key registration.lane)
 
+  (* The prompt and the response, dropped from the copy the store keeps.
+
+     They are 98% of this registry's bytes: the log is 347 MB across 12,079
+     rows and [registration.input] alone is 340 MB (measured 2026-09-05). The
+     store holds 2 000 completed rows per lane across four lanes, and the list
+     projection reads none of it -- [projected_run_of_entry] already sets both
+     to [`Null] -- while the detail route reads one row at a time. That was
+     498 MB of live heap, the largest single item in the server.
+
+     Nothing is lost: the row on disk still carries both, and [get] re-reads
+     it. What stays here is what a projection reads -- the lane, the actor and
+     the outcome -- so [retention_group] above and the list keep working on
+     the shed copy. *)
+  let shed_registration registration = { registration with input = Exact_input `Null }
+
+  let shed_completion (completion : completion) =
+    { completion with output = `Null }
+  ;;
+
   let registration_to_yojson registration =
     `Assoc
       [ "lane", `String (lane_key registration.lane)

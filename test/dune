@@ -1759,6 +1759,11 @@
  (modules test_voice_config)
  (libraries alcotest yojson masc.voice_config masc.string_util unix))
 
+(test
+ (name test_tui_audio_device)
+ (modules test_tui_audio_device)
+ (libraries alcotest yojson masc_tui_audio_device))
+
 ; MCP HTTP session persistence: save/forget/load round-trip through the
 ; fd-safe write path (close_out_noerr finally guard).
 

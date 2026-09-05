@@ -1,6 +1,6 @@
 ---
-title: Claude Code · Cursor 연동
-description: Claude Code, Cursor 등 MCP 클라이언트를 MASC 서버에 연결합니다.
+title: MCP 클라이언트 연결
+description: masc mcp-config 가 만들어 주는 설정으로, 또는 손으로 MCP 클라이언트를 MASC 서버에 연결합니다.
 ---
 
 MASC 는 Model Context Protocol(MCP) 엔드포인트를 여기서 제공합니다.
@@ -9,34 +9,50 @@ MASC 는 Model Context Protocol(MCP) 엔드포인트를 여기서 제공합니�
 http://127.0.0.1:8935/mcp
 ```
 
-이 엔드포인트는 **bearer 토큰을 요구**합니다 — 인증 없는 클라이언트는 거부합니다.
-URL 만으로 연결하면 실패하므로, 토큰부터 만듭니다.
+이 엔드포인트는 **bearer 토큰을 요구**합니다 — 토큰 없는 요청은 `401` 입니다. URL
+만으로는 연결되지 않습니다.
 
-## 1. worker 토큰 만들기
+## masc 가 직접 만들어 주는 것
 
-설치 스크립트가 마지막에 이 명령을 찍어줍니다. 클라이언트 신원으로 로그인하고
-토큰을 현재 셸에 `MASC_TOKEN` 으로 내보냅니다.
+`masc mcp-config` 가 토큰을 발급하고 설정 블록까지 찍어 줍니다. `--client` 는 셋 중
+하나입니다.
+
+| `--client` | 나오는 것 |
+|---|---|
+| `env` (기본) | 셸 export — bearer 를 환경변수로 읽는 아무 클라이언트나 |
+| `codex` | Codex 용 TOML |
+| `claude-desktop` | Claude Desktop 용 `mcp-remote` JSON |
+
+```bash
+masc mcp-config --base-path ~/masc --client codex
+```
+
+`--client-env` 로 변수 이름을 바꿀 수 있습니다(기본 `MASC_TOKEN`). 토큰은 기본이
+장기 토큰입니다 — 로컬 MCP 데몬은 만료를 스스로 갱신하지 못하기 때문입니다. 세션
+범위 토큰을 원하면 `--expiring` 을 주세요.
+
+## 손으로 붙이는 클라이언트
+
+**나머지는 emitter 가 없습니다.** 아래 둘은 손으로 적는 예이고, 다른 MCP 클라이언트도
+같은 URL 과 헤더면 붙습니다.
+
+먼저 토큰을 만들어 현재 셸에 내보냅니다.
 
 ```bash
 eval "$(masc login --base-path ~/masc --host 127.0.0.1 --port 8935 \
   --agent local-mcp-client --role worker --client-env MASC_TOKEN --no-expiry --shell)"
 ```
 
-클라이언트를 이 같은 셸에서 실행해 `MASC_TOKEN` 을 물려받게 하거나, 값을 클라이언트
-설정에 직접 넣으세요.
-
-## 2. Claude Code
-
-Authorization 헤더와 함께 서버를 추가합니다.
+### Claude Code
 
 ```bash
 claude mcp add --transport http masc http://127.0.0.1:8935/mcp \
   --header "Authorization: Bearer $MASC_TOKEN"
 ```
 
-## 3. Cursor
+### Cursor 등 JSON 설정을 쓰는 클라이언트
 
-MCP 설정에서 같은 URL 과 헤더로 HTTP 서버를 추가합니다. `~/.cursor/mcp.json` 예:
+`~/.cursor/mcp.json` 예:
 
 ```json
 {
@@ -48,6 +64,19 @@ MCP 설정에서 같은 URL 과 헤더로 HTTP 서버를 추가합니다. `~/.cu
   }
 }
 ```
+
+## 토큰 관리
+
+작업 공간은 토큰의 SHA-256 만 들고 있습니다. 원문이 남는 곳은
+`.masc/auth/<agent>.token`(권한 `0600`) 하나뿐입니다.
+
+```bash
+masc token list                 # 어떤 bearer 가 있는지
+masc token revoke --agent NAME  # 하나 폐기
+masc token prune                # 만료된 것만
+```
+
+같은 agent 이름으로 다시 발급하면 자격증명이 교체됩니다. 그게 회전입니다.
 
 ## 클라이언트가 얻는 도구
 

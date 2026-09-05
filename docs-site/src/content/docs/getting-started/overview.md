@@ -16,7 +16,7 @@ When two agents work in the same repository on their own, each keeps its own mem
 ```mermaid
 flowchart TD
     STORE[".masc/ shared state<br/>(goals · tasks · ownership · board · execution evidence)"]
-    SERVER["masc server (:8935)"]
+    SERVER["masc (:8935)"]
 
     SERVER --- STORE
     SERVER --> TUI["Terminal UI (masc-tui)"]

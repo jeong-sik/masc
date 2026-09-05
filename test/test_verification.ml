@@ -3059,10 +3059,11 @@ let completion_output =
   `Assoc [ "required_artifacts", `List [ `String "note:done" ] ]
 ;;
 
-(* The shape a cancel claim's record has. It carries no required_artifacts
-   because a stop makes none, and the operator reads it, not this mapping. *)
-let cancel_record_output =
-  `Assoc [ "cancel_reason", `String "the upstream schema landed instead" ]
+(* An output with no completion material. The operator reads a stop from its
+   Board post, not from this mapping, so nothing in a record stands in for
+   [required_artifacts]. *)
+let output_without_completion_material =
+  `Assoc [ "task_title", `String "the upstream schema landed instead" ]
 ;;
 
 let test_the_request_asks_the_completion_question () =
@@ -3104,7 +3105,7 @@ let test_a_record_without_completion_material_is_no_question () =
     | Ok _ -> Alcotest.fail (label ^ " must not build a question")
     | Error _ -> ()
   in
-  expect_error "a cancel claim's record" cancel_record_output;
+  expect_error "an output without completion material" output_without_completion_material;
   expect_error "a non-object output" (`String "the upstream schema landed instead")
 ;;
 

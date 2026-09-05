@@ -339,6 +339,19 @@ let cancelled_event_reasons emitted =
     (emitted ())
 ;;
 
+(* The durable transition row, read back through the reader the MCP events
+   resource uses. It is the one surface no hook sees: [log_event] appends the
+   row to the workspace's events log, so the assertion reads that file. *)
+let transition_log_reasons config ~task_id =
+  Mcp_server.read_event_lines config ~limit:50
+  |> List.filter_map (fun line ->
+       let row = Yojson.Safe.from_string line in
+       let field name = Yojson.Safe.Util.member name row in
+       if field "type" = `String "task_transition" && field "task" = `String task_id
+       then Some (field "reason")
+       else None)
+;;
+
 let test_cancel_does_not_borrow_the_previous_owners_note () =
   with_test_env (fun config ~baseline_seq ->
   with_captured_activity (fun emitted ->
@@ -374,6 +387,9 @@ let test_cancel_does_not_borrow_the_previous_owners_note () =
       (contents config ~baseline_seq);
     Alcotest.(check bool) "the activity event carries the same reason" true
       (cancelled_event_reasons emitted = [ `String "the premise is gone" ]);
+    Alcotest.(check bool) "the transition log row carries the same reason" true
+      (transition_log_reasons config ~task_id:"task-14"
+       = [ `String "the premise is gone" ]);
     match List.find_opt (fun (task : D.task) -> String.equal task.id "task-14")
             (Workspace.get_tasks_raw config) with
     | Some task ->
@@ -383,9 +399,10 @@ let test_cancel_does_not_borrow_the_previous_owners_note () =
 ;;
 
 (* A stop stated only in handoff_context.summary — the shape the tool schema
-   asks for — reaches every surface with that sentence. The record, the
-   message log and the committed Task already read it; the activity event
-   read the bare [reason] argument and published null for exactly this call. *)
+   asks for — reaches every surface with that sentence: the record, the
+   message log, the committed Task, the activity event and the durable
+   transition row. Each is read back here, so a surface that resolves the
+   sentence on its own is caught the moment it disagrees. *)
 let test_cancel_stated_in_the_summary_reaches_every_surface () =
   with_test_env (fun config ~baseline_seq ->
   with_captured_activity (fun emitted ->
@@ -421,6 +438,9 @@ let test_cancel_stated_in_the_summary_reaches_every_surface () =
       (contents config ~baseline_seq);
     Alcotest.(check bool) "the activity event carries the summary, not null" true
       (cancelled_event_reasons emitted = [ `String "the premise this rests on is gone" ]);
+    Alcotest.(check bool) "the transition log row carries the summary, not null" true
+      (transition_log_reasons config ~task_id:"task-15"
+       = [ `String "the premise this rests on is gone" ]);
     match List.find_opt (fun (task : D.task) -> String.equal task.id "task-15")
             (Workspace.get_tasks_raw config) with
     | Some { handoff_context = Some { summary; _ }; _ } ->

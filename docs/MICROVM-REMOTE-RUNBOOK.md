@@ -68,11 +68,19 @@ CLI 를 놓고 읽으면 된다. 아래 계약 표의 항목 1·2 는 백엔드�
 shim 설정(`masc-exec-shim.conf`)은 서버가 부팅마다 같은 디렉터리에 다시
 쓴다. 내용은 `remote_root=/masc-work`, `path=<이미지의 PATH>`
 (`MASC_KEEPER_MICROVM_PAYLOAD_PATH`), `env_allowlist=MASC_BASE_PATH,
-MASC_BASE_PATH_INPUT,MASC_CONFIG_DIR`. 손으로 고칠 것이 없다.
+MASC_BASE_PATH_INPUT,MASC_CONFIG_DIR`, `scratch_root=/tmp`. 손으로 고칠 것이 없다.
+마지막 줄은 프로토콜 3 shim 이 읽는 키다. 그보다 오래된 shim 은 모르는 키라며
+거부하는데, 그 전에 부팅 probe 가 `remote_shim_version_skew` 로 그 shim 을
+먼저 거부하므로, 운영자가 보는 것은 설정 오류가 아니라 "shim 을 다시 빌드하라"
+는 메시지다.
 
 게스트가 마운트하는 것: 설정 디렉터리(읽기 전용, `/tmp/masc-runtime/.masc/config`),
 GitHub identity 스냅샷, 작업 볼륨(`masc-keeper-work-<keeper>` →
-`/masc-work`), shim 디렉터리(읽기 전용, `/opt/masc-exec-shim`). 그게 전부다.
+`/masc-work`), shim 디렉터리(읽기 전용, `/opt/masc-exec-shim`), 그리고
+메모리 파일시스템 `/tmp`(`--tmpfs /tmp`). 마지막 것은 RFC-0422 의 관측 상자가
+쓰는 스크래치 자리다. 루트는 읽기 전용이라 이게 없으면 상자 안의 명령은 아무
+데도 쓸 수 없다. 크기는 커널 기본값(게스트 메모리의 절반, 기본 게스트에서
+551M 실측)이고 게스트가 내려가면 사라진다. 그게 전부다.
 
 ## shim 만들기
 

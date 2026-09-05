@@ -12785,7 +12785,14 @@ and is loaded on demand through keeper_skill.
            | Error detail ->
                report_action state "error"
                  (keeper.k_name ^ ": invalid config write receipt: " ^ detail)
-           | Ok (severity, message) -> report_action state severity message);
+           (* Name the backend the key selected, not just the server's write
+              receipt: pressing the key for the backend a keeper already runs is
+              a no-op the receipt reports blandly, and the operator is left
+              unsure the key did anything. *)
+           | Ok (severity, message) ->
+               report_action state severity
+                 (Printf.sprintf "%s: sandbox backend \xe2\x86\x92 %s (%s)"
+                    keeper.k_name profile message));
           state.keeper_sandbox_view <- None;
           state.keeper_sandbox_view_error <- None;
           launch_keeper_sandbox_view state ~mailbox:async_messages keeper.k_name)

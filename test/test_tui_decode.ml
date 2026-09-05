@@ -2976,8 +2976,6 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
                   ; ("label", `String "Librarian")
                   ; ( "message"
                     , `String "running memoryless and cannot leave that state" )
-                  ; ("value", `Float 4.0)
-                  ; ("threshold", `Float 0.0)
                   ]
               ]
           else `List [] )
@@ -3165,7 +3163,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
 (* The alert's typed code is the only field the renderer reads: the wire's
    severity and target are functions of it, and the decoder refuses a payload
    that disagrees rather than trusting the string it was handed. *)
-let memory_alert_snapshot ~code ~severity ~target =
+let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
     [ ("schema", `String "keeper.memory_os.current_health.v3")
     ; ("generated_at", `Float 1_775_000_000.0)
@@ -3197,14 +3195,13 @@ let memory_alert_snapshot ~code ~severity ~target =
               ; ( "alerts"
                 , `List
                     [ `Assoc
-                        [ ("code", `String code)
-                        ; ("severity", `String severity)
-                        ; ("target", `String target)
-                        ; ("label", `String "Librarian")
-                        ; ("message", `String "running memoryless")
-                        ; ("value", `Float 4.0)
-                        ; ("threshold", `Float 0.0)
-                        ]
+                        (extra_alert_fields
+                        @ [ ("code", `String code)
+                          ; ("severity", `String severity)
+                          ; ("target", `String target)
+                          ; ("label", `String "Librarian")
+                          ; ("message", `String "running memoryless")
+                          ])
                     ] )
               ]
           ] )
@@ -3239,6 +3236,8 @@ let memory_alert_snapshot ~code ~severity ~target =
           ] )
     ]
 
+let memory_alert_snapshot = memory_alert_snapshot_with_extra []
+
 let test_decode_memory_alert_keeps_the_code_contract () =
   (match
      Tui_decode.decode_memory_health_snapshot
@@ -3266,7 +3265,15 @@ let test_decode_memory_alert_keeps_the_code_contract () =
        ~target:"librarian_starvation");
   rejected "a target that disagrees with the code is refused"
     (memory_alert_snapshot ~code:"librarian_starvation" ~severity:"error"
-       ~target:"librarian_lane_busy")
+       ~target:"librarian_lane_busy");
+  rejected "legacy threshold field is rejected by exact fields"
+    (memory_alert_snapshot_with_extra [ ("threshold", `Float 0.0) ]
+       ~code:"librarian_starvation" ~severity:"error"
+       ~target:"librarian_starvation");
+  rejected "legacy value field is rejected by exact fields"
+    (memory_alert_snapshot_with_extra [ ("value", `Float 4.0) ]
+       ~code:"librarian_starvation" ~severity:"error"
+       ~target:"librarian_starvation")
 
 let test_decode_memory_health_rejects_stale_schema () =
   let json =

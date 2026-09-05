@@ -4302,7 +4302,7 @@ let decode_memory_alert json =
   let* () =
     require_exact_object_fields
       "memory alert"
-      [ "code"; "severity"; "target"; "label"; "message"; "value"; "threshold" ]
+      [ "code"; "severity"; "target"; "label"; "message" ]
       json
   in
   let* code = required_string_field json "code" in
@@ -4310,19 +4310,12 @@ let decode_memory_alert json =
   let* target = required_string_field json "target" in
   let* ma_label = required_string_field json "label" in
   let* ma_message = required_string_field json "message" in
-  (* [value] and [threshold] are read to hold the server to the contract and
-     then dropped: the count is already drawn from the health record, and the
-     server sends 0.0 for every threshold. *)
-  let* value = require_float_field json "value" in
-  let* threshold = require_float_field json "threshold" in
   (match memory_alert_code_of_wire code with
    | Some ma_code
      when String.equal code target
           && String.equal severity (memory_alert_severity_wire ma_code)
           && not (String.equal ma_label "")
-          && not (String.equal ma_message "")
-          && Float.is_finite value
-          && Float.is_finite threshold -> Ok { ma_code; ma_label; ma_message }
+          && not (String.equal ma_message "") -> Ok { ma_code; ma_label; ma_message }
    | Some _ | None -> Error "memory alert has an invalid typed code contract")
 
 let decode_memory_keeper_health json =

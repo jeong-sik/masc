@@ -514,3 +514,15 @@ P4h-3 #33429(OTel 저장소 순회를 pool 로) 는 15:57Z 에 병합됐고 P4h-
 같은 서버의 앞선 창(16:09:32Z, ready+2분, 래퍼 프로세스가 잠깐 겹침): 하네스 p99 56.9 ms·max 1,180 ms, main 점유 7.0%, ≥100 ms 실행 0, 최대 91.8 ms, 샘플의 `Re.Compile` 517/2,407 busy(21%).
 
 pool 도메인의 긴 작업은 이 창에서 최대 475 ms 다. 무거운 창의 2.4~6.9초 작업은 대시보드 telemetry 조회(`Telemetry_unified.bounded_entries_for_window`, RFC-0372 의 요청당 상한 안에서 하루 80~200 MB 의 `tool_calls`·`agent-core-events` 를 읽음)였고 keeper 턴 경로가 아니다. `Eio.Executor_pool` 은 큐 하나에서 도메인이 남은 용량만큼 작업을 가져가고, io 작업의 무게가 0.05 라 한 도메인이 io 작업 20개를 fiber 로 함께 든다. 읽기 작업은 양보하지 않으므로 6.9초짜리 하나가 같은 도메인의 나머지 19개를 그만큼 세운다. keeper 턴의 읽기도 이제 같은 pool 에 서므로 "새 줄만" 읽는 커서(P4h 계획)가 그 다음이다.
+
+#### 옮길 수 없는 대기 — 프로세스 스폰의 `fork()`
+
+`Eio.Process.spawn` 은 eio 1.3 의 `lib_eio_posix/eio_posix_stubs.c:412` 에서 `fork()` 로 자식을 만든다. macOS 의 libmalloc 은 fork 직전 부모의 모든 malloc zone 을 잠그는데(`_malloc_fork_parent` → `_xzm_foreach_lock`), 힙이 1~2 GB 인 이 프로세스에서 그 잠금이 한 번에 약 141 ms 다. 스택 샘플 40초당 스폰 안의 시간은 250·167·32·17 ms 로 도구 실행량에 비례한다. 스폰이 가장 많은 곳은 `keeper_sandbox_microvm`, `exec_dispatch`, `keeper_turn_sandbox_runtime` 이다.
+
+이 대기는 pool 로도 systhread 로도 못 내린다. `Eio.Process.spawn` 이 받는 switch 와 proc_mgr 가 부르는 fiber 의 도메인에 묶여 있다. 남는 방향은 셋이고 각각 별도 RFC 감이다.
+
+| 방향 | 내용 | 비용 |
+|---|---|---|
+| `posix_spawn` 스텁 | masc 소유 C 스텁으로 `posix_spawn(2)` 를 부르는 process backend. macOS 의 `posix_spawn` 은 시스템 콜이라 atfork 핸들러와 zone 잠금이 없다 | C 스텁·fd 상속·cwd·env 처리·취소 계약을 새로 만듦 |
+| 스폰 보조 프로세스 | 힙이 작은 보조 프로세스가 스폰만 맡고 파이프로 fd 를 넘김 | 프로토콜·수명 관리·fd 전달 |
+| 턴당 스폰 축소 | 같은 턴에서 반복되는 `git`·셸 호출을 묶음 | 도구 계약 변경 |

@@ -63,6 +63,9 @@ type prepared =
         (** Carried from the same lane resolution the catalog slots came from,
             so the tail cannot drift from the flow it follows. *)
   ; prompt : string
+  ; request : Yojson.Safe.t
+        (** Built from the same material [prompt] was rendered from, so the run
+            record cannot say something the judge did not read. *)
   ; requirement : Exact_output.output_requirement
   }
 
@@ -70,9 +73,9 @@ let message role text =
   Agent_core.Types.make_message ~role [ Agent_core.Types.Text text ]
 ;;
 
-let judge_prompt candidate =
-  let* request =
-    Keeper_board_attention_candidate.singleton_judgment_request candidate
+let judge_prompt candidate material =
+  let request =
+    Keeper_board_attention_candidate.singleton_judgment_request candidate material
   in
   Prompt_registry.render_prompt_template
     Prompt_names.judge_board
@@ -119,12 +122,16 @@ let prepare ~base_path ~keeper_name ~net candidate =
     ), None ->
     Error Network_unavailable
   | ( Keeper_board_attention_candidate.Direct_resumable
-        (Keeper_board_attention_candidate.Resumable_pending _)
+        (Keeper_board_attention_candidate.Resumable_pending pending)
     | Keeper_board_attention_candidate.Requeued_resumable
-        { resumable = Keeper_board_attention_candidate.Resumable_pending _; _ }
+        { resumable = Keeper_board_attention_candidate.Resumable_pending pending; _ }
     ), Some net ->
+    let material = pending.Keeper_board_attention_candidate.material in
+    let request =
+      Keeper_board_attention_candidate.judgment_request candidate material
+    in
     let* prompt =
-      judge_prompt candidate
+      judge_prompt candidate material
       |> Result.map_error (fun detail -> Prompt_contract_unavailable detail)
     in
     let messages = [ message Agent_core.Types.User prompt ] in
@@ -169,6 +176,7 @@ let prepare ~base_path ~keeper_name ~net candidate =
          ; attempt
          ; cli_slots = resolved.cli_slots
          ; prompt
+         ; request
          ; requirement
          })
 ;;
@@ -473,7 +481,7 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
     ~lane:Exact_lane_run_registry.Board_attention
     ~actor:prepared.candidate.keeper_name
     ~started_at
-    ~input:(Exact_lane_run_registry.Exact_input prepared.candidate.judgment_request);
+    ~input:(Exact_lane_run_registry.Exact_input prepared.request);
   let bound = ref None in
   let complete outcome output =
     let selected_slot =

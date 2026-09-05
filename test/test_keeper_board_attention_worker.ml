@@ -125,24 +125,21 @@ let candidate ?(id = "candidate-worker") ?(recorded_at = 1.0) () : A.candidate =
   { candidate_id
   ; keeper_name
   ; signal
-  ; judgment_request =
-      `Assoc
-        [ "candidate_id", `String candidate_id
-        ; "signal", A.signal_to_yojson signal
-        ; "post", Masc.Board.post_to_yojson (post_of_signal signal)
-        ; "comments", `List []
-        ; ( "keeper_context"
-          , `Assoc
-              [ "lane_keeper_name", `String keeper_name
-              ; "keeper_record_id", `Null
-              ; "keeper_runtime_uid", `Null
-              ; "instructions", `String "continue"
-              ; "current_task_id", `Null
-              ; "mention_keeper_ids", `List [ `String keeper_name ]
-              ] )
-        ]
   ; recorded_at
-  ; status = A.Pending { last_delivery_failure = None }
+  ; keeper_context =
+      `Assoc
+        [ "lane_keeper_name", `String keeper_name
+        ; "keeper_record_id", `Null
+        ; "keeper_runtime_uid", `Null
+        ; "instructions", `String "continue"
+        ; "current_task_id", `Null
+        ; "mention_keeper_ids", `List [ `String keeper_name ]
+        ]
+  ; status =
+      A.Pending
+        { last_delivery_failure = None
+        ; material = { post = post_of_signal signal; comments = [] }
+        }
   }
 ;;
 

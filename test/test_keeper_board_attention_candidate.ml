@@ -154,18 +154,22 @@ let candidate ?(context = keeper_context ()) signal :
   { candidate_id
   ; keeper_name
   ; signal
-  ; judgment_request =
-      `Assoc
-        [ "candidate_id", `String candidate_id
-        ; "signal", A.signal_to_yojson signal
-        ; "post", Masc.Board.post_to_yojson (post_of_signal signal)
-        ; ( "comments"
-          , `List
-              [ Masc.Board.comment_to_yojson (comment_of_signal signal) ] )
-        ; "keeper_context", context
-        ]
+  ; keeper_context = context
   ; recorded_at = 1.0
-  ; status = A.Pending { last_delivery_failure = None }
+  ; status =
+      A.Pending
+        { last_delivery_failure = None
+        ; material =
+            { post = post_of_signal signal
+            ; comments = [ comment_of_signal signal ]
+            }
+        }
+  }
+;;
+
+let material_of ?post ?comments signal : A.judgment_material =
+  { post = Option.value post ~default:(post_of_signal signal)
+  ; comments = Option.value comments ~default:[ comment_of_signal signal ]
   }
 ;;
 
@@ -198,8 +202,9 @@ let quarantine_state ~phase prior_status : A.quarantine_state =
 ;;
 
 let test_status_view_preserves_resumability_and_quarantine () =
-  let pending = A.Resumable_pending { last_delivery_failure = None } in
-  (match A.status_view (A.Pending { last_delivery_failure = None }) with
+  let material = material_of (signal "status-view") in
+  let pending = A.Resumable_pending { last_delivery_failure = None; material } in
+  (match A.status_view (A.Pending { last_delivery_failure = None; material }) with
    | A.Direct_resumable observed when observed = pending -> ()
    | A.Direct_resumable _
    | A.Requeued_resumable _
@@ -371,72 +376,9 @@ let test_codec_and_context_identity_are_strict () =
     "list order remains context identity"
     false
     (A.Context_key.equal left changed_list);
-  (match
-     A.Context_key.of_candidate
-       { original with
-         judgment_request =
-           `Assoc
-             [ "keeper_context", `Assoc []
-             ; "keeper_context", `Assoc []
-             ]
-       }
-   with
-   | Error _ -> ()
-   | Ok _ -> Alcotest.fail "duplicate keeper_context authority was accepted")
-;;
-
-let rewrite_assoc_field key rewrite = function
-  | `Assoc fields ->
-    `Assoc
-      (List.map
-         (fun (field, value) ->
-            if String.equal field key
-            then field, rewrite value
-            else field, value)
-         fields)
-  | _ -> Alcotest.fail ("expected object while rewriting field " ^ key)
-;;
-
-let add_legacy_extra = function
-  | `Assoc fields -> `Assoc (("legacy_extra", `String "must-not-survive") :: fields)
-  | _ -> Alcotest.fail "expected Board object fixture"
-;;
-
-let set_assoc_field key value = function
-  | `Assoc fields ->
-    if List.exists (fun (field, _) -> String.equal field key) fields
-    then
-      `Assoc
-        (List.map
-           (fun (field, current) ->
-              if String.equal field key then field, value else field, current)
-           fields)
-    else `Assoc (fields @ [ key, value ])
-  | _ -> Alcotest.fail ("expected object while setting field " ^ key)
-;;
-
-let append_assoc_field key value = function
-  | `Assoc fields -> `Assoc (fields @ [ key, value ])
-  | _ -> Alcotest.fail ("expected object while appending field " ^ key)
-;;
-
-let insert_assoc_field_after anchor key value = function
-  | `Assoc fields ->
-    let rec insert reversed = function
-      | [] -> Alcotest.fail ("missing object field " ^ anchor)
-      | ((name, _) as field) :: rest ->
-        if String.equal name anchor
-        then `Assoc (List.rev_append reversed (field :: (key, value) :: rest))
-        else insert (field :: reversed) rest
-    in
-    insert [] fields
-  | _ -> Alcotest.fail ("expected object while inserting field " ^ key)
-;;
-
-let rewrite_candidate_keeper_context rewrite candidate =
-  A.candidate_to_json candidate
-  |> rewrite_assoc_field "judgment_request" (fun request ->
-    rewrite_assoc_field "keeper_context" rewrite request)
+  (* 중복 keeper_context 키를 거부하는지 보던 검사가 있었다. keeper_context 가
+     재료의 필드가 된 뒤로는 그 상태를 만들 수 없어 지웠다. RFC-0424. *)
+  ()
 ;;
 
 let ledger_path ~base_path =
@@ -463,12 +405,6 @@ let write_ledger_rows ~base_path rows =
     (String.concat "" (List.map (fun row -> Yojson.Safe.to_string row ^ "\n") rows))
 ;;
 
-let rewrite_first_comment rewrite = function
-  | `List (comment :: rest) -> `List (rewrite comment :: rest)
-  | `List [] -> Alcotest.fail "expected one Board comment fixture"
-  | _ -> Alcotest.fail "expected comments array"
-;;
-
 let expect_record_error ?expected_detail ~base_path label candidate =
   match A.record ~base_path candidate with
   | A.Record_error detail ->
@@ -479,104 +415,122 @@ let expect_record_error ?expected_detail ~base_path label candidate =
   | A.Recorded _ | A.Duplicate _ -> Alcotest.fail (label ^ " was recorded")
 ;;
 
-let test_singleton_request_is_canonical_and_identity_bound () =
-  let original = candidate (signal "post-canonical-request") in
-  ignore
-    (ok
-       "canonical singleton request"
-       (A.singleton_judgment_request original)
-      : Yojson.Safe.t);
-  let noisy_request =
-    original.judgment_request
-    |> rewrite_assoc_field "post" add_legacy_extra
-    |> rewrite_assoc_field "comments" (function
-      | `List comments -> `List (List.map add_legacy_extra comments)
-      | _ -> Alcotest.fail "expected comments array")
-  in
-  (match
-     A.singleton_judgment_request
-       { original with judgment_request = noisy_request }
-   with
-   | Error _ -> ()
-   | Ok _ -> Alcotest.fail "unknown nested Board fields were accepted");
-  let mismatched_post =
-    original.judgment_request
-    |> rewrite_assoc_field "post" (rewrite_assoc_field "id" (fun _ ->
-      `String "different-post"))
-  in
-  (match
-     A.singleton_judgment_request
-       { original with judgment_request = mismatched_post }
-   with
-   | Error _ -> ()
-   | Ok _ -> Alcotest.fail "mismatched Board post identity was accepted");
-  let mismatched_comment =
-    original.judgment_request
-    |> rewrite_assoc_field "comments" (function
-      | `List (comment :: rest) ->
-        `List
-          (rewrite_assoc_field
-             "post_id"
-             (fun _ -> `String "different-post")
-             comment
-           :: rest)
-      | `List [] -> Alcotest.fail "expected one Board comment fixture"
-      | _ -> Alcotest.fail "expected comments array")
-  in
-  match
-    A.singleton_judgment_request
-      { original with judgment_request = mismatched_comment }
-  with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "mismatched Board comment identity was accepted"
+(* 요청은 후보와 재료로 만들어지므로 candidate_id 와 signal 이 durable 정체성과
+   다를 수 없다. 전에는 저장된 요청이 그것과 어긋나는지 검사했다. RFC-0424. *)
+let test_singleton_request_is_built_from_candidate_identity () =
+  let source = signal "post-canonical-request" in
+  let original = candidate source in
+  match A.singleton_judgment_request original (material_of source) with
+  | `Assoc [ ("keeper_context", _); ("items", `List [ `Assoc item ]) ] ->
+    Alcotest.(check bool)
+      "item candidate_id is the candidate's own"
+      true
+      (List.assoc_opt "candidate_id" item
+       = Some (`String original.candidate_id));
+    Alcotest.(check bool)
+      "item signal is the candidate's own"
+      true
+      (List.assoc_opt "signal" item = Some (A.signal_to_yojson original.signal));
+    Alcotest.(check bool)
+      "item carries the material post and comments"
+      true
+      (List.assoc_opt "post" item
+       = Some (Masc.Board.post_to_yojson (post_of_signal source))
+       && List.assoc_opt "comments" item
+          = Some (`List [ Masc.Board.comment_to_yojson (comment_of_signal source) ]))
+  | _ -> Alcotest.fail "singleton request did not carry exactly one item"
 ;;
 
 let test_record_rejects_malformed_without_poisoning_ledger () =
   with_temp_base "board-attention-candidate-record-validation" @@ fun base_path ->
   let valid = candidate (signal "post-record-validation") in
-  let malformed_request =
-    valid.judgment_request
-    |> rewrite_assoc_field "post" (rewrite_assoc_field "id" (fun _ ->
-      `String "different-post"))
+  let with_material material =
+    { valid with status = A.Pending { last_delivery_failure = None; material } }
   in
-  (match
-     A.record
-       ~base_path
-       { valid with judgment_request = malformed_request }
-   with
-   | A.Record_error _ -> ()
-   | A.Recorded _ | A.Duplicate _ ->
-     Alcotest.fail "malformed in-memory candidate was recorded");
-  Alcotest.(check int)
-    "failed validation did not poison the ledger"
-    0
-    (ok
-       "load ledger after rejected record"
-       (A.load_candidates ~base_path ~keeper_name:valid.keeper_name)
-     |> List.length);
-  let noisy_request =
-    valid.judgment_request
-    |> rewrite_assoc_field "post" add_legacy_extra
-    |> rewrite_assoc_field "comments" (function
-      | `List comments -> `List (List.map add_legacy_extra comments)
-      | _ -> Alcotest.fail "expected comments array")
+  let expect_rejected label candidate =
+    (match A.record ~base_path candidate with
+     | A.Record_error _ -> ()
+     | A.Recorded _ | A.Duplicate _ -> Alcotest.fail (label ^ " was recorded"));
+    Alcotest.(check int)
+      (label ^ " left the ledger empty")
+      0
+      (ok
+         "load ledger after rejected record"
+         (A.load_candidates ~base_path ~keeper_name:valid.keeper_name)
+       |> List.length)
   in
-  (match A.record ~base_path { valid with judgment_request = noisy_request } with
-   | A.Record_error _ -> ()
-   | A.Recorded _ | A.Duplicate _ ->
-     Alcotest.fail "unknown nested Board fields were canonicalized and recorded");
-  Alcotest.(check int)
-    "rejected old JSON left the ledger empty"
-    0
-    (ok
-       "load ledger after rejected old JSON"
-       (A.load_candidates ~base_path ~keeper_name:valid.keeper_name)
-     |> List.length);
+  let mismatched_post =
+    { (post_of_signal valid.signal) with id = post_id_exn "different-post" }
+  in
+  expect_rejected
+    "mismatched Board post identity"
+    (with_material (material_of ~post:mismatched_post valid.signal));
+  let mismatched_comment =
+    { (comment_of_signal valid.signal) with post_id = post_id_exn "different-post" }
+  in
+  expect_rejected
+    "mismatched Board comment identity"
+    (with_material (material_of ~comments:[ mismatched_comment ] valid.signal));
   let persisted = record ~base_path valid in
   Alcotest.(check bool)
-    "valid current request is the only durable row"
+    "valid current material is the only durable row"
     true
     (load_one ~base_path = persisted)
+;;
+
+(* 판정 증거는 pending 에서만 읽힌다. 판정이 끝나면 행에서 사라지고, 파티션
+   정체성인 keeper_context 는 남는다. 소비된 후보 9,808건이 원장의 92% 를 차지하던
+   이유가 이 둘을 한 덩어리로 들고 있었기 때문이다. RFC-0424. *)
+let test_judgment_drops_board_evidence_but_keeps_partition_identity () =
+  with_temp_base "board-attention-candidate-evidence-lifetime" @@ fun base_path ->
+  let source = signal "post-evidence-lifetime" in
+  (* signal.content 과 post.body 는 같은 문자열이므로, 게시글에만 있는 표식을
+     심어야 "행에서 사라졌다"를 실제로 잴 수 있다. *)
+  let marker = "evidence-marker-must-not-outlive-the-judgment" in
+  let persisted =
+    record
+      ~base_path
+      { (candidate source) with
+        status =
+          A.Pending
+            { last_delivery_failure = None
+            ; material =
+                material_of ~post:{ (post_of_signal source) with body = marker } source
+            }
+      }
+  in
+  let mentions_body candidate =
+    let row = Yojson.Safe.to_string (A.candidate_to_json candidate) in
+    let rec search index =
+      index + String.length marker <= String.length row
+      && (String.equal (String.sub row index (String.length marker)) marker
+          || search (index + 1))
+    in
+    search 0
+  in
+  Alcotest.(check bool)
+    "a pending row carries the Board evidence"
+    true
+    (Option.is_some (A.pending_judgment_material persisted.status)
+     && mentions_body persisted);
+  let judged =
+    ok
+      "record judgment"
+      (A.record_judgment ~base_path persisted (judgment J.Not_relevant))
+  in
+  Alcotest.(check bool)
+    "a judged row carries none"
+    true
+    (Option.is_none (A.pending_judgment_material judged.status)
+     && not (mentions_body judged));
+  Alcotest.(check bool)
+    "the durable row agrees with the value in hand"
+    true
+    (load_one ~base_path = judged);
+  Alcotest.(check bool)
+    "partition identity outlives the evidence"
+    true
+    (A.Context_key.of_candidate judged = A.Context_key.of_candidate persisted)
 ;;
 
 let test_judgment_write_invariant_rejects_blank_provenance () =
@@ -684,7 +638,11 @@ let test_non_finite_lifecycle_times_are_rejected () =
     ~base_path
     "infinite delivery failed_at"
     { valid with
-      status = A.Pending { last_delivery_failure = Some infinite_failure }
+      status =
+        A.Pending
+          { last_delivery_failure = Some infinite_failure
+          ; material = material_of valid.signal
+          }
     };
   expect_record_error
     ~base_path
@@ -756,6 +714,9 @@ let test_non_finite_lifecycle_times_are_rejected () =
 let test_non_finite_complete_request_evidence_is_rejected () =
   with_temp_base "board-attention-candidate-request-finite" @@ fun base_path ->
   let base = candidate (signal "post-request-finite") in
+  let with_material (candidate : A.candidate) material : A.candidate =
+    { candidate with status = A.Pending { last_delivery_failure = None; material } }
+  in
   let at_signal value =
     (* [candidate] derives candidate_id by serializing the signal, which yojson 3
        refuses to do for a non-finite float. Hash a finite placeholder and inject
@@ -764,50 +725,38 @@ let test_non_finite_complete_request_evidence_is_rejected () =
       { (signal "post-request-finite") with updated_at = Some 0.0 }
     in
     let candidate = candidate placeholder in
-    let candidate =
-      { candidate with
-        signal = { candidate.signal with updated_at = Some value }
-      }
-    in
-    { candidate with
-      judgment_request =
-        candidate.judgment_request
-        |> rewrite_assoc_field
-             "post"
-             (rewrite_assoc_field "updated_at" (fun _ -> `Float 42.0))
-    }
+    let source = { candidate.signal with updated_at = Some value } in
+    with_material
+      { candidate with signal = source }
+      (material_of
+         ~post:{ (post_of_signal source) with updated_at = 42.0 }
+         source)
   in
   let at_post value =
-    { base with
-      judgment_request =
-        base.judgment_request
-        |> rewrite_assoc_field
-             "post"
-             (rewrite_assoc_field "created_at" (fun _ -> `Float value))
-    }
+    with_material
+      base
+      (material_of
+         ~post:{ (post_of_signal base.signal) with created_at = value }
+         base.signal)
   in
   let at_comment value =
-    { base with
-      judgment_request =
-        base.judgment_request
-        |> rewrite_assoc_field
-             "comments"
-             (rewrite_first_comment
-                (rewrite_assoc_field "created_at" (fun _ -> `Float value)))
-    }
+    with_material
+      base
+      (material_of
+         ~comments:[ { (comment_of_signal base.signal) with created_at = value } ]
+         base.signal)
   in
   let at_nested_evidence value =
+    (* post.meta_json stays untyped JSON, so a non-finite number can still hide
+       inside it and the canonicalizer is what answers. *)
     let nested =
-      `Assoc
-        [ ( "evidence"
-          , `List [ `Assoc [ "confidence", `Float value ] ] )
-        ]
+      `Assoc [ "evidence", `List [ `Assoc [ "confidence", `Float value ] ] ]
     in
-    { base with
-      judgment_request =
-        base.judgment_request
-        |> rewrite_assoc_field "post" (set_assoc_field "meta" nested)
-    }
+    with_material
+      base
+      (material_of
+         ~post:{ (post_of_signal base.signal) with meta_json = Some nested }
+         base.signal)
   in
   let locations =
     [ (* signal.updated_at is a typed field, so the record's own finiteness
@@ -870,24 +819,20 @@ let test_finite_numeric_boundary_is_persisted () =
             ] )
       ]
   in
-  let judgment_request =
-    original.judgment_request
-    |> rewrite_assoc_field
-         "post"
-         (fun post ->
-            post
-            |> rewrite_assoc_field
-                 "created_at"
-                 (fun _ -> `Float (-. Float.max_float))
-            |> set_assoc_field "meta" nested_boundary)
-    |> rewrite_assoc_field
-         "comments"
-         (rewrite_first_comment
-            (rewrite_assoc_field
-               "created_at"
-               (fun _ -> `Float Float.max_float)))
+  let material =
+    material_of
+      ~post:
+        { (post_of_signal signal) with
+          created_at = -.Float.max_float
+        ; meta_json = Some nested_boundary
+        }
+      ~comments:
+        [ { (comment_of_signal signal) with created_at = Float.max_float } ]
+      signal
   in
-  let original = { original with judgment_request } in
+  let original =
+    { original with status = A.Pending { last_delivery_failure = None; material } }
+  in
   let persisted = record ~base_path original in
   Alcotest.(check bool)
     "largest finite magnitudes round-trip"
@@ -1238,9 +1183,13 @@ let () =
             `Quick
             test_status_view_preserves_resumability_and_quarantine
         ; Alcotest.test_case
-            "singleton request is canonical and identity bound"
+            "singleton request is built from candidate identity"
             `Quick
-            test_singleton_request_is_canonical_and_identity_bound
+            test_singleton_request_is_built_from_candidate_identity
+        ; Alcotest.test_case
+            "judgment drops Board evidence and keeps partition identity"
+            `Quick
+            test_judgment_drops_board_evidence_but_keeps_partition_identity
         ; Alcotest.test_case
             "record rejects malformed input without poisoning ledger"
             `Quick

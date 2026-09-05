@@ -483,7 +483,11 @@ usage() {
 case "${1:---check}" in
   --measure) measure ;;
   --check)
-    shift
+    # ${1:---check} above supplies the default for the case test only; it
+    # does not create a positional parameter. With no arguments $# is 0,
+    # so an unguarded shift fails and `set -e` ends the script before the
+    # first metric runs — silently, because nothing has printed yet.
+    if [ "$#" -gt 0 ]; then shift; fi
     mode="blocking"
     fail_policy="all"
     json_out=""

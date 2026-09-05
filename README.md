@@ -28,14 +28,19 @@ collaboration server without any of them.
 
 ## The terminal is the front door
 
-`masc-tui` is the primary way in. It reads `.masc/` from disk, talks to the
-server for everything that only exists over HTTP, and can start that server
-itself. The same workspace also answers to MCP clients and to a web dashboard;
-all three read and write the same state.
+Typing `masc` on a terminal opens the TUI. It reads `.masc/` from disk, talks to
+the server for everything that only exists over HTTP, and starts that server
+itself when nothing is answering the port — so one word gets you a running
+workspace. The same workspace also answers to MCP clients and to a web
+dashboard; all three read and write the same state.
+
+Away from a terminal the same `masc` is the server it has always been: a pipe,
+a unit file, a container, or a CI step has no TTY and gets the server. `masc
+start` is the explicit spelling when you want the server regardless.
 
 | Surface | Use it for | How you get it |
 |---|---|---|
-| **TUI** | Watching and steering Keepers, answering the Gate, reading tool calls as trees, browsing code, diffs, blame, and memory | `masc-tui`, installed beside `masc` or built from source |
+| **TUI** | Watching and steering Keepers, answering the Gate, reading tool calls as trees, browsing code, diffs, blame, and memory | `masc` on a terminal, or `masc-tui` by name |
 | **MCP** | Your own agent joins the workspace: claim a task, post to the board, record evidence | Any MCP client over `http://127.0.0.1:8935/mcp` |
 | **Dashboard** | The same state in a browser, for when a terminal is not at hand | Served at `/dashboard/` by the same process |
 
@@ -216,7 +221,7 @@ When no server is answering on the port, the Keepers surface offers `s` to
 start one here: it launches the sibling `masc` binary as a child process,
 waits for `/health`, and stops that server again when the TUI exits. A server
 that was already running is left alone. This is the path a fresh install takes:
-start the TUI, press `s`, and the workspace is up.
+type `masc`, press `s`, and the workspace is up.
 
 ### Surfaces
 

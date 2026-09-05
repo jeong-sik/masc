@@ -1024,10 +1024,77 @@ let mcp_config_cmd =
       const mcp_config_cmd_exit $ base_path $ host $ port $ mcp_config_agent
       $ mcp_config_client_env $ mcp_config_expiring $ mcp_config_client)
 
+(* `masc` with no subcommand is the product's front door, and the front door is
+   the terminal: the TUI is where Keepers are watched and steered, and it starts
+   this same binary as its server when nothing answers the port. So an
+   interactive bare invocation hands over to [masc-tui] instead of serving.
+
+   Every condition has to hold, because the same bare invocation is how service
+   managers and containers start the server:
+
+   - a terminal on both stdin and stdout — a pipe, a unit file or a CI step has
+     neither;
+   - the default loopback host — `--host 0.0.0.0` is a deployment asking for a
+     server, and the TUI carries no --host to hand it;
+   - no server-deployment flag — build provenance and the store-quarantine
+     override are passed by the deploy path and by nothing else;
+   - a `masc-tui` beside this binary or on PATH — the layout install.sh creates.
+     A source checkout builds `masc_tui.exe` under a different name and the
+     container image ships no TUI at all, so both keep the server they had.
+
+   `masc start` always serves, whatever the terminal looks like. The rule itself
+   lives in [Masc_front_door] so it runs under a test without a TTY; what stays
+   here is the effects it reads and the handover it performs. *)
+let stdio_is_a_terminal () =
+  match Unix.isatty Unix.stdin && Unix.isatty Unix.stdout with
+  | answer -> answer
+  | exception Unix.Unix_error _ -> false
+
+let path_is_executable candidate =
+  match Unix.access candidate [ Unix.X_OK ] with
+  | () -> true
+  | exception Unix.Unix_error _ -> false
+
+let front_door_cmd_exit
+      host port base_path accept_store_quarantine
+      provenance_path provenance_sha256 provenance_device provenance_inode =
+  let serve () =
+    run_cmd_exit host port base_path accept_store_quarantine provenance_path
+      provenance_sha256 provenance_device provenance_inode
+  in
+  let deployment_flags_present =
+    accept_store_quarantine
+    || Option.is_some provenance_path
+    || Option.is_some provenance_sha256
+    || Option.is_some provenance_device
+    || Option.is_some provenance_inode
+  in
+  match
+    Masc_front_door.decide
+      ~interactive:(stdio_is_a_terminal ())
+      ~host
+      ~default_host:(Env_config.masc_host ())
+      ~deployment_flags_present
+      ~port
+      ~base_path
+      ~executable_name:Sys.executable_name
+      ~path_env:(Sys.getenv_opt "PATH")
+      ~is_executable:path_is_executable
+  with
+  | Masc_front_door.Serve -> serve ()
+  | Masc_front_door.Open_tui { binary; argv } ->
+    Printf.printf "masc: opening %s — `masc start` runs the server alone\n%!" binary;
+    (try Unix.execv binary (Array.of_list argv) with
+     | Unix.Unix_error (err, _, _) ->
+       Printf.eprintf "masc: could not run %s (%s); starting the server instead\n%!"
+         binary (Unix.error_message err);
+       serve ())
+
 let start_cmd =
   let doc =
-    "Start the MASC MCP server (HTTP/SSE). Same as running `masc` with no \
-     subcommand; exposed as an explicit name for quick-start guides."
+    "Start the MASC MCP server (HTTP/SSE). What `masc` with no subcommand does \
+     everywhere except an interactive terminal, where the bare name opens the \
+     fleet TUI instead. Use this name whenever the server is what you want."
   in
   let info = Cmd.info "start" ~doc in
   Cmd.v info
@@ -1986,11 +2053,13 @@ let setup_gc () =
         Gc.set { gc with minor_heap_size = desired_minor_words }
 
 let cmd =
-  let doc = "MASC MCP Server and operator diagnostics" in
+  let doc =
+    "MASC workspace: the fleet TUI on a terminal, the MCP server everywhere else"
+  in
   let info = Cmd.info "masc" ~version:Runtime_build_version.current ~doc in
   Cmd.group
     ~default:
-      Term.(const run_cmd_exit $ host $ port $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode)
+      Term.(const front_door_cmd_exit $ host $ port $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode)
     info
     [ init_cmd
     ; start_cmd

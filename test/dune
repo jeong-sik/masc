@@ -2144,6 +2144,7 @@
 (include stanzas/test_discord_directory_failure.inc)
 (include stanzas/test_bootstrap_retention_warning.inc)
 (include stanzas/test_config_root_embedded_seed.inc)
+(include stanzas/test_front_door.inc)
 
 (include stanzas/test_gate_surface.inc)
 

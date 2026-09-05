@@ -743,6 +743,12 @@ let test_cancel_waits_for_the_child_to_act_on_sigterm () =
          (Sys.file_exists finished))
 ;;
 
+(* How far past the grace a stop may come back before a case calls it a
+   hang. Generous on purpose: what these cases prove is that the wait ends,
+   not how promptly, and a tight bound under the nightly's four parallel
+   suites reads scheduling jitter as a regression (#33200). *)
+let grace_overrun_allowance_seconds = 5.0
+
 let test_cancel_grace_is_bounded_when_the_child_ignores_sigterm () =
   with_process_runtime @@ fun ~clock ->
   let started = fresh_marker ".started" in
@@ -763,12 +769,13 @@ let test_cancel_grace_is_bounded_when_the_child_ignores_sigterm () =
          (Printf.sprintf "the stop waited out the grace (%.2fs)" elapsed)
          true
          (elapsed >= Process_eio.child_exit_grace_seconds);
-       (* Generous on the upper side: the bound this proves is that a child
-          holding its pipes open cannot stall the cancellation indefinitely. *)
+       (* The bound this proves is that a child holding its pipes open
+          cannot stall the cancellation indefinitely. *)
        check bool
          (Printf.sprintf "and not much longer (%.2fs)" elapsed)
          true
-         (elapsed < Process_eio.child_exit_grace_seconds +. 5.0))
+         (elapsed < Process_eio.child_exit_grace_seconds
+                    +. grace_overrun_allowance_seconds))
 ;;
 
 (* #33182: a timeout raced the finalizer onto the switch-off path, which
@@ -847,20 +854,20 @@ exception Operator_stop_during_the_reap_grace
 
 let operator_stop_into_grace_seconds = 0.5
 
-(* Longer than the watchdog bound: a child that exited on its own inside the
-   window would satisfy the timing for the wrong reason. *)
-let sigterm_ignoring_child_lifetime_seconds = 5.0
-
 let watchdog_poll_interval_seconds = 0.05
 
-(* A second for two timers and one process exit to be scheduled, on top of
-   the budget and the grace the reap waits out. *)
-let reap_return_allowance_seconds = 1.0
-
+(* The budget, the grace the reap waits out, and the same allowance the
+   switch-off case above gives a stop to come back. *)
 let reap_return_bound_seconds =
   grandchild_timeout_budget_seconds
   +. Process_eio.child_exit_grace_seconds
-  +. reap_return_allowance_seconds
+  +. grace_overrun_allowance_seconds
+;;
+
+(* One grace longer than the watchdog bound: a child that exited on its own
+   inside the window would satisfy the timing for the wrong reason. *)
+let sigterm_ignoring_child_lifetime_seconds =
+  reap_return_bound_seconds +. Process_eio.child_exit_grace_seconds
 ;;
 
 let outcome_within_seconds bound scenario =

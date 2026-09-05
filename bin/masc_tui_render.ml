@@ -11866,17 +11866,12 @@ let render_memory (state : state) =
         ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
         ~push_divider:c.push_divider ~push_empty:c.push_empty)
 
-let memory_fact_age_label = Render_memory.memory_fact_age_label
-let memory_fact_row_line = Render_memory.memory_fact_row_line
-let memory_fact_detail_lines = Render_memory.memory_fact_detail_lines
-
 let render_memory_facts (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let open Masc.Tui_decode in
   let keeper_name = Option.value state.memory_facts_keeper ~default:"" in
   let rows = Masc_tui_types.memory_fact_rows state in
   let total = List.length rows in
-  let cursor = max 0 (min state.memory_facts_cursor (total - 1)) in
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
     Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min

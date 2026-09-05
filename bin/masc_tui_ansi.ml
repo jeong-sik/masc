@@ -111,6 +111,18 @@ module Theme = struct
     | Slot_5
     | Slot_6
 
+  (* One place says which hue a slot carries, so the contrast suite measures
+     the mapping the renderer actually draws instead of a copy of it. *)
+  let category_colour = function
+    | Slot_1 -> Masc_tui_theme.Bright_cyan
+    | Slot_2 -> Masc_tui_theme.Bright_yellow
+    | Slot_3 -> Masc_tui_theme.Bright_green
+    | Slot_4 -> Masc_tui_theme.Bright_magenta
+    | Slot_5 -> Masc_tui_theme.Bright_blue
+    | Slot_6 -> Masc_tui_theme.Bright_red
+
+  let all_categories = [ Slot_1; Slot_2; Slot_3; Slot_4; Slot_5; Slot_6 ]
+
   let resolved_cache : resolved option Atomic.t = Atomic.make None
 
   let rec resolved () =
@@ -144,12 +156,12 @@ module Theme = struct
            here because a categorical surface carries no status reading --
            the file list it first serves has no well or unwell -- and
            dropping it would leave five slots for a six-member axis. *)
-        ; slot_1 = of_colour Masc_tui_theme.Bright_cyan
-        ; slot_2 = of_colour Masc_tui_theme.Bright_yellow
-        ; slot_3 = of_colour Masc_tui_theme.Bright_green
-        ; slot_4 = of_colour Masc_tui_theme.Bright_magenta
-        ; slot_5 = of_colour Masc_tui_theme.Bright_blue
-        ; slot_6 = of_colour Masc_tui_theme.Bright_red
+        ; slot_1 = of_colour (category_colour Slot_1)
+        ; slot_2 = of_colour (category_colour Slot_2)
+        ; slot_3 = of_colour (category_colour Slot_3)
+        ; slot_4 = of_colour (category_colour Slot_4)
+        ; slot_5 = of_colour (category_colour Slot_5)
+        ; slot_6 = of_colour (category_colour Slot_6)
         }
       in
       if Atomic.compare_and_set resolved_cache previous (Some next) then next

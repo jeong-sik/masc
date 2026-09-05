@@ -426,6 +426,56 @@ let test_keeper_action_colours_stay_apart_without_red_and_green () =
     schemes
 ;;
 
+(* Six hues for six kinds, measured on all 43 shipped schemes.
+
+   0.024 is the observed worst pair -- horizon-dark's yellow against its
+   green -- and it sits just under the 0.025 the keeper action colours hold.
+   That set is four colours with no green in it; six cannot be picked that
+   far apart out of a palette that only names seven. The number is here as a
+   ratchet: a scheme added below it fails this rather than a reader's eye.
+
+   Colour is not what carries this axis, and the measurement is why. Under
+   deuteranopia the worst pair falls to 0.0014 (tokyo-night-light, yellow
+   against magenta) and under protanopia to 0.0044 (edge-dark, yellow
+   against green) -- eighteen and six times under the floor. So the glyph is
+   load-bearing rather than decorative, and test_tui_file_icon's
+   [glyphs_distinct] is what holds it. Any axis moved onto these slots needs
+   its own second channel; the colour is redundancy. *)
+let categorical_separation_floor = 0.024
+
+let categorical_slot_colours =
+  List.map
+    (fun slot ->
+      ( (match slot with
+         | Masc_tui_ansi.Theme.Slot_1 -> "Slot_1"
+         | Masc_tui_ansi.Theme.Slot_2 -> "Slot_2"
+         | Masc_tui_ansi.Theme.Slot_3 -> "Slot_3"
+         | Masc_tui_ansi.Theme.Slot_4 -> "Slot_4"
+         | Masc_tui_ansi.Theme.Slot_5 -> "Slot_5"
+         | Masc_tui_ansi.Theme.Slot_6 -> "Slot_6")
+      , Masc_tui_ansi.Theme.category_colour slot ))
+    Masc_tui_ansi.Theme.all_categories
+;;
+
+let test_categorical_slots_hold_their_measured_floor () =
+  List.iter
+    (fun scheme ->
+      List.iter
+        (fun ((left_label, left), (right_label, right)) ->
+          let separation =
+            oklab_distance
+              (ansi scheme (Masc_tui_theme.For_testing.ansi_color_index left))
+              (ansi scheme (Masc_tui_theme.For_testing.ansi_color_index right))
+          in
+          check bool
+            (Printf.sprintf "%s: %s and %s stay %.4f apart" scheme.name
+               left_label right_label separation)
+            true
+            (separation >= categorical_separation_floor))
+        (pairs categorical_slot_colours))
+    schemes
+;;
+
 (* [tui] lift_colours off. The lift exists for schemes whose colours fall
    under the floor; a reader who picked a high-contrast scheme already solved
    that, and for them the lift is not a rescue but a change to colours they
@@ -662,6 +712,9 @@ let () =
         ; Alcotest.test_case
             "keeper action colours stay apart without red and green" `Quick
             test_keeper_action_colours_stay_apart_without_red_and_green
+        ; Alcotest.test_case "categorical slots hold their measured floor"
+            `Quick test_categorical_slots_hold_their_measured_floor
+
         ] )
     ; ( "toml theme loading"
       , [ Alcotest.test_case "of_toml_content parses valid theme" `Quick

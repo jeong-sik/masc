@@ -48,6 +48,12 @@ type model_input_projection = Types.message list -> (Types.message list, Error.t
 
 type pre_dispatch_serialization_observer = Llm_provider.Request_wire_observer.try_observe
 
+(** Runs the serialisation of an admitted provider body, the walk over every
+    message in the request. The closure reads immutable request values and
+    returns a value. A caller whose scheduler must stay responsive supplies
+    one that runs it on another domain; [None] runs it inline. *)
+type serialization_executor = { run : 'a. (unit -> 'a) -> 'a }
+
 type options =
   { provider_config : Llm_provider.Provider_config.t option
   ; stream_idle_timeout_s : float option
@@ -182,6 +188,7 @@ type t =
   ; context_fit_admission : context_fit_admission
   ; model_input_projection : model_input_projection option
   ; pre_dispatch_serialization_observer : pre_dispatch_serialization_observer option
+  ; serialization_executor : serialization_executor option
   ; checkpoint_sink : checkpoint_sink option
   }
 
@@ -222,6 +229,7 @@ val create
   -> ?context_fit_admission:context_fit_admission
   -> ?model_input_projection:model_input_projection
   -> ?pre_dispatch_serialization_observer:pre_dispatch_serialization_observer
+  -> ?serialization_executor:serialization_executor
   -> ?checkpoint_sink:checkpoint_sink
   -> unit
   -> t

@@ -1,5 +1,15 @@
 open Agent_types
 
+(* The admitted body's serialisation walks every message in the request. An
+   agent may carry an executor that runs it elsewhere: the closure reads
+   immutable request values and returns a result, and nothing in it needs
+   this fiber. *)
+let run_serialization agent f =
+  match agent.serialization_executor with
+  | Some executor -> executor.run f
+  | None -> f ()
+;;
+
 let core_error_of_http_error = Http_error_agent_core.of_http_error
 
 let notify_attribution callback attribution =
@@ -221,7 +231,8 @@ let dispatch_sync
      closed instead of falling back to a second dispatch path. *)
   let result =
     match
-      Llm_provider.Complete.admit_request_body ~stream:false prepared
+      run_serialization agent (fun () ->
+        Llm_provider.Complete.admit_request_body ~stream:false prepared)
       |> Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider)
     with
     | Error error -> Error error
@@ -328,7 +339,8 @@ let dispatch_stream
   in
   let result =
     match
-      Llm_provider.Complete.admit_request_body ~stream:true prepared
+      run_serialization agent (fun () ->
+        Llm_provider.Complete.admit_request_body ~stream:true prepared)
       |> Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider)
     with
     | Error error -> Error error

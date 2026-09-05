@@ -17,7 +17,7 @@ open Keeper_context_core
 type post_turn_lifecycle = {
   updated_meta : keeper_meta;
   checkpoint : Agent_core.Checkpoint.t option;
-  checkpoint_bytes : int;
+  checkpoint_bytes : int option;
   message_count : int;
 }
 
@@ -130,7 +130,22 @@ let apply_multimodal_wirein
             ();
           lifecycle))
 
+(* The store answers from the summary it published when this process wrote
+   the file, so no part of the context is serialised here. Until 2026-09-05
+   this re-encoded the whole history to JSON once per turn only to take its
+   length (RFC main-domain-scheduler-latency section 8.7). *)
+let durable_checkpoint_bytes ~(config : Workspace.config) ~(meta : keeper_meta) =
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
+  match
+    Keeper_checkpoint_store.canonical_byte_count ~session_dir ~session_id:trace_id
+  with
+  | Ok bytes -> Ok bytes
+  | Error error ->
+    Error (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+
 let apply_post_turn_lifecycle
+    ~(config : Workspace.config)
     ~(meta : keeper_meta)
     ~(checkpoint : Agent_core.Checkpoint.t option) : post_turn_lifecycle =
   let now_ts = Time_compat.now () in
@@ -140,7 +155,7 @@ let apply_post_turn_lifecycle
       {
         updated_meta;
         checkpoint = None;
-        checkpoint_bytes = 0;
+        checkpoint_bytes = None;
         message_count = 0;
       }
   | Some cp ->
@@ -150,7 +165,18 @@ let apply_post_turn_lifecycle
       {
         updated_meta = meta_after_context_check;
         checkpoint = Some cp;
-        checkpoint_bytes = serialized_bytes ctx;
+        checkpoint_bytes =
+          (match durable_checkpoint_bytes ~config ~meta with
+           | Ok bytes -> bytes
+           | Error detail ->
+             Log.Keeper.warn
+               "keeper:%s checkpoint byte count unavailable: %s"
+               meta.name detail;
+             Otel_metric_store.inc_counter
+               Keeper_metrics.(to_string PostTurnWireinFailures)
+               ~labels:[("keeper", meta.name); ("phase", "checkpoint_bytes")]
+               ();
+             None);
         message_count = message_count ctx;
       }
   in

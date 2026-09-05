@@ -74,6 +74,7 @@ let make_agent
       ?hooks
       ?tool_choice
       ?pre_dispatch_serialization_observer
+      ?serialization_executor
       ?(model_id = "mock-model")
       base_url
   =
@@ -96,7 +97,14 @@ let make_agent
          | None -> Hooks.empty)
     }
   in
-  Agent.create ~net ~config ~tools ~options ?pre_dispatch_serialization_observer ()
+  Agent.create
+    ~net
+    ~config
+    ~tools
+    ~options
+    ?pre_dispatch_serialization_observer
+    ?serialization_executor
+    ()
 ;;
 
 let extract_text (resp : Types.api_response) =
@@ -358,6 +366,40 @@ let test_agent_run_observes_pre_dispatch_serialization () =
          ~body
          !observations
      | bodies -> failf "sync server received %d bodies" (List.length bodies));
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_agent_run_serializes_through_executor () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let bodies = ref [] in
+    let runs = ref 0 in
+    let url =
+      start_multi_mock
+        ~on_body:(fun body -> bodies := body :: !bodies)
+        ~sw
+        ~net:env#net
+        ~port:20035
+        [ openai_text_response "serialized through the executor" ]
+    in
+    let executor =
+      { Agent.run =
+          (fun f ->
+            incr runs;
+            f ())
+      }
+    in
+    let agent = make_agent ~net:env#net ~serialization_executor:executor url in
+    (match Agent.run ~sw agent "serialize through the executor" with
+     | Ok _ -> ()
+     | Error error -> fail (Error.to_string error));
+    check int "the executor ran once for the one provider request" 1 !runs;
+    check int "the server received the body it produced" 1 (List.length !bodies);
     Eio.Switch.fail sw Exit
   with
   | Exit -> ()
@@ -897,6 +939,10 @@ let () =
             "run pre-dispatch serialization observer"
             `Quick
             test_agent_run_observes_pre_dispatch_serialization
+        ; test_case
+            "run serializes the body through the executor"
+            `Quick
+            test_agent_run_serializes_through_executor
         ] )
     ]
 ;;

@@ -492,6 +492,26 @@ let delete_credential config agent_name =
 
     De-duplicates by [agent_name] so that a UUID-backed credential
     plus its redirect stub do not appear twice in the result. *)
+(* A redirect stub whose target is gone. [load_credential] follows the redirect
+   and answers [None], so [list_credentials] skips these silently and nothing
+   ever removes them: they authenticate nothing and stay forever. Reported by
+   agent name so the same [delete_credential] retires them as any other. *)
+let orphaned_credential_stubs config : string list =
+  let dir = agents_dir config in
+  if not (file_exists dir)
+  then []
+  else
+    read_dir dir
+    |> Array.to_list
+    |> List.filter (fun f -> Filename.check_suffix f ".json")
+    |> List.filter_map (fun f ->
+      let name = Filename.chop_suffix f ".json" in
+      match load_redirect_target config (credential_file config name) with
+      | Some target when not (file_exists target) -> Some name
+      | Some _ | None -> None)
+    |> List.sort compare
+;;
+
 let list_credentials config : agent_credential list =
   let dir = agents_dir config in
   if file_exists dir

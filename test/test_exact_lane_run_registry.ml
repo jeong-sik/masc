@@ -755,6 +755,43 @@ let test_summary_carries_no_payload () =
   check bool "summary still identifies the run" true (Option.is_some (field "run_id" summary))
 ;;
 
+let test_projected_runs_omit_payload_in_memory () =
+  let path = Filename.temp_file "exact-lane-proj-" ".jsonl" in
+  remove_if_exists path;
+  let registry = R.create ~path () in
+  R.register_running
+    registry
+    ~run_id:"run-large"
+    ~lane:R.Librarian
+    ~actor:"keeper-a"
+    ~started_at:10.0
+    ~input:(R.Exact_input (`Assoc [ "prompt", `String (String.make 1000 'A') ]));
+  mark_completed_exn
+    registry
+    ~run_id:"run-large"
+    ~outcome:R.Succeeded
+    ~elapsed_s:0.5
+    ~output:(`Assoc [ "completion", `String (String.make 1000 'B') ]);
+  let listed_run = List.hd (R.list_runs registry) in
+  check bool "listed run input is stripped" true
+    (match listed_run.R.input with R.Exact_input `Null -> true | _ -> false);
+  check bool "listed run output is stripped" true
+    (match listed_run.R.status with R.Completed { output = `Null; _ } -> true | _ -> false);
+  let paged_run = List.hd (R.recent_runs registry ~limit:1 ~before:None).runs in
+  check bool "paged run input is stripped" true
+    (match paged_run.R.input with R.Exact_input `Null -> true | _ -> false);
+  let detail_run = R.get registry ~run_id:"run-large" |> Option.get in
+  check bool "get run detail preserves full input from disk" true
+    (match detail_run.R.input with
+     | R.Exact_input (`Assoc [ "prompt", `String s ]) -> String.length s = 1000
+     | _ -> false);
+  check bool "get run detail preserves full output from disk" true
+    (match detail_run.R.status with
+     | R.Completed { output = `Assoc [ "completion", `String s ]; _ } -> String.length s = 1000
+     | _ -> false);
+  remove_if_exists path
+;;
+
 let () =
   run
     "exact_lane_run_registry"
@@ -797,5 +834,7 @@ let () =
         ; test_case "pages are a total order over equal timestamps" `Quick
             test_pages_are_a_total_order_over_equal_timestamps
         ; test_case "summary carries no payload" `Quick test_summary_carries_no_payload
+        ; test_case "projected runs omit payload in memory" `Quick
+            test_projected_runs_omit_payload_in_memory
         ] )
     ]

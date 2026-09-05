@@ -301,12 +301,7 @@ let test_glyphs_hold_their_bytes () =
   check str "equalizer min level" " " (equalizer_level 0);
   check str "equalizer max level" "\xe2\x96\x88" (equalizer_level 7);
   check str "equalizer negative level clamped" " " (equalizer_level (-1));
-  check str "equalizer overflow clamped" "\xe2\x96\x88" (equalizer_level 99);
-  check bool "treasure box top border" true
-    (String.starts_with ~prefix:"\xe2\x95\xad" (List.hd treasure_box));
-  check bool "treasure box bottom border" true
-    (String.starts_with ~prefix:"\xe2\x95\xb0" (List.nth treasure_box 3));
-  check Alcotest.int "treasure box line count" 4 (List.length treasure_box)
+  check str "equalizer overflow clamped" "\xe2\x96\x88" (equalizer_level 99)
 
 let test_the_shim_is_the_same_strings () =
   (* Masc_tui_ansi is not linkable from tests (it lives in the executable),

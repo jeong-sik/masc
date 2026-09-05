@@ -2651,25 +2651,11 @@ let render_approvals (state : state) =
                 box_empty buf cols
               done
           | None ->
-              if approval_body_rows >= 6 then begin
-                let gold = Masc_tui_theme.tone Masc_tui_theme.Accent in
-                let green = Masc_tui_theme.status Masc_tui_theme.Ok in
-                let dim = Masc_tui_theme.tone Masc_tui_theme.Dim in
-                box_line buf cols "";
-                box_line buf cols (Printf.sprintf "  %s╭──────────────────────────────────────────────────╮%s" dim Ansi.reset);
-                box_line buf cols (Printf.sprintf "  %s│%s  %s[ $ $ $ ]%s  %sALL GATES SECURE · ZERO PENDING%s      %s│%s" dim Ansi.reset gold Ansi.reset green Ansi.reset dim Ansi.reset);
-                box_line buf cols (Printf.sprintf "  %s│%s  %sDungeon treasury safe — zero held tool calls.%s   %s│%s" dim Ansi.reset dim Ansi.reset dim Ansi.reset);
-                box_line buf cols (Printf.sprintf "  %s╰──────────────────────────────────────────────────╯%s" dim Ansi.reset);
-                for _ = 1 to max 0 (approval_body_rows - 5) do
-                  box_empty buf cols
-                done
-              end else begin
-                box_line buf cols
-                  (Ansi.dim ^ "  (no pending approvals)" ^ Ansi.reset);
-                for _ = 1 to max 0 (approval_body_rows - 1) do
-                  box_empty buf cols
-                done
-              end));
+              box_line buf cols
+                (Ansi.dim ^ "  (no pending approvals)" ^ Ansi.reset);
+              for _ = 1 to max 0 (approval_body_rows - 1) do
+                box_empty buf cols
+              done));
   end else begin
     let content_height = approval_body_rows in
     let scroll_offset =

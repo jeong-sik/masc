@@ -2707,6 +2707,12 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/diagnostics/memprof" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name req reqd ->
+            let json = Server_diagnostics_memprof.report_json () in
+            Http.Response.json_value ~compress:true ~request:req json reqd)
+         request reqd)
   |> Http.Router.get "/api/v1/diagnostics/heap-roots" (fun request reqd ->
        (* Operator diagnostic, never cached and never public: the walk stalls
           the process, so only an admin token may ask for it, and each call

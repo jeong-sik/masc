@@ -30,11 +30,6 @@ val sparkline_colored :
 
 (** {1 Gauges and Utilization Bars} *)
 
-type gauge_thresholds = {
-  warn_percent : int;
-  bad_percent : int;
-}
-
 val format_compact_num : int -> string
 (** Compact number formatter: 1200 -> "1.2k", 1500000 -> "1.5M". Safe on min_int. *)
 
@@ -42,12 +37,13 @@ val gauge :
   width:int ->
   value:int ->
   max_value:int ->
-  ?thresholds:gauge_thresholds ->
   ?label:string ->
   unit ->
   string
-(** [gauge ~width ~value ~max_value ?thresholds ?label ()] renders a proportional gauge bar
-    bounded strictly within [width] display cells. *)
+(** [gauge ~width ~value ~max_value ?label ()] renders a proportional gauge bar
+    bounded strictly within [width] display cells. The bar carries no level
+    colouring: fill and remainder differ by glyph and dimming only. A domain
+    that defines a warning or critical level draws it beside the bar. *)
 
 (** {1 Waterfall Charts} *)
 

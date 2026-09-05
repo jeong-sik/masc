@@ -267,7 +267,7 @@ let heatmap_row ?max_val ?(empty_glyph = dot_empty) ~buckets =
             else if level >= 2 then Masc_tui_theme.tone Accent
             else Masc_tui_theme.tone Dim
           in
-          Buffer.add_string buf (Masc_tui_theme.tone style ^ glyph ^ Masc_tui_theme.Sgr.reset))
+          Buffer.add_string buf (style ^ glyph ^ Masc_tui_theme.Sgr.reset))
       buckets;
     Buffer.contents buf
 ;;

@@ -3556,7 +3556,7 @@
 (test
  (name test_tui_chart)
  (modules test_tui_chart)
- (libraries alcotest masc_tui_chart masc_tui_message_layout))
+ (libraries alcotest masc_tui_chart masc_tui_message_layout masc_tui_theme))
 
 (test
  (name test_tui_esc_interrupt)

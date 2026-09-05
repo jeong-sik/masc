@@ -52,7 +52,11 @@ let content_block_to_history_json block =
   | wire, _ -> wire
 
 let content_block_of_history_json json =
-  match Agent_core.Llm_provider.Api_common.content_block_of_json json with
+  match
+    Agent_core.Llm_provider.Api_common.content_block_of_json
+      ~parse_tool_result_json:false
+      json
+  with
   | Some (Agent_core.Types.ToolResult result) ->
       let outcome =
         match Json_util.assoc_member_opt "tool_failure" json with
@@ -78,7 +82,7 @@ let content_block_of_history_json json =
       let json_payload =
         match Json_util.assoc_member_opt "tool_result_json" json with
         | Some payload -> Some payload
-        | None -> result.json
+        | None -> None
       in
       Some
         (Agent_core.Types.ToolResult

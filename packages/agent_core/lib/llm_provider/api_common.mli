@@ -149,10 +149,14 @@ type content_block_decode_error =
 val content_block_decode_error_to_string : content_block_decode_error -> string
 
 val content_block_of_json_result
-  :  Yojson.Safe.t
+  :  ?parse_tool_result_json:bool
+  -> Yojson.Safe.t
   -> (Types.content_block, content_block_decode_error) result
 
-val content_block_of_json : Yojson.Safe.t -> Types.content_block option
+val content_block_of_json
+  :  ?parse_tool_result_json:bool
+  -> Yojson.Safe.t
+  -> Types.content_block option
 
 (* Internal metadata is retained while projecting an immediate ToolResult plus
    plain User follow-up into one provider user turn; metadata is not wire

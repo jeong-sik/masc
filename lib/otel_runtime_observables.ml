@@ -27,7 +27,12 @@ let watched_store_dirs =
 ;;
 
 (* Directory walks are not free on a 0.5s export tick; recompute at most
-   once per minute and serve the cached samples in between. *)
+   once per minute and serve the cached samples in between. The walk itself
+   is one lstat per file and one readdir per directory over every watched
+   store; on the live root it held the sampler's fiber, and with it the main
+   domain, for about 200 ms per refresh (2026-09-05 stack sample, RFC
+   main-domain-scheduler-latency §8.8). It runs as one job on the domain
+   pool when one is installed and inline otherwise. *)
 let store_walk_min_interval_sec = 60.0
 
 let counter name value =
@@ -74,17 +79,18 @@ let rec store_samples ~masc_root () =
   then cached
   else (
     let samples =
-      List.concat_map
-        (fun store ->
-          let dir = Filename.concat masc_root store in
-          if Sys.file_exists dir
-          then (
-            let bytes, files = walk_dir_totals dir in
-            [ gauge ~labels:[ "store", store ] Otel_metric_store.metric_store_bytes bytes
-            ; gauge ~labels:[ "store", store ] Otel_metric_store.metric_store_files (Float.of_int files)
-            ])
-          else [])
-        watched_store_dirs
+      Domain_pool_ref.submit_io_or_inline (fun () ->
+        List.concat_map
+          (fun store ->
+            let dir = Filename.concat masc_root store in
+            if Sys.file_exists dir
+            then (
+              let bytes, files = walk_dir_totals dir in
+              [ gauge ~labels:[ "store", store ] Otel_metric_store.metric_store_bytes bytes
+              ; gauge ~labels:[ "store", store ] Otel_metric_store.metric_store_files (Float.of_int files)
+              ])
+            else [])
+          watched_store_dirs)
     in
     let next = now, samples in
     if Atomic.compare_and_set store_cache current next

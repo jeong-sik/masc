@@ -164,6 +164,7 @@ let health_uptime_secs = Server_routes_http_runtime_health_helpers.health_uptime
 let health_uptime_string = Server_routes_http_runtime_health_helpers.health_uptime_string
 let protocol_json = Server_routes_http_runtime_health_helpers.protocol_json
 let quick_gc_json = Server_routes_http_runtime_health_helpers.quick_gc_json
+let scheduler_json = Server_routes_http_runtime_health_helpers.scheduler_json
 
 let internal_keeper_token_hash_opt ~base_path =
   let hash_file = Auth.internal_keeper_token_hash_file base_path in
@@ -292,6 +293,7 @@ let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
       ("subsystems", Subsystem_health.to_yojson ());
       ("logs", Log.Ring.summary_json ());
       ("gc", quick_gc_json ());
+      ("scheduler", scheduler_json ());
     ]
 
 let make_health_probe_json ?(listener = "http/1.1") ~request_authority request =
@@ -651,6 +653,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ("feature_flags", let features = Dashboard_feature_health.get_all_features () in
       Dashboard_feature_health.overview_json features);
     ("gc", quick_gc_json ());
+    ("scheduler", scheduler_json ());
     ("overall_status", `String overall_status);
     ("operator_action_required", `Bool operator_action_required);
     ( "operator_action_reasons",

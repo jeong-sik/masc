@@ -1197,19 +1197,28 @@ let test_compact_and_full_keep_the_same_typed_facts () =
   check int "full has three details plus the transcript omission" 4
     (List.length full.rows);
   check int "full hides no detail row" 0 full.hidden_activity_rows;
-  check int "compact keeps its summary and the transcript omission" 2
+  check int "compact keeps inventory, trouble and the transcript omission" 3
     (List.length compact.rows);
   check int "compact states exactly how many rows it hid" 3
     compact.hidden_activity_rows;
-  let summary = List.hd compact.rows in
-  check bool "the compact row does not hide the failure" true
-    (contains ~needle:"1 failed" summary);
-  check bool "the compact row reads as one activity summary" true
-    (String.starts_with ~prefix:"✗ Tools 3" summary);
-  check bool "the compact row carries the exact folded count" true
-    (contains ~needle:"3 details folded" summary);
+  let inventory = List.hd compact.rows in
+  let trouble = List.nth compact.rows 1 in
+  check bool "the inventory row reads as one activity summary" true
+    (String.starts_with ~prefix:"✗ Tools 3" inventory);
+  check bool "the inventory row carries the exact folded count" true
+    (contains ~needle:"3 details folded" inventory);
+  check bool "the inventory row keeps what returned" true
+    (contains ~needle:"1 returned" inventory);
+  check bool "the inventory row leaves the failure to the row below" false
+    (contains ~needle:"1 failed" inventory);
+  check bool "the trouble row names the failure" true
+    (contains ~needle:"1 failed" trouble);
+  check bool "the trouble row keeps the unrecorded call with it" true
+    (contains ~needle:"1 outcome unrecorded" trouble);
+  check bool "the trouble row carries its own mark" true
+    (String.starts_with ~prefix:"✗ " trouble);
   check string "compact does not count the visible omission as hidden"
-    (List.nth full.rows 3) (List.nth compact.rows 1)
+    (List.nth full.rows 3) (List.nth compact.rows 2)
 
 let test_compact_summary_counts_registered_public_names () =
   let activity name =
@@ -1228,7 +1237,7 @@ let test_compact_summary_counts_registered_public_names () =
           check bool ("summary contains " ^ expected) true
             (contains ~needle:expected summary))
         [ "Tools 4"; "Read 2"; "Edit 1"; "Execute 1" ]
-  | rows -> failf "expected one compact row, got %d" (List.length rows)
+  | rows -> failf "every call returned, so one compact row was expected, got %d" (List.length rows)
 
 let test_compact_summary_keeps_operational_tool_kinds () =
   let activity name =
@@ -1251,7 +1260,7 @@ let test_compact_summary_keeps_operational_tool_kinds () =
           check bool ("summary keeps " ^ expected) true
             (contains ~needle:expected summary))
         [ "Skill 1"; "Keeper 1"; "Fusion 1" ]
-  | rows -> failf "expected one compact row, got %d" (List.length rows)
+  | rows -> failf "every call returned, so one compact row was expected, got %d" (List.length rows)
 
 let full_tool_rows block =
   (Transcript.project_tool_block Transcript.Full block).Transcript.rows
@@ -1310,7 +1319,7 @@ let test_compact_mix_caps_a_degenerate_tool_name () =
          (not (contains ~needle:"150151152" summary));
        check bool "the summary row stays on one line of a pane" true
          (String.length summary < 200)
-   | rows -> failf "expected one compact row, got %d" (List.length rows))
+   | rows -> failf "every call returned, so one compact row was expected, got %d" (List.length rows))
 
 let test_a_registered_length_name_passes_through_whole () =
   let longest = "masc_operator_board_attention_quarantine_requeue" in

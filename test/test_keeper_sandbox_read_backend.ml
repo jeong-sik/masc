@@ -1957,13 +1957,14 @@ let test_typed_guest_target_leaves_image_preflight_to_runtime_creation () =
     | Error error -> Alcotest.fail error.message
     | Ok { target = Masc_exec.Sandbox_target.Docker { runner; _ }; _ } ->
       let status, _stdout, stderr =
-        runner
-          ~on_stdout_chunk:None
-          ~on_stderr_chunk:None
-          ~stdin_content:None
-          ~argv:[ "true" ]
-          ~env:[||]
-          ~cwd:None
+        Masc_exec.Sandbox_target.status_tuple
+          (runner
+             ~on_stdout_chunk:None
+             ~on_stderr_chunk:None
+             ~stdin_content:None
+             ~argv:[ "true" ]
+             ~env:[||]
+             ~cwd:None)
       in
       (match status with
        | Unix.WEXITED 0 -> ()

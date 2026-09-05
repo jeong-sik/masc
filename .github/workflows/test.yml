@@ -24,25 +24,58 @@ name: Test
 # #33008.
 #
 # See: https://github.com/jeong-sik/masc/issues/33008
+#
+# A dispatch can also name suites. With the `suite` input set, the Test
+# step builds only those executables and runs each straight from
+# _build/default/test under a per-suite timeout, outside dune's (test)
+# action, with ALCOTEST_VERBOSE=1: every case prints its [OK] line as it
+# finishes, so a hang names the case after the last [OK] instead of a
+# suite after 90 minutes. Two suites hung past the full lane's deadline
+# on 2026-09-05 (#33200); this is how to measure them in ten minutes
+# rather than ninety, and with `eio_backend=posix` how to tell an Eio
+# backend difference from a scheduling one.
 
 on:
   schedule:
     # 17:43 UTC = 02:43 KST, off-peak for both GitHub runners and the team.
     - cron: "43 17 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: >-
+          Comma-separated test executables under test/ to build and run on
+          their own instead of the full runner, for example
+          test_heartbeat_integration,test_hitl_summary_worker. Empty runs
+          the full suite.
+        type: string
+        default: ""
+      eio_backend:
+        description: >-
+          EIO_BACKEND for a targeted run, for example posix. Empty leaves
+          the Eio default, io_uring on Linux where available. Ignored
+          when suite is empty.
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
-# Two lanes. Every dispatch shares one, where a new dispatch cancels the
-# run in flight instead of stacking a second 180-minute job, as before;
-# the scheduled run has a lane of its own that no dispatch can reach. One
-# group for the whole repo did reach it: on 2026-09-04 the scheduled run
-# (17:43:56Z, 7aed1b696f) was cancelled within two seconds by a branch
-# dispatch created the same second, and of this lane's first 13 runs none
-# completed successfully.
+# Two lanes plus one per targeted run. Every full dispatch shares one
+# lane, where a new dispatch cancels the run in flight instead of stacking
+# a second 180-minute job, as before; the scheduled run has a lane of its
+# own that no dispatch can reach. One group for the whole repo did reach
+# it: on 2026-09-04 the scheduled run (17:43:56Z, 7aed1b696f) was
+# cancelled within two seconds by a branch dispatch created the same
+# second, and of this lane's first 13 runs none completed successfully.
+# A dispatch that names suites runs beside the full lane, not instead of
+# it, so it gets a group of its own keyed by run id: the first targeted
+# dispatch (33951571973, 2026-09-05 07:05:06Z) shared the dispatch lane
+# and cancelled a full run 82 minutes in (33947949528). On the schedule
+# there are no inputs, and `inputs.suite` is null; GitHub compares a null
+# with '' by coercing both to 0, so the test below is false and the
+# scheduled run keeps its lane.
 concurrency:
-  group: test-${{ github.event_name }}
+  group: ${{ inputs.suite != '' && format('test-targeted-{0}', github.run_id) || format('test-{0}', github.event_name) }}
   cancel-in-progress: true
 
 jobs:
@@ -136,8 +169,22 @@ jobs:
           CI_TEST_HEARTBEAT_SEC: "30"
           # A fixed path so the step below can upload it. ci-run-tests.sh
           # otherwise names the file with mktemp and only its last 120
-          # lines reach the step output.
+          # lines reach the step output. The targeted path appends to the
+          # same file, so the upload step serves both.
           CI_TEST_LOG_FILE: ${{ runner.temp }}/ci-run-tests.log
+          # The targeted path, from the dispatch inputs; both are empty on
+          # the schedule and on a dispatch that names no suite.
+          TARGET_SUITES: ${{ inputs.suite }}
+          TARGET_EIO_BACKEND: ${{ inputs.eio_backend }}
+          # One suite's budget on the targeted path, where none of the
+          # three deadlines above applies: the run is not under
+          # ci-run-tests.sh, and each suite is under timeout(1). The suites
+          # #33200 is about ran past 5400s under the full lane; one that
+          # needs more than ten minutes alone is the finding, not a run to
+          # wait out. TERM first, KILL after the grace, in case the suite
+          # handles TERM itself.
+          TARGET_SUITE_TIMEOUT_SEC: "600"
+          TARGET_SUITE_KILL_GRACE_SEC: "30"
         # The runner is scripts/ci-run-test-suite.sh, NOT raw dune test:
         # nine suites in test/ci-known-failures.txt fail today, so plain
         # dune test exits 1 on every run -- permanently red, zero signal.
@@ -146,9 +193,81 @@ jobs:
         # and fails only on the delta: an unlisted suite breaking, a listed
         # suite newly passing, or a failure header that names no suite.
         # ci-run-tests.sh wraps it as the heartbeat observer.
+        #
+        # The targeted path skips both scripts. Dune holds a (test) action's
+        # output until the suite exits, so under dune a hang names nothing;
+        # the executable run directly with ALCOTEST_VERBOSE=1 prints each
+        # case as it finishes. The environment is what test/dune's (env)
+        # block sets for every suite plus the setenv lines of the suite's
+        # own stanza in test/stanzas/*.inc; a suite whose stanza sets more
+        # needs a case below, and one that is missing gets the shared
+        # environment only. DUNE_SOURCEROOT is what masc_test_deps reads
+        # to find config/ and prompts/ from inside _build.
         run: |
           set -euo pipefail
-          scripts/ci-run-tests.sh "scripts/ci-run-test-suite.sh"
+          if [ -z "${TARGET_SUITES}" ]; then
+            scripts/ci-run-tests.sh "scripts/ci-run-test-suite.sh"
+            exit 0
+          fi
+          log() { printf '%s\n' "$*" | tee -a "${CI_TEST_LOG_FILE}"; }
+          export DUNE_SOURCEROOT="$(pwd -P)"
+          if [ -n "${TARGET_EIO_BACKEND}" ]; then
+            export EIO_BACKEND="${TARGET_EIO_BACKEND}"
+          fi
+          suites=()
+          exes=()
+          IFS=',' read -r -a requested <<< "${TARGET_SUITES}"
+          for suite in "${requested[@]}"; do
+            suite="${suite// /}"
+            [ -n "${suite}" ] || continue
+            suites+=("${suite}")
+            exes+=("test/${suite}.exe")
+          done
+          # dune build with no target builds everything; a suite input of
+          # separators only must not turn into the full build.
+          if [ "${#suites[@]}" -eq 0 ]; then
+            log "[targeted] FAIL - the suite input names no executable: '${TARGET_SUITES}'"
+            exit 2
+          fi
+          log "[targeted] EIO_BACKEND=${EIO_BACKEND:-<unset>} timeout=${TARGET_SUITE_TIMEOUT_SEC}s per suite"
+          log "[targeted] dune build ${exes[*]}"
+          opam exec -- dune build --root . "${exes[@]}" 2>&1 | tee -a "${CI_TEST_LOG_FILE}"
+          status=0
+          cd _build/default/test
+          for suite in "${suites[@]}"; do
+            case "${suite}" in
+              test_heartbeat_integration)
+                suite_env=(MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=true
+                           MASC_BASE_PATH=/tmp/test-heartbeat-integ
+                           MASC_BASE_PATH_INPUT=/tmp/test-heartbeat-integ) ;;
+              *)
+                suite_env=() ;;
+            esac
+            log "[targeted] ${suite}: start $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            started=$(date +%s)
+            rc=0
+            # ${arr[@]+"${arr[@]}"} expands an empty array to nothing under
+            # set -u on every bash, not only 4.4 and later.
+            env MASC_BASE_PATH= GRAPHQL_API_KEY= ZAI_API_KEY= \
+                MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false \
+                MASC_KEEPER_DOCKER_PLAYGROUND=false \
+                ALCOTEST_VERBOSE=1 ${suite_env[@]+"${suite_env[@]}"} \
+                timeout -s TERM -k "${TARGET_SUITE_KILL_GRACE_SEC}" "${TARGET_SUITE_TIMEOUT_SEC}" \
+                "./${suite}.exe" 2>&1 | tee -a "${CI_TEST_LOG_FILE}" || rc=$?
+            elapsed=$(( $(date +%s) - started ))
+            # timeout(1) exits 124 when TERM ended the command and 137
+            # when it took the KILL after the grace.
+            case "${rc}" in
+              0)   log "[targeted] ${suite}: OK in ${elapsed}s" ;;
+              124|137)
+                   log "[targeted] ${suite}: TIMEOUT exit ${rc} after ${elapsed}s;" \
+                       "the hung case is the one after the last [OK] line above"
+                   status=1 ;;
+              *)   log "[targeted] ${suite}: FAIL exit ${rc} in ${elapsed}s"
+                   status=1 ;;
+            esac
+          done
+          exit "${status}"
 
       # The step output carries the heartbeat and the last 120 lines of the
       # runner log; every per-suite verdict lives only in the file. The

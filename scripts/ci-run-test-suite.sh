@@ -200,6 +200,64 @@ terminate_rows() {
   kill -KILL $pids 2>/dev/null
 }
 
+# What a suite still running at the deadline was doing. Alcotest 1.9.1
+# (alcotest-engine/log_trap.ml, core.ml perform_test) opens
+# _build/_tests/<run id>/<group>.<index>.output under the suite's working
+# directory when a case starts and redirects the case's output there, so
+# under a running suite the newest file names the case in progress, by its
+# group and its index in that group, and holds whatever it printed; the
+# files before it hold the assertions of the cases that finished. The run
+# id directory has two sibling symlinks, the suite name and `latest`. Dune
+# runs each suite in a sandbox under _build/.sandbox and removes the sandbox
+# when the action ends, so at the deadline only the suites still running
+# have files there, and the listing has to be taken before the tree is
+# killed. The nightly of 2026-09-05 named its two hung suites and nothing
+# else (#33200); this names the case.
+alcotest_outputs_at_deadline=6
+alcotest_output_tail_lines=40
+
+# "<mtime epoch> <path>" for the newest .output files under sandbox root
+# $1, oldest first, at most alcotest_outputs_at_deadline of them. GNU find:
+# the deadline path runs on the Linux runner. Symlinks are not followed, so
+# each file is listed once, under its run id.
+newest_alcotest_outputs() {
+  [ -d "$1" ] || return 0
+  find "$1" -path '*/_build/_tests/*.output' -type f -printf '%T@ %p\n' 2>/dev/null \
+    | sort -n | tail -n "$alcotest_outputs_at_deadline"
+}
+
+# The suite name of alcotest run directory $1: the sibling symlink to it
+# that is not `latest`, or the run id when there is none.
+alcotest_suite_of() {
+  local run_dir="$1"
+  local link
+  for link in "$(dirname "$run_dir")"/*; do
+    [ -L "$link" ] || continue
+    [ "$(basename "$link")" != latest ] || continue
+    if [ "$(basename "$(readlink "$link")")" = "$(basename "$run_dir")" ]; then
+      basename "$link"
+      return 0
+    fi
+  done
+  basename "$run_dir"
+}
+
+# For each newest_alcotest_outputs line on stdin: the suite and the file
+# name alcotest chose, how long before epoch $1 the file was last written,
+# and its last alcotest_output_tail_lines lines.
+print_alcotest_outputs() {
+  local now="$1"
+  local mtime path suite file
+  while read -r mtime path; do
+    suite="$(alcotest_suite_of "$(dirname "$path")")"
+    file="$(basename "$path")"
+    echo "[test-suite] alcotest output in flight: ${suite}/${file}," \
+         "last written $(( now - ${mtime%.*} ))s before the deadline"
+    echo "[test-suite]   ${path}"
+    tail -n "$alcotest_output_tail_lines" "$path" | sed 's/^/    /'
+  done
+}
+
 self_test() {
   local exact_block
   local longer_block
@@ -428,6 +486,64 @@ EOF
   fi
   : > "$fixture_rows"
   echo "[test-suite] self-test OK - a suite in its own process group is found and terminated"
+
+  # The deadline listing of alcotest case output, on the layout alcotest
+  # 1.9.1 writes: two sandboxes, each with a run id directory and the suite
+  # name and `latest` symlinks beside it. The newest file under each suite
+  # comes last, a file longer than the tail is cut to its last lines, one
+  # file more than the listing holds is dropped as the oldest, the symlinks
+  # are not followed, and the suite is named from its symlink. BSD find has
+  # no -printf; the listing runs on the Linux runner, so the check is
+  # skipped where it is missing.
+  if ! find . -maxdepth 0 -printf '' 2>/dev/null; then
+    echo "[test-suite] self-test SKIP - find has no -printf; the deadline listing runs on the Linux runner"
+    return 0
+  fi
+  fixture_sandbox="$(mktemp -d "${TMPDIR:-/tmp}/masc-test-suite-sandbox.XXXXXX")"
+  heartbeat_tests="$fixture_sandbox/aa11/default/test/_build/_tests"
+  hitl_tests="$fixture_sandbox/bb22/default/test/_build/_tests"
+  heartbeat_dir="$heartbeat_tests/6A8F1C2B"
+  hitl_dir="$hitl_tests/0D3E9B47"
+  mkdir -p "$heartbeat_dir" "$hitl_dir"
+  ln -s "$heartbeat_dir" "$heartbeat_tests/Heartbeat_integration"
+  ln -s "$heartbeat_dir" "$heartbeat_tests/latest"
+  ln -s "$hitl_dir" "$hitl_tests/Hitl_summary_worker"
+  ln -s "$hitl_dir" "$hitl_tests/latest"
+  seq 1 50 | sed 's/^/heartbeat line /' > "$heartbeat_dir/lifecycle.004.output"
+  printf 'started the case that hangs\n' > "$heartbeat_dir/lifecycle.005.output"
+  printf 'ASSERT worker case 011 failed first\n' > "$hitl_dir/worker.011.output"
+  printf 'worker case 012 in flight\n' > "$hitl_dir/worker.012.output"
+  for stale in 1 2 3; do
+    printf 'stale %s\n' "$stale" > "$hitl_dir/worker.00${stale}.output"
+    touch -t 202601010${stale}00 "$hitl_dir/worker.00${stale}.output"
+  done
+  touch -t 202609050100 "$heartbeat_dir/lifecycle.004.output"
+  touch -t 202609050200 "$hitl_dir/worker.011.output"
+  touch -t 202609050300 "$heartbeat_dir/lifecycle.005.output"
+  touch -t 202609050400 "$hitl_dir/worker.012.output"
+  listing="$(newest_alcotest_outputs "$fixture_sandbox" | awk '{ print $2 }' | sed "s#^$fixture_sandbox/##" | tr '\n' ';')"
+  [ "$listing" = "bb22/default/test/_build/_tests/0D3E9B47/worker.002.output;bb22/default/test/_build/_tests/0D3E9B47/worker.003.output;aa11/default/test/_build/_tests/6A8F1C2B/lifecycle.004.output;bb22/default/test/_build/_tests/0D3E9B47/worker.011.output;aa11/default/test/_build/_tests/6A8F1C2B/lifecycle.005.output;bb22/default/test/_build/_tests/0D3E9B47/worker.012.output;" ] \
+    || { echo "[test-suite] self-test FAIL - the newest alcotest outputs are misordered or miscounted: $listing" >&2
+         rm -rf "$fixture_sandbox"; exit 1; }
+  rendered="$(newest_alcotest_outputs "$fixture_sandbox" | print_alcotest_outputs "$(date +%s)")"
+  printf '%s\n' "$rendered" | grep -Fq 'alcotest output in flight: Heartbeat_integration/lifecycle.005.output' \
+    || { echo "[test-suite] self-test FAIL - the case in flight is not named by its suite symlink" >&2
+         rm -rf "$fixture_sandbox"; exit 1; }
+  printf '%s\n' "$rendered" | grep -Fq 'alcotest output in flight: Hitl_summary_worker/worker.012.output' \
+    || { echo "[test-suite] self-test FAIL - the second suite is not named by its symlink" >&2
+         rm -rf "$fixture_sandbox"; exit 1; }
+  printf '%s\n' "$rendered" | grep -Fq '    ASSERT worker case 011 failed first' \
+    || { echo "[test-suite] self-test FAIL - the finished case's assertion is missing" >&2
+         rm -rf "$fixture_sandbox"; exit 1; }
+  printf '%s\n' "$rendered" | grep -Fq '    heartbeat line 11' \
+    || { echo "[test-suite] self-test FAIL - the tail of a long output is missing" >&2
+         rm -rf "$fixture_sandbox"; exit 1; }
+  if printf '%s\n' "$rendered" | grep -Fq 'heartbeat line 10'; then
+    echo "[test-suite] self-test FAIL - a long output is not cut to its tail" >&2
+    rm -rf "$fixture_sandbox"; exit 1
+  fi
+  rm -rf "$fixture_sandbox"
+  echo "[test-suite] self-test OK - the deadline listing names the alcotest case in flight"
 }
 
 if [ "${1:-}" = "--self-test" ]; then
@@ -443,6 +559,8 @@ tmp="${RUNNER_TEMP:-/tmp}"
 log="$tmp/test-suite.log"
 tree_at_deadline="$tmp/test-suite-tree-at-deadline.txt"
 running_at_deadline="$tmp/test-suite-running-at-deadline.txt"
+alcotest_outputs_at_deadline_file="$tmp/test-suite-alcotest-outputs-at-deadline.txt"
+sandbox_root="_build/.sandbox"
 
 if [ ! -f "$known_file" ]; then
   echo "[test-suite] FAIL - $known_file is missing"
@@ -455,19 +573,25 @@ fi
 # tail names the last suite that finished, not the one that hung. In run
 # 33916791821 (2026-09-04) the tail ended with output stamped 20:49 and the
 # deadline fell at 22:04, with nothing in between. At the deadline the
-# process tree under dune is recorded, the executables in it are named, and
-# the whole tree gets TERM, then KILL after a grace period; rc is 124 as
-# before.
+# process tree under dune is recorded, the executables in it are named, the
+# alcotest case output still in the running suites' sandboxes is rendered
+# while the sandboxes exist, and the whole tree gets TERM, then KILL after a
+# grace period; rc is 124 as before.
 run_suite_under_deadline() {
   opam exec -- dune build --root . "$alias_target" > "$log" 2>&1 &
   local dune_pid=$!
   local exited
+  local now
   rc=""
   : > "$running_at_deadline"
+  : > "$alcotest_outputs_at_deadline_file"
   while kill -0 "$dune_pid" 2>/dev/null; do
-    if [ $(( $(date +%s) - started )) -ge "$deadline" ]; then
+    now=$(date +%s)
+    if [ $(( now - started )) -ge "$deadline" ]; then
       process_table | process_tree_of "$dune_pid" > "$tree_at_deadline"
       name_suite_processes < "$tree_at_deadline" > "$running_at_deadline"
+      newest_alcotest_outputs "$sandbox_root" \
+        | print_alcotest_outputs "$now" > "$alcotest_outputs_at_deadline_file"
       terminate_rows "$tree_at_deadline" 30
       rc=124
       break
@@ -495,6 +619,13 @@ if [ "$rc" = 124 ]; then
   fi
   echo "[test-suite] process tree under dune at deadline:"
   sed 's/^/  /' "$tree_at_deadline"
+  if [ -s "$alcotest_outputs_at_deadline_file" ]; then
+    echo "[test-suite] alcotest case output in the running suites' sandboxes at deadline, newest last:"
+    cat "$alcotest_outputs_at_deadline_file"
+  else
+    echo "[test-suite] alcotest case output at deadline: no .output file under $sandbox_root;" \
+         "no suite had started a case, or the suites run outside a sandbox"
+  fi
   echo
   tail -60 "$log"
   exit 2

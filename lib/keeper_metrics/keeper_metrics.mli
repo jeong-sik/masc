@@ -177,6 +177,7 @@ type t =
   | VisionCandidateAttempts
   | VisionIngestEvictions
   | VisionIngestErrors
+  | VisionDownscale
   | PromptSegmentBytes
   | PromptTemplateRenderOutcome
   | ToolCallParamCompleteness

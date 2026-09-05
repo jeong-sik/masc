@@ -403,6 +403,19 @@ module KeeperVision = struct
     |> clamp_float ~min_value:0.0 ~max_value:candidate_backoff_max_sec_ceiling
     |> Float.max base
   ;;
+
+  let max_dimension_default = 1568
+  let max_dimension_floor = 256
+  let max_dimension_ceiling = 8192
+
+  (** Maximum image dimension (longest edge) before downscaling. Default is 1568px
+      matching provider token-efficiency recommendations. Range: [256, 8192].
+
+      @category Policies @ops_class operator *)
+  let max_dimension () =
+    get_int_nonneg ~default:max_dimension_default "MASC_KEEPER_VISION_MAX_DIMENSION"
+    |> clamp_int ~min_value:max_dimension_floor ~max_value:max_dimension_ceiling
+  ;;
 end
 
 (** {1 Keeper Generated Media Configuration} *)

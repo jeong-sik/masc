@@ -134,6 +134,10 @@ module KeeperVision : sig
 
   (** Max inter-candidate backoff, clamped to [base, 30] seconds. *)
   val candidate_backoff_max_sec : unit -> float
+
+  (** Maximum image dimension (longest edge) before downscaling, clamped to [256, 8192].
+      Default: 1568. *)
+  val max_dimension : unit -> int
 end
 
 (** {1 Keeper generated media} *)

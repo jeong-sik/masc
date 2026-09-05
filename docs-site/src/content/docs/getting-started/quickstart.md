@@ -33,13 +33,19 @@ TAG=vX.Y.Z
 curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/${TAG}/scripts/install.sh" \
   -o /tmp/masc-install.sh
 less /tmp/masc-install.sh      # read it first; press q to exit the pager
-bash /tmp/masc-install.sh --version "$TAG"
+bash /tmp/masc-install.sh --version "$TAG" --base-path ~/masc
 ```
 
 The installer downloads the binaries, verifies their `SHA256SUMS`, and places
-`masc` and `masc-tui` in `~/.local/bin`. It then runs a one-time setup wizard
-(see [step 3](#3-choose-a-model-source-for-keepers)); you can skip the wizard
-with `--no-wizard`.
+`masc` and `masc-tui` in `~/.local/bin`.
+
+`--base-path ~/masc` is where your workspace lives: the setup creates `~/masc/.masc/`
+and the commands below all point at `~/masc`. Without `--base-path` the workspace
+goes in the directory you run the installer from, which is easy to lose track of —
+setting it once keeps every later command the same. The installer also prints your
+exact start, login, and TUI commands at the end, with this path already filled in.
+
+The installer then runs a one-time setup wizard; you can skip it with `--no-wizard`.
 
 ## 2. Put `masc` on your PATH
 
@@ -77,12 +83,11 @@ Opening a new terminal window has the same effect as `source`.
 
 ## 3. Start the server
 
-The installer prints the exact start command for your setup at the end. It looks
-like this, and it runs in the **foreground** — the terminal stays busy with the
-server as long as it runs:
+Start the server with the same base path you installed with. It runs in the
+**foreground** — the terminal stays busy with the server as long as it runs:
 
 ```bash
-masc --base-path ~/.masc
+masc --base-path ~/masc
 ```
 
 Because the server holds this terminal, **open a second terminal window** for the
@@ -97,10 +102,12 @@ at `http://127.0.0.1:8935/dashboard/` in a browser.
 
 ## 4. Open the Terminal UI
 
-The Terminal UI is the operator cockpit — it needs an interactive terminal:
+The Terminal UI is the operator cockpit — it needs an interactive terminal. Pass
+the same base path, because a second terminal starts in your home directory, not
+the workspace:
 
 ```bash
-masc-tui --port 8935
+masc-tui --base-path ~/masc --port 8935
 ```
 
 - `Tab` / `Shift-Tab` move between surfaces (Keepers, Board, Approvals, …).
@@ -137,5 +144,6 @@ or on the command line with `masc keeper-create --help`. The
 ## If something goes wrong
 
 See [Troubleshooting](/runbooks/troubleshooting/). The most common first-run
-snags are `masc: command not found` (step 2, PATH) and a server that will not
-start because its default model source is unreachable (step 6).
+snag is `masc: command not found` — that is the PATH step above. If the server
+exits at startup instead of staying in the foreground, the Troubleshooting page
+covers the usual causes.

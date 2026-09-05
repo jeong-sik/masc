@@ -33,12 +33,19 @@ TAG=vX.Y.Z
 curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/${TAG}/scripts/install.sh" \
   -o /tmp/masc-install.sh
 less /tmp/masc-install.sh      # 먼저 내용을 확인하세요. q 를 누르면 나옵니다
-bash /tmp/masc-install.sh --version "$TAG"
+bash /tmp/masc-install.sh --version "$TAG" --base-path ~/masc
 ```
 
 설치 스크립트는 바이너리를 받아 `SHA256SUMS` 로 무결성을 확인하고, `masc` 와
-`masc-tui` 를 `~/.local/bin` 에 놓습니다. 그다음 일회성 설정 마법사가
-[3단계](#3-서버-켜기)로 이어집니다. 마법사를 건너뛰려면 `--no-wizard` 를 붙이세요.
+`masc-tui` 를 `~/.local/bin` 에 놓습니다.
+
+`--base-path ~/masc` 는 작업 공간이 놓일 자리입니다. 설치가 `~/masc/.masc/` 를
+만들고, 아래 명령들은 모두 `~/masc` 를 가리킵니다. `--base-path` 를 안 주면 작업
+공간이 설치 스크립트를 실행한 디렉터리에 생겨 나중에 찾기 어렵습니다 — 한 번
+정해두면 이후 명령이 전부 같아집니다. 설치가 끝나면 이 경로가 채워진 시작·login·TUI
+명령도 스크립트가 찍어줍니다.
+
+그다음 일회성 설정 마법사가 이어집니다. 마법사를 건너뛰려면 `--no-wizard` 를 붙이세요.
 
 ## 2. `masc` 를 PATH 에 넣기
 
@@ -76,12 +83,11 @@ masc --help
 
 ## 3. 서버 켜기
 
-설치가 끝나면 스크립트가 각자 환경에 맞는 시작 명령을 찍어줍니다. 모양은 아래와
-비슷하고, 이 명령은 **앞단(foreground)에서 돕니다** — 서버가 도는 동안 그 터미널은
-서버가 붙잡고 있습니다.
+설치할 때 쓴 것과 같은 base-path 로 서버를 켭니다. 이 명령은 **앞단(foreground)에서
+돕니다** — 서버가 도는 동안 그 터미널은 서버가 붙잡고 있습니다.
 
 ```bash
-masc --base-path ~/.masc
+masc --base-path ~/masc
 ```
 
 서버가 이 터미널을 붙잡고 있으니, 아래 단계는 **새 터미널 창을 하나 더 열어서**
@@ -96,10 +102,11 @@ curl http://127.0.0.1:8935/health
 
 ## 4. 터미널 UI 열기
 
-터미널 UI 는 운영자용 조종석입니다. 대화형 터미널이 필요합니다.
+터미널 UI 는 운영자용 조종석입니다. 대화형 터미널이 필요합니다. 같은 base-path 를
+넘기세요. 새 터미널은 작업 공간이 아니라 홈 디렉터리에서 시작하기 때문입니다.
 
 ```bash
-masc-tui --port 8935
+masc-tui --base-path ~/masc --port 8935
 ```
 
 - `Tab` / `Shift-Tab` 로 화면(Keepers, Board, Approvals …)을 넘깁니다.
@@ -138,5 +145,5 @@ Keeper 는 MASC 가 직접 돌리는 에이전트입니다. 두 가지가 더 �
 ## 잘 안 될 때
 
 [문제 해결](/ko/runbooks/troubleshooting/)을 보세요. 첫 실행에서 가장 흔한 문제는
-`masc: command not found` (2단계, PATH)와, 기본 모델 소스에 닿지 못해 서버가 안
-켜지는 경우(6단계)입니다.
+`masc: command not found` 입니다 — 위 2단계 PATH 문제입니다. 서버가 앞단에 머무르지
+않고 시작하자마자 꺼지면, 문제 해결 문서에서 흔한 원인을 확인하세요.

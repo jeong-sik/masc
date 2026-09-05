@@ -1448,8 +1448,8 @@ let candidate_of_json json =
    refusing everything.
 
    Rejected rows are returned, never swallowed: the caller logs them, and the
-   next write compacts them out because [latest_candidates] rewrites the file
-   from the rows that parsed. *)
+   next write rewrites the store from the rows that parsed (see
+   [needs_compaction]). *)
 type parse_report =
   { rows : candidate list
   ; rejected : (int * string) list
@@ -1480,23 +1480,33 @@ let parse_rows content =
   loop 1 [] [] lines
 ;;
 
-let latest_candidates rows =
-  let _, latest =
-    List.fold_left
-      (fun (index, map) candidate ->
-         let first_index =
-           match Candidate_map.find_opt candidate.candidate_id map with
-           | Some (first_index, _) -> first_index
-           | None -> index
-         in
-         index + 1, Candidate_map.add candidate.candidate_id (first_index, candidate) map)
-      (0, Candidate_map.empty)
-      rows
-  in
-  Candidate_map.bindings latest
+let ordered_latest by_id =
+  Candidate_map.bindings by_id
   |> List.map snd
   |> List.sort (fun (left, _) (right, _) -> Int.compare left right)
   |> List.map snd
+;;
+
+(* Folds decoded rows into the latest-row-per-id map, continuing the first
+   index from [decoded_rows]. Called with the empty map for a whole-store parse
+   and with the cached map for the tail read after a cursor, so both index the
+   rows the same way. *)
+let index_rows ~decoded_rows ~by_id rows =
+  List.fold_left
+    (fun (index, map) candidate ->
+       let first_index =
+         match Candidate_map.find_opt candidate.candidate_id map with
+         | Some (first_index, _) -> first_index
+         | None -> index
+       in
+       index + 1, Candidate_map.add candidate.candidate_id (first_index, candidate) map)
+    (decoded_rows, by_id)
+    rows
+;;
+
+let latest_candidates rows =
+  let _, by_id = index_rows ~decoded_rows:0 ~by_id:Candidate_map.empty rows in
+  ordered_latest by_id
 ;;
 
 let report_rejected_rows ~context rejected =
@@ -1511,124 +1521,150 @@ let report_rejected_rows ~context rejected =
       detail
 ;;
 
-let load_candidates_from_content ~context content =
-  let { rows; rejected } = parse_rows content in
-  report_rejected_rows ~context rejected;
-  latest_candidates rows
-;;
+(* Ledger store.
 
-let durable_error_to_string error =
-  Fs_compat.durable_append_error_to_string error
-;;
+   Every access to a ledger path goes through the [Fs_compat] private JSONL
+   stable-lock transaction family: readers take the bytes after a known
+   cursor, writers append at that cursor, and compaction rewrites at it. The
+   temp+rename family must not touch the same path; its rename would strand an
+   appender on the old inode (see the contract on
+   [Fs_compat.append_private_jsonl_durable_locked_at_cursor_result]).
 
-let read_locked path parse =
-  match
-    Fs_compat.update_private_file_durable_locked_result path (fun content ->
-      None, parse content)
-  with
-  | Private_file_failed error -> Error (durable_error_to_string error)
-  | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
-    Error
-      (Printf.sprintf
-         "%s; descriptor settlement failed: %s"
-         (durable_error_to_string error)
-         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
-  | Private_file_succeeded result -> result
-  | Private_file_succeeded_with_cleanup_failure
-      { value = result; cleanup_failure } ->
-    Log.Keeper.error
-      "board attention candidate read succeeded with descriptor settlement failure path=%s: %s"
-      path
-      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
-    result
-;;
-
-(* Read-side stat memo. Owner-lane drains call [load_candidates] far more often
-   than the ledger changes, and every call otherwise re-reads and re-parses the
-   whole file — with multi-MB ledgers this was a dominant CPU source (issue
-   #25003: concurrent whole-file Yojson parses in systhreads starving the
-   domain's main event loop). Every producer replaces the ledger through an
-   atomic temp+rename ([update_ledger] via
-   [Fs_compat.rewrite_private_file_durable_locked_result]), so any content
-   change allocates a new inode; (dev, ino, mtime, size) equality therefore
-   implies unchanged content. One entry per keeper ledger path, so the table
-   stays as small as the fleet. *)
-type ledger_stat_key =
-  { stat_dev : int
-  ; stat_ino : int
-  ; stat_mtime : float
-  ; stat_size : int
+   One in-process state per ledger path is the latest-row-per-id projection
+   readers get; the file is its durable log. Before this, every update
+   re-parsed and rewrote the whole ledger; measured 2026-09-05 on a 25 MB
+   ledger, that was ~4.5 GB allocated per 4 minutes across the fleet (RFC
+   main-domain-scheduler-latency §8, P4a). *)
+type ledger_state =
+  { by_id : (int * candidate) Candidate_map.t
+    (* first index among the decoded rows on disk, and the latest row of that id *)
+  ; latest : candidate list (* [by_id] in first-index order; what readers get *)
+  ; decoded_rows : int (* rows on disk the decoder accepted; also the next first index *)
+  ; rejected_rows : int (* rows on disk the decoder refused *)
+  ; cursor : Fs_compat.Private_jsonl_cursor.t (* store identity and end offset *)
   }
 
-(* Compared field by field rather than with [=], so each field has a named
-   reader the compiler can see. *)
-let ledger_stat_key_equal left right =
-  Int.equal left.stat_dev right.stat_dev
-  && Int.equal left.stat_ino right.stat_ino
-  && Float.equal left.stat_mtime right.stat_mtime
-  && Int.equal left.stat_size right.stat_size
+type ledger_entry =
+  { ledger_mutex : Stdlib.Mutex.t
+  ; mutable ledger_cache : ledger_state option
+    (* [None]: unknown; the next access reads the whole store *)
+  }
+
+let ledger_registry : (string, ledger_entry) Hashtbl.t = Hashtbl.create 16
+
+(* Stdlib mutexes on purpose: touched from systhread and main-domain paths, and
+   the critical sections never yield to the Eio scheduler. The per-path mutex
+   is held across the blocking store transaction, as the per-path mutex inside
+   [Fs_compat.rewrite_private_file_durable_locked_result] was before. *)
+let ledger_registry_mutex = Stdlib.Mutex.create ()
+
+let ledger_entry path =
+  Stdlib.Mutex.protect ledger_registry_mutex (fun () ->
+    match Hashtbl.find_opt ledger_registry path with
+    | Some entry -> entry
+    | None ->
+      let entry = { ledger_mutex = Stdlib.Mutex.create (); ledger_cache = None } in
+      Hashtbl.add ledger_registry path entry;
+      entry)
 ;;
 
-let ledger_stat_key_opt path =
-  match Unix.stat path with
-  | stats ->
-    Some
-      { stat_dev = stats.st_dev
-      ; stat_ino = stats.st_ino
-      ; stat_mtime = stats.st_mtime
-      ; stat_size = stats.st_size
-      }
-  | exception Unix.Unix_error _ -> None
+let empty_ledger_state cursor =
+  { by_id = Candidate_map.empty
+  ; latest = []
+  ; decoded_rows = 0
+  ; rejected_rows = 0
+  ; cursor
+  }
 ;;
 
-let candidate_read_memo : (string, ledger_stat_key * candidate list) Hashtbl.t =
-  Hashtbl.create 16
+let apply_decoded_rows state rows =
+  let decoded_rows, by_id =
+    index_rows ~decoded_rows:state.decoded_rows ~by_id:state.by_id rows
+  in
+  { state with by_id; latest = ordered_latest by_id; decoded_rows }
 ;;
 
-(* Stdlib mutex on purpose: touched from systhread read paths and module-level
-   state; the critical sections are Hashtbl lookups with no yield. *)
-let candidate_read_memo_mutex = Stdlib.Mutex.create ()
+let store_error = Fs_compat.private_jsonl_transaction_error_to_string
+
+let observe_settlement_warning ~path error =
+  Log.Keeper.error
+    "board attention candidate ledger: descriptor settlement incomplete path=%s detail=%s"
+    path
+    (store_error error)
+;;
+
+let snapshot_result ~path result =
+  match Fs_compat.private_jsonl_snapshot_success_receipt result with
+  | Error error -> Error (store_error error)
+  | Ok { Fs_compat.value; settlement_error } ->
+    Option.iter (observe_settlement_warning ~path) settlement_error;
+    Ok value
+;;
+
+let cursor_result ~path result =
+  match Fs_compat.private_jsonl_cursor_success_receipt result with
+  | Error error -> Error (store_error error)
+  | Ok { Fs_compat.value; settlement_error } ->
+    Option.iter (observe_settlement_warning ~path) settlement_error;
+    Ok value
+;;
+
+let apply_snapshot ~path state (snapshot : Fs_compat.private_jsonl_snapshot) =
+  let { rows; rejected } = parse_rows snapshot.Fs_compat.bytes in
+  report_rejected_rows ~context:path rejected;
+  let state = apply_decoded_rows state rows in
+  { state with
+    rejected_rows = state.rejected_rows + List.length rejected
+  ; cursor = snapshot.Fs_compat.cursor
+  }
+;;
+
+(* Under [entry.ledger_mutex]. Reads only the bytes after the cached cursor. A
+   replaced, truncated, or removed store is a [Cursor_mismatch]; the cache is
+   dropped and the state rebuilt from a whole-store read. Any other failure
+   drops the cache so the next access reads the store again. *)
+let rec refresh_ledger ~path entry =
+  let after = Option.map (fun state -> state.cursor) entry.ledger_cache in
+  match Fs_compat.read_private_jsonl_durable_locked_result path ~after with
+  | Error (Fs_compat.Cursor_mismatch _) when Option.is_some after ->
+    entry.ledger_cache <- None;
+    refresh_ledger ~path entry
+  | result ->
+    (match snapshot_result ~path result with
+     | Error error ->
+       entry.ledger_cache <- None;
+       Error error
+     | Ok snapshot ->
+       let base =
+         match entry.ledger_cache with
+         | Some state -> state
+         | None -> empty_ledger_state snapshot.Fs_compat.cursor
+       in
+       let state = apply_snapshot ~path base snapshot in
+       entry.ledger_cache <- Some state;
+       Ok state)
+;;
 
 (* Rejections are returned, not only logged: a caller that must fail closed on
    an unreadable row can see it, and a test can name the reason. Callers that
-   only want the readable candidates use [load_candidates]. *)
+   only want the readable candidates use [load_candidates]. This read takes the
+   whole store and leaves the cache alone. *)
 let load_candidates_with_rejections ~base_path ~keeper_name =
   let path = candidate_path ~base_path ~keeper_name in
-  read_locked path (fun content ->
-    let { rows; rejected } = parse_rows content in
-    report_rejected_rows ~context:path rejected;
-    Ok (latest_candidates rows, rejected))
+  let* snapshot =
+    Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
+    |> snapshot_result ~path
+  in
+  let { rows; rejected } = parse_rows snapshot.Fs_compat.bytes in
+  report_rejected_rows ~context:path rejected;
+  Ok (latest_candidates rows, rejected)
 ;;
 
 let load_candidates ~base_path ~keeper_name =
   let path = candidate_path ~base_path ~keeper_name in
-  let before = ledger_stat_key_opt path in
-  let cached =
-    match before with
-    | None -> None
-    | Some key ->
-      Stdlib.Mutex.protect candidate_read_memo_mutex (fun () ->
-        match Hashtbl.find_opt candidate_read_memo path with
-        | Some (cached_key, candidates) when cached_key = key -> Some candidates
-        | Some _ | None -> None)
-  in
-  match cached with
-  | Some candidates -> Ok candidates
-  | None ->
-    let* candidates =
-      read_locked path (fun content ->
-        Ok (load_candidates_from_content ~context:path content))
-    in
-    (* Double-stat: memoize only when the file identity is unchanged across
-       the read; a concurrent rewrite lands as a new inode and skips the
-       store, so the next call re-reads. *)
-    (match before, ledger_stat_key_opt path with
-     | Some key_before, Some key_after
-       when ledger_stat_key_equal key_before key_after ->
-       Stdlib.Mutex.protect candidate_read_memo_mutex (fun () ->
-         Hashtbl.replace candidate_read_memo path (key_before, candidates))
-     | Some _, (Some _ | None) | None, (Some _ | None) -> ());
-    Ok candidates
+  let entry = ledger_entry path in
+  Stdlib.Mutex.protect entry.ledger_mutex (fun () ->
+    Result.map (fun state -> state.latest) (refresh_ledger ~path entry))
 ;;
 
 let append_row candidate = Yojson.Safe.to_string (candidate_to_json candidate) ^ "\n"
@@ -1637,38 +1673,73 @@ let serialize_candidates candidates =
   String.concat "" (List.map append_row candidates)
 ;;
 
+(* Dead rows on disk stay bounded by the live set: a write that would leave
+   more than [compaction_ratio] times as many decoded rows as live candidates
+   rewrites the store as the latest set instead of appending, so the file
+   holds at most [compaction_ratio * live] rows plus the rows of that write.
+   A store with an undecodable row is rewritten on its next write regardless;
+   that is the promise in [load_candidates_with_rejections]. *)
+let compaction_ratio = 2
+
+let needs_compaction ~decoded_rows ~rejected_rows ~live =
+  rejected_rows > 0 || decoded_rows > compaction_ratio * live
+;;
+
+let validate_for_persistence candidates =
+  List.fold_left
+    (fun validation candidate ->
+       let* () = validation in
+       validate_candidate_for_persistence candidate)
+    (Ok ())
+    candidates
+;;
+
+(* Only the rows this write persists are validated; rows already on disk
+   passed validation when they were written, and refusing to compact them
+   would wedge the ledger behind a rule tightened since. *)
 let update_ledger_many ~base_path ~keeper_name decide =
   let path = candidate_path ~base_path ~keeper_name in
-  (* Compact on write: a committed change rewrites the ledger as the deduped
-     latest-per-id set (via [latest_candidates]) instead of appending one row.
-     The reader already discards all but the latest row per candidate_id, so the
-     older rows are dead weight; appending them grew the file without bound and
-     made every update O(n^2) because the durable transaction re-parses the whole
-     ledger before writing. Rewriting keeps the file bounded to the number of
-     distinct candidates. *)
+  let entry = ledger_entry path in
   try
-    match
-      Fs_compat.rewrite_private_file_durable_locked_result path (fun content ->
-        let candidates = load_candidates_from_content ~context:path content in
-        (match decide candidates with
-           | Error _ as error -> None, error
-           | Ok (None, result) -> None, Ok result
-           | Ok (Some updated, result) ->
-             let compacted = latest_candidates (candidates @ updated) in
-             let validation =
-               List.fold_left
-                 (fun validation candidate ->
-                    let* () = validation in
-                    validate_candidate_for_persistence candidate)
-                 (Ok ())
-                 compacted
-             in
-             (match validation with
-              | Error detail -> None, Error detail
-              | Ok () -> Some (serialize_candidates compacted), Ok result)))
-    with
-    | Error error -> Error error
-    | Ok result -> result
+    Stdlib.Mutex.protect entry.ledger_mutex (fun () ->
+      let* state = refresh_ledger ~path entry in
+      match decide state.latest with
+      | Error _ as error -> error
+      | Ok (None, result) -> Ok result
+      | Ok (Some updated, result) ->
+        let* () = validate_for_persistence updated in
+        let appended = apply_decoded_rows state updated in
+        let compact =
+          needs_compaction
+            ~decoded_rows:appended.decoded_rows
+            ~rejected_rows:appended.rejected_rows
+            ~live:(Candidate_map.cardinal appended.by_id)
+        in
+        let written =
+          if compact
+          then
+            Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result
+              path
+              ~expected:state.cursor
+              (serialize_candidates appended.latest)
+          else
+            Fs_compat.append_private_jsonl_durable_locked_at_cursor_result
+              path
+              ~expected:state.cursor
+              (serialize_candidates updated)
+        in
+        (match cursor_result ~path written with
+         | Error error ->
+           entry.ledger_cache <- None;
+           Error error
+         | Ok cursor ->
+           let next =
+             if compact
+             then apply_decoded_rows (empty_ledger_state cursor) appended.latest
+             else { appended with cursor }
+           in
+           entry.ledger_cache <- Some next;
+           Ok result))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->

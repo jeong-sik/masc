@@ -937,8 +937,8 @@ let run_argv ?timeout_sec ?env (argv : string list) : string =
             let label = String.concat " " (List.map Filename.quote argv) in
             let phase_ref = ref Timeout_origin.Spawn in
             try
-              with_explicit_timeout_exn clk timeout_sec (fun () ->
-                  Eio.Switch.run (fun sw ->
+              Eio.Switch.run (fun sw ->
+                  with_explicit_timeout_exn clk timeout_sec (fun () ->
                       let status = spawn_and_drain_stdout ~phase_ref ~sw pm ~cwd ?env ~clock:clk argv buf in
                       output_for_status ~status ~stdout:(Exec_buffer.render buf) ~stderr:""))
             with
@@ -989,8 +989,8 @@ let run_argv_with_stdin ?timeout_sec ?env ~(stdin_content : string) (argv : stri
             let stdin_source = Eio.Flow.string_source stdin_content in
             let phase_ref = ref Timeout_origin.Spawn in
             try
-              with_explicit_timeout_exn clk timeout_sec (fun () ->
-                  Eio.Switch.run (fun sw ->
+              Eio.Switch.run (fun sw ->
+                  with_explicit_timeout_exn clk timeout_sec (fun () ->
                       let status =
                         spawn_and_drain_stdout ~phase_ref ~sw pm ~cwd ?env ~stdin_source ~clock:clk argv buf
                       in
@@ -1067,9 +1067,9 @@ let run_argv_with_stdin_and_status_split
             let stdin_source = Eio.Flow.string_source stdin_content in
             let phase_ref = ref Timeout_origin.Spawn in
             try
-              with_explicit_timeout_exn clk timeout_sec (fun () ->
+              Eio.Switch.run (fun sw ->
                   let unix_status =
-                    Eio.Switch.run (fun sw ->
+                    with_explicit_timeout_exn clk timeout_sec (fun () ->
                         match on_stdout_chunk, on_stderr_chunk with
                         | None, None ->
                             spawn_and_drain_both ~phase_ref ~sw pm
@@ -1178,9 +1178,9 @@ let run_argv_with_stdin_held_open_and_status_split
       let on_stdout_chunk = Option.value on_stdout_chunk ~default:ignore_chunk in
       let on_stderr_chunk = Option.value on_stderr_chunk ~default:ignore_chunk in
       try
-        with_explicit_timeout_exn clk timeout_sec (fun () ->
+        Eio.Switch.run (fun sw ->
           let unix_status =
-            Eio.Switch.run (fun sw ->
+            with_explicit_timeout_exn clk timeout_sec (fun () ->
               spawn_and_drain_both_with_stdin_held_open
                 ~phase_ref ~sw pm ~cwd:effective_cwd ?env ~stdin_content
                 ~clock:clk argv ~on_stdout_chunk ~on_stderr_chunk stdout_buf
@@ -1374,9 +1374,9 @@ let run_argv_with_status_split ?timeout_sec ?env ?cwd
             let label = String.concat " " (List.map Filename.quote argv) in
             let phase_ref = ref Timeout_origin.Spawn in
             try
-              with_explicit_timeout_exn clk timeout_sec (fun () ->
+              Eio.Switch.run (fun sw ->
                   let unix_status =
-                    Eio.Switch.run (fun sw ->
+                    with_explicit_timeout_exn clk timeout_sec (fun () ->
                         spawn_and_drain_both ~phase_ref ~sw pm ~cwd:effective_cwd ?env
                           ~clock:clk argv stdout_buf stderr_buf)
                   in
@@ -1468,9 +1468,9 @@ let run_argv_with_status_split_streaming
           let label = String.concat " " (List.map Filename.quote argv) in
           let phase_ref = ref Timeout_origin.Spawn in
           try
-            with_explicit_timeout_exn clk timeout_sec (fun () ->
+            Eio.Switch.run (fun sw ->
                 let unix_status =
-                  Eio.Switch.run (fun sw ->
+                  with_explicit_timeout_exn clk timeout_sec (fun () ->
                       spawn_and_drain_both_streaming
                         ~phase_ref
                         ~sw

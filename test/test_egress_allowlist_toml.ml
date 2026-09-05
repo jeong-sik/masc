@@ -103,6 +103,29 @@ allow = ["github.com"]
     (String_util.contains_substring errors "egress")
 ;;
 
+(* [allow] with the wrong shape is a refusal that names the key, not an
+   [Otoml.Type_error] out of the loader: [parse_file] catches only parse and
+   file errors, so the exception used to take boot and hot reload down. *)
+let test_a_string_allow_fails_the_load () =
+  let errors = load_errors (base ^ {|
+[egress.keepers.rondo]
+allow = "github.com"
+|}) in
+  check bool "the refusal names the key" true
+    (String_util.contains_substring errors "egress.keepers.rondo.allow");
+  check bool "and the shape it wanted" true
+    (String_util.contains_substring errors "an array of strings")
+;;
+
+let test_a_non_string_element_fails_the_load () =
+  let errors = load_errors (base ^ {|
+[egress.keepers.rondo]
+allow = [1]
+|}) in
+  check bool "the refusal names the key" true
+    (String_util.contains_substring errors "egress.keepers.rondo.allow")
+;;
+
 let () =
   run "egress_allowlist_toml"
     [ ( "load"
@@ -120,5 +143,9 @@ let () =
             test_a_table_without_allow_fails_the_load
         ; test_case "an unknown egress child fails the load" `Quick
             test_an_unknown_egress_child_fails_the_load
+        ; test_case "a string allow fails the load" `Quick
+            test_a_string_allow_fails_the_load
+        ; test_case "a non-string allow element fails the load" `Quick
+            test_a_non_string_element_fails_the_load
         ] )
     ]

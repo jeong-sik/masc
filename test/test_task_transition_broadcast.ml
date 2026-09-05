@@ -291,6 +291,70 @@ let test_explicit_reason_outranks_handoff_context () =
       (contents config ~baseline_seq))
 ;;
 
+(* A note already on the Task is the previous owner's: a release summary kept
+   across the claim so the incoming owner can read it (RFC-0365). It is not
+   this owner's reason to stop. Resolving the cancel reason from it put the
+   previous owner's sentence before the operator as the claim, while the
+   broadcast, reading only this call's arguments, announced no reason at all.
+   The record, the committed Task and the message log read one value: this
+   call's [reason] or [handoff_context] — and with neither, the cancel is
+   refused rather than explained by someone else. *)
+let held_with_the_previous_owners_note ~id =
+  { (make_task ~id ~status:(D.InProgress { assignee = owner; started_at = now })) with
+    handoff_context =
+      Some
+        { summary = "previous owner: half done, see branch wip/1"
+        ; reason = None
+        ; next_step = None
+        ; failure_mode = None
+        ; reclaim_policy = None
+        ; evidence_refs = []
+        ; updated_at = None
+        ; updated_by = None
+        }
+  }
+;;
+
+let test_cancel_does_not_borrow_the_previous_owners_note () =
+  with_test_env (fun config ~baseline_seq ->
+    seed config (held_with_the_previous_owners_note ~id:"task-14");
+    let recorded = ref None in
+    let capture ~task:_ ~assignee:_ ~verification_id:_ ~claim =
+      recorded := Some claim;
+      Ok ()
+    in
+    (match
+       transition config ~task_id:"task-14" ~action:D.Cancel
+         ~prepare_verification_request:capture ()
+     with
+     | Ok message ->
+       Alcotest.failf "a cancel with no reason of its own was accepted: %s" message
+     | Error (D.Task (D.Task_error.InvalidState _)) -> ()
+     | Error err -> Alcotest.failf "unexpected rejection: %s" (D.masc_error_to_string err));
+    Alcotest.(check bool) "no record is written for a refused cancel" true
+      (Option.is_none !recorded);
+    Alcotest.(check (list string)) "a refused cancel is silent" []
+      (contents config ~baseline_seq);
+    check_ok "cancel"
+      (transition config ~task_id:"task-14" ~action:D.Cancel
+         ~prepare_verification_request:capture ~reason:"the premise is gone" ());
+    (match !recorded with
+     | Some (D.Cancellation_reason { reason }) ->
+       Alcotest.(check string) "the record carries this owner's reason"
+         "the premise is gone" reason
+     | Some (D.Completion_evidence _) -> Alcotest.fail "a cancel wrote a completion claim"
+     | None -> Alcotest.fail "the cancel wrote no record");
+    Alcotest.(check (list string)) "the message log carries the same reason"
+      [ "Cancellation requested for task-14 - the premise is gone" ]
+      (contents config ~baseline_seq);
+    match List.find_opt (fun (task : D.task) -> String.equal task.id "task-14")
+            (Workspace.get_tasks_raw config) with
+    | Some task ->
+      Alcotest.(check bool) "the previous owner's note does not ride on the cancel" true
+        (Option.is_none task.handoff_context)
+    | None -> Alcotest.fail "task-14 vanished")
+;;
+
 (* The idempotent no-op returns before the commit, so it must not manufacture a
    message for a transition that never happened. *)
 let test_noop_transition_is_silent () =
@@ -336,6 +400,8 @@ let () =
             test_release_wrapper_broadcasts_its_handoff_reason
         ; Alcotest.test_case "release carries a summary-only handoff" `Quick
             test_release_broadcasts_a_summary_only_handoff
+        ; Alcotest.test_case "cancel does not borrow the previous owner's note" `Quick
+            test_cancel_does_not_borrow_the_previous_owners_note
         ; Alcotest.test_case "explicit reason outranks handoff context" `Quick
             test_explicit_reason_outranks_handoff_context
         ] )

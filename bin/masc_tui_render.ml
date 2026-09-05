@@ -38,6 +38,7 @@ module Status = Masc.Keeper_status_runtime
 module Render_tools = Masc_tui_render_tools
 module Span = Masc_tui_span
 module Diff = Masc_tui_diff
+module Chart = Masc_tui_chart
 
 let json_assoc_member_opt = Masc_tui_json.member_opt
 
@@ -1537,8 +1538,39 @@ let render_overview (state : state) =
   box_divider buf cols;
 
   (* Tasks section *)
-  Buffer.add_string buf
-    (Printf.sprintf " %sTasks%s\n" Ansi.bold Ansi.reset);
+  let task_header =
+    if List.is_empty state.tasks then Printf.sprintf " %sTasks%s\n" Ansi.bold Ansi.reset
+    else
+      let count = List.length state.tasks in
+      let done_c =
+        List.fold_left
+          (fun acc (t : task) -> match t.status with Done _ -> acc + 1 | _ -> acc)
+          0 state.tasks
+      in
+      let active_c =
+        List.fold_left
+          (fun acc (t : task) -> match t.status with InProgress _ | Claimed _ -> acc + 1 | _ -> acc)
+          0 state.tasks
+      in
+      let awaiting_c =
+        List.fold_left
+          (fun acc (t : task) -> match t.status with AwaitingVerification _ -> acc + 1 | _ -> acc)
+          0 state.tasks
+      in
+      let todo_c =
+        List.fold_left
+          (fun acc (t : task) -> match t.status with Todo -> acc + 1 | _ -> acc)
+          0 state.tasks
+      in
+      Printf.sprintf " %sTasks%s (%d · %s%d done%s · %s%d active%s · %s%d awaiting%s · %s%d todo%s)\n"
+        Ansi.bold Ansi.reset
+        count
+        (Theme.ok ()) done_c Ansi.reset
+        (Theme.info ()) active_c Ansi.reset
+        (Theme.warn ()) awaiting_c Ansi.reset
+        Ansi.dim todo_c Ansi.reset
+  in
+  Buffer.add_string buf task_header;
 
   (match tasks_error with
    | Some err when row_budget.task_error_rows > 0 ->
@@ -2447,11 +2479,22 @@ let render_approvals (state : state) =
     | None -> ""
   in
   let action_badge = if action_inflight then "  [submitting]" else "" in
+  let type_breakdown =
+    let held_c = List.length state.keeper_tool_approvals in
+    let gate_c = List.length state.gate_pending in
+    let op_c = List.length (operator_approval_items state) in
+    if count > 0 then
+      Printf.sprintf " [%s%d held%s · %s%d gate%s · %s%d op%s]"
+        (Theme.warn ()) held_c Ansi.reset
+        (Theme.bad ()) gate_c Ansi.reset
+        (Theme.info ()) op_c Ansi.reset
+    else ""
+  in
   let header =
     Printf.sprintf
-      "%s (%d%s%s)  %s  %s%s"
+      "%s (%d%s%s%s)  %s  %s%s"
       (screen_title " MASC Approvals")
-      count queue_note held_note timestamp
+      count type_breakdown queue_note held_note timestamp
       (connection_badge state) action_badge
   in
 
@@ -5559,7 +5602,8 @@ let lane_run_status_style = function
   | Tui_decode.Lane_run_not_reviewed
   | Tui_decode.Lane_run_commit_failed
   | Tui_decode.Lane_run_raised -> Theme.bad ()
-  | Tui_decode.Lane_run_running -> Theme.info ()
+  | Tui_decode.Lane_run_running
+  | Tui_decode.Lane_run_operator_routed -> Theme.info ()
   | Tui_decode.Lane_run_other _ -> Theme.muted ()
 
 let lane_run_clock started_at =
@@ -6483,7 +6527,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
     Masc_tui_types.identity_preamble
       ~keeper:(Terminal_text.single_line k.k_name)
       ~notice:
-        (attempt @ Masc_tui_types.identity_app_form_rows state.identity_app_form
+        (attempt @ started @ Masc_tui_types.identity_app_form_rows state.identity_app_form
         @ filter_rows)
     @ [ Ansi.dim ^ "  Nothing here matches. esc to see them all." ^ Ansi.reset ]
   else if numbered = [] && rejected = [] then
@@ -6492,9 +6536,9 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
     Masc_tui_types.identity_preamble
       ~keeper:(Terminal_text.single_line k.k_name)
       ~notice:
-        (attempt @ Masc_tui_types.identity_app_form_rows state.identity_app_form
+        (attempt @ started @ Masc_tui_types.identity_app_form_rows state.identity_app_form
         @ filter_rows)
-    @ numbered @ rejected @ started @ attached_tool_lines
+    @ numbered @ rejected @ attached_tool_lines
 
 let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     (* Beside the roster pane the box is the pane separator; alone on the
@@ -10565,8 +10609,28 @@ let render_fusion_list (state : state) =
           (screen_title " MASC Fusion") timestamp
           (connection_badge state)
     | Some _ ->
-        Printf.sprintf "%s (%d runs)  %s  %s"
-          (screen_title " MASC Fusion") shown timestamp
+        let completed_count =
+          List.fold_left
+            (fun acc (r : Tui_decode.fusion_run) ->
+               if r.fur_status = Tui_decode.Fusion_completed then acc + 1 else acc)
+            0 runs
+        in
+        let failed_count =
+          List.fold_left
+            (fun acc (r : Tui_decode.fusion_run) ->
+               match r.fur_status with Tui_decode.Fusion_failed _ -> acc + 1 | _ -> acc)
+            0 runs
+        in
+        let running_count = Stdlib.max 0 (shown - completed_count - failed_count) in
+        let stats_note =
+          Printf.sprintf " (%d runs · %s%d done%s · %s%d run%s%s)"
+            shown
+            (Theme.ok ()) completed_count Ansi.reset
+            (Theme.info ()) running_count Ansi.reset
+            (if failed_count > 0 then Printf.sprintf " · %s%d fail%s" (Theme.bad ()) failed_count Ansi.reset else "")
+        in
+        Printf.sprintf "%s%s  %s  %s"
+          (screen_title " MASC Fusion") stats_note timestamp
           (connection_badge state)
   in
   (* Measured from the rows, the way the Approvals table measures its own
@@ -10690,7 +10754,7 @@ let fusion_tool_actor_text actor =
   match actor.fta_phase with
   | Fusion_tool_panel -> "panel/" ^ Terminal_text.single_line actor.fta_identity
   | Fusion_tool_judge role ->
-      Printf.sprintf "judge/%s/%s" (Terminal_text.single_line role)
+      Printf.sprintf "judge/%s/%s" (fusion_judge_role_label role)
         (Terminal_text.single_line actor.fta_identity)
 
 let fusion_tool_agent_suffix actor agent_name =
@@ -10889,6 +10953,30 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
                          failure.fpf_reason_detail)
           |> List.concat
         in
+        let panel_token_items =
+          List.filter_map
+            (function
+              | Fusion_panel_answered answer ->
+                  Some
+                    { Chart.name = Terminal_text.single_line answer.fpa_model
+                    ; count = answer.fpa_input_tokens + answer.fpa_output_tokens
+                    ; style = Some (Chart.Status Masc_tui_theme.Ok)
+                    }
+              | Fusion_panel_failed failure ->
+                  Some
+                    { Chart.name = Terminal_text.single_line failure.fpf_model
+                    ; count = 0
+                    ; style = Some (Chart.Status Masc_tui_theme.Bad)
+                    })
+            evidence.fe_panel
+        in
+        let panel_chart_lines =
+          if List.length panel_token_items >= 2 then
+            (Ansi.dim, "  Model token distribution:")
+            :: List.map (fun row -> (Ansi.reset, row)) (Chart.distribution_bars ~width panel_token_items)
+            @ [ Ansi.dim, "" ]
+          else []
+        in
         let judge_lines =
           match evidence.fe_judge with
           | Fusion_judge_synthesized judge ->
@@ -11008,6 +11096,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
                 answered failed input_tokens output_tokens )
         ]
         @ [ Ansi.dim, "" ]
+        @ panel_chart_lines
         @ panel_lines
         @ [ Ansi.dim, ""
           ; Ansi.magenta, "  3  JUDGE"
@@ -11268,7 +11357,10 @@ type change_context = {
   ctx_goal_title : string option;
   ctx_turn : int option;
   ctx_comment : string option;
-  ctx_pr_number : string option;
+  ctx_pr : Masc_tui_pr_ref.t option;
+      (** An explicit PR reference -- a pull link or a PR-N token -- found in
+          the task title, then its description, then the chat note. A bare
+          [#n] is a list item as often as a PR and is not read as one. *)
 }
 
 let file_change_matches_path (path : string) (fc : Masc.Tui_decode.file_change) =
@@ -11277,31 +11369,6 @@ let file_change_matches_path (path : string) (fc : Masc.Tui_decode.file_change) 
   | Masc.Tui_decode.Fc_in_bundle { bundle_path } -> String.equal bundle_path path
   | Masc.Tui_decode.Fc_at_absolute_path { path = p } ->
       String.equal p path || String.equal (Filename.basename p) (Filename.basename path)
-
-let extract_pr_number (s : string) : string option =
-  let n = String.length s in
-  let rec scan i =
-    if i >= n then None
-    else if s.[i] = '#' && i + 1 < n && s.[i + 1] >= '0' && s.[i + 1] <= '9' then
-      let start_digits = i + 1 in
-      let rec digits j =
-        if j < n && s.[j] >= '0' && s.[j] <= '9' then digits (j + 1)
-        else j
-      in
-      let end_digits = digits start_digits in
-      Some (String.sub s start_digits (end_digits - start_digits))
-    else if (i + 3 <= n && (String.sub s i 3 = "PR-" || String.sub s i 3 = "pr-"))
-            && i + 3 < n && s.[i + 3] >= '0' && s.[i + 3] <= '9' then
-      let start_digits = i + 3 in
-      let rec digits j =
-        if j < n && s.[j] >= '0' && s.[j] <= '9' then digits (j + 1)
-        else j
-      in
-      let end_digits = digits start_digits in
-      Some (String.sub s start_digits (end_digits - start_digits))
-    else scan (i + 1)
-  in
-  scan 0
 
 let first_line_summary ?(max_len = 34) (s : string) : string =
   let lines = String.split_on_char '\n' s in
@@ -11416,13 +11483,10 @@ let resolve_change_context (state : state) ~(path_opt : string option) : change_
     | Some c -> Some c
     | None -> task_description
   in
-  let pr_number =
-    match Option.bind task_title extract_pr_number with
-    | Some _ as p -> p
-    | None ->
-        (match Option.bind task_description extract_pr_number with
-         | Some _ as p -> p
-         | None -> Option.bind comment extract_pr_number)
+  let pr =
+    List.find_map
+      (fun text -> Option.bind text Masc_tui_pr_ref.find)
+      [ task_title; task_description; comment ]
   in
   { ctx_keeper = keeper
   ; ctx_task_id = task_id
@@ -11432,7 +11496,7 @@ let resolve_change_context (state : state) ~(path_opt : string option) : change_
   ; ctx_goal_title = goal_title
   ; ctx_turn = turn
   ; ctx_comment = effective_comment
-  ; ctx_pr_number = pr_number
+  ; ctx_pr = pr
   }
 
 let build_change_context_lines (change_ctx : change_context) : string list =
@@ -11458,8 +11522,9 @@ let build_change_context_lines (change_ctx : change_context) : string list =
   in
   let line2_items = [] in
   let line2_items =
-    match change_ctx.ctx_pr_number with
-    | Some pr -> ("PR: #" ^ pr) :: line2_items
+    match change_ctx.ctx_pr with
+    | Some pr ->
+        Printf.sprintf "PR: #%d" (Masc_tui_pr_ref.number pr) :: line2_items
     | None -> line2_items
   in
   let line2_items =
@@ -11514,24 +11579,46 @@ let tree_diff_row_span ~width (row : Masc.Tui_decode.git_diff_row) =
   in
   Span.pad_to width background (Span.truncate width composed)
 
-let render_repository_changes_diff (state : state) ~path =
+(* The two diff readings -- a Git Changes file against HEAD, and a change on
+   the Changes tree -- draw one frame from different state. What differs is
+   listed once here and the frame is drawn once below; each copy used to
+   count its own chrome by hand. *)
+type diff_surface =
+  { ds_title : string  (** the screen title *)
+  ; ds_address : string  (** what the header names beside "vs HEAD" *)
+  ; ds_context_lines : string list
+        (** drawn under the header, each followed by a divider *)
+  ; ds_diff : Masc.Tui_decode.git_diff option  (** [None] until the tree is read *)
+  ; ds_error : string option
+  ; ds_scroll : int  (** the stored scroll, clamped here and reported back *)
+  ; ds_unchanged : string  (** the empty line when the tree reports no change *)
+  ; ds_esc_hint : string  (** what esc does on this surface *)
+  ; ds_footer_hints : string
+  ; ds_surface_key : string
+  ; ds_clamped : int -> clamped_scroll
+  }
+
+(* Rows the frame spends outside the diff body: top border, header, its
+   divider, the column caption, its divider, the status line, bottom border.
+   A context line and the error line each add themselves plus a divider. *)
+let diff_surface_fixed_chrome_rows = 7
+let diff_surface_rows_per_context_line = 2
+let diff_surface_error_rows = 2
+
+let render_diff_surface (state : state) (ds : diff_surface) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let diff_rows =
-    match state.repository_changes_diff with
-    | Some (p, diff) when String.equal p path -> diff.Masc.Tui_decode.gd_rows
-    | _ -> []
+    match ds.ds_diff with
+    | None -> []
+    | Some diff -> diff.Masc.Tui_decode.gd_rows
   in
   let total = List.length diff_rows in
   let header =
-    Printf.sprintf "%s %s  vs HEAD  %s"
-      (screen_title " MASC Git Diff")
-      (Terminal_text.single_line path)
+    Printf.sprintf "%s %s  vs HEAD  %s" (screen_title ds.ds_title) ds.ds_address
       (connection_badge state)
   in
-  let change_ctx = resolve_change_context state ~path_opt:(Some path) in
-  let context_lines = build_change_context_lines change_ctx in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
@@ -11539,33 +11626,35 @@ let render_repository_changes_diff (state : state) ~path =
     (fun ctx_line ->
       box_line buf cols ctx_line;
       box_divider buf cols)
-    context_lines;
+    ds.ds_context_lines;
   box_line_styled buf cols ~style:(Theme.recede ())
     "  old   new     what the working tree holds, against its last commit";
   box_divider buf cols;
-  (match state.repository_changes_diff_error with
+  (match ds.ds_error with
    | None -> ()
    | Some detail ->
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
   let chrome_rows =
-    7
-    + (List.length context_lines * 2)
-    + if Option.is_some state.repository_changes_diff_error then 2 else 0
+    diff_surface_fixed_chrome_rows
+    + (List.length ds.ds_context_lines * diff_surface_rows_per_context_line)
+    + if Option.is_some ds.ds_error then diff_surface_error_rows else 0
   in
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (total - content_height) in
-  let scroll = max 0 (min state.repository_changes_diff_scroll max_scroll) in
+  let scroll = max 0 (min ds.ds_scroll max_scroll) in
   if total = 0 then begin
+    (* Three different facts, and none of them is the others: not read yet, a
+       failed read, and a file that matches its last commit. *)
     let empty =
-      match (state.repository_changes_diff, state.repository_changes_diff_error) with
-      | _, Some _ -> "  (the read failed; nothing here is a reading)"
+      match (ds.ds_diff, ds.ds_error) with
+      | (Some _ | None), Some _ -> "  (the read failed; nothing here is a reading)"
       | None, None -> "  (reading the tree)"
-      | Some (_, diff), None ->
+      | Some diff, None ->
           if diff.Masc.Tui_decode.gd_has_changes then
             "  (the tree reports a change and sent no lines)"
-          else "  (this file matches its last commit, or is untracked)"
+          else ds.ds_unchanged
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
@@ -11581,13 +11670,33 @@ let render_repository_changes_diff (state : state) ~path =
     done;
   box_line_styled buf cols ~style:(Theme.recede ())
     (if total > content_height then
-       Printf.sprintf "[%d lines, scroll %d]  esc back to files" total scroll
-     else "  esc back to files");
+       Printf.sprintf "[%d lines, scroll %d]  %s" total scroll ds.ds_esc_hint
+     else "  " ^ ds.ds_esc_hint);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:Masc_tui_keys.footer_hints_git_diff);
-  finish_surface state
-    ~surface_key:"repository-changes-diff" ~rows:terminal_rows ~cols buf
+    (footer_line state ~max_cells:cols ~hints:ds.ds_footer_hints);
+  finish_surface state ~clamped:(ds.ds_clamped scroll)
+    ~surface_key:ds.ds_surface_key ~rows:terminal_rows ~cols buf
+
+let render_repository_changes_diff (state : state) ~path =
+  let change_ctx = resolve_change_context state ~path_opt:(Some path) in
+  render_diff_surface state
+    { ds_title = " MASC Git Diff"
+    ; ds_address = Terminal_text.single_line path
+    ; ds_context_lines = build_change_context_lines change_ctx
+    ; ds_diff =
+        (* A diff held for another path is not this file's reading. *)
+        (match state.repository_changes_diff with
+         | Some (p, diff) when String.equal p path -> Some diff
+         | Some _ | None -> None)
+    ; ds_error = state.repository_changes_diff_error
+    ; ds_scroll = state.repository_changes_diff_scroll
+    ; ds_unchanged = "  (this file matches its last commit, or is untracked)"
+    ; ds_esc_hint = "esc back to files"
+    ; ds_footer_hints = Masc_tui_keys.footer_hints_git_diff
+    ; ds_surface_key = "repository-changes-diff"
+    ; ds_clamped = (fun scroll -> Repository_changes_diff_scroll scroll)
+    }
 
 let render_repository_changes (state : state) =
   match state.repository_changes_diff_path with
@@ -11980,64 +12089,153 @@ let render_memory (state : state) =
            c.push_divider ();
            List.iter (c.push_styled ~style:(Theme.recede ())) lines))
 
+let memory_fact_age_label ts =
+  keeper_lane_idle_text (int_of_float (Unix.gettimeofday () -. ts))
+
 (* The fact browser Enter opens over a health row: what the keeper actually
    remembers, row by row, with the cursor row unpacked below the list. The
    category and origin strings are drawn exactly as the server spelled
    them. *)
-let memory_fact_row_line (row : Masc_tui_types.memory_fact_row) =
+let memory_fact_row_line ~cols (row : Masc_tui_types.memory_fact_row) =
   let open Masc.Tui_decode in
+  let inner_width = max 10 (framed_inner_width cols) in
   match row with
   | Masc_tui_types.Memory_row_fact fact ->
-      Printf.sprintf "  [%s] %s \xc3\x97%d" fact.mf_category
-        (Terminal_text.single_line fact.mf_claim)
-        fact.mf_reinforcement
-  | Masc_tui_types.Memory_row_source_fact fact ->
-      Printf.sprintf "  [source] %s \xe2\x80\x94 %s" fact.msf_path
-        (Terminal_text.single_line fact.msf_claim)
-  | Masc_tui_types.Memory_row_invalidation row ->
-      Printf.sprintf "  [dropped] %s \xe2\x80\x94 %s" row.mi_source_path
-        row.mi_reason
-
-let memory_fact_age_label ts =
-  keeper_lane_idle_text (int_of_float (Unix.gettimeofday () -. ts))
-
-let memory_fact_detail_lines (row : Masc_tui_types.memory_fact_row) =
-  let open Masc.Tui_decode in
-  match row with
-  | Masc_tui_types.Memory_row_fact fact ->
-      [ "  " ^ Terminal_text.single_line fact.mf_claim
-      ; Printf.sprintf
-          "  category %s · origin %s · reinforced \xc3\x97%d · first %s · last %s · id %s"
-          fact.mf_category fact.mf_origin fact.mf_reinforcement
-          (memory_fact_age_label fact.mf_first_seen)
-          (memory_fact_age_label fact.mf_last_seen)
-          fact.mf_memory_id
-      ]
-  | Masc_tui_types.Memory_row_source_fact fact ->
-      let sha_short =
-        if String.length fact.msf_sha256 > 12 then
-          String.sub fact.msf_sha256 0 12
-        else fact.msf_sha256
+      let cat_style =
+        match fact.mf_category with
+        | "rule" | "rules" -> Theme.warn ()
+        | "persona" | "identity" -> Theme.info ()
+        | "preference" | "user" -> Theme.ok ()
+        | "architecture" | "system" -> Theme.info ()
+        | _ -> Theme.recede ()
       in
-      [ "  " ^ Terminal_text.single_line fact.msf_claim
-      ; Printf.sprintf "  bound to %s · sha %s · first %s" fact.msf_path
-          sha_short
-          (memory_fact_age_label fact.msf_first_seen)
-      ]
+      let reinf_style =
+        if fact.mf_reinforcement >= 10 then Ansi.bold ^ Theme.ok ()
+        else if fact.mf_reinforcement >= 3 then Ansi.bold
+        else Theme.recede ()
+      in
+      let raw_cat = Terminal_text.single_line fact.mf_category in
+      let cat_str =
+        if Message_layout.display_width raw_cat > 10 then
+          Message_layout.take_cells raw_cat 9 ^ "\xe2\x80\xa6"
+        else raw_cat
+      in
+      let pad = String.make (max 0 (10 - Message_layout.display_width cat_str)) ' ' in
+      let cat_badge = Printf.sprintf "%s[%s%s]%s" cat_style cat_str pad Ansi.reset in
+      let reinf_badge =
+        Printf.sprintf "%s\xc3\x97%-3d%s" reinf_style fact.mf_reinforcement Ansi.reset
+      in
+      let age = memory_fact_age_label fact.mf_last_seen in
+      let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
+      let prefix = Printf.sprintf "  %s %s %s " cat_badge reinf_badge age_badge in
+      let prefix_cells = 2 + 12 + 1 + 5 + 1 + 6 + 1 in
+      let claim_budget = max 4 (inner_width - prefix_cells) in
+      let claim = Terminal_text.single_line fact.mf_claim in
+      let claim_display =
+        if Message_layout.display_width claim > claim_budget then
+          if claim_budget > 1 then
+            Message_layout.take_cells claim (claim_budget - 1) ^ "\xe2\x80\xa6"
+          else Message_layout.take_cells claim claim_budget
+        else claim
+      in
+      prefix ^ claim_display
+  | Masc_tui_types.Memory_row_source_fact fact ->
+      let cat_badge = Printf.sprintf "%s[source    ]%s" (Theme.info ()) Ansi.reset in
+      let age = memory_fact_age_label fact.msf_first_seen in
+      let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
+      let path_raw = Terminal_text.single_line fact.msf_path in
+      let path_width = Message_layout.display_width path_raw in
+      let path_str =
+        if path_width > 16 then
+          "\xe2\x80\xa6" ^ Message_layout.drop_cells path_raw (path_width - 15)
+        else path_raw
+      in
+      let pad = String.make (max 0 (16 - Message_layout.display_width path_str)) ' ' in
+      let path_badge = Printf.sprintf "%s%s%s%s" (Theme.info ()) path_str pad Ansi.reset in
+      let prefix = Printf.sprintf "  %s   -   %s %s " cat_badge age_badge path_badge in
+      let prefix_cells = 2 + 12 + 1 + 5 + 1 + 6 + 1 + 16 + 1 in
+      let claim_budget = max 4 (inner_width - prefix_cells) in
+      let claim = Terminal_text.single_line fact.msf_claim in
+      let claim_display =
+        if Message_layout.display_width claim > claim_budget then
+          if claim_budget > 1 then
+            Message_layout.take_cells claim (claim_budget - 1) ^ "\xe2\x80\xa6"
+          else Message_layout.take_cells claim claim_budget
+        else claim
+      in
+      prefix ^ claim_display
   | Masc_tui_types.Memory_row_invalidation row ->
-      [ Printf.sprintf "  dropped %s ago · reason %s"
-          (memory_fact_age_label row.mi_invalidated_at)
-          row.mi_reason
-      ; "  was bound to " ^ row.mi_source_path
-      ]
+      let cat_badge = Printf.sprintf "%s[dropped   ]%s" (Theme.bad ()) Ansi.reset in
+      let age = memory_fact_age_label row.mi_invalidated_at in
+      let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
+      let path_raw = Terminal_text.single_line row.mi_source_path in
+      let path_width = Message_layout.display_width path_raw in
+      let path_str =
+        if path_width > 16 then
+          "\xe2\x80\xa6" ^ Message_layout.drop_cells path_raw (path_width - 15)
+        else path_raw
+      in
+      let pad = String.make (max 0 (16 - Message_layout.display_width path_str)) ' ' in
+      let path_badge = Printf.sprintf "%s%s%s%s" (Theme.recede ()) path_str pad Ansi.reset in
+      let prefix = Printf.sprintf "  %s   -   %s %s " cat_badge age_badge path_badge in
+      let prefix_cells = 2 + 12 + 1 + 5 + 1 + 6 + 1 + 16 + 1 in
+      let claim_budget = max 4 (inner_width - prefix_cells) in
+      let reason = Terminal_text.single_line row.mi_reason in
+      let reason_display =
+        if Message_layout.display_width reason > claim_budget then
+          if claim_budget > 1 then
+            Message_layout.take_cells reason (claim_budget - 1) ^ "\xe2\x80\xa6"
+          else Message_layout.take_cells reason claim_budget
+        else reason
+      in
+      prefix ^ reason_display
 
-(* One store's state for the summary strip: its rows are in the list only
-   when the reading is present, so the strip is where a failed or absent
-   store stays visible instead of passing as "remembers nothing". *)
-let memory_store_state_label name = function
-  | Masc.Tui_decode.Memory_store_read_error _ -> name ^ " read failed"
-  | Masc.Tui_decode.Memory_store_absent -> name ^ " absent"
-  | Masc.Tui_decode.Memory_store_present _ -> name ^ " ok"
+let memory_fact_detail_lines ~cols (row : Masc_tui_types.memory_fact_row) =
+  let open Masc.Tui_decode in
+  let inner_width = max 30 (cols - 6) in
+  match row with
+  | Masc_tui_types.Memory_row_fact fact ->
+      let claim_lines =
+        Message_layout.split_cells ~max_cells:inner_width (Terminal_text.single_line fact.mf_claim)
+        |> List.map (fun line -> "    " ^ line)
+      in
+      let reinf_tag =
+        if fact.mf_reinforcement >= 10 then " (High Confidence)"
+        else if fact.mf_reinforcement >= 3 then " (Confirmed)"
+        else " (Provisional)"
+      in
+      [ Printf.sprintf "  %s%sFact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
+      @ claim_lines
+      @ [ Printf.sprintf "    %sCategory:%s   %-15s %sReinforced:%s \xc3\x97%d%s"
+            (Theme.recede ()) Ansi.reset fact.mf_category
+            (Theme.recede ()) Ansi.reset fact.mf_reinforcement reinf_tag
+        ; Printf.sprintf "    %sOrigin:%s     %-15s %sTimeline:%s   First: %s · Last: %s"
+            (Theme.recede ()) Ansi.reset fact.mf_origin
+            (Theme.recede ()) Ansi.reset
+            (memory_fact_age_label fact.mf_first_seen)
+            (memory_fact_age_label fact.mf_last_seen)
+        ; Printf.sprintf "    %sMemory ID:%s  %s"
+            (Theme.recede ()) Ansi.reset fact.mf_memory_id
+        ]
+  | Masc_tui_types.Memory_row_source_fact fact ->
+      let claim_lines =
+        Message_layout.split_cells ~max_cells:inner_width (Terminal_text.single_line fact.msf_claim)
+        |> List.map (fun line -> "    " ^ line)
+      in
+      [ Printf.sprintf "  %s%sSource-Bound Fact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
+      @ claim_lines
+      @ [ Printf.sprintf "    %sBound Path:%s %s" (Theme.recede ()) Ansi.reset fact.msf_path
+        ; Printf.sprintf "    %sFile SHA:%s   %s · %sFirst Seen:%s %s"
+            (Theme.recede ()) Ansi.reset fact.msf_sha256
+            (Theme.recede ()) Ansi.reset (memory_fact_age_label fact.msf_first_seen)
+        ]
+  | Masc_tui_types.Memory_row_invalidation row ->
+      [ Printf.sprintf "  %s%sDropped / Invalidated Fact%s" Ansi.bold (Theme.bad ()) Ansi.reset
+      ; Printf.sprintf "    %sReason:%s     %s" (Theme.recede ()) Ansi.reset row.mi_reason
+      ; Printf.sprintf "    %sSource Path:%s %s" (Theme.recede ()) Ansi.reset row.mi_source_path
+      ; Printf.sprintf "    %sDropped At:%s  %s ago"
+          (Theme.recede ()) Ansi.reset (memory_fact_age_label row.mi_invalidated_at)
+      ]
 
 let render_memory_facts (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -12052,9 +12250,18 @@ let render_memory_facts (state : state) =
       now.Unix.tm_sec
   in
   let filter_label =
-    match state.memory_facts_category with
-    | None -> "All"
-    | Some category -> category
+    Masc_tui_types.memory_category_filter_label state.memory_facts_category
+  in
+  let sort_label = Masc_tui_types.memory_sort_order_label state.memory_facts_sort in
+  let query_label =
+    match state.search with
+    | Some q when String.length (String.trim q) > 0 ->
+        Printf.sprintf " · find \"%s\"" (Terminal_text.single_line (String.trim q))
+    | Some _ -> " · find \"\""
+    | None ->
+        if String.length (String.trim state.search_last) > 0 then
+          Printf.sprintf " · filter \"%s\"" (Terminal_text.single_line (String.trim state.search_last))
+        else ""
   in
   let title =
     match state.memory_facts with
@@ -12063,41 +12270,95 @@ let render_memory_facts (state : state) =
           (screen_title " MASC Memory") keeper_name timestamp
           (connection_badge state)
     | Some _ ->
-        Printf.sprintf "%s \xe2\x96\xb8 %s (%d rows · filter %s)  %s  %s"
-          (screen_title " MASC Memory") keeper_name total filter_label
+        Printf.sprintf "%s \xe2\x96\xb8 %s (%d facts · %s · sort: %s%s)  %s  %s"
+          (screen_title " MASC Memory") keeper_name total filter_label sort_label query_label
           timestamp (connection_badge state)
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"memory-facts"
     ~title ~hints:Masc_tui_keys.footer_hints_memory_facts
     ~body:(fun ~budget c ->
-      let summary =
+      let stats_line, pills_line =
         match state.memory_facts with
-        | None -> "  (loading facts\xe2\x80\xa6)"
+        | None -> ("  (loading facts\xe2\x80\xa6)", "")
         | Some snapshot ->
-            let ordinary_label =
+            let ord_count, ord_facts =
               match snapshot.mfs_ordinary with
               | Memory_store_present store ->
-                  Printf.sprintf "ordinary r%d · %d facts"
-                    store.mos_revision
-                    (List.length store.mos_facts)
-              | (Memory_store_read_error _ | Memory_store_absent) as reading
-                ->
-                  memory_store_state_label "ordinary" reading
+                  (List.length store.mos_facts, store.mos_facts)
+              | _ -> (0, [])
             in
-            let source_label =
+            let src_count, dropped_count =
               match snapshot.mfs_source with
               | Memory_store_present store ->
-                  Printf.sprintf "source-bound r%d · %d facts · %d dropped"
-                    store.mss_revision
-                    (List.length store.mss_facts)
-                    (List.length store.mss_invalidations)
-              | (Memory_store_read_error _ | Memory_store_absent) as reading
-                ->
-                  memory_store_state_label "source-bound" reading
+                  (List.length store.mss_facts, List.length store.mss_invalidations)
+              | _ -> (0, 0)
             in
-            "  " ^ ordinary_label ^ " \xc2\xb7 " ^ source_label
+            let grand_total = ord_count + src_count + dropped_count in
+            let max_reinf =
+              List.fold_left
+                (fun acc (f : Tui_decode.memory_fact) -> max acc f.mf_reinforcement)
+                0 ord_facts
+            in
+            let avg_reinf =
+              if ord_count = 0 then 0.0
+              else
+                float_of_int
+                  (List.fold_left
+                     (fun acc (f : Tui_decode.memory_fact) -> acc + f.mf_reinforcement)
+                     0 ord_facts)
+                /. float_of_int ord_count
+            in
+            let stats =
+              Printf.sprintf
+                "  %sTotal:%s %d facts  %s(%d ord · %d src · %d drop)%s · %sMax Reinf:%s \xc3\x97%d · %sAvg:%s \xc3\x97%.1f · %sSort [s]:%s %s"
+                Ansi.bold Ansi.reset grand_total
+                (Theme.recede ()) ord_count src_count dropped_count Ansi.reset
+                (Theme.recede ()) Ansi.reset max_reinf
+                (Theme.recede ()) Ansi.reset avg_reinf
+                (Theme.recede ()) Ansi.reset sort_label
+            in
+            let all_categories = Masc_tui_types.memory_fact_categories state in
+            let pill_of_filter filt count is_active =
+              let marker = if is_active then "\xe2\x97\x8f" else "\xe2\x97\x8b" in
+              let style = if is_active then Ansi.bold ^ Theme.info () else Theme.recede () in
+              let label = Masc_tui_types.memory_category_filter_label filt in
+              Printf.sprintf "%s[%s %s: %d]%s" style marker label count Ansi.reset
+            in
+            let all_pill =
+              pill_of_filter Masc_tui_types.Category_all grand_total
+                (state.memory_facts_category = Masc_tui_types.Category_all)
+            in
+            let cat_pills =
+              List.map
+                (fun filt ->
+                  let count =
+                    match filt with
+                    | Masc_tui_types.Category_all -> grand_total
+                    | Masc_tui_types.Category_source -> src_count
+                    | Masc_tui_types.Category_dropped -> dropped_count
+                    | Masc_tui_types.Category_ordinary cat ->
+                        List.length
+                          (List.filter
+                             (fun (f : Tui_decode.memory_fact) -> f.mf_category = cat)
+                             ord_facts)
+                  in
+                  let is_active = state.memory_facts_category = filt in
+                  pill_of_filter filt count is_active)
+                all_categories
+            in
+            let pills = "  Categories [c/C]: " ^ String.concat " " (all_pill :: cat_pills) in
+            (stats, pills)
       in
-      c.push_styled ~style:(Theme.recede ()) summary;
+      c.push stats_line;
+      if pills_line <> "" then c.push pills_line;
+      let search_banner =
+        if String.length (String.trim state.search_last) > 0 then
+          Printf.sprintf "  %sFilter [/]:%s \"%s\" (%d matching facts)  %s[Esc to clear]%s"
+            Ansi.bold Ansi.reset (Terminal_text.single_line state.search_last) total
+            (Theme.recede ()) Ansi.reset
+        else ""
+      in
+      if search_banner <> "" then c.push search_banner;
       c.push_divider ();
       (match state.memory_facts_error with
        | None -> ()
@@ -12105,9 +12366,6 @@ let render_memory_facts (state : state) =
            c.push_styled ~style:(Theme.bad ())
              ("  " ^ Keeper_chat.terminal_safe_text detail);
            c.push_divider ());
-      (* A store that failed to read keeps its reason on screen, not only a
-         "read failed" tag in the strip. Two matches because the two stores
-         carry different payloads; only the error text is shared. *)
       (match state.memory_facts with
        | None -> ()
        | Some snapshot ->
@@ -12123,10 +12381,15 @@ let render_memory_facts (state : state) =
                   ("  source-bound store: "
                    ^ Keeper_chat.terminal_safe_text detail)
             | Memory_store_absent | Memory_store_present _ -> ()));
+      let col_header =
+        Printf.sprintf "  %-12s %-5s %-6s %s" "CATEGORY" "REINF" "AGE" "CLAIM / BOUND PATH"
+      in
+      c.push_styled ~style:(Theme.recede ()) col_header;
+      c.push_divider ();
       let detail_lines =
         match List.nth_opt rows cursor with
         | None -> []
-        | Some row -> memory_fact_detail_lines row
+        | Some row -> memory_fact_detail_lines ~cols row
       in
       let detail_rows =
         match detail_lines with [] -> 0 | lines -> 1 + List.length lines
@@ -12142,11 +12405,17 @@ let render_memory_facts (state : state) =
                | Memory_store_read_error _ -> 1
                | Memory_store_absent | Memory_store_present _ -> 0)
       in
-      let fixed =
-        2 + detail_rows + store_error_rows
+      let top_fixed =
+        1
+        + (if pills_line <> "" then 1 else 0)
+        + (if search_banner <> "" then 1 else 0)
+        + 1
+        + 1
+        + 1
+        + detail_rows + store_error_rows
         + (if Option.is_some state.memory_facts_error then 2 else 0)
       in
-      let room = max 1 (budget - fixed) in
+      let room = max 1 (budget - top_fixed) in
       let overflowing = total > room in
       let content_height = if overflowing then max 1 (room - 1) else room in
       let max_scroll = max 0 (total - content_height) in
@@ -12155,10 +12424,14 @@ let render_memory_facts (state : state) =
         (let empty =
            match state.memory_facts, state.memory_facts_category with
            | None, _ -> "  (waiting for the server)"
-           | Some _, Some category ->
-               Printf.sprintf "  (no facts in category %s \xe2\x80\x94 c cycles)"
-                 category
-           | Some _, None -> "  (no facts in either store)"
+           | Some _, Masc_tui_types.Category_all ->
+               if state.search_last <> "" then
+                 Printf.sprintf "  (no facts matching \"%s\" \xe2\x80\x94 Esc clears filter)"
+                   state.search_last
+               else "  (no facts in either store)"
+           | Some _, filt ->
+               Printf.sprintf "  (no facts in category %s \xe2\x80\x94 c/C cycles)"
+                 (Masc_tui_types.memory_category_filter_label filt)
          in
          c.push_styled ~style:(Theme.recede ()) empty)
       else begin
@@ -12167,25 +12440,19 @@ let render_memory_facts (state : state) =
           match List.nth_opt rows idx with
           | None -> c.push_empty ()
           | Some row ->
-              if idx = cursor then c.push_selected (memory_fact_row_line row)
-              else
-                (match row with
-                 | Masc_tui_types.Memory_row_invalidation _ ->
-                     c.push_styled ~style:(Theme.recede ())
-                       (memory_fact_row_line row)
-                 | Masc_tui_types.Memory_row_fact _
-                 | Masc_tui_types.Memory_row_source_fact _ ->
-                     c.push (memory_fact_row_line row))
+              let line = memory_fact_row_line ~cols row in
+              if idx = cursor then c.push_selected (Masc_tui_theme.strip_sgr line)
+              else c.push line
         done;
         if overflowing then
           c.push_styled ~style:(Theme.recede ())
-            (Printf.sprintf "[%d rows, scroll %d]" total scroll)
+            (Printf.sprintf "[%d facts, scroll %d]" total scroll)
       end;
       (match detail_lines with
        | [] -> ()
        | lines ->
            c.push_divider ();
-           List.iter (c.push_styled ~style:(Theme.recede ())) lines))
+           List.iter c.push lines))
 
 let render_repositories (state : state) =
   if state.repository_changes_open then render_repository_changes state
@@ -12574,72 +12841,19 @@ let render_changes_list (state : state) =
    whichever it drew look like the whole answer. *)
 let render_changes_tree_diff (state : state)
     (change : Masc.Tui_decode.file_change) =
-  let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
-  let diff_rows =
-    match state.changes_tree_diff with
-    | None -> []
-    | Some diff -> diff.Masc.Tui_decode.gd_rows
-  in
-  let total = List.length diff_rows in
-  let header =
-    Printf.sprintf "%s %s  vs HEAD  %s"
-      (screen_title " MASC Tree")
-      (Terminal_text.single_line (change_row_address change))
-      (connection_badge state)
-  in
-  box_top buf cols;
-  box_line buf cols header;
-  box_divider buf cols;
-  box_line_styled buf cols ~style:(Theme.recede ())
-    "  old   new     what the working tree holds, against its last commit";
-  box_divider buf cols;
-  (match state.changes_tree_diff_error with
-   | None -> ()
-   | Some detail ->
-       box_line_styled buf cols ~style:(Theme.bad ())
-         ("  " ^ Keeper_chat.terminal_safe_text detail);
-       box_divider buf cols);
-  let chrome_rows =
-    7 + if Option.is_some state.changes_tree_diff_error then 2 else 0
-  in
-  let content_height = max 1 (rows - chrome_rows) in
-  let max_scroll = max 0 (total - content_height) in
-  let scroll = max 0 (min state.changes_diff_scroll max_scroll) in
-  if total = 0 then begin
-    (* Three different facts, and none of them is the others: not read yet, a
-       failed read, and a file that matches its last commit. *)
-    let empty =
-      match (state.changes_tree_diff, state.changes_tree_diff_error) with
-      | _, Some _ -> "  (the read failed; nothing here is a reading)"
-      | None, None -> "  (reading the tree)"
-      | Some diff, None ->
-          if diff.Masc.Tui_decode.gd_has_changes then
-            "  (the tree reports a change and sent no lines)"
-          else "  (this file matches its last commit)"
-    in
-    box_line_styled buf cols ~style:(Theme.recede ()) empty;
-    for _ = 1 to content_height - 1 do
-      box_empty buf cols
-    done
-  end
-  else
-    for i = 0 to content_height - 1 do
-      match List.nth_opt diff_rows (i + scroll) with
-      | None -> box_empty buf cols
-      | Some row ->
-          box_line_span buf cols (tree_diff_row_span ~width:(framed_inner_width cols) row)
-    done;
-  box_line_styled buf cols ~style:(Theme.recede ())
-    (if total > content_height then
-       Printf.sprintf "[%d lines, scroll %d]  esc closes" total scroll
-     else "  esc closes");
-  box_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  left/esc:back  o:open in editor  q:quit");
-  finish_surface state ~clamped:(Changes_diff_scroll scroll)
-    ~surface_key:"changes" ~rows:terminal_rows ~cols buf
+  render_diff_surface state
+    { ds_title = " MASC Tree"
+    ; ds_address = Terminal_text.single_line (change_row_address change)
+    ; ds_context_lines = []
+    ; ds_diff = state.changes_tree_diff
+    ; ds_error = state.changes_tree_diff_error
+    ; ds_scroll = state.changes_diff_scroll
+    ; ds_unchanged = "  (this file matches its last commit)"
+    ; ds_esc_hint = "esc closes"
+    ; ds_footer_hints = "j/k:scroll  left/esc:back  o:open in editor  q:quit"
+    ; ds_surface_key = "changes"
+    ; ds_clamped = (fun scroll -> Changes_diff_scroll scroll)
+    }
 
 (* The surface has two readings: the list, and one change opened. The open row
    is held as an index, so a refresh that shortens the list closes the diff
@@ -16161,11 +16375,39 @@ let context_composition_lines ~cols ~turn_back
             ^ Ansi.reset
           ]
     in
+    let inputs =
+      List.filter_map
+        (fun r ->
+          match r.Inspector.input_tokens with
+          | Some n when n > 0 -> Some n
+          | _ -> None)
+        selection.Inspector.recent
+      |> List.rev
+    in
+    let velocity_lines =
+      match inputs with
+      | [] | [ _ ] -> []
+      | _ ->
+          let latest_tokens =
+            match selection.Inspector.recent with
+            | { input_tokens = Some n; _ } :: _ -> Inspector.format_tokens n
+            | _ -> "-"
+          in
+          [ Printf.sprintf "  %sVelocity:%s %s  %s(%d turns recorded)  ·  latest %s tokens%s"
+              Ansi.dim Ansi.reset
+              (Chart.sparkline inputs)
+              Ansi.dim
+              (List.length inputs)
+              latest_tokens
+              Ansi.reset
+          ]
+    in
     [ "  "
       ^ Context_bars.band ~width ~title:"RECENT TURNS"
           ~caption:
             "input the provider counted, one row per dispatched turn"
     ]
+    @ velocity_lines
     @ List.concat (List.mapi row selection.Inspector.recent)
   in
   [ identity; turn; trace; "" ]

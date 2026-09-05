@@ -57,6 +57,8 @@ export function verificationRunTone(status: VerificationRunStatusLabel): StatusB
     case 'commit_failed':
     case 'raised':
       return 'bad'
+    case 'operator_routed':
+      return 'info'
   }
 }
 
@@ -78,6 +80,8 @@ export function verificationRunLabel(status: VerificationRunStatusLabel): string
       return '커밋 실패'
     case 'raised':
       return '예외'
+    case 'operator_routed':
+      return '운영자 판정 대기'
   }
 }
 

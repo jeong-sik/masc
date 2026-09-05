@@ -237,6 +237,7 @@ function normalizeApprovalLifecycle(raw: unknown): KeeperApprovalLifecycle | nul
     toolName: asString(raw.tool_name) ?? null,
     phase,
     artifactSha256: artifact ? asString(artifact.sha256) ?? null : null,
+    callSummary: asString(raw.call_summary) ?? null,
   }
 }
 

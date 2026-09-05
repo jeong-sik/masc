@@ -150,9 +150,9 @@ let parse_after_sequence request =
 ;;
 
 (* RFC-0412 §3.2, v2 events endpoint: the journal as written, paged over seq.
-   Default page and ceiling are wire constants the TUI (stage 3) pages by. *)
-let chat_events_default_limit = 500
-let chat_events_max_limit = 2000
+   The default page and the ceiling are the journal's own
+   ([Keeper_chat_event_log.page_default_limit], [page_max_limit]), read here
+   and by the TUI that pages at the ceiling. *)
 
 let parse_since_seq request =
   match Server_utils.query_param request "since_seq" with
@@ -169,14 +169,17 @@ let parse_since_seq request =
 
 let parse_limit request =
   match Server_utils.query_param request "limit" with
-  | None -> Ok chat_events_default_limit
+  | None -> Ok Keeper_chat_event_log.page_default_limit
   | Some raw ->
     (match int_of_string_opt (String.trim raw) with
-     | Some value when value >= 1 && value <= chat_events_max_limit -> Ok value
+     | Some value when value >= 1 && value <= Keeper_chat_event_log.page_max_limit ->
+       Ok value
      | Some _ | None ->
        Error
          (invalid_input
-            (Printf.sprintf "limit must be an integer in 1..%d" chat_events_max_limit)))
+            (Printf.sprintf
+               "limit must be an integer in 1..%d"
+               Keeper_chat_event_log.page_max_limit)))
 ;;
 
 let parse_operation_id_query request =

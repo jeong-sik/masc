@@ -5,6 +5,11 @@
    right after. The phase is the fact; this is the only place its wording
    lives.
 
+   The phase is the store's own closed sum, so every match here is total: a
+   phase the store adds fails this compile instead of drawing as "알 수 없는
+   승인 단계", and a label the store does not know never reaches this module
+   -- the history decoder drops that row as undecodable.
+
    A gated call defers the call, not the Keeper: the turn it was asked on
    keeps running, and a settled approval resumes as a continuation. The
    sentences say that — a row that announces waiting reads as the whole turn
@@ -12,23 +17,29 @@
    else. [summary] is the one line naming what was deferred; without it the
    row can only name the tool. *)
 
-let lifecycle_line ~phase ~tool ~summary =
+open Masc.Keeper_chat_store
+
+(* Said once, because it is drawn twice: as the whole line of a
+   continuation row, and as the suffix of a folded run that also resumed. *)
+let continuation_wording = "턴 이어서 진행"
+
+let lifecycle_line ~(phase : approval_lifecycle_phase) ~tool ~summary =
   let subject =
     let tool = match tool with None -> "외부 효과" | Some name -> name in
     match summary with
     | Some summary when String.trim summary <> "" -> tool ^ " · " ^ summary
-    | _ -> tool
+    | Some _ | None -> tool
   in
   match phase with
-  | "requested" -> subject ^ " · 판정 중 · 이 호출은 미뤄짐"
-  | "resolved_approved" -> subject ^ " · 승인됨 · 적용 예정"
-  | "resolved_rejected" -> subject ^ " · 승인 거절"
-  | "replay_applied" -> subject ^ " · 미뤘던 호출 적용됨"
-  | "replay_applied_with_warning" -> subject ^ " · 적용됨 · 경고 있음"
-  | "replay_failed" -> subject ^ " · 적용 실패"
-  | "replay_indeterminate" -> subject ^ " · 적용 여부 불명 · 대상을 직접 확인하세요"
-  | "continuation_recorded" -> subject ^ " · 턴 이어서 진행"
-  | other -> Printf.sprintf "%s · 알 수 없는 승인 단계 %s" subject other
+  | Approval_requested -> subject ^ " · 판정 중 · 이 호출은 미뤄짐"
+  | Approval_resolved_approved -> subject ^ " · 승인됨 · 적용 예정"
+  | Approval_resolved_rejected -> subject ^ " · 승인 거절"
+  | Approval_replay_applied -> subject ^ " · 미뤘던 호출 적용됨"
+  | Approval_replay_applied_with_warning -> subject ^ " · 적용됨 · 경고 있음"
+  | Approval_replay_failed -> subject ^ " · 적용 실패"
+  | Approval_replay_indeterminate ->
+    subject ^ " · 적용 여부 불명 · 대상을 직접 확인하세요"
+  | Approval_continuation_recorded -> subject ^ " · " ^ continuation_wording
 ;;
 
 (* One approval's steps as one line.
@@ -47,19 +58,38 @@ let lifecycle_line ~phase ~tool ~summary =
    severity instead would have kept showing the phase the correction exists to
    overturn.
 
-   [continuation_recorded] is the exception to all of it: it says the turn
-   resumed, which no outcome says, so it rides along as a suffix instead of
-   replacing the outcome. *)
+   [Approval_continuation_recorded] is the exception to all of it: it says the
+   turn resumed, which no outcome says, so it is not a stage and rides along
+   as a suffix instead of replacing the outcome. *)
+type stage =
+  | Waiting
+  | Resolved
+  | Replayed
+
+let stage_rank = function
+  | Waiting -> 1
+  | Resolved -> 2
+  | Replayed -> 3
+;;
+
 let stage_of_phase = function
-  | "replay_applied" | "replay_applied_with_warning" | "replay_failed"
-  | "replay_indeterminate" -> Some 3
-  | "resolved_approved" | "resolved_rejected" -> Some 2
-  | "requested" -> Some 1
-  | _ -> None
+  | Approval_replay_applied | Approval_replay_applied_with_warning
+  | Approval_replay_failed | Approval_replay_indeterminate ->
+    Some Replayed
+  | Approval_resolved_approved | Approval_resolved_rejected -> Some Resolved
+  | Approval_requested -> Some Waiting
+  | Approval_continuation_recorded -> None
+;;
+
+let is_continuation = function
+  | Approval_continuation_recorded -> true
+  | Approval_requested | Approval_resolved_approved | Approval_resolved_rejected
+  | Approval_replay_applied | Approval_replay_applied_with_warning
+  | Approval_replay_failed | Approval_replay_indeterminate ->
+    false
 ;;
 
 let fold_line ~phases ~tool ~summary =
-  let has phase = List.exists (String.equal phase) phases in
   let outcome =
     List.fold_left
       (fun best phase ->
@@ -70,23 +100,21 @@ let fold_line ~phases ~tool ~summary =
           (* [>=] and not [>]: within one stage the later step is the one that
              stands, which is how a correction row supersedes the row it
              corrects. *)
-          | Some (best_stage, _) when stage >= best_stage -> Some (stage, phase)
+          | Some (best_stage, _) when stage_rank stage >= stage_rank best_stage
+            ->
+            Some (stage, phase)
           | Some _ -> best
           | None -> Some (stage, phase)))
       None phases
   in
-  let outcome =
-    match outcome with
-    | Some (_, phase) -> Some phase
-    (* A run of phases this build does not know still has to draw something,
-       and the last one is the furthest the approval got. *)
-    | None -> List.nth_opt (List.rev phases) 0
-  in
-  match outcome with
-  | None -> None
-  | Some phase ->
-    let line = lifecycle_line ~phase ~tool ~summary in
-    if has "continuation_recorded" && not (String.equal phase "continuation_recorded")
-    then Some (line ^ " · 턴 이어서 진행")
-    else Some line
+  let continued = List.exists is_continuation phases in
+  match outcome, continued with
+  (* Every phase is either a stage or the continuation, so a run with neither
+     is the empty run. *)
+  | None, false -> None
+  | None, true ->
+    Some (lifecycle_line ~phase:Approval_continuation_recorded ~tool ~summary)
+  | Some (_, phase), false -> Some (lifecycle_line ~phase ~tool ~summary)
+  | Some (_, phase), true ->
+    Some (lifecycle_line ~phase ~tool ~summary ^ " · " ^ continuation_wording)
 ;;

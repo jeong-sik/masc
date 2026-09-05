@@ -29,9 +29,6 @@ val get_permission : get_route -> Masc_domain.permission
 
 val mutation_permission : Masc_domain.permission
 
-val chat_events_default_limit : int
-val chat_events_max_limit : int
-
 (** What a missing journal means for an operation the store may hold. *)
 type missing_journal =
   | Nothing_journaled_yet  (** Queued or Running: an empty page is the truth. *)
@@ -55,7 +52,8 @@ val chat_events_page :
     most [limit], each encoded as journaled
     ({!Keeper_chat_event_log.journaled_event_to_json}) and passed through
     [redact_json] -- the same second layer the SSE projection applies.
-    [limit] is positive; the HTTP layer admits [1..chat_events_max_limit], and
+    [limit] is positive; the HTTP layer admits
+    [1..Keeper_chat_event_log.page_max_limit], and
     the function is not meaningful outside that. [next_since_seq] is the seq
     of the last event returned, or [since_seq] itself when the page is empty,
     so a caller can always feed it straight back. Exposed so the wire contract

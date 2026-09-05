@@ -104,6 +104,10 @@ const RESERVED_TOP_LEVEL = new Set([
   'profiles',
   'web_search',
   'exec',
+  'egress',
+  'skills',
+  'voice',
+  'vision',
 ])
 
 function parseDocument(sourceText: string): TomlDocument {

@@ -20,12 +20,19 @@ val unsupported_docker_flags : string list
     unknown option rather than ignoring it, so this list is what a reader
     must weigh when choosing the profile, not a runtime fallback. *)
 
-val policy_network_name : string
-(** The host-only network a [Network_policy] guest is attached to. It carries
-    no allowlist of its own: it removes every route except the host gateway,
-    and the keeper's allowlist is judged by the proxy behind that gateway. *)
+val policy_network_name : keeper_name:string -> string
+(** The host-only network this keeper's [Network_policy] guest is attached
+    to. One per keeper, not one for the fleet.
 
-val policy_network_create_argv_for : Keeper_microvm_backend.t -> (string list, string) result
+    A shared network let a guest reach a neighbour's proxy port through the
+    common gateway and go out under that keeper's allowlist, recorded as that
+    keeper. Separate networks get separate subnets, and a guest on one cannot
+    reach another's gateway on any port -- measured, not assumed. The network
+    carries no allowlist of its own; it removes every route except this
+    keeper's gateway, and the allowlist is judged by the proxy behind it. *)
+
+val policy_network_create_argv_for :
+  Keeper_microvm_backend.t -> keeper_name:string -> (string list, string) result
 (** Create the host-only network the policy lane attaches to. Only the
     backend that carries the lane answers; the others refuse, so a backend
     that gained a policy arm without gaining this fails here rather than
@@ -34,7 +41,7 @@ val policy_network_create_argv_for : Keeper_microvm_backend.t -> (string list, s
 val policy_network_list_argv_for : Keeper_microvm_backend.t -> (string list, string) result
 (** List networks, to see whether {!policy_network_name} already exists. *)
 
-val policy_network_present : listing:string -> (bool, string) result
+val policy_network_present : keeper_name:string -> listing:string -> (bool, string) result
 (** Whether [container network list --format json] carries
     {!policy_network_name}. Compared as a decoded [id], so nothing depends on
     how the CLI spaces a column, and a network whose name contains this one's
@@ -45,7 +52,8 @@ val policy_network_present : listing:string -> (bool, string) result
     exist, and the guest would then be refused with a message about creation
     rather than about the listing that could not be read. *)
 
-val policy_network_inspect_argv_for : Keeper_microvm_backend.t -> (string list, string) result
+val policy_network_inspect_argv_for :
+  Keeper_microvm_backend.t -> keeper_name:string -> (string list, string) result
 (** Inspect the policy network, to learn the gateway a guest on it reaches
     the host at.
 
@@ -74,6 +82,7 @@ type policy_proxy =
 val network_args_for :
   Keeper_microvm_backend.t ->
   dns:string option ->
+  keeper_name:string ->
   policy_proxy:policy_proxy option ->
   Keeper_types_profile_sandbox.network_mode ->
   (string list, string) result

@@ -336,8 +336,11 @@
       가중치나 숫자 비교로 Keeper 흐름 제어 로직을 짜지 않는다.
       암묵적 판단 기준이 아니라 선명한 기준으로 개발한다.
       진짜 중요한 이유가 있을 때만 예외.
-      [parity C2: keeper_agent_run.ml 의 반복 감지 threshold 두 축 — 배포 후
-       재측정으로 판정. C1 은 완료]
+      [parity C2: keeper_agent_run.ml 의 반복 감지 bound 세 개 —
+       repeated_tool_call_yield_threshold = 3 (같은 tool·입력·출력 지문),
+       repeated_assistant_text_yield_threshold = 3 (연속 turn 의 같은 텍스트),
+       repeated_tool_call_input_yield_threshold = 5 (같은 tool·입력, 출력 무관).
+       값의 근거는 각 상수 위 주석에 있고, 배포 후 재측정으로 판정. C1 은 완료]
     </item>
 
     <item id="string_matching">

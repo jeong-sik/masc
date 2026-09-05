@@ -655,6 +655,30 @@ describe('initRuntimeDraftFromConfig — sandbox fields', () => {
     }, c)).toEqual({ proactive_enabled: true })
   })
 
+  it('diffs and rebases voice_always_allow correctly', () => {
+    const c = makeKeeperConfigForSandbox({
+      voice_always_allow: false,
+    })
+    const draft = initRuntimeDraftFromConfig(c)
+    expect(draft.voice_always_allow).toBe(false)
+
+    expect(buildRuntimePayload({
+      ...draft,
+      voice_always_allow: true,
+    }, c)).toEqual({ voice_always_allow: true })
+
+    expect(buildRuntimePayload(draft, c).voice_always_allow).toBeUndefined()
+
+    const fresh = makeKeeperConfigForSandbox({
+      voice_always_allow: false,
+      autoboot_enabled: true,
+    })
+    const editedDraft = { ...draft, voice_always_allow: true }
+    const rebased = rebaseRuntimeDraftOnFreshConfig(editedDraft, c, fresh)
+    expect(rebased.voice_always_allow).toBe(true)
+    expect(rebased.autoboot_enabled).toBe(true)
+  })
+
   it('leaves sandbox_profile unset when config is missing it', () => {
     const c = makeKeeperConfigForSandbox({
       sandbox_profile: undefined,

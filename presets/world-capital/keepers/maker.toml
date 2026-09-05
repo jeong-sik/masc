@@ -1,7 +1,7 @@
 [keeper]
 autoboot_enabled = true
 proactive_enabled = true
-sandbox_profile = "local"
+sandbox_profile = "docker"
 network_mode = "inherit"
 mention_targets = ["maker", "제작"]
 

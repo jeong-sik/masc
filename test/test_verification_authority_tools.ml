@@ -523,7 +523,12 @@ let test_prompt_states_the_root_and_not_a_repository () =
     let text =
       match
         AR.build_prompt
-          ~question:(AR.Completion { completion_contract = None; required_evidence = []; evidence_posture = AR.Note_only; few_shot_block = "" })
+          ~question:
+            { AR.completion_contract = None
+            ; required_evidence = []
+            ; evidence_posture = AR.Note_only
+            ; few_shot_block = ""
+            }
           ~lookup:
             (AR.Lookup_tools
                { schemas = VAT.schemas surface
@@ -564,7 +569,14 @@ let test_prompt_states_the_available_surface () =
       }
     in
     let render lookup =
-      match AR.build_prompt ~question:(AR.Completion { completion_contract = None; required_evidence = []; evidence_posture = AR.Note_only; few_shot_block = "" }) ~lookup request with
+      let question =
+        { AR.completion_contract = None
+        ; required_evidence = []
+        ; evidence_posture = AR.Note_only
+        ; few_shot_block = ""
+        }
+      in
+      match AR.build_prompt ~question ~lookup request with
       | Ok text -> text
       | Error detail -> Alcotest.failf "prompt render failed: %s" detail
     in

@@ -213,59 +213,29 @@ let required_string_list_field ~context name fields =
     Error (Printf.sprintf "%s has no %s" context name)
 ;;
 
-(* The producer's stated why, written into the request by the transition that
-   created the obligation. Absent, there is nothing to judge — a cancellation
-   is only its reason — so this is an error rather than an empty string that
-   would reach the judge as a case with no argument. *)
-let cancel_reason_of_output fields =
-  match List.assoc_opt "cancel_reason" fields with
-  | Some (`String reason) when String.trim reason <> "" -> Ok (String.trim reason)
-  | Some (`String _) ->
-    Error "verification request output cancel_reason is blank"
-  | Some other ->
-    Error
-      (Printf.sprintf
-         "verification request output cancel_reason must be a string, got %s"
-         (Json_util.excerpt other))
-  | None -> Error "verification request output has no cancel_reason"
-;;
-
-(* Which question to put, and the material it needs. The Task's intent picks
-   the branch; the request supplies the rest. A completion is weighed against
-   its contract and artifacts, a stop against its reason with the contract
-   alongside as context. *)
-let verdict_question_of_request
-      ~(intent : Masc_domain.verification_intent)
-      (request : Verification.verification_request)
-  =
+(* The question to put, and the material it needs: a completion weighed
+   against its contract and artifacts. The request supplies both. *)
+let verdict_question_of_request (request : Verification.verification_request) =
   match request.output with
   | `Assoc fields ->
-    (match intent with
-     | Masc_domain.Complete_task ->
-       let* required_evidence =
-         required_string_list_field
-           ~context:"verification request output"
-           "required_artifacts"
-           fields
-       in
-       Ok
-         (Task.Anti_rationalization.Completion
-            { completion_contract =
-                (match request.criteria with
-                 | [] -> None
-                 | descriptions -> Some descriptions)
-            ; required_evidence
-              (* Both filled at the review site, where the snapshot and the
-                 calibration ledger are read. This function maps an intent to
-                 a question and reads no store. *)
-            ; evidence_posture = Task.Anti_rationalization.Note_only
-            ; few_shot_block = ""
-            })
-     | Masc_domain.Cancel_task ->
-       let* reason = cancel_reason_of_output fields in
-       Ok
-         (Task.Anti_rationalization.Cancellation
-            { reason; contract_context = request.criteria }))
+    let* required_evidence =
+      required_string_list_field
+        ~context:"verification request output"
+        "required_artifacts"
+        fields
+    in
+    Ok
+      { Task.Anti_rationalization.completion_contract =
+          (match request.criteria with
+           | [] -> None
+           | descriptions -> Some descriptions)
+      ; required_evidence
+        (* Both filled at the review site, where the snapshot and the
+           calibration ledger are read. This function maps a request to a
+           question and reads no store. *)
+      ; evidence_posture = Task.Anti_rationalization.Note_only
+      ; few_shot_block = ""
+      }
   | other ->
     Error
       (Printf.sprintf
@@ -325,24 +295,6 @@ let prepare_review
       ~(authority : Masc_domain.completion_authority)
   : (prepared_review, string) result
   =
-  (* Which question was asked lives on the Task, put there by the transition
-     that created the obligation. It is not copied into the request record:
-     one field, one owner, and a record that repeated it could disagree with
-     the status the verdict is applied to. *)
-  let* intent =
-    match task.task_status with
-    | Masc_domain.AwaitingVerification { intent; _ } -> Ok intent
-    | Masc_domain.Todo
-    | Masc_domain.Claimed _
-    | Masc_domain.InProgress _
-    | Masc_domain.Done _
-    | Masc_domain.Cancelled _ ->
-      Error
-        (Printf.sprintf
-           "task %s is not awaiting a verdict (status=%s)"
-           task.id
-           (Masc_domain.task_status_to_string task.task_status))
-  in
   let* request = Verification.load_request config.base_path verification_id in
   if not (String.equal request.id verification_id)
   then
@@ -406,7 +358,7 @@ let prepare_review
              header.worker)
       else
         let* evidence_refs = evidence_refs_of_output request.output in
-        let* question = verdict_question_of_request ~intent request in
+        let* question = verdict_question_of_request request in
         (* An artifact reference the store could not read is carried here,
            not refused here.
 
@@ -614,16 +566,35 @@ let commit_verdict
     , Verification_run_registry.Commit_failed { detail } )
 ;;
 
-(** RFC-0415 §4.1: which verification intents the system lane may review at
-    all. Completion review is the system LLM's job; a cancellation is
-    permission for work to stop existing, and that authority belongs to the
-    operator's one click. The gate is pure so the contract is testable
-    without a runtime; the process path consults it and records the refusal
-    as [Not_reviewed { gate = "operator_routing" }] instead of reviewing in
-    the dark. *)
-let system_review_allowed = function
-  | Masc_domain.Complete_task -> true
-  | Masc_domain.Cancel_task -> false
+(** What the system lane does with one Task it was woken for, read off the
+    status alone. Which question was asked lives on the Task, put there by
+    the transition that created the obligation; it is not copied into the
+    request record, so one field has one owner and the record cannot disagree
+    with the status the verdict is applied to.
+
+    RFC-0417 §4.1: completion review is the system LLM's job; a cancellation
+    is permission for work to stop existing, and that authority belongs to
+    the operator's one click. No review prompt exists for a cancel claim —
+    the lane records it as [Verification_run_registry.Operator_routed] and
+    the Task stays [AwaitingVerification] (§5 stay_pending) until the
+    operator clicks, so a keeper's refusal of its own cancel request cannot
+    be laundered into a system-LLM verdict either. Pure, so the routing is
+    testable without a runtime. *)
+type admission =
+  | Review_completion
+  | Operator_routed
+  | Not_awaiting
+
+let admission_of_status = function
+  | Masc_domain.AwaitingVerification { intent = Masc_domain.Complete_task; _ } ->
+    Review_completion
+  | Masc_domain.AwaitingVerification { intent = Masc_domain.Cancel_task; _ } ->
+    Operator_routed
+  | Masc_domain.Todo
+  | Masc_domain.Claimed _
+  | Masc_domain.InProgress _
+  | Masc_domain.Done _
+  | Masc_domain.Cancelled _ -> Not_awaiting
 ;;
 
 let process_task_once
@@ -673,31 +644,19 @@ let process_task_once
       , Verification_run_registry.Infrastructure_unavailable { stage; detail } )
   in
   try
-    (* RFC-0415 §4.1: the gate above is the contract; this is its teeth. A
-       cancel claim is not deferred for retry and not auto-finalized — the
-       Task stays [AwaitingVerification] (§5 stay_pending) until the operator
-       clicks, so a keeper's refusal of its own cancel request cannot be
-       laundered into a system-LLM verdict either. The refusal is recorded,
-       not silent. *)
-    if
-      match task.task_status with
-      | Masc_domain.AwaitingVerification { intent; _ } ->
-        not (system_review_allowed intent)
-      | Masc_domain.Todo
-      | Masc_domain.Claimed _
-      | Masc_domain.InProgress _
-      | Masc_domain.Done _
-      | Masc_domain.Cancelled _ ->
-        false
-    then
-      complete
-        ( Deferred
-        , Verification_run_registry.Not_reviewed
-            { gate = "operator_routing"
-            ; detail =
-                "cancel intent is operator-routed; the system LLM does not review it"
-            } )
-    else
+    match admission_of_status task.task_status with
+    (* Not deferred for retry and not auto-finalized: the operator's click is
+       the next event, and the row says so. *)
+    | Operator_routed -> complete (Deferred, Verification_run_registry.Operator_routed)
+    | Not_awaiting ->
+      defer_unavailable
+        ~stage:Verification_run_registry.Review_preparation
+        ~detail:
+          (Printf.sprintf
+             "task %s is not awaiting a verdict (status=%s)"
+             task.id
+             (Masc_domain.task_status_to_string task.task_status))
+    | Review_completion ->
     match
       prepare_review
         ~config:runtime.config
@@ -736,26 +695,18 @@ let process_task_once
             in
             (* Human labels close the judge's own loop: where an operator
                disagreed with a past verdict, the divergence returns to the
-               judge as a few-shot example, false positives first.
-
-               Only a completion asks for them. Every row in the ledger is a
-               completion judgement, and the cancellation prompt has no slot to
-               put one in, so on a stop this read is answered by a file nobody
-               will look at. The block rides inside [Completion] for that
-               reason: the arm that has the slot is the arm that fills it. *)
+               judge as a few-shot example, false positives first. Filled
+               here, where the ledger and the snapshot are read, so the
+               question picker stays a pure mapping. *)
             let question =
-              match prepared.question with
-              | Task.Anti_rationalization.Completion completion ->
-                Task.Anti_rationalization.Completion
-                  { completion with
-                    few_shot_block =
-                      Eval_calibration.format_few_shot_block
-                        (Eval_calibration.select_examples
-                           ~max_examples:judge_few_shot_examples)
-                  ; evidence_posture =
-                      evidence_posture_of_snapshot prepared.evidence_access
-                  }
-              | Task.Anti_rationalization.Cancellation _ as stop -> stop
+              { prepared.question with
+                Task.Anti_rationalization.few_shot_block =
+                  Eval_calibration.format_few_shot_block
+                    (Eval_calibration.select_examples
+                       ~max_examples:judge_few_shot_examples)
+              ; evidence_posture =
+                  evidence_posture_of_snapshot prepared.evidence_access
+              }
             in
             let result =
               Task.Anti_rationalization.review
@@ -1089,7 +1040,10 @@ module For_testing = struct
 
   let entries_in_scope = entries_in_scope
 
-  (* RFC-0415 §4.1: the pure operator-routing gate, exposed for the refusal
-     contract test. *)
-  let system_review_allowed = system_review_allowed
+  type nonrec admission = admission =
+    | Review_completion
+    | Operator_routed
+    | Not_awaiting
+
+  let admission_of_status = admission_of_status
 end

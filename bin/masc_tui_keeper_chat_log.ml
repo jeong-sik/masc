@@ -173,13 +173,23 @@ let hold_seq t seq =
   end
 ;;
 
+(* The one fold of a journal page into a log. What it returns is what the
+   caller's projection has to follow: the lines whose delta the log took, in
+   journal order, so a transcript kept as the fold of the log can apply
+   exactly those, each at its line's own time. A line already held by seq,
+   and a line that draws nothing, are not in it. *)
 let add_journaled t (lines : Journal.journaled_event list) =
-  List.iter
-    (fun (line : Journal.journaled_event) ->
+  List.fold_left
+    (fun taken (line : Journal.journaled_event) ->
        match delta_of_journaled line.event with
-       | None -> hold_seq t line.seq
-       | Some delta -> ignore (add t ~seq:(Some line.seq) delta : bool))
+       | None ->
+         hold_seq t line.seq;
+         taken
+       | Some delta ->
+         if add t ~seq:(Some line.seq) delta then (line, delta) :: taken else taken)
+    []
     lines
+  |> List.rev
 ;;
 
 type events_page =
@@ -283,18 +293,27 @@ let decode_events_error ~status ~credential_sent body =
 
 (* A whole journal, page by page, through the caller's fetch. [since_seq] is
    where to start ([-1] for the whole journal, a held log's [last_seq] to read
-   only what it lacks). The loop follows [has_more] only while
-   [next_since_seq] advances: a page that claimed more without advancing
-   would be read forever, and what came back so far is what there is. *)
+   only what it lacks). The loop follows [has_more] while [next_since_seq]
+   advances. A page that claims more without advancing would be read
+   forever, and the lines read so far are not the journal: such a read is
+   an error naming the position, not a shorter [Ok]. *)
 let read_whole_journal ~fetch ~since_seq =
   let rec page since_seq acc =
     match fetch ~since_seq with
     | Error error -> Error error
     | Ok { events; has_more; next_since_seq; _ } ->
       let acc = List.rev_append events acc in
-      if has_more && next_since_seq > since_seq
+      if not has_more
+      then Ok (List.rev acc)
+      else if next_since_seq > since_seq
       then page next_since_seq acc
-      else Ok (List.rev acc)
+      else
+        Error
+          (Events_undecodable
+             (Printf.sprintf
+                "page after seq %d claims more but did not advance (next_since_seq %d)"
+                since_seq
+                next_since_seq))
   in
   page since_seq []
 ;;

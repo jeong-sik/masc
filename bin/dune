@@ -286,6 +286,12 @@
  (libraries masc_tui_theme))
 
 (library
+ (name masc_tui_chart)
+ (wrapped false)
+ (modules masc_tui_chart)
+ (libraries masc_tui_theme masc_tui_message_layout))
+
+(library
  (name masc_tui_ask_projection)
  (wrapped false)
  (modules masc_tui_ask_projection)
@@ -359,7 +365,10 @@
 (library
  (name masc_tui_gate_text)
  (wrapped false)
- (modules masc_tui_gate_text))
+ (modules masc_tui_gate_text)
+ ;; The wording is a function of Keeper_chat_store's closed phase sum, so a
+ ;; phase the store adds fails this compile instead of drawing as unknown.
+ (libraries masc))
 
 (library
  (name masc_tui_preset_text)
@@ -390,6 +399,8 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_history)
  (libraries
+  ;; The Gate phase is Keeper_chat_store's closed sum, parsed once at decode.
+  masc
   masc.keeper_chat_delivery_identity
   ; turn_sequence_of_fields reads Ids.Turn_ref, and implicit_transitive_deps
   ; is false, so the module is not reachable through the others.
@@ -532,6 +543,11 @@
  (wrapped false)
  (modules masc_tui_browser)
  (libraries unix))
+
+(library
+ (name masc_tui_pr_ref)
+ (wrapped false)
+ (modules masc_tui_pr_ref))
 
 (library
  (name masc_tui_utf8_input)
@@ -1005,6 +1021,7 @@
   masc_tui_frame_timing
   masc_tui_attachment
   masc_tui_browser
+  masc_tui_pr_ref
   masc_tui_clipboard
   masc_tui_termios
   masc_tui_keys
@@ -1104,6 +1121,7 @@
   masc_tui_json
   masc_tui_render_tools
   masc_tui_context_bars
+  masc_tui_chart
   masc_tui_tool_tree
   masc_tui_tool_detail
   masc_tui_terminal_write_repair

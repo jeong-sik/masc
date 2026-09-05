@@ -321,7 +321,8 @@ type msg_identity =
    for. *)
 type gate_step = {
   gs_approval_id: string;
-  gs_phase: string;
+  gs_phase: Masc.Keeper_chat_store.approval_lifecycle_phase;
+      (** The store's closed sum, parsed once by the history decoder. *)
   gs_tool: string option;
   gs_summary: string option;
 }
@@ -442,13 +443,14 @@ let fold_gate_runs entries =
         match steps with
         | [] -> acc
         | (newest, extra) :: _ ->
+          (* [steps] was filtered on [me_gate] being a step of this approval,
+             so the map is total over what it keeps. *)
           let phases =
-            List.rev_map
-              (fun (entry, _) ->
-                match entry.me_gate with
-                | Some gate -> gate.gs_phase
-                | None -> "")
-              steps
+            List.rev
+              (List.filter_map
+                 (fun (entry, _) ->
+                   Option.map (fun gate -> gate.gs_phase) entry.me_gate)
+                 steps)
           in
           let tool =
             match newest.me_gate with Some gate -> gate.gs_tool | None -> None
@@ -1864,8 +1866,8 @@ let identity_filter_rows ~providers filter =
    do not stack two blanks and none of them leaves the list flush against
    the hint. *)
 let identity_preamble ~keeper ~notice =
-  ("  Move with the arrows and press enter to connect " ^ keeper
-   ^ ", R to ask again what tools exist, T to switch the row off or on.")
+  ("  Move with arrows, enter to connect " ^ keeper
+   ^ ", A: custom app (Client ID), /: filter, R: refresh, T: toggle on/off.")
   :: "" :: notice
 
 (** Which pane line the provider at [index] is drawn on.
@@ -2211,7 +2213,8 @@ let system_log_listing_chrome ~error = listing_chrome ~error + 1
 (* One turn as its event log and the transcript that follows it (RFC-0412
    §3.3, stage 3a). The log is the record: every delta the stream or the
    journal delivered, keyed by journal seq. The transcript is its projection,
-   kept in step by the one writer, [turn_log_add], which folds a delta into
+   kept in step by the two entry points, [turn_log_add] for a live frame and
+   [turn_log_add_journaled] for a journal page, each folding a delta into
    the transcript exactly when the log accepted it -- so the transcript is
    always the fold of the log ([Masc_tui_keeper_chat_transcript.of_log], pinned
    by test), each delta folded at its arrival time rather than re-folded at
@@ -2254,19 +2257,18 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
       then Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
 ;;
 
-(* A v2 journal page, line by line: a line that draws is added to the log and
-   folded at the line's own journal time, so a tool call in a reloaded turn
-   keeps the start time it really had; a line that draws nothing still holds
-   its position. The same fold {!turn_log_add} runs for a live frame, with the
-   arrival clock in place of the journal's. *)
+(* A v2 journal page: the log's own fold ({!Masc_tui_keeper_chat_log.add_journaled})
+   decides which lines are entries -- seq dedup, undrawn positions held --
+   and the transcript follows exactly those, each at the line's own journal
+   time, so a tool call in a reloaded turn keeps the start time it really
+   had. A live frame goes through {!turn_log_add} instead, with the arrival
+   clock in place of the journal's. *)
 let turn_log_add_journaled turn_log
     (lines : Masc.Keeper_chat_event_log.journaled_event list) =
   List.iter
-    (fun (line : Masc.Keeper_chat_event_log.journaled_event) ->
-      match Masc_tui_keeper_chat_log.delta_of_journaled line.event with
-      | None -> Masc_tui_keeper_chat_log.hold_seq turn_log.tl_log line.seq
-      | Some delta -> turn_log_add ~now:line.ts turn_log ~seq:(Some line.seq) delta)
-    lines
+    (fun ((line : Masc.Keeper_chat_event_log.journaled_event), delta) ->
+      Masc_tui_keeper_chat_transcript.apply ~now:line.ts turn_log.tl_transcript delta)
+    (Masc_tui_keeper_chat_log.add_journaled turn_log.tl_log lines)
 ;;
 
 let turn_log_keeper_name turn_log = Masc_tui_keeper_chat_log.keeper_name turn_log.tl_log
@@ -2489,6 +2491,36 @@ let runtime_param_edit_value edit =
         | Some _ | None -> Error "Enter a number")
      | "string" -> Ok (`String edit.rpe_draft)
      | _ -> parse_json ())
+
+type memory_sort_order =
+  | Sort_reinforcement
+  | Sort_recency
+  | Sort_category
+  | Sort_claim
+
+let memory_sort_order_label = function
+  | Sort_reinforcement -> "Reinforcement (\xc3\x97N)"
+  | Sort_recency -> "Recency (Newest)"
+  | Sort_category -> "Category (A-Z)"
+  | Sort_claim -> "Claim (A-Z)"
+
+let next_memory_sort = function
+  | Sort_reinforcement -> Sort_recency
+  | Sort_recency -> Sort_category
+  | Sort_category -> Sort_claim
+  | Sort_claim -> Sort_reinforcement
+
+type memory_category_filter =
+  | Category_all
+  | Category_ordinary of string
+  | Category_source
+  | Category_dropped
+
+let memory_category_filter_label = function
+  | Category_all -> "All"
+  | Category_ordinary cat -> cat
+  | Category_source -> "source"
+  | Category_dropped -> "dropped"
 
 type state = {
   mutable agents: agent list;
@@ -3096,7 +3128,8 @@ type state = {
   mutable memory_facts_error: string option;
   mutable memory_facts_cursor: int;
   mutable memory_facts_scroll: int;
-  mutable memory_facts_category: string option;
+  mutable memory_facts_category: memory_category_filter;
+  mutable memory_facts_sort: memory_sort_order;
   mutable repository_changes_open: bool;
   mutable repository_changes_scope: Tui_decode.repository_change_scope option;
   mutable repository_changes: Tui_decode.repository_change_snapshot option;
@@ -3513,13 +3546,18 @@ let settled_logs_for_keeper state keeper_name =
    have. A request already held by a log that stands for its turn is not
    added twice; a log that never heard the turn's end gives way to one that
    did, which is how a cut stream's turn gets its whole record back from the
-   journal on the next refresh. *)
+   journal on the next refresh. The held log itself, fed more lines in place
+   (a journal read joining a cut stream's partial log), takes its place
+   again: [chat_rows_for] keys its memo on the identity of this list, so a
+   log that came to stand for its turn in place has to arrive as a new list
+   value, or the memo keeps answering with the loaded rows the log now
+   draws. *)
 let hold_settled_log state turn_log =
   let request_id = turn_log_request_id turn_log in
   let keeper_name = turn_log_keeper_name turn_log in
   let replaceable =
     match settled_log_for_request state ~keeper_name request_id with
-    | Some existing -> not (turn_log_holds_the_turn existing)
+    | Some existing -> existing == turn_log || not (turn_log_holds_the_turn existing)
     | None -> true
   in
   if replaceable then begin
@@ -3786,6 +3824,28 @@ let keeper_available_for_new_message (state : state) keeper_name =
   && List.exists
        (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
        state.keepers
+
+(* The composer is where the operator's keys go: the chat pane, whichever
+   half of it has the cursor, or the composer row on another surface once it
+   has taken focus. A draft put away by leaving the pane or releasing the
+   row is text nobody is typing. *)
+let composer_is_live (state : state) =
+  state.view = Keepers Keeper_message || state.composer_focused
+
+(* The operator is mid-line for this keeper: the composer is live, holds
+   text, and is aimed here. While that is true, a settle should not dispatch
+   the keeper's waiting line out from under the line being typed -- holding
+   it lets the next Enter fold the two together. The hold ends with the
+   compose: the composer emptied or sent, aimed at another keeper, or put
+   away (the pane left, the row released), and each of those drains the
+   queue so the released line goes then, not at some later settle. Gated on
+   the setting: with coalescing off the operator wants every line its own
+   turn, so the settle dispatches promptly. *)
+let composing_for_keeper (state : state) keeper_name =
+  state.coalesce_queued_input
+  && composer_is_live state
+  && Buffer.length state.msg_input > 0
+  && Option.exists (String.equal keeper_name) state.msg_target_keeper_name
 
 (** The next target both the input path and footer agree is safe to select.
     A pending request or live transcript stays pinned to its Keeper until that
@@ -4107,7 +4167,8 @@ let create_state
   memory_facts_error = None;
   memory_facts_cursor = 0;
   memory_facts_scroll = 0;
-  memory_facts_category = None;
+  memory_facts_category = Category_all;
+  memory_facts_sort = Sort_reinforcement;
   repository_changes_open = false;
   repository_changes_scope = None;
   repository_changes = None;
@@ -4500,6 +4561,10 @@ type clamped_scroll =
      the stored value kept climbing past the end of the diff, and coming back
      up took one keypress per step taken past it. *)
   | Changes_diff_scroll of int
+  (* The Git Changes file diff is the same shape with its own scroll: the
+     rows exist only once the drawing has read the tree, and the keypress
+     stepped the stored value past them unbounded. *)
+  | Repository_changes_diff_scroll of int
   (* Both surfaces worked out the row they could actually draw and then threw
      it away: the drawing clamped for display while the stored value kept
      climbing, so coming back up took one keypress per step taken past the
@@ -4525,6 +4590,8 @@ let apply_clamped_scroll (state : state) = function
   | Planning_detail_scroll value -> state.planning_scroll <- value
   | Lane_run_detail_scroll value -> state.lane_run_detail_scroll <- value
   | Changes_diff_scroll value -> state.changes_diff_scroll <- value
+  | Repository_changes_diff_scroll value ->
+      state.repository_changes_diff_scroll <- value
   | Resource_scroll value -> state.resource_scroll <- value
   | Approval_detail_scroll value -> state.approval_detail_scroll <- value
 
@@ -4683,6 +4750,25 @@ type memory_fact_row =
   | Memory_row_source_fact of Tui_decode.memory_source_fact
   | Memory_row_invalidation of Tui_decode.memory_invalidation
 
+(* Prefix match: the lowercased label starts with the query. An empty query
+   is a prefix of everything. *)
+let palette_starts_with ~needle haystack =
+  String.starts_with ~prefix:needle (String.lowercase_ascii haystack)
+
+let palette_contains ~needle haystack =
+  let h = String.lowercase_ascii haystack in
+  let n_str = String.lowercase_ascii needle in
+  let n = String.length n_str and hl = String.length h in
+  if n = 0 then true
+  else begin
+    let found = ref false in
+    for start = 0 to hl - n do
+      if (not !found) && String.equal (String.sub h start n) n_str then
+        found := true
+    done;
+    !found
+  end
+
 (* The flat row list the browser's cursor, scroll, and search all read. The
    category filter narrows only ordinary facts: source-bound rows carry no
    category, and hiding them under a category filter would read as the store
@@ -4700,12 +4786,13 @@ let memory_fact_rows (state : state) : memory_fact_row list =
         | Tui_decode.Memory_store_present store ->
             let facts =
               match state.memory_facts_category with
-              | None -> store.Tui_decode.mos_facts
-              | Some category ->
+              | Category_all -> store.Tui_decode.mos_facts
+              | Category_ordinary category ->
                   List.filter
                     (fun (fact : Tui_decode.memory_fact) ->
                       String.equal fact.Tui_decode.mf_category category)
                     store.Tui_decode.mos_facts
+              | Category_source | Category_dropped -> []
             in
             List.map (fun fact -> Memory_row_fact fact) facts
       in
@@ -4715,49 +4802,171 @@ let memory_fact_rows (state : state) : memory_fact_row list =
           ->
             ([], [])
         | Tui_decode.Memory_store_present store ->
-            ( List.map
-                (fun fact -> Memory_row_source_fact fact)
-                store.Tui_decode.mss_facts
-            , List.map
-                (fun row -> Memory_row_invalidation row)
-                store.Tui_decode.mss_invalidations )
+            let src =
+              match state.memory_facts_category with
+              | Category_all | Category_source ->
+                  List.map
+                    (fun fact -> Memory_row_source_fact fact)
+                    store.Tui_decode.mss_facts
+              | Category_ordinary _ | Category_dropped -> []
+            in
+            let inv =
+              match state.memory_facts_category with
+              | Category_all | Category_dropped ->
+                  List.map
+                    (fun row -> Memory_row_invalidation row)
+                    store.Tui_decode.mss_invalidations
+              | Category_ordinary _ | Category_source -> []
+            in
+            (src, inv)
       in
-      ordinary @ source_rows @ invalidation_rows
+      let all_rows = ordinary @ source_rows @ invalidation_rows in
+      let query =
+        match state.search with
+        | Some q -> String.lowercase_ascii (String.trim q)
+        | None ->
+            if String.length (String.trim state.search_last) > 0 then
+              String.lowercase_ascii (String.trim state.search_last)
+            else ""
+      in
+      let filtered_rows =
+        if query = "" then all_rows
+        else
+          List.filter
+            (fun row ->
+              let text =
+                match row with
+                | Memory_row_fact f ->
+                    f.Tui_decode.mf_claim ^ " " ^ f.Tui_decode.mf_category ^ " "
+                    ^ f.Tui_decode.mf_origin
+                | Memory_row_source_fact f ->
+                    f.Tui_decode.msf_claim ^ " " ^ f.Tui_decode.msf_path
+                | Memory_row_invalidation f ->
+                    f.Tui_decode.mi_reason ^ " " ^ f.Tui_decode.mi_source_path
+              in
+              palette_contains ~needle:query text)
+            all_rows
+      in
+      (match state.memory_facts_sort with
+       | Sort_reinforcement ->
+           List.sort
+             (fun a b ->
+               let score = function
+                 | Memory_row_fact f ->
+                     (f.Tui_decode.mf_reinforcement, f.Tui_decode.mf_last_seen)
+                 | Memory_row_source_fact f ->
+                     (1, f.Tui_decode.msf_first_seen)
+                 | Memory_row_invalidation f ->
+                     (0, f.Tui_decode.mi_invalidated_at)
+               in
+               let r_a, t_a = score a in
+               let r_b, t_b = score b in
+               if r_a <> r_b then Stdlib.compare r_b r_a
+               else Stdlib.compare t_b t_a)
+             filtered_rows
+       | Sort_recency ->
+           List.sort
+             (fun a b ->
+               let ts = function
+                 | Memory_row_fact f -> f.Tui_decode.mf_last_seen
+                 | Memory_row_source_fact f -> f.Tui_decode.msf_first_seen
+                 | Memory_row_invalidation f -> f.Tui_decode.mi_invalidated_at
+               in
+               Stdlib.compare (ts b) (ts a))
+             filtered_rows
+       | Sort_category ->
+           List.sort
+             (fun a b ->
+               let cat = function
+                 | Memory_row_fact f -> (0, f.Tui_decode.mf_category)
+                 | Memory_row_source_fact _ -> (1, "source")
+                 | Memory_row_invalidation _ -> (2, "dropped")
+               in
+               let p_a, c_a = cat a in
+               let p_b, c_b = cat b in
+               let c = String.compare c_a c_b in
+               if c <> 0 then c
+               else if p_a <> p_b then Stdlib.compare p_a p_b
+               else
+                 let claim = function
+                   | Memory_row_fact f -> f.Tui_decode.mf_claim
+                   | Memory_row_source_fact f -> f.Tui_decode.msf_claim
+                   | Memory_row_invalidation f -> f.Tui_decode.mi_reason
+                 in
+                 String.compare (claim a) (claim b))
+             filtered_rows
+       | Sort_claim ->
+           List.sort
+             (fun a b ->
+               let claim = function
+                 | Memory_row_fact f -> f.Tui_decode.mf_claim
+                 | Memory_row_source_fact f -> f.Tui_decode.msf_claim
+                 | Memory_row_invalidation f -> f.Tui_decode.mi_reason
+               in
+               String.compare (claim a) (claim b))
+             filtered_rows)
 
-(* The categories the loaded ordinary store actually holds, distinct and
+(* The categories the loaded ordinary store and source store actually hold, distinct and
    sorted -- the [c] cycle walks these. Read from the rows, never from a
    list this side hardcodes: the taxonomy is the server's, and a category it
    adds appears here without a code change. *)
-let memory_fact_categories (state : state) : string list =
+let memory_fact_categories (state : state) : memory_category_filter list =
   match state.memory_facts with
   | None -> []
-  | Some snapshot -> (
-      match snapshot.Tui_decode.mfs_ordinary with
-      | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
-        ->
-          []
-      | Tui_decode.Memory_store_present store ->
-          store.Tui_decode.mos_facts
-          |> List.map (fun (fact : Tui_decode.memory_fact) ->
-               fact.Tui_decode.mf_category)
-          |> List.sort_uniq String.compare)
+  | Some snapshot ->
+      let ordinary_cats =
+        match snapshot.Tui_decode.mfs_ordinary with
+        | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
+          ->
+            []
+        | Tui_decode.Memory_store_present store ->
+            store.Tui_decode.mos_facts
+            |> List.map (fun (fact : Tui_decode.memory_fact) ->
+                 Category_ordinary fact.Tui_decode.mf_category)
+            |> List.sort_uniq Stdlib.compare
+      in
+      let source_cats =
+        match snapshot.Tui_decode.mfs_source with
+        | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
+          ->
+            []
+        | Tui_decode.Memory_store_present store ->
+            (if store.Tui_decode.mss_facts <> [] then [ Category_source ] else [])
+            @ (if store.Tui_decode.mss_invalidations <> [] then [ Category_dropped ] else [])
+      in
+      ordinary_cats @ source_cats
 
 (* All -> first category -> ... -> last -> All. A [current] that is no
    longer among [categories] (the snapshot refreshed under the filter)
    restarts at All rather than guessing a neighbour. *)
-let next_memory_category (current : string option) (categories : string list)
-    : string option =
+let next_memory_category (current : memory_category_filter)
+    (categories : memory_category_filter list) : memory_category_filter =
   match current with
-  | None -> ( match categories with [] -> None | first :: _ -> Some first)
-  | Some current ->
+  | Category_all -> (match categories with [] -> Category_all | first :: _ -> first)
+  | c ->
       let rec after = function
-        | [] -> None
+        | [] -> Category_all
         | candidate :: rest ->
-            if String.equal candidate current then
-              (match rest with [] -> None | next :: _ -> Some next)
+            if candidate = c then
+              (match rest with [] -> Category_all | next :: _ -> next)
             else after rest
       in
       after categories
+
+let prev_memory_category (current : memory_category_filter)
+    (categories : memory_category_filter list) : memory_category_filter =
+  match current with
+  | Category_all -> (match List.rev categories with [] -> Category_all | last :: _ -> last)
+  | c ->
+      let rev = List.rev categories in
+      let rec before = function
+        | [] -> Category_all
+        | candidate :: rest ->
+            if candidate = c then
+              (match rest with [] -> Category_all | prev :: _ -> prev)
+            else before rest
+      in
+      before rev
 
 let scrolled_surface_rows (state : state) : surface -> scrolled option =
   let listing ~error count =
@@ -5279,24 +5488,6 @@ type palette_action =
      Code pane's cursor line — the K/D candidates ride the palette as
      entries so one keypress can also be a choice among several names. *)
   | Palette_lsp of string * string
-
-(* Prefix match: the lowercased label starts with the query. An empty query
-   is a prefix of everything. *)
-let palette_starts_with ~needle haystack =
-  String.starts_with ~prefix:needle (String.lowercase_ascii haystack)
-
-let palette_contains ~needle haystack =
-  let h = String.lowercase_ascii haystack in
-  let n = String.length needle and hl = String.length h in
-  if n = 0 then true
-  else begin
-    let found = ref false in
-    for start = 0 to hl - n do
-      if (not !found) && String.equal (String.sub h start n) needle then
-        found := true
-    done;
-    !found
-  end
 
 (* The identifier names on the file pane's cursor line, in reading order,
    first occurrence only. The open file already carries its lexed segments,

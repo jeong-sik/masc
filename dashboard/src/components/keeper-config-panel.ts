@@ -327,6 +327,7 @@ export type RuntimeDraft = {
   // '' = no endpoint. Only meaningful under remote_ssh; serialised as null.
   remote_endpoint: string
   proactive_enabled: boolean
+  voice_always_allow: boolean
   // Keeper-level autonomous wake prompt; '' = inherit fleet (sent as null)
   skill_selection:
     | { mode: 'all'; prior_names_text: string }
@@ -492,6 +493,7 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     network_mode: coerceNetworkMode(c.network_mode),
     remote_endpoint: c.remote_endpoint ?? '',
     proactive_enabled: proactiveConfigValue(c),
+    voice_always_allow: Boolean(c.voice_always_allow),
     skill_selection: c.skills.names === null
       ? { mode: 'all', prior_names_text: '' }
       : { mode: 'names', names_text: c.skills.names.join('\n') },
@@ -529,6 +531,9 @@ export function rebaseRuntimeDraftOnFreshConfig(
   }
   if (draft.proactive_enabled !== base.proactive_enabled) {
     rebased.proactive_enabled = draft.proactive_enabled
+  }
+  if (draft.voice_always_allow !== base.voice_always_allow) {
+    rebased.voice_always_allow = draft.voice_always_allow
   }
   const draftSelection = draft.skill_selection
   const baseSelection = base.skill_selection
@@ -812,6 +817,16 @@ export function keeperConfigControlInventory(
           'skills.names',
           ['skills.names'],
         ),
+        keeperRuntimeControlItem(
+          c,
+          tab,
+          'kcf-policy-voice-bypass',
+          'Voice gate bypass',
+          `${configApiSource} voice_always_allow`,
+          'PATCH /api/v1/keepers/:name/config voice_always_allow',
+          'voice_always_allow',
+          ['voice_always_allow'],
+        ),
       ]
     case 'access':
       return [
@@ -999,6 +1014,9 @@ export function buildRuntimePayloadResult(
     payload.remote_endpoint = endpointDraft === '' ? null : endpointDraft
   }
   if (draft.proactive_enabled !== proactiveConfigValue(orig)) payload.proactive_enabled = draft.proactive_enabled
+  if (draft.voice_always_allow !== Boolean(orig.voice_always_allow)) {
+    payload.voice_always_allow = draft.voice_always_allow
+  }
   if (draft.skill_selection.mode === 'all') {
     if (orig.skills.names !== null) payload.skills = {}
   } else {
@@ -1139,6 +1157,7 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
     network_mode: 'network_mode' in payload,
     remote_endpoint: 'remote_endpoint' in payload,
     proactive_enabled: 'proactive_enabled' in payload,
+    voice_always_allow: 'voice_always_allow' in payload,
     skills: 'skills' in payload,
   }
 }
@@ -2318,6 +2337,16 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     ` : html`
       <${BoolRow} label="자동 부팅" value=${c.autoboot_enabled} />
       <${BoolRow} label="활성" value=${proactiveConfigValue(c)} />
+    `}
+
+    <${SectionHeader} title="음성 게이트" />
+    ${rd && runtimeCanEdit ? html`
+      <${SetRow} label="음성 승인 생략" hint="음성 합성 발화 시 게이트 승인 대기 없이 즉시 재생" dirty=${dirtyFlags.voice_always_allow}>
+        <${SetToggle} ariaLabel="음성 승인 생략" on=${rd.voice_always_allow}
+          onChange=${(v: boolean) => updateRuntimeDraft('voice_always_allow', v)} />
+      </${SetRow}>
+    ` : html`
+      <${BoolRow} label="음성 승인 생략" value=${c.voice_always_allow ?? false} />
     `}
 
     <${KcfSec} title="Keeper Skills" desc="Keeper TOML의 [keeper.skills] 선택을 그대로 편집합니다. 이름 비교는 정확히 일치하며, 현재 카탈로그에 없는 이름도 저장 후 관측 화면에 남습니다.">

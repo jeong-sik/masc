@@ -496,34 +496,51 @@ let fork_egress_proxy
              in
              let port =
                match Eio.Net.listening_addr socket with
-               | `Tcp (_, port) -> port
-               | `Unix _ -> 0
+               | `Tcp (_, port) -> Some port
+               (* A unix socket cannot be an address a guest dials, and a 0
+                  here would be recorded as a port and handed to a guest. The
+                  lane stays closed instead. *)
+               | `Unix _ -> None
              in
+             match port with
+             | None ->
+               Log.Keeper.error
+                 "egress proxy not started keeper=%s: the listener bound no TCP \
+                  port (the lane stays closed)"
+                 keeper_name
+             | Some port ->
              (* The turn boot reads this to build the guest's proxy
                 environment. Recorded before serving so a guest that boots
-                while the first request is in flight still finds it. *)
+                while the first request is in flight still finds it, and
+                cleared when this listener goes away: the port is ephemeral,
+                so a stale one sends the next guest to a port nothing is
+                listening on -- no refusal, no event, a keeper that looks
+                idle rather than cut off. *)
              Atomic.set reg.egress_proxy_port (Some port);
-             Log.Keeper.info
-               "egress proxy listening keeper=%s port=%d rules=%d"
-               keeper_name
-               port
-               (List.length rules);
-             Eio.Fiber.first
+             Fun.protect
+               ~finally:(fun () -> Atomic.set reg.egress_proxy_port None)
                (fun () ->
-                  Egress_proxy_net.serve
-                    ~sw:proxy_sw
-                    ~net
-                    ~clock:ctx.clock
-                    ~keeper_name
-                    ~rules
-                    ~on_event:(fun event ->
-                      Log.Keeper.info
-                        "egress keeper=%s %s"
-                        event.Egress_proxy_net.keeper_name
-                        (Egress_proxy_net.outcome_to_string event.Egress_proxy_net.outcome))
-                    ~socket
-                    ~read_timeout_s:Keeper_egress_lane.request_line_read_timeout_s)
-               (fun () -> Eio.Promise.await stop))
+                  Log.Keeper.info
+                    "egress proxy listening keeper=%s port=%d rules=%d"
+                    keeper_name
+                    port
+                    (List.length rules);
+                  Eio.Fiber.first
+                    (fun () ->
+                       Egress_proxy_net.serve
+                         ~sw:proxy_sw
+                         ~net
+                         ~clock:ctx.clock
+                         ~keeper_name
+                         ~rules
+                         ~on_event:(fun event ->
+                           Log.Keeper.info
+                             "egress keeper=%s %s"
+                             event.Egress_proxy_net.keeper_name
+                             (Egress_proxy_net.outcome_to_string event.Egress_proxy_net.outcome))
+                         ~socket
+                         ~read_timeout_s:Keeper_egress_lane.request_line_read_timeout_s)
+                    (fun () -> Eio.Promise.await stop)))
          with
          | Eio.Cancel.Cancelled _ -> ()
          | exn ->

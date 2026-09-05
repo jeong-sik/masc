@@ -8,11 +8,20 @@ let make_state () =
   Types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
 ;;
 
+(* Two things this had wrong, and CI could see neither: the check here is
+   [dune build @check] and runs no tests.
+
+   [memory_fact_age_label] takes the moment a fact was last seen, not its
+   age -- its caller hands it [fact.mf_last_seen] -- so passing 10.0 asked
+   what 1970 looks like. And "just now" / "5m ago" are not spellings this
+   renderer produces; it answers the compact form the rest of the TUI uses
+   for idle time. *)
 let test_age_label () =
-  check string "recent" "just now" (Render_memory.memory_fact_age_label 10.0);
-  check string "minutes" "5m ago" (Render_memory.memory_fact_age_label 300.0);
-  check string "hours" "2h ago" (Render_memory.memory_fact_age_label 7200.0);
-  check string "days" "3d ago" (Render_memory.memory_fact_age_label 259200.0)
+  let seconds_ago age = Unix.gettimeofday () -. age in
+  check string "seconds" "10s" (Render_memory.memory_fact_age_label (seconds_ago 10.0));
+  check string "minutes" "5m" (Render_memory.memory_fact_age_label (seconds_ago 300.0));
+  check string "hours" "2h" (Render_memory.memory_fact_age_label (seconds_ago 7200.0));
+  check string "days" "3d" (Render_memory.memory_fact_age_label (seconds_ago 259200.0))
 ;;
 
 let test_fact_row_line () =

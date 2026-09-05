@@ -3611,7 +3611,8 @@
   masc_tui_message_layout
   masc_tui_render_memory
   masc_tui_theme
-  masc_tui_types))
+  masc_tui_types  unix
+))
 
 (test
  (name test_tui_memory_facts_explorer)

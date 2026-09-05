@@ -21,6 +21,19 @@ module Palette = Masc_tui_terminal_palette
 
 module Catalog = Masc_tui_theme_catalog
 
+(* [Catalog.all] reads config/themes relative to the process cwd, and a dune
+   test runs in _build/default/test, where that directory does not exist: the
+   list would quietly narrow to the bundled themes and every contrast below
+   would measure a copy instead of the shipped ones. The prompt gate
+   (test_prompt_templates_render) reads its directory through
+   DUNE_SOURCEROOT; this stanza deps (source_tree config/themes) the same
+   directory, so the two halves agree here. *)
+let themes_base_path () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> Filename.concat root "config/themes"
+  | None -> Filename.concat (Sys.getcwd ()) "config/themes"
+;;
+
 (* The schemes are the ones masc ships, not a copy of them. A number here is
    what a reader who picks that theme sees. *)
 type scheme =
@@ -42,7 +55,7 @@ let schemes =
       | Some palette -> { name = Catalog.name shipped; palette }
       | None ->
         Alcotest.failf "shipped scheme %s has malformed hex" (Catalog.name shipped))
-    (Catalog.all ())
+    (Catalog.all ~base_path:(themes_base_path ()))
 ;;
 
 
@@ -582,7 +595,7 @@ base00 = "000000"
 let test_load_retro_themes_toml () =
   List.iter
     (fun name ->
-      let scheme_opt = Catalog.find name in
+      let scheme_opt = Catalog.find ~base_path:(themes_base_path ()) name in
       check bool (name ^ " is discovered from config/themes") true (Option.is_some scheme_opt);
       match scheme_opt with
       | None -> ()

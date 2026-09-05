@@ -1,2 +1,0 @@
-/app/masc-runtime-entrypoint: line 38: /app/masc-deployment-preflight-helper: cannot execute binary file: Exec format error
-/app/masc-runtime-entrypoint: line 38: /app/masc-deployment-preflight-helper: Success

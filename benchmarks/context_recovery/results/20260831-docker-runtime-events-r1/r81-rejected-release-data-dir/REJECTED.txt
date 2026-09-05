@@ -1,1 +1,0 @@
-Rejected as runtime-events release acceptance evidence: Linux artifacts and deployment preflight succeeded, but the current release image stayed startup.phase=degraded because appuser could not create /app/data/tool-metrics. This is tracked separately; the failed image/runtime evidence is retained.

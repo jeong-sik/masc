@@ -443,7 +443,7 @@ let test_keeper_action_colours_stay_apart_without_red_and_green () =
    its own second channel; the colour is redundancy. *)
 let categorical_separation_floor = 0.024
 
-let categorical_slot_colours =
+let labelled_categories =
   List.map
     (fun slot ->
       ( (match slot with
@@ -451,10 +451,43 @@ let categorical_slot_colours =
          | Masc_tui_ansi.Theme.Slot_2 -> "Slot_2"
          | Masc_tui_ansi.Theme.Slot_3 -> "Slot_3"
          | Masc_tui_ansi.Theme.Slot_4 -> "Slot_4"
-         | Masc_tui_ansi.Theme.Slot_5 -> "Slot_5"
-         | Masc_tui_ansi.Theme.Slot_6 -> "Slot_6")
-      , Masc_tui_ansi.Theme.category_colour slot ))
+         | Masc_tui_ansi.Theme.Slot_5 -> "Slot_5")
+      , slot ))
     Masc_tui_ansi.Theme.all_categories
+;;
+
+let categorical_slot_colours =
+  List.map
+    (fun (label, slot) -> (label, Masc_tui_ansi.Theme.category_colour slot))
+    labelled_categories
+;;
+
+(* A slot is the same bytes as some status token by construction: the theme
+   names seven hues and status_ansi_color claims five of them. What must not
+   happen is a slot aliasing a token drawn on the same terminal row, and the
+   file list is where that bit: it draws Theme.bad () eight times and
+   Theme.ok () once across the two panes write_two_panes joins, and for one
+   commit its media mark was Bright_red -- Theme.bad () to the byte.
+
+   So this holds the slot set clear of those two. Info and warn are still
+   aliased, and are safe only because that surface draws neither; a surface
+   reaching for slot 1 or 2 owes the same check this test makes here. *)
+let test_no_categorical_slot_aliases_a_drawn_status_token () =
+  let drawn = [ "bad", Masc_tui_ansi.Theme.bad; "ok", Masc_tui_ansi.Theme.ok ] in
+  List.iter
+    (fun (slot_label, _) ->
+      List.iter
+        (fun (status_label, token) ->
+          check bool
+            (Printf.sprintf "%s does not draw the same escape as %s" slot_label
+               status_label)
+            false
+            (String.equal
+               (Masc_tui_ansi.Theme.category
+                  (List.assoc slot_label labelled_categories))
+               (token ())))
+        drawn)
+    categorical_slot_colours
 ;;
 
 let test_categorical_slots_hold_their_measured_floor () =
@@ -712,6 +745,8 @@ let () =
         ; Alcotest.test_case
             "keeper action colours stay apart without red and green" `Quick
             test_keeper_action_colours_stay_apart_without_red_and_green
+        ; Alcotest.test_case "no categorical slot aliases a drawn status token"
+            `Quick test_no_categorical_slot_aliases_a_drawn_status_token
         ; Alcotest.test_case "categorical slots hold their measured floor"
             `Quick test_categorical_slots_hold_their_measured_floor
 

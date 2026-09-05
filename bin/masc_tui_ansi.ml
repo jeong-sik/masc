@@ -91,15 +91,22 @@ module Theme = struct
        the rows saying "kind" were the ones a theme could not reach.
 
        Numbered, not named. Two axes never on the same screen can hold the
-       same slot, and a global kind-to-colour map runs out of colours: the
-       theme knows seven, one of which recedes. Six is the ceiling, and an
-       axis wider than that needs a channel other than colour. RFC-0427. *)
+       same slot, and a global kind-to-colour map runs out of colours.
+
+       Five, not six, and none of them is free of status. The theme names
+       seven ANSI colours and [status_ansi_color] already claims five --
+       green, yellow, red, cyan and the receding black -- so a slot is the
+       same bytes as some status token by construction. Red is the one
+       nobody can use: it is [bad], and it turned a media file's mark into
+       the failure text sharing its terminal row. Blue and magenta are the
+       only hues status leaves alone; a surface reaching for any of the
+       other three owes a check that it does not draw that status token.
+       RFC-0427. *)
     ; slot_1 : string
     ; slot_2 : string
     ; slot_3 : string
     ; slot_4 : string
     ; slot_5 : string
-    ; slot_6 : string
     }
 
   (* A slot, so the accessor below is total. *)
@@ -109,7 +116,6 @@ module Theme = struct
     | Slot_3
     | Slot_4
     | Slot_5
-    | Slot_6
 
   (* One place says which hue a slot carries, so the contrast suite measures
      the mapping the renderer actually draws instead of a copy of it. *)
@@ -119,9 +125,8 @@ module Theme = struct
     | Slot_3 -> Masc_tui_theme.Bright_green
     | Slot_4 -> Masc_tui_theme.Bright_magenta
     | Slot_5 -> Masc_tui_theme.Bright_blue
-    | Slot_6 -> Masc_tui_theme.Bright_red
 
-  let all_categories = [ Slot_1; Slot_2; Slot_3; Slot_4; Slot_5; Slot_6 ]
+  let all_categories = [ Slot_1; Slot_2; Slot_3; Slot_4; Slot_5 ]
 
   let resolved_cache : resolved option Atomic.t = Atomic.make None
 
@@ -152,16 +157,12 @@ module Theme = struct
         ; quiet = of_colour Masc_tui_theme.Bright_black
         ; probe = of_colour Masc_tui_theme.Bright_cyan
         ; message = of_colour Masc_tui_theme.Bright_magenta
-        (* All six the theme has that are not the receding one. Red sits
-           here because a categorical surface carries no status reading --
-           the file list it first serves has no well or unwell -- and
-           dropping it would leave five slots for a six-member axis. *)
+        (* Every hue but the receding one and [bad]'s red. *)
         ; slot_1 = of_colour (category_colour Slot_1)
         ; slot_2 = of_colour (category_colour Slot_2)
         ; slot_3 = of_colour (category_colour Slot_3)
         ; slot_4 = of_colour (category_colour Slot_4)
         ; slot_5 = of_colour (category_colour Slot_5)
-        ; slot_6 = of_colour (category_colour Slot_6)
         }
       in
       if Atomic.compare_and_set resolved_cache previous (Some next) then next
@@ -177,7 +178,6 @@ module Theme = struct
     | Slot_3 -> (resolved ()).slot_3
     | Slot_4 -> (resolved ()).slot_4
     | Slot_5 -> (resolved ()).slot_5
-    | Slot_6 -> (resolved ()).slot_6
 
   let ok () = (resolved ()).ok
   let warn () = (resolved ()).warn

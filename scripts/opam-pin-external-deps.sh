@@ -72,6 +72,14 @@ fi
 # --- Pin SHAs (bump these when upstream changes are needed) ---
 readonly GRPC_DIRECT_SHA="d7269ebebf9e4688486cc6591c66e794607e7b0f"
 readonly WS_DIRECT_SHA="05e01cf008d4a5024474d13cee35cda42e2bea09"
+# cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
+# delivery from the position already delivered instead of offset 0. Without it
+# a chunk handed over in three or more single_read calls repeats its first
+# bytes and drops the displaced ones, which is the sse/malformed_payload the
+# providers were blamed for (masc#28761). Pinned as version 6.2.1 so the lock
+# file constraint still holds. Verified by test_cohttp_eio_body_flow. Remove
+# the pin when a cohttp-eio release carries the fix (upstream PR from this fork).
+readonly COHTTP_EIO_SHA="45ecbe94b2a6e9a49e5ce11a9f69127833814d46"
 
 include_bisect=false
 include_compact_protocol=false
@@ -145,6 +153,8 @@ opam_pin_add ws-direct-gluten "https://github.com/jeong-sik/ws-direct.git#${WS_D
 pinned_pkgs+=("ws-direct-gluten")
 opam_pin_add ws-direct-eio "https://github.com/jeong-sik/ws-direct.git#${WS_DIRECT_SHA}" -n -y
 pinned_pkgs+=("ws-direct-eio")
+opam_pin_add cohttp-eio.6.2.1 "https://github.com/jeong-sik/ocaml-cohttp.git#${COHTTP_EIO_SHA}" -n -y
+pinned_pkgs+=("cohttp-eio")
 
 if $include_bisect; then
   # bisect_ppx opam constraints lag newer compilers; keep CI solvable under OCaml 5.5 by pinning.

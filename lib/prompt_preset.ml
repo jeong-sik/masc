@@ -44,6 +44,11 @@ type manifest =
   ; preset_description : string
   ; preset_created_at : string
   ; override_count : int
+  ; override_keys : string list option
+        (** Which prompts the preset overrides. [None] on a manifest written
+            before this field existed -- distinct from [Some []], which is a
+            preset that overrides nothing. A count alone cannot be chosen
+            between. *)
   ; keepers : string list
   ; assignment_count : int
   ; lane_count : int
@@ -170,6 +175,11 @@ let manifest_of_snapshot (s : snapshot) =
   ; preset_description = s.description
   ; preset_created_at = s.created_at
   ; override_count = List.length s.prompt_overrides
+  ; override_keys =
+      Some
+        (s.prompt_overrides
+         |> List.map (fun (e : Prompt_override_persistence.entry) -> e.key)
+         |> List.sort String.compare)
   ; keepers = List.map fst s.instructions
   ; assignment_count = List.length s.assignments
   ; lane_count = List.length s.lanes
@@ -183,9 +193,61 @@ let manifest_to_json (m : manifest) : Yojson.Safe.t =
     ; "description", `String m.preset_description
     ; "created_at", `String m.preset_created_at
     ; "override_count", `Int m.override_count
+    ; ( "override_keys"
+      , match m.override_keys with None -> `Null | Some keys -> strings keys )
     ; "keepers", strings m.keepers
     ; "assignment_count", `Int m.assignment_count
     ; "lane_count", `Int m.lane_count
+    ]
+;;
+
+(* Everything a preset would change, so an operator can read one before
+   applying it. The manifest counts things; this names them. Restoring
+   without being able to look is how a preset with ten keepers gets applied
+   over a workspace that has fourteen. *)
+let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
+  `Assoc
+    [ "schema_version", `Int schema_version
+    ; "name", `String s.name
+    ; "description", `String s.description
+    ; "created_at", `String s.created_at
+    ; ( "prompt_overrides"
+      , `List
+          (List.map
+             (fun (e : Prompt_override_persistence.entry) ->
+               `Assoc
+                 [ "key", `String e.key
+                 ; "value", `String e.value
+                 ; "bytes", `Int (String.length e.value)
+                 ; "contract_revision", `String e.contract_revision
+                 ])
+             s.prompt_overrides) )
+    ; ( "instructions"
+      , `List
+          (List.map
+             (fun (file, text) ->
+               `Assoc
+                 [ "keeper_file", `String file
+                 ; "bytes", `Int (String.length text)
+                 ; "text", `String text
+                 ])
+             s.instructions) )
+    ; ( "assignments"
+      , `List
+          (List.map
+             (fun (keeper, runtime) ->
+               `Assoc [ "keeper", `String keeper; "runtime", `String runtime ])
+             s.assignments) )
+    ; ( "lanes"
+      , `List
+          (List.map
+             (fun (l : lane) ->
+               `Assoc
+                 [ "id", `String l.id
+                 ; "slots", strings l.slots
+                 ; "cli_slots", strings l.cli_slots
+                 ])
+             s.lanes) )
     ]
 ;;
 
@@ -205,6 +267,17 @@ let manifest_of_json (json : Yojson.Safe.t) =
       let* preset_description = string_field fields "description" in
       let* preset_created_at = string_field fields "created_at" in
       let* override_count = int_field fields "override_count" in
+      let override_keys =
+        match List.assoc_opt "override_keys" fields with
+        | Some (`List items) ->
+          Some
+            (List.filter_map
+               (function
+                 | `String key -> Some key
+                 | _ -> None)
+               items)
+        | Some `Null | None | Some _ -> None
+      in
       let* keepers = string_list_field fields "keepers" in
       let* () =
         match List.find_opt (fun keeper -> not (is_valid_name keeper)) keepers with
@@ -218,6 +291,7 @@ let manifest_of_json (json : Yojson.Safe.t) =
         ; preset_description
         ; preset_created_at
         ; override_count
+        ; override_keys
         ; keepers
         ; assignment_count
         ; lane_count

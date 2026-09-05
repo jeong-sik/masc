@@ -177,7 +177,29 @@ let test_capture_save_load_round_trip () =
     let listing = Preset.list ~base_path in
     check (list string) "the listing names the preset" [ "morning" ]
       (List.map (fun (m : Preset.manifest) -> m.Preset.preset_name) listing.Preset.presets);
-    check (list (pair string string)) "nothing is unreadable" [] listing.Preset.unreadable)
+    check (list (pair string string)) "nothing is unreadable" [] listing.Preset.unreadable;
+    (* A count says one override; it does not say which. Choosing between two
+       presets from a list means the list has to name them. *)
+    check (option (list string)) "the listing names the overridden prompts"
+      (Some [ "test.preset" ])
+      (List.hd listing.Preset.presets).Preset.override_keys;
+    (* And the whole of a preset is readable without applying it, because
+       applying it is the decision being made. *)
+    let shown = Preset.snapshot_to_json loaded in
+    let field name =
+      match shown with
+      | `Assoc fields -> List.assoc_opt name fields
+      | _ -> None
+    in
+    check bool "the snapshot carries the override text" true
+      (match field "prompt_overrides" with
+       | Some (`List [ `Assoc entry ]) ->
+         List.assoc_opt "value" entry = Some (`String "Overridden body.")
+       | _ -> false);
+    check bool "and the keeper instructions" true
+      (match field "instructions" with
+       | Some (`List (_ :: _)) -> true
+       | _ -> false))
 ;;
 
 let test_invalid_name_is_refused () =

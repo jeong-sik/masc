@@ -438,3 +438,35 @@ P4g 가 겨냥한 턴 조립은 main 에서 사라졌다. 남은 것은 **날짜
 - `Dated_jsonl.load_tail_lines_from_channel` 의 호출자는 `telemetry_unified`·`tool_usage_log`·`keeper_transition_audit`·`keeper_status_detail`·`keeper_tool_call_log`·approval `audit`·`eval_calibration`·`audit_log`·chat store·provider input 스냅샷의 dedup 이다. 파일을 열어 꼬리를 읽고 줄마다 JSON 을 파싱한다. 읽기(syscall)는 systhread 로, 파싱은 pool 로, 결과만 fiber 로 돌아온다. 호출자가 원하는 것은 "최근 N 개" 이므로 P4a 처럼 파일마다 커서를 두고 새 줄만 읽는 것이 근본 해결이다.
 - `Fs_compat_internal.Atomic_write.save_file_atomic_with_parent_sync` 는 temp 쓰기·fsync·rename·부모 fsync 를 main fiber 에서 한다. §7.3 의 `Blocking_syscall.t` 로 syscall 만 넘긴다.
 - 판정: 같은 창에서 main 의 `openat -> switch`·`fstat -> fstat` 부류 합계(이번 창 6.4초/90초)와 ≥100 ms 실행 11 → 0.
+
+#### P4h-0 뒤 (pid 77804, #33416 포함, 15:35Z~15:38Z, 기동 15:31:09Z)
+
+하네스와 스택 샘플 1은 ready+4분(15:35Z), fiber 추적·GC 추적·스택 샘플 2는 그 직후 90초(15:36:44Z~15:38:14Z)다. 도구 경로를 잘못 불러 첫 추적이 비어서 두 창으로 나뉘었다.
+
+| 항목 | 기준선 | 전체 P4g(1) | 전체 P4g(2) | P4h-0 |
+|---|---|---|---|---|
+| 하네스 lag p99 / max | 153 / 552 ms | 70.8 / 409 ms | 51.6 / 215 ms | 84.0 / 324 ms |
+| main 도메인 점유 | 12.6% | 15.6% | 9.2% | 9.2% |
+| main 의 ≥10 / ≥50 / ≥100 ms 실행 | 109 / 37 / 19 | 191 / 106 / 11 | 130 / 33 / 8 | 84 / 31 / **4** |
+| main 의 최대 실행 | 954 ms | 427 ms | 141 ms | 200 ms |
+| 할당 / STW minor / major | 617 MB/s / 561 / 11.9 | 62 / 48 / 0 | 344 / — / — | 121 / 107 / 6.0 |
+
+옮긴 일은 pool 도메인에 그대로 보인다: 도메인 1~14 에 100~1,229 ms 짜리 단일 작업(`(first run) -> exit`, 날짜별 JSONL 읽기)과 `fs-compat-private-jsonl-read` 246~299 ms 가 찍힌다. main 에 남은 100 ms 넘는 실행은 넷이다 — `Promise.await -> fstat` 200 ms(그중 GC 34.9 ms), `sleep -> sleep` 170 ms, `openat -> switch` 143 ms.
+
+스택 샘플 1(40초, main 스레드 busy 4,977/32,062 = 15.5%)에서 `Dated_jsonl` 은 상위 30 프레임에서 사라졌다(직전 창에서 busy 의 약 10%). 남은 큰 덩어리는 전부 커널 대기다.
+
+| 프레임 | 샘플(1 ms) | 내용 |
+|---|---|---|
+| `Atomic_write.save_file_atomic_with_parent_sync` | 490 | 486 이 `rename` syscall 한 번 |
+| `Eio_posix.Low_level` spawn | 250 | `fork()` 안 `_malloc_fork_parent` 141, 2 GB 힙의 malloc zone 잠금 |
+| `Eio_posix.Low_level` writev | 221 | 파일 쓰기 201 이 커널 |
+
+샘플 2(15:36:44Z)는 busy 6.7% 로 조용했고 상위는 `Otel_runtime_observables` 139, Yojson 문자열 쓰기 124 다.
+
+P4h-1 #33421(뒤로 읽는 스캔 `find_latest_entry_result`·`collect_matching` 을 청크마다 pool 작업 하나로, 호출자 필터는 fiber) 은 이 창 뒤에 병합됐고 아직 라이브가 아니다.
+
+#### P4h-2 — 원자 교체의 커밋 syscall 을 systhread 로 (#33426)
+
+`fs_compat` 은 `Domain_pool_ref` 를 볼 수 없다. `masc_core` 가 `fs_compat` 에 의존하고 `Eio_guard` 가 `Fs_compat` 을 쓴다. 그래서 pool 대신 같은 파일이 이미 디렉터리 fsync 에 쓰는 `Eio_unix.run_in_systhread` 를 쓴다. `save_file_atomic_with_parent_sync` 의 페이로드 fsync·rename·부모 fsync 세 syscall 이 fiber 안에서는 systhread 작업 하나로 돌고, Eio 밖에서는 inline 이다. Eio 컨텍스트 판별은 `Fs_compat.execution_context` 에서 `fs_compat_internal.Execution_context` 로 내려가 `Atomic_write` 가 쓴다. 실패 단계와 취소 보고는 그대로다. eio 의 thread pool 이 작업 스레드의 예외를 그 백트레이스와 함께 fiber 에서 다시 던진다(`eio/unix/thread_pool.ml:73,134`). 임시 파일 생성과 `Eio.Path.save` 는 fiber 에 남는다.
+
+남은 표적 하나는 pool 로도 systhread 로도 못 내린다. `Eio.Process.spawn` 은 eio_posix 가 `fork()` 로 구현하고 자식 실행 전 부모의 malloc zone 을 전부 잠근다. 힙이 2 GB 인 지금 한 번에 141 ms 다. switch 와 proc_mgr 가 부르는 fiber 의 도메인에 묶여 있어 다른 도메인으로 옮길 수 없다. 턴당 스폰 횟수를 줄이거나 스폰 전용 보조 프로세스를 두는 것이 방향이고, 별도 절이 필요하다.

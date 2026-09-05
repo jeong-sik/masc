@@ -76,6 +76,13 @@ type authorization_source =
       (** The request is a closed-set observation-only argv inside a
           per-keeper disposable guest — docker container or microvm
           ({!Keeper_gate_readonly}); allowed without judgment. *)
+  | Observed_in_box
+      (** The request ran once inside the executor's box — no file write
+          outside a scratch, no socket, enforced by the guest kernel through
+          Landlock and seccomp (RFC-0422) — and exited 0. Nothing it did
+          could have left an effect, so its output is returned and no judge
+          is asked. A run that exited otherwise is not this: it goes to the
+          judge as before. *)
 
 type authorization =
   { source : authorization_source
@@ -150,15 +157,47 @@ type cycle_grant
 val cycle_grant_of_resolution :
   Keeper_event_queue.hitl_resolution -> cycle_grant option
 
+(** What one run of the request inside the executor's box came back as
+    (RFC-0422). The caller that owns the sandbox runs it; the Gate only
+    decides when to ask, and what each answer means. *)
+type observation =
+  | Observed_clean
+      (** Exit 0 inside the box. The kernel refused every write outside the
+          scratch and every socket, so nothing this run did is an effect;
+          the caller holds its output and returns it as the result. *)
+  | Observed_refused of
+      { status : Unix.process_status
+      ; stderr : string
+      }
+      (** The box ended the run otherwise: a refused write or socket, a
+          program that exited non-zero, a signal. Not an effect either, but
+          not an answer — the request keeps the judge, and this is what the
+          judge will be shown (RFC-0422 step 3b). *)
+  | Observation_unavailable of string
+      (** No box could be built for this request — a profile with no shim, a
+          shim that advertises no box, a dispatch the typed gate refused — so
+          the request keeps the judge exactly as before this stage existed.
+          Never read as clean. *)
+
 (** Evaluate one exact external-effect request. [keeper_always_allow] is the
     explicit Keeper profile switch; it carries no inferred semantics. Manual,
     Auto Judge, and invalid-mode outcomes enqueue durably and return without
     suspending the caller. Explicit Keeper/workspace Always Allow modes do not
     depend on the optional exact-rule store being readable. A supplied one-shot
     grant that cannot be consumed returns [Unavailable] without evaluating a
-    second authorization path, so the durable grant remains single-use. *)
+    second authorization path, so the durable grant remains single-use.
+
+    [observe] is the executor's box (RFC-0422): a [tool_execute] caller that
+    can run the request boxed passes it, every other caller omits it. The
+    Gate calls it at exactly one point — Auto Judge mode, after the one-shot
+    grant, both Always Allow switches, the exact rules and the observation
+    tables have all declined — and only there, so an always-allowed keeper
+    never pays a box run and a Manual workspace still sees every request.
+    [Observed_clean] is allowed with source {!Observed_in_box}; the other two
+    answers defer to the judge as the request would have without the box. *)
 val decide :
   ?cycle_grant:cycle_grant ->
+  ?observe:(unit -> observation) ->
   keeper_always_allow:bool ->
   request ->
   decision

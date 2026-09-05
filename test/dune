@@ -4585,6 +4585,11 @@
  (libraries masc_test_deps exec_ssh_protocol eio_main))
 
 (test
+ (name test_keeper_tool_execute_observe)
+ (modules test_keeper_tool_execute_observe)
+ (libraries masc_test_deps))
+
+(test
  (name test_keeper_github_login_lane)
  (modules test_keeper_github_login_lane)
  (libraries masc_test_deps exec_ssh_protocol eio_main))

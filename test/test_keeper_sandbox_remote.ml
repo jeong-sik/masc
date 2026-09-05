@@ -56,6 +56,21 @@ let stub_main () =
   then (
     write_all Unix.stderr "Error: get failed: container masc-keeper-vm-keeper-a not found\n";
     exit 1);
+  (* [--probe] takes no frame: the shim answers its identity on stdout and
+     exits. The two probe modes differ only in what the shim says it can
+     build, which is the one fact the observe stage reads (RFC-0422). *)
+  if List.exists (String.equal "--probe") args
+  then (
+    let capabilities =
+      if String.equal mode "probe-observe" then [ Exec_ssh_protocol.observe_capability ] else []
+    in
+    write_all Unix.stdout
+      (Exec_ssh_protocol.render_probe
+         { name = "masc-exec-shim"
+         ; version = string_of_int Exec_ssh_protocol.protocol_version ^ ".0.0"
+         ; capabilities
+         });
+    exit 0);
   let header = read_exact Unix.stdin 8 in
   let body_len = Bytes.get_int64_be (Bytes.unsafe_of_string header) 0 |> Int64.to_int in
   let frame = header ^ read_exact Unix.stdin body_len in
@@ -65,7 +80,7 @@ let stub_main () =
       { v = Exec_ssh_protocol.protocol_version; exit; signal; timed_out; shim_error }
   in
   match mode with
-  | "exit3" ->
+  | "exit3" | "probe-observe" | "probe-plain" ->
     write_all Unix.stdout "guest-out";
     write_all Unix.stderr ("guest-err" ^ trailer ~exit:3 ());
     exit 0
@@ -246,6 +261,48 @@ let test_frame_exit_and_injected_env () =
       request.env
 ;;
 
+(* ── the box (RFC-0422) ─────────────────────────────────────────────── *)
+
+let decoded_mode frame_path =
+  match Exec_ssh_protocol.decode_request (read_file frame_path) with
+  | Error error -> fail error
+  | Ok (request, _) -> Exec_ssh_protocol.mode_to_string request.mode
+;;
+
+(* The runner asks for the box in the request and nowhere else: same
+   transport argv, same env, one more field. Omitted, it is Effect, so every
+   caller that never heard of the box still runs what it ran. *)
+let test_the_requested_mode_travels_in_the_frame () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, frame_path = make_stub ~dir:base_path ~mode:"exit3" in
+  let state = make_state ~base_path ~cli in
+  let run mode =
+    let runner = Keeper_sandbox_remote.runner ?mode ~timeout_sec:2.0 state in
+    ignore (run_request runner ~cwd:None () : Unix.process_status * string * string);
+    decoded_mode frame_path
+  in
+  check string "omitted is effect" "effect" (run None);
+  check string "observe is asked for by name" "observe" (run (Some Exec_ssh_protocol.Observe));
+  check string "guest_local likewise" "guest_local" (run (Some Exec_ssh_protocol.Guest_local))
+;;
+
+(* Whether there is a box is the shim's answer, read from its probe: a shim
+   that advertises none gets no observe run, one that does gets one, and a
+   probe that cannot run is a no. Each state has its own base path because
+   the answer is remembered per endpoint for the life of the process. *)
+let test_observe_support_is_what_the_shim_advertises () =
+  with_eio @@ fun () ->
+  let supported mode =
+    let base_path = temp_dir () in
+    let cli, _ = make_stub ~dir:base_path ~mode in
+    Keeper_sandbox_remote.observe_supported (make_state ~base_path ~cli)
+  in
+  check bool "a shim without the box" false (supported "probe-plain");
+  check bool "a shim with the box" true (supported "probe-observe");
+  check bool "a probe that fails" false (supported "cli-not-found")
+;;
+
 let test_lane_error_codes () =
   with_eio @@ fun () ->
   let base_path = temp_dir () in
@@ -298,6 +355,10 @@ let () =
               test_openssh_probe_stays_one_word
           ; test_case "frame, exit and injected env" `Quick
               test_frame_exit_and_injected_env
+          ; test_case "the requested mode travels in the frame" `Quick
+              test_the_requested_mode_travels_in_the_frame
+          ; test_case "observe support is what the shim advertises" `Quick
+              test_observe_support_is_what_the_shim_advertises
           ; test_case "lane error codes" `Quick test_lane_error_codes
           ; test_case "preflight unreachable names the guest" `Quick
               test_preflight_unreachable_names_the_guest

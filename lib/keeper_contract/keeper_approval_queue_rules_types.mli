@@ -142,6 +142,9 @@ type authorization_source =
   | Keeper_always_allow
   | Workspace_always_allow
   | Readonly_sandbox
+  | Observed_in_box
+      (** The request ran once inside the executor's box and exited 0
+          (RFC-0422); the kernel, not a table, said it had no effect. *)
 
 (** An immutable exact Always Allowed rule. Its identity is the workspace-local
     Keeper, opaque operation identity, and complete normalized effect input;

@@ -69,6 +69,15 @@ type authorization_source =
   | Keeper_always_allow
   | Workspace_always_allow
   | Readonly_sandbox
+  | Observed_in_box
+
+type observation =
+  | Observed_clean
+  | Observed_refused of
+      { status : Unix.process_status
+      ; stderr : string
+      }
+  | Observation_unavailable of string
 
 type authorization =
   { source : authorization_source
@@ -266,6 +275,7 @@ let authorization_source_to_string = function
   | Keeper_always_allow -> "keeper_always_allow"
   | Workspace_always_allow -> "workspace_always_allow"
   | Readonly_sandbox -> "readonly_sandbox"
+  | Observed_in_box -> "observed_in_box"
 ;;
 
 let deferred_reason_to_string = function
@@ -303,6 +313,8 @@ let source_fields = function
     [ "authorization_source", `String "workspace_always_allow" ]
   | Readonly_sandbox ->
     [ "authorization_source", `String "readonly_sandbox" ]
+  | Observed_in_box ->
+    [ "authorization_source", `String "observed_in_box" ]
 ;;
 
 let request_turn_id request =
@@ -318,7 +330,8 @@ let approval_sse_audit_event = "approval:audit"
 let authorization_subject_id = function
   | One_shot_resolution approval_id -> Some approval_id
   | Exact_always_rule rule_id -> Some rule_id
-  | Keeper_always_allow | Workspace_always_allow | Readonly_sandbox -> None
+  | Keeper_always_allow | Workspace_always_allow | Readonly_sandbox | Observed_in_box ->
+    None
 ;;
 
 (* Authorization is already committed when these receipts exist.  A failed
@@ -447,6 +460,7 @@ let audit_authorization_source
   | Workspace_always_allow ->
     Keeper_approval_queue_rules_types.Workspace_always_allow
   | Readonly_sandbox -> Keeper_approval_queue_rules_types.Readonly_sandbox
+  | Observed_in_box -> Keeper_approval_queue_rules_types.Observed_in_box
 ;;
 
 let audit_allow request ?rule_match ?source_approval_id ?decision_source source =
@@ -458,7 +472,7 @@ let audit_allow request ?rule_match ?source_approval_id ?decision_source source 
       (match source with
        | One_shot_resolution approval_id -> approval_id
        | Exact_always_rule rule_id -> rule_id
-       | Keeper_always_allow | Workspace_always_allow | Readonly_sandbox ->
+       | Keeper_always_allow | Workspace_always_allow | Readonly_sandbox | Observed_in_box ->
          Keeper_approval_queue.generate_id ())
     ~keeper_name:request.keeper_name
     ~tool_name:request.operation
@@ -1939,7 +1953,51 @@ let observe_exact_rule_expired
        ())
 ;;
 
-let decide_from_selected_mode request = function
+let status_label = function
+  | Unix.WEXITED code -> Printf.sprintf "exit=%d" code
+  | Unix.WSIGNALED signal -> Printf.sprintf "signal=%d" signal
+  | Unix.WSTOPPED signal -> Printf.sprintf "stopped=%d" signal
+;;
+
+(* RFC-0422: the box is asked only here, after every cheaper authority has
+   declined and before the judge is paid. Exit 0 is the whole criterion: the
+   guest kernel refused every write outside the scratch and every socket, so
+   a run that still ended 0 left nothing behind, and its output is the
+   answer. Anything else keeps the judge — the same deferral the request
+   would have had before this stage existed, so a box that cannot be built
+   is a request that is judged, never one that runs unboxed. *)
+let decide_after_observation request ~observe =
+  match observe with
+  | None -> defer request Judge_requested
+  | Some run ->
+    (match (run () : observation) with
+     | Observed_clean ->
+       let source = Observed_in_box in
+       let audit_receipt =
+         audit_allow
+           request
+           ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
+           source
+       in
+       allow request source [ audit_receipt ]
+     | Observed_refused { status; stderr } ->
+       Log.Keeper.info
+         ~keeper_name:request.keeper_name
+         "observe run refused operation=%s %s stderr_bytes=%d; the judge decides"
+         request.operation
+         (status_label status)
+         (String.length stderr);
+       defer request Judge_requested
+     | Observation_unavailable reason ->
+       Log.Keeper.info
+         ~keeper_name:request.keeper_name
+         "observe run unavailable operation=%s reason=%s; the judge decides"
+         request.operation
+         reason;
+       defer request Judge_requested)
+;;
+
+let decide_from_selected_mode ?observe request = function
   | Error detail -> defer request (Mode_state_invalid detail)
   | Ok Keeper_gate_mode.Manual -> defer request Human_requested
   | Ok Keeper_gate_mode.Auto_judge ->
@@ -1967,7 +2025,7 @@ let decide_from_selected_mode request = function
           source
       in
       allow request source [ audit_receipt ])
-    else defer request Judge_requested
+    else decide_after_observation request ~observe
   | Ok Keeper_gate_mode.Always_allow ->
     let source = Workspace_always_allow in
     let audit_receipt =
@@ -1979,7 +2037,7 @@ let decide_from_selected_mode request = function
     allow request source [ audit_receipt ]
 ;;
 
-let decide_without_cycle_grant ~read_mode ~keeper_always_allow request =
+let decide_without_cycle_grant ~read_mode ?observe ~keeper_always_allow request =
   if keeper_always_allow
   then (
     let source = Keeper_always_allow in
@@ -2019,7 +2077,7 @@ let decide_without_cycle_grant ~read_mode ~keeper_always_allow request =
         with
         | Error error ->
           observe_exact_rule_store_degraded request error;
-          decide_from_selected_mode request mode
+          decide_from_selected_mode ?observe request mode
         | Ok (Keeper_approval_queue_rules_types.Rule_match_active rule_match) ->
           let source = Exact_always_rule rule_match.rule_id in
           let audit_receipt =
@@ -2032,12 +2090,12 @@ let decide_without_cycle_grant ~read_mode ~keeper_always_allow request =
           allow request source [ audit_receipt ]
         | Ok (Keeper_approval_queue_rules_types.Rule_match_expired rule_match) ->
           observe_exact_rule_expired request rule_match;
-          decide_from_selected_mode request mode
+          decide_from_selected_mode ?observe request mode
         | Ok Keeper_approval_queue_rules_types.Rule_match_absent ->
-          decide_from_selected_mode request mode))
+          decide_from_selected_mode ?observe request mode))
 ;;
 
-let decide_with_mode ~read_mode ?cycle_grant ~keeper_always_allow request =
+let decide_with_mode ~read_mode ?cycle_grant ?observe ~keeper_always_allow request =
   let grant_result =
     match cycle_grant with
     | None -> Cycle_grant_not_applicable
@@ -2051,7 +2109,7 @@ let decide_with_mode ~read_mode ?cycle_grant ~keeper_always_allow request =
     in
     allow request source [ grant_audit_receipt; gate_audit_receipt ]
   | Cycle_grant_not_applicable ->
-    decide_without_cycle_grant ~read_mode ~keeper_always_allow request
+    decide_without_cycle_grant ~read_mode ?observe ~keeper_always_allow request
   | Cycle_grant_temporarily_unavailable (approval_id, reason) ->
     Log.Keeper.warn
       ~keeper_name:request.keeper_name
@@ -2076,10 +2134,11 @@ let decide_with_mode ~read_mode ?cycle_grant ~keeper_always_allow request =
     Unavailable reason
 ;;
 
-let decide ?cycle_grant ~keeper_always_allow request =
+let decide ?cycle_grant ?observe ~keeper_always_allow request =
   decide_with_mode
     ~read_mode:Keeper_gate_mode.resolve
     ?cycle_grant
+    ?observe
     ~keeper_always_allow
     request
 ;;

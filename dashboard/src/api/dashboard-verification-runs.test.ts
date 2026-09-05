@@ -145,6 +145,31 @@ describe('parseVerificationRunsResponse', () => {
     expect(onlyRun(parsed).retryable).toBe(false)
   })
 
+  // A cancel claim is the operator's to close: the lane records that it handed
+  // the claim on and reviewed nothing. The row is neither a verdict nor a
+  // failure, so it carries no cause, no gate and no retry flag.
+  it('keeps an operator-routed claim as its own status with no cause', () => {
+    const parsed = parseVerificationRunsResponse({
+      generated_at: '2026-08-05T00:00:00Z',
+      count: 1,
+      runs: [{
+        verification_id: 'vrf-cancel-claim',
+        task_id: 'task-140',
+        producer: 'keeper-kidsnote-agent',
+        authority_kind: 'system_llm_agent',
+        authority_actor: 'verifier_exact',
+        started_at: 1_754_000_000,
+        status: 'operator_routed',
+        elapsed_s: 0.1,
+        tools: [],
+      }],
+    })
+    expect(onlyRun(parsed)).toMatchObject({ status: 'operator_routed' })
+    expect(onlyRun(parsed).cause).toBeUndefined()
+    expect(onlyRun(parsed).gate).toBeUndefined()
+    expect(onlyRun(parsed).retryable).toBeUndefined()
+  })
+
   it('keeps the typed infrastructure stage without inventing a verdict', () => {
     const parsed = parseVerificationRunsResponse({
       generated_at: '2026-08-05T00:00:00Z',

@@ -1731,6 +1731,7 @@ type lane_run_status =
   | Lane_run_not_reviewed
   | Lane_run_commit_failed
   | Lane_run_raised
+  | Lane_run_operator_routed
   | Lane_run_other of string
 
 val lane_run_status_label : lane_run_status -> string
@@ -1756,7 +1757,9 @@ type lane_run_decision =
 val lane_run_decision :
   run_kind:lane_run_kind -> status:lane_run_status -> lane_run_decision
 (** Separates a completed execution from a review decision. In particular,
-    an exact-output run that succeeded is still [Lane_run_not_a_decision]. *)
+    an exact-output run that succeeded is still [Lane_run_not_a_decision], and
+    so is a task verification the lane handed to the operator
+    ([Lane_run_operator_routed]): the click that follows is the verdict. *)
 
 type lane_run_tool_disposition =
   | Lane_run_tool_completed

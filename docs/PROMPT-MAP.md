@@ -106,20 +106,20 @@ keeper.md ### world.frame.frame
 
 ## 등급의 기준
 
-**운영자가 고쳤을 때 제품 동작이 바뀌면 `primary`, 아니면 조각이다.** 라벨(`CURRENT GOAL:`), 진단 CLI 픽스처, 내부 템플릿은 config 에 남되 목록에는 안 나온다. 이 기준으로 운영자 목록은 16행이다.
+**운영자가 고쳤을 때 제품 동작이 바뀌면 `primary`, 아니면 조각이다.** 라벨(`CURRENT GOAL:`), 진단 CLI 픽스처, 내부 템플릿은 config 에 남되 목록에는 안 나온다. 이 기준으로 운영자 목록은 15행이다.
 
 | 파일 | 운영자용 키 |
 |---|---|
 | `keeper.md` | `keeper`, `keeper.identity`, `keeper.workspace` |
 | `librarian.md` | `librarian` |
-| `verification.md` | `verification`, `verification.cancellation` |
+| `verification.md` | `verification` |
 | `judge.md` | `judge.board`, `judge.effect` |
 | `goal_verification.md` | `goal_verification.proof` |
 | `fusion.judge.md` | `fusion.judge`, `.refine`, `.meta`, `.output` |
 | `mcp.md` | `mcp.full`, `.managed_agent`, `.operator_remote` |
 | `tool_failure.md` `lane_cli_probe.md` `eval.calibration.few_shot.md` | 없음 |
 
-슬롯은 기본이 조각이고, 운영자가 따로 손대는 것만 마커 끝에 `[primary: 설명]` 을 단다. 설명을 적지 않으면 그룹 파일의 설명을 쓰는데, 그러면 목록의 모든 행이 같은 문장을 말한다. 파일을 읽는 사람 기준으로 접었더니 한 파일 안에 운영자용 프롬프트와 조립용 조각이 같이 살게 됐고, 등급이 파일 단위면 그 둘을 구분할 수 없다. 운영자용은 16개다.
+슬롯은 기본이 조각이고, 운영자가 따로 손대는 것만 마커 끝에 `[primary: 설명]` 을 단다. 설명을 적지 않으면 그룹 파일의 설명을 쓰는데, 그러면 목록의 모든 행이 같은 문장을 말한다. 파일을 읽는 사람 기준으로 접었더니 한 파일 안에 운영자용 프롬프트와 조립용 조각이 같이 살게 됐고, 등급이 파일 단위면 그 둘을 구분할 수 없다. 운영자용은 15개다.
 
 서식도 config 에 남는다. 운영자가 바꿀 일이 드물 뿐 바꿀 수 있어야 한다. 다만 재정의 목록에서 문장과 서식이 같은 무게로 보이면 목록이 읽히지 않으므로, 표시 등급은 따로 다룬다 (#32890).
 

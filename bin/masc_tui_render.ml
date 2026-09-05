@@ -5602,7 +5602,8 @@ let lane_run_status_style = function
   | Tui_decode.Lane_run_not_reviewed
   | Tui_decode.Lane_run_commit_failed
   | Tui_decode.Lane_run_raised -> Theme.bad ()
-  | Tui_decode.Lane_run_running -> Theme.info ()
+  | Tui_decode.Lane_run_running
+  | Tui_decode.Lane_run_operator_routed -> Theme.info ()
   | Tui_decode.Lane_run_other _ -> Theme.muted ()
 
 let lane_run_clock started_at =

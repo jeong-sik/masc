@@ -21,6 +21,7 @@ export type VerificationRunStatusLabel =
   | 'not_reviewed'
   | 'commit_failed'
   | 'raised'
+  | 'operator_routed'
 
 export type VerificationToolDisposition = 'completed' | 'deferred' | 'failed'
 
@@ -42,6 +43,7 @@ const BACKEND_STATUSES: readonly string[] = [
   'not_reviewed',
   'commit_failed',
   'raised',
+  'operator_routed',
 ]
 
 /** One tracked review from the registry.
@@ -208,6 +210,12 @@ function parseRun(raw: unknown, index: number): VerificationRunRecord {
     case 'commit_failed':
     case 'raised':
       requiredOutcomeFields = ['elapsed_s', 'detail', 'tools']
+      optionalFields = ['evaluator_runtime']
+      break
+    case 'operator_routed':
+      // The lane handed the claim to the operator without a review: no
+      // evaluator, no gate, no cause beyond the status itself.
+      requiredOutcomeFields = ['elapsed_s', 'tools']
       optionalFields = ['evaluator_runtime']
       break
   }

@@ -16,6 +16,7 @@ type outcome =
   | Commit_failed of { detail : string }
   | Raised of { detail : string }
   | Review_cancelled of { detail : string }
+  | Operator_routed
 
 type tool_observation =
   { tool_name : string
@@ -114,6 +115,7 @@ let outcome_label = function
   | Commit_failed _ -> "commit_failed"
   | Raised _ -> "raised"
   | Review_cancelled _ -> "review_cancelled"
+  | Operator_routed -> "operator_routed"
 ;;
 
 module Payload = struct
@@ -189,6 +191,7 @@ module Payload = struct
       ]
     | Not_reviewed { gate; detail } ->
       [ "gate", `String gate; "detail", `String detail ]
+    | Operator_routed -> []
   ;;
 
   let completion_to_yojson completion =
@@ -219,6 +222,7 @@ module Payload = struct
       | "infrastructure_unavailable" -> Ok [ "stage"; "detail" ]
       | "commit_failed" | "raised" | "review_cancelled" -> Ok [ "detail" ]
       | "not_reviewed" -> Ok [ "gate"; "detail" ]
+      | "operator_routed" -> Ok []
       | other -> Error (Printf.sprintf "unknown verification outcome %S" other)
     in
     let* required_detail_fields = required_detail_fields in
@@ -278,6 +282,7 @@ module Payload = struct
       | "review_cancelled" ->
         let* detail = Run_registry_core.Json.string_field "detail" fields in
         Ok (Review_cancelled { detail })
+      | "operator_routed" -> Ok Operator_routed
       | other -> Error (Printf.sprintf "unknown verification outcome %S" other)
     in
     Ok { outcome; evaluator_runtime; elapsed_s; tools }
@@ -398,6 +403,7 @@ let outcome_detail_fields = function
     ]
   | Not_reviewed { gate; detail } ->
     [ "gate", `String gate; "detail", `String detail ]
+  | Operator_routed -> []
 ;;
 
 let run_to_yojson run =

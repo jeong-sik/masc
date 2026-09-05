@@ -118,17 +118,9 @@ let render key vars =
   | Error detail -> Error (sprintf "prompt %s: %s" key detail)
 ;;
 
-(* Which question the completion authority is being asked, and the material
-    that question needs. The Task's [verification_intent] chooses it.
-
-    One value rather than two optional arguments because the two prompts want
-    opposite things from the same contract: the completion block demands
-    evidence for every item, the cancellation block offers the items as
-    context for a producer asking not to do them. Passed separately, a
-    cancellation could be rendered through the completion prompt with its
-    contract attached — which is what happened, and refused every cancellation
-    of a contracted Task for not finishing the work it asks not to finish
-    (#33052). *)
+(* The question the completion authority is asked, and the material it needs.
+   Only a completion reaches this module: a cancel claim is the operator's to
+   close (RFC-0417 §4.1) and the system lane hands it on without a prompt. *)
 
 (* The evidence posture of a completion submission, as the judge will see it.
    [Note_only]: zero artifacts it can open — every snapshot item is a
@@ -140,28 +132,15 @@ type evidence_posture =
   | Usable_artifacts of int
 
 type verdict_question =
-  | Completion of
-      { completion_contract : string list option
-      ; required_evidence : string list
-      ; evidence_posture : evidence_posture
-            (** Computed at the review site from the fixed snapshot. Rides
-                inside the arm like [few_shot_block]: the question picker
-                reads no store, and a posture passed beside the question
-                would be accepted for a cancellation that never asks about
-                artifacts. *)
-      ; few_shot_block : string
-            (** Operator disagreements returned to the judge as examples. It
-                lives in this arm because only the completion prompt has a slot
-                for it: passed alongside the question it was accepted for a
-                cancellation and dropped without a word, and the ledger read
-                that produced it ran for nothing. *)
-      }
-  | Cancellation of
-      { reason : string
-            (** The producer's stated why. The whole of what is judged: a stop
-                submits no artifacts and is not refused for having none. *)
-      ; contract_context : string list
-      }
+  { completion_contract : string list option
+  ; required_evidence : string list
+  ; evidence_posture : evidence_posture
+        (** Computed at the review site from the fixed snapshot. The question
+            picker reads no store. *)
+  ; few_shot_block : string
+        (** Operator disagreements returned to the judge as examples, filled
+            at the review site where the calibration ledger is read. *)
+  }
 
 let contract_section = function
   | None | Some [] -> Ok ""
@@ -230,43 +209,19 @@ let tool_names schemas =
   |> String.concat ", "
 ;;
 
-(* The lookup surface is described to the judge in the terms of the question it
-   is answering. The completion wording tells it that checkable evidence lives
-   in the submitted snapshot and that a build claim needs an execution receipt;
-   spliced into a cancellation prompt it contradicts that prompt eighty lines
-   up ("증거 스냅샷이 비어 있다는 사실은 기각 사유가 아닙니다") and points at a
-   [completion_notes] block the cancellation branch does not send. Same tools,
-   same root, different thing to do with them. *)
-let lookup_section ~(question : verdict_question) lookup =
-  let none, producer_tree =
-    match question with
-    | Completion _ ->
-      ( Prompt_names.verification_lookup_none
-      , Prompt_names.verification_lookup_producer_tree )
-    | Cancellation _ ->
-      ( Prompt_names.verification_lookup_none_cancellation
-      , Prompt_names.verification_lookup_producer_tree_cancellation )
-  in
+(* The lookup surface as the judge is told about it: checkable evidence lives
+   in the submitted snapshot, and a build claim needs an execution receipt.
+   Same tools and same root whichever slot renders; the slot only says what
+   the judge holds. *)
+let lookup_section lookup =
   match lookup with
-  | No_lookup_surface -> render none []
+  | No_lookup_surface -> render Prompt_names.verification_lookup_none []
   | Lookup_tools { schemas; dispatch = _; root_layout } ->
     let ( let* ) = Result.bind in
     let* lookup_root_layout = root_layout_lines root_layout in
     render
-      producer_tree
+      Prompt_names.verification_lookup_producer_tree
       [ "lookup_tools", tool_names schemas; "lookup_root_layout", lookup_root_layout ]
-;;
-
-(* What the Task was for, offered to a cancellation as context. The completion
-   block's job is to demand evidence for each item; this one's is to say what
-   the producer is asking not to do. Same list, opposite instruction, which is
-   why they cannot be the same slot. *)
-let contract_context_section = function
-  | [] -> Ok ""
-  | items ->
-    render
-      Prompt_names.verification_cancellation_contract_context
-      [ "contract_items", numbered items ]
 ;;
 
 let build_prompt
@@ -274,58 +229,34 @@ let build_prompt
       ~(lookup : lookup_surface)
       (req : review_request) : (string, string) result =
   let ( let* ) = Result.bind in
-  let* lookup_section = lookup_section ~question lookup in
-  match question with
-  | Completion
-      { completion_contract
-      ; required_evidence
-      ; evidence_posture
-      ; few_shot_block
-      } ->
-    let calibration_section =
-      if few_shot_block = "" then "" else "\n" ^ few_shot_block ^ "\n"
-    in
-    let* verification_contract_section = contract_section completion_contract in
-    let* required_evidence_section = evidence_section ~required_evidence in
-    let* evidence_posture_section = posture_section evidence_posture in
-    let evidence_refs_json =
-      req.evidence_refs
-      |> List.map (fun reference -> `String reference)
-      |> fun values -> Yojson.Safe.to_string (`List values)
-    in
-    Prompt_registry.render_prompt_template
-      Prompt_names.verification
-      [ "task_title", req.task_title
-      ; "task_description", req.task_description
-      ; "agent_name", req.agent_name
-      ; "completion_notes", req.completion_notes
-      ; "verification_contract_section", verification_contract_section
-      ; "evidence_section", required_evidence_section
-      ; "evidence_posture_section", evidence_posture_section
-      ; "evidence_refs", evidence_refs_json
-      ; "lookup_section", lookup_section
-      ; "calibration_section", calibration_section
-      ]
-  | Cancellation { reason; contract_context } ->
-    (* Neither [completion_notes] nor [evidence_refs] is offered. A stop makes
-       no artifacts, and the completion prompt reads their absence as a reason
-       to refuse — which is how every cancellation of a contracted Task came to
-       be refused for not finishing the work it asks not to finish (#33052). *)
-    (* No calibration block, and the arm carries no field for one. Every
-       recorded divergence is a completion judgement — the row carries no
-       intent, so the selector cannot tell them apart — and feeding "the
-       evaluator wrongly approved this completion" into a stop's prompt
-       teaches it the shape this branch exists to unlearn. *)
-    let* contract_context_section = contract_context_section contract_context in
-    Prompt_registry.render_prompt_template
-      Prompt_names.verification_cancellation
-      [ "task_title", req.task_title
-      ; "task_description", req.task_description
-      ; "agent_name", req.agent_name
-      ; "cancel_reason", reason
-      ; "contract_context_section", contract_context_section
-      ; "lookup_section", lookup_section
-      ]
+  let* lookup_section = lookup_section lookup in
+  let { completion_contract; required_evidence; evidence_posture; few_shot_block } =
+    question
+  in
+  let calibration_section =
+    if few_shot_block = "" then "" else "\n" ^ few_shot_block ^ "\n"
+  in
+  let* verification_contract_section = contract_section completion_contract in
+  let* required_evidence_section = evidence_section ~required_evidence in
+  let* evidence_posture_section = posture_section evidence_posture in
+  let evidence_refs_json =
+    req.evidence_refs
+    |> List.map (fun reference -> `String reference)
+    |> fun values -> Yojson.Safe.to_string (`List values)
+  in
+  Prompt_registry.render_prompt_template
+    Prompt_names.verification
+    [ "task_title", req.task_title
+    ; "task_description", req.task_description
+    ; "agent_name", req.agent_name
+    ; "completion_notes", req.completion_notes
+    ; "verification_contract_section", verification_contract_section
+    ; "evidence_section", required_evidence_section
+    ; "evidence_posture_section", evidence_posture_section
+    ; "evidence_refs", evidence_refs_json
+    ; "lookup_section", lookup_section
+    ; "calibration_section", calibration_section
+    ]
 ;;
 
 (* ================================================================ *)

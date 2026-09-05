@@ -301,53 +301,10 @@ let transition_task_outcome_r
            authority reads. Keyed on the action, the cancel path wrote none,
            and the authority deferred the Task on "verification not found"
            until an operator noticed (task-1303, 2026-09-03). *)
-        let pending_verification =
+        let* pending_verification =
           match new_status with
           | Masc_domain.AwaitingVerification
               { assignee; verification_id; intent = Masc_domain.Complete_task; _ } ->
-            Some
-              ( assignee
-              , verification_id
-              , Masc_domain.Completion_evidence
-                  { evidence_refs =
-                      Workspace_task_verification.verification_submission_evidence_refs
-                        task
-                        ~notes
-                        handoff_context
-                  } )
-          | Masc_domain.AwaitingVerification
-              { assignee; verification_id; intent = Masc_domain.Cancel_task; _ } ->
-            (* The why arrives on either argument. [reason] is optional on this
-               entry point while [handoff_context.summary] is required for every
-               exit-class action, so a caller that put the whole explanation in
-               the summary — which the tool schema told it to fill — has stated
-               one. [stated_reason] is the same resolution the broadcast below
-               uses; reading only [reason] here would refuse a cancellation the
-               message log would then have announced with its reason. *)
-            Some
-              ( assignee
-              , verification_id
-              , Masc_domain.Cancellation_reason
-                  { reason =
-                      Option.value
-                        ~default:""
-                        (Masc_domain.stated_reason
-                           ~reason:(Some reason)
-                           ~handoff_context:
-                             (match handoff_context with
-                              | Some _ -> handoff_context
-                              | None -> task.handoff_context))
-                  } )
-          | Masc_domain.Todo
-          | Masc_domain.Claimed _
-          | Masc_domain.InProgress _
-          | Masc_domain.Done _
-          | Masc_domain.Cancelled _ -> None
-        in
-        let* () =
-          match pending_verification with
-          | None -> Ok ()
-          | Some (_, _, Masc_domain.Completion_evidence _) ->
             if String.length (String.trim notes) = 0
             then
               Error
@@ -355,17 +312,56 @@ let transition_task_outcome_r
                    (Masc_domain.Task_error.InvalidState
                       "submit_for_verification requires non-empty notes describing the \
                        deliverable and evidence references"))
-            else Ok ()
-          | Some (_, _, Masc_domain.Cancellation_reason { reason }) ->
-            if String.length (String.trim reason) = 0
-            then
-              Error
-                (Masc_domain.Task
-                   (Masc_domain.Task_error.InvalidState
-                      "cancel requires a stated reason: pass reason, or state it in \
-                       handoff_context (summary or reason). The completion \
-                       authority judges that sentence and nothing else"))
-            else Ok ()
+            else
+              Ok
+                (Some
+                   ( assignee
+                   , verification_id
+                   , Masc_domain.Completion_evidence
+                       { evidence_refs =
+                           Workspace_task_verification
+                           .verification_submission_evidence_refs
+                             task
+                             ~notes
+                             handoff_context
+                       } ))
+          | Masc_domain.AwaitingVerification
+              { assignee; verification_id; intent = Masc_domain.Cancel_task; _ } ->
+            (* The why arrives on either argument of this call. [reason] is
+               optional on this entry point while [handoff_context.summary] is
+               required for every exit-class action, so a caller that put the
+               whole explanation in the summary — which the tool schema told it
+               to fill — has stated one. [stated_reason] over the same two
+               arguments is what the broadcast below publishes and what the
+               committed Task keeps as its note, so the record the operator
+               judges, the note and the message log carry one sentence.
+
+               Only this call's arguments. The note already on the Task is the
+               previous owner's release summary, kept across the claim so the
+               incoming owner can read it (RFC-0365); resolving from it put that
+               owner's sentence before the operator as this owner's reason,
+               while the broadcast, reading the arguments, announced none. *)
+            (match
+               Masc_domain.stated_reason ~reason:(Some reason) ~handoff_context
+             with
+             | None ->
+               Error
+                 (Masc_domain.Task
+                    (Masc_domain.Task_error.InvalidState
+                       "cancel requires a stated reason: pass reason, or state it in \
+                        handoff_context (summary or reason). The operator judges \
+                        that sentence and nothing else"))
+             | Some reason ->
+               Ok
+                 (Some
+                    ( assignee
+                    , verification_id
+                    , Masc_domain.Cancellation_reason { reason } )))
+          | Masc_domain.Todo
+          | Masc_domain.Claimed _
+          | Masc_domain.InProgress _
+          | Masc_domain.Done _
+          | Masc_domain.Cancelled _ -> Ok None
         in
         let* () =
           match pending_verification with

@@ -156,8 +156,10 @@ classify_simple { bin; args; env; redirects } =
 ## 6. 이 RFC 가 정하지 않는 것
 
 - 게스트 안 `git fetch/clone/checkout`, `mkdir`, `dune build` 를 관측으로 볼지.
-  `/masc-work` 가 호스트 playground 마운트라 "게스트 안이니 무해" 가 성립하지 않는다.
-  microvm judge 의 절반이 여기 있다. 별도 RFC.
+  microvm 의 `/masc-work` 는 keeper 전용 볼륨(`masc-keeper-work-<keeper>`)이고 호스트
+  마운트는 전부 읽기 전용이라 게스트의 파일 쓰기는 호스트에 닿지 않는다(2026-09-05
+  실측, RFC-0422 §1.2). 밖으로 나가는 길은 네트워크다. 그래서 이 결정은 "쓰기" 가
+  아니라 "네트워크" 를 기준으로 다시 세워야 한다. RFC-0422.
 - remote_ssh(rondo)를 disposable 로 볼 조건. 112건/이틀. 별도 RFC.
 - judge 모델 자체의 지연(p50 18초). RFC-0404 §4 그대로.
 

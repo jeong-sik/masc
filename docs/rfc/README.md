@@ -261,6 +261,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0418 | Memory OS: 기억은 다시 꺼내 쓸 때 굳는다 — reinforcement 카운터를 걷어내고 회수·인용·개정 사건을 기록한다 | Draft | - |
 | 0420 | 부팅은 store 를 격리하지 않고 거부한다 — 운영자가 명시하지 않는 한 | Draft | - |
 | 0421 | 관측 여부는 문자열이 아니라 셸 IR 로 정한다 — 파서가 이미 푼 것을 분류기가 다시 못 읽는 일을 끝낸다 | Draft | - |
+| 0422 | 실행기가 관측을 증명한다 — judge 는 상자가 거부한 것만 본다 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |

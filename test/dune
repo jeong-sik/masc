@@ -2239,6 +2239,7 @@
 (include stanzas/test_dated_jsonl_mutex_registry_10372.inc)
 
 (include stanzas/test_dated_jsonl_count_cache.inc)
+(include stanzas/test_dated_jsonl_off_fiber.inc)
 
 (include stanzas/test_distributed_lock_acquire_failed_counter.inc)
 

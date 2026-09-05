@@ -37,9 +37,9 @@ Simmel, *Philosophie des Geldes* (1900). 화폐가 질적으로 다른 것들을
 만든다는 관찰. `world-capital` 의 미측정 칸이 커지는 걸 지켜보라는 지시가 이 지적에
 대한 대응이다.
 
-Weber, *Die protestantische Ethik und der Geist des Kapitalismus* (1905). 목적 합리성과
-가치 합리성의 구분. 이 프리셋 묶음 전체가 그 구분 위에 서 있다 — 어떤 세계는 목적을
-재고 어떤 세계는 규범을 잰다.
+Weber, *Wirtschaft und Gesellschaft* (1921-22). 목적 합리성과 가치 합리성의 구분. 이
+프리셋 묶음 전체가 그 구분 위에 서 있다 — 어떤 세계는 목적을 재고 어떤 세계는 규범을
+잰다.
 
 ### world-fief — 봉건 봉신 관계
 
@@ -81,9 +81,9 @@ Moses Finley, *The Ancient Economy* (1973). 고대 경제가 계급이 아니라
 
 ## 축 둘: 평판을 무엇으로 재는가
 
-Pierre Bourdieu, "The Forms of Capital" (1986) 과 *La distinction* (1979). 자본을 경제,
-문화, 사회, 상징 넷으로 나누고 그 사이의 환전을 논한다. 평판 클러스터 네 세계가 상징
-자본을 각각 다른 방식으로 계상한 것이다.
+Pierre Bourdieu, "The Forms of Capital" (1986) 과 *La distinction* (1979). 돈이 아닌
+것도 자본처럼 쌓이고 서로 바뀐다는 논의. 평판 클러스터 네 세계가 그 비-경제 자본을 각각
+다른 방식으로 계상한 것이다.
 
 - `world-approval` — Randall Collins, *Interaction Ritual Chains* (2004). 감정적 에너지가
   상호작용에서 생기고 쓰이지 않으면 사그라든다는 모델. 반응이 휘발하는 재화라는 규칙이

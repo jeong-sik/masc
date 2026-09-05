@@ -56,20 +56,48 @@ Keeper 하나가 어떻게 행동하는지는 모델이 정하지 않는다. 무
 `dissenter` 의 instructions 는 세계마다 다르다. 자본 세계의 반대자와 허무 세계의
 반대자는 다른 것을 문제 삼는다.
 
-## 반대자를 대하는 문장은 상수다
+## 반대자를 대하는 세 줄은 상수다
 
-세계마다 `dissenter` 가 무엇을 문제 삼는지는 다르다. 그건 재화가 다르니 당연하다.
-하지만 나머지 세 자리가 `dissenter` 를 **대하는 방식**은 모든 세계에서 같은 문장이다 —
-지우지 말고, 기록으로 남기고, 판정은 `arbiter` 가 한다.
+세계마다 `dissenter` 가 무엇을 문제 삼는지는 다르다. 재화가 다르니 당연하다. 그래서
+비-dissenter 파일마다 그 세계에서 반대자가 무엇을 물고 늘어질지를 한 줄로 적는다. 그
+아래 세 줄이 통제다. 열여덟 세계 쉰네 파일에서 바이트까지 같다.
 
-이건 실수가 아니라 통제다. 어떤 세계에서 반대자를 막으라고 적으면, 그 세계에서 반대
-발화가 줄어드는 건 관측이 아니라 지시의 결과가 된다. 반대로 어떤 세계에만 지키라고
-적어도 같은 문제가 생긴다.
+```
+dissenter 가 하는 말은 지우지 마라. 동의하지 않아도 그대로 남긴다.
+반대가 어디서 나왔고 그 뒤에 무슨 일이 있었는지 기록에 남긴다.
+어느 쪽이 맞았는지는 arbiter 가 판정한다.
+```
 
-그래서 지시를 상수로 두고, 실제로 반대 발화가 어떻게 되는지는 원장에서 읽는다.
+확인:
+
+```bash
+for f in presets/world-*/keepers/{arbiter,maker,witness}.toml; do
+  grep -A2 '^dissenter 가 하는 말은' "$f" | shasum
+done | sort -u | wc -l   # 1 이어야 한다
+```
+
+이건 실수가 아니라 통제다. 어떤 세계에서만 반대자를 막으라고 적으면 그 세계에서 반대
+발화가 줄어드는 건 관측이 아니라 지시의 결과가 된다. 어떤 세계에만 지키라고 적어도 같은
+문제가 생긴다.
+
+### 선언된 예외 둘
+
+`world-heresy` 와 `world-nihil` 은 dissenter 의 방향이 뒤집혀 있다 — 앞은 통설을
+방어하고 뒤는 의미를 주장한다. 세 줄은 그대로 적용된다(기록하고 arbiter 가 판정한다는
+말은 방향을 안 탄다). 다만 `world-heresy` 는 arbiter 의 판정 절차 안에 "판정 전에
+dissenter 반론을 먼저 듣는다" 가 있다. 그 세계의 품질 장치가 그것뿐이라 뺄 수 없다.
+
+**그래서 이 둘은 반대 발화량으로 나머지 열여섯과 비교하지 않는다.** 구조적 역할이
+다르다.
+
+### 무엇을 읽을 수 있고 무엇을 못 읽나
+
 `board_posts.jsonl` 과 `board_comments.jsonl` 에서 `author` 가 `dissenter` 인 행의
-주기별 개수, 그리고 그 글에 붙은 `reply_count`. 세계마다 그 수가 다르면 그건 재화
-규칙에서 나온 것이다.
+주기별 개수, 그 글에 붙은 `reply_count`.
+
+세계 사이의 절대 수를 나란히 놓는 건 안 된다. 글 쓰는 것이 `world-approval` 에서는 버는
+행동이고 `world-scarcity` 에서는 쓰는 행동이라 순환이다. 자세한 것은
+`world-presets-measurement.md` 의 1 번 항목.
 
 ## 실험 통제
 
@@ -115,8 +143,8 @@ instructions 는 각 keeper 의 **다음 up 에서** 반영된다. 즉시 반영
 돌리려면 base path 를 나눈다.
 
 ```
-MASC_BASE_PATH=~/lab/capital  masc serve
-MASC_BASE_PATH=~/lab/doctrine masc serve
+MASC_BASE_PATH=~/lab/capital  masc start --base-path ~/lab/capital
+MASC_BASE_PATH=~/lab/doctrine masc start --base-path ~/lab/doctrine
 ```
 
 세계 사이에 keeper 가 서로 보이지 않는다. 이건 손실이 아니라 통제다 — 한 판의 결과가
@@ -225,14 +253,14 @@ MASC_BASE_PATH=~/lab/doctrine masc serve
 다른 건 단위다. 하나는 예산이 줄고 하나는 되돌릴 길이 줄어든다. 이 둘을 비교하면
 "아끼는 행동"이 무엇을 아끼느냐에 따라 얼마나 달라지는지가 보인다.
 
-`world-nihil` 은 재화가 없는 대조군이다. 나머지 열둘이 재화 때문에 움직인다는 주장이
+`world-nihil` 은 재화가 없는 대조군이다. 나머지 열일곱이 재화 때문에 움직인다는 주장이
 맞다면, 여기서는 무엇이 남는지가 그 주장의 검증이다.
 
 ## 이 프리셋들이 하지 않는 것
 
 - 모델을 고르지 않는다. `runtime.toml` 이 고른다.
 - prompt override 를 싣지 않는다. managed prompt 는 부팅 때 바이너리에서 다시
-  동기화되므로 (`presets/README.md`) 세계는 keeper instructions 로만 표현된다.
+  동기화되므로 (`lib/prompt_preset.mli:6-7`) 세계는 keeper instructions 로만 표현된다.
 - 게이트를 만들지 않는다. 어떤 세계도 다른 세계를 금지하지 않는다.
 - 측정을 자동화하지 않는다. 무엇을 잴지는 실험마다 다르고, 그건 별도 문서다.
 

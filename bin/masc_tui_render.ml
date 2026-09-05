@@ -14044,8 +14044,8 @@ let render_code (state : state) =
     let diff_showing = state.code_diff_open in
     let notes_showing = state.code_notes_open in
     let title =
-      match state.code_file with
-      | Some (path, _) ->
+      match Masc_tui_fetched.current_key state.code_file with
+      | Some path ->
           let path = Terminal_text.single_line path in
           let path =
             (* Say the view is shifted; a pane that silently starts at
@@ -14184,9 +14184,10 @@ let render_code (state : state) =
                   lexed segment's reset is followed by re-opening the diff
                   background, so the band survives the lexer's own resets. *)
                let lexed_line index =
-                 match state.code_file with
-                 | None -> None
-                 | Some (_, file_rows) -> List.nth_opt file_rows (index - 1)
+                 match Masc_tui_fetched.current state.code_file with
+                 | Some (_, Masc_tui_fetched.Ready file_rows) ->
+                   List.nth_opt file_rows (index - 1)
+                 | Some (_, _) | None -> None
                in
                for i = 0 to content_height - 1 do
                  match List.nth_opt rows (scroll + i) with
@@ -14327,19 +14328,24 @@ let render_code (state : state) =
              | None -> box_empty pane_buf pane_cols
            done
      else
-       match state.code_file_error, state.code_file with
-       | Some detail, _ ->
-           box_line pane_buf pane_cols
-             ((Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail
-             ^ Ansi.reset);
-           for _ = 2 to content_height do
-             box_empty pane_buf pane_cols
-           done
-       | None, None ->
+       (* A blank pane used to mean three things: no file open, a file being
+          read, and a file that failed to read. Two of them now say so. *)
+       let say style text =
+         box_line pane_buf pane_cols
+           (style ^ "  " ^ Terminal_text.single_line text ^ Ansi.reset);
+         for _ = 2 to content_height do
+           box_empty pane_buf pane_cols
+         done
+       in
+       match Masc_tui_fetched.current state.code_file with
+       | Some (_, Masc_tui_fetched.Failed detail) -> say (Theme.bad ()) detail
+       | Some (path, Masc_tui_fetched.Loading) ->
+           say (Theme.recede ()) (path ^ " 읽는 중…")
+       | Some (_, Masc_tui_fetched.Absent) | None ->
            for _ = 1 to content_height do
              box_empty pane_buf pane_cols
            done
-       | None, Some (_, file_rows) ->
+       | Some (_, Masc_tui_fetched.Ready file_rows) ->
            let total_lines = List.length file_rows in
            let max_scroll = max 0 (total_lines - content_height) in
            let scroll = max 0 (min state.code_file_scroll max_scroll) in
@@ -14352,8 +14358,8 @@ let render_code (state : state) =
               is already loaded (m or H has been opened for this file); the
               pane does not fetch merely to decorate. *)
            let matches_open_file loaded_path =
-             match state.code_file with
-             | Some (open_path, _) -> String.equal loaded_path open_path
+             match Masc_tui_fetched.current_key state.code_file with
+             | Some open_path -> String.equal loaded_path open_path
              | None -> false
            in
            let note_spans =

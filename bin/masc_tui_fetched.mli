@@ -45,3 +45,13 @@ val complete
     dropped: rendering it beside a different key reads as that key's value. *)
 
 val view_for : equal:('k -> 'k -> bool) -> ('k, 'a) t -> key:'k -> 'a view
+
+val current : ('k, 'a) t -> ('k * 'a view) option
+(** What this pane is about right now, and what is known about it. [None]
+    before the first request.
+
+    A pane whose key comes from the fetch itself -- the open file, the
+    selected post -- cannot ask {!view_for} without already knowing the key,
+    and the key is the thing it is asking for. *)
+
+val current_key : ('k, 'a) t -> 'k option

@@ -146,6 +146,16 @@ let test_friendly_runtime_param_editing () =
     (advanced.rpe_mode = Advanced_json)
 ;;
 
+(* A file that has landed, which is the state these names are read from. *)
+let landed ~path rows =
+  match
+    Masc_tui_fetched.start ~equal:String.equal Masc_tui_fetched.initial ~key:path
+  with
+  | Masc_tui_fetched.Already_loading -> Alcotest.fail "the fixture did not start"
+  | Masc_tui_fetched.Started (t, request) ->
+    Masc_tui_fetched.complete ~equal:String.equal t request (Ok rows)
+;;
+
 let check_names = Alcotest.(check (list string))
 
 let test_the_cursor_lines_names_are_the_candidates () =
@@ -153,13 +163,12 @@ let test_the_cursor_lines_names_are_the_candidates () =
     create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
   state.code_file <-
-    Some
-      ( "lib/a.ml",
-        [ [ ("let ", Masc_tui_code_lexer.kind_keyword);
-            ("x = x + ", Masc_tui_code_lexer.kind_code);
-            ("1", Masc_tui_code_lexer.kind_number) ];
-          [ ("(* x *)", Masc_tui_code_lexer.kind_comment) ];
-          [ ("Foo.bar x'", Masc_tui_code_lexer.kind_code) ] ] );
+    landed ~path:"lib/a.ml"
+      [ [ ("let ", Masc_tui_code_lexer.kind_keyword);
+          ("x = x + ", Masc_tui_code_lexer.kind_code);
+          ("1", Masc_tui_code_lexer.kind_number) ];
+        [ ("(* x *)", Masc_tui_code_lexer.kind_comment) ];
+        [ ("Foo.bar x'", Masc_tui_code_lexer.kind_code) ] ];
   state.code_file_cursor <- 0;
   check_names "a keyword and a number offer no name, x appears once"
     [ "x" ]
@@ -212,8 +221,9 @@ let test_a_label_starting_with_the_query_leads () =
   state.board_posts <-
     [ post "p-1" "deferred wakeup evidence"; post "p-2" "head 7def9c review" ];
   state.code_file <-
-    Some ("lib/a.ml", [ [ ("open ", Masc_tui_code_lexer.kind_keyword);
-                          ("Hook_common", Masc_tui_code_lexer.kind_code) ] ]);
+    landed ~path:"lib/a.ml"
+      [ [ ("open ", Masc_tui_code_lexer.kind_keyword);
+          ("Hook_common", Masc_tui_code_lexer.kind_code) ] ];
   state.code_file_cursor <- 0;
   state.view <- Code;
   state.code_focus_file <- Right_pane;

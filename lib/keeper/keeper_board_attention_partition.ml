@@ -1698,5 +1698,7 @@ module For_testing = struct
 end
 ;;
 
-(* For [Heap_roots]: the value the diagnostic walks. *)
-let heap_root () = Obj.repr cache_registry
+(* For [Heap_roots]: walk the table under its own lock, so the diagnostic
+   never counts a bucket array another domain is resizing. Never called from
+   inside this module's critical sections; the lock is not reentrant. *)
+let heap_root walk = Stdlib.Mutex.protect cache_registry_mutex (fun () -> walk (Obj.repr cache_registry))

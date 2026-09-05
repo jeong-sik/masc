@@ -1709,7 +1709,9 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
         ~request_authority:background_request_authority;
       (* Roots for GET /api/v1/diagnostics/heap-roots. Registered here, after
          owner readiness, because every store named below is installed by
-         now; a walk before that would size the empty initial registries. *)
+         now; a walk before that would size the empty initial registries.
+         Each root receives the walker and calls it itself, so a table that
+         has a lock is walked under it. *)
       List.iter
         (fun (name, value) ->
            match Heap_roots.register ~name value with
@@ -1718,20 +1720,23 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
              Log.Server.warn
                "heap root %S was already registered; the first registration stands"
                name)
-        [ ("exact_lane_runs", fun () -> Some (Obj.repr (Exact_lane_run_registry.global ())))
-        ; ("verification_runs", fun () -> Some (Obj.repr (Verification_run_registry.global ())))
+        [ ("exact_lane_runs", fun walk -> walk (Some (Obj.repr (Exact_lane_run_registry.global ()))))
+        ; ("verification_runs", fun walk -> walk (Some (Obj.repr (Verification_run_registry.global ()))))
         ; ( "goal_verification_runs"
-          , fun () -> Some (Obj.repr (Goal_verification_run_registry.global ())) )
-        ; ("fusion_runs", fun () -> Some (Obj.repr (Fusion_run_registry.global ())))
-        ; ("sse_clients", fun () -> Some (Obj.repr (Atomic.get Sse.clients)))
-        ; ("dashboard_snapshot", fun () -> Option.map Obj.repr (Dashboard_snapshot.current ()))
+          , fun walk -> walk (Some (Obj.repr (Goal_verification_run_registry.global ()))) )
+        ; ("fusion_runs", fun walk -> walk (Some (Obj.repr (Fusion_run_registry.global ()))))
+        ; ("sse_clients", fun walk -> walk (Some (Obj.repr (Atomic.get Sse.clients))))
+        ; ("dashboard_snapshot", fun walk -> walk (Option.map Obj.repr (Dashboard_snapshot.current ())))
         ; ( "keeper_registry"
-          , fun () -> Some (Obj.repr (Atomic.get Keeper_registry_setup.registry)) )
-        ; ("keeper_owner_pools", fun () -> Some (Keeper_owner_registry.heap_root ()))
+          , fun walk -> walk (Some (Obj.repr (Atomic.get Keeper_registry_setup.registry))) )
+        ; ( "keeper_owner_pools"
+          , fun walk -> Keeper_owner_registry.heap_root (fun value -> walk (Some value)) )
         ; ( "board_attention_partition_caches"
-          , fun () -> Some (Keeper_board_attention_partition.heap_root ()) )
-        ; ("activity_graph_caches", fun () -> Some (Activity_graph.heap_root ()))
-        ; ("telemetry_trajectory_summaries", fun () -> Some (Telemetry_unified.heap_root ()))
+          , fun walk -> Keeper_board_attention_partition.heap_root (fun value -> walk (Some value)) )
+        ; ( "activity_graph_caches"
+          , fun walk -> Activity_graph.heap_root (fun value -> walk (Some value)) )
+        ; ( "telemetry_trajectory_summaries"
+          , fun walk -> Telemetry_unified.heap_root (fun value -> walk (Some value)) )
         ];
       let path_diagnostics = activated_owner.path_diagnostics in
       let resolved_base, masc_dir =

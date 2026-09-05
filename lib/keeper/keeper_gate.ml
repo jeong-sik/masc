@@ -484,7 +484,7 @@ let audit_allow request ?rule_match ?source_approval_id ?decision_source source 
     ()
 ;;
 
-let submit request =
+let submit ?observation request =
   Keeper_approval_queue.submit_pending
     ~keeper_name:request.keeper_name
     ~tool_name:request.operation
@@ -493,9 +493,25 @@ let submit request =
     ~base_path:request.base_path
     ?turn_id:(request_turn_id request)
     ?request_context:(Option.map (fun context -> context.snapshot) request.causal_context)
+    ?observation
     ?task_id:request.task_id
     ?continuation_channel:request.continuation_channel
     ()
+;;
+
+(* What the box refused, in the shape the row stores and the judge reads
+   (RFC-0422). The stderr tail is bounded here, once, by the operator's knob,
+   so the durable row and the keeper's own deferred receipt carry the same
+   bytes. *)
+let observed_refusal ~status ~stderr =
+  Keeper_approval_queue_rules_types.observed_refusal
+    ~max_stderr_bytes:(Keeper_config.keeper_hitl_observation_stderr_bytes ())
+    ~status:
+      (match status with
+       | Unix.WEXITED code -> Keeper_approval_queue_rules_types.Observed_exit code
+       | Unix.WSIGNALED signal -> Keeper_approval_queue_rules_types.Observed_signal signal
+       | Unix.WSTOPPED signal -> Keeper_approval_queue_rules_types.Observed_stopped signal)
+    ~stderr
 ;;
 
 let log_auto_resolution_error ~keeper_name ~approval_id reason =
@@ -1813,8 +1829,8 @@ let request_operator_auto_judge_recovery ~base_path =
                })))
 ;;
 
-let defer request reason =
-  match submit request with
+let defer ?observation request reason =
+  match submit ?observation request with
   | Error error -> Unavailable (Queue_storage_unavailable error)
   | Ok submission ->
     let approval_id = submission.approval_id in
@@ -1987,7 +2003,9 @@ let decide_after_observation request ~observe =
          request.operation
          (status_label status)
          (String.length stderr);
-       defer request Judge_requested
+       (* The judge is shown what the box refused rather than left to guess
+          what the request would have done (RFC-0422 §3.3). *)
+       defer ~observation:(observed_refusal ~status ~stderr) request Judge_requested
      | Observation_unavailable reason ->
        Log.Keeper.info
          ~keeper_name:request.keeper_name

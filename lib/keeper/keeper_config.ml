@@ -71,6 +71,26 @@ let keeper_hitl_thinking_blocks_rp =
 let keeper_hitl_thinking_blocks () : int =
   Runtime_params.get keeper_hitl_thinking_blocks_rp
 
+(* RFC-0422 step 3b. What a refused observe run wrote to stderr travels to
+   the judge on the approval row. The tail is what is kept, because the
+   refusal is the last thing a program reports; the bound is there because
+   the row is durable and a program can print megabytes before its first
+   refused write. 4096 holds every line the step-1 measurement produced
+   (45 to 120 bytes each) with room for a Python traceback, and stays well
+   under the roughly 19 KB a request_context snapshot already weighs on the
+   same row. *)
+let keeper_hitl_observation_stderr_bytes_rp =
+  _rp_int ~key:"keeper.hitl.observation_stderr_bytes"
+    ~default:(fun () ->
+      int_of_env_default "MASC_KEEPER_HITL_OBSERVATION_STDERR_BYTES"
+        ~default:4096 ~min_v:0 ~max_v:65536)
+    ~min_v:0 ~max_v:65536
+    ~description:
+      "Bytes of a refused observe run's stderr tail kept on the approval row for the judge (RFC-0422)"
+    ()
+let keeper_hitl_observation_stderr_bytes () : int =
+  Runtime_params.get keeper_hitl_observation_stderr_bytes_rp
+
 (* Auto Judge work is independent, durable, and nonblocking to the Keeper. A
    single owner slot turned a burst from one Keeper into a serial queue even
    while provider capacity sat idle. Four matches the existing completion

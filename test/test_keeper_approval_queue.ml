@@ -1407,6 +1407,56 @@ let test_queue_writes_advance_the_projection_revision () =
          (AQ.store_revision_for_workspace ~base_path > after_enqueue))
 ;;
 
+(* RFC-0422 §3.3: what the box refused is written on the row and read back
+   after a restart, so the judge that runs later sees what the gate saw. *)
+let test_an_observation_survives_the_row_round_trip () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-observation" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       ensure_keeper_exists ~base_path ~keeper_name;
+       let refusal : Rule_types.observed_refusal =
+         { observed_status = Rule_types.Observed_exit 2
+         ; observed_stderr = "sh: 1: cannot create w: Permission denied"
+         ; observed_stderr_omitted_bytes = 0
+         }
+       in
+       let id =
+         match
+           AQ.submit_pending
+             ~keeper_name
+             ~tool_name:"external-effect"
+             ~call_summary:None
+             ~input:(`Assoc [ "argv", `List [ `String "touch"; `String "w" ] ])
+             ~base_path
+             ~observation:refusal
+             ()
+         with
+         | Ok { approval_id; _ } -> approval_id
+         | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
+       in
+       Alcotest.(check bool)
+         "the row carries the refusal"
+         true
+         ((pending_entry_exn id).observation = Some refusal);
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       Alcotest.(check bool)
+         "and still does after a restart reads it back"
+         true
+         ((pending_entry_exn id).observation = Some refusal);
+       let bare =
+         match submit ~base_path ~keeper_name ~input:(`Assoc [ "argv", `List [ `String "ls" ] ]) with
+         | id -> id
+       in
+       Alcotest.(check bool)
+         "a row with no box run carries none"
+         true
+         (Option.is_none (pending_entry_exn bare).observation))
+;;
+
 let test_delivery_wire_shape_drops_request_context () =
   let base_path = temp_dir () in
   let keeper_name = "queue-delivery-context" in
@@ -5615,6 +5665,10 @@ let () =
             "partial log tail is dropped and the snapshot rewritten"
             `Quick
             test_partial_log_tail_is_dropped_and_the_snapshot_rewritten
+        ; Alcotest.test_case
+            "an observation survives the row round trip"
+            `Quick
+            test_an_observation_survives_the_row_round_trip
         ] )
     ]
 ;;

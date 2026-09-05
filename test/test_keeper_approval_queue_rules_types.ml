@@ -16,6 +16,70 @@ let sample_rule =
   }
 ;;
 
+(* ── what the box refused (RFC-0422) ─────────────────────────────────── *)
+
+let refusal_testable =
+  testable
+    (fun fmt (r : Q.observed_refusal) ->
+      Format.pp_print_string fmt (Yojson.Safe.to_string (Q.observed_refusal_to_yojson r)))
+    ( = )
+;;
+
+let test_observed_refusal_json_round_trips () =
+  List.iter
+    (fun status ->
+      let refusal =
+        Q.observed_refusal ~max_stderr_bytes:4096 ~status ~stderr:"sh: cannot create w: Permission denied"
+      in
+      check (result refusal_testable string) "round trip" (Ok refusal)
+        (Q.observed_refusal_of_yojson (Q.observed_refusal_to_yojson refusal)))
+    [ Q.Observed_exit 2; Q.Observed_signal 15; Q.Observed_stopped 19 ]
+;;
+
+(* The tail is kept, the cut lands on a character boundary, and the bytes
+   dropped are counted rather than marked inside the text. *)
+let test_observed_stderr_is_bounded_to_its_tail () =
+  let whole = Q.observed_refusal ~max_stderr_bytes:64 ~status:(Q.Observed_exit 1) ~stderr:"short" in
+  check string "under the bound, untouched" "short" whole.observed_stderr;
+  check int "nothing dropped" 0 whole.observed_stderr_omitted_bytes;
+  let long = String.make 100 'a' ^ "tail" in
+  let cut = Q.observed_refusal ~max_stderr_bytes:8 ~status:(Q.Observed_exit 1) ~stderr:long in
+  check string "the last bytes survive" "aaaatail" cut.observed_stderr;
+  check int "the dropped count is the prefix length" 96 cut.observed_stderr_omitted_bytes;
+  (* "가" is three bytes; a bound landing inside it moves forward to the
+     next character rather than splitting it. *)
+  let korean = "x가나" in
+  let boundary = Q.observed_refusal ~max_stderr_bytes:4 ~status:(Q.Observed_exit 1) ~stderr:korean in
+  check string "no split character" "나" boundary.observed_stderr;
+  check int "the partial character counts as dropped" 4 boundary.observed_stderr_omitted_bytes;
+  let none = Q.observed_refusal ~max_stderr_bytes:0 ~status:(Q.Observed_exit 1) ~stderr:"abc" in
+  check string "a zero bound keeps nothing" "" none.observed_stderr;
+  check int "and drops everything" 3 none.observed_stderr_omitted_bytes
+;;
+
+let test_observed_refusal_decoder_is_closed () =
+  let rejects label json =
+    match Q.observed_refusal_of_yojson json with
+    | Ok _ -> failf "%s decoded" label
+    | Error _ -> ()
+  in
+  rejects "unknown kind"
+    (`Assoc
+       [ "status", `Assoc [ "kind", `String "crashed"; "code", `Int 1 ]
+       ; "stderr", `String ""
+       ; "stderr_omitted_bytes", `Int 0
+       ]);
+  rejects "missing stderr"
+    (`Assoc [ "status", `Assoc [ "kind", `String "exit"; "code", `Int 1 ]; "stderr_omitted_bytes", `Int 0 ]);
+  rejects "negative omitted"
+    (`Assoc
+       [ "status", `Assoc [ "kind", `String "exit"; "code", `Int 1 ]
+       ; "stderr", `String ""
+       ; "stderr_omitted_bytes", `Int (-1)
+       ]);
+  rejects "not an object" (`String "exit 1")
+;;
+
 let test_advisory_judgment_round_trip () =
   List.iter
     (fun judgment ->
@@ -214,6 +278,11 @@ let () =
             "duplicate fields rejected"
             `Quick
             test_rule_parser_rejects_duplicate_fields
+        ] )
+    ; ( "observed refusal"
+      , [ test_case "JSON round trip" `Quick test_observed_refusal_json_round_trips
+        ; test_case "stderr is bounded to its tail" `Quick test_observed_stderr_is_bounded_to_its_tail
+        ; test_case "decoder is closed" `Quick test_observed_refusal_decoder_is_closed
         ] )
     ]
 ;;

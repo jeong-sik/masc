@@ -1168,6 +1168,41 @@ let test_summary_answers_watermark_and_count_without_reading () =
 (* A canonical file replaced behind the store (another process, an operator)
    is a new inode, so the summary no longer matches and the next answer
    parses the file; a removed file answers as no checkpoint. *)
+(* The canonical read goes through the owned-file reader: a canonical path
+   that is a symbolic link out of the session's ownership chain is refused
+   as an I/O error instead of being followed. *)
+let test_checkpoint_read_refuses_a_symlinked_canonical_file () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "symlinked-canonical" in
+  save_ok
+    ~session_dir
+    (make_checkpoint ~session_id:sid ~turn_count:1 ~marker:"one")
+    "save turn 1";
+  (match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:sid with
+   | Ok checkpoint -> check int "regular canonical file loads" 1 checkpoint.turn_count
+   | Error error ->
+     failf "regular canonical file failed: %s"
+       (Keeper_checkpoint_store.checkpoint_load_error_to_string error));
+  let path =
+    Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid
+  in
+  let outside = Filename.temp_file "ckpt_outside_" ".json" in
+  Fun.protect ~finally:(fun () -> try Sys.remove outside with Sys_error _ -> ()) @@ fun () ->
+  Out_channel.with_open_bin outside (fun channel ->
+    output_string channel (In_channel.with_open_bin path In_channel.input_all));
+  Sys.remove path;
+  Unix.symlink outside path;
+  match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:sid with
+  | Error (Keeper_checkpoint_store.Io_error _) -> ()
+  | Error error ->
+    failf "symlinked canonical file refused with the wrong class: %s"
+      (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+  | Ok _ -> fail "symlinked canonical file was followed"
+
 let test_summary_follows_a_checkpoint_replaced_behind_it () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -1288,5 +1323,7 @@ let () =
             test_byte_count_from_summary_without_reading;
           test_case "summary follows a checkpoint replaced behind it" `Quick
             test_summary_follows_a_checkpoint_replaced_behind_it;
+          test_case "canonical read refuses a symlinked file" `Quick
+            test_checkpoint_read_refuses_a_symlinked_canonical_file;
         ] );
     ]

@@ -1,12 +1,12 @@
 {
-  "captured_utc": "2026-09-05T15:41:49Z",
+  "captured_utc": "2026-09-05T16:16:28Z",
   "commit": "8a068e17a6e0683dd5d34d211e3e77a1650dbf34",
   "terminal": {
-    "cols": 133,
-    "rows": 28
+    "cols": 100,
+    "rows": 30
   },
   "api_port": 8935,
-  "keeper_names_redacted": 19,
+  "keeper_names_redacted": 20,
   "task_titles_redacted": true,
   "frames": [
     {

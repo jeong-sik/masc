@@ -32,6 +32,12 @@ type t =
   | Toggle_acting_pane
       (** [/activity] — show or hide the Activity pane beside this surface,
           the same toggle as Ctrl-L. *)
+  | Show_acting_pane_tab of [ `Fleet | `Changes ]
+      (** [/activity fleet], [/activity changes] — show the pane on that
+          tab: the fleet's feed, or the selected keeper's file changes. *)
+  | Acting_pane_tab_unknown of string
+      (** [/activity <word>] with a word that names no tab; reported, not
+          guessed. *)
   | Switch_keeper of string
       (** [/keeper <name>] — point this pane at another keeper. *)
   | Switch_keeper_missing_name  (** [/keeper] with no name on the line. *)

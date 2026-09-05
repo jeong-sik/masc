@@ -118,6 +118,18 @@ let make_meta ?(name = "keeper-exec-tools") () =
     { meta with sandbox_profile = Masc_test_deps.fixture_sandbox_profile () }
   | Error err -> failwith ("make_meta failed: " ^ err)
 
+(* replay_approved_effect fails closed when a guest profile is dispatched
+   without a turn sandbox factory (#33345).  The suite's meta declares Docker
+   by default, so every replay site wires the same factory the production
+   turn bundle wires.  Cleanup is idempotent and registered with at_exit: the
+   factory creates its runtime lazily, so sites that never dispatch a guest
+   command pay nothing. *)
+let test_turn_sandbox_factory ~config ~meta =
+  let factory = Masc.Keeper_sandbox_factory.create ~config ~meta () in
+  at_exit (fun () -> Masc.Keeper_sandbox_factory.cleanup factory);
+  Some factory
+;;
+
 (* Durable HITL intake reads the recipient's metadata to decide whether the
    Keeper exists (#31717), so a fixture that only registers in the in-memory
    registry has its operator decision refused as [Hitl_recipient_absent] and
@@ -153,13 +165,30 @@ let playground_file ~config ~meta name =
 let make_ctx () =
   Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
 
+let is_sandbox_available =
+  lazy (
+    match Masc_test_deps.fixture_sandbox_profile () with
+    | Masc.Keeper_types_profile.Docker ->
+      (try Sys.command "docker image inspect masc-keeper-sandbox:local > /dev/null 2>&1" = 0
+       with _ -> false)
+    | _ -> false
+  )
+
+let require_sandbox () =
+  if not (Lazy.force is_sandbox_available) then
+    Alcotest.skip ()
+
 let with_exec_fixture
       ?(process = false)
       ?(always_allow = false)
       ?(bind_eio_context = false)
+      ?(require_sandbox = false)
       name
       fn
   =
+  if require_sandbox && not (Lazy.force is_sandbox_available)
+  then Alcotest.skip ()
+  else
   let dir = temp_dir name in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -224,7 +253,16 @@ let with_exec_fixture
                else run ())))
 
 let parse_json raw =
-  try Yojson.Safe.from_string raw with
+  let cleaned =
+    String.split_on_char '
+' raw
+    |> List.filter (fun line ->
+         not (String.starts_with ~prefix:"failure_class=" (String.trim line)))
+    |> String.concat "
+"
+    |> String.trim
+  in
+  try Yojson.Safe.from_string cleaned with
   | Yojson.Json_error err -> fail ("invalid json: " ^ err)
 
 let structured_tool_output_exn ~base_path content =
@@ -354,6 +392,7 @@ let test_public_read_rejects_unsupported_range_fields () =
 
 let test_public_read_accepts_offset_without_enrichment () =
   with_exec_fixture
+    ~require_sandbox:true
     "keeper_tool_dispatch_runtime_read_accepts_offset"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let playground = KES.keeper_default_write_root ~config ~meta in
@@ -697,7 +736,7 @@ let test_keeper_tools_list_json_names_the_model_visible_tools () =
   ()
 
 let test_execute_with_outcome_missing_file_is_failure () =
-  with_exec_fixture "keeper_tool_dispatch_runtime_missing_file"
+  with_exec_fixture ~require_sandbox:true "keeper_tool_dispatch_runtime_missing_file"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let repo_dir =
         Filename.concat
@@ -828,6 +867,7 @@ let check_publication_recovery_failure
 
 let test_initializing_recovery_isolates_only_publication_writes () =
   with_exec_fixture
+    ~require_sandbox:true
     ~always_allow:true
     "keeper_tool_dispatch_recovery_initializing"
     (fun ~config ~meta ~publication_recovery:_ ~ctx_work ->
@@ -2196,6 +2236,7 @@ let test_real_directory_release_failure_preserves_effect_truth () =
 
 let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
   with_exec_fixture
+    ~require_sandbox:true
     ~process:true
     ~always_allow:true
     "keeper_tool_dispatch_runtime_model_tools"
@@ -2916,7 +2957,7 @@ let test_approved_web_search_replays_without_model_resubmission () =
           ~config
           ~meta
           ~publication_recovery
-          ~turn_sandbox_factory:None
+          ~turn_sandbox_factory:(test_turn_sandbox_factory ~config ~meta)
           ~grant
           ~approval_id
           ()
@@ -3139,7 +3180,7 @@ let test_blob_failure_repairs_journal_without_second_effect () =
            ~config
            ~meta
            ~publication_recovery
-           ~turn_sandbox_factory:None
+           ~turn_sandbox_factory:(test_turn_sandbox_factory ~config ~meta)
            ~grant:(grant ())
            ~approval_id
            ()
@@ -3171,7 +3212,7 @@ let test_blob_failure_repairs_journal_without_second_effect () =
            ~config
            ~meta
            ~publication_recovery
-           ~turn_sandbox_factory:None
+           ~turn_sandbox_factory:(test_turn_sandbox_factory ~config ~meta)
            ~grant:(grant ())
            ~approval_id
            ()
@@ -3243,7 +3284,7 @@ let test_journal_failure_retries_only_persistence () =
            ~config
            ~meta
            ~publication_recovery
-           ~turn_sandbox_factory:None
+           ~turn_sandbox_factory:(test_turn_sandbox_factory ~config ~meta)
            ~grant:(grant ())
            ~approval_id
            ()
@@ -3279,7 +3320,7 @@ let test_journal_failure_retries_only_persistence () =
            ~config
            ~meta
            ~publication_recovery
-           ~turn_sandbox_factory:None
+           ~turn_sandbox_factory:(test_turn_sandbox_factory ~config ~meta)
            ~grant:(grant ())
            ~approval_id
            ()
@@ -3326,7 +3367,7 @@ let test_unknown_effect_is_durable_and_not_replayed () =
            ~config
            ~meta
            ~publication_recovery
-           ~turn_sandbox_factory:None
+           ~turn_sandbox_factory:(test_turn_sandbox_factory ~config ~meta)
            ~grant:(grant ())
            ~approval_id
            ()
@@ -3344,7 +3385,7 @@ let test_unknown_effect_is_durable_and_not_replayed () =
            ~config
            ~meta
            ~publication_recovery
-           ~turn_sandbox_factory:None
+           ~turn_sandbox_factory:(test_turn_sandbox_factory ~config ~meta)
            ~grant:(grant ())
            ~approval_id
            ()
@@ -3422,7 +3463,7 @@ let test_consumed_without_outcome_is_terminal_indeterminate () =
            ~config
            ~meta
            ~publication_recovery
-           ~turn_sandbox_factory:None
+           ~turn_sandbox_factory:(test_turn_sandbox_factory ~config ~meta)
            ~grant:restarted_grant
            ~approval_id
            ()
@@ -3521,7 +3562,7 @@ let test_unsupported_approved_operation_retains_exact_model_issued_path () =
            ~config
            ~meta
            ~publication_recovery
-           ~turn_sandbox_factory:None
+           ~turn_sandbox_factory:(test_turn_sandbox_factory ~config ~meta)
            ~grant
            ~approval_id
            ()
@@ -3586,6 +3627,7 @@ let test_tool_result_does_not_infer_task_fsm_rejections_from_message () =
 
 let test_manual_gate_defers_tool_execute_before_process () =
   with_exec_fixture
+    ~require_sandbox:true
     "keeper_tool_dispatch_manual_execute_gate"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       (match
@@ -3658,6 +3700,7 @@ let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
    parser now, so a schema-conformant script call must reach execution. *)
 let test_tool_execute_script_form_is_admitted_and_runs () =
   with_exec_fixture
+    ~require_sandbox:true
     ~process:true
     ~always_allow:true
     "tool_execute_script_form_runs"
@@ -3676,7 +3719,7 @@ let test_tool_execute_script_form_is_admitted_and_runs () =
       check string "the and-chain ran both commands" "begin-end"
         Yojson.Safe.Util.(member "output" json |> to_string))
 
-let test_tool_execute_empty_input_names_all_three_forms () =
+let test_tool_execute_empty_input_names_both_forms () =
   with_exec_fixture "tool_execute_empty_input_names_forms"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let raw =
@@ -3686,7 +3729,7 @@ let test_tool_execute_empty_input_names_all_three_forms () =
       in
       let json = Yojson.Safe.from_string raw in
       check string "no-source refusal names every form"
-        "$.argv, $.pipeline or $.script is required"
+        "$.argv or $.script is required"
         Yojson.Safe.Util.(member "error" json |> to_string))
 
 let keeper_delegate_input_schema () =
@@ -4894,7 +4937,7 @@ let test_frozen_surface_rejects_same_id_counterfeit_descriptor () =
 ;;
 
 let test_frozen_surface_production_bundle_executes_public_read () =
-  with_exec_fixture "frozen-surface-production-read"
+  with_exec_fixture ~require_sandbox:true "frozen-surface-production-read"
   @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
   let playground = KES.keeper_default_write_root ~config ~meta in
   let relative_path = "frozen-bundle-read.txt" in
@@ -5300,7 +5343,7 @@ pointer = "/output_artifact/_blob/sha256"
 ;;
 
 let test_composition_catalog_materializes_and_executes_first_class_tool () =
-  with_exec_fixture "composition-first-class-tool"
+  with_exec_fixture ~require_sandbox:true "composition-first-class-tool"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        let skill_catalog =
          skill_catalog_of_composition ~name:"clock" one_node_clock_composition
@@ -5465,6 +5508,7 @@ let test_compositions_share_closed_turn_descriptor_set () =
 
 let test_composition_feeds_typed_shell_ir_output_to_later_tool () =
   with_exec_fixture
+    ~require_sandbox:true
     ~process:true
     ~always_allow:true
     "composition-shell-ir-output"
@@ -5522,6 +5566,7 @@ let test_composition_feeds_typed_shell_ir_output_to_later_tool () =
 
 let test_composition_externalizes_oversized_shell_ir_output () =
   with_exec_fixture
+    ~require_sandbox:true
     ~process:true
     ~always_allow:true
     "composition-shell-ir-artifact"
@@ -5654,6 +5699,7 @@ let test_composition_externalizes_oversized_shell_ir_output () =
 
 let test_direct_execute_artifact_manifest_survives_maintenance () =
   with_exec_fixture
+    ~require_sandbox:true
     ~process:true
     ~always_allow:true
     "direct-shell-ir-artifact"
@@ -5745,6 +5791,7 @@ let test_direct_execute_artifact_manifest_survives_maintenance () =
 
 let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop () =
   with_exec_fixture
+    ~require_sandbox:true
     ~process:true
     ~always_allow:true
     "direct-shell-ir-post-effect-artifact-failure"
@@ -6349,7 +6396,7 @@ let test_composition_plan_failure_exposes_typed_cause () =
 ;;
 
 let test_terminal_composition_post_effect_failure_closes_official_client_loop () =
-  with_exec_fixture "composition-post-effect-terminal-failure"
+  with_exec_fixture ~require_sandbox:true "composition-post-effect-terminal-failure"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        (match
           Masc.Keeper_gate_mode.set
@@ -6455,7 +6502,7 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
 ;;
 
 let test_terminal_composition_unknown_write_failure_closes_official_client_loop () =
-  with_exec_fixture "composition-unknown-effect-terminal-failure"
+  with_exec_fixture ~require_sandbox:true "composition-unknown-effect-terminal-failure"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        (match
           Masc.Keeper_gate_mode.set
@@ -7280,6 +7327,9 @@ let test_composable_outputs_satisfy_declared_schema () =
        let failures =
          List.filter_map
            (fun { tool_name; prepare } ->
+              if String.equal tool_name "Execute" && not (Lazy.force is_sandbox_available)
+              then None
+              else
               let input = prepare ~config ~meta in
               let result =
                 KET.execute_keeper_tool_call_with_outcome
@@ -7287,6 +7337,7 @@ let test_composable_outputs_satisfy_declared_schema () =
                   ~meta
                   ~publication_recovery
                   ~ctx_work
+                  ?turn_sandbox_factory:(test_turn_sandbox_factory ~config ~meta)
                   ~name:tool_name
                   ~input
                   ()
@@ -7402,7 +7453,7 @@ let () =
       test_case "tool_execute script form is admitted and runs" `Quick
         test_tool_execute_script_form_is_admitted_and_runs;
       test_case "tool_execute empty input names all three forms" `Quick
-        test_tool_execute_empty_input_names_all_three_forms;
+        test_tool_execute_empty_input_names_both_forms;
       test_case "Agent Core handler threads Eio context to keeper dispatch" `Quick
         test_agent_core_handler_threads_eio_context_to_keeper_dispatch;
       test_case "registered dispatch does not require masc_ prefix" `Quick

@@ -1896,6 +1896,12 @@ type async_msg =
   | Code_notes_loaded of
       string Masc_tui_fetched.request
       * (Masc.Tui_decode.ide_annotation list, string) result
+  (* The Activity pane's Changes tab: the selected keeper's recorded file
+     changes, stamped with the request so an answer for a keeper the
+     cursor has left is dropped. *)
+  | Acting_pane_changes_loaded of
+      string Masc_tui_fetched.request
+      * (Masc.Tui_decode.file_change_snapshot, string) result
   (* The path the margin describes; stamped so a late answer cannot caption
      another file. *)
   | Code_blame_loaded of
@@ -4386,6 +4392,71 @@ let launch_file_changes_load state ~mailbox ~keeper_name =
       enqueue_async mailbox
         (File_changes_loaded (keeper_name, Error "Eio switch is unavailable"))
 
+(* The pane's Changes tab asks for the selected keeper's changes through
+   the fetch helper, so a request already in flight is not repeated and an
+   answer for another keeper is dropped on arrival. *)
+let launch_acting_pane_changes_load state ~mailbox ~keeper_name =
+  match
+    Masc_tui_fetched.start ~equal:String.equal state.acting_pane_changes
+      ~key:keeper_name
+  with
+  | Masc_tui_fetched.Already_loading -> ()
+  | Masc_tui_fetched.Started (next, request) -> (
+      state.acting_pane_changes <- next;
+      let host = server_peer_host in
+      let port = state.port in
+      let run () =
+        let result =
+          try
+            Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
+              ~window_hours:changes_window_hours
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox (Acting_pane_changes_loaded (request, result))
+      in
+      match Eio_context.get_switch_opt () with
+      | Some sw ->
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+              run ();
+              `Stop_daemon)
+      | None ->
+          enqueue_async mailbox
+            (Acting_pane_changes_loaded
+               (request, Error "Eio switch is unavailable")))
+
+(* The Changes tab is live only while it is on screen: the pane drawn, the
+   tab up, a keeper under the cursor. [refresh] asks again whatever is
+   known; [ensure] asks only for a keeper never asked about, so the loop
+   can call it after every input without repeating a settled fetch. *)
+let acting_pane_changes_keeper (state : state) =
+  if Masc_tui_render.acting_pane_drawn_cols () <= 0 then None
+  else
+    match state.acting_pane_tab with
+    | Masc_tui_acting_pane.Tab_fleet -> None
+    | Masc_tui_acting_pane.Tab_changes ->
+        Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
+
+let refresh_acting_pane_changes state ~mailbox =
+  match acting_pane_changes_keeper state with
+  | None -> ()
+  | Some keeper_name -> launch_acting_pane_changes_load state ~mailbox ~keeper_name
+
+let ensure_acting_pane_changes state ~mailbox =
+  match acting_pane_changes_keeper state with
+  | None -> ()
+  | Some keeper_name -> (
+      match
+        Masc_tui_fetched.view_for ~equal:String.equal state.acting_pane_changes
+          ~key:keeper_name
+      with
+      | Masc_tui_fetched.Absent ->
+          launch_acting_pane_changes_load state ~mailbox ~keeper_name
+      | Masc_tui_fetched.Loading | Masc_tui_fetched.Ready _
+      | Masc_tui_fetched.Failed _ ->
+          ())
+
 let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
     ~keeper_name =
   if state.msg_tool_visibility <> Tools_full then ()
@@ -6594,6 +6665,22 @@ let toggle_acting_pane (state : state) =
       state.acting_pane_scroll <- 0;
       Ok hidden
 
+(* Show one of the pane's tabs. Where the pane cannot show, the tab is not
+   set either: a preference with no visible effect would surprise the
+   reader after a later resize, the same rule the toggle follows. *)
+let show_acting_pane_tab (state : state) tab =
+  let _rows, cols = Masc_tui_ansi.get_terminal_size () in
+  if not (Masc_tui_acting_pane.shown ~hidden:false ~cols) then
+    Error
+      (Printf.sprintf "Activity pane needs %d columns; preference unchanged"
+         Masc_tui_acting_pane.threshold_cols)
+  else begin
+    state.acting_pane_hidden <- false;
+    state.acting_pane_tab <- tab;
+    state.acting_pane_scroll <- 0;
+    Ok ()
+  end
+
 (* Where a mouse report landed, relative to the Activity pane the last frame
    drew. The pane's columns are the render's own answer for that frame
    ([acting_pane_reserved_cols], zero when it drew none); its rows are the
@@ -6632,7 +6719,38 @@ let scroll_acting_pane (state : state) ~delta =
 let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
   match Masc_tui_render.acting_pane_target_at ~line with
   | Masc_tui_acting_pane.Target_none -> ()
+  | Masc_tui_acting_pane.Target_next_tab ->
+      state.acting_pane_tab <- Masc_tui_acting_pane.next_tab state.acting_pane_tab;
+      state.acting_pane_scroll <- 0
   | Masc_tui_acting_pane.Target_more -> scroll_acting_pane state ~delta:1
+  | Masc_tui_acting_pane.Target_file index -> (
+      (* The row indexes the snapshot the pane drew. The Changes surface
+         opens on that same snapshot with the row's diff up, then asks for
+         a fresh one the way [/changes] does; the loaded handler keeps the
+         open row when the fresh answer holds the same change there. *)
+      match selected_keeper state with
+      | None -> ()
+      | Some (keeper : keeper) -> (
+          match
+            Masc_tui_fetched.view_for ~equal:String.equal
+              state.acting_pane_changes ~key:keeper.k_name
+          with
+          | Masc_tui_fetched.Ready snapshot
+            when index >= 0
+                 && index < List.length snapshot.Masc.Tui_decode.fcs_changes ->
+              goto_surface state ~mailbox Changes;
+              state.changes <- Some snapshot;
+              state.changes_error <- None;
+              state.changes_cursor <- index;
+              state.changes_scroll <- 0;
+              state.changes_diff_row <- Some index;
+              state.changes_diff_scroll <- 0;
+              state.changes_tree_diff <- None;
+              state.changes_tree_diff_error <- None;
+              state.changes_tree_diff_path <- None
+          | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent
+          | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ ->
+              ()))
   | Masc_tui_acting_pane.Target_keeper keeper_name -> (
       match
         List.find_index
@@ -6722,6 +6840,23 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            notice ~role:Message_local
              (if hidden then "Activity pane hidden" else "Activity pane shown")
        | Error reason -> notice ~role:Message_error reason)
+  | Masc_tui_command.Show_acting_pane_tab tab ->
+      Buffer.clear state.msg_input;
+      let tab =
+        match tab with
+        | `Fleet -> Masc_tui_acting_pane.Tab_fleet
+        | `Changes -> Masc_tui_acting_pane.Tab_changes
+      in
+      (match show_acting_pane_tab state tab with
+       | Ok () ->
+           ensure_acting_pane_changes state ~mailbox;
+           notice ~role:Message_local
+             ("Activity pane on " ^ Masc_tui_acting_pane.tab_label tab)
+       | Error reason -> notice ~role:Message_error reason)
+  | Masc_tui_command.Acting_pane_tab_unknown word ->
+      Buffer.clear state.msg_input;
+      notice ~role:Message_error
+        (Printf.sprintf "/activity takes fleet or changes, not %s" word)
   | Masc_tui_command.Open_metrics ->
       Buffer.clear state.msg_input;
       goto_surface state ~mailbox Metrics
@@ -9217,6 +9352,8 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Help | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
         | Masc_tui_command.Open_diff | Masc_tui_command.Open_changes
         | Masc_tui_command.Toggle_acting_pane
+        | Masc_tui_command.Show_acting_pane_tab _
+        | Masc_tui_command.Acting_pane_tab_unknown _
         | Masc_tui_command.Open_settings | Masc_tui_command.Open_metrics
        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Steer_turn _
        | Masc_tui_command.Steer_missing_message
@@ -9476,6 +9613,23 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          rides along so an open detail only refetches when it is the run
          that moved. *)
       let fusion_status_seen = ref None in
+      (* Same shape again for the pane's Changes tab: a tool call the
+         selected keeper completed may have written a file, so the tab
+         asks once per batch. Agent-core events name their lane; the
+         roster's trace ids resolve it. *)
+      let pane_changes_keeper = acting_pane_changes_keeper state in
+      let pane_keeper_acted = ref false in
+      let traces =
+        List.map
+          (fun (keeper : keeper) -> (keeper.k_name, keeper.k_trace_id))
+          state.keepers
+      in
+      let acted_by_pane_keeper event =
+        match pane_changes_keeper with
+        | None -> false
+        | Some name ->
+            String.equal name (Masc_tui_acting.keeper_of_event ~traces event)
+      in
       List.iter
         (fun item ->
           match item with
@@ -9494,6 +9648,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               (match event with
                | Masc_tui_observer.Fusion_run_status { run_id; _ } ->
                    fusion_status_seen := Some run_id
+               | Masc_tui_observer.Keeper_tool_call _
+               | Masc_tui_observer.Agent_core { kind = Masc_tui_observer.Tool_completed; _ }
+                 when acted_by_pane_keeper event ->
+                   pane_keeper_acted := true
                | Masc_tui_observer.Agent_core _
                | Masc_tui_observer.Keeper_heartbeat _
                | Masc_tui_observer.Keeper_tool_call _
@@ -9533,6 +9691,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         state.acting <- kept;
         state.acting_dropped <- state.acting_dropped + dropped
       end;
+      if !pane_keeper_acted then refresh_acting_pane_changes state ~mailbox;
       (* The pane otherwise reloads only on open, on its own sends and on
          the operator cadence — a turn appended from anywhere else (API
          chat, another operator, a connector) stayed invisible until the
@@ -11204,6 +11363,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           launch_keeper_chat_file_changes_load ~force:true state ~mailbox
             ~keeper_name
       end
+  | Acting_pane_changes_loaded (request, result) ->
+      (* An answer for a keeper the cursor has left is not this tab's
+         answer and [complete] drops it. The stamp belongs to an answer
+         that landed. *)
+      let landed =
+        Masc_tui_fetched.is_current ~equal:String.equal state.acting_pane_changes
+          request
+        && Result.is_ok result
+      in
+      state.acting_pane_changes <-
+        Masc_tui_fetched.complete ~equal:String.equal state.acting_pane_changes
+          request result;
+      if landed then state.acting_pane_changes_at <- Some (Unix.gettimeofday ())
   | File_changes_loaded (keeper_name, result) ->
       (* An answer for a keeper the surface has since left is not this
          surface's answer. Dropping it keeps one keeper's files from being
@@ -11211,15 +11383,41 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       if Option.equal String.equal state.changes_keeper (Some keeper_name) then (
         match result with
         | Ok snapshot ->
-            state.changes <- Some snapshot;
-            state.changes_error <- None;
-            state.changes_cursor <- 0;
-            state.changes_scroll <- 0;
             (* The open row indexes the snapshot it was opened against. A new
                snapshot can hold a different change at the same index, so the
-               diff closes rather than silently changing what it shows. *)
-            state.changes_diff_row <- None;
-            state.changes_diff_scroll <- 0;
+               diff stays open only when the same change still sits there,
+               and closes rather than silently changing what it shows. *)
+            let same_change_at index =
+              match state.changes with
+              | None -> false
+              | Some _ when index < 0 -> false
+              | Some (before : Masc.Tui_decode.file_change_snapshot) -> (
+                  match
+                    ( List.nth_opt before.fcs_changes index
+                    , List.nth_opt snapshot.Masc.Tui_decode.fcs_changes index )
+                  with
+                  | Some (was : Masc.Tui_decode.file_change), Some (now : Masc.Tui_decode.file_change) ->
+                      Float.equal was.fc_at now.fc_at
+                      && String.equal was.fc_keeper now.fc_keeper
+                      && Option.equal String.equal was.fc_execution_id
+                           now.fc_execution_id
+                      && was.fc_location = now.fc_location
+                  | Some _, None | None, Some _ | None, None -> false)
+            in
+            let kept_row =
+              match state.changes_diff_row with
+              | Some index when same_change_at index -> Some index
+              | Some _ | None -> None
+            in
+            state.changes <- Some snapshot;
+            state.changes_error <- None;
+            (match kept_row with
+             | Some index -> state.changes_cursor <- index
+             | None ->
+                 state.changes_cursor <- 0;
+                 state.changes_scroll <- 0;
+                 state.changes_diff_scroll <- 0);
+            state.changes_diff_row <- kept_row;
             state.changes_tree_diff <- None;
             state.changes_tree_diff_error <- None;
             state.changes_tree_diff_path <- None
@@ -13448,6 +13646,7 @@ and is loaded on demand through keeper_skill.
        | Some (Mouse_left_press _) | Some (Mouse_wheel _) | None -> ());
       if Option.is_some input then
         Render_schedule.request render_schedule Render_schedule.Input;
+      ensure_acting_pane_changes state ~mailbox:async_messages;
       let _terminal_rows, terminal_columns = get_terminal_size () in
       let message_mode =
         (not compact_viewport) && state.view = Keepers Keeper_message
@@ -18303,6 +18502,7 @@ and is loaded on demand through keeper_skill.
           ~scoped_refresh_inflight:http_scoped_refresh_inflight
           ~scoped_refresh_followup
           ~mailbox:async_messages;
+        refresh_acting_pane_changes state ~mailbox:async_messages;
         (* Also refresh logs / Board detail if viewing them. *)
         (match state.view with
          | Code -> ()

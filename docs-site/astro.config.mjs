@@ -5,6 +5,14 @@ import mermaid from 'astro-mermaid';
 
 // https://astro.build/config
 export default defineConfig({
+	// The root used to be a splash page. Someone arriving at the docs wants the
+	// docs, and the overview is the page the sidebar starts on anyway, so the
+	// root goes straight there rather than to a second copy of the pitch.
+	redirects: {
+		'/': '/getting-started/overview/',
+		'/ko': '/ko/getting-started/overview/',
+		'/ko/': '/ko/getting-started/overview/',
+	},
 	integrations: [
 		// autoTheme followed the visitor's OS, but custom.css pins the page dark
 		// for every value of data-theme. A light OS therefore drew a light diagram

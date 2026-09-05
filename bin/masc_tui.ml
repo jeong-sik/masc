@@ -6488,8 +6488,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Buffer.clear state.msg_input;
       let active_keepers = List.length state.keepers in
       let theme_name =
-        match Masc_tui_theme_catalog.active_theme () with
-        | Some t -> t.name
+        match state.theme_choice with
+        | Some name -> name
         | None -> "default"
       in
       let banner =

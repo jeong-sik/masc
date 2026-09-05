@@ -4,43 +4,66 @@
 
 ## [0.32.0] - 2026-09-05
 
-- **Context 오버플로는 히스토리를 바닥까지 내려간다.** 동일 실행 shrink
-  재시도는 이제 세 번의 절반으로 멈추지 않고, 런타임이 더 작은 뷰를
-  지칭할 수 있는 동안 계속 내려가 없는 곳에서 끝난다. 따라서
-  `bootstrap_floor_exceeded`는 더 작은 뷰가 남지 않을 때만 확정된다.
-  2026-09-05 실측: 128k 토큰 모델의 4.1 MB 히스토리가 세 번의 절반으로
-  498 KB까지 줄었고 79개 메시지가 붙은 operator recovery에 안착했다.
-- **타임아웃 없는 voice listen은 스키마가 말하는 15초를 기다린다.**
-  `keeper_voice_listen`의 `timeout_seconds` 기본값이 도구에서는 60초,
-  스키마는 15초, TUI 캡처는 15초로 어긋났다; 이제 도구가 아무것도
-  넘기지 않고 브리지의 단일 기본값이 적용된다.
-- **취소 클레임은 운영자가 닫는다; 시스템 LLM은 완료 클레임을 리뷰한다.**
-  레인은 취소 클레임을 `operator_routed`로 기록하며 리뷰 프롬프트가
-  없다. operator-routed 행은 Verifier 레인에서 판정도 레인 실패도 아니다.
-- **취소는 그 사유가 누구 것인지 말한다.** 취소는 자신의 `reason` 또는
-  `handoff_context`에서만 사유를 해석하고, Task가 여전히 실은 이전
-  소유자의 release 노트에서는 절대 가져오지 않는다.
-- **nightly 테스트 레인이 말하는 것을 돌린다.** 루트 `@runtest` 앨리어스를
-  빌드하므로 `packages/agent_core/test`의 41개 스위트, `lib/exec/test`의
-  10개, `tools/` 스위트가 함께 돈다.
-- **Keeper 설정의 sandbox_image가 도커 프리플라이트에 그대로 흐른다.**
-  keeper TOML의 `sandbox_image`가 docker preflight로 전달되고(#33434,
-  #33455), 사용자 지정 태그는 공백이 잘려 들어가며, 지정된 이미지가
-  없을 때의 거부 문구가 실제 동작과 일치한다.
-- **크로스 도메인 레인 시작/재시작은 소유 도메인으로 위임된다.**
-  (#33368, #33447) 와일드카드 catch 3곳은 cancel-guard 마커 주석으로
-  정당화된다(#33494).
-- **microsandbox shim 프로브가 `--stream` 없이 발사된다.** (#33431, #33464)
-- **TUI: 웹 링크 프리뷰와 테마 6슬롯.** 웹 링크 프리뷰·OpenGraph 추출·
-  리치 임베드 카드·3D 프리뷰 모달(#33478), 종류별 여섯 슬롯 테마와
-  파일 목록 적용(#33471), 스마트 declutter 승인·재정 HUD·인터랙티브
-  diff 리뷰 모달·도구 행 가독성(#33448), 레인 디코더에 닿지 못하던
-  테스트 수정(#33469).
-- **keeper_lane_status, 레인 스스로에 대한 계좌.** (#33472)
-- **대시보드: keeper별 fusion 심의 목록.** (#33452)
-- **.mli 노출 정리.** 아무도 쓰지 않는 .mli 노출을 닫고, 컴파일러가
-  죽었다고 한 것을 지운다(#33474). 연구 기록 트리에 없던 인덱스가
-  생긴다(#33336).
+- **A context overflow walks the history down to its floor.** The same-run
+  shrink retry no longer stops after three halvings; it goes on while the
+  runtime can name a strictly smaller view and ends where none exists, so
+  `bootstrap_floor_exceeded` is committed only once no smaller view remains.
+  Measured 2026-09-05: a 4.1 MB history on a 128k-token model was
+  cut to 498 KB in three halvings and left on an operator recovery with 79
+  messages still attached.
+- **A voice listen with no timeout waits 15 s, the number its schema says.**
+  `keeper_voice_listen` defaulted `timeout_seconds` to 60 s in the tool while
+  its schema advertised 15 and the TUI capture used 15; the tool passes
+  nothing now and the bridge's one default applies. The 60 came in with
+  #20370, which released the turn semaphore for the length of a listen;
+  #20379 removed that release the same day and kept the number, and nothing
+  releases a turn during a listen today. Whether 15 is the right window is
+  the owner's call with those two in view. A `keeper_voice_speak`
+  under a voice config that does not load is refused with the loader's
+  sentence instead of being sent to the Gate; capture config errors name
+  `capture.<key>`; a capture result with no `status` reads back as its own
+  case; the TUI's input-device probe reports why it found nothing.
+- **A cancel claim is the operator's to close; the system LLM reviews
+  completion claims.** The lane records a cancel claim as `operator_routed`
+  and has no review prompt for it. An operator-routed row is neither a verdict
+  nor a lane failure on the Verifier lane.
+- **A cancel says whose reason it is.** A cancel resolves its reason from its
+  own `reason` or `handoff_context` only, never from the previous owner's
+  release note the Task still carries. A cancel of a claimed, started or
+  awaiting Task is refused when neither is given; a cancel of an unclaimed
+  Task commits without one. The Board post the operator judges, the
+  committed Task, the message log, the transition log row, the activity
+  event and the duration metric carry one sentence. The verification record
+  carries no `cancel_reason` field: nothing read it.
+- **The nightly test lane runs what it says.** It builds the root `@runtest`
+  alias, so the 41 suites in `packages/agent_core/test`, the ten in
+  `lib/exec/test` and the `tools/` suites run with the rest; the scheduled run
+  on main has its own concurrency lane, so a branch dispatch no longer cancels
+  it; a failure in any `dune` file is attributed to its suite, keyed as
+  `<dir>/<name>` in `test/ci-known-failures.txt` because two directories now
+  declare the same names, and a run in which a failure header names no suite
+  fails; and a deadline expiry lists the executables still running under dune,
+  found through parent links since dune starts each one in its own process
+  group, instead of only a log tail.
+- **A keeper's `sandbox_image` reaches the docker preflight.** The keeper
+  TOML `sandbox_image` is passed through to the docker preflight (#33434,
+  #33455): a custom tag is trimmed before it is used, and the rejection
+  wording when a stated image cannot be used matches what actually happens.
+- **A cross-domain lane start or restart delegates to the owning domain.**
+  (#33368, #33447) The three wildcard catches the delegation needs are
+  justified with cancel-guard marker comments (#33494).
+- **The microsandbox shim probe fires without `--stream`.** (#33431, #33464)
+- **TUI: web link previews and a six-slot categorical theme.** Web link
+  preview, OpenGraph extraction, rich embed cards and a 3D preview modal
+  (#33478); a categorical six-slot theme applied to the file listing
+  (#33471); smart declutter approvals, a refine HUD, an interactive diff
+  review modal and tool-row readability (#33448); a theme test that could
+  not reach the lane decoder is fixed (#33469).
+- **`keeper_lane_status`, the lane's account of itself.** (#33472)
+- **Dashboard: a per-keeper fusion review list.** (#33452)
+- **.mli exposure cleanup.** Unused .mli exposures are closed and what the
+  compiler already reported dead is removed (#33474); the research record
+  tree grows the index it lacked (#33336).
 
 ## [0.31.0] - 2026-09-04
 

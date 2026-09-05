@@ -720,13 +720,18 @@ let test_discovery_reads_both_hops () =
 
 (* ── where the metadata is ───────────────────────────────────────────── *)
 
-(* A server of Asana's shape: MCP served below the origin, metadata published
-   at the origin, and a 401 that says so. The computed URL misses it, so this
-   is the case the header exists for. *)
-let origin_only_metadata = "https://mcp.example.com/.well-known/oauth-protected-resource"
+(* A server that publishes its metadata where only its 401 header says:
+   below the MCP path, not at either place RFC 9728 lets a client compute
+   (the path-qualified well-known URL, or the origin root that
+   [fetch_with_root_fallback] tries after it). Only a location read out of
+   the header reaches it, so an [Ok] here means the header was read, and a
+   [Not_published] on the computed URL means it was not. A fixture that
+   published at the origin root could not tell those two apart: the root
+   fallback reaches it whether or not the header was read. *)
+let named_only_metadata = "https://mcp.example.com/mcp/.well-known/oauth-protected-resource"
 
-let origin_only_get ~url =
-  if String.equal url origin_only_metadata then
+let named_only_get ~url =
+  if String.equal url named_only_metadata then
     Ok (200, {|{"resource":"https://mcp.example.com","authorization_servers":["https://as.example.com"]}|})
   else if
     String.equal url "https://as.example.com/.well-known/oauth-authorization-server"
@@ -741,12 +746,12 @@ let says ~header = fun ~url:_ -> Some [ ("WWW-Authenticate", header) ]
 
 let test_the_server_says_where_its_metadata_is () =
   match
-    Keeper_oauth_discovery.discover ~get:origin_only_get
+    Keeper_oauth_discovery.discover ~get:named_only_get
       ~ask:
         (says
            ~header:
              (Printf.sprintf {|Bearer realm="OAuth", resource_metadata="%s", error="invalid_token"|}
-                origin_only_metadata))
+                named_only_metadata))
       ~mcp_url:"https://mcp.example.com/mcp" ()
   with
   | Ok found ->
@@ -761,7 +766,7 @@ let test_no_header_falls_back_to_the_computed_url () =
   (* Nine of the servers measured send no such header, so the computed URL
      is not a fallback for broken servers; it is the other half. *)
   match
-    Keeper_oauth_discovery.discover ~get:origin_only_get ~ask:no_header
+    Keeper_oauth_discovery.discover ~get:named_only_get ~ask:no_header
       ~mcp_url:"https://mcp.example.com/mcp" ()
   with
   | Error (Keeper_oauth_discovery.Not_published { url; _ }) ->
@@ -777,7 +782,7 @@ let test_a_plaintext_location_is_not_followed () =
      could be replaced on the way, so it is dropped and the computed URL
      stands. *)
   match
-    Keeper_oauth_discovery.discover ~get:origin_only_get
+    Keeper_oauth_discovery.discover ~get:named_only_get
       ~ask:
         (says
            ~header:
@@ -794,7 +799,7 @@ let test_a_plaintext_location_is_not_followed () =
 
 let test_a_header_without_the_parameter_is_not_a_location () =
   match
-    Keeper_oauth_discovery.discover ~get:origin_only_get
+    Keeper_oauth_discovery.discover ~get:named_only_get
       ~ask:(says ~header:{|Bearer realm="OAuth", error="invalid_token"|})
       ~mcp_url:"https://mcp.example.com/mcp" ()
   with
@@ -813,7 +818,7 @@ let test_a_header_without_the_parameter_is_not_a_location () =
 let computed_url = "https://mcp.example.com/.well-known/oauth-protected-resource/mcp"
 
 let discover_with ~ask =
-  Keeper_oauth_discovery.discover ~get:origin_only_get ~ask
+  Keeper_oauth_discovery.discover ~get:named_only_get ~ask
     ~mcp_url:"https://mcp.example.com/mcp" ()
 
 let the_named_location_is_read ~header ~ask =
@@ -842,13 +847,13 @@ let test_a_token_value_is_read_as_a_token () =
      the location beside it is still found. *)
   named
     (Printf.sprintf {|Bearer error=invalid_token, resource_metadata="%s"|}
-       origin_only_metadata)
+       named_only_metadata)
 
 let test_an_unquoted_url_is_not_a_token () =
   (* RFC 9110 5.6.2: a token is 1*tchar, and neither the colon nor the slash
      is a tchar, so a URL can only travel quoted. Unquoted, the header is
      not one the grammar covers, and the computed URL stands. *)
-  let header = Printf.sprintf "Bearer resource_metadata=%s" origin_only_metadata in
+  let header = Printf.sprintf "Bearer resource_metadata=%s" named_only_metadata in
   (match Masc_http_client.Www_authenticate.parse header with
   | Error (Masc_http_client.Www_authenticate.Expected_delimiter at) ->
       Alcotest.(check int) "stops at the colon after the scheme"
@@ -863,7 +868,7 @@ let test_a_quoted_pair_in_the_location_is_unescaped () =
   (* RFC 9110 5.6.4: a recipient handles a quoted-pair as the octet it
      escapes. *)
   named
-    {|Bearer resource_metadata="https://mcp.example.com/.well-known/oauth\-protected\-resource"|}
+    {|Bearer resource_metadata="https://mcp.example.com/mcp/.well-known/oauth\-protected\-resource"|}
 
 let test_the_same_letters_inside_another_value_are_not_the_location () =
   (* The text of the parameter sits inside error_description's quoted
@@ -871,32 +876,32 @@ let test_the_same_letters_inside_another_value_are_not_the_location () =
   computed
     (Printf.sprintf
        {|Bearer error="invalid_token", error_description="see resource_metadata=\"%s\""|}
-       origin_only_metadata)
+       named_only_metadata)
 
 let test_a_decoy_before_the_parameter_does_not_shadow_it () =
   named
     (Printf.sprintf
        {|Bearer error_description="resource_metadata=\"https://evil.example.com/\"", resource_metadata="%s"|}
-       origin_only_metadata)
+       named_only_metadata)
 
 let test_a_location_under_another_scheme_is_not_read () =
   (* This client presents a bearer token, so the Bearer challenge is the
      one answering it. *)
-  computed (Printf.sprintf {|DPoP resource_metadata="%s"|} origin_only_metadata)
+  computed (Printf.sprintf {|DPoP resource_metadata="%s"|} named_only_metadata)
 
 let test_the_bearer_challenge_may_come_second () =
   named
     (Printf.sprintf {|Basic realm="ops", Bearer resource_metadata="%s"|}
-       origin_only_metadata)
+       named_only_metadata)
 
 let test_scheme_and_parameter_name_carry_no_case () =
   (* RFC 9110 11.1: both are case-insensitive. *)
-  named (Printf.sprintf {|bearer RESOURCE_METADATA="%s"|} origin_only_metadata)
+  named (Printf.sprintf {|bearer RESOURCE_METADATA="%s"|} named_only_metadata)
 
 let test_a_later_header_may_carry_the_location () =
   (* Each WWW-Authenticate header is its own challenge list; the first
      Bearer challenge naming the location wins, whichever header it is in. *)
-  let second = Printf.sprintf {|Bearer resource_metadata="%s"|} origin_only_metadata in
+  let second = Printf.sprintf {|Bearer resource_metadata="%s"|} named_only_metadata in
   the_named_location_is_read ~header:second ~ask:(fun ~url:_ ->
       Some [ ("WWW-Authenticate", {|Basic realm="ops"|}); ("www-authenticate", second) ])
 
@@ -904,7 +909,7 @@ let test_a_malformed_header_names_nothing () =
   (* An unterminated quote is not a header the grammar covers. The parser
      says where it stopped; discovery treats the header as naming nothing
      and the computed URL stands. *)
-  let header = Printf.sprintf {|Bearer resource_metadata="%s|} origin_only_metadata in
+  let header = Printf.sprintf {|Bearer resource_metadata="%s|} named_only_metadata in
   (match Masc_http_client.Www_authenticate.parse header with
   | Error (Masc_http_client.Www_authenticate.Unterminated_quoted_string _) -> ()
   | Error other ->

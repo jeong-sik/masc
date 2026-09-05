@@ -266,6 +266,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0423 | 실행 기록의 페이로드는 볼 때 읽는다 — 목록이 안 읽는 340MB 를 메모리에서 뺀다 | Draft | - |
 | 0424 | 판정 요청은 pending 상태의 것이다 — 끝난 후보가 186MB 를 붙들고 있다 | Draft | - |
 | 0425 | 질문은 자기가 어떻게 답해질 수 있는지를 말한다 — masc_ask 의 세 필드를 한 갈래로 | Draft | - |
+| 0426 | 도구 블록은 훑는 것이 아니라 읽는 것이다 — 채팅 팬의 세 가지 읽기 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |

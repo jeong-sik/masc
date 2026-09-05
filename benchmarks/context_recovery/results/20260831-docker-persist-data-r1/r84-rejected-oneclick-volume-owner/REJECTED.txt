@@ -1,1 +1,0 @@
-Rejected: declaring /app/data as a one-click volume without creating the directory in the image produced a root-owned volume mount. Startup stayed degraded on tool-metrics permission denial. r85 adds the missing pre-volume directory producer.

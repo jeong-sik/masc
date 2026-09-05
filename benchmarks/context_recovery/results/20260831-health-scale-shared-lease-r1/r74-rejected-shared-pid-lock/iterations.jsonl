@@ -1,2 +1,0 @@
-{"iteration":1,"runtime_id":"01a05404-f551-7000-96a6-9977a06ae776","startup_elapsed_sec":1.1954410076141357,"before_files":[],"ready_files":["6.events"],"ready_file_count":1,"pruned_stale_count":0,"shutdown":"SIGKILL","exit_code":137,"oom_killed":false,"after_files":["6.events"]}
-{"iteration":2,"runtime_id":"01a05404-ffdc-7000-925c-a6e7b3b6c6d0","startup_elapsed_sec":1.1368699073791504,"before_files":["6.events"],"ready_files":["7.events"],"ready_file_count":1,"pruned_stale_count":1,"shutdown":"SIGKILL","exit_code":137,"oom_killed":false,"after_files":["7.events"]}

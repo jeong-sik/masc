@@ -1790,6 +1790,7 @@ type async_msg =
       (Tui_decode.keeper_tool_approval list, string) result
   | Image_render_ready of {
       title : string;
+      caption : string list;
       result : (string, string) result;
     }
       (** A [v]-requested web image, downloaded and converted to PNG off the
@@ -6431,7 +6432,7 @@ let clamp_planning_cursor state =
    about why -- the picture that never arrives looks exactly like the picture
    that did. The sniff is the composer's, so both surfaces read bytes by one
    rule. *)
-let draw_image state ~refuse ~title data =
+let draw_image state ?(caption = []) ~refuse ~title data =
   match Masc.Keeper_vision_tool.sniff_image_media_type data with
   | Error detail -> refuse detail
   | Ok media when not (String.equal media Masc_tui_graphics.payload_media_type)
@@ -6441,9 +6442,15 @@ let draw_image state ~refuse ~title data =
            Masc_tui_graphics.payload_media_type media)
   | Ok _ ->
       let rows, columns = get_terminal_size () in
+      (* Header rows -- the title, then one row per caption line (description,
+         site, URL). The image starts below the header and the footer sits on
+         the last row, so the picture never overlaps the text. With no caption
+         this is the old title-only layout. *)
+      let header_lines = title :: caption in
+      let header_rows = List.length header_lines in
       let box =
         { Masc_tui_graphics.columns = max 1 (columns - 2)
-        ; rows = max 1 (rows - 3)
+        ; rows = max 1 (rows - header_rows - 2)
         }
       in
       let img_escape =
@@ -6453,10 +6460,17 @@ let draw_image state ~refuse ~title data =
         | Masc_tui_graphics.Kitty_protocol | Masc_tui_graphics.Unsupported_protocol ->
             Masc_tui_graphics.place ~data box
       in
+      let header =
+        String.concat ""
+          (List.mapi
+             (fun i line ->
+               Printf.sprintf "\x1b[%d;1H%s" (i + 1)
+                 (Message_layout.fit_width line (max 1 (columns - 1))))
+             header_lines)
+      in
       write_to_terminal
-        (Ansi.clear ^ Masc_tui_graphics.delete_all
-        ^ Printf.sprintf "\x1b[1;1H%s\x1b[2;1H"
-            (Message_layout.fit_width title (max 1 (columns - 1)))
+        (Ansi.clear ^ Masc_tui_graphics.delete_all ^ header
+        ^ Printf.sprintf "\x1b[%d;1H" (header_rows + 1)
         ^ img_escape
         ^ Printf.sprintf "\x1b[%d;1H%s" rows
             (Message_layout.fit_width "  any key: back" (max 1 (columns - 1))));
@@ -6651,7 +6665,7 @@ let prepare_remote_image_bytes url =
    so the domain keeps rendering; the loading line is shown at once so the
    keypress is not silent. terminal_draws_images = false skips the download and
    opens a browser instead. *)
-let launch_image_render ~mailbox ~notice url =
+let launch_image_render ~mailbox ~notice ~title ~caption url =
   if !terminal_draws_images = Some false then
     match Masc_tui_browser.open_url url with
     | Ok opener ->
@@ -6665,13 +6679,14 @@ let launch_image_render ~mailbox ~notice url =
       let result =
         Eio_guard.run_in_systhread (fun () -> prepare_remote_image_bytes url)
       in
-      enqueue_async mailbox (Image_render_ready { title = url; result })
+      enqueue_async mailbox (Image_render_ready { title; caption; result })
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
     | None ->
         enqueue_async mailbox
-          (Image_render_ready { title = url; result = Error "Eio switch unavailable" })
+          (Image_render_ready
+             { title; caption; result = Error "Eio switch unavailable" })
   end
 
 (* The staged door. Ctrl-V leaves the image in the attachment as base64 for
@@ -10980,14 +10995,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
-  | Image_render_ready { title; result } ->
+  | Image_render_ready { title; caption; result } ->
       let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
       (match result with
        | Ok data ->
            let refuse reason =
              notice ~role:Message_error (Printf.sprintf "image %s: %s" title reason)
            in
-           draw_image state ~refuse ~title data
+           draw_image state ~caption ~refuse ~title data
        | Error e -> (
            match Masc_tui_browser.open_url title with
            | Ok opener ->
@@ -14524,7 +14539,15 @@ and is loaded on demand through keeper_skill.
                      let img_url =
                        match p.image_url with Some i -> i | None -> url
                      in
-                     launch_image_render ~mailbox:async_messages ~notice img_url
+                     let title =
+                       match p.title with Some t -> "  " ^ t | None -> "  " ^ url
+                     in
+                     let caption =
+                       (match p.description with Some d -> [ "  " ^ d ] | None -> [])
+                       @ [ "  " ^ Masc_tui_link_preview.site_label p ^ " \xc2\xb7 " ^ url ]
+                     in
+                     launch_image_render ~mailbox:async_messages ~notice ~title
+                       ~caption img_url
                  | None -> ())
             | _ -> ())
        | Some k when state.patch_modal_open ->

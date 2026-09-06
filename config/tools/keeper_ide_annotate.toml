@@ -1,88 +1,32 @@
 name = "keeper_ide_annotate"
 description = """
-Attach a keeper-authored annotation to a source file line range.
-
-Use this to \
-leave durable IDE context linked to an optional goal, task, or opaque \
-external reference. codebase, file_path, line_start, and content are \
-required. Hand codebase and file_path back exactly as the IDE co-view \
-context names them — never derive them from your sandbox mount layout. The \
-IDE transport stores and renders reference relation/value pairs without \
-interpreting the producer's product vocabulary."""
+Leave a memo above a line of a file, as a comment in the file's own syntax. The memo reads masc(<your name>): <text>, or masc(<your name>) <kind>: <text> with kind decision, question or bookmark; the TUI lists these and marks their lines, and they travel with the file into diffs and reviews. This edits the file: the comment is inserted above line, indented like it, through the same write path as Edit. file_path, line and text are required. The file's extension picks the comment syntax; a file no language here owns, or one with no comment syntax (JSON), is refused."""
 additional_properties = false
 
-# Held back from the request until the model asks for it by name. Not
-# called once on 2026-08-29 or 2026-08-30 across the fleet.
+# Held back from the request until the model asks for it by name.
 defer_loading = true
-
-[[params]]
-name = "codebase"
-type = "string"
-required = true
-description = """
-Canonical codebase slug exactly as the co-view context names it (e.g. \
-example.com_owner_repo)"""
 
 [[params]]
 name = "file_path"
 type = "string"
 required = true
-description = """
-Repo-root-relative source file path exactly as the co-view context names it"""
+description = "Absolute or sandbox-relative path of the file, as Edit takes it. The file must exist."
 
 [[params]]
-name = "line_start"
+name = "line"
 type = "integer"
 required = true
 minimum = 1
-description = "First 1-based source line"
-
-[[params]]
-name = "line_end"
-type = "integer"
-minimum = 1
-description = "Last 1-based source line; defaults to line_start"
+description = "1-based line the memo goes above"
 
 [[params]]
 name = "kind"
 type = "string"
-enum = ["Comment", "Decision", "Question", "Bookmark"]
-description = "Annotation kind; defaults to Comment"
+enum = ["comment", "decision", "question", "bookmark"]
+description = "Memo kind; defaults to comment"
 
 [[params]]
-name = "content"
+name = "text"
 type = "string"
 required = true
-description = "Short annotation text shown in the IDE"
-
-[[params]]
-name = "goal_id"
-type = "string"
-description = "Optional Goal route id"
-
-[[params]]
-name = "task_id"
-type = "string"
-description = "Optional Task route id"
-
-[[params]]
-name = "references"
-type = "array"
-description = """
-Optional opaque links rendered by the IDE without product-specific routing"""
-
-[params.items]
-type = "object"
-additional_properties = false
-
-[[params.items.params]]
-name = "relation"
-type = "string"
-required = true
-description = "Opaque relation label supplied by the producer"
-
-[[params.items.params]]
-name = "reference"
-type = "string"
-required = true
-description = "Opaque reference value preserved without interpretation"
+description = "One line of memo text"

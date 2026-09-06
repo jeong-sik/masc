@@ -2311,6 +2311,10 @@ type file_change_kind =
       replace_all : bool;
     }
   | Fc_written of { content : string }
+  | Fc_inserted of {
+      line : int;
+      text : string;
+    }
 
 type file_change = {
   fc_at : float;

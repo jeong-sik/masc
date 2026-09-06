@@ -7711,6 +7711,43 @@ let test_blame_block_at_names_the_run_and_its_first_line () =
       Alcotest.(check string) "past the end nothing covers" "-" (show (at 10));
       Alcotest.(check string) "before the first, nothing either" "-" (show (at 0))
 
+let test_decode_file_change_reads_an_insert () =
+  let change =
+    `Assoc
+      [ ("at", `Float 1.)
+      ; ("keeper", `String "alpha")
+      ; ("turn", `Null)
+      ; ("task_id", `Null)
+      ; ("execution_id", `String "exec-1")
+      ; ("line_evidence", `Null)
+      ; ("location", `Assoc [ ("kind", `String "absolute"); ("path", `String "/tmp/src.ml") ])
+      ; ("change", `Assoc [ ("kind", `String "insert"); ("line", `Int 3); ("text", `String "# masc(alpha): why") ])
+      ; ("succeeded", `Bool true)
+      ]
+  in
+  let snapshot =
+    `Assoc
+      [ ("keeper", `String "alpha")
+      ; ("window_hours", `Float 1.)
+      ; ("calls_in_window", `Int 1)
+      ; ("changes", `List [ change ])
+      ; ("over_budget", `Int 0)
+      ; ("malformed", `Int 0)
+      ]
+  in
+  match Tui_decode.decode_file_change_snapshot snapshot with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+    (match snapshot.Tui_decode.fcs_changes with
+     | [ change ] ->
+       (match change.Tui_decode.fc_kind with
+        | Tui_decode.Fc_inserted { line; text } ->
+          Alcotest.(check int) "line" 3 line;
+          Alcotest.(check string) "the comment line" "# masc(alpha): why" text
+        | Tui_decode.Fc_edited _ | Tui_decode.Fc_written _ -> Alcotest.fail "expected an insert")
+     | [] | _ :: _ :: _ -> Alcotest.fail "expected one change")
+;;
+
 let () =
   Alcotest.run "tui_decode" [
     ( "decode_verification_evidence",
@@ -8298,4 +8335,6 @@ let () =
       ; Alcotest.test_case "timestamp ties compare parsed instants" `Quick
           test_decode_skill_evidence_tie_compares_rfc3339_instants
       ] );
+    ( "file change"
+    , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert ] );
   ]

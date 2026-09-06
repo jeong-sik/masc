@@ -300,36 +300,9 @@ let observation_file_path_from_tool_input ~sandbox_root input =
 ;;
 
 (* Returns where the tool fact belongs (RFC-0378 §5.1). A call that names
-   no file is [Pathless] — a keeper-timeline fact with no document — and
-   never touches the resolver; a call that names one gets the resolver's
-   attribution, minted once here and carried as a parsed value. *)
-let annotation_attribution_from_tool_input input =
-  let codebase =
-    match Yojson.Safe.Util.member "codebase" input with
-    | `String value -> value
-    | _ -> ""
-  in
-  let path =
-    match Yojson.Safe.Util.member "file_path" input with
-    | `String value -> value
-    | _ -> ""
-  in
-  match Agent_observation.Code_address.v ~codebase ~path with
-  | Ok address ->
-    Agent_observation.File
-      (Agent_observation.Addressed { address; checkout = None })
-  | Error reason ->
-    Agent_observation.File
-      (Agent_observation.Unaddressed
-         { reason = Agent_observation.Unattributed.Unmintable reason
-         ; attempted_path = path
-         })
-;;
-
-let observation_attribution_for_tool_input ?(tool_name = "") ~config ~meta input =
-  if String.equal tool_name "keeper_ide_annotate"
-  then annotation_attribution_from_tool_input input
-  else
+   no file is [Pathless], a keeper-timeline fact with no document; a call
+   that names one gets the resolver's attribution, minted once here. *)
+let observation_attribution_for_tool_input ~config ~meta input =
   let base_dir = Keeper_alerting_path.project_root_of_config config in
   let sandbox_root =
     Keeper_tool_shared_runtime.keeper_observation_sandbox_root ~config ~meta
@@ -619,7 +592,6 @@ let assemble_hooks
                   sandbox root, matching the file tools' own resolution. *)
                let attribution =
                  observation_attribution_for_tool_input
-                   ~tool_name
                    ~config
                    ~meta:acc.meta
                    input

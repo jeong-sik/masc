@@ -404,6 +404,7 @@ rather than a guess.
 | Dart | `dart` | `pubspec.yaml` |
 | Scala | `metals` | `build.sbt` |
 | C# | `csharp-ls` | workspace boundary |
+| Markdown | `marksman` | workspace boundary |
 
 The same servers back the Keeper's `keeper_code_query` tool, so a Keeper asked
 about a language whose server is missing falls back to reading text. For OCaml,

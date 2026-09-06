@@ -1354,7 +1354,8 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
             { Pane.file_path = change_row_address change
             ; file_kind =
                 (match change.fc_kind with
-                 | Masc.Tui_decode.Fc_edited _ -> Pane.File_edited
+                 | Masc.Tui_decode.Fc_edited _ | Masc.Tui_decode.Fc_inserted _ ->
+                   Pane.File_edited
                  | Masc.Tui_decode.Fc_written _ -> Pane.File_written)
             ; file_succeeded = change.fc_succeeded
             ; file_at = change.fc_at
@@ -12853,6 +12854,7 @@ let change_row_summary (change : Masc.Tui_decode.file_change) =
   let content =
     match change.Masc.Tui_decode.fc_kind with
     | Masc.Tui_decode.Fc_edited { after; _ } -> Terminal_text.preview_line after
+    | Masc.Tui_decode.Fc_inserted { text; _ } -> Terminal_text.preview_line text
     | Masc.Tui_decode.Fc_written { content } ->
       Printf.sprintf "(wrote %d bytes)" (String.length content)
   in
@@ -12865,6 +12867,7 @@ let change_row_summary (change : Masc.Tui_decode.file_change) =
 let change_kind_badge (change : Masc.Tui_decode.file_change) =
   match change.Masc.Tui_decode.fc_kind with
   | Masc.Tui_decode.Fc_edited _ -> Theme.category Theme.Slot_4, "EDIT"
+  | Masc.Tui_decode.Fc_inserted _ -> Theme.category Theme.Slot_4, "MEMO"
   | Masc.Tui_decode.Fc_written _ -> (Masc_tui_theme.tone Masc_tui_theme.Accent), "WRITE"
 
 let change_result_badge (change : Masc.Tui_decode.file_change) =
@@ -12909,6 +12912,7 @@ let diff_row_span ~width (row : Diff.row) =
 let change_diff_halves (change : Masc.Tui_decode.file_change) =
   match change.Masc.Tui_decode.fc_kind with
   | Masc.Tui_decode.Fc_edited { before; after; _ } -> (before, after)
+  | Masc.Tui_decode.Fc_inserted { text; _ } -> ("", text)
   | Masc.Tui_decode.Fc_written { content } -> ("", content)
 
 let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
@@ -12945,6 +12949,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
            one pair without saying so would undercount the change. *)
         [ turn; "  replace_all: every occurrence changed; the log holds the text once" ]
     | Masc.Tui_decode.Fc_edited { replace_all = false; _ }
+    | Masc.Tui_decode.Fc_inserted _
     | Masc.Tui_decode.Fc_written _ -> [ turn ]
   in
   let notes =
@@ -14921,6 +14926,7 @@ let render_code (state : state) =
                  let kind =
                    match change.fc_kind with
                    | Fc_edited _ -> "EDIT"
+                   | Fc_inserted _ -> "MEMO"
                    | Fc_written _ -> "WRITE"
                  in
                  let result_style, result =

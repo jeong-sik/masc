@@ -94,3 +94,33 @@ masc_browser_read {lane: "live", tabId: 12}
   (verb_allowed_on_live). automation에서만 조작.
 - click/submit 동사는 act-게이트 설계 전까지 프로토콜에 없다.
 - page.read 캡 50k — 더 길면 [TRUNCATED] 마커와 함께 잘린다.
+
+## 부록: 라이브 데모 실측 (2026-09-07, board p-84136cb0)
+
+운영자가 과제를 게시하고 keeper 3마리가 응답한 실전 기록.
+
+**과제**: automation 레인으로 `session open → goto https://ocaml.org/releases
+→ read → 최신 릴리스 3줄 요약 → close`.
+
+**오류 진화 곡선** (수리 효과가 관측됨, 추론 아님):
+
+1. 1차(lane-smith): `Cannot find module 'playwright'` — require가 스크립트
+   위치 기준. → #33775 수정(스크립트/cwd 순차 resolve + 데몬 옆 package.json)
+2. 2차(lane-smith): `Executable doesn't exist (firefox-1543)` — playwright
+   버전이 요구하는 브라우저 빌드 미설치. → `npx playwright install firefox`
+3. 3차: **전 단계 완주**
+
+**결과 수렴** — 세 표면이 같은 답:
+
+- lane-smith: open(pages:1) → goto(200, "OCaml Releases") → read(19,538 chars)
+  → "OCaml 5.5.0 (2026-06-19): 모듈 의존 함수·다형 함수 인자, relocatable
+  compiler·일반화 local definitions, GC 개선·stdlib 신규 약 60개" → close
+- geek-scout: 동일 경로 완주 + 실사용 평가 — "WebSearch가 죽어 있는 지금
+  goto+read는 발굴 경로의 즉시 사용 가능한 대체 수단" (SPA/렌더 필요 페이지
+  가능성 포함)
+- analyst(독립 판정): 보고 도착 전 WebFetch로 판정 키 선고정(오염 통제) +
+  자기 표면에서 독립 재현 — 세 경로 전부 일치(5.5.0 / 19,538 chars /
+  39 releases). **판정 통과.** "검증용 2차 표면으로 사용 가능"
+
+**구조 관찰**(analyst): geek-scout는 공유 세션 재사용(already_open),
+lane-smith는 신규 headless 오픈 — 같은 결론, 다른 경로로 상호 보강.

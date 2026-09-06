@@ -249,7 +249,6 @@
   test_lsp_questions
   test_lsp_message_router
   test_lsp_workspace_pool
-  test_ide_annotations
   test_agent_observation_bridge
   test_enum_mirror_sync
   test_blocker_class_mirror
@@ -264,8 +263,6 @@
   test_server_activity_http
   test_ide_paths
   test_ide_canonical_url_join
-  test_ide_lsp_join_key
-  test_ide_diagnostics
   test_claimable_task_summaries
   test_schema_surface_index
   test_keeper_lifecycle_registry_dispatch
@@ -600,7 +597,6 @@
   test_lsp_questions
   test_lsp_message_router
   test_lsp_workspace_pool
-  test_ide_annotations
   test_agent_observation_bridge
   test_enum_mirror_sync
   test_blocker_class_mirror
@@ -616,8 +612,6 @@
   test_server_activity_http
   test_ide_paths
   test_ide_canonical_url_join
-  test_ide_lsp_join_key
-  test_ide_diagnostics
   test_claimable_task_summaries
   test_schema_surface_index
   test_keeper_lifecycle_registry_dispatch
@@ -3299,7 +3293,8 @@
 (test
  (name test_tui_gate_fold)
  (modules test_tui_gate_fold)
- (libraries alcotest masc masc_tui_types masc_tui_gate_text))
+ (libraries alcotest masc masc_tui_types masc_tui_gate_text
+   masc_tui_message_layout))
 
 (test
  (name test_tui_server_identity_refresh)
@@ -4153,6 +4148,7 @@
  (modules test_tui_acting_pane)
  (libraries
   alcotest
+  masc
   masc_tui_acting_pane
   masc_tui_acting
   masc_tui_observer
@@ -4335,7 +4331,7 @@
 (test
  (name test_keeper_ide_annotate_contract)
  (modules test_keeper_ide_annotate_contract)
- (libraries alcotest yojson masc masc_test_deps))
+ (libraries alcotest yojson masc masc_test_deps eio eio_main fs_compat unix))
 
 (test
  (name test_goal_tool_toml_parity)
@@ -4605,6 +4601,11 @@
  (name test_keeper_sandbox_remote)
  (modules test_keeper_sandbox_remote)
  (libraries masc_test_deps exec_ssh_protocol eio_main))
+
+(test
+ (name test_shell_ir_with_sandbox)
+ (modules test_shell_ir_with_sandbox)
+ (libraries masc_test_deps))
 
 (test
  (name test_keeper_tool_execute_observe)

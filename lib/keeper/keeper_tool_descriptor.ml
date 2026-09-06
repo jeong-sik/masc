@@ -137,6 +137,7 @@ type runtime_handler =
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
+  | Tool_masc_file_dispatch
   | Tool_masc_library_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image
@@ -258,6 +259,7 @@ let runtime_handler_to_string = function
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
   | Tool_masc_fusion_dispatch -> "tool_masc_fusion_dispatch"
   | Tool_masc_fusion_status -> "tool_masc_fusion_status"
+  | Tool_masc_file_dispatch -> "tool_masc_file_dispatch"
   | Tool_masc_library_dispatch -> "tool_masc_library_dispatch"
   | Tool_masc_local_runtime_dispatch -> "tool_masc_local_runtime_dispatch"
   | Tool_analyze_image -> "tool_analyze_image"
@@ -465,6 +467,7 @@ let descriptor
       | Tool_masc_keeper_dispatch
       | Tool_masc_fusion_dispatch
       | Tool_masc_fusion_status
+      | Tool_masc_file_dispatch
       | Tool_masc_library_dispatch
       | Tool_masc_local_runtime_dispatch
       | Tool_analyze_image ) -> Ordinary ordinary_execution_mode
@@ -2100,16 +2103,28 @@ let internal_descriptors : t list =
       ~handler:Tool_person_note_set
       ()
     (* ── IDE (RFC-0179 PR-3) ──────────────────────────────────── *)
-  ; in_process_descriptor_with_schema_source
+    (* A memo is a comment inserted into a file, so the tool is a
+       filesystem write with Edit's roots, Gate and evidence. *)
+  ; descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
       ~input_schema_source:ide_annotate_schema_source
       ~id:"keeper.ide.annotate"
-      ~name:"keeper_ide_annotate"
+      ~public_name:"keeper_ide_annotate"
+      ~internal_name:"keeper_ide_annotate"
       ~description:ide_annotate_schema.description
       ~input_schema:ide_annotate_schema.input_schema
-      ~policy:(write_in_process_policy ())
-      ~handler:Tool_ide_annotate
+      ~policy:
+        (policy
+           ~readonly:false
+           ~cwd_scope:"keeper_sandbox"
+           ~leaves_masc:true
+           ())
+      ~executor:Filesystem
+      ~backend:Sandbox_process
+      ~sandbox:Backend_selected
+      ~runtime_handler:Tool_ide_annotate
+      ~input_translation:(Identity Validate_once_after_translation)
       ()
     (* ── fusion deliberation (RFC-0252) ───────────────────────── *)
   ; in_process_descriptor_with_schema_source
@@ -2140,6 +2155,40 @@ let internal_descriptors : t list =
       ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_masc_fusion_status
+      ()
+    (* ── provider Files tools (RFC-0430 Phase 3) ──────────────── *)
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"masc.file.upload"
+      ~name:Keeper_runtime_schemas_toml.file_upload.Masc_domain.name
+      ~description:Keeper_runtime_schemas_toml.file_upload.Masc_domain.description
+      ~input_schema:Keeper_runtime_schemas_toml.file_upload.Masc_domain.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_masc_file_dispatch
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"masc.file.delete"
+      ~name:Keeper_runtime_schemas_toml.file_delete.Masc_domain.name
+      ~description:Keeper_runtime_schemas_toml.file_delete.Masc_domain.description
+      ~input_schema:Keeper_runtime_schemas_toml.file_delete.Masc_domain.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_masc_file_dispatch
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"masc.file.list"
+      ~name:Keeper_runtime_schemas_toml.file_list.Masc_domain.name
+      ~description:Keeper_runtime_schemas_toml.file_list.Masc_domain.description
+      ~input_schema:Keeper_runtime_schemas_toml.file_list.Masc_domain.input_schema
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_masc_file_dispatch
       ()
     (* ── vision delegation (RFC-keeper-vision-delegation-tool §2.6) ─ *)
   ; in_process_descriptor_with_schema_source

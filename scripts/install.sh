@@ -17,6 +17,9 @@
 #   --allow-unverified Continue if SHA256SUMS cannot be fetched (unsafe)
 #   --wizard           Always run the first-time provider setup wizard
 #   --no-wizard        Skip the provider setup wizard
+#   --no-guest-shim    Do not place the guest exec shim (masc-exec-shim) and its
+#                      sha256 sidecar under <base-path>/.masc/microvm/shim; a
+#                      host that boots no microvm keeper needs neither
 #   --provider ID      Pre-select a provider for the wizard (e.g. deepseek)
 #   --team PRESET      Seed a keeper team preset (e.g. classic) into the config
 #   --sandbox PROFILE  Set the seeded team keepers' sandbox_profile
@@ -57,6 +60,7 @@ BASE_PATH=""
 SEED_CONFIG=1
 FORCE=0
 DRY_RUN=0
+GUEST_SHIM=1
 ALLOW_UNVERIFIED="${MASC_ALLOW_UNVERIFIED:-0}"
 WIZARD="${MASC_WIZARD:-auto}"
 WIZARD_PROVIDER=""
@@ -796,6 +800,7 @@ while [ $# -gt 0 ]; do
     --allow-unverified) ALLOW_UNVERIFIED=1; shift ;;
     --wizard)      WIZARD=1; shift ;;
     --no-wizard)   WIZARD=0; shift ;;
+    --no-guest-shim) GUEST_SHIM=0; shift ;;
     --provider)    require_flag_value "$1" "${2-}"; WIZARD_PROVIDER="$2"; shift 2 ;;
     --team)        require_flag_value "$1" "${2-}"; TEAM="$2"; shift 2 ;;
     --sandbox)     require_flag_value "$1" "${2-}"; WIZARD_SANDBOX="$2"; shift 2 ;;
@@ -1070,6 +1075,67 @@ install_release_companion() {
 install_release_companion "$TUI_ASSET" "$TUI_DEST"
 install_release_companion "$PREFLIGHT_HELPER_ASSET" "$PREFLIGHT_HELPER_DEST"
 install_release_companion "$PREFLIGHT_GATE_ASSET" "$PREFLIGHT_GATE_DEST"
+
+# The guest exec shim (RFC-0427 B-2). The release ships one static Linux
+# binary per guest architecture; the guest is arm64 on an Apple Silicon host
+# (Apple's container) and the host's own architecture on Linux. It lands where
+# the server's microvm boot mounts it, with the release's own sha256 beside it
+# so the boot can refuse a shim the release did not ship. The same rule as the
+# companions above: a missing asset stops the install.
+guest_shim_asset() {
+  case "$PLATFORM_SUFFIX" in
+    macos-arm64|linux-arm64) echo "masc-exec-shim-linux-arm64" ;;
+    linux-x64) echo "masc-exec-shim-linux-amd64" ;;
+    *) die "no guest exec shim asset for platform $PLATFORM_SUFFIX" ;;
+  esac
+}
+
+install_guest_shim() {
+  local asset dest_dir dest sidecar url tmp expected
+  asset="$(guest_shim_asset)"
+  dest_dir="$BASE_PATH/.masc/microvm/shim"
+  dest="$dest_dir/masc-exec-shim"
+  sidecar="$dest_dir/masc-exec-shim.sha256"
+  url="$RELEASE_BASE_URL/$VERSION/$asset"
+  if [ "$SKIP_DL" -eq 1 ] && [ -x "$dest" ] && [ -f "$sidecar" ]; then
+    log "guest exec shim already present: $dest"
+    return 0
+  fi
+  log "downloading $url"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "[dry-run] would place $dest and $sidecar"
+    return 0
+  fi
+  mkdir -p "$dest_dir"
+  tmp="$dest.partial"
+  PARTIAL_FILES+=("$tmp")
+  fetch_release_checksums
+  curl -fL \
+    --max-time "$MASC_INSTALL_BINARY_DOWNLOAD_TIMEOUT_S" \
+    --retry "$MASC_INSTALL_CURL_RETRIES" \
+    --progress-bar \
+    -o "$tmp" \
+    "$url" \
+    || die "download failed (asset missing for $VERSION?): $asset"
+  verify_checksum "$tmp" "$asset"
+  chmod 755 "$tmp"
+  expected=""
+  if [ "$CHECKSUMS_AVAILABLE" -eq 1 ]; then
+    expected="$(expected_hash "$asset")"
+  fi
+  mv "$tmp" "$dest"
+  if [ -n "$expected" ]; then
+    printf '%s  %s\n' "$expected" "$asset" > "$sidecar"
+    log "installed: $dest (sha256 sidecar written)"
+  else
+    rm -f "$sidecar"
+    warn "installed: $dest without a sha256 sidecar (release checksums unavailable); the server will run it unverified"
+  fi
+}
+
+if [ "$GUEST_SHIM" -eq 1 ]; then
+  install_guest_shim
+fi
 
 if [ "$SKIP_DL" -ne 1 ]; then
   log "downloading $URL"

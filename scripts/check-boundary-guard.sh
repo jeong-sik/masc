@@ -243,21 +243,16 @@ check_forbidden_active "V7m-mcp-message-semantics" \
   "lib/mcp_server_eio_protocol.ml" \
   "lib/mcp_server_eio_protocol.mli"
 
-# V7n: the generic IDE/filesystem annotation boundary stores opaque
-# relation/reference pairs. Product route identifiers belong to their owning
-# adapters and must not return to this transport/storage path.
+# V7n: the IDE observation boundary (tool schema, observation bus, bridge,
+# HTTP, dashboard client) carries file facts only. Product route identifiers
+# belong to their owning adapters and must not return to this path.
 check_forbidden_active "V7n-generic-ide-product-routes" \
   'board_post_id|comment_id|pr_id|git_ref|log_id|session_id|operation_id|worker_run_id|(^|[^[:alnum:]_])Board([^[:alnum:]_]|$)|GitHub|github' \
   "lib/tool_surface/tool_shard_types_schemas_filesystem.ml" \
   "lib/keeper/keeper_tool_ide_runtime.ml" \
   "lib/agent_observation/agent_observation.ml" \
   "lib/agent_observation/agent_observation.mli" \
-  "lib/ide/ide_annotation_types.ml" \
-  "lib/ide/ide_annotation_types.mli" \
-  "lib/ide/ide_annotations.ml" \
-  "lib/ide/ide_annotations.mli" \
   "lib/ide/ide_bridge.ml" \
-  "lib/server/lsp_overlay_provider.ml" \
   "lib/server/server_ide_http.ml" \
   "dashboard/src/api/schemas/ide-annotations.ts" \
   "dashboard/src/api/ide.ts" \

@@ -82,7 +82,7 @@ let agent_card_action_of_string raw =
   | _ -> None
 
 (** Handle masc_get_metrics *)
-let handle_get_metrics ?(tool_name = "masc_get_metrics") ?(start_time = 0.0) ctx args
+let handle_get_metrics ?(tool_name = Tool_schemas_agent.tool_name Get_metrics) ?(start_time = 0.0) ctx args
   : Tool_result.result
   =
   (* Original used [let*! target = get_string_required] which
@@ -165,7 +165,7 @@ let components_for ~min_avg metrics =
   (completion, reliability, speed, handoff)
 
 (** Handle masc_agent_fitness *)
-let handle_agent_fitness ?(tool_name = "masc_agent_fitness") ?(start_time = 0.0) ctx args
+let handle_agent_fitness ?(tool_name = Tool_schemas_agent.tool_name Agent_fitness) ?(start_time = 0.0) ctx args
   : Tool_result.result
   =
   let agent_opt = get_string_opt args "agent_name" in
@@ -220,7 +220,7 @@ let handle_agent_fitness ?(tool_name = "masc_agent_fitness") ?(start_time = 0.0)
     json_ok ~tool_name ~start_time json
 
 (** Handle masc_agent_card *)
-let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx args
+let handle_agent_card ?(tool_name = Tool_schemas_agent.tool_name Agent_card) ?(start_time = 0.0) ctx args
   : Tool_result.result
   =
   let action_raw = get_string args "action" "get" in
@@ -257,37 +257,40 @@ let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx a
       in
       json_ok ~tool_name ~start_time json
 
-(** Dispatch handler. Returns Some (Tool_result.result) if handled, None otherwise *)
+(** Dispatch handler. The wire name is parsed once and the operations are
+    matched, so an operation added to [Tool_schemas_agent] is a compile error
+    here. [None] means the name is not this surface's. *)
 let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
-  match name with
-  | "masc_get_metrics" ->
+  match Tool_schemas_agent.operation_of_tool_name name with
+  | None -> None
+  | Some Tool_schemas_agent.Get_metrics ->
       Some (handle_get_metrics ~tool_name:name ~start_time:start ctx args)
-  | "masc_agent_fitness" ->
+  | Some Tool_schemas_agent.Agent_fitness ->
       Some (handle_agent_fitness ~tool_name:name ~start_time:start ctx args)
-  | "masc_agent_card" ->
+  | Some Tool_schemas_agent.Agent_card ->
       Some (handle_agent_card ~tool_name:name ~start_time:start ctx args)
-  | _ -> None
-
-let schemas = Tool_schemas_agent.schemas
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let tool_spec_read_only =
-  [ "masc_agent_card" ]
+let is_read_only = function
+  | Tool_schemas_agent.Agent_card -> true
+  | Tool_schemas_agent.Agent_fitness | Tool_schemas_agent.Get_metrics -> false
 
+(* Registration walks the same list [dispatch] matches, so this surface cannot
+   advertise a name it does not route. *)
 let () =
-  List.iter
-    (fun (s : Masc_domain.tool_schema) ->
-      Tool_spec.register
-        (Tool_spec.create
-           ~name:s.name
-           ~description:s.description
-           ~module_tag:Tool_dispatch.Mod_agent
-           ~input_schema:s.input_schema
-           ~handler_binding:Tag_dispatch
-           ~is_read_only:(List.mem s.name tool_spec_read_only)
-           ()))
-    schemas
+  Tool_schemas_agent.operations
+  |> List.iter (fun operation ->
+       let schema = Tool_schemas_agent.schema operation in
+       Tool_spec.register
+         (Tool_spec.create
+            ~name:(Tool_schemas_agent.tool_name operation)
+            ~description:schema.description
+            ~module_tag:Tool_dispatch.Mod_agent
+            ~input_schema:schema.input_schema
+            ~handler_binding:Tag_dispatch
+            ~is_read_only:(is_read_only operation)
+            ()))

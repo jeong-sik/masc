@@ -224,11 +224,17 @@ let turn_resources_error ~surface failure =
   let detail =
     Keeper_publication_recovery_scope.failure_to_string failure
   in
-  tool_result_error_data ~class_:Tool_result.Dependency_unavailable
+  (* The payload said "runtime_failure" while the call beside it set
+     Dependency_unavailable, so anything reading the payload got the opposite
+     answer from anything reading the result. One value now feeds both. *)
+  let class_ = Tool_result.Dependency_unavailable in
+  tool_result_error_data
+    ~class_
     ~tool_name:(invocation_tool_name surface)
     (`Assoc
        [ "error", `String "keeper_turn_resources_unavailable"
-       ; "failure_class", `String "runtime_failure"
+       ; ( "failure_class"
+         , `String (Tool_result.tool_failure_class_to_string class_) )
        ; "detail", `String detail
        ])
 ;;

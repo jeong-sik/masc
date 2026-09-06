@@ -21,6 +21,10 @@ type cancellation_mode =
   | Cancellable
   | Durable
 
+(* [use_ro] is still exclusive; unlike [use_rw] it releases rather than poisons
+   the gate when the callback raises. The gate carries no mutable resource state
+   of its own, and the Stdlib mutex is released by the [Fun.protect] finalizer
+   before any callback exception is propagated. *)
 let with_eio_lock cancellation_mode t f =
   Eio.Mutex.use_ro t.eio_gate (fun () ->
     lock_cooperatively t.cross_context_mutex;

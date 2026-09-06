@@ -87,6 +87,7 @@
   masc.attribution
   masc.exec_policy
   masc.keeper_registry
+  masc.keeper_tool_name
   masc.keeper_checkpoint_ref
   masc.keeper_contract
   masc.keeper_approval
@@ -178,6 +179,7 @@
   masc.config
   masc.agent_observation
   masc.ide
+  masc.ide_memo
   masc.dashboard_utils
   masc.tool_schemas
   ;; RFC a-language-server-the-keeper-can-ask: keeper_tool_code_query asks a

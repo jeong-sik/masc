@@ -695,19 +695,22 @@ let run_keeper_cycle
                    cap * Keeper_config.keeper_context_briefing_share_percent () / 100)
                in
                let { Keeper_unified_prompt.system_prompt; world_state; user_message } =
-                 Keeper_unified_prompt.build_prompt
-                   ~meta
-                   ~config
-                   ~profile_defaults
-                   ~turn_decision
-                   ?previous_turn_stop
-                   ~current_task
-                   ~task_skill_surfaces
-                   ~active_goal_summaries
-                   ~repository_freshness
-                   ?context_budget_bytes
-                   ~observation
-                   ()
+                 (* Named so a run on the main domain during prompt assembly
+                    reads as [keeper <name> cycle > turn:prompt] in the trace. *)
+                 Eio_guard.with_named_switch "turn:prompt" (fun () ->
+                   Keeper_unified_prompt.build_prompt
+                     ~meta
+                     ~config
+                     ~profile_defaults
+                     ~turn_decision
+                     ?previous_turn_stop
+                     ~current_task
+                     ~task_skill_surfaces
+                     ~active_goal_summaries
+                     ~repository_freshness
+                     ?context_budget_bytes
+                     ~observation
+                     ())
                in
                Eio.Fiber.yield ();
                let base_dir = session_base_dir config in

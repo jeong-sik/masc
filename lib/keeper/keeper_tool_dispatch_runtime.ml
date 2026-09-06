@@ -98,6 +98,11 @@ let resolve_descriptor_dispatch = function
   | Undescribed_route -> Try_registered_only_route
 ;;
 
+(* The class the invariant break is reported as. #28895 already derived the
+   log level from this value rather than repeating it; the payload below kept
+   its own copy as a string until 2026-09-06. *)
+let descriptor_route_invariant_class = Tool_result.Runtime_failure
+
 let descriptor_route_invariant_payload ~tool_name descriptor =
   let descriptor_id = descriptor.Keeper_tool_descriptor.id in
   let executor =
@@ -109,7 +114,10 @@ let descriptor_route_invariant_payload ~tool_name descriptor =
   `Assoc
     [ "ok", `Bool false
     ; "error", `String "keeper_tool_descriptor_route_invariant"
-    ; "failure_class", `String "runtime_failure"
+    ; ( "failure_class"
+      , `String
+          (Tool_result.tool_failure_class_to_string
+             descriptor_route_invariant_class) )
     ; "tool", `String tool_name
     ; "descriptor_id", `String descriptor_id
     ; "executor", `String executor
@@ -140,7 +148,7 @@ let descriptor_route_invariant_error ~keeper_name ~tool_name descriptor =
   (* The invariant break is a Runtime_failure by construction; deriving the
      level from that same class keeps the log honest if the classification
      ever changes (#28895 review). *)
-  let failure_class = Tool_result.Runtime_failure in
+  let failure_class = descriptor_route_invariant_class in
   Log.Keeper.emit
     (Tool_result.log_level_of_failure_class failure_class)
     ~keeper_name

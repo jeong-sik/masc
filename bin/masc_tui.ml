@@ -1788,6 +1788,13 @@ type async_msg =
       * (Masc_tui_http.tool_approval_answer, string) result
   | Keeper_tool_approvals_loaded of
       (Tui_decode.keeper_tool_approval list, string) result
+  | Image_render_ready of {
+      title : string;
+      result : (string, string) result;
+    }
+      (** A [v]-requested web image, downloaded and converted to PNG off the
+          render loop. [result] is the PNG bytes ready to draw, or why they
+          could not be produced. *)
   | Keeper_turns_loaded of (Tui_decode.keeper_turn_row list, string) result
       (** Which keepers are mid-turn right now, for the "answering now"
           badge drawn from every surface. *)
@@ -1949,6 +1956,26 @@ type 'a mailed = {
 
 let enqueue_async mailbox msg =
   Eio.Stream.add mailbox { ready_at = Unix.gettimeofday (); message = msg }
+
+(* Wire the web-link-preview background fetcher. On the first cache miss for a
+   URL, Masc_tui_link_preview renders the synthesized card immediately and calls
+   this hook; the fetched <title>/og:* then replace that entry in the shared
+   cache, and the next render (a periodic loader tick, sub-second) shows the real
+   card. A failed fetch leaves the synthesized card. Runs on its own daemon fiber
+   so a slow site never blocks the render loop, and sends no masc auth header to
+   the third-party URL. *)
+let () =
+  Masc_tui_link_preview.set_background_fetch (fun url ->
+      match Eio_context.get_switch_opt () with
+      | None -> ()
+      | Some sw ->
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+              (match Masc_tui_http.fetch_link_preview_body ~url with
+               | Ok body ->
+                   Masc_tui_link_preview.cache_store
+                     (Masc_tui_link_preview.parse_og_html ~url ~body)
+               | Error _ -> ());
+              `Stop_daemon))
 
 let current_clock_text () =
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -6545,6 +6572,55 @@ let open_image state ~notice path =
                     else
                       draw_image state ~refuse ~title:path prepared_data))
 
+(* Download a remote image and hand back PNG bytes ready for [draw_image], or
+   why they could not be produced. Pure of the render loop: no terminal writes,
+   so it is safe to run on a systhread. *)
+let prepare_remote_image_bytes url =
+  match download_remote_image url with
+  | Error e -> Error e
+  | Ok local_path -> (
+      match read_file_bytes local_path with
+      | Error detail -> Error detail
+      | Ok data when String.length data = 0 -> Error "the downloaded image is empty"
+      | Ok initial_data -> (
+          match Masc.Keeper_vision_tool.sniff_image_media_type initial_data with
+          | Ok media when String.equal media Masc_tui_graphics.payload_media_type ->
+              Ok initial_data
+          | _ -> (
+              match convert_to_png local_path with
+              | Ok png_path -> read_file_bytes png_path
+              | Error _ ->
+                  Error "could not convert the image to a format the terminal draws")))
+
+(* [v] on a link preview: download and convert the image OFF the render loop,
+   then hand the PNG bytes back through the mailbox so [draw_image] runs on the
+   render fiber, not here. The blocking curl/sips live inside run_in_systhread
+   so the domain keeps rendering; the loading line is shown at once so the
+   keypress is not silent. terminal_draws_images = false skips the download and
+   opens a browser instead. *)
+let launch_image_render ~mailbox ~notice url =
+  if !terminal_draws_images = Some false then
+    match Masc_tui_browser.open_url url with
+    | Ok opener ->
+        notice ~role:Message_local
+          (Printf.sprintf "Opened in browser (%s): %s" opener url)
+    | Error err ->
+        notice ~role:Message_error (Printf.sprintf "Could not open browser: %s" err)
+  else begin
+    notice ~role:Message_local (Printf.sprintf "Loading image: %s" url);
+    let run () =
+      let result =
+        Eio_guard.run_in_systhread (fun () -> prepare_remote_image_bytes url)
+      in
+      enqueue_async mailbox (Image_render_ready { title = url; result })
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+    | None ->
+        enqueue_async mailbox
+          (Image_render_ready { title = url; result = Error "Eio switch unavailable" })
+  end
+
 (* The staged door. Ctrl-V leaves the image in the attachment as base64 for
    the wire to the endpoint; the terminal wants the PNG's own bytes, so they
    are decoded back and drawn by the same tail a named file gets. The
@@ -10851,6 +10927,22 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
+  | Image_render_ready { title; result } ->
+      let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
+      (match result with
+       | Ok data ->
+           let refuse reason =
+             notice ~role:Message_error (Printf.sprintf "image %s: %s" title reason)
+           in
+           draw_image state ~refuse ~title data
+       | Error e -> (
+           match Masc_tui_browser.open_url title with
+           | Ok opener ->
+               notice ~role:Message_local
+                 (Printf.sprintf "Could not draw inline (%s). Opened in browser (%s): %s"
+                    e opener title)
+           | Error _ ->
+               notice ~role:Message_error (Printf.sprintf "image %s: %s" title e)))
   | Keeper_turns_loaded result ->
       (match result with
        | Ok rows ->
@@ -14347,11 +14439,10 @@ and is loaded on demand through keeper_skill.
                  | Some url ->
                      let p = Masc_tui_link_preview.get_preview url in
                      let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
-                     (match p.image_url with
-                      | Some img_url ->
-                          open_image state ~notice img_url
-                      | None ->
-                          open_image state ~notice url)
+                     let img_url =
+                       match p.image_url with Some i -> i | None -> url
+                     in
+                     launch_image_render ~mailbox:async_messages ~notice img_url
                  | None -> ())
             | _ -> ())
        | Some k when state.patch_modal_open ->
@@ -16065,8 +16156,21 @@ and is loaded on demand through keeper_skill.
                 launch_runtime_surface_load state ~mailbox:async_messages
                   ~force:true
             | Tools -> launch_tools_load state ~mailbox:async_messages
-            | Config ->
-                launch_runtime_config_load state ~mailbox:async_messages
+            | Config -> (
+                (* Same per-pane dispatch as goto_surface: each Config pane
+                   loads its own source, so a manual refresh must not
+                   quietly fall back to runtime.toml's loader for panes
+                   that read somewhere else (presets, prompts, params,
+                   voice). *)
+                match state.config_pane with
+                | Config_prompts -> launch_prompts_load state ~mailbox:async_messages
+                | Config_presets -> launch_presets_load state ~mailbox:async_messages
+                | Config_params ->
+                    launch_runtime_params_load state ~mailbox:async_messages
+                | Config_voice ->
+                    launch_voice_config_load state ~mailbox:async_messages
+                | Config_runtime | Config_models | Config_themes ->
+                    launch_runtime_config_load state ~mailbox:async_messages)
             | Resources ->
                 launch_resources_list state ~mailbox:async_messages
             | Schedules -> launch_schedules_load state ~mailbox:async_messages

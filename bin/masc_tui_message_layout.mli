@@ -32,6 +32,18 @@ val all_styles : style list
     it. The mark-distinctness check walks this; nothing in the language forces
     a variant to appear here. *)
 
+(** What arrived from outside this conversation and landed between its turns.
+
+    Only what the types already know. A line this pane wrote in answer to
+    something typed at it ([Message_local]) is not an arrival. Neither is
+    [Sent_by_operator] from another surface: that one is an arrival in fact,
+    but the surface lives in the label's text and not in the constructor, and
+    a distinction cut out of a string is the type pretending to know. *)
+type siding =
+  | Siding_journal  (** A Memory OS journal commit. *)
+  | Siding_arrival
+      (** Another agent's broadcast, a connector, a second operator. *)
+
 type turn_rail =
   | Rail_opens  (** The turn's first row. *)
   | Rail_says
@@ -42,6 +54,11 @@ type turn_rail =
           Drawn as a branch off the trunk, because a turn's work is
           subordinate to the turn and was reading as a sibling of it. *)
   | Rail_closes  (** The last row of a turn that has finished. *)
+  | Rail_joins of siding
+      (** Belongs to no turn and landed while one was running. It joins the
+          conversation's line from the left rather than breaking it: the turn
+          it arrived inside neither produced it nor read it, and drawing it as
+          one of that turn's rows would say both. *)
   | Rail_none
       (** Nothing to hang: a row belonging to no turn, or a turn of one row.
           A single-row turn has no hierarchy to draw, so ordinary chatter
@@ -197,6 +214,19 @@ type row = {
           the same width in blanks on the rest, so a wrapped body lines up
           under where it started. *)
 }
+
+val siding_lead : siding -> string
+(** The run a siding takes to reach the line, {!siding_lead_cells} wide. The
+    kind is in the texture -- the journal dashed, an arrival solid -- rather
+    than a mark, which would be the third time one row says who it is. *)
+
+val siding_lead_cells : int
+
+val turn_rail_gutter : turn_rail -> string
+(** The whole margin for one row, {!turn_rail_cells} wide, siding run
+    included. Concatenate this rather than {!turn_rail_glyph}: a caller that
+    drew the glyph and padded the rest itself would put the line in a
+    different column on the rows that have a siding. *)
 
 val turn_rail_glyph : turn_rail -> string
 (** The one cell this rail piece draws, or a blank for {!Rail_none}. Box

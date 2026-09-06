@@ -17,11 +17,12 @@ name: Test
 # future proposal to move tests into the PR gate; until that proposal
 # exists, the gate is unchanged by design.
 #
-# Known gap: a red scheduled run is silent. GitHub emails only the last
+# A red scheduled run used to reach nobody: GitHub emails only the last
 # editor of the cron line, and a dispatched run notifies only the
-# dispatcher. Until a notification step or tracking automation exists,
-# someone has to look at the Actions tab; that follow-up is tracked under
-# #33008.
+# dispatcher. The last step of this job now files the failure as an issue
+# labelled `nightly-test-lane`, reusing the open one so a run of red
+# nights is one thread. A dispatch files nothing — its dispatcher is
+# already told.
 #
 # See: https://github.com/jeong-sik/masc/issues/33008
 #
@@ -60,6 +61,9 @@ on:
 
 permissions:
   contents: read
+  # The scheduled failure below files an issue. A dispatch never reaches
+  # that step, so this scope is unused on every other path.
+  issues: write
 
 # Two lanes plus one per targeted run. Every full dispatch shares one
 # lane, where a new dispatch cancels the run in flight instead of stacking
@@ -310,3 +314,54 @@ jobs:
           path: ${{ runner.temp }}/ci-run-tests.log
           if-no-files-found: warn
           retention-days: 14
+
+      # The lane's whole point is that a test-only regression surfaces
+      # within ~24h. Without this step it surfaced only to whoever opened
+      # the Actions tab, which is how the 2026-09-05 hang (#33200) sat
+      # unread. Scheduled runs only: a dispatcher already sees their own
+      # run. Cancellation counts as a failure here because the job-level
+      # 180-minute cap is exactly what a hung suite hits.
+      - name: File the scheduled failure as an issue
+        if: (failure() || cancelled()) && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # gh infers the repo from the checkout's git remote. This step also
+          # runs when the job failed before Checkout, where there is no remote
+          # to read, so name the repo outright.
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          label=nightly-test-lane
+          # --force is a no-op when the label already exists, so the first
+          # red night does not fail on a label nobody created yet.
+          gh label create "${label}" \
+            --color B60205 \
+            --description "야간 테스트 레인이 실패한 실행" \
+            --force
+          # The taxonomy workflow comments on any issue with no declaration
+          # block, so this body carries one. A red lane is a ci defect that
+          # degrades and whose root is that nothing said so.
+          body=$(printf '%s\n\n%s\n%s\n\n%s\n%s\n\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+            "야간 테스트 레인이 \`${JOB_STATUS}\` 로 끝났습니다." \
+            "- 실행: ${RUN_URL}" \
+            "- 커밋: \`${GITHUB_SHA}\`" \
+            "스위트별 판정은 그 실행의 \`suite-runner-log\` 아티팩트에 있습니다." \
+            "단계 출력에는 마지막 120줄만 남습니다." \
+            '```masc-triage' \
+            "kind: defect" \
+            "area: ci" \
+            "impact: degrades" \
+            "must-do: false" \
+            '```')
+          existing=$(gh issue list --state open --label "${label}" \
+            --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "${existing}" ]; then
+            gh issue comment "${existing}" --body "${body}"
+            echo "commented on #${existing}"
+          else
+            gh issue create --label "${label}" \
+              --title "야간 테스트 레인이 빨갛습니다" \
+              --body "${body}"
+          fi

@@ -38,11 +38,27 @@ let all_styles =
   ]
 ;;
 
+(* What arrived from outside this conversation and landed between its turns.
+
+   Only what the types already know. A line this pane wrote in answer to
+   something typed at it ([Message_local]) is not an arrival, and drawing it
+   on a siding would read as though someone else had sent it. Neither is
+   [Sent_by_operator] from another surface: that one is an arrival in fact,
+   but the surface lives in the label's text and not in the constructor, and
+   a distinction cut out of a string is the type pretending to know. *)
+type siding =
+  | Siding_journal  (** A Memory OS journal commit. *)
+  | Siding_arrival  (** Another agent's broadcast, a connector, a second operator. *)
+
 type turn_rail =
   | Rail_opens
   | Rail_says
   | Rail_does
   | Rail_closes
+  | Rail_joins of siding
+      (** Belongs to no turn and arrived while one was running. It joins the
+          conversation's line from the left rather than breaking it: the turn
+          it landed inside did not produce it and did not read it. *)
   | Rail_none
 
 type markdown_source =
@@ -719,13 +735,42 @@ let turn_rail_glyph : turn_rail -> string = function
   | Rail_says -> "\xe2\x94\x82"    (* the turn itself, still going *)
   | Rail_does -> "\xe2\x94\x9c"    (* work hanging off the turn *)
   | Rail_closes -> "\xe2\x95\xb0"  (* the turn ended on this row *)
+  | Rail_joins _ -> "\xe2\x94\xa4"  (* something from outside meets the line *)
   | Rail_none -> " "
+
+(* The run a siding takes to reach the conversation's line.
+
+   The kind is in the texture rather than a mark: the journal is this
+   workspace's own auxiliary lane and draws dashed, while a line someone else
+   put here draws solid. A mark would be the third time the row says who it
+   is -- the label names it and {!speaker_mark} stamps it already. *)
+let siding_lead : siding -> string = function
+  | Siding_journal -> "\xe2\x95\x8c\xe2\x95\x8c\xe2\x95\x8c"
+  | Siding_arrival -> "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+
+let siding_lead_cells = 3
 
 (* Charged to every row, drawn or not. The margin's width is what the body's
    width is taken from, so a rail column that appeared and vanished with the
    rows would re-wrap the conversation under a scroll position taken before
-   it. Two cells out of a sixty-cell pane, spent once. *)
-let turn_rail_cells = 2
+   it. Five cells out of a sixty-cell pane, spent once: three for a siding to
+   run in, one for the glyph, one to keep it off the clock. A turn-only row
+   pays the three as blanks, which is what keeps the line in one column
+   whether or not anything arrived beside it. *)
+let turn_rail_cells = siding_lead_cells + 2
+
+(* The whole margin for one row, siding run included. Callers concatenate
+   this rather than the glyph: a row that drew the glyph and padded the rest
+   itself would put the line in a different column on the rows that have a
+   siding. *)
+let turn_rail_gutter (piece : turn_rail) =
+  let lead =
+    match piece with
+    | Rail_joins siding -> siding_lead siding
+    | Rail_opens | Rail_says | Rail_does | Rail_closes | Rail_none ->
+        String.make siding_lead_cells ' '
+  in
+  lead ^ turn_rail_glyph piece ^ ""
 
 (* Cells the speaker mark and its separator occupy at the head of a label, or
    zero when the column was too narrow to keep the mark at all. One reader, so
@@ -1216,8 +1261,12 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
           | Rail_opens -> if index = 0 then Rail_opens else Rail_says
           | Rail_does -> if index = 0 then Rail_does else Rail_says
           | Rail_closes -> if index = last then Rail_closes else Rail_says
+          (* Only the first row joins. A wrapped arrival keeps its body under
+             the join without drawing a second one, and it never picks up the
+             turn's own line: the turn it landed inside did not produce it. *)
+          | Rail_joins siding -> if index = 0 then Rail_joins siding else Rail_none
         in
-        turn_rail_glyph piece ^ String.make (rail_cells - 1) ' '
+        turn_rail_gutter piece
     in
     body_chunks
     |> List.mapi (fun index chunk ->

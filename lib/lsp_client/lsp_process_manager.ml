@@ -64,6 +64,7 @@ type language =
   | Dart
   | Scala
   | Csharp
+  | Markdown
 
 (* Every variant once, in the order the wire and the error texts list them.
    The compiler cannot check a list against a sum; the language test walks
@@ -71,7 +72,8 @@ type language =
    variant is missing here. *)
 let all_languages =
   [ Ocaml; Typescript; Javascript; Python; Rust; Go; C; Cpp; Swift; Java; Kotlin
-  ; Ruby; Php; Lua; Bash; Json; Yaml; Zig; Haskell; Elixir; Dart; Scala; Csharp ]
+  ; Ruby; Php; Lua; Bash; Json; Yaml; Zig; Haskell; Elixir; Dart; Scala; Csharp
+  ; Markdown ]
 ;;
 
 (* The LSP languageId each server is initialised with. Bash is
@@ -100,6 +102,7 @@ let lang_id_of_language = function
   | Dart -> "dart"
   | Scala -> "scala"
   | Csharp -> "csharp"
+  | Markdown -> "markdown"
 ;;
 
 let language_of_lang_id id =
@@ -129,6 +132,7 @@ let command_of_language = function
   | Dart -> "dart", [ "dart"; "language-server" ]
   | Scala -> "metals", [ "metals" ]
   | Csharp -> "csharp-ls", [ "csharp-ls" ]
+  | Markdown -> "marksman", [ "marksman"; "server" ]
 ;;
 
 (* Where a language server for this language is rooted. A file whose
@@ -156,7 +160,7 @@ let root_rule_of_language = function
   | Ruby -> Marker_files [ "Gemfile" ]
   | Php -> Marker_files [ "composer.json" ]
   | Lua -> Marker_files [ ".luarc.json" ]
-  | Bash | Json | Yaml | Csharp -> Boundary_root
+  | Bash | Json | Yaml | Csharp | Markdown -> Boundary_root
   | Zig -> Marker_files [ "build.zig" ]
   | Haskell -> Marker_files [ "stack.yaml"; "cabal.project" ]
   | Elixir -> Marker_files [ "mix.exs" ]
@@ -181,7 +185,8 @@ let reference_index_of_language = function
       ; build_command = "dune build @ocaml-index"
       }
   | Typescript | Javascript | Python | Rust | Go | C | Cpp | Swift | Java | Kotlin | Ruby
-  | Php | Lua | Bash | Json | Yaml | Zig | Haskell | Elixir | Dart | Scala | Csharp ->
+  | Php | Lua | Bash | Json | Yaml | Zig | Haskell | Elixir | Dart | Scala | Csharp
+  | Markdown ->
     None
 ;;
 
@@ -198,7 +203,8 @@ let reference_index_of_language = function
 let redirecting_variables_of_language = function
   | Ocaml -> [ "DUNE_BUILD_DIR"; "DUNE_WORKSPACE" ]
   | Typescript | Javascript | Python | Rust | Go | C | Cpp | Swift | Java | Kotlin | Ruby
-  | Php | Lua | Bash | Json | Yaml | Zig | Haskell | Elixir | Dart | Scala | Csharp ->
+  | Php | Lua | Bash | Json | Yaml | Zig | Haskell | Elixir | Dart | Scala | Csharp
+  | Markdown ->
     []
 ;;
 
@@ -229,10 +235,49 @@ let extensions_of_language = function
   | Dart -> [ ".dart" ]
   | Scala -> [ ".scala"; ".sc" ]
   | Csharp -> [ ".cs" ]
+  | Markdown -> [ ".md"; ".markdown" ]
 ;;
 
 let language_of_extension ext =
   List.find_opt (fun language -> List.mem ext (extensions_of_language language)) all_languages
+;;
+
+(* How a memo (Ide_memo) is spelled in each language's comment syntax.
+   [None] is the one language with no comment syntax at all: a memo cannot
+   stand in JSON. *)
+let memo_markers_of_language = function
+  | Ocaml -> Some (Ide_memo.Block { opens = "(*"; closes = "*)" })
+  | Typescript | Javascript | Rust | Go | C | Cpp | Swift | Java | Kotlin | Php | Zig | Dart
+  | Scala | Csharp -> Some (Ide_memo.Line "//")
+  | Python | Ruby | Bash | Yaml | Elixir -> Some (Ide_memo.Line "#")
+  | Lua | Haskell -> Some (Ide_memo.Line "--")
+  | Markdown -> Some (Ide_memo.Block { opens = "<!--"; closes = "-->" })
+  | Json -> None
+;;
+
+type memo_line_refusal =
+  | Extension_unknown of string
+  | No_comment_syntax of language
+
+let memo_line_refusal_to_string = function
+  | Extension_unknown "" -> "the file has no extension, so no language here owns it"
+  | Extension_unknown ext -> Printf.sprintf "no language here owns the extension %s" ext
+  | No_comment_syntax language ->
+    Printf.sprintf "%s has no comment syntax, so a memo cannot stand in it"
+      (lang_id_of_language language)
+;;
+
+(* The comment line a memo becomes in the file at [path]. One function, so
+   the tool that writes the line and the projection that records the call
+   spell it the same way. *)
+let memo_line ~path (memo : Ide_memo.t) =
+  let extension = String.lowercase_ascii (Filename.extension path) in
+  match language_of_extension extension with
+  | None -> Error (Extension_unknown extension)
+  | Some language ->
+    (match memo_markers_of_language language with
+     | None -> Error (No_comment_syntax language)
+     | Some markers -> Ok (Ide_memo.to_line markers memo))
 ;;
 
 let covered_extensions () = List.concat_map extensions_of_language all_languages

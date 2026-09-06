@@ -1354,7 +1354,8 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
             { Pane.file_path = change_row_address change
             ; file_kind =
                 (match change.fc_kind with
-                 | Masc.Tui_decode.Fc_edited _ -> Pane.File_edited
+                 | Masc.Tui_decode.Fc_edited _ | Masc.Tui_decode.Fc_inserted _ ->
+                   Pane.File_edited
                  | Masc.Tui_decode.Fc_written _ -> Pane.File_written)
             ; file_succeeded = change.fc_succeeded
             ; file_at = change.fc_at
@@ -1397,6 +1398,7 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
         { Pane.name = keeper.k_name
         ; mark = Masc_tui_keeper_mark.glyph ~paused reading_of_health
         ; mark_tone
+        ; health = reading_of_health
         ; trace_id = keeper.k_trace_id
         })
       state.keepers
@@ -8432,6 +8434,20 @@ let keeper_message_tool_activity_details state ~keeper_name
    own file changes. The committed history and the turn still streaming both
    ask this, so a diff folded into the history and the same diff arriving live
    cannot be projected two ways. *)
+(* One step. Deep enough that a call reads as belonging to the rollup above
+   it, shallow enough that a block of eight calls does not walk off the pane
+   on a narrow terminal. *)
+let tool_detail_indent = "  "
+
+(* How wide one body line runs. Floored so a narrow pane still shows
+   something and capped so a wide one does not run a sentence past where the
+   eye returns; the eight is the gutter and the space that follows it.
+
+   Shared by everything that has to decide what fits on a line, because two
+   readers with two budgets wrap the same pane at two places. *)
+let chat_body_line_cells ~chat_cols ~role_label_column =
+  max 24 (min 120 (chat_cols - role_label_column - 8))
+
 let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection =
   let role_label_column =
     Message_layout.chat_role_label_width ~pane_cells:chat_cols
@@ -8445,7 +8461,7 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
   let rows =
     Keeper_chat_diff.rows
     ~mode
-    ~max_line_cells:(max 24 (min 120 (chat_cols - role_label_column - 8)))
+    ~max_line_cells:(chat_body_line_cells ~chat_cols ~role_label_column)
     ~activity_details:(keeper_message_tool_activity_details state ~keeper_name)
     file_change_index projection
   in
@@ -8455,7 +8471,14 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
      with four tool blocks carried the same sentence four times -- which is
      what pushed the tool names onto a second line and broke the read of the
      conversation they sit inside. *)
-  rows
+  match projection.Keeper_chat_transcript.header with
+  | None -> rows
+  | Some header ->
+      (* The rollup is the block's first line and the calls hang under it,
+         one step in. The projection knows which line is the header; how far
+         the calls sit from it is this pane's decision, so the indent is
+         applied here rather than baked into the strings upstream. *)
+      header :: List.map (fun row -> tool_detail_indent ^ row) rows
 
 (* Every committed row of one keeper's conversation, as the layout entries the
    pane draws -- the grouping, the aligned badges, the tool projections, and
@@ -8569,10 +8592,38 @@ let keeper_message_visible_messages ?messages (state : state) ~keeper_name =
    said, and they were drawn at the same depth as the answer -- same column,
    same indent, same clock -- so a turn's work read as a sibling of its speech.
    They hang off the trunk instead. *)
-let turn_rail_of ~(edge : Masc_tui_types.turn_edge)
+(* Which siding a row came in on, or [None] when it is not an arrival.
+
+   Exhaustive on purpose: a new row kind has to say whether it arrived from
+   outside, and the compiler is the only thing that will ask.
+
+   [Sent_by_operator] is not here. A prompt the operator sent from another
+   surface did arrive from outside, but which surface is in the label's text
+   and not in the constructor, and reading it back out of the string is the
+   pane deciding something the type never recorded. *)
+let siding_of_message (message : Masc_tui_types.msg_entry) =
+  match message.me_role with
+  | Masc_tui_types.Message_memory -> Some Message_layout.Siding_journal
+  | Masc_tui_types.Message_user (Masc_tui_types.Sent_by_other _) ->
+      Some Message_layout.Siding_arrival
+  | Masc_tui_types.Message_user (Masc_tui_types.Sent_by_operator _)
+  | Masc_tui_types.Message_keeper | Masc_tui_types.Message_autonomous
+  | Masc_tui_types.Message_status | Masc_tui_types.Message_local
+  | Masc_tui_types.Message_error | Masc_tui_types.Message_tool
+  | Masc_tui_types.Message_skill _ | Masc_tui_types.Message_thinking ->
+      None
+
+(* [siding] only reaches the rail through [Turn_outside]: a row that owns a
+   request is on the line whoever sent it, and a broadcast that opened a turn
+   is that turn's first row rather than something beside it. *)
+let turn_rail_of ~siding ~(edge : Masc_tui_types.turn_edge)
     ~(style : Message_layout.style) =
   match edge with
-  | Turn_outside | Turn_alone -> Message_layout.Rail_none
+  | Turn_outside -> (
+      match siding with
+      | Some siding -> Message_layout.Rail_joins siding
+      | None -> Message_layout.Rail_none)
+  | Turn_alone -> Message_layout.Rail_none
   | Turn_opens -> Message_layout.Rail_opens
   | Turn_closes -> Message_layout.Rail_closes
   | Turn_continues -> (
@@ -8725,6 +8776,16 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                   match message.me_memory_summary with
                   | Some summary -> summary ^ " · Ctrl-N: journal detail"
                   | None -> message.me_text))
+          (* Only a gated row: a Gate step's text ends in the argument the
+             call asked for, while a status row without one is a sentence the
+             server composed and has nothing to fold away. *)
+          | Message_status when message.me_gate <> None -> (
+              match tool_projection_mode state with
+              | Keeper_chat_transcript.Full -> message.me_text
+              | Keeper_chat_transcript.Compact ->
+                  Masc_tui_gate_text.folded_argument
+                    ~cap:(chat_body_line_cells ~chat_cols ~role_label_column)
+                    message.me_text)
           | Message_thinking | Message_user _ | Message_keeper
           | Message_autonomous
           | Message_status | Message_local | Message_error ->
@@ -8810,7 +8871,8 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                    observed_at = message.me_at;
                    entry_index;
                  };
-             turn_rail = turn_rail_of ~edge ~style;
+             turn_rail =
+               turn_rail_of ~siding:(siding_of_message message) ~edge ~style;
            }
             : Message_layout.entry))
       visible_entries
@@ -9461,7 +9523,8 @@ let render_keeper_message (state : state) =
                       body;
                       markdown_source;
                       turn_rail =
-                        turn_rail_of ~edge:Masc_tui_types.Turn_continues ~style;
+                        turn_rail_of ~siding:None
+                          ~edge:Masc_tui_types.Turn_continues ~style;
                     }
                      : Message_layout.entry)
                in
@@ -9623,10 +9686,16 @@ let render_keeper_message (state : state) =
                 | false, true -> Turn_closes
                 | false, false -> Turn_continues
               in
+              let siding =
+                match tag with
+                | Tagged_row message -> siding_of_message message
+                | Tagged_block _ -> None
+              in
               ( tag
               , { entry with
                   Message_layout.turn_rail =
-                    turn_rail_of ~edge ~style:entry.Message_layout.style
+                    turn_rail_of ~siding ~edge
+                      ~style:entry.Message_layout.style
                 } )
           | Some _, None | None, Some _ | None, None -> item)
         merged
@@ -12853,6 +12922,7 @@ let change_row_summary (change : Masc.Tui_decode.file_change) =
   let content =
     match change.Masc.Tui_decode.fc_kind with
     | Masc.Tui_decode.Fc_edited { after; _ } -> Terminal_text.preview_line after
+    | Masc.Tui_decode.Fc_inserted { text; _ } -> Terminal_text.preview_line text
     | Masc.Tui_decode.Fc_written { content } ->
       Printf.sprintf "(wrote %d bytes)" (String.length content)
   in
@@ -12865,6 +12935,7 @@ let change_row_summary (change : Masc.Tui_decode.file_change) =
 let change_kind_badge (change : Masc.Tui_decode.file_change) =
   match change.Masc.Tui_decode.fc_kind with
   | Masc.Tui_decode.Fc_edited _ -> Theme.category Theme.Slot_4, "EDIT"
+  | Masc.Tui_decode.Fc_inserted _ -> Theme.category Theme.Slot_4, "MEMO"
   | Masc.Tui_decode.Fc_written _ -> (Masc_tui_theme.tone Masc_tui_theme.Accent), "WRITE"
 
 let change_result_badge (change : Masc.Tui_decode.file_change) =
@@ -12909,6 +12980,7 @@ let diff_row_span ~width (row : Diff.row) =
 let change_diff_halves (change : Masc.Tui_decode.file_change) =
   match change.Masc.Tui_decode.fc_kind with
   | Masc.Tui_decode.Fc_edited { before; after; _ } -> (before, after)
+  | Masc.Tui_decode.Fc_inserted { text; _ } -> ("", text)
   | Masc.Tui_decode.Fc_written { content } -> ("", content)
 
 let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
@@ -12945,6 +13017,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
            one pair without saying so would undercount the change. *)
         [ turn; "  replace_all: every occurrence changed; the log holds the text once" ]
     | Masc.Tui_decode.Fc_edited { replace_all = false; _ }
+    | Masc.Tui_decode.Fc_inserted _
     | Masc.Tui_decode.Fc_written _ -> [ turn ]
   in
   let notes =
@@ -14921,6 +14994,7 @@ let render_code (state : state) =
                  let kind =
                    match change.fc_kind with
                    | Fc_edited _ -> "EDIT"
+                   | Fc_inserted _ -> "MEMO"
                    | Fc_written _ -> "WRITE"
                  in
                  let result_style, result =

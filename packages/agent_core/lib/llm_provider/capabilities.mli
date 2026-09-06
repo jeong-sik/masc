@@ -228,8 +228,19 @@ val effective_disable_parallel_tool_use
 
 (** Resolve Anthropic thinking control from the model catalog, then the
     capability manifest when the catalog has no matching row. [None] means
-    neither source declares an Anthropic thinking policy. *)
+    neither source declares an Anthropic thinking policy. Bare rows only: the
+    lookup skips provider-qualified rows. *)
 val anthropic_thinking_control_for_model_id : string -> anthropic_thinking_control option
+
+(** Same resolution scoped to a provider label: the provider-qualified row is
+    consulted first, so a model declared under a provider (deepseek on the
+    Anthropic-compatible surface) resolves its policy on the non-exact path
+    too. [None] when the provider row declares no policy; the caller decides
+    whether to fall back to the bare reading. *)
+val anthropic_thinking_control_for_provider_model_id
+  :  provider_label:string
+  -> model_id:string
+  -> anthropic_thinking_control option
 
 (** Look up capabilities for [model_id] in the loaded model catalog only
     (no manifest consultation).

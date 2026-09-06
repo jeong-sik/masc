@@ -46,8 +46,8 @@ let entries events =
   |> List.map (fun (at, event) -> { Acting.ae_at = at; ae_event = event })
   |> List.sort (fun a b -> Float.compare b.Acting.ae_at a.Acting.ae_at)
 
-let keeper ?(mark = "\xe2\x97\x8f") ?(tone = Pane.Ok) name : Pane.keeper =
-  { Pane.name; mark; mark_tone = tone; trace_id = "trace-" ^ name }
+let keeper ?(mark = "\xe2\x97\x8f") ?(tone = Pane.Ok) ?(health = None) name : Pane.keeper =
+  { Pane.name; mark; mark_tone = tone; health; trace_id = "trace-" ^ name }
 
 let lane = "agent_core-glm-coding.glm-5.3"
 
@@ -128,6 +128,44 @@ let index_of_in texts name =
   go 0 texts
 
 let index_of name = index_of_in texts name
+
+(* goner's process is gone: the mark says the keeper is not there, the
+   health reading is Offline. Its last turn never settled — the end event
+   died with the keeper — so neither the fleet row nor the focus block may
+   read that turn as running. *)
+let dead_fixture : Pane.input =
+  { fixture with
+    Pane.keepers =
+      keeper ~mark:"\xc3\x97" ~tone:Pane.Bad
+        ~health:(Some Masc.Tui_decode.Health_offline) "goner"
+      :: fixture.Pane.keepers
+  ; selected = Some "goner"
+  ; entries =
+      fixture.Pane.entries
+      @ entries
+          [ ( 995.
+            , agent_core ~kind:Observer.Turn_started ~turn:7 ~at:995.
+                ~correlation:"trace-goner" lane )
+          ; ( 996.
+            , agent_core ~tool:"Read" ~turn:7 ~tool_use_id:"c" ~at:996.
+                ~correlation:"trace-goner" lane )
+          ]
+  }
+
+let dead_drawn = Pane.lines ~rows ~cols ~scroll:0 dead_fixture
+let dead_texts = List.map text dead_drawn.Pane.rows
+
+let test_a_gone_keepers_turn_is_not_read_as_running () =
+  let row = find_row_in dead_texts "goner" in
+  check bool "the gone row says unfinished" true (contains "unfinished" row);
+  check bool "the gone row does not say running" false (contains "running" row)
+
+let test_a_gone_keepers_focus_header_says_unfinished () =
+  let header = index_of_in dead_texts "turn 7" in
+  check bool "the focus header says unfinished" true
+    (contains "unfinished" (List.nth dead_texts header));
+  check bool "the focus header does not say in turn" false
+    (contains "in turn" (List.nth dead_texts header))
 
 (* ── width contract ─────────────────────────────────────────────────── *)
 
@@ -405,9 +443,10 @@ let test_changes_overflow_folds_and_scrolls () =
 let test_state_text_reads_each_case () =
   let plain spans = String.concat "" (List.map (fun s -> s.Pane.text) spans) in
   check bool "approval outranks a running turn" true
-    (contains "approval" (plain (Pane.keeper_state_text ~now ~approval:(Some "Write") None)));
+    (contains "approval"
+       (plain (Pane.keeper_state_text ~now ~health:None ~approval:(Some "Write") None)));
   check string "no chunk is quiet" "\xc2\xb7 quiet"
-    (plain (Pane.keeper_state_text ~now ~approval:None None))
+    (plain (Pane.keeper_state_text ~now ~health:None ~approval:None None))
 
 let test_tokens_and_ages_are_compact () =
   check string "both sides summed" "74.2k tok" (Pane.tokens_text (Some 73_877, Some 358));
@@ -439,6 +478,12 @@ let () =
         ; test_case "focus falls back to who acted last" `Quick
             test_focus_falls_back_to_who_acted_last
         ; test_case "narrow budget folds the fleet" `Quick test_narrow_budget_folds_the_fleet
+        ] )
+    ; ( "a gone keeper"
+      , [ test_case "a gone keeper's turn is not read as running" `Quick
+            test_a_gone_keepers_turn_is_not_read_as_running
+        ; test_case "a gone keeper's focus header says unfinished" `Quick
+            test_a_gone_keepers_focus_header_says_unfinished
         ] )
     ; ( "targets"
       , [ test_case "targets name the keeper under each fleet row" `Quick

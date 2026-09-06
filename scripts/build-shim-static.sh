@@ -70,8 +70,18 @@ cp "$repo_root/lib/exec_ssh_protocol/exec_ssh_protocol.ml" \
    "$repo_root/lib/exec_shim/exec_shim.mli" \
    "$repo_root/lib/exec_shim/prctl_stub.c" \
    "$repo_root/lib/exec_shim/observe_stub.c" \
+   "$repo_root/lib/exec_shim/shim_build_id.ml" \
+   "$repo_root/lib/exec_shim/shim_build_id.mli" \
    "$repo_root/bin/masc_exec_shim.ml" \
    "$stage/src/"
+
+# Stamp the build discriminator over the in-repo empty suffix, so the
+# artifact's probe answer names the commit it came from. git is a build
+# dependency here the way dune is; a build outside a git tree falls back to
+# the date, which still distinguishes two builds of the same day.
+build_id="$(git -C "$repo_root" rev-parse --short=8 HEAD 2>/dev/null \
+  || date -u +%Y%m%d)"
+printf 'let suffix = "+%s"\n' "$build_id" > "$stage/src/shim_build_id.ml"
 
 cat > "$stage/src/dune-project" <<'EOF'
 (lang dune 3.0)
@@ -85,7 +95,7 @@ cat > "$stage/src/dune" <<'EOF'
 
 (library
  (name exec_shim)
- (modules exec_shim)
+ (modules exec_shim shim_build_id)
  (libraries exec_ssh_protocol unix)
  (foreign_stubs
   (language c)

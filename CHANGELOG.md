@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **The installer places the guest exec shim, and the boot verifies it.**
+  `scripts/install.sh` downloads `masc-exec-shim-linux-<guest arch>` from the
+  release beside the other companions, places it at
+  `<base>/.masc/microvm/shim/masc-exec-shim`, and writes the release's sha256
+  next to it as `masc-exec-shim.sha256`; `--no-guest-shim` skips it. A microvm
+  boot compares the binary with that sidecar and refuses a mismatch as
+  `microvm_shim_hash_mismatch`; a shim without a sidecar (hand-built) runs
+  unverified and the boot log says so. The release job's installer smoke
+  covers both paths (RFC-0427 B-2).
 - **The release ships the exec shim.** Every tagged release now carries
   `masc-exec-shim-linux-arm64` and `masc-exec-shim-linux-amd64`, built
   statically on a runner of the same architecture and probed before upload.

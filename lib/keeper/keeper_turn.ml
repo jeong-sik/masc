@@ -453,8 +453,11 @@ let run_keeper_invocation_turn_admitted_inner
       (* RFC vision-delegation §2.3 site 1 (fresh input). For a keeper whose
          runtime cannot take an image on its own,
          evict each image to the artifact store + an eager analyze_image reading
-         BEFORE it enters the turn, so the main history stays text-only and
-         RFC-0265 never recomputes required=['image'] from it. A runtime that
+         BEFORE it enters the turn, so inline pixels never reach the main
+         history and RFC-0265 never recomputes required=['image'] from them.
+         A Url/File_id reference passes through (#33682): the degrade floor
+         strips it from a text-only runtime's dispatch view while the
+         reference itself stays requestable. A runtime that
          takes the image itself keeps it — seeing the pixels beats a reading. *)
       let user_blocks =
         Option.map

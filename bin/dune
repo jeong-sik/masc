@@ -1354,3 +1354,19 @@
   masc_tui_ansi
   masc_tui_image_mosaic
   msx))
+
+;; RFC-0429 §3.0: the same HTTP client the TUI uses, with no TUI around it.
+;; A request the server answers in milliseconds is logged by the live TUI as
+;; taking seconds; this separates the transport from the loop it runs in.
+(executable
+ (name masc_http_probe)
+ (modules masc_http_probe)
+ (public_name masc-http-probe)
+ (package masc)
+ (libraries
+  masc.http_client
+  masc.masc_eio_context
+  eio
+  eio_main
+  unix
+  mtime.clock.os))

@@ -1742,21 +1742,25 @@ type prompt_operator_surface =
   | Prompt_primary
   | Prompt_fragment
 
+(** Where the effective text came from. The server resolves this once, in
+    [Prompt_registry_types.resolve_source], and it is the whole answer: an
+    operator editing an overridden prompt is editing the override, and
+    clearing it returns the file's words rather than emptying the prompt.
+
+    The wire also carries [has_override] and [file_exists], the two booleans
+    resolution consumed. Decoding them here would give the TUI a second way to
+    spell the same decision, and it had one: the list mark and the detail line
+    each classified separately, in the same file, fifty lines apart.
+
+    [decode_prompts] rejects the whole snapshot when any row fails, as it
+    already does for a row with no key or a partial variable list, so an
+    unknown word here empties the pane rather than mislabelling one row. That
+    is the older contract, not a new one, and it is the honest reading: an
+    unrecognised word means the server and this build disagree. *)
 type prompt_source =
   | Prompt_override
   | Prompt_file
   | Prompt_missing
-      (** Where the effective text came from. The server resolves this once,
-          in [Prompt_registry_types.resolve_source], and it is the whole
-          answer: an operator editing an overridden prompt is editing the
-          override, and clearing it returns the file's words rather than
-          emptying the prompt.
-
-          The wire also carries [has_override] and [file_exists], the two
-          booleans resolution consumed. Decoding them here would give the TUI
-          a second way to spell the same decision, and it had one: the list
-          mark and the detail line each classified separately, in the same
-          file, fifty lines apart. *)
 
 type prompt_row = {
   pr_key : string;

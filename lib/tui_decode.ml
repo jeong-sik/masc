@@ -6981,6 +6981,7 @@ let decode_prompt_row json =
     | `String "file" -> Ok Prompt_file
     | `String "missing" -> Ok Prompt_missing
     | `String value -> Error (Printf.sprintf "unknown prompt source %S" value)
+    | `Null -> Error (Printf.sprintf "missing required field '%s'" "source")
     | value -> field_type_error "source" "a string" value
   in
   Ok

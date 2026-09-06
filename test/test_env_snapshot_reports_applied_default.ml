@@ -28,6 +28,40 @@ let entry_default ~env_name =
     | _ -> None)
 ;;
 
+(* Every knob [Env_setting] declares must reach this JSON.
+
+   The first shape of this tried a registry filled at declaration time. OCaml
+   links only the modules a binary references, so this executable never linked
+   the declaring module and the catalogue reported nothing -- this case is what
+   caught it. The declarations are a closed vocabulary now, which is why the
+   list is complete regardless of what a binary happens to link. *)
+let reported_env_names () =
+  Env_config_snapshot.all_categories ()
+  |> List.concat_map (fun (_category, entries) ->
+    match entries with
+    | `List entries -> entries
+    | _ -> [])
+  |> List.filter_map (function
+    | `Assoc fields ->
+      (match List.assoc_opt "env" fields with
+       | Some (`String name) -> Some name
+       | _ -> None)
+    | _ -> None)
+;;
+
+let test_declarations_reach_the_operator_surface () =
+  let declared = Env_setting.all_rows in
+  check bool "at least one knob is declared" true (declared <> []);
+  let reported = reported_env_names () in
+  let missing =
+    declared
+    |> List.filter (fun (row : Env_setting.row) ->
+      not (List.exists (String.equal row.env_name) reported))
+    |> List.map (fun (row : Env_setting.row) -> row.env_name)
+  in
+  check (list string) "declared knobs the snapshot omits" [] missing
+;;
+
 let test_max_connections_matches_the_server () =
   match entry_default ~env_name:"MASC_HTTP_MAX_CONNECTIONS" with
   | [ reported ] ->
@@ -154,6 +188,10 @@ let () =
             "pure projection redacts explicit observations"
             `Quick
             test_pure_projection_redacts_explicit_observation
+        ; test_case
+            "declarations reach the operator surface"
+            `Quick
+            test_declarations_reach_the_operator_surface
         ] )
     ]
 ;;

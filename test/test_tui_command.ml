@@ -56,6 +56,8 @@ let describe = function
   | Command.View_image_missing_path -> "image-missing-path"
   | Command.Attach_image path -> "attach:" ^ path
   | Command.Attach_image_missing_path -> "attach-missing-path"
+  | Command.Attach_image_ref value -> "ref:" ^ value
+  | Command.Attach_image_ref_missing_value -> "ref-missing-value"
   | Command.Preset_list -> "preset-list"
   | Command.Preset_save { name; description } ->
       Printf.sprintf "preset-save:%s|%s" name description
@@ -63,6 +65,16 @@ let describe = function
   | Command.Preset_restore name -> "preset-restore:" ^ name
   | Command.Preset_restore_missing_name -> "preset-restore-missing-name"
   | Command.Unknown word -> "unknown:" ^ word
+
+let test_ref_command_parses_url_and_bare_id () =
+  check (list string) "a whole http(s) URL and a bare id both stage as references"
+    [ "ref:https://example.test/a.png"; "ref:file-abc123" ]
+    (List.map
+       (fun line -> describe (Command.parse line))
+       [ "/ref https://example.test/a.png"; "/ref file-abc123" ]);
+  check string "no value names the miss"
+    "ref-missing-value"
+    (describe (Command.parse "/ref"))
 
 let test_plain_text_is_a_message () =
   check (list string) "text, blanks, and a slash that is not first are messages"
@@ -503,16 +515,34 @@ let test_the_typed_run_is_what_was_pressed () =
   (* One candidate left, so the argument comes along with it. *)
   check string "a prefix highlights through the slash"
     "T[/ta]U[sk]D[ <title>]" (spans "/ta");
-  (* Four left, so names only -- and each carries the same typed run. The
-     separator is one space. *)
-  check string "one glyph, four candidates"
-    "T[/t]U[ask]D[ ]T[/t]U[hinking]D[ ]T[/t]U[ools]D[ ]T[/t]U[elemetry]" (spans "/t");
-  (* The bare slash draws its shared prefix once, then what fits. The catalog
-     outgrew an 80-column composer, so the row says how many words it could
-     not carry and points at the list that is complete by definition. *)
-  check string "the bare slash highlights only itself"
-    "T[/]U[task keeper settings diff changes interrupt steer thinking]D[ +14 more (/help)]"
-    (spans "/")
+  (* Several left, so names only -- and each carries the same typed run. The
+     word list itself is deliberately not pinned: the catalog grows without
+     this test's leave, and the row's real contract (same typed run, one-space
+     separator, elision marker naming the count) is what [test_the_bare_slash_
+     row_is_bounded_by_its_width] below already asserts. *)
+  let t_spans = Command.hint_spans (Command.hint "/t") in
+  check bool "one glyph still offers several name-only candidates" true
+    (List.length t_spans >= 4
+     && List.for_all
+          (function
+            | Command.Typed "/t" | Command.Untyped _ | Command.Detail " " -> true
+            | _ -> false)
+          t_spans);
+  (* The bare slash draws its shared prefix once, then what fits; the row says
+     how many words it could not carry and points at the complete list. *)
+  check bool "the bare slash highlights only itself and elides the rest" true
+    (let bare = spans "/" in
+     (* ...D[ +N more (/help)] -- an elided row carries the marker; the count
+        itself is the catalog's business, not this contract's. *)
+     let tail = " more (/help)]" in
+     let tail_len = String.length tail in
+     String.starts_with ~prefix:"T[/]U[" bare
+     && String.length bare > tail_len
+     && String.sub bare (String.length bare - tail_len) tail_len = tail
+     && let head =
+          String.sub bare 0 (String.length bare - tail_len)
+        in
+        String.contains head '+')
 
 (* The row an operator types knowing nothing is the one that must not run off
    the pane, and it used to be sized by how many commands happened to exist:
@@ -609,9 +639,9 @@ let test_autocomplete_unique_prefix () =
   check (option string) "/se -> /settings" (Some "/settings") (Command.autocomplete "/se");
   (* Two words each, so neither is a unique prefix any more: [m] stops at the
      shared "me" of memory and metrics, and [c] has nothing shared past the
-     letter itself, so it offers the first of changes and context. *)
+     letter itself, so it offers the catalog's first c-word (cost, today). *)
   check (option string) "/m -> /me" (Some "/me") (Command.autocomplete "/m");
-  check (option string) "/c -> /changes" (Some "/changes") (Command.autocomplete "/c");
+  check (option string) "/c -> /cost" (Some "/cost") (Command.autocomplete "/c");
   check (option string) "/h -> /help" (Some "/help") (Command.autocomplete "/h");
   check (option string) "/zork -> None" None (Command.autocomplete "/zork")
 
@@ -776,6 +806,8 @@ let () =
   run "tui command"
     [ ( "composer"
       , [ test_case "plain text is a message" `Quick test_plain_text_is_a_message
+        ; test_case "ref command parses url and bare id" `Quick
+            test_ref_command_parses_url_and_bare_id
         ; test_case "keeper names resolve by unique prefix" `Quick
             test_keeper_names_resolve_by_unique_prefix
         ; test_case "pane commands parse by word" `Quick

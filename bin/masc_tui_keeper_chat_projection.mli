@@ -8,11 +8,20 @@ type attachment = {
   data : string;
 }
 
+(** An image reference staged with [:ref] (#33728): an external http(s) URL
+    the provider fetches, or a Files-API id an upload minted. Travels as its
+    user_block carrier only — no bytes, so it never enters the attachments
+    array. *)
+type image_reference =
+  | Ref_url of string
+  | Ref_file_id of string
+
 type request = {
   request_id : string;
   keeper_name : string;
   message : string;
   attachments : attachment list;
+  references : image_reference list;
 }
 
 type acceptance_state =
@@ -168,6 +177,7 @@ val validate_custom_value
 
 val create_request :
   ?attachments:attachment list ->
+  ?references:image_reference list ->
   keeper_name:string ->
   message:string ->
   unit ->

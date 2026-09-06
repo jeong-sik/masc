@@ -51,6 +51,46 @@ supports_native_streaming = true
 input_per_million = 0.44
 output_per_million = 1.32
 
+# 2026-09-06 RFC-0430 Phase 2: the same two models over the native
+# Responses API. The provider's /responses request_path selects the
+# Openai_responses codec, whose reasoning rides reasoning.effort
+# (none|low|high|max per the guide; accepted here are the model's
+# high|max). Stateless — previous_response_id/store are ignored by the
+# endpoint. Probed live 2026-09-06.
+[[models]]
+id_prefix = "deepseek-v4-pro"
+base = "openai_chat_extended"
+provider_name = "deepseek-responses"
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["high", "max"]
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_native_streaming = true
+input_per_million = 1.32
+output_per_million = 3.96
+
+[[models]]
+id_prefix = "deepseek-v4-flash"
+base = "openai_chat_extended"
+provider_name = "deepseek-responses"
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["high", "max"]
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_native_streaming = true
+input_per_million = 0.44
+output_per_million = 1.32
+
 [[models]]
 id_prefix = "claude-mythos-5"
 base = "anthropic"
@@ -2416,6 +2456,19 @@ base_url = "https://api.deepseek.com/anthropic"
 request_path = "/v1/messages"
 api_key_env = "DEEPSEEK_API_KEY"
 capabilities_base = "anthropic"
+
+# 2026-09-06 RFC-0430 Phase 2: DeepSeek's native Responses API
+# (https://api-docs.deepseek.com/guides/responses_api, probed live
+# 2026-09-06 — status "completed", reasoning output items). The request_path
+# selects the Openai_responses codec (provider_http_codec), so this rides the
+# existing responses backend: stateless, terminal events instead of [DONE].
+[[providers]]
+id = "deepseek-responses"
+kind = "openai_compat"
+base_url = "https://api.deepseek.com"
+request_path = "/responses"
+api_key_env = "DEEPSEEK_API_KEY"
+capabilities_base = "openai_chat"
 
 [[providers]]
 id = "gemini"

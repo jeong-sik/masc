@@ -2549,6 +2549,13 @@ kind = "kimi"
 identity_kinds = ["kimi", "openai_compat"]
 base_url = "https://api.kimi.com/coding"
 request_path = "/v1/messages"
+# Same split as ollama_cloud below: the native path is Anthropic-shaped, so an
+# openai_compat caller taking it would post an OpenAI body to /coding/v1/messages.
+# Both routes answer 401 unauthenticated while a made-up path under the same
+# prefix answers 404, so the openai route is present, not a catch-all
+# (probed 2026-09-06). No runtime row addresses this provider today; the
+# declaration is here so the wire is named where it is read, not guessed.
+request_path_by_identity_kind = { openai_compat = "/v1/chat/completions" }
 api_key_env = "KIMI_API_KEY"
 capabilities_base = "kimi"
 identity_hosts = ["api.kimi.com"]
@@ -2560,10 +2567,11 @@ identity_kinds = ["ollama", "openai_compat"]
 capabilities_base_by_identity_kind = { openai_compat = "ollama_cloud_v1" }
 base_url = "https://ollama.com"
 request_path = "/api/chat"
-# The second wire answers somewhere else. Both routes exist on the host
-# (401 unauthenticated, probed 2026-09-06); what did not exist is the mixture
-# a caller got by taking this row's native path onto an operator-configured
-# /v1 base: https://ollama.com/v1/api/chat, 404 on every turn.
+# The second wire answers somewhere else. Both routes exist on the host: 401
+# unauthenticated, while a made-up path under the same prefix answers 404, so
+# the 401 is routing and not a catch-all (probed 2026-09-06). What did not
+# exist is the mixture a caller got by taking this row's native path onto an
+# operator-configured /v1 base: https://ollama.com/v1/api/chat, 404 every turn.
 request_path_by_identity_kind = { openai_compat = "/chat/completions" }
 api_key_env = "OLLAMA_CLOUD_API_KEY"
 capabilities_base = "ollama_cloud"

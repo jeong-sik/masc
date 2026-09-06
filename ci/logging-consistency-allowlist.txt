@@ -86,6 +86,11 @@ bin/deployment_preflight_helper.ml
 # per-trial verdicts are the measurement the operator asked for, not server
 # records.
 bin/masc_lane_cli_probe.ml
+# masc_http_probe times the TUI's HTTP client with no TUI around it
+# (RFC-0429 §3.0). Its per-trial readings and its usage diagnostics are the
+# measurement the operator asked for; sending them to the log file would
+# hide them from the terminal that ran the probe.
+bin/masc_http_probe.ml
 
 # --- Before the screen, and before the log ---
 # masc_tui writes to stderr while deciding where stderr goes; saying it

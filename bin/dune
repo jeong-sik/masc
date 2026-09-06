@@ -378,7 +378,9 @@
  (modules masc_tui_gate_text)
  ;; The wording is a function of Keeper_chat_store's closed phase sum, so a
  ;; phase the store adds fails this compile instead of drawing as unknown.
- (libraries masc))
+ ;; message_layout for terminal cells: folding an argument to fit a line is
+ ;; a question about width, and this module already owns what the row says.
+ (libraries masc masc_tui_message_layout))
 
 (library
  (name masc_tui_preset_text)
@@ -740,6 +742,9 @@
  (wrapped false)
  (modules masc_tui_acting_pane)
  (libraries
+  masc ; the health reading is a typed variant: the pane decides what a gone
+       ; keeper's unsettled turn may claim, as masc_tui_keeper_mark already
+       ; reads the same variant for its glyph.
   masc_tui_acting
   masc_tui_observer
   masc_tui_message_layout

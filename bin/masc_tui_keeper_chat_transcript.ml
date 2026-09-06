@@ -71,7 +71,8 @@ type tool_projection_mode =
 
 type tool_projection =
   { activities : tool_activity list
-  ; rows : string list
+  ; header : string option
+  ; details : string list
   ; hidden_activity_rows : int
   ; omitted_steps : int
   ; summary_outcome : tool_outcome option
@@ -639,33 +640,61 @@ let compact_activity_kinds activities =
    view and therefore stays byte-compatible with the old formatter. [Compact]
    folds only the presentation rows; it reports exactly how many detail rows
    it hid and keeps failures/open calls visible in its outcome summary. *)
-let project_tool_block mode (block : tool_block) =
-  let activity_count = List.length block.activities in
-  let full_activity_rows = render_activity_rows block.activities in
-  let activity_rows, hidden_activity_rows, summary_outcome =
-    match mode, block.activities with
-    | (Full | Compact), ([] | [ _ ]) ->
-        full_activity_rows, 0, None
-    | Full, _ -> full_activity_rows, 0, None
-    | Compact, activities ->
-        let mix = compact_tool_mix activities in
-        let kinds =
-          match compact_activity_kinds activities with
-          | [] -> ""
-          | kinds -> " · " ^ String.concat " · " kinds
-        in
-        let hidden_activity_rows = List.length full_activity_rows in
-        (* What ran and what came of it are two questions, and the fold
-           answered both on one line: a run of names and counts, then a run
-           of outcomes and counts, five clauses deep with nowhere for the eye
-           to land. Calls that returned belong with the inventory -- they are
-           what ran, finished. Everything still open or failed gets a line of
-           its own under its own mark, so a block's trouble is a line rather
-           than a clause in the middle of one.
+(* The block's rollup, on a line of its own. [folded] is how many detail rows
+   sit behind it: zero when the details are drawn underneath, and the count
+   when they are not. A rollup reading "0 details folded" would describe a
+   fold that is not there.
 
-           A block keeps its single line when nothing needs the second one:
-           every call accounted for, or too few calls for the split to save
-           anything. *)
+   [outcomes] is passed rather than derived because the two modes count
+   different calls: folded, the trouble gets a line of its own and the rollup
+   speaks for what is left; unfolded, every call is visible and the rollup
+   speaks for all of them.
+
+   Assembled from parts instead of one format string so a part with nothing
+   to say drops out, rather than leaving an empty clause between two
+   separators. *)
+let inventory_row ~folded ~outcomes activities =
+  let parts =
+    (Printf.sprintf "Tools %d" (List.length activities)
+     :: compact_activity_kinds activities)
+    @ compact_tool_parts activities
+    @ outcomes
+    @ (if folded = 0 then [] else [ plural folded "detail" ^ " folded" ])
+  in
+  safe_line
+    (Printf.sprintf "%s %s"
+       (compact_marker activities)
+       (String.concat " \xc2\xb7 "
+          (List.filter (fun part -> String.trim part <> "") parts)))
+
+(* A block is a header and the calls under it. Which of the two a mode drops
+   is the whole of the difference: [Compact] keeps the header and folds the
+   calls away, [Full] keeps both. Neither draws a header over a single call --
+   a summary of one call is that call, said twice. *)
+let project_tool_block mode (block : tool_block) =
+  let full_activity_rows = render_activity_rows block.activities in
+  let header, activity_rows, hidden_activity_rows, summary_outcome =
+    match mode, block.activities with
+    | (Full | Compact), ([] | [ _ ]) -> None, full_activity_rows, 0, None
+    | Full, activities ->
+        ( Some
+            (inventory_row ~folded:0
+               ~outcomes:(compact_outcome_parts activities)
+               activities)
+        , full_activity_rows
+        , 0
+        (* Nothing is behind a fold, so the block has no folded state for its
+           colour to stand for. The header carries its own mark in the text. *)
+        , None )
+    | Compact, activities ->
+        let hidden_activity_rows = List.length full_activity_rows in
+        (* What ran and what came of it are two questions, and one line
+           answered both: a run of names and counts, then a run of outcomes
+           and counts, five clauses deep with nowhere for the eye to land.
+           Calls that returned belong with the inventory -- they are what ran,
+           finished. Everything still open or failed gets a line of its own
+           under its own mark, so a block's trouble is a line rather than a
+           clause in the middle of one. *)
         let inventory_activities, trouble_activities =
           List.partition
             (fun activity ->
@@ -685,24 +714,12 @@ let project_tool_block mode (block : tool_block) =
            saves one: at two calls a split block draws the two rows Full
            draws, and Full's rows carry each call's subject and duration. *)
         let trouble_activities =
-          if activity_count > 2 then trouble_activities else []
+          if List.length activities > 2 then trouble_activities else []
         in
         let inventory_activities =
           match trouble_activities with
           | [] -> activities
           | _ :: _ -> inventory_activities
-        in
-        let inventory =
-          let outcomes =
-            match compact_outcome_parts inventory_activities with
-            | [] -> ""
-            | parts -> String.concat ", " parts ^ " · "
-          in
-          safe_line
-            (Printf.sprintf "%s Tools %d%s · %s · %s%s folded"
-               (compact_marker activities)
-               activity_count kinds mix outcomes
-               (plural hidden_activity_rows "detail"))
         in
         (* The mark is the block's own: compact_outcome tests exactly the four
            outcomes this list holds, so the two calls cannot disagree while
@@ -717,16 +734,21 @@ let project_tool_block mode (block : tool_block) =
                    (String.concat ", " (compact_outcome_parts trouble)))
             ]
         in
-        ( inventory :: trouble_rows
+        ( Some
+            (inventory_row ~folded:hidden_activity_rows
+               ~outcomes:(compact_outcome_parts inventory_activities)
+               activities)
+        , trouble_rows
         , hidden_activity_rows
         , Some (compact_outcome activities) )
   in
-  let rows =
+  let details =
     if block.omitted_steps = 0 then activity_rows
     else activity_rows @ [ omitted_steps_row block.omitted_steps ]
   in
   { activities = block.activities
-  ; rows
+  ; header
+  ; details
   ; hidden_activity_rows
   ; omitted_steps = block.omitted_steps
   ; summary_outcome
@@ -734,7 +756,9 @@ let project_tool_block mode (block : tool_block) =
 
 let tool_rows t =
   let projection = project_tool_block Full (tool_block (tool_calls t)) in
-  projection.rows
+  (* The calls, not the rollup over them: a caller asking for rows wants one
+     row per call, and the header is a fifth thing on a list of four. *)
+  projection.details
 
 type trail_item =
   | Trail_thinking of string list

@@ -1,6 +1,6 @@
 open Keeper_meta_contract
 
-let kind_words = String.concat ", " [ "comment"; "decision"; "question"; "bookmark" ]
+let kind_words = String.concat ", " Ide_memo.kind_words
 
 let handle_ide_annotate_with_outcome
       ~turn_sandbox_factory

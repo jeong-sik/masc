@@ -173,7 +173,7 @@ let external_gate_decision
                   ; "gate_reason"
                   , `String (Keeper_gate.unavailable_reason_to_string reason)
                   ])
-         ; failure_class = Tool_result.Runtime_failure
+         ; failure_class = Tool_result.Dependency_unavailable
          })
   | Keeper_gate.Allow authorization ->
     Log.Keeper.info
@@ -2053,6 +2053,104 @@ let handle_masc_fusion_with_outcome ~(config : Workspace.config) ~(meta : keeper
               , `String "fusion requires the server root switch + net (unavailable)" )
             ]))
 ;;
+
+(* RFC-0430 Phase 3 — masc_file_* provider Files tools. Same root-switch+net
+   gate as fusion (the upload posts over provider HTTP), and the API key comes
+   from the same env the direct provider binding declares. Results are the
+   client's typed decode rendered as JSON — a tool result, never a silent
+   fallback. *)
+let masc_file_failure message =
+  Keeper_tool_execution.failure
+    ~class_:Tool_result.Runtime_failure
+    (Yojson.Safe.to_string (`Assoc [ "ok", `Bool false; "error", `String message ]))
+;;
+
+let handle_masc_file_with_outcome ~name ~args () =
+  let require_env key =
+    match Sys.getenv_opt key with
+    | Some v when v <> "" -> Ok v
+    | _ -> Error ("masc_file requires the " ^ key ^ " environment variable")
+  in
+  match Eio_context.get_root_switch_opt (), Eio_context.get_net_opt () with
+  | Some sw, Some net -> (
+    match name with
+    | "masc_file_upload" -> (
+      match require_env "DEEPSEEK_API_KEY" with
+      | Error msg -> masc_file_failure msg
+      | Ok api_key ->
+        let filename = Tool_args.get_string args "filename" "" in
+        let content_base64 = Tool_args.get_string args "content_base64" "" in
+        let purpose = Tool_args.get_string args "purpose" "user_data" in
+        if filename = "" || content_base64 = "" then
+          masc_file_failure "filename and content_base64 are required"
+        else (
+          (* The boundary only needs to be unique within one request body. *)
+          let boundary = "masc-file-" ^ string_of_int (int_of_float (Unix.time ())) in
+          match
+            Llm_provider.Provider_files.upload ~sw ~net ~api_key ~boundary
+              ~filename ~purpose ~content:content_base64 ()
+          with
+          | Error msg -> masc_file_failure msg
+          | Ok file ->
+            Keeper_tool_execution.of_tool_result
+              (Tool_result.make_ok
+                 ~tool_name:name
+                 ~start_time:0.0
+                 ~data:
+                   (`Assoc
+                      [ ("ok", `Bool true)
+                      ; ("file_id", `String file.Llm_provider.Provider_files.id)
+                      ; ("filename", `String file.Llm_provider.Provider_files.filename)
+                      ; ("bytes", `Int file.Llm_provider.Provider_files.bytes)
+                      ])
+                 ()))
+        )
+    | "masc_file_delete" -> (
+      match require_env "DEEPSEEK_API_KEY" with
+      | Error msg -> masc_file_failure msg
+      | Ok api_key ->
+        let file_id = Tool_args.get_string args "file_id" "" in
+        if file_id = "" then masc_file_failure "file_id is required"
+        else
+          match Llm_provider.Provider_files.delete ~sw ~net ~api_key ~file_id () with
+          | Error msg -> masc_file_failure msg
+          | Ok true ->
+            Keeper_tool_execution.of_tool_result
+              (Tool_result.make_ok
+                 ~tool_name:name
+                 ~start_time:0.0
+                 ~data:(`Assoc [ ("ok", `Bool true); ("file_id", `String file_id) ])
+                 ())
+          | Ok false -> masc_file_failure "deletion not confirmed"
+      )
+    | "masc_file_list" -> (
+      match require_env "DEEPSEEK_API_KEY" with
+      | Error msg -> masc_file_failure msg
+      | Ok api_key ->
+        (match Llm_provider.Provider_files.list_files ~sw ~net ~api_key () with
+         | Error msg -> masc_file_failure msg
+         | Ok files ->
+           let rows =
+             List.map
+               (fun (f : Llm_provider.Provider_files.file_object) ->
+                  `Assoc
+                    [ ("file_id", `String f.Llm_provider.Provider_files.id)
+                    ; ("filename", `String f.Llm_provider.Provider_files.filename)
+                    ; ("bytes", `Int f.Llm_provider.Provider_files.bytes)
+                    ])
+               files
+           in
+           Keeper_tool_execution.of_tool_result
+             (Tool_result.make_ok
+                ~tool_name:name
+                ~start_time:0.0
+                ~data:(`Assoc [ ("ok", `Bool true); ("count", `Int (List.length rows)); ("files", `List rows) ])
+                ())))
+    | _ -> masc_file_failure ("unknown file tool " ^ name))
+  | _ ->
+    masc_file_failure "masc_file requires the server root switch + net (unavailable)"
+;;
+
 
 (* RFC-0266 §7 Phase 3 — masc_fusion_status: read-only view of the caller's
    fusion runs (in-progress + recently completed). [fusion_status_json] is the

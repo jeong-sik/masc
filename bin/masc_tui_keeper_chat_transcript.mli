@@ -133,12 +133,28 @@ type tool_projection_mode =
     number of per-call detail rows folded into a compact summary. *)
 type tool_projection = private
   { activities : tool_activity list
-  ; rows : string list
+  ; header : string option
+        (** The block's rollup, on a line of its own: what ran, how it ended,
+            how many rows are behind a fold. [None] for a block of one call --
+            a summary of one call is that call, and drawing both says the same
+            thing twice.
+
+            Split from [details] rather than prepended to it because the two
+            are drawn differently: the header is where a fold is toggled and
+            carries the block's mark, while a detail row is one call. A
+            consumer that had to tell them apart by reading the text would be
+            recovering a distinction this type already knows. *)
+  ; details : string list
+        (** One row per call in arrival order, and the calls that need naming
+            even while folded. Never indented here: how far a detail sits from
+            its header is the layout's decision, and baking it into the string
+            would fix it for every pane width. *)
   ; hidden_activity_rows : int
   ; omitted_steps : int
   ; summary_outcome : tool_outcome option
-        (** The outcome the folded summary row stands for, and [None] when
-            nothing was folded.
+        (** The outcome the [header] stands for while it is holding calls
+            behind a fold, and [None] when nothing is folded -- including
+            [Full], which draws a header over details that are all visible.
 
             A chat body is sanitized before it is drawn -- a row cannot carry
             an escape into the terminal -- so a marker inside the text cannot
@@ -355,6 +371,9 @@ val tool_rows : t -> string list
 (** One line per tool call, in stream order, the way the pane draws them: a
     marker for how far the call got, the tool's name, and the argument it is
     known by.
+
+    The calls only: {!tool_projection.header} is a rollup over them, not one
+    of them, and a caller counting steps would count one too many.
 
     This is the [Full] compatibility accessor for the current pane. New live
     and history consumers carry {!tool_block} to the render boundary and call

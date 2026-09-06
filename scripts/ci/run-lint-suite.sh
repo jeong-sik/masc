@@ -72,6 +72,14 @@ blocking_lints() {
     bash scripts/lint/prompt-source-words-agree.sh --self-test
   run_lint "Prompt source words agree" \
     bash scripts/lint/prompt-source-words-agree.sh
+
+  # The report-only step that runs a pull request's edited suites trusts this
+  # tool to say which of them can be run by executing the binary. A wrong
+  # "run" reports a failure the change did not cause, which is how a report
+  # stops being read (RFC-0428).
+  run_self_test_when_changed "Dune suite scope self-test (RFC-0428)" \
+    scripts/ci/dune_suite_scope.py \
+    python3 scripts/ci/test_dune_suite_scope.py
   run_lint "Hardcoded model prefix" bash scripts/lint/no-roadmap-stale-hardcoding.sh
   run_lint "Raw font-size px" bash scripts/lint/no-raw-font-size-px.sh
   run_lint "OCaml comment terminator trap" bash scripts/lint/no-ocaml-comment-terminator-trap.sh

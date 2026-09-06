@@ -402,6 +402,20 @@ val get_sync
   -> unit
   -> (raw_sync_response, http_error) result
 
+(** DELETE synchronously, returning the full response — same receipt shape
+    and deadline semantics as {!get_sync} over the DELETE verb. The Files API
+    (RFC-0430 Phase 3) answers deletion with a JSON body even on 2xx. *)
+val delete_sync
+  :  ?cache:cache
+  -> ?clock:_ Eio.Time.clock
+  -> ?timeout_s:float
+  -> sw:Eio.Switch.t
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> url:string
+  -> headers:(string * string) list
+  -> unit
+  -> (raw_sync_response, http_error) result
+
 (** POST JSON body synchronously, returning the full response.
     Returns status, body, and the response-header evidence the caller needs
     ([Retry-After], [Content-Type]) on success.

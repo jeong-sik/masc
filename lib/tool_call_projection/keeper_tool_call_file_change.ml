@@ -111,6 +111,7 @@ let writes_files (handler : Keeper_tool_descriptor.runtime_handler) =
   | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
   | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
   | Keeper_tool_descriptor.Tool_masc_fusion_status
+  | Keeper_tool_descriptor.Tool_masc_file_dispatch
   | Keeper_tool_descriptor.Tool_masc_library_dispatch
   | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
   | Keeper_tool_descriptor.Tool_analyze_image -> false
@@ -292,6 +293,7 @@ let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) ~keeper in
   | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
   | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
   | Keeper_tool_descriptor.Tool_masc_fusion_status
+  | Keeper_tool_descriptor.Tool_masc_file_dispatch
   | Keeper_tool_descriptor.Tool_masc_library_dispatch
   | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
   | Keeper_tool_descriptor.Tool_analyze_image ->

@@ -3318,11 +3318,8 @@ type state = {
   mutable code_diff: (string, Tui_decode.git_diff) Masc_tui_fetched.t;
   mutable code_diff_open: bool;
   mutable code_diff_scroll: int;
-  (* The file pane's notes view: m on an open file (repository scope only --
-     the annotation routes are scoped by the server-minted codebase slug,
-     which only a Repositories row carries) swaps the content for the notes
-     anchored to the file. *)
-  (* The notes anchored to the open file, keyed by its path. *)
+  (* The file pane's notes view: m on an open file swaps the content for
+     the memos written as comments in the file itself. *)
   mutable code_notes_open: bool;
   mutable code_notes_scroll: int;
   (* The file pane's blame margin: b on an open file fetches who last touched

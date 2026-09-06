@@ -1915,6 +1915,36 @@ let get_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers () =
           })))
 ;;
 
+(* Same receipt shape as get_sync over the DELETE verb. The Files API deletes
+   by file id (RFC-0430 Phase 3) and answers with a JSON body even on 2xx, so
+   the caller keeps reading status + body the same way. *)
+let delete_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers () =
+  let* deadline =
+    resolve_explicit_deadline
+      ~operation:"delete_sync"
+      ~parameter:"timeout_s"
+      ~clock
+      ~timeout_s
+  in
+  catch_network (fun () ->
+    let* origin = parse_uri url in
+    with_client ?cache ~sw ~net ~origin (fun ~sw client ->
+      let hdr = Http.Header.of_list (maybe_add_connection_close ?cache headers) in
+      with_explicit_deadline deadline (fun () ->
+        let resp, resp_body =
+          Cohttp_eio.Client.delete ~sw client ~headers:hdr origin.uri
+        in
+        let code = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
+        let resp_headers = Cohttp.Response.headers resp in
+        let* body_str = read_response_body resp_body in
+        Ok
+          { status = code
+          ; body = body_str
+          ; retry_after_header = retry_after_header_of_response_headers resp_headers
+          ; content_type = content_type_of_response_headers resp_headers
+          })))
+;;
+
 let post_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers ~body () =
   let* deadline =
     resolve_explicit_deadline

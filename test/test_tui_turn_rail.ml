@@ -31,6 +31,8 @@ let every_rail =
   ; Layout.Rail_says
   ; Layout.Rail_does
   ; Layout.Rail_closes
+  ; Layout.Rail_joins Layout.Siding_journal
+  ; Layout.Rail_joins Layout.Siding_arrival
   ; Layout.Rail_none
   ]
 ;;
@@ -60,7 +62,9 @@ let test_the_drawn_pieces_are_distinct () =
     List.filter (fun rail -> rail <> Layout.Rail_none) every_rail
     |> List.map Layout.turn_rail_glyph
   in
-  check int "four distinct glyphs" 4
+  (* Five shapes, not six: both sidings meet the line the same way, and what
+     kind of siding it was is in the run leading up to it. *)
+  check int "five distinct glyphs" 5
     (List.length (List.sort_uniq String.compare drawn));
   check string "nothing to hang draws a blank" " "
     (Layout.turn_rail_glyph Layout.Rail_none)
@@ -93,10 +97,57 @@ let test_a_turn_of_one_row_draws_nothing () =
   | [] -> failwith "no body row"
 ;;
 
+(* The glyph sits past the siding run, not at the head of the gutter: a
+   turn-only row pays those cells as blanks so the line stays in one column
+   whether or not anything arrived beside it. *)
 let rail_glyphs rows =
   List.map
-    (fun (row : Layout.row) -> Layout.take_cells row.gutter 1)
+    (fun (row : Layout.row) ->
+      Layout.take_cells
+        (Layout.drop_cells row.gutter Layout.siding_lead_cells)
+        1)
     rows
+;;
+
+(* The run is where a siding says what it is. Both kinds meet the line with
+   the same glyph, so if the runs matched too a journal commit and another
+   agent's broadcast would be one shape. *)
+let test_the_siding_runs_tell_the_kinds_apart () =
+  let run rail =
+    match body_rows (entry ~turn_rail:rail "arrived") with
+    | row :: _ -> Layout.take_cells row.Layout.gutter Layout.siding_lead_cells
+    | [] -> failwith "no body row"
+  in
+  let journal = run (Layout.Rail_joins Layout.Siding_journal) in
+  let arrival = run (Layout.Rail_joins Layout.Siding_arrival) in
+  check bool "the two runs differ" true (journal <> arrival);
+  check int "the journal run fills the column" Layout.siding_lead_cells
+    (Layout.display_width journal);
+  check int "the arrival run fills it too" Layout.siding_lead_cells
+    (Layout.display_width arrival)
+;;
+
+(* An arrival joins once. A wrapped broadcast that drew the join on every row
+   would read as several arrivals, and one that fell back to the turn's own
+   line would say the turn produced it. *)
+let test_a_wrapped_arrival_joins_once_and_never_joins_the_turn () =
+  let rows =
+    body_rows ~inner_width:40
+      (entry ~turn_rail:(Layout.Rail_joins Layout.Siding_arrival)
+         ~style:Layout.Inbound ~role:"geek-scout" (String.make 200 'x'))
+  in
+  match rail_glyphs rows with
+  | first :: rest ->
+      check string "the first row joins"
+        (Layout.turn_rail_glyph (Layout.Rail_joins Layout.Siding_arrival))
+        first;
+      List.iter
+        (fun glyph ->
+          check string "and the rest hang on nothing"
+            (Layout.turn_rail_glyph Layout.Rail_none)
+            glyph)
+        rest
+  | [] -> failwith "no body row"
 ;;
 
 (* The bracket runs the height of the entry. Broken at every wrap it would read
@@ -170,7 +221,7 @@ let test_the_rail_boundary_is_inside_the_label_offset () =
       | row :: _ ->
           check bool "rail cells are the head of the label offset" true
             (row.Layout.gutter_rail_cells <= row.Layout.gutter_label_at);
-          check int "the rail is the glyph and its separator"
+          check int "the gutter is the run, the glyph and its separator"
             row.Layout.gutter_rail_cells
             (Layout.display_width
                (Layout.take_cells row.Layout.gutter
@@ -250,6 +301,10 @@ let () =
             test_the_opening_corner_stays_on_the_first_row
         ; test_case "the closing corner lands on the last row" `Quick
             test_the_closing_corner_lands_on_the_last_row
+        ; test_case "the siding runs tell the kinds apart" `Quick
+            test_the_siding_runs_tell_the_kinds_apart
+        ; test_case "a wrapped arrival joins once" `Quick
+            test_a_wrapped_arrival_joins_once_and_never_joins_the_turn
         ; test_case "work branches once and then carries the turn" `Quick
             test_work_branches_once_and_then_carries_the_turn
         ] )

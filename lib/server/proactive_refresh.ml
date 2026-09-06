@@ -201,7 +201,9 @@ let start ~sw ~clock ~config:raw_config ~compute ~on_result =
       let t0 = Time_compat.now () in
       (try
          match
-           Eio.Time.with_timeout clock config.timeout_s (fun () -> Ok (compute ()))
+           Eio.Time.with_timeout clock config.timeout_s (fun () ->
+             (* Named per refresh so a tracer attached later still sees it. *)
+             Ok (Eio.Switch.run ~name:(config.label ^ " refresh") (fun _ -> compute ())))
          with
          | Ok v ->
          on_result v;

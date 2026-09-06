@@ -5893,7 +5893,11 @@ let test_decode_prompts_rejects_a_row_with_no_source () =
   in
   match Tui_decode.decode_prompts json with
   | Ok _ -> Alcotest.fail "a row with no source must not decode"
-  | Error _ -> ()
+  | Error detail ->
+    (* An absence reported as a type error sends the reader looking for a
+       wrong value where there is no value. *)
+    Alcotest.(check string) "reported as an absence"
+      "missing required field 'source'" detail
 
 let test_decode_prompts_survives_a_sparse_row () =
   match Tui_decode.decode_prompts prompts_payload with

@@ -628,3 +628,19 @@ P4k #33555 는 `load_all` 을 증분으로 바꾼다. path 별 캐시에 파싱�
 `with_open_out` 은 `Eio.Path.save` = `Fs_compat.save_file`, `with_open_in` 은 `Eio.Path.load` = `Fs_compat.load_file` 이다. eio_posix 는 일반 파일의 `readv`·`writev` 를 fiber 위에서 그대로 실행한다(일반 파일은 "준비 안 됨" 을 보고하지 않으므로 `await_writable` 을 거치지 않는다). 따라서 2 MB 파일 하나를 저장하는 데 120~130 ms, 큰 파일 하나를 읽는 데 40~50 ms 가 fiber 에서 흘렀고, 이것이 P4g 이후 모든 창에 있던 `openat -> switch` 부류의 마지막 정체다. P4h-5 는 그중 체크포인트 읽기 하나만 옮긴 것이었다.
 
 P4m 은 `Fs_compat.load_file`·`save_file`·`append_file` 의 Eio 분기를 Unix 구현의 systhread 실행으로 바꾼다(§7.2 Phase 2 의 모양). 호출자 12·14·16곳과 원자 쓰기 약 30곳이 한 번에 fiber 밖으로 나간다. 원자 쓰기는 blocking writer 를 직접 받아 임시 파일 생성부터 부모 fsync 까지를 작업 하나로 돈다. append 는 Eio 안에서도 path 별 mutex 로 직렬화된다. 판정은 재기동 뒤 라벨 표에서 `with_open_out`·`with_open_in` 이 사라지는지다.
+
+#### P4l·P4m 라이브 (pid 84548, 커밋 632c4fe4d3, 06:18:16Z 기동, 호스트 부하 20~37)
+
+| 항목 | 기준선 | P4i·j·k 표준 | P4l·m ready+4.6분 | P4l·m ready+7분 |
+|---|---|---|---|---|
+| 하네스 lag p99 / max | 153 / 552 ms | 20.3 / 86.4 ms | **5.9 / 347 ms** | — |
+| main 도메인 점유 | 12.6% | 10.8% | 4.2% | 4.5% |
+| main 의 ≥10 / ≥50 / ≥100 ms 실행 | 109 / 37 / 19 | 132 / 17 / 9 | 34 / 4 / 1 | 32 / **0** / **0** |
+| main 의 최대 실행 | 954 ms | 249 ms | 385 ms | **48 ms** |
+| 라벨 `with_open_out` | — | 28회 / 1,067 ms | **0** | 0 |
+| 라벨 `with_open_in` | — | 18회 / 518 ms | 6회 / 131 ms | 6회 / 136 ms |
+| 할당 | 617 MB/s | 152 | 208 | — |
+
+`Eio.Path.save` 를 fiber 에서 돌리던 부류는 사라졌다. `with_open_in` 6회는 P4m 을 거치지 않는 직접 `Eio.Path.load` 호출(`Backend.get`, `Log`)이고 최대 28 ms 다. 첫 창의 385 ms 한 건은 append 뒤 순수 계산(GC 17 ms)이었고, 두 번째 창에는 50 ms 를 넘는 실행이 없다.
+
+라벨은 그러나 masc 의 이름이 아니라 Eio 내부 switch 이름(`both`, `filter_map`, `Buf_write.with_flow`)만 보여 주었다. Eio 는 switch 가 열릴 때 이름을 링에 적고 링은 몇 분 안에 덮이므로, fiber 시작 때 한 번 연 P4l 의 이름은 뒤늦게 붙는 추적기에 보이지 않는다. P4n(#33591 계열)은 유지보수 루프는 반복마다, keeper 는 cycle 마다 이름을 열게 하고, 추적기는 창 안에서 처음 연 이름을 라벨로 쓰며 뒤의 Eio 내부 이름은 `첫이름 > 최근이름` 으로 덧붙인다.

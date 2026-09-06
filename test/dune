@@ -3293,7 +3293,8 @@
 (test
  (name test_tui_gate_fold)
  (modules test_tui_gate_fold)
- (libraries alcotest masc masc_tui_types masc_tui_gate_text))
+ (libraries alcotest masc masc_tui_types masc_tui_gate_text
+   masc_tui_message_layout))
 
 (test
  (name test_tui_server_identity_refresh)

@@ -8439,6 +8439,15 @@ let keeper_message_tool_activity_details state ~keeper_name
    on a narrow terminal. *)
 let tool_detail_indent = "  "
 
+(* How wide one body line runs. Floored so a narrow pane still shows
+   something and capped so a wide one does not run a sentence past where the
+   eye returns; the eight is the gutter and the space that follows it.
+
+   Shared by everything that has to decide what fits on a line, because two
+   readers with two budgets wrap the same pane at two places. *)
+let chat_body_line_cells ~chat_cols ~role_label_column =
+  max 24 (min 120 (chat_cols - role_label_column - 8))
+
 let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection =
   let role_label_column =
     Message_layout.chat_role_label_width ~pane_cells:chat_cols
@@ -8452,7 +8461,7 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
   let rows =
     Keeper_chat_diff.rows
     ~mode
-    ~max_line_cells:(max 24 (min 120 (chat_cols - role_label_column - 8)))
+    ~max_line_cells:(chat_body_line_cells ~chat_cols ~role_label_column)
     ~activity_details:(keeper_message_tool_activity_details state ~keeper_name)
     file_change_index projection
   in
@@ -8767,6 +8776,16 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                   match message.me_memory_summary with
                   | Some summary -> summary ^ " · Ctrl-N: journal detail"
                   | None -> message.me_text))
+          (* Only a gated row: a Gate step's text ends in the argument the
+             call asked for, while a status row without one is a sentence the
+             server composed and has nothing to fold away. *)
+          | Message_status when message.me_gate <> None -> (
+              match tool_projection_mode state with
+              | Keeper_chat_transcript.Full -> message.me_text
+              | Keeper_chat_transcript.Compact ->
+                  Masc_tui_gate_text.folded_argument
+                    ~cap:(chat_body_line_cells ~chat_cols ~role_label_column)
+                    message.me_text)
           | Message_thinking | Message_user _ | Message_keeper
           | Message_autonomous
           | Message_status | Message_local | Message_error ->

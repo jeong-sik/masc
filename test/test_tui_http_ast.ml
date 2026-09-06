@@ -244,7 +244,11 @@ let test_tui_ansi_status_helpers_use_theme_tokens () =
       check int (binding_name ^ " contains no direct raw status identifier") 0
         (Ast_grep.count_identifiers_outside_calls_in_value_binding ~module_path
            ~binding_name ~callees:[] ~identifiers:raw_status_identifiers))
-    [ "priority_indicator"; "ctx_color"; "ctx_bar" ];
+    (* [origin] is here because nothing else asks it this. Its own check
+       counts calls, and a count cannot see an arm that reached for a raw
+       colour instead of a token -- that arm simply adds nothing to any
+       count. *)
+    [ "priority_indicator"; "ctx_color"; "ctx_bar"; "origin" ];
   check int "priority glyph has one owner" 1
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"priority_indicator"
@@ -297,13 +301,20 @@ let test_tui_ansi_status_helpers_use_theme_tokens () =
    [masc_tui_ansi.ml], so this focused check requires every arm of [origin] to
    reach its resolved role token. *)
 let test_chat_roles_draw_through_the_readable_path () =
+  (* Reached, not counted. One arm per token was true when [origin] had one
+     arm per style; the Skill readings and Thinking arrived since and share
+     the tokens they mean -- quiet_origin draws both Local and Thinking, warn
+     draws Status and Skill_attention, bad draws Error and Skill_failure. A
+     count of one asks how many arms a token has, which is a question about
+     the style list rather than about the path a colour takes. *)
   List.iter
     (fun callee ->
-      check int
-        (Printf.sprintf "chat origin resolves %s once" callee)
-        1
+      check bool
+        (Printf.sprintf "chat origin reaches %s" callee)
+        true
         (Ast_grep.count_calls_in_value_binding
-           ~module_path:"bin/masc_tui_ansi.ml" ~binding_name:"origin" ~callee))
+           ~module_path:"bin/masc_tui_ansi.ml" ~binding_name:"origin" ~callee
+         > 0))
     [ "Theme.user_origin"
     ; "Theme.keeper_origin"
     ; "Theme.quiet_origin"

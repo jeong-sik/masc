@@ -546,14 +546,17 @@ let refresh_registry_projection ?lifecycle_token entry meta =
 ;;
 
 let apply_meta ?lifecycle_token ~base_path ~keeper_name command =
+  Printf.printf "DIAG14 am-0-before-key-lock\n%!";
   let result =
     Keeper_lifecycle_reservation.with_key_lock
       ~base_path
       ~keeper_name
       (fun () ->
+         Printf.printf "DIAG14 am-1-key-lock-held\n%!";
          match get ~base_path ~keeper_name with
          | Error error -> Error (Command_lookup_failed error)
          | Ok owner ->
+           Printf.printf "DIAG14 am-2-owner-got\n%!";
            (match
               Keeper_lifecycle_reservation.authorize
                 ?token:lifecycle_token
@@ -563,11 +566,16 @@ let apply_meta ?lifecycle_token ~base_path ~keeper_name command =
             with
             | Error reservation -> Error (Command_lifecycle_reserved reservation)
             | Ok () ->
+              Printf.printf "DIAG14 am-3-authorized\n%!";
               let observed_entry = Keeper_registry.get ~base_path keeper_name in
+              Printf.printf "DIAG14 am-4-registry-read\n%!";
               (match Keeper_owner.apply_meta owner command with
                | Error error -> Error (Command_rejected error)
-               | Ok meta -> Ok (meta, observed_entry))))
+               | Ok meta ->
+                 Printf.printf "DIAG14 am-5-reducer-done\n%!";
+                 Ok (meta, observed_entry))))
   in
+  Printf.printf "DIAG14 am-6-key-lock-released\n%!";
   (match result with
    | Ok (Some meta, observed_entry) ->
      Option.iter

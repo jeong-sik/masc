@@ -217,19 +217,50 @@ projection 을 각자 다시 만들면 두 화면이 서로 다른 이야기를 
 |---|---|---|---|---|
 | 1 | 요약을 헤더로, 상세를 자식으로 | 한 블록이 요약 1행 + 상세 N행 | 요약과 상세가 같은 프레임에 | 머지됨 #33633 |
 | 2 | 측선 도입 | journal 과 남이 보낸 줄이 `╌╌╌┤`·`───┤` 로 합류 | journal 이 턴 사이에 끼어도 턴이 끊기지 않음 | 머지됨 #33641 |
-| 3 | Gate 원문 접힘 | compact 에서 승인 행이 한 줄 + 남은 줄 수 | Ctrl-D 로 전문이 돌아옴 | |
-| 4 | 채팅 패널 마우스 | 클릭이 접힘을 토글 | 마우스를 놓아도 키보드 경로가 남음 | |
-| 5 | wire 이벤트 | DELEGATE/BROADCAST/CHANNEL/STREAM + `stream_scope` 지속 | 각 이벤트에 생산자와 소비자가 동시에 | |
-| 6 | 병렬 그룹 | `stream_scope` 동석을 `┬`/`┴` 로 | 한 scope 3호출 → 분기 1개 | 5 에 의존 |
+| 3 | Gate 원문 접힘 | compact 에서 승인 행이 한 줄 + 남은 줄 수 | Ctrl-D 로 전문이 돌아옴 | 머지됨 #33646 |
+| 4 | 채팅 패널 마우스 | 클릭이 접힘을 토글 | 마우스를 놓아도 키보드 경로가 남음 | #33660 |
+| 5 | 도구 계열을 등록부에서 읽는다 | 위임이 `Delegate` 로 따로 세어짐 | 이름 철자가 아니라 descriptor 가 계열을 정함 | |
+| 6 | 병렬 그룹 | `stream_scope` 동석을 `┬`/`┴` 로 | 한 scope 3호출 → 분기 1개 | occurrence 전달에 의존 |
 | 7 | Dashboard 정렬 | 같은 projection | 두 화면이 같은 턴에 같은 위계 | |
 
 ### 순서를 정한 두 의존
 
-**병렬 그룹은 저장을 먼저 고쳐야 한다.** `stream_scope` 는 `live_tool_call`
-에만 있고 `masc_tui_keeper_chat_history` 는 그것을 싣지 않는다. 라이브에서만
-`┬`/`┴` 를 그리면 턴이 끝나 스크롤백으로 가는 순간 병렬 표시가 사라진다 —
-같은 턴이 진행 중일 때와 끝난 뒤에 다르게 보이는 화면이 되고, 그것은 이
-RFC 가 §1.1 에서 고치려던 종류의 불일치다. 그래서 6 은 5 뒤에 둔다.
+**없는 것은 wire 이벤트가 아니라 구분이었다.** 5 를 "DELEGATE/CHANNEL
+생산자를 서버에 만든다" 로 적었는데, 세어 보니 넷 다 이미 흐르고 있었다.
+위임은 keeper 가 `masc_keeper_delegate` **도구를 부르는 것**이라
+`Tool_call_start` 로 지나가고, BROADCAST 는 `Keeper_chat_broadcast.chat_appended`
+로 이미 2 가 그렸고, 남이 보낸 줄은 `Siding_arrival` 로 이미 합류하고,
+STREAM 은 `KEEPER_STREAM_*` 로 이미 온다.
+
+그래서 5 는 서버 작업이 아니다. `masc_tui_keeper_chat_transcript` 의
+`activity_kind` 가 `String.starts_with ~prefix:"masc_keeper"` 로 계열을
+정하고 있어서, 다른 Keeper 에게 일을 넘기는 호출과 `masc_keeper_status`
+조회가 같은 `Keeper` 로 접힌다. 같은 파일 위쪽은 이미 등록부를
+`find_public` 으로 파싱하면서 "철자 관습에서 갈래를 뽑지 않는다" 고 적어
+두었다 — 90 줄 아래가 그 규칙을 어기고 있었다.
+
+접두사가 실제로 틀리는 곳도 셌다. `keeper_code_query` 는 코드 검색이고
+`keeper_webmcp_call` 은 MCP 호출인데, 둘 다 이름이 `keeper_` 로 시작해서
+Keeper 작업으로 세어졌다.
+
+**병렬 그룹은 두 군데서 막혀 있다.** 처음엔 "히스토리가 `stream_scope` 를
+안 싣는다" 고 적었는데, 세어 보니 자리가 둘이고 성격이 다르다.
+
+`masc_tui_keeper_chat_log` 는 라이브 SSE 와 v2 저널 재생을 같은 로그로
+받고, 둘 다 `tool_occurrence` 를 그대로 싣는다. 여기까지는 온다.
+
+버려지는 곳이 그 다음 둘이다.
+
+1. `tool_activity` 에 occurrence 필드가 없다. 투영이 렌더러에게 넘기기
+   전에 "어느 scope 의 몇 번째 블록인가" 를 버린다.
+2. durable 행에는 애초에 안 적힌다. `keeper_chat_store` 가 쓰는 필드는
+   `tool_call_id`·`execution_id`·`tool_call_name` 이고 `stream_scope` 는
+   없다.
+
+1 만 고치면 저널 창 안에서는 `┬`/`┴` 가 그려지고 스크롤백으로 밀려나는
+순간 사라진다 — 같은 턴이 방금일 때와 어제일 때 다르게 보이는 화면이고,
+그것이 이 RFC 가 §1.1 에서 고치려던 종류의 불일치다. 6 은 2 를 먼저 하고
+1 을 얹는다.
 
 **접힘은 행 커서가 아니라 이미 있는 축에 붙는다.** 처음에는 행마다 접었다
 펴는 상태를 두려 했고, 그러려면 "어느 행" 을 가리킬 커서가 필요했다. 그

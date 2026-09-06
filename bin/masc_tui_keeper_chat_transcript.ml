@@ -425,15 +425,22 @@ let compact_marker activities = marker_of_outcome (compact_outcome activities)
    Execute, ...), instead of deriving categories from spelling conventions.
    A trace from an older or external provider may name no registered tool; in
    that case the exact safe name is more useful than an invented "Other". *)
-let canonical_tool_name (activity : tool_activity) =
-  match Masc.Keeper_tool_descriptor.find_public activity.tool_name with
-  | Some descriptor -> descriptor.public_name
+(* One reading of the registry for both questions a row asks of a name: what
+   to call the call, and what family of work it is. A descriptor may carry
+   several internal aliases and one public name, so the public lookup is
+   tried first. *)
+let descriptor_of_tool_name name : Masc.Keeper_tool_descriptor.t option =
+  match Masc.Keeper_tool_descriptor.find_public name with
+  | Some _ as found -> found
   | None -> (
-      match
-        Masc.Keeper_tool_descriptor.public_name_for_internal activity.tool_name
-      with
-      | Some public_name -> public_name
-      | None -> safe_line (display_tool_name activity.tool_name))
+      match Masc.Keeper_tool_descriptor.public_descriptors_for_internal name with
+      | descriptor :: _ -> Some descriptor
+      | [] -> None)
+
+let canonical_tool_name (activity : tool_activity) =
+  match descriptor_of_tool_name activity.tool_name with
+  | Some descriptor -> descriptor.public_name
+  | None -> safe_line (display_tool_name activity.tool_name)
 
 (* The outcomes worth naming a tool for.
 
@@ -513,9 +520,84 @@ let compact_tool_mix activities =
 
 type activity_kind =
   | Skill_activity
+  | Delegate_activity
   | Keeper_activity
   | Fusion_activity
   | Tool_activity
+
+(* Which family a registered tool belongs to, read from the descriptor that
+   owns it. The spelling tests this replaces counted [keeper_code_query] and
+   [keeper_webmcp_call] as Keeper work because their names begin with the
+   process that hosts them; one is a code search and the other an MCP call,
+   and they now count as the tools they are.
+
+   Written out rather than left to a catch-all so a new handler stops the
+   build here and is placed on purpose. *)
+let handler_activity_kind handler =
+  let open Masc.Keeper_tool_descriptor in
+  match handler with
+  | Tool_masc_fusion_dispatch | Tool_masc_fusion_status -> Fusion_activity
+  | Tool_keeper_spawn_dispatch | Tool_masc_keeper_dispatch -> Keeper_activity
+  | Tool_execute
+  | Tool_search_files
+  | Tool_read_file
+  | Tool_edit_file
+  | Tool_write_file
+  | Tool_time_now
+  | Tool_lane_status
+  | Tool_tools_list
+  | Tool_capability_search
+  | Tool_context_status
+  | Tool_artifact_read
+  | Tool_memory_search
+  | Tool_memory_retract
+  | Tool_memory_write
+  | Tool_library_search
+  | Tool_library_read
+  | Tool_surface_read
+  | Tool_surface_post
+  | Tool_person_note_set
+  | Tool_ide_annotate
+  | Tool_voice_dispatch
+  | Tool_task_dispatch
+  | Tool_board_dispatch
+  | Tool_masc_task_dispatch
+  | Tool_masc_plan_dispatch
+  | Tool_masc_run_dispatch
+  | Tool_masc_agent_dispatch
+  | Tool_masc_workspace_dispatch
+  | Tool_masc_misc_dispatch
+  | Tool_web_search
+  | Tool_web_fetch
+  | Tool_masc_control_dispatch
+  | Tool_masc_agent_timeline_dispatch
+  | Tool_masc_schedule_dispatch
+  | Tool_keeper_code_query_dispatch
+  | Tool_keeper_webmcp_dispatch
+  | Tool_masc_file_dispatch
+  | Tool_masc_library_dispatch
+  | Tool_masc_local_runtime_dispatch
+  | Tool_analyze_image -> Tool_activity
+
+(* Delegation stands apart from the rest of the keeper family because it is
+   the one call that moves work to another Keeper. [masc_keeper_status] and
+   [masc_keeper_list] read state, and a fold that counts them together with a
+   handoff says a turn delegated when it only looked. *)
+let keeper_tool_activity_kind = function
+  | Keeper_tool_name.Keeper_delegate | Keeper_tool_name.Keeper_delegate_cancel
+    -> Delegate_activity
+  | Keeper_tool_name.Keeper_audit
+  | Keeper_tool_name.Keeper_clear
+  | Keeper_tool_name.Keeper_delegate_list
+  | Keeper_tool_name.Keeper_delegate_status
+  | Keeper_tool_name.Keeper_down
+  | Keeper_tool_name.Keeper_list
+  | Keeper_tool_name.Keeper_msg
+  | Keeper_tool_name.Keeper_reset
+  | Keeper_tool_name.Keeper_sandbox_start
+  | Keeper_tool_name.Keeper_sandbox_stop
+  | Keeper_tool_name.Keeper_status
+  | Keeper_tool_name.Keeper_up -> Keeper_activity
 
 let activity_kind (activity : tool_activity) =
   let name = activity.tool_name in
@@ -524,12 +606,13 @@ let activity_kind (activity : tool_activity) =
     || Option.is_some
          (Masc.Keeper_tool_composition_catalog.skill_source_of_tool_name name)
   then Skill_activity
-  else if String.starts_with ~prefix:"masc_fusion" name then Fusion_activity
-  else if
-    String.starts_with ~prefix:"masc_keeper" name
-    || String.starts_with ~prefix:"keeper_" name
-  then Keeper_activity
-  else Tool_activity
+  else
+    match Keeper_tool_name.of_string name with
+    | Some keeper_tool -> keeper_tool_activity_kind keeper_tool
+    | None -> (
+        match descriptor_of_tool_name name with
+        | None -> Tool_activity
+        | Some descriptor -> handler_activity_kind descriptor.runtime_handler)
 
 let make_skill_activity ?skill_tool_use_id ?turn_ref ?content_revision
     ?runtime_id ?detail ~skill_name ~state ~actions () =
@@ -545,7 +628,8 @@ let make_skill_activity ?skill_tool_use_id ?turn_ref ?content_revision
 
 let skill_activity_of_tool (activity : tool_activity) =
   match activity_kind activity with
-  | Tool_activity | Keeper_activity | Fusion_activity -> None
+  | Tool_activity | Delegate_activity | Keeper_activity | Fusion_activity ->
+      None
   | Skill_activity ->
       let state =
         match activity.outcome with
@@ -618,8 +702,10 @@ let skill_rows ~full (activity : skill_activity) =
     in
     summary :: actions @ proof @ detail
 
-(* Generic tools are already named by [compact_tool_mix]. These three tags
-   retain the operational kind a compact fold used to erase. *)
+(* Generic tools are already named by [compact_tool_mix]. These tags retain
+   the operational kind a compact fold used to erase. A handoff reads as
+   [Delegate] rather than [Keeper] -- it replaces that clause instead of
+   adding one, so the fold does not grow. *)
 let compact_activity_kinds activities =
   let count kind =
     List.fold_left
@@ -628,6 +714,7 @@ let compact_activity_kinds activities =
       0 activities
   in
   [ Skill_activity, "Skill"
+  ; Delegate_activity, "Delegate"
   ; Keeper_activity, "Keeper"
   ; Fusion_activity, "Fusion"
   ]

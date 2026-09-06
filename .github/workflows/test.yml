@@ -263,18 +263,36 @@ jobs:
           if [ "${#exes[@]}" -eq 0 ]; then
             exit "${status}"
           fi
-          log "[targeted] dune build ${exes[*]}"
-          opam exec -- dune build --root . "${exes[@]}" 2>&1 | tee -a "${CI_TEST_LOG_FILE}"
+          # A stanza's (setenv ...) belongs to dune's runtest action, so a run
+          # of the executable does not get it, and 22 of the 346 stanzas
+          # declare one. This file used to carry a case block that named
+          # exactly one of them, so a dispatch naming any of the other 21 ran
+          # that suite under the wrong environment and reported verdicts the
+          # nightly lane would not agree with -- silently, since a missing
+          # variable looks like a normal run. stanza_env.py reads the stanza.
+          # Captured, not piped: a failing script inside a process
+          # substitution leaves the loop's exit status at 0, and a suite that
+          # runs with no environment because the reader broke is the exact
+          # outcome this replaces.
+          stanza_env_reader="${GITHUB_WORKSPACE}/scripts/ci/stanza_env.py"
+          stanza_deps=()
+          for suite in "${suites[@]}"; do
+            dep_lines=$(python3 "${stanza_env_reader}" --deps "${suite}")
+            while IFS= read -r dep; do
+              if [ -n "${dep}" ]; then stanza_deps+=("${dep}"); fi
+            done <<< "${dep_lines}"
+          done
+          log "[targeted] dune build ${exes[*]} ${stanza_deps[*]+${stanza_deps[*]}}"
+          opam exec -- dune build --root . "${exes[@]}" \
+            ${stanza_deps[@]+"${stanza_deps[@]}"} 2>&1 | tee -a "${CI_TEST_LOG_FILE}"
           cd _build/default/test
           for suite in "${suites[@]}"; do
-            case "${suite}" in
-              test_heartbeat_integration)
-                suite_env=(MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=true
-                           MASC_BASE_PATH=/tmp/test-heartbeat-integ
-                           MASC_BASE_PATH_INPUT=/tmp/test-heartbeat-integ) ;;
-              *)
-                suite_env=() ;;
-            esac
+            suite_env=()
+            env_lines=$(python3 "${stanza_env_reader}" "${suite}")
+            while IFS= read -r pair; do
+              if [ -n "${pair}" ]; then suite_env+=("${pair}"); fi
+            done <<< "${env_lines}"
+            log "[targeted] ${suite}: stanza env ${suite_env[*]+${suite_env[*]}}"
             log "[targeted] ${suite}: start $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             started=$(date +%s)
             rc=0

@@ -2437,6 +2437,11 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
       in
       let update_switch, resolve_update_switch = Eio.Promise.create () in
       let update_done, resolve_update_done = Eio.Promise.create () in
+      (* The fork must resolve [update_done] on every exit, not only the two it
+         expected. Anything else left the promise unresolved and the await
+         below waited forever -- which is how one case took the whole nightly
+         lane with it (#33200): the suite ran 80 minutes and reported nothing,
+         while the real fault was a keeper turn dying of a missing config. *)
       Eio.Fiber.fork ~sw:root_sw (fun () ->
         let disposition =
           try
@@ -2451,6 +2456,7 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
             `Returned
           with
           | Cancel_keeper_up_after_metadata -> `Cancelled
+          | exn -> `Raised exn  (* cancel-guard-ok: not a swallow -- the exception, Cancelled included, is re-delivered through update_done to the fiber awaiting it *)
         in
         Eio.Promise.resolve resolve_update_done disposition);
       let update_sw = Eio.Promise.await update_switch in
@@ -2471,7 +2477,9 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
       Eio.Promise.resolve resolve_release_librarian ();
       (match Eio.Promise.await update_done with
        | `Cancelled -> ()
-       | `Returned -> fail "keeper update returned after its caller was cancelled");
+       | `Returned -> fail "keeper update returned after its caller was cancelled"
+       | `Raised exn ->
+         failf "keeper update raised instead of cancelling: %s" (Printexc.to_string exn));
       check bool
         "cancelled update rolls back its temporary shutdown fence"
         true

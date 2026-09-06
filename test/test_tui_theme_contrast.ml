@@ -469,9 +469,7 @@ let labelled_categories =
     (fun slot ->
       ( (match slot with
          | Masc_tui_ansi.Theme.Slot_1 -> "Slot_1"
-         | Masc_tui_ansi.Theme.Slot_2 -> "Slot_2"
-         | Masc_tui_ansi.Theme.Slot_3 -> "Slot_3"
-         | Masc_tui_ansi.Theme.Slot_4 -> "Slot_4")
+         | Masc_tui_ansi.Theme.Slot_2 -> "Slot_2")
       , slot ))
     Masc_tui_ansi.Theme.all_categories
 ;;
@@ -494,8 +492,30 @@ let categorical_slot_colours =
    four hues are what is left. Info and warn are still aliased, and are safe
    only because that surface draws neither; a surface reaching for slot 1 or 2
    owes the same check this test makes here. *)
+(* Every state the surface drawing slots also draws, not the two that were
+   noticed first.
+
+   The file listing is the surface: write_two_panes joins it to the content
+   pane on one terminal row, so a slot colour on the left and a state colour
+   on the right are one colour with two meanings on one line. #33477 found it
+   as red against bad, when a .png drew the blame failure's escape beside it,
+   and named bad here. #33722 found green against ok and added ok. Cyan
+   against info and yellow against warn were live the whole time and this
+   list is why nobody saw them: a test that names the defect it was written
+   for finds that defect again and nothing else.
+
+   So the list is what the pane draws, read off its Theme calls rather than
+   off what has gone wrong. It drifts when the pane starts drawing a state it
+   did not before -- there is no reading of the renderer that would catch
+   that, and the alternative to saying so is a test that quietly narrows. *)
 let test_no_categorical_slot_aliases_a_drawn_status_token () =
-  let drawn = [ "bad", Masc_tui_ansi.Theme.bad; "ok", Masc_tui_ansi.Theme.ok ] in
+  let drawn =
+    [ "bad", Masc_tui_ansi.Theme.bad
+    ; "ok", Masc_tui_ansi.Theme.ok
+    ; "info", Masc_tui_ansi.Theme.info
+    ; "warn", Masc_tui_ansi.Theme.warn
+    ]
+  in
   List.iter
     (fun (slot_label, _) ->
       List.iter

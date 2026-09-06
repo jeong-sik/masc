@@ -104,16 +104,12 @@ module Theme = struct
        RFC-0431. *)
     ; slot_1 : string
     ; slot_2 : string
-    ; slot_3 : string
-    ; slot_4 : string
     }
 
   (* A slot, so the accessor below is total. *)
   type category =
     | Slot_1
     | Slot_2
-    | Slot_3
-    | Slot_4
 
   (* One place says which hue a slot carries, so the contrast suite measures
      the mapping the renderer actually draws instead of a copy of it.
@@ -125,12 +121,17 @@ module Theme = struct
      colours by kind. Cyan and yellow still read as info and warn, which is
      safe only on a surface that draws neither. *)
   let category_colour = function
-    | Slot_1 -> Masc_tui_theme.Bright_cyan
-    | Slot_2 -> Masc_tui_theme.Bright_yellow
-    | Slot_3 -> Masc_tui_theme.Bright_blue
-    | Slot_4 -> Masc_tui_theme.Bright_magenta
+    (* The two colours a theme names that no surface drawing a slot also
+       draws as a state. The file listing shares a terminal row with a pane
+       that draws bad, ok, info and warn -- red, green, cyan and yellow --
+       which is four of the seven, and a slot on any of them is a status
+       token to the byte on that row. Two is what is left, and it is why the
+       kind axes rest on glyphs and words with colour on top rather than
+       under. *)
+    | Slot_1 -> Masc_tui_theme.Bright_blue
+    | Slot_2 -> Masc_tui_theme.Bright_magenta
 
-  let all_categories = [ Slot_1; Slot_2; Slot_3; Slot_4 ]
+  let all_categories = [ Slot_1; Slot_2 ]
 
   let resolved_cache : resolved option Atomic.t = Atomic.make None
 
@@ -164,8 +165,6 @@ module Theme = struct
         (* See [category_colour]: the hues no status token draws. *)
         ; slot_1 = of_colour (category_colour Slot_1)
         ; slot_2 = of_colour (category_colour Slot_2)
-        ; slot_3 = of_colour (category_colour Slot_3)
-        ; slot_4 = of_colour (category_colour Slot_4)
         }
       in
       if Atomic.compare_and_set resolved_cache previous (Some next) then next
@@ -178,8 +177,6 @@ module Theme = struct
   let category = function
     | Slot_1 -> (resolved ()).slot_1
     | Slot_2 -> (resolved ()).slot_2
-    | Slot_3 -> (resolved ()).slot_3
-    | Slot_4 -> (resolved ()).slot_4
 
   let ok () = (resolved ()).ok
   let warn () = (resolved ()).warn

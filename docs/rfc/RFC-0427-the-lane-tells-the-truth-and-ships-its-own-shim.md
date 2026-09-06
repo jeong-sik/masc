@@ -25,7 +25,7 @@ keeper 가 도구를 마음껏 쓰려면 두 가지가 먼저 있어야 한다. 
 | Execute 호출 | 1,820 | 같은 줄 |
 | tool_execute 승인 경로 | readonly_sandbox 841 · keeper_always_allow 552 · **judge(one_shot_resolution) 319** · observed_in_box 32 | `operation=tool_execute source=` |
 | Execute 오류 중 cwd 없음 | 38 (`cwd_missing`/`cwd_not_directory`) | `tool=Execute outcome=error` |
-| Grep 오류 중 원격 rg 에 호스트 경로가 감 | 14, 전부 15:57Z 재시작 전 (`remote_ssh_read_failed … rg: /Users/dancer/me/.masc/playground/rondo/…`). 재시작 뒤 rondo 의 Grep 19건은 모두 성공 | `tool=Grep outcome=error` |
+| Grep 오류 중 엔드포인트에 없는 경로 | 16 (`remote_*_read_failed … rg: … No such file`). 메시지의 `/Users/…` 는 게스트 답을 호스트 표기로 되쓴 것이다(§1.2 A) | `tool=Grep outcome=error` |
 | Read 오류 | 109 (그중 `path_outside_sandbox` 12) | `tool=Read outcome=error` |
 | 실행 레인 전멸 시간 | 13:39Z ~ 15:57Z, keeper 8명 | 보드 p-d5ed6f05, #33425 |
 
@@ -36,16 +36,19 @@ microvm keeper 의 트리는 게스트 볼륨(`/masc-work/<keeper>`)에 있고, 
 keeper 의 트리는 원격 계정 안(`/opt/masc-playground`)에 있다. 그런데 오늘
 `Execute` 는 `cwd_not_directory: /Users/dancer/me/.masc/playground/polisher/masc-t1348`
 로 38번 거절됐다(`Keeper_tool_execute_path.resolve_missing_cwd` 가 호스트 경로의
-존재를 본다; #33461 이 고쳤다). rondo 의 `Grep` 이 원격 rg 에
-`/Users/dancer/me/.masc/playground/rondo/…` 를 넘겨 exit 2 를 받은 14건과, polisher 가
-보드에서 여덟 번 넘게 재현한 "있는 패턴인데 `ok:true, matches:[]`" 는 모두 15:57Z
-재시작 전의 일이다. 읽기 경로의 호스트→원격 변환(`Keeper_remote_path.host_to_remote`,
-`Keeper_sandbox_read_backend.container_path_of_host`)은 08-29 와 09-02 에 main 에 들어갔고,
-재시작 뒤에는 rondo 19건·polisher 3건·sangsu 7건의 Grep 이 모두 성공했다. 재시작 전
-서버가 그 변환보다 오래된 빌드였다고 보는 것이 가장 단순한 설명이지만, 그 빌드의
-버전을 적은 로그 줄이 없어 확인 필요로 남긴다. 그래서 A 의 나머지(A-2, A-3)는
-관측된 결함이 아니라 재발 방지의 타입 경계다. 0 매치를 못 믿는 도구는 없는
-도구이므로 경계는 세우되, B 와 C 뒤에 둔다.
+존재를 본다; #33461 이 고쳤다). 처음 이 문서는 rondo 의 `Grep` 오류
+`remote_ssh_read_failed … rg: /Users/dancer/me/.masc/playground/rondo/repos/masc: No such
+file` 를 "원격 rg 에 호스트 경로가 갔다" 로 읽었다. 틀렸다. 읽기 경로의 호스트→원격
+변환(`Keeper_sandbox_read_backend.container_path_of_host` → `Keeper_remote_path.host_to_remote`)
+은 맞게 동작하고(microvm 매핑을 `test_keeper_sandbox_read_backend` 에 고정했다), 원격 rg 는
+`/opt/masc-playground/rondo/repos/masc` 를 받았다. 그 디렉터리가 원격에 없어서 rg 가
+exit 2 로 그 경로를 찍었고, 레인이 게스트 출력의 keeper 루트를 호스트 표기로 되쓰는
+`Keeper_remote_path.rewrite_output` 이 그것을 `/Users/…` 로 바꿔 keeper 에게 보였다. 즉
+그 16건은 keeper 가 없는 경로를 물은 것이고, 레인은 사실을 말했다. polisher 의
+"있는 패턴인데 `ok:true, matches:[]`" 는 이 부류가 아니라 재시작 전 서버에서만 보인
+현상으로, 재시작 뒤에는 polisher 3건·sangsu 7건·rondo 19건의 Grep 이 모두 성공했다.
+그래서 A 의 나머지(A-2, A-3)는 관측된 결함이 아니라 재발 방지의 타입 경계다. 0 매치를
+못 믿는 도구는 없는 도구이므로 경계는 세우되, B 와 C 뒤에 둔다.
 
 **(B) shim 은 손으로 배포되고, 서버는 그 사실을 모른다.** shim 은 운영자가
 `build-shim.sh` 로 만들어 `~/me/.masc/microvm/shim/` 과 원격 호스트
@@ -69,7 +72,7 @@ keeper 가 읽을 자리가 없었을 뿐이다.
 
 | 갈래 | 목표 | 측정 (주간, 로그) |
 |---|---|---|
-| A 경로 | 게스트·원격 트리를 가진 keeper 의 Read/Grep/Execute 가 호스트 경로를 보지 않는다 | `cwd_missing`+`cwd_not_directory` 0, `remote_ssh_read_failed … rg: /Users/` 0, 알려진-매치 탐침 100% 적중 |
+| A 경로 | 게스트·원격 트리를 가진 keeper 의 Read/Grep/Execute 가 호스트 경로를 보지 않는다 | 호스트 확인에서 난 `cwd_missing`+`cwd_not_directory` 0 (엔드포인트가 답한 것은 셈에 넣지 않는다), 알려진-매치 탐침 100% 적중 |
 | B 배포 | shim 은 서버 릴리즈의 일부다. 부팅이 게스트 shim 을 놓고, preflight 가 원격 shim 의 해시를 본다 | `remote_shim_version_skew` 0, `microvm_shim_missing` 0, 운영자 복사 절차 삭제 |
 | C 통행료 | judge 경유 비율을 18% 에서 측정값 기준으로 내린다 | `source=one_shot_resolution` / 전체 tool_execute, `observed_in_box` 수, `observe run refused` 수 |
 | D 진단 | keeper 가 한 도구 호출로 자기 레인 상태와 운영자 조치를 읽는다 | 레인 장애 시 보드 "데이터포인트" 댓글 수, 장애 인지까지 시간 |
@@ -80,8 +83,9 @@ keeper 가 읽을 자리가 없었을 뿐이다.
 
 `Keeper_types_profile_sandbox.tree_location_of_profile` 이 이미 `Endpoint_owned |
 Shared_mount` 를 가른다. 읽기 디스패치(`Keeper_sandbox_read_backend.resolve_read_dispatch`)
-는 이 값을 쓰지만, 그 앞의 cwd 해석(`Keeper_tool_execute_path`, `resolve_keeper_read_cwd`)
-과 rg 인자 조립은 여전히 호스트 경로를 만든 뒤 그 존재를 호스트에서 확인한다.
+는 이 값을 쓰고 rg 인자도 `container_path_of_host` 로 변환하지만, 그 앞의 cwd 해석
+(`Keeper_tool_execute_path.resolve_tool_read_cwd`)은 여전히 호스트 경로를 만든 뒤 그 존재를
+호스트에서 확인한다. Execute 쪽은 #33461 이 옮겼다.
 
 - `Endpoint_owned` 프로필에서는 호스트 파일시스템을 보지 않는다. cwd 는 논리
   경로(keeper 루트 기준 상대 경로)로만 검증하고, 존재 확인은 엔드포인트가 한다
@@ -134,7 +138,9 @@ RFC-0422 §4-2 그대로다. 2026-09-05T16:20Z 부터 이틀 동안
   본다. 표(RFC-0404)에 넣을 후보는 그 교집합에서만 고른다. 텍스트 예측을 늘리는
   대신 상자의 판정을 표의 근거로 쓴다.
 
-검증은 숫자 자체다. 주간 표를 이 RFC 의 §5 에 덧붙인다.
+검증은 숫자 자체다. `scripts/measure-rfc-0427-judge-share.py --since … --until …
+<system_log_*.jsonl>` 이 §5 의 행을 만든다(`--selftest` 로 자기 검사). 주간 표를 §5 에
+덧붙인다.
 
 ### 3-D. keeper 가 읽는 레인 상태는 서버가 이미 아는 것의 투영이다
 
@@ -176,9 +182,11 @@ capabilities)와 첫 디스패치 여부를 가진다. 여기에 마지막 디�
 
 ## 5. 측정 기록
 
-| 날짜 | tool_execute | judge | observed_in_box | refused | cwd 오류 | rg 호스트 경로 | 비고 |
+| 창 | tool_execute | judge | observed_in_box | refused | unavailable | cwd 오류 | 비고 |
 |---|---|---|---|---|---|---|---|
-| 2026-09-05 | 1,742 | 319 (18%) | 32 | 2 | 38 | 14 (모두 재시작 전) | 상자는 16:20Z 부터 전 레인. A-1·D-1 은 09-06 머지 |
+| 09-05 00:00~16:30Z | 1,839 | 319 (17.3%) | 39 | 2 | 6 | 38 | 상자 전. 손으로 센 초안(1,742/319/32/2/38)을 스크립트가 대체 |
+| 09-05 하루 | 7,697 | 414 (5.4%) | 1,382 | 87 | 20 | 64 | 16:20Z 부터 전 레인에 상자 |
+| 09-05 16:20Z ~ 09-06 05:40Z | 7,829 | 113 (1.4%) | 1,613 | 95 | 20 | 35 | A-1 은 09-06 04:54Z 재시작부터 라이브(그 뒤 cwd 오류 1건은 엔드포인트가 답한 것) |
 
 ## 6. 하지 않는 것
 

@@ -496,9 +496,13 @@ let release_durable_lock_result ~lock_path fd =
 ;;
 
 let with_durable_lock_observed_with ~release_fd ~lock_path f =
+  Printf.printf "DIAG14 durable-before-mutex\n%!";
   with_mutex lock_path (fun () ->
+    Printf.printf "DIAG14 durable-inside-mutex\n%!";
     let execution_context = Eio_guard.execution_context () in
-    match acquire_durable_flock ~execution_context lock_path with
+    let flock = acquire_durable_flock ~execution_context lock_path in
+    Printf.printf "DIAG14 durable-after-flock\n%!";
+    match flock with
     | Error error -> Lock_not_acquired error
     | Ok fd ->
       let admitted () =

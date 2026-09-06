@@ -23,8 +23,9 @@ related: ["chat-references-are-recorded-not-guessed", "skill-usage-rollup"]
 
 - **본선**: 턴 하나가 `╭`로 열려 `│`로 흐르고 `╰`로 닫힌다. 턴 안의 일
   (사고·도구·스킬·승인·위임)은 `├`로 본선에 매달린다.
-- **측선**: journal·broadcast·channel·gate 처럼 턴 밖에서 도착한 것은
-  본선을 끊지 않고 `─┥`로 옆에서 합류한다.
+- **측선**: journal 과 남이 보낸 줄처럼 턴 밖에서 도착한 것은 본선을 끊지 않고
+  왼쪽에서 `┤`로 합류한다. 종류는 합류선의 질감이 말한다 — journal 은 점선,
+  도착은 실선.
 - **분기**: 한 `stream_scope` 안의 여러 `block_index`는 프로바이더가 한 번에
   낸 병렬 호출이다. `┬`로 갈라 `┴`로 합친다.
 
@@ -73,19 +74,7 @@ let closes = closes_at = index
 
 턴 아래 한 층이 더 필요하다. 지금은 턴과 블록 사이가 전부다.
 
-### 1.3 레일이 두 질문을 다시 섞었다
-
-`turn_rail_glyph`의 주석은 이렇게 선언한다.
-
-> that alphabet answers "who is talking" and this one answers "which turn is
-> this row part of". Folding the second question into the first was the shape
-> that failed — a mark that means two things stops meaning either.
-
-그런데 `turn_rail_of`(`:8578`)는 `Turn_continues`일 때 **style로**
-`Rail_does`(`├`)와 `Rail_says`(`│`)를 가른다. 레일이 "턴 안 어디"가 아니라
-"이 행이 도구냐 말이냐"를 답한다. 경계했던 실패 모양이 반대편에서 재발했다.
-
-### 1.4 라벨 컬럼이 위계를 지운다
+### 1.3 라벨 컬럼이 위계를 지운다
 
 `chat_role_label_column = 10` 하나에 keeper 이름·`TOOLS`·`STATUS`·
 `THINKING`·`JOURNAL`이 전부 같은 x, 같은 폭으로 정렬된다
@@ -102,14 +91,14 @@ Lane_turn of request_id | Lane_unowned | Lane_memory
 이라고 못박는다. 그런데 렌더는 전부 세로로 쌓는다. 타입이 아는 것을
 화면이 모른다.
 
-### 1.5 롤업이 상세보다 뒤에 온다
+### 1.4 롤업이 상세보다 뒤에 온다
 
 `project_tool_block`의 Compact 경로는 `√ Tools 14 · … · 14 details folded`
 한 줄을 만든다. 이 줄은 그 14개가 **끝난 뒤** 형제 행으로 놓인다.
 바로 아래 이어지는 `STATUS` 두 줄이 그 14개 중 일부인지 다음 라운드인지
 화면만 봐서는 알 수 없다.
 
-### 1.6 요약과 상세가 동시에 보이지 않는다
+### 1.5 요약과 상세가 동시에 보이지 않는다
 
 `tool_projection_mode` 는 두 값뿐이다.
 
@@ -125,7 +114,7 @@ type tool_projection_mode = Compact | Full
 `명령 21개 실행함` 아래 목록, `Setting up environment` 아래 스텝.
 요약은 헤더고 상세는 그 자식이다. 형제가 아니다.
 
-### 1.7 원문이 화면을 먹는다
+### 1.6 원문이 화면을 먹는다
 
 `STATUS` 행이 `tool_execute · python3 -c 'import base64;print(base64.b64decode('\''…`
 를 그대로 뱉는다. 한 호출의 base64 인자가 화면 절반을 차지한다.
@@ -227,18 +216,16 @@ projection 을 각자 다시 만들면 두 화면이 서로 다른 이야기를 
 | # | 범위 | 산출 | 검증 |
 |---|---|---|---|
 | 1 | 요약을 헤더로, 상세를 자식으로 | 한 블록이 요약 1행 + 상세 N행, 상세는 요약보다 들여씀 | 요약과 상세가 같은 프레임에 |
-| 2 | 레일에서 style 분기 제거 | `Rail_does`/`Rail_says` 판정을 style 이 아니라 소속으로 | 같은 style 이 본선/측선 양쪽에 놓여도 레일이 다름 |
-| 3 | 측선 도입 | `Lane_memory`/`Lane_unowned` 가 `─┥` 로 합류 | journal 이 턴 사이에 끼어도 턴이 끊기지 않음 |
-| 4 | 병렬 그룹 | `stream_scope` 동석을 `┬`/`┴` 로 | 한 scope 3호출 → 분기 1개, 3 scope 3호출 → 분기 0개 |
-| 5 | 롤업을 헤더로 | 요약이 상세 **앞** | 접힌 블록의 첫 행이 요약 |
-| 6 | 잘라내기 → 접기 | `…` 제거, `⋯ N개 더` | Full 모드에서 잘린 행 0 |
-| 7 | 레인 필터 | 토글 3개 → 필터 1개 | 끈 레인의 숨은 개수가 헤더에 |
-| 8 | 채팅 패널 마우스 | 클릭 접기/펴기 | 마우스 해제 시 키보드 경로 동일 |
-| 9 | wire 이벤트 | DELEGATE/BROADCAST/CHANNEL/STREAM | 각 이벤트에 생산자와 소비자가 동시에 |
-| 10 | Dashboard 정렬 | 같은 projection | 두 화면이 같은 턴에 같은 위계 |
+| 2 | 측선 도입 | `Lane_memory` 와 남이 보낸 줄이 `╌╌╌┤`·`───┤` 로 합류 | journal 이 턴 사이에 끼어도 턴이 끊기지 않음 |
+| 3 | 병렬 그룹 | `stream_scope` 동석을 `┬`/`┴` 로 | 한 scope 3호출 → 분기 1개, 3 scope 3호출 → 분기 0개 |
+| 4 | 잘라내기 → 접기 | `…` 제거, `⋯ N개 더` | Full 모드에서 잘린 행 0 |
+| 5 | 레인 필터 | 토글 3개 → 필터 1개 | 끈 레인의 숨은 개수가 헤더에 |
+| 6 | 채팅 패널 마우스 | 클릭 접기/펴기 | 마우스 해제 시 키보드 경로 동일 |
+| 7 | wire 이벤트 | DELEGATE/BROADCAST/CHANNEL/STREAM | 각 이벤트에 생산자와 소비자가 동시에 |
+| 8 | Dashboard 정렬 | 같은 projection | 두 화면이 같은 턴에 같은 위계 |
 
-증분 9는 렌더 밖(런타임·SSE·저장)으로 범위가 넓어진다. 1–8이 렌더 안에서
-끝나므로 9는 그 뒤에 둔다. 없는 데이터를 위해 빈 자리를 먼저 만들지 않는다.
+증분 7은 렌더 밖(런타임·SSE·저장)으로 범위가 넓어진다. 1–6이 렌더 안에서
+끝나므로 7은 그 뒤에 둔다. 없는 데이터를 위해 빈 자리를 먼저 만들지 않는다.
 
 ## 6. 비목표
 

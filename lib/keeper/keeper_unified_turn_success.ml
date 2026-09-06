@@ -590,6 +590,9 @@ let handle
       ~keeper_turn_id
       execution_outcome
   =
+  (* Named so post-turn work (checkpoint, metrics, memory, projections)
+     reads as [turn:post] in the trace. *)
+  Eio_guard.with_named_switch "turn:post" @@ fun () ->
   let result = Keeper_execution_outcome.result execution_outcome in
   let channel = Keeper_execution_outcome.metrics_channel execution_outcome in
   let run_projection terminal_effect f =

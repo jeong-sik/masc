@@ -32,7 +32,7 @@
     [tool_post_get], [tool_comment_add], [tool_vote],
     [tool_stats], [tool_search], [tool_comment_vote],
     [tool_profile], [tool_hearth_list], [tool_delete],
-    [board_tool_cleanup], [tool_spec_read_only]). *)
+    [board_tool_cleanup]). *)
 
 open Masc_board_handlers
 

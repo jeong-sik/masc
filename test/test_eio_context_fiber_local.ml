@@ -261,6 +261,52 @@ let test_run_on_owner_domain_cross_domain_dispatch () =
       999
       post_cancel_ran)
 
+let test_set_switch_clears_on_release () =
+  Eio_main.run @@ fun _env ->
+  Eio_context.For_testing.clear_root_switch ();
+  Alcotest.(check bool) "root switch initially None" true
+    (Option.is_none (Eio_context.get_root_switch_opt ()));
+  Eio.Switch.run (fun sw ->
+    Eio_context.set_switch sw;
+    Alcotest.(check bool) "root switch set while active" true
+      (Option.is_some (Eio_context.get_root_switch_opt ())));
+  Alcotest.(check bool) "root switch cleared after switch released" true
+    (Option.is_none (Eio_context.get_root_switch_opt ()))
+
+let test_with_turn_switch_does_not_mutate_root_switch () =
+  Eio_main.run @@ fun _env ->
+  Eio_context.For_testing.clear_root_switch ();
+  Eio.Switch.run @@ fun root_sw ->
+  Eio_context.set_switch root_sw;
+  Eio.Switch.run @@ fun request_sw ->
+  let inside_saw_request_sw = Atomic.make false in
+  let inside_root_switch_preserved = Atomic.make false in
+  Eio_context.with_turn_switch request_sw (fun () ->
+    (match Eio_context.get_switch_opt () with
+     | Some sw -> Atomic.set inside_saw_request_sw (sw == request_sw)
+     | None -> ());
+    (match Eio_context.get_root_switch_opt () with
+     | Some sw -> Atomic.set inside_root_switch_preserved (sw == root_sw)
+     | None -> ()));
+  Alcotest.(check bool) "with_turn_switch provides request switch to get_switch_opt" true
+    (Atomic.get inside_saw_request_sw);
+  Alcotest.(check bool) "with_turn_switch preserves root switch in get_root_switch_opt" true
+    (Atomic.get inside_root_switch_preserved);
+  (match Eio_context.get_switch_opt () with
+   | Some sw -> Alcotest.(check bool) "after with_turn_switch, fallback returns root_sw" true (sw == root_sw)
+   | None -> Alcotest.fail "expected root switch fallback");
+  Eio_context.For_testing.clear_root_switch ()
+
+let test_for_testing_clear_root_switch () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  Alcotest.(check bool) "set_switch installed" true
+    (Option.is_some (Eio_context.get_root_switch_opt ()));
+  Eio_context.For_testing.clear_root_switch ();
+  Alcotest.(check bool) "clear_root_switch reset to None" true
+    (Option.is_none (Eio_context.get_root_switch_opt ()))
+
 let () =
   Alcotest.run "eio_context_fiber_local"
     [
@@ -275,6 +321,9 @@ let () =
           Alcotest.test_case "binding cleared after exit"
             `Quick
             test_binding_cleared_after_with_turn_switch_exits;
+          Alcotest.test_case "with_turn_switch does not mutate root switch"
+            `Quick
+            test_with_turn_switch_does_not_mutate_root_switch;
         ] );
       ( "fork propagation",
         [
@@ -308,5 +357,11 @@ let () =
           Alcotest.test_case "run_on_owner_domain cross-domain dispatch"
             `Quick
             test_run_on_owner_domain_cross_domain_dispatch;
+          Alcotest.test_case "set_switch clears on release"
+            `Quick
+            test_set_switch_clears_on_release;
+          Alcotest.test_case "For_testing.clear_root_switch resets to None"
+            `Quick
+            test_for_testing_clear_root_switch;
         ] );
     ]

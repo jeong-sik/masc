@@ -854,12 +854,15 @@ let microvm_shim_host_dir (t : t) =
   Config_dir_resolver.microvm_shim_dir ~base_path:t.config.base_path
 ;;
 
-(** The shim the guest runs is a static Linux binary the operator installs on
-    the host ([scripts/remote-ssh/build-shim.sh --arch arm64]); the config
+(** The shim the guest runs is a static Linux binary the release ships and
+    [scripts/install.sh] places on the host with its sha256 sidecar
+    (RFC-0427 B-1, B-2); a hand-built one from
+    [scripts/remote-ssh/build-shim.sh] runs too, unverified. The config
     beside it is written here on every boot, so a changed payload PATH
-    reaches the guest without an operator step. A missing binary refuses the
-    boot: a guest without a shim has no remote lane, and the routing that
-    follows this change has no other channel into the guest. *)
+    reaches the guest without an operator step. A missing binary, or one
+    that does not match its own sidecar, refuses the boot: a guest without
+    a shim has no remote lane, and a shim the release did not ship is the
+    version skew of 2026-09-05 waiting to recur. *)
 let prepare_microvm_shim_dir (t : t) =
   let dir = microvm_shim_host_dir t in
   let binary = Filename.concat dir Keeper_sandbox_microvm.shim_binary_name in
@@ -867,18 +870,28 @@ let prepare_microvm_shim_dir (t : t) =
   | exception Unix.Unix_error (code, _, _) ->
     Error
       (Printf.sprintf
-         "microvm_shim_missing: %s (%s); build it with scripts/remote-ssh/build-shim.sh --arch arm64 and install it there"
+         "microvm_shim_missing: %s (%s); scripts/install.sh places it from the release (asset masc-exec-shim-linux-arm64), or build it with scripts/remote-ssh/build-shim.sh --arch arm64 and install it there"
          binary
          (Unix.error_message code))
   | () ->
-    (match
-       Fs_compat.save_file_atomic
-         (Filename.concat dir Keeper_sandbox_microvm.shim_config_name)
-         (Keeper_sandbox_microvm.shim_config_content
-            ~payload_path:(Env_config_sandbox.Runtime.microvm_payload_path ()))
-     with
-     | Ok () -> Ok dir
-     | Error message -> Error ("microvm_shim_config_unwritable: " ^ message))
+    (match Keeper_sandbox_microvm.verify_shim_sidecar ~dir with
+     | Error _ as refused -> refused
+     | Ok provenance ->
+       (match provenance with
+        | Keeper_sandbox_microvm.Shim_verified { sha256 } ->
+          Log.Keeper.info "microvm shim %s verified against its sidecar: sha256 %s" binary sha256
+        | Keeper_sandbox_microvm.Shim_unverified ->
+          Log.Keeper.info
+            "microvm shim %s has no %s beside it; running it unverified (a hand-built shim)"
+            binary Keeper_sandbox_microvm.shim_sidecar_name);
+       (match
+          Fs_compat.save_file_atomic
+            (Filename.concat dir Keeper_sandbox_microvm.shim_config_name)
+            (Keeper_sandbox_microvm.shim_config_content
+               ~payload_path:(Env_config_sandbox.Runtime.microvm_payload_path ()))
+        with
+        | Ok () -> Ok dir
+        | Error message -> Error ("microvm_shim_config_unwritable: " ^ message)))
 ;;
 
 type microvm_guest_provisions =

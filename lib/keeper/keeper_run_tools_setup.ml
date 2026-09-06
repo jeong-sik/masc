@@ -226,6 +226,81 @@ let deferred_names_absent_from ~declared_names ~actual_names =
   absent
 ;;
 
+(* task-1204 / #26057: seed the loop-detector accumulator with the matched
+   ToolUse/ToolResult pairs of the prior run so a keeper repeating the
+   identical call across a checkpoint restart is still caught. The detector
+   folds over the run-local accumulator, which used to start empty on every
+   resume; the checkpoint preserves the AGENT_CORE message history, so the
+   identical pairs of the previous run were invisible to it and a repeat
+   split 2+2 across two runs escaped at threshold 3. *)
+let seed_tool_calls_from_history
+    ~(history_messages : Agent_core.Types.message list)
+  : Keeper_agent_result.tool_call_detail list
+  =
+  let result_by_id = Hashtbl.create 16 in
+  List.iter
+    (fun (message : Agent_core.Types.message) ->
+       List.iter
+         (fun (block : Agent_core.Types.content_block) ->
+            match block with
+            | Agent_core.Types.ToolResult { tool_use_id; content; _ } ->
+              Hashtbl.replace result_by_id tool_use_id content
+            | _ -> ())
+         message.content)
+    history_messages;
+  (* Newest first, matching the live accumulator's order. Only matched
+     ToolUse/ToolResult pairs seed the detector: [same_exact_tool_call]
+     compares both input and output fingerprints, so an unanswered ToolUse
+     alone could never match a live call anyway. *)
+  List.rev history_messages
+  |> List.concat_map
+       (fun (message : Agent_core.Types.message) ->
+          List.filter_map
+            (fun (block : Agent_core.Types.content_block) ->
+               match block with
+               | Agent_core.Types.ToolUse { id; name; input; _ } -> (
+                   match Hashtbl.find_opt result_by_id id with
+                   | Some output_text -> (
+                       match
+                         Keeper_tool_progress_identity.digest_tool_io
+                           ~tool_name:name
+                           ~input
+                           ~output_text
+                       with
+                       | Some
+                           { Keeper_tool_progress_identity.input_fingerprint;
+                             output_fingerprint } ->
+                         Some
+                           { Keeper_agent_result.tool_name = name
+                           ; provider = "history"
+                           ; execution_outcome = Tool_result.Ok
+                           ; typed_outcome = None
+                           ; latency_ms = 0.
+                           ; task_id = None
+                           ; route_evidence = None
+                           ; input_fingerprint = Some input_fingerprint
+                           ; output_fingerprint = Some output_fingerprint
+                           }
+                       | None -> None)
+                   | None -> None)
+               | _ -> None)
+            message.content)
+(* The wiring seam for the task-1204 fix: what a fresh run's accumulator
+   starts from, given the checkpoint-resumed history. Production acc creation
+   and the regression test both go through this function, so reverting its
+   body to [] is exactly the pre-fix behavior. *)
+let initial_tool_calls ~(history_messages : Agent_core.Types.message list) :
+    Keeper_agent_result.tool_call_detail list =
+  (* Serialising and hashing every tool call in the history is pure, so the
+     pool does it. The walk is over the whole history, which measured
+     1,278,158 B above, and it runs once per turn between the raw-trace
+     append and [Keeper_identity_tools.for_turn]: the 2026-09-06 20:29 KST
+     trace shows that stretch as the longest run left on the main domain,
+     55-222 ms across five Keepers. *)
+  Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    seed_tool_calls_from_history ~history_messages)
+;;
+
 let prepare_agent_setup
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -395,7 +470,7 @@ let prepare_agent_setup
   in
   let acc : Keeper_run_tools_hook_accumulator.hook_accumulator =
     { meta
-    ; tool_calls = []
+    ; tool_calls = initial_tool_calls ~history_messages
     ; current_turn = 0
     ; tool_surface =
         { turn_lane = Keeper_agent_tool_surface.Lane_text_only

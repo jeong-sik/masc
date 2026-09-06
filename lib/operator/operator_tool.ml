@@ -5,22 +5,7 @@ type tool_result = Tool_result.result
 
 type 'a context = 'a Tool_operator.context
 
-module Operator_remote_name = Tool_name.Operator_remote_name
 module Operator_name = Tool_name.Operator_name
-
-let operator_remote_tool_name name = Operator_remote_name.to_string name
-
-let operator_tool_name name =
-  operator_remote_tool_name (Operator_remote_name.Operator_tool name)
-;;
-
-let board_attention_quarantine_requeue_tool_name =
-  operator_tool_name Operator_name.Operator_board_attention_quarantine_requeue
-;;
-
-let task_recovery_tool_name =
-  operator_tool_name Operator_name.Operator_task_recovery_resolve
-;;
 
 (* RFC-0189 PR-1b.11 — typed result.
 
@@ -235,8 +220,21 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
       mcp_session_id = ctx.mcp_session_id;
     }
   in
-  match name with
-  | "masc_operator_snapshot" ->
+  let module O = Tool_name.Operator_name in
+  (* Routing is decided on the closed Operator vocabulary; the string arms below
+     are reached only for names outside it. A constructor added to
+     Tool_name.Operator_name is a compile error in [operator_name_arm]. *)
+  let operator_name_arm = function
+    | O.Operator_snapshot -> `Snapshot
+    | O.Operator_digest -> `Digest
+    | O.Operator_action -> `Action
+    | O.Operator_board_attention_quarantine_requeue -> `Quarantine_requeue
+    | O.Operator_task_recovery_resolve -> `Task_recovery
+    | O.Operator_confirm -> `Confirm
+    | O.Operator_judgment_write -> `Judgment_write
+  in
+  match Option.map operator_name_arm (O.of_string name) with
+  | Some `Snapshot ->
       (* The tool is the observation half of operator CAS commands. Dashboard
          refreshes may use the cache, but an explicit operator observation must
          not return a stale assignee/backlog version. *)
@@ -249,7 +247,7 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
         (json_ok ~tool_name:name ~start_time:start
            (Operator_control.snapshot_json ?actor ?view ~include_messages
               ~include_keepers control_ctx))
-  | "masc_operator_digest" ->
+  | Some `Digest ->
       let actor = get_string_opt args "actor" in
       let target_type = get_string_opt args "target_type" in
       let target_id = get_string_opt args "target_id" in
@@ -258,86 +256,132 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.digest_json ?actor ?target_type ?target_id
               ~include_workers control_ctx))
-  | "masc_operator_action" ->
+  | Some `Action ->
       Some
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.action_json control_ctx args))
-  | tool_name
-    when String.equal tool_name board_attention_quarantine_requeue_tool_name ->
+  | Some `Quarantine_requeue ->
       Some
         (board_attention_quarantine_requeue_result
-           ~tool_name
+           ~tool_name:name
            ~start_time:start
            ctx
            args)
-  | tool_name when String.equal tool_name task_recovery_tool_name ->
-      Some (task_recovery_result ~tool_name ~start_time:start ctx args)
-  | "masc_operator_confirm" ->
+  | Some `Task_recovery ->
+      Some (task_recovery_result ~tool_name:name ~start_time:start ctx args)
+  | Some `Confirm ->
       Some
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.confirm_json control_ctx args))
-  | "masc_operator_judgment_write" ->
+  | Some `Judgment_write ->
       Some
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.judgment_write_json control_ctx args))
-  | _ ->
+  | None ->
       Log.Misc.warn "operator_dispatch_unknown: tool=%s agent=%s" name ctx.agent_name;
       None
 
+(* One row per Tool_name.Operator_name constructor.
+
+   Everything the surface knows about a tool that does not depend on the
+   request lives here: which schema advertises it, whether the Operator_remote
+   profile carries it, and how it is registered. Splitting these across
+   separate matches meant adding a tool touched three places and could touch
+   only two; one exhaustive function means one row, and omitting it does not
+   compile.
+
+   [remote = None] is local-only. Mcp_server_eio_tool_profile gates the remote
+   profile on these names, so widening the set is a deliberate edit here.
+
+   [allow_direct_call_when_hidden] is a hidden tool the operator profile still
+   reaches directly; false for the two that must go through the profile and
+   nothing else. This used to be recovered with List.mem over four string
+   lists, so a tool got its policy by being absent from them. *)
+type tool_def =
+  { schema : tool_schema
+  ; remote : tool_schema option
+  ; read_only : bool
+  ; hidden : bool
+  ; allow_direct_call_when_hidden : bool
+  }
+
+let tool_def : Operator_name.t -> tool_def = function
+  | Operator_name.Operator_snapshot ->
+    { schema = snapshot_schemas.local
+    ; remote = Some snapshot_schemas.remote
+    ; read_only = true
+    ; hidden = false
+    ; allow_direct_call_when_hidden = false
+    }
+  | Operator_name.Operator_digest ->
+    { schema = digest_schemas.local
+    ; remote = Some digest_schemas.remote
+    ; read_only = true
+    ; hidden = false
+    ; allow_direct_call_when_hidden = false
+    }
+  | Operator_name.Operator_confirm ->
+    { schema = confirm_schema
+    ; remote = Some confirm_schema
+    ; read_only = false
+    ; hidden = false
+    ; allow_direct_call_when_hidden = false
+    }
+  | Operator_name.Operator_action ->
+    { schema = action_schemas.local
+    ; remote = Some action_schemas.remote
+    ; read_only = false
+    ; hidden = true
+    ; allow_direct_call_when_hidden = true
+    }
+  | Operator_name.Operator_judgment_write ->
+    { schema = judgment_write_schema
+    ; remote = None
+    ; read_only = false
+    ; hidden = true
+    ; allow_direct_call_when_hidden = true
+    }
+  | Operator_name.Operator_board_attention_quarantine_requeue ->
+    { schema = board_attention_quarantine_requeue_schema
+    ; remote = Some board_attention_quarantine_requeue_schema
+    ; read_only = false
+    ; hidden = true
+    ; allow_direct_call_when_hidden = false
+    }
+  | Operator_name.Operator_task_recovery_resolve ->
+    { schema = task_recovery_schema
+    ; remote = Some task_recovery_schema
+    ; read_only = false
+    ; hidden = true
+    ; allow_direct_call_when_hidden = false
+    }
+;;
+
 let schemas : tool_schema list =
-  [ snapshot_schemas.local
-  ; digest_schemas.local
-  ; action_schemas.local
-  ; board_attention_quarantine_requeue_schema
-  ; task_recovery_schema
-  ; confirm_schema
-  ; judgment_write_schema
-  ]
+  List.map (fun name -> (tool_def name).schema) Operator_name.all
 ;;
 
 let remote_schemas : tool_schema list =
-  [ snapshot_schemas.remote
-  ; digest_schemas.remote
-  ; action_schemas.remote
-  ; board_attention_quarantine_requeue_schema
-  ; task_recovery_schema
-  ; confirm_schema
-  ]
+  List.filter_map (fun name -> (tool_def name).remote) Operator_name.all
 ;;
 
-let remote_tool_names : string list = Operator_remote_name.all_strings
+let remote_tool_names : string list =
+  List.map (fun (s : tool_schema) -> s.name) remote_schemas
+;;
+
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let tool_spec_read_only =
-  [
-    operator_tool_name Operator_name.Operator_snapshot;
-    operator_tool_name Operator_name.Operator_digest;
-  ]
-
-(* Tools with explicit catalog metadata that must be preserved. *)
-let operator_profile_only_tools =
-  [ board_attention_quarantine_requeue_tool_name
-  ; task_recovery_tool_name
-  ]
-;;
-
-let tool_spec_hidden =
-  "masc_operator_judgment_write" :: operator_profile_only_tools
-;;
-
-let tool_spec_hidden_actions = [ operator_tool_name Operator_name.Operator_action ]
-
+(* Registration walks the vocabulary, not the schema list, so every constructor
+   is registered with the schema and policy that belong to it. *)
 let () =
   List.iter
-    (fun (s : tool_schema) ->
-      let is_hidden = List.mem s.name tool_spec_hidden || List.mem s.name tool_spec_hidden_actions in
+    (fun name ->
+      let def = tool_def name in
+      let (s : tool_schema) = def.schema in
       let existing = Tool_catalog.metadata s.name in
-      let direct_call_when_hidden =
-        is_hidden && not (List.mem s.name operator_profile_only_tools)
-      in
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name
@@ -345,12 +389,13 @@ let () =
            ~module_tag:Tool_dispatch.Mod_operator
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
-           ~is_read_only:(List.mem s.name tool_spec_read_only)
-           ~visibility:(if is_hidden then Tool_catalog.Hidden else Tool_catalog.Default)
-           ~allow_direct_call_when_hidden:direct_call_when_hidden
+           ~is_read_only:def.read_only
+           ~visibility:
+             (if def.hidden then Tool_catalog.Hidden else Tool_catalog.Default)
+           ~allow_direct_call_when_hidden:def.allow_direct_call_when_hidden
            ?reason:existing.reason
            ()))
-    schemas
+    Operator_name.all
 
 let () =
   Tool_operator.register_operator_tools ~dispatch ~remote_schemas;

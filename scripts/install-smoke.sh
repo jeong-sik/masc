@@ -43,6 +43,22 @@ for a in "${ASSETS[@]}"; do
   [ -f "$BIN_DIR/$a" ] || { echo "install-smoke: missing release asset $BIN_DIR/$a" >&2; exit 2; }
 done
 
+# The guest exec shim (RFC-0427 B-2) is built by the Linux release jobs on
+# their own architecture, so it is in dist/ there and absent on the macOS job.
+# When it is here the smoke stages it and checks the installer placed it with
+# its sha256 sidecar; when it is not, the smoke asks the installer to skip it,
+# which is the flag a host without microvm keepers uses.
+case "$ARCH" in
+  macos-arm64|linux-arm64) SHIM_ASSET="masc-exec-shim-linux-arm64" ;;
+  linux-x64) SHIM_ASSET="masc-exec-shim-linux-amd64" ;;
+  *) SHIM_ASSET="" ;;
+esac
+SHIM_FLAG="--no-guest-shim"
+if [ -n "$SHIM_ASSET" ] && [ -f "$BIN_DIR/$SHIM_ASSET" ]; then
+  ASSETS+=("$SHIM_ASSET")
+  SHIM_FLAG=""
+fi
+
 # SMOKE_VERSION is a label, not a real tag: it only names the file:// release
 # directory and the SHA256SUMS the installer verifies against.
 VERSION="v0.0.0-install-smoke"
@@ -77,17 +93,31 @@ sha_tool() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@"; else 
 ( cd "$stage" && sha_tool "${ASSETS[@]}" > SHA256SUMS )
 
 echo "install-smoke: installing $VERSION ($ARCH) from file://$stage"
+# shellcheck disable=SC2086  # SHIM_FLAG is one optional word, or empty
 MASC_RELEASE_BASE_URL="file://$work/release" \
   bash "$INSTALL_SH" \
     --version "$VERSION" \
     --prefix "$prefix" \
     --base-path "$base" \
-    --no-wizard
+    --no-wizard $SHIM_FLAG
 
 for a in masc masc-tui masc-deployment-preflight-helper masc-check-runtime-deployment-preflight; do
   [ -x "$prefix/$a" ] || { echo "install-smoke: installer did not place $a" >&2; exit 1; }
 done
 echo "install-smoke: installer placed all four binaries"
+
+shim_dest="$base/.masc/microvm/shim/masc-exec-shim"
+if [ -z "$SHIM_FLAG" ]; then
+  [ -x "$shim_dest" ] || { echo "install-smoke: installer did not place the guest shim at $shim_dest" >&2; exit 1; }
+  [ -f "$shim_dest.sha256" ] || { echo "install-smoke: installer left no sha256 sidecar beside the guest shim" >&2; exit 1; }
+  want="$(awk -v f="$SHIM_ASSET" '$2 == f {print $1; exit}' "$stage/SHA256SUMS")"
+  got="$(awk '{print $1; exit}' "$shim_dest.sha256")"
+  [ "$want" = "$got" ] || { echo "install-smoke: sidecar digest $got differs from the release's $want" >&2; exit 1; }
+  echo "install-smoke: installer placed the guest shim with the release's sha256 beside it"
+else
+  [ ! -e "$shim_dest" ] || { echo "install-smoke: --no-guest-shim still placed $shim_dest" >&2; exit 1; }
+  echo "install-smoke: no guest shim in this release dir; installer skipped it as asked"
+fi
 
 # What the installer's own seed had to produce. runtime.toml AND the
 # model-catalog overlay both matter: without the overlay the exact-output lanes

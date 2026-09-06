@@ -545,7 +545,10 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | Some { action = Cancel_request; _ } ->
       handle (fun ~tool_name ~start_time ctx ->
           handle_cancel ~tool_name ~start_time ctx.config)
-  | _ -> None
+  (* [None] is "not a schedule tool". Spelling it out rather than [_] keeps the
+     action match exhaustive, so an action added to Tool_schemas_schedule is a
+     compile error here instead of an advertised name with no route. *)
+  | None -> None
 ;;
 
 let schemas = Tool_schemas_schedule.schemas

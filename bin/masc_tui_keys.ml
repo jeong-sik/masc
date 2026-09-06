@@ -133,7 +133,7 @@ let for_surface = function
       ; b Navigate "PgUp / PgDn" "history" ~help:"scroll history by a page"
       ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
       ; b Act "Ctrl-D" "tool detail" ~help:"toggle compact / full tool-call detail"
-      ; b Act "Ctrl-N" "memory detail"
+      ; b Act "Ctrl-N" "journal detail"
           (* The three words are the states' own, the way Ctrl-R above spells
              its own. Pressing this answers "Librarian/Memory timeline: full",
              so a help promising "full detail" sends a reader looking for a
@@ -470,6 +470,9 @@ let for_surface = function
           ~help:"available / async runs / receipts / usage / all tools"
       ; b Navigate "J/K" "Skill" ~help:"select a published Skill"
       ; b Navigate "[/]" "Keeper" ~help:"change the effective Keeper surface"
+      ; b Act "c/C" "new Skill"
+          ~help:"open $EDITOR on a template for a new Skill; c starts an \
+                 instruction Skill, C starts a composition Skill"
       ; b Act "e" "edit Skill"
           ~help:"open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish"
       ; b Act "Esc" "config" ~help:"back to the Config surface it hangs off"
@@ -669,9 +672,6 @@ let footer_hints_memory_facts =
      ; b Act "Esc" "close / clear" ~help:"clear filter or exit to health table"
      ]
      @ listing_meta)
-
-let footer_hints_metrics =
-  hints_of_bindings (for_surface Metrics)
 
 (* One section per surface family; the strip's spelling names it. Keepers
    sub-modes collapse into the two sections an operator thinks in. *)

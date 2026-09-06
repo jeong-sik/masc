@@ -71,7 +71,16 @@ val sanitize_json_utf8 : Yojson.Safe.t -> Yojson.Safe.t
     Intended for writer-side sanitization before persistence or broadcast. *)
 
 val parse_json_safe : context:string -> string -> (Yojson.Safe.t, string) result
-(** Parse JSON with detailed error reporting. *)
+(** Parse JSON with detailed error reporting. Runs where it is called. *)
+
+val json_parse_offload_min_bytes : int
+(** Document size from which {!parse_json_off_fiber} uses the domain pool. *)
+
+val parse_json_off_fiber : context:string -> string -> (Yojson.Safe.t, string) result
+(** {!parse_json_safe}, but a document of at least {!json_parse_offload_min_bytes}
+    is parsed on the shared domain pool instead of the calling fiber. Same
+    result either way; the pool submit runs inline when there is no pool, when
+    the caller is already a pool worker, or when it is not on an Eio fiber. *)
 
 (** {1 File I/O} *)
 

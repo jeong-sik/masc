@@ -86,6 +86,15 @@ let () =
      creating fiber's domain, so the fiber current there is the creator. *)
   let created_by : (int, int) Hashtbl.t = Hashtbl.create 4096 in
   let cc_kind : (int, string) Hashtbl.t = Hashtbl.create 4096 in
+  (* The name of the newest named switch each fiber opened. Eio names only
+     cancellation contexts ([Switch.run ~name]), never fibers, so a fiber
+     that opens a named switch at the top of its body is labelled by it. *)
+  let opened : (int, string) Hashtbl.t = Hashtbl.create 4096 in
+  (* The first named switch each fiber opened: masc names its long-lived
+     fibers at the top of their body, and Eio names its own internal
+     switches ([both], [with_open_in], [Buf_write.with_flow]) later, so the
+     first name is the code and the newest is what the fiber was doing. *)
+  let opened_first : (int, string) Hashtbl.t = Hashtbl.create 4096 in
   let lost = ref 0 in
   let close d ts ended_by =
     let s = state d in
@@ -132,7 +141,13 @@ let () =
       (match (state d).cur with
        | Some (creator, _, _) -> Hashtbl.replace created_by id creator
        | None -> ())
-    | `Name (id, n) -> Hashtbl.replace names id n
+    | `Name (id, n) ->
+      Hashtbl.replace names id n;
+      (match Hashtbl.find_opt created_by id with
+       | Some creator ->
+         Hashtbl.replace opened creator n;
+         if not (Hashtbl.mem opened_first creator) then Hashtbl.replace opened_first creator n
+       | None -> ())
     | _ -> ()
   in
   let runtime_begin d ts phase =
@@ -184,15 +199,20 @@ let () =
         s.over_10 s.over_50 s.over_100 (ms s.run_max_ns))
     domains;
   let label_of fiber =
-    match Hashtbl.find_opt names fiber with
-    | Some n -> n
-    | None -> (
+    match Hashtbl.find_opt opened_first fiber, Hashtbl.find_opt opened fiber with
+    | Some first, Some last when not (String.equal first last) -> first ^ " > " ^ last
+    | Some first, _ -> first
+    | None, Some last -> last
+    | None, None -> (
+      match Hashtbl.find_opt names fiber with
+      | Some n -> n
+      | None -> (
       match Hashtbl.find_opt parent fiber with
       | Some cc -> (
         match Hashtbl.find_opt names cc with
         | Some n -> "cc:" ^ n
         | None -> Printf.sprintf "cc#%d" cc)
-      | None -> "-")
+      | None -> "-"))
   in
   (* fiber <- its cc (kind, name) <- the fiber that created it <- ... *)
   let ancestry fiber =
@@ -210,7 +230,7 @@ let () =
            | None -> ()
            | Some creator ->
              Buffer.add_string buf (Printf.sprintf " <- fiber %d" creator);
-             (match Hashtbl.find_opt names creator with
+             (match Hashtbl.find_opt opened_first creator with
               | Some n -> Buffer.add_string buf (Printf.sprintf "(%s)" n)
               | None -> ());
              go creator (depth + 1))
@@ -235,6 +255,34 @@ let () =
           r.turn_depth r.resumed_from r.ended_by (label_of r.fiber) (ancestry r.fiber)
       end)
     by_len;
+  Printf.printf "\nlongest uninterrupted runs on domain 0 (fiber ms gc_ms turn resumed_from -> ended_by [label])\n";
+  List.iteri
+    (fun i r ->
+      if i < 15 then begin
+        let dur = Int64.sub r.end_ns r.start_ns in
+        let gc = union_ms (state 0).gc r.start_ns r.end_ns in
+        Printf.printf "%-7d %8.1f %6.1f %4d %-34s -> %-34s [%s]%s\n" r.fiber (ms dur) gc
+          r.turn_depth r.resumed_from r.ended_by (label_of r.fiber) (ancestry r.fiber)
+      end)
+    (List.filter (fun r -> r.domain = 0) by_len);
+  Printf.printf "\ndomain 0 runs >= 10ms grouped by label: count total_ms max_ms\n";
+  let by_label : (string, int * int64 * int64) Hashtbl.t = Hashtbl.create 64 in
+  List.iter
+    (fun r ->
+      if r.domain = 0 then begin
+        let dur = Int64.sub r.end_ns r.start_ns in
+        if Int64.compare dur 10_000_000L >= 0 then begin
+          let key = Printf.sprintf "%s (turn %d)" (label_of r.fiber) r.turn_depth in
+          let c, t, m = Option.value ~default:(0, 0L, 0L) (Hashtbl.find_opt by_label key) in
+          Hashtbl.replace by_label key (c + 1, Int64.add t dur, max m dur)
+        end
+      end)
+    all_runs;
+  List.iter
+    (fun (k, (c, t, m)) -> Printf.printf "%5d %9.1f %8.1f  %s\n" c (ms t) (ms m) k)
+    (List.sort
+       (fun (_, (_, t1, _)) (_, (_, t2, _)) -> Int64.compare t2 t1)
+       (Hashtbl.fold (fun k v l -> (k, v) :: l) by_label []));
   Printf.printf "\ndomain 0 runs >= 10ms grouped by (resumed_from -> ended_by): count total_ms max_ms\n";
   let groups : (string * string, int * int64 * int64) Hashtbl.t = Hashtbl.create 64 in
   List.iter

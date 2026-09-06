@@ -124,7 +124,21 @@ let hints_visible ~base_path =
 let coalesce_queued_input_of_doc doc =
   Keeper_toml_loader.toml_bool_opt doc "tui.coalesce_queued_input"
 
+(* Whether ^Y ending a capture also sends what was heard,
+   [tui].voice_send_on_stop. Absent reads as off, unlike its siblings here:
+   they choose between two ways of showing the same thing, and this one sends
+   a message without the operator confirming it. The draft is also where a
+   spoken half-sentence waits for typing, so the default keeps the step that
+   operator uses. *)
+let voice_send_on_stop_of_doc doc =
+  Keeper_toml_loader.toml_bool_opt doc "tui.voice_send_on_stop"
+
 let coalesce_queued_input ~base_path =
   match doc_of_path (runtime_toml_path ~base_path) with
   | None -> None
   | Some doc -> coalesce_queued_input_of_doc doc
+
+let voice_send_on_stop ~base_path =
+  match doc_of_path (runtime_toml_path ~base_path) with
+  | None -> None
+  | Some doc -> voice_send_on_stop_of_doc doc

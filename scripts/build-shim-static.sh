@@ -70,8 +70,24 @@ cp "$repo_root/lib/exec_ssh_protocol/exec_ssh_protocol.ml" \
    "$repo_root/lib/exec_shim/exec_shim.mli" \
    "$repo_root/lib/exec_shim/prctl_stub.c" \
    "$repo_root/lib/exec_shim/observe_stub.c" \
+   "$repo_root/lib/exec_shim/shim_build_id.mli" \
    "$repo_root/bin/masc_exec_shim.ml" \
    "$stage/src/"
+
+# Write the build identity this artifact reports through its probe. In the
+# repo a dune rule generates this module (the release comes from
+# dune-project); this scratch project has no package, so the script writes
+# the same two values itself. git is a build dependency here the way dune is;
+# a build outside a git tree falls back to the date, which still
+# distinguishes two builds of the same day.
+build_id="$(git -C "$repo_root" rev-parse --short=8 HEAD 2>/dev/null \
+  || date -u +%Y%m%d)"
+release="$(sed -n 's/^(version \(.*\))$/\1/p' "$repo_root/dune-project" | head -1)"
+[ -n "$release" ] || { echo "no (version ...) in dune-project" >&2; exit 1; }
+{
+  printf 'let suffix = "+%s"\n' "$build_id"
+  printf 'let release = "%s"\n' "$release"
+} > "$stage/src/shim_build_id.ml"
 
 cat > "$stage/src/dune-project" <<'EOF'
 (lang dune 3.0)
@@ -85,7 +101,7 @@ cat > "$stage/src/dune" <<'EOF'
 
 (library
  (name exec_shim)
- (modules exec_shim)
+ (modules exec_shim shim_build_id)
  (libraries exec_ssh_protocol unix)
  (foreign_stubs
   (language c)

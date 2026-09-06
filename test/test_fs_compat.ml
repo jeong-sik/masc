@@ -307,6 +307,30 @@ let test_save_file_atomic_strict_parent_sync_cancellation () =
     ~exception_:(Eio.Cancel.Cancelled Exit)
 ;;
 
+(* Inside Eio the three primitives run their Unix implementation on a
+   system thread; the bytes, the append order and the file mode must be the
+   ones the inline implementation produces. *)
+let test_primitives_agree_inside_and_outside_eio ~fs () =
+  with_tmp_dir
+  @@ fun base ->
+  let run implementation =
+    let target = Filename.concat base (implementation ^ ".txt") in
+    Fs_compat.save_file target "first\n";
+    Fs_compat.append_file target "second\n";
+    Fs_compat.append_file target "third\n";
+    let contents = Fs_compat.load_file target in
+    let mode = (Unix.stat target).Unix.st_perm in
+    contents, mode
+  in
+  Fs_compat.clear_fs ();
+  let inline = run "inline" in
+  Fs_compat.set_fs fs;
+  let eio = Fun.protect ~finally:Fs_compat.clear_fs (fun () -> run "eio") in
+  check string "same bytes" "first\nsecond\nthird\n" (fst inline);
+  check string "eio path writes the same bytes" (fst inline) (fst eio);
+  check int "eio path creates the same mode" (snd inline) (snd eio)
+;;
+
 let test_read_dir_and_path_kind_use_typed_inventory ~fs () =
   with_tmp_dir
   @@ fun base ->
@@ -647,6 +671,10 @@ let () =
             `Quick
             (test_read_dir_and_path_kind_use_typed_inventory
                ~fs:(Eio.Stdenv.fs env))
+        ; test_case
+            "load, save and append agree inside and outside Eio"
+            `Quick
+            (test_primitives_agree_inside_and_outside_eio ~fs:(Eio.Stdenv.fs env))
         ] )
     ; ( "owned regular file"
       , [ test_case

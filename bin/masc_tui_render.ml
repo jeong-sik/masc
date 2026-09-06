@@ -74,6 +74,17 @@ let acting_pane_reserved_cols = ref 0
    what was on screen, which is these, not from what the next frame would
    draw. Empty when no pane was drawn, so a stale row cannot answer. *)
 let acting_pane_row_targets : Masc_tui_acting_pane.row_target array ref = ref [||]
+
+(* The chat history as the last frame drew it: which terminal row its first
+   line landed on, and what a press on each line opens. Same reason as the
+   Activity pane above -- a press between frames answers what was on screen.
+
+   The row is absolute because the two-pane split places the chat buffer
+   beside the roster rather than below it, so a line's vertical position is
+   the buffer's own whether or not the roster is showing. Zero means no chat
+   history was drawn, which is what keeps a stale row from answering. *)
+let chat_history_first_row = ref 0
+let chat_history_actions : Message_layout.row_action array ref = ref [||]
 let acting_pane_scroll_max = ref 0
 
 let acting_pane_target_at ~line =
@@ -84,6 +95,13 @@ let acting_pane_target_at ~line =
 (* The input layer reads the last frame's pane through these, never the
    cells themselves: what it needs is the answer, and the cells stay this
    module's to set once per frame. *)
+let chat_row_action_at ~row =
+  let first = !chat_history_first_row in
+  let actions = !chat_history_actions in
+  let line = row - first in
+  if first > 0 && line >= 0 && line < Array.length actions then actions.(line)
+  else Message_layout.Action_none
+
 let acting_pane_drawn_cols () = !acting_pane_reserved_cols
 let acting_pane_scroll_limit () = !acting_pane_scroll_max
 
@@ -547,17 +565,7 @@ let dress_tool_clause (clause : string) : string =
       String.trim (String.sub c (String.length m) (String.length c - String.length m))
     in
     let col = tool_marker_color m in
-    if String.starts_with ~prefix:"Tools " rest || String.starts_with ~prefix:"Ran " rest then
-      match split_last_space rest with
-      | Some (word, count) when is_all_digits count ->
-        Printf.sprintf "%s%s%s %s%s%s %s%s%s" col m Ansi.reset
-          (Ansi.bold ^ Theme.info ()) word Ansi.reset
-          (Theme.recede () ^ Ansi.dim) count Ansi.reset
-      | _ ->
-        Printf.sprintf "%s%s%s %s%s%s" col m Ansi.reset
-          (Ansi.bold ^ Theme.info ()) rest Ansi.reset
-    else
-      (match String.index_opt rest ' ' with
+    (match String.index_opt rest ' ' with
        | Some idx ->
          let name = String.sub rest 0 idx in
          let args = String.sub rest idx (String.length rest - idx) in
@@ -567,14 +575,7 @@ let dress_tool_clause (clause : string) : string =
          Printf.sprintf "%s%s%s %s%s%s" col m Ansi.reset
            (Theme.tool_origin ()) rest Ansi.reset)
   | None ->
-    if String.starts_with ~prefix:"Tools " c then
-      match split_last_space c with
-      | Some (word, count) when is_all_digits count ->
-        Printf.sprintf "%s%s%s %s%s%s"
-          (Ansi.bold ^ Theme.info ()) word Ansi.reset
-          (Theme.recede () ^ Ansi.dim) count Ansi.reset
-      | _ -> Printf.sprintf "%s%s%s" (Ansi.bold ^ Theme.info ()) c Ansi.reset
-    else if contains_sub c "detail" && contains_sub c "folded" then
+    if contains_sub c "detail" && contains_sub c "folded" then
       Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c Ansi.reset
     else if String.starts_with ~prefix:"Ctrl-" c || contains_sub c "carried by the transcript" then
       Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c Ansi.reset
@@ -1354,7 +1355,8 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
             { Pane.file_path = change_row_address change
             ; file_kind =
                 (match change.fc_kind with
-                 | Masc.Tui_decode.Fc_edited _ -> Pane.File_edited
+                 | Masc.Tui_decode.Fc_edited _ | Masc.Tui_decode.Fc_inserted _ ->
+                   Pane.File_edited
                  | Masc.Tui_decode.Fc_written _ -> Pane.File_written)
             ; file_succeeded = change.fc_succeeded
             ; file_at = change.fc_at
@@ -1397,6 +1399,7 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
         { Pane.name = keeper.k_name
         ; mark = Masc_tui_keeper_mark.glyph ~paused reading_of_health
         ; mark_tone
+        ; health = reading_of_health
         ; trace_id = keeper.k_trace_id
         })
       state.keepers
@@ -4084,7 +4087,7 @@ let planning_phase_column =
    for health, [tone] for weight and [Syntax] for what a token is, and
    nothing for a kind.
 
-   It takes a categorical slot now (RFC-0427). Slot 4 is magenta, the hue it
+   It takes a categorical slot now (RFC-0431). Slot 4 is magenta, the hue it
    already drew, and magenta is one of the two the status axis does not
    claim -- which matters here, because the three phases beside it are
    status tokens and a slot aliasing one of those would read as a verdict.
@@ -4092,7 +4095,7 @@ let planning_phase_column =
    The count of these was thirteen. This is the last of them. *)
 let planning_phase_color = function
   | Goal_phase.Executing -> (Theme.info ())
-  | Goal_phase.Verifying -> Theme.category Theme.Slot_4
+  | Goal_phase.Verifying -> Theme.category Theme.Slot_2
   | Goal_phase.Completed -> (Theme.ok ())
   | Goal_phase.Dropped -> (Theme.muted ())
 
@@ -5568,7 +5571,7 @@ let keeper_flag_cell (runtime : keeper_runtime option) =
       let sandbox =
         match row.kr_sandbox_profile with
         | "docker" -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "D" ^ Ansi.reset
-        | "microvm" -> (Theme.category Theme.Slot_4) ^ "M" ^ Ansi.reset
+        | "microvm" -> (Theme.category Theme.Slot_2) ^ "M" ^ Ansi.reset
         | "local" -> Ansi.dim ^ "L" ^ Ansi.reset
         | other when String.length other > 0 ->
           (Theme.warn ()) ^ String.uppercase_ascii (String.sub other 0 1) ^ Ansi.reset
@@ -8432,6 +8435,30 @@ let keeper_message_tool_activity_details state ~keeper_name
    own file changes. The committed history and the turn still streaming both
    ask this, so a diff folded into the history and the same diff arriving live
    cannot be projected two ways. *)
+(* One step. Deep enough that a call reads as belonging to the rollup above
+   it, shallow enough that a block of eight calls does not walk off the pane
+   on a narrow terminal. *)
+let tool_detail_indent = "  "
+
+(* How wide one body line runs. Floored so a narrow pane still shows
+   something and capped so a wide one does not run a sentence past where the
+   eye returns; the eight is the gutter and the space that follows it.
+
+   Shared by everything that has to decide what fits on a line, because two
+   readers with two budgets wrap the same pane at two places. *)
+let chat_body_line_cells ~chat_cols ~role_label_column =
+  max 24 (min 120 (chat_cols - role_label_column - 8))
+
+(* One reading of a Gate row's fold, for the two questions that need it: what
+   the row draws, and whether pressing it opens anything. Folded twice, the
+   text could say it is holding something on a frame where the press says it
+   is not. *)
+let gate_fold ~chat_cols ~role_label_column (message : Masc_tui_types.msg_entry)
+    =
+  Masc_tui_gate_text.fold_argument
+    ~cap:(chat_body_line_cells ~chat_cols ~role_label_column)
+    message.me_text
+
 let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection =
   let role_label_column =
     Message_layout.chat_role_label_width ~pane_cells:chat_cols
@@ -8445,7 +8472,7 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
   let rows =
     Keeper_chat_diff.rows
     ~mode
-    ~max_line_cells:(max 24 (min 120 (chat_cols - role_label_column - 8)))
+    ~max_line_cells:(chat_body_line_cells ~chat_cols ~role_label_column)
     ~activity_details:(keeper_message_tool_activity_details state ~keeper_name)
     file_change_index projection
   in
@@ -8455,7 +8482,14 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
      with four tool blocks carried the same sentence four times -- which is
      what pushed the tool names onto a second line and broke the read of the
      conversation they sit inside. *)
-  rows
+  match projection.Keeper_chat_transcript.header with
+  | None -> rows
+  | Some header ->
+      (* The rollup is the block's first line and the calls hang under it,
+         one step in. The projection knows which line is the header; how far
+         the calls sit from it is this pane's decision, so the indent is
+         applied here rather than baked into the strings upstream. *)
+      header :: List.map (fun row -> tool_detail_indent ^ row) rows
 
 (* Every committed row of one keeper's conversation, as the layout entries the
    pane draws -- the grouping, the aligned badges, the tool projections, and
@@ -8560,30 +8594,60 @@ let keeper_message_visible_messages ?messages (state : state) ~keeper_name =
 
 (* Which piece of its turn's bracket a row draws.
 
-   [Turn_alone] draws nothing. One row is not a hierarchy, and marking it would
-   put a rail on nearly every row of ordinary chatter, which is where a reader
-   stops seeing it at all.
+   A lone row of speech draws nothing. One thing said is not a hierarchy, and
+   marking it would put a rail on nearly every row of ordinary chatter, which
+   is where a reader stops seeing it at all. A lone row of work is a different
+   case and keeps its branch.
 
    The split between speech and work is the fact the pane was missing.
    Reasoning, tool calls and skills are what a turn did to arrive at what it
    said, and they were drawn at the same depth as the answer -- same column,
    same indent, same clock -- so a turn's work read as a sibling of its speech.
    They hang off the trunk instead. *)
-let turn_rail_of ~(edge : Masc_tui_types.turn_edge)
+(* Which siding a row came in on, or [None] when it is not an arrival.
+
+   Exhaustive on purpose: a new row kind has to say whether it arrived from
+   outside, and the compiler is the only thing that will ask.
+
+   [Sent_by_operator] is not here. A prompt the operator sent from another
+   surface did arrive from outside, but which surface is in the label's text
+   and not in the constructor, and reading it back out of the string is the
+   pane deciding something the type never recorded. *)
+let siding_of_message (message : Masc_tui_types.msg_entry) =
+  match message.me_role with
+  | Masc_tui_types.Message_memory -> Some Message_layout.Siding_journal
+  | Masc_tui_types.Message_user (Masc_tui_types.Sent_by_other _) ->
+      Some Message_layout.Siding_arrival
+  | Masc_tui_types.Message_user (Masc_tui_types.Sent_by_operator _)
+  | Masc_tui_types.Message_keeper | Masc_tui_types.Message_autonomous
+  | Masc_tui_types.Message_status | Masc_tui_types.Message_local
+  | Masc_tui_types.Message_error | Masc_tui_types.Message_tool
+  | Masc_tui_types.Message_skill _ | Masc_tui_types.Message_thinking ->
+      None
+
+(* [siding] only reaches the rail through [Turn_outside]: a row that owns a
+   request is on the line whoever sent it, and a broadcast that opened a turn
+   is that turn's first row rather than something beside it. *)
+let turn_rail_of ~siding ~(edge : Masc_tui_types.turn_edge)
     ~(style : Message_layout.style) =
   match edge with
-  | Turn_outside | Turn_alone -> Message_layout.Rail_none
+  | Turn_outside -> (
+      match siding with
+      | Some siding -> Message_layout.Rail_joins siding
+      | None -> Message_layout.Rail_none)
+  (* A turn of one row still divides into speech and work. It read as neither
+     while an autonomous turn also wrote an empty reply -- two rows, so the
+     turn drew a bracket -- and once that row stopped being drawn (#33692) the
+     common autonomous turn became a single tool block with nothing marking it
+     as work at all. *)
+  | Turn_alone ->
+      Message_layout.rail_for_style ~work:Message_layout.Rail_does
+        ~speech:Message_layout.Rail_none style
   | Turn_opens -> Message_layout.Rail_opens
   | Turn_closes -> Message_layout.Rail_closes
-  | Turn_continues -> (
-      match style with
-      | Message_layout.Tool | Message_layout.Skill _ | Message_layout.Thinking
-        ->
-          Message_layout.Rail_does
-      | Message_layout.User | Message_layout.Inbound | Message_layout.Keeper
-      | Message_layout.Status | Message_layout.Local | Message_layout.Journal
-      | Message_layout.Error ->
-          Message_layout.Rail_says)
+  | Turn_continues ->
+      Message_layout.rail_for_style ~work:Message_layout.Rail_does
+        ~speech:Message_layout.Rail_says style
 
 let compute_keeper_message_layout_entries (state : state) ~keeper_name
     ~chat_cols ~start_index visible_entries =
@@ -8722,9 +8786,23 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                  and a neutral system row with no projection remains whole. *)
               | Memory_full | Memory_hidden -> message.me_text
               | Memory_summary -> (
+                  (* A summarised row is a cut row, so it says which key
+                     uncuts it. What that key does is the footer's line,
+                     which is on screen whenever this row is: spelling
+                     "journal detail" here again cost twenty-five cells on
+                     every journal row of the pane. *)
                   match message.me_memory_summary with
-                  | Some summary -> summary ^ " · Ctrl-N: journal detail"
+                  | Some summary -> summary ^ " · Ctrl-N"
                   | None -> message.me_text))
+          (* Only a gated row: a Gate step's text ends in the argument the
+             call asked for, while a status row without one is a sentence the
+             server composed and has nothing to fold away. *)
+          | Message_status when message.me_gate <> None -> (
+              match tool_projection_mode state with
+              | Keeper_chat_transcript.Full -> message.me_text
+              | Keeper_chat_transcript.Compact ->
+                  (gate_fold ~chat_cols ~role_label_column message)
+                    .Masc_tui_gate_text.fa_text)
           | Message_thinking | Message_user _ | Message_keeper
           | Message_autonomous
           | Message_status | Message_local | Message_error ->
@@ -8810,7 +8888,20 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                    observed_at = message.me_at;
                    entry_index;
                  };
-             turn_rail = turn_rail_of ~edge ~style;
+             turn_rail =
+               turn_rail_of ~siding:(siding_of_message message) ~edge ~style;
+             (* Only a Gate row that actually folded: a row holding nothing
+                would take a press and do nothing visible, which reads as the
+                pane ignoring the click. *)
+             action =
+               (match message.me_role, tool_projection_mode state with
+                | Masc_tui_types.Message_status, Keeper_chat_transcript.Compact
+                  when message.me_gate <> None
+                       && (gate_fold ~chat_cols ~role_label_column message)
+                            .Masc_tui_gate_text.fa_held_cells
+                          > 0 ->
+                    Message_layout.Action_unfold_argument
+                | _ -> Message_layout.Action_none);
            }
             : Message_layout.entry))
       visible_entries
@@ -9461,7 +9552,12 @@ let render_keeper_message (state : state) =
                       body;
                       markdown_source;
                       turn_rail =
-                        turn_rail_of ~edge:Masc_tui_types.Turn_continues ~style;
+                        turn_rail_of ~siding:None
+                          ~edge:Masc_tui_types.Turn_continues ~style;
+                      (* A live turn draws its Gate steps as status text the
+                         transcript composed, not as the store's argument, so
+                         there is no argument here to unfold. *)
+                      action = Message_layout.Action_none;
                     }
                      : Message_layout.entry)
                in
@@ -9623,10 +9719,16 @@ let render_keeper_message (state : state) =
                 | false, true -> Turn_closes
                 | false, false -> Turn_continues
               in
+              let siding =
+                match tag with
+                | Tagged_row message -> siding_of_message message
+                | Tagged_block _ -> None
+              in
               ( tag
               , { entry with
                   Message_layout.turn_rail =
-                    turn_rail_of ~edge ~style:entry.Message_layout.style
+                    turn_rail_of ~siding ~edge
+                      ~style:entry.Message_layout.style
                 } )
           | Some _, None | None, Some _ | None, None -> item)
         merged
@@ -9745,6 +9847,14 @@ let render_keeper_message (state : state) =
         ~requested:(state.msg_scroll + rows_since_pin) layout_entries
     in
 
+    (* Recorded before the rows are written, so the count is the lines above
+       the history rather than including them. One-based: terminal rows are. *)
+    chat_history_first_row := count_frame_lines chat_buf + 1;
+    chat_history_actions :=
+      Array.of_list
+        (List.map
+           (fun (row : Message_layout.row) -> row.Message_layout.action)
+           visible_rows);
     if visible_rows = [] then begin
       if history_height > 0 then
         box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
@@ -12853,6 +12963,7 @@ let change_row_summary (change : Masc.Tui_decode.file_change) =
   let content =
     match change.Masc.Tui_decode.fc_kind with
     | Masc.Tui_decode.Fc_edited { after; _ } -> Terminal_text.preview_line after
+    | Masc.Tui_decode.Fc_inserted { text; _ } -> Terminal_text.preview_line text
     | Masc.Tui_decode.Fc_written { content } ->
       Printf.sprintf "(wrote %d bytes)" (String.length content)
   in
@@ -12864,7 +12975,8 @@ let change_row_summary (change : Masc.Tui_decode.file_change) =
 
 let change_kind_badge (change : Masc.Tui_decode.file_change) =
   match change.Masc.Tui_decode.fc_kind with
-  | Masc.Tui_decode.Fc_edited _ -> Theme.category Theme.Slot_4, "EDIT"
+  | Masc.Tui_decode.Fc_edited _ -> Theme.category Theme.Slot_2, "EDIT"
+  | Masc.Tui_decode.Fc_inserted _ -> Theme.category Theme.Slot_2, "MEMO"
   | Masc.Tui_decode.Fc_written _ -> (Masc_tui_theme.tone Masc_tui_theme.Accent), "WRITE"
 
 let change_result_badge (change : Masc.Tui_decode.file_change) =
@@ -12909,6 +13021,7 @@ let diff_row_span ~width (row : Diff.row) =
 let change_diff_halves (change : Masc.Tui_decode.file_change) =
   match change.Masc.Tui_decode.fc_kind with
   | Masc.Tui_decode.Fc_edited { before; after; _ } -> (before, after)
+  | Masc.Tui_decode.Fc_inserted { text; _ } -> ("", text)
   | Masc.Tui_decode.Fc_written { content } -> ("", content)
 
 let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
@@ -12945,6 +13058,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
            one pair without saying so would undercount the change. *)
         [ turn; "  replace_all: every occurrence changed; the log holds the text once" ]
     | Masc.Tui_decode.Fc_edited { replace_all = false; _ }
+    | Masc.Tui_decode.Fc_inserted _
     | Masc.Tui_decode.Fc_written _ -> [ turn ]
   in
   let notes =
@@ -14603,6 +14717,9 @@ let render_code (state : state) =
           let marker =
             if node.Masc.Tui_decode.wt_has_children then
               if selected then "\xe2\x96\xb8 "
+              (* The mark colour the files below it take. A folder is not a
+                 kind of file, and the arrow already says which of the two
+                 this row is. *)
               else (Theme.category Theme.Slot_1) ^ "\xe2\x96\xb8 " ^ Ansi.reset
             else
               let kind =
@@ -14612,28 +14729,44 @@ let render_code (state : state) =
               if selected then glyph ^ " "
               else
                 let colour =
-                  (* Six kinds, six categorical slots (RFC-0427). These were
-                     constant SGR codes, so a file list was one of the places
-                     a theme could not reach: everything around it moved when
-                     the terminal answered with its palette and these did not.
+                  (* One colour for "this is a file mark". Which kind it is
+                     belongs to the glyph, and the glyph already carries it --
+                     seven kinds, seven distinct marks in File_icon.glyph.
 
-                     Six kinds and five slots, so Script and Media share
-                     one. They did before too -- magenta and bright magenta,
-                     a hue apart -- and the honest form of that is the same
-                     hue with two marks rather than two hues a reader cannot
-                     separate. Media had red for one commit, which is [bad]
-                     to the byte: a .png in the listing drew the same escape
-                     as the blame failure on its own half of the row.
+                     Colour used to carry the kind, over four slots, and it
+                     could not. Two reasons, both measured.
 
-                     Plain recedes through the theme rather than a constant
-                     [dim], for the same reason the six above it do. *)
+                     RFC-0431 measured the slot hues across every shipped
+                     scheme: 0.0014 to 0.0044 apart in Oklab under
+                     deuteranopia and protanopia, against the 0.024 a colour
+                     has to clear to read as a distinction at all. About a
+                     seventh of it. For roughly one reader in twelve the axis
+                     was never splitting, whatever the slots held.
+
+                     And it cost what it could not buy. write_two_panes joins
+                     this listing to the content pane on one terminal row, and
+                     that pane draws Theme.bad, ok, info and warn -- red,
+                     green, cyan, yellow. Of the seven colours a theme names
+                     that leaves blue and magenta, so a kind axis wider than
+                     two was a status token to the byte on somebody's row.
+                     #33477 caught red against bad, when a .png in the listing
+                     drew the blame failure's escape beside it. #33722 caught
+                     green against ok. Cyan against info and yellow against
+                     warn were the same defect and outlived both, because the
+                     test that was supposed to stop this named only bad and
+                     ok.
+
+                     Blue rather than magenta, because magenta already means
+                     Verifying, microvm, EDIT, MEMO and two context readings
+                     elsewhere, and one more meaning on it is the pile
+                     RFC-0431 was opened to take apart.
+
+                     Plain recedes rather than taking a constant [dim], so a
+                     mark nobody classified still moves with the theme. *)
                   match kind with
-                  | File_icon.Code -> Theme.category Theme.Slot_1
-                  | File_icon.Data -> Theme.category Theme.Slot_2
-                  | File_icon.Prose -> Theme.category Theme.Slot_3
-                  | File_icon.Script | File_icon.Media ->
-                    Theme.category Theme.Slot_4
-                  | File_icon.Web -> Theme.category Theme.Slot_5
+                  | File_icon.Code | File_icon.Web | File_icon.Data
+                  | File_icon.Prose | File_icon.Script | File_icon.Media ->
+                    Theme.category Theme.Slot_1
                   | File_icon.Plain -> Theme.recede ()
                 in
                 colour ^ glyph ^ Ansi.reset ^ " "
@@ -14714,10 +14847,15 @@ let render_code (state : state) =
     let content_height = code_pane_content_height state in
     (if notes_showing then
        (* The memos are the file's own comments, so the overlay lists what
-          the lexed rows hold and has no reading state of its own. *)
+          the loaded rows hold in the file's comment syntax and has no
+          reading state of its own. *)
+       (* Read off the rows at load, so this is a lookup. Shown only while
+          the file they came from is the loaded one: clearing the file
+          leaves the field behind, and a list captioning bytes that are no
+          longer on screen is worse than none. *)
        let memos =
          match Masc_tui_fetched.current state.code_file with
-         | Some (_, Masc_tui_fetched.Ready rows) -> Masc_tui_memo.of_rows rows
+         | Some (_, Masc_tui_fetched.Ready _) -> state.code_memos
          | Some
              ( _
              , ( Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
@@ -14921,6 +15059,7 @@ let render_code (state : state) =
                  let kind =
                    match change.fc_kind with
                    | Fc_edited _ -> "EDIT"
+                   | Fc_inserted _ -> "MEMO"
                    | Fc_written _ -> "WRITE"
                  in
                  let result_style, result =
@@ -14975,7 +15114,7 @@ let render_code (state : state) =
            for _ = 1 to content_height do
              box_empty pane_buf pane_cols
            done
-       | Some (_, Masc_tui_fetched.Ready file_rows) ->
+       | Some (open_path, Masc_tui_fetched.Ready file_rows) ->
            let total_lines = List.length file_rows in
            let max_scroll = max 0 (total_lines - content_height) in
            let scroll = max 0 (min state.code_file_scroll max_scroll) in
@@ -14997,7 +15136,7 @@ let render_code (state : state) =
                (fun found ->
                  let line = Masc_tui_memo.line_of found in
                  (line, line))
-               (Masc_tui_memo.of_rows file_rows)
+               state.code_memos
            in
            let keeper_spans =
              match Masc_tui_fetched.current state.code_history with
@@ -16026,13 +16165,7 @@ let render_themes (state : state) =
           | Some name -> String.equal name entry.name
           | None -> false
         in
-        let swatch =
-          entry.Theme_choice.swatch
-          |> List.map (fun rgb ->
-               Masc_tui_theme.Sgr.background (Masc_tui_terminal_palette.best_color rgb)
-               ^ "  \027[49m")
-          |> String.concat ""
-        in
+        let swatch = Theme_choice.swatch_cells entry in
         let row =
           Printf.sprintf "  %s %s " (if picked then chosen_mark else " ")
             (fit_width (Terminal_text.single_line entry.name) name_width)
@@ -16556,7 +16689,7 @@ module Context_bars = Masc_tui_context_bars
 
 let context_component_style = function
   | Turn_record.Prompt_block Prompt_block_id.Memory_os_recall ->
-      Ansi.bold ^ Theme.category Theme.Slot_4
+      Ansi.bold ^ Theme.category Theme.Slot_2
   | Turn_record.Prompt_block _ -> Ansi.bold
   | Turn_record.Tool_schemas -> (Theme.warn ())
   | Turn_record.Message_user -> (Theme.info ())
@@ -16572,7 +16705,7 @@ let context_evidence_style = function
   | Masc_tui_context_inspector.Serialized_turn_snapshot ->
       Ansi.bold ^ Theme.info ()
   | Masc_tui_context_inspector.Producer_digest_only ->
-      Ansi.bold ^ Theme.category Theme.Slot_4
+      Ansi.bold ^ Theme.category Theme.Slot_2
   | Masc_tui_context_inspector.Byte_count_only ->
       Ansi.bold ^ (Theme.recede ())
 

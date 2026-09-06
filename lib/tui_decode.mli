@@ -710,7 +710,7 @@ type repository = {
   rp_id : string;  (** what the workspace routes' [?repo_id=] resolves *)
   rp_name : string;
   rp_codebase : string option;
-      (** the server-minted slug the IDE annotation routes scope by;
+      (** the server-minted slug the IDE events route scopes by;
           [None] when the remote cannot canonicalize *)
   rp_url : string;  (** the remote as registered, for building links *)
   rp_local_path : string;
@@ -2311,6 +2311,10 @@ type file_change_kind =
       replace_all : bool;
     }
   | Fc_written of { content : string }
+  | Fc_inserted of {
+      line : int;
+      text : string;
+    }
 
 type file_change = {
   fc_at : float;
@@ -2439,7 +2443,7 @@ val decode_git_log : Yojson.Safe.t -> (git_log_row list, string) result
 
 (** One run of adjacent lines the same author last touched, as
     [/api/v1/git/blame] groups them. The wire spells the author [keeper_id],
-    the shape it shares with the activity and annotation routes; here it is
+    the shape it shares with the activity routes; here it is
     whatever git reported, which is a person and not a Keeper. *)
 type blame_block = {
   bb_line_start : int;

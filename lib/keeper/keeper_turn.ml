@@ -224,11 +224,17 @@ let turn_resources_error ~surface failure =
   let detail =
     Keeper_publication_recovery_scope.failure_to_string failure
   in
-  tool_result_error_data ~class_:Tool_result.Dependency_unavailable
+  (* The payload said "runtime_failure" while the call beside it set
+     Dependency_unavailable, so anything reading the payload got the opposite
+     answer from anything reading the result. One value now feeds both. *)
+  let class_ = Tool_result.Dependency_unavailable in
+  tool_result_error_data
+    ~class_
     ~tool_name:(invocation_tool_name surface)
     (`Assoc
        [ "error", `String "keeper_turn_resources_unavailable"
-       ; "failure_class", `String "runtime_failure"
+       ; ( "failure_class"
+         , `String (Tool_result.tool_failure_class_to_string class_) )
        ; "detail", `String detail
        ])
 ;;
@@ -447,8 +453,11 @@ let run_keeper_invocation_turn_admitted_inner
       (* RFC vision-delegation §2.3 site 1 (fresh input). For a keeper whose
          runtime cannot take an image on its own,
          evict each image to the artifact store + an eager analyze_image reading
-         BEFORE it enters the turn, so the main history stays text-only and
-         RFC-0265 never recomputes required=['image'] from it. A runtime that
+         BEFORE it enters the turn, so inline pixels never reach the main
+         history and RFC-0265 never recomputes required=['image'] from them.
+         A Url/File_id reference passes through (#33682): the degrade floor
+         strips it from a text-only runtime's dispatch view while the
+         reference itself stays requestable. A runtime that
          takes the image itself keeps it — seeing the pixels beats a reading. *)
       let user_blocks =
         Option.map

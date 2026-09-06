@@ -38,12 +38,36 @@ let all_styles =
   ]
 ;;
 
+(* What arrived from outside this conversation and landed between its turns.
+
+   Only what the types already know. A line this pane wrote in answer to
+   something typed at it ([Message_local]) is not an arrival, and drawing it
+   on a siding would read as though someone else had sent it. Neither is
+   [Sent_by_operator] from another surface: that one is an arrival in fact,
+   but the surface lives in the label's text and not in the constructor, and
+   a distinction cut out of a string is the type pretending to know. *)
+type siding =
+  | Siding_journal  (** A Memory OS journal commit. *)
+  | Siding_arrival  (** Another agent's broadcast, a connector, a second operator. *)
+
 type turn_rail =
   | Rail_opens
   | Rail_says
   | Rail_does
   | Rail_closes
+  | Rail_joins of siding
+      (** Belongs to no turn and arrived while one was running. It joins the
+          conversation's line from the left rather than breaking it: the turn
+          it landed inside did not produce it and did not read it. *)
   | Rail_none
+
+(* What a press on this row opens. One case today -- a Gate argument held
+   behind a fold -- and a variant rather than a bool because the pane must not
+   recover the answer from the glyphs it drew: text that changes would kill
+   the click silently, and a press has no error to report. *)
+type row_action =
+  | Action_none
+  | Action_unfold_argument
 
 type markdown_source =
   | Markdown_stable of {
@@ -77,6 +101,10 @@ type entry = {
   body : string;
   markdown_source : markdown_source;
   turn_rail : turn_rail;
+  action : row_action;
+      (** What a press on this entry's first row opens. Carried on the entry
+          because the entry is where the folding was decided; the rows below
+          it are continuations of one decision, not decisions of their own. *)
 }
 
 type metadata =
@@ -110,6 +138,7 @@ type row = {
   gutter_rail_cells : int;
   gutter_label_at : int;
   gutter : string;
+  action : row_action;
 }
 
 let utf8_scalar_byte_length first =
@@ -703,6 +732,20 @@ let speaker_mark : style -> string = function
   | Skill Skill_failure -> "\xe2\x9c\x97"
   | Thinking -> "\xc2\xb7"
 
+(* Speech or work -- the one question the rail's ordinary pieces answer.
+
+   Reasoning, tool calls and skills are what a turn did to arrive at what it
+   said. Drawn at the same depth as the reply they read as its siblings, so
+   the rail hangs them off the trunk instead.
+
+   Which of the two a row is does not depend on how many rows came with it,
+   which is why both the running turn and the turn of a single row decide it
+   here. The callers differ only in what a speech row gets: inside a running
+   turn the trunk continues, and a lone utterance has no trunk to draw. *)
+let rail_for_style ~work ~speech : style -> turn_rail = function
+  | Tool | Skill _ | Thinking -> work
+  | User | Inbound | Keeper | Status | Local | Journal | Error -> speech
+
 (* The bracket a turn draws down the left margin. One cell of box drawing plus
    the space that keeps it off the clock.
 
@@ -711,21 +754,58 @@ let speaker_mark : style -> string = function
    second question into the first was the shape that failed -- a mark that
    means two things stops meaning either.
 
-   [Rail_none] is a blank rather than a fifth glyph. A turn of one row has no
-   hierarchy to show, and marking it would put the rail on nearly every row of
-   an ordinary conversation, which is where a reader stops seeing it. *)
+   [Rail_none] is a blank rather than a fifth glyph, and it is what a lone
+   utterance draws: one thing said is not a hierarchy, and marking it would
+   put the rail on nearly every row of an ordinary conversation, which is
+   where a reader stops seeing it. A lone row of work is not that case --
+   {!rail_for_style} still calls it work. *)
 let turn_rail_glyph : turn_rail -> string = function
   | Rail_opens -> "\xe2\x95\xad"   (* the turn starts here *)
   | Rail_says -> "\xe2\x94\x82"    (* the turn itself, still going *)
   | Rail_does -> "\xe2\x94\x9c"    (* work hanging off the turn *)
   | Rail_closes -> "\xe2\x95\xb0"  (* the turn ended on this row *)
+  | Rail_joins _ -> "\xe2\x94\xa4"  (* something from outside meets the line *)
   | Rail_none -> " "
+
+(* The run a siding takes to reach the conversation's line.
+
+   The kind is in the texture rather than a mark: the journal is this
+   workspace's own auxiliary lane and draws dashed, while a line someone else
+   put here draws solid. A mark would be the third time the row says who it
+   is -- the label names it and {!speaker_mark} stamps it already. *)
+let siding_lead : siding -> string = function
+  | Siding_journal -> "\xe2\x95\x8c\xe2\x95\x8c\xe2\x95\x8c"
+  | Siding_arrival -> "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+
+let siding_lead_cells = 3
 
 (* Charged to every row, drawn or not. The margin's width is what the body's
    width is taken from, so a rail column that appeared and vanished with the
    rows would re-wrap the conversation under a scroll position taken before
-   it. Two cells out of a sixty-cell pane, spent once. *)
-let turn_rail_cells = 2
+   it. Five cells out of a sixty-cell pane, spent once: three for a siding to
+   run in, one for the glyph, one to keep it off the clock. A turn-only row
+   pays the three as blanks, which is what keeps the line in one column
+   whether or not anything arrived beside it. *)
+let turn_rail_cells = siding_lead_cells + 2
+
+(* The whole margin for one row, siding run included. Callers concatenate
+   this rather than the glyph: a row that drew the glyph and padded the rest
+   itself would put the line in a different column on the rows that have a
+   siding. *)
+let turn_rail_gutter (piece : turn_rail) =
+  let lead =
+    match piece with
+    | Rail_joins siding -> siding_lead siding
+    | Rail_opens | Rail_says | Rail_does | Rail_closes | Rail_none ->
+        String.make siding_lead_cells ' '
+  in
+  let drawn = lead ^ turn_rail_glyph piece in
+  (* Pad to the budget rather than trusting the parts to add up to it. The
+     margin is charged {!turn_rail_cells} whether or not the glyph fills it,
+     so a gutter one cell short does not shrink the margin — it slides the
+     clock and the label one cell left, and the row that follows lands in a
+     different column than the one the layout reserved. *)
+  drawn ^ String.make (max 0 (turn_rail_cells - display_width drawn)) ' '
 
 (* Cells the speaker mark and its separator occupy at the head of a label, or
    zero when the column was too narrow to keep the mark at all. One reader, so
@@ -743,10 +823,10 @@ let align_role_label ?(column = chat_role_label_column) ~style label =
      width is taken from what the badge leaves, so charging it to the label
      keeps every body exactly as wide as it was.
 
-     It is also kept outside the truncation. A label that overruns loses its
-     head, and the mark sits at the head -- inside, the longest names would be
-     the ones that lost the glyph, and those are the names a reader most needs
-     help telling apart. *)
+     It is also kept outside the truncation. A label that overruns is cut by
+     {!fit_middle}, which spends the ellipsis inside the name; with the mark
+     inside the budget the longest names would be the ones that lost the
+     glyph, and those are the names a reader most needs help telling apart. *)
   let mark_cells = display_width mark + 1 in
   let inner = column - mark_cells in
   (* Kept in step with [role_label_mark_cells]: both decide on [inner < 1]. *)
@@ -947,6 +1027,7 @@ let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
       ; gutter_rail_cells = 0
       ; gutter_label_at = 0
       ; gutter = ""
+      ; action = Action_none
       }
 
 let same_timeline_bucket left right =
@@ -987,6 +1068,7 @@ let timeline_break_row ~(previous : entry option) ~inner_width (entry : entry) =
         ; gutter_rail_cells = 0
         ; gutter_label_at = 0
         ; gutter = ""
+        ; action = Action_none
         }
 
 (* A body is a document, not a row. [sanitize] is applied to each line rather
@@ -1216,8 +1298,12 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
           | Rail_opens -> if index = 0 then Rail_opens else Rail_says
           | Rail_does -> if index = 0 then Rail_does else Rail_says
           | Rail_closes -> if index = last then Rail_closes else Rail_says
+          (* Only the first row joins. A wrapped arrival keeps its body under
+             the join without drawing a second one, and it never picks up the
+             turn's own line: the turn it landed inside did not produce it. *)
+          | Rail_joins siding -> if index = 0 then Rail_joins siding else Rail_none
         in
-        turn_rail_glyph piece ^ String.make (rail_cells - 1) ' '
+        turn_rail_gutter piece
     in
     body_chunks
     |> List.mapi (fun index chunk ->
@@ -1228,6 +1314,10 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
       ; gutter_rail_cells = rail_cells
       ; gutter_label_at = (if index = 0 then label_at else rail_cells)
       ; gutter = rail_at index ^ (if index = 0 then margin else blank)
+      (* The fold marker sits at the end of the first row, so that is the
+         row a press lands on. A continuation carries the same text and none
+         of the affordance. *)
+      ; action = (if index = 0 then entry.action else Action_none)
       })
   in
   let message_rows =
@@ -1297,6 +1387,7 @@ let collapse_repeated_body_rows ~inner_width rows =
     ; gutter_rail_cells = row.gutter_rail_cells
     ; gutter_label_at = 0
     ; gutter = row.gutter
+    ; action = Action_none
     }
   in
   let emit_run reversed row count =
@@ -1360,6 +1451,7 @@ let newest_entry_window ~inner_width ~height rows =
         ; gutter_rail_cells = 0
         ; gutter_label_at = 0
         ; gutter = ""
+        ; action = Action_none
         }
       in
       start @ (gap :: tail)

@@ -182,18 +182,6 @@ val handle_person_note_set_with_outcome
   -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
 
-val handle_ide_annotate
-  :  config:Workspace.config
-  -> meta:keeper_meta
-  -> args:Yojson.Safe.t
-  -> string
-
-val handle_ide_annotate_with_outcome
-  :  config:Workspace.config
-  -> meta:keeper_meta
-  -> args:Yojson.Safe.t
-  -> Keeper_tool_execution.t
-
 (** [handle_voice_with_outcome] dispatches to
     [Keeper_tool_voice_runtime.handle_voice_tool_with_outcome] by [name]. Caller
     must pass a name in the voice cluster. *)
@@ -361,6 +349,18 @@ val handle_masc_fusion_with_outcome
   :  config:Workspace.config
   -> meta:keeper_meta
   -> ?continuation_channel:Keeper_continuation_channel.t
+  -> args:Yojson.Safe.t
+  -> unit
+  -> Keeper_tool_execution.t
+
+(** RFC-0430 Phase 3 — [handle_masc_file_with_outcome] is the in-process
+    handler for the [masc_file_{upload,delete}] provider Files tools: it
+    resolves the server root switch + net from {!Eio_context} (same reason as
+    fusion: the upload must not be tied to the keeper turn) and the API key
+    from the [DEEPSEEK_API_KEY] environment. Every failure is an explicit
+    typed failure. *)
+val handle_masc_file_with_outcome
+  :  name:string
   -> args:Yojson.Safe.t
   -> unit
   -> Keeper_tool_execution.t

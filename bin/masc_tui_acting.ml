@@ -616,6 +616,26 @@ let fold_chunks ~traces entries =
                        shows nothing else about (live capture 2026-09-01,
                        #32208). *)
                     existing
+                | Member_settle _ when turn_of_member <> None ->
+                    (* A numbered settle that finds no chunk with its number
+                       joins the newest still-open chunk: the wire numbered
+                       that turn from the agent session while the settle
+                       numbers it from the keeper's lifetime, so one real
+                       turn arrived as two numbers and drew as two rows --
+                       the open row hoarding the ledger calls, the settled
+                       row holding the tokens (live capture 2026-09-06,
+                       turn 1740 beside turn 3084). A keeper runs one turn
+                       at a time, so the newest open chunk is the turn this
+                       settle ends, and [apply_member] stamps it with the
+                       keeper's own number. With every chunk settled the
+                       settle stands as its own row, as before. *)
+                    (match existing with
+                     | chunk :: rest when not chunk.ck_settled ->
+                         apply_member chunk ~at member :: rest
+                     | _ ->
+                         apply_member (empty_chunk ~keeper ~turn:None ~at) ~at
+                           member
+                         :: existing)
                 | Member_turn_marker _ | Member_wire_call _
                 | Member_wire_return _ | Member_settle _
                 | Member_ledger_tool _ ->

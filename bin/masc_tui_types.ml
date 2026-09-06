@@ -244,8 +244,12 @@ let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
     List.filter_map Fun.id
       [ (match memory with
          | Memory_summary -> None
-         | Memory_hidden -> Some "memory:off"
-         | Memory_full -> Some "memory:full")
+         (* Named for the rows it governs, which the pane labels JOURNAL and
+            the footer reaches with Ctrl-N:journal. It read "memory" here and
+            "journal" there, so pressing the key and looking for what moved
+            meant knowing the two words were one axis. *)
+         | Memory_hidden -> Some "journal:off"
+         | Memory_full -> Some "journal:full")
       ; (* The clock-free gutter is the resting layout: the speaker mark and
            label retain who/what, while timestamps and request ids remain one
            keypress away. Name only the denser projection's added metadata so
@@ -2632,6 +2636,11 @@ type state = {
      queued line has not been sent, so joining two changes what one turn
      receives rather than what a turn in flight sees. *)
   mutable coalesce_queued_input: bool;
+  (* Whether ^Y ending a voice capture also sends what was heard
+     ([tui].voice_send_on_stop at boot). Off by default: the transcript lands
+     in the draft either way, and that draft is also where a spoken
+     half-sentence waits for typing. *)
+  mutable voice_send_on_stop: bool;
   mutable answering_open: bool;
   mutable answering_scroll: int;
   (* Cursor over the overlay's actionable rows (running / just finished);
@@ -3318,11 +3327,11 @@ type state = {
   mutable code_diff: (string, Tui_decode.git_diff) Masc_tui_fetched.t;
   mutable code_diff_open: bool;
   mutable code_diff_scroll: int;
-  (* The file pane's notes view: m on an open file (repository scope only --
-     the annotation routes are scoped by the server-minted codebase slug,
-     which only a Repositories row carries) swaps the content for the notes
-     anchored to the file. *)
-  (* The notes anchored to the open file, keyed by its path. *)
+  (* The file pane's notes view: m on an open file swaps the content for
+     the memos written as comments in the file itself. Read off the rows
+     once at load, like the width above: the memos change when the file
+     does, and rebuilding them per frame walks every row of it. *)
+  mutable code_memos: Masc_tui_memo.found list;
   mutable code_notes_open: bool;
   mutable code_notes_scroll: int;
   (* The file pane's blame margin: b on an open file fetches who last touched
@@ -4025,6 +4034,7 @@ let create_state
   agenda_scroll = 0;
   hints_visible = true;
   coalesce_queued_input = true;
+  voice_send_on_stop = false;
   answering_open = false;
   answering_scroll = 0;
   answering_cursor = 0;
@@ -4351,6 +4361,7 @@ let create_state
   code_jump_back = [];
   code_file_hscroll = 0;
   code_file_max_width = 0;
+  code_memos = [];
   code_focus_file = Left_pane;
   code_history = Masc_tui_fetched.initial;
   code_history_open = false;

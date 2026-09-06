@@ -175,7 +175,16 @@ streaming = true
 [test_provider.test_model]
 is-default = true
 max-concurrent = 1
-max-request-body-bytes = 65536
+# Runtime.validate_request_body_cap refuses a keeper turn on a runtime with no
+# positive ceiling, and every Keeper provider-call boundary calls it. The TOML
+# parser allows the key to be omitted ("no declared ceiling"), so a fixture
+# without it loads clean and dies at the first turn instead.
+#
+# The key belongs on the runtime row, not on [providers.<name>]: that is where
+# test_runtime_per_keeper_routing puts it ([runpod_mtp.qwen], [openai.gpt]) and
+# where the ceiling is read from. A first attempt placed it on the provider
+# and the turn failed exactly as before.
+max-request-body-bytes = 1048576
 |}
   in
   let path = Filename.temp_file "heartbeat_integ_runtime_" ".toml" in
@@ -184,12 +193,7 @@ max-request-body-bytes = 65536
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc runtime_toml);
   (* Ignore Error: a prior test in the binary may have initialized it already. *)
-  ignore (Runtime.init_default ~config_path:path);
-  let prompt_dir =
-    Filename.concat (Masc_test_deps.find_project_root ()) "config/prompts"
-  in
-  if Sys.file_exists prompt_dir then
-    Prompt_registry.set_markdown_dir prompt_dir
+  ignore (Runtime.init_default ~config_path:path)
 
 let cleanup_dir dir =
   let rec rm path =
@@ -250,14 +254,14 @@ let remove_meta_cleanup : Shutdown_types.cleanup_intent =
 (* Keepalive resolves its sandbox profile from the persisted keeper TOML. Seed
    the fixture explicitly so this test exercises the lifecycle path rather than
    keeper configuration validation. *)
-let seed_keeper_sandbox_profile ?(profile = "microvm") ~base_dir name =
+let seed_keeper_sandbox_profile ~base_dir name =
   let keepers_dir =
     List.fold_left Filename.concat base_dir [ ".masc"; "config"; "keepers" ]
   in
   Fs_compat.mkdir_p keepers_dir;
   Fs_compat.save_file
     (Filename.concat keepers_dir (name ^ ".toml"))
-    ("[keeper]\nsandbox_profile = \"" ^ profile ^ "\"\ninstructions = \"# " ^ name ^ "\"\n")
+    ("[keeper]\nsandbox_profile = \"docker\"\ninstructions = \"# " ^ name ^ "\"\n")
 
 let dashboard_purge_cleanup requested_name
     (meta : Keeper_meta_contract.keeper_meta)
@@ -306,23 +310,20 @@ let install_test_env env =
   Eio_context.set_net (Eio.Stdenv.net env);
   Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env)
 
+(* [Memory_lane.submit] has four ways to not accept a unit and its .mli gives
+   each a different meaning -- Rejected_draining even names the call a later
+   lifecycle has to make first. Both fixture sites collapsed all four into one
+   sentence, so a failure said only that it was not Submitted. *)
+let memory_lane_outcome_name : Memory_lane.outcome -> string = function
+  | Memory_lane.Submitted -> "Submitted"
+  | Memory_lane.Coalesced -> "Coalesced"
+  | Memory_lane.Ran_inline -> "Ran_inline"
+  | Memory_lane.Dropped -> "Dropped"
+  | Memory_lane.Rejected_draining -> "Rejected_draining"
+
 let eio_test name fn =
   test_case name `Quick (fun () -> Eio_main.run @@ fun env ->
   install_test_env env; fn ())
-
-(* #33569: the contamination medium is the Eio_context global set —
-   net/clock/mono_clock/net_initialized installed by a prior test's
-   [ensure_default_runtime] (which trusts "already initialized" and skips
-   re-init), plus the root-switch binding. A later keepalive lane reading
-   those globals forks/sleeps under the dead scheduler and fails with
-   "Switch finished!". Proven by pair runs: [1,4] fails without this
-   wrapper, passes with it; a root-switch-only restore does NOT fix it. *)
-let isolated_keepalive_test name fn =
-  test_case name `Quick (fun () ->
-    let snapshot = Eio_context.snapshot_state () in
-    Fun.protect
-      ~finally:(fun () -> Eio_context.restore_state snapshot)
-      fn)
 
 let base_observation : WO.world_observation =
   { pending_messages = []
@@ -856,11 +857,13 @@ let test_cross_domain_start_keepalive_and_swap () =
   Eio_main.run @@ fun env ->
   install_test_env env;
   R.For_testing.clear ();
+  Eio_context.For_testing.clear_root_switch ();
   let base_dir = temp_dir "cross-domain-keepalive" in
   let keeper_name = "cross-domain-keeper" in
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
+      Eio_context.For_testing.clear_root_switch ();
       cleanup_dir base_dir)
     (fun () ->
       ensure_default_runtime ();
@@ -916,12 +919,14 @@ let test_cross_domain_shutdown_submit () =
   install_test_env env;
   R.For_testing.clear ();
   Masc.Keeper_process_switch.For_testing.clear ();
+  Eio_context.For_testing.clear_root_switch ();
   let base_dir = temp_dir "cross-domain-shutdown" in
   let keeper_name = "cross-domain-shutdown-keeper" in
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
       Masc.Keeper_process_switch.For_testing.clear ();
+      Eio_context.For_testing.clear_root_switch ();
       cleanup_dir base_dir)
     (fun () ->
       ensure_default_runtime ();
@@ -1086,11 +1091,13 @@ let test_direct_stop_resolves_done_after_librarian_drain_failure () =
                  Eio.Promise.await never)
           with
           | Memory_lane.Submitted -> ()
-          | Memory_lane.Coalesced
-          | Memory_lane.Ran_inline
-          | Memory_lane.Dropped
-          | Memory_lane.Rejected_draining ->
-            fail "failed Librarian receipt fixture was not submitted");
+          | ( Memory_lane.Coalesced
+            | Memory_lane.Ran_inline
+            | Memory_lane.Dropped
+            | Memory_lane.Rejected_draining ) as other ->
+            failf
+              "failed Librarian receipt fixture was not submitted: %s"
+              (memory_lane_outcome_name other));
          Eio.Promise.await started;
          Eio.Switch.fail librarian_sw Librarian_executor_cancel
        with
@@ -2365,17 +2372,10 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
       let config = Masc.Workspace.default_config base_dir in
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       seed_keeper_sandbox_profile ~base_dir name;
-      (* The #33569 isolation wrapper unmasked a latent hang in this test:
-         the lane registers, its first cycle fails (no instructions prompt,
-         by design), it transitions running→failing→crashed, and then the
-         body never observes the lane-swap fence — [update_done] never
-         resolves. Bound the whole scenario so CI fails with a message
-         instead of hanging a runner. *)
-      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 60.0 (fun () ->
-          Eio.Switch.run @@ fun root_sw ->
-          install_owner_inventory_exn ~sw:root_sw config;
-          Memory_lane.init ~sw:root_sw;
-          let clock = Eio.Stdenv.clock env in
+      Eio.Switch.run @@ fun root_sw ->
+      install_owner_inventory_exn ~sw:root_sw config;
+      Memory_lane.init ~sw:root_sw;
+      let clock = Eio.Stdenv.clock env in
       let meta =
         { (make_meta name) with
           proactive = { enabled = false }
@@ -2412,16 +2412,14 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
               Eio.Promise.await release_librarian)
        with
        | Memory_lane.Submitted -> ()
-       | Memory_lane.Coalesced
-       | Memory_lane.Ran_inline
-       | Memory_lane.Dropped
-       | Memory_lane.Rejected_draining ->
-         fail "cancelled-update Librarian fixture was not submitted");
-      (match Eio.Time.with_timeout_exn clock 5.0 (fun () ->
-             Eio.Promise.await librarian_started) with
-       | () -> ()
-       | exception Eio.Time.Timeout ->
-         fail "cancelled-update Librarian fixture task never ran");
+       | ( Memory_lane.Coalesced
+         | Memory_lane.Ran_inline
+         | Memory_lane.Dropped
+         | Memory_lane.Rejected_draining ) as other ->
+         failf
+           "cancelled-update Librarian fixture was not submitted: %s"
+           (memory_lane_outcome_name other));
+      Eio.Promise.await librarian_started;
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with
           sandbox_profile = Some meta.sandbox_profile
@@ -2470,7 +2468,7 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
         in
         Eio.Promise.resolve resolve_update_done disposition);
       let update_sw = Eio.Promise.await update_switch in
-      Eio.Time.with_timeout_exn clock 30.0 (fun () ->
+      Eio.Time.with_timeout_exn clock 1.0 (fun () ->
         let rec await_lane_swap_fence () =
           match
             owner_shutdown_operation_id_exn
@@ -2485,12 +2483,9 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
         await_lane_swap_fence ());
       Eio.Switch.fail update_sw Cancel_keeper_up_after_metadata;
       Eio.Promise.resolve resolve_release_librarian ();
-      (match Eio.Time.with_timeout_exn clock 10.0 (fun () ->
-             Eio.Promise.await update_done) with
+      (match Eio.Promise.await update_done with
        | `Cancelled -> ()
-       | `Returned -> fail "keeper update returned after its caller was cancelled"
-       | exception Eio.Time.Timeout ->
-         fail "cancelled update never resolved: update lifecycle did not finish after cancellation");
+       | `Returned -> fail "keeper update returned after its caller was cancelled");
       check bool
         "cancelled update rolls back its temporary shutdown fence"
         true
@@ -2510,7 +2505,8 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
         (Masc.Keeper_keepalive.stop_keepalive_and_await
            ~base_path:config.base_path
            name
-          : Masc.Keeper_keepalive.joined_stop_result)))
+          : Masc.Keeper_keepalive.joined_stop_result))
+;;
 
 let test_keeper_up_shared_boundary_outlives_calling_turn () =
   Eio_main.run @@ fun env ->
@@ -5132,81 +5128,81 @@ let () =
         test_operator_interrupt_skips_turn_accounting;
     ];
     "direct_keepalive", [
-      isolated_keepalive_test "stop resolves done after lane exit"
+      test_case "stop resolves done after lane exit" `Quick
         test_direct_start_keepalive_resolves_done_on_stop;
-      isolated_keepalive_test "cross-domain start keepalive and swap"
+      test_case "cross-domain start keepalive and swap" `Quick
         test_cross_domain_start_keepalive_and_swap;
-      isolated_keepalive_test "cross-domain shutdown submit"
+      test_case "cross-domain shutdown submit" `Quick
         test_cross_domain_shutdown_submit;
-      isolated_keepalive_test "cancelled launch owner rolls back under launch reservation"
+      test_case "cancelled launch owner rolls back under launch reservation" `Quick
         test_direct_start_rolls_back_when_the_launch_owner_is_already_cancelled;
-      isolated_keepalive_test "stop resolves done after Librarian drain failure"
+      test_case "stop resolves done after Librarian drain failure" `Quick
         test_direct_stop_resolves_done_after_librarian_drain_failure;
-      isolated_keepalive_test "lane join waits for children and cleanup"
+      test_case "lane join waits for children and cleanup" `Quick
         test_keeper_lane_join_waits_for_children_and_cleanup;
-      isolated_keepalive_test "lane join surfaces cleanup failure"
+      test_case "lane join surfaces cleanup failure" `Quick
         test_keeper_lane_surfaces_cleanup_failure;
-      isolated_keepalive_test "lane identity is typed and unique"
+      test_case "lane identity is typed and unique" `Quick
         test_keeper_lane_identity_is_typed_and_unique;
-      isolated_keepalive_test "lane cancellation is local and joinable"
+      test_case "lane cancellation is local and joinable" `Quick
         test_keeper_lane_cancel_is_lane_local_and_joinable;
-      isolated_keepalive_test "lane cancel before start is joinable"
+      test_case "lane cancel before start is joinable" `Quick
         test_lane_cancel_before_start_is_joinable;
-      isolated_keepalive_test "shutdown store round-trip and identity guard"
+      test_case "shutdown store round-trip and identity guard" `Quick
         test_keeper_shutdown_store_round_trip_and_identity_guard;
-      isolated_keepalive_test "operator update supersedes exact blocked shutdown"
+      test_case "operator update supersedes exact blocked shutdown" `Quick
         test_operator_update_supersedes_exact_blocked_shutdown;
-      isolated_keepalive_test "field-only update honors TOML-declared profile"
+      test_case "field-only update honors TOML-declared profile" `Quick
         test_field_only_update_honors_toml_declared_profile;
-      isolated_keepalive_test "update rejects lane swap while turn in flight"
+      test_case "update rejects lane swap while turn in flight" `Quick
         test_update_keeper_rejects_lane_swap_while_turn_in_flight;
-      isolated_keepalive_test "cancelled update finishes lane swap"
+      test_case "cancelled update finishes lane swap" `Quick
         test_update_keeper_cancellation_finishes_lane_swap;
-      isolated_keepalive_test "keeper up shared boundary outlives calling turn"
+      test_case "keeper up shared boundary outlives calling turn" `Quick
         test_keeper_up_shared_boundary_outlives_calling_turn;
-      isolated_keepalive_test "shutdown store isolates corrupt owner"
+      test_case "shutdown store isolates corrupt owner" `Quick
         test_keeper_shutdown_store_isolates_corrupt_owner;
-      isolated_keepalive_test "terminal shutdown recovery releases admission"
+      test_case "terminal shutdown recovery releases admission" `Quick
         test_terminal_shutdown_recovery_releases_admission;
-      isolated_keepalive_test "unsupported shutdown schema retains exact fence"
+      test_case "unsupported shutdown schema retains exact fence" `Quick
         test_unsupported_shutdown_schema_retains_exact_fence;
-      isolated_keepalive_test "dashboard purge resolution is fail closed"
+      test_case "dashboard purge resolution is fail closed" `Quick
         test_dashboard_purge_resolution_is_fail_closed;
-      isolated_keepalive_test "Librarian rejection unregisters with lifecycle authority"
+      test_case "Librarian rejection unregisters with lifecycle authority" `Quick
         test_librarian_rejection_unregisters_with_lifecycle_authority;
-      isolated_keepalive_test "shutdown prepare joins idle lane"
+      test_case "shutdown prepare joins idle lane" `Quick
         test_keeper_shutdown_prepare_joins_idle_lane;
-      isolated_keepalive_test "shutdown owner failure persists blocked join"
+      test_case "shutdown owner failure persists blocked join" `Quick
         test_keeper_shutdown_owner_failure_persists_blocked_join;
-      isolated_keepalive_test "shutdown blocks join replay after record failure"
+      test_case "shutdown blocks join replay after record failure" `Quick
         test_keeper_shutdown_blocks_join_replay_after_record_failure;
-      isolated_keepalive_test "shutdown prepare joins not-started lane"
+      test_case "shutdown prepare joins not-started lane" `Quick
         test_keeper_shutdown_prepare_joins_not_started_lane;
-      isolated_keepalive_test "shutdown prepare failure rolls back admission fence"
+      test_case "shutdown prepare failure rolls back admission fence" `Quick
         test_keeper_shutdown_prepare_failure_rolls_back_fence;
-      isolated_keepalive_test "cancelled dormant shutdown join rolls back admission fence"
+      test_case "cancelled dormant shutdown join rolls back admission fence" `Quick
         test_keeper_dormant_shutdown_join_cancel_rolls_back_fence;
-      isolated_keepalive_test "shutdown finalizes idle operation"
+      test_case "shutdown finalizes idle operation" `Quick
         test_keeper_shutdown_finalizes_idle_operation;
-      isolated_keepalive_test "destructive shutdown blocks on bound summary"
+      test_case "destructive shutdown blocks on bound summary" `Quick
         test_destructive_shutdown_drains_bound_summary_then_completes;
-      isolated_keepalive_test "dashboard purge finalizes artifacts and receipt"
+      test_case "dashboard purge finalizes artifacts and receipt" `Quick
         test_dashboard_keeper_purge_finalizes_artifacts_and_receipt;
-      isolated_keepalive_test "shutdown cleanup replays after meta removal"
+      test_case "shutdown cleanup replays after meta removal" `Quick
         test_keeper_shutdown_cleanup_replays_after_meta_removal;
-      isolated_keepalive_test "shutdown rejects stale snapshot delete"
+      test_case "shutdown rejects stale snapshot delete" `Quick
         test_keeper_shutdown_rejects_stale_snapshot_delete;
-      isolated_keepalive_test "shutdown recovers committed task receipt"
+      test_case "shutdown recovers committed task receipt" `Quick
         test_keeper_shutdown_recovers_committed_task_receipt;
-      isolated_keepalive_test "unresolved failing entry is preserved"
+      test_case "unresolved failing entry is preserved" `Quick
         test_start_keepalive_preserves_unresolved_failing_entry;
-      isolated_keepalive_test "finished failing entry is reclaimed"
+      test_case "finished failing entry is reclaimed" `Quick
         test_start_keepalive_reclaims_finished_failing_entry;
-      isolated_keepalive_test "manual stop only requests lane stop"
+      test_case "manual stop only requests lane stop" `Quick
         test_stop_keepalive_only_requests_lane_stop;
-      isolated_keepalive_test "manual stop preserves crashed outcome"
+      test_case "manual stop preserves crashed outcome" `Quick
         test_stop_keepalive_preserves_existing_crash_outcome;
-      isolated_keepalive_test "resolve_done reports prior outcome"
+      test_case "resolve_done reports prior outcome" `Quick
         test_resolve_done_reports_prior_outcome;
     ];
     "pipeline_stage_phase", [

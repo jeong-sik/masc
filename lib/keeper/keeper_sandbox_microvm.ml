@@ -891,6 +891,56 @@ let keeper_work_root ~keeper_name =
 let shim_guest_dir = "/opt/masc-exec-shim"
 let shim_binary_name = "masc-exec-shim"
 let shim_config_name = "masc-exec-shim.conf"
+let shim_sidecar_name = "masc-exec-shim.sha256"
+
+(* RFC-0427 B-2. The installer places the release's shim and, beside it, the
+   sha256 the release's SHA256SUMS gave for that asset. The boot reads the
+   pair: a binary that does not match its own sidecar is refused by name,
+   because a shim the release did not ship is the 2026-09-05 outage waiting
+   to recur. No sidecar means a hand-built shim; it runs, and the boot log
+   says it was not verified. *)
+type shim_provenance =
+  | Shim_verified of { sha256 : string }
+  | Shim_unverified
+
+let sha256_of_file path =
+  In_channel.with_open_bin path In_channel.input_all
+  |> Digestif.SHA256.digest_string
+  |> Digestif.SHA256.to_hex
+;;
+
+let verify_shim_sidecar ~dir =
+  let binary = Filename.concat dir shim_binary_name in
+  let sidecar = Filename.concat dir shim_sidecar_name in
+  if not (Sys.file_exists sidecar)
+  then Ok Shim_unverified
+  else
+    match In_channel.with_open_bin sidecar In_channel.input_all with
+    | exception Sys_error detail ->
+      Error (Printf.sprintf "microvm_shim_sidecar_unreadable: %s: %s" sidecar detail)
+    | content ->
+      let want =
+        match String.split_on_char ' ' (String.trim content) with
+        | first :: _ -> String.trim first
+        | [] -> ""
+      in
+      if not (String_util.is_lowercase_sha256_hex want)
+      then
+        Error
+          (Printf.sprintf
+             "microvm_shim_sidecar_invalid: %s does not begin with a lowercase sha256 hex digest"
+             sidecar)
+      else
+        match sha256_of_file binary with
+        | exception Sys_error detail ->
+          Error (Printf.sprintf "microvm_shim_unreadable: %s: %s" binary detail)
+        | got when String.equal got want -> Ok (Shim_verified { sha256 = got })
+        | got ->
+          Error
+            (Printf.sprintf
+               "microvm_shim_hash_mismatch: %s is %s but %s says %s; reinstall both with scripts/install.sh, or remove the sidecar to run a hand-built shim unverified"
+               binary got sidecar want)
+;;
 let shim_guest_path = Filename.concat shim_guest_dir shim_binary_name
 let shim_config_guest_path = Filename.concat shim_guest_dir shim_config_name
 
@@ -973,7 +1023,7 @@ let classify_volume_probe ~volume_name ~inspect ~listing =
     (match listing with
      | None ->
        Volume_probe_failed
-         "container volume inspect exited 1 and no listing was taken to           confirm whether the volume is absent"
+         "container volume inspect exited 1 and no listing was taken to confirm whether the volume is absent"
      | Some (Unix.WEXITED 0, stdout, _) ->
        (match Yojson.Safe.from_string stdout with
         | exception Yojson.Json_error message ->

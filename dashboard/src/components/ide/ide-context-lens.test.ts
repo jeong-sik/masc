@@ -3,26 +3,10 @@ import { h } from 'preact'
 import { render } from 'preact'
 import { fireEvent } from '@testing-library/preact'
 import { deriveIdeContextLens, IdeContextLens, routeLinksForContext } from './ide-context-lens'
-import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import type { UnifiedDiffRow } from '../../api/workspace'
 import type { AnchoredThread } from './anchored-thread-rail-store'
 import type { RunActivityEvent } from './run-activity-store'
 import { ideContextFocus } from './ide-state'
-
-const annotation: IdeAnnotation = {
-  id: 'ann-1',
-  file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
-  line_start: 12,
-  line_end: 14,
-  keeper_id: 'sangsu',
-  kind: 'Comment',
-  content: 'Wire goal and task progress into the code line.',
-  goal_id: 'goal-ide',
-  task_id: 'task-42',
-  references: [],
-  created_at_ms: 1,
-  updated_at_ms: 2,
-}
 
 const diffRows: ReadonlyArray<UnifiedDiffRow> = [
   { kind: 'add', oldLine: null, newLine: 12, text: '+let progress = ...' },
@@ -42,7 +26,7 @@ const events: ReadonlyArray<RunActivityEvent> = [
     timestamp_ms: 100,
     // Structured surface classification (#20513 replaced regex/tag/text
     // parsing with event.context for surface counts). Drives goal/task/
-    // board/pr/git surfaces; comment stays sourced from the annotation.
+    // board/pr/git surfaces; comment comes from anchored threads.
     context: {
       goal_id: 'goal-ide',
       task_id: 'task-42',
@@ -70,12 +54,12 @@ const thread: AnchoredThread = {
 }
 
 describe('IdeContextLens', () => {
-  it('derives linked surfaces from annotations, diff rows, and activity', () => {
+  it('derives linked surfaces from threads, diff rows, and activity', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      annotations: [annotation],
       diffRows,
       events,
+      threads: [thread],
     })
 
     const linked = new Set(
@@ -85,7 +69,6 @@ describe('IdeContextLens', () => {
     )
 
     expect(linked).toEqual(new Set([
-      'lsp',
       'line',
       'keeper',
       'goal',
@@ -97,13 +80,13 @@ describe('IdeContextLens', () => {
       'log',
       'telemetry',
     ]))
-    expect(model.activeLineCount).toBe(1)
+    expect(model.activeLineCount).toBe(2)
     expect(model.changedLineCount).toBe(2)
     expect(model.anchorTotalCount).toBe(3)
     expect(model.anchors.map(anchor => anchor.surface)).toContain('Git')
     expect(model.surfaces.find(surface => surface.id === 'line')?.routeLink).toMatchObject({
       label: 'Code',
-      params: { file: 'lib/keeper/keeper_tool_ide_runtime.ml', line: '12' },
+      params: { file: 'lib/keeper/keeper_tool_ide_runtime.ml', line: '19' },
     })
     expect(model.surfaces.find(surface => surface.id === 'pr')?.routeLink).toMatchObject({
       label: 'PR',
@@ -113,23 +96,24 @@ describe('IdeContextLens', () => {
       label: 'Telemetry',
       params: { section: 'fleet-health', view: 'event-log' },
     })
-    expect(model.surfaces.find(surface => surface.id === 'comment')?.routeLink).toBeNull()
+    expect(model.surfaces.find(surface => surface.id === 'comment')?.routeLink).toMatchObject({
+      label: 'Board',
+    })
     expect(model.surfaces.find(surface => surface.id === 'comment')?.focusAnchor).toMatchObject({
-      id: 'annotation-ann-1',
-      surface: 'Comment',
+      id: 'thread-thread-1',
+      surface: 'QUESTION',
     })
   })
 
   it('does not claim telemetry links from local-only code evidence', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      annotations: [annotation],
       diffRows,
       events: [],
     })
 
     const counts = new Map(model.surfaces.map(surface => [surface.id, surface.count]))
-    expect(counts.get('lsp')).toBe(1)
+    expect(counts.get('lsp')).toBe(0)
     expect(counts.get('git')).toBe(2)
     expect(counts.get('log')).toBe(0)
     expect(counts.get('telemetry')).toBe(0)
@@ -143,9 +127,9 @@ describe('IdeContextLens', () => {
     render(
       h(IdeContextLens, {
         filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-        annotations: [annotation],
         diffRows,
         events,
+        threads: [thread],
         onRouteLinkActivate: link => activated.push(link),
       }),
       container,
@@ -153,18 +137,18 @@ describe('IdeContextLens', () => {
 
     expect(container.querySelector('[data-testid="ide-context-lens"]')).not.toBeNull()
     expect(container.textContent).toContain('CONTEXT LENS')
-    expect(container.textContent).toContain('11/12 linked')
+    expect(container.textContent).toContain('10/12 linked')
     expect(container.textContent).toContain('keeper_tool_ide_runtime.ml')
     expect(container.textContent).toContain('3 anchors')
     expect(container.textContent).toContain('goal goal-ide')
 
     const surfaceButtons = [...container.querySelectorAll<HTMLButtonElement>('.ide-context-surface-action')]
     expect(surfaceButtons.map(button => button.textContent)).toEqual([
-      'Line1',
-      'Keeper1',
-      'Goal2',
-      'Task2',
-      'Board1',
+      'Line2',
+      'Keeper2',
+      'Goal1',
+      'Task1',
+      'Board2',
       'Git3',
       'PR1',
       'Comment1',
@@ -179,20 +163,18 @@ describe('IdeContextLens', () => {
     })
 
     fireEvent.click(surfaceButtons.find(button => button.textContent === 'Comment1')!)
-    expect(ideContextFocus.value).toMatchObject({
-      file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      line: 12,
-      surface: 'Comment',
-      source_id: 'annotation-ann-1',
+    expect(activated[1]).toMatchObject({
+      label: 'Board',
+      params: { post: 'thread-1' },
     })
   })
 
   it('reports when the compact anchor list is truncated', () => {
     const container = document.createElement('div')
-    const extraAnnotations = [
-      annotation,
-      { ...annotation, id: 'ann-2', line_start: 15, content: 'Second note' },
-      { ...annotation, id: 'ann-3', line_start: 16, content: 'Third note' },
+    const extraEvents = [
+      events[0]!,
+      { ...events[0]!, id: 'evt-2' },
+      { ...events[0]!, id: 'evt-3' },
     ]
     const secondThread: AnchoredThread = {
       ...thread,
@@ -203,7 +185,6 @@ describe('IdeContextLens', () => {
     render(
       h(IdeContextLens, {
         filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-        annotations: extraAnnotations,
         diagnostics: [
           {
             file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
@@ -221,7 +202,7 @@ describe('IdeContextLens', () => {
           },
         ],
         diffRows,
-        events: [],
+        events: extraEvents,
         threads: [thread, secondThread],
       }),
       container,
@@ -234,14 +215,27 @@ describe('IdeContextLens', () => {
   })
 
   it('keeps operational PR, Git, and planning anchors visible when the current file is busy', () => {
-    const extraAnnotations = [
-      annotation,
-      { ...annotation, id: 'ann-2', line_start: 15, content: 'Second task note' },
-      { ...annotation, id: 'ann-3', line_start: 16, content: 'Third task note' },
-    ]
+    const richEvent: RunActivityEvent = {
+      id: 'evt-rich',
+      run_id: 'run-default',
+      keeper_id: 'sangsu',
+      verb: 'noted',
+      target: 'PR #15000',
+      timestamp_ms: 400,
+      context: {
+        file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
+        line: 27,
+        goal_id: 'goal-ide',
+        task_id: 'task-42',
+        pr_id: '15000',
+        board_post_id: 'post-1',
+        comment_id: 'comment-1',
+        git_ref: 'abc123',
+        log_id: 'turn-9',
+      },
+    }
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      annotations: extraAnnotations,
       diagnostics: [
         {
           file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
@@ -260,41 +254,24 @@ describe('IdeContextLens', () => {
         },
       ],
       diffRows,
-      events: [{
-        id: 'evt-rich',
-        run_id: 'run-default',
-        keeper_id: 'sangsu',
-        verb: 'noted',
-        target: 'PR #15000',
-        timestamp_ms: 400,
-        context: {
-          file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
-          line: 27,
-          goal_id: 'goal-ide',
-          task_id: 'task-42',
-          pr_id: '15000',
-          board_post_id: 'post-1',
-          comment_id: 'comment-1',
-          git_ref: 'abc123',
-          log_id: 'turn-9',
-        },
-      }],
+      events: [
+        richEvent,
+        { ...richEvent, id: 'evt-rich-2', context: { ...richEvent.context, line: 28 } },
+        { ...richEvent, id: 'evt-rich-3', context: { ...richEvent.context, line: 29 } },
+      ],
       threads: [thread],
     })
 
     expect(model.anchorTotalCount).toBeGreaterThan(6)
     expect(model.anchors).toHaveLength(6)
-    expect(model.anchors.map(anchor => anchor.id)).toEqual([
-      'diagnostic-21-ocamllsp-type-0',
-      'event-evt-rich',
-      'git-diff-summary',
-      'annotation-ann-1',
-      'thread-thread-1',
-      'annotation-ann-2',
-    ])
-    expect(model.anchors[1]?.route_links?.map(link => link.label)).toContain('PR')
-    expect(model.anchors[2]?.surface).toBe('Git')
-    expect(model.anchors[3]?.route_links?.map(link => link.label)).toEqual(['Code', 'Goal', 'Task', 'Keeper'])
+    const visible = model.anchors.map(anchor => anchor.id)
+    expect(visible[0]).toBe('diagnostic-21-ocamllsp-type-0')
+    expect(visible).toContain('event-evt-rich')
+    expect(visible).toContain('git-diff-summary')
+    expect(visible).toContain('thread-thread-1')
+    const richAnchor = model.anchors.find(anchor => anchor.id === 'event-evt-rich')
+    expect(richAnchor?.route_links?.map(link => link.label)).toContain('PR')
+    expect(model.anchors.find(anchor => anchor.id === 'git-diff-summary')?.surface).toBe('Git')
   })
 
   it('publishes focused file and line when an anchor is clicked', () => {
@@ -304,9 +281,9 @@ describe('IdeContextLens', () => {
     render(
       h(IdeContextLens, {
         filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-        annotations: [annotation],
         diffRows: [],
         events: [],
+        threads: [thread],
       }),
       container,
     )
@@ -317,17 +294,16 @@ describe('IdeContextLens', () => {
 
     expect(ideContextFocus.value).toMatchObject({
       file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      line: 12,
-      surface: 'Comment',
-      source_id: 'annotation-ann-1',
-      keeper_id: 'sangsu',
+      line: 19,
+      surface: 'QUESTION',
+      source_id: 'thread-thread-1',
+      keeper_id: 'scholar',
     })
   })
 
   it('links LSP diagnostics into file line anchors', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      annotations: [],
       diagnostics: [{
         file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
         line: 22,
@@ -375,7 +351,6 @@ describe('IdeContextLens', () => {
   it('keeps diagnostic telemetry routes quiet without source metadata', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      annotations: [],
       diagnostics: [{
         file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
         line: 22,
@@ -389,45 +364,6 @@ describe('IdeContextLens', () => {
     expect(model.anchors[0]?.route_links?.map(link => link.label)).toEqual(['Code'])
   })
 
-  it('omits invalid annotation lines from anchors and focus state', () => {
-    const invalidLineAnnotation: IdeAnnotation = {
-      ...annotation,
-      id: 'ann-line-zero',
-      line_start: 0,
-      line_end: 0,
-    }
-    const model = deriveIdeContextLens({
-      filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      annotations: [invalidLineAnnotation],
-      diffRows: [],
-      events: [],
-    })
-
-    expect(model.activeLineCount).toBe(0)
-    expect(model.anchors[0]).toMatchObject({
-      id: 'annotation-ann-line-zero',
-      surface: 'Comment',
-    })
-    expect(model.anchors[0]?.line).toBeUndefined()
-
-    const container = document.createElement('div')
-    ideContextFocus.value = null
-    render(
-      h(IdeContextLens, {
-        filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-        annotations: [invalidLineAnnotation],
-        diffRows: [],
-        events: [],
-      }),
-      container,
-    )
-    const button = container.querySelector<HTMLButtonElement>('.ide-context-anchor-action')
-    fireEvent.click(button!)
-
-    const focus = ideContextFocus.value as { readonly line?: number } | null
-    expect(focus?.line).toBeUndefined()
-  })
-
   it('renders operational route links for linked goal, task, and keeper context', () => {
     const activated: unknown[] = []
     const container = document.createElement('div')
@@ -435,17 +371,29 @@ describe('IdeContextLens', () => {
     render(
       h(IdeContextLens, {
         filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-        annotations: [annotation],
         diffRows: [],
-        events: [],
+        events: [{
+          id: 'evt-planning',
+          run_id: 'run-default',
+          keeper_id: 'sangsu',
+          verb: 'edited',
+          target: 'lib/keeper/keeper_tool_ide_runtime.ml',
+          timestamp_ms: 100,
+          context: {
+            file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
+            line: 12,
+            goal_id: 'goal-ide',
+            task_id: 'task-42',
+          },
+        }],
         onRouteLinkActivate: link => activated.push(link),
       }),
       container,
     )
 
     const links = [...container.querySelectorAll<HTMLButtonElement>('.ide-context-route-link')]
-    expect(container.querySelector('.ide-context-route-count')?.textContent).toBe('CTX 4')
-    expect(links.map(link => link.textContent)).toEqual(['Code', 'Goal', 'Task', 'Keeper'])
+    expect(container.querySelector('.ide-context-route-count')?.textContent).toBe('CTX 5')
+    expect(links.map(link => link.textContent)).toEqual(['Code', 'Goal', 'Task', 'Telemetry', 'Keeper'])
 
     fireEvent.click(links.find(link => link.textContent === 'Goal')!)
     expect(activated[0]).toMatchObject({
@@ -453,41 +401,6 @@ describe('IdeContextLens', () => {
       tab: 'workspace',
       params: { section: 'planning', goal: 'goal-ide' },
     })
-  })
-
-  it('renders opaque annotation references without assigning product surfaces or routes', () => {
-    const linkedAnnotation: IdeAnnotation = {
-      ...annotation,
-      id: 'ann-linked-route-context',
-      kind: 'Bookmark',
-      references: [
-        { relation: 'evidence', reference: 'urn:example:15035' },
-        { relation: 'source', reference: 'opaque-context' },
-      ],
-    }
-    const model = deriveIdeContextLens({
-      filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      annotations: [linkedAnnotation],
-      diffRows: [],
-      events: [],
-    })
-
-    const counts = new Map(model.surfaces.map(surface => [surface.id, surface.count]))
-    expect(counts.get('board')).toBe(0)
-    expect(counts.get('comment')).toBe(0)
-    expect(counts.get('pr')).toBe(0)
-    expect(counts.get('git')).toBe(0)
-    expect(counts.get('log')).toBe(0)
-    expect(counts.get('runtime')).toBe(0)
-    expect(counts.get('telemetry')).toBe(0)
-    expect(model.anchors[0]?.meta).toContain('evidence urn:example:15035')
-    expect(model.anchors[0]?.meta).toContain('source opaque-context')
-    expect(model.anchors[0]?.route_links?.map(link => link.label)).toEqual([
-      'Code',
-      'Goal',
-      'Task',
-      'Keeper',
-    ])
   })
 
   it('routes file and line context back into the Code IDE shell', () => {
@@ -529,7 +442,6 @@ describe('IdeContextLens', () => {
   it('links conversation threads into board, comment, keeper, and line context', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      annotations: [],
       diffRows: [],
       events: [],
       threads: [thread],
@@ -550,7 +462,6 @@ describe('IdeContextLens', () => {
   it('uses structured activity context as file, line, PR, task, goal, log, and git evidence', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      annotations: [],
       diffRows: [],
       events: [{
         id: 'evt-context',
@@ -661,7 +572,6 @@ describe('IdeContextLens', () => {
   it('promotes tagged activity references into routeable IDE context links', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      annotations: [],
       diffRows: [],
       events: [{
         id: 'evt-tagged-context',
@@ -746,7 +656,6 @@ describe('IdeContextLens', () => {
   it('promotes tagged runtime references into runtime anchors', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      annotations: [],
       diffRows: [],
       events: [{
         id: 'evt-tagged-runtime',
@@ -811,7 +720,6 @@ describe('IdeContextLens', () => {
   it('prefers structured activity context over tagged fallback references', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      annotations: [],
       diffRows: [],
       events: [{
         id: 'evt-structured-wins',
@@ -842,7 +750,6 @@ describe('IdeContextLens', () => {
   it('keeps other-file activity out of the current-file lens', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      annotations: [],
       diffRows: [],
       events: [{
         id: 'evt-other-file',
@@ -873,11 +780,6 @@ describe('IdeContextLens', () => {
   it('normalizes file paths before matching current-file lens inputs', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      annotations: [{
-        ...annotation,
-        id: 'ann-backslash',
-        file_path: ' lib\\keeper\\keeper_tool_ide_runtime.ml ',
-      }],
       diffRows: [],
       events: [{
         id: 'evt-backslash',
@@ -903,12 +805,11 @@ describe('IdeContextLens', () => {
     })
 
     const counts = new Map(model.surfaces.map(surface => [surface.id, surface.count]))
-    expect(counts.get('lsp')).toBe(1)
+    expect(counts.get('lsp')).toBe(0)
     expect(counts.get('keeper')).toBe(2)
     expect(counts.get('log')).toBe(1)
-    expect(model.activeLineCount).toBe(3)
+    expect(model.activeLineCount).toBe(2)
     expect(model.anchors.map(anchor => anchor.id)).toEqual([
-      'annotation-ann-backslash',
       'thread-thread-backslash',
       'event-evt-backslash',
     ])
@@ -917,7 +818,6 @@ describe('IdeContextLens', () => {
   it('does not turn unscoped event lines into current-file anchors', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      annotations: [],
       diffRows: [],
       events: [{
         id: 'evt-line-only',
@@ -943,7 +843,6 @@ describe('IdeContextLens', () => {
   it('does not advertise delete-only diff rows as editor-focusable lines', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      annotations: [],
       diffRows: [{ kind: 'delete', oldLine: 13, newLine: null, text: '-let old = ...' }],
       events: [],
     })
@@ -960,7 +859,6 @@ describe('IdeContextLens', () => {
   it('routes log context into the runtime audit focus', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      annotations: [],
       diffRows: [],
       events: [{
         id: 'evt-log',
@@ -984,7 +882,6 @@ describe('IdeContextLens', () => {
   it('routes telemetry-only context into event-log query focus', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      annotations: [],
       diffRows: [],
       events: [{
         id: 'evt-telemetry',

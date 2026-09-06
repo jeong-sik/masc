@@ -329,6 +329,33 @@ let anthropic_thinking_control_for_model_id model_id =
      | None -> manifest_value ())
 ;;
 
+(* [anthropic_thinking_control_for_model_id] reads only bare rows: the bare
+   lookup filters out every provider-qualified row (model_catalog.ml filters on
+   [Option.is_none entry.provider_name]). A provider-scoped model — deepseek on
+   the Anthropic-compatible surface is the live case — declares its policy on a
+   provider-qualified row, so the non-exact path never saw it and an explicit
+   enable_thinking then failed with "no catalog-declared policy" while the row
+   carried one. This variant resolves the row the same way the capability path
+   ([for_provider_model_id]) does, by provider label first; callers without a
+   provider label keep the bare-only reading. Found by adversarial review
+   (2026-09-06), F1. *)
+let anthropic_thinking_control_for_provider_model_id
+      ~(provider_label : string)
+      ~(model_id : string)
+  =
+  match Model_catalog.global () with
+  | None -> None
+  | Some catalog ->
+    (match
+       Model_catalog.lookup_for_provider catalog ~provider_name:provider_label ~model_id
+     with
+     | Some entry ->
+       Option.map
+         anthropic_thinking_control_of_vocab_value
+         entry.anthropic_thinking_control
+     | None -> None)
+;;
+
 let anthropic_capabilities =
   { default_capabilities with
     max_context_tokens = Some 200_000
@@ -1925,6 +1952,28 @@ let%test "Anthropic thinking policy falls back to manifest when catalog has no r
     (fun () ->
        anthropic_thinking_control_for_model_id "manifest-anthropic-model"
        = Some Anthropic_adaptive_only)
+;;
+
+(* Adversarial F1 (2026-09-06): a provider-qualified row — deepseek on the
+   Anthropic-compatible surface — is invisible to the bare lookup, so the
+   provider-aware variant must be the one that sees its policy, and the bare
+   reading must stay blind to it. *)
+let%test "Anthropic thinking policy on a provider-qualified row resolves by provider label" =
+  Model_catalog.set_global
+    (Model_catalog.of_model_entries
+       [ { (test_catalog_entry "provider-scoped-anthropic-model") with
+           provider_name = Some "deepseek-anthropic";
+           anthropic_thinking_control = Some Capability_vocab.Always_adaptive
+         }
+       ]);
+  Fun.protect ~finally:Model_catalog.clear_global (fun () ->
+    anthropic_thinking_control_for_provider_model_id
+      ~provider_label:"deepseek-anthropic"
+      ~model_id:"provider-scoped-anthropic-model"
+    = Some Anthropic_always_adaptive
+    && Option.is_none
+         (anthropic_thinking_control_for_model_id
+            "provider-scoped-anthropic-model"))
 ;;
 
 (* --- emits_usage_tokens / capabilities_for_provider_label --- *)

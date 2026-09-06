@@ -3,10 +3,9 @@
     One owner is identified by the canonical MASC [base_path] and a parsed
     {!Keeper_id.Keeper_name}.  The process-wide ephemeron registry mutex
     protects only owner lookup/creation; inactive entries are collectible
-    without an eviction heuristic.  Every owner carries its own cooperative
-    Eio gate and a shared Stdlib mutex, so unrelated Keeper lanes never
-    serialize on queue I/O while Eio and non-Eio callers still exclude each
-    other. *)
+    without an eviction heuristic.  Every owner carries its own
+    {!Cross_context_mutex}, so unrelated Keeper lanes never serialize on
+    queue I/O while Eio and non-Eio callers still exclude each other. *)
 
 type resolve_error =
   | Invalid_base_path of string

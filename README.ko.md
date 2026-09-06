@@ -462,6 +462,7 @@ Keeper에게 바로 넘깁니다. `masc_ask`로 질문을 던진 Keeper에게는
 | Dart | `dart` | `pubspec.yaml` |
 | Scala | `metals` | `build.sbt` |
 | C# | `csharp-ls` | 작업 공간 경계 |
+| Markdown | `marksman` | 작업 공간 경계 |
 
 TUI와 서버가 서로 다른 작업 공간을 보고 있으면 머리글이 그렇게 말합니다 — 연결
 표시 옆 `[workspace mismatch]`, 그리고 아래 줄에 두 경로가 같이 나옵니다. 그동안

@@ -1788,6 +1788,14 @@ type async_msg =
       * (Masc_tui_http.tool_approval_answer, string) result
   | Keeper_tool_approvals_loaded of
       (Tui_decode.keeper_tool_approval list, string) result
+  | Image_render_ready of {
+      title : string;
+      caption : string list;
+      result : (string, string) result;
+    }
+      (** A [v]-requested web image, downloaded and converted to PNG off the
+          render loop. [result] is the PNG bytes ready to draw, or why they
+          could not be produced. *)
   | Keeper_turns_loaded of (Tui_decode.keeper_turn_row list, string) result
       (** Which keepers are mid-turn right now, for the "answering now"
           badge drawn from every surface. *)
@@ -1949,6 +1957,34 @@ type 'a mailed = {
 
 let enqueue_async mailbox msg =
   Eio.Stream.add mailbox { ready_at = Unix.gettimeofday (); message = msg }
+
+(* Wire the web-link-preview background fetcher. On the first cache miss for a
+   URL, Masc_tui_link_preview renders the synthesized card immediately and calls
+   this hook; the fetched <title>/og:* then replace that entry in the shared
+   cache, and the next render (a periodic loader tick, sub-second) shows the real
+   card. A failed fetch leaves the synthesized card. Runs on its own daemon fiber
+   so a slow site never blocks the render loop, and sends no masc auth header to
+   the third-party URL. *)
+(* Set once the image helpers below are in scope: downloads and decodes a
+   preview's image into a half-block mosaic off the render loop. A no-op until
+   then, so a preview fetched during early init simply carries no mosaic. *)
+let compute_and_store_mosaic : (string -> unit) ref = ref (fun _ -> ())
+
+let () =
+  Masc_tui_link_preview.set_background_fetch (fun url ->
+      match Eio_context.get_switch_opt () with
+      | None -> ()
+      | Some sw ->
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+              (match Masc_tui_http.fetch_link_preview_body ~url with
+               | Ok body ->
+                   let preview = Masc_tui_link_preview.parse_og_html ~url ~body in
+                   Masc_tui_link_preview.cache_store preview;
+                   (match preview.Masc_tui_link_preview.image_url with
+                    | Some img -> !compute_and_store_mosaic img
+                    | None -> ())
+               | Error _ -> ());
+              `Stop_daemon))
 
 let current_clock_text () =
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -5345,11 +5381,9 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     | Keeper_chat_history.Said_by_keeper ->
         (Message_keeper, Turn_output, row.text, None, None)
     | Keeper_chat_history.Autonomous_reply ->
-        ( Message_autonomous
-        , Turn_output
-        , (if String.trim row.text = "" then "\xc2\xb7" else row.text)
-        , None
-        , None )
+        (* The decoder no longer emits a blank autonomous reply, so there is
+           nothing here to stand in for. *)
+        (Message_autonomous, Turn_output, row.text, None, None)
     | Keeper_chat_history.Delivery_failed { recovered_at; _ } ->
         let text, recovered =
           match
@@ -6398,7 +6432,7 @@ let clamp_planning_cursor state =
    about why -- the picture that never arrives looks exactly like the picture
    that did. The sniff is the composer's, so both surfaces read bytes by one
    rule. *)
-let draw_image state ~refuse ~title data =
+let draw_image state ?(caption = []) ~refuse ~title data =
   match Masc.Keeper_vision_tool.sniff_image_media_type data with
   | Error detail -> refuse detail
   | Ok media when not (String.equal media Masc_tui_graphics.payload_media_type)
@@ -6408,9 +6442,15 @@ let draw_image state ~refuse ~title data =
            Masc_tui_graphics.payload_media_type media)
   | Ok _ ->
       let rows, columns = get_terminal_size () in
+      (* Header rows -- the title, then one row per caption line (description,
+         site, URL). The image starts below the header and the footer sits on
+         the last row, so the picture never overlaps the text. With no caption
+         this is the old title-only layout. *)
+      let header_lines = title :: caption in
+      let header_rows = List.length header_lines in
       let box =
         { Masc_tui_graphics.columns = max 1 (columns - 2)
-        ; rows = max 1 (rows - 3)
+        ; rows = max 1 (rows - header_rows - 2)
         }
       in
       let img_escape =
@@ -6420,10 +6460,17 @@ let draw_image state ~refuse ~title data =
         | Masc_tui_graphics.Kitty_protocol | Masc_tui_graphics.Unsupported_protocol ->
             Masc_tui_graphics.place ~data box
       in
+      let header =
+        String.concat ""
+          (List.mapi
+             (fun i line ->
+               Printf.sprintf "\x1b[%d;1H%s" (i + 1)
+                 (Message_layout.fit_width line (max 1 (columns - 1))))
+             header_lines)
+      in
       write_to_terminal
-        (Ansi.clear ^ Masc_tui_graphics.delete_all
-        ^ Printf.sprintf "\x1b[1;1H%s\x1b[2;1H"
-            (Message_layout.fit_width title (max 1 (columns - 1)))
+        (Ansi.clear ^ Masc_tui_graphics.delete_all ^ header
+        ^ Printf.sprintf "\x1b[%d;1H" (header_rows + 1)
         ^ img_escape
         ^ Printf.sprintf "\x1b[%d;1H%s" rows
             (Message_layout.fit_width "  any key: back" (max 1 (columns - 1))));
@@ -6484,6 +6531,54 @@ let convert_to_png input_path =
 (* Put a picture on the terminal, or say why not. The refusal is text for the
    pane: there is nothing to draw, and taking the screen away from the frame
    to say so would hide the only surface that can say it. *)
+(* Mosaic preview size: 72 cells wide, 40 pixels tall -> 20 half-block rows.
+   ~72 columns fit a modal on a normal-width terminal; decode and draw stay a
+   few ms. og:images are high-res, so this size is what bounds the sharpness. *)
+let mosaic_cols = 72
+let mosaic_pixel_rows = 40
+
+(* Download a preview image and decode it into half-block mosaic lines, or None.
+   Blocking (curl + ffmpeg through Unix.system): the caller runs it off the
+   render loop inside run_in_systhread. *)
+let image_url_to_mosaic ~cols ~rows url =
+  match download_remote_image url with
+  | Error _ -> None
+  | Ok local_path -> (
+      let raw =
+        Filename.concat
+          (ensure_img_cache_dir ())
+          ("mosaic_"
+          ^ Digest.to_hex (Digest.string (Printf.sprintf "%s_%dx%d" url cols rows))
+          ^ ".raw")
+      in
+      let cmd =
+        Printf.sprintf
+          "ffmpeg -y -loglevel error -i %s -vf scale=%d:%d -f rawvideo -pix_fmt \
+           rgb24 %s"
+          (Filename.quote local_path) cols rows (Filename.quote raw)
+      in
+      match Unix.system cmd with
+      | Unix.WEXITED 0 when Sys.file_exists raw -> (
+          try
+            let ic = open_in_bin raw in
+            let data = really_input_string ic (in_channel_length ic) in
+            close_in ic;
+            match Masc_tui_image_mosaic.render ~cols ~rows data with
+            | [] -> None
+            | lines -> Some lines
+          with _ -> None)
+      | _ -> None)
+
+let () =
+  compute_and_store_mosaic :=
+    fun img ->
+      match
+        Eio_guard.run_in_systhread (fun () ->
+            image_url_to_mosaic ~cols:mosaic_cols ~rows:mosaic_pixel_rows img)
+      with
+      | Some lines -> Masc_tui_link_preview.mosaic_store img lines
+      | None -> ()
+
 let open_image state ~notice path =
   let refuse reason =
     notice ~role:Message_error (Printf.sprintf "/image %s: %s" path reason)
@@ -6544,6 +6639,56 @@ let open_image state ~notice path =
                           draw_image state ~refuse ~title:path prepared_data
                     else
                       draw_image state ~refuse ~title:path prepared_data))
+
+(* Download a remote image and hand back PNG bytes ready for [draw_image], or
+   why they could not be produced. Pure of the render loop: no terminal writes,
+   so it is safe to run on a systhread. *)
+let prepare_remote_image_bytes url =
+  match download_remote_image url with
+  | Error e -> Error e
+  | Ok local_path -> (
+      match read_file_bytes local_path with
+      | Error detail -> Error detail
+      | Ok data when String.length data = 0 -> Error "the downloaded image is empty"
+      | Ok initial_data -> (
+          match Masc.Keeper_vision_tool.sniff_image_media_type initial_data with
+          | Ok media when String.equal media Masc_tui_graphics.payload_media_type ->
+              Ok initial_data
+          | _ -> (
+              match convert_to_png local_path with
+              | Ok png_path -> read_file_bytes png_path
+              | Error _ ->
+                  Error "could not convert the image to a format the terminal draws")))
+
+(* [v] on a link preview: download and convert the image OFF the render loop,
+   then hand the PNG bytes back through the mailbox so [draw_image] runs on the
+   render fiber, not here. The blocking curl/sips live inside run_in_systhread
+   so the domain keeps rendering; the loading line is shown at once so the
+   keypress is not silent. terminal_draws_images = false skips the download and
+   opens a browser instead. *)
+let launch_image_render ~mailbox ~notice ~title ~caption url =
+  if !terminal_draws_images = Some false then
+    match Masc_tui_browser.open_url url with
+    | Ok opener ->
+        notice ~role:Message_local
+          (Printf.sprintf "Opened in browser (%s): %s" opener url)
+    | Error err ->
+        notice ~role:Message_error (Printf.sprintf "Could not open browser: %s" err)
+  else begin
+    notice ~role:Message_local (Printf.sprintf "Loading image: %s" url);
+    let run () =
+      let result =
+        Eio_guard.run_in_systhread (fun () -> prepare_remote_image_bytes url)
+      in
+      enqueue_async mailbox (Image_render_ready { title; caption; result })
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+    | None ->
+        enqueue_async mailbox
+          (Image_render_ready
+             { title; caption; result = Error "Eio switch unavailable" })
+  end
 
 (* The staged door. Ctrl-V leaves the image in the attachment as base64 for
    the wire to the endpoint; the terminal wants the PNG's own bytes, so they
@@ -9652,7 +9797,26 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         then Buffer.add_char state.msg_input ' ';
         Buffer.add_string state.msg_input text;
         save_message_draft state;
-        state.last_action <- Some ("voice: " ^ text, Unix.gettimeofday ()))
+        state.last_action <- Some ("voice: " ^ text, Unix.gettimeofday ());
+        (* [voice.stt].send_on_stop: the operator who says a sentence and
+           stops the capture has finished the sentence, and the Enter that
+           follows says nothing the stop did not. Off by default, because the
+           draft is also where a spoken half-sentence waits for typing, and
+           taking the review step away costs an operator who works that way
+           more than it saves the one who does not.
+
+           Sent by handing the composer the send key rather than calling the
+           send path: that path decides what a draft is (a message, a slash
+           command, a preset) and which surface comes forward, and a second
+           caller would be a second answer to those questions. A capture in
+           continuous mode re-arms above before this, so the microphone is
+           already listening for the next sentence when this returns. *)
+        if state.voice_send_on_stop
+        then (
+          let (_ : bool) =
+            handle_composer_key state ~base_path ~mailbox Composer.send_key
+          in
+          ()))
   | Voice_silent { keeper; reason } ->
       if state.voice_capture = Some keeper then (
         state.voice_capture <- None;
@@ -10323,6 +10487,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 in
                 max widest row_width)
               0 rows;
+          state.code_memos <- Masc_tui_memo.of_file ~path rows;
           state.code_focus_file <- Right_pane;
           (* A new file starts on its content; the old file's history or
              diff would caption the wrong bytes. *)
@@ -10336,6 +10501,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.code_notes_scroll <- 0;
           state.code_blame <- Masc_tui_fetched.clear state.code_blame
       | Error detail ->
+          state.code_memos <- [];
           state.code_file <-
             Masc_tui_fetched.complete ~equal:String.equal state.code_file request
               (Error detail))
@@ -10851,6 +11017,22 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
+  | Image_render_ready { title; caption; result } ->
+      let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
+      (match result with
+       | Ok data ->
+           let refuse reason =
+             notice ~role:Message_error (Printf.sprintf "image %s: %s" title reason)
+           in
+           draw_image state ~caption ~refuse ~title data
+       | Error e -> (
+           match Masc_tui_browser.open_url title with
+           | Ok opener ->
+               notice ~role:Message_local
+                 (Printf.sprintf "Could not draw inline (%s). Opened in browser (%s): %s"
+                    e opener title)
+           | Error _ ->
+               notice ~role:Message_error (Printf.sprintf "image %s: %s" title e)))
   | Keeper_turns_loaded result ->
       (match result with
        | Ok rows ->
@@ -11977,6 +12159,12 @@ let main () =
     Option.value
       (Masc_tui_config.coalesce_queued_input ~base_path)
       ~default:true;
+  (* Default false, unlike its neighbours: this one sends without the operator
+     confirming, so absence is not consent. *)
+  state.voice_send_on_stop <-
+    Option.value
+      (Masc_tui_config.voice_send_on_stop ~base_path)
+      ~default:false;
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
@@ -12103,17 +12291,30 @@ let main () =
     ~flush:(fun () -> flush stdout);
   (* Reads the palette rather than taking a colour, so every caller sends
      whatever is in force at the moment it asks -- picking a scheme, dropping
-     one, and the first paint all go through the same answer. *)
+     one, and the first paint all go through the same answer.
+
+     Gated on the reader's own pick rather than on the palette alone. The
+     palette is also what the terminal answered about itself, and sending a
+     terminal its own colours back is masc claiming an opinion it does not
+     have. It read as harmless while only the page travelled; the sixteen
+     make it a round trip through masc's 8-bit parse of a reply a terminal
+     may have given at 16. *)
   let sync_theme_page () =
-    Frame_presenter.sync_page ~write:(output_string stdout)
+    Frame_presenter.sync_scheme ~write:(output_string stdout)
       ~flush:(fun () -> flush stdout)
-      (Option.map
-         (fun palette ->
-           { Frame_presenter.foreground =
-               Masc_tui_terminal_palette.foreground palette
-           ; background = Masc_tui_terminal_palette.background palette
-           })
-         (Masc_tui_terminal_palette.current ()))
+      (match state.theme_choice with
+       | None -> None
+       | Some _ ->
+         Option.map
+           (fun palette ->
+             { Frame_presenter.foreground =
+                 Masc_tui_terminal_palette.foreground palette
+             ; background = Masc_tui_terminal_palette.background palette
+             ; ansi =
+                 Array.init Masc_tui_terminal_palette.ansi_slot_count
+                   (Masc_tui_terminal_palette.ansi palette)
+             })
+           (Masc_tui_terminal_palette.current ()))
   in
   (* The pick, written to the runtime.toml boot reads it back from. Only a
      commit comes here: a preview is a look at a scheme, not a choice of one,
@@ -13658,6 +13859,22 @@ and is loaded on demand through keeper_skill.
                handle_acting_pane_click state ~base_path ~mailbox:async_messages
                  ~line
            | Pane_miss -> ())
+       (* A press on a folded Gate row opens what the fold is holding. The
+          fold lives on the tool-detail axis, so this sets the state Ctrl-D
+          sets rather than a second one: two ways in, one thing opened. Only
+          folded rows carry the action, so a press on an open row is not a
+          press that quietly did nothing -- there was nothing to open. *)
+       | Some (Mouse_left_press (row, _column))
+         when state.view = Keepers Keeper_message
+              && (not dismissed_image) && (not compact_viewport)
+              && (not state.help_open)
+              && (not state.agenda_open)
+              && (not state.palette_open)
+              && (not state.context_inspector_open)
+              && Option.is_none state.search
+              && Masc_tui_render.chat_row_action_at ~row
+                 = Masc_tui_message_layout.Action_unfold_argument ->
+           state.msg_tool_visibility <- Tools_full
        (* A left press on the Lanes overview moves the row cursor (and opens
           the row it already named). The modals above the surface -- help,
           agenda, palette, search -- keep the press from reaching rows they
@@ -14347,11 +14564,18 @@ and is loaded on demand through keeper_skill.
                  | Some url ->
                      let p = Masc_tui_link_preview.get_preview url in
                      let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
-                     (match p.image_url with
-                      | Some img_url ->
-                          open_image state ~notice img_url
-                      | None ->
-                          open_image state ~notice url)
+                     let img_url =
+                       match p.image_url with Some i -> i | None -> url
+                     in
+                     let title =
+                       match p.title with Some t -> "  " ^ t | None -> "  " ^ url
+                     in
+                     let caption =
+                       (match p.description with Some d -> [ "  " ^ d ] | None -> [])
+                       @ [ "  " ^ Masc_tui_link_preview.site_label p ^ " \xc2\xb7 " ^ url ]
+                     in
+                     launch_image_render ~mailbox:async_messages ~notice ~title
+                       ~caption img_url
                  | None -> ())
             | _ -> ())
        | Some k when state.patch_modal_open ->
@@ -16065,8 +16289,21 @@ and is loaded on demand through keeper_skill.
                 launch_runtime_surface_load state ~mailbox:async_messages
                   ~force:true
             | Tools -> launch_tools_load state ~mailbox:async_messages
-            | Config ->
-                launch_runtime_config_load state ~mailbox:async_messages
+            | Config -> (
+                (* Same per-pane dispatch as goto_surface: each Config pane
+                   loads its own source, so a manual refresh must not
+                   quietly fall back to runtime.toml's loader for panes
+                   that read somewhere else (presets, prompts, params,
+                   voice). *)
+                match state.config_pane with
+                | Config_prompts -> launch_prompts_load state ~mailbox:async_messages
+                | Config_presets -> launch_presets_load state ~mailbox:async_messages
+                | Config_params ->
+                    launch_runtime_params_load state ~mailbox:async_messages
+                | Config_voice ->
+                    launch_voice_config_load state ~mailbox:async_messages
+                | Config_runtime | Config_models | Config_themes ->
+                    launch_runtime_config_load state ~mailbox:async_messages)
             | Resources ->
                 launch_resources_list state ~mailbox:async_messages
             | Schedules -> launch_schedules_load state ~mailbox:async_messages
@@ -16478,13 +16715,10 @@ and is loaded on demand through keeper_skill.
                   state.repository_changes_scroll <- scroll
                 else if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then (
-                    match Masc_tui_fetched.current state.code_file with
-                    | Some (_, Masc_tui_fetched.Ready rows) ->
-                        state.code_notes_scroll <-
-                          min
-                            (max 0 (List.length (Masc_tui_memo.of_rows rows) - 1))
-                            (state.code_notes_scroll + 1)
-                    | Some (_, _) | None -> ())
+                    state.code_notes_scroll <-
+                      min
+                        (max 0 (List.length state.code_memos - 1))
+                        (state.code_notes_scroll + 1))
                   else if state.code_diff_open then (
                     match Masc_tui_fetched.current state.code_diff with
                     | Some (_, Masc_tui_fetched.Ready diff) ->
@@ -17632,6 +17866,12 @@ and is loaded on demand through keeper_skill.
              | Some gid ->
                  (match state.planning with
                   | Some snap ->
+                      (* The cursor indexes the rows the pane draws, which
+                         [clamp_planning_cursor] also bounds by that list. The
+                         raw goal list is in the order the server sent; the
+                         filter hides goals and the sort reorders them, so an
+                         index found in it lands on a different row than the
+                         goal it was found for. *)
                       let rec find_idx i = function
                         | [] -> ()
                         | (g : planning_goal) :: rest ->
@@ -17639,7 +17879,9 @@ and is loaded on demand through keeper_skill.
                               state.planning_cursor <- i
                             else find_idx (i + 1) rest
                       in
-                      find_idx 0 snap.pl_goals
+                      find_idx 0
+                        (planning_visible_goals ~filter:state.planning_filter
+                           ~sort:state.planning_sort snap.pl_goals)
                   | None -> ());
                  clamp_planning_cursor state
              | None ->

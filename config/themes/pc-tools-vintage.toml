@@ -1,0 +1,20 @@
+name = "pc-tools-vintage"
+light = false
+
+[palette]
+base00 = "0e2424"
+base01 = "163838"
+base02 = "225050"
+base03 = "4a7070"
+base04 = "a0bcbc"
+base05 = "e6e6e6"
+base06 = "f0f4f4"
+base07 = "ffffff"
+base08 = "ff6e60"
+base09 = "f5b04a"
+base0a = "e8c34a"
+base0b = "66c866"
+base0c = "5bc0de"
+base0d = "5a94e0"
+base0e = "c472d0"
+base0f = "cf9a4a"

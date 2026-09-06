@@ -103,7 +103,7 @@ let confidential_examples =
     ".env.local", "prefixed .env.local";
     "src/.env.production", "nested .env.production";
     ".masc/config/credentials.toml", "the concrete leak from the report";
-    ".masc-ide/by-url/x/annotations.jsonl", "keeper annotation store";
+    ".masc-ide/by-url/x/tool_events.jsonl", "keeper tool-event store";
     "credentials.toml", "root credentials file";
     "config/credentials", "nested credentials";
     ".git/config", "git config with credential URLs";
@@ -281,7 +281,7 @@ let test_denylist_matches_tree_hidden () =
     mkdir_p (Filename.concat base ".masc/config");
     touch (Filename.concat base ".masc/config/credentials.toml");
     mkdir_p (Filename.concat base ".masc-ide/by-url");
-    touch (Filename.concat base ".masc-ide/by-url/annotations.jsonl");
+    touch (Filename.concat base ".masc-ide/by-url/tool_events.jsonl");
     mkdir_p (Filename.concat base ".git");
     touch (Filename.concat base ".git/config");
     touch (Filename.concat base ".env");

@@ -28,6 +28,57 @@ let entry_default ~env_name =
     | _ -> None)
 ;;
 
+(* Every knob [Env_setting] declares must reach this JSON.
+
+   The first shape of this tried a registry filled at declaration time. OCaml
+   links only the modules a binary references, so this executable never linked
+   the declaring module and the catalogue reported nothing -- this case is what
+   caught it. The declarations are a closed vocabulary now, which is why the
+   list is complete regardless of what a binary happens to link. *)
+let reported_env_names () =
+  Env_config_snapshot.all_categories ()
+  |> List.concat_map (fun (_category, entries) ->
+    match entries with
+    | `List entries -> entries
+    | _ -> [])
+  |> List.filter_map (function
+    | `Assoc fields ->
+      (match List.assoc_opt "env" fields with
+       | Some (`String name) -> Some name
+       | _ -> None)
+    | _ -> None)
+;;
+
+(* A knob moved into [Env_setting] whose hand-written row was not deleted is
+   reported twice. Writing this slice did exactly that: MASC_WEB_SEARCH_* were
+   already declared in Keeper_runtime_setting_registry, and declaring them again
+   put two rows in front of the operator. Arithmetic caught it -- nine
+   declarations moved the gap by seven -- which is not a check. *)
+let test_no_declaration_is_reported_twice () =
+  let reported = reported_env_names () in
+  let counted name = List.length (List.filter (String.equal name) reported) in
+  let duplicated =
+    Env_setting.all_rows
+    |> List.filter_map (fun (row : Env_setting.row) ->
+      let n = counted row.env_name in
+      if n > 1 then Some (Printf.sprintf "%s x%d" row.env_name n) else None)
+  in
+  check (list string) "declared knobs the snapshot reports more than once" [] duplicated
+;;
+
+let test_declarations_reach_the_operator_surface () =
+  let declared = Env_setting.all_rows in
+  check bool "at least one knob is declared" true (declared <> []);
+  let reported = reported_env_names () in
+  let missing =
+    declared
+    |> List.filter (fun (row : Env_setting.row) ->
+      not (List.exists (String.equal row.env_name) reported))
+    |> List.map (fun (row : Env_setting.row) -> row.env_name)
+  in
+  check (list string) "declared knobs the snapshot omits" [] missing
+;;
+
 let test_max_connections_matches_the_server () =
   match entry_default ~env_name:"MASC_HTTP_MAX_CONNECTIONS" with
   | [ reported ] ->
@@ -154,6 +205,14 @@ let () =
             "pure projection redacts explicit observations"
             `Quick
             test_pure_projection_redacts_explicit_observation
+        ; test_case
+            "declarations reach the operator surface"
+            `Quick
+            test_declarations_reach_the_operator_surface
+        ; test_case
+            "no declaration is reported twice"
+            `Quick
+            test_no_declaration_is_reported_twice
         ] )
     ]
 ;;

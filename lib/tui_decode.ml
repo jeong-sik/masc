@@ -7965,6 +7965,10 @@ type file_change_kind =
       replace_all : bool;
     }
   | Fc_written of { content : string }
+  | Fc_inserted of {
+      line : int;
+      text : string;
+    }
 
 type file_change = {
   fc_at : float;
@@ -8043,6 +8047,10 @@ let decode_file_change_kind json =
   | "write" ->
       let* content = required_string_field json "content" in
       Ok (Fc_written { content })
+  | "insert" ->
+      let* line = required_int_field json "line" in
+      let* text = required_string_field json "text" in
+      Ok (Fc_inserted { line; text })
   | other -> Error (Printf.sprintf "unknown file change kind %S" other)
 
 let validate_line_evidence_contract
@@ -8067,8 +8075,17 @@ let validate_line_evidence_contract
         { occurrence_count; occurrences = _ })
     when occurrence_count <> 1 ->
     Error "single Edit carries an occurrence_count other than one"
+  | Fc_inserted _,
+    Some
+      (Keeper_file_change_evidence.Edited
+        { occurrence_count; occurrences = _ })
+    when occurrence_count <> 1 ->
+    Error "an insert carries an occurrence_count other than one"
   | Fc_edited _, Some (Keeper_file_change_evidence.Edited _) -> Ok ()
+  | Fc_inserted _, Some (Keeper_file_change_evidence.Edited _) -> Ok ()
   | Fc_written _, Some (Keeper_file_change_evidence.Written _) -> Ok ()
+  | Fc_inserted _, Some (Keeper_file_change_evidence.Written _) ->
+    Error "insert change carries Write line_evidence"
   | Fc_edited _, Some (Keeper_file_change_evidence.Written _) ->
     Error "Edit change carries Write line_evidence"
   | Fc_written _, Some (Keeper_file_change_evidence.Edited _) ->

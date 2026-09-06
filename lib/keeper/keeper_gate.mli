@@ -103,6 +103,14 @@ type unavailable_reason =
   | Approval_grant_unavailable of Keeper_approval_queue.grant_error
   | Approval_grant_consumption_in_progress of string
 
+(** Every reason above says the approval machinery could not act, not that
+    the call was wrong or that the effect half-happened. Callers report
+    {!Unavailable} as [Tool_result.Dependency_unavailable] with
+    [Proven_pre_effect]. Four of the five call sites reported
+    [Runtime_failure] until 2026-09-06, which reaches a model as
+    [Agent_core.Types.Unknown] -- an uncertain outcome, next to a message
+    saying the effect was not executed. *)
+
 type decision =
   | Allow of authorization
   | Deferred of

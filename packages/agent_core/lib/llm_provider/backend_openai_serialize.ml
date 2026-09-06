@@ -215,18 +215,32 @@ let openai_content_parts_of_blocks blocks =
   |> List.filter_map (function
     | Text s ->
       Some (`Assoc [ "type", `String "text"; "text", `String (Utf8_sanitize.sanitize s) ])
-    | Image { media_type; data; source_type } ->
-      let url =
-        Api_common.base64_media_data_url
-          ~backend:"openai_chat"
-          ~block:"image"
-          ~media_type
-          ~data
-          source_type
-      in
-      Some
-        (`Assoc
-            [ "type", `String "image_url"; "image_url", `Assoc [ "url", `String url ] ])
+    | Image { media_type; data; source_type } -> (
+      (* The three carriers the closed media_source_kind names map to the
+         three wire forms the chat surface documents: an inline base64 data
+         URL, an external https URL passed through as the image_url, and a
+         Files API reference as {"type":"file","file_id":…} — file_id and
+         inline data are mutually exclusive on the wire. [data] carries the
+         URL or the file id verbatim for the two reference forms; the
+         base64_data_url below still rejects them, which is what kept these
+         sources dead until the catalog gained a Files surface (RFC-0430). *)
+      match source_type with
+      | Url ->
+        Some (`Assoc [ "type", `String "image_url"; "image_url", `Assoc [ "url", `String data ] ])
+      | File_id ->
+        Some (`Assoc [ "type", `String "file"; "file", `Assoc [ "file_id", `String data ] ])
+      | Base64 ->
+        let url =
+          Api_common.base64_media_data_url
+            ~backend:"openai_chat"
+            ~block:"image"
+            ~media_type
+            ~data
+            source_type
+        in
+        Some
+          (`Assoc
+              [ "type", `String "image_url"; "image_url", `Assoc [ "url", `String url ] ]))
     | Document { media_type; data; source_type } ->
       (* agent-core boundary — a document is not an image. This arm used to emit an
          [image_url] part, so a PDF reached the model as a picture and no layer

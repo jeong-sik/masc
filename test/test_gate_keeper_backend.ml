@@ -319,7 +319,7 @@ let test_parse_keeper_chat_stream_request_accepts_attachment_only_user_blocks ()
       check string "fallback message" "[image attached: screen.png]" payload.message;
       check int "attachment preserved" 1 (List.length payload.attachments);
       match payload.user_blocks with
-      | [ Server_routes_http_keeper_stream.User_image media ] ->
+      | [ Server_routes_http_keeper_stream.User_image (Attached media) ] ->
           check string "attachment id" "att-img" media.attachment_id;
           check string "mime type" "image/png" media.mime_type;
           check (option int) "size" (Some 1024) media.size
@@ -448,12 +448,13 @@ let test_keeper_chat_operation_input_accepts_referenced_attachment () =
   let user_blocks =
     [
       Keeper_multimodal_input.User_image
-        {
-          Keeper_multimodal_input.attachment_id = "att-img";
-          name = "screen.png";
-          mime_type = "image/png";
-          size = Some 1024;
-        };
+        (Attached
+           {
+             Keeper_multimodal_input.attachment_id = "att-img";
+             name = "screen.png";
+             mime_type = "image/png";
+             size = Some 1024;
+           });
     ]
   in
   let input =
@@ -492,7 +493,7 @@ let test_keeper_multimodal_input_converts_user_blocks_to_agent_core_blocks () =
   match
     Keeper_multimodal_input.to_agent_core_blocks ~attachments
       [
-        Keeper_multimodal_input.User_image media;
+        Keeper_multimodal_input.User_image (Attached media);
         Keeper_multimodal_input.User_text "describe this";
       ]
   with
@@ -529,7 +530,7 @@ let test_keeper_multimodal_parse_maps_each_kind_to_its_constructor () =
   match Keeper_multimodal_input.parse_user_blocks request with
   | Ok
       [
-        Keeper_multimodal_input.User_image image;
+        Keeper_multimodal_input.User_image (Attached image);
         Keeper_multimodal_input.User_document document;
         Keeper_multimodal_input.User_audio audio;
       ] ->
@@ -552,6 +553,186 @@ let test_keeper_multimodal_parse_rejects_unknown_kind () =
   | Error err ->
       check bool "error names the unsupported kind" true
         (String_util.contains_substring err "video")
+
+(* #33728: an image block may name a reference carrier instead of an
+   attachment. The reference crosses into AGENT_CORE in its native form so
+   the serializers (#33669) emit it as-is; nothing is fetched here. *)
+let test_keeper_multimodal_parse_accepts_image_reference_carriers () =
+  let parse blocks =
+    Keeper_multimodal_input.parse_user_blocks
+      (`Assoc [ ("user_blocks", `List blocks) ])
+  in
+  (match
+     parse
+       [ `Assoc
+           [ ("type", `String "image")
+           ; ("url", `String "https://example.test/a.png")
+           ; ("mime_type", `String "image/png")
+           ]
+       ]
+   with
+   | Ok
+       [ Keeper_multimodal_input.User_image
+           (Keeper_multimodal_input.Url_ref reference)
+       ] ->
+     check string "url value" "https://example.test/a.png" reference.value;
+     check (option string) "url advisory mime" (Some "image/png")
+       reference.mime_type
+   | Ok _ -> fail "expected one url reference image block"
+   | Error err -> fail ("url reference must parse: " ^ err));
+  (match
+     parse
+       [ `Assoc
+           [ ("type", `String "image"); ("file_id", `String "file-abc123") ]
+       ]
+   with
+   | Ok
+       [ Keeper_multimodal_input.User_image
+           (Keeper_multimodal_input.File_id_ref reference)
+       ] ->
+     check string "file_id value" "file-abc123" reference.value;
+     check (option string) "file_id advisory mime" None reference.mime_type
+   | Ok _ -> fail "expected one file_id reference image block"
+   | Error err -> fail ("file_id reference must parse: " ^ err))
+
+(* The three carriers are mutually exclusive at the parse boundary — zero or
+   several at once are request errors — and a url carrier must be http(s):
+   the provider fetches it, and no other scheme is a fetchable image
+   location. *)
+let test_keeper_multimodal_parse_rejects_ambiguous_image_carriers () =
+  let expect_error ~needle blocks =
+    match
+      Keeper_multimodal_input.parse_user_blocks
+        (`Assoc [ ("user_blocks", `List blocks) ])
+    with
+    | Ok _ -> fail ("expected rejection: " ^ needle)
+    | Error err ->
+        check bool ("error mentions: " ^ needle) true
+          (String_util.contains_substring err needle)
+  in
+  expect_error ~needle:"exactly one"
+    [ `Assoc [ ("type", `String "image") ] ];
+  expect_error ~needle:"only one"
+    [ `Assoc
+        [ ("type", `String "image")
+        ; ("url", `String "https://example.test/a.png")
+        ; ("file_id", `String "file-abc123")
+        ]
+    ];
+  expect_error ~needle:"only one"
+    [ `Assoc
+        [ ("type", `String "image")
+        ; ("attachment_id", `String "att-img")
+        ; ("url", `String "https://example.test/a.png")
+        ]
+    ];
+  expect_error ~needle:"http or https"
+    [ `Assoc
+        [ ("type", `String "image"); ("url", `String "ftp://example.test/a.png") ]
+    ];
+  expect_error ~needle:"non-empty"
+    [ `Assoc [ ("type", `String "image"); ("file_id", `String " ") ] ]
+
+let test_keeper_multimodal_reference_crosses_in_native_form () =
+  match
+    Keeper_multimodal_input.to_agent_core_blocks ~attachments:[]
+      [ Keeper_multimodal_input.User_image
+          (Keeper_multimodal_input.Url_ref
+             { value = "https://example.test/a.png"; mime_type = Some "image/png" })
+      ; Keeper_multimodal_input.User_image
+          (Keeper_multimodal_input.File_id_ref
+             { value = "file-abc123"; mime_type = None })
+      ]
+  with
+  | Ok
+      [ Agent_core.Types.Image
+          { media_type = url_mime; data = url; source_type = Agent_core.Types.Url }
+      ; Agent_core.Types.Image
+          { media_type = default_mime
+          ; data = file_id
+          ; source_type = Agent_core.Types.File_id
+          }
+      ] ->
+      check string "url rides as the data" "https://example.test/a.png" url;
+      check string "url advisory mime rides along" "image/png" url_mime;
+      check string "file_id rides as the data" "file-abc123" file_id;
+      check string "absent mime falls to the generic unknown"
+        "application/octet-stream" default_mime
+  | Ok _ -> fail "expected two reference image AGENT_CORE blocks"
+  | Error err -> fail ("reference images must convert: " ^ err)
+
+(* The durable replay path round-trips user_blocks through yojson; a
+   reference block that survives the write but not the read would drop the
+   image from a replayed turn. *)
+let test_keeper_multimodal_reference_round_trips_through_yojson () =
+  let blocks =
+    [ Keeper_multimodal_input.User_text "compare these two"
+    ; Keeper_multimodal_input.User_image
+        (Keeper_multimodal_input.Url_ref
+           { value = "https://example.test/a.png"; mime_type = Some "image/png" })
+    ; Keeper_multimodal_input.User_image
+        (Keeper_multimodal_input.File_id_ref
+           { value = "file-abc123"; mime_type = None })
+    ]
+  in
+  match
+    Keeper_multimodal_input.parse_user_blocks
+      (`Assoc
+         [ ("user_blocks", Keeper_multimodal_input.user_blocks_to_yojson blocks) ])
+  with
+  | Ok parsed -> check bool "round trip preserves reference blocks" true (parsed = blocks)
+  | Error err -> fail ("round-tripped reference blocks must parse: " ^ err)
+
+let test_keeper_multimodal_reference_falls_back_to_a_text_line () =
+  check string "url label" "[image: https://example.test/a.png]"
+    (Keeper_multimodal_input.fallback_message ~attachments:[]
+       [ Keeper_multimodal_input.User_image
+           (Keeper_multimodal_input.Url_ref
+              { value = "https://example.test/a.png"; mime_type = None })
+       ]);
+  check string "file_id label" "[image: file_id file-abc123]"
+    (Keeper_multimodal_input.fallback_message ~attachments:[]
+       [ Keeper_multimodal_input.User_image
+           (Keeper_multimodal_input.File_id_ref
+              { value = "file-abc123"; mime_type = None })
+       ])
+
+(* A reference names no attachment: it resolves at the provider, so it must
+   not satisfy the orphan check — an attachment shipped alongside only a
+   reference would otherwise be silently dropped. *)
+let test_keeper_multimodal_reference_does_not_satisfy_attachment_referencing () =
+  let attachment =
+    { K.id = "att-img"
+    ; att_type = "image"
+    ; name = "screen.png"
+    ; size = 1024
+    ; mime_type = "image/png"
+    ; data = "data:image/png;base64,abc123"
+    ; width = None
+    ; height = None
+    }
+  in
+  (match
+     Keeper_multimodal_input.validate_attachment_references
+       ~attachments:[ attachment ]
+       [ Keeper_multimodal_input.User_image
+           (Keeper_multimodal_input.Url_ref
+              { value = "https://example.test/a.png"; mime_type = None })
+       ]
+   with
+   | Ok _ -> fail "a reference block must not satisfy attachment referencing"
+   | Error err ->
+       check bool "error names the orphan" true
+         (String_util.contains_substring err "not referenced"));
+  (match
+     Keeper_multimodal_input.validate_attachment_references ~attachments:[]
+       [ Keeper_multimodal_input.User_image
+           (Keeper_multimodal_input.File_id_ref
+              { value = "file-abc123"; mime_type = None })
+       ]
+   with
+   | Ok () -> ()
+   | Error err -> fail ("reference with no attachments must validate: " ^ err))
 
 let document_input ~mime_type ~payload =
   let attachment_id = "att-doc" in
@@ -693,7 +874,7 @@ let test_keeper_multimodal_input_accepts_mixed_case_data_url () =
   in
   match
     Keeper_multimodal_input.to_agent_core_blocks ~attachments
-      [ Keeper_multimodal_input.User_image media ]
+      [ Keeper_multimodal_input.User_image (Attached media) ]
   with
   | Ok [ Agent_core.Types.Image { media_type; data; source_type } ] ->
       check string "media type" "image/png" media_type;
@@ -727,7 +908,7 @@ let test_keeper_multimodal_input_normalizes_inferred_data_url_mime () =
   in
   match
     Keeper_multimodal_input.to_agent_core_blocks ~attachments
-      [ Keeper_multimodal_input.User_image media ]
+      [ Keeper_multimodal_input.User_image (Attached media) ]
   with
   | Ok [ Agent_core.Types.Image { media_type; data; source_type } ] ->
       check string "media type" "image/png" media_type;
@@ -761,7 +942,7 @@ let test_keeper_multimodal_input_rejects_mismatched_data_url_mime () =
   in
   match
     Keeper_multimodal_input.to_agent_core_blocks ~attachments
-      [ Keeper_multimodal_input.User_image media ]
+      [ Keeper_multimodal_input.User_image (Attached media) ]
   with
   | Ok _ -> fail "expected mismatched data URL MIME to be rejected"
   | Error err ->
@@ -794,7 +975,7 @@ let test_keeper_multimodal_input_rejects_malformed_data_url () =
   in
   match
     Keeper_multimodal_input.to_agent_core_blocks ~attachments
-      [ Keeper_multimodal_input.User_image media ]
+      [ Keeper_multimodal_input.User_image (Attached media) ]
   with
   | Ok _ -> fail "expected malformed data URL to be rejected"
   | Error err ->
@@ -813,7 +994,7 @@ let test_keeper_stream_args_preserve_user_blocks () =
   in
   let user_blocks =
     [ Keeper_multimodal_input.User_text "describe this"
-    ; Keeper_multimodal_input.User_image media
+    ; Keeper_multimodal_input.User_image (Attached media)
     ]
   in
   let attachments =
@@ -3595,6 +3776,18 @@ let () =
             test_keeper_multimodal_parse_maps_each_kind_to_its_constructor;
           test_case "multimodal parse rejects an unknown kind" `Quick
             test_keeper_multimodal_parse_rejects_unknown_kind;
+          test_case "multimodal parse accepts image reference carriers" `Quick
+            test_keeper_multimodal_parse_accepts_image_reference_carriers;
+          test_case "multimodal parse rejects ambiguous image carriers" `Quick
+            test_keeper_multimodal_parse_rejects_ambiguous_image_carriers;
+          test_case "multimodal reference crosses in native form" `Quick
+            test_keeper_multimodal_reference_crosses_in_native_form;
+          test_case "multimodal reference round-trips through yojson" `Quick
+            test_keeper_multimodal_reference_round_trips_through_yojson;
+          test_case "multimodal reference falls back to a text line" `Quick
+            test_keeper_multimodal_reference_falls_back_to_a_text_line;
+          test_case "multimodal reference does not satisfy attachment referencing" `Quick
+            test_keeper_multimodal_reference_does_not_satisfy_attachment_referencing;
           test_case "multimodal input projects text documents as text" `Quick
             test_keeper_multimodal_input_projects_text_documents_as_text;
           test_case "multimodal input preserves binary documents" `Quick

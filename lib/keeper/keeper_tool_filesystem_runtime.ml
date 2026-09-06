@@ -1354,7 +1354,7 @@ let approved_write_of_gate_input input =
     let carried =
       List.filter_map
         (fun name -> Option.map (fun value -> name, value) (field name))
-        [ "content"; "old_string"; "new_string"; "replace_all" ]
+        [ "content"; "old_string"; "new_string"; "replace_all"; "insert_before_line"; "insert_text" ]
     in
     Ok { target; mode; carried }
   | _ -> Error "approved Gate input is not a JSON object"
@@ -1390,6 +1390,8 @@ let file_write_gate_input
       ?old_string
       ?new_string
       ?replace_all
+      ?insert_before_line
+      ?insert_text
       ()
   =
   let optional_string name = function
@@ -1400,6 +1402,10 @@ let file_write_gate_input
     | None -> []
     | Some value -> [ name, `Bool value ]
   in
+  let optional_int name = function
+    | None -> []
+    | Some value -> [ name, `Int value ]
+  in
   `Assoc
     ([ "effect", Keeper_alerting_path.path_effect_to_yojson gate_effect
      ; "requested_target", `String requested_target
@@ -1407,7 +1413,9 @@ let file_write_gate_input
      ]
      @ optional_string "old_string" old_string
      @ optional_string "new_string" new_string
-     @ optional_bool "replace_all" replace_all)
+     @ optional_bool "replace_all" replace_all
+     @ optional_int "insert_before_line" insert_before_line
+     @ optional_string "insert_text" insert_text)
 ;;
 
 let decide_file_write
@@ -1979,7 +1987,7 @@ let publication_recovery_unavailable_attempt unavailable =
         Keeper_publication_recovery_availability.unavailable_to_string unavailable
     ; data =
         Keeper_publication_recovery_availability.unavailable_to_yojson unavailable
-    ; class_ = Tool_result.Runtime_failure
+    ; class_ = Keeper_publication_recovery_availability.failure_class unavailable
     }
 ;;
 
@@ -2022,19 +2030,21 @@ let publication_recovery_cleanup_failed_attempt
     | Publication_write_indeterminate ->
       fs_guidance_text Recovery_lane_indeterminate, `Null
   in
+  let class_ = Tool_result.Runtime_failure in
   Write_failed_data
     { message
     ; data =
         `Assoc
           [ "error", `String "publication_recovery_cleanup_failed"
-          ; "failure_class", `String "runtime_failure"
+          ; ( "failure_class"
+            , `String (Tool_result.tool_failure_class_to_string class_) )
           ; "state", `String "lane_release_failed"
           ; "detail", `String (fs_guidance_text Recovery_lane_cleanup_detail)
           ; "write_executed", write_executed
           ; "keeper_active", `Bool true
           ; "publication_result", publication_result
           ]
-    ; class_ = Tool_result.Runtime_failure
+    ; class_
     }
 ;;
 
@@ -2272,7 +2282,7 @@ let handle_file_write_with_outcome
                      , `String (Keeper_gate.unavailable_reason_to_string reason)
                      ]
                    (fs_guidance_text Gate_record_unavailable)
-             ; class_ = Tool_result.Runtime_failure
+             ; class_ = Tool_result.Dependency_unavailable
              })
       | Keeper_gate.Allow authorization ->
         Log.Keeper.info
@@ -2675,12 +2685,24 @@ let handle_file_write_with_outcome
       let old_string = Safe_ops.json_string ~default:"" "old_string" args in
       let new_string = Safe_ops.json_string ~default:"" "new_string" args in
       let replace_all = Safe_ops.json_bool ~default:false "replace_all" args in
-      if old_string = ""
-      then
+      (* A patch is one of two operations on the bytes read back. The Edit
+         tool sends a replace; the memo tool sends an insert above a line.
+         Neither present is the Edit caller's mistake the guidance names. *)
+      let insert_before_line = Safe_ops.json_int ~default:0 "insert_before_line" args in
+      let insert_text = Safe_ops.json_string ~default:"" "insert_text" args in
+      let operation =
+        if old_string <> ""
+        then Some (Keeper_tool_patch.Replace { old_string; new_string; replace_all })
+        else if insert_before_line > 0
+        then Some (Keeper_tool_patch.Insert_before_line { line = insert_before_line; text = insert_text })
+        else None
+      in
+      (match operation with
+       | None ->
         Keeper_tool_execution.failure
           ~class_:Tool_result.Policy_rejection
           (error_json (fs_guidance_text Patch_requires_old_string))
-      else
+       | Some operation ->
         (match
            resolve_keeper_confined_write_path
              ~config
@@ -2699,14 +2721,24 @@ let handle_file_write_with_outcome
                     write
                 =
                 let input =
-                  file_write_gate_input
-                    ~gate_effect
-                    ~requested_target:target
-                    ~content:updated
-                    ~old_string
-                    ~new_string
-                    ~replace_all
-                    ()
+                  match operation with
+                  | Keeper_tool_patch.Replace { old_string; new_string; replace_all } ->
+                    file_write_gate_input
+                      ~gate_effect
+                      ~requested_target:target
+                      ~content:updated
+                      ~old_string
+                      ~new_string
+                      ~replace_all
+                      ()
+                  | Keeper_tool_patch.Insert_before_line { line; text } ->
+                    file_write_gate_input
+                      ~gate_effect
+                      ~requested_target:target
+                      ~content:updated
+                      ~insert_before_line:line
+                      ~insert_text:text
+                      ()
                 in
                 after_gate ~confined ~target ~input
                 @@ fun () ->
@@ -2765,13 +2797,21 @@ let handle_file_write_with_outcome
                        })
                 | Ok () ->
                   Log.Keeper.info
-                    "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=patch replace_all=%b \
+                    "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=patch op=%s replace_all=%b \
                      occurrences=%d bytes=%d"
                     meta.name
                     target
+                    (Keeper_tool_patch.operation_label operation)
                     replace_all
                     occurrence_count
                     (String.length updated);
+                  let operation_fields =
+                    match operation with
+                    | Keeper_tool_patch.Replace { replace_all; _ } ->
+                      [ "replace_all", `Bool replace_all ]
+                    | Keeper_tool_patch.Insert_before_line { line; text } ->
+                      [ "insert_before_line", `Int line; "inserted", `String text ]
+                  in
                   Ok
                     (Write_succeeded
                        { payload =
@@ -2780,10 +2820,11 @@ let handle_file_write_with_outcome
                                  ([ "ok", `Bool true
                                   ; "path", `String target
                                   ; "mode", `String "patch"
-                                  ; "replace_all", `Bool replace_all
-                                  ; "occurrences", `Int occurrence_count
-                                  ; "bytes_written", `Int (String.length updated)
                                   ]
+                                  @ operation_fields
+                                  @ [ "occurrences", `Int occurrence_count
+                                    ; "bytes_written", `Int (String.length updated)
+                                    ]
                                   @ via_field))
                        ; file_change_evidence =
                            Some
@@ -2819,7 +2860,7 @@ let handle_file_write_with_outcome
                     write
                 =
                 let* (application : Keeper_tool_patch.patch_application) =
-                  Keeper_tool_patch.apply_patch ~old_string ~new_string ~replace_all current
+                  Keeper_tool_patch.apply operation current
                 in
                 let* projection =
                   Keeper_alerting_path.patch_then_atomic_replace_effect
@@ -2932,7 +2973,7 @@ let handle_file_write_with_outcome
                | Ok attempt -> file_write_attempt_to_execution attempt
                | Error msg ->
                  Keeper_tool_execution.failure
-                   (error_json ~fields:[ "path", `String target ] msg)))
+                   (error_json ~fields:[ "path", `String target ] msg))))
     | Ok Overwrite ->
       handle_atomic_content_write
         ~mode:Overwrite

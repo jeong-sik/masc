@@ -67,6 +67,18 @@ let handle_filesystem ctx descriptor args =
          ?gate_grant:ctx.gate_grant
          ~args
          ())
+  | Tool_ide_annotate ->
+    Some
+      (Keeper_tool_ide_runtime.handle_ide_annotate_with_outcome
+         ~turn_sandbox_factory:ctx.turn_sandbox_factory
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~publication_recovery:ctx.publication_recovery
+         ?continuation_channel:ctx.continuation_channel
+         ?gate_context:ctx.gate_context
+         ?gate_grant:ctx.gate_grant
+         ~args
+         ())
   | Tool_execute
   | Tool_search_files
   | Tool_time_now
@@ -83,7 +95,6 @@ let handle_filesystem ctx descriptor args =
   | Tool_surface_read
   | Tool_surface_post
   | Tool_person_note_set
-  | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
   | Tool_board_dispatch
@@ -104,6 +115,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
+  | Tool_masc_file_dispatch
   | Tool_masc_library_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image -> None
@@ -174,6 +186,7 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
+  | Tool_masc_file_dispatch
   | Tool_masc_library_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image -> None
@@ -277,12 +290,6 @@ let handle_in_process ctx descriptor args =
   | Tool_person_note_set ->
     Some
       (Keeper_tool_in_process_runtime.handle_person_note_set_with_outcome
-         ~config:ctx.config
-         ~meta:ctx.meta
-         ~args)
-  | Tool_ide_annotate ->
-    Some
-      (Keeper_tool_in_process_runtime.handle_ide_annotate_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ~args)
@@ -446,6 +453,14 @@ let handle_in_process ctx descriptor args =
             ~meta:ctx.meta
             ~args
             ()))
+  | Tool_masc_file_dispatch ->
+    (* sw/net는 핸들러가 Eio_context(서버 root switch + net)에서 직접 해석한다
+       — fusion과 같은 이유로 업로드가 턴 스코프에 묶이면 안 된다. *)
+    Some
+      (Keeper_tool_in_process_runtime.handle_masc_file_with_outcome
+         ~name
+         ~args
+         ())
   | Tool_masc_library_dispatch ->
     Keeper_tool_registered_runtime.handle_registered_tool_with_outcome
       ~config:ctx.config
@@ -478,7 +493,8 @@ let handle_in_process ctx descriptor args =
   | Tool_search_files
   | Tool_read_file
   | Tool_edit_file
-  | Tool_write_file -> None
+  | Tool_write_file
+  | Tool_ide_annotate -> None
 ;;
 
 (* [handle] hands itself to the shell-ir owner as a value: a masc stage

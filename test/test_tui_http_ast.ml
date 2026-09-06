@@ -1333,10 +1333,18 @@ let test_server_identity_is_revalidated_on_every_refresh () =
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
        ~module_path:main_path ~binding_name:"load_http_surfaces" ~callees:[]
        ~identifiers:[ "identity_known" ]);
+  (* The transition sits in its own binding now, with the workspace identity
+     that has to move in the same step. Asked in two halves so extracting it
+     again does not read as the HTTP apply losing it: one owner for the
+     transition, and the apply reaching that owner. *)
+  check int "the identity transition has one owner" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"apply_server_identity_reading"
+       ~callee:"Masc_tui_types.server_identity_of_refresh");
   check int "HTTP apply uses the tested A-to-B transition" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_http_surfaces"
-       ~callee:"Masc_tui_types.server_identity_of_refresh");
+       ~callee:"apply_server_identity_reading");
   (* The clearing is [state.server_identity <- None], a write. Counting
      reads of the field found none and called a working path broken. *)
   check int "a failed refresh clears current identity" 1
@@ -1378,10 +1386,22 @@ let test_gate_stance_listing_rides_the_flow_generation () =
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_async_message"
        ~callee:"Approval.Flow.is_current");
-  check int "the press closes its own action" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"apply_async_message"
-       ~callee:"Approval.Flow.finish_action")
+  (* Every path that resolves an approval closes the action it opened, and
+     closes it with the generation it was handed. There are four such paths
+     now and there was one when this line was written; the number is a count
+     of outcomes, and an outcome that closed someone else's action would not
+     change it. So the two counts are compared instead. *)
+  let closes =
+    Ast_grep.count_calls_in_value_binding ~module_path:main_path
+      ~binding_name:"apply_async_message" ~callee:"Approval.Flow.finish_action"
+  in
+  check bool "the press closes an action" true (closes > 0);
+  check int "every close names the generation it was given" closes
+    (Ast_grep
+     .count_applications_with_exact_positional_identifier_in_value_binding
+       ~module_path:main_path ~binding_name:"apply_async_message"
+       ~callee:"Approval.Flow.finish_action" ~position:1
+       ~identifier:"generation")
 ;;
 
 let test_the_scroll_counts_back_from_a_pinned_row () =
@@ -1478,9 +1498,17 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Mtime_clock.elapsed_ns"
      >= 3);
-  check int "main loop has no wall-clock refresh deadline" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"main" ~callee:"Unix.gettimeofday");
+  (* [main] is seven thousand lines and reads the wall clock five times: a
+     slow-loop report, and four voice status timestamps. None is a deadline,
+     and a count over the binding cannot tell a deadline from a timestamp.
+
+     The deadline arithmetic is fed by [Mtime_clock.elapsed_ns] above, and
+     the schedule it feeds takes its time as an argument rather than reading
+     one. So the question is asked of that module, which is where a wall
+     clock would have to appear for a deadline to stop being monotonic. *)
+  check int "the schedule itself reads no wall clock" 0
+    (Ast_grep.count_calls ~module_path:"bin/masc_tui_render_schedule.ml"
+       ~callee:"Unix.gettimeofday");
   check bool "context bar width is total" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_ansi.ml"
@@ -2057,6 +2085,10 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
          for the call here would ask the renderer to sanitize a constructor. *)
     ];
   check_fields "overview_layout" [ "tasks_error" ];
+  (* [ap_summary] is not in this list: the press-again line and the row
+     summary both moved into [approval_detail_line], and the guard follows
+     the field rather than the surface's name. *)
+  check_fields "approval_detail_line" [ "ap_summary" ];
   check_fields "render_approvals"
     [ "aps_actor_filter"
     ; "approvals_error"
@@ -2064,7 +2096,6 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "ap_actor"
     ; "ap_action_type"
     ; "ap_target_type"
-    ; "ap_summary"
     ; "ap_expires_at"
     ; "ap_payload"
     ; "ap_trace_id"

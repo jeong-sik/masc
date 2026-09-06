@@ -14840,9 +14840,13 @@ let render_code (state : state) =
        (* The memos are the file's own comments, so the overlay lists what
           the loaded rows hold in the file's comment syntax and has no
           reading state of its own. *)
+       (* Read off the rows at load, so this is a lookup. Shown only while
+          the file they came from is the loaded one: clearing the file
+          leaves the field behind, and a list captioning bytes that are no
+          longer on screen is worse than none. *)
        let memos =
          match Masc_tui_fetched.current state.code_file with
-         | Some (path, Masc_tui_fetched.Ready rows) -> Masc_tui_memo.of_file ~path rows
+         | Some (_, Masc_tui_fetched.Ready _) -> state.code_memos
          | Some
              ( _
              , ( Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
@@ -15123,7 +15127,7 @@ let render_code (state : state) =
                (fun found ->
                  let line = Masc_tui_memo.line_of found in
                  (line, line))
-               (Masc_tui_memo.of_file ~path:open_path file_rows)
+               state.code_memos
            in
            let keeper_spans =
              match Masc_tui_fetched.current state.code_history with

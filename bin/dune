@@ -962,6 +962,7 @@
   masc_tui_fetched
   masc_tui_attachment
   masc_tui_code_lexer
+  masc_tui_memo
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_queue
   masc_tui_keeper_chat_diff

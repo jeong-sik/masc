@@ -8594,7 +8594,7 @@ let siding_of_message (message : Masc_tui_types.msg_entry) =
 (* [siding] only reaches the rail through [Turn_outside]: a row that owns a
    request is on the line whoever sent it, and a broadcast that opened a turn
    is that turn's first row rather than something beside it. *)
-let turn_rail_of ?siding ~(edge : Masc_tui_types.turn_edge)
+let turn_rail_of ~siding ~(edge : Masc_tui_types.turn_edge)
     ~(style : Message_layout.style) =
   match edge with
   | Turn_outside -> (
@@ -8840,7 +8840,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                    entry_index;
                  };
              turn_rail =
-               turn_rail_of ?siding:(siding_of_message message) ~edge ~style;
+               turn_rail_of ~siding:(siding_of_message message) ~edge ~style;
            }
             : Message_layout.entry))
       visible_entries
@@ -9491,7 +9491,8 @@ let render_keeper_message (state : state) =
                       body;
                       markdown_source;
                       turn_rail =
-                        turn_rail_of ~edge:Masc_tui_types.Turn_continues ~style;
+                        turn_rail_of ~siding:None
+                          ~edge:Masc_tui_types.Turn_continues ~style;
                     }
                      : Message_layout.entry)
                in
@@ -9653,10 +9654,16 @@ let render_keeper_message (state : state) =
                 | false, true -> Turn_closes
                 | false, false -> Turn_continues
               in
+              let siding =
+                match tag with
+                | Tagged_row message -> siding_of_message message
+                | Tagged_block _ -> None
+              in
               ( tag
               , { entry with
                   Message_layout.turn_rail =
-                    turn_rail_of ~edge ~style:entry.Message_layout.style
+                    turn_rail_of ~siding ~edge
+                      ~style:entry.Message_layout.style
                 } )
           | Some _, None | None, Some _ | None, None -> item)
         merged

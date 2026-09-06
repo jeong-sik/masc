@@ -565,14 +565,17 @@ let run_keeper_cycle
               ~error_message
               ~keeper_turn_id
               ();
+            (* The same discarded classification as the Streaming path below:
+               both arms were wildcards and the branch was decided by the
+               [when] guard, which never looks at the scrutinee. Written as
+               the two-way choice it is. Whether a masc-internal failure
+               deserves a reason of its own is #33671. *)
             let failure_reason =
-              match Keeper_turn_driver.classify_masc_internal_error err with
-              | _ when EC.is_runtime_exhausted_error err ->
+              if EC.is_runtime_exhausted_error err
+              then
                 Keeper_turn_fsm.Failure_runtime_unavailable
-                  { base = effective_runtime_runtime_name
-                  ; resolved = None
-                  }
-              | _ ->
+                  { base = effective_runtime_runtime_name; resolved = None }
+              else
                 Keeper_turn_fsm.Failure_provider_error
                   { kind = Agent_core.Error.(category err |> category_label)
                   ; detail = error_message

@@ -13682,8 +13682,27 @@ and is loaded on demand through keeper_skill.
         close_image state;
         invalidate_frame_for_resize frame_presenter render_schedule
       end;
-      let key =
+      (* The MSX screen owns the keyboard the same way a showing picture
+         does, except it answers keys instead of ending on the first one:
+         each is injected into the machine and steps a frame, and only [esc]
+         hands the terminal back. Intercepted before [key] is computed, so
+         no surface underneath ever sees an emulator's keystroke. *)
+      let msx_key =
         if dismissed_image then None
+        else if state.msx_open then
+          match input with
+          | Some (Key name) -> Some name
+          | Some _ -> Some ""  (* deliberate non-key input: step, own it *)
+          | None -> None
+        else None
+      in
+      (match msx_key with
+      | Some name ->
+          if not (Masc_tui_msx.consume ~write:write_to_terminal state name)
+          then invalidate_frame_for_resize frame_presenter render_schedule
+      | None -> ());
+      let key =
+        if dismissed_image || Option.is_some msx_key then None
         else
           match input with
           | Some (Key name) -> Some name
@@ -15601,6 +15620,10 @@ and is loaded on demand through keeper_skill.
        | Some "?" ->
            state.help_open <- true;
            state.help_scroll <- 0
+      | Some "&" ->
+           (* The MSX screen takes the whole terminal, like the image
+              overlay: it draws itself and the loop yields until [esc]. *)
+           Masc_tui_msx.open_screen ~write:write_to_terminal state
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0
@@ -18977,7 +19000,7 @@ and is loaded on demand through keeper_skill.
        with
        (* The terminal belongs to the picture until it is dismissed. A frame
           drawn now would clear the rows it occupies and leave the rest. *)
-       | Render_schedule.Render when state.image_open -> ()
+       | Render_schedule.Render when state.image_open || state.msx_open -> ()
        | Render_schedule.Render ->
            let frame, clamped, approval =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build

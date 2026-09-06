@@ -6074,10 +6074,14 @@ def memory_journal_timeline_interaction(
 
         # Page-up is what reads back in the chat surface; a single row per
         # press was the arrow key's old behaviour and is gone. The status
-        # row names its row count only while an older page exists, and this
-        # transcript has none, so the needle is the part that marks reading
-        # back in either wording. How far a page reaches is the renderer's
-        # to decide -- the claim below is only about the pinned row's slot.
+        # row names its row count only while an older page exists, so the
+        # needle is the part that marks reading back in either wording. How
+        # far a page reaches is the renderer's to decide -- the claim below
+        # is only about the pinned row's slot.
+        #
+        # This waits out today: the transcript is shorter than the pane, so
+        # the pane clamps the scroll to nothing and says "back at the newest
+        # row" instead. The fixture needs older rows (#33757).
         reading_back = b"Ctrl-E returns to the newest"
         scrolled = send_and_wait(
             process, master_fd, output, b"\x1b[5~", reading_back

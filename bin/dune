@@ -503,6 +503,7 @@
  (modules masc_tui_theme_catalog)
  (libraries
   masc.config_dir_resolver
+  masc.embedded_config
   masc.fs_compat
   masc.keeper_toml
   masc_tui_terminal_palette))

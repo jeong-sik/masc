@@ -41,6 +41,7 @@ val existing_sibling_dirs_hint : ?workdir:string -> string -> string option
     ancestor directory has child directories to surface. *)
 
 val validate_shell_ir_paths :
+  ?requires_existing_dir:bool ->
   ?workdir:string ->
   Masc_exec.Shell_ir.t ->
   (unit, string) result

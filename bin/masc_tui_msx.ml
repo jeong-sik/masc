@@ -58,7 +58,7 @@ let draw ~write (state : Masc_tui_types.state) =
   Buffer.add_string buf "\027[0K";
   write (Buffer.contents buf)
 
-let open_screen ~write state =
+let open_screen ~write (state : Masc_tui_types.state) =
   state.msx_open <- true;
   (* [draw] creates the machine through [machine_of] on first use, so there
      is nothing to force here -- opening is setting the flag and painting. *)

@@ -9489,6 +9489,22 @@ let launch_voice_capture state ~mailbox ~keeper =
    the mode can be turned off between utterances — a fiber that re-armed itself
    would have to be cancelled mid-recording, and that throws away speech
    already said. *)
+(* [voice.stt].send_on_stop, read off the config the TUI already holds rather
+   than a second load: the voice config arrives once as JSON and this is one
+   field of it, so a reload that changes the setting changes this with it.
+
+   Absent or malformed reads false. The field decides whether a spoken
+   sentence is sent without the operator confirming it, and a value this
+   cannot parse is not the operator having asked for that. *)
+let voice_sends_on_stop state =
+  match state.voice_config with
+  | None -> false
+  | Some json ->
+    (match Yojson.Safe.Util.(json |> member "stt" |> member "send_on_stop") with
+     | `Bool value -> value
+     | _ -> false)
+;;
+
 let rearm_continuous_capture state ~mailbox ~keeper =
   match state.voice_continuous with
   | Some active when String.equal active keeper && state.voice_capture = None ->
@@ -9796,7 +9812,26 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         then Buffer.add_char state.msg_input ' ';
         Buffer.add_string state.msg_input text;
         save_message_draft state;
-        state.last_action <- Some ("voice: " ^ text, Unix.gettimeofday ()))
+        state.last_action <- Some ("voice: " ^ text, Unix.gettimeofday ());
+        (* [voice.stt].send_on_stop: the operator who says a sentence and
+           stops the capture has finished the sentence, and the Enter that
+           follows says nothing the stop did not. Off by default, because the
+           draft is also where a spoken half-sentence waits for typing, and
+           taking the review step away costs an operator who works that way
+           more than it saves the one who does not.
+
+           Sent by handing the composer the send key rather than calling the
+           send path: that path decides what a draft is (a message, a slash
+           command, a preset) and which surface comes forward, and a second
+           caller would be a second answer to those questions. A capture in
+           continuous mode re-arms above before this, so the microphone is
+           already listening for the next sentence when this returns. *)
+        if voice_sends_on_stop state
+        then (
+          let (_ : bool) =
+            handle_composer_key state ~base_path ~mailbox Composer.send_key
+          in
+          ()))
   | Voice_silent { keeper; reason } ->
       if state.voice_capture = Some keeper then (
         state.voice_capture <- None;

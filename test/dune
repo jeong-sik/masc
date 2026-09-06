@@ -33,6 +33,7 @@
  (libraries
   alcotest
   masc
+  masc.runtime
   masc_server
   masc.skill_config
   masc.skill_reference

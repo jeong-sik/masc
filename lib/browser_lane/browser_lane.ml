@@ -53,12 +53,22 @@ let verb_json = function
     `Assoc [ ("verb", `String "page.goto"); ("args", `Assoc [ ("url", `String url) ]) ]
 ;;
 
-(* Reads change nothing in the browser; a navigation can (a POST replayed in
-   a logged-in session). The verb set is closed, so this classification is
-   exhaustive by construction. *)
+(* Two different questions, two different classifications, both exhaustive
+   over the closed verb set:
+
+   - [verb_is_read]: may the TOOL surface call this without an act budget?
+     Sessions manage a keeper-owned resource, so they read.
+   - [verb_allowed_on_live]: may this run against the operator's browser?
+     Only the two readers — the live lane exists to be read; sessions own
+     nothing there and a navigation acts with the operator's logins. *)
 let verb_is_read = function
   | Tabs_list | Page_read _ | Session_open _ | Session_close -> true
   | Page_goto _ -> false
+;;
+
+let verb_allowed_on_live = function
+  | Tabs_list | Page_read _ -> true
+  | Session_open _ | Session_close | Page_goto _ -> false
 ;;
 
 type issued = { id : string; verb_json : Yojson.Safe.t }
@@ -67,6 +77,7 @@ type answer =
   | Answered of Yojson.Safe.t
   | Lane_absent
   | Timed_out
+  | Refused of string
 
 (* Two lanes by design — "live" (the user's browser via the extension host)
    and "automation" (the Playwright daemon). Anything else is refused. *)
@@ -150,10 +161,22 @@ let lane_connected ~lane_name =
   | None -> false
 ;;
 
+(* The live lane is the operator's browser: it exists to be read. Sessions
+   belong to nobody here (the browser is already open), and a navigation can
+   act with the operator's logins — both stay on the automation lane, whose
+   profile no human owns. The extension refuses them too; this is the
+   server-side half of that defence in depth. *)
+let live_lane_refused =
+  Refused
+    "the live lane is read-only: session and navigation verbs belong to the \
+     automation lane"
+;;
+
 let issue ~lane_name ~verb:v ~timeout_sec =
   match Hashtbl.find_opt lanes lane_name with
   | Some lane when not (lane_connected ~lane_name) -> Lane_absent
   | None -> Lane_absent
+  | Some { name = "live"; _ } when not (verb_allowed_on_live v) -> live_lane_refused
   | Some lane ->
     let id =
       Printf.sprintf "bl%d-%06d" (Unix.time () |> int_of_float) (Random.int 1_000_000)

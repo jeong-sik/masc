@@ -32,6 +32,19 @@ cat > "$target_dir/masc_browser_host.json" <<EOF
 }
 EOF
 
+# The lane token gates /browser-lane/* on the server (fail closed without
+# it). One token serves both the live host and the automation daemon.
+base="${MASC_BROWSER_LANE_BASE:-$HOME/me/.masc/browser-lane}"
+mkdir -p "$base"
+if [ ! -s "$base/token" ]; then
+  token="$(openssl rand -hex 24)"
+  printf '%s\n' "$token" > "$base/token"
+  chmod 600 "$base/token"
+  echo "lane token written: $base/token (0600)"
+else
+  echo "lane token present: $base/token"
+fi
+
 echo "installed: $target_dir/masc_browser_host.json -> $wrapper"
 echo "extension source to load (about:debugging → Load Temporary Add-on):"
 echo "  $here/extension/manifest.json"

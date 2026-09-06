@@ -88,12 +88,24 @@ MVP 범위: 읽기 동사 + session.open/close + page.goto까지. page.goto는
 게이트 분류 — 레인 verb 자체는 읽기/조작 구분을 프로토콜에 실어
 백엔드가 거부할 수 있게 한다(방어 심층).
 
-## 순서
+## 순서와 상태 (2026-09-06)
 
-1. 확장 + host + 로컬 수신 시험(브라우저 ↔ host까지 end-to-end)
-2. 서버 엔드포인트 + 도구(B 읽기 2개) → live 세션에서 tabs/read 실측
-3. A 데몬 + session/navigate 도구
-4. 조작 동사 게이트 설계(별도 문서)
+1. ✅ 확장 + host — web-ext 실측(tabs 왕복, unknown verb 거부)
+2. ✅ 서버 엔드포인트 + B 읽기 도구 — scratch 서버 실측(403/레인 거부/long-poll)
+3. ✅ A 데몬 + session/goto 도구 — Playwright Firefox 빌드, 영구 프로파일
+4. 조작 동사(click/submit) 게이트 설계 — 별도 문서, 그 전에 레인 프로토콜에도 넣지 않는다
+
+## 구현이 밝힌 계약
+
+- keeper 노출은 `Keeper_tool_descriptor`(웹 도구와 같은 길). misc 파사드의
+  등록 루프는 스키마가 None인 연산을 건너뛴다.
+- 닫힌 runtime_handler variant는 소비자 5곳(레지스트리 태그, 파일 변경
+  투영 2곳, 번들, 런타임 디스패치)을 컴파일러가 강제 갱신한다 — wildcard 없음.
+- `Concurrent` 실행 모드는 정적 읽기 전용 힌트가 있을 때만 선언 가능.
+  goto는 Serial — 단일 브라우저 자원이라 어차피 직렬이 정직한 분류.
+- 동사 분류는 두 개: `verb_is_read`(도구 예산)와 `verb_allowed_on_live`
+  (운영자 브라우저 허용 집합). 세션 동사는 읽기이되 live 금지 — 두 질문이
+  다르다는 걸 코드가 강제한다.
 
 ## 안전
 

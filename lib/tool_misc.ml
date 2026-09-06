@@ -177,6 +177,10 @@ let dispatch ctx ~name ~args : Tool_result.result option =
       Some (Tool_misc_browser_lane.handle_tabs ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_browser_read ->
       Some (Tool_misc_browser_lane.handle_read ~tool_name:name ~start_time:start args)
+  | Some Tool_schemas_misc.Misc_browser_session ->
+      Some (Tool_misc_browser_lane.handle_session ~tool_name:name ~start_time:start args)
+  | Some Tool_schemas_misc.Misc_browser_goto ->
+      Some (Tool_misc_browser_lane.handle_goto ~tool_name:name ~start_time:start args)
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
@@ -192,11 +196,16 @@ let is_read_only = function
   (* Browser readers change nothing in the browser; the verb set in
      Browser_lane is this classification's source of truth. *)
   | Tool_schemas_misc.Misc_browser_tabs
-  | Tool_schemas_misc.Misc_browser_read -> true
+  | Tool_schemas_misc.Misc_browser_read
+  (* Session open/close manage a keeper-owned resource, not the web. *)
+  | Tool_schemas_misc.Misc_browser_session -> true
   | Tool_schemas_misc.Misc_ask
   | Tool_schemas_misc.Misc_ask_withdraw
   | Tool_schemas_misc.Misc_config
   | Tool_schemas_misc.Misc_gc
+  | (* A navigation reaches the web from a keeper-owned profile — the same
+       classification the web fetch carries. *)
+    Tool_schemas_misc.Misc_browser_goto
   | Tool_schemas_misc.Misc_web_fetch
   | Tool_schemas_misc.Misc_web_search -> false
 

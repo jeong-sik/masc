@@ -37,6 +37,8 @@ let answer_to_result ~tool_name ~start_time = function
        running with the browser-lane extension and host (connectors/browser)"
   | Browser_lane.Timed_out ->
     make_workflow_err ~tool_name ~start_time "the browser lane did not answer in time"
+  | Browser_lane.Refused reason ->
+    make_workflow_err ~tool_name ~start_time reason
 ;;
 
 let handle_tabs ~tool_name ~start_time args : Tool_result.result =
@@ -46,6 +48,41 @@ let handle_tabs ~tool_name ~start_time args : Tool_result.result =
     answer_to_result ~tool_name ~start_time
       (Browser_lane.issue ~lane_name:lane ~verb:Browser_lane.Tabs_list
          ~timeout_sec:default_timeout_sec)
+;;
+
+(* Sessions and navigations are automation-lane verbs; the state module
+   refuses them on the live lane too (live_lane_refused), so a caller cannot
+   route them there even by naming it. *)
+let handle_session ~tool_name ~start_time args : Tool_result.result =
+  let action = get_string args "action" "" in
+  match action with
+  | "open" ->
+    let headless = Some (get_bool args "headless" true) in
+    answer_to_result ~tool_name ~start_time
+      (Browser_lane.issue
+         ~lane_name:"automation"
+         ~verb:(Browser_lane.Session_open { headless })
+         ~timeout_sec:60.0)
+  | "close" ->
+    answer_to_result ~tool_name ~start_time
+      (Browser_lane.issue ~lane_name:"automation" ~verb:Browser_lane.Session_close ~timeout_sec:60.0)
+  | _ ->
+    make_workflow_err ~tool_name ~start_time
+      "action must be one of: open, close"
+;;
+
+let handle_goto ~tool_name ~start_time args : Tool_result.result =
+  let url = get_string args "url" "" in
+  if not (String.length url > 7 && (String.starts_with ~prefix:"http://" url || String.starts_with ~prefix:"https://" url))
+  then
+    make_workflow_err ~tool_name ~start_time
+      "url must be a valid http or https URL"
+  else
+    answer_to_result ~tool_name ~start_time
+      (Browser_lane.issue
+         ~lane_name:"automation"
+         ~verb:(Browser_lane.Page_goto { url })
+         ~timeout_sec:45.0)
 ;;
 
 let handle_read ~tool_name ~start_time args : Tool_result.result =

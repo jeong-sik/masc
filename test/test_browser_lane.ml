@@ -35,7 +35,8 @@ let test_issue_poll_deliver_roundtrip () =
       | Ok (Lane.Answered (`Assoc (("tabs", `List []) :: _))) -> ()
       | Ok (Lane.Answered _) -> fail "answered with an unexpected payload"
       | Ok Lane.Timed_out -> fail "the round trip timed out"
-      | Ok Lane.Lane_absent -> fail "the lane was absent inside the same scheduler"))
+      | Ok Lane.Lane_absent -> fail "the lane was absent inside the same scheduler"
+      | Ok (Lane.Refused _) -> fail "a read verb was refused"))
 ;;
 
 let test_unknown_lane_is_refused () =
@@ -53,6 +54,17 @@ let test_absent_lane_answers_absent () =
     | _ -> fail "expected Lane_absent for a never-polled lane"))
 ;;
 
+let test_live_lane_refuses_act_verbs () =
+  with_eio (fun () ->
+    ignore (Lane.take_command ~lane_name:"live" ~window_sec:0.01);
+    (match Lane.issue ~lane_name:"live" ~verb:(Lane.Page_goto { url = "https://x" }) ~timeout_sec:0.1 with
+    | Lane.Refused _ -> ()
+    | _ -> fail "expected Refused for a navigation on the live lane");
+    (match Lane.issue ~lane_name:"live" ~verb:(Lane.Session_open { headless = None }) ~timeout_sec:0.1 with
+    | Lane.Refused _ -> ()
+    | _ -> fail "expected Refused for a session verb on the live lane"))
+;;
+
 let () =
   run "browser lane"
     [ "state", [ test_case "issue → poll → deliver round trip" `Quick
@@ -60,5 +72,7 @@ let () =
                ; test_case "unknown lane is refused" `Quick
                    test_unknown_lane_is_refused
                ; test_case "never-polled lane answers absent" `Quick
-                   test_absent_lane_answers_absent ] ]
+                   test_absent_lane_answers_absent
+               ; test_case "the live lane refuses session and navigation verbs" `Quick
+                   test_live_lane_refuses_act_verbs ] ]
 ;;

@@ -61,6 +61,7 @@
   ; Tool_args / Tool_result live in a (wrapped false) leaf and are referenced
   ; unqualified here, so the dependency has to be spelled out.
   masc.tool_types
+  masc.browser_lane
   masc.tool_metrics_store
   masc.crypto_rng
   masc.time_codec

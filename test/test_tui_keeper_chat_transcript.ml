@@ -1252,7 +1252,35 @@ let test_compact_summary_counts_registered_public_names () =
       failf "every call returned, so the header was expected alone, got %d details"
         (List.length details)
 
-let test_compact_summary_keeps_operational_tool_kinds () =
+let test_compact_summary_adds_up_a_kind_it_ran_twice () =
+  let activity name =
+    Transcript.make_tool_activity ~call_id:None ~tool_name:name ~args:"{}"
+      ~outcome:Transcript.Returned ~duration:None ()
+  in
+  let projection =
+    Transcript.tool_block
+      [ activity "masc_keeper_status"
+      ; activity "masc_keeper_list"
+      ; activity "Read"
+      ]
+    |> Transcript.project_tool_block Transcript.Compact
+  in
+  match projection.header, projection.details with
+  | Some summary, [] ->
+      check bool "the two keeper tools are added up" true
+        (contains ~needle:"Keeper 2" summary);
+      (* The tag is what the names leave separate. Both are still named. *)
+      check bool "and the block still counts its calls" true
+        (contains ~needle:"Tools 3" summary)
+  | _, details ->
+      failf "every call returned, so the header was expected alone, got %d details"
+        (List.length details)
+
+let test_compact_summary_does_not_tag_a_kind_it_ran_once () =
+  (* On one live screen every [Keeper N] was exactly the count of one
+     [keeper_*] tool named a few clauses along on the same line -- in all
+     eight blocks that carried the tag. A tag over one name is that name's
+     number, said twice. *)
   let activity name =
     Transcript.make_tool_activity ~call_id:None ~tool_name:name ~args:"{}"
       ~outcome:Transcript.Returned ~duration:None ()
@@ -1269,10 +1297,12 @@ let test_compact_summary_keeps_operational_tool_kinds () =
   match projection.header, projection.details with
   | Some summary, [] ->
       List.iter
-        (fun expected ->
-          check bool ("summary keeps " ^ expected) true
-            (contains ~needle:expected summary))
-        [ "Skill 1"; "Keeper 1"; "Fusion 1" ]
+        (fun tag ->
+          check bool ("summary does not repeat " ^ tag) false
+            (contains ~needle:tag summary))
+        [ "Skill 1"; "Keeper 1"; "Fusion 1" ];
+      check bool "and the block still counts its calls" true
+        (contains ~needle:"Tools 4" summary)
   | _, details ->
       failf "every call returned, so the header was expected alone, got %d details"
         (List.length details)
@@ -1293,20 +1323,24 @@ let compact_summary_of activities =
   | None -> fail "a block of several calls was expected to carry a header"
 
 let test_compact_summary_separates_a_handoff_from_a_keeper_read () =
+  (* Two of each kind, because a tag over a single name is dropped as a
+     repeat of that name's count. *)
   let summary =
     compact_summary_of
       [ kind_activity "masc_keeper_delegate"
+      ; kind_activity "masc_keeper_delegate_cancel"
       ; kind_activity "masc_keeper_delegate_status"
+      ; kind_activity "masc_keeper_status"
       ; kind_activity "Read"
       ]
   in
-  check bool "the handoff is counted as a delegation" true
-    (contains ~needle:"Delegate 1" summary);
-  (* Reading how a delegation is going is not delegating. Both names carry
-     the same [masc_keeper_delegate] prefix, so a spelling test cannot tell
-     them apart. *)
-  check bool "the status read stays keeper work" true
-    (contains ~needle:"Keeper 1" summary)
+  check bool "the handoffs are counted as delegations" true
+    (contains ~needle:"Delegate 2" summary);
+  (* Reading how a delegation is going is not delegating. The status read
+     carries the same [masc_keeper_delegate] prefix as the handoff, so a
+     spelling test cannot tell them apart. *)
+  check bool "the reads stay keeper work" true
+    (contains ~needle:"Keeper 2" summary)
 
 let test_compact_summary_does_not_call_a_code_query_keeper_work () =
   (* [keeper_code_query] is a code search and [keeper_webmcp_call] an MCP
@@ -1900,8 +1934,10 @@ let () =
             test_compact_and_full_keep_the_same_typed_facts
         ; test_case "compact summary counts registered public names" `Quick
             test_compact_summary_counts_registered_public_names
-        ; test_case "compact summary keeps operational tool kinds" `Quick
-            test_compact_summary_keeps_operational_tool_kinds
+        ; test_case "compact summary adds up a kind it ran twice" `Quick
+            test_compact_summary_adds_up_a_kind_it_ran_twice
+        ; test_case "compact summary does not tag a kind it ran once" `Quick
+            test_compact_summary_does_not_tag_a_kind_it_ran_once
         ; test_case "compact summary separates a handoff from a keeper read"
             `Quick test_compact_summary_separates_a_handoff_from_a_keeper_read
         ; test_case "compact summary does not call a code query keeper work"

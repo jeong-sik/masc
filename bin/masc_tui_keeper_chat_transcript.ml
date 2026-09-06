@@ -702,16 +702,18 @@ let skill_rows ~full (activity : skill_activity) =
     in
     summary :: actions @ proof @ detail
 
-(* Generic tools are already named by [compact_tool_mix]. These tags retain
-   the operational kind a compact fold used to erase. A handoff reads as
-   [Delegate] rather than [Keeper] -- it replaces that clause instead of
-   adding one, so the fold does not grow. *)
+(* The kind a run of calls amounts to, when the names alone do not show it.
+   [compact_tool_mix] on the same line already names every distinct tool with
+   its count, so a tag over a single name is that name's number said twice --
+   on one live screen every [Keeper N] was exactly the count of one
+   [keeper_*] tool named a few clauses along, in all eight blocks that had
+   one. A tag is drawn only where it adds several names up.
+
+   A handoff reads as [Delegate] rather than [Keeper]: it replaces that
+   clause instead of adding one, so the fold does not grow. *)
 let compact_activity_kinds activities =
-  let count kind =
-    List.fold_left
-      (fun total activity ->
-        if activity_kind activity = kind then total + 1 else total)
-      0 activities
+  let of_kind kind =
+    List.filter (fun activity -> activity_kind activity = kind) activities
   in
   [ Skill_activity, "Skill"
   ; Delegate_activity, "Delegate"
@@ -719,9 +721,17 @@ let compact_activity_kinds activities =
   ; Fusion_activity, "Fusion"
   ]
   |> List.filter_map (fun (kind, label) ->
-       match count kind with
-       | 0 -> None
-       | count -> Some (Printf.sprintf "%s %d" label count))
+       let members = of_kind kind in
+       let names =
+         List.sort_uniq String.compare (List.map canonical_tool_name members)
+       in
+       match names with
+       (* Nothing of this kind ran, or one tool did and the rollup already
+          names it with the same number a few clauses along. A tag adds up
+          what the names leave separate, and there is nothing to add up. *)
+       | [] | [ _ ] -> None
+       | _ :: _ :: _ ->
+           Some (Printf.sprintf "%s %d" label (List.length members)))
 
 (* Both projections retain the same typed activities. [Full] is the shipping
    view and therefore stays byte-compatible with the old formatter. [Compact]

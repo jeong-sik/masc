@@ -123,6 +123,28 @@ agent_core가 deepseek.com 직접 API를 카탈로그·런타임 양쪽에서 �
   `stop=end_turn`(39.3s) — thinking+tools 턴이 400 없이 완주했다. Phase 0 의
   replay 정책이 라이브에서 증명됐다.
 
+### 풀 피처 실측 매트릭스 (2026-09-06, 직접 프로브 — 총 USD 0.05)
+
+| 기능 | 결과 |
+|---|---|
+| chat completions: thinking 토글·effort high/max·tools·replay | 완결 (직접+라이브) |
+| vision-exp base64 data URL | "Red, blue" 정확 |
+| Files API: upload→file_id 참조→list→retrieve→delete | 전 사이클 완결 |
+| JSON mode (response_format json_object + 지시) | `{"city":"Seoul","temp_c":18.0}` |
+| streaming: `data: [DONE]` + usage 청크 | 확인 (keep-alive 코멘트는 긴 대기 턴에서만 — 미발생, 문서 명시와 일치) |
+| strict tools (beta base_url, strict:true) | tool_calls, 인자 스키마 준수 |
+| FIM completion (beta, pro) | 코드 완성 생성 |
+| Chat Prefix Completion (beta) | prefix 에서 이어짐 |
+| Responses API sync | status completed |
+| Responses API stream | 이벤트 체계 확인, **[DONE] 없음**(문서대로) |
+| Responses API 이미지 입력 (input_image) | "Red Blue" 정확 |
+| Anthropic API tool_use | stop_reason tool_use, input 인자 정상 |
+| Anthropic API thinking + stream | anthropic SSE 이벤트 체계(message_start/content_block_delta/ping) |
+| tool_choice required/named | thinking 모드 400 / non-thinking 수용 (위 실측) |
+
+미확인 1건: non-streaming 빈 줄·streaming `: keep-alive` 코멘트는 10 분급
+대기 턴에서만 발생 — 실측 생략, 문서 명시로 충분.
+
 ## 관계
 
 - 런타임 체인 등록(2026-09-06, runtime.toml lane 3곳 + `[providers.deepseek]`)은

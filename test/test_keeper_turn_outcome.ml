@@ -679,11 +679,17 @@ let test_tool_io_digest_is_keyed_on_the_bytes () =
     "a different input is not answered from the old one"
     false
     (String.equal (fst first) (fst (digest "masc_status" other_input body)));
+  (* The fingerprints are of the payload: [digest_tool_input] and
+     [digest_tool_output] both take the tool name and both ignore it, and the
+     repeated-call check compares the name separately as its own field of
+     [tool_call_detail]. The memo still keys on it, because a memo is keyed on
+     what its function is asked, not on which of those arguments the function
+     happens to read today. *)
   check
-    bool
-    "and neither is a different tool"
-    false
-    (String.equal (fst first) (fst (digest "keeper_tasks_list" input body)))
+    (pair string string)
+    "the tool name is not part of the fingerprint"
+    first
+    (digest "keeper_tasks_list" input body)
 ;;
 
 (* Forty calls that differ only in their tail, three tool names between

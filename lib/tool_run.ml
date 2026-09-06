@@ -85,15 +85,21 @@ let handle_run_list ~tool_name ~start_time ctx _args : Tool_result.result =
    keeper_tag_dispatch) still consume Tool_result.result option. PR-1c will
    move the Tool_dispatch.handler ABI itself to result, removing this
    bridge. *)
+(* The wire name is parsed once and the operations are matched, so an operation
+   added to [Tool_schemas_run] is a compile error here. *)
 let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   let lift r = Some r in
-  match name with
-  | "masc_run_init" -> lift (handle_run_init ~tool_name:name ~start_time:start ctx args)
-  | "masc_run_plan" -> lift (handle_run_plan ~tool_name:name ~start_time:start ctx args)
-  | "masc_run_get" -> lift (handle_run_get ~tool_name:name ~start_time:start ctx args)
-  | "masc_run_list" -> lift (handle_run_list ~tool_name:name ~start_time:start ctx args)
-  | _ -> None
+  match Tool_schemas_run.operation_of_tool_name name with
+  | None -> None
+  | Some Tool_schemas_run.Run_init ->
+    lift (handle_run_init ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_run.Run_plan ->
+    lift (handle_run_plan ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_run.Run_get ->
+    lift (handle_run_get ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_run.Run_list ->
+    lift (handle_run_list ~tool_name:name ~start_time:start ctx args)
 
 let schemas : Masc_domain.tool_schema list = Tool_schemas_run.schemas
 

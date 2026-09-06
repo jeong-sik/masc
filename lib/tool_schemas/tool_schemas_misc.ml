@@ -138,3 +138,36 @@ let misc_registered_schema operation : tool_schema option =
      | Some schema -> Some schema
      | None -> invalid_arg ("missing misc schema: " ^ name))
 ;;
+
+(* [plan_operation] is the set [Tool_plan] routes and registers. It replaced
+   three hand-written string lists in that module -- the dispatcher's arms, the
+   [is_plan] filter that picked plan names out of [schemas], and a read-only
+   membership list -- which could disagree without the compiler noticing. *)
+type plan_operation =
+  | Plan_clear_task
+  | Plan_get_task
+  | Plan_set_task
+[@@deriving enumerate]
+
+let plan_operations = all_of_plan_operation
+
+let plan_tool_name = function
+  | Plan_clear_task -> "masc_plan_clear_task"
+  | Plan_get_task -> "masc_plan_get_task"
+  | Plan_set_task -> "masc_plan_set_task"
+;;
+
+let plan_operation_of_tool_name value =
+  List.find_opt
+    (fun operation -> String.equal value (plan_tool_name operation))
+    plan_operations
+;;
+
+let plan_schema operation =
+  let name = plan_tool_name operation in
+  match
+    List.find_opt (fun (schema : tool_schema) -> String.equal schema.name name) schemas
+  with
+  | Some schema -> schema
+  | None -> invalid_arg ("missing plan schema: " ^ name)
+;;

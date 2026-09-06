@@ -103,3 +103,23 @@ val misc_registered_schema : misc_operation -> Masc_domain.tool_schema option
 (** The schema [Tool_misc] registers for an operation, or [None] for the two web
     tools, which are advertised through [Config.raw_all_tool_schemas] and tagged
     from their keeper descriptor instead. *)
+
+type plan_operation =
+  | Plan_clear_task
+  | Plan_get_task
+  | Plan_set_task
+[@@deriving enumerate]
+(** Closed vocabulary routed and registered by [Tool_plan]. *)
+
+val plan_operations : plan_operation list
+(** Exhaustive stable-order projection of the plan operations. *)
+
+val plan_tool_name : plan_operation -> string
+(** Canonical wire name for a plan operation. *)
+
+val plan_operation_of_tool_name : string -> plan_operation option
+(** Parse a canonical plan wire name at the dispatch boundary. *)
+
+val plan_schema : plan_operation -> Masc_domain.tool_schema
+(** The declaration [Tool_plan] registers for an operation. A name whose
+    declaration is missing refuses the boot. *)

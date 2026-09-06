@@ -310,6 +310,17 @@ let install_test_env env =
   Eio_context.set_net (Eio.Stdenv.net env);
   Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env)
 
+(* [Memory_lane.submit] has four ways to not accept a unit and its .mli gives
+   each a different meaning -- Rejected_draining even names the call a later
+   lifecycle has to make first. Both fixture sites collapsed all four into one
+   sentence, so a failure said only that it was not Submitted. *)
+let memory_lane_outcome_name : Memory_lane.outcome -> string = function
+  | Memory_lane.Submitted -> "Submitted"
+  | Memory_lane.Coalesced -> "Coalesced"
+  | Memory_lane.Ran_inline -> "Ran_inline"
+  | Memory_lane.Dropped -> "Dropped"
+  | Memory_lane.Rejected_draining -> "Rejected_draining"
+
 let eio_test name fn =
   test_case name `Quick (fun () -> Eio_main.run @@ fun env ->
   install_test_env env; fn ())
@@ -1080,11 +1091,13 @@ let test_direct_stop_resolves_done_after_librarian_drain_failure () =
                  Eio.Promise.await never)
           with
           | Memory_lane.Submitted -> ()
-          | Memory_lane.Coalesced
-          | Memory_lane.Ran_inline
-          | Memory_lane.Dropped
-          | Memory_lane.Rejected_draining ->
-            fail "failed Librarian receipt fixture was not submitted");
+          | ( Memory_lane.Coalesced
+            | Memory_lane.Ran_inline
+            | Memory_lane.Dropped
+            | Memory_lane.Rejected_draining ) as other ->
+            failf
+              "failed Librarian receipt fixture was not submitted: %s"
+              (memory_lane_outcome_name other));
          Eio.Promise.await started;
          Eio.Switch.fail librarian_sw Librarian_executor_cancel
        with
@@ -2399,11 +2412,13 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
               Eio.Promise.await release_librarian)
        with
        | Memory_lane.Submitted -> ()
-       | Memory_lane.Coalesced
-       | Memory_lane.Ran_inline
-       | Memory_lane.Dropped
-       | Memory_lane.Rejected_draining ->
-         fail "cancelled-update Librarian fixture was not submitted");
+       | ( Memory_lane.Coalesced
+         | Memory_lane.Ran_inline
+         | Memory_lane.Dropped
+         | Memory_lane.Rejected_draining ) as other ->
+         failf
+           "cancelled-update Librarian fixture was not submitted: %s"
+           (memory_lane_outcome_name other));
       Eio.Promise.await librarian_started;
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with

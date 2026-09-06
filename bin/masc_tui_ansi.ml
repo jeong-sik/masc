@@ -101,7 +101,7 @@ module Theme = struct
        the failure text sharing its terminal row. Blue and magenta are the
        only hues status leaves alone; a surface reaching for any of the
        other three owes a check that it does not draw that status token.
-       RFC-0427. *)
+       RFC-0431. *)
     ; slot_1 : string
     ; slot_2 : string
     ; slot_3 : string

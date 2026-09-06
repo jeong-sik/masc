@@ -142,8 +142,6 @@ let test_a_run_of_only_continuations_still_draws () =
     [ "Execute · 턴 이어서 진행" ]
     (fold [ step Approval_continuation_recorded ])
 
-let () =
-  run "tui_gate_fold"
 (* Cells, not bytes: a Korean status word is one cell wide per glyph and three
    bytes long, so a byte budget would fold a line that fits and leave one that
    does not. *)
@@ -189,6 +187,8 @@ let test_the_held_count_does_not_depend_on_the_cap_being_a_row () =
     [ 24; 40; 120 ]
 ;;
 
+let () =
+  run "tui_gate_fold"
     [ ( "fold"
       , [ test_case "one approval is one row" `Quick test_one_approval_is_one_row
         ; test_case "the summary names the deferred call" `Quick

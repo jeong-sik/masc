@@ -19,6 +19,8 @@
 
 open Masc.Keeper_chat_store
 
+module Message_layout = Masc_tui_message_layout
+
 (* Said once, because it is drawn twice: as the whole line of a
    continuation row, and as the suffix of a folded run that also resumed. *)
 let continuation_wording = "턴 이어서 진행"

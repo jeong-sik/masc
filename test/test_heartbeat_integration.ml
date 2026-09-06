@@ -165,6 +165,11 @@ default = "test_provider.test_model"
 display-name = "Test Provider"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1"
+# Runtime.validate_request_body_cap refuses a keeper turn on a provider with no
+# positive ceiling, and every Keeper provider-call boundary calls it. The TOML
+# parser allows the key to be omitted ("no declared ceiling"), so a fixture
+# without it loads clean and dies at the first turn instead.
+max-request-body-bytes = 1048576
 
 [models.test_model]
 api-name = "test-model"

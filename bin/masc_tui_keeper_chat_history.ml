@@ -221,7 +221,12 @@ let float_field fields name =
 (* A channel reference, cut to its tail rather than its head. Discord ids are
    snowflakes: consecutive channels share a long prefix, so [1356818755795157113]
    and [1356818756755525815] are the same string for the first eleven digits.
-   Cutting the head is what tells them apart. *)
+   Cutting the head is what tells them apart.
+
+   {!Masc_tui_message_layout.fit_middle} cuts the label again at the speaker
+   column, keeping a third of the head and two thirds of the tail. The tail
+   there is whatever the label ends with, which for {!addressed_label} is the
+   surface rather than the speaker. *)
 let channel_reference_cells = 8
 
 let short_channel reference =
@@ -235,10 +240,12 @@ let connector_label name channel =
   match channel with
   | None -> Some name
   (* A room name is left whole. The label is fitted to the speaker column
-     further down, and that cut keeps the head -- which is the half of a name
-     that carries it. Cutting again here would only cut it shorter. *)
+     further down, and cutting again here would only cut it shorter. *)
   | Some (Surface.Channel_name room) -> Some (name ^ " #" ^ String.trim room)
-  (* An id is cut here because the fit above keeps the wrong half of one. *)
+  (* An id is cut here as well, so the label reaching the column already has
+     an ellipsis in it and the column's own cut adds a second. What a label
+     should keep when it does not fit -- the speaker or the surface -- is
+     #33699. *)
   | Some (Surface.Channel_id reference) ->
       Some (name ^ " " ^ short_channel (String.trim reference))
 

@@ -236,6 +236,20 @@ let test_parse_single_quote_and_name_attr () =
   let p2 = parse_og_html ~url:"https://example.com/na" ~body:body2 in
   check (option string) "name= attribute accepted" (Some "Via Name Attr") p2.title
 
+let test_parse_og_far_into_body () =
+  (* Regression: real pages (YouTube's watch page, ~700 KB in) place og:* well
+     past the first hundreds of KB, after large inline scripts. A head-window
+     scan would silently miss them; the parser must scan the whole body. *)
+  let filler = String.make 400_000 'x' in
+  let body =
+    Printf.sprintf
+      {|<html><head><script>%s</script><meta property="og:title" content="Deep OG Title"></head></html>|}
+      filler
+  in
+  let p = parse_og_html ~url:"https://example.com/deep" ~body in
+  check (option string) "og found far into body" (Some "Deep OG Title") p.title;
+  check bool "has_metadata true" true p.has_metadata
+
 let () =
   run "tui link preview"
     [ ( "synthesizer"
@@ -267,5 +281,6 @@ let () =
         ; test_case "entity decode" `Quick test_parse_entities
         ; test_case "keeps kind" `Quick test_parse_keeps_kind
         ; test_case "single quote and name attr" `Quick test_parse_single_quote_and_name_attr
+        ; test_case "og far into body (no head cap)" `Quick test_parse_og_far_into_body
         ] )
     ]

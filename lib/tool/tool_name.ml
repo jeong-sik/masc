@@ -18,27 +18,24 @@ module Task_name = struct
     | Add_task
     | Batch_add_tasks
     | Task_history
+    | Task_set_goal
     | Tasks
     | Transition
     | Update_priority
+  [@@deriving enumerate]
 
   let to_string = function
     | Add_task -> "masc_add_task"
     | Batch_add_tasks -> "masc_batch_add_tasks"
     | Task_history -> "masc_task_history"
+    | Task_set_goal -> "masc_task_set_goal"
     | Tasks -> "masc_tasks"
     | Transition -> "masc_transition"
     | Update_priority -> "masc_update_priority"
   ;;
 
-  let of_string = function
-    | "masc_add_task" -> Some Add_task
-    | "masc_batch_add_tasks" -> Some Batch_add_tasks
-    | "masc_task_history" -> Some Task_history
-    | "masc_tasks" -> Some Tasks
-    | "masc_transition" -> Some Transition
-    | "masc_update_priority" -> Some Update_priority
-    | _ -> None
+  let of_string value =
+    List.find_opt (fun name -> String.equal value (to_string name)) all
   ;;
 
   let pp fmt t = Format.pp_print_string fmt (to_string t)
@@ -131,6 +128,7 @@ module Goal_name = struct
     | Goal_list
     | Goal_transition
     | Goal_upsert
+  [@@deriving enumerate]
 
   let to_string = function
     | Goal_list -> "masc_goal_list"
@@ -138,11 +136,8 @@ module Goal_name = struct
     | Goal_upsert -> "masc_goal_upsert"
   ;;
 
-  let of_string = function
-    | "masc_goal_list" -> Some Goal_list
-    | "masc_goal_transition" -> Some Goal_transition
-    | "masc_goal_upsert" -> Some Goal_upsert
-    | _ -> None
+  let of_string value =
+    List.find_opt (fun name -> String.equal value (to_string name)) all
   ;;
 
   let pp fmt t = Format.pp_print_string fmt (to_string t)
@@ -154,8 +149,10 @@ module Operator_name = struct
     | Operator_board_attention_quarantine_requeue
     | Operator_confirm
     | Operator_digest
+    | Operator_judgment_write
     | Operator_snapshot
     | Operator_task_recovery_resolve
+  [@@deriving enumerate]
 
   let to_string = function
     | Operator_action -> "masc_operator_action"
@@ -163,19 +160,13 @@ module Operator_name = struct
       "masc_operator_board_attention_quarantine_requeue"
     | Operator_confirm -> "masc_operator_confirm"
     | Operator_digest -> "masc_operator_digest"
+    | Operator_judgment_write -> "masc_operator_judgment_write"
     | Operator_snapshot -> "masc_operator_snapshot"
     | Operator_task_recovery_resolve -> "masc_operator_task_recovery_resolve"
   ;;
 
-  let of_string = function
-    | "masc_operator_action" -> Some Operator_action
-    | "masc_operator_board_attention_quarantine_requeue" ->
-      Some Operator_board_attention_quarantine_requeue
-    | "masc_operator_confirm" -> Some Operator_confirm
-    | "masc_operator_digest" -> Some Operator_digest
-    | "masc_operator_snapshot" -> Some Operator_snapshot
-    | "masc_operator_task_recovery_resolve" -> Some Operator_task_recovery_resolve
-    | _ -> None
+  let of_string value =
+    List.find_opt (fun name -> String.equal value (to_string name)) all
   ;;
 
   let pp fmt t = Format.pp_print_string fmt (to_string t)

@@ -12,9 +12,13 @@ module Task_name : sig
     | Add_task
     | Batch_add_tasks
     | Task_history
+    | Task_set_goal
     | Tasks
     | Transition
     | Update_priority
+
+  val all : t list
+  (** Exhaustive Task operation vocabulary. *)
 
   val to_string : t -> string
   val of_string : string -> t option
@@ -63,6 +67,9 @@ module Goal_name : sig
     | Goal_transition
     | Goal_upsert
 
+  val all : t list
+  (** Exhaustive Goal operation vocabulary. *)
+
   val to_string : t -> string
   val of_string : string -> t option
   val pp : Stdlib.Format.formatter -> t -> unit
@@ -74,8 +81,12 @@ module Operator_name : sig
     | Operator_board_attention_quarantine_requeue
     | Operator_confirm
     | Operator_digest
+    | Operator_judgment_write
     | Operator_snapshot
     | Operator_task_recovery_resolve
+
+  val all : t list
+  (** Exhaustive Operator operation vocabulary. *)
 
   val to_string : t -> string
   val of_string : string -> t option

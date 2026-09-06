@@ -3718,6 +3718,22 @@
 ; output instead of one undifferentiated suite.
 
 (rule
+ (alias runtest-test_tui_keyboard_input-code-memo)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   code-memo)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-code-memo)))
+
+(rule
  (alias runtest-test_tui_keyboard_input-cli-base-path)
  (deps
   test_tui_keyboard_input.py
@@ -4600,7 +4616,7 @@
 (test
  (name test_keeper_sandbox_remote)
  (modules test_keeper_sandbox_remote)
- (libraries masc_test_deps exec_ssh_protocol eio_main))
+ (libraries masc_test_deps exec_ssh_protocol eio_main masc.build_version))
 
 (test
  (name test_shell_ir_with_sandbox)

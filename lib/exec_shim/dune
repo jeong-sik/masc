@@ -7,3 +7,16 @@
  (foreign_stubs
   (language c)
   (names prctl_stub observe_stub)))
+
+; RFC-0427 B-3. shim_build_id.ml is generated so the release version the probe
+; reports comes from dune-project and nothing has to remember to stamp it.
+; scripts/build-shim-static.sh builds in a scratch project with no package, so
+; it writes this file itself with the same two values.
+(rule
+ (targets shim_build_id.ml)
+ (action
+  (with-stdout-to
+   shim_build_id.ml
+   (progn
+    (echo "let suffix = \"\"\n")
+    (echo "let release = \"%{version:masc}\"\n")))))

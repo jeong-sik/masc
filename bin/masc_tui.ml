@@ -13750,6 +13750,22 @@ and is loaded on demand through keeper_skill.
                handle_acting_pane_click state ~base_path ~mailbox:async_messages
                  ~line
            | Pane_miss -> ())
+       (* A press on a folded Gate row opens what the fold is holding. The
+          fold lives on the tool-detail axis, so this sets the state Ctrl-D
+          sets rather than a second one: two ways in, one thing opened. Only
+          folded rows carry the action, so a press on an open row is not a
+          press that quietly did nothing -- there was nothing to open. *)
+       | Some (Mouse_left_press (row, _column))
+         when state.view = Keepers Keeper_message
+              && (not dismissed_image) && (not compact_viewport)
+              && (not state.help_open)
+              && (not state.agenda_open)
+              && (not state.palette_open)
+              && (not state.context_inspector_open)
+              && Option.is_none state.search
+              && Masc_tui_render.chat_row_action_at ~row
+                 = Masc_tui_message_layout.Action_unfold_argument ->
+           state.msg_tool_visibility <- Tools_full
        (* A left press on the Lanes overview moves the row cursor (and opens
           the row it already named). The modals above the surface -- help,
           agenda, palette, search -- keep the press from reaching rows they
@@ -16583,10 +16599,10 @@ and is loaded on demand through keeper_skill.
                 else if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then (
                     match Masc_tui_fetched.current state.code_file with
-                    | Some (_, Masc_tui_fetched.Ready rows) ->
+                    | Some (path, Masc_tui_fetched.Ready rows) ->
                         state.code_notes_scroll <-
                           min
-                            (max 0 (List.length (Masc_tui_memo.of_rows rows) - 1))
+                            (max 0 (List.length (Masc_tui_memo.of_file ~path rows) - 1))
                             (state.code_notes_scroll + 1)
                     | Some (_, _) | None -> ())
                   else if state.code_diff_open then (

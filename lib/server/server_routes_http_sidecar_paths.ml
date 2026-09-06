@@ -72,7 +72,7 @@ let project_root_from_executable () =
     walk (Filename.dirname exe))
 ;;
 
-let sidecar_root () = trim_opt (Sys.getenv_opt "MASC_SIDECAR_ROOT")
+let sidecar_root () = Env_setting.String_opt_knob.get Sidecar_root
 
 let sidecar_root_candidates ?sidecar_root ?project_root ~base_path () =
   [ sidecar_root; Some base_path; project_root ]

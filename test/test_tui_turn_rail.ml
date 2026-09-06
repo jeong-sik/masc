@@ -23,6 +23,7 @@ let entry ?(turn_rail = Layout.Rail_none) ?(style = Layout.Keeper)
   ; body
   ; markdown_source = Layout.Markdown_streaming
   ; turn_rail
+  ; action = Layout.Action_none
   }
 ;;
 
@@ -291,6 +292,28 @@ let test_the_rail_does_not_eat_the_badge () =
     every_rail
 ;;
 
+(* The fold marker sits at the end of the first row, so that is the row a
+   press has to land on. A continuation carrying the action would take a press
+   that opens something the reader cannot see the handle for. *)
+let test_only_the_first_row_carries_the_action () =
+  let rows =
+    body_rows ~inner_width:40
+      { (entry ~turn_rail:Layout.Rail_says (String.make 200 'x')) with
+        Layout.action = Layout.Action_unfold_argument
+      }
+  in
+  match rows with
+  | [] -> failwith "no body row"
+  | first :: rest ->
+      check bool "the first row is pressable" true
+        (first.Layout.action = Layout.Action_unfold_argument);
+      List.iter
+        (fun (row : Layout.row) ->
+          check bool "and no continuation is" true
+            (row.Layout.action = Layout.Action_none))
+        rest
+;;
+
 let () =
   run "tui turn rail"
     [ ( "glyphs"
@@ -321,6 +344,8 @@ let () =
             test_the_siding_runs_tell_the_kinds_apart
         ; test_case "a wrapped arrival joins once" `Quick
             test_a_wrapped_arrival_joins_once_and_never_joins_the_turn
+        ; test_case "only the first row carries the action" `Quick
+            test_only_the_first_row_carries_the_action
         ; test_case "work branches once and then carries the turn" `Quick
             test_work_branches_once_and_then_carries_the_turn
         ] )

@@ -74,6 +74,17 @@ let acting_pane_reserved_cols = ref 0
    what was on screen, which is these, not from what the next frame would
    draw. Empty when no pane was drawn, so a stale row cannot answer. *)
 let acting_pane_row_targets : Masc_tui_acting_pane.row_target array ref = ref [||]
+
+(* The chat history as the last frame drew it: which terminal row its first
+   line landed on, and what a press on each line opens. Same reason as the
+   Activity pane above -- a press between frames answers what was on screen.
+
+   The row is absolute because the two-pane split places the chat buffer
+   beside the roster rather than below it, so a line's vertical position is
+   the buffer's own whether or not the roster is showing. Zero means no chat
+   history was drawn, which is what keeps a stale row from answering. *)
+let chat_history_first_row = ref 0
+let chat_history_actions : Message_layout.row_action array ref = ref [||]
 let acting_pane_scroll_max = ref 0
 
 let acting_pane_target_at ~line =
@@ -84,6 +95,13 @@ let acting_pane_target_at ~line =
 (* The input layer reads the last frame's pane through these, never the
    cells themselves: what it needs is the answer, and the cells stay this
    module's to set once per frame. *)
+let chat_row_action_at ~row =
+  let first = !chat_history_first_row in
+  let actions = !chat_history_actions in
+  let line = row - first in
+  if first > 0 && line >= 0 && line < Array.length actions then actions.(line)
+  else Message_layout.Action_none
+
 let acting_pane_drawn_cols () = !acting_pane_reserved_cols
 let acting_pane_scroll_limit () = !acting_pane_scroll_max
 
@@ -4086,7 +4104,7 @@ let planning_phase_column =
    for health, [tone] for weight and [Syntax] for what a token is, and
    nothing for a kind.
 
-   It takes a categorical slot now (RFC-0427). Slot 4 is magenta, the hue it
+   It takes a categorical slot now (RFC-0431). Slot 4 is magenta, the hue it
    already drew, and magenta is one of the two the status axis does not
    claim -- which matters here, because the three phases beside it are
    status tokens and a slot aliasing one of those would read as a verdict.
@@ -8448,6 +8466,16 @@ let tool_detail_indent = "  "
 let chat_body_line_cells ~chat_cols ~role_label_column =
   max 24 (min 120 (chat_cols - role_label_column - 8))
 
+(* One reading of a Gate row's fold, for the two questions that need it: what
+   the row draws, and whether pressing it opens anything. Folded twice, the
+   text could say it is holding something on a frame where the press says it
+   is not. *)
+let gate_fold ~chat_cols ~role_label_column (message : Masc_tui_types.msg_entry)
+    =
+  Masc_tui_gate_text.fold_argument
+    ~cap:(chat_body_line_cells ~chat_cols ~role_label_column)
+    message.me_text
+
 let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection =
   let role_label_column =
     Message_layout.chat_role_label_width ~pane_cells:chat_cols
@@ -8783,9 +8811,8 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
               match tool_projection_mode state with
               | Keeper_chat_transcript.Full -> message.me_text
               | Keeper_chat_transcript.Compact ->
-                  Masc_tui_gate_text.folded_argument
-                    ~cap:(chat_body_line_cells ~chat_cols ~role_label_column)
-                    message.me_text)
+                  (gate_fold ~chat_cols ~role_label_column message)
+                    .Masc_tui_gate_text.fa_text)
           | Message_thinking | Message_user _ | Message_keeper
           | Message_autonomous
           | Message_status | Message_local | Message_error ->
@@ -8873,6 +8900,18 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                  };
              turn_rail =
                turn_rail_of ~siding:(siding_of_message message) ~edge ~style;
+             (* Only a Gate row that actually folded: a row holding nothing
+                would take a press and do nothing visible, which reads as the
+                pane ignoring the click. *)
+             action =
+               (match message.me_role, tool_projection_mode state with
+                | Masc_tui_types.Message_status, Keeper_chat_transcript.Compact
+                  when message.me_gate <> None
+                       && (gate_fold ~chat_cols ~role_label_column message)
+                            .Masc_tui_gate_text.fa_held_cells
+                          > 0 ->
+                    Message_layout.Action_unfold_argument
+                | _ -> Message_layout.Action_none);
            }
             : Message_layout.entry))
       visible_entries
@@ -9525,6 +9564,10 @@ let render_keeper_message (state : state) =
                       turn_rail =
                         turn_rail_of ~siding:None
                           ~edge:Masc_tui_types.Turn_continues ~style;
+                      (* A live turn draws its Gate steps as status text the
+                         transcript composed, not as the store's argument, so
+                         there is no argument here to unfold. *)
+                      action = Message_layout.Action_none;
                     }
                      : Message_layout.entry)
                in
@@ -9814,6 +9857,14 @@ let render_keeper_message (state : state) =
         ~requested:(state.msg_scroll + rows_since_pin) layout_entries
     in
 
+    (* Recorded before the rows are written, so the count is the lines above
+       the history rather than including them. One-based: terminal rows are. *)
+    chat_history_first_row := count_frame_lines chat_buf + 1;
+    chat_history_actions :=
+      Array.of_list
+        (List.map
+           (fun (row : Message_layout.row) -> row.Message_layout.action)
+           visible_rows);
     if visible_rows = [] then begin
       if history_height > 0 then
         box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
@@ -14685,7 +14736,7 @@ let render_code (state : state) =
               if selected then glyph ^ " "
               else
                 let colour =
-                  (* Six kinds, six categorical slots (RFC-0427). These were
+                  (* Six kinds, six categorical slots (RFC-0431). These were
                      constant SGR codes, so a file list was one of the places
                      a theme could not reach: everything around it moved when
                      the terminal answered with its palette and these did not.
@@ -14787,10 +14838,11 @@ let render_code (state : state) =
     let content_height = code_pane_content_height state in
     (if notes_showing then
        (* The memos are the file's own comments, so the overlay lists what
-          the lexed rows hold and has no reading state of its own. *)
+          the loaded rows hold in the file's comment syntax and has no
+          reading state of its own. *)
        let memos =
          match Masc_tui_fetched.current state.code_file with
-         | Some (_, Masc_tui_fetched.Ready rows) -> Masc_tui_memo.of_rows rows
+         | Some (path, Masc_tui_fetched.Ready rows) -> Masc_tui_memo.of_file ~path rows
          | Some
              ( _
              , ( Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
@@ -15049,7 +15101,7 @@ let render_code (state : state) =
            for _ = 1 to content_height do
              box_empty pane_buf pane_cols
            done
-       | Some (_, Masc_tui_fetched.Ready file_rows) ->
+       | Some (open_path, Masc_tui_fetched.Ready file_rows) ->
            let total_lines = List.length file_rows in
            let max_scroll = max 0 (total_lines - content_height) in
            let scroll = max 0 (min state.code_file_scroll max_scroll) in
@@ -15071,7 +15123,7 @@ let render_code (state : state) =
                (fun found ->
                  let line = Masc_tui_memo.line_of found in
                  (line, line))
-               (Masc_tui_memo.of_rows file_rows)
+               (Masc_tui_memo.of_file ~path:open_path file_rows)
            in
            let keeper_spans =
              match Masc_tui_fetched.current state.code_history with

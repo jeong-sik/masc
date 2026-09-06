@@ -162,16 +162,25 @@ let input_content_part_of_block = function
   | Text s ->
     Some
       (`Assoc [ "type", `String "input_text"; "text", `String (Utf8_sanitize.sanitize s) ])
-  | Image { media_type; data; source_type } ->
-    let image_url =
-      Api_common.base64_media_data_url
-        ~backend:"openai_responses"
-        ~block:"image"
-        ~media_type
-        ~data
-        source_type
-    in
-    Some (`Assoc [ "type", `String "input_image"; "image_url", `String image_url ])
+  | Image { media_type; data; source_type } -> (
+    (* The responses surface takes image_url OR file_id on input_image,
+       mutually exclusive; the docs' file_id names a Files API upload. Same
+       three-carrier mapping as the chat serializer. *)
+    match source_type with
+    | Url ->
+      Some (`Assoc [ "type", `String "input_image"; "image_url", `String data ])
+    | File_id ->
+      Some (`Assoc [ "type", `String "input_image"; "file_id", `String data ])
+    | Base64 ->
+      let image_url =
+        Api_common.base64_media_data_url
+          ~backend:"openai_responses"
+          ~block:"image"
+          ~media_type
+          ~data
+          source_type
+      in
+      Some (`Assoc [ "type", `String "input_image"; "image_url", `String image_url ]))
   | Document { media_type; data; source_type } ->
     let file_data =
       Api_common.base64_media_data_url

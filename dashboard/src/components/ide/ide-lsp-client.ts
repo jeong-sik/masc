@@ -1,6 +1,5 @@
 /**
- * IDE LSP Client — CodeMirror 6 extension for Language Server Protocol
- * with MASC observational overlay integration.
+ * IDE LSP Client — CodeMirror 6 extension for Language Server Protocol.
  *
  * Implements JSON-RPC 2.0 request-response over WebSocket.
  * The server (server_ide_lsp_proxy.ml) expects client-initiated requests
@@ -15,7 +14,6 @@ import {
 } from '@codemirror/view'
 import { StateField, StateEffect, RangeSetBuilder, type Extension } from '@codemirror/state'
 import { signal } from '@preact/signals'
-import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import { normalizeIdeContextFilePath } from './ide-state'
 import {
   DEFAULT_MASC_ORIGIN,
@@ -29,11 +27,12 @@ import { DEFAULT_LANGUAGE_ID } from './ide-language'
 // ── Types ─────────────────────────────────────────────────────────
 
 /**
- * Which codebase this editor's LSP connection is looking at.
+ * Which workspace this editor's LSP connection is looking at.
  *
- * `codebase` addresses the optional MASC overlay store. `repoId`/`keeper`
- * independently select the workspace tree. A connection without a codebase
- * gets language-server passthrough with no guessed MASC overlay.
+ * `codebase` declares the IDE scope, which fixes the tree the connection's
+ * document paths are relative to. `repoId`/`keeper` select that tree
+ * independently. Without a codebase the server takes the tree from the
+ * client's `rootUri` instead.
  */
 export interface LspScope {
   readonly repoId: string | null
@@ -82,10 +81,6 @@ export interface LspCodeLens {
     command: string
     arguments?: unknown[]
   }
-  data?: {
-    keeper_id?: string
-    annotation_id?: string
-  }
 }
 
 export interface LspInlayHint {
@@ -120,8 +115,8 @@ export const lspDiagnosticSnapshot = signal<ReadonlyMap<string, ReadonlyArray<Ls
 export interface LspLanguageStatus {
   readonly lang: string
   readonly connected: boolean
-  readonly overlay_only: boolean
   readonly command: string | null
+  /** Why the language has no server, when it is not connected. */
   readonly last_error: string | null
 }
 
@@ -134,20 +129,6 @@ export const lspStatusSnapshot = signal<LspStatusSnapshot>(EMPTY_LSP_STATUS_SNAP
 
 const LSP_TERMINAL_CLOSE_CODES = new Set([1008, 4401, 4403])
 
-export type SelectedAnnotation = Pick<
-  IdeAnnotation,
-  | 'id'
-  | 'keeper_id'
-  | 'kind'
-  | 'content'
-  | 'goal_id'
-  | 'task_id'
-  | 'references'
-  | 'file_path'
-  | 'line_start'
-  | 'line_end'
->
-
 // ── State Effects ────────────────────────────────────────────────
 
 /** Debounce window for LSP refresh + hover triggers (milliseconds).
@@ -158,7 +139,6 @@ const LSP_DEBOUNCE_MS = 300
 const setCodeLenses = StateEffect.define<ReadonlyMap<number, LspCodeLens[]>>()
 const setInlayHints = StateEffect.define<ReadonlyMap<number, LspInlayHint[]>>()
 const setDiagnostics = StateEffect.define<ReadonlyMap<number, LspDiagnostic[]>>()
-const setSelectedAnnotation = StateEffect.define<SelectedAnnotation | null>()
 
 // ── State Fields ─────────────────────────────────────────────────
 
@@ -192,16 +172,6 @@ const diagnosticField = StateField.define<ReadonlyMap<number, LspDiagnostic[]>>(
   },
 })
 
-const selectedAnnotationField = StateField.define<SelectedAnnotation | null>({
-  create() { return null },
-  update(state, tr) {
-    for (const eff of tr.effects) {
-      if (eff.is(setSelectedAnnotation)) return eff.value
-    }
-    return state
-  },
-})
-
 // ── CodeLens Gutter ──────────────────────────────────────────────
 
 class CodeLensMarker extends GutterMarker {
@@ -220,17 +190,6 @@ class CodeLensMarker extends GutterMarker {
         'display:inline-flex;align-items:center;gap:4px;padding:2px 6px;' +
         'margin:2px 0;font-size:11px;color:var(--color-fg-muted);' +
         'background:var(--color-bg-muted);border-radius:4px;cursor:pointer;user-select:none'
-      if (lens.command?.command === 'masc.showAnnotation' && lens.command.arguments) {
-        el.addEventListener('click', (e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          const detail = lens.command!.arguments![0] as SelectedAnnotation
-          el.dispatchEvent(new CustomEvent('masc-annotation-select', {
-            bubbles: true,
-            detail,
-          }))
-        })
-      }
       container.appendChild(el)
     }
     return container
@@ -857,16 +816,14 @@ export function parseLspStatusSnapshot(value: unknown): LspStatusSnapshot | null
 
 function parseLspLanguageStatus(value: unknown): LspLanguageStatus | null {
   if (!isRecord(value)) return null
-  const { lang, connected, overlay_only, command, last_error } = value
+  const { lang, connected, command, last_error } = value
   if (typeof lang !== 'string') return null
   if (typeof connected !== 'boolean') return null
-  if (typeof overlay_only !== 'boolean') return null
   if (!isStringOrNull(command)) return null
   if (!isStringOrNull(last_error)) return null
   return {
     lang,
     connected,
-    overlay_only,
     command,
     last_error,
   }
@@ -972,7 +929,6 @@ const lspViewPlugin = ViewPlugin.fromClass(
     private conn: LspConnection
     private filePath: string
     private refreshTimer: ReturnType<typeof setTimeout> | null = null
-    private onAnnotationSelect: ((e: Event) => void) | null = null
     private hoverTimer: ReturnType<typeof setTimeout> | null = null
     private tooltip: HTMLDivElement | null = null
     private hoverClientX = 0
@@ -1007,11 +963,6 @@ const lspViewPlugin = ViewPlugin.fromClass(
         },
       )
       this.conn.connect()
-      this.onAnnotationSelect = (e: Event) => {
-        const detail = (e as CustomEvent).detail as SelectedAnnotation
-        this.dispatch(setSelectedAnnotation.of(detail))
-      }
-      this.view.dom.addEventListener('masc-annotation-select', this.onAnnotationSelect)
       this.boundHoverMove = (e) => this.onHoverMove(e)
       this.boundHoverLeave = () => this.onHoverLeave()
       this.view.dom.addEventListener('mousemove', this.boundHoverMove)
@@ -1139,9 +1090,6 @@ const lspViewPlugin = ViewPlugin.fromClass(
       if (this.refreshTimer) clearTimeout(this.refreshTimer)
       if (this.hoverTimer) clearTimeout(this.hoverTimer)
       this.hideTooltip()
-      if (this.onAnnotationSelect) {
-        this.view.dom.removeEventListener('masc-annotation-select', this.onAnnotationSelect)
-      }
       if (this.boundHoverMove) this.view.dom.removeEventListener('mousemove', this.boundHoverMove)
       if (this.boundHoverLeave) this.view.dom.removeEventListener('mouseleave', this.boundHoverLeave)
       this.conn.notifyDidClose(this.filePath)
@@ -1169,7 +1117,6 @@ export function lspExtension(opts: LspExtensionOpts): Extension {
     codeLensField,
     inlayHintField,
     diagnosticField,
-    selectedAnnotationField,
     codeLensGutter,
     diagnosticGutter,
     inlayHintTheme,
@@ -1181,12 +1128,4 @@ export function lspExtension(opts: LspExtensionOpts): Extension {
 
 export function updateLspFilePath(view: EditorView, filePath: string): void {
   view.dispatch({ effects: [setLspConfig.of({ filePath })] })
-}
-
-export function getSelectedAnnotation(view: EditorView): SelectedAnnotation | null {
-  return view.state.field(selectedAnnotationField)
-}
-
-export function clearSelectedAnnotation(view: EditorView): void {
-  view.dispatch({ effects: [setSelectedAnnotation.of(null)] })
 }

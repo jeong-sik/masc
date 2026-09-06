@@ -526,3 +526,208 @@ pool 도메인의 긴 작업은 이 창에서 최대 475 ms 다. 무거운 창�
 | `posix_spawn` 스텁 | masc 소유 C 스텁으로 `posix_spawn(2)` 를 부르는 process backend. macOS 의 `posix_spawn` 은 시스템 콜이라 atfork 핸들러와 zone 잠금이 없다 | C 스텁·fd 상속·cwd·env 처리·취소 계약을 새로 만듦 |
 | 스폰 보조 프로세스 | 힙이 작은 보조 프로세스가 스폰만 맡고 파이프로 fd 를 넘김 | 프로토콜·수명 관리·fd 전달 |
 | 턴당 스폰 축소 | 같은 턴에서 반복되는 `git`·셸 호출을 묶음 | 도구 계약 변경 |
+
+#### P4h-4 라이브 (pid 27910, 커밋 f91917f5e2 = P4h-0~4, 16:23:41Z 기동)
+
+두 창을 잡았다. 부팅 직후 창(16:26:39Z, ready+3분)은 첫 턴들이 몰리는 때이고, 표준 창(16:28:10Z, ready+4.5분)은 호스트 부하 평균이 140 이던 때다(agy 97%, masc 89%, conmon 83%, fseventsd 78%, watchman 35%).
+
+| 항목 | P4h-1(무거운 창) | P4h-0~3(깨끗한 창) | P4h-4 부팅 직후 | P4h-4 표준(호스트 과부하) |
+|---|---|---|---|---|
+| 하네스 lag p99 / max | 234.7 / 848 ms | 15.8 / 37.4 ms | **31.0 / 39.9 ms** | 66.5 / 147.8 ms |
+| main 도메인 점유 | 20.2% | 6.7% | 14.4% | 28.0% |
+| main 의 ≥10 / ≥50 / ≥100 ms 실행 | 233 / 66 / 24 | 106 / 11 / 0 | 218 / 38 / **0** | 428 / 114 / 17 |
+| main 의 최대 실행 | 512 ms | 74 ms | **87 ms** | 219 ms |
+| 할당 / STW minor / major | 106 MB/s / 107 / 5.9 | 162 / 197 / 6.0 | 193 / 173 / 6.0 | 198 / 165 / 5.9 |
+| 샘플의 `Re.Compile` | 3,559 / 10,034 busy | — | **126** / 2,071 | 278 / 3,538 |
+
+부팅 직후 창이 P4h-4 의 판정이다. 같은 부류의 창(첫 턴들, 점유 14~20%)에서 정규식 컴파일이 3,559 에서 126 샘플로 줄고, 100 ms 를 넘는 실행이 24 에서 0 이 됐다.
+
+표준 창의 17회는 코드 부류로 읽을 수 없다. GC 추적의 `stw_handler` p99 72 ms·max 136 ms, `minor_leave_barrier` max 120 ms 는 OS 가 도메인을 선점해 STW 장벽에 늦게 도착한 것이고, 그 대기가 main 의 실행 안에 GC 시간으로 잡힌다. 호스트가 과포화되면 15 도메인 프로세스의 STW 는 가장 늦은 도메인을 기다린다. 이건 코드가 아니라 호스트의 문제다.
+
+두 창 모두에서 main 의 10 ms 이상 실행 중 가장 큰 묶음은 `openat -> switch` 다(부팅 직후 131회 5,864 ms, 표준 82회 5,638 ms, 최대 87·178 ms). 이 부류는 P4g 이후 모든 창에 있었고 정체는 다음과 같다.
+
+#### `openat -> switch` 의 정체 — 턴마다 읽는 35 MB 체크포인트 (P4h-5, #33453)
+
+`Fs_compat.load_file` 의 Eio 경로는 `Eio.Path.load` 다. `with_open_in`(worker 스레드의 `openat`, 그래서 재개 사유가 `openat`) 안에서 파일을 fiber 위에서 끝까지 복사하고 `Switch.run` 이 닫히며 끝난다(종료 사유 `switch`). keeper 의 정본 체크포인트 `traces/<trace>/<trace>.json` 은 13~35 MB 이고 턴마다 이 경로로 읽혔다. 디코드는 이미 pool 에 있었지만 바이트 복사는 아니었다. 같은 디렉터리의 history 스냅샷 `agent-core-snapshot-*.json` 은 한 시간에 117개·1,350 MB 가 쓰였다. 쓰기는 `Keeper_fs.save_bytes_durable_atomic_core` 가 이미 `Eio_guard.run_in_systhread` 안에서 한다.
+
+P4h-5 는 두 읽기(정본·history)를 `Fs_compat.load_owned_regular_file ~ownership_root:(dirname session_dir)` 로 바꾼다. 쓰는 쪽과 같은 소유 경계이고, Eio 파일시스템이 있으면 systhread 에서 읽는다. 심볼릭 링크와 바뀐 부모 체인은 `Io_error` 로 거절한다(전에는 따라갔다). 더 깊은 고침은 체크포인트 크기 자체다 — 35 MB 를 턴마다 읽고 쓰는 구조(§8.6 의 P4c, exact-lane 본문을 blob 참조로).
+
+#### P4h-5 라이브의 부팅 폭풍과 Instruments 가 보여준 것 (pid 79601, 17:09:28Z 기동)
+
+P4h-5(#33453) 라이브의 첫 두 창은 지금까지 가장 무거웠다. ready+3분: 하네스 p99 5,877 ms·max 14,834 ms, main 점유 57.8%, ≥100 ms 실행 212회, `openat -> switch` 198회·34,069 ms/90초. ready+4.5분: p99 192 ms·max 2,894 ms, 점유 42.4%, ≥100 ms 120회. 호스트 부하는 16~44 로 낮았다. 이 부팅에는 antigravity official client 를 쓰는 keeper 둘(lane-smith, jazz-developer)이 활발했고, 그 외부 CLI 가 12분에 파일 636개를 썼다. 파일 churn 은 자식 프로세스의 것이다.
+
+`openat -> switch` 의 정체는 앞 절보다 넓다. P4h-5 의 체크포인트 읽기는 systhread 로 갔고(샘플에서 `load_owned_regular_file` 0), main 의 `readv`·`writev` 는 213·384 샘플뿐이다. 이 부류는 "Eio 로 파일을 연 뒤 fiber 에서 하는 계산"이고 본체는 JSON 파싱이다(`Yojson` 렉서 2,198 샘플).
+
+`sample` 은 프레임 포인터로 되감기 때문에 OCaml fiber 스택의 호출자를 못 본다. Instruments 의 Time Profiler(`xcrun xctrace record --template 'Time Profiler' --attach <pid> --time-limit 30s`, `xctrace export --xpath '/trace-toc/run[@number="1"]/data/table[@schema="time-profile"]'`) 도 같은 한계를 보였지만 main 스레드의 leaf 는 분명하다(30초, running 4,930 샘플).
+
+| leaf | 샘플 | 뜻 |
+|---|---|---|
+| `_xzm_foreach_lock` | 993 (20%) | `fork()` 의 부모 쪽 malloc zone 잠금 — 프로세스 스폰 |
+| `__open_nocancel` | 270 | fiber 위 Stdlib `open` |
+| `md5_do_chunk` | 226 | `Digest.string` |
+| `caml_lex_engine` | 226 | Yojson 파싱 |
+| `do_some_marking` | 132 | major GC 마킹 |
+| `Yojson.write_string_body` | 126 | JSON 직렬화 |
+| `Llm_provider.Secret_redactor` | 159 | 제공자 쪽 비밀 스캔(문자 단위) |
+
+#### P4i — 프로세스 스폰을 `posix_spawn(2)` 로 (#33483)
+
+앞 절의 세 방향 중 첫 번째다. eio 의 프로세스 층은 작다: `lib_eio_posix/process.ml` 52줄이 `Eio_unix.Process.Make_mgr` 위에 `spawn_unix`(fork 액션 셋)를 얹고, `Low_level.Process` 가 pid·exit promise·`Eio_unix.Process.sigchld`(공개) 로 `waitpid` 한다. `Posix_spawn_process_mgr` 는 같은 모양으로 `spawn_unix` 만 C 스텁의 `posix_spawn` 으로 바꾼다. cwd 는 `posix_spawn_file_actions_addchdir_np`(glibc 2.29+·macOS 10.15+ 공통 표기), fd 맵은 `adddup2`(같은 번호는 macOS 의 `addinherit_np`), 나머지 fd 는 `POSIX_SPAWN_CLOEXEC_DEFAULT` 로 닫힘, 시그널 마스크는 비움, 호출 동안 런타임 락 해제. 서버 부트스트랩만 이 매니저를 쓴다.
+
+CI 는 C 스텁을 컴파일하지 않고 테스트도 돌리지 않으므로 같은 소스를 레포 밖 dune 프로젝트로 빌드해 확인했다. 패리티 테스트(stdout 캡처·종료 코드·cwd·env·없는 실행 파일·switch 해제 시 kill)는 두 매니저 모두 통과했다. `tools/spawn_bench`(라이브 힙 1,515 MB, 20회):
+
+| 매니저 | p50 | p90 | max |
+|---|---|---|---|
+| fork (eio_posix) | 43.7 ms | 47.3 ms | 75.6 ms |
+| posix_spawn | 1.2 ms | 1.3 ms | 1.4 ms |
+
+라이브 서버의 fork 는 malloc 상태가 더 커서 약 141 ms 였다. 판정은 재기동 뒤 샘플에서 `caml_eio_posix_spawn`·`_xzm_foreach_lock` 이 사라지는지다.
+
+#### 정정 — `Re.Compile` 은 컴파일이 아니라 매칭이다
+
+ocaml-re 의 `Re__Compile.loop` 은 `lib/compile.ml` 의 스캔 루프이고 `make_match_str` 은 매치 결과를 만든다. 앞 절들에서 "정규식 컴파일" 이라 부른 샘플은 정규식 *매칭* 시간이다. P4h-4 가 줄인 것은 스냅샷을 새로 컴파일할 때마다 비어 있는 DFA 를 첫 매칭에서 다시 채우던 몫이고, 그 뒤에도 남은 것은 매칭 자체다.
+
+#### 릴리즈 바이너리 창과 P4k (pid 3793, `masc start`, 커밋 a0518e4f26 = v0.32.0 컷, P4i·P4j 미포함)
+
+00:06Z(ready+6분, 호스트 부하 117): 하네스 p99 432 ms·max 1,481 ms, main 점유 33.5%, ≥100 ms 실행 57회, 최대 691 ms. 샘플(main busy 53%)의 상위는 `Re.Compile.loop` + `make_match_str` 2,903(busy 의 19%), `Hashtbl.key_index` 1,120, `Yojson` 렉서 1,073 이다. 귀속되는 프레임은 `Secret_patterns.redact_text` ← `Keeper_chat_store.redact_block`/`redact_message` 이고, `Keeper_chat_store.load_all` 은 keeper 가 깰 때마다(`Keeper_world_observation_message_scope`) 기록 전체 — 라이브 root 에서 19 파일, 최대 3,520 KB·3,705 줄 — 를 읽어 줄마다 파싱하고 메시지마다 N+5 개 패턴으로 `Re.replace_string` 을 돈다. 기록은 append-only 다(쓰는 곳은 private JSONL 잠금 아래의 append 하나).
+
+P4k #33555 는 `load_all` 을 증분으로 바꾼다. path 별 캐시에 파싱·redact 한 메시지와 마지막 파싱 줄 끝 오프셋을 두고, 파일의 device·inode 가 같고 크기가 그 오프셋 아래로 줄지 않았고 redaction 스냅샷이 같으면(`Keeper_secret_redaction` 의 메모가 같은 값을 돌려준다) `Fs_compat.read_private_jsonl_slice_locked_result ~from` 으로 새 바이트만 읽어 pool 에서 파싱·redact 해 덧붙인다. 아니면, 그리고 torn tail 이면, `read_private_jsonl_rows_locked_result` 로 전체를 다시 읽는다. 트레이드오프는 파싱본이 힙에 남는 것이다. 값이 크면 소비자(`pending_messages_of_messages`, fleet 행)를 "최근 창" 으로 바꾸는 쪽이 다음이다.
+
+#### P4i·P4j·P4k 라이브 (pid 7905, 커밋 4b78a909cf, 04:54:12Z 기동, 호스트 부하 60~80)
+
+| 항목 | 기준선 | P4h-0~3 깨끗한 창 | 릴리즈 컷(P4h 까지) | P4i·j·k 부팅 직후 | P4i·j·k 표준 |
+|---|---|---|---|---|---|
+| 하네스 lag p99 / max | 153 / 552 ms | 15.8 / 37.4 ms | 432 / 1,481 ms | 118 / 257 ms | **20.3 / 86.4 ms** |
+| main 도메인 점유 | 12.6% | 6.7% | 33.5% | 18.3% | 10.8% |
+| main 의 ≥10 / ≥50 / ≥100 ms 실행 | 109 / 37 / 19 | 106 / 11 / 0 | 384 / 164 / 57 | 211 / 46 / 19 | 132 / 17 / 9 |
+| main 의 최대 실행 | 954 ms | 74 ms | 691 ms | 226 ms | 249 ms |
+| `openat -> switch` 묶음 | — | 41회 / 1.7 s | 73회 / 6.3 s | 상위 6 밖 | **2회 / 0.3 s** |
+| 샘플의 `Re` 매칭 | — | — | 2,903 | 807 | **71** |
+| 샘플의 spawn `fork` | 250~2,124 | — | 954 | 상위 밖 | 상위 밖 |
+| 할당 | 617 MB/s | 162 | 193 | 188 | 152 |
+
+부팅 직후 창과 표준 창 모두에서 세 조각이 겨냥한 부류가 사라졌다. `openat -> switch`(체크포인트·backlog·채팅 기록 읽기 뒤의 계산)는 150회에서 2회로, 정규식 매칭은 2,903 에서 71 샘플로, 스폰의 `fork` 잠금은 샘플 상위에서 보이지 않는다. 표준 창의 p99 는 20 ms 이고, 부팅 직후의 118 ms 는 첫 턴들이 몰리는 부하(점유 18%, 할당 188 MB/s)에서의 값이다.
+
+남은 100 ms 넘는 실행은 표준 창에 9회이고 부류가 흩어져 있다: `-> fstat` 22회(최대 106 ms), `fs-compat-atomic-commit -> ` 13회(저장이 끝난 뒤 이어지는 계산, 최대 67 ms; 부팅 직후엔 226 ms), `fstat -> fstat` 11회(171 ms), `(first run) -> Promise.await` 10회(pool 작업을 기다리기 전의 계산, 137 ms), `Promise.await -> Promise.await` 249 ms 한 건(GC 72 ms 포함). 부팅 직후 샘플의 `Hashtbl.key_index` 858(busy 의 9%)은 호출자가 잘려 귀속되지 않았다. `String.split_on_char` 는 대시보드의 `Keeper_memory_os_current.read_journal_tail_indexed`(128) 와 `Prompt_registry` 의 본문·frontmatter 파싱(56) 이다.
+
+#### P4l — fiber 에 이름을 붙이니 남은 부류가 읽혔다 (#33587), 그리고 P4m (#33589)
+
+귀속이 안 되던 이유는 이름이 없어서였다. Eio 는 `Switch.run ~name` 으로 연 cancellation context 에만 `eio.name` 이벤트를 남기고 fiber 에는 이름을 붙이지 않는데, masc 는 이름 있는 switch 를 한 곳도 쓰지 않았다. 스택 샘플러(`sample`, Instruments)는 fiber 스택 경계를 못 넘어 `Hashtbl.key_index` 858 샘플이 `Fun.protect <- caml_startup` 바로 아래로만 보였다. P4l 은 서버의 root-level fiber 8개, HTTP 연결(listener tag), proactive refresh 루프, OTel store writer, keeper lane(`keeper <name>`)과 board-attention worker 가 몸체 첫 줄에서 이름 있는 switch 를 열게 하고, 추적기가 "fiber 가 가장 최근에 연 이름 있는 switch" 를 라벨로 쓰며 domain 0 만의 상위 15 실행과 라벨·turn 깊이별 묶음 표를 찍게 한다.
+
+추적기만 바꿔 현재 서버(pid 7905, P4i·j·k)에 붙이자 masc 의 이름이 없어도 답이 나왔다. Eio 자신이 내부 switch 에 이름을 붙이기 때문이다.
+
+| 라벨 (turn 깊이) | 10 ms 이상 실행 | 합계 | 최대 |
+|---|---|---|---|
+| `with_open_out` (1) | 15 | 506 ms | 125 ms |
+| `with_open_in` (1) | 12 | 389 ms | 53 ms |
+| `with_open_out` (0) | 10 | 327 ms | 120 ms |
+| `with_open_out` (2) | 3 | 234 ms | 132 ms |
+| `with_open_in` (0) | 6 | 129 ms | 30 ms |
+| `Buf_write.with_flow` (1) | 2 | 75 ms | 47 ms |
+
+`with_open_out` 은 `Eio.Path.save` = `Fs_compat.save_file`, `with_open_in` 은 `Eio.Path.load` = `Fs_compat.load_file` 이다. eio_posix 는 일반 파일의 `readv`·`writev` 를 fiber 위에서 그대로 실행한다(일반 파일은 "준비 안 됨" 을 보고하지 않으므로 `await_writable` 을 거치지 않는다). 따라서 2 MB 파일 하나를 저장하는 데 120~130 ms, 큰 파일 하나를 읽는 데 40~50 ms 가 fiber 에서 흘렀고, 이것이 P4g 이후 모든 창에 있던 `openat -> switch` 부류의 마지막 정체다. P4h-5 는 그중 체크포인트 읽기 하나만 옮긴 것이었다.
+
+P4m 은 `Fs_compat.load_file`·`save_file`·`append_file` 의 Eio 분기를 Unix 구현의 systhread 실행으로 바꾼다(§7.2 Phase 2 의 모양). 호출자 12·14·16곳과 원자 쓰기 약 30곳이 한 번에 fiber 밖으로 나간다. 원자 쓰기는 blocking writer 를 직접 받아 임시 파일 생성부터 부모 fsync 까지를 작업 하나로 돈다. append 는 Eio 안에서도 path 별 mutex 로 직렬화된다. 판정은 재기동 뒤 라벨 표에서 `with_open_out`·`with_open_in` 이 사라지는지다.
+
+#### P4l·P4m 라이브 (pid 84548, 커밋 632c4fe4d3, 06:18:16Z 기동, 호스트 부하 20~37)
+
+| 항목 | 기준선 | P4i·j·k 표준 | P4l·m ready+4.6분 | P4l·m ready+7분 |
+|---|---|---|---|---|
+| 하네스 lag p99 / max | 153 / 552 ms | 20.3 / 86.4 ms | **5.9 / 347 ms** | — |
+| main 도메인 점유 | 12.6% | 10.8% | 4.2% | 4.5% |
+| main 의 ≥10 / ≥50 / ≥100 ms 실행 | 109 / 37 / 19 | 132 / 17 / 9 | 34 / 4 / 1 | 32 / **0** / **0** |
+| main 의 최대 실행 | 954 ms | 249 ms | 385 ms | **48 ms** |
+| 라벨 `with_open_out` | — | 28회 / 1,067 ms | **0** | 0 |
+| 라벨 `with_open_in` | — | 18회 / 518 ms | 6회 / 131 ms | 6회 / 136 ms |
+| 할당 | 617 MB/s | 152 | 208 | — |
+
+`Eio.Path.save` 를 fiber 에서 돌리던 부류는 사라졌다. `with_open_in` 6회는 P4m 을 거치지 않는 직접 `Eio.Path.load` 호출(`Backend.get`, `Log`)이고 최대 28 ms 다. 첫 창의 385 ms 한 건은 append 뒤 순수 계산(GC 17 ms)이었고, 두 번째 창에는 50 ms 를 넘는 실행이 없다.
+
+라벨은 그러나 masc 의 이름이 아니라 Eio 내부 switch 이름(`both`, `filter_map`, `Buf_write.with_flow`)만 보여 주었다. Eio 는 switch 가 열릴 때 이름을 링에 적고 링은 몇 분 안에 덮이므로, fiber 시작 때 한 번 연 P4l 의 이름은 뒤늦게 붙는 추적기에 보이지 않는다. P4n(#33606)은 유지보수 루프는 반복마다, keeper 는 cycle 마다 이름을 열게 하고, 추적기는 창 안에서 처음 연 이름을 라벨로 쓰며 뒤의 Eio 내부 이름은 `첫이름 > 최근이름` 으로 덧붙인다.
+
+#### P4n 라이브 — 이름이 남은 실행을 keeper cycle 로 가리켰다 (pid 30093, 커밋 97e09172b4, 06:54:45Z 기동, 07:02Z ready+7분, 호스트 부하 10)
+
+| 항목 | P4l·m ready+7분 | P4n ready+7분 |
+|---|---|---|
+| 하네스 lag p99 / max | — / — | 17.0 / 315 ms |
+| main 도메인 점유 | 4.5% | 7.5% |
+| main 의 ≥10 / ≥50 / ≥100 ms 실행 | 32 / 0 / 0 | 93 / 8 / 6 |
+| main 의 최대 실행 | 48 ms | 363 ms |
+
+두 창의 차이는 부하다(이 창엔 keeper 다섯이 턴 중). 이번엔 라벨이 읽힌다.
+
+| 라벨 (열린 turn 수) | 10 ms 이상 | 합계 | 최대 | 재개 → 중단 |
+|---|---|---|---|---|
+| `keeper rondo cycle > both` | 5 | 504 ms | 363 ms | `fs-compat-append-file → fs-compat-load-file` |
+| `keeper code-reviewer cycle > with_open_in` | 7 | 371 ms | 143 ms | 같음, 그리고 `openat → switch` 102·58 ms |
+| `keeper edgar.a.poe cycle` | 4 | 254 ms | 191 ms | 같음 |
+| `keeper lane-smith cycle > both` | 5 | 243 ms | 178 ms | 같음 |
+| `keeper pr-updater cycle > both` | 5 | 239 ms | 170 ms | 같음 |
+| `execution refresh` (대시보드) | 1 | 56 ms | 56 ms | `Promise.await → load` |
+| `Buf_write.with_flow` (HTTP 응답 fiber) | 13 | 253 ms | 45 ms | `atomic-replace →` |
+
+남은 긴 실행은 전부 keeper cycle 안, **append 가 끝난 뒤 다음 load 를 부르기 전의 순수 계산**이다(GC 는 4~29 ms). cycle 의 단계 집계(metrics 저장소 행의 `presence/snapshot/board/turn`)는 이 시간을 `turn`(50~330초, provider 대기 포함)으로만 말한다. board 게시물은 메모리 Hashtbl 이라 파싱이 아니다. `code-reviewer` 의 `openat → switch` 둘은 `Fs_compat` 를 거치지 않는 직접 `Eio.Path.load` 다. 대시보드 쪽은 `[keepers_json:<keeper>] sub-op audit=205ms trust=100ms total=346ms` 로그가 있는데, HTTP fiber 의 일이라 이 RFC 의 범위 밖이고 별도 항목이다.
+
+P4o(#33623)는 turn 의 단계에 이름을 붙인다: `turn:prompt`(프롬프트 조립), `turn:provider`(provider 시도, 스트리밍·도구 루프 포함), `tool <name>`(도구 호출마다), `turn:post`(post-turn). `Eio_guard.with_named_switch` 는 fiber 안에서만 switch 를 열고 밖에서는 그대로 실행한다. 다음 창의 라벨 `keeper <name> cycle > 단계` 가 140~360 ms 의 주인을 가른다.
+
+#### P4o 라이브 — 단계와 도구 이름이 붙었다 (pid 65328, 커밋 0a002722e2, 09:44:38Z 기동)
+
+두 창을 잡았다. 첫 창(09:47Z, ready+3분)은 호스트 부하 69~110 의 부팅 폭풍이고, 둘째 창(09:49Z, ready+4.5분)은 부하가 내려간 뒤다.
+
+부팅 폭풍 창: 하네스 p99 755 ms·max 1,456 ms, main 점유 68.4%, ≥100 ms 실행 86. 라벨 상위는 이렇다.
+
+| 라벨 | 10 ms 이상 | 합계 | 최대 |
+|---|---|---|---|
+| `-` (이름 없는 boot fiber 28006) | 11 | 10,464 ms | 7,672 ms |
+| `keeper rondo cycle > turn:provider` | 11 | 2,977 ms | 2,275 ms |
+| `keeper polisher cycle > turn:provider` | 11 | 2,601 ms | 1,370 ms |
+| `keeper pr-updater cycle > turn:provider` | 11 | 1,956 ms | 694 ms |
+| `Buf_write.with_flow` | 38 | 1,810 ms | 174 ms |
+| `Process.parse_out > spawn_unix` | 10 | 1,506 ms | 615 ms |
+
+keeper 쪽 긴 실행은 전부 `turn:provider` 안이고 여전히 `append-file → load-file` 사이의 계산이다. 가장 큰 것은 라벨이 없는 fiber 28006 인데, 부팅 때 만들어져 이름 있는 switch 를 연 적이 없다.
+
+부하가 내려간 창: 하네스 p99 378 ms·max 2,486 ms(정리 중), main 점유 13.6%, ≥100 ms 실행 9. 여기서 1위가 도구다.
+
+| 라벨 | 10 ms 이상 | 합계 | 최대 |
+|---|---|---|---|
+| `tool masc_web_fetch > with_open_in` | 3 | 1,524 ms | **626 ms** |
+| `filter_map > Buf_write.with_flow` | 13 | 796 ms | 458 ms |
+| `keeper rondo cycle > turn:provider` | 5 | 640 ms | 490 ms |
+| `tool tool_execute > both` | 8 | 330 ms | 204 ms |
+
+스택 샘플도 같은 곳을 짚었다: `Tool_misc_web_fetch.handle`/`fetch_impl` 613, `extract_description` 260, `Markup.Encoding.run` 237. 세 실행 모두 `Promise.await`(HTTP 응답)에서 재개해 `fs-compat-atomic-replace`(본문 오프로드)로 끝난다. 그 사이가 문서 파싱이다.
+
+#### P4p — 받아온 문서의 파싱을 pool 로 (#33658)
+
+제목 추출, 설명 추출, 마크다운 렌더는 응답 본문에 대해 순수하므로 셋을 pool 작업 하나로 돌린다. `truncate_text` 는 전체 본문을 파일로 내보내므로 fiber 에 남는다. 대시보드 쪽(`Dashboard_snapshot` 루프, shell payload)은 이미 pool 로 내려가 있고, `keepers_json` 의 `Eio.Fiber.all` 은 그 pool 워커 도메인 위에서 돈다.
+
+남은 표적 넷: `turn:provider` 안의 append→load 계산(더 세분화가 필요하다), 이름 없는 boot fiber 28006, `tool tool_execute`, 그리고 HTTP 응답 fiber 의 `filter_map > Buf_write.with_flow`.
+
+#### P4p 를 넣고 잰 창 (09-06 19:31 KST, 부하 57–76)
+
+서버는 19:25 KST 에 `37cc8b8b` 로 떴고 그 안에 #33658 이 들어 있다. 90 초 창: main 점유 22.9%, ≥100 ms 실행 21, 최대 487.9 ms. 하네스는 p99 156.5 ms·max 439.7 ms.
+
+`tool masc_web_fetch` 는 라벨 표에서 **사라졌다**. 직전 창에서 1위였고(3회 1,524 ms·최대 626 ms) 이번에는 한 줄도 없다.
+
+| 라벨 | 10 ms 이상 | 합계 | 최대 |
+|---|---|---|---|
+| `Buf_write.with_flow > spawn_unix` | 29 | 2,076 ms | 139 ms |
+| `turn:post > with_open_in` | 30 | 1,009 ms | 205 ms |
+| `keeper rondo cycle > turn:provider` | 4 | 583 ms | **488 ms** |
+| `Buf_write.with_flow > with_open_in` | 14 | 664 ms | 238 ms |
+
+사유별로 묶으면 1위가 바뀌지 않는다.
+
+| 재개 → 중단 | 10 ms 이상 | 합계 | 최대 |
+|---|---|---|---|
+| `openat → switch` | 33 | 2,473 ms | 139 ms |
+| `fs-compat-append-file → fs-compat-load-file` | 11 | **2,076 ms** | 488 ms |
+| `fs-compat-atomic-replace → (없음)` | 25 | 1,029 ms | 238 ms |
+| `fs-compat-load-file → switch` | 49 | 864 ms | 97 ms |
+
+11 개 실행이 전부 `keeper <이름> cycle > turn:provider` 안이고, 다섯 keeper(rondo·polisher·edgar.a.poe·pr-updater·geek-scout)가 같은 모양을 낸다. 어떤 파일을 붙이고 어떤 파일을 읽는지는 라벨에 없다.
+
+#### P4q — 파일 I/O 라벨이 파일 이름을 말하게 (#33673)
+
+`Eio_unix.run_in_systhread ~label` 은 라벨을 링에 fiber 의 중단 사유로 적는다(eio 1.3 `lib_eio/unix/thread_pool.ml:123`). 그래서 추적기가 읽는 "재개 → 중단" 은 곧 이 라벨이다. `fs_compat` 의 load/save/append 와 `atomic_write` 의 replace 에 `Filename.basename` 을 붙이면 같은 실행이 `fs-compat-append-file chat.jsonl → fs-compat-load-file memory.json` 으로 읽힌다. turn 안에 switch 를 새로 넣지 않고 호출자를 특정하는 방법이다.

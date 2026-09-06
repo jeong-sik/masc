@@ -74,7 +74,11 @@ let stub_main () =
     in
     write_all Unix.stdout
       (Exec_ssh_protocol.render_probe
-         { name = "masc-exec-shim"; version = string_of_int major ^ ".0.0"; capabilities });
+         { name = "masc-exec-shim"
+           ; version = string_of_int major ^ ".0.0"
+           ; capabilities
+           ; release = None
+           });
     exit 0);
   let header = read_exact Unix.stdin 8 in
   let body_len = Bytes.get_int64_be (Bytes.unsafe_of_string header) 0 |> Int64.to_int in
@@ -403,6 +407,43 @@ let test_the_lane_report_is_what_the_last_dispatch_said () =
 ;;
 
 (* The tool's JSON names the operator action from the failure's class. *)
+(* RFC-0427 B-3. The shim names the release it came from, so the keeper reading
+   its own lane sees whether the endpoint runs this server's shim. A shim from
+   this release asks nothing of anyone; any other answer, including a shim old
+   enough not to name itself, is the operator's to repair. *)
+let test_the_lane_status_names_a_shim_from_another_release () =
+  let report probe =
+    Keeper_tool_lane_status.json_of_report
+      { Keeper_sandbox_remote.lane = "remote_ssh"
+      ; endpoint = "builder"
+      ; probe
+      ; last_dispatch = None
+      }
+  in
+  let field name json = Yojson.Safe.Util.member name json in
+  let answered release =
+    report
+      (Keeper_sandbox_remote.Probe_answered
+         { major = Exec_ssh_protocol.V3; capabilities = []; release })
+  in
+  let same = answered (Some Build_version.current) in
+  check bool "a shim from this release asks nothing" true
+    (field "operator_action" same = `Null);
+  check string "the probe names the shim's release" Build_version.current
+    (Yojson.Safe.Util.to_string (field "shim_release" (field "probe" same)));
+  check string "and the server's own" Build_version.current
+    (Yojson.Safe.Util.to_string (field "server_release" (field "probe" same)));
+  let older = answered (Some "0.1.0") in
+  check bool "another release is the operator's" true
+    (contains "different release"
+       (Yojson.Safe.Util.to_string (field "operator_action" older)));
+  let unstamped = answered None in
+  check bool "so is a shim that does not name itself" true
+    (contains "different release"
+       (Yojson.Safe.Util.to_string (field "operator_action" unstamped)));
+  check bool "and its release reads as null" true
+    (field "shim_release" (field "probe" unstamped) = `Null)
+
 let test_the_lane_status_names_who_acts () =
   let at = 1.0 in
   let report last_dispatch probe =
@@ -416,7 +457,8 @@ let test_the_lane_status_names_who_acts () =
          (Keeper_sandbox_remote.Dispatch_failed
             { at; failure = Transport_failed
             ; detail = "remote_ssh_version_error: trailer carries v=2, this build speaks v3" }))
-      (Keeper_sandbox_remote.Probe_answered { major = Exec_ssh_protocol.V3; capabilities = [] })
+      (Keeper_sandbox_remote.Probe_answered
+         { major = Exec_ssh_protocol.V3; capabilities = []; release = None })
   in
   check string "failure class" "transport_failed"
     (Yojson.Safe.Util.to_string (field "failure" (field "last_dispatch" version_skew)));
@@ -497,6 +539,8 @@ let () =
               test_the_lane_report_is_what_the_last_dispatch_said
           ; test_case "the lane status names who acts" `Quick
               test_the_lane_status_names_who_acts
+          ; test_case "the lane status names a shim from another release" `Quick
+              test_the_lane_status_names_a_shim_from_another_release
           ; test_case "lane error codes" `Quick test_lane_error_codes
           ; test_case "preflight unreachable names the guest" `Quick
               test_preflight_unreachable_names_the_guest

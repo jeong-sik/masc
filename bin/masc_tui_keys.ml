@@ -673,9 +673,6 @@ let footer_hints_memory_facts =
      ]
      @ listing_meta)
 
-let footer_hints_metrics =
-  hints_of_bindings (for_surface Metrics)
-
 (* One section per surface family; the strip's spelling names it. Keepers
    sub-modes collapse into the two sections an operator thinks in. *)
 let help_surfaces : (string * surface) list =

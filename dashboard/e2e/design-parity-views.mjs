@@ -74,7 +74,6 @@ export const VIEWS = [
   // Toggles inside a surface that swap the whole body.
   { id: 'schedule-list', surface: 'schedule', clicks: ['.sch-viewbtn:nth-of-type(2)'] },
   { id: 'approvals-history', surface: 'approvals', clicks: ['.ap-viewbtn:nth-of-type(2)'] },
-  { id: 'ide-annotations', surface: 'ide', clicks: ['.ide-rail-tab:nth-of-type(2)'] },
   { id: 'ide-cursor', surface: 'ide', clicks: ['.ide-rail-tab:nth-of-type(3)'] },
 ]
 

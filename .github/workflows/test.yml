@@ -227,10 +227,15 @@ jobs:
             suite="${suite// /}"
             [ -n "${suite}" ] || continue
             # A suite that is a script under a dune alias rather than an
-            # executable: test/<suite>.py with (alias runtest-<suite>) in
-            # test/dune, the PTY suite being the one. Dune runs the script
-            # as the alias's action, so building the alias is the run.
-            if [ -f "test/${suite}.py" ]; then
+            # executable. Two spellings reach the same place: test/<suite>.py
+            # for a script named after its file, and any name a test/ dune
+            # file declares as (alias runtest-<suite>) — the PTY suite's
+            # per-family lanes are named that way and have no file of their
+            # own. Dune runs the script as the alias's action, so building
+            # the alias is the run.
+            if [ -f "test/${suite}.py" ] \
+              || grep -Eqr "^[[:space:]]*\(alias runtest-${suite}\)[[:space:]]*$" \
+                   test/dune test/stanzas 2>/dev/null; then
               aliases+=("${suite}")
             else
               suites+=("${suite}")

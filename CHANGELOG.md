@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **The shim names the release it came from, and the server says when they
+  differ.** `masc-exec-shim --probe` now answers with a `release` field taken
+  from `dune-project` through a generated module, so no build step has to
+  remember to stamp it. On every probe the server compares that with its own
+  version and logs `remote_shim_outdated` when they differ, or when the shim is
+  old enough not to name itself; the lane keeps running, because the two sides
+  negotiate the protocol major and tolerate one release apart on purpose. The
+  `keeper_lane_status` tool reports `shim_release` beside `server_release`, so a
+  keeper can read it for its own lane. The repair is the existing
+  `masc-exec-ssh-bootstrap --shim`, which the warning names (RFC-0427 B-3).
+
 - **The observation stage actually runs in the box now.** The gate's
   pre-judge observation (RFC-0422) dispatched the keeper's effect-built
   shell IR unchanged: execution reads the dispatch target from the IR, so

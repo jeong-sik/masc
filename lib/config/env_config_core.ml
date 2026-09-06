@@ -590,7 +590,9 @@ let pubsub_max_messages () =
     @category Policies @ops_class operator *)
 let default_jsonl_retention_days = 30
 
+let jsonl_retention_days_env_key = "MASC_JSONL_RETENTION_DAYS"
+
 let jsonl_retention_days () =
-  get_int ~default:default_jsonl_retention_days "MASC_JSONL_RETENTION_DAYS"
+  get_int ~default:default_jsonl_retention_days jsonl_retention_days_env_key
 
 (** {1 Keeper Defaults} *)

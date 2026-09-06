@@ -58,6 +58,18 @@ let auth_entries =
   ]
   @ declared_entries "auth"
 
+let host_pressure_entries =
+  [
+    entry ~default:"(none)" Env_config_core.host_fd_pressure_state_file_env_key
+      "Host fd-pressure state file the poller reads";
+    entry ~default:"false" Env_config_core.host_fd_pressure_poller_disabled_env_key
+      "Disable the host fd-pressure poller";
+    entry ~default:"1" Env_config_core.host_fd_pressure_poll_interval_sec_env_key
+      "Host fd-pressure poll interval (seconds)";
+    entry ~default:"120" Env_config_core.git_fetch_timeout_sec_env_key
+      "Timeout for a git fetch (seconds); floored at 10";
+  ]
+
 let runtime_entries =
   [
     entry ~default:"(auto)" Env_config_core.log_level_env_key "Log level override";
@@ -96,6 +108,12 @@ let storage_entries =
   [
     entry ~default:"1000" "MASC_PUBSUB_MAX_MESSAGES"
       "Max pubsub messages per batch";
+    (* Named through Env_config_core's own constants rather than restated here.
+       Env_setting cannot declare these: it reads through Env_config_core, so a
+       knob that module reads for itself would be a dependency cycle. This is
+       the shape MASC_ADMIN_TOKEN already uses. *)
+    entry ~default:"30" Env_config_core.jsonl_retention_days_env_key
+      "Days of dated JSONL kept before pruning";
   ]
 
 let transport_entries =
@@ -421,6 +439,7 @@ let category_specs () =
       @ message_gc_entries @ internal_timer_entries
       @ sse_entries @ telemetry_entries
       @ tool_entries
+      @ host_pressure_entries
       @ declared_entries "runtime" );
     "rate_limiting", rate_limiting_entries;
     "inference", model_routing_entries @ agent_core_sse_entries @ local_runtime_entries;

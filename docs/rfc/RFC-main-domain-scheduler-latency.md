@@ -592,3 +592,20 @@ ocaml-re 의 `Re__Compile.loop` 은 `lib/compile.ml` 의 스캔 루프이고 `ma
 00:06Z(ready+6분, 호스트 부하 117): 하네스 p99 432 ms·max 1,481 ms, main 점유 33.5%, ≥100 ms 실행 57회, 최대 691 ms. 샘플(main busy 53%)의 상위는 `Re.Compile.loop` + `make_match_str` 2,903(busy 의 19%), `Hashtbl.key_index` 1,120, `Yojson` 렉서 1,073 이다. 귀속되는 프레임은 `Secret_patterns.redact_text` ← `Keeper_chat_store.redact_block`/`redact_message` 이고, `Keeper_chat_store.load_all` 은 keeper 가 깰 때마다(`Keeper_world_observation_message_scope`) 기록 전체 — 라이브 root 에서 19 파일, 최대 3,520 KB·3,705 줄 — 를 읽어 줄마다 파싱하고 메시지마다 N+5 개 패턴으로 `Re.replace_string` 을 돈다. 기록은 append-only 다(쓰는 곳은 private JSONL 잠금 아래의 append 하나).
 
 P4k #33555 는 `load_all` 을 증분으로 바꾼다. path 별 캐시에 파싱·redact 한 메시지와 마지막 파싱 줄 끝 오프셋을 두고, 파일의 device·inode 가 같고 크기가 그 오프셋 아래로 줄지 않았고 redaction 스냅샷이 같으면(`Keeper_secret_redaction` 의 메모가 같은 값을 돌려준다) `Fs_compat.read_private_jsonl_slice_locked_result ~from` 으로 새 바이트만 읽어 pool 에서 파싱·redact 해 덧붙인다. 아니면, 그리고 torn tail 이면, `read_private_jsonl_rows_locked_result` 로 전체를 다시 읽는다. 트레이드오프는 파싱본이 힙에 남는 것이다. 값이 크면 소비자(`pending_messages_of_messages`, fleet 행)를 "최근 창" 으로 바꾸는 쪽이 다음이다.
+
+#### P4i·P4j·P4k 라이브 (pid 7905, 커밋 4b78a909cf, 04:54:12Z 기동, 호스트 부하 60~80)
+
+| 항목 | 기준선 | P4h-0~3 깨끗한 창 | 릴리즈 컷(P4h 까지) | P4i·j·k 부팅 직후 | P4i·j·k 표준 |
+|---|---|---|---|---|---|
+| 하네스 lag p99 / max | 153 / 552 ms | 15.8 / 37.4 ms | 432 / 1,481 ms | 118 / 257 ms | **20.3 / 86.4 ms** |
+| main 도메인 점유 | 12.6% | 6.7% | 33.5% | 18.3% | 10.8% |
+| main 의 ≥10 / ≥50 / ≥100 ms 실행 | 109 / 37 / 19 | 106 / 11 / 0 | 384 / 164 / 57 | 211 / 46 / 19 | 132 / 17 / 9 |
+| main 의 최대 실행 | 954 ms | 74 ms | 691 ms | 226 ms | 249 ms |
+| `openat -> switch` 묶음 | — | 41회 / 1.7 s | 73회 / 6.3 s | 상위 6 밖 | **2회 / 0.3 s** |
+| 샘플의 `Re` 매칭 | — | — | 2,903 | 807 | **71** |
+| 샘플의 spawn `fork` | 250~2,124 | — | 954 | 상위 밖 | 상위 밖 |
+| 할당 | 617 MB/s | 162 | 193 | 188 | 152 |
+
+부팅 직후 창과 표준 창 모두에서 세 조각이 겨냥한 부류가 사라졌다. `openat -> switch`(체크포인트·backlog·채팅 기록 읽기 뒤의 계산)는 150회에서 2회로, 정규식 매칭은 2,903 에서 71 샘플로, 스폰의 `fork` 잠금은 샘플 상위에서 보이지 않는다. 표준 창의 p99 는 20 ms 이고, 부팅 직후의 118 ms 는 첫 턴들이 몰리는 부하(점유 18%, 할당 188 MB/s)에서의 값이다.
+
+남은 100 ms 넘는 실행은 표준 창에 9회이고 부류가 흩어져 있다: `-> fstat` 22회(최대 106 ms), `fs-compat-atomic-commit -> ` 13회(저장이 끝난 뒤 이어지는 계산, 최대 67 ms; 부팅 직후엔 226 ms), `fstat -> fstat` 11회(171 ms), `(first run) -> Promise.await` 10회(pool 작업을 기다리기 전의 계산, 137 ms), `Promise.await -> Promise.await` 249 ms 한 건(GC 72 ms 포함). 부팅 직후 샘플의 `Hashtbl.key_index` 858(busy 의 9%)은 호출자가 잘려 귀속되지 않았다. `String.split_on_char` 는 대시보드의 `Keeper_memory_os_current.read_journal_tail_indexed`(128) 와 `Prompt_registry` 의 본문·frontmatter 파싱(56) 이다.

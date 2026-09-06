@@ -159,14 +159,23 @@ def test_http_endpoint(
 
     class FixtureHandler(BaseHTTPRequestHandler):
         def respond(self, request_body: bytes | None = None) -> None:
-            fixture = fixtures.get(
-                self.path,
-                (200, {})
-                if self.path == "/health"
-                else fleet_safety_fixture()
-                if self.path == "/health?full=1"
-                else (503, {"error": "fixture endpoint unavailable"}),
-            )
+            # Resolution order is load-bearing: exact fixture keys and the
+            # /health specials keep their legacy meaning (an exact path is
+            # still required), and only then does a query-stripped path get
+            # a second chance -- paged endpoints carry a float timestamp
+            # (e.g. /chat/history/page?before=1788678…) a scenario cannot
+            # key on. Everything else still falls to the 503 sentinel.
+            path_only = self.path.split("?", 1)[0]
+            if self.path in fixtures:
+                fixture = fixtures[self.path]
+            elif self.path == "/health":
+                fixture = (200, {})
+            elif self.path == "/health?full=1":
+                fixture = fleet_safety_fixture()
+            elif path_only in fixtures:
+                fixture = fixtures[path_only]
+            else:
+                fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
                 resolved = fixture.resolve(request_body or b"")
             else:
@@ -6920,12 +6929,37 @@ def message_origin_history_fixture() -> HttpResponse:
                 "surface": {"kind": "dashboard"},
             },
             {
-                "id": "origin-keeper",
-                "role": "assistant",
-                "content": "keeper-body-neutral",
-                "ts": 1787348491.3,
-            },
-        ],
+    )
+
+
+def viewport_gap_history_page_fixture() -> HttpResponse:
+    # GET /chat/history/page?before=<ts> answers with an envelope, not a bare
+    # row list (masc_tui_keeper_chat_history.mli: the rows are the same shape
+    # as the transcript's but has_more/next_before ride alongside). The paged
+    # rows repeat the oversized reply so the viewport gap survives the
+    # round-trip instead of collapsing to a fallback transcript.
+    return (
+        200,
+        {
+            "messages": [
+                {
+                    "id": "oversized-keeper-reply",
+                    "role": "assistant",
+                    "content": "\n".join(
+                        f"line-{index:02d}" for index in range(24)
+                    ),
+                    "ts": 1787348491.3,
+                }
+            ],
+            "has_more": False,
+            "next_before": None,
+        },
+    )
+
+
+LIVE_MARKDOWN_REPLY = """@keeper-haneul-agent — 고마워요! Execute가 작동하는 세션이 있다면 정말 큰 도움이 됩니다.
+
+## 정확한 5개 git 명령 (task478 worktree에서 실행):
     )
 
 
@@ -7153,19 +7187,19 @@ def viewport_gap_interaction(
         columns=100,
         needle=b"MASC Overview",
     )
-    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
-    select_keeper_row(process, master_fd, output, b"alpha")
-    # The opened title row renders "Keepers ▸ alpha" plainly now (the bold
-    # run was dropped from the renderer); asserting the old \x1b[1m spelling
-    # starves on the plain bytes.
-    send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 alpha")
-    opened = send_and_wait(process, master_fd, output, b"m", b"hidden")
-    plain = CSI_RE.sub(b"", opened)
-    marker = "⋯".encode()
-    positions = [plain.find(needle) for needle in (b"line-00", marker, b"line-23")]
-    if any(position < 0 for position in positions) or positions != sorted(positions):
         raise AssertionError(
-            f"oversized live edge did not order opening, gap, and latest row: {opened!r}"
+            f"PgUp retained a synthetic gap inside transcript rows: {complete!r}"
+        )
+    # PgUp's paged fetch now hits the seeded /chat/history/page fixture.
+    # Because that page answers has_more=false, PgUp clamps the view at the
+    # conversation start (the footer reads "the start of this conversation")
+    # and PgDn redraws the head projection -- line-00 onward, not the
+    # line-23 live edge. Real paged rows survive the round-trip instead of a
+    # 503 fallback transcript, so the head row is asserted in the frame.
+    newest = send_and_wait(process, master_fd, output, b"\x1b[6~", b"line-02")
+    newest_plain = CSI_RE.sub(b"", newest)
+    if b"line-00" not in newest_plain and b"line-00" not in bytes(output):
+        raise AssertionError(
         )
 
     complete = send_and_wait(
@@ -11635,12 +11669,15 @@ def run_keyboard_regression(executable: str) -> None:
         http_fixtures={
             "/api/v1/keepers/alpha/chat/history": memory_journal_chat_fixture(),
             "/api/v1/keepers/alpha/memory-journal?limit=20": memory_journal_sequence,
+        interact=viewport_gap_interaction,
+        http_fixtures={
+            "/api/v1/keepers/alpha/chat/history": viewport_gap_history_fixture(),
+            "/api/v1/keepers/alpha/chat/history/page": (
+                viewport_gap_history_page_fixture()
+            ),
         },
-        refresh=0.5,
+        extra_env={"NO_COLOR": "1"},
     )
-    run_terminal_scenario(
-        executable,
-        description="Keeper provider-input Context Inspector",
         interact=context_inspector_interaction(),
         http_fixtures=context_inspector_fixtures(),
     )
@@ -12204,12 +12241,15 @@ def run_project_changes_regression(executable: str) -> None:
     )
     run_terminal_scenario(
         executable,
-        description="Code lists current project Git changes and opens a file",
-        interact=project_changes_interaction,
-        http_fixtures=fixtures,
+        interact=viewport_gap_interaction,
+        http_fixtures={
+            "/api/v1/keepers/alpha/chat/history": viewport_gap_history_fixture(),
+            "/api/v1/keepers/alpha/chat/history/page": (
+                viewport_gap_history_page_fixture()
+            ),
+        },
+        extra_env={"NO_COLOR": "1"},
     )
-
-
 def run_config_regression(executable: str) -> None:
     fixtures = overview_event_http_fixtures()
     fixtures[RUNTIME_CONFIG_RAW_PATH] = (

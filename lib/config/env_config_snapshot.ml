@@ -38,6 +38,15 @@ let server_entries =
       "MASC_HTTP_MAX_CONNECTIONS" "HTTP server max connections";
   ]
 
+(* Rows from {!Env_setting} declarations. A knob declared there is reported
+   without being restated here, which is the shape the hand-written lists below
+   are being moved to. *)
+let declared_entries category =
+  Env_setting.rows_in ~category
+  |> List.map (fun (row : Env_setting.row) ->
+    entry ~default:row.default_display row.env_name row.description)
+;;
+
 let auth_entries =
   [
     entry ~sensitive:true ~default:"(none)" Env_config_core.admin_token_env_key
@@ -47,6 +56,7 @@ let auth_entries =
     entry ~default:"false" "MASC_HTTP_AUTH_STRICT"
       "Require auth for HTTP endpoints";
   ]
+  @ declared_entries "auth"
 
 let runtime_entries =
   [
@@ -397,7 +407,7 @@ let worker_entries =
       "Local runtime debug logging (feature flag)";
   ]
 
-let category_specs =
+let category_specs () =
   [
     ( "server"
     , server_entries @ path_entries
@@ -429,9 +439,9 @@ let category_specs =
   ]
 
 let all_categories () =
-  List.map (fun (name, entries) -> category name entries) category_specs
+  List.map (fun (name, entries) -> category name entries) (category_specs ())
 
-let valid_config_category_strings = List.map fst category_specs
+let valid_config_category_strings = List.map fst (category_specs ())
 
 let to_json ?server_meta ?generated_at ?cat () =
   let categories =

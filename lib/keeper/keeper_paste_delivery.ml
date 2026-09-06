@@ -130,13 +130,14 @@ let verify_readback ~endpoint ~config ~meta ~file_name ~expected_bytes =
     in
     let cwd = Keeper_sandbox.host_root_abs_of_meta ~config meta in
     let status, stdout, stderr =
-      runner
-        ~on_stdout_chunk:None
-        ~on_stderr_chunk:None
-        ~stdin_content:None
-        ~argv:(readback_argv ~remote_path)
-        ~env:[||]
-        ~cwd:(Some cwd)
+      Masc_exec.Sandbox_target.status_tuple
+        (runner
+           ~on_stdout_chunk:None
+           ~on_stderr_chunk:None
+           ~stdin_content:None
+           ~argv:(readback_argv ~remote_path)
+           ~env:[||]
+           ~cwd:(Some cwd))
     in
     (match status with
      | Unix.WEXITED 0 ->

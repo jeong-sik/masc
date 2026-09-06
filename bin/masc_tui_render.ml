@@ -3224,7 +3224,7 @@ let render_approvals (state : state) =
             Ansi.reset
         , Printf.sprintf "  %sargs=%s%s" Ansi.dim
             (fit_width
-               (Terminal_text.single_line held.kta_args)
+               (Terminal_text.preview_line held.kta_args)
                (max 8 (cols - 9)))
             Ansi.reset )
     | Some (Gate_row pending) ->
@@ -4077,18 +4077,22 @@ let planning_phase_column =
     0
     Goal_phase.all
 
-(* Verifying keeps a raw colour, and it is not the only one: a runtime badge,
-   a file-type icon, a stage heading in the Fusion flow, and the EDIT half of
-   a change badge all pick their own. Thirteen sites, and they are one
-   problem, not thirteen. Each is a member of a small closed set of *kinds*
-   where no member is better than its siblings -- the reader's job is only to
-   tell them apart. That is a categorical palette, which this theme does not
-   have: [status] is for health, [tone] is for weight, and [Syntax] is for
-   what a token is. Naming them badly here would be worse than leaving them
-   visible, so they stay visible. *)
+(* Three of the four phases are a health reading and one is not. Executing,
+   Completed and Dropped are how the goal is doing; Verifying is where it
+   is, and a goal under review is neither well nor unwell. It used to keep a
+   raw colour for want of anywhere else to put it -- the theme had [status]
+   for health, [tone] for weight and [Syntax] for what a token is, and
+   nothing for a kind.
+
+   It takes a categorical slot now (RFC-0427). Slot 4 is magenta, the hue it
+   already drew, and magenta is one of the two the status axis does not
+   claim -- which matters here, because the three phases beside it are
+   status tokens and a slot aliasing one of those would read as a verdict.
+
+   The count of these was thirteen. This is the last of them. *)
 let planning_phase_color = function
   | Goal_phase.Executing -> (Theme.info ())
-  | Goal_phase.Verifying -> Ansi.magenta
+  | Goal_phase.Verifying -> Theme.category Theme.Slot_4
   | Goal_phase.Completed -> (Theme.ok ())
   | Goal_phase.Dropped -> (Theme.muted ())
 
@@ -4322,10 +4326,14 @@ let render_planning_list (state : state) =
        let phase_counters =
          Printf.sprintf
            "%s● Exec: %d%s  %s◆ Ver: %d%s  %s✓ Done: %d%s  %s✕ Drop: %d%s"
-           (Theme.info ()) p.pl_rollup.pr_active Ansi.reset
-           Ansi.magenta p.pl_rollup.pr_verifying Ansi.reset
-           (Theme.ok ()) p.pl_rollup.pr_done Ansi.reset
-           (Theme.muted ()) p.pl_rollup.pr_dropped Ansi.reset
+           (planning_phase_color Goal_phase.Executing)
+           p.pl_rollup.pr_active Ansi.reset
+           (planning_phase_color Goal_phase.Verifying)
+           p.pl_rollup.pr_verifying Ansi.reset
+           (planning_phase_color Goal_phase.Completed)
+           p.pl_rollup.pr_done Ansi.reset
+           (planning_phase_color Goal_phase.Dropped)
+           p.pl_rollup.pr_dropped Ansi.reset
        in
        let rollup =
          Printf.sprintf "  Goals: %s%s%s %s  %s│%s  %s"
@@ -5447,8 +5455,17 @@ let keeper_runtime_cell ~width (runtime : keeper_runtime option) =
       (* Running is the normal lifecycle and stays silent — eleven rows all
          reading "running" said nothing any row could act on; the cells go to
          the runtime identity instead. Every other phase keeps its word. *)
+      (* A paused keeper says so instead of saying its phase. [kr_paused] is
+         a separate reading from [kr_phase] and the two disagree in practice:
+         on the live gate, two of sixteen keepers report phase offline with
+         paused true, and a third reports offline with paused false. The word
+         "offline" drew all three the same, and the difference is the one an
+         operator acts on -- a person stopped that one, so nothing is wrong
+         with it. The phase this replaces is still on the chat header, which
+         draws [kr_phase] unconditionally. *)
       let phase =
-        if Tui_decode.keeper_phase_is_running row.kr_phase then ""
+        if row.kr_paused then "paused "
+        else if Tui_decode.keeper_phase_is_running row.kr_phase then ""
         else Tui_decode.keeper_phase_to_string row.kr_phase ^ " "
       in
       let runtime_id = Terminal_text.single_line row.kr_runtime_id in
@@ -5551,7 +5568,7 @@ let keeper_flag_cell (runtime : keeper_runtime option) =
       let sandbox =
         match row.kr_sandbox_profile with
         | "docker" -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "D" ^ Ansi.reset
-        | "microvm" -> Ansi.magenta ^ "M" ^ Ansi.reset
+        | "microvm" -> (Theme.category Theme.Slot_4) ^ "M" ^ Ansi.reset
         | "local" -> Ansi.dim ^ "L" ^ Ansi.reset
         | other when String.length other > 0 ->
           (Theme.warn ()) ^ String.uppercase_ascii (String.sub other 0 1) ^ Ansi.reset
@@ -12835,7 +12852,7 @@ let file_change_ranges (change : Masc.Tui_decode.file_change) =
 let change_row_summary (change : Masc.Tui_decode.file_change) =
   let content =
     match change.Masc.Tui_decode.fc_kind with
-    | Masc.Tui_decode.Fc_edited { after; _ } -> Terminal_text.single_line after
+    | Masc.Tui_decode.Fc_edited { after; _ } -> Terminal_text.preview_line after
     | Masc.Tui_decode.Fc_written { content } ->
       Printf.sprintf "(wrote %d bytes)" (String.length content)
   in
@@ -12847,7 +12864,7 @@ let change_row_summary (change : Masc.Tui_decode.file_change) =
 
 let change_kind_badge (change : Masc.Tui_decode.file_change) =
   match change.Masc.Tui_decode.fc_kind with
-  | Masc.Tui_decode.Fc_edited _ -> Ansi.magenta, "EDIT"
+  | Masc.Tui_decode.Fc_edited _ -> Theme.category Theme.Slot_4, "EDIT"
   | Masc.Tui_decode.Fc_written _ -> (Masc_tui_theme.tone Masc_tui_theme.Accent), "WRITE"
 
 let change_result_badge (change : Masc.Tui_decode.file_change) =
@@ -13987,14 +14004,29 @@ let render_keeper_calls (state : state) =
           timestamp
           (connection_badge state)
     | Some snapshot ->
+        (* The verdict says what is wrong with the log; the reason says why,
+           and it is not always the verdict said twice. Four of the words
+           this route can send come with a reason derived from themselves --
+           "empty" arrives with "no_entries" -- but "coverage_gap" carries
+           the gap record's own message, which nothing else on this header
+           can supply.
+
+           The "ok" arm that used to open this match built the same string
+           the arm below it builds, so it decided nothing, and matched a
+           health word by its spelling to do it. *)
         let freshness =
+          let reason =
+            match snapshot.Masc.Tui_decode.kcs_stale_reason with
+            | None -> ""
+            | Some reason -> " · " ^ Terminal_text.single_line reason
+          in
           match
             (snapshot.Masc.Tui_decode.kcs_health,
              snapshot.Masc.Tui_decode.kcs_latest_age_s)
           with
-          | "ok", Some age -> Printf.sprintf "ok · latest %.0fs ago" age
-          | health, Some age -> Printf.sprintf "%s · latest %.0fs ago" health age
-          | health, None -> health
+          | health, Some age ->
+            Printf.sprintf "%s · latest %.0fs ago%s" health age reason
+          | health, None -> health ^ reason
         in
         Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 calls (%d)  %s  %s  %s"
           (Terminal_text.single_line keeper_name)
@@ -14562,11 +14594,16 @@ let render_code (state : state) =
           (* A folder keeps the "▸" it has always drawn; a file takes a
              type mark by extension. The colour is dropped on the selected
              row, where the selection band already owns the whole line and a
-             mid-line reset would tear a hole in it. *)
+             mid-line reset would tear a hole in it.
+
+             The folder mark takes the same slot as a code file, which is
+             the cyan it always had: both were bright cyan to the byte until
+             one of them started resolving through the theme and the other
+             did not, leaving two cyans in one column. *)
           let marker =
             if node.Masc.Tui_decode.wt_has_children then
               if selected then "\xe2\x96\xb8 "
-              else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "\xe2\x96\xb8 " ^ Ansi.reset
+              else (Theme.category Theme.Slot_1) ^ "\xe2\x96\xb8 " ^ Ansi.reset
             else
               let kind =
                 File_icon.kind_of_name node.Masc.Tui_decode.wt_label
@@ -14580,20 +14617,24 @@ let render_code (state : state) =
                      a theme could not reach: everything around it moved when
                      the terminal answered with its palette and these did not.
 
-                     Script and Media used to be magenta and bright magenta,
-                     one hue apart in a column where telling them apart is
-                     the whole job. They are now two slots apart.
+                     Six kinds and five slots, so Script and Media share
+                     one. They did before too -- magenta and bright magenta,
+                     a hue apart -- and the honest form of that is the same
+                     hue with two marks rather than two hues a reader cannot
+                     separate. Media had red for one commit, which is [bad]
+                     to the byte: a .png in the listing drew the same escape
+                     as the blame failure on its own half of the row.
 
-                     Plain keeps [dim] rather than a slot. It is the member
-                     that recedes, which is a weight and not a kind. *)
+                     Plain recedes through the theme rather than a constant
+                     [dim], for the same reason the six above it do. *)
                   match kind with
                   | File_icon.Code -> Theme.category Theme.Slot_1
                   | File_icon.Data -> Theme.category Theme.Slot_2
                   | File_icon.Prose -> Theme.category Theme.Slot_3
-                  | File_icon.Script -> Theme.category Theme.Slot_4
+                  | File_icon.Script | File_icon.Media ->
+                    Theme.category Theme.Slot_4
                   | File_icon.Web -> Theme.category Theme.Slot_5
-                  | File_icon.Media -> Theme.category Theme.Slot_6
-                  | File_icon.Plain -> Ansi.dim
+                  | File_icon.Plain -> Theme.recede ()
                 in
                 colour ^ glyph ^ Ansi.reset ^ " "
           in
@@ -16529,7 +16570,7 @@ module Context_bars = Masc_tui_context_bars
 
 let context_component_style = function
   | Turn_record.Prompt_block Prompt_block_id.Memory_os_recall ->
-      Ansi.bold ^ Ansi.magenta
+      Ansi.bold ^ Theme.category Theme.Slot_4
   | Turn_record.Prompt_block _ -> Ansi.bold
   | Turn_record.Tool_schemas -> (Theme.warn ())
   | Turn_record.Message_user -> (Theme.info ())
@@ -16545,7 +16586,7 @@ let context_evidence_style = function
   | Masc_tui_context_inspector.Serialized_turn_snapshot ->
       Ansi.bold ^ Theme.info ()
   | Masc_tui_context_inspector.Producer_digest_only ->
-      Ansi.bold ^ Ansi.magenta
+      Ansi.bold ^ Theme.category Theme.Slot_4
   | Masc_tui_context_inspector.Byte_count_only ->
       Ansi.bold ^ (Theme.recede ())
 
@@ -17807,10 +17848,22 @@ let render_palette (state : state) =
   let total = List.length matches in
   let cursor = max 0 (min state.palette_cursor (total - 1)) in
   framed_shadow_top buf cols;
+  (* A choice says which question, how many names and which line; the
+     prompt is a filter over those names, not a jump query. *)
+  let title, prompt, action =
+    match state.palette_mode with
+    | Masc_tui_types.Palette_jump -> (" Quick Jump & Navigation", ":", "Jump")
+    | Masc_tui_types.Palette_choice { choice_question; choice_line } ->
+        let names = List.length (Masc_tui_types.code_cursor_line_symbols state) in
+        ( Printf.sprintf " %s \xc2\xb7 %d name%s on line %d" choice_question names
+            (if names = 1 then "" else "s") choice_line
+        , "filter:"
+        , "Ask" )
+  in
   framed_shadow_line buf cols
-    (screen_title " Quick Jump & Navigation" ^ "  "
+    (screen_title title ^ "  "
      ^ (Theme.warn ()) ^ "\xe2\x9a\xa1" ^ Ansi.reset ^ "  "
-     ^ Ansi.bold ^ ":" ^ Ansi.reset ^ " "
+     ^ Ansi.bold ^ prompt ^ Ansi.reset ^ " "
      ^ (Terminal_text.single_line state.palette_query)
      ^ ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "\xe2\x96\x8c" ^ Ansi.reset));
   framed_shadow_divider buf cols;
@@ -17833,9 +17886,9 @@ let render_palette (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Printf.sprintf "%d/%d · [Enter] Jump · [Up/Down] Navigate · [Esc] Close"
+         (Printf.sprintf "%d/%d · [Enter] %s · [Up/Down] Navigate · [Esc] Close"
             (if total = 0 then 0 else cursor + 1)
-            total));
+            total action));
   finish_surface state ~surface_key:"palette" ~rows:terminal_rows ~cols buf
 
 let render_patch_modal (state : state) =

@@ -30,10 +30,14 @@ let rec sorted (json : Yojson.Safe.t) : Yojson.Safe.t =
 
 (* name, description, input_schema (keys sorted) *)
 let expected =
-    [ {|masc_run_init|}, {|Create an execution memory directory (.masc/runs/{task_id}/) to track the run plan. Call when starting work on a claimed task to enable structured progress tracking. After init, use masc_run_plan to set approach and masc_run_get to review.|}, {|{"additionalProperties":false,"properties":{"agent_name":{"description":"Agent working on the task","type":"string"},"task_id":{"description":"Task ID to track","type":"string"}},"required":["task_id","agent_name"],"type":"object"}|}
+    [ {|masc_run_init|}, {|Create an execution memory directory to track the run plan.
+
+The directory is .masc/runs/{task_id}/. Call when starting work on a claimed task to enable structured progress tracking. After init, use masc_run_plan to set approach and masc_run_get to review.|}, {|{"additionalProperties":false,"properties":{"agent_name":{"description":"Agent working on the task","type":"string"},"task_id":{"description":"Task ID to track","type":"string"}},"required":["task_id","agent_name"],"type":"object"}|}
     ; {|masc_run_plan|}, {|Set or update the execution plan (markdown) for a task run; each update creates a new revision. \nCall after masc_run_init to document your approach before starting implementation. \nOther agents can view plans via masc_run_get for workspace and handoff context.|}, {|{"additionalProperties":false,"properties":{"plan":{"description":"The plan (markdown supported)","type":"string"},"task_id":{"description":"Task ID","type":"string"}},"required":["task_id","plan"],"type":"object"}|}
     ; {|masc_run_get|}, {|Retrieve the run record and execution plan for a task. \nIf the task has no run record yet, create an empty run scaffold and return it so resume flow can continue. \nUse when resuming work on a task, reviewing progress, or preparing a handoff. \nPair with masc_run_plan to set the plan.|}, {|{"additionalProperties":false,"properties":{"task_id":{"description":"Task ID to retrieve","type":"string"}},"required":["task_id"],"type":"object"}|}
-    ; {|masc_run_list|}, {|List all task runs with their status (active/completed) and plan presence. \nUse when starting a session to find abandoned work or review completed runs. \nAfter finding a run, call masc_run_get for full details or masc_run_init to start a new one.|}, {|{"additionalProperties":false,"properties":{},"type":"object"}|}
+    ; {|masc_run_list|}, {|List all task runs with their status (active/completed) and plan presence.
+
+\nUse when starting a session to find abandoned work or review completed runs. \nAfter finding a run, call masc_run_get for full details or masc_run_init to start a new one.|}, {|{"additionalProperties":false,"properties":{},"type":"object"}|}
     ]
 ;;
 

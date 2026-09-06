@@ -63,6 +63,16 @@ blocking_lints() {
   run_self_test_when_changed "OCaml test suite reporter self-test" \
     scripts/ci-run-test-suite.sh \
     bash scripts/ci-run-test-suite.sh --self-test
+  # The three words a prompt's source can be, on both sides of the wire.
+  # They are asserted only in test/, which this CI does not run, so a typo in
+  # prompt_source_to_string type-checks and passes every other lint while
+  # breaking the dashboard's filter and the TUI's label.
+  run_self_test_when_changed "Prompt source words self-test" \
+    scripts/lint/prompt-source-words-agree.sh \
+    bash scripts/lint/prompt-source-words-agree.sh --self-test
+  run_lint "Prompt source words agree" \
+    bash scripts/lint/prompt-source-words-agree.sh
+
   # The report-only step that runs a pull request's edited suites trusts this
   # tool to say which of them can be run by executing the binary. A wrong
   # "run" reports a failure the change did not cause, which is how a report

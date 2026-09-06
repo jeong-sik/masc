@@ -6,6 +6,7 @@
  (wrapped false)
  (modules
   process_eio
+  posix_spawn_process_mgr
   spawn_handle
   spawn_registry
   spawn_turn_registry
@@ -28,4 +29,7 @@
   eio.unix
   cstruct
   unix
-  threads))
+  threads)
+ (foreign_stubs
+  (language c)
+  (names posix_spawn_stubs)))

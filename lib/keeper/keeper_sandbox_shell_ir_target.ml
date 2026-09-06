@@ -66,7 +66,11 @@ let docker_runners ~runtime ~timeout_sec ~cwd =
   in
   let runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd:stage_cwd =
     if Array.length env > 0 then
-      (Unix.WEXITED 1, "", "typed Shell IR guest dispatch does not support env yet")
+      Masc_exec.Sandbox_target.Transport_failed
+        { reason = "typed Shell IR guest dispatch does not support env yet"
+        ; stdout = ""
+        ; stderr = "typed Shell IR guest dispatch does not support env yet"
+        }
     else
       let cwd = stage_cwd_or_default stage_cwd in
       match
@@ -79,8 +83,11 @@ let docker_runners ~runtime ~timeout_sec ~cwd =
           ~cwd
           ~command_argv:argv
        with
-       | Ok result -> result
-       | Error err -> Unix.WEXITED 1, "", err
+       | Ok (status, stdout, stderr) ->
+         Masc_exec.Sandbox_target.Ran { status; stdout; stderr }
+       | Error err ->
+         Masc_exec.Sandbox_target.Transport_failed
+           { reason = err; stdout = ""; stderr = err }
    in
   let pipeline_runner ~on_stdout_chunk ~on_stderr_chunk ~stages =
     match
@@ -89,7 +96,11 @@ let docker_runners ~runtime ~timeout_sec ~cwd =
          stages
      with
      | Some _ ->
-       (Unix.WEXITED 1, "", "typed Shell IR guest dispatch does not support env yet")
+       Masc_exec.Sandbox_target.Transport_failed
+         { reason = "typed Shell IR guest dispatch does not support env yet"
+         ; stdout = ""
+         ; stderr = "typed Shell IR guest dispatch does not support env yet"
+         }
      | None ->
        let stages =
          List.map
@@ -109,8 +120,11 @@ let docker_runners ~runtime ~timeout_sec ~cwd =
           ~cwd
           ~stages
        with
-       | Ok result -> result
-       | Error err -> Unix.WEXITED 1, "", err
+       | Ok (status, stdout, stderr) ->
+         Masc_exec.Sandbox_target.Ran { status; stdout; stderr }
+       | Error err ->
+         Masc_exec.Sandbox_target.Transport_failed
+           { reason = err; stdout = ""; stderr = err }
    in
    runner, pipeline_runner
 ;;
@@ -126,7 +140,9 @@ let docker_runners ~runtime ~timeout_sec ~cwd =
 let microvm_runner ~runtime ~timeout_sec =
   fun ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd ->
     match Keeper_sandbox_remote_lane.microvm_endpoint ~timeout_sec runtime with
-    | Error err -> Unix.WEXITED 1, "", err
+    | Error err ->
+      Masc_exec.Sandbox_target.Transport_failed
+        { reason = err; stdout = ""; stderr = err }
     | Ok endpoint ->
       Keeper_sandbox_remote.runner ~timeout_sec endpoint
         ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd

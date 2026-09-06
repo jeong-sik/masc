@@ -61,7 +61,8 @@ let () =
   let runner_calls = ref [] in
   let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content ~argv ~env ~cwd =
     runner_calls := (argv, env, cwd, stdin_content) :: !runner_calls;
-    (Unix.WEXITED 0, "out", "err")
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 0; stdout = "out"; stderr = "err" }
   in
   let ssh_sandbox =
     Masc_exec.Sandbox_target.ssh ~endpoint:test_endpoint ~runner:mock_runner ()
@@ -114,7 +115,8 @@ let () =
   in
   let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     runner_called := true;
-    Unix.WEXITED 0, "stdout", "stderr"
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 0; stdout = "stdout"; stderr = "stderr" }
   in
   let ssh_sandbox =
     Masc_exec.Sandbox_target.ssh ~endpoint:test_endpoint ~runner:mock_runner ()
@@ -150,9 +152,13 @@ let () =
   let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content ~argv ~env:_ ~cwd:_ =
     runner_calls := (argv, stdin_content) :: !runner_calls;
     match argv, stdin_content with
-    | [ "printf"; "typed" ], None -> Unix.WEXITED 0, "typed", ""
-    | [ "wc"; "-c" ], Some "typed" -> Unix.WEXITED 0, "5\n", ""
-    | _ -> Unix.WEXITED 2, "", "unexpected mock runner call"
+    | [ "printf"; "typed" ], None ->
+        Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout = "typed"; stderr = "" }
+    | [ "wc"; "-c" ], Some "typed" ->
+        Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout = "5\n"; stderr = "" }
+    | _ ->
+        Masc_exec.Sandbox_target.Ran
+          { status = Unix.WEXITED 2; stdout = ""; stderr = "unexpected mock runner call" }
   in
   let ssh_sandbox =
     Masc_exec.Sandbox_target.ssh ~endpoint:test_endpoint ~runner:mock_runner ()
@@ -179,11 +185,13 @@ let () =
   let pipeline_runner_calls = ref [] in
   let simple_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     simple_runner_called := true;
-    Unix.WEXITED 3, "", "simple runner should not be used"
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 3; stdout = ""; stderr = "simple runner should not be used" }
   in
   let pipeline_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stages =
     pipeline_runner_calls := stages :: !pipeline_runner_calls;
-    Unix.WEXITED 0, "5\n", "pipeline-stderr"
+    Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED 0; stdout = "5\n"; stderr = "pipeline-stderr" }
   in
   let ssh_sandbox =
     Masc_exec.Sandbox_target.ssh

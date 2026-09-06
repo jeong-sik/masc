@@ -20,8 +20,8 @@ type spawn_error =
 val pp_spawn_error : Format.formatter -> spawn_error -> unit
 
 (** The languages this client knows. One variant rather than one string match
-    per question, so a language cannot have a command and no project markers:
-    every per-language function below is an exhaustive match. *)
+    per question, so a language cannot have a command and no root rule: every
+    per-language function below is an exhaustive match. *)
 type language =
   | Ocaml
   | Typescript
@@ -29,11 +29,43 @@ type language =
   | Python
   | Rust
   | Go
+  | C
+  | Cpp
+  | Swift
+  | Java
+  | Kotlin
+  | Ruby
+  | Php
+  | Lua
+  | Bash
+  | Json
+  | Yaml
+  | Zig
+  | Haskell
+  | Elixir
+  | Dart
+  | Scala
+  | Csharp
 
+(** Every variant once. The language test walks it against the exhaustive
+    functions and fails when a variant is missing. *)
+val all_languages : language list
+
+(** The LSP languageId the server is initialised with; Bash is
+    ["shellscript"] on the wire. *)
 val lang_id_of_language : language -> string
 
-(** The executable and argv that start this language's server. *)
+val language_of_lang_id : string -> language option
+
+(** The executable and argv that start this language's server: each
+    server's documented stdio invocation, standing where the operator has
+    not named another. *)
 val command_of_language : language -> string * string list
+
+(** Who answers "which command starts this language's server". The caller
+    passes {!command_of_language} where nothing is configured, or the
+    runtime's resolver where an operator named a server for a language. *)
+type servers = language -> string * string list
 
 (** What has to exist on disk before a language server answers about
     references outside the file it was given. *)
@@ -47,15 +79,25 @@ type reference_index =
 
     Measured for OCaml: with no [.ocaml-index], [textDocument/references] on a
     two-file project answered one occurrence where the truth was three; after
-    [dune build @ocaml-index] it answered all three, in both files. The other
-    four answer [None] because their servers index themselves — none is
-    installed on the host this was measured on, so that is a statement about
-    what this client checks, not a measurement. *)
+    [dune build @ocaml-index] it answered all three, in both files. Every other
+    language answers [None] because nobody has measured it here -- a statement
+    about what this client checks, not a measurement. *)
 val reference_index_of_language : language -> reference_index option
 
-(** Files whose directory is a project root for this language, nearest first.
-    {!Lsp_project_root} walks a file's ancestors looking for these. *)
-val project_markers_of_language : language -> string list
+(** Where a server for this language is rooted: the nearest ancestor holding
+    one of the marker files, or the workspace boundary itself for languages
+    with no project file of their own. {!Lsp_project_root} applies it. *)
+type root_rule =
+  | Marker_files of string list  (** nearest first *)
+  | Boundary_root
+
+val root_rule_of_language : language -> root_rule
+
+(** The extensions a language owns, lower-case with the dot. *)
+val extensions_of_language : language -> string list
+
+(** Every extension a server here covers, in language order. *)
+val covered_extensions : unit -> string list
 
 (** The language of a file, by extension. [None] for a file no server here
     covers. *)
@@ -81,6 +123,7 @@ val read_message : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r -> s
     the process is terminated automatically via [on_release]. *)
 val spawn :
   sw:Eio.Switch.t ->
+  servers:servers ->
   lang_id:string ->
   workspace_root:string ->
   Eio_unix.Process.mgr_ty Eio.Resource.t ->

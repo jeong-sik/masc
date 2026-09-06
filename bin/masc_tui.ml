@@ -1942,7 +1942,17 @@ type async_msg =
       original : string;
     }
 
-let enqueue_async mailbox msg = Eio.Stream.add mailbox msg
+(* Every async result carries the instant it was ready, so the loop can say
+   how long it sat in the mailbox. A result that arrived in a second and was
+   applied ten seconds later names the loop, not the request (RFC-0429
+   §3.0). *)
+type 'a mailed = {
+  ready_at : float;
+  message : 'a;
+}
+
+let enqueue_async mailbox msg =
+  Eio.Stream.add mailbox { ready_at = Unix.gettimeofday (); message = msg }
 
 let current_clock_text () =
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -9768,11 +9778,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         state.acting_dropped <- state.acting_dropped + dropped
       end;
       if !pane_keeper_acted then refresh_acting_pane_changes state ~mailbox;
-      (* The pane otherwise reloads only on open, on its own sends and on
-         the operator cadence — a turn appended from anywhere else (API
-         chat, another operator, a connector) stayed invisible until the
-         operator left and re-entered.  Same guard as the cadence reload:
-         an operator scrolled into the past keeps their place. *)
+      (* The pane otherwise reloads only on open and on its own sends — a
+         turn appended from anywhere else (API chat, another operator, a
+         connector) stayed invisible until the operator left and re-entered.
+         Same guard the cadence reload used: an operator scrolled into the
+         past keeps their place. *)
       (if !open_chat_gained_turn && state.msg_scroll = 0 then
          match state.msg_target_keeper_name with
          | Some keeper_name ->
@@ -9807,6 +9817,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          zombie under) a surface it was not opened on. *)
       state.help_open <- false;
       state.palette_open <- false;
+      state.palette_mode <- Masc_tui_types.Palette_jump;
       state.palette_query <- "";
       state.palette_cursor <- 0;
       state.search <- None;
@@ -11682,7 +11693,12 @@ let drain_async_messages state ~base_path ~http_refresh_inflight
   let rec loop changed =
     match Eio.Stream.take_nonblocking mailbox with
     | None -> changed
-    | Some msg ->
+    | Some { ready_at; message = msg } ->
+        let waited = Unix.gettimeofday () -. ready_at in
+        if waited >= Masc_tui_http.slow_report_sec then
+          Log.Transport.info
+            "async result waited %.0f ms in the mailbox before the loop applied it"
+            (waited *. 1000.);
         apply_async_message state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox msg;
         loop true
@@ -12194,6 +12210,7 @@ let main () =
   let http_scoped_refresh_inflight = ref false in
   let scoped_refresh_followup = ref No_scoped_followup in
   let async_messages = Eio.Stream.create 32 in
+  let last_loop_at = ref (Unix.gettimeofday ()) in
   let presented_surface_reference () =
     match state.view with
     | Approvals -> Option.bind !presented_approval approval_row_reference
@@ -13731,6 +13748,12 @@ and is loaded on demand through keeper_skill.
        | Some (Mouse_left_press _) | Some (Mouse_wheel _) | None -> ());
       if Option.is_some input then
         Render_schedule.request render_schedule Render_schedule.Input;
+      (let now = Unix.gettimeofday () in
+       let gap = now -. !last_loop_at in
+       if gap >= Masc_tui_http.slow_report_sec then
+         Log.Transport.info "main loop: %.0f ms between two iterations"
+           (gap *. 1000.);
+       last_loop_at := now);
       ensure_acting_pane_changes state ~mailbox:async_messages;
       let _terminal_rows, terminal_columns = get_terminal_size () in
       let message_mode =
@@ -14467,6 +14490,7 @@ and is loaded on demand through keeper_skill.
          when text_input_target state ~compact_viewport = Some Text_palette ->
            let close () =
              state.palette_open <- false;
+             state.palette_mode <- Masc_tui_types.Palette_jump;
              state.palette_query <- "";
              state.palette_cursor <- 0
            in
@@ -15463,6 +15487,7 @@ and is loaded on demand through keeper_skill.
               | [] -> 0)
        | Some ":" ->
            state.palette_open <- true;
+           state.palette_mode <- Masc_tui_types.Palette_jump;
            state.palette_query <- "";
            state.palette_cursor <- 0
        | Some "\025" ->
@@ -15550,11 +15575,11 @@ and is loaded on demand through keeper_skill.
               candidates: one name is asked about at once, several open the
               palette with each as an entry (typing still narrows, and a
               typed "def <name>" keeps working), and none says so. *)
-           let question, prefix =
+           let question =
              match key_name with
-             | "K" -> ("hover", "hover ")
-             | "R" -> ("references", "refs ")
-             | "D" | _ -> ("definition", "def ")
+             | "K" -> "hover"
+             | "R" -> "references"
+             | "D" | _ -> "definition"
            in
            (match Masc_tui_types.code_cursor_line_symbols state with
             | [] ->
@@ -15565,7 +15590,12 @@ and is loaded on demand through keeper_skill.
                   ~question ~symbol
             | _ :: _ :: _ ->
                 state.palette_open <- true;
-                state.palette_query <- prefix;
+                state.palette_mode <-
+                  Masc_tui_types.Palette_choice
+                    { choice_question = question
+                    ; choice_line = state.code_file_cursor + 1
+                    };
+                state.palette_query <- "";
                 state.palette_cursor <- 0)
        | Some "w" when state.view = Code && state.code_notes_open ->
            (* Adding a note lives inside the notes view: the view proves the
@@ -18724,7 +18754,18 @@ and is loaded on demand through keeper_skill.
           ~scoped_refresh_inflight:http_scoped_refresh_inflight
           ~scoped_refresh_followup
           ~mailbox:async_messages;
-        refresh_acting_pane_changes state ~mailbox:async_messages;
+        (* The Changes tab is not reloaded here. Its answer comes from
+           [GET /api/v1/keepers/<name>/file-changes], which parses every row
+           in the date files the window touches -- that endpoint's own
+           comment records 4.4s for 24h, and this server answered 1.8-8.8s
+           per call on 2026-09-06. On the cadence, an open tab kept one of
+           those in flight continuously and the whole server felt it.
+
+           The observer already reloads the tab when the feed shows the
+           selected keeper finish a tool call, which is when the list can
+           change; opening the tab or moving the cursor loads it too. What
+           this line added was coverage for a change with no feed event, and
+           that is not worth a seconds-long scan on a timer. *)
         (* Also refresh logs / Board detail if viewing them. *)
         (match state.view with
          | Code -> ()

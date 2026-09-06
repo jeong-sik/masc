@@ -246,7 +246,7 @@ let test_definition_answers_from_a_real_server () =
     Eio_context.set_env env;
     let _ = write ~config "dune-project" "(lang dune 3.22)\n" in
     let path = write ~config "sample.ml" "let answer = 42\nlet doubled = answer * 2\n" in
-    Lsp_turn_pool.with_turn_pool (fun () ->
+    Lsp_turn_pool.with_turn_pool ~servers:Lsp_process_manager.command_of_language (fun () ->
       let result = call ~config (args ~question:"definition" ~line:2 ~symbol:"answer" path) in
       (match Tool_result.failure_class result with
        | Some _ -> Alcotest.failf "expected an answer, got: %s" (Tool_result.message result)
@@ -306,7 +306,7 @@ let test_references_answers_across_files_once_the_index_exists () =
            (Filename.quote root))
     in
     Alcotest.(check int) "the index builds" 0 build;
-    Lsp_turn_pool.with_turn_pool (fun () ->
+    Lsp_turn_pool.with_turn_pool ~servers:Lsp_process_manager.command_of_language (fun () ->
       let result =
         call ~config (args ~question:"references" ~line:1 ~symbol:"shared_name" path)
       in

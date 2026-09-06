@@ -47,6 +47,29 @@ val keeper_turn_record_freshness_slo_s : keepalive_interval_s:float -> float
     so the SLO covers the configured sleep cadence plus two minutes of cycle
     execution/scheduling slack while preserving the historical 300-second
     floor for short cadences. *)
+val keeper_tool_call_source_health :
+  gap:(float option * string) option ->
+  latest_ts:float option ->
+  latest_age_s:float option ->
+  freshness_slo_s:float ->
+  string * string
+(** Classify a tool-call source: ["coverage_gap"] when the newest recorded
+    gap is one the store has not caught up past, otherwise
+    {!keeper_turn_record_source_health} with the two turn-record answers
+    ([live], [incompatible]) out of reach.
+
+    [gap] is that newest gap as its timestamp and its own reason. A gap is
+    recovered, and so not a verdict, when the newest row is at or after it —
+    the rule
+    [Dashboard_tool_source_freshness.active_coverage_gaps] applies to these
+    same stores. A gap with no timestamp cannot be shown recovered and
+    stands.
+
+    Not the whole of what the [health] wire field can say. ["missing"],
+    ["error"], ["not_yet"], ["incomplete"] and ["partial"] are produced
+    elsewhere for other stores and other questions; this covers the
+    freshness-and-gap axis for the two tool-call routes. *)
+
 val keeper_turn_record_source_health :
   skipped_rows:int ->
   live_turn_in_progress:bool ->

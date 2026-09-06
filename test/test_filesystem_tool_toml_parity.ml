@@ -26,32 +26,19 @@ let visible name =
 ;;
 
 let expected_read_description =
-  "Read one existing file from the keeper sandbox or an allowed path with no \
-   implicit cwd. Read targets a single FILE; to list a directory use the Execute \
-   tool with ls. Pass cwd explicitly for repo-relative reads. Read never inherits \
-   Execute cwd."
+"Read one existing file, or a line range of one file, from the keeper sandbox or an allowed path with no implicit cwd. Read targets a single FILE; to list a directory use the Execute tool with ls. Pass cwd explicitly for repo-relative reads. Read never inherits Execute cwd. For a line range, pass offset (1-based line) and limit (max lines) — do not run sed -n via Execute for this. The payload carries the exact current bytes (no line numbers) plus offset, returned_lines, truncated; when truncated=true a next_offset field gives the next line offset. If last_line_partial=true, the byte budget cut inside the final returned line and next_offset intentionally skips that line's unseen remainder rather than continuing byte-for-byte. Before Edit, Read the target region so old_string matches current bytes."
 ;;
 
 let expected_edit_description =
-  "Patch an existing file by replacing an exact string. Read the file first and \
-   copy old_string verbatim from its current bytes, including leading whitespace, \
-   indentation, and newlines; the match is exact and byte-sensitive. On \
-   'old_string not found', re-Read the file to get the current text instead of \
-   retrying the same string."
+"Patch an existing file by replacing an exact string. Prefer Edit over sed -i/awk/perl via Execute for file changes: the exact-match check and the 'not found' error keep a failed edit from writing anything. Each call replaces one exact string (every occurrence with replace_all=true); apply several disjoint changes as successive Edit calls. Read the file first and copy old_string verbatim from its current bytes, including leading whitespace, indentation, and newlines; the match is exact and byte-sensitive. On 'old_string not found', re-Read the file to get the current text instead of retrying the same string."
 ;;
 
 let expected_write_description =
-  "Write full file content into the keeper sandbox or an allowed path. Missing \
-   parent directories are created safely; call Write directly instead of using \
-   Execute mkdir."
+"Write full file content into the keeper sandbox or an allowed path. Missing parent directories are created safely; call Write directly instead of using Execute mkdir."
 ;;
 
 let expected_search_description =
-  "Search file contents with ripgrep: provide a regex `pattern` (and optionally \
-   path/glob/type). To list a directory, read a file, or run git status/log/diff, \
-   use the Execute tool (e.g. argv=['ls','-la','<path>']). Patterns match within a \
-   single line; a literal newline in `pattern` is rejected. To match across lines, \
-   run `rg -U` through the Execute tool."
+"Search file contents with ripgrep: provide a regex `pattern` (and optionally path/glob/type). To list a directory, read a file, or run git status/log/diff, use the Execute tool (e.g. argv=['ls','-la','<path>']). Patterns match within a single line; a literal newline in `pattern` is rejected. To match across lines, run `rg -U` through the Execute tool."
 ;;
 
 let test_descriptions_are_byte_identical () =

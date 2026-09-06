@@ -1,8 +1,19 @@
 # 번들된 색 스킴의 출처
 
-masc TUI 는 색 스킴 43개를 함께 배포하며 `config/themes/` 디렉터리의 TOML 테마를
-지원한다. 그중 `default-dark`, `default-light`, `dungeon-gold`, `norton`, `msx`, `pc-tools`, `msc`, `cyber` 는 masc 자체 것이고,
+masc TUI 는 색 스킴 47개를 함께 배포하며 `config/themes/` 디렉터리의 TOML 테마를
+지원한다. 그중 `default-dark`, `default-light`, `dungeon-gold`, `norton`, `msx`,
+`pc-tools`, `msc`, `cyber`, 그리고 아래 절의 레트로 프리셋 4개(`norton-commander`,
+`msx-retro`, `pc-tools-vintage`, `cga-classic`)는 masc 자체 것이고,
 **나머지 35개는 다른 사람이 만든 것**이다. 이 문서가 누가 만들었고 어떤 조건으로 쓰는지를 적는다.
+
+### masc 자체 레트로 프리셋 4개 (2026-09-05)
+
+`norton-commander`, `msx-retro`, `pc-tools-vintage`, `cga-classic` 은 tinted-theming
+값이 아니라 클래식 UI(노턴 커맨더, MSX, PC Tools/Turbo Vision, CGA)의 디자인을
+masc 가 직접 base16 으로 옮긴 것이라 다른 사람의 라이선스 조항이 붙지 않는다.
+번들 전에 `test_tui_theme_contrast` 의 가독성 계약을 독립 계측(python3 이식판,
+상수는 masc_tui_color.ml 에서 그대로)으로 통과시켰고, 계측 원문은
+`artifacts/evidence/task-1343-contrast-receipts.json` 에 남는다.
 
 `LICENSE-AUDIT-2026-04.md` 가 "의존성 license 인벤토리 | 미점검" 으로 남겨둔 항목 중
 색 스킴 부분에 해당한다.

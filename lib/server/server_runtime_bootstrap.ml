@@ -512,7 +512,11 @@ let init_runtime_context env =
   let mono_clock = Eio.Stdenv.mono_clock env in
   let net = Eio.Stdenv.net env in
   let domain_mgr = Eio.Stdenv.domain_mgr env in
-  let proc_mgr = Eio.Stdenv.process_mgr env in
+  (* Children start with posix_spawn(2), not eio_posix's fork(): on macOS the
+     parent side of a fork locks every malloc zone and held the main domain
+     about 141 ms per spawn with this process's heap (RFC
+     main-domain-scheduler-latency §8.8). *)
+  let proc_mgr = Posix_spawn_process_mgr.mgr in
   let fs = Eio.Stdenv.fs env in
   (clock, mono_clock, net, domain_mgr, proc_mgr, fs)
 

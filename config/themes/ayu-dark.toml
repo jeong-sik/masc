@@ -1,0 +1,20 @@
+name = "ayu-dark"
+light = false
+
+[palette]
+base00 = "0b0e14"
+base01 = "131721"
+base02 = "202229"
+base03 = "3e4b59"
+base04 = "bfbdb6"
+base05 = "e6e1cf"
+base06 = "ece8db"
+base07 = "f2f0e7"
+base08 = "f07178"
+base09 = "ff8f40"
+base0a = "ffb454"
+base0b = "aad94c"
+base0c = "95e6cb"
+base0d = "59c2ff"
+base0e = "d2a6ff"
+base0f = "e6b450"

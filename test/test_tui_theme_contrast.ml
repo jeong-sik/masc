@@ -703,6 +703,25 @@ let test_load_retro_themes_toml () =
 (* The schemes above are found by name; this says they are also *measured*.
    [schemes] is the list every contract in this file iterates, so a theme
    missing here is a theme masc draws and never checks. *)
+(* Every shipped theme reaches the reader.
+
+   The catalogue drops a scheme it cannot parse. That is the right answer for
+   a TUI -- refusing to start over a bad hex would be worse -- but it means a
+   malformed file masc ships goes missing in silence, and the schemes moved
+   out of OCaml on 2026-09-06 are exactly the ones with nothing else pointing
+   at them any more. Counting the keys against the schemes is what turns that
+   silence into a failure here. *)
+let test_every_shipped_theme_parses () =
+  let keys =
+    List.filter
+      (fun key -> String.starts_with ~prefix:"themes/" key)
+      Embedded_config.file_list
+  in
+  check bool "the binary carries themes at all" true (List.length keys > 0);
+  check int "every shipped theme file becomes a scheme" (List.length keys)
+    (List.length Masc_tui_theme_catalog.bundled)
+;;
+
 let test_contracts_cover_the_toml_themes () =
   let measured = List.map (fun s -> s.name) schemes in
   List.iter
@@ -826,6 +845,8 @@ let () =
             test_load_retro_themes_toml
         ; Alcotest.test_case "readability contracts cover the toml themes" `Quick
             test_contracts_cover_the_toml_themes
+        ; Alcotest.test_case "every shipped theme parses" `Quick
+            test_every_shipped_theme_parses
         ; Alcotest.test_case "bundled retro presets carry the task's names" `Quick
             test_bundled_retro_presets_carry_the_task_names
         ; Alcotest.test_case "contracts cover the bundled retro presets" `Quick

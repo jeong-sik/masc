@@ -1,7 +1,8 @@
 # 번들된 색 스킴의 출처
 
-masc TUI 는 색 스킴 52개를 함께 배포하며 `config/themes/` 디렉터리의 TOML 테마를
-지원한다. 그중 `default-dark`, `default-light`, `dungeon-gold`, `norton`, `msx`,
+masc TUI 는 색 스킴 52개를 함께 배포한다. 전부 `config/themes/` 의 TOML 파일이고,
+바이너리에 함께 구워져 나간다. 읽는 사람이 `<base>/.masc/config/themes/` 나
+`<base>/config/themes/` 에 같은 형식으로 자기 것을 두면 같은 이름을 덮어쓴다. 그중 `default-dark`, `default-light`, `dungeon-gold`, `norton`, `msx`,
 `pc-tools`, `msc`, `cyber`, `vaporwave`, `toxic`, `abyss`, `solar-flare`,
 `blade`, 그리고 아래 절의 레트로 프리셋 4개(`norton-commander`,
 `msx-retro`, `pc-tools-vintage`, `cga-classic`)는 masc 자체 것이고,

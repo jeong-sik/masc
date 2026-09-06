@@ -12608,6 +12608,18 @@ def run_theme_scheme_regression(executable: str) -> None:
         else:
             raise AssertionError("[p] never reached the themes pane")
 
+        # A scheme that ships only as TOML. Until the catalogue started
+        # reading config/themes out of the binary, these loaded from the
+        # reader's base path and a live workspace is not this repo, so the
+        # picker listed only what OCaml carried and cyber was measured by the
+        # contracts while nobody could choose it.
+        pane = CSI_RE.sub(b"", bytes(output))
+        if b"cyber" not in pane:
+            raise AssertionError(
+                "the picker does not list cyber: a shipped TOML scheme is not "
+                "reaching the reader"
+            )
+
         before = len(output)
         # The cursor opens on the first row, which the picker sorts to be a
         # native-pass scheme -- the case that used to send nothing.

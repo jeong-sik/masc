@@ -14,7 +14,13 @@
 type t
 
 val bundled : t list
-(** In no particular order beyond the one they were written in. *)
+(** Everything under [config/themes/], read out of the binary that
+    {!Embedded_config} crunched the tree into. Ordered by filename.
+
+    "Bundled" is now about where a scheme travels, not how it is written:
+    these are the same TOML files a reader can put beside them, shipped rather
+    than found. A scheme that fails to parse is absent rather than raised on,
+    which is a shipping mistake and is counted in test_tui_theme_contrast. *)
 
 val of_toml_content : ?default_name:string -> string -> (t, string) result
 (** Parse a TOML string defining a base16 theme into a scheme [t].
@@ -25,9 +31,10 @@ val load_file : string -> (t, string) result
 (** Load a theme from a single TOML file. *)
 
 val all : ?base_path:string -> unit -> t list
-(** Returns all available schemes: bundled base16 schemes plus any [.toml] schemes
-    discovered under [config/themes/] or [<base-path>/.masc/config/themes/].
-    TOML themes take precedence over bundled themes of the same name. *)
+(** Every scheme a reader can pick: the shipped ones plus any [.toml] found
+    under [<base-path>/config/themes/] or [<base-path>/.masc/config/themes/].
+    A found scheme wins over a shipped one of the same name, so a reader can
+    replace a scheme masc ships without editing it. *)
 
 val names : ?base_path:string -> unit -> string list
 val find : ?base_path:string -> string -> t option
@@ -40,5 +47,5 @@ val light : t -> bool
 val to_palette : t -> Masc_tui_terminal_palette.t option
 (** The scheme as a palette, so a chosen theme reaches every colour by the
     same road a terminal's answer does. [None] only where a scheme's own hex
-    is malformed, which for a bundled one would be a typo in this file. *)
+    is malformed, which for a shipped one would be a typo in its TOML. *)
 

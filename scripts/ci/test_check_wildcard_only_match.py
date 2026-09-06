@@ -14,6 +14,7 @@ Exits 0 on success, 1 on the first failed expectation.
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -90,9 +91,34 @@ let b err =
 ]
 
 
+def check_scan_covers_every_tracked_directory(guard) -> int:
+    """The scan used to name five directories and miss three. A checker that
+    reads part of the tree reports a clean result for the part it did not
+    read, so this asks git for the same answer the checker does."""
+    root = guard.repo_root()
+    out = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "*.ml"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    tracked = {line for line in out.stdout.splitlines() if line}
+    scanned = {str(path.relative_to(root)) for path in guard.sources(root)}
+    missing = sorted(tracked - scanned)
+    if missing:
+        print(
+            f"FAIL the scan misses {len(missing)} tracked file(s), "
+            f"first {missing[0]}",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"pass the scan reads all {len(tracked)} tracked .ml files")
+    return 0
+
+
 def main() -> int:
     guard = load_guard()
-    failures = 0
+    failures = check_scan_covers_every_tracked_directory(guard)
     with tempfile.TemporaryDirectory() as tmp:
         for label, source, expected in CASES:
             path = Path(tmp) / "case.ml"

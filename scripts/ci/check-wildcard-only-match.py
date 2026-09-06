@@ -53,16 +53,23 @@ def repo_root() -> Path:
 
 
 def sources(root: Path) -> list[Path]:
-    files: list[Path] = []
-    for top in ("lib", "bin", "test", "packages", "scripts"):
-        base = root / top
-        if not base.is_dir():
-            continue
-        for path in base.rglob("*.ml"):
-            if "_build" in path.parts:
-                continue
-            files.append(path)
-    return sorted(files)
+    """Every tracked .ml file.
+
+    Naming the directories instead left tools/, test_lib/ and ppx_tla/ out,
+    which is how a checker ends up reporting a clean tree it never read. Ask
+    git rather than keep a list that drifts as directories are added.
+    """
+    out = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", "*.ml"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return sorted(
+        root / name
+        for name in out.stdout.split("\0")
+        if name and "_build" not in Path(name).parts
+    )
 
 
 def violations_in(path: Path) -> list[tuple[int, str]]:

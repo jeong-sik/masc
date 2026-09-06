@@ -807,10 +807,10 @@ let align_role_label ?(column = chat_role_label_column) ~style label =
      width is taken from what the badge leaves, so charging it to the label
      keeps every body exactly as wide as it was.
 
-     It is also kept outside the truncation. A label that overruns loses its
-     head, and the mark sits at the head -- inside, the longest names would be
-     the ones that lost the glyph, and those are the names a reader most needs
-     help telling apart. *)
+     It is also kept outside the truncation. A label that overruns is cut by
+     {!fit_middle}, which spends the ellipsis inside the name; with the mark
+     inside the budget the longest names would be the ones that lost the
+     glyph, and those are the names a reader most needs help telling apart. *)
   let mark_cells = display_width mark + 1 in
   let inner = column - mark_cells in
   (* Kept in step with [role_label_mark_cells]: both decide on [inner < 1]. *)

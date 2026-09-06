@@ -9,12 +9,14 @@ let create () =
   }
 ;;
 
-let rec lock_cooperatively mutex =
+let rec lock_cooperatively ?(spins = 0) mutex =
   if Stdlib.Mutex.try_lock mutex
   then ()
   else (
+    if spins > 0 && spins mod 100000 = 0
+    then Printf.printf "DIAG14 core-spin=%d\n%!" spins;
     Eio.Fiber.yield ();
-    (lock_cooperatively [@tailcall]) mutex)
+    (lock_cooperatively [@tailcall]) ~spins:(spins + 1) mutex)
 ;;
 
 type cancellation_mode =

@@ -11716,58 +11716,6 @@ def run_keyboard_regression(executable: str) -> None:
             "/api/v1/verification/requests?limit=200": verification_gate,
         },
     )
-    repositories_fixtures = keeper_runtime_http_fixtures()
-    repositories_fixtures[REPOSITORIES_PATH] = repositories_fixture()
-    repositories_fixtures["/api/v1/workspace/children?path=&limit=2000&repo_id=masc"] = (
-        200,
-        [
-            {"path": "src", "label": "src", "depth": 0, "parent": "",
-             "hasChildren": True, "diff": None, "keeperId": None,
-             "hueIndex": None},
-            {"path": "note.ml", "label": "note.ml", "depth": 0, "parent": "",
-             "hasChildren": False, "diff": None, "keeperId": None,
-             "hueIndex": None},
-        ],
-    )
-    repo_file = (
-        200,
-        {
-            "ok": True,
-            "content": (
-                "(* masc(alpha) decision: keep n at three until the probe lands *)\n"
-                "let n = 3\n"
-            ),
-        },
-    )
-    for file_path in (
-        "/api/v1/workspace/file?path=note.ml&repo_id=masc",
-    ):
-        repositories_fixtures[file_path] = repo_file
-    repositories_fixtures[
-        "/api/v1/git/log?path=note.ml&limit=50&repo_id=masc"
-    ] = (
-        200,
-        {"ok": True, "commits": [
-            {"hash": "abc1234", "timestamp_ms": 1787650000000,
-             "author": "keeper", "subject": "docs: seed the file (#1256)"},
-        ]},
-    )
-    run_terminal_scenario(
-        executable,
-        description="Repositories Enter opens the Code tree",
-        interact=repositories_enter_interaction(),
-        http_fixtures=repositories_fixtures,
-    )
-    add_requests: HttpRequests = []
-    with repository_declaration_editor_script() as repo_editor:
-        run_terminal_scenario(
-            executable,
-            description="Repositories add says what it did",
-            interact=repository_add_interaction(add_requests),
-            http_fixtures=repositories_fixtures,
-            http_requests=add_requests,
-            extra_env={"EDITOR": repo_editor},
-        )
     verdict_requests: HttpRequests = []
     with reject_editor_script() as reject_editor:
         run_terminal_scenario(
@@ -12056,6 +12004,62 @@ def run_repositories_regression(executable: str) -> None:
         interact=repositories_path_interaction,
         http_fixtures=fixtures,
     )
+    # The two scenarios below opened a repository's own tree and declared a
+    # new repository from the default group, where a failure earlier in the
+    # run kept them from running at all. They are repository scenarios, so
+    # they run under the repositories alias with the one above.
+    repositories_fixtures = keeper_runtime_http_fixtures()
+    repositories_fixtures[REPOSITORIES_PATH] = repositories_fixture()
+    repositories_fixtures["/api/v1/workspace/children?path=&limit=2000&repo_id=masc"] = (
+        200,
+        [
+            {"path": "src", "label": "src", "depth": 0, "parent": "",
+             "hasChildren": True, "diff": None, "keeperId": None,
+             "hueIndex": None},
+            {"path": "note.ml", "label": "note.ml", "depth": 0, "parent": "",
+             "hasChildren": False, "diff": None, "keeperId": None,
+             "hueIndex": None},
+        ],
+    )
+    repo_file = (
+        200,
+        {
+            "ok": True,
+            "content": (
+                "(* masc(alpha) decision: keep n at three until the probe lands *)\n"
+                "let n = 3\n"
+            ),
+        },
+    )
+    for file_path in (
+        "/api/v1/workspace/file?path=note.ml&repo_id=masc",
+    ):
+        repositories_fixtures[file_path] = repo_file
+    repositories_fixtures[
+        "/api/v1/git/log?path=note.ml&limit=50&repo_id=masc"
+    ] = (
+        200,
+        {"ok": True, "commits": [
+            {"hash": "abc1234", "timestamp_ms": 1787650000000,
+             "author": "keeper", "subject": "docs: seed the file (#1256)"},
+        ]},
+    )
+    run_terminal_scenario(
+        executable,
+        description="Repositories Enter opens the Code tree",
+        interact=repositories_enter_interaction(),
+        http_fixtures=repositories_fixtures,
+    )
+    add_requests: HttpRequests = []
+    with repository_declaration_editor_script() as repo_editor:
+        run_terminal_scenario(
+            executable,
+            description="Repositories add says what it did",
+            interact=repository_add_interaction(add_requests),
+            http_fixtures=repositories_fixtures,
+            http_requests=add_requests,
+            extra_env={"EDITOR": repo_editor},
+        )
 
 
 def run_project_changes_regression(executable: str) -> None:

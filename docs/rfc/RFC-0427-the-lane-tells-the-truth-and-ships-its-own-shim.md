@@ -99,27 +99,41 @@ Shared_mount` 를 가른다. 읽기 디스패치(`Keeper_sandbox_read_backend.re
 `test_keeper_sandbox_read_backend` 와 `test_keeper_tool_filesystem_remote_write` 옆에
 둔다. 호스트에 같은 이름의 빈 디렉터리를 두고도 게스트의 결과가 나와야 한다.
 
-### 3-B. shim 은 릴리즈 산출물이고, 서버가 놓는다
+### 3-B. shim 은 릴리즈 산출물이고, 설치기가 놓고, 부팅이 검증한다
 
 - 릴리즈 워크플로(`.github/workflows/release.yml`)가 `build-shim.sh` 로
   linux/arm64 와 linux/amd64 정적 shim 을 만들어 릴리즈 자산으로 올린다.
-  러너는 지금 `ubuntu-latest`(amd64) 뿐이라 arm64 는 `ubuntu-24.04-arm` 러너
-  또는 컨테이너 안 크로스 빌드가 필요하다. 1단계에서 둘 중 하나를 확정한다.
-- 서버 바이너리는 자기 릴리즈의 shim 해시 두 개(arm64, amd64)를 상수로 안다.
-  `dune-project` 버전과 같은 곳에서 나오며, 릴리즈 스크립트가 함께 갱신한다.
-- microvm 부팅: `<base>/.masc/microvm/shim/masc-exec-shim` 의 해시가 상수와
-  다르면 서버가 릴리즈 자산에서 받아 원자적으로 놓는다(`Fs_compat.save_file_atomic`,
-  옛 파일은 `.prev`). 받을 수 없으면 지금처럼 `microvm_shim_missing` 으로 부팅을
-  거절하되, 메시지에 릴리즈 URL 과 기대 해시를 적는다.
+  매트릭스에 이미 `ubuntu-24.04-arm` 러너가 있어 각 Linux 잡이 자기
+  아키텍처의 shim 을 만든다 (B-1, #33581).
+- `scripts/install.sh` 가 다른 companion 자산을 받는 길로 게스트 shim 도 받아
+  `<base>/.masc/microvm/shim/masc-exec-shim` 에 놓고, 옆에
+  `masc-exec-shim.sha256` 을 쓴다. 내용은 릴리즈 `SHA256SUMS` 가 그 자산에 준
+  줄 그대로(`<hash>  <asset>`). 게스트 아키텍처는 호스트가 macos-arm64 나
+  linux-arm64 면 arm64, linux-x64 면 amd64. microvm keeper 를 돌리지 않는
+  호스트는 `--no-guest-shim` 으로 건너뛴다.
+- microvm 부팅(`prepare_microvm_shim_dir`): 옆에 sha256 파일이 있으면 바이너리의
+  해시와 비교한다. 다르면 `microvm_shim_hash_mismatch` 로 부팅을 거절하고
+  메시지에 두 해시를 적는다. 파일이 없으면 손으로 빌드한 shim 으로 보고 그대로
+  돌리되 부팅 로그에 검증 안 됨을 남긴다. 릴리즈가 안 준 shim 이 조용히 도는
+  것이 2026-09-05 장애의 형태였고, 이 검증이 그 형태를 이름으로 막는다.
+- 서버 바이너리가 해시 상수를 품는 원안은 버렸다. 그 상수는 릴리즈마다 손으로
+  갱신해야 하고(`masc-releases-hand-edit-four-of-six-version-surfaces` 가 그
+  비용이다), 서버가 부팅 중 네트워크에서 바이너리를 받아 놓는 것은 부팅을
+  릴리즈 서버 가용성에 묶는다. 설치기는 이미 자산을 받고 해시를 검증하는
+  자리라 그 일이 거기 놓인다.
 - remote_ssh preflight: `--probe` 응답에 shim 이 자기 sha256 을 더한다
   (`probe.sha256`, 프로토콜 v3 안에서 추가 필드는 허용). 해시가 릴리즈와 다르면
   preflight 는 통과시키되(한 버전 차이는 #33425 로 견딘다) `remote_shim_outdated`
   를 WARN 으로 남기고, 운영자 명령 `masc shim install <endpoint>` 가 그 엔드포인트의
   키로 `/usr/local/bin` 에 놓는다(계정에 쓰기 권한이 없으면 sudo 경로를 안내).
-- 운영자 절차 문서(`MICROVM-REMOTE-RUNBOOK.md` "shim 만들기")는 삭제한다.
+- 운영자 절차 문서(`MICROVM-REMOTE-RUNBOOK.md` "shim 받기")는 설치기가 놓는다는
+  한 줄과, 릴리즈 없이 손으로 빌드할 때의 예외만 남긴다.
 
-검증: 릴리즈 스모크(`release-binary-smoke.sh`)가 shim 두 개의 해시와 `--probe`
-를 확인한다. 부팅 테스트는 다른 해시의 가짜 shim 을 두고 서버가 바꾸는지 본다.
+검증: 릴리즈 잡의 설치기 스모크(`install-smoke.sh`)가 Linux 에서는 shim 을
+스테이징해 설치기가 놓은 바이너리와 sidecar 의 해시가 릴리즈 `SHA256SUMS` 와
+같은지 확인하고, shim 이 없는 macOS 잡에서는 `--no-guest-shim` 경로를 확인한다.
+단위 테스트(`test_keeper_sandbox_microvm`)는 sidecar 있음·없음·불일치·형식
+오류 네 경우의 부팅 판정을 고정한다.
 
 ### 3-C. 상자가 증명하는 비율을 측정하고, 표를 그 결과로 넓힌다
 
@@ -163,16 +177,15 @@ capabilities)와 첫 디스패치 여부를 가진다. 여기에 마지막 디�
 |---|---|---|---|
 | A-1 | `Endpoint_owned` 프로필의 cwd 해석에서 호스트 존재 확인 제거, 논리 경로 검증만 | 3 파일 (#33461, 머지) | 없음 |
 | D-1 | `shared_state` 에 마지막 디스패치 분류, `keeper_lane_status` 도구 | 12 파일 (#33472, 머지) | 없음 |
-| B-1 | 릴리즈 워크플로에 shim 두 아키텍처 빌드와 자산 업로드 | 1~2 파일 | 없음 |
-| B-2 | 서버가 아는 릴리즈 shim 해시, 부팅 시 게스트 shim 자동 배치 | 3 파일 | B-1 |
+| B-1 | 릴리즈 워크플로에 shim 두 아키텍처 빌드와 자산 업로드 | 3 파일 (#33581, 머지) | 없음 |
+| B-2 | 설치기가 shim 과 sha256 sidecar 를 놓고, 부팅이 그 쌍을 검증 | 8 파일 | B-1 |
 | B-3 | probe 에 sha256, preflight WARN, `masc shim install` | 4 파일 | B-1 |
 | C-1 | 이틀 측정표, 카나리 결정 | 문서 | 16:20Z + 48h |
 | C-2 | 카나리와 표 후보 | 설정 + 표 | C-1 |
 | A-2 | 원격 argv 가 `Remote_path.t` 만 받도록 타입 경계 (관측 결함 없음, 재발 방지) | 3~4 파일 | B, C 뒤 |
 | A-3 | Grep 0 매치 판정에 exit 2 + stderr 조건, 알려진-매치 테스트 | 2 파일 | A-2 |
 
-한 단계가 한 Draft PR 이다. A 와 D 는 서로 독립이라 병렬로 간다. B-1 은 CI 러너
-확정이 먼저다.
+한 단계가 한 Draft PR 이다. A 와 D 는 서로 독립이라 병렬로 간다.
 
 ## 5. 측정 기록
 

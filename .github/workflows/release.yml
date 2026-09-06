@@ -201,23 +201,12 @@ jobs:
             dist/masc-deployment-preflight-helper-${{ matrix.arch }} \
             dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}
 
-      # Exercise scripts/install.sh end to end against the just-packaged
-      # binaries: stage dist/ as a file:// release, install through the real
-      # installer (detect_asset + SHA256SUMS verification + placement), boot
-      # the installed server, and assert /health. This guards the installer's
-      # asset-name and checksum contract -- the download path that nothing
-      # else runs -- without any network access.
-      - name: Installer smoke (offline)
-        run: |
-          chmod +x scripts/install-smoke.sh
-          scripts/install-smoke.sh dist ${{ matrix.arch }}
-
       # RFC-0427 B-1: the exec shim ships with the server release instead of
       # being built by the operator. It is a static musl binary built in a
       # container on this runner's own architecture (no emulation), and it is
       # probed once here: a shim that cannot answer --probe is not an asset.
-      # The runbook points operators at this asset; a server that places the
-      # shim itself by hash (B-2) reads the same asset.
+      # It is built before the installer smoke so the smoke can stage it and
+      # check that install.sh places it with its sha256 sidecar (B-2).
       - name: Build exec shim (static ${{ matrix.shim-arch }})
         if: matrix.shim-arch != ''
         run: |
@@ -230,6 +219,17 @@ jobs:
           echo "probe: $probe"
           echo "$probe" | jq -e '.name == "masc-exec-shim" and (.version | test("^[0-9]+\\.")) and (.capabilities | type == "array")' >/dev/null
           sha256sum "$shim"
+
+      # Exercise scripts/install.sh end to end against the just-packaged
+      # binaries: stage dist/ as a file:// release, install through the real
+      # installer (detect_asset + SHA256SUMS verification + placement), boot
+      # the installed server, and assert /health. This guards the installer's
+      # asset-name and checksum contract -- the download path that nothing
+      # else runs -- without any network access.
+      - name: Installer smoke (offline)
+        run: |
+          chmod +x scripts/install-smoke.sh
+          scripts/install-smoke.sh dist ${{ matrix.arch }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

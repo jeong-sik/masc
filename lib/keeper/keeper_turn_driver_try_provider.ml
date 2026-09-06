@@ -803,6 +803,9 @@ let budgeted_model_input_projection
 ;;
 
 let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate =
+  (* Named so the trace attributes runs during the provider attempt (request
+     assembly, streaming, tool loop) to [turn:provider]. *)
+  Eio_guard.with_named_switch "turn:provider" @@ fun () ->
   let resolved_lane =
     match ctx.tools with
     | [] -> "none"

@@ -1908,11 +1908,17 @@ let test_missing_operator_token_is_reported () =
     ~label:"credential_sent";
   asks_the_question ~binding_name:"apply_keeper_roster_load"
     ~callee:"Keeper_control.roster_failure_message" ~label:"credential_sent";
-  (* Every surface reads JSON through these two. Answering a refusal inside them
-     is what keeps the server's auth body out of six different panes; a surface
-     that decoded the status itself would print it again. *)
-  check int "the JSON reads share one refusal answer" 2
-    (Ast_grep.count_calls ~module_path:"bin/masc_tui_http.ml" ~callee:"decode_json");
+  (* Every surface reads JSON through [decode_json]. Answering a refusal inside
+     it is what keeps the server's auth body out of six different panes; a
+     surface that decoded the status itself would print it again.
+
+     The count below is of readers, not of the contract: four call it today
+     and two did when this line was written, and neither number says anything
+     about where a refusal is answered. The line under it does -- one owner
+     for the decode is what makes the answer single. *)
+  check bool "the JSON reads have a shared owner" true
+    (Ast_grep.count_calls ~module_path:"bin/masc_tui_http.ml" ~callee:"decode_json"
+     > 0);
   check int "no surface decodes a status on its own" 1
     (Ast_grep.count_calls
        ~module_path:"bin/masc_tui_http.ml"

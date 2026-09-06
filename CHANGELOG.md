@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **The observation stage actually runs in the box now.** The gate's
+  pre-judge observation (RFC-0422) dispatched the keeper's effect-built
+  shell IR unchanged: execution reads the dispatch target from the IR, so
+  the "observed" run was the real call with live network, and its exit
+  became the gate's evidence — an `observed_in_box` auto-allow granted a
+  real `gh pr create` (PR #33609) and a review comment before any operator
+  decision on 2026-09-06. `Shell_ir.with_sandbox` rewrites every stage of
+  the IR onto the box's target (a delegated masc-tool stage keeps its own),
+  and the observation stage dispatches the rewritten IR (#33638,
+  task-1375).
 - **The exec shim traces every request and names its build.** On 2026-09-06
   an `observed_in_box` auto-allow ran with live network (a keeper opened PR
   #33609 through the observation path), while the same shim binary framed by

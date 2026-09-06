@@ -48,4 +48,12 @@ type t =
           written down. Evaluation is left to right: each connector looks only
           at the status of whatever ran last. *)
 
+val with_sandbox : Sandbox_target.t -> t -> t
+(** [with_sandbox target ir] rebuilds [ir] with every stage's dispatch
+    target set to [target], recursively. A [Delegated] stage keeps its own:
+    it names a masc tool call whose routing is the delegation's. Execution
+    reads the target from the IR ({!Exec_dispatch.dispatch} takes none), so
+    a caller re-running a command under a different target must pass a
+    rewritten IR — the observation stage (RFC-0422) does exactly this. *)
+
 val pp : Format.formatter -> t -> unit

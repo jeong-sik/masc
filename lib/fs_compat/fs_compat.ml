@@ -233,6 +233,15 @@ let mkdir_p_unix (path : string) : unit =
    main-domain-scheduler-latency §8.8). Inside an Eio fiber the three
    primitives therefore run their Unix implementation on a system thread;
    outside Eio they run it inline, as before. *)
+(* The label reaches the runtime-events ring as the fiber's suspend reason
+   ([Eio_unix.run_in_systhread] calls [Trace.suspend_fiber label]), and a
+   trace reads a long run as "resumed from X, suspended on Y". With the file
+   named, X and Y identify the code: a run between
+   [fs-compat-append-file chat.jsonl] and [fs-compat-load-file memory.json]
+   needs no further instrumentation to place. The basename alone keeps the
+   label short and is unique enough among the stores a keeper touches. *)
+let labelled operation path = operation ^ " " ^ Filename.basename path
+
 let on_systhread ~label f =
   let result = Eio_unix.run_in_systhread ~label f in
   Eio.Fiber.check ();
@@ -246,7 +255,10 @@ let load_file (path : string) : string =
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> load_file_unix path)
-    (fun _fs -> on_systhread ~label:"fs-compat-load-file" (fun () -> load_file_unix path))
+    (fun _fs ->
+       on_systhread
+         ~label:(labelled "fs-compat-load-file" path)
+         (fun () -> load_file_unix path))
 ;;
 
 (* The write behind [save_file] and the atomic writers: the path guard on
@@ -266,7 +278,9 @@ let save_file (path : string) (content : string) : unit =
     ~path
     ~fallback:(fun () -> save_file_unix path content)
     (fun _fs ->
-       on_systhread ~label:"fs-compat-save-file" (fun () -> save_file_unix path content))
+       on_systhread
+         ~label:(labelled "fs-compat-save-file" path)
+         (fun () -> save_file_unix path content))
 ;;
 
 let save_file_atomic path content =
@@ -598,7 +612,9 @@ let append_file (path : string) (content : string) : unit =
     ~path
     ~fallback:(fun () -> append_file_unix path content)
     (fun _fs ->
-       on_systhread ~label:"fs-compat-append-file" (fun () -> append_file_unix path content))
+       on_systhread
+         ~label:(labelled "fs-compat-append-file" path)
+         (fun () -> append_file_unix path content))
 ;;
 
 (** Check if file exists.

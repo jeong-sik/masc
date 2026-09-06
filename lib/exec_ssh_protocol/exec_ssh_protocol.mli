@@ -258,6 +258,13 @@ type probe =
   { name : string  (** e.g. ["masc-exec-shim"] *)
   ; version : string  (** dotted semver, e.g. ["1.4.2"] *)
   ; capabilities : string list
+  ; release : string option
+      (** The MASC release the shim was built from, for example
+          [Some "0.33.0"]. [None] from a shim built before this field
+          existed, which is itself a skew signal. Unknown keys are ignored
+          on the way in and an absent key is [None], so a v3 shim and a v3
+          server disagree about this field without either refusing the
+          other (RFC-0427 B-3). *)
   }
 
 val render_probe : probe -> string

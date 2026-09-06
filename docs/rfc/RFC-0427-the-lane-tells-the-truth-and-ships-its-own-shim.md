@@ -121,11 +121,20 @@ Shared_mount` 를 가른다. 읽기 디스패치(`Keeper_sandbox_read_backend.re
   비용이다), 서버가 부팅 중 네트워크에서 바이너리를 받아 놓는 것은 부팅을
   릴리즈 서버 가용성에 묶는다. 설치기는 이미 자산을 받고 해시를 검증하는
   자리라 그 일이 거기 놓인다.
-- remote_ssh preflight: `--probe` 응답에 shim 이 자기 sha256 을 더한다
-  (`probe.sha256`, 프로토콜 v3 안에서 추가 필드는 허용). 해시가 릴리즈와 다르면
-  preflight 는 통과시키되(한 버전 차이는 #33425 로 견딘다) `remote_shim_outdated`
-  를 WARN 으로 남기고, 운영자 명령 `masc shim install <endpoint>` 가 그 엔드포인트의
-  키로 `/usr/local/bin` 에 놓는다(계정에 쓰기 권한이 없으면 sudo 경로를 안내).
+- probe 는 sha256 이 아니라 자기가 나온 릴리즈를 적는다(`release`, v3 안의 추가
+  필드라 이 키를 모르는 쪽은 그냥 무시한다). 해시로 잡으려던 원안은 엔드포인트마다
+  아키텍처가 달라 성립하지 않는다. arm64 호스트가 가진 shim 과 amd64 엔드포인트의
+  shim 은 같은 릴리즈여도 절대 같은 해시가 아니다. 릴리즈 문자열은 아키텍처와
+  무관하게 두 쪽을 비교한다.
+- 서버는 probe 의 릴리즈를 자기 `Build_version.current` 와 견주고, 다르면
+  `remote_shim_outdated` 를 WARN 으로 남긴다. 막지는 않는다. 한 버전 차이는
+  #33425 로 견디도록 만든 것이고, 릴리즈 차이는 고칠 일이지 레인을 세울 일이 아니다.
+  릴리즈를 안 적는 낡은 shim 도 같은 WARN 이다.
+- 새 명령 `masc shim install <endpoint>` 는 만들지 않는다. `masc-exec-ssh-bootstrap
+  --endpoint <name> --shim <path>` 가 이미 그 일(핀된 채널로 업로드,
+  `/usr/local/bin` 설치, probe 기록)을 한다. WARN 문구가 그 명령을 그대로 적는다.
+  그 도구가 `--probe` 출력을 `/usr/local/share/masc/exec-shim.version` 에 남기므로,
+  이 필드가 생긴 뒤로는 그 파일도 릴리즈를 담는다.
 - 운영자 절차 문서(`MICROVM-REMOTE-RUNBOOK.md` "shim 받기")는 설치기가 놓는다는
   한 줄과, 릴리즈 없이 손으로 빌드할 때의 예외만 남긴다.
 
@@ -179,7 +188,7 @@ capabilities)와 첫 디스패치 여부를 가진다. 여기에 마지막 디�
 | D-1 | `shared_state` 에 마지막 디스패치 분류, `keeper_lane_status` 도구 | 12 파일 (#33472, 머지) | 없음 |
 | B-1 | 릴리즈 워크플로에 shim 두 아키텍처 빌드와 자산 업로드 | 3 파일 (#33581, 머지) | 없음 |
 | B-2 | 설치기가 shim 과 sha256 sidecar 를 놓고, 부팅이 그 쌍을 검증 | 8 파일 | B-1 |
-| B-3 | probe 에 sha256, preflight WARN, `masc shim install` | 4 파일 | B-1 |
+| B-3 | probe 가 자기 릴리즈를 적고, 서버가 다르면 `remote_shim_outdated` WARN | 11 파일 | B-1 |
 | C-1 | 이틀 측정표, 카나리 결정 | 문서 | 16:20Z + 48h |
 | C-2 | 카나리와 표 후보 | 설정 + 표 | C-1 |
 | A-2 | 원격 argv 가 `Remote_path.t` 만 받도록 타입 경계 (관측 결함 없음, 재발 방지) | 3~4 파일 | B, C 뒤 |
@@ -200,4 +209,4 @@ capabilities)와 첫 디스패치 여부를 가진다. 여기에 마지막 디�
 - 레인 상태를 저장하거나, 그것으로 스케줄링을 막는 Gate. 투영만 한다.
 - microsandbox 백엔드 살리기. #32837 과 #33431 은 별건이다.
 - 죽어 있는 remote_ssh 엔드포인트 다섯 개(127.0.0.1:2222, :22222)를 살리는 일.
-  다시 쓸 때 B-3 의 `masc shim install` 로 붙인다.
+  다시 쓸 때 `masc-exec-ssh-bootstrap --endpoint <name> --shim <릴리즈 자산>` 으로 붙인다.

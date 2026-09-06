@@ -254,19 +254,8 @@ check_forbidden_active "V7n-generic-ide-product-routes" \
   "lib/agent_observation/agent_observation.mli" \
   "lib/ide/ide_bridge.ml" \
   "lib/server/server_ide_http.ml" \
-  "dashboard/src/api/schemas/ide-annotations.ts" \
   "dashboard/src/api/ide.ts" \
-  "dashboard/src/components/ide/ide-annotation-rail.ts" \
-  "dashboard/src/components/ide/ide-editor-annotation-ui.ts" \
   "dashboard/src/components/ide/ide-lsp-client.ts"
-
-# Dashboard annotation consumers may display opaque reference pairs, but may
-# not recover retired product routes by inspecting relation names or legacy
-# annotation fields. Other IDE activity/event models retain their own typed
-# product context and are intentionally outside this annotation-only ratchet.
-check_forbidden_active "V7n-dashboard-annotation-reference-semantics" \
-  'annotation\.(board_post_id|comment_id|pr_id|git_ref|log_id|session_id|operation_id|worker_run_id)|annotation\.references\.(find|filter|some)|reference\.relation[[:space:]]*(===|!==|==|!=)' \
-  "dashboard/src/components/ide/"
 
 # V7o: Keeper dispatch consumes producer-owned typed outcomes. Opaque output
 # payloads must never be parsed or shape-tagged to reconstruct success/failure.

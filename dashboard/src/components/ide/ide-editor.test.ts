@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
-import { annotationRouteLinks, currentFileFindMatches, IdeEditor } from './ide-editor'
+import { currentFileFindMatches, IdeEditor } from './ide-editor'
 import { createCodeDocumentStore } from './code-document-store'
 import { createKeeperLineOwnershipStore } from './keeper-line-ownership-store'
 import { focusIdeContextAnchor, focusIdeFile, ideContextFocus } from './ide-state'
@@ -372,20 +372,6 @@ describe('IdeEditor', () => {
           { kind: 'add', oldLine: null, newLine: 1, text: '+const runtime = 1' },
           { kind: 'delete', oldLine: 2, newLine: null, text: '-const old = 1' },
         ] as const,
-        annotations: [{
-          id: 'ann-1',
-          file_path: 'runtime.ts',
-          line_start: 1,
-          line_end: 1,
-          keeper_id: 'sangsu',
-          kind: 'Comment',
-          content: 'Keep this task linked to the line',
-          goal_id: 'goal-1',
-          task_id: 'task-1',
-          references: [],
-          created_at_ms: 1,
-          updated_at_ms: 1,
-        }],
       }),
       container,
     )
@@ -393,7 +379,6 @@ describe('IdeEditor', () => {
     const signals = [...container.querySelectorAll<HTMLLIElement>('.ide-editor-file-signals > li')]
     expect(signals.map(item => item.textContent)).toEqual([
       'LSP1',
-      'Notes1',
       'Threads1',
       'Trace2',
       'Ops1',
@@ -402,160 +387,11 @@ describe('IdeEditor', () => {
     expect(signals.every(item => item.getAttribute('data-active') === 'true')).toBe(true)
     expect(signals.map(item => item.title)).toEqual([
       '1 current-file diagnostic',
-      '1 current-file annotation',
       '1 current-file anchored thread',
       '2 current-file trace events',
       '1 current-file operational surface link',
       '2 current-file changed rows',
     ])
-  })
-
-  it('counts loaded annotations in the notes overlay summary', () => {
-    const documentStore = createCodeDocumentStore({
-      file_path: 'runtime.ts',
-      language: 'typescript',
-      content: 'const runtime = 1\n',
-    })
-    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
-
-    render(
-      h(IdeEditor, {
-        documentStore,
-        ownershipStore,
-        diffRows: () => [],
-        activeLayers: new Set(['notes']),
-        annotations: [{
-          id: 'ann-1',
-          file_path: 'runtime.ts',
-          line_start: 1,
-          line_end: 1,
-          keeper_id: 'sangsu',
-          kind: 'Comment',
-          content: 'Keep this task linked to the line',
-          goal_id: 'goal-1',
-          task_id: 'task-1',
-          references: [],
-          created_at_ms: 1,
-          updated_at_ms: 1,
-        }],
-      }),
-      container,
-    )
-
-    expect(container.querySelector('[aria-label="Active IDE overlays"]')?.textContent)
-      .toContain('1 note')
-  })
-
-  it('renders loaded annotations as compact context chips on code lines', async () => {
-    const documentStore = createCodeDocumentStore({
-      file_path: 'runtime.ts',
-      language: 'typescript',
-      content: 'const runtime = 1\nconst other = 2\n',
-    })
-    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
-
-    render(
-      h(IdeEditor, {
-        documentStore,
-        ownershipStore,
-        diffRows: () => [],
-        annotations: [
-          {
-            id: 'ann-1',
-            file_path: 'runtime.ts',
-            line_start: 1,
-            line_end: 1,
-            keeper_id: 'sangsu',
-            kind: 'Comment',
-            content: 'Keep this task linked to the line',
-            goal_id: 'goal-1',
-            task_id: 'task-1',
-            references: [],
-            created_at_ms: 1,
-            updated_at_ms: 1,
-          },
-          {
-            id: 'ann-2',
-            file_path: 'runtime.ts',
-            line_start: 1,
-            line_end: 1,
-            keeper_id: 'reviewer',
-            kind: 'Question',
-            content: 'Is this still the active goal?',
-            goal_id: null,
-            task_id: null,
-            references: [],
-            created_at_ms: 2,
-            updated_at_ms: 2,
-          },
-          {
-            id: 'ann-other-file',
-            file_path: 'other.ts',
-            line_start: 1,
-            line_end: 1,
-            keeper_id: 'other',
-            kind: 'Comment',
-            content: 'Not this file',
-            goal_id: null,
-            task_id: null,
-            references: [],
-            created_at_ms: 3,
-            updated_at_ms: 3,
-          },
-        ],
-      }),
-      container,
-    )
-
-    await waitFor(() => {
-      const chip = container.querySelector('.cm-masc-annotation-chip')
-      expect(chip?.textContent)
-        .toBe('Comment · goal goal-1 · task task-1 · keeper sangsu · +1')
-    })
-    expect(container.querySelectorAll('.cm-masc-annotation-chip')).toHaveLength(1)
-    expect(container.querySelector('.cm-masc-annotation-chip')?.getAttribute('aria-label'))
-      .toBe('Line 1 annotation context: Comment · goal goal-1 · task task-1 · keeper sangsu · +1')
-  })
-
-  it('maps annotation detail context into operational route links', () => {
-    const links = annotationRouteLinks({
-      id: 'ann-1',
-      file_path: 'runtime.ts',
-      line_start: 7,
-      line_end: 7,
-      keeper_id: 'sangsu',
-      kind: 'Comment',
-      content: 'Keep this task linked to the active goal',
-      goal_id: 'goal-runtime',
-      task_id: 'task-runtime',
-      references: [{ relation: 'evidence', reference: 'urn:example:42' }],
-    })
-
-    expect(links.map(link => link.label)).toEqual(['Code', 'Goal', 'Task', 'Keeper'])
-    expect(links.find(link => link.label === 'Code')).toMatchObject({
-      tab: 'code',
-      params: {
-        section: 'ide-shell',
-        view: 'source',
-        file: 'runtime.ts',
-        line: '7',
-        surface: 'Comment',
-        source_id: 'annotation-ann-1',
-        keeper: 'sangsu',
-      },
-    })
-    expect(links.find(link => link.label === 'Goal')?.params).toMatchObject({
-      section: 'planning',
-      goal: 'goal-runtime',
-    })
-    expect(links.find(link => link.label === 'Task')?.params).toMatchObject({
-      section: 'planning',
-      task: 'task-runtime',
-    })
-    expect(links.find(link => link.label === 'Keeper')?.params).toMatchObject({
-      section: 'agents',
-      keeper: 'sangsu',
-    })
   })
 
   it('focuses operational route context when a keeper trace gutter stack is clicked', async () => {

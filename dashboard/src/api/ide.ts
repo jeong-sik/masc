@@ -1,17 +1,5 @@
-import { get, post, fetchWithTimeout, authHeaders, type GetOptions } from './core'
-import {
-  type IdeAnnotation,
-  type IdeAnnotationReference,
-  type AnnotationKind,
-  parseIdeAnnotation,
-} from './schemas/ide-annotations'
+import { get, type GetOptions } from './core'
 import { isRecord } from '../lib/type-guards'
-
-export type {
-  IdeAnnotation,
-  IdeAnnotationReference,
-  AnnotationKind,
-} from './schemas/ide-annotations'
 
 export interface IdeApiOptions extends GetOptions {
   readonly keeper?: string
@@ -63,34 +51,6 @@ export interface IdeTurnEvent extends IdeBridgeEventBase {
 
 export type IdeBridgeEvent = IdeToolEvent | IdeTurnEvent
 
-export interface IdeAnnotationFilter {
-  readonly file_path?: string
-  readonly keeper_id?: string
-  readonly goal_id?: string
-  readonly task_id?: string
-}
-
-export interface CreateAnnotationInput {
-  readonly file_path: string
-  readonly line_start: number
-  readonly line_end: number
-  readonly kind: AnnotationKind
-  readonly content: string
-  readonly goal_id?: string
-  readonly task_id?: string
-  readonly references?: ReadonlyArray<IdeAnnotationReference>
-}
-
-function appendFilterParams(
-  params: URLSearchParams,
-  filter: IdeAnnotationFilter,
-): void {
-  if (filter.file_path) params.set('file_path', filter.file_path)
-  if (filter.keeper_id) params.set('keeper_id', filter.keeper_id)
-  if (filter.goal_id) params.set('goal_id', filter.goal_id)
-  if (filter.task_id) params.set('task_id', filter.task_id)
-}
-
 function trimmedNonEmpty(value: string | null | undefined): string | null {
   const trimmed = value?.trim()
   return trimmed ? trimmed : null
@@ -141,111 +101,6 @@ function ideEnvelopeRecord(raw: unknown, operation: string): Record<string, unkn
   const data = ideEnvelopeData(raw, operation)
   if (!isRecord(data)) throw new Error(`${operation} returned malformed data`)
   return data
-}
-
-function parseStrictRows<T>(
-  operation: string,
-  data: unknown,
-  parse: (value: unknown) => T | null,
-): ReadonlyArray<T> {
-  if (!Array.isArray(data)) throw new Error(`${operation} returned malformed data`)
-  const parsed = data.map(parse)
-  const invalidIndex = parsed.findIndex(item => item === null)
-  if (invalidIndex >= 0) {
-    throw new Error(`${operation} returned malformed row at index ${invalidIndex}`)
-  }
-  return parsed as ReadonlyArray<T>
-}
-
-function parseStrictRow<T>(
-  operation: string,
-  data: unknown,
-  parse: (value: unknown) => T | null,
-): T {
-  const parsed = parse(data)
-  if (parsed === null) throw new Error(`${operation} returned malformed row`)
-  return parsed
-}
-
-function parseStrictIdeAnnotation(raw: unknown): IdeAnnotation | null {
-  return parseIdeAnnotation(raw)
-}
-
-export async function fetchIdeAnnotations(
-  filter: IdeAnnotationFilter = {},
-  opts: IdeApiOptions = {},
-): Promise<ReadonlyArray<IdeAnnotation>> {
-  const params = new URLSearchParams()
-  appendFilterParams(params, filter)
-  appendWorkspaceParams(params, opts)
-  const query = params.size > 0 ? `?${params.toString()}` : ''
-  const raw = await get<unknown>(`/api/v1/ide/annotations${query}`, opts)
-  return parseStrictRows('fetchIdeAnnotations', ideEnvelopeData(raw, 'fetchIdeAnnotations'), parseStrictIdeAnnotation)
-}
-
-export async function createIdeAnnotation(
-  input: CreateAnnotationInput,
-  opts: IdeApiOptions = {},
-): Promise<IdeAnnotation | null> {
-  const params = new URLSearchParams()
-  appendWorkspaceParams(params, opts)
-  const query = params.size > 0 ? `?${params.toString()}` : ''
-  const raw = await post<unknown>(`/api/v1/ide/annotations${query}`, input)
-  return parseStrictRow('createIdeAnnotation', ideEnvelopeData(raw, 'createIdeAnnotation'), parseStrictIdeAnnotation)
-}
-
-// Typed outcome of a DELETE (task-1736 B3 route, token-bound):
-// - 'rejected'     403 with the server's annotation_delete_rejected code —
-//                  the stored annotation is not owned by the token identity,
-//                  or it no longer exists (the server flattens the two).
-// - 'forbidden'    403 from the auth layer — the token's tier lacks the
-//                  write permission; ownership was never evaluated.
-// - 'unauthorized' 401 — missing/expired bearer token.
-// - 'error'        transport failure or any other server error.
-export type IdeAnnotationDeleteOutcome =
-  | 'deleted'
-  | 'rejected'
-  | 'forbidden'
-  | 'unauthorized'
-  | 'error'
-
-// Wire constant mirrored from server_ide_http.ml annotation_delete_rejected_code.
-const ANNOTATION_DELETE_REJECTED_CODE = 'annotation_delete_rejected'
-
-async function responseErrorCode(res: Response): Promise<string | null> {
-  try {
-    const body: unknown = await res.json()
-    if (isRecord(body) && typeof body.code === 'string') return body.code
-    return null
-  } catch {
-    return null
-  }
-}
-
-export async function deleteIdeAnnotation(
-  id: string,
-  opts: IdeApiOptions = {},
-): Promise<IdeAnnotationDeleteOutcome> {
-  const params = new URLSearchParams()
-  appendWorkspaceParams(params, opts)
-  const query = params.size > 0 ? `?${params.toString()}` : ''
-  const path = `/api/v1/ide/annotations/${encodeURIComponent(id)}${query}`
-  try {
-    const res = await fetchWithTimeout(
-      path,
-      { method: 'DELETE', headers: authHeaders() },
-      15_000,
-    )
-    if (res.ok) return 'deleted'
-    if (res.status === 401) return 'unauthorized'
-    if (res.status === 403) {
-      const code = await responseErrorCode(res)
-      return code === ANNOTATION_DELETE_REJECTED_CODE ? 'rejected' : 'forbidden'
-    }
-    return 'error'
-  } catch {
-    return 'error'
-  }
 }
 
 export async function fetchIdePresence(

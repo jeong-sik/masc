@@ -290,7 +290,15 @@ let resolve_done_for_test reg value =
    this suite dying on "Eio clock not initialized". *)
 let install_test_env env =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Masc_test_deps.init_eio_clock env
+  Masc_test_deps.init_eio_clock env;
+  (* The net for the same reason as the clock, and found the same way: with
+     the clock installed the turn got one step further and died on
+     "Invalid config 'eio_context': Eio net not available (running outside
+     server context)". That is promoted to a fatal environment error, which
+     crashes the Keeper, which drains its Librarian lane -- and the two
+     fixtures that then submit to that lane get Rejected_draining. *)
+  Eio_context.set_net (Eio.Stdenv.net env);
+  Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env)
 
 let eio_test name fn =
   test_case name `Quick (fun () -> Eio_main.run @@ fun env ->

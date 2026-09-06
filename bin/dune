@@ -142,6 +142,29 @@
   masc.tool_catalog_surfaces
   yojson))
 
+;; Tool parity artifact generator (task-1363): reads config/tools/*.toml
+;; through the production loader (Tool_definition_toml.load) and regenerates
+;; the test/golden/tool_parity_*.txt baselines. Manual-only via
+;; @regen_tool_parity_artifacts (tools/tool_parity_regen.inc); never a build
+;; dependency of anything.
+(executable
+ (name tool_parity_generator)
+ (modules tool_parity_generator)
+ (libraries
+  masc.masc_tool_surface
+  masc_types
+  yojson))
+
+;; Manual-only regeneration entry point for the tool parity baselines
+;; (task-1363): dune build @regen_tool_parity_artifacts. The generator reads
+;; config/tools/*.toml through the production loader and rewrites
+;; test/golden/tool_parity_*.txt; it is never a build dependency of anything.
+(alias
+ (name regen_tool_parity_artifacts)
+ (action
+  (chdir %{workspace_root}
+    (run %{exe:tool_parity_generator.exe}))))
+
 ;; runtime_materialize (RFC-0058 §9 Phase 9.3): retired. The CLI's only
 ;; purpose was to pre-write the old derived JSON artifact.
 

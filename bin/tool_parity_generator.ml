@@ -1,77 +1,99 @@
-(** Tool definition parity artifact generator.
-    
-    This program reads TOML tool definitions from config/tools/ and generates
-    expected_tool_*.txt artifacts for CI verification.
-    
-    Invoked by: dune build @regen_tool_parity_artifacts
-    Output: test/golden/tool_parity_*.txt (4 files, one per dimension)
-*)
+(** Tool definition parity artifact generator (task-1363).
 
-open Core
+    Reads every [config/tools/<name>.toml] through the production loader
+    ([Tool_definition_toml.load ~name ~contents]) and emits the parity
+    baselines under [test/golden/]:
+
+      - tool_parity_description.txt  — name, description (byte-exact prose)
+      - tool_parity_params.txt       — name, Yojson.Safe.to_string input_schema
+      - tool_parity_visibility.txt   — name, loading, keeper projection
+      - tool_parity_availability.txt — name, loading
+
+    One line per tool, tab-separated, sorted by name, LF endings, trailing
+    newline. The loader is the only decoder: whatever it accepts is the
+    parity truth, and drift between the TOML declarations and a consumer's
+    expectation shows up as a baseline diff.
+
+    Invoked manually by: dune build @regen_tool_parity_artifacts
+    (the alias lives in test/dune via tools/tool_parity_regen.inc). *)
 
 let tool_config_dir = "config/tools"
+
 let output_dir = "test/golden"
 
-(** Load all .toml files from config/tools/ *)
-let load_tool_definitions () =
-  Sys_unix.ls_dir tool_config_dir
-  |> List.filter ~f:(String.is_suffix ~suffix:".toml")
-  |> List.map ~f:(fun filename ->
-      let path = Filename.concat tool_config_dir filename in
-      let name = String.chop_suffix_exn filename ~suffix:".toml" in
-      try
-        let defn = Tool_definition_toml.load path in
-        Some (name, defn)
-      with e ->
-        Printf.eprintf "Warning: failed to load %s: %s\n" path (Exn.to_string e);
-        None
-    )
-  |> List.filter_map ~f:Fn.id
+(* Read a whole file as a string (the loader takes [contents], not a path). *)
+let read_file path =
+  let ic = open_in_bin path in
+  let n = in_channel_length ic in
+  let s = really_input_string ic n in
+  close_in ic;
+  s
 
-(** Generate a canonical string representation of tool definition for parity check.
-    
-    Format: one tool per line, fields tab-separated.
-    Dimensions:
-    - description (prose)
-    - params (input schema structure)
-    - visibility (access control)
-    - availability (tool load status)
-*)
-let tool_to_parity_line (name : string) (defn : Tool_definition_toml.t) : string =
-  (* TODO: implement actual serialization matching Tool_definition_toml structure *)
-  (* For now, a placeholder that the test suite will refine *)
-  Printf.sprintf "%s\t%s" name (Tool_definition_toml.description defn)
+(* [description]: the exact sentence the loader decoded — the prose every
+   projection inherits unless it overrides it. *)
+let render_description (loaded : Tool_definition_toml.loaded) : string =
+  loaded.schema.description
 
-(** Write parity artifacts for each dimension *)
-let generate_artifacts () =
-  let tools = load_tool_definitions () in
-  if List.is_empty tools then (
-    Printf.eprintf "Error: no TOML files found in %s\n" tool_config_dir;
-    exit 1
-  );
-  
-  (* Dimension 1: description parity *)
-  let description_parity =
-    tools
-    |> List.map ~f:(fun (name, defn) -> tool_to_parity_line name defn)
-    |> String.concat ~sep:"\n"
-  in
-  let desc_file = Filename.concat output_dir "tool_parity_description.txt" in
-  Out_channel.write_all desc_file ~data:description_parity;
-  Printf.printf "Generated: %s\n" desc_file;
-  
-  (* Dimension 2-4: params, visibility, availability (TODO) *)
-  (* Placeholder: copy description to other dimensions for now *)
-  List.iter ["params"; "visibility"; "availability"] ~f:(fun dim ->
-    let outfile = Filename.concat output_dir (Printf.sprintf "tool_parity_%s.txt" dim) in
-    Out_channel.write_all outfile ~data:description_parity;
-    Printf.printf "Generated: %s\n" outfile
-  );
-  
-  printf "Tool parity artifacts regenerated: %d tools, 4 dimensions\n" (List.length tools)
+(* [params]: the loader-assembled input schema, serialized with the same
+   [Yojson.Safe.to_string] whose byte-identity property the loader's .mli
+   documents — key order preserved, so a TOML edit that only reorders keys
+   is not a parity change. *)
+let render_params (loaded : Tool_definition_toml.loaded) : string =
+  Yojson.Safe.to_string loaded.schema.input_schema
+
+(* [visibility]: which surfaces see the tool — the loading axis and whether
+   a narrower keeper projection was declared. *)
+let render_visibility (loaded : Tool_definition_toml.loaded) : string =
+  Printf.sprintf "%s\t%s"
+    (Tool_definition_toml.loading_to_string loaded.loading)
+    (match loaded.keeper_projection with
+     | None -> "none"
+     | Some _ -> "keeper_projection")
+
+(* [availability]: the loading axis alone — always-loaded tools ride every
+   request, deferrable ones wait to be named. *)
+let render_availability (loaded : Tool_definition_toml.loaded) : string =
+  Tool_definition_toml.loading_to_string loaded.loading
+
+let dimensions : (string * (Tool_definition_toml.loaded -> string)) list =
+  [ ("description", render_description)
+  ; ("params", render_params)
+  ; ("visibility", render_visibility)
+  ; ("availability", render_availability) ]
 
 let () =
-  try generate_artifacts ()
-  with e ->
-    Printf.eprintf "Fatal: %s\n" (Exn.to_string e);
-    exit 1
+  if not (Sys.file_exists output_dir) then Sys.mkdir output_dir 0o755;
+  let names =
+    Sys.readdir tool_config_dir |> Array.to_list
+    |> List.filter (fun file -> String.ends_with ~suffix:".toml" file)
+    |> List.map (fun file -> String.sub file 0 (String.length file - 5))
+    |> List.sort String.compare
+  in
+  match names with
+  | [] ->
+      Printf.eprintf "tool_parity_generator: no .toml in %s\n" tool_config_dir;
+      exit 1
+  | _ ->
+      let defs =
+        List.map
+          (fun name ->
+            let path = Filename.concat tool_config_dir (name ^ ".toml") in
+            match Tool_definition_toml.load ~name ~contents:(read_file path) with
+            | Ok loaded -> (name, loaded)
+            | Error err ->
+                Printf.eprintf "tool_parity_generator: %s failed to load: %s\n"
+                  path err;
+                exit 1)
+          names
+      in
+      List.iter
+        (fun (suffix, render) ->
+          let path = Filename.concat output_dir ("tool_parity_" ^ suffix ^ ".txt") in
+          let oc = open_out_bin path in
+          List.iter
+            (fun (name, loaded) ->
+              Printf.fprintf oc "%s\t%s\n" name (render loaded))
+            defs;
+          close_out oc;
+          Printf.printf "generated %s (%d tools)\n" path (List.length defs))
+        dimensions

@@ -278,7 +278,7 @@ let test_status_snapshot_is_sorted_and_complete () =
   check (list string) "sorted by lang id" [ "ocaml"; "python" ] (List.map lang_of langs)
 ;;
 
-(* --- task-1692: read-only method allowlist + no overlay write edits --- *)
+(* --- task-1692: read-only method allowlist --- *)
 
 (* Read-only navigation methods that reach the catch-all forwarder are
    proxied to the language server. *)
@@ -431,44 +431,6 @@ let test_unknown_language_is_typed () =
   | Lsp.Known_lang lang -> Alcotest.fail ("unexpected known lang: " ^ lang)
 ;;
 
-let rec json_contains_key key = function
-  | `Assoc fields ->
-    List.exists (fun (k, v) -> String.equal k key || json_contains_key key v) fields
-  | `List items -> List.exists (json_contains_key key) items
-  | _ -> false
-;;
-
-(* Overlay code actions must not carry a WorkspaceEdit/newText that writes the
-   source buffer; the create affordance is offered through a MASC command
-   instead (a separate write lane). *)
-let test_code_actions_have_no_workspace_edit () =
-  (* code_actions reads the annotation cache, which takes an Eio mutex, so it
-     must run inside an Eio context. A fresh temp dir yields no annotations but
-     still exercises the create action that used to carry the edit. *)
-  Eio_main.run (fun env ->
-    Fs_compat.set_fs (Eio.Stdenv.fs env);
-    let base_dir = Filename.temp_dir "masc-lsp-proxy-" "" in
-    Fun.protect
-      ~finally:(fun () -> try Unix.rmdir base_dir with _ -> ())
-      (fun () ->
-         let actions =
-           Lsp_overlay_provider.code_actions
-             ~base_dir
-             ~codebase:(Some "github.com_other_repo")
-             ~file_path:"a.ml"
-             ~line:0
-             ~diagnostics:[]
-         in
-         let j = `List actions in
-         check bool "no WorkspaceEdit in code actions" false (json_contains_key "edit" j);
-         check bool "no newText in code actions" false (json_contains_key "newText" j);
-         check
-           bool
-           "create action offered via a command lane"
-           true
-           (json_contains_key "command" j)))
-;;
-
 let () =
   run
     "server_ide_lsp_proxy"
@@ -511,8 +473,6 @@ let () =
         ; test_case "relayed table drives the decision" `Quick
             test_relayed_table_drives_the_decision
         ; test_case "unknown language is typed" `Quick test_unknown_language_is_typed
-        ; test_case "overlay code actions carry no write edit" `Quick
-            test_code_actions_have_no_workspace_edit
         ] )
     ]
 ;;

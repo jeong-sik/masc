@@ -86,6 +86,7 @@ type provider_entry = Model_provider_catalog.entry =
   ; default_model : string option
   ; capabilities_base : string option
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
+  ; request_path_by_identity_kind : (Provider_kind.t * string) list
   ; identity_hosts : string list
   }
 

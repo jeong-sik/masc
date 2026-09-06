@@ -353,6 +353,18 @@ val handle_masc_fusion_with_outcome
   -> unit
   -> Keeper_tool_execution.t
 
+(** RFC-0430 Phase 3 — [handle_masc_file_with_outcome] is the in-process
+    handler for the [masc_file_{upload,delete}] provider Files tools: it
+    resolves the server root switch + net from {!Eio_context} (same reason as
+    fusion: the upload must not be tied to the keeper turn) and the API key
+    from the [DEEPSEEK_API_KEY] environment. Every failure is an explicit
+    typed failure. *)
+val handle_masc_file_with_outcome
+  :  name:string
+  -> args:Yojson.Safe.t
+  -> unit
+  -> Keeper_tool_execution.t
+
 (** RFC-0266 §7 Phase 3 — [fusion_status_json] projects the calling keeper's
     fusion runs to the masc_fusion_status tool's JSON string. With an empty
     [run_id] it lists every tracked run owned by [keeper]

@@ -1,0 +1,14 @@
+name = "masc_file_delete"
+description = """
+Delete an uploaded file from the provider Files API by its file_id.
+
+Deletion \
+is permanent; a vision request that still names the file_id will fail \
+afterwards."""
+
+defer_loading = true
+[[params]]
+name = "file_id"
+type = "string"
+required = true
+description = "The file_id returned by masc_file_upload."

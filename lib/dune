@@ -142,6 +142,7 @@
   uuidm
   zstd
   dune-build-info
+  masc.build_version
   time_compat
   fs_compat
   dated_jsonl

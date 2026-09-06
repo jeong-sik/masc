@@ -135,6 +135,11 @@ type probe_report =
   | Probe_answered of
       { major : Exec_ssh_protocol.major
       ; capabilities : string list
+      ; release : string option
+          (** The MASC release the shim was built from, as it named itself in
+              the probe. [None] from a shim built before the field existed,
+              which the server treats as a skew and says so once
+              ([remote_shim_outdated], RFC-0427 B-3). *)
       }
   | Probe_failed of
       { at : float

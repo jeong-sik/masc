@@ -765,6 +765,7 @@ let probe () =
     ; version =
       Printf.sprintf "%d.0.0%s" protocol_version Shim_build_id.suffix
     ; capabilities = (if observe_supported () then [ observe_capability ] else [])
+    ; release = (if Shim_build_id.release = "" then None else Some Shim_build_id.release)
     }
 
 let main () =

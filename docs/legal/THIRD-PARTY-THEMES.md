@@ -1,10 +1,10 @@
 # 번들된 색 스킴의 출처
 
-masc TUI 는 색 스킴 52개를 함께 배포한다. 전부 `config/themes/` 의 TOML 파일이고,
+masc TUI 는 색 스킴 53개를 함께 배포한다. 전부 `config/themes/` 의 TOML 파일이고,
 바이너리에 함께 구워져 나간다. 읽는 사람이 `<base>/.masc/config/themes/` 나
 `<base>/config/themes/` 에 같은 형식으로 자기 것을 두면 같은 이름을 덮어쓴다. 그중 `default-dark`, `default-light`, `dungeon-gold`, `norton`, `msx`,
-`pc-tools`, `msc`, `cyber`, `vaporwave`, `toxic`, `abyss`, `solar-flare`,
-`blade`, 그리고 아래 절의 레트로 프리셋 4개(`norton-commander`,
+`pc-tools`, `msc`, `cyber`, `vaporwave`, `toxic`, `ultraviolet`, `glacier`,
+`bloodmoon`, `arcade`, 그리고 아래 절의 레트로 프리셋 4개(`norton-commander`,
 `msx-retro`, `pc-tools-vintage`, `cga-classic`)는 masc 자체 것이고,
 **나머지 35개는 다른 사람이 만든 것**이다. 이 문서가 누가 만들었고 어떤 조건으로 쓰는지를 적는다.
 
@@ -128,10 +128,11 @@ Pro 의 라이선스 문구도 `Monokai Pro extensions` 로 범위가 그쪽에 
 | `norton` | — | masc | 이 저장소의 MIT |
 | `msx` | — | masc | 이 저장소의 MIT |
 | `vaporwave` | — | masc | 이 저장소의 MIT |
+| `ultraviolet` | — | masc | 이 저장소의 MIT |
+| `glacier` | — | masc | 이 저장소의 MIT |
+| `bloodmoon` | — | masc | 이 저장소의 MIT |
+| `arcade` | — | masc | 이 저장소의 MIT |
 | `toxic` | — | masc | 이 저장소의 MIT |
-| `abyss` | — | masc | 이 저장소의 MIT |
-| `solar-flare` | — | masc | 이 저장소의 MIT |
-| `blade` | — | masc | 이 저장소의 MIT |
 
 ## 여기 없는 것
 

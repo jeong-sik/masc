@@ -105,8 +105,30 @@ let set_switch sw =
     done;
     `Stop_daemon)
 
+(* A finished switch is not a root switch.
+
+   Nothing owns this slot's lifetime. Boot writes it once, and
+   [Mcp_server_eio_execute] rewrites it with the request's own switch on every
+   tool call -- its comment says why, "tests may leave a finished switch in
+   the global slot" -- but no one clears it when that scope ends. So between
+   requests the slot still answers [Some] with a switch nothing can fork into.
+
+   The caller then learns about it at [Fiber.fork], as
+   [Invalid_argument "Switch finished!"], far from the write that left it.
+   That is what [Keeper_keepalive]'s [lane_parent_sw] hits: it prefers the
+   root switch and falls back to [ctx.sw], and the fallback is right, but a
+   dead switch never reaches it. Measured 2026-09-06 in
+   test_heartbeat_integration, where six cases fail this way (#33200).
+
+   Asking the switch is the only way to know: a finished switch is not a
+   failed one, so [get_error] answers [None] for it. *)
 let get_root_switch_opt () =
-  Option.map (fun binding -> binding.switch) (Atomic.get current_sw)
+  match Atomic.get current_sw with
+  | None -> None
+  | Some binding ->
+    (match Eio.Switch.check binding.switch with
+     | () -> Some binding.switch
+     | exception _ -> None)  (* cancel-guard-ok: reports on another switch, not on the caller's fiber; every reason check raises means the same thing to someone asking for a switch to fork into *)
 
 let root_switch_on_current_domain () =
   match Atomic.get current_sw with

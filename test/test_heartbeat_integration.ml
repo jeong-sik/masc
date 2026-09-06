@@ -286,9 +286,29 @@ let resolve_done_for_test reg value =
   | Ok () -> ()
   | Error error -> fail (Lane.start_error_to_string error)
 
+(* Every harness in this file fills the same two registries. The fs one was
+   always here; the clock one never was, and lib/ code that reaches
+   Eio_context.get_clock_opt fails on it -- Masc_test_deps.init_eio_clock
+   exists for exactly this and says so in its own docstring.
+
+   What that cost: the nightly lane stalled on 2026-09-05 (#33200) and the
+   last thing in its log before 79 minutes of silence is a keeper cycle in
+   this suite dying on "Eio clock not initialized". *)
+let install_test_env env =
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Masc_test_deps.init_eio_clock env;
+  (* The net for the same reason as the clock, and found the same way: with
+     the clock installed the turn got one step further and died on
+     "Invalid config 'eio_context': Eio net not available (running outside
+     server context)". That is promoted to a fatal environment error, which
+     crashes the Keeper, which drains its Librarian lane -- and the two
+     fixtures that then submit to that lane get Rejected_draining. *)
+  Eio_context.set_net (Eio.Stdenv.net env);
+  Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env)
+
 let eio_test name fn =
   test_case name `Quick (fun () -> Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env); fn ())
+  install_test_env env; fn ())
 
 (* #33569: the contamination medium is the Eio_context global set —
    net/clock/mono_clock/net_initialized installed by a prior test's
@@ -546,7 +566,7 @@ let test_crash_turn_failures () =
     successful turn. *)
 let test_fresh_presence_preserves_turn_failures () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   Eio.Switch.run @@ fun sw ->
   R.For_testing.clear ();
   let base_path = temp_dir "fresh-presence-turn-failure" in
@@ -594,7 +614,7 @@ let test_fresh_presence_preserves_turn_failures () =
 
 let test_turn_failure_streak_survives_registry_restart () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   R.For_testing.clear ();
   let base_path = temp_dir "turn-failure-streak-restart" in
   Fun.protect
@@ -644,7 +664,7 @@ let test_turn_failure_streak_survives_registry_restart () =
 
 let test_turn_failure_streak_unknown_schema_fails_closed () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   R.For_testing.clear ();
   let base_path = temp_dir "turn-failure-streak-schema" in
   Fun.protect
@@ -678,7 +698,7 @@ let test_turn_failure_streak_unknown_schema_fails_closed () =
     failing. *)
 let test_crashed_cycle_records_turn_failure () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   R.For_testing.clear ();
   let base_path = temp_dir "crashed-cycle-turn-failure" in
   Fun.protect
@@ -741,7 +761,7 @@ let test_turn_status_preserves_configuration_failure_reason () =
 
 let test_operator_interrupt_skips_turn_accounting () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   R.For_testing.clear ();
   let base_path = temp_dir "operator-interrupt-turn-accounting" in
   Fun.protect
@@ -779,7 +799,7 @@ let test_operator_interrupt_skips_turn_accounting () =
 
 let test_direct_start_keepalive_resolves_done_on_stop () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   R.For_testing.clear ();
   let base_dir = temp_dir "direct-keepalive" in
   let keeper_name = "direct-lifecycle" in
@@ -834,7 +854,7 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
 
 let test_cross_domain_start_keepalive_and_swap () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   R.For_testing.clear ();
   let base_dir = temp_dir "cross-domain-keepalive" in
   let keeper_name = "cross-domain-keeper" in
@@ -893,7 +913,7 @@ let test_cross_domain_start_keepalive_and_swap () =
 
 let test_cross_domain_shutdown_submit () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   R.For_testing.clear ();
   Masc.Keeper_process_switch.For_testing.clear ();
   let base_dir = temp_dir "cross-domain-shutdown" in
@@ -951,7 +971,7 @@ let test_cross_domain_shutdown_submit () =
 
 let test_direct_start_rolls_back_when_the_launch_owner_is_already_cancelled () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   R.For_testing.clear ();
   Memory_lane.For_testing.reset ();
   let base_dir = temp_dir "direct-keepalive-fork-reject" in
@@ -1012,7 +1032,7 @@ let test_direct_start_rolls_back_when_the_launch_owner_is_already_cancelled () =
 
 let test_direct_stop_resolves_done_after_librarian_drain_failure () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   R.For_testing.clear ();
   Memory_lane.For_testing.reset ();
   let base_dir = temp_dir "direct-keepalive-librarian-failure" in
@@ -1244,7 +1264,7 @@ let test_keeper_lane_cancel_is_lane_local_and_joinable () =
 
 let test_keeper_shutdown_store_round_trip_and_identity_guard () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   let base_dir = temp_dir "shutdown-store" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -1530,7 +1550,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
 
 let test_operator_update_supersedes_exact_blocked_shutdown () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir "shutdown-supersession" in
   Fun.protect
@@ -2210,7 +2230,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
 
 let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir "update-turn-in-flight" in
   Fun.protect
@@ -2329,10 +2349,7 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
 
 let test_update_keeper_cancellation_finishes_lane_swap () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Eio_context.set_clock (Eio.Stdenv.clock env);
-  Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
-  Eio_context.set_net (Eio.Stdenv.net env);
+  install_test_env env;
   R.For_testing.clear ();
   Memory_lane.For_testing.reset ();
   let base_dir = temp_dir "update-cancelled-lane-swap" in
@@ -2497,7 +2514,7 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
 
 let test_keeper_up_shared_boundary_outlives_calling_turn () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   let base_dir = temp_dir "cross-keeper-up-lifetime" in
   let target_name = "cross-keeper-target" in
   let previous_startup_state = Masc.Server_startup_state.snapshot () in
@@ -2597,7 +2614,7 @@ let test_keeper_up_shared_boundary_outlives_calling_turn () =
 
 let test_keeper_shutdown_store_isolates_corrupt_owner () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir "shutdown-store-corrupt-owner" in
   Fun.protect
@@ -2763,7 +2780,7 @@ let test_keeper_shutdown_store_isolates_corrupt_owner () =
 
 let test_terminal_shutdown_recovery_releases_admission () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   let base_dir = temp_dir "terminal-shutdown-recovery-release" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -2831,7 +2848,7 @@ let test_terminal_shutdown_recovery_releases_admission () =
 
 let test_unsupported_shutdown_schema_retains_exact_fence () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   let base_dir = temp_dir "unsupported-shutdown-schema" in
   Fun.protect
     ~finally:(fun () ->
@@ -2980,7 +2997,7 @@ let test_unsupported_shutdown_schema_retains_exact_fence () =
 
 let test_dashboard_purge_resolution_is_fail_closed () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   let base_dir = temp_dir "dashboard-purge-resolution" in
   Fun.protect
     ~finally:(fun () ->
@@ -3177,7 +3194,7 @@ let test_dashboard_purge_resolution_is_fail_closed () =
 
 let test_keeper_shutdown_prepare_joins_idle_lane () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   Eio.Switch.run @@ fun parent_sw ->
   let base_dir = temp_dir "shutdown-prepare-join" in
   Fun.protect
@@ -3338,7 +3355,7 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
 
 let test_keeper_shutdown_owner_failure_persists_blocked_join () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   let base_dir = temp_dir "shutdown-owner-failure" in
   Fun.protect
     ~finally:(fun () ->
@@ -3409,7 +3426,7 @@ let test_keeper_shutdown_owner_failure_persists_blocked_join () =
 
 let test_keeper_shutdown_blocks_join_replay_after_record_failure () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir "shutdown-join-record-retry" in
   Fun.protect
@@ -3507,7 +3524,7 @@ let test_keeper_shutdown_blocks_join_replay_after_record_failure () =
 
 let test_keeper_shutdown_prepare_joins_not_started_lane () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir "shutdown-prepare-not-started" in
   Fun.protect
@@ -3558,7 +3575,7 @@ let test_keeper_shutdown_prepare_joins_not_started_lane () =
 
 let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir "shutdown-prepare-rollback" in
   Fun.protect
@@ -3612,7 +3629,7 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
 
 let test_keeper_dormant_shutdown_join_cancel_rolls_back_fence () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   let base_dir = temp_dir "shutdown-dormant-cancel-rollback" in
   Fun.protect
     ~finally:(fun () ->
@@ -3731,7 +3748,7 @@ let install_pending_summary ~base_path ~keeper_name ~bind_exact =
 
 let test_keeper_shutdown_finalizes_idle_operation () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   Eio.Switch.run @@ fun owner_sw ->
   let base_dir = temp_dir "shutdown-finalize" in
   Fun.protect
@@ -3846,7 +3863,7 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
   List.iter
     (fun mode ->
        Eio_main.run @@ fun env ->
-       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       install_test_env env;
        Eio.Switch.run @@ fun owner_sw ->
        let label =
          match mode with
@@ -4003,7 +4020,7 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
 
 let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   Eio.Switch.run @@ fun owner_sw ->
   let base_dir = temp_dir "dashboard-purge-finalization" in
   let completion_bus = Agent_core.Event_bus.create () in
@@ -4286,7 +4303,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
 
 let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   Eio.Switch.run @@ fun owner_sw ->
   let base_dir = temp_dir "shutdown-meta-replay" in
   Fun.protect
@@ -4350,7 +4367,7 @@ let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
 
 let test_keeper_shutdown_rejects_stale_snapshot_delete () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   Eio.Switch.run @@ fun owner_sw ->
   let base_dir = temp_dir "shutdown-stale-meta-delete" in
   Fun.protect
@@ -4418,7 +4435,7 @@ let test_keeper_shutdown_rejects_stale_snapshot_delete () =
 
 let test_keeper_shutdown_recovers_committed_task_receipt () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   Eio.Switch.run @@ fun owner_sw ->
   let base_dir = temp_dir "shutdown-task-receipt" in
   Fun.protect
@@ -4527,7 +4544,7 @@ let test_keeper_shutdown_recovers_committed_task_receipt () =
 
 let test_librarian_rejection_unregisters_with_lifecycle_authority () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   R.For_testing.clear ();
   Memory_lane.For_testing.reset ();
   let base_dir = temp_dir "librarian-lifecycle-rejection" in
@@ -4604,7 +4621,7 @@ let test_librarian_rejection_unregisters_with_lifecycle_authority () =
 
 let test_start_keepalive_preserves_unresolved_failing_entry () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   R.For_testing.clear ();
   let base_dir = temp_dir "direct-keepalive-live-failing" in
   let keeper_name = "live-failing-entry" in
@@ -4652,7 +4669,7 @@ let test_start_keepalive_preserves_unresolved_failing_entry () =
 
 let test_start_keepalive_reclaims_finished_failing_entry () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   R.For_testing.clear ();
   let base_dir = temp_dir "direct-keepalive-stale-failing" in
   let keeper_name = "stale-failing-entry" in
@@ -4937,7 +4954,7 @@ let test_turn_intake_uses_only_lifecycle () =
 
 let test_crashed_cycle_records_health_failure () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   let base_path = temp_dir "health-feed" in
   let keeper_name = "health-feed-keeper" in
   Health.record_success ~agent_name:keeper_name;
@@ -4984,7 +5001,7 @@ let test_invalid_keeper_config_revision_name_creates_no_artifact () =
    keepers (and a TOML "none" network mode would have read back inherit). *)
 let test_field_only_update_honors_toml_declared_profile () =
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  install_test_env env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir "update-toml-profile" in
   let gate = "MASC_EXEC_ALLOW_LOCAL_PLAYGROUND" in

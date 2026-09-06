@@ -681,19 +681,6 @@ let runtime_env_for_tool ~config ~keeper_name env =
        Ok (overlay_config_env ~config_dir:snapshot env, Configured path, cleanup))
 ;;
 
-let docker_args ~config ~keeper_name ~container_masc_dir =
-  match ensure_config_dir ~config ~keeper_name with
-  | Error _ as error -> error
-  | Ok host_dir ->
-    let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
-    Ok
-      [ "--env"
-      ; "GH_CONFIG_DIR=" ^ container_dir
-      ; "-v"
-      ; host_dir ^ ":" ^ container_dir ^ ":ro"
-      ]
-;;
-
 (* Keeper-lifetime containers cannot mount a per-turn snapshot: turn cleanup
    deletes the snapshot directory while the container keeps running, and the
    bind mount would read a vanished path. They mount the stable config

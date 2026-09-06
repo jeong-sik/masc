@@ -1189,6 +1189,44 @@ let test_the_box_the_toml_names_is_the_box_the_shim_is_asked_for () =
   Alcotest.(check string) "guest_local" "guest_local" (mode Profile.Guest_local)
 ;;
 
+(* RFC-0427 B-2: the installer leaves a sha256 sidecar beside the shim, and
+   the boot reads the pair. A matching pair is verified, a missing sidecar is
+   a hand-built shim run unverified, and a binary that disagrees with its
+   sidecar -- or a sidecar that is not a digest -- refuses the boot by name. *)
+let test_the_shim_sidecar_decides_the_boot () =
+  let dir = temp_dir "masc-shim-sidecar" in
+  let binary = Filename.concat dir M.shim_binary_name in
+  let sidecar = Filename.concat dir M.shim_sidecar_name in
+  let write path content = ignore (Fs_compat.save_file_atomic path content) in
+  write binary "#!/bin/sh\necho shim\n";
+  let digest =
+    Digestif.SHA256.(to_hex (digest_string "#!/bin/sh\necho shim\n"))
+  in
+  (match M.verify_shim_sidecar ~dir with
+   | Ok M.Shim_unverified -> ()
+   | Ok (M.Shim_verified _) -> Alcotest.fail "verified without a sidecar"
+   | Error e -> Alcotest.fail e);
+  write sidecar (digest ^ "  masc-exec-shim-linux-arm64\n");
+  (match M.verify_shim_sidecar ~dir with
+   | Ok (M.Shim_verified { sha256 }) -> Alcotest.(check string) "the digest" digest sha256
+   | Ok M.Shim_unverified -> Alcotest.fail "a matching sidecar read as absent"
+   | Error e -> Alcotest.fail e);
+  write binary "#!/bin/sh\necho another shim\n";
+  (match M.verify_shim_sidecar ~dir with
+   | Error e ->
+     Alcotest.(check bool) "named mismatch" true
+       (String_util.contains_substring e "microvm_shim_hash_mismatch");
+     Alcotest.(check bool) "carries the sidecar's digest" true
+       (String_util.contains_substring e digest)
+   | Ok _ -> Alcotest.fail "a binary that disagrees with its sidecar passed");
+  write sidecar "not a digest\n";
+  match M.verify_shim_sidecar ~dir with
+  | Error e ->
+    Alcotest.(check bool) "named invalid sidecar" true
+      (String_util.contains_substring e "microvm_shim_sidecar_invalid")
+  | Ok _ -> Alcotest.fail "a sidecar without a digest passed"
+;;
+
 let test_shim_travels_read_only_with_its_config () =
   Alcotest.(check bool)
     "shim dir is a read-only mount"
@@ -1839,6 +1877,49 @@ let test_live_a_moved_proxy_port_replaces_the_guest () =
       "which means it was replaced, not adopted"
       true
       (not (String.equal first after))
+let test_unbooted_microvm_guest_is_not_booted_and_skips_freshness_scan () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir "microvm_freshness_" in
+  let config = Masc.Workspace.default_config base in
+  let meta = microvm_meta ~name:"vm-freshness-unbooted" in
+  Alcotest.(check bool) "initially not booted" false
+    (Masc.Keeper_turn_sandbox_runtime.is_microvm_guest_booted ~config ~meta ());
+  Alcotest.(check bool) "lane reflects not booted" false
+    (Masc.Keeper_sandbox_remote_lane.is_guest_booted ~config ~meta ());
+  let expected_root =
+    Filename.concat
+      Masc.Keeper_sandbox_microvm.work_volume_guest_root
+      (Playground_paths.sanitize_keeper_name meta.name)
+  in
+  (match
+     Masc.Keeper_sandbox_remote_checkouts.discover_and_inspect
+       ~timeout_sec:5.0 ~config ~meta ~catalog:(Ok []) ()
+   with
+   | Error (Masc.Keeper_playground_checkouts.Root_missing { root }) ->
+     Alcotest.(check string) "root is keeper playground root" expected_root root
+   | Error (Root_unreadable { detail; _ }) ->
+     Alcotest.failf "unexpected Root_unreadable: %s" detail
+   | Error (Root_not_directory _) ->
+     Alcotest.fail "unexpected Root_not_directory"
+   | Ok _ -> Alcotest.fail "expected Root_missing for unbooted microvm guest");
+  (match Masc.Keeper_sandbox_control.checkout_freshness_rows ~config ~meta () with
+   | Error (Masc.Keeper_playground_checkouts.Root_missing { root }) ->
+     Alcotest.(check string) "root is keeper playground root" expected_root root
+   | Error scan_err ->
+     Alcotest.failf "unexpected checkout_freshness_rows scan error: %s"
+       (Masc.Keeper_playground_checkouts.scan_error_to_string scan_err)
+   | Ok _ -> Alcotest.fail "expected Root_missing from checkout_freshness_rows");
+  Masc.Keeper_turn_sandbox_runtime.For_testing_microvm.mark_microvm_guest_booted
+    ~config ~meta ();
+  Alcotest.(check bool) "marked booted" true
+    (Masc.Keeper_turn_sandbox_runtime.is_microvm_guest_booted ~config ~meta ());
+  Alcotest.(check bool) "lane reflects booted" true
+    (Masc.Keeper_sandbox_remote_lane.is_guest_booted ~config ~meta ());
+  Masc.Keeper_turn_sandbox_runtime.forget_microvm_guest_booted ~config ~meta ();
+  Alcotest.(check bool) "evicted not booted" false
+    (Masc.Keeper_turn_sandbox_runtime.is_microvm_guest_booted ~config ~meta ());
+  Alcotest.(check bool) "lane reflects evicted" false
+    (Masc.Keeper_sandbox_remote_lane.is_guest_booted ~config ~meta ())
 ;;
 
 let () =
@@ -1911,6 +1992,8 @@ let () =
             test_turn_start_argv_shape
         ; Alcotest.test_case "inspect state parser" `Quick
             test_inspect_state_parser
+        ; Alcotest.test_case "unbooted microvm guest skips freshness scan" `Quick
+            test_unbooted_microvm_guest_is_not_booted_and_skips_freshness_scan
         ; Alcotest.test_case "live guest cat (MASC_MICROVM_LIVE=1)" `Slow
             test_live_turn_runtime_cat
         ] )
@@ -1921,6 +2004,8 @@ let () =
             test_volume_create_argv_carries_a_size
         ; Alcotest.test_case "shim travels read-only with its config" `Quick
             test_shim_travels_read_only_with_its_config
+        ; Alcotest.test_case "the shim sidecar decides the boot" `Quick
+            test_the_shim_sidecar_decides_the_boot
         ; Alcotest.test_case "the box the TOML names is the box the shim is asked for" `Quick
             test_the_box_the_toml_names_is_the_box_the_shim_is_asked_for
         ; Alcotest.test_case "keeper work root is created as root with a mode" `Quick

@@ -56,9 +56,6 @@ val store_version : string
     and the directory name are both derived from it, so a shape change moves
     both or neither. *)
 
-val schema : string
-(** The only accepted durable receipt schema. *)
-
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 (** Strict current codec used by both public surfaces and durable loads. *)

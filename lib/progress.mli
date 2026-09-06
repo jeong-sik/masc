@@ -41,7 +41,6 @@ module Tracker : sig
   }
 
   val create : task_id:string -> ?total_steps:int -> unit -> t
-  val update : t -> progress:float -> ?message:string -> unit -> unit
   val step : t -> ?message:string -> unit -> unit
   val complete : t -> ?message:string -> unit -> unit
 end

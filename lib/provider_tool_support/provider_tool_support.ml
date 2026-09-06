@@ -43,7 +43,3 @@ let capabilities_of_config ?override provider_cfg =
 let provider_supports_inline_tools ?override provider_cfg =
   (capabilities_of_config ?override provider_cfg).supports_inline_tools
 ;;
-
-let provider_kind_label (config : Llm_provider.Provider_config.t) =
-  Llm_provider.Provider_config.string_of_provider_kind config.kind
-;;

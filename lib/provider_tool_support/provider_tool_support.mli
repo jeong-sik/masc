@@ -14,14 +14,7 @@ val agent_core_capabilities_of_config :
   Llm_provider.Provider_config.t -> Llm_provider.Capabilities.capabilities
 (** Return the AGENT_CORE-owned provider capability row without local reclassification. *)
 
-val capabilities_of_config :
-  ?override:runtime_capabilities_override ->
-  Llm_provider.Provider_config.t ->
-  capabilities
-
 val provider_supports_inline_tools :
   ?override:runtime_capabilities_override ->
   Llm_provider.Provider_config.t ->
   bool
-
-val provider_kind_label : Llm_provider.Provider_config.t -> string

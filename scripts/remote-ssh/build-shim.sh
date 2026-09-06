@@ -59,6 +59,13 @@ done
 
 repo_root="$(git rev-parse --show-toplevel)"
 mkdir -p "$repo_root/$OUT_DIR"
+# The build container installs the result into the bind-mounted output
+# directory as its own user (opam, uid 1000). On a Linux host the mount keeps
+# the host's ownership, so a directory the invoking user owns refuses that
+# write (GitHub's ubuntu runners: "install: cannot create regular file
+# '/out/...': Permission denied"). Docker Desktop and Apple's container map
+# the write to the host user, so this is a no-op there.
+chmod a+rwx "$repo_root/$OUT_DIR"
 
 prepare_builder() {
   arch="$1"

@@ -35,10 +35,7 @@ val dispatch_keeper_msg
 
 module For_testing : sig
   val reset_keeper_list_cache : unit -> unit
-  val invalidate_keeper_list_cache : unit -> unit
 
-  val cached_keeper_list_data :
-    key:string -> ttl_s:float -> (unit -> Yojson.Safe.t) -> Yojson.Safe.t
 end
 
 val dispatch_keeper_msg_stream_admitted :

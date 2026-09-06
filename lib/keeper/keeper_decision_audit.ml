@@ -141,21 +141,6 @@ let append ~keeper_name (rec_ : decision_record) =
   ring.count <- min (ring.count + 1) cap;
   ring.unflushed <- min (ring.unflushed + 1) cap
 
-let recent ~keeper_name ~limit : decision_record list =
-  match Hashtbl.find_opt rings keeper_name with
-  | None -> []
-  | Some ring ->
-    let cap = Array.length ring.buf in
-    let n = min limit (min ring.count cap) in
-    let result = ref [] in
-    for i = 0 to n - 1 do
-      let idx = ((ring.pos - 1 - i) mod cap + cap) mod cap in
-      match ring.buf.(idx) with
-      | Some r -> result := r :: !result
-      | None -> ()
-    done;
-    List.rev !result
-
 (* ================================================================ *)
 (* JSONL flush                                                      *)
 (* ================================================================ *)

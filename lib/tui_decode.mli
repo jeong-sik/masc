@@ -1742,6 +1742,26 @@ type prompt_operator_surface =
   | Prompt_primary
   | Prompt_fragment
 
+(** Where the effective text came from. The server resolves this once, in
+    [Prompt_registry_types.resolve_source], and it is the whole answer: an
+    operator editing an overridden prompt is editing the override, and
+    clearing it returns the file's words rather than emptying the prompt.
+
+    The wire also carries [has_override] and [file_exists], the two booleans
+    resolution consumed. Decoding them here would give the TUI a second way to
+    spell the same decision, and it had one: the list mark and the detail line
+    each classified separately, in the same file, fifty lines apart.
+
+    [decode_prompts] rejects the whole snapshot when any row fails, as it
+    already does for a row with no key or a partial variable list, so an
+    unknown word here empties the pane rather than mislabelling one row. That
+    is the older contract, not a new one, and it is the honest reading: an
+    unrecognised word means the server and this build disagree. *)
+type prompt_source =
+  | Prompt_override
+  | Prompt_file
+  | Prompt_missing
+
 type prompt_row = {
   pr_key : string;
   pr_category : string;
@@ -1750,14 +1770,8 @@ type prompt_row = {
   pr_effective : string;
       (** What a turn actually gets: the override when there is one, the file
           otherwise. This is the text an editor should open. *)
-  pr_has_override : bool;
-      (** Whether the effective text came from an override rather than the
-          file. The two are different facts: an operator editing an
-          overridden prompt is editing the override, and clearing it returns
-          the file's words rather than emptying the prompt. *)
-  pr_file_exists : bool;
   pr_file_path : string;
-  pr_source : string;
+  pr_source : prompt_source;
   pr_template_variables : string list;
 }
 
@@ -2297,6 +2311,10 @@ type file_change_kind =
       replace_all : bool;
     }
   | Fc_written of { content : string }
+  | Fc_inserted of {
+      line : int;
+      text : string;
+    }
 
 type file_change = {
   fc_at : float;
@@ -2443,21 +2461,6 @@ val blame_block_at : blame_block list -> int -> (blame_block * bool) option
     [line] is where that block starts. Blocks do not overlap, so the first
     cover is the only one; the flag is what lets a gutter name an author once
     per run instead of once per line. *)
-
-(** One [/api/v1/ide/annotations] note: where it anchors, who left it, the
-    server's kind word, and what it says. *)
-type ide_annotation = {
-  ia_line_start : int;
-  ia_line_end : int;
-  ia_keeper : string;
-  ia_kind : string;
-  ia_content : string;
-  ia_task : string option;
-}
-
-val decode_ide_annotations :
-  Yojson.Safe.t -> (ide_annotation list, string) result
-(** The route's [{ok; data}] envelope. *)
 
 (** The [/api/v1/lsp/question] answer: where a name is defined (1-based,
     workspace-relative when inside), or what the server says it is. *)

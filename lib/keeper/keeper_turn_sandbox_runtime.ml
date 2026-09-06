@@ -757,6 +757,16 @@ let bound_egress_proxy_port (t : t) =
 
 module For_testing_microvm = struct
   let microvm_container_name = microvm_container_name
+
+  let mark_microvm_guest_booted ~(config : Workspace.config) ~(meta : keeper_meta) () =
+    let container_name =
+      microvm_container_name
+        ~config
+        ~keeper_name:meta.name
+        ~network_mode:meta.network_mode
+    in
+    mark_microvm_work_root_ready container_name
+  ;;
 end
 
 let keeper_vm_name (t : t) =
@@ -844,12 +854,15 @@ let microvm_shim_host_dir (t : t) =
   Config_dir_resolver.microvm_shim_dir ~base_path:t.config.base_path
 ;;
 
-(** The shim the guest runs is a static Linux binary the operator installs on
-    the host ([scripts/remote-ssh/build-shim.sh --arch arm64]); the config
+(** The shim the guest runs is a static Linux binary the release ships and
+    [scripts/install.sh] places on the host with its sha256 sidecar
+    (RFC-0427 B-1, B-2); a hand-built one from
+    [scripts/remote-ssh/build-shim.sh] runs too, unverified. The config
     beside it is written here on every boot, so a changed payload PATH
-    reaches the guest without an operator step. A missing binary refuses the
-    boot: a guest without a shim has no remote lane, and the routing that
-    follows this change has no other channel into the guest. *)
+    reaches the guest without an operator step. A missing binary, or one
+    that does not match its own sidecar, refuses the boot: a guest without
+    a shim has no remote lane, and a shim the release did not ship is the
+    version skew of 2026-09-05 waiting to recur. *)
 let prepare_microvm_shim_dir (t : t) =
   let dir = microvm_shim_host_dir t in
   let binary = Filename.concat dir Keeper_sandbox_microvm.shim_binary_name in
@@ -857,18 +870,28 @@ let prepare_microvm_shim_dir (t : t) =
   | exception Unix.Unix_error (code, _, _) ->
     Error
       (Printf.sprintf
-         "microvm_shim_missing: %s (%s); build it with scripts/remote-ssh/build-shim.sh --arch arm64 and install it there"
+         "microvm_shim_missing: %s (%s); scripts/install.sh places it from the release (asset masc-exec-shim-linux-arm64), or build it with scripts/remote-ssh/build-shim.sh --arch arm64 and install it there"
          binary
          (Unix.error_message code))
   | () ->
-    (match
-       Fs_compat.save_file_atomic
-         (Filename.concat dir Keeper_sandbox_microvm.shim_config_name)
-         (Keeper_sandbox_microvm.shim_config_content
-            ~payload_path:(Env_config_sandbox.Runtime.microvm_payload_path ()))
-     with
-     | Ok () -> Ok dir
-     | Error message -> Error ("microvm_shim_config_unwritable: " ^ message))
+    (match Keeper_sandbox_microvm.verify_shim_sidecar ~dir with
+     | Error _ as refused -> refused
+     | Ok provenance ->
+       (match provenance with
+        | Keeper_sandbox_microvm.Shim_verified { sha256 } ->
+          Log.Keeper.info "microvm shim %s verified against its sidecar: sha256 %s" binary sha256
+        | Keeper_sandbox_microvm.Shim_unverified ->
+          Log.Keeper.info
+            "microvm shim %s has no %s beside it; running it unverified (a hand-built shim)"
+            binary Keeper_sandbox_microvm.shim_sidecar_name);
+       (match
+          Fs_compat.save_file_atomic
+            (Filename.concat dir Keeper_sandbox_microvm.shim_config_name)
+            (Keeper_sandbox_microvm.shim_config_content
+               ~payload_path:(Env_config_sandbox.Runtime.microvm_payload_path ()))
+        with
+        | Ok () -> Ok dir
+        | Error message -> Error ("microvm_shim_config_unwritable: " ^ message)))
 ;;
 
 type microvm_guest_provisions =
@@ -1867,6 +1890,29 @@ let microvm_guest_absence_reason ?timeout_sec ~(config : Workspace.config)
            meta.name container_name)
 ;;
 
+let is_microvm_guest_booted ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  if meta.sandbox_profile <> Keeper_types_profile_sandbox.Micro_vm
+  then false
+  else
+    let container_name =
+      microvm_container_name
+        ~config
+        ~keeper_name:meta.name
+        ~network_mode:meta.network_mode
+    in
+    microvm_work_root_ready container_name
+;;
+
+let forget_microvm_guest_booted ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  let container_name =
+    microvm_container_name
+      ~config
+      ~keeper_name:meta.name
+      ~network_mode:meta.network_mode
+  in
+  forget_microvm_work_root container_name
+;;
+
 let retire_current_github_identity_snapshot t =
   update_github_identity_snapshots t (fun snapshots ->
     match snapshots.current with
@@ -2300,14 +2346,6 @@ let run_command_with_status
           in
           Ok (st, body)
         | _ -> Error (format_docker_exec_error ~head_program ~st ~out)))
-;;
-
-let run_command ?(ok_exit_codes = [ 0 ]) ~timeout_sec t ~cwd ~command_argv ~max_bytes () =
-  match
-    run_command_with_status ~ok_exit_codes ~timeout_sec t ~cwd ~command_argv ~max_bytes ()
-  with
-  | Ok (_st, out) -> Ok out
-  | Error _ as err -> err
 ;;
 
 let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()

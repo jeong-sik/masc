@@ -536,9 +536,6 @@ let raw_trace_reference_for_turn ~turn_trace_ref ~sink =
 let terminal_effect_boundary_decision = Keeper_tool_terminal_boundary.decision
 
 module For_testing = struct
-  let sse_event_progress_kind = Turn_helpers.sse_event_progress_kind
-  let sse_event_watchdog_progress_kind =
-    Turn_helpers.sse_event_watchdog_progress_kind
   let registry_progress_on_event = Turn_helpers.registry_progress_on_event
   let progress_keeper_tool_names_for_contract =
     Contract_helpers.progress_keeper_tool_names_for_contract
@@ -702,7 +699,7 @@ let run_turn
      reason lsp_turn_pool.mli measures: starting one costs 11-60 ms, keeping
      one costs 12-155 MB, and every keeper has its own sandbox root. Binding
      here also shuts them down when the turn ends. *)
-  Lsp_turn_pool.with_turn_pool
+  Lsp_turn_pool.with_turn_pool ~servers:(Runtime.lsp_servers ())
   @@ fun () ->
   let runtime_id_string = runtime_id in
   (* Steps 0–4: inference params, session dir, checkpoint, base prompt,

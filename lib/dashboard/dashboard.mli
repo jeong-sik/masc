@@ -37,7 +37,6 @@ type workspace_snapshot = Dashboard_labels.workspace_snapshot = {
 
 (** {1 Scope Helpers} *)
 
-val scope_to_string : scope -> string
 val valid_scope_strings : string list
 
 val scope_of_string_opt : string -> scope option
@@ -47,7 +46,6 @@ val scope_of_string_opt : string -> scope option
 
 val format_section : section -> string
 val parse_iso_timestamp : string -> float option
-val format_elapsed : float -> string -> string -> string
 val truncate_path : string -> string
 val truncate_message : string -> string
 

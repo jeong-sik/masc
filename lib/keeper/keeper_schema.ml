@@ -8,12 +8,6 @@ let network_mode_enum_strings =
   Keeper_types_profile_sandbox.valid_network_mode_strings
 ;;
 
-let string_array_schema =
-  `Assoc [
-    ("type", `String "array");
-    ("items", `Assoc [ ("type", `String "string") ]);
-  ]
-
 let schemas : tool_schema list = [
   Keeper_schema_toml.sandbox_start;
   Keeper_schema_toml.sandbox_stop;

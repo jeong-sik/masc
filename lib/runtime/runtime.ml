@@ -996,7 +996,8 @@ let validate_keeper_dispatch_request_caps
     , (default_runtime : t)
     , assignments
     , media_failover
-    , lanes )
+    , lanes
+    , _lsp_servers )
   =
   let ids =
     keeper_dispatch_runtime_ids
@@ -1148,18 +1149,20 @@ let missing_reference_error
 
 let degrade_loaded_for_missing_catalog
     ( (runtimes, configured_default, assignments,
-       media_failover, lanes) :
+       media_failover, lanes, lsp_servers) :
       t list
       * t
       * (string * string) list
       * string list
-      * Runtime_lane.t list )
+      * Runtime_lane.t list
+      * (string * (string * string list)) list )
     (report : missing_catalog_report)
   : ( ( t list
         * t
         * (string * string) list
         * string list
-        * Runtime_lane.t list )
+        * Runtime_lane.t list
+        * (string * (string * string list)) list )
       * startup_degradation
     , string )
     result
@@ -1277,7 +1280,8 @@ let degrade_loaded_for_missing_catalog
         , configured_default
         , kept_assignments
         , kept_media_failover
-        , kept_lanes )
+        , kept_lanes
+        , lsp_servers )
       , degradation )
 ;;
 
@@ -1289,7 +1293,8 @@ let materialize_config
        * t
        * (string * string) list
        * string list
-       * Runtime_lane.t list)
+       * Runtime_lane.t list
+       * (string * (string * string list)) list)
       * Runtime_schema.exact_output_lane_decl list
     , string )
     result
@@ -1359,7 +1364,8 @@ let materialize_config
     , rt
     , assignments
     , cfg.media_failover
-    , lanes )
+    , lanes
+    , cfg.lsp_servers )
   in
   Ok (loaded, cfg.exact_output_lane_decls)
 ;;
@@ -1369,7 +1375,8 @@ let load_list_internal ~(config_path : string) ~validate_max_context
        * t
        * (string * string) list
        * string list
-       * Runtime_lane.t list)
+       * Runtime_lane.t list
+       * (string * (string * string list)) list)
       * Runtime_schema.exact_output_lane_decl list
     , string )
     result
@@ -1411,9 +1418,13 @@ let load_list_internal_text ~(config_path : string) ~content ~validate_max_conte
   materialize_config ~validate_max_context ~config_path cfg
 ;;
 
+(* The public five-tuple stays as its callers destructure it; the operator's
+   language-server commands travel inside this module only and are read
+   back through [lsp_servers]. *)
 let load_list ~config_path =
   load_list_internal ~config_path ~validate_max_context:true
-  |> Result.map fst
+  |> Result.map (fun ((runtimes, rt, assignments, media_failover, lanes, _lsp_servers), _) ->
+       (runtimes, rt, assignments, media_failover, lanes))
 ;;
 
 (* ---- Lazy default runtime singleton ---- *)
@@ -1428,6 +1439,7 @@ type loaded_state =
   ; keeper_assignments : (string * string) list
   ; media_failover : string list
   ; lanes : Runtime_lane.t list
+  ; lsp_servers : (string * (string * string list)) list
   ; config_path : string option
   ; startup_degradation : startup_degradation option
   }
@@ -1438,6 +1450,7 @@ let empty_loaded_state =
   ; keeper_assignments = []
   ; media_failover = []
   ; lanes = []
+  ; lsp_servers = []
   ; config_path = None
   ; startup_degradation = None
   }
@@ -1453,13 +1466,15 @@ let set_loaded
     , rt
     , assignments
     , media_failover
-    , lanes ) =
+    , lanes
+    , lsp_servers ) =
   Atomic.set loaded_state_ref
     { default_runtime = Some rt
     ; runtimes
     ; keeper_assignments = assignments
     ; media_failover
     ; lanes
+    ; lsp_servers
     ; config_path = Some config_path
     ; startup_degradation
     }
@@ -1491,7 +1506,7 @@ let publish_exact_output_registry ?required_lane_ids ~lanes resolver_snapshot =
 let init_default_strict_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:true with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _) as loaded), exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _) as loaded), exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
@@ -1513,7 +1528,7 @@ let init_default_strict ~config_path =
 
 let initialize_degraded_loaded ~config_path = function
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _) as loaded), exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _) as loaded), exact_output_lane_decls) ->
     let verifier_exact_slot_ids =
       verifier_exact_slot_ids_of_lane_decls exact_output_lane_decls
     in
@@ -1536,7 +1551,7 @@ let initialize_degraded_loaded ~config_path = function
        (match degrade_loaded_for_missing_catalog loaded report with
         | Error msg -> Error (Runtime_config_error msg)
         | Ok
-            (((active_runtimes, _, _, _, _) as degraded_loaded), degradation)
+            (((active_runtimes, _, _, _, _, _) as degraded_loaded), degradation)
           ->
           (match validate_runtime_max_context ~config_path active_runtimes with
            | Error msg -> Error (Runtime_config_error msg)
@@ -1650,6 +1665,16 @@ let media_failover () = (runtime_state ()).media_failover
 (* [runtime.lanes.<id>] ordered failover candidate lists. Reads the Atomic ref
    set by [init_default]. *)
 let lanes () = (runtime_state ()).lanes
+
+(* [lsp.servers] per language: the operator's command where one was written,
+   the client's own table otherwise. Reads the Atomic ref set by
+   [init_default], so a reload is seen by the next language server started. *)
+let lsp_servers () : Lsp_process_manager.language -> string * string list =
+  let overrides = (runtime_state ()).lsp_servers in
+  fun language ->
+    match List.assoc_opt (Lsp_process_manager.lang_id_of_language language) overrides with
+    | Some command -> command
+    | None -> Lsp_process_manager.command_of_language language
 
 let get_lane_by_id (id : string) : Runtime_lane.t option =
   List.find_opt (fun (lane : Runtime_lane.t) -> String.equal lane.id id)

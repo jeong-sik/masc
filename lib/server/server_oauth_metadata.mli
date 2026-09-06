@@ -2,10 +2,8 @@
 
     No function in this module reads raw Host/Forwarded headers. *)
 
-val base_url : Server_request_authority.authority -> string
 val resource : Server_request_authority.authority -> string
 val protected_resource_metadata_url : Server_request_authority.authority -> string
-val challenge : Server_request_authority.authority -> string
 val challenge_for_authority : Server_request_authority.authority -> string
 (** OAuth discovery challenge when built-in OAuth is enabled on loopback;
     otherwise the compatibility challenge [Bearer]. *)

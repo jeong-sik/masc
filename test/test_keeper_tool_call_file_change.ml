@@ -59,7 +59,7 @@ let test_edit_carries_both_sides () =
       check string "before" "let x = 1" before;
       check string "after" "let x = 2" after;
       check bool "replace_all defaults to one occurrence" false replace_all
-  | Change.Written _ -> fail "expected Edited"
+  | Change.Written _ | Change.Inserted _ -> fail "expected Edited"
 ;;
 
 let test_edit_reads_replace_all () =
@@ -68,7 +68,7 @@ let test_edit_reads_replace_all () =
   in
   match change.Change.kind with
   | Change.Edited { replace_all; _ } -> check bool "replace_all" true replace_all
-  | Change.Written _ -> fail "expected Edited"
+  | Change.Written _ | Change.Inserted _ -> fail "expected Edited"
 ;;
 
 let test_write_carries_content () =
@@ -79,7 +79,7 @@ let test_write_carries_content () =
   in
   match change.Change.kind with
   | Change.Written { content } -> check string "content" "whole body" content
-  | Change.Edited _ -> fail "expected Written"
+  | Change.Edited _ | Change.Inserted _ -> fail "expected Written"
 ;;
 
 let test_edit_carries_producer_line_evidence_through_redaction () =
@@ -479,6 +479,50 @@ let test_classify_all_counts_each_outcome () =
   check int "over budget" 0 tally.Change.over_budget
 ;;
 
+(* The reason [fold_row] is named: a caller reading rows in batches must end
+   with the same tally as one that read them all at once, or an incremental
+   reader answers something a whole read never would. *)
+let test_folding_in_batches_equals_reading_at_once () =
+  let rows =
+    [ row (edit_input ~before:"first" ~after:"1" ())
+    ; row ~descriptor_id:"agent.read_file" (`Assoc [ ("file_path", `String "x.ml") ])
+    ; row (edit_input ~before:"second" ~after:"2" ())
+    ; row (`Assoc [ ("file_path", `String "x.ml") ])
+    ]
+  in
+  let at_once = Change.classify_all rows in
+  let in_batches =
+    let first_half = [ List.nth rows 0; List.nth rows 1 ] in
+    let second_half = [ List.nth rows 2; List.nth rows 3 ] in
+    let tally = List.fold_left Change.fold_row Change.empty_tally first_half in
+    Change.seal_tally (List.fold_left Change.fold_row tally second_half)
+  in
+  let befores tally =
+    List.map
+      (fun (c : Change.t) ->
+        match c.Change.kind with
+        | Change.Edited { before; _ } -> before
+        | Change.Written _ | Change.Inserted _ -> "")
+      tally.Change.changes
+  in
+  check (list string) "same changes in the same order"
+    (befores at_once) (befores in_batches);
+  check int "same not-file-changes"
+    at_once.Change.not_file_changes in_batches.Change.not_file_changes;
+  check int "same malformed" at_once.Change.malformed in_batches.Change.malformed;
+  check int "same over-budget" at_once.Change.over_budget in_batches.Change.over_budget;
+  check int "an empty tally is empty" 0
+    (List.length Change.empty_tally.Change.changes);
+  (* The endpoint reports "n changes out of m calls". An incremental caller
+     keeps the tally and drops the rows, so m has to come from the tally: the
+     three outcomes partition what was read. *)
+  check int "rows_counted is the number of rows folded"
+    (List.length rows) (Change.rows_counted at_once);
+  check int "and it survives being folded in batches"
+    (List.length rows) (Change.rows_counted in_batches);
+  check int "no rows, no count" 0 (Change.rows_counted Change.empty_tally)
+;;
+
 let test_classify_all_preserves_order () =
   let rows =
     [ row (edit_input ~before:"first" ~after:"1" ())
@@ -489,7 +533,9 @@ let test_classify_all_preserves_order () =
   let befores =
     List.map
       (fun (c : Change.t) ->
-        match c.Change.kind with Change.Edited { before; _ } -> before | Change.Written _ -> "")
+        match c.Change.kind with
+        | Change.Edited { before; _ } -> before
+        | Change.Written _ | Change.Inserted _ -> "")
       changes
   in
   check (list string) "order" [ "first"; "second" ] befores
@@ -533,6 +579,27 @@ let test_unreadable_filter_uses_independent_resolved_target () =
   match (List.hd filtered).Change.ur_reason with
   | Change.Input_exceeded_log_budget -> ()
   | Change.Malformed detail -> failf "expected log budget, got %s" detail
+;;
+
+(* A memo call is projected as the comment line the file received, spelled
+   with the keeper as author in the file's own syntax: the same function the
+   tool used, so the projection shows what is in the file. *)
+let test_a_memo_projects_as_the_comment_line_the_file_received () =
+  let change =
+    change_of
+      (row ~keeper:"alpha" ~descriptor_id:"keeper.ide.annotate"
+         (`Assoc
+            [ ("file_path", `String "src.ml")
+            ; ("line", `Int 3)
+            ; ("kind", `String "question")
+            ; ("text", `String "why three")
+            ]))
+  in
+  match change.Change.kind with
+  | Change.Inserted { line; text } ->
+      check int "the line it went above" 3 line;
+      check string "the comment as written" "(* masc(alpha) question: why three *)" text
+  | Change.Edited _ | Change.Written _ -> fail "expected Inserted"
 ;;
 
 let () =
@@ -582,10 +649,16 @@ let () =
     ; ( "classify_all"
       , [ test_case "counts each outcome" `Quick test_classify_all_counts_each_outcome
         ; test_case "preserves order" `Quick test_classify_all_preserves_order
+        ; test_case "folding in batches equals reading at once" `Quick
+            test_folding_in_batches_equals_reading_at_once
         ; test_case "repo file filter is exact" `Quick
             test_repo_file_filter_is_exact_and_preserves_order
         ; test_case "unreadable filter uses resolved target" `Quick
             test_unreadable_filter_uses_independent_resolved_target
+        ] )
+    ; ( "memo"
+      , [ test_case "a memo projects as the comment line the file received" `Quick
+            test_a_memo_projects_as_the_comment_line_the_file_received
         ] )
     ]
 ;;

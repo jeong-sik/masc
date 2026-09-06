@@ -33,6 +33,7 @@
  (libraries
   alcotest
   masc
+  masc.runtime
   masc_server
   masc.skill_config
   masc.skill_reference
@@ -4289,6 +4290,11 @@
 (include stanzas/test_tui_keys.inc)
 (include stanzas/test_workspace_git_log.inc)
 (include stanzas/test_tui_code_lexer.inc)
+(include stanzas/test_tui_mermaid.inc)
+
+(include stanzas/test_ide_memo.inc)
+
+(include stanzas/test_tui_memo.inc)
 (include stanzas/test_tui_mode.inc)
 (include stanzas/test_lsp_position.inc)
 (include stanzas/test_tui_theme.inc)
@@ -4329,7 +4335,7 @@
 (test
  (name test_keeper_ide_annotate_contract)
  (modules test_keeper_ide_annotate_contract)
- (libraries alcotest yojson masc masc_test_deps))
+ (libraries alcotest yojson masc masc_test_deps eio eio_main fs_compat unix))
 
 (test
  (name test_goal_tool_toml_parity)

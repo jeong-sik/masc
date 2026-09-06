@@ -384,9 +384,27 @@ rather than a guess.
 | OCaml | `ocamllsp` | `dune-project`, `dune-workspace` |
 | TypeScript | `typescript-language-server` | `tsconfig.json`, `package.json` |
 | JavaScript | `typescript-language-server` | `jsconfig.json`, `package.json` |
-| Python | `pylsp` | `pyproject.toml`, `setup.py`, `setup.cfg` |
+| Python | `pyright-langserver` | `pyproject.toml`, `setup.py`, `setup.cfg` |
 | Rust | `rust-analyzer` | `Cargo.toml` |
 | Go | `gopls` | `go.mod` |
+| C | `clangd` | `compile_commands.json`, `CMakeLists.txt`, `Makefile` |
+| C++ | `clangd` | `compile_commands.json`, `CMakeLists.txt`, `Makefile` |
+| Swift | `sourcekit-lsp` | `Package.swift` |
+| Java | `jdtls` | `pom.xml`, `build.gradle`, `build.gradle.kts` |
+| Kotlin | `kotlin-language-server` | `build.gradle.kts`, `settings.gradle.kts`, `build.gradle` |
+| Ruby | `ruby-lsp` | `Gemfile` |
+| PHP | `intelephense` | `composer.json` |
+| Lua | `lua-language-server` | `.luarc.json` |
+| Bash | `bash-language-server` | workspace boundary |
+| JSON | `vscode-json-language-server` | workspace boundary |
+| YAML | `yaml-language-server` | workspace boundary |
+| Zig | `zls` | `build.zig` |
+| Haskell | `haskell-language-server-wrapper` | `stack.yaml`, `cabal.project` |
+| Elixir | `elixir-ls` | `mix.exs` |
+| Dart | `dart` | `pubspec.yaml` |
+| Scala | `metals` | `build.sbt` |
+| C# | `csharp-ls` | workspace boundary |
+| Markdown | `marksman` | workspace boundary |
 
 The same servers back the Keeper's `keeper_code_query` tool, so a Keeper asked
 about a language whose server is missing falls back to reading text. For OCaml,

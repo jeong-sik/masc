@@ -1,44 +1,45 @@
-(** Tool_name — Compile-time verified tool identifiers.
+(** Tool_name — the tool-name vocabularies, one closed type per domain.
 
-    Replaces stringly-typed tool dispatch with exhaustive variant matching.
-    Parse boundary: [of_string] at MCP/JSON ingress only.
-    Internal code uses [t] directly — typos become compile errors.
+    Each submodule owns the complete [masc_*] string for its operations:
+    [all] is derived by [@@deriving enumerate], [to_string] is an exhaustive
+    match, and [of_string] is derived from [all] so it can never fall behind
+    a constructor.
 
-    PR-S1 (tool-domain decouple): the Task/Board/Goal/Operator tool *names*
-    are owned by domain-scoped submodules ([Task_name], [Board_name],
-    [Goal_name], [Operator_name]) instead of being enumerated flat in
-    [Masc.t]. The substrate ([Tool_name], [tool_dispatch]) no longer
-    hard-codes those domain operation names in a god-enum + static routing
-    table. Every MCP tool-name STRING is preserved exactly — each domain
-    submodule owns the complete [masc_*] string and [Masc.to_string]/
-    [Masc.of_string] compose over the submodules. *)
+    Routing parses the wire string once with the owning domain's [of_string]
+    and then matches the constructors, so a constructor added here is a
+    compile error at the site that must handle it:
+
+    - [Task_name]     — [Tool_task.dispatch_task_name]
+    - [Board_name]    — [Board_tool_dispatch.handle_tool]
+    - [Goal_name]     — [Tool_workspace.goal_handler]
+    - [Operator_name] — [Operator_tool.dispatch]
+
+    Non-domain [masc_*] names are owned by their schema/descriptor modules,
+    not by this substrate. *)
 
 module Task_name = struct
   type t =
     | Add_task
     | Batch_add_tasks
     | Task_history
+    | Task_set_goal
     | Tasks
     | Transition
     | Update_priority
+  [@@deriving enumerate]
 
   let to_string = function
     | Add_task -> "masc_add_task"
     | Batch_add_tasks -> "masc_batch_add_tasks"
     | Task_history -> "masc_task_history"
+    | Task_set_goal -> "masc_task_set_goal"
     | Tasks -> "masc_tasks"
     | Transition -> "masc_transition"
     | Update_priority -> "masc_update_priority"
   ;;
 
-  let of_string = function
-    | "masc_add_task" -> Some Add_task
-    | "masc_batch_add_tasks" -> Some Batch_add_tasks
-    | "masc_task_history" -> Some Task_history
-    | "masc_tasks" -> Some Tasks
-    | "masc_transition" -> Some Transition
-    | "masc_update_priority" -> Some Update_priority
-    | _ -> None
+  let of_string value =
+    List.find_opt (fun name -> String.equal value (to_string name)) all
   ;;
 
   let pp fmt t = Format.pp_print_string fmt (to_string t)
@@ -131,6 +132,7 @@ module Goal_name = struct
     | Goal_list
     | Goal_transition
     | Goal_upsert
+  [@@deriving enumerate]
 
   let to_string = function
     | Goal_list -> "masc_goal_list"
@@ -138,11 +140,8 @@ module Goal_name = struct
     | Goal_upsert -> "masc_goal_upsert"
   ;;
 
-  let of_string = function
-    | "masc_goal_list" -> Some Goal_list
-    | "masc_goal_transition" -> Some Goal_transition
-    | "masc_goal_upsert" -> Some Goal_upsert
-    | _ -> None
+  let of_string value =
+    List.find_opt (fun name -> String.equal value (to_string name)) all
   ;;
 
   let pp fmt t = Format.pp_print_string fmt (to_string t)
@@ -154,8 +153,10 @@ module Operator_name = struct
     | Operator_board_attention_quarantine_requeue
     | Operator_confirm
     | Operator_digest
+    | Operator_judgment_write
     | Operator_snapshot
     | Operator_task_recovery_resolve
+  [@@deriving enumerate]
 
   let to_string = function
     | Operator_action -> "masc_operator_action"
@@ -163,50 +164,18 @@ module Operator_name = struct
       "masc_operator_board_attention_quarantine_requeue"
     | Operator_confirm -> "masc_operator_confirm"
     | Operator_digest -> "masc_operator_digest"
+    | Operator_judgment_write -> "masc_operator_judgment_write"
     | Operator_snapshot -> "masc_operator_snapshot"
     | Operator_task_recovery_resolve -> "masc_operator_task_recovery_resolve"
   ;;
 
-  let of_string = function
-    | "masc_operator_action" -> Some Operator_action
-    | "masc_operator_board_attention_quarantine_requeue" ->
-      Some Operator_board_attention_quarantine_requeue
-    | "masc_operator_confirm" -> Some Operator_confirm
-    | "masc_operator_digest" -> Some Operator_digest
-    | "masc_operator_snapshot" -> Some Operator_snapshot
-    | "masc_operator_task_recovery_resolve" -> Some Operator_task_recovery_resolve
-    | _ -> None
-  ;;
-
-  let pp fmt t = Format.pp_print_string fmt (to_string t)
-end
-
-module Operator_remote_name = struct
-  type t = Operator_tool of Operator_name.t
-
-  let to_string = function
-    | Operator_tool tool -> Operator_name.to_string tool
-  ;;
-
   let of_string value =
-    match Operator_name.of_string value with
-    | Some tool -> Some (Operator_tool tool)
-    | None -> None
+    List.find_opt (fun name -> String.equal value (to_string name)) all
   ;;
 
-  let all =
-    [ Operator_tool Operator_name.Operator_snapshot
-    ; Operator_tool Operator_name.Operator_digest
-    ; Operator_tool Operator_name.Operator_action
-    ; Operator_tool Operator_name.Operator_board_attention_quarantine_requeue
-    ; Operator_tool Operator_name.Operator_task_recovery_resolve
-    ; Operator_tool Operator_name.Operator_confirm
-    ]
-  ;;
-
-  let all_strings = List.map to_string all
   let pp fmt t = Format.pp_print_string fmt (to_string t)
 end
+
 
 (** Domain_tool — the single domain-owned grouping of Task/Board/Goal/Operator
     tool names.
@@ -214,84 +183,3 @@ end
     This module owns only name construction and string round-tripping. Dispatch
     and execution decisions are supplied by their explicit boundaries instead
     of being inferred from this typed name carrier. *)
-module Domain_tool = struct
-  type t =
-    | Task of Task_name.t
-    | Board of Board_name.t
-    | Goal of Goal_name.t
-    | Operator of Operator_name.t
-
-  let to_string = function
-    | Task t -> Task_name.to_string t
-    | Board b -> Board_name.to_string b
-    | Goal g -> Goal_name.to_string g
-    | Operator o -> Operator_name.to_string o
-  ;;
-
-  let of_string s =
-    (* Domain submodules are tried in turn; each returns [None] for names it
-       does not own. The string namespaces are disjoint, so order is
-       irrelevant for correctness. *)
-    match Task_name.of_string s with
-    | Some t -> Some (Task t)
-    | None ->
-      match Board_name.of_string s with
-      | Some b -> Some (Board b)
-      | None ->
-        match Goal_name.of_string s with
-        | Some g -> Some (Goal g)
-        | None ->
-          match Operator_name.of_string s with
-          | Some o -> Some (Operator o)
-          | None -> None
-  ;;
-
-  let is_board = function
-    | Board _ -> true
-    | Task _ | Goal _ | Operator _ -> false
-  ;;
-
-  let pp fmt t = Format.pp_print_string fmt (to_string t)
-end
-
-module Masc = struct
-  (* Domain tool-NAME operations (Task/Board/Goal/Operator) are owned by
-     [Domain_tool]; [Masc.t] carries them behind one neutral [Domain] arm so
-     the Tool substrate never enumerates domain constructors. Non-domain
-     public masc_* names are owned by their schema/descriptor modules instead
-     of this typed substrate. *)
-  type t =
-    | Domain of Domain_tool.t
-
-  let to_string = function
-    | Domain d -> Domain_tool.to_string d
-  ;;
-
-  let of_string s =
-    match Domain_tool.of_string s with
-    | Some d -> Some (Domain d)
-    | None -> None
-  ;;
-
-  let is_board = function
-    | Domain d -> Domain_tool.is_board d
-  ;;
-
-  let pp fmt t = Format.pp_print_string fmt (to_string t)
-end
-
-type t =
-  | Masc of Masc.t
-
-let to_string = function
-  | Masc m -> Masc.to_string m
-;;
-
-let of_string s =
-  match Masc.of_string s with
-  | Some m -> Some (Masc m)
-  | None -> None
-;;
-
-let pp fmt t = Format.pp_print_string fmt (to_string t)
-

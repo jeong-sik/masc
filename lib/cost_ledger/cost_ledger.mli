@@ -41,7 +41,6 @@ type t =
 type decode_error
 
 val decode_error_to_string : decode_error -> string
-val source_to_string : source -> string
 val compare_inference_identity : inference_identity -> inference_identity -> int
 val inference_identity : t -> inference_identity option
 

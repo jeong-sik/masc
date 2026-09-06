@@ -3,10 +3,6 @@
     a ["provider:model"] / ["custom:model@url"] label via Provider_registry
     (SSOT). No runtime routing/weighted-entry machinery. *)
 
-val split_provider_model : string -> (string * string) option
-(** Split ["provider:model_id"] at the first colon; [None] if missing/leading/
-    trailing colon or empty model id. *)
-
 val parse_model_string
   :  ?temperature:float
   -> ?max_tokens:int

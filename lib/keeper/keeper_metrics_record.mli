@@ -6,6 +6,5 @@ type kind =
   | Heartbeat
 
 val schema : string
-val kind_to_string : kind -> string
 val fields : kind -> (string * Yojson.Safe.t) list
 val kind_of_json : Yojson.Safe.t -> kind option

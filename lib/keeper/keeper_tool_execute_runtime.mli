@@ -74,7 +74,6 @@ module For_testing : sig
     option
     ref
 
-  val elapsed_duration_ms : start_time:float -> end_time:float -> int
   val model_execute_location_fields :
     config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->

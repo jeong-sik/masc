@@ -197,6 +197,10 @@ let for_surface = function
       ; b Navigate "h/l" "pane" ~help:"focus the post list or detail pane"
         (* Beside [f], not instead of it: [f] narrows the list to one hearth,
            this jumps the cursor to a post without changing what is listed. *)
+      ; b Navigate "PgUp / PgDn" "detail page"
+        (* The global page dispatcher already scrolls the open post body and
+           its comment thread by a window; it answers in the detail pane, so
+           the help owed it a line. *)
       ; b Search "/" "find" ~help:"jump the cursor to a matching post id, author or title"
       ; b Search "n / N" "next / previous match"
       ]
@@ -445,11 +449,9 @@ let for_surface = function
           ~help:"who last touched each run of lines, in the margin; b again \
                  drops it"
       ; b Act "m" "notes"
-          ~help:"the notes anchored to the open file (repository scope)"
-      ; b Act "w" "add note"
-          ~help:"in the notes view: add one through the $EDITOR form, \
-                 anchored to the line the cursor was on when the view opened \
-                 (kind: Comment / Decision / Question / Bookmark)"
+          ~help:"the memos in the open file: comments on their own row \
+                 reading masc(name): text, or masc(name) question: text; m \
+                 again closes the list"
       ; b Act "d" "diff"
           ~help:"on the project tree, list every working-tree change; on an \
                  open file, show that file's diff against HEAD"
@@ -468,6 +470,9 @@ let for_surface = function
           ~help:"available / async runs / receipts / usage / all tools"
       ; b Navigate "J/K" "Skill" ~help:"select a published Skill"
       ; b Navigate "[/]" "Keeper" ~help:"change the effective Keeper surface"
+      ; b Act "c/C" "new Skill"
+          ~help:"open $EDITOR on a template for a new Skill; c starts an \
+                 instruction Skill, C starts a composition Skill"
       ; b Act "e" "edit Skill"
           ~help:"open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish"
       ; b Act "Esc" "config" ~help:"back to the Config surface it hangs off"
@@ -541,12 +546,11 @@ let footer_hints_code ~pane =
   let file_keys =
     [ "Shift-Left / Shift-Right"; "K"; "D"; "R"; "B"; "b"; "d"; "H"; "m" ]
   in
-  (* Two keys belong to one pane each and were showing on all three. [w]
-     writes a note and only the notes view takes it; [Enter (history)] opens
-     a commit's pull request and only the history view has commits. Named
-     apart from [file_keys] because they are the overlay's own, not the
-     file's. *)
-  let overlay_keys = [ "w"; "Enter (history)" ] in
+  (* One key belongs to one pane and was showing on all three: [Enter
+     (history)] opens a commit's pull request and only the history view has
+     commits. Named apart from [file_keys] because it is the overlay's own,
+     not the file's. *)
+  let overlay_keys = [ "Enter (history)" ] in
   let dead =
     match pane with
     | Code_tree -> overlay_keys @ file_keys

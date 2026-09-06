@@ -29,7 +29,6 @@ type timeout_phase =
   | Capacity_backpressure
   | Unknown_timeout
 
-val timeout_phase_to_label : timeout_phase -> string
 type timeout_source =
   | Agent_core_api
   | Agent_core_provider

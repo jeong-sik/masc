@@ -272,8 +272,10 @@ let start_store_writer ~sw ~clock ~masc_root () =
   Eio.Fiber.fork_daemon ~sw (fun () ->
     let rec loop () =
       Eio.Time.sleep clock store_writer_interval_s;
-      (* fire-and-forget: the count only serves callers that log it *)
-      ignore (write_samples_to_store ~masc_root () : int);
+      (* Named per iteration so a tracer attached later still sees it. *)
+      Eio.Switch.run ~name:"otel-store-writer" (fun _ ->
+        (* fire-and-forget: the count only serves callers that log it *)
+        ignore (write_samples_to_store ~masc_root () : int));
       loop ()
     in
     loop ())

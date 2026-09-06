@@ -441,35 +441,6 @@ let pop_message registry ~agent_name =
   | Some session -> Eio.Stream.take_nonblocking session.message_queue
   | None -> None
 
-let wait_for_message registry ~agent_name ~timeout =
-  (* Ensure session exists *)
-  let session = match get_session registry ~agent_name with
-    | Some s -> s
-    | None -> register registry ~agent_name
-  in
-  update_activity registry ~agent_name ~is_listening:true ();
-  
-  let result =
-    match Process_eio.get_clock () with
-    | Ok clk ->
-        (match
-           Eio.Time.with_timeout clk timeout (fun () ->
-             Ok (Eio.Stream.take session.message_queue)
-           )
-         with
-         | Ok msg -> Some msg
-         | Error `Timeout -> None
-         | exception Eio.Cancel.Cancelled e -> raise (Eio.Cancel.Cancelled e)
-         | exception exn ->
-             Log.Misc.warn "session listen interrupted: %s" (Printexc.to_string exn);
-             None)
-    | Error e ->
-        Log.Session.debug "clock unavailable in wait_for_message: %s" e;
-        None
-  in
-  update_activity registry ~agent_name ~is_listening:false ();
-  result
-
 let get_inactive_agents registry ~threshold =
   let now = Time_compat.now () in
   let sessions = get_sessions registry in

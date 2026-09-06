@@ -23,11 +23,6 @@ val script : string
 val send_argv : chat_guid:string -> text:string -> string list
 (** The exact argv handed to [Eio.Process]. Pure. *)
 
-val default_timeout_sec : float
-(** Wall clock allowed for one [osascript] run. Messages.app can block on a
-    first-run Automation prompt, so the send is bounded rather than hanging
-    the poll fiber behind it. *)
-
 val send :
   ?timeout_sec:float -> chat_guid:string -> text:string -> unit -> (unit, error) result
 (** Send [text] to the Messages.app chat identified by [chat_guid]. *)

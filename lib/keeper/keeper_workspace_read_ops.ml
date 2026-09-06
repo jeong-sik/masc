@@ -284,15 +284,3 @@ let try_handle_with_outcome
                    else Keeper_tool_execution.failure payload)))))
   | _ -> None
 ;;
-
-let try_handle ~turn_sandbox_factory ~config ~meta ~args ~op ~raw_path =
-  Option.map
-    (fun (result : Keeper_tool_execution.t) -> result.raw_output)
-    (try_handle_with_outcome
-       ~turn_sandbox_factory
-       ~config
-       ~meta
-       ~args
-       ~op
-       ~raw_path)
-;;

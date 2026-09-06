@@ -1371,6 +1371,128 @@ let test_public_write_file_uses_explicit_repo_path () =
   Alcotest.(check string) "file written through explicit repo path"
     "let generated = true\n" (Fs_compat.load_file path)
 
+
+(* ── Insert above a line ─────────────────────────────────────────── *)
+
+let insert_args ~path ~line ~text =
+  `Assoc
+    [ ("path", `String path)
+    ; ("mode", `String "patch")
+    ; ("insert_before_line", `Int line)
+    ; ("insert_text", `String text)
+    ]
+
+let test_insert_takes_the_lines_indentation () =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let path = Filename.concat playground "src.ml" in
+  Fs_compat.save_file path "let x = 1\n  let y = 2\nlet z = 3\n";
+  let execution =
+    handle_file_write_with_outcome
+      ~turn_sandbox_factory:None ~config ~meta ~publication_recovery
+      ~args:(insert_args ~path ~line:2 ~text:"(* masc(alpha): why two *)")
+      ()
+  in
+  let raw = execution.Keeper_tool_execution.raw_output in
+  Alcotest.(check bool) "ok" true (parse_ok raw);
+  Alcotest.(check (option int)) "the line it went above" (Some 2)
+    (parse_int raw "insert_before_line");
+  Alcotest.(check (option int)) "one occurrence" (Some 1) (parse_int raw "occurrences");
+  Alcotest.(check string) "the line sits above, indented like its neighbour"
+    "let x = 1\n  (* masc(alpha): why two *)\n  let y = 2\nlet z = 3\n"
+    (Fs_compat.load_file path);
+  match file_change_evidence execution with
+  | Keeper_file_change_evidence.Edited { occurrence_count; occurrences = Some [ occurrence ] } ->
+    Alcotest.(check int) "evidence counts one" 1 occurrence_count;
+    check_line_range "old range is the line it went above" ~start_line:2 ~end_line:2
+      occurrence.Keeper_file_change_evidence.old_range;
+    (match occurrence.Keeper_file_change_evidence.new_range with
+     | Some range ->
+       check_line_range "new range covers the memo and that line" ~start_line:2 ~end_line:3 range
+     | None -> Alcotest.fail "an insert has a new range")
+  | Keeper_file_change_evidence.Edited _ -> Alcotest.fail "expected exactly one recorded occurrence"
+  | Keeper_file_change_evidence.Written _ -> Alcotest.fail "an insert is edit evidence, not write evidence"
+
+let test_insert_beyond_the_last_line_is_refused () =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let path = Filename.concat playground "src.ml" in
+  Fs_compat.save_file path "let x = 1\nlet y = 2\n";
+  let raw =
+    handle_file_write ~turn_sandbox_factory:None ~config ~meta ~publication_recovery
+      ~args:(insert_args ~path ~line:3 ~text:"# memo") ()
+  in
+  Alcotest.(check bool) "refused" false (parse_ok raw);
+  (match parse_error raw with
+   | Some message ->
+     Alcotest.(check bool) ("names the missing line: " ^ message) true
+       (String_util.contains_substring message "line 3 does not exist")
+   | None -> Alcotest.fail "no error text");
+  Alcotest.(check string) "the file is untouched" "let x = 1\nlet y = 2\n"
+    (Fs_compat.load_file path)
+
+let test_patch_with_neither_replace_nor_insert_is_refused () =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let path = Filename.concat playground "src.ml" in
+  Fs_compat.save_file path "let x = 1\n";
+  let raw =
+    handle_file_write ~turn_sandbox_factory:None ~config ~meta ~publication_recovery
+      ~args:(`Assoc [ ("path", `String path); ("mode", `String "patch"); ("insert_text", `String "x") ])
+      ()
+  in
+  Alcotest.(check bool) "refused" false (parse_ok raw);
+  Alcotest.(check string) "untouched" "let x = 1\n" (Fs_compat.load_file path)
+
+(* An approval recorded for an insert replays as the same insert: the
+   fields the Gate input carries are the ones the handler reads. *)
+let test_replay_carries_the_insert () =
+  let input =
+    `Assoc
+      [ ("requested_target", `String "/tmp/memo/src.ml")
+      ; ( "effect"
+        , `Assoc
+            [ ( "operation"
+              , `String
+                  (Keeper_alerting_path.path_effect_operation_to_string
+                     Keeper_alerting_path.Patch_then_atomic_replace_entry) )
+            ] )
+      ; ("content", `String "updated bytes")
+      ; ("insert_before_line", `Int 2)
+      ; ("insert_text", `String "# masc(alpha): why")
+      ]
+  in
+  match Keeper_tool_filesystem_runtime.replay_args_of_gate_input input with
+  | Ok (`Assoc fields) ->
+    Alcotest.(check (option string)) "mode" (Some "patch")
+      (Option.bind (List.assoc_opt "mode" fields) Yojson.Safe.Util.to_string_option);
+    Alcotest.(check (option int)) "line" (Some 2)
+      (Option.bind (List.assoc_opt "insert_before_line" fields) Yojson.Safe.Util.to_int_option);
+    Alcotest.(check (option string)) "text" (Some "# masc(alpha): why")
+      (Option.bind (List.assoc_opt "insert_text" fields) Yojson.Safe.Util.to_string_option)
+  | Ok other -> Alcotest.failf "replay args are not an object: %s" (Yojson.Safe.to_string other)
+  | Error message -> Alcotest.fail message
+
+let pure_insert ~line ~text content =
+  Masc.Keeper_tool_patch.apply (Masc.Keeper_tool_patch.Insert_before_line { line; text }) content
+
+let test_insert_step_edges () =
+  (match pure_insert ~line:1 ~text:"# m" "" with
+   | Error message -> Alcotest.(check bool) "an empty file has no line" true
+                        (String_util.contains_substring message "empty")
+   | Ok _ -> Alcotest.fail "an empty file took an insert");
+  (match pure_insert ~line:2 ~text:"# m" "a\n\nb\n" with
+   | Ok application -> Alcotest.(check string) "a blank line takes it" "a\n# m\n\nb\n" application.Masc.Keeper_tool_patch.updated
+   | Error message -> Alcotest.fail message);
+  (match pure_insert ~line:2 ~text:"# m" "a\nb" with
+   | Ok application -> Alcotest.(check string) "the last line without a break" "a\n# m\nb" application.Masc.Keeper_tool_patch.updated
+   | Error message -> Alcotest.fail message);
+  (match pure_insert ~line:2 ~text:"one\ntwo" "a\nb\n" with
+   | Error message -> Alcotest.(check bool) "two lines refused" true
+                        (String_util.contains_substring message "one line")
+   | Ok _ -> Alcotest.fail "a two-line text was inserted");
+  (match pure_insert ~line:3 ~text:"# m" "a\nb\n" with
+   | Error message -> Alcotest.(check string) "the count names the file's lines"
+                        "the file has 2 lines; line 3 does not exist." message
+   | Ok _ -> Alcotest.fail "a line past the end took an insert")
+
 let () =
   Alcotest.run "Keeper_fs_edit_patch"
     [
@@ -1488,5 +1610,17 @@ let () =
             test_edit_translation_pins_patch_even_with_content;
           Alcotest.test_case "public Write uses explicit repo path" `Quick
             test_public_write_file_uses_explicit_repo_path;
+        ] );
+      ( "insert_before_line",
+        [
+          Alcotest.test_case "the line goes above, indented like its neighbour" `Quick
+            test_insert_takes_the_lines_indentation;
+          Alcotest.test_case "a line past the end is refused" `Quick
+            test_insert_beyond_the_last_line_is_refused;
+          Alcotest.test_case "neither replace nor insert is refused" `Quick
+            test_patch_with_neither_replace_nor_insert_is_refused;
+          Alcotest.test_case "the pure step's edges" `Quick test_insert_step_edges;
+          Alcotest.test_case "an approval replays as the same insert" `Quick
+            test_replay_carries_the_insert;
         ] );
     ]

@@ -84,10 +84,6 @@ val search_metadata_key : t -> string -> Artifact.any list
 (** Artifacts whose [metadata] is an [`Assoc] containing the
     given key. *)
 
-val provenance_dag : t -> Multimodal_hydrator.provenance_dag
-(** Direct access to the DAG (for use with
-    {!Multimodal_hydrator.hydrate}). *)
-
 val origins_of :
   t ->
   Shared_types.Artifact_id.t ->

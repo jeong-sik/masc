@@ -178,6 +178,29 @@ let http_get ~(host : string) ~(port : int) ~(path : string) :
   | Ok (status, body) -> Ok (status, body)
   | Error e -> Error (report_err "GET failed" e)
 
+(** Fetch an arbitrary external URL's body for web link previews. Unlike the
+    dashboard helpers above this sends NO masc auth header -- the URL is a
+    third-party site, so leaking the operator's token there would be a real
+    credential exposure. Only http(s) is followed, and only a 2xx response
+    yields a body. Response size is capped by {!Masc_http_client} (8 MB). *)
+let fetch_link_preview_body ~(url : string) : (string, string) result =
+  if not (String.starts_with ~prefix:"http://" url
+          || String.starts_with ~prefix:"https://" url)
+  then Error "link preview: unsupported url scheme"
+  else
+    let headers =
+      [ ("User-Agent", "masc-tui/link-preview (+https://github.com/jeong-sik/masc)")
+      ; ("Accept", "text/html,application/xhtml+xml") ]
+    in
+    match
+      Masc_http_client.get_response_sync ?clock:(request_clock ())
+        ~timeout_sec:(request_timeout_sec ()) ~url ~headers ()
+    with
+    | Error e -> Error (report_err "link preview GET failed" e)
+    | Ok { Masc_http_client.status; body; _ } ->
+        if status >= 200 && status < 300 then Ok body
+        else Error (Printf.sprintf "link preview: HTTP %d" status)
+
 (** Send an HTTP POST request with a JSON body and return the structured status/body pair. *)
 let http_post_with_timeout ~timeout_sec ~headers ~(host : string) ~(port : int)
     ~(path : string) ~(body : string) : (int * string, string) result =
@@ -507,28 +530,6 @@ let fetch_git_blame ?keeper ?repo ~(host : string) ~(port : int)
           Error ("git blame was not JSON: " ^ detail)
       | json -> Masc.Tui_decode.decode_git_blame json)
 
-(** The notes anchored to [file_path] in [codebase]
-    ([/api/v1/ide/annotations]). The slug is the server's own mint, carried
-    from the repositories listing -- never re-derived here (RFC-0378). *)
-let fetch_ide_annotations ~(host : string) ~(port : int) ~(codebase : string)
-    ~(file_path : string) : (Masc.Tui_decode.ide_annotation list, string) result
-    =
-  let route =
-    Printf.sprintf "/api/v1/ide/annotations?codebase=%s&file_path=%s"
-      (percent_encode_query_value codebase)
-      (percent_encode_query_value file_path)
-  in
-  match http_get ~host ~port ~path:route with
-  | Error detail -> Error detail
-  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
-    ->
-      Error (Printf.sprintf "annotations returned %d: %s" status body)
-  | Ok (_, body) -> (
-      match Yojson.Safe.from_string body with
-      | exception Yojson.Json_error detail ->
-          Error ("annotations were not JSON: " ^ detail)
-      | json -> Masc.Tui_decode.decode_ide_annotations json)
-
 (** Durable Keeper writes over one repository file. Unlike the removed IDE
     region store, this reads the tool-call log projection and therefore keeps
     working after the producing turn exits. *)
@@ -601,42 +602,6 @@ let fetch_lsp_question ?keeper ?repo ~(host : string) ~(port : int)
       | exception Yojson.Json_error detail ->
           Error ("lsp question was not JSON: " ^ detail)
       | json -> Masc.Tui_decode.decode_lsp_answer json)
-
-(** Add a note to [file_path] in [codebase]
-    ([POST /api/v1/ide/annotations]). The route wants a write-tier bearer;
-    the admin token this process mints carries it. The server answers the
-    created note, which the caller re-reads through the listing rather than
-    splicing locally. *)
-let post_ide_annotation ~(host : string) ~(port : int) ~(codebase : string)
-    ~(file_path : string) ~(line_start : int) ~(line_end : int)
-    ~(kind : string) ~(content : string) : (unit, string) result =
-  let path =
-    Printf.sprintf "/api/v1/ide/annotations?codebase=%s"
-      (percent_encode_query_value codebase)
-  in
-  let body =
-    Yojson.Safe.to_string
-      (`Assoc
-         [ ("file_path", `String file_path)
-         ; ("line_start", `Int line_start)
-         ; ("line_end", `Int line_end)
-         ; ("kind", `String kind)
-         ; ("content", `String content)
-         ])
-  in
-  match post_json ~host ~port ~path ~body with
-  | Error detail -> Error detail
-  | Ok json -> (
-      match json with
-      | `Assoc fields -> (
-          match List.assoc_opt "ok" fields with
-          | Some (`Bool true) -> Ok ()
-          | Some (`Bool false) -> (
-              match List.assoc_opt "error" fields with
-              | Some (`String e) -> Error e
-              | Some _ | None -> Error "note rejected")
-          | Some _ | None -> Error "unexpected note response envelope")
-      | _ -> Error "unexpected note response envelope")
 
 let fetch_keeper_file_changes ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(window_hours : float) :

@@ -2100,16 +2100,28 @@ let internal_descriptors : t list =
       ~handler:Tool_person_note_set
       ()
     (* ── IDE (RFC-0179 PR-3) ──────────────────────────────────── *)
-  ; in_process_descriptor_with_schema_source
+    (* A memo is a comment inserted into a file, so the tool is a
+       filesystem write with Edit's roots, Gate and evidence. *)
+  ; descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
       ~input_schema_source:ide_annotate_schema_source
       ~id:"keeper.ide.annotate"
-      ~name:"keeper_ide_annotate"
+      ~public_name:"keeper_ide_annotate"
+      ~internal_name:"keeper_ide_annotate"
       ~description:ide_annotate_schema.description
       ~input_schema:ide_annotate_schema.input_schema
-      ~policy:(write_in_process_policy ())
-      ~handler:Tool_ide_annotate
+      ~policy:
+        (policy
+           ~readonly:false
+           ~cwd_scope:"keeper_sandbox"
+           ~leaves_masc:true
+           ())
+      ~executor:Filesystem
+      ~backend:Sandbox_process
+      ~sandbox:Backend_selected
+      ~runtime_handler:Tool_ide_annotate
+      ~input_translation:(Identity Validate_once_after_translation)
       ()
     (* ── fusion deliberation (RFC-0252) ───────────────────────── *)
   ; in_process_descriptor_with_schema_source
@@ -2542,10 +2554,6 @@ let public_name_for_internal internal_name =
   match public_descriptors_for_internal internal_name with
   | [] -> None
   | first :: _ -> Some first.public_name
-;;
-
-let public_input_schema public =
-  Option.map (fun d -> d.input_schema) (find_public public)
 ;;
 
 let translate_input ~public input =

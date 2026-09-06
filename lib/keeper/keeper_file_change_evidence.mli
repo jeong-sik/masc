@@ -27,10 +27,6 @@ val max_recorded_edit_occurrences : int
     Larger edits retain their exact occurrence count and explicitly omit the
     range list. *)
 
-val line_count : string -> int
-(** Count displayed lines. Empty text has zero lines; a trailing newline does
-    not create an additional empty line. *)
-
 val advance_line : start_line:int -> string -> int
 (** Advance a file cursor by the line breaks in [text]. *)
 

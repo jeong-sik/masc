@@ -41,5 +41,4 @@ val depth : unit -> int
 module For_testing : sig
   val reset : ?capacity_override:int -> unit -> unit
   val set_active : bool -> unit
-  val is_active : unit -> bool
 end

@@ -833,9 +833,6 @@ val rename : string -> string -> unit
     rather than substring matching on the libc message. *)
 val rename_if_exists : src:string -> dst:string -> bool
 
-(** Remove directory. *)
-val rmdir : string -> unit
-
 (** Remove a file, symlink, or directory tree without invoking a shell.
     Missing paths are ignored.  Symlinks are unlinked, not followed. *)
 val remove_tree : string -> unit
@@ -981,7 +978,6 @@ module Private_jsonl_cursor : sig
   type t
 
   val equal : t -> t -> bool
-  val to_string : t -> string
 end
 
 type private_jsonl_snapshot =
@@ -1379,13 +1375,6 @@ val append_jsonl : string -> Yojson.Safe.t -> unit
     in a single lock+flush cycle. More efficient than calling [append_jsonl]
     repeatedly when batching pending entries. No-op if [jsons] is empty. *)
 val append_jsonl_batch : string -> Yojson.Safe.t list -> unit
-
-(** Flush and close every cached [out_channel] held by
-    [append_jsonl]. Safe to call concurrently with active appends;
-    a subsequent [append_jsonl] re-opens fresh. Intended for
-    shutdown sequencing and rare administrative refresh.
-    RFC-0162 §3.4. *)
-val close_all_cached_writers : unit -> unit
 
 (** [invalidate_cached_writer path] drops the cached [append_jsonl]
     writer for [path] (a no-op if none is cached). Call it after

@@ -43,7 +43,7 @@ export interface KeeperPromptAssemblyRow {
   title: string
   lane: AssemblyLane
   promptKey: string
-  source: PromptSource | 'computed'
+  source: PromptSource
   hasOverride: boolean
   filePath: string | null
   text: string
@@ -237,13 +237,11 @@ function promptText(prompt: DashboardPromptItem | undefined): string {
 
 function promptDisplayText(row: KeeperPromptAssemblyRow): string {
   if (row.text) return row.text
-  if (row.source === 'computed') return 'Computed at turn time from workspace, scheduler, memory, and runtime state.'
   if (row.missing) return 'Required prompt file is missing from the active prompt root.'
   return 'No effective text is currently resolved for this prompt.'
 }
 
 function sourceLabel(source: KeeperPromptAssemblyRow['source']): string {
-  if (source === 'computed') return 'computed'
   if (source === 'override') return 'saved override'
   if (source === 'file') return 'prompt file'
   return 'missing'
@@ -318,12 +316,12 @@ function stageIdFromPreset(id: string): string | null {
 
 function assemblyPresetOptions(report: KeeperPromptAssemblyReport): KeeperPromptAssemblyPreset[] {
   const stagePresets = report.stages
-    .filter(stage => stage.rows.some(row => row.source !== 'computed'))
+    .filter(stage => stage.rows.length > 0)
     .map(stage => ({
       id: stagePresetId(stage),
       label: stage.messageSlot === 'not sent' ? stage.title : `${stage.messageSlot}: ${stage.title}`,
       description: stage.summary,
-      count: stage.rows.filter(row => row.source !== 'computed').length,
+      count: stage.rows.length,
     }))
 
   return [
@@ -407,7 +405,7 @@ function stageRows(rows: KeeperPromptAssemblyRow[], stage: AssemblyStageSpec): K
 function buildStages(rows: KeeperPromptAssemblyRow[]): KeeperPromptAssemblyStage[] {
   return STAGES.map(stage => {
     const rowsForStage = stageRows(rows, stage)
-    const promptCount = rowsForStage.filter(row => row.source !== 'computed').length
+    const promptCount = rowsForStage.length
     return {
       id: stage.id,
       order: stage.order,
@@ -443,7 +441,7 @@ export function buildKeeperPromptAssemblyReport(
         lane: stage.lane,
         promptKey,
         source: prompt?.source ?? 'missing',
-        hasOverride: prompt?.has_override ?? false,
+        hasOverride: prompt?.source === 'override',
         filePath: prompt?.file_path ?? null,
         text,
         bytes: textByteLength(text),
@@ -534,7 +532,6 @@ function sourceTone(row: KeeperPromptAssemblyRow): StatusChipTone {
   if (row.missing) return 'bad'
   if (row.hasOverride) return 'warn'
   if (row.source === 'file') return 'ok'
-  if (row.source === 'computed') return 'neutral'
   return 'info'
 }
 
@@ -721,7 +718,6 @@ function PromptDocumentRow({ row, stage }: { row: KeeperPromptAssemblyRow; stage
         </div>
         <div class="ml-auto flex flex-wrap gap-1">
           <${StatusChip} tone=${sourceTone(row)} uppercase=${false}>${sourceLabel(row.source)}<//>
-          ${row.hasOverride && row.source !== 'override' ? html`<${StatusChip} tone="warn" uppercase=${false}>edited<//>` : null}
           ${row.missing && row.source !== 'missing' ? html`<${StatusChip} tone="bad" uppercase=${false}>missing<//>` : null}
         </div>
       </div>

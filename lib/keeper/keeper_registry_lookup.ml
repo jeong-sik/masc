@@ -20,14 +20,6 @@ let find_by_name_in_base_path ~base_path name =
 ;;
 
 
-let find_by_id (uid : Keeper_id.Uid.t) =
-  Keeper_registry.all ()
-  |> List.find_opt (fun (v : registry_entry) ->
-       match v.meta.keeper_id with
-       | Some id -> Keeper_id.Uid.equal id uid
-       | None -> false)
-;;
-
 let tool_usage_of_by_name name =
   match find_by_name name with
   | None -> []

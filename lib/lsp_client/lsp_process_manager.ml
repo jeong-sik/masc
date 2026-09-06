@@ -25,10 +25,15 @@ let pp_spawn_error fmt = function
   | Process_error msg -> Fmt.pf fmt "LSP process error: %s" msg
 ;;
 
-(* One row per language the client knows. A variant rather than three
-   independent string matches: adding a language now fails to compile until its
-   command, its extensions and its project markers are all given, where before
-   a new arm in one match left the others silently answering "unknown". *)
+(* One row per language the client knows. A variant rather than string
+   matches: adding a language fails to compile until its wire id, its
+   command, its extensions and its root rule are all given, where a table
+   keyed by string left the others silently answering "unknown". The
+   commands are each server's documented stdio invocation; on the host this
+   was written on, ocamllsp, rust-analyzer, clangd and sourcekit-lsp were
+   present and answered, the rest were not installed (RFC-0429 §1.6, §3.2).
+   An operator who runs a different server for a language points at it in
+   runtime.toml; this table is what stands when nothing is said. *)
 type reference_index =
   { artifact_suffix : string
   ; search_root : string
@@ -42,7 +47,37 @@ type language =
   | Python
   | Rust
   | Go
+  | C
+  | Cpp
+  | Swift
+  | Java
+  | Kotlin
+  | Ruby
+  | Php
+  | Lua
+  | Bash
+  | Json
+  | Yaml
+  | Zig
+  | Haskell
+  | Elixir
+  | Dart
+  | Scala
+  | Csharp
+  | Markdown
 
+(* Every variant once, in the order the wire and the error texts list them.
+   The compiler cannot check a list against a sum; the language test walks
+   this list against the exhaustive functions below and fails when a
+   variant is missing here. *)
+let all_languages =
+  [ Ocaml; Typescript; Javascript; Python; Rust; Go; C; Cpp; Swift; Java; Kotlin
+  ; Ruby; Php; Lua; Bash; Json; Yaml; Zig; Haskell; Elixir; Dart; Scala; Csharp
+  ; Markdown ]
+;;
+
+(* The LSP languageId each server is initialised with. Bash is
+   "shellscript" on the wire, the name the protocol registers for it. *)
 let lang_id_of_language = function
   | Ocaml -> "ocaml"
   | Typescript -> "typescript"
@@ -50,38 +85,87 @@ let lang_id_of_language = function
   | Python -> "python"
   | Rust -> "rust"
   | Go -> "go"
+  | C -> "c"
+  | Cpp -> "cpp"
+  | Swift -> "swift"
+  | Java -> "java"
+  | Kotlin -> "kotlin"
+  | Ruby -> "ruby"
+  | Php -> "php"
+  | Lua -> "lua"
+  | Bash -> "shellscript"
+  | Json -> "json"
+  | Yaml -> "yaml"
+  | Zig -> "zig"
+  | Haskell -> "haskell"
+  | Elixir -> "elixir"
+  | Dart -> "dart"
+  | Scala -> "scala"
+  | Csharp -> "csharp"
+  | Markdown -> "markdown"
 ;;
 
-let language_of_lang_id = function
-  | "ocaml" -> Some Ocaml
-  | "typescript" -> Some Typescript
-  | "javascript" -> Some Javascript
-  | "python" -> Some Python
-  | "rust" -> Some Rust
-  | "go" -> Some Go
-  | _ -> None
+let language_of_lang_id id =
+  List.find_opt (fun language -> String.equal (lang_id_of_language language) id) all_languages
 ;;
 
 let command_of_language = function
   | Ocaml -> "ocamllsp", [ "ocamllsp" ]
   | Typescript | Javascript ->
     "typescript-language-server", [ "typescript-language-server"; "--stdio" ]
-  | Python -> "pylsp", [ "pylsp" ]
+  | Python -> "pyright-langserver", [ "pyright-langserver"; "--stdio" ]
   | Rust -> "rust-analyzer", [ "rust-analyzer" ]
   | Go -> "gopls", [ "gopls" ]
+  | C | Cpp -> "clangd", [ "clangd" ]
+  | Swift -> "sourcekit-lsp", [ "sourcekit-lsp" ]
+  | Java -> "jdtls", [ "jdtls" ]
+  | Kotlin -> "kotlin-language-server", [ "kotlin-language-server" ]
+  | Ruby -> "ruby-lsp", [ "ruby-lsp" ]
+  | Php -> "intelephense", [ "intelephense"; "--stdio" ]
+  | Lua -> "lua-language-server", [ "lua-language-server" ]
+  | Bash -> "bash-language-server", [ "bash-language-server"; "start" ]
+  | Json -> "vscode-json-language-server", [ "vscode-json-language-server"; "--stdio" ]
+  | Yaml -> "yaml-language-server", [ "yaml-language-server"; "--stdio" ]
+  | Zig -> "zls", [ "zls" ]
+  | Haskell -> "haskell-language-server-wrapper", [ "haskell-language-server-wrapper"; "--lsp" ]
+  | Elixir -> "elixir-ls", [ "elixir-ls" ]
+  | Dart -> "dart", [ "dart"; "language-server" ]
+  | Scala -> "metals", [ "metals" ]
+  | Csharp -> "csharp-ls", [ "csharp-ls" ]
+  | Markdown -> "marksman", [ "marksman"; "server" ]
 ;;
 
-(* The file whose directory a language server for this language should be
-   rooted at, nearest first. [dune-workspace] sits above [dune-project] in a
-   multi-project tree, so it is listed second and only wins where no
-   [dune-project] is nearer. *)
-let project_markers_of_language = function
-  | Ocaml -> [ "dune-project"; "dune-workspace" ]
-  | Typescript -> [ "tsconfig.json"; "package.json" ]
-  | Javascript -> [ "jsconfig.json"; "package.json" ]
-  | Python -> [ "pyproject.toml"; "setup.py"; "setup.cfg" ]
-  | Rust -> [ "Cargo.toml" ]
-  | Go -> [ "go.mod" ]
+(* Where a language server for this language is rooted. A file whose
+   directory a marker names, nearest first; or the workspace boundary for
+   languages that have no project file of their own -- a shell script, a
+   JSON or YAML document, a C# solution named by a pattern rather than a
+   fixed file -- so the server sees the whole checkout. [dune-workspace]
+   sits above [dune-project] in a multi-project tree, so it is listed
+   second and only wins where no [dune-project] is nearer. *)
+type root_rule =
+  | Marker_files of string list
+  | Boundary_root
+
+let root_rule_of_language = function
+  | Ocaml -> Marker_files [ "dune-project"; "dune-workspace" ]
+  | Typescript -> Marker_files [ "tsconfig.json"; "package.json" ]
+  | Javascript -> Marker_files [ "jsconfig.json"; "package.json" ]
+  | Python -> Marker_files [ "pyproject.toml"; "setup.py"; "setup.cfg" ]
+  | Rust -> Marker_files [ "Cargo.toml" ]
+  | Go -> Marker_files [ "go.mod" ]
+  | C | Cpp -> Marker_files [ "compile_commands.json"; "CMakeLists.txt"; "Makefile" ]
+  | Swift -> Marker_files [ "Package.swift" ]
+  | Java -> Marker_files [ "pom.xml"; "build.gradle"; "build.gradle.kts" ]
+  | Kotlin -> Marker_files [ "build.gradle.kts"; "settings.gradle.kts"; "build.gradle" ]
+  | Ruby -> Marker_files [ "Gemfile" ]
+  | Php -> Marker_files [ "composer.json" ]
+  | Lua -> Marker_files [ ".luarc.json" ]
+  | Bash | Json | Yaml | Csharp | Markdown -> Boundary_root
+  | Zig -> Marker_files [ "build.zig" ]
+  | Haskell -> Marker_files [ "stack.yaml"; "cabal.project" ]
+  | Elixir -> Marker_files [ "mix.exs" ]
+  | Dart -> Marker_files [ "pubspec.yaml" ]
+  | Scala -> Marker_files [ "build.sbt" ]
 ;;
 
 (* What a language server needs on disk before it can answer about references
@@ -90,10 +174,9 @@ let project_markers_of_language = function
    the truth was 3; after `dune build @ocaml-index` (0.33 s on that project) it
    answered all 3, across both files.
 
-   The other four are [None] because their servers hold the index themselves,
-   and none of them is installed on the host this was measured on -- so [None]
-   here means "no precondition this client checks", not "measured as needing
-   nothing". *)
+   Every other language is [None]: their servers hold the index themselves,
+   or nobody has measured them here. [None] means "no precondition this
+   client checks", not "measured as needing nothing". *)
 let reference_index_of_language = function
   | Ocaml ->
     Some
@@ -101,7 +184,10 @@ let reference_index_of_language = function
       ; search_root = "_build"
       ; build_command = "dune build @ocaml-index"
       }
-  | Typescript | Javascript | Python | Rust | Go -> None
+  | Typescript | Javascript | Python | Rust | Go | C | Cpp | Swift | Java | Kotlin | Ruby
+  | Php | Lua | Bash | Json | Yaml | Zig | Haskell | Elixir | Dart | Scala | Csharp
+  | Markdown ->
+    None
 ;;
 
 (* Variables that redirect this language's toolchain to a build directory other
@@ -116,19 +202,92 @@ let reference_index_of_language = function
    unrelated directory still answered 3. So the cwd is left alone. *)
 let redirecting_variables_of_language = function
   | Ocaml -> [ "DUNE_BUILD_DIR"; "DUNE_WORKSPACE" ]
-  | Typescript | Javascript | Python | Rust | Go -> []
+  | Typescript | Javascript | Python | Rust | Go | C | Cpp | Swift | Java | Kotlin | Ruby
+  | Php | Lua | Bash | Json | Yaml | Zig | Haskell | Elixir | Dart | Scala | Csharp
+  | Markdown ->
+    []
+;;
+
+(* The extensions a language owns, lower-case with the dot. One table, read
+   both ways: {!language_of_extension} searches it, and the error text that
+   names what is covered is built from it. *)
+let extensions_of_language = function
+  | Ocaml -> [ ".ml"; ".mli" ]
+  | Typescript -> [ ".ts"; ".tsx" ]
+  | Javascript -> [ ".js"; ".jsx"; ".mjs"; ".cjs" ]
+  | Python -> [ ".py"; ".pyi" ]
+  | Rust -> [ ".rs" ]
+  | Go -> [ ".go" ]
+  | C -> [ ".c"; ".h" ]
+  | Cpp -> [ ".cc"; ".cpp"; ".cxx"; ".hpp"; ".hh"; ".hxx" ]
+  | Swift -> [ ".swift" ]
+  | Java -> [ ".java" ]
+  | Kotlin -> [ ".kt"; ".kts" ]
+  | Ruby -> [ ".rb" ]
+  | Php -> [ ".php" ]
+  | Lua -> [ ".lua" ]
+  | Bash -> [ ".sh"; ".bash"; ".zsh" ]
+  | Json -> [ ".json" ]
+  | Yaml -> [ ".yml"; ".yaml" ]
+  | Zig -> [ ".zig" ]
+  | Haskell -> [ ".hs" ]
+  | Elixir -> [ ".ex"; ".exs" ]
+  | Dart -> [ ".dart" ]
+  | Scala -> [ ".scala"; ".sc" ]
+  | Csharp -> [ ".cs" ]
+  | Markdown -> [ ".md"; ".markdown" ]
 ;;
 
 let language_of_extension ext =
-  match ext with
-  | ".ml" | ".mli" -> Some Ocaml
-  | ".ts" | ".tsx" -> Some Typescript
-  | ".js" | ".jsx" -> Some Javascript
-  | ".py" -> Some Python
-  | ".rs" -> Some Rust
-  | ".go" -> Some Go
-  | _ -> None
+  List.find_opt (fun language -> List.mem ext (extensions_of_language language)) all_languages
 ;;
+
+(* How a memo (Ide_memo) is spelled in each language's comment syntax.
+   [None] is the one language with no comment syntax at all: a memo cannot
+   stand in JSON. *)
+let memo_markers_of_language = function
+  | Ocaml -> Some (Ide_memo.Block { opens = "(*"; closes = "*)" })
+  | Typescript | Javascript | Rust | Go | C | Cpp | Swift | Java | Kotlin | Php | Zig | Dart
+  | Scala | Csharp -> Some (Ide_memo.Line "//")
+  | Python | Ruby | Bash | Yaml | Elixir -> Some (Ide_memo.Line "#")
+  | Lua | Haskell -> Some (Ide_memo.Line "--")
+  | Markdown -> Some (Ide_memo.Block { opens = "<!--"; closes = "-->" })
+  | Json -> None
+;;
+
+type memo_line_refusal =
+  | Extension_unknown of string
+  | No_comment_syntax of language
+
+let memo_line_refusal_to_string = function
+  | Extension_unknown "" -> "the file has no extension, so no language here owns it"
+  | Extension_unknown ext -> Printf.sprintf "no language here owns the extension %s" ext
+  | No_comment_syntax language ->
+    Printf.sprintf "%s has no comment syntax, so a memo cannot stand in it"
+      (lang_id_of_language language)
+;;
+
+(* The comment line a memo becomes in the file at [path]. One function, so
+   the tool that writes the line and the projection that records the call
+   spell it the same way. *)
+let memo_line ~path (memo : Ide_memo.t) =
+  let extension = String.lowercase_ascii (Filename.extension path) in
+  match language_of_extension extension with
+  | None -> Error (Extension_unknown extension)
+  | Some language ->
+    (match memo_markers_of_language language with
+     | None -> Error (No_comment_syntax language)
+     | Some markers -> Ok (Ide_memo.to_line markers memo))
+;;
+
+let covered_extensions () = List.concat_map extensions_of_language all_languages
+
+(* Who answers "which command starts this language's server": the table
+   above when nothing is said, the operator's [lsp.servers] entry for a
+   language when there is one. Threaded in by the caller rather than read
+   here, because this library sits below the module that reads
+   runtime.toml. *)
+type servers = language -> string * string list
 
 (** Language → command mapping. Returns [(executable, argv)] or [None]. *)
 let command_for_lang lang_id =
@@ -238,12 +397,18 @@ let read_message (flow : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.
 
     The process is bound to [sw] — when the switch is turned off,
     the process is terminated automatically via [on_release]. *)
-let spawn ~sw ~lang_id ~workspace_root (proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t)
+let spawn
+    ~sw
+    ~(servers : servers)
+    ~lang_id
+    ~workspace_root
+    (proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t)
   : (lsp_process, spawn_error) result
   =
-  match command_for_lang lang_id with
+  match language_of_lang_id lang_id with
   | None -> Error (Command_not_found lang_id)
-  | Some (cmd, argv) ->
+  | Some language ->
+    let cmd, argv = servers language in
     if not (command_exists cmd)
     then Error (Command_not_found cmd)
     else (

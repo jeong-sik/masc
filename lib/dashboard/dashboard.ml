@@ -49,7 +49,6 @@ type scope = Tool_schemas_specs_types.dashboard_scope =
   | Dashboard_scope_all
   | Dashboard_scope_current
 
-let scope_to_string = Tool_schemas_specs_types.dashboard_scope_to_string
 let valid_scope_strings = Tool_schemas_specs_types.dashboard_scope_strings
 let scope_of_string_opt = Tool_schemas_specs_types.dashboard_scope_of_string_opt
 

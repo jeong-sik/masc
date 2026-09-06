@@ -23,12 +23,6 @@ val agent_core_history_path :
 val agent_core_history_snapshot_id_of_checkpoint :
   Agent_core.Checkpoint.t -> string
 
-(** Save [ckpt] to the AGENT_CORE history archive in [session_dir],
-    pruning to [max_agent_core_history_retained] entries. Logs and
-    swallows write failures. *)
-val save_agent_core_history :
-  session_dir:string -> Agent_core.Checkpoint.t -> unit
-
 (** Delete AGENT_CORE history archive entries by [snapshot_ids]. Returns
     [(deleted, missing)] in input-order, with [missing] containing
     every snapshot id whose file was absent OR removal failed. An id

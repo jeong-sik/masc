@@ -317,8 +317,6 @@ val load_list :
     keeper→runtime-id list; [media_failover] is the RFC-0265 ordered reroute
     list; [lanes] is the ordered failover candidate lists. *)
 
-val runtime_ids : t list -> string list
-
 type request_body_cap_error = Missing_or_non_positive_request_body_cap of
   { runtime_id : string
   }
@@ -492,6 +490,11 @@ val media_failover : unit -> string list
 val lanes : unit -> Runtime_lane.t list
 (** [\[runtime.lanes.<id>\]] ordered failover candidate lists. Each lane carries
     an ordered list of runtime ids validated at load. *)
+
+val lsp_servers : unit -> Lsp_process_manager.language -> string * string list
+(** [\[lsp.servers\]] applied over the client's own table: the command that
+    starts a language's server, the operator's where one was written for that
+    language. Pass it as [~servers] to the language-server pool and spawn. *)
 
 val get_lane_by_id : string -> Runtime_lane.t option
 (** Lane with the given id, or [None] if no such lane is configured. *)

@@ -211,6 +211,32 @@ val read_recent_lines : ?offset:int -> t -> int -> string list
 (** Like {!read_recent} but returns raw JSONL strings (no parse).
     Useful for tail-readers that do their own parsing. *)
 
+val range_day_file_paths : t -> since:string -> until:string -> string list
+(** The day files the inclusive [[since, until]] range covers, oldest first,
+    without opening any of them. Same day-selection rule as {!iter_range}, so a
+    path returned here is a file that call would have read. Invalid dates give
+    the empty list. *)
+
+val fold_range_appended
+  :  t
+  -> since:string
+  -> until:string
+  -> cursors:(string * int) list
+  -> init:'acc
+  -> f:('acc -> Yojson.Safe.t -> 'acc)
+  -> 'acc * (string * int) list
+(** Fold only the rows a range gained since [cursors] said each file was read
+    to, and return the accumulator with the cursors advanced.
+
+    A day file is append-only, so a caller holding a trailing-window answer can
+    keep its accumulator and pass the cursors back rather than reading the
+    window again. A path absent from [cursors] is read whole; malformed rows
+    are skipped as {!iter_range} skips them.
+
+    A file that shrank below its cursor (rotation, rewrite) is re-read from
+    zero, so such a caller double-counts rather than under-counts. Compare the
+    returned cursor against the one passed to detect it. *)
+
 val read_range : t -> since:string -> until:string -> Yojson.Safe.t list
 (** [read_range t ~since ~until] returns entries whose day-file falls
     within [[since, until]] (inclusive, format ["YYYY-MM-DD"]).

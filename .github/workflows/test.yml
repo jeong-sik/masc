@@ -234,7 +234,8 @@ jobs:
             # own. Dune runs the script as the alias's action, so building
             # the alias is the run.
             if [ -f "test/${suite}.py" ] \
-              || grep -Fqr "(alias runtest-${suite})" test/dune test/stanzas 2>/dev/null; then
+              || grep -Eqr "^[[:space:]]*\(alias runtest-${suite}\)[[:space:]]*$" \
+                   test/dune test/stanzas 2>/dev/null; then
               aliases+=("${suite}")
             else
               suites+=("${suite}")

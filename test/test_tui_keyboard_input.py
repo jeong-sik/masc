@@ -9776,9 +9776,11 @@ def code_memo_interaction(
     than for something the lexer marked."""
     palette_go(process, master_fd, output, b"go code", b"init.lua")
     send_and_wait(process, master_fd, output, b"\r", b"local lock = 1")
-    listed = send_and_wait(
-        process, master_fd, output, b"m", b"keep the coroutine"
-    )
+    # The wait needle has to be text only the overlay draws: the memo's own
+    # words are line 2 of the file and are already on screen before m, so a
+    # redraw arriving in the wait window would satisfy a needle taken from
+    # the file pane and read the wrong frame back.
+    listed = send_and_wait(process, master_fd, output, b"m", b"(decision)")
     plain = CSI_RE.sub(b"", listed).decode("utf-8")
     for needle in ("notes: init.lua", "L2", "alpha", "(decision)"):
         if needle not in plain:

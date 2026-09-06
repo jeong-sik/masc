@@ -6541,11 +6541,12 @@ let convert_to_png input_path =
 (* Put a picture on the terminal, or say why not. The refusal is text for the
    pane: there is nothing to draw, and taking the screen away from the frame
    to say so would hide the only surface that can say it. *)
-(* Mosaic preview size: 72 cells wide, 40 pixels tall -> 20 half-block rows.
-   ~72 columns fit a modal on a normal-width terminal; decode and draw stay a
-   few ms. og:images are high-res, so this size is what bounds the sharpness. *)
-let mosaic_cols = 72
-let mosaic_pixel_rows = 40
+(* Mosaic preview size: 120 cells wide, 64 pixels tall -> 32 half-block rows.
+   Bigger = sharper (og:images are high-res; cell count is the cap). The modal
+   only draws it when it fits the width (render_modal_card guards), so a narrow
+   terminal skips it rather than wrapping. Decode and draw stay a few ms. *)
+let mosaic_cols = 120
+let mosaic_pixel_rows = 64
 
 (* Download a preview image and decode it into half-block mosaic lines, or None.
    Blocking (curl + ffmpeg through Unix.system): the caller runs it off the

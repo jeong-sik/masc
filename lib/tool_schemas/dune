@@ -40,6 +40,8 @@
   masc_core
   masc.task_handlers
   masc.masc_tool_surface
+  ; Tool_name owns the Goal vocabulary the schema list is built from.
+  masc.masc_tool_dispatch
   ; tool_schemas_workspace_extra, tool_schemas_filesystem_files and
   ; tool_schemas_operator_surface read config/tools/*.toml from the
   ; binary-embedded config tree.

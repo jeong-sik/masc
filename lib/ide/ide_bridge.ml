@@ -469,10 +469,11 @@ let install_agent_observation_sinks () =
            reject, never an ok:true burial in a directory no codebase-scoped
            read can see. *)
         Error
-          (Printf.sprintf
-             "annotation target failed attribution (%s): %s"
-             (Agent_observation.Unattributed.reason_to_string reason)
-             attempted_path)
+          (Agent_observation.Sink_rejected
+             (Printf.sprintf
+                "annotation target failed attribution (%s): %s"
+                (Agent_observation.Unattributed.reason_to_string reason)
+                attempted_path))
       | Agent_observation.Addressed addressed ->
       match
         Ide_annotations.create
@@ -489,7 +490,7 @@ let install_agent_observation_sinks () =
           ~references
           ()
       with
-      | Error msg -> Error msg
+      | Error msg -> Error (Agent_observation.Sink_rejected msg)
       | Ok annotation ->
         Ok
           { Agent_observation.id = annotation.id

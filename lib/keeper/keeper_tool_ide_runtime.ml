@@ -108,7 +108,17 @@ let handle_ide_annotate_with_outcome
                ; "line_start", `Int annotation.line_start
                ; "line_end", `Int annotation.line_end
                ]))
-    | Error msg -> reject ~class_:Tool_result.Runtime_failure msg
+    (* A missing sink is a dependency this process never attached, not a
+       fault in the call. Reporting it as a runtime failure told the model
+       its own call broke and left the outcome unknown, so it could retry a
+       call that had no effect. *)
+    | Error Agent_observation.Sink_not_installed ->
+      reject
+        ~class_:Tool_result.Dependency_unavailable
+        (Agent_observation.annotation_error_to_string
+           Agent_observation.Sink_not_installed)
+    | Error (Agent_observation.Sink_rejected msg) ->
+      reject ~class_:Tool_result.Runtime_failure msg
 ;;
 
 let handle_ide_annotate ~config ~meta ~args =

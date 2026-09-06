@@ -379,10 +379,21 @@ type annotation_result =
   }
 
 type tool_event_sink = tool_event -> unit
-type annotation_sink = annotation_request -> (annotation_result, string) result
+
+type annotation_error =
+  | Sink_not_installed
+  | Sink_rejected of string
+
+let annotation_error_to_string = function
+  | Sink_not_installed -> "annotation sink is not installed"
+  | Sink_rejected detail -> detail
+;;
+
+type annotation_sink =
+  annotation_request -> (annotation_result, annotation_error) result
 
 let noop_tool_event_sink (_ : tool_event) = ()
-let noop_annotation_sink (_ : annotation_request) = Error "annotation sink is not installed"
+let noop_annotation_sink (_ : annotation_request) = Error Sink_not_installed
 
 let tool_event_sink = Atomic.make noop_tool_event_sink
 let annotation_sink = Atomic.make noop_annotation_sink

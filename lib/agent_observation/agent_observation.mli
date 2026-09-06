@@ -178,13 +178,27 @@ type annotation_result =
   }
 
 type tool_event_sink = tool_event -> unit
-type annotation_sink = annotation_request -> (annotation_result, string) result
+
+type annotation_error =
+  | Sink_not_installed
+      (** No sink is registered: the IDE bridge was never attached to this
+          process. A caller that reports this as a runtime failure tells the
+          model its call broke, when what is missing is a dependency. *)
+  | Sink_rejected of string
+      (** An installed sink refused or failed the request. *)
+
+val annotation_error_to_string : annotation_error -> string
+
+type annotation_sink =
+  annotation_request -> (annotation_result, annotation_error) result
 
 val register_tool_event_sink : tool_event_sink -> unit
 val register_annotation_sink : annotation_sink -> unit
 
 val emit_tool_event : tool_event -> unit
-val emit_annotation_request : annotation_request -> (annotation_result, string) result
+
+val emit_annotation_request :
+  annotation_request -> (annotation_result, annotation_error) result
 
 type snapshot
 

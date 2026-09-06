@@ -74,6 +74,33 @@ let test_tool_observation_reaches_ide_storage () =
     | _ -> fail "expected one tool event")
 ;;
 
+let test_absent_sink_is_named_rather_than_described () =
+  (* The two failures a caller has to tell apart: no sink attached to this
+     process, and an attached sink that refused. They shared one string until
+     2026-09-06, so keeper_ide_annotate reported both as a runtime failure --
+     which tells a model its call broke and leaves the outcome unknown. *)
+  Agent_observation.reset_for_testing ();
+  match
+    Agent_observation.emit_annotation_request
+      { base_path = "/nonexistent-annotation-base"
+      ; attribution =
+          addressed_file ~codebase:"github.com_owner_repo" ~path:"lib/absent.ml"
+      ; keeper_id = "keeper-absent-sink"
+      ; line_start = 1
+      ; line_end = 1
+      ; kind = Agent_observation.Decision
+      ; content = "no sink is installed"
+      ; goal_id = None
+      ; task_id = None
+      ; references = []
+      }
+  with
+  | Ok _ -> fail "annotation succeeded with no sink installed"
+  | Error Agent_observation.Sink_not_installed -> ()
+  | Error (Agent_observation.Sink_rejected detail) ->
+    failf "an absent sink reported a rejection instead of its absence: %s" detail
+;;
+
 let test_annotation_request_reaches_ide_storage () =
   with_temp_dir (fun base_dir ->
     install_fresh_ide_sink ();
@@ -94,7 +121,10 @@ let test_annotation_request_reaches_ide_storage () =
         }
     in
     match result with
-    | Error msg -> failf "annotation request failed: %s" msg
+    | Error err ->
+      failf
+        "annotation request failed: %s"
+        (Agent_observation.annotation_error_to_string err)
     | Ok created ->
       check string "result file" "lib/annotated.ml" created.file_path;
       check int "result line start" 7 created.line_start;
@@ -244,6 +274,10 @@ let () =
             "annotation request reaches IDE storage"
             `Quick
             test_annotation_request_reaches_ide_storage
+        ; test_case
+            "an absent annotation sink is named, not described"
+            `Quick
+            test_absent_sink_is_named_rather_than_described
         ; test_case "annotation references reject malformed entries" `Quick
             test_annotation_references_reject_malformed_entries
         ; test_case "annotation references preserve unknown relations" `Quick

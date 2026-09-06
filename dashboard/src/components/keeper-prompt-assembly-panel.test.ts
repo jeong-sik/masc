@@ -18,9 +18,7 @@ function prompt(overrides: Partial<DashboardPromptItem>): DashboardPromptItem {
     file_value: null,
     override_value: null,
     file_path: null,
-    file_exists: true,
     source: 'file',
-    has_override: false,
     char_count: 0,
     required_file: true,
     template_variables: [],
@@ -36,7 +34,6 @@ describe('buildKeeperPromptAssemblyReport', () => {
         effective: 'world override',
         override_value: 'world override',
         source: 'override',
-        has_override: true,
         file_path: '/tmp/.masc/config/prompts/keeper.md',
       }),
     ])
@@ -104,7 +101,6 @@ describe('buildKeeperPromptAssemblyReport', () => {
             effective: 'world override tool policy',
             override_value: 'world override tool policy',
             source: 'override',
-            has_override: true,
             file_path: '/tmp/.masc/config/prompts/keeper.md',
           }),
         ]}

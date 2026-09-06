@@ -69,14 +69,6 @@ let resolve ~base_path ~keeper_name =
 let base_path owner = fst owner.owner_key
 let keeper_name owner = snd owner.owner_key
 
-let rec lock_cross_context_cooperatively mutex =
-  if Stdlib.Mutex.try_lock mutex
-  then ()
-  else (
-    Eio.Fiber.yield ();
-    lock_cross_context_cooperatively mutex)
-;;
-
 type 'a lock_outcome =
   | Returned of 'a
   | Raised of exn * Printexc.raw_backtrace
@@ -89,7 +81,7 @@ let with_eio_lock ~check_after owner f =
   let outcome =
     match
       Eio.Mutex.use_ro owner.eio_gate (fun () ->
-        lock_cross_context_cooperatively owner.cross_context_mutex;
+        Cross_context_mutex.lock_cooperatively owner.cross_context_mutex;
         Eio.Cancel.protect (fun () ->
           Fun.protect
             ~finally:(fun () -> Stdlib.Mutex.unlock owner.cross_context_mutex)

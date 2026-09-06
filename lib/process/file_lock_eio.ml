@@ -273,19 +273,12 @@ let release_flock_fd fd =
       (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
       Unix.close fd)
 
-let rec lock_cross_context_cooperatively mutex =
-  if Stdlib.Mutex.try_lock mutex
-  then ()
-  else (
-    Eio.Fiber.yield ();
-    lock_cross_context_cooperatively mutex)
-
 let with_entry_lock entry f =
   match Eio_guard.execution_context () with
   | Eio_guard.Non_eio -> Stdlib.Mutex.protect entry.cross_context_mu f
   | Eio_guard.Eio_fiber ->
     Eio.Mutex.use_ro entry.mu (fun () ->
-      lock_cross_context_cooperatively entry.cross_context_mu;
+      Cross_context_mutex.lock_cooperatively entry.cross_context_mu;
       Fun.protect
         ~finally:(fun () -> Stdlib.Mutex.unlock entry.cross_context_mu)
         f)

@@ -382,6 +382,8 @@ let request t command =
   then Error Owner_closed
   else (
     let response, resolve = Eio.Promise.create () in
+    Printf.printf "DIAG14 rq-0-before-enqueue depth=%d closed=%b\n%!"
+      (Eio.Stream.length t.mailbox) (Atomic.get t.closed);
     match
       Eio.Fiber.first
         (fun () ->
@@ -393,12 +395,17 @@ let request t command =
     with
     | `Closed -> Error Owner_closed
     | `Enqueued ->
+      Printf.printf "DIAG14 rq-1-enqueued depth=%d\n%!" (Eio.Stream.length t.mailbox);
       Eio.Cancel.protect (fun () ->
-        Eio.Fiber.first
-          (fun () -> Eio.Promise.await response)
-          (fun () ->
-             Eio.Promise.await t.closed_p;
-             Error Owner_closed)))
+        let r =
+          Eio.Fiber.first
+            (fun () -> Eio.Promise.await response)
+            (fun () ->
+               Eio.Promise.await t.closed_p;
+               Error Owner_closed)
+        in
+        Printf.printf "DIAG14 rq-2-answered\n%!";
+        r))
 ;;
 
 let commit store transition =

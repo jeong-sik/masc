@@ -159,14 +159,23 @@ def test_http_endpoint(
 
     class FixtureHandler(BaseHTTPRequestHandler):
         def respond(self, request_body: bytes | None = None) -> None:
-            fixture = fixtures.get(
-                self.path,
-                (200, {})
-                if self.path == "/health"
-                else fleet_safety_fixture()
-                if self.path == "/health?full=1"
-                else (503, {"error": "fixture endpoint unavailable"}),
-            )
+            # Resolution order is load-bearing: exact fixture keys and the
+            # /health specials keep their legacy meaning (an exact path is
+            # still required), and only then does a query-stripped path get
+            # a second chance -- paged endpoints carry a float timestamp
+            # (e.g. /chat/history/page?before=1788678…) a scenario cannot
+            # key on. Everything else still falls to the 503 sentinel.
+            path_only = self.path.split("?", 1)[0]
+            if self.path in fixtures:
+                fixture = fixtures[self.path]
+            elif self.path == "/health":
+                fixture = (200, {})
+            elif self.path == "/health?full=1":
+                fixture = fleet_safety_fixture()
+            elif path_only in fixtures:
+                fixture = fixtures[path_only]
+            else:
+                fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
                 resolved = fixture.resolve(request_body or b"")
             else:
@@ -6943,6 +6952,31 @@ def viewport_gap_history_fixture() -> HttpResponse:
     )
 
 
+def viewport_gap_history_page_fixture() -> HttpResponse:
+    # GET /chat/history/page?before=<ts> answers with an envelope, not a bare
+    # row list (masc_tui_keeper_chat_history.mli: the rows are the same shape
+    # as the transcript's but has_more/next_before ride alongside). The paged
+    # rows repeat the oversized reply so the viewport gap survives the
+    # round-trip instead of collapsing to a fallback transcript.
+    return (
+        200,
+        {
+            "messages": [
+                {
+                    "id": "oversized-keeper-reply",
+                    "role": "assistant",
+                    "content": "\n".join(
+                        f"line-{index:02d}" for index in range(24)
+                    ),
+                    "ts": 1787348491.3,
+                }
+            ],
+            "has_more": False,
+            "next_before": None,
+        },
+    )
+
+
 LIVE_MARKDOWN_REPLY = """@keeper-haneul-agent — 고마워요! Execute가 작동하는 세션이 있다면 정말 큰 도움이 됩니다.
 
 ## 정확한 5개 git 명령 (task478 worktree에서 실행):
@@ -7176,13 +7210,13 @@ def viewport_gap_interaction(
         raise AssertionError(
             f"PgUp retained a synthetic gap inside transcript rows: {complete!r}"
         )
-    # PgUp triggers a paged history fetch; without a fixture for the paged
-    # endpoint the fetch 503s and the fallback history replaces the rows,
-    # so the post-PgDn projection draws line-20/21/22 (one row shy of the
-    # live edge) instead of line-23. The head row survives only in the
-    # pre-PgUp frame, so assert against the accumulated output, not the
-    # diff frame PgDn itself re-emits.
-    newest = send_and_wait(process, master_fd, output, b"\x1b[6~", b"line-22")
+    # PgUp's paged fetch now hits the seeded /chat/history/page fixture.
+    # Because that page answers has_more=false, PgUp clamps the view at the
+    # conversation start (the footer reads "the start of this conversation")
+    # and PgDn redraws the head projection -- line-00 onward, not the
+    # line-23 live edge. Real paged rows survive the round-trip instead of a
+    # 503 fallback transcript, so the head row is asserted in the frame.
+    newest = send_and_wait(process, master_fd, output, b"\x1b[6~", b"line-02")
     newest_plain = CSI_RE.sub(b"", newest)
     if b"line-00" not in newest_plain and b"line-00" not in bytes(output):
         raise AssertionError(
@@ -11723,6 +11757,9 @@ def run_keyboard_regression(executable: str) -> None:
         interact=viewport_gap_interaction,
         http_fixtures={
             "/api/v1/keepers/alpha/chat/history": viewport_gap_history_fixture(),
+            "/api/v1/keepers/alpha/chat/history/page": (
+                viewport_gap_history_page_fixture()
+            ),
         },
         extra_env={"NO_COLOR": "1"},
     )
@@ -12272,6 +12309,9 @@ def run_chat_clarity_regression(executable: str) -> None:
         interact=viewport_gap_interaction,
         http_fixtures={
             "/api/v1/keepers/alpha/chat/history": viewport_gap_history_fixture(),
+            "/api/v1/keepers/alpha/chat/history/page": (
+                viewport_gap_history_page_fixture()
+            ),
         },
         extra_env={"NO_COLOR": "1"},
     )

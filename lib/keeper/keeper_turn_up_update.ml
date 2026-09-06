@@ -100,11 +100,16 @@ let turn_in_flight_rejection ~keeper_name
      launch-conflict arm. *)
 let rec swap_keepalive_lane_fenced (ctx : _ context) (updated : keeper_meta)
   : (joined_stop_result * start_keepalive_outcome, tool_result) result =
+  Printf.printf
+    "DIAG14 upd-fenced-entry on_domain=%b root=%b\n%!"
+    (Eio_context.root_switch_on_current_domain ())
+    (Option.is_some (Eio_context.get_root_switch_opt ()));
   if not (Eio_context.root_switch_on_current_domain ())
      && Option.is_some (Eio_context.get_root_switch_opt ())
-  then
+  then (
+    Printf.printf "DIAG14 upd-hop-to-owner-domain\n%!";
     Eio_context.run_on_owner_domain (fun () ->
-      swap_keepalive_lane_fenced ctx updated)
+      swap_keepalive_lane_fenced ctx updated))
   else
     let () = Printf.printf "DIAG14 upd-local-branch\n%!" in
     let base_path = ctx.config.base_path in

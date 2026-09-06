@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+## [0.33.0] - 2026-09-06
+
+- **TUI: Notion-grade 2-column web bookmarks, visual banners, and remote image viewer.**
+  - 2-column Notion-style bookmark cards with domain favicon/header, title, description summary, URL, and action pills (`[o:Browser]`, `[y:Copy]`, `[v:Visual]`), with mathematically grapheme-safe cell width alignment across all lines and responsive fallback to 1-column on narrow terminals (< 55 cols) (#33541).
+  - 24-bit TrueColor visual OG thumbnail banners with platform-specific branding: GitHub (slate/purple with Octocat), YouTube (crimson with play mark), arXiv (academic navy with preprint ID), Hacker News (warm orange), Direct Image (cyan), and Web (charcoal) (#33541).
+  - Remote image viewer: one-click inspection (`[v]`) downloads HTTP(S) images to `/tmp/masc_img_cache/` and renders inline via Kitty graphics or falls back to browser opening (#33541).
+  - Multi-protocol terminal graphics: added iTerm2 `OSC 1337` (`\x1b]1337;File=inline=1;...`) protocol alongside Kitty APC graphics, auto-detected via `TERM_PROGRAM = "iTerm.app"` (#33544).
+  - Universal fast image format conversion: added `convert_to_png` leveraging macOS built-in `/usr/bin/sips` (with ImageMagick `convert` and `ffmpeg` fallback) to convert JPEG, WebP, GIF, and TIFF images to PNG in milliseconds (#33544).
+- **TUI: line memos from lexed comments, Mermaid text rendering, and categorical themes.**
+  - Line memos are comments in the file (`masc(AUTHOR): TEXT`, `masc(AUTHOR) KIND: TEXT`), read directly off lexer rows without network round-trips or server drift (#33543).
+  - Mermaid diagram rendering: draws `mermaid` graph and flowchart code blocks as clean Unicode/ASCII box-and-arrow diagrams within the TUI viewport (#33508).
+  - Categorical 6-slot theming extended across all remaining axes in `render.ml` with raw hues removed (#33485).
+  - Palette matchers fold case internally (#33536, #33522); `K`/`D`/`R` shortcuts open the palette as a choice among the line's names (#33514); multiline preview uses return marks instead of raw `\n` (#33482); stopped keepers display as `paused` instead of `offline` (#33510).
+  - Loop gaps, slow requests, and mailbox waits logged with dual monotonic and wall clocks (#33486).
+- **LSP: 23 languages recognized with root detection and Python support.**
+  - Language table expanded to 23 languages, each paired with project root discovery rules (#33509).
+  - Python language server configured with `pyright-langserver` (#33535).
+- **Runtime, process execution, and storage performance.**
+  - Subprocess spawn migrated from `fork` to `posix_spawn` for safer and faster process management (#33483).
+  - Incremental dated JSONL folding: `fold_range_appended` reads only bytes appended since the last read cursor, avoiding redundant rescans of multi-megabyte log ranges (#33542).
+  - Workspace backlog decoding and task ID parsing offloaded to domain pool workers (#33487).
+  - Typed `run_outcome` prevents execution errors from masquerading as empty tool results (#33467).
+  - Seed catalog bindings declare explicit `max-request-body-bytes` (#33484).
+  - Tool schema payload size structurally reduced below the 80 KB ceiling (#33528).
+  - GitHub config directory preauth clarification prevents redundant HOME copies in keeper containers (#33545).
+- **Architecture & Specifications.**
+  - RFC-0427: Autonomous execution lanes and self-deploying shims (#33450).
+  - RFC-0429: Terminal UI as an IDE surface: real-world defect analysis, universal language servers, and Mermaid text rendering (#33480).
+
 ## [0.32.0] - 2026-09-05
 
 - **A context overflow walks the history down to its floor.** The same-run

@@ -3323,7 +3323,6 @@ type state = {
      which only a Repositories row carries) swaps the content for the notes
      anchored to the file. *)
   (* The notes anchored to the open file, keyed by its path. *)
-  mutable code_notes: (string, Tui_decode.ide_annotation list) Masc_tui_fetched.t;
   mutable code_notes_open: bool;
   mutable code_notes_scroll: int;
   (* The file pane's blame margin: b on an open file fetches who last touched
@@ -4359,7 +4358,6 @@ let create_state
   code_diff = Masc_tui_fetched.initial;
   code_diff_open = false;
   code_diff_scroll = 0;
-  code_notes = Masc_tui_fetched.initial;
   code_notes_open = false;
   code_notes_scroll = 0;
   code_blame = Masc_tui_fetched.initial;
@@ -4906,23 +4904,18 @@ type memory_fact_row =
   | Memory_row_source_fact of Tui_decode.memory_source_fact
   | Memory_row_invalidation of Tui_decode.memory_invalidation
 
-(* Prefix match: the lowercased label starts with the query. An empty query
-   is a prefix of everything. *)
-let palette_starts_with ~needle haystack =
-  String.starts_with ~prefix:needle (String.lowercase_ascii haystack)
+(* The three palette matchers fold case themselves, on both sides. A caller
+   hands them the operator's text as typed; "ADM" and "adm" find the same
+   rows, and a new caller cannot forget a step it never had. *)
 
-let palette_contains ~needle haystack =
-  let h = String.lowercase_ascii haystack in
-  let n = String.length needle and hl = String.length h in
-  if n = 0 then true
-  else begin
-    let found = ref false in
-    for start = 0 to hl - n do
-      if (not !found) && String.equal (String.sub h start n) needle then
-        found := true
-    done;
-    !found
-  end
+(* Prefix match: the label starts with the query. An empty query is a prefix
+   of everything. *)
+let palette_starts_with ~needle haystack =
+  String.starts_with
+    ~prefix:(String.lowercase_ascii needle)
+    (String.lowercase_ascii haystack)
+
+let palette_contains ~needle haystack = lowercase_contains ~needle haystack
 
 (* The flat row list the browser's cursor, scroll, and search all read. The
    category filter narrows only ordinary facts: source-bound rows carry no
@@ -4978,11 +4971,8 @@ let memory_fact_rows (state : state) : memory_fact_row list =
       let all_rows = ordinary @ source_rows @ invalidation_rows in
       let query =
         match state.search with
-        | Some q -> String.lowercase_ascii (String.trim q)
-        | None ->
-            if String.length (String.trim state.search_last) > 0 then
-              String.lowercase_ascii (String.trim state.search_last)
-            else ""
+        | Some q -> String.trim q
+        | None -> String.trim state.search_last
       in
       let filtered_rows =
         if query = "" then all_rows
@@ -5283,21 +5273,6 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
 let scrolled_surface (state : state) (surface : surface) : scrolled option =
   scrolled_surface_rows state surface
 ;;
-
-(* The $EDITOR form [w] opens, anchored to one line.
-
-   A form rather than a prompt because a note carries four fields, and a
-   stem rather than an empty file because the shape is the thing an operator
-   should not have to remember. [anchor] is 1-based: it is what the reader
-   sees in the gutter, not the index behind it.
-
-   The anchor was the literal 1 until it was measured -- every one of this
-   workspace's 51 stored annotations sits at line 1, which is what a form
-   that never offered a line produces. *)
-let code_note_stem ~anchor =
-  Printf.sprintf
-    "{\n  \"line_start\": %d,\n  \"line_end\": %d,\n  \"kind\": \"Comment\",\n  \"content\": \"\"\n}\n"
-    anchor anchor
 
 (* The text a "/" search reads for each row: the identifiers an operator
    would type, not the drawn bytes. [Some texts] means the surface is
@@ -5868,19 +5843,18 @@ let palette_entries (state : state) =
    "keeper adm-race". *)
 let palette_subsequence ~needle haystack =
   let h = String.lowercase_ascii haystack in
-  let hl = String.length h and nl = String.length needle in
+  let n = String.lowercase_ascii needle in
+  let hl = String.length h and nl = String.length n in
   let rec walk hi ni =
     if ni >= nl then true
     else if hi >= hl then false
-    else if Char.equal h.[hi] needle.[ni] then walk (hi + 1) (ni + 1)
+    else if Char.equal h.[hi] n.[ni] then walk (hi + 1) (ni + 1)
     else walk (hi + 1) ni
   in
   walk 0 0
 
 let palette_matches (state : state) =
-  let needle =
-    String.lowercase_ascii (String.trim state.palette_query)
-  in
+  let needle = String.trim state.palette_query in
   let entries =
     match state.palette_mode with
     | Palette_jump -> palette_entries state

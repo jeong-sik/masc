@@ -326,42 +326,50 @@ and unreadable_row = {
   ur_reason : unreadable_reason;
 }
 
-let classify_all rows =
-  let tally =
-    List.fold_left
-      (fun tally row ->
-        match classify row with
-        | File_change change -> { tally with changes = change :: tally.changes }
-        | Not_a_file_change -> { tally with not_file_changes = tally.not_file_changes + 1 }
-        | Unreadable reason ->
-          let ur_location =
-            match target_path_of_row row with
-            | Ok target_path -> Some (location_of_target ~target_path)
-            | Error _ -> None
-          in
-          { tally with
-            unreadable_rows = { ur_location; ur_reason = reason } :: tally.unreadable_rows
-          ; over_budget =
-              (match reason with
-               | Input_exceeded_log_budget -> tally.over_budget + 1
-               | Malformed _ -> tally.over_budget)
-          ; malformed =
-              (match reason with
-               | Input_exceeded_log_budget -> tally.malformed
-               | Malformed _ -> tally.malformed + 1)
-          })
-      { changes = []
-      ; unreadable_rows = []
-      ; not_file_changes = 0
-      ; over_budget = 0
-      ; malformed = 0
-      }
-      rows
-  in
+let empty_tally =
+  { changes = []
+  ; unreadable_rows = []
+  ; not_file_changes = 0
+  ; over_budget = 0
+  ; malformed = 0
+  }
+;;
+
+(* [classify_all] is this fold; a caller that reads rows incrementally holds
+   the tally between reads and folds each new row into it, so the step is
+   named rather than buried. Both lists accumulate newest-first and are
+   reversed by [seal_tally]. *)
+let fold_row tally row =
+  match classify row with
+  | File_change change -> { tally with changes = change :: tally.changes }
+  | Not_a_file_change -> { tally with not_file_changes = tally.not_file_changes + 1 }
+  | Unreadable reason ->
+    let ur_location =
+      match target_path_of_row row with
+      | Ok target_path -> Some (location_of_target ~target_path)
+      | Error _ -> None
+    in
+    { tally with
+      unreadable_rows = { ur_location; ur_reason = reason } :: tally.unreadable_rows
+    ; over_budget =
+        (match reason with
+         | Input_exceeded_log_budget -> tally.over_budget + 1
+         | Malformed _ -> tally.over_budget)
+    ; malformed =
+        (match reason with
+         | Input_exceeded_log_budget -> tally.malformed
+         | Malformed _ -> tally.malformed + 1)
+    }
+;;
+
+let seal_tally tally =
   { tally with
     changes = List.rev tally.changes
   ; unreadable_rows = List.rev tally.unreadable_rows
   }
+;;
+
+let classify_all rows = seal_tally (List.fold_left fold_row empty_tally rows)
 
 let for_repo_file ~repo_id ~relative_path changes =
   List.filter

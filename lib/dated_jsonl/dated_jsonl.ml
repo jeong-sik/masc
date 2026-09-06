@@ -1604,6 +1604,68 @@ let read_range t ~since ~until =
   iter_range t ~since ~until (fun json -> collected := json :: !collected);
   List.rev !collected
 
+(* The day files a range covers, oldest first, without opening any of them.
+   [iter_range] answers what the rows are; a caller that keeps its own
+   accumulator between calls needs to know which files it read and how far,
+   and that is a different question. Same day-selection rule as [iter_range],
+   from the same code, so a file this returns is a file that would have been
+   iterated.
+
+   Callers: [fold_range_appended] below. Exported because a store is
+   append-only per day file, so an incremental reader outside this module can
+   only exist if it can name them. *)
+let range_day_file_paths t ~since ~until =
+  match parse_date since, parse_date until with
+  | None, _ | _, None -> []
+  | Some (since_month, since_day), Some (until_month, until_day) ->
+    list_month_dirs t.base_dir
+    |> List.filter (fun m ->
+      String.compare m since_month >= 0 && String.compare m until_month <= 0)
+    |> List.concat_map (fun m ->
+      let month_path = Filename.concat t.base_dir m in
+      list_day_files month_path
+      |> List.filter (fun d ->
+        let day_num = day_number_of_day_file_name d in
+        let dominated =
+          (m = since_month && String.compare day_num since_day < 0)
+          || (m = until_month && String.compare day_num until_day > 0)
+        in
+        not dominated)
+      |> List.map (fun d -> Filename.concat month_path d))
+;;
+
+(* Fold the rows a range gained since [cursors] said each file was read to.
+
+   A day file is append-only, so what a trailing-window answer gains between
+   two calls is the bytes appended to files it already read plus files that
+   did not exist yet. Measured 2026-09-06 on this workspace's tool-call log: a
+   24h window is 242MB, and the busy hour appends about 15MB -- 0.04MB at a
+   10-second call interval. Re-reading the window for that is the cost this
+   exists to remove.
+
+   [cursors] maps a path to the byte boundary a previous fold stopped at; the
+   returned list is the same map advanced, and a caller keeps it beside its
+   accumulator. A path absent from [cursors] is read whole. A file that
+   shrank below its cursor is a rotation or a rewrite: [fold_appended_lines]
+   restarts it from zero, which double-counts rather than under-counts, so a
+   caller that cannot tolerate that must compare the returned cursor against
+   the one it passed. *)
+let fold_range_appended t ~since ~until ~cursors ~init ~f =
+  let paths = range_day_file_paths t ~since ~until in
+  List.fold_left
+    (fun (acc, next_cursors) path ->
+       let from = match List.assoc_opt path cursors with Some n -> n | None -> 0 in
+       let acc, boundary =
+         Fs_compat.fold_appended_lines ~path ~from ~init:acc ~f:(fun acc line ->
+           match Yojson.Safe.from_string line with
+           | json -> f acc json
+           | exception Yojson.Json_error _ -> acc)
+       in
+       acc, (path, boundary) :: next_cursors)
+    (init, [])
+    paths
+;;
+
 (* Like [read_range] but bounded to the [n] most recent entries within
    [since, until] (inclusive day range). Reads newest day-file first and
    only the tail of each file, parsing at most ~[n] entries instead of the

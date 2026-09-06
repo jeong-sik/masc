@@ -507,28 +507,6 @@ let fetch_git_blame ?keeper ?repo ~(host : string) ~(port : int)
           Error ("git blame was not JSON: " ^ detail)
       | json -> Masc.Tui_decode.decode_git_blame json)
 
-(** The notes anchored to [file_path] in [codebase]
-    ([/api/v1/ide/annotations]). The slug is the server's own mint, carried
-    from the repositories listing -- never re-derived here (RFC-0378). *)
-let fetch_ide_annotations ~(host : string) ~(port : int) ~(codebase : string)
-    ~(file_path : string) : (Masc.Tui_decode.ide_annotation list, string) result
-    =
-  let route =
-    Printf.sprintf "/api/v1/ide/annotations?codebase=%s&file_path=%s"
-      (percent_encode_query_value codebase)
-      (percent_encode_query_value file_path)
-  in
-  match http_get ~host ~port ~path:route with
-  | Error detail -> Error detail
-  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
-    ->
-      Error (Printf.sprintf "annotations returned %d: %s" status body)
-  | Ok (_, body) -> (
-      match Yojson.Safe.from_string body with
-      | exception Yojson.Json_error detail ->
-          Error ("annotations were not JSON: " ^ detail)
-      | json -> Masc.Tui_decode.decode_ide_annotations json)
-
 (** Durable Keeper writes over one repository file. Unlike the removed IDE
     region store, this reads the tool-call log projection and therefore keeps
     working after the producing turn exits. *)
@@ -601,42 +579,6 @@ let fetch_lsp_question ?keeper ?repo ~(host : string) ~(port : int)
       | exception Yojson.Json_error detail ->
           Error ("lsp question was not JSON: " ^ detail)
       | json -> Masc.Tui_decode.decode_lsp_answer json)
-
-(** Add a note to [file_path] in [codebase]
-    ([POST /api/v1/ide/annotations]). The route wants a write-tier bearer;
-    the admin token this process mints carries it. The server answers the
-    created note, which the caller re-reads through the listing rather than
-    splicing locally. *)
-let post_ide_annotation ~(host : string) ~(port : int) ~(codebase : string)
-    ~(file_path : string) ~(line_start : int) ~(line_end : int)
-    ~(kind : string) ~(content : string) : (unit, string) result =
-  let path =
-    Printf.sprintf "/api/v1/ide/annotations?codebase=%s"
-      (percent_encode_query_value codebase)
-  in
-  let body =
-    Yojson.Safe.to_string
-      (`Assoc
-         [ ("file_path", `String file_path)
-         ; ("line_start", `Int line_start)
-         ; ("line_end", `Int line_end)
-         ; ("kind", `String kind)
-         ; ("content", `String content)
-         ])
-  in
-  match post_json ~host ~port ~path ~body with
-  | Error detail -> Error detail
-  | Ok json -> (
-      match json with
-      | `Assoc fields -> (
-          match List.assoc_opt "ok" fields with
-          | Some (`Bool true) -> Ok ()
-          | Some (`Bool false) -> (
-              match List.assoc_opt "error" fields with
-              | Some (`String e) -> Error e
-              | Some _ | None -> Error "note rejected")
-          | Some _ | None -> Error "unexpected note response envelope")
-      | _ -> Error "unexpected note response envelope")
 
 let fetch_keeper_file_changes ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(window_hours : float) :

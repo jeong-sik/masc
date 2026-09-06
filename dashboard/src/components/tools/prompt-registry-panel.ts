@@ -74,7 +74,7 @@ function LibrarianRuntimeContract({
       ${prompt ? html`
         <div class="mt-3 grid gap-2 md:grid-cols-3">
           <div><span class="text-3xs text-[var(--color-fg-disabled)]">KEY</span><div class="font-mono text-xs">${prompt.key}</div></div>
-          <div><span class="text-3xs text-[var(--color-fg-disabled)]">EFFECTIVE SOURCE</span><div class="font-mono text-xs">${prompt.source}${prompt.has_override ? ' · override active' : ''}</div></div>
+          <div><span class="text-3xs text-[var(--color-fg-disabled)]">EFFECTIVE SOURCE</span><div class="font-mono text-xs">${prompt.source}</div></div>
           <div class="min-w-0"><span class="text-3xs text-[var(--color-fg-disabled)]">FILE</span><div class="truncate font-mono text-xs" title=${prompt.file_path ?? ''}>${prompt.file_path ?? 'missing'}</div></div>
         </div>
       ` : null}
@@ -144,6 +144,13 @@ function isModelInputDestination(destination: PromptDestination): boolean {
   return destination.role === MODEL_INPUT_STAGE_ROLE
 }
 
+// The count on the attention tab and the rows behind it are the same set, so
+// they ask one question. A prompt wants attention when it is not simply the
+// file's words: an override is in force, or there is no file to fall back to.
+function wantsAttention(prompt: DashboardPromptItem): boolean {
+  return prompt.source !== 'file'
+}
+
 function presetPromptCount(
   prompts: DashboardPromptItem[],
   report: KeeperPromptAssemblyReport,
@@ -151,7 +158,7 @@ function presetPromptCount(
 ): number {
   if (preset === 'all') return prompts.length
   if (preset === 'attention') {
-    return prompts.filter(prompt => prompt.has_override || prompt.source === 'missing').length
+    return prompts.filter(wantsAttention).length
   }
   const allowed = promptPresetRows(report, preset)
   if (!allowed || allowed.size === 0) return 0
@@ -230,7 +237,7 @@ export function filterPrompts(
       ? promptPresetRows(report, preset)
       : null
   return prompts.filter(p => {
-    if (preset === 'attention' && !p.has_override && p.source !== 'missing') return false
+    if (preset === 'attention' && !wantsAttention(p)) return false
     if (allowedPromptKeys && !allowedPromptKeys.has(p.key)) return false
     if (source !== 'all' && p.source !== source) return false
     if (!q) return true
@@ -521,9 +528,6 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
             <div class="mb-4 flex flex-wrap items-center gap-2">
               <div class="font-mono text-sm text-[var(--color-fg-secondary)]">${selectedPrompt.key}</div>
               <${StatusChip} tone=${sourceBadgeClass(selectedPrompt.source)}>${selectedPrompt.source}<//>
-              ${selectedPrompt.has_override
-                ? html`<${StatusChip} tone="warn">오버라이드 활성<//>`
-                : null}
             </div>
 
             <div class="mb-4 grid gap-3 md:grid-cols-2">
@@ -601,7 +605,7 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
               <${ActionButton} variant="primary" size="md" disabled=${saving || loading || draft.trim().length === 0} onClick=${() => { void applyOverride() }}>
                 ${saving ? '저장 중...' : '오버라이드 적용'}
               <//>
-              <${ActionButton} variant="ghost" size="md" disabled=${saving || loading || !selectedPrompt.has_override} onClick=${() => { void clearOverride() }}>
+              <${ActionButton} variant="ghost" size="md" disabled=${saving || loading || selectedPrompt.source !== 'override'} onClick=${() => { void clearOverride() }}>
                 오버라이드 제거
               <//>
               <${ActionButton} variant="ghost" size="md" disabled=${saving || loading} onClick=${() => {

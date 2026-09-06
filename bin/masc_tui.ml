@@ -1893,9 +1893,6 @@ type async_msg =
       * (Masc_tui_types.code_history_listing, string) result
   | Code_diff_loaded of
       string Masc_tui_fetched.request * (Masc.Tui_decode.git_diff, string) result
-  | Code_notes_loaded of
-      string Masc_tui_fetched.request
-      * (Masc.Tui_decode.ide_annotation list, string) result
   (* The Activity pane's Changes tab: the selected keeper's recorded file
      changes, stamped with the request so an answer for a keeper the
      cursor has left is dropped. *)
@@ -1908,7 +1905,6 @@ type async_msg =
       string Masc_tui_fetched.request
       * (Masc.Tui_decode.blame_block list, string) result
   (* The path the note anchored to; success re-reads the listing. *)
-  | Code_note_written of string * (unit, string) result
   (* (question, symbol, answer) — the note the pane shows names both. *)
   | Code_lsp_answered of
       string * string * (Masc.Tui_decode.lsp_answer, string) result
@@ -3102,36 +3098,6 @@ let code_history_limit = 50
    read. *)
 let tree_diff_base_ref = "HEAD"
 
-(* Annotation routes are scoped by the server-minted codebase slug
-   (RFC-0378), and only a Repositories row carries one -- the other scopes say
-   so instead of guessing a slug. Durable file activity below is different:
-   its repository id is resolved server-side against the tool-call log. *)
-let code_scope_codebase state =
-  match state.code_scope with
-  | Code_scope_repo repo_id -> (
-      match state.repositories with
-      | None -> Error "the repositories listing is not loaded yet"
-      | Some snapshot -> (
-          match
-            List.find_opt
-              (fun (r : Masc.Tui_decode.repository) ->
-                String.equal r.Masc.Tui_decode.rp_id repo_id)
-              snapshot.Masc.Tui_decode.rs_repositories
-          with
-          | None ->
-              Error ("repository " ^ repo_id ^ " is not in the listing")
-          | Some r -> (
-              match r.Masc.Tui_decode.rp_codebase with
-              | Some slug -> Ok slug
-              | None ->
-                  Error
-                    "this repository's remote has no canonical slug, so \
-                     it has no notes")))
-  | Code_scope_keeper _ ->
-      Error "notes are scoped by repository; open the file from Workspace"
-  | Code_scope_project ->
-      Error "the project tree is not a registered repository; no notes here"
-
 let code_file_activity_address scope path =
   match scope with
   | Code_scope_repo repo_id -> Ok (Some repo_id, path)
@@ -3331,54 +3297,6 @@ let launch_code_blame_load state ~mailbox ~path =
   | None ->
       enqueue_async mailbox
         (Code_blame_loaded (request, Error "Eio switch is unavailable"))
-
-let launch_code_notes_load state ~mailbox ~codebase ~path =
-  match Masc_tui_fetched.start ~equal:String.equal state.code_notes ~key:path with
-  | Masc_tui_fetched.Already_loading -> ()
-  | Masc_tui_fetched.Started (next, request) ->
-  state.code_notes <- next;
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try
-        Masc_tui_http.fetch_ide_annotations ~host ~port ~codebase
-          ~file_path:path
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Code_notes_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Code_notes_loaded (request, Error "Eio switch is unavailable"))
-
-(* Same fiber-and-mailbox shape as the other writes. *)
-let start_code_note_write state ~mailbox ~codebase ~path ~line_start ~line_end
-    ~kind ~content =
-  add_event state "system" ("adding a note to " ^ path);
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try
-        Masc_tui_http.post_ide_annotation ~host ~port ~codebase
-          ~file_path:path ~line_start ~line_end ~kind ~content
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Code_note_written (path, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork ~sw run
-  | None -> run ()
 
 (* Remember where a jump is about to leave from, so B can walk back.
    Bounded: the oldest entry falls off past twenty. *)
@@ -4967,7 +4885,6 @@ let show_lanes_action_error state detail =
   state.lanes_action_error <- Some detail
 
 let search_jump ?(backwards = false) state ~query ~after =
-  let query = String.lowercase_ascii query in
   match surface_row_texts state state.view with
   | None -> ()
   | Some texts ->
@@ -6265,6 +6182,7 @@ let paste_clipboard_image state =
    and remembered: the answer cannot change while the process runs, and asking
    again would put another reply on the key stream. [None] until asked. *)
 let terminal_draws_images = ref None
+let active_graphics_protocol = ref Masc_tui_graphics.Unsupported_protocol
 
 (* Said the same at both doors a picture comes through: the capability was
    asked once and the answer cannot change, so neither does the sentence that
@@ -6469,29 +6387,78 @@ let draw_image state ~refuse ~title data =
            Masc_tui_graphics.payload_media_type media)
   | Ok _ ->
       let rows, columns = get_terminal_size () in
-      (* Three rows kept back, not the two this comment used to claim: the
-         name above the picture, the way out below it, and one more.
-         Counting what is drawn, the picture starts at row 2 and the way
-         out is written at row [rows], so [rows - 2] would already clear
-         it -- the third row is spare.
-         Left as it is on purpose. Some terminals scroll when an image
-         reaches the last row, and a spare row is the usual guard, but
-         nothing here records whether that is why. Naming it after a reason
-         that may not be the real one would put a guess in the code, so the
-         comment says what is true and stops there. *)
       let box =
         { Masc_tui_graphics.columns = max 1 (columns - 2)
         ; rows = max 1 (rows - 3)
         }
       in
+      let img_escape =
+        match !active_graphics_protocol with
+        | Masc_tui_graphics.ITerm2_protocol ->
+            Masc_tui_graphics.iterm2_place ~data box
+        | Masc_tui_graphics.Kitty_protocol | Masc_tui_graphics.Unsupported_protocol ->
+            Masc_tui_graphics.place ~data box
+      in
       write_to_terminal
         (Ansi.clear ^ Masc_tui_graphics.delete_all
         ^ Printf.sprintf "\x1b[1;1H%s\x1b[2;1H"
             (Message_layout.fit_width title (max 1 (columns - 1)))
-        ^ Masc_tui_graphics.place ~data box
+        ^ img_escape
         ^ Printf.sprintf "\x1b[%d;1H%s" rows
             (Message_layout.fit_width "  any key: back" (max 1 (columns - 1))));
       state.image_open <- true
+
+let ensure_img_cache_dir () =
+  let dir = Filename.concat (Filename.get_temp_dir_name ()) "masc_img_cache" in
+  (try Unix.mkdir dir 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  dir
+
+let download_remote_image url =
+  let cache_dir = ensure_img_cache_dir () in
+  let hash = Digest.to_hex (Digest.string url) in
+  let target_file = Filename.concat cache_dir ("img_" ^ hash) in
+  if Sys.file_exists target_file && (Unix.stat target_file).st_size > 0 then
+    Ok target_file
+  else
+    let cmd =
+      Printf.sprintf "curl -s -L --max-time 5 -o %s %s"
+        (Filename.quote target_file)
+        (Filename.quote url)
+    in
+    match Unix.system cmd with
+    | Unix.WEXITED 0 when Sys.file_exists target_file && (Unix.stat target_file).st_size > 0 ->
+        Ok target_file
+    | _ ->
+        (try Sys.remove target_file with _ -> ());
+        Error "could not download remote image"
+
+let convert_to_png input_path =
+  let cache_dir = ensure_img_cache_dir () in
+  let hash = Digest.to_hex (Digest.string (input_path ^ "_converted_png")) in
+  let target_png = Filename.concat cache_dir ("conv_" ^ hash ^ ".png") in
+  if Sys.file_exists target_png && (Unix.stat target_png).st_size > 0 then
+    Ok target_png
+  else
+    let commands =
+      [ Printf.sprintf "sips -s format png %s --out %s >/dev/null 2>&1"
+          (Filename.quote input_path) (Filename.quote target_png)
+      ; Printf.sprintf "convert %s %s >/dev/null 2>&1"
+          (Filename.quote input_path) (Filename.quote target_png)
+      ; Printf.sprintf "ffmpeg -y -i %s %s >/dev/null 2>&1"
+          (Filename.quote input_path) (Filename.quote target_png)
+      ]
+    in
+    let rec try_cmd = function
+      | [] -> Error "could not convert image to PNG"
+      | cmd :: rest ->
+          match Unix.system cmd with
+          | Unix.WEXITED 0 when Sys.file_exists target_png && (Unix.stat target_png).st_size > 0 ->
+              Ok target_png
+          | _ ->
+              (try Sys.remove target_png with _ -> ());
+              try_cmd rest
+    in
+    try_cmd commands
 
 (* Put a picture on the terminal, or say why not. The refusal is text for the
    pane: there is nothing to draw, and taking the screen away from the frame
@@ -6500,13 +6467,62 @@ let open_image state ~notice path =
   let refuse reason =
     notice ~role:Message_error (Printf.sprintf "/image %s: %s" path reason)
   in
-  match !terminal_draws_images with
-  | Some false -> refuse terminal_draws_no_images
-  | Some true | None -> (
-      match read_file_bytes path with
-      | Error detail -> refuse detail
-      | Ok data when String.length data = 0 -> refuse "the file is empty"
-      | Ok data -> draw_image state ~refuse ~title:path data)
+  let is_remote =
+    String.starts_with ~prefix:"http://" path
+    || String.starts_with ~prefix:"https://" path
+  in
+  if is_remote && !terminal_draws_images = Some false then
+    match Masc_tui_browser.open_url path with
+    | Ok opener ->
+        notice ~role:Message_local
+          (Printf.sprintf "Opened in browser (%s): %s" opener path)
+    | Error err ->
+        refuse (Printf.sprintf "Could not open browser: %s" err)
+  else
+    let local_path_res =
+      if is_remote then download_remote_image path else Ok path
+    in
+    match local_path_res with
+    | Error dl_err ->
+        (match Masc_tui_browser.open_url path with
+         | Ok opener ->
+             notice ~role:Message_local
+               (Printf.sprintf "Image download failed. Opened in browser (%s): %s" opener path)
+         | Error _ ->
+             refuse dl_err)
+    | Ok local_path -> (
+        match !terminal_draws_images with
+        | Some false -> refuse terminal_draws_no_images
+        | Some true | None -> (
+            match read_file_bytes local_path with
+            | Error detail -> refuse detail
+            | Ok data when String.length data = 0 -> refuse "the file is empty"
+            | Ok initial_data ->
+                let prepared_data =
+                  match Masc.Keeper_vision_tool.sniff_image_media_type initial_data with
+                  | Ok media when String.equal media Masc_tui_graphics.payload_media_type ->
+                      initial_data
+                  | _ -> (
+                      match convert_to_png local_path with
+                      | Ok png_path -> (
+                          match read_file_bytes png_path with
+                          | Ok png_data -> png_data
+                          | Error _ -> initial_data)
+                      | Error _ -> initial_data)
+                in
+                match Masc.Keeper_vision_tool.sniff_image_media_type prepared_data with
+                | Ok media when String.equal media Masc_tui_graphics.payload_media_type ->
+                    draw_image state ~refuse ~title:path prepared_data
+                | _ ->
+                    if is_remote then
+                      match Masc_tui_browser.open_url path with
+                      | Ok opener ->
+                          notice ~role:Message_local
+                            (Printf.sprintf "Terminal draws PNG only. Opened image in browser (%s): %s" opener path)
+                      | Error _ ->
+                          draw_image state ~refuse ~title:path prepared_data
+                    else
+                      draw_image state ~refuse ~title:path prepared_data))
 
 (* The staged door. Ctrl-V leaves the image in the attachment as base64 for
    the wire to the endpoint; the terminal wants the PNG's own bytes, so they
@@ -6635,7 +6651,7 @@ let seek_in_chat state ~target ~restart =
          echoes back to them. *)
       match
         Masc_tui_render.keeper_message_find_scroll state ~keeper_name
-          ~needle:(String.lowercase_ascii (String.trim state.msg_find))
+          ~needle:(String.trim state.msg_find)
           ~older_than
       with
       | Some (scroll, anchor) ->
@@ -10295,7 +10311,6 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.code_diff <- Masc_tui_fetched.clear state.code_diff;
           state.code_diff_open <- false;
           state.code_diff_scroll <- 0;
-          state.code_notes <- Masc_tui_fetched.clear state.code_notes;
           state.code_notes_open <- false;
           state.code_notes_scroll <- 0;
           state.code_blame <- Masc_tui_fetched.clear state.code_blame
@@ -10312,40 +10327,6 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          used to carry said the same thing in more places. *)
       state.code_blame <-
         Masc_tui_fetched.complete ~equal:String.equal state.code_blame request result
-  | Code_notes_loaded (request, result) ->
-      (* Opening a file clears the notes, so a request from before that is no
-         longer the one being waited on and [complete] drops it. The scroll
-         reset belongs to an answer that actually landed. *)
-      let landed =
-        Masc_tui_fetched.is_current ~equal:String.equal state.code_notes request
-        && Result.is_ok result
-      in
-      state.code_notes <-
-        Masc_tui_fetched.complete ~equal:String.equal state.code_notes request result;
-      if landed then state.code_notes_scroll <- 0
-  | Code_note_written (path, result) -> (
-      match result with
-      | Ok () ->
-          add_event state "system" ("note added to " ^ path);
-          (* Re-read rather than splice: the server owns ids and order. *)
-          let still_current =
-            match Masc_tui_fetched.current_key state.code_file with
-            | Some open_path -> String.equal open_path path
-            | None -> false
-          in
-          if still_current then (
-            match code_scope_codebase state with
-            | Ok codebase ->
-                (* Cleared first so [start] treats this as a new read rather
-                   than a revalidation that keeps the pre-write list on
-                   screen. *)
-                state.code_notes <- Masc_tui_fetched.clear state.code_notes;
-                launch_code_notes_load state ~mailbox ~codebase ~path
-            | Error _ -> ())
-      (* The write failed, which is not a fact about the notes that are
-         loaded. It is said as an event rather than replacing them. *)
-      | Error detail ->
-          add_event state "error" ("note not written to " ^ path ^ ": " ^ detail))
   | Code_lsp_answered (question, symbol, result) ->
       (match result with
        | Error detail ->
@@ -12354,11 +12335,20 @@ let main () =
    | true, None ->
      install_late_palette_publisher input_reader ~request_full_repaint
    | true, Some _ | false, _ -> ());
+  let proto =
+    match terminal_probe.graphics with
+    | Some Masc_tui_graphics.Supported -> Masc_tui_graphics.Kitty_protocol
+    | Some (Masc_tui_graphics.Refused _) | None ->
+        (match Sys.getenv_opt "TERM_PROGRAM" with
+         | Some "iTerm.app" -> Masc_tui_graphics.ITerm2_protocol
+         | _ -> Masc_tui_graphics.Unsupported_protocol)
+  in
+  active_graphics_protocol := proto;
   terminal_draws_images :=
     Some
-      (match terminal_probe.graphics with
-       | Some Masc_tui_graphics.Supported -> true
-       | Some (Masc_tui_graphics.Refused _) | None -> false);
+      (match proto with
+       | Masc_tui_graphics.Kitty_protocol | Masc_tui_graphics.ITerm2_protocol -> true
+       | Masc_tui_graphics.Unsupported_protocol -> false);
 
   (* ── Keeper settings over $EDITOR (#29684) ─────────────────────
      The editor itself is the confirmation step: an exit other than 0
@@ -12535,84 +12525,6 @@ let main () =
                    ~port:state.port ~connector
                    ~body_json:(Yojson.Safe.to_string json))
                ())
-  in
-  (* A new note over the open file: $EDITOR is the form, and the editor is
-     the confirmation step -- a non-zero exit or an empty content leaves the
-     file unannotated. Reachable only from the notes view, which already
-     proved the scope has a codebase slug. *)
-  let handle_code_note_write () =
-    match Masc_tui_fetched.current_key state.code_file with
-    | None -> ()
-    | Some path -> (
-        match code_scope_codebase state with
-        | Error why -> report_action state "system" ("notes: " ^ why)
-        | Ok codebase -> (
-            match Masc_tui_editor.editor_command () with
-            | None ->
-                report_action state "error"
-                  "no $EDITOR set; export EDITOR to add a note here"
-            | Some _ -> (
-                (* The line the cursor is on, which is the line the operator
-                   pressed [w] about. This was the literal 1, and it shows:
-                   every one of the 51 annotations this workspace has ever
-                   stored anchors at line 1, including the two written from
-                   here. Nobody declined to anchor -- the form never offered
-                   their line, and correcting it meant editing JSON in
-                   $EDITOR before writing a word.
-
-                   [code_file_cursor] is 0-based and is the same anchor a
-                   language-server question is asked at, so [w] and [K]/[D]/
-                   [R] now agree about which line the operator means. *)
-                let stem =
-                  Masc_tui_types.code_note_stem
-                    ~anchor:(state.code_file_cursor + 1)
-                in
-                match
-                  Masc_tui_editor.roundtrip ~restore:restore_terminal
-                    ~reenter:reenter_terminal stem
-                with
-                | Error abort -> report_editor_abort state ~action:"note" abort
-                | Ok body -> (
-                    match Yojson.Safe.from_string body with
-                    | exception Yojson.Json_error e ->
-                        report_action state "error"
-                          ("note: body is not JSON: " ^ e)
-                    | json ->
-                        let field key =
-                          match json with
-                          | `Assoc fields -> List.assoc_opt key fields
-                          | _ -> None
-                        in
-                        let int_field key =
-                          match field key with
-                          | Some (`Int n) -> Some n
-                          | Some _ | None -> None
-                        in
-                        let content =
-                          match field "content" with
-                          | Some (`String s) -> String.trim s
-                          | Some _ | None -> ""
-                        in
-                        let kind =
-                          match field "kind" with
-                          | Some (`String s) -> String.trim s
-                          | Some _ | None -> "Comment"
-                        in
-                        if String.equal content "" then
-                          report_action state "system"
-                            "note cancelled (empty content)"
-                        else (
-                          match
-                            (int_field "line_start", int_field "line_end")
-                          with
-                          | Some line_start, Some line_end ->
-                              start_code_note_write state
-                                ~mailbox:async_messages ~codebase ~path
-                                ~line_start ~line_end ~kind ~content
-                          | _ ->
-                              report_action state "error"
-                                "note: line_start and line_end must be \
-                                 integers")))))
   in
   (* The verdict row under the Harness cursor, when the list has one. *)
   let harness_cursor_verdict () =
@@ -13234,11 +13146,12 @@ and is loaded on demand through keeper_skill.
   let handle_prompt_clear () =
     match selected_prompt () with
     | None -> add_event state "error" "prompts not loaded yet; r to reload"
-    | Some row ->
-      if not row.Tui_decode.pr_has_override then
+    | Some row -> (
+      match row.Tui_decode.pr_source with
+      | Tui_decode.Prompt_file | Tui_decode.Prompt_missing ->
         add_event state "system"
           (row.Tui_decode.pr_key ^ ": no override to clear")
-      else (
+      | Tui_decode.Prompt_override -> (
         match
           Masc_tui_http.post_prompt_clear ~host:server_peer_host
             ~port:state.port ~key:row.Tui_decode.pr_key
@@ -13249,7 +13162,7 @@ and is loaded on demand through keeper_skill.
           launch_prompts_load state ~mailbox:async_messages
         | Error detail ->
           add_event state "error"
-            (row.Tui_decode.pr_key ^ ": clear failed: " ^ detail))
+            (row.Tui_decode.pr_key ^ ": clear failed: " ^ detail)))
   in
   let handle_keeper_settings_edit () =
     match selected_keeper state with
@@ -14412,12 +14325,12 @@ and is loaded on demand through keeper_skill.
                 (match state.link_modal_url with
                  | Some url ->
                      let p = Masc_tui_link_preview.get_preview url in
+                     let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
                      (match p.image_url with
                       | Some img_url ->
-                          let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
                           open_image state ~notice img_url
                       | None ->
-                          add_event state "system" "Selected link is not an image resource")
+                          open_image state ~notice url)
                  | None -> ())
             | _ -> ())
        | Some k when state.patch_modal_open ->
@@ -15597,10 +15510,6 @@ and is loaded on demand through keeper_skill.
                     };
                 state.palette_query <- "";
                 state.palette_cursor <- 0)
-       | Some "w" when state.view = Code && state.code_notes_open ->
-           (* Adding a note lives inside the notes view: the view proves the
-              scope, and the fresh listing lands where the writer looks. *)
-           handle_code_note_write ()
        | Some "b" when state.view = Code && state.code_focus_file = Right_pane
                        && Option.is_some (Masc_tui_fetched.current_key state.code_file) ->
            (* Who last touched each run of lines, in the margin beside the
@@ -15623,30 +15532,17 @@ and is loaded on demand through keeper_skill.
                 else launch_code_blame_load state ~mailbox:async_messages ~path)
        | Some "m" when state.view = Code && state.code_focus_file = Right_pane
                        && Option.is_some (Masc_tui_fetched.current_key state.code_file) ->
-           (* The notes anchored to the open file. Repository scope only:
-              the annotation routes are scoped by the server-minted codebase
-              slug, and only a Repositories row carries one -- the other
-              scopes say so instead of guessing a slug. *)
-           (match Masc_tui_fetched.current_key state.code_file with
-            | None -> ()
-            | Some path ->
-                if state.code_notes_open then state.code_notes_open <- false
-                else
-                  match code_scope_codebase state with
-                  | Error why -> add_event state "system" ("notes: " ^ why)
-                  | Ok codebase ->
-                      state.code_notes_open <- true;
-                      state.code_diff_open <- false;
-                      state.code_history_open <- false;
-                      (* Already about this file -- loaded, reading, or
-                         failed -- so opening the overlay shows what there is
-                         rather than asking again. *)
-                      (match Masc_tui_fetched.current state.code_notes with
-                       | Some (loaded_path, _)
-                         when String.equal loaded_path path -> ()
-                       | Some _ | None ->
-                           launch_code_notes_load state
-                             ~mailbox:async_messages ~codebase ~path))
+           (* The memos in the open file: comments in the file's own syntax
+              that read as Ide_memo's grammar, taken off the rows already
+              lexed. Nothing to fetch, so the overlay opens on what is
+              loaded, and the same key closes it. *)
+           if state.code_notes_open then state.code_notes_open <- false
+           else begin
+             state.code_notes_open <- true;
+             state.code_notes_scroll <- 0;
+             state.code_diff_open <- false;
+             state.code_history_open <- false
+           end
        | Some "d" when state.view = Code && state.code_focus_file = Right_pane
                        && Option.is_some (Masc_tui_fetched.current_key state.code_file) ->
            (* The working tree against HEAD, over the open file. One overlay
@@ -16561,11 +16457,11 @@ and is loaded on demand through keeper_skill.
                   state.repository_changes_scroll <- scroll
                 else if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then (
-                    match Masc_tui_fetched.current state.code_notes with
-                    | Some (_, Masc_tui_fetched.Ready notes) ->
+                    match Masc_tui_fetched.current state.code_file with
+                    | Some (_, Masc_tui_fetched.Ready rows) ->
                         state.code_notes_scroll <-
                           min
-                            (max 0 (List.length notes - 1))
+                            (max 0 (List.length (Masc_tui_memo.of_rows rows) - 1))
                             (state.code_notes_scroll + 1)
                     | Some (_, _) | None -> ())
                   else if state.code_diff_open then (

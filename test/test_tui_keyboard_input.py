@@ -7816,11 +7816,11 @@ def project_changes_interaction(
     os.write(master_fd, b"q")
 
 
-def repositories_enter_interaction(requests: HttpRequests) -> Interaction:
+def repositories_enter_interaction() -> Interaction:
     """Enter on a Repositories row opens that repository's own tree on the
     Code surface, through the ?repo_id= axis; the header names whose tree
-    it is. Then m reads the notes anchored to a file, and w adds one
-    through the $EDITOR form -- the assertion is the recorded POST body."""
+    it is. Then m lists the memos the file carries as comments, read off
+    the lexed rows rather than fetched."""
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -7839,35 +7839,24 @@ def repositories_enter_interaction(requests: HttpRequests) -> Interaction:
             raise AssertionError(
                 f"the Code header does not name the repository: {code_plain!r}"
             )
-        # Open a file in the repository scope, then m: the notes anchored to
-        # it arrive through the codebase slug the repositories row carries.
+        # Open a file in the repository scope, then m: the memo is the
+        # comment on line 1, in the file's own syntax, so the list needs no
+        # request and names the line, the author, the kind and the text.
         send_and_wait(process, master_fd, output, b"j\r", b"let")
         notes = send_and_wait(
             process, master_fd, output, b"m", b"keep n at three"
         )
         notes_plain = CSI_RE.sub(b"", notes).decode("utf-8")
-        for needle in ("notes: note.ml", "L1", "alpha", "Decision", "task-77"):
+        for needle in ("notes: note.ml", "L1", "alpha", "(decision)"):
             if needle not in notes_plain:
                 raise AssertionError(
                     f"the notes view missed {needle!r}: {notes_plain!r}"
                 )
-        # w: the $EDITOR stub saves the form, and the wire carries it.
-        os.write(master_fd, b"w")
-        body = wait_for_http_request(
-            process, master_fd, output, requests,
-            path="/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc",
-        )
-        payload = json.loads(body)
-        if payload != {"file_path": "note.ml", "line_start": 1,
-                       "line_end": 1, "kind": "Question",
-                       "content": "why three?"}:
-            raise AssertionError(f"note POST body: {payload!r}")
         back = send_and_wait(process, master_fd, output, b"\x1b", b"let")
-        # The loaded notes now decorate the gutter: line 1 carries the
-        # note anchor mark.
+        # The memo decorates the gutter: line 1 carries the anchor mark.
         if "●".encode() not in back:
             raise AssertionError(
-                f"the note anchor mark is missing from the gutter: {back!r}"
+                f"the memo mark is missing from the gutter: {back!r}"
             )
         # H over the repo-scoped file: the commits that touched it,
         # newest first.
@@ -7935,23 +7924,6 @@ def reject_editor_script() -> Iterator[str]:
     fd, path = tempfile.mkstemp(prefix="masc-tui-reject-editor-", suffix=".sh")
     try:
         os.write(fd, b'#!/bin/sh\nprintf %s \'{"reason": "needs a repro"}\' > "$1"\n')
-        os.close(fd)
-        os.chmod(path, 0o755)
-        yield path
-    finally:
-        os.unlink(path)
-
-
-@contextmanager
-def note_editor_script() -> Iterator[str]:
-    """An $EDITOR that fills the note form and exits 0 -- the saved form."""
-    fd, path = tempfile.mkstemp(prefix="masc-tui-note-editor-", suffix=".sh")
-    try:
-        os.write(
-            fd,
-            b'#!/bin/sh\nprintf %s \'{"line_start": 1, "line_end": 1, '
-            b'"kind": "Question", "content": "why three?"}\' > "$1"\n',
-        )
         os.close(fd)
         os.chmod(path, 0o755)
         yield path
@@ -11757,27 +11729,20 @@ def run_keyboard_regression(executable: str) -> None:
              "hueIndex": None},
         ],
     )
-    repo_file = (200, {"ok": True, "content": "let n = 3\n"})
+    repo_file = (
+        200,
+        {
+            "ok": True,
+            "content": (
+                "(* masc(alpha) decision: keep n at three until the probe lands *)\n"
+                "let n = 3\n"
+            ),
+        },
+    )
     for file_path in (
         "/api/v1/workspace/file?path=note.ml&repo_id=masc",
     ):
         repositories_fixtures[file_path] = repo_file
-    notes_response = (
-        200,
-        {
-            "ok": True,
-            "data": [
-                {"id": "an-1", "file_path": "note.ml", "line_start": 1,
-                 "line_end": 1, "keeper_id": "alpha", "kind": "Decision",
-                 "content": "keep n at three until the probe lands",
-                 "goal_id": None, "task_id": "task-77", "references": [],
-                 "created_at_ms": 1, "updated_at_ms": 1},
-            ],
-        },
-    )
-    repositories_fixtures[
-        "/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc&file_path=note.ml"
-    ] = notes_response
     repositories_fixtures[
         "/api/v1/git/log?path=note.ml&limit=50&repo_id=masc"
     ] = (
@@ -11787,26 +11752,12 @@ def run_keyboard_regression(executable: str) -> None:
              "author": "keeper", "subject": "docs: seed the file (#1256)"},
         ]},
     )
-    repositories_fixtures[
-        "/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc"
-    ] = (
-        201,
-        {"ok": True, "data": {"id": "an-2", "file_path": "note.ml",
-         "line_start": 1, "line_end": 1, "keeper_id": "masc-tui",
-         "kind": "Question", "content": "why three?", "goal_id": None,
-         "task_id": None, "references": [], "created_at_ms": 2,
-         "updated_at_ms": 2}},
+    run_terminal_scenario(
+        executable,
+        description="Repositories Enter opens the Code tree",
+        interact=repositories_enter_interaction(),
+        http_fixtures=repositories_fixtures,
     )
-    note_requests: HttpRequests = []
-    with note_editor_script() as note_editor:
-        run_terminal_scenario(
-            executable,
-            description="Repositories Enter opens the Code tree",
-            interact=repositories_enter_interaction(note_requests),
-            http_fixtures=repositories_fixtures,
-            http_requests=note_requests,
-            extra_env={"EDITOR": note_editor},
-        )
     add_requests: HttpRequests = []
     with repository_declaration_editor_script() as repo_editor:
         run_terminal_scenario(

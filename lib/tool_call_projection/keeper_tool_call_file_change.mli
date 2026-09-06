@@ -128,6 +128,19 @@ type tally = {
   malformed : int;
 }
 
+val empty_tally : tally
+(** The tally of no rows. *)
+
+val fold_row : tally -> Yojson.Safe.t -> tally
+(** Fold one row into a tally. [classify_all] is this over a list; a caller
+    reading rows incrementally holds the tally between reads instead. Both
+    lists accumulate newest-first — pass the result through {!seal_tally}
+    before showing it. *)
+
+val seal_tally : tally -> tally
+(** Put a folded tally's lists back in source order. Idempotent it is not:
+    call it once, when the fold is finished. *)
+
 val classify_all : Yojson.Safe.t list -> tally
 (** [classify_all rows] classifies each row and counts the
     outcomes. The counts are returned rather than logged so a caller can put

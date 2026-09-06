@@ -1,12 +1,10 @@
-(* The two matchers behind the [:] palette and the [/] roster search.
+(* The matchers behind the [:] palette, the [/] surface search, the memory
+   browser filter, and the keeper message find.
 
-   Both are pure, and both were shipped without a test. They also share an
-   unstated contract: each lowercases the haystack itself and expects the
-   caller to have lowercased the needle. All three call sites do
-   (masc_tui_types.palette_matches, masc_tui.roster_search_jump, and the n/N
-   repeat beside it), so the contract holds today -- these cases pin it so a
-   fourth caller that forgets is a failure here rather than a search box that
-   quietly finds nothing. *)
+   All are pure and fold case on both sides themselves. A caller hands over
+   the operator's text as typed; the one that used to lowercase first and
+   forgot would have found nothing, and that failure was silent. These cases
+   pin the fold so it cannot move back to the callers one at a time. *)
 
 open Masc_tui_types
 
@@ -35,13 +33,14 @@ let test_subsequence_takes_the_characters_in_order () =
     (palette_subsequence ~needle:"kz" "keeper adm-race")
 ;;
 
-let test_the_caller_owns_the_needle_case () =
-  (* Not a nicety: an uppercase needle reaches the comparison unchanged and
-     matches nothing, because the haystack is already lowercase by then. The
-     three call sites lowercase before calling. *)
-  check_bool "uppercase needle finds nothing in contains" false
+let test_the_matcher_owns_the_needle_case () =
+  (* An uppercase needle finds a lowercase row in every matcher, so no
+     caller has to lowercase first and none can forget to. *)
+  check_bool "uppercase needle finds in starts_with" true
+    (palette_starts_with ~needle:"KEE" "keeper adm-race");
+  check_bool "uppercase needle finds in contains" true
     (palette_contains ~needle:"ADM" "keeper adm-race");
-  check_bool "uppercase needle finds nothing in subsequence" false
+  check_bool "uppercase needle finds in subsequence" true
     (palette_subsequence ~needle:"KADM" "keeper adm-race")
 ;;
 
@@ -282,8 +281,8 @@ let () =
             test_contains_is_a_substring_over_a_lowercased_haystack
         ; Alcotest.test_case "subsequence takes the characters in order" `Quick
             test_subsequence_takes_the_characters_in_order
-        ; Alcotest.test_case "the caller owns the needle case" `Quick
-            test_the_caller_owns_the_needle_case
+        ; Alcotest.test_case "the matcher owns the needle case" `Quick
+            test_the_matcher_owns_the_needle_case
         ; Alcotest.test_case "a label starting with the query leads" `Quick
             test_a_label_starting_with_the_query_leads
         ] )

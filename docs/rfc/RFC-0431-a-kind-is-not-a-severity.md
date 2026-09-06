@@ -1,5 +1,5 @@
 ---
-rfc: "0427"
+rfc: "0431"
 title: "종류는 심각도가 아니다 — 테마에 없는 축 하나"
 status: Implemented
 created: 2026-09-06

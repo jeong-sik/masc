@@ -110,7 +110,7 @@ let command_of_language = function
   | Ocaml -> "ocamllsp", [ "ocamllsp" ]
   | Typescript | Javascript ->
     "typescript-language-server", [ "typescript-language-server"; "--stdio" ]
-  | Python -> "pylsp", [ "pylsp" ]
+  | Python -> "pyright-langserver", [ "pyright-langserver"; "--stdio" ]
   | Rust -> "rust-analyzer", [ "rust-analyzer" ]
   | Go -> "gopls", [ "gopls" ]
   | C | Cpp -> "clangd", [ "clangd" ]

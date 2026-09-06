@@ -487,9 +487,11 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
       Printf.printf "DIAG14 tx-inside-runtime-transaction\n%!";
       let ( let* ) = Result.bind in
       let* () = instructions_result |> Result.map_error (fun error -> Io_error error) in
+      Printf.printf "DIAG14 tx-a-instructions-ok\n%!";
       let* snapshot =
         read_snapshot_unlocked path |> Result.map_error (fun error -> Io_error error)
       in
+      Printf.printf "DIAG14 tx-b-snapshot-read\n%!";
       let observed_manifest = revision_of_snapshot snapshot in
       let observed : config_revision =
         { manifest = observed_manifest
@@ -502,6 +504,7 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
         then Error (Revision_conflict { expected = expected_revision; observed })
         else Ok ()
       in
+      Printf.printf "DIAG14 tx-c-revision-ok\n%!";
       let created = observed_manifest = Missing in
       let* write_warnings =
         (if created
@@ -516,6 +519,7 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
            else Keeper_toml_loader.edit_keeper_toml_fields_strict_staged ~path edits)
         |> strict_write_result
       in
+      Printf.printf "DIAG14 tx-d-staged-write-done\n%!";
       let restore_publication_state () =
         Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
         let runtime_restore =
@@ -570,6 +574,7 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
                  detail))
        | Ok revision ->
          let outcome = { path; created; revision } in
+         Printf.printf "DIAG14 tx-e-before-publish\n%!";
          let publication =
            match publish runtime_transaction outcome with
            | decision -> Ok decision

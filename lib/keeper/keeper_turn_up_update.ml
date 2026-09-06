@@ -520,11 +520,16 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
               (Keeper_shutdown_supersession.error_to_string error)
           | Ok supersession ->
             let publish runtime_transaction outcome =
+              Printf.printf "DIAG14 tx-f-publish-enter\n%!";
               match
-                apply_profile
+                (let r =
+                   apply_profile
                      ~base_path:ctx.config.base_path
                      ~keeper_name:updated.name
                      (profile_update_command updated)
+                 in
+                 Printf.printf "DIAG14 tx-g-apply-profile-done\n%!";
+                 r)
               with
               | Error error ->
                    Otel_metric_store.inc_counter

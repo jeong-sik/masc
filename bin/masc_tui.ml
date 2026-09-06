@@ -1949,14 +1949,17 @@ type async_msg =
 (* Every async result carries the instant it was ready, so the loop can say
    how long it sat in the mailbox. A result that arrived in a second and was
    applied ten seconds later names the loop, not the request (RFC-0429
-   §3.0). *)
+   §3.0). The instant is read off [Mtime_clock.elapsed_ns] so that a clock
+   correction landing between the two reads cannot fabricate the wait or
+   erase it. *)
 type 'a mailed = {
-  ready_at : float;
+  ready_at_ns : int64;
   message : 'a;
 }
 
 let enqueue_async mailbox msg =
-  Eio.Stream.add mailbox { ready_at = Unix.gettimeofday (); message = msg }
+  Eio.Stream.add mailbox
+    { ready_at_ns = Mtime_clock.elapsed_ns (); message = msg }
 
 (* Wire the web-link-preview background fetcher. On the first cache miss for a
    URL, Masc_tui_link_preview renders the synthesized card immediately and calls
@@ -11877,12 +11880,12 @@ let drain_async_messages state ~base_path ~http_refresh_inflight
   let rec loop changed =
     match Eio.Stream.take_nonblocking mailbox with
     | None -> changed
-    | Some { ready_at; message = msg } ->
-        let waited = Unix.gettimeofday () -. ready_at in
-        if waited >= Masc_tui_http.slow_report_sec then
+    | Some { ready_at_ns; message = msg } ->
+        let waited_ns = Int64.sub (Mtime_clock.elapsed_ns ()) ready_at_ns in
+        if Int64.compare waited_ns Masc_tui_http.slow_report_ns >= 0 then
           Log.Transport.info
             "async result waited %.0f ms in the mailbox before the loop applied it"
-            (waited *. 1000.);
+            (Masc_tui_http.ms_of_ns waited_ns);
         apply_async_message state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox msg;
         loop true
@@ -12413,7 +12416,7 @@ let main () =
   let http_scoped_refresh_inflight = ref false in
   let scoped_refresh_followup = ref No_scoped_followup in
   let async_messages = Eio.Stream.create 32 in
-  let last_loop_at = ref (Unix.gettimeofday ()) in
+  let last_loop_at_ns = ref (Mtime_clock.elapsed_ns ()) in
   let presented_surface_reference () =
     match state.view with
     | Approvals -> Option.bind !presented_approval approval_row_reference
@@ -13899,12 +13902,12 @@ and is loaded on demand through keeper_skill.
        | Some (Mouse_left_press _) | Some (Mouse_wheel _) | None -> ());
       if Option.is_some input then
         Render_schedule.request render_schedule Render_schedule.Input;
-      (let now = Unix.gettimeofday () in
-       let gap = now -. !last_loop_at in
-       if gap >= Masc_tui_http.slow_report_sec then
+      (let now_ns = Mtime_clock.elapsed_ns () in
+       let gap_ns = Int64.sub now_ns !last_loop_at_ns in
+       if Int64.compare gap_ns Masc_tui_http.slow_report_ns >= 0 then
          Log.Transport.info "main loop: %.0f ms between two iterations"
-           (gap *. 1000.);
-       last_loop_at := now);
+           (Masc_tui_http.ms_of_ns gap_ns);
+       last_loop_at_ns := now_ns);
       ensure_acting_pane_changes state ~mailbox:async_messages;
       let _terminal_rows, terminal_columns = get_terminal_size () in
       let message_mode =

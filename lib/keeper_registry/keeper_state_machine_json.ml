@@ -74,13 +74,3 @@ let event_to_json (ev : event) : Yojson.Safe.t =
       "operator_clear_requested"
       [ "preserve_system", `Bool r.preserve_system; "reason", `String r.reason ]
 ;;
-
-let transition_result_to_json (tr : transition_result) =
-  `Assoc
-    [ "prev_phase", phase_to_json tr.prev_phase
-    ; "new_phase", phase_to_json tr.new_phase
-    ; "conditions", conditions_to_json tr.updated_conditions
-    ; "event", event_to_json tr.event_applied
-    ; "timestamp", `Float tr.timestamp
-    ]
-;;

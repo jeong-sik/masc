@@ -757,6 +757,16 @@ let bound_egress_proxy_port (t : t) =
 
 module For_testing_microvm = struct
   let microvm_container_name = microvm_container_name
+
+  let mark_microvm_guest_booted ~(config : Workspace.config) ~(meta : keeper_meta) () =
+    let container_name =
+      microvm_container_name
+        ~config
+        ~keeper_name:meta.name
+        ~network_mode:meta.network_mode
+    in
+    mark_microvm_work_root_ready container_name
+  ;;
 end
 
 let keeper_vm_name (t : t) =
@@ -1867,6 +1877,29 @@ let microvm_guest_absence_reason ?timeout_sec ~(config : Workspace.config)
            meta.name container_name)
 ;;
 
+let is_microvm_guest_booted ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  if meta.sandbox_profile <> Keeper_types_profile_sandbox.Micro_vm
+  then false
+  else
+    let container_name =
+      microvm_container_name
+        ~config
+        ~keeper_name:meta.name
+        ~network_mode:meta.network_mode
+    in
+    microvm_work_root_ready container_name
+;;
+
+let forget_microvm_guest_booted ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  let container_name =
+    microvm_container_name
+      ~config
+      ~keeper_name:meta.name
+      ~network_mode:meta.network_mode
+  in
+  forget_microvm_work_root container_name
+;;
+
 let retire_current_github_identity_snapshot t =
   update_github_identity_snapshots t (fun snapshots ->
     match snapshots.current with
@@ -2300,14 +2333,6 @@ let run_command_with_status
           in
           Ok (st, body)
         | _ -> Error (format_docker_exec_error ~head_program ~st ~out)))
-;;
-
-let run_command ?(ok_exit_codes = [ 0 ]) ~timeout_sec t ~cwd ~command_argv ~max_bytes () =
-  match
-    run_command_with_status ~ok_exit_codes ~timeout_sec t ~cwd ~command_argv ~max_bytes ()
-  with
-  | Ok (_st, out) -> Ok out
-  | Error _ as err -> err
 ;;
 
 let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()

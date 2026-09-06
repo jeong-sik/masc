@@ -37,7 +37,6 @@ type state = {
 
 type t = {
   state : state Atomic.t;
-  config_path: string;
   session_dir: string;
   mutation_lock : Cross_context_mutex.t;
   (** Serialises filesystem effects with publication of the next immutable
@@ -221,7 +220,6 @@ let create ~config_path =
   let session_dir = Filename.concat config_path "voice_sessions" in
   {
     state = Atomic.make { sessions = Session_by_agent.empty };
-    config_path;
     session_dir;
     mutation_lock = Cross_context_mutex.create ();
   }
@@ -324,22 +322,6 @@ let end_session t ~agent_id =
     | None -> false)
 
 
-let resume_session t ~agent_id =
-  with_mutation t (fun () ->
-    let current = Atomic.get t.state in
-    match Session_by_agent.find_opt agent_id current.sessions with
-    | Some session ->
-      let session =
-        { session with status = Active; last_activity = Time_compat.now () }
-      in
-      save_session t session;
-      Atomic.set
-        t.state
-        { sessions = Session_by_agent.add agent_id session current.sessions }
-    | None -> ())
-
-(** {1 Session Query} *)
-
 let get_session t ~agent_id =
   Session_by_agent.find_opt agent_id (Atomic.get t.state).sessions
 
@@ -351,18 +333,6 @@ let session_count t =
   Session_by_agent.cardinal (Atomic.get t.state).sessions
 
 (** {1 Activity Tracking} *)
-
-let heartbeat t ~agent_id =
-  with_mutation t (fun () ->
-    let current = Atomic.get t.state in
-    match Session_by_agent.find_opt agent_id current.sessions with
-    | Some session ->
-      let session = { session with last_activity = Time_compat.now () } in
-      save_session t session;
-      Atomic.set
-        t.state
-        { sessions = Session_by_agent.add agent_id session current.sessions }
-    | None -> ())
 
 let increment_turn t ~agent_id =
   with_mutation t (fun () ->
@@ -383,13 +353,6 @@ let increment_turn t ~agent_id =
     | None -> ())
 
 (** {1 Persistence} *)
-
-let persist t =
-  with_mutation t (fun () ->
-    ensure_session_dir t;
-    Session_by_agent.iter
-      (fun _ session -> save_session t session)
-      (Atomic.get t.state).sessions)
 
 let restore t =
   with_mutation t (fun () ->
@@ -413,16 +376,3 @@ let restore t =
       Atomic.set t.state { sessions }))
 
 (** {1 Status} *)
-
-let status_json t =
-  let snapshot = Atomic.get t.state in
-  let sessions_json =
-    Session_by_agent.bindings snapshot.sessions
-    |> List.map (fun (_, session) -> session_to_json session)
-    |> fun sessions -> `List sessions
-  in
-  `Assoc [
-    ("session_count", `Int (Session_by_agent.cardinal snapshot.sessions));
-    ("config_path", `String t.config_path);
-    ("sessions", sessions_json);
-  ]

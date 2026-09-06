@@ -76,10 +76,6 @@ val of_yojson : Yojson.Safe.t -> (record, string) result
 
 (** {1 Freshness} *)
 
-val generated_at_unix : record -> float
-val fresh_until_unix : record -> float
-(** Field accessors — present because the [is_fresh] / freshness
-    comparison logic is duplicated in dashboard rendering. *)
 
 val is_fresh : ?now:float -> record -> bool
 (** [is_fresh ?now record] returns [true] iff

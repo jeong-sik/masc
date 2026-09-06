@@ -102,17 +102,6 @@ val compare :
   Keeper_chat_store.chat_message list ->
   verdict
 
-(** Shared core of the IO shell: journal entries already read, store rows
-    already loaded. Joins the rows by [turn_ref] and by the [Operation]
-    delivery key derived from [operation_id] (via
-    {!Keeper_chat_store.transcript_of_messages}) and compares. {!sweep} calls
-    this per journal file against a row list loaded once per keeper. *)
-val audit_entries :
-  operation_id:string ->
-  entries:Keeper_chat_event_log.journaled_event list ->
-  rows:Keeper_chat_store.chat_message list ->
-  verdict
-
 (** IO shell: audit one operation. Reads the journal ([Journal_missing] /
     [Journal_unreadable] / [Journal_corrupt] come from here) via
     {!Keeper_chat_event_log.journal_path} +

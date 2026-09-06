@@ -257,7 +257,7 @@ let existing_sibling_dirs_hint ?workdir path =
              Some (String.concat ", " shown ^ suffix))))
 ;;
 
-let validate_shell_ir_paths ?workdir shell_ir =
+let validate_shell_ir_paths ?(requires_existing_dir = true) ?workdir shell_ir =
   match workdir with
   | None -> Ok ()
   | Some _ ->
@@ -299,7 +299,7 @@ let validate_shell_ir_paths ?workdir shell_ir =
         | None -> Ok ()
         | Some cwd ->
           Masc_exec.Path_scope.raw cwd
-          |> validate_path_value ~requires_existing_dir:true
+          |> validate_path_value ~requires_existing_dir
       in
       let validate_simple (simple : Masc_exec.Shell_ir.simple) =
         match validate_cwd simple.cwd with
@@ -325,16 +325,6 @@ let validate_shell_ir_paths ?workdir shell_ir =
 
 
 let flat_stage_words = Literal_words.flat_stage_words
-
-let sanitize_command_for_log cmd =
-  let trimmed = String.trim cmd in
-  if trimmed = ""
-  then Log_sanitize.sanitize_command_for_log cmd
-  else (
-    match parse_string_to_ir ~mode:Tool_execute trimmed with
-    | Ok ir -> Log_sanitize.sanitize_command_for_log_of_ir ~fallback_cmd:cmd ir
-    | Error _ -> Log_sanitize.sanitize_command_for_log cmd)
-;;
 
 let sanitize_command_for_log_of_ir = Log_sanitize.sanitize_command_for_log_of_ir
 let truncate_for_log = Log_sanitize.truncate_for_log

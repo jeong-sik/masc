@@ -7,8 +7,6 @@
 open Ide_annotation_types
 module String_set = Set.Make (String)
 
-let store_path ~base_dir = Ide_paths.store_path ~base_dir
-
 let codebase_dir ~base_dir codebase =
   Ide_paths.code_store_dir ~base_dir ~codebase
 ;;

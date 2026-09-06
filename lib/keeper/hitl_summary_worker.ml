@@ -2032,7 +2032,6 @@ module For_testing = struct
 
   let flow_evidence prepared = Exact_output.flow_attempt_evidence prepared.attempt
   let system_prompt = system_prompt
-  let summary_version = summary_version
   let lane_id = lane_id
 end
 ;;

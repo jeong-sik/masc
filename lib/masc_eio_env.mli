@@ -6,7 +6,7 @@
     {!init} is called at server bootstrap and may be called again
     by additional OCaml domains that own their own Eio handles.
     Every consumer that needs to issue an HTTP call later reaches
-    the captured handles via {!get} or {!get_opt}.
+    the captured handles via [get] or {!get_opt}.
 
     Internal storage is hidden and domain-local. There is no
     process-wide fallback; an OCaml domain that performs AGENT_CORE HTTP calls
@@ -30,16 +30,6 @@ val init :
     Last-writer-wins for the current domain-local slot. Intended to be called
     at startup; re-init is permitted by harness tests and standalone
     executables. *)
-
-val reset_for_test : unit -> unit
-(** Clear the captured environment for direct test executable runs. *)
-
-val get : unit -> t
-(** Read the captured environment.
-
-    @raise Invalid_argument when {!init} has not yet run.
-    Callers in the boot path that may legitimately fire before
-    {!init} should use {!get_opt} instead. *)
 
 val get_opt : unit -> t option
 (** Read the captured environment without raising. Returns

@@ -20,8 +20,6 @@ type config = {
   force_timeout_s : float;
 }
 
-val default_config : config
-
 type config_field =
   | Notify_delay
   | Drain_timeout
@@ -108,8 +106,6 @@ type phase =
   | Exiting
   | Done
 
-val phase_to_string : phase -> string
-
 type state
 
 val create : ?config:config -> unit -> state
@@ -183,4 +179,3 @@ val is_benign_termination : benign:(exn -> bool) -> exn -> bool
 
 val current_phase : state -> phase
 val is_shutting_down : state -> bool
-val elapsed : state -> float

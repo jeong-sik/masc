@@ -7,10 +7,6 @@ type t =
   | Health_probe
   | Other of string
 
-let standard =
-  [ Slot_wait; Spawn; Command; Llm_response; Dashboard_refresh; Health_probe ]
-;;
-
 let process_origins = [ Slot_wait; Spawn; Command ]
 
 let is_process_origin = function

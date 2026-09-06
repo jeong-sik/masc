@@ -510,7 +510,15 @@ let test_folding_in_batches_equals_reading_at_once () =
   check int "same malformed" at_once.Change.malformed in_batches.Change.malformed;
   check int "same over-budget" at_once.Change.over_budget in_batches.Change.over_budget;
   check int "an empty tally is empty" 0
-    (List.length Change.empty_tally.Change.changes)
+    (List.length Change.empty_tally.Change.changes);
+  (* The endpoint reports "n changes out of m calls". An incremental caller
+     keeps the tally and drops the rows, so m has to come from the tally: the
+     three outcomes partition what was read. *)
+  check int "rows_counted is the number of rows folded"
+    (List.length rows) (Change.rows_counted at_once);
+  check int "and it survives being folded in batches"
+    (List.length rows) (Change.rows_counted in_batches);
+  check int "no rows, no count" 0 (Change.rows_counted Change.empty_tally)
 ;;
 
 let test_classify_all_preserves_order () =

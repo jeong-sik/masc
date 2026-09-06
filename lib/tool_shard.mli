@@ -4,7 +4,6 @@
     runtime membership or authorization state. *)
 
 val memory_search_source_enum_strings : string list
-val fs_write_mode_enum_strings : string list
 
 val base_tools : Masc_domain.tool_schema list
 val all_keeper_tool_schemas : Masc_domain.tool_schema list

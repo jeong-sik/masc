@@ -1,20 +1,25 @@
-(** Compile-time verified tool name identifiers.
+(** Tool-name vocabularies, one closed type per domain.
 
-    Use [of_string] at MCP/JSON parse boundaries only.
-    All internal code passes [t] values directly.
+    Each submodule owns the complete [masc_*] string for its operations, with
+    [all] exhaustive and [of_string] derived from it.
 
-    PR-S1: domain tool *names* (Task/Board/Goal/Operator) are owned by the
-    submodules below; [Masc.t] composes them. Each submodule owns the complete
-    [masc_*] string for its operations. *)
+    Routing parses the wire string once with the owning domain's [of_string]
+    and matches the constructors, so a constructor added here is a compile
+    error at the site that handles it. Non-domain [masc_*] names are owned by
+    their schema/descriptor modules, not by this substrate. *)
 
 module Task_name : sig
   type t =
     | Add_task
     | Batch_add_tasks
     | Task_history
+    | Task_set_goal
     | Tasks
     | Transition
     | Update_priority
+
+  val all : t list
+  (** Exhaustive Task operation vocabulary. *)
 
   val to_string : t -> string
   val of_string : string -> t option
@@ -63,6 +68,9 @@ module Goal_name : sig
     | Goal_transition
     | Goal_upsert
 
+  val all : t list
+  (** Exhaustive Goal operation vocabulary. *)
+
   val to_string : t -> string
   val of_string : string -> t option
   val pp : Stdlib.Format.formatter -> t -> unit
@@ -74,8 +82,12 @@ module Operator_name : sig
     | Operator_board_attention_quarantine_requeue
     | Operator_confirm
     | Operator_digest
+    | Operator_judgment_write
     | Operator_snapshot
     | Operator_task_recovery_resolve
+
+  val all : t list
+  (** Exhaustive Operator operation vocabulary. *)
 
   val to_string : t -> string
   val of_string : string -> t option
@@ -91,36 +103,3 @@ module Operator_remote_name : sig
   val all_strings : string list
   val pp : Stdlib.Format.formatter -> t -> unit
 end
-
-(** Domain_tool — single domain-owned grouping of Task/Board/Goal/Operator tool
-    names. This module owns only names and string round-tripping; dispatch and
-    execution decisions belong to their explicit boundaries. *)
-module Domain_tool : sig
-  type t =
-    | Task of Task_name.t
-    | Board of Board_name.t
-    | Goal of Goal_name.t
-    | Operator of Operator_name.t
-
-  val to_string : t -> string
-  val of_string : string -> t option
-  val is_board : t -> bool
-  val pp : Stdlib.Format.formatter -> t -> unit
-end
-
-module Masc : sig
-  type t =
-    | Domain of Domain_tool.t
-
-  val to_string : t -> string
-  val of_string : string -> t option
-  val is_board : t -> bool
-  val pp : Stdlib.Format.formatter -> t -> unit
-end
-
-type t =
-  | Masc of Masc.t
-
-val to_string : t -> string
-val of_string : string -> t option
-val pp : Stdlib.Format.formatter -> t -> unit

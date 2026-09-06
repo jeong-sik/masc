@@ -272,10 +272,6 @@ let ensure_loaded () =
       Atomic.set pool { state with runtimes = refreshed })
   end
 
-let parse_errors () =
-  ensure_loaded ();
-  with_pool_lock (fun () -> (Atomic.get pool).parse_errors)
-
 let snapshots () =
   ensure_loaded ();
   with_pool_lock (fun () ->

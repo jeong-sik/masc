@@ -17,7 +17,6 @@ type t =
       }
 
 val keeper_basename : keeper_name:string -> keeper_artifact -> string
-val basename : t -> string
 
 (** Exact metadata interpretation, independent of overlapping artifact
     suffixes. *)

@@ -150,7 +150,7 @@ let serve ~sw ~clock ~socket ~addr_label ~request_handler =
       Transport_metrics.record_http_accept ~mode;
       Transport_metrics.record_http_accept_latency ~mode accept_latency;
       Eio.Fiber.fork ~sw (fun () ->
-        Eio.Switch.run (fun conn_sw ->
+        Eio.Switch.run ~name:listener_tag (fun conn_sw ->
           on_connection_release conn_sw ~mode ~listener_tag flow;
           try
             let conn_handler =
@@ -218,7 +218,7 @@ let serve_h2 ~sw ~clock ~socket ~addr_label ~h2_request_handler ~h2_error_handle
       Transport_metrics.record_http_accept ~mode;
       Transport_metrics.record_http_accept_latency ~mode accept_latency;
       Eio.Fiber.fork ~sw (fun () ->
-        Eio.Switch.run (fun conn_sw ->
+        Eio.Switch.run ~name:listener_tag (fun conn_sw ->
           on_connection_release conn_sw ~mode ~listener_tag flow;
           try
             H2_eio.Server.create_connection_handler
@@ -287,7 +287,7 @@ let serve_auto ~sw ~clock ~socket ~addr_label ~request_handler ~h2_request_handl
       Transport_metrics.record_http_accept ~mode;
       Transport_metrics.record_http_accept_latency ~mode accept_latency;
       Eio.Fiber.fork ~sw (fun () ->
-        Eio.Switch.run (fun conn_sw ->
+        Eio.Switch.run ~name:listener_tag (fun conn_sw ->
           on_connection_release conn_sw ~mode ~listener_tag flow;
           try
             match Http_protocol_detect.detect flow with

@@ -189,11 +189,6 @@ let of_yojson json =
   Ok { schema_version; parser; command; parse_status; features; commands; error }
 ;;
 
-let of_string raw =
-  try Yojson.Safe.from_string raw |> of_yojson with
-  | Yojson.Json_error msg -> Error (Printf.sprintf "invalid JSON: %s" msg)
-;;
-
 let feature_names t =
   let f = t.features in
   [ "pipeline", f.pipeline

@@ -3,10 +3,6 @@
     See {!Board_sort} for the rationale (Hot-sort deduplication, Trending
     net-vote-only semantics). *)
 
-val net_vote : Board_types.post -> int
-(** [net_vote p] is [p.votes_up - p.votes_down]. Negative for
-    downvote-heavy posts. *)
-
 val hot_compare : Board_types.post -> Board_types.post -> int
 (** Hot ordering comparator: net vote DESC, then created_at DESC. *)
 

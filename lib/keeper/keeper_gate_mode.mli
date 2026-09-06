@@ -23,13 +23,12 @@ type change =
   ; replaced_read_error : string option
   }
 
-val default : t
 val to_string : t -> string
 val of_string : string -> t option
 val parse_json : Yojson.Safe.t -> (t, string) result
 val path : base_path:string -> string
 
-(** A missing state file selects {!default}. An existing unreadable or invalid
+(** A missing state file selects [default]. An existing unreadable or invalid
     file is an explicit error; callers must not silently coerce it. *)
 val read : base_path:string -> (t, string) result
 

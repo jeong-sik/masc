@@ -224,33 +224,53 @@ let mkdir_p_unix (path : string) : unit =
   ensure_dir path
 ;;
 
+(* Whole-file reads, writes and appends of regular files block in the
+   kernel for as long as the disk takes, and eio_posix runs them on the
+   calling fiber: a regular file never reports "not ready", so [readv] and
+   [writev] are issued inline. On the live server a 2 MB [save_file] held
+   the main domain 120-130 ms and a large [load_file] 40-50 ms per call
+   (2026-09-06 fiber trace, labels [with_open_out] and [with_open_in]; RFC
+   main-domain-scheduler-latency §8.8). Inside an Eio fiber the three
+   primitives therefore run their Unix implementation on a system thread;
+   outside Eio they run it inline, as before. *)
+let on_systhread ~label f =
+  let result = Eio_unix.run_in_systhread ~label f in
+  Eio.Fiber.check ();
+  result
+;;
+
 (** Load entire file contents as string.
-    Eio-native when available, fallback to Unix.
-    @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
+    Read on a system thread inside Eio, inline otherwise.
+    @raises Sys_error on all I/O failures. *)
 let load_file (path : string) : string =
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> load_file_unix path)
-    (fun fs ->
-       let eio_path = Eio.Path.(fs / path) in
-       Eio.Path.load eio_path)
+    (fun _fs -> on_systhread ~label:"fs-compat-load-file" (fun () -> load_file_unix path))
+;;
+
+(* The write behind [save_file] and the atomic writers: the path guard on
+   the fiber, the open, write and close wherever the caller runs it. The
+   atomic writers run it inside their own blocking job. *)
+let save_file_blocking (path : string) (content : string) : unit =
+  test_exec_home_guard ~op:"save_file" path;
+  save_file_unix path content
 ;;
 
 (** Save string to file (overwrite).
-    Eio-native when available, fallback to Unix.
-    @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
+    Written on a system thread inside Eio, inline otherwise.
+    @raises Sys_error on all I/O failures. *)
 let save_file (path : string) (content : string) : unit =
   test_exec_home_guard ~op:"save_file" path;
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> save_file_unix path content)
-    (fun fs ->
-       let eio_path = Eio.Path.(fs / path) in
-       Eio.Path.save ~create:(`Or_truncate save_file_mode) eio_path content)
+    (fun _fs ->
+       on_systhread ~label:"fs-compat-save-file" (fun () -> save_file_unix path content))
 ;;
 
 let save_file_atomic path content =
-  Atomic_write.save_file_atomic ~save_file path content
+  Atomic_write.save_file_atomic ~save_file:save_file_blocking path content
 ;;
 
 type atomic_replace_failure_stage =
@@ -271,11 +291,11 @@ let atomic_replace_failure_to_string =
 ;;
 
 let save_file_atomic_strict_staged path content =
-  Atomic_write.save_file_atomic_strict_staged ~save_file path content
+  Atomic_write.save_file_atomic_strict_staged ~save_file:save_file_blocking path content
 ;;
 
 let save_file_atomic_strict path content =
-  Atomic_write.save_file_atomic_strict ~save_file path content
+  Atomic_write.save_file_atomic_strict ~save_file:save_file_blocking path content
 ;;
 
 module Atomic_replace_for_testing = struct
@@ -283,7 +303,7 @@ module Atomic_replace_for_testing = struct
     Atomic_write.Atomic_replace_for_testing.save_file_atomic_strict_staged
       ?sync_file
       ~sync_parent
-      ~save_file
+      ~save_file:save_file_blocking
       path
       content
   ;;
@@ -568,16 +588,17 @@ let cleanup_atomic_orphans ~ownership_root ~base_path ~scope () =
 ;;
 
 (** Append string to file.
-    Eio-native when available, fallback to Unix.
-    @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
+    Appended on a system thread inside Eio, inline otherwise; both go
+    through the per-path mutex of [append_file_unix], so two appends to one
+    path from two threads stay whole.
+    @raises Sys_error on all I/O failures. *)
 let append_file (path : string) (content : string) : unit =
   test_exec_home_guard ~op:"append_file" path;
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> append_file_unix path content)
-    (fun fs ->
-       let eio_path = Eio.Path.(fs / path) in
-       Eio.Path.save ~append:true ~create:(`If_missing 0o644) eio_path content)
+    (fun _fs ->
+       on_systhread ~label:"fs-compat-append-file" (fun () -> append_file_unix path content))
 ;;
 
 (** Check if file exists.
@@ -1132,13 +1153,6 @@ let rename_if_exists ~src ~dst =
       | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> false)
 ;;
 
-let rmdir (path : string) : unit =
-  with_fs_or_fallback
-    ~path
-    ~fallback:(fun () -> Unix.rmdir path)
-    (fun fs -> Eio.Path.rmdir Eio.Path.(fs / path))
-;;
-
 let remove_tree_unix (path : string) : unit =
   let rec remove path =
     match Unix.lstat path with
@@ -1468,8 +1482,6 @@ let fold_jsonl_lines ~init ~f path =
    - The cache lookup uses a separate, microsecond-scoped mutex
      ([fd_cache_mu]) so two appends to *different* paths never
      contend on a global fd-cache lock. *)
-let close_all_cached_writers () = Fd_cache.close_all ()
-
 let invalidate_cached_writer path =
   let path_mu = get_append_path_mutex path in
   Stdlib.Mutex.protect path_mu (fun () -> Fd_cache.invalidate path)

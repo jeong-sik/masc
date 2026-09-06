@@ -243,6 +243,12 @@ val turn_rail_gutter : turn_rail -> string
     drew the glyph and padded the rest itself would put the line in a
     different column on the rows that have a siding. *)
 
+val rail_for_style : work:turn_rail -> speech:turn_rail -> style -> turn_rail
+(** Which of two rail pieces a row of this style takes: [work] for reasoning,
+    tool calls and skills, [speech] for everything the turn says. Asked by
+    both the running turn and the turn of a single row, because what a row is
+    does not depend on how many rows came with it. *)
+
 val turn_rail_glyph : turn_rail -> string
 (** The one cell this rail piece draws, or a blank for {!Rail_none}. Box
     drawing so the bracket survives NO_COLOR as a shape. *)

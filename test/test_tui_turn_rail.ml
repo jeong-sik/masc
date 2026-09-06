@@ -314,6 +314,48 @@ let test_only_the_first_row_carries_the_action () =
         rest
 ;;
 
+(* Which of the rail's two ordinary pieces a row takes is decided by what the
+   row is, not by how many rows its turn had. Reading [Layout.all_styles]
+   rather than a list of its own: a style added without a decision here would
+   otherwise be silently sorted with the speech. *)
+let test_work_and_speech_split_the_same_way_for_every_style () =
+  let work, speech =
+    List.partition
+      (fun style ->
+        Layout.rail_for_style ~work:Layout.Rail_does ~speech:Layout.Rail_says
+          style
+        = Layout.Rail_does)
+      Layout.all_styles
+  in
+  check (list bool) "reasoning, tools and skills are the turn's work"
+    [ true; true; true; true; true; true ]
+    (* [mem], not [memq]: a [Skill] tone is a block, and the ones written here
+       are not the ones the list holds. *)
+    (List.map (fun style -> List.mem style work)
+       [ Layout.Tool
+       ; Layout.Thinking
+       ; Layout.Skill Layout.Skill_live
+       ; Layout.Skill Layout.Skill_used
+       ; Layout.Skill Layout.Skill_attention
+       ; Layout.Skill Layout.Skill_failure
+       ]);
+  check int "and everything else is what the turn says" 7 (List.length speech)
+;;
+
+(* A lone row of work still hangs off its turn. This is the arm the pane lost
+   when an autonomous turn stopped writing an empty reply beside its calls:
+   with two rows the turn drew a bracket, with one it drew nothing at all. *)
+let test_a_lone_row_keeps_work_and_drops_speech () =
+  check bool "a lone tool block is still work" true
+    (Layout.rail_for_style ~work:Layout.Rail_does ~speech:Layout.Rail_none
+       Layout.Tool
+     = Layout.Rail_does);
+  check bool "a lone utterance draws nothing" true
+    (Layout.rail_for_style ~work:Layout.Rail_does ~speech:Layout.Rail_none
+       Layout.Keeper
+     = Layout.Rail_none)
+;;
+
 let () =
   run "tui turn rail"
     [ ( "glyphs"
@@ -322,6 +364,10 @@ let () =
             test_the_gutter_spends_its_whole_budget
         ; test_case "the drawn pieces are distinct" `Quick
             test_the_drawn_pieces_are_distinct
+        ; test_case "work and speech split the same way for every style" `Quick
+            test_work_and_speech_split_the_same_way_for_every_style
+        ; test_case "a lone row keeps work and drops speech" `Quick
+            test_a_lone_row_keeps_work_and_drops_speech
         ] )
     ; ( "geometry"
       , [ test_case "the rail costs the same whatever it draws" `Quick

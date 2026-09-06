@@ -5926,9 +5926,15 @@ def memory_journal_timeline_interaction(
         )
         plain_resting = CSI_RE.sub(b"", resting)
         assert_monotonic_direct_turn(resting)
-        if b"Ctrl-N: journal detail" not in plain_resting:
+        if b"\xc2\xb7 Ctrl-N" not in plain_resting:
             raise AssertionError(
                 f"Journal summary did not expose its detail key: {resting!r}"
+            )
+        # What the key does is the footer's line, which is on screen with
+        # this row; saying it again per row is what the row stopped doing.
+        if b"Ctrl-N: journal detail" in plain_resting:
+            raise AssertionError(
+                f"Journal summary spelled the footer's own words: {resting!r}"
             )
         if re.search("\u25c8\\s+JOURNAL".encode(), plain_resting) is None:
             raise AssertionError(
@@ -11663,17 +11669,7 @@ def run_keyboard_regression(executable: str) -> None:
         },
         extra_args=("--reasoning", "full", "--tool-view", "full"),
     )
-    memory_journal_sequence = SequencedHttpResponse([memory_journal_fixture()])
-    run_terminal_scenario(
-        executable,
-        description="Keeper Memory journal timeline",
-        interact=memory_journal_timeline_interaction(memory_journal_sequence),
-        http_fixtures={
-            "/api/v1/keepers/alpha/chat/history": memory_journal_chat_fixture(),
-            "/api/v1/keepers/alpha/memory-journal?limit=20": memory_journal_sequence,
-        },
-        refresh=0.5,
-    )
+    run_memory_journal_regression(executable)
     run_terminal_scenario(
         executable,
         description="Keeper provider-input Context Inspector",
@@ -12566,6 +12562,20 @@ def run_code_memo_regression(executable: str) -> None:
     )
 
 
+def run_memory_journal_regression(executable: str) -> None:
+    memory_journal_sequence = SequencedHttpResponse([memory_journal_fixture()])
+    run_terminal_scenario(
+        executable,
+        description="Keeper Memory journal timeline",
+        interact=memory_journal_timeline_interaction(memory_journal_sequence),
+        http_fixtures={
+            "/api/v1/keepers/alpha/chat/history": memory_journal_chat_fixture(),
+            "/api/v1/keepers/alpha/memory-journal?limit=20": memory_journal_sequence,
+        },
+        refresh=0.5,
+    )
+
+
 def run_board_json_regression(executable: str) -> None:
     run_terminal_scenario(
         executable,
@@ -12697,11 +12707,16 @@ def main() -> None:
         run_code_memo_regression(os.path.abspath(sys.argv[1]))
         print("tui Code memo regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "memory-journal":
+        run_memory_journal_regression(os.path.abspath(sys.argv[1]))
+        print("tui Memory journal regression: PASS")
+        return
     if len(sys.argv) != 2:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
             "[cli-base-path|planning-review|repositories|project-changes|config|"
-            "chat-clarity|runtime|resources|keepers-lanes|board-json|code-memo]"
+            "chat-clarity|runtime|resources|keepers-lanes|board-json|code-memo|"
+            "memory-journal]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

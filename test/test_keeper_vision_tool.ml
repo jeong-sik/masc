@@ -1006,12 +1006,17 @@ let test_delegate_eviction_bad_base64_surfaces_redacted_text_error () =
     assert (not (String_util.contains_substring placeholder "bad base64"))
   | _ -> failwith "bad base64 must surface as a redacted text placeholder"
 
-let test_delegate_eviction_rejects_non_base64_source_before_store () =
+(* RFC-0430 / #33682: a URL or Files-API id is a reference, not a payload. The
+   serializers put both on the wire natively (#33669), so eviction — which
+   exists to trade heavy inline pixels for a local artifact handle — must hand
+   the block through unchanged instead of swapping it for a store-failure
+   placeholder the reader cannot act on. *)
+let test_delegate_eviction_passes_reference_source_through () =
   List.iter
     (fun source_type ->
       let source_name = Agent_core.Types.media_source_kind_to_string source_type in
       let metric_labels =
-        [ "mode", "store_only"; "result", "error"; "reason", "invalid_source_type" ]
+        [ "mode", "store_only"; "result", "ok"; "reason", "reference_passthrough" ]
       in
       let before =
         metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels
@@ -1028,14 +1033,18 @@ let test_delegate_eviction_rejects_non_base64_source_before_store () =
               }
           ]
       with
-      | [ Agent_core.Types.Text placeholder ] ->
-        assert (String_util.contains_substring placeholder "could not store");
-        assert (String_util.contains_substring placeholder "unsupported image source");
+      | [ Agent_core.Types.Image img ] ->
+        assert (String.equal img.data "https://example.invalid/image.png");
+        assert (String.equal img.media_type "image/png");
+        assert (
+          String.equal
+            (Agent_core.Types.media_source_kind_to_string img.source_type)
+            source_name);
         assert_metric_increment
-          ("vision_ingest invalid_source_type " ^ source_name)
+          ("vision_ingest reference_passthrough " ^ source_name)
           before
           (metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels)
-      | _ -> failwith "non-base64 image source must surface as a text placeholder")
+      | _ -> failwith "a reference-carrying image block must pass through unchanged")
     [ Agent_core.Types.Url; Agent_core.Types.File_id ]
 
 let test_non_delegate_eviction_preserves_inline_image () =
@@ -1185,7 +1194,7 @@ let () =
   test_delegate_eviction_rejects_invalid_media_type_before_store ();
   test_delegate_eviction_rejects_oversize_before_store ();
   test_delegate_eviction_bad_base64_surfaces_redacted_text_error ();
-  test_delegate_eviction_rejects_non_base64_source_before_store ();
+  test_delegate_eviction_passes_reference_source_through ();
   test_non_delegate_eviction_preserves_inline_image ();
   test_evicted_history_has_no_image_modality ();
   test_delegates_media_follows_lane_capability ();

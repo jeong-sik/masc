@@ -12077,10 +12077,13 @@ let apply_raw_mode new_term =
 
 let enter_terminal_session ~cleanup ~terminate ~request_interrupt
     ~request_full_repaint ~suspend ~new_term =
-  at_exit cleanup;
-  (* After [cleanup] registers, so the summary is written once the terminal is
-     back and cannot land in the middle of a restored screen. *)
+  (* [at_exit] runs its callbacks in the reverse of this order and stops at
+     the first one that raises, so the terminal restore is registered last
+     and runs first. The frame summary appends to a file and can raise on a
+     write -- registered the other way round it would take the restore with
+     it and leave the terminal in raw mode. *)
   at_exit Masc_tui_frame_timing.report;
+  at_exit cleanup;
   (* SIGINT is the only one of these a person sends by hand mid-sentence, so
      it asks the loop rather than ending the process. The rest still mean the
      session is over. *)

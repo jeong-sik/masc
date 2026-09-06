@@ -1739,11 +1739,16 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
       ~module_path:main_path ~binding_name:"enter_terminal_session" ~signal
       ~handler
   in
+  (* Two [at_exit] calls, and which is which matters: they run in reverse of
+     this order and stop at the first that raises, so the frame summary --
+     which appends to a file and can fail on the write -- registers first and
+     the terminal restore registers last, where it runs first. *)
   check bool "startup registers cleanup and handlers before raw mode" true
     (Ast_grep.direct_call_sequence_matches_in_value_binding
        ~module_path:main_path ~binding_name:"enter_terminal_session"
        ~callees:
          [ "at_exit"
+         ; "at_exit"
          ; "Sys.set_signal"
          ; "Sys.set_signal"
          ; "Sys.set_signal"

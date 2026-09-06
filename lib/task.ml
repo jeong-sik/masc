@@ -16,18 +16,34 @@ module Args = Masc_task_handlers.Tool_task_args
 module Anti_rationalization = Masc_task_handlers.Anti_rationalization
 module Planning_eio = Masc_task_handlers.Planning_eio
 
-let tool_spec_read_only = [ "masc_task_history"; "masc_tasks" ]
+let is_read_only = function
+  | Tool_name.Task_name.Task_history | Tool_name.Task_name.Tasks -> true
+  | Tool_name.Task_name.Add_task
+  | Tool_name.Task_name.Batch_add_tasks
+  | Tool_name.Task_name.Task_set_goal
+  | Tool_name.Task_name.Transition
+  | Tool_name.Task_name.Update_priority -> false
+;;
 
+(* Registration walks Tool_name.Task_name, the same vocabulary
+   [Schemas.schemas] is derived from, so read_only is a match on the
+   constructor rather than a membership test over two name strings.
+
+   The registered name still comes from the declaration, not from
+   [to_string]: [schema_for] maps a constructor to a pre-loaded value rather
+   than looking one up by name, so the two agree today but not by
+   construction, and the declaration is what clients are served. *)
 let () =
   List.iter
-    (fun (s : Masc_domain.tool_schema) ->
+    (fun name ->
+       let schema = Schemas.schema_for name in
        Tool_spec.register
          (Tool_spec.create
-            ~name:s.name
-            ~description:s.description
+            ~name:schema.name
+            ~description:schema.description
             ~module_tag:Tool_dispatch.Mod_task
-            ~input_schema:s.input_schema
+            ~input_schema:schema.input_schema
             ~handler_binding:Tag_dispatch
-            ~is_read_only:(List.mem s.name tool_spec_read_only)
+            ~is_read_only:(is_read_only name)
             ()))
-    Schemas.schemas
+    Tool_name.Task_name.all

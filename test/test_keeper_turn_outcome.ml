@@ -594,6 +594,160 @@ let test_repeated_exact_tool_call_boundary () =
        ; tool_call ~output:(Some "a") "Execute"
        ])
 
+(* task-1204 / #26057 — the cross-turn shape. The detector folds over the
+   run-local hook accumulator ([Keeper_run_tools.hook_accumulator], created
+   fresh per Agent.run execution), while the persisted checkpoint keeps only
+   the AGENT_CORE message history. A keeper that repeats the identical call
+   across a checkpoint restart therefore presents each new run with an empty
+   accumulator: the fold below counts what one run saw, not what the keeper
+   did. Four identical calls split 2 + 2 across two runs escape both axes at
+   threshold 3 — the same four in one run are caught on the third call.
+   This is the reproduction the #26057 handoff asked for: a repeat that is
+   only visible across the restart boundary. *)
+let test_repeated_exact_tool_call_reset_across_checkpoint_restart () =
+  let detect =
+    Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
+  in
+  (* Run 1: two identical calls, then a yield persists the checkpoint.
+     Newest-first, as in [test_repeated_exact_tool_call_boundary]. *)
+  let run_1_saw = [ tool_call "keeper_tasks_list"; tool_call "keeper_tasks_list" ] in
+  check (option (pair string int)) "two identical calls inside one run stay silent" None
+    (detect run_1_saw);
+  (* Restart: the next run's accumulator starts empty; the checkpoint history
+     is not folded in, so the two earlier identical calls are invisible. *)
+  let run_2_saw = [ tool_call "keeper_tasks_list"; tool_call "keeper_tasks_list" ] in
+  check (option (pair string int))
+    "restart hides the earlier identical calls from the fold" None
+    (detect run_2_saw);
+  (* Control: the same four calls in a single run are caught on the third. *)
+  check (option (pair string int)) "the same four in one run are caught"
+    (Some ("keeper_tasks_list", 4))
+    (detect
+       [ tool_call "keeper_tasks_list"
+       ; tool_call "keeper_tasks_list"
+       ; tool_call "keeper_tasks_list"
+       ; tool_call "keeper_tasks_list"
+       ])
+
+(* task-1204 / #26057 — post-fix verification at the seeding seam. The
+   pre-fix shape above is preserved as the boundary test: without seeding,
+   run 2 starts from an empty accumulator. The fix seeds the accumulator
+   from the checkpoint's message history ([Keeper_run_tools_setup]), so the
+   pairs the previous run executed are what run 2's detector folds over.
+   This exercises the real production function on real [Agent_core.Types]
+   messages — not a hand-built list — so it fails before the fix lands and
+   passes after. *)
+let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
+  let open Agent_core.Types in
+  let message role content = { role; content; name = None; tool_call_id = None; metadata = [] } in
+  let tool_use id name input =
+    ToolUse { id; name; input = `Assoc [ ("argv", `List [ `String input ]) ] }
+  in
+  let tool_result id output =
+    ToolResult
+      { tool_use_id = id
+      ; content = output
+      ; outcome = Tool_succeeded
+      ; json = None
+      ; content_blocks = None
+      }
+  in
+  (* Prior run: two identical keeper_tasks_list calls, oldest first, each
+     answered by its ToolResult. *)
+  let prior_run_history =
+    [ message Assistant [ tool_use "u1" "keeper_tasks_list" "list" ]
+    ; message User [ tool_result "u1" "{\"ok\":true}" ]
+    ; message Assistant [ tool_use "u2" "keeper_tasks_list" "list" ]
+    ; message User [ tool_result "u2" "{\"ok\":true}" ]
+    ]
+  in
+  let seed =
+    Masc.Keeper_run_tools_setup.seed_tool_calls_from_history
+      ~history_messages:prior_run_history
+  in
+  (* Newest first, matching the live accumulator's order. *)
+  check int "seed keeps both prior-run calls" 2 (List.length seed);
+  check bool "seed is newest-first" true
+    (match seed with
+     | first :: _ -> String.equal first.Masc.Keeper_agent_result.tool_name "keeper_tasks_list"
+     | [] -> false);
+  (* The fingerprinted seed must be byte-identical to what the live hook
+     records, or the detector would not match them. *)
+  List.iter
+    (fun (detail : Masc.Keeper_agent_result.tool_call_detail) ->
+       let live =
+         Masc.Keeper_tool_progress_identity.digest_tool_io
+           ~tool_name:detail.tool_name
+           ~input:(`Assoc [ ("argv", `List [ `String "list" ]) ])
+           ~output_text:"{\"ok\":true}"
+       in
+       match live with
+       | Some { Masc.Keeper_tool_progress_identity.input_fingerprint; output_fingerprint } ->
+         check string "seed input fingerprint matches live digest"
+           input_fingerprint
+           (Option.value ~default:"" detail.input_fingerprint);
+         check string "seed output fingerprint matches live digest"
+           output_fingerprint
+           (Option.value ~default:"" detail.output_fingerprint)
+       | None -> fail "digest_tool_io refused the fixture input")
+    seed;
+  (* Unmatched ToolUse (a yield interrupted before the result) must not
+     seed: it has no output fingerprint, so it could never match a live
+     call and would only pad the count. *)
+  let unmatched_history =
+    [ message Assistant [ tool_use "u9" "keeper_tasks_list" "list" ] ]
+  in
+  check int "unanswered tool use does not seed" 0
+    (List.length
+       (Masc.Keeper_run_tools_setup.seed_tool_calls_from_history
+          ~history_messages:unmatched_history));
+  (* The wiring seam: production acc creation goes through
+     [initial_tool_calls], so this is what run 2's detector actually folds
+     over after a checkpoint restart with [prior_run_history] persisted. *)
+  let run_2_starts_from =
+    Masc.Keeper_run_tools_setup.initial_tool_calls ~history_messages:prior_run_history
+  in
+  (* Run 2 then executes the same two identical calls live. Build them with
+     the production digest so their fingerprints are byte-identical to the
+     seed's. *)
+  let live_call () =
+    match
+      Masc.Keeper_tool_progress_identity.digest_tool_io
+        ~tool_name:"keeper_tasks_list"
+        ~input:(`Assoc [ ("argv", `List [ `String "list" ]) ])
+        ~output_text:"{\"ok\":true}"
+    with
+    | Some { Masc.Keeper_tool_progress_identity.input_fingerprint; output_fingerprint } ->
+      { Masc.Keeper_agent_result.tool_name = "keeper_tasks_list"
+      ; provider = "run2"
+      ; execution_outcome = Tool_result.Ok
+      ; typed_outcome = None
+      ; latency_ms = 1.
+      ; task_id = None
+      ; route_evidence = None
+      ; input_fingerprint = Some input_fingerprint
+      ; output_fingerprint = Some output_fingerprint
+      }
+    | None -> fail "digest_tool_io refused the fixture input"
+  in
+  let detect =
+    Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
+  in
+  (* Newest first: run 2's two calls sit in front of the seeded pair. With
+     the seed, the fold sees four identical calls and fires -- without it
+     (the pre-fix empty accumulator) it saw only run 2's two and stayed
+     silent. That difference is the whole fix. *)
+  let run_2_view = live_call () :: live_call () :: run_2_starts_from in
+  check (option (pair string int))
+    "resumed run is caught when it repeats the prior run's exact calls"
+    (Some ("keeper_tasks_list", 4))
+    (detect run_2_view);
+  (* Control below threshold: one live call over one seeded pair is only
+     two -- a legitimate retry, not a loop. *)
+  check (option (pair string int))
+    "single retry after restart stays silent" None
+    (detect [ live_call (); List.hd run_2_starts_from ])
+
 let test_repeated_assistant_text_boundary () =
   let detect =
     Masc.Keeper_agent_run.For_testing.repeated_assistant_text ~threshold:3
@@ -1107,6 +1261,10 @@ let () =
             test_applied_gate_replay_seeds_terminal_settlement;
           test_case "repeated exact tool call boundary" `Quick
             test_repeated_exact_tool_call_boundary;
+          test_case "repeated exact tool call reset across checkpoint restart" `Quick
+            test_repeated_exact_tool_call_reset_across_checkpoint_restart;
+          test_case "repeated exact tool call seeded from checkpoint history" `Quick
+            test_repeated_exact_tool_call_seeded_from_checkpoint_history;
           test_case "repeated tool input boundary" `Quick
             test_repeated_tool_call_input_boundary;
           test_case "repeated assistant text boundary" `Quick

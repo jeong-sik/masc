@@ -2065,7 +2065,7 @@ let append_user_history_once ~submitted_at state
   in
   if not already_present then
     append_chat_history ~at:submitted_at ~submitted_at state request
-      (Message_user (Sent_by_operator "you"))
+      (Message_user (Sent_by_operator { surface = None }))
       request.message
 
 let enqueue_dispatch_ack mailbox make_message =
@@ -5378,11 +5378,13 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         in
         let author =
           match speaker with
+          (* The operator's own name is never in doubt, but the door is: this
+             row draws no arrival siding, so the surface is the only thing
+             saying a line came in from a connector. Handed over apart, the
+             column keeps it whenever it fits and drops it whole when it does
+             not -- joined, the row kept neither. *)
           | Keeper_chat_history.Operator ->
-              (* "you", or "you · <surface>": short enough that the column
-                 holds both, so it is joined here as it always was. *)
-              Sent_by_operator
-                (Keeper_chat_history.addressed_label speaker surface)
+              Sent_by_operator { surface = arrived_by }
           | Keeper_chat_history.Named _
           | Keeper_chat_history.Unresolved _ ->
               Sent_by_other { speaker = name; surface = arrived_by }

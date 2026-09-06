@@ -8664,12 +8664,20 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
     | Message_user (Sent_by_other { speaker; surface }) ->
         Message_layout.fit_speaker ~column:role_label_column ~speaker ~surface
           ()
-    | Message_user (Sent_by_operator label) ->
+    | Message_user (Sent_by_operator { surface }) ->
         (* Pending input is not a transcript row. Once it enters a turn this
            label can say YOU without a second queue lookup or a transient
-           QUEUED identity that later changes underneath it. *)
-        if String.equal label "you" then "YOU"
-        else label
+           QUEUED identity that later changes underneath it.
+
+           Fitted the same way as the arm above, because the pair is measured
+           against the same column: the surface joins the badge when both fit
+           and goes when they do not. It used to be joined before it got here
+           and the badge asked whether the whole string was still "you", which
+           only a row from the dashboard ever was -- so a line the operator
+           wrote through a connector was cut as one string and drew
+           "yo…dcast". *)
+        Message_layout.fit_speaker ~column:role_label_column ~speaker:"YOU"
+          ~surface ()
     | Message_keeper -> Keeper_chat.terminal_safe_text message.me_keeper_name
     | Message_autonomous -> Keeper_chat.terminal_safe_text message.me_keeper_name
     | Message_status -> "STATUS"

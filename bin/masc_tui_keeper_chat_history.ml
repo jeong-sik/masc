@@ -223,10 +223,9 @@ let float_field fields name =
    and [1356818756755525815] are the same string for the first eleven digits.
    Cutting the head is what tells them apart.
 
-   {!Masc_tui_message_layout.fit_middle} cuts the label again at the speaker
-   column, keeping a third of the head and two thirds of the tail. The tail
-   there is whatever the label ends with, which for {!addressed_label} is the
-   surface rather than the speaker. *)
+   Cutting it here is safe because the surface half is now weighed whole:
+   {!Masc_tui_message_layout.fit_speaker} keeps the pair or keeps the speaker,
+   so what this shortens is either drawn as it is or not drawn. *)
 let channel_reference_cells = 8
 
 let short_channel reference =
@@ -242,10 +241,8 @@ let connector_label name channel =
   (* A room name is left whole. The label is fitted to the speaker column
      further down, and cutting again here would only cut it shorter. *)
   | Some (Surface.Channel_name room) -> Some (name ^ " #" ^ String.trim room)
-  (* An id is cut here as well, so the label reaching the column already has
-     an ellipsis in it and the column's own cut adds a second. What a label
-     should keep when it does not fit -- the speaker or the surface -- is
-     #33699. *)
+  (* An id is shortened here so that the pair has a chance of fitting at all;
+     see the note above on why one cut is all it gets. *)
   | Some (Surface.Channel_id reference) ->
       Some (name ^ " " ^ short_channel (String.trim reference))
 
@@ -319,12 +316,6 @@ let addressed_label_parts speaker surface =
     | Unresolved { id = None } -> "someone"
   in
   (name, Option.bind surface surface_label)
-;;
-
-let addressed_label speaker surface =
-  match addressed_label_parts speaker surface with
-  | name, None -> name
-  | name, Some surface -> name ^ " \xc2\xb7 " ^ surface
 ;;
 
 (* What one server row is, before consecutive tool rows are folded. Parsed once

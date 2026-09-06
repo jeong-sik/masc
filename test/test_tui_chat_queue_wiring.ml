@@ -156,7 +156,7 @@ let test_oldest_at_reports_the_cursor () =
 ;;
 
 let test_visible_clock_stays_monotonic_inside_one_causal_turn () =
-  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
   let loaded =
     [ chat_entry ~operation_seq:0 ~request_id:"turn-d" ~role:user ~text:"D"
         ~at:100. ()
@@ -192,7 +192,7 @@ let test_visible_clock_stays_monotonic_inside_one_causal_turn () =
 ;;
 
 let test_same_request_exact_clock_normalizes_the_turn_sequence () =
-  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
   let rows =
     Tui_types.chat_timeline
       ~loaded:
@@ -252,7 +252,7 @@ let test_absolute_turn_sequence_breaks_equal_clock_ties () =
 ;;
 
 let test_journal_interleaves_request_and_reply_by_displayed_time () =
-  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
   let rows =
     Tui_types.chat_timeline
       ~loaded:
@@ -307,7 +307,7 @@ let test_scroll_anchor_distinguishes_duplicate_text_in_one_turn () =
 ;;
 
 let test_scroll_anchor_survives_session_user_persistence () =
-  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
   let session =
     chat_entry ~operation_seq:0 ~request_id:"same-turn" ~role:user
       ~text:"submitted locally" ~at:10. ()
@@ -347,7 +347,7 @@ let test_running_turn_does_not_escape_the_displayed_time_axis () =
   in
   let session =
     [ chat_entry ~turn_sequence:10 ~request_id:"running-10"
-        ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you"))
+        ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }))
         ~text:"running at 100" ~at:100. () ]
   in
   let rows =
@@ -360,7 +360,7 @@ let test_running_turn_does_not_escape_the_displayed_time_axis () =
 ;;
 
 let test_uncommitted_live_turn_inserts_on_the_visible_clock_axis () =
-  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
   let messages =
     [ chat_entry ~request_id:"skewed" ~role:user ~text:"input at 100" ~at:100.
         ()
@@ -383,7 +383,7 @@ let test_uncommitted_live_turn_inserts_on_the_visible_clock_axis () =
 ;;
 
 let test_live_turn_uses_its_latest_committed_causal_frontier () =
-  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
   let messages =
     [ chat_entry ~request_id:"running" ~role:user ~text:"input" ~at:100. ()
     ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory ~text:"journal"
@@ -404,7 +404,7 @@ let test_live_turn_uses_its_latest_committed_causal_frontier () =
 ;;
 
 let test_live_turn_follows_an_unknown_same_request_row () =
-  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
   let rows =
     Tui_types.chat_timeline
       ~loaded:
@@ -430,7 +430,7 @@ let test_live_turn_follows_an_unknown_same_request_row () =
 ;;
 
 let test_hidden_phase_keeps_its_timeline_projection () =
-  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
   let rows =
     Tui_types.chat_timeline
       ~loaded:
@@ -471,7 +471,7 @@ let test_hidden_phase_keeps_its_timeline_projection () =
 ;;
 
 let test_unknown_phase_clock_inherits_the_causal_frontier () =
-  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
   let rows =
     [ chat_entry ~operation_seq:0 ~request_id:"legacy" ~role:user ~text:"input"
         ~at:100. ()
@@ -535,7 +535,7 @@ let test_producer_append_keeps_a_structural_scroll_pin () =
 
   let moved_turn =
     chat_entry ~turn_sequence:20 ~operation_seq:0 ~request_id:"turn-20"
-      ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you"))
+      ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }))
       ~text:"late-arriving input" ~at:50. ()
   in
   let moved =
@@ -945,7 +945,7 @@ let settled_log ~request_id deltas =
 
 let loaded_turn ~request_id =
   [ chat_entry ~request_id
-      ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you"))
+      ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }))
       ~text:"asked" ~at:100. ()
   ; chat_entry ~request_id ~role:Tui_types.Message_thinking
       ~text:"2 reasoning steps, content withheld" ~at:101. ()
@@ -1168,8 +1168,8 @@ let test_the_scroll_pin_remembers_the_settled_logs_on_screen () =
    turns that ran in between, not below both. The live block still follows
    every committed row of its request. *)
 let test_a_settled_block_sits_before_its_requests_output_rows () =
-  let user_b = chat_entry ~request_id:"B" ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you")) ~text:"uB" ~at:20. () in
-  let user_a = chat_entry ~request_id:"A" ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you")) ~text:"uA" ~at:30. () in
+  let user_b = chat_entry ~request_id:"B" ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None })) ~text:"uB" ~at:20. () in
+  let user_a = chat_entry ~request_id:"A" ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None })) ~text:"uA" ~at:30. () in
   let err_b = chat_entry ~request_id:"B" ~role:Tui_types.Message_error ~text:"errB" ~at:50. () in
   let positioned = [ (user_b, Some 20.); (user_a, Some 30.); (err_b, Some 50.) ] in
   check int "settled B goes after uB, before uA and errB" 1
@@ -1371,7 +1371,7 @@ let test_promoted_queue_request_owns_a_typed_slot_outside_transcript () =
   state.msg_target_keeper_name <- Some "alpha";
   state.msg_history <-
     [ chat_entry ~request_id:request.request_id
-        ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you"))
+        ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }))
         ~text:"queued input" ~at:42.0 () ];
   state.msg_inflight <-
     [ { Tui_types.sent_request = request

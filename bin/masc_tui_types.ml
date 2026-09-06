@@ -122,9 +122,13 @@ type log_entry = Tui_decode.log_entry
     Each arm carries the label to draw. The label is a rendering of the fact;
     the constructor is the fact. *)
 type message_author =
-  | Sent_by_operator of string
-      (** The person reading this pane. ["you"], or ["you \xc2\xb7 <surface>"]
-          where the line came in from somewhere other than the dashboard. *)
+  | Sent_by_operator of { surface : string option }
+      (** The person reading this pane, and the door they came in by when it
+          was not the dashboard -- an operator can write to a keeper from a
+          connector. Apart for the same reason as the arm below, and it was
+          joined here while that one was split: at a ten-cell column
+          ["you \xc2\xb7 broadcast"] was cut to ["yo\xe2\x80\xa6dcast"],
+          losing the speaker to keep the tail of the surface. *)
   | Sent_by_other of
       { speaker : string
       ; surface : string option

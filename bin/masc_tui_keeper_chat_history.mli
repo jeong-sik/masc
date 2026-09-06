@@ -219,13 +219,6 @@ val addressed_label_parts : speaker -> Surface.t option -> string * string optio
     cannot hold both, and cutting them as one string keeps the surface and
     loses the name; whoever knows the column decides which to draw. *)
 
-val addressed_label : speaker -> Surface.t option -> string
-(** The name to draw beside an {!Addressed_to_keeper} row. An unnamed operator
-    row is ["you"], the way it always read. A named author is drawn, and a
-    surface that is not an operator's own is appended — ["<keeper> · agent"],
-    ["<operator> · slack"] — so a fleet broadcast and a direct message do not
-    look alike. *)
-
 (** One page of rows older than a cursor, from
     [GET /keepers/<name>/chat/history/page?before=<ts>].
 

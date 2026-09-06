@@ -273,12 +273,14 @@ let release_flock_fd fd =
       (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
       Unix.close fd)
 
-let rec lock_cross_context_cooperatively mutex =
+let rec lock_cross_context_cooperatively ?(spins = 0) mutex =
   if Stdlib.Mutex.try_lock mutex
   then ()
   else (
+    if spins > 0 && spins mod 200000 = 0
+    then Printf.printf "DIAG14 cross-context-spin=%d\n%!" spins;
     Eio.Fiber.yield ();
-    lock_cross_context_cooperatively mutex)
+    lock_cross_context_cooperatively ~spins:(spins + 1) mutex)
 
 let with_entry_lock entry f =
   match Eio_guard.execution_context () with

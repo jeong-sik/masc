@@ -260,9 +260,12 @@ let validate_keeper_name keeper_name =
   else Error (Printf.sprintf "invalid keeper name: %S" keeper_name)
 
 let with_manifest_lock_using observe path f =
+  Printf.printf "DIAG14 manifest-lock-enter %s\n%!" path;
   Fs_compat.mkdir_p (Filename.dirname path);
   let lock_path = path ^ ".lock" in
-  match observe ~lock_path f with
+  let r = observe ~lock_path f in
+  Printf.printf "DIAG14 manifest-lock-exit\n%!";
+  match r with
   | File_lock_eio.Lock_not_acquired error ->
     Error (File_lock_eio.durable_lock_error_to_string error)
   | File_lock_eio.Body_completed { value; release_error = None } ->

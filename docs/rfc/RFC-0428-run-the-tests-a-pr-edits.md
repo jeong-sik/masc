@@ -176,7 +176,19 @@ runtest 를 지원해야 한다.
    | `test_hitl_summary_worker` | 46건 중 **1건 실패** |
    | `test_keeper_owner` | 전부 통과 |
 
-   앞의 둘은 `test/ci-known-failures.txt` 에 없다. 그리고 `test_heartbeat_integration` 의 6건은 **한 가족으로 보인다** — 둘은 `start_keepalive` 가 `lane fork failed: Invalid_argument("Switch finished!")` 로 거절하고, 나머지 넷은 "키퍼가 다시 떴는가"를 묻는 단언이다. 하나가 풀리면 여섯이 같이 풀릴 수 있다 (#33200).
+   앞의 둘은 `test/ci-known-failures.txt` 에 없다.
+
+   **그리고 이 표본이 야간 멈춤의 원인을 찾아냈다.** `test_heartbeat_integration` 의 6건은 한 가족이었고, 실제로는 결함 둘의 그림자였다.
+
+   | | 결과 | 시간 |
+   |---|---|---|
+   | main | 6건 실패 | 2초 |
+   | `+#33571` 죽은 root switch | 3건 닫힘, 하나가 멈춤 | 600초 TIMEOUT |
+   | `+#33571 +#33564` clock | **2건 실패** | **1.4초** |
+
+   `Eio_context.get_root_switch_opt` 이 끝난 스위치를 돌려주고 있었고, 그래서 레인이 아예 안 떴다. 그걸 치우자 레인이 뜨고 멈춤이 드러났다 — 턴이 `Eio clock not initialized` 로 죽고 fiber 가 unresolved 로 끝나는, 야간 로그와 **글자 그대로 같은** 자리다.
+
+   이건 RFC 의 논지를 그대로 보여준다. 이 두 결함은 **타입 체크가 볼 수 없다.** 그리고 야간 레인은 90분을 쓰고도 이름을 못 댔다. 스위트 하나를 2초에 돌린 것이 댔다.
 
    전수는 아직이다. 다만 **개수를 못 얻는 상태는 아니게 됐다.**
 3. **게이트.** 빨간 스위트를 닫거나 명시적으로 waiver 를 적은 뒤 required 로 올린다.

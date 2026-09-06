@@ -12949,6 +12949,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
            one pair without saying so would undercount the change. *)
         [ turn; "  replace_all: every occurrence changed; the log holds the text once" ]
     | Masc.Tui_decode.Fc_edited { replace_all = false; _ }
+    | Masc.Tui_decode.Fc_inserted _
     | Masc.Tui_decode.Fc_written _ -> [ turn ]
   in
   let notes =
@@ -14925,6 +14926,7 @@ let render_code (state : state) =
                  let kind =
                    match change.fc_kind with
                    | Fc_edited _ -> "EDIT"
+                   | Fc_inserted _ -> "MEMO"
                    | Fc_written _ -> "WRITE"
                  in
                  let result_style, result =

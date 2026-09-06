@@ -271,8 +271,9 @@ let memo_line_refusal_to_string = function
    the tool that writes the line and the projection that records the call
    spell it the same way. *)
 let memo_line ~path (memo : Ide_memo.t) =
-  match language_of_path path with
-  | None -> Error (Extension_unknown (String.lowercase_ascii (Filename.extension path)))
+  let extension = String.lowercase_ascii (Filename.extension path) in
+  match language_of_extension extension with
+  | None -> Error (Extension_unknown extension)
   | Some language ->
     (match memo_markers_of_language language with
      | None -> Error (No_comment_syntax language)

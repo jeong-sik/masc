@@ -474,7 +474,7 @@ let test_keeper_rows_say_what_the_keeper_did () =
     "\xe2\x96\xa0 largo turn settled | turn 2086 \xc2\xb7 in 73877 out 358 \xc2\xb7 $0.0258 \xc2\xb7 0 calls"
     (text (Acting.row_of_event ~at:100. ~duration_ms:None (settled "largo")));
   check string "a heartbeat in a turn says how long it has been in it"
-    "\xc2\xb7 bandleader heartbeat | turn_running \xc2\xb7 in turn for 36m29s"
+    "  bandleader heartbeat | turn_running \xc2\xb7 in turn for 36m29s"
     (text (Acting.row_of_event ~at:100. ~duration_ms:None (heartbeat "bandleader")))
 
 let test_agent_terminal_rows_keep_success_and_failure_distinct () =

@@ -2480,6 +2480,12 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
         await_lane_swap_fence ())
        with exn ->
          Printf.printf "DIAG14 fence-raised=%s\n%!" (Printexc.to_string exn);
+         (* The parked Librarian unit is released only on the happy path below,
+            so anything raising before that line leaves it parked and the
+            enclosing switch has to cancel it during teardown. Release it on
+            the way out and see whether teardown then finishes. *)
+         ignore (Eio.Promise.try_resolve resolve_release_librarian () : bool);
+         Printf.printf "DIAG14 released-on-failure\n%!";
          raise exn);
       Printf.printf "DIAG14 after-fence\n%!";
       Eio.Switch.fail update_sw Cancel_keeper_up_after_metadata;

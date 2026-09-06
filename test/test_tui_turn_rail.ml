@@ -86,6 +86,20 @@ let test_the_rail_costs_the_same_whatever_it_draws () =
     (List.length (List.sort_uniq Int.compare widths))
 ;;
 
+(* The budget is charged to the margin before any row exists, so the gutter
+   must spend exactly what it cost. One cell short and the renderer, which
+   trusts [gutter_rail_cells], colours the clock's first digit as rail; one
+   long and every body sits a column right of what the width was taken
+   from. *)
+let test_the_gutter_spends_the_budgeted_cells () =
+  List.iter
+    (fun rail ->
+      check int "the gutter is exactly the rail's budget"
+        Layout.turn_rail_cells
+        (Layout.display_width (Layout.turn_rail_gutter rail)))
+    every_rail
+;;
+
 (* One row is not a hierarchy. Marking it would put a rail on nearly every row
    of an ordinary conversation, which is where a reader stops seeing it. *)
 let test_a_turn_of_one_row_draws_nothing () =
@@ -287,6 +301,8 @@ let () =
     ; ( "geometry"
       , [ test_case "the rail costs the same whatever it draws" `Quick
             test_the_rail_costs_the_same_whatever_it_draws
+        ; test_case "the gutter spends the budgeted cells" `Quick
+            test_the_gutter_spends_the_budgeted_cells
         ; test_case "the rail boundary is inside the label offset" `Quick
             test_the_rail_boundary_is_inside_the_label_offset
         ; test_case "a pane too narrow drops the rail, not the name" `Quick

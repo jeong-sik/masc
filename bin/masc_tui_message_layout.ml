@@ -762,7 +762,10 @@ let turn_rail_cells = siding_lead_cells + 2
 (* The whole margin for one row, siding run included. Callers concatenate
    this rather than the glyph: a row that drew the glyph and padded the rest
    itself would put the line in a different column on the rows that have a
-   siding. *)
+   siding. The trailing cell is the one {!turn_rail_cells} budgets to keep
+   it off the clock, so the drawn gutter is exactly as wide as the cells it
+   is charged; a renderer that advances by what it drew would otherwise put
+   the clock and the speaker mark one column into the rail. *)
 let turn_rail_gutter (piece : turn_rail) =
   let lead =
     match piece with
@@ -770,7 +773,7 @@ let turn_rail_gutter (piece : turn_rail) =
     | Rail_opens | Rail_says | Rail_does | Rail_closes | Rail_none ->
         String.make siding_lead_cells ' '
   in
-  lead ^ turn_rail_glyph piece ^ ""
+  lead ^ turn_rail_glyph piece ^ " "
 
 (* Cells the speaker mark and its separator occupy at the head of a label, or
    zero when the column was too narrow to keep the mark at all. One reader, so

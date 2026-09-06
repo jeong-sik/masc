@@ -235,8 +235,21 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
       mcp_session_id = ctx.mcp_session_id;
     }
   in
-  match name with
-  | "masc_operator_snapshot" ->
+  let module O = Tool_name.Operator_name in
+  (* Routing is decided on the closed Operator vocabulary; the string arms below
+     are reached only for names outside it. A constructor added to
+     Tool_name.Operator_name is a compile error in [operator_name_arm]. *)
+  let operator_name_arm = function
+    | O.Operator_snapshot -> `Snapshot
+    | O.Operator_digest -> `Digest
+    | O.Operator_action -> `Action
+    | O.Operator_board_attention_quarantine_requeue -> `Quarantine_requeue
+    | O.Operator_task_recovery_resolve -> `Task_recovery
+    | O.Operator_confirm -> `Confirm
+    | O.Operator_judgment_write -> `Judgment_write
+  in
+  match Option.map operator_name_arm (O.of_string name) with
+  | Some `Snapshot ->
       (* The tool is the observation half of operator CAS commands. Dashboard
          refreshes may use the cache, but an explicit operator observation must
          not return a stale assignee/backlog version. *)
@@ -249,7 +262,7 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
         (json_ok ~tool_name:name ~start_time:start
            (Operator_control.snapshot_json ?actor ?view ~include_messages
               ~include_keepers control_ctx))
-  | "masc_operator_digest" ->
+  | Some `Digest ->
       let actor = get_string_opt args "actor" in
       let target_type = get_string_opt args "target_type" in
       let target_id = get_string_opt args "target_id" in
@@ -258,29 +271,28 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.digest_json ?actor ?target_type ?target_id
               ~include_workers control_ctx))
-  | "masc_operator_action" ->
+  | Some `Action ->
       Some
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.action_json control_ctx args))
-  | tool_name
-    when String.equal tool_name board_attention_quarantine_requeue_tool_name ->
+  | Some `Quarantine_requeue ->
       Some
         (board_attention_quarantine_requeue_result
-           ~tool_name
+           ~tool_name:name
            ~start_time:start
            ctx
            args)
-  | tool_name when String.equal tool_name task_recovery_tool_name ->
-      Some (task_recovery_result ~tool_name ~start_time:start ctx args)
-  | "masc_operator_confirm" ->
+  | Some `Task_recovery ->
+      Some (task_recovery_result ~tool_name:name ~start_time:start ctx args)
+  | Some `Confirm ->
       Some
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.confirm_json control_ctx args))
-  | "masc_operator_judgment_write" ->
+  | Some `Judgment_write ->
       Some
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.judgment_write_json control_ctx args))
-  | _ ->
+  | None ->
       Log.Misc.warn "operator_dispatch_unknown: tool=%s agent=%s" name ctx.agent_name;
       None
 

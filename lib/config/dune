@@ -7,6 +7,7 @@
   config_boot_overrides
   env_config
   env_config_core
+  env_setting
   env_config_runtime_services
   env_config_keeper
   env_config_memory
@@ -28,6 +29,8 @@
   nickname_words
   playground_paths)
  (wrapped false)
+ (preprocess
+  (pps ppx_enumerate))
  ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on. + unused-value ratchet (warning 32)
  ; Closed-variant fragile sites fixed in this PR: the two Shell_timeout.bucket
  ; matches in env_config_sandbox.ml (now routed through

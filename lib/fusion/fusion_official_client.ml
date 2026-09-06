@@ -172,7 +172,7 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema 
     | None -> Error (provider_error ~runtime_id "runtime is not configured")
   in
   let* env, clock = eio_context ~runtime_id in
-  let mgr = Eio.Stdenv.process_mgr env in
+  let mgr = Posix_spawn_process_mgr.mgr in
   let cwd = Eio.Path.(Eio.Stdenv.fs env / base_dir) in
   match execution with
   | Runtime_execution.Agent_core _ ->

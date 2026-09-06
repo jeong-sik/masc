@@ -5372,11 +5372,9 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     | Keeper_chat_history.Said_by_keeper ->
         (Message_keeper, Turn_output, row.text, None, None)
     | Keeper_chat_history.Autonomous_reply ->
-        ( Message_autonomous
-        , Turn_output
-        , (if String.trim row.text = "" then "\xc2\xb7" else row.text)
-        , None
-        , None )
+        (* The decoder no longer emits a blank autonomous reply, so there is
+           nothing here to stand in for. *)
+        (Message_autonomous, Turn_output, row.text, None, None)
     | Keeper_chat_history.Delivery_failed { recovered_at; _ } ->
         let text, recovered =
           match
@@ -13750,6 +13748,22 @@ and is loaded on demand through keeper_skill.
                handle_acting_pane_click state ~base_path ~mailbox:async_messages
                  ~line
            | Pane_miss -> ())
+       (* A press on a folded Gate row opens what the fold is holding. The
+          fold lives on the tool-detail axis, so this sets the state Ctrl-D
+          sets rather than a second one: two ways in, one thing opened. Only
+          folded rows carry the action, so a press on an open row is not a
+          press that quietly did nothing -- there was nothing to open. *)
+       | Some (Mouse_left_press (row, _column))
+         when state.view = Keepers Keeper_message
+              && (not dismissed_image) && (not compact_viewport)
+              && (not state.help_open)
+              && (not state.agenda_open)
+              && (not state.palette_open)
+              && (not state.context_inspector_open)
+              && Option.is_none state.search
+              && Masc_tui_render.chat_row_action_at ~row
+                 = Masc_tui_message_layout.Action_unfold_argument ->
+           state.msg_tool_visibility <- Tools_full
        (* A left press on the Lanes overview moves the row cursor (and opens
           the row it already named). The modals above the surface -- help,
           agenda, palette, search -- keep the press from reaching rows they

@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { signal } from '@preact/signals'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { waitFor } from '@testing-library/preact'
 
 const RETIRED_BRIGHT_GREEN = '#4ade80'
 
@@ -189,10 +190,11 @@ describe('HarnessHealth', () => {
     expect(container.textContent).toContain('transition-done')
     expect(get).toHaveBeenCalledTimes(1)
 
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    await flushUi()
-
-    expect(get).toHaveBeenCalledTimes(2)
+    // The reload is debounced 700ms (HARNESS_RELOAD_DEBOUNCE_MS). Sleeping
+    // past it and then asserting bets the timer is never late; under a
+    // parallel suite run it is. Waiting for the call returns as soon as it
+    // lands and tolerates a timer that fires behind schedule.
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2), { timeout: 5000 })
   })
 
   it('derives a status-aware mermaid graph from harness data', async () => {

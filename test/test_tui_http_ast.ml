@@ -1612,37 +1612,46 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"board_read_pane" ~callees:[]
        ~fields:[ "normalized_scroll"; "body_offset"; "comment_offset" ]);
-  check int "resize invalidation and Force request share one boundary" 1
+  (* Two doors notice a resize and they learn of it differently: SIGWINCH
+     knows only that the size changed, the loop's own ioctl already read the
+     new one and must keep it for the frame it is about to draw. What a
+     resize costs is the same either way, and lives in one place. *)
+  check int "the cost of a resize is invalidating the presenter" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"invalidate_frame_for_resize"
+       ~binding_name:"discard_frame_for_new_size"
        ~callee:"Frame_presenter.invalidate");
-  check int "resize boundary owns terminal-size cache invalidation" 1
+  check int "and requesting one frame" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"discard_frame_for_new_size"
+       ~callee:"Render_schedule.request");
+  check int "whose reason is exactly Force" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_constructor_in_value_binding
+       ~module_path:main_path ~binding_name:"discard_frame_for_new_size"
+       ~callee:"Render_schedule.request" ~position:1
+       ~constructor:"Render_schedule.Force");
+  check int "the SIGWINCH door drops the size it was not told" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"invalidate_frame_for_resize"
        ~callee:"invalidate_terminal_size");
-  check int "resize boundary requests one forced frame" 1
+  check int "and then pays the same cost" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"invalidate_frame_for_resize"
-       ~callee:"Render_schedule.request");
-  check int "resize request's reason is exactly Force" 1
-    (Ast_grep
-     .count_applications_with_exact_positional_constructor_in_value_binding
-       ~module_path:main_path ~binding_name:"invalidate_frame_for_resize"
-       ~callee:"Render_schedule.request" ~position:1
-       ~constructor:"Render_schedule.Force");
-  (* The contract is that this boundary is the only door, not that main walks
-     through it once. #30255 gave the loop a second reason to distrust the
-     presenter's cached screen -- an image overlay covered the frame and was
-     dismissed -- and a count read that as a regression. What must stay true
-     is that main never reaches past the boundary: the three assertions above
-     pin what happens inside it, and this one pins that nothing else does it.
+       ~callee:"discard_frame_for_new_size");
+  (* The contract is that the cost is paid in one place, not that main walks
+     through it a fixed number of times. #30255 gave the loop a second reason
+     to distrust the presenter's cached screen -- an image overlay covered
+     the frame and was dismissed -- and a count read that as a regression.
 
-     [Frame_presenter.invalidate] appears once in the whole file, inside the
-     boundary, so a caller that invalidated on its own would raise this to 2
-     and fail here. *)
-  check bool "main reaches the presenter only through the resize boundary" true
+     [Frame_presenter.invalidate] appears once in the whole file, inside
+     [discard_frame_for_new_size], so a caller that invalidated on its own
+     would raise this to 2 and fail here. That is how the loop's own ioctl
+     door was found: it had copied both lines rather than calling them. *)
+  check bool "main reaches the presenter only through that cost" true
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"invalidate_frame_for_resize"
+     + Ast_grep.count_calls_in_value_binding ~module_path:main_path
+         ~binding_name:"main" ~callee:"discard_frame_for_new_size"
      >= 1);
   check int "nothing invalidates the presenter outside that boundary" 1
     (Ast_grep.count_calls ~module_path:main_path

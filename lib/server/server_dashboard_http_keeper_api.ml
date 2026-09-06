@@ -939,8 +939,12 @@ let handle_keeper_get_subroutes state req request reqd =
       with
       | Error detail -> respond_error reqd detail
       | Ok window_hours ->
-      let rows = Keeper_tool_call_log.read_window ~keeper_name:name ~window_hours () in
-      let tally = Keeper_tool_call_file_change.classify_all rows in
+      (* Folds what the store gained since the last call rather than reading
+         the window again: this route answered 1.8-8.8s per call on
+         2026-09-06 and was the profile's top allocator. *)
+      let tally =
+        Keeper_tool_call_log.file_change_tally ~keeper_name:name ~window_hours ()
+      in
       let json =
         `Assoc
           [ ("keeper", `String name)

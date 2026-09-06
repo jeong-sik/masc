@@ -144,8 +144,7 @@ let resolve_file_activity_repository ~base_path ~repo_id =
                    repository.id))))
 
 let file_activity_json ~codebase ~repo_id ~file_path ~window_hours =
-  let rows = Keeper_tool_call_log.read_window ~window_hours () in
-  let tally = Keeper_tool_call_file_change.classify_all rows in
+  let tally = Keeper_tool_call_log.file_change_tally ~window_hours () in
   let changes =
     Keeper_tool_call_file_change.for_repo_file
       ~repo_id ~relative_path:file_path tally.changes

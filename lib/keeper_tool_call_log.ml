@@ -1024,6 +1024,95 @@ let ts_of_entry (json : Yojson.Safe.t) : float option =
   | _ -> None
 ;;
 
+(* A trailing-window file-change answer, kept between calls.
+
+   The store is append-only per day file, so what a window gains between two
+   calls is the bytes appended plus files that did not exist yet. Measured
+   2026-09-06 on this workspace: a 24h window is 242MB and the busy hour
+   appends about 15MB, so a caller ten seconds apart needs 0.04MB of it. The
+   endpoint that reads this answered 1.8-8.8s per call and was the top
+   allocator in the profile at 2.62GB of major-direct allocation.
+
+   Held per (keeper, window) because that is what a caller asks for, and the
+   tally is small: the same measurement put every file change in a 24h window
+   across fifteen keepers at 3.4MB, the largest keeper at 0.8MB.
+
+   [Keeper_tool_call_file_change.tally] carries no timestamp on its unreadable
+   rows, so a folded tally cannot drop what aged out of the window. The cache
+   is therefore keyed by the day range it covers: when the range moves, the
+   entry is dropped and refolded. A day range moves once a day; the repeat
+   this exists to remove happens within it. *)
+type file_change_cache_entry =
+  { fcc_since : string
+  ; fcc_until : string
+  ; fcc_cursors : (string * int) list
+  ; fcc_tally : Keeper_tool_call_file_change.tally
+  }
+
+let file_change_cache : (string * float, file_change_cache_entry) Hashtbl.t =
+  Hashtbl.create 16
+;;
+
+let file_change_cache_mu = Stdlib.Mutex.create ()
+
+let reset_file_change_cache_for_testing () =
+  Stdlib.Mutex.protect file_change_cache_mu (fun () -> Hashtbl.reset file_change_cache)
+;;
+
+let file_change_tally ?keeper_name ~(window_hours : float) () =
+  if window_hours <= 0.0
+  then Keeper_tool_call_file_change.empty_tally
+  else (
+    match (Atomic.get store_state).store with
+    | None -> Keeper_tool_call_file_change.empty_tally
+    | Some store ->
+      let now = Time_compat.now () in
+      let since_ts = now -. (window_hours *. Masc_time_constants.hour) in
+      let since = iso_date_of_unix since_ts in
+      let until = iso_date_of_unix now in
+      let key = Option.value keeper_name ~default:"", window_hours in
+      Stdlib.Mutex.protect file_change_cache_mu (fun () ->
+        let carried =
+          match Hashtbl.find_opt file_change_cache key with
+          | Some entry
+            when String.equal entry.fcc_since since
+                 && String.equal entry.fcc_until until -> Some entry
+          | Some _ | None -> None
+        in
+        let cursors, tally =
+          match carried with
+          | Some entry -> entry.fcc_cursors, entry.fcc_tally
+          | None -> [], Keeper_tool_call_file_change.empty_tally
+        in
+        let tally, cursors =
+          Dated_jsonl.fold_range_appended
+            store
+            ~since
+            ~until
+            ~cursors
+            ~init:tally
+            ~f:(fun tally json ->
+              let in_window =
+                match ts_of_entry json with
+                | Some ts -> ts >= since_ts
+                | None -> false
+              in
+              let keeper_ok =
+                match keeper_name with
+                | None -> true
+                | Some name -> keeper_matches name json
+              in
+              if in_window && keeper_ok
+              then Keeper_tool_call_file_change.fold_row tally json
+              else tally)
+        in
+        Hashtbl.replace
+          file_change_cache
+          key
+          { fcc_since = since; fcc_until = until; fcc_cursors = cursors; fcc_tally = tally };
+        Keeper_tool_call_file_change.seal_tally tally))
+;;
+
 let read_window ?keeper_name ~(window_hours : float) () : Yojson.Safe.t list =
   if window_hours <= 0.0
   then []

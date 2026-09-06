@@ -250,6 +250,62 @@ let test_read_window_keeps_the_keepers_rows_in_order () =
       (List.length (Keeper_tool_call_log.read_window ~window_hours:0.0 ())))
 ;;
 
+(* ── file_change_tally carries its answer ─────────────── *)
+
+(* The tally is folded from what the store gained since the last call. Two
+   things have to hold for that to be safe: the answer must equal what a whole
+   read produces, and a row appended between calls must appear. The counts are
+   what this checks — a keeper's rows are not file changes in this fixture, so
+   [rows_counted] is where they land, and it is the field the endpoint reports
+   as "of m calls". *)
+let test_file_change_tally_matches_a_whole_read () =
+  with_tmp_log (fun () ->
+    let module Change = Keeper_tool_call_file_change in
+    let log keeper tool =
+      Keeper_tool_call_log.log_call
+        ~keeper_name:keeper ~tool_name:tool
+        ~input:(`Assoc []) ~output_text:"out"
+        ~success:true ~duration_ms:1.0 ()
+    in
+    log "alice" "first";
+    log "bob" "other";
+    log "alice" "second";
+    let whole_read keeper =
+      Change.classify_all
+        (Keeper_tool_call_log.read_window ~keeper_name:keeper ~window_hours:1.0 ())
+    in
+    let carried = Keeper_tool_call_log.file_change_tally ~keeper_name:"alice" ~window_hours:1.0 () in
+    Alcotest.(check int)
+      "a first fold equals a whole read"
+      (Change.rows_counted (whole_read "alice"))
+      (Change.rows_counted carried);
+    Alcotest.(check int) "and it saw alice's two rows" 2 (Change.rows_counted carried);
+    (* Called again with nothing appended, the carried tally must not double. *)
+    let again = Keeper_tool_call_log.file_change_tally ~keeper_name:"alice" ~window_hours:1.0 () in
+    Alcotest.(check int) "a repeat call does not re-count" 2 (Change.rows_counted again);
+    log "alice" "third";
+    let after = Keeper_tool_call_log.file_change_tally ~keeper_name:"alice" ~window_hours:1.0 () in
+    Alcotest.(check int) "a row appended between calls appears" 3 (Change.rows_counted after);
+    Alcotest.(check int)
+      "and still equals a whole read"
+      (Change.rows_counted (whole_read "alice"))
+      (Change.rows_counted after);
+    (* A different keeper and an unfiltered read are separate carried answers. *)
+    Alcotest.(check int)
+      "bob's own answer"
+      1
+      (Change.rows_counted
+         (Keeper_tool_call_log.file_change_tally ~keeper_name:"bob" ~window_hours:1.0 ()));
+    Alcotest.(check int)
+      "no keeper filter sees every row"
+      4
+      (Change.rows_counted (Keeper_tool_call_log.file_change_tally ~window_hours:1.0 ()));
+    Alcotest.(check int)
+      "a non-positive window is empty"
+      0
+      (Change.rows_counted (Keeper_tool_call_log.file_change_tally ~window_hours:0.0 ())))
+;;
+
 (* ── read_recent edge cases ─────────────────────────── *)
 
 let test_read_recent_n_zero () =
@@ -1960,6 +2016,10 @@ let () =
             "cancelled invocation releases file evidence"
             `Quick
             test_abandoned_file_change_evidence_is_released_with_invocation
+        ] )
+    ; ( "file_change_tally",
+        [ eio_test "matches a whole read and sees appends"
+            test_file_change_tally_matches_a_whole_read
         ] )
     ; ( "read_window",
         [ eio_test "keeps the keeper's rows in order"

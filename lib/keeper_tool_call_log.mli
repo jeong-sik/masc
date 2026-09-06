@@ -309,6 +309,28 @@ val filter_rows_for_keeper :
     ["keeper"] field equals [keeper_name], order preserved, truncated to
     the last [n]. *)
 
+val file_change_tally :
+  ?keeper_name:string ->
+  window_hours:float ->
+  unit ->
+  Keeper_tool_call_file_change.tally
+(** The file changes in the trailing [window_hours], as a sealed tally.
+
+    Reads only what the store gained since the last call with the same
+    [(keeper_name, window_hours)]: the store is append-only per day file, so a
+    caller ten seconds apart reads the appended bytes rather than the window.
+    Measured 2026-09-06, a 24h window was 242MB against about 15MB appended in
+    a busy hour.
+
+    The carried tally is dropped and refolded when the window's day range moves
+    — an unreadable row carries no timestamp, so a folded tally cannot drop
+    what aged out. That happens once a day; the repeats this exists for happen
+    within one. *)
+
+val reset_file_change_cache_for_testing : unit -> unit
+(** Drop every carried tally. Tests that write rows and read them back in one
+    process need the next read to start from an empty window. *)
+
 val read_window :
   ?keeper_name:string ->
   window_hours:float ->

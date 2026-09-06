@@ -4,16 +4,6 @@ type t
 
 val create : unit -> t
 
-val lock_cooperatively : Stdlib.Mutex.t -> unit
-(** Take a raw [Stdlib.Mutex.t] from an Eio fiber, yielding between attempts
-    instead of blocking the Domain on it.
-
-    Exported for the two call sites that own their own [Stdlib.Mutex.t] for the
-    same cross-context purpose and cannot pass a {!t}. Three byte-identical
-    copies of this loop existed until 2026-09-06; a spin counter added to the
-    wrong copy stayed silent through a stall investigation. One copy is one
-    place to instrument. *)
-
 val with_lock : t -> (unit -> 'a) -> 'a
 (** Serialize [f] across Eio fibers, system threads, and Domains.
 

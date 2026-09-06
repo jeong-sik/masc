@@ -19,8 +19,7 @@ end
 
 type t =
   { owner_key : Owner_key.t
-  ; eio_gate : Eio.Mutex.t
-  ; cross_context_mutex : Stdlib.Mutex.t
+  ; lock : Cross_context_mutex.t
   }
 
 module Owner_table = Ephemeron.K1.Make (Owner_key)
@@ -57,10 +56,7 @@ let resolve ~base_path ~keeper_name =
          | None ->
            Owner_table.clean owners;
            let owner =
-             { owner_key = key
-             ; eio_gate = Eio.Mutex.create ()
-             ; cross_context_mutex = Stdlib.Mutex.create ()
-             }
+             { owner_key = key; lock = Cross_context_mutex.create () }
            in
            Owner_table.add owners key owner;
            owner))
@@ -69,39 +65,5 @@ let resolve ~base_path ~keeper_name =
 let base_path owner = fst owner.owner_key
 let keeper_name owner = snd owner.owner_key
 
-type 'a lock_outcome =
-  | Returned of 'a
-  | Raised of exn * Printexc.raw_backtrace
-
-(* Eio [use_ro] is still exclusive; unlike [use_rw], it releases rather than
-   poisons the gate when the callback raises. The gate carries no mutable
-   resource state of its own, and the shared Stdlib mutex is released by the
-   [Fun.protect] finalizer before any callback exception is propagated. *)
-let with_eio_lock ~check_after owner f =
-  let outcome =
-    match
-      Eio.Mutex.use_ro owner.eio_gate (fun () ->
-        Cross_context_mutex.lock_cooperatively owner.cross_context_mutex;
-        Eio.Cancel.protect (fun () ->
-          Fun.protect
-            ~finally:(fun () -> Stdlib.Mutex.unlock owner.cross_context_mutex)
-            f))
-    with
-    | value -> Returned value
-    | exception exn -> Raised (exn, Printexc.get_raw_backtrace ())
-  in
-  (* [Cancel.protect] deliberately finishes an acquired persistence
-     transaction. Re-check the parent context after both owner locks have been
-     released on every outcome so an ordinary exception cannot mask pending
-     cancellation. *)
-  if check_after then Eio.Fiber.check ();
-  match outcome with
-  | Returned value -> value
-  | Raised (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
-;;
-
-let with_durable_lock owner f =
-  match Eio_guard.execution_context () with
-  | Eio_guard.Eio_fiber -> with_eio_lock ~check_after:false owner f
-  | Eio_guard.Non_eio -> Stdlib.Mutex.protect owner.cross_context_mutex f
+let with_durable_lock owner f = Cross_context_mutex.with_durable_lock owner.lock f
 ;;

@@ -1,12 +1,13 @@
-(** File_lock_eio — Cooperative per-key locking via Eio.Mutex + flock.
+(** File_lock_eio — Cooperative per-key locking via Cross_context_mutex + flock.
 
     Two-layer locking for local filesystem paths:
-    1. Eio.Mutex (cooperative) — prevents blocking the Eio fiber scheduler
+    1. {!Cross_context_mutex} — serializes Eio fibers, system threads and
+       Domains without blocking the Eio scheduler
     2. Unix.lockf F_TLOCK (non-blocking) — preserves cross-process safety
 
-    The Eio.Mutex serializes fibers within the process so most contention
-    is resolved cooperatively.  The flock is acquired non-blocking after
-    the Eio.Mutex; if another process holds it, we yield and retry.
+    Layer 1 resolves most contention inside the process. The flock is
+    acquired non-blocking after it; if another process holds it, we yield
+    and retry.
 
     Distributed backend paths (Some key in workspace_utils_ops.ml) are not
     affected — this only replaces the local filesystem lock path. *)
@@ -112,8 +113,7 @@ let rec atomic_update_with_result atomic f =
   end
 
 type lock_entry = {
-  mu : Eio.Mutex.t;
-  cross_context_mu : Stdlib.Mutex.t;
+  lock : Cross_context_mutex.t;
   last_used : float Atomic.t;
   active : int Atomic.t;   (** Number of fibers currently holding or waiting on this mutex *)
 }
@@ -165,8 +165,7 @@ let get_entry path =
         , fun () -> ignore (Atomic.fetch_and_add entry.active (-1)) )
       | None ->
         let entry =
-          { mu = Eio.Mutex.create ()
-          ; cross_context_mu = Stdlib.Mutex.create ()
+          { lock = Cross_context_mutex.create ()
           ; last_used = Atomic.make (Time_compat.now ())
           ; active = Atomic.make 1
           }
@@ -273,15 +272,7 @@ let release_flock_fd fd =
       (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
       Unix.close fd)
 
-let with_entry_lock entry f =
-  match Eio_guard.execution_context () with
-  | Eio_guard.Non_eio -> Stdlib.Mutex.protect entry.cross_context_mu f
-  | Eio_guard.Eio_fiber ->
-    Eio.Mutex.use_ro entry.mu (fun () ->
-      Cross_context_mutex.lock_cooperatively entry.cross_context_mu;
-      Fun.protect
-        ~finally:(fun () -> Stdlib.Mutex.unlock entry.cross_context_mu)
-        f)
+let with_entry_lock entry f = Cross_context_mutex.with_lock entry.lock f
 
 (** Run [f] while holding only the cross-context per-path mutex.
     Use this for in-memory backends that need single-process fiber
@@ -292,7 +283,7 @@ let with_mutex path f =
     ~finally:(fun () -> release_entry entry)
     (fun () -> with_entry_lock entry f)
 
-(** Run [f] while holding both the cooperative Eio.Mutex and an
+(** Run [f] while holding both the per-path {!Cross_context_mutex} and an
     OS-level flock on [path].lock. The flock uses non-blocking F_TLOCK
     retries; sleep/yield stays scheduler-friendly whether or not a clock
     is provided. Max 200 attempts (~2s with sleeps). *)

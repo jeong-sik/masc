@@ -170,16 +170,17 @@ and `?surface=settings` is rejected outright because Settings is not in the
 prototype's `SURFACES` registry.
 
 `design-parity-views.mjs` is the recipe list — a view is a surface plus the
-clicks that open it — and the shot harness follows it. Twenty-one views,
-2026-08-22 (parenthesised values re-measured 2026-08-23 after the re-sync):
+clicks that open it — and the shot harness follows it. Twenty views. The
+numbers below are the 2026-08-22 run (parenthesised values re-measured
+2026-08-23 after the re-sync):
 
 | View | SSIM | | View | SSIM |
 |---|---|---|---|---|
-| ide-cursor | 0.996 (0.995) | | monitor-tools | 0.969 (0.969) |
-| monitor-observatory | 0.995 (0.995) | | settings ×12 | 0.967–0.972 (same band) |
-| monitor-journey | 0.993 (0.993) | | **monitor-lanes** | **0.959** (0.959) |
+| monitor-observatory | 0.995 (0.995) | | monitor-tools | 0.969 (0.969) |
+| monitor-journey | 0.993 (0.993) | | settings ×12 | 0.967–0.972 (same band) |
+| monitor-runtime | 0.984 (0.984) | | **monitor-lanes** | **0.959** (0.959) |
 | | | | monitor-internal | 0.870 (0.870 — harness boundary, see below) |
-| monitor-runtime | 0.984 (0.984) | | schedule-list | 0.868 (**0.953**) |
+| | | | schedule-list | 0.868 (**0.953**) |
 | | | | approvals-history | 0.796 (**0.891**) |
 | | | | **mean** | **0.957** (**0.965**) |
 

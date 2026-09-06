@@ -1855,6 +1855,72 @@ let test_attempt_loop_does_not_gate_network_retry () =
     4
     (List.length !events)
 
+(* The wiring, not the module. A 429 is what a spent quota actually arrives
+   as, and it reaches the driver as [RateLimit], not [HardQuota] -- 402 is the
+   only thing that becomes [HardQuota]. Matching [HardQuota] alone meant this
+   loop recorded nothing for any real rate limit, which the tests above could
+   not see because they hand-build the error. This one builds it the way the
+   transport does, so it fails if the driver stops reading the classifier's
+   own answer. *)
+let rate_limit_error_from_a_429 ~body =
+  match
+    Llm_provider.Error.of_retry_api_error
+      ~provider:"shared_a"
+      (Llm_provider.Retry.classify_error ~retry_after_header:None ~status:429 ~body)
+  with
+  | Llm_provider.Error.RateLimit _ as e -> Agent_core.Error.Provider e
+  | other ->
+    Alcotest.failf
+      "a 429 must classify as RateLimit; got %s"
+      (Llm_provider.Error.to_string other)
+;;
+
+let test_a_rate_limited_account_is_demoted_in_the_same_walk () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect
+      ~finally:Runtime_quota_window.reset_for_testing
+      (fun () ->
+         let attempts = ref [] in
+         let result =
+           Driver.For_testing.attempt_runtime_candidates
+             ~runtime_id:"quota_lane"
+             ~runtime_id_of:Fun.id
+             ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+             ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
+               attempts := !attempts @ [ runtime_id ];
+               match runtime_id with
+               | "shared_a.test_model" ->
+                 (* The body ollama.com actually returns: a message and no
+                    retry_after, so nothing states when the account is back. *)
+                 attempt_without_effect
+                   (Error
+                      (rate_limit_error_from_a_429
+                         ~body:
+                           {|{"error":{"message":"you have reached your weekly usage limit","type":"api_error"}}|}))
+                   None
+               | "other.test_model" -> attempt_without_effect (Ok runtime_id) None
+               | "shared_b.test_model" ->
+                 Alcotest.fail
+                   "a sibling on the same credential must move behind the \
+                    unrelated account"
+               | other -> Alcotest.failf "unexpected candidate %s" other)
+             [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ]
+         in
+         (match result with
+          | Ok runtime_id ->
+            Alcotest.(check string)
+              "the unrelated account serves the turn"
+              "other.test_model"
+              runtime_id
+          | Error error ->
+            Alcotest.failf "expected fallback success: %s" (Agent_core.Error.to_string error));
+         Alcotest.(check (list string))
+           "a 429 with no stated reset reorders the rest of this walk"
+           [ "shared_a.test_model"; "other.test_model" ]
+           !attempts))
+;;
+
 let test_attempt_loop_reorders_shared_quota_sibling_same_turn () =
   with_runtime_config runtime_toml_quota_lane (fun () ->
     Runtime_quota_window.reset_for_testing ();
@@ -2771,6 +2837,10 @@ let () =
             "hard quota reorders shared sibling in same turn"
             `Quick
             test_attempt_loop_reorders_shared_quota_sibling_same_turn;
+          Alcotest.test_case
+            "a 429 with no stated reset demotes in the same walk"
+            `Quick
+            test_a_rate_limited_account_is_demoted_in_the_same_walk;
           Alcotest.test_case
             "hard quota keeps attempted scope across runtime reload"
             `Quick

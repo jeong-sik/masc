@@ -103,3 +103,27 @@ let upload ~sw ~net ~(api_key : string) ~boundary ~filename ~purpose ~content ()
     | 200 -> parse_body_file_object response.body
     | code -> Error (Printf.sprintf "files upload: HTTP %d" code))
 ;;
+
+let delete ~sw ~net ~(api_key : string) ~(file_id : string) ()
+  : (bool, string) result =
+  match
+    Http_client.delete_sync ~sw ~net
+      ~url:(files_base_url ^ "/files/" ^ file_id)
+      ~headers:(auth_headers ~api_key)
+      ()
+  with
+  | Error _ -> Error "files delete: HTTP dispatch failed"
+  | Ok response -> (
+    (* The API answers {"id":…,"object":"file","deleted":true}; the boolean is
+       the whole fact, and a non-200 is the caller's error. *)
+    match response.Http_client.status with
+    | 200 ->
+      (match Yojson.Safe.from_string response.body with
+       | exception _ -> Error "files delete: reply is not JSON"
+       | `Assoc fields -> (
+         match List.assoc_opt "deleted" fields with
+         | Some (`Bool true) -> Ok true
+         | _ -> Error "files delete: reply did not confirm deletion")
+       | _ -> Error "files delete: reply is not a JSON object")
+    | code -> Error (Printf.sprintf "files delete: HTTP %d" code))
+;;

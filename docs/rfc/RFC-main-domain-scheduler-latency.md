@@ -644,3 +644,28 @@ P4m 은 `Fs_compat.load_file`·`save_file`·`append_file` 의 Eio 분기를 Unix
 `Eio.Path.save` 를 fiber 에서 돌리던 부류는 사라졌다. `with_open_in` 6회는 P4m 을 거치지 않는 직접 `Eio.Path.load` 호출(`Backend.get`, `Log`)이고 최대 28 ms 다. 첫 창의 385 ms 한 건은 append 뒤 순수 계산(GC 17 ms)이었고, 두 번째 창에는 50 ms 를 넘는 실행이 없다.
 
 라벨은 그러나 masc 의 이름이 아니라 Eio 내부 switch 이름(`both`, `filter_map`, `Buf_write.with_flow`)만 보여 주었다. Eio 는 switch 가 열릴 때 이름을 링에 적고 링은 몇 분 안에 덮이므로, fiber 시작 때 한 번 연 P4l 의 이름은 뒤늦게 붙는 추적기에 보이지 않는다. P4n(#33606)은 유지보수 루프는 반복마다, keeper 는 cycle 마다 이름을 열게 하고, 추적기는 창 안에서 처음 연 이름을 라벨로 쓰며 뒤의 Eio 내부 이름은 `첫이름 > 최근이름` 으로 덧붙인다.
+
+#### P4n 라이브 — 이름이 남은 실행을 keeper cycle 로 가리켰다 (pid 30093, 커밋 97e09172b4, 06:54:45Z 기동, 07:02Z ready+7분, 호스트 부하 10)
+
+| 항목 | P4l·m ready+7분 | P4n ready+7분 |
+|---|---|---|
+| 하네스 lag p99 / max | — / — | 17.0 / 315 ms |
+| main 도메인 점유 | 4.5% | 7.5% |
+| main 의 ≥10 / ≥50 / ≥100 ms 실행 | 32 / 0 / 0 | 93 / 8 / 6 |
+| main 의 최대 실행 | 48 ms | 363 ms |
+
+두 창의 차이는 부하다(이 창엔 keeper 다섯이 턴 중). 이번엔 라벨이 읽힌다.
+
+| 라벨 (열린 turn 수) | 10 ms 이상 | 합계 | 최대 | 재개 → 중단 |
+|---|---|---|---|---|
+| `keeper rondo cycle > both` | 5 | 504 ms | 363 ms | `fs-compat-append-file → fs-compat-load-file` |
+| `keeper code-reviewer cycle > with_open_in` | 7 | 371 ms | 143 ms | 같음, 그리고 `openat → switch` 102·58 ms |
+| `keeper edgar.a.poe cycle` | 4 | 254 ms | 191 ms | 같음 |
+| `keeper lane-smith cycle > both` | 5 | 243 ms | 178 ms | 같음 |
+| `keeper pr-updater cycle > both` | 5 | 239 ms | 170 ms | 같음 |
+| `execution refresh` (대시보드) | 1 | 56 ms | 56 ms | `Promise.await → load` |
+| `Buf_write.with_flow` (HTTP 응답 fiber) | 13 | 253 ms | 45 ms | `atomic-replace →` |
+
+남은 긴 실행은 전부 keeper cycle 안, **append 가 끝난 뒤 다음 load 를 부르기 전의 순수 계산**이다(GC 는 4~29 ms). cycle 의 단계 집계(metrics 저장소 행의 `presence/snapshot/board/turn`)는 이 시간을 `turn`(50~330초, provider 대기 포함)으로만 말한다. board 게시물은 메모리 Hashtbl 이라 파싱이 아니다. `code-reviewer` 의 `openat → switch` 둘은 `Fs_compat` 를 거치지 않는 직접 `Eio.Path.load` 다. 대시보드 쪽은 `[keepers_json:<keeper>] sub-op audit=205ms trust=100ms total=346ms` 로그가 있는데, HTTP fiber 의 일이라 이 RFC 의 범위 밖이고 별도 항목이다.
+
+P4o(#33623)는 turn 의 단계에 이름을 붙인다: `turn:prompt`(프롬프트 조립), `turn:provider`(provider 시도, 스트리밍·도구 루프 포함), `tool <name>`(도구 호출마다), `turn:post`(post-turn). `Eio_guard.with_named_switch` 는 fiber 안에서만 switch 를 열고 밖에서는 그대로 실행한다. 다음 창의 라벨 `keeper <name> cycle > 단계` 가 140~360 ms 의 주인을 가른다.

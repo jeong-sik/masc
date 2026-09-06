@@ -397,12 +397,26 @@ let request t command =
     | `Enqueued ->
       Printf.printf "DIAG14 rq-1-enqueued depth=%d\n%!" (Eio.Stream.length t.mailbox);
       Eio.Cancel.protect (fun () ->
+        let rec observe spins =
+          if spins > 0 && spins mod 200000 = 0
+          then
+            Printf.printf
+              "DIAG14 rq-obs spins=%d depth=%d closed=%b\n%!"
+              spins
+              (Eio.Stream.length t.mailbox)
+              (Atomic.get t.closed);
+          Eio.Fiber.yield ();
+          observe (spins + 1)
+        in
         let r =
           Eio.Fiber.first
-            (fun () -> Eio.Promise.await response)
             (fun () ->
-               Eio.Promise.await t.closed_p;
-               Error Owner_closed)
+               Eio.Fiber.first
+                 (fun () -> Eio.Promise.await response)
+                 (fun () ->
+                    Eio.Promise.await t.closed_p;
+                    Error Owner_closed))
+            (fun () -> observe 0)
         in
         Printf.printf "DIAG14 rq-2-answered\n%!";
         r))

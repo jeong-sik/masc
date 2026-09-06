@@ -742,7 +742,7 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
   (* The producer repeating the id in the name field is the store saying it had
      no name, not a person called [U09L0RHPW7P]. *)
   check string "a name that repeats the id is not a name"
-    "\xe2\x80\xa6L0RHPW7P \xc2\xb7 slack C1"
+    "U09L0RHPW7P \xc2\xb7 slack C1"
     (label
        (addressed ~speaker_id:"U09L0RHPW7P" ~speaker_name:"U09L0RHPW7P"
           ~speaker_authority:"external"

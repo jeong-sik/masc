@@ -543,7 +543,7 @@ let create ~base_path ~source_id ~package_id ~source_text ~refresh =
            a systhread, re-check cancellation after, and never fold
            Cancelled into a write failure. *)
         try
-          Eio_guard.run_in_systhread (fun () ->
+          Eio_guard.run_in_systhread ~label:"skill-editor-create-package-dir" (fun () ->
             Unix.mkdir package_dir 0o755;
             Keeper_fs_durable_directory.fsync_directory source_root);
           Eio_guard.check_if_ready ();
@@ -566,7 +566,7 @@ let create ~base_path ~source_id ~package_id ~source_text ~refresh =
            the operator has to know it is there. *)
         let detail =
           try
-            Eio_guard.run_in_systhread (fun () -> Unix.rmdir package_dir);
+            Eio_guard.run_in_systhread ~label:"skill-editor-remove-package-dir" (fun () -> Unix.rmdir package_dir);
             Eio_guard.check_if_ready ();
             base_detail
           with
@@ -627,7 +627,7 @@ let path_rejection_of_owned_directory = function
 
 let run_quarantine_io operation =
   try
-    let result = Eio_guard.run_in_systhread operation in
+    let result = Eio_guard.run_in_systhread ~label:"skill-editor-operation" operation in
     Eio_guard.check_if_ready ();
     Ok result
   with
@@ -678,7 +678,7 @@ let create_quarantine source_root =
     let directory = Filename.concat recovery_root recovery_id in
     let creation =
       try
-        Eio_guard.run_in_systhread (fun () -> Unix.mkdir directory 0o700);
+        Eio_guard.run_in_systhread ~label:"skill-editor-create-dir" (fun () -> Unix.mkdir directory 0o700);
         Eio_guard.check_if_ready ();
         `Created
       with
@@ -754,7 +754,7 @@ let quarantine_candidate ~before_quarantine ~after_move (target : target) =
     let move_result =
       try
         Eio.Cancel.protect (fun () ->
-          Eio_guard.run_in_systhread (fun () ->
+          Eio_guard.run_in_systhread ~label:"skill-editor-quarantine-rename" (fun () ->
             Unix.rename target.path quarantine.path;
             moved := true;
             after_move ();

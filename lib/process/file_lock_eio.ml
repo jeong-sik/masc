@@ -178,7 +178,7 @@ let get_entry path =
 let release_entry entry =
   ignore (Atomic.fetch_and_add entry.active (-1))
 
-let run_blocking_lock_op f = Eio_guard.run_in_systhread f
+let run_blocking_lock_op f = Eio_guard.run_in_systhread ~label:"file-lock-op" f
 
 (** Acquire a non-blocking Unix file lock (F_TLOCK) with retry.
     This is the blocking variant for callers that already run in a systhread

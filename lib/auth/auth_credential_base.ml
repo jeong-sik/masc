@@ -55,7 +55,7 @@ let internal_keeper_token_env_key = "MASC_INTERNAL_MCP_TOKEN"
    environment as a mutable in-memory channel. *)
 let internal_keeper_token_holder : string option Atomic.t = Atomic.make None
 let internal_keeper_token () = Atomic.get internal_keeper_token_holder
-let run_blocking_io f = Eio_guard.run_in_systhread f
+let run_blocking_io f = Eio_guard.run_in_systhread ~label:"auth-credential-io" f
 let file_exists path = run_blocking_io (fun () -> Sys.file_exists path)
 let read_text_file path = Fs_compat.load_file path
 let write_text_file path content = Fs_compat.save_file path content

@@ -23,6 +23,11 @@ type entry =
   ; default_model : string option
   ; capabilities_base : string option
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
+  ; request_path_by_identity_kind : (Provider_kind.t * string) list
+        (** The path a wire answers on, for an entry that declares more than
+            one. [request_path] above is the default wire's; a second wire that
+            answers elsewhere names it here, or a caller on that wire sends the
+            default wire's path to a host that has no such route. *)
   ; identity_hosts : string list
   }
 
@@ -112,6 +117,7 @@ let known_keys =
   ; "default_model"
   ; "capabilities_base"
   ; "capabilities_base_by_identity_kind"
+  ; "request_path_by_identity_kind"
   ; "identity_hosts"
   ]
 ;;
@@ -194,6 +200,82 @@ let identity_kinds_field ~entry_id ~default toml =
                 (String.concat ", " (List.map Provider_kind.to_string Provider_kind.all))))
     in
     loop [] values
+;;
+
+(* A wire's path, keyed the way its capability base is keyed. Same shape as
+   the field below on purpose: an entry that speaks two wires states both of
+   them per wire, so a reader never has to infer which vocabulary a bare
+   [request_path] belongs to. *)
+let request_path_by_identity_kind_field ~entry_id ~identity_kinds toml =
+  match Otoml.find_opt toml Fun.id [ "request_path_by_identity_kind" ] with
+  | None -> Ok []
+  | Some value ->
+    (match Otoml.get_table value with
+     | exception Otoml.Type_error _ ->
+       Error
+         (Printf.sprintf
+            "provider entry %S field \"request_path_by_identity_kind\" expected table"
+            entry_id)
+     | pairs ->
+       let rec loop seen acc = function
+         | [] -> Ok (List.rev acc)
+         | (raw_kind, raw_path) :: rest ->
+           (match Provider_kind.of_string raw_kind with
+            | None ->
+              Error
+                (Printf.sprintf
+                   "provider entry %S request-path wire %S is unknown (canonical: %s)"
+                   entry_id
+                   raw_kind
+                   (String.concat
+                      ", "
+                      (List.map Provider_kind.to_string Provider_kind.all)))
+            | Some kind when not (List.mem kind identity_kinds) ->
+              Error
+                (Printf.sprintf
+                   "provider entry %S request-path wire %S is not declared in identity_kinds"
+                   entry_id
+                   raw_kind)
+            | Some kind when List.mem kind seen ->
+              Error
+                (Printf.sprintf
+                   "provider entry %S declares request-path wire %S twice"
+                   entry_id
+                   raw_kind)
+            | Some kind ->
+              (match Otoml.get_string raw_path with
+               | exception Otoml.Type_error _ ->
+                 Error
+                   (Printf.sprintf
+                      "provider entry %S request-path wire %S expected string"
+                      entry_id
+                      raw_kind)
+               | path ->
+                 if not (String.equal path (String.trim path))
+                 then
+                   Error
+                     (Printf.sprintf
+                        "provider entry %S request-path wire %S must not be padded"
+                        entry_id
+                        raw_kind)
+                 else if String.equal path ""
+                 then
+                   Error
+                     (Printf.sprintf
+                        "provider entry %S request-path wire %S is empty"
+                        entry_id
+                        raw_kind)
+                 else if not (String.length path > 0 && path.[0] = '/')
+                 then
+                   Error
+                     (Printf.sprintf
+                        "provider entry %S request-path wire %S must start with '/' (got %S)"
+                        entry_id
+                        raw_kind
+                        path)
+                 else loop (kind :: seen) ((kind, path) :: acc) rest))
+       in
+       loop [] [] pairs)
 ;;
 
 let capabilities_base_by_identity_kind_field ~entry_id ~identity_kinds toml =
@@ -292,6 +374,9 @@ let parse_entry provider_toml =
       ~allowed:Capability_vocab.base_label_values
       provider_toml
   in
+  let* request_path_by_identity_kind =
+    request_path_by_identity_kind_field ~entry_id:id ~identity_kinds provider_toml
+  in
   let* capabilities_base_by_identity_kind =
     capabilities_base_by_identity_kind_field ~entry_id:id ~identity_kinds provider_toml
   in
@@ -309,6 +394,7 @@ let parse_entry provider_toml =
     ; default_model
     ; capabilities_base
     ; capabilities_base_by_identity_kind
+    ; request_path_by_identity_kind
     ; identity_hosts =
         Option.value identity_hosts ~default:[] |> List.map String.lowercase_ascii
     }

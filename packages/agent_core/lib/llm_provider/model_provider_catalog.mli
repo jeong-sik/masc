@@ -12,6 +12,9 @@ type entry =
   ; default_model : string option
   ; capabilities_base : string option
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
+  ; request_path_by_identity_kind : (Provider_kind.t * string) list
+        (** The path a wire answers on, for an entry declaring more than one.
+            [request_path] is the default wire's. *)
     (** Wire-specific capability bases. Keys must also appear in
         [identity_kinds]; absent keys inherit [capabilities_base]. *)
   ; identity_hosts : string list

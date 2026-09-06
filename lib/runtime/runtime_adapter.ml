@@ -275,8 +275,23 @@ let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~regist
      the Chat-completions default. Providers absent from the catalog keep the
      protocol default exactly as before: their registry entries carry only the
      kind default, and no catalog row means no separate surface to name. *)
+  (* A registry path wins for the wire it belongs to, not for every wire. An
+     entry that speaks two of them states the second one's path per wire; the
+     bare [request_path] is the default wire's. ollama_cloud declares
+     kind = "ollama" with request_path = "/api/chat" and carries an
+     openai_compat identity kind, so before this the OpenAI wire sent
+     https://ollama.com/v1 + /api/chat and every turn on it 404'd. Both wires
+     answer (401 unauthenticated on /api/chat and /v1/chat/completions,
+     measured 2026-09-06); only the mixture does not exist. *)
+  let wire_request_path entry =
+    List.assoc_opt
+      kind
+      entry.Llm_provider.Provider_registry.defaults.request_path_by_identity_kind
+  in
   let request_path =
     match registry_entry with
+    | Some entry when Option.is_some (wire_request_path entry) ->
+      Option.get (wire_request_path entry)
     | Some entry
       when not
              (String.equal

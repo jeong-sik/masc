@@ -7,6 +7,7 @@ type provider_defaults = Provider_registry_state.provider_defaults =
   ; base_url : string
   ; api_key_env : string
   ; request_path : string
+  ; request_path_by_identity_kind : (Provider_config.provider_kind * string) list
   }
 
 type entry = Provider_registry_state.entry =
@@ -96,6 +97,7 @@ let register_catalog_entry t (entry : Provider_catalog.entry) =
     ; base_url = entry.base_url
     ; api_key_env = entry.api_key_env
     ; request_path = entry.request_path
+    ; request_path_by_identity_kind = entry.request_path_by_identity_kind
     }
   in
   if String.trim entry.id = ""
@@ -215,6 +217,7 @@ let default () =
       ; base_url = Model_provider_catalog.resolved_base_url entry
       ; api_key_env = entry.api_key_env
       ; request_path = entry.request_path
+      ; request_path_by_identity_kind = entry.request_path_by_identity_kind
       }
     in
     register

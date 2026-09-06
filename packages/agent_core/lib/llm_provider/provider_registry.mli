@@ -15,6 +15,7 @@ type provider_defaults =
   ; base_url : string
   ; api_key_env : string
   ; request_path : string
+  ; request_path_by_identity_kind : (Provider_config.provider_kind * string) list
   }
 
 (** A registered provider entry.

@@ -2560,6 +2560,11 @@ identity_kinds = ["ollama", "openai_compat"]
 capabilities_base_by_identity_kind = { openai_compat = "ollama_cloud_v1" }
 base_url = "https://ollama.com"
 request_path = "/api/chat"
+# The second wire answers somewhere else. Both routes exist on the host
+# (401 unauthenticated, probed 2026-09-06); what did not exist is the mixture
+# a caller got by taking this row's native path onto an operator-configured
+# /v1 base: https://ollama.com/v1/api/chat, 404 on every turn.
+request_path_by_identity_kind = { openai_compat = "/chat/completions" }
 api_key_env = "OLLAMA_CLOUD_API_KEY"
 capabilities_base = "ollama_cloud"
 identity_hosts = ["ollama.com"]

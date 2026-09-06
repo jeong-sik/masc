@@ -25,7 +25,7 @@ let bare_row ~model ~max_context =
   Printf.sprintf "[[models]]\nid_prefix = %S\nmax_context_tokens = %d\n" model max_context
 ;;
 
-let provider_entry ?(aliases = []) ?wire_base ~id ~base_url () =
+let provider_entry ?(aliases = []) ?wire_base ?wire_request_path ~id ~base_url () =
   let aliases =
     match aliases with
     | [] -> ""
@@ -42,6 +42,14 @@ let provider_entry ?(aliases = []) ?wire_base ~id ~base_url () =
         "capabilities_base_by_identity_kind = { openai_compat = %S }\n"
         base
   in
+  let wire_request_path =
+    match wire_request_path with
+    | None -> ""
+    | Some path ->
+      Printf.sprintf
+        "request_path_by_identity_kind = { openai_compat = %S }\n"
+        path
+  in
   Printf.sprintf
     "[[providers]]\n\
      id = %S\n\
@@ -50,11 +58,12 @@ let provider_entry ?(aliases = []) ?wire_base ~id ~base_url () =
      request_path = \"/v1/chat/completions\"\n\
      api_key_env = \"\"\n\
      capabilities_base = \"openai_chat\"\n\
-     %s"
+     %s%s"
     id
     aliases
     base_url
     wire_base
+    wire_request_path
 ;;
 
 let max_context ~suite ~what = function
@@ -179,6 +188,38 @@ let test_provider_wire_capability_base_is_typed_and_alias_addressable () =
       (List.map
          (fun (kind, base) -> Llm_provider.Provider_kind.to_string kind, base)
          entry.capabilities_base_by_identity_kind)
+;;
+
+let test_provider_wire_request_path_is_typed_and_alias_addressable () =
+  (* The wire a provider answers on and the path it answers at are the same
+     question asked twice. An entry that states only the default wire's path
+     hands it to every wire, which is how ollama_cloud sent its native
+     /api/chat onto an operator-configured /v1 base and 404'd every turn. *)
+  let catalog =
+    catalog_of
+      ~suite:"provider wire request path"
+      (provider_entry
+         ~aliases:[ "cloud" ]
+         ~wire_request_path:"/chat/completions"
+         ~id:"provider-a"
+         ~base_url:"https://provider.example"
+         ())
+  in
+  match Model_catalog.provider_entry_for_label catalog "cloud" with
+  | None -> fail "provider alias did not resolve to its typed entry"
+  | Some entry ->
+    check
+      string
+      "the default wire keeps its own path"
+      "/v1/chat/completions"
+      entry.request_path;
+    check
+      (list (pair string string))
+      "the second wire names where it answers"
+      [ "openai_compat", "/chat/completions" ]
+      (List.map
+         (fun (kind, path) -> Llm_provider.Provider_kind.to_string kind, path)
+         entry.request_path_by_identity_kind)
 ;;
 
 (* --- global composition --- *)
@@ -519,6 +560,10 @@ let () =
             "provider wire capability base is typed"
             `Quick
             test_provider_wire_capability_base_is_typed_and_alias_addressable
+        ; test_case
+            "provider wire request path is typed"
+            `Quick
+            test_provider_wire_request_path_is_typed_and_alias_addressable
         ; test_case
             "overlay provider wins endpoint identity"
             `Quick

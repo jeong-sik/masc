@@ -31,6 +31,7 @@ let test_register_and_find () =
         ; base_url = "http://localhost:9999"
         ; api_key_env = ""
         ; request_path = "/v1/chat/completions"
+        ; request_path_by_identity_kind = []
         }
     ; max_context = Some 128_000
     ; capabilities = Capabilities.default_capabilities
@@ -53,6 +54,7 @@ let test_overwrite () =
         ; base_url = url
         ; api_key_env = ""
         ; request_path = "/v1/chat/completions"
+        ; request_path_by_identity_kind = []
         }
     ; max_context = Some 128_000
     ; capabilities = Capabilities.default_capabilities
@@ -76,6 +78,7 @@ let test_unregister () =
         ; base_url = "http://x"
         ; api_key_env = ""
         ; request_path = "/v1/chat/completions"
+        ; request_path_by_identity_kind = []
         }
     ; max_context = Some 128_000
     ; capabilities = Capabilities.default_capabilities
@@ -99,6 +102,7 @@ let test_concurrent_register_keeps_every_snapshot_update () =
           ; base_url = "http://localhost"
           ; api_key_env = ""
           ; request_path = "/v1/chat/completions"
+          ; request_path_by_identity_kind = []
           }
       ; max_context = Some 128_000
       ; capabilities = Capabilities.default_capabilities
@@ -151,6 +155,7 @@ let test_available_filter () =
         ; base_url = "http://x"
         ; api_key_env = ""
         ; request_path = "/v1/chat/completions"
+        ; request_path_by_identity_kind = []
         }
     ; max_context = Some 128_000
     ; capabilities = Capabilities.default_capabilities
@@ -214,6 +219,7 @@ let test_find_capable_tools () =
         ; base_url = "http://x"
         ; api_key_env = ""
         ; request_path = "/v1/chat/completions"
+        ; request_path_by_identity_kind = []
         }
     ; max_context = Some 128_000
     ; capabilities = caps
@@ -240,6 +246,7 @@ let test_find_capable_composite () =
         ; base_url = "http://x"
         ; api_key_env = ""
         ; request_path = "/v1/chat/completions"
+        ; request_path_by_identity_kind = []
         }
     ; max_context = Some 128_000
     ; capabilities = caps

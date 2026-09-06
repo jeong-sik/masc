@@ -2449,18 +2449,22 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
           try
             Eio.Switch.run @@ fun update_sw ->
             Eio.Promise.resolve resolve_update_switch update_sw;
+            Printf.printf "DIAG14 fork-before-update-keeper\n%!";
             ignore
               (Turn_up_update.update_keeper
                  ~expected_config_revision:(config_revision_exn config name)
                  ctx
                  parsed
                  meta);
+            Printf.printf "DIAG14 fork-after-update-keeper\n%!";
             `Returned
           with
           | Cancel_keeper_up_after_metadata -> `Cancelled
           | exn -> `Raised exn  (* cancel-guard-ok: not a swallow -- the exception, Cancelled included, is re-delivered through update_done to the fiber awaiting it *)
         in
-        Eio.Promise.resolve resolve_update_done disposition);
+        Printf.printf "DIAG14 fork-resolving\n%!";
+        Eio.Promise.resolve resolve_update_done disposition;
+        Printf.printf "DIAG14 fork-done\n%!");
       Printf.printf "DIAG14 before-update-switch\n%!";
       let update_sw = Eio.Promise.await update_switch in
       Printf.printf "DIAG14 after-update-switch\n%!";

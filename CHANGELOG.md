@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **The exec shim traces every request and names its build.** On 2026-09-06
+  an `observed_in_box` auto-allow ran with live network (a keeper opened PR
+  #33609 through the observation path), while the same shim binary framed by
+  hand boxed correctly — and no record said what the server had actually
+  framed. The shim now appends one line per request to the guest's
+  `/tmp/masc-shim-requests.log` (framed mode, the plan it got, argv0, build
+  id; best-effort, capped at 4 MiB), and the static build stamps its commit
+  sha into the probe version (`3.0.0+a1b2c3d4`), so two artifacts of one
+  protocol stop looking identical. RFC-0422 diagnosis, task-1375.
+
 ## [0.33.0] - 2026-09-06
 
 - **The release ships the exec shim.** Every tagged release now carries

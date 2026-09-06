@@ -290,6 +290,13 @@ let test_probe_major_is_spoken_or_a_skew () =
   (match major_int (probe "1.4.2") with
    | Ok _ -> fail "v1 accepted"
    | Error msg -> check bool "names both sides" true (contains "v1" msg && contains "v2, v3" msg));
+  (* A static artifact stamps its build sha after the dotted version
+     ("3.0.0+a1b2c3d4"); the major is still the numeric prefix, so a stamped
+     probe is spoken, never a skew. *)
+  check (result int string) "stamped v3 shim" (Ok 3)
+    (major_int (probe "3.0.0+a1b2c3d4"));
+  check (result int string) "stamped v2 shim" (Ok 2)
+    (major_int (probe "2.4.1+00000000"));
   (match major_int (probe "4.0.0") with
    | Ok _ -> fail "v4 accepted"
    | Error _ -> ());

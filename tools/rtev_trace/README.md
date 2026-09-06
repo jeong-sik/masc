@@ -32,7 +32,12 @@ time inside the run, and how many `masc.turn` spans were open on that
 domain. Each long run also prints the fiber's ancestry: the cancellation
 context it was forked in (kind and name when the switch was named) and the
 fiber that created that context, up to six levels, so a loop that shows up
-only as `fstat -> fstat` can be traced to the code that forked it. Domain 0 is the main domain; a run there of 100 ms is 100 ms of
+only as `fstat -> fstat` can be traced to the code that forked it. A fiber
+that opens a named switch (`Eio.Switch.run ~name`) at the top of its body is
+labelled by that name; masc names its long-lived server fibers, HTTP
+connections and keeper lanes this way. Two further sections list the
+longest runs on domain 0 alone and group its runs of 10 ms or more by label
+and open `masc.turn` depth. Domain 0 is the main domain; a run there of 100 ms is 100 ms of
 scheduler lag for every other fiber on it.
 
 Numbers from these tools are recorded in

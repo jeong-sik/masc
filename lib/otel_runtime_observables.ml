@@ -270,6 +270,7 @@ let store_writer_interval_s = 30.0
 let start_store_writer ~sw ~clock ~masc_root () =
   register_once ~masc_root ();
   Eio.Fiber.fork_daemon ~sw (fun () ->
+    Eio.Switch.run ~name:"otel-store-writer" @@ fun _ ->
     let rec loop () =
       Eio.Time.sleep clock store_writer_interval_s;
       (* fire-and-forget: the count only serves callers that log it *)

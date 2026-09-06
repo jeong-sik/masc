@@ -5372,11 +5372,9 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     | Keeper_chat_history.Said_by_keeper ->
         (Message_keeper, Turn_output, row.text, None, None)
     | Keeper_chat_history.Autonomous_reply ->
-        ( Message_autonomous
-        , Turn_output
-        , (if String.trim row.text = "" then "\xc2\xb7" else row.text)
-        , None
-        , None )
+        (* The decoder no longer emits a blank autonomous reply, so there is
+           nothing here to stand in for. *)
+        (Message_autonomous, Turn_output, row.text, None, None)
     | Keeper_chat_history.Delivery_failed { recovered_at; _ } ->
         let text, recovered =
           match

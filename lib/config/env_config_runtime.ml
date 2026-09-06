@@ -85,8 +85,15 @@ module Executor = struct
       host-aware recommendation.
       @category Concurrency
       @ops_class operator *)
+  (* [get_int_nonneg] keeps the clamp: a negative override reads as the
+     default rather than as "no domains". The name and default come from the
+     declaration. *)
   let domain_count_override () =
-    let n = get_int_nonneg ~default:0 "MASC_EXECUTOR_DOMAIN_COUNT" in
+    let n =
+      get_int_nonneg
+        ~default:(Env_setting.Int_knob.default Executor_domain_count)
+        (Env_setting.Int_knob.env_name Executor_domain_count)
+    in
     if n <= 0 then None else Some n
   ;;
 end
@@ -298,7 +305,7 @@ module Board = struct
       @category Concurrency
       @ops_class operator *)
   let flusher_inbox_capacity =
-    get_int ~default:1000 "MASC_BOARD_FLUSHER_INBOX_CAPACITY"
+    Env_setting.Int_knob.get Board_flusher_inbox_capacity
 end
 
 (** {1 Tool Surface Configuration} *)
@@ -534,8 +541,7 @@ module Dashboard = struct
       target is unnamed does not expire, and the next one cites it as
       precedent. *)
   let full_health_refresh_timeout_sec =
-    Float.max 1.0
-      (get_float ~default:20.0 "MASC_FULL_HEALTH_REFRESH_TIMEOUT_SEC")
+    Float.max 1.0 (Env_setting.Float_knob.get Full_health_refresh_timeout_sec)
 
   (** Number of consecutive [/health?full=1] cache-refresh failures
       that must accumulate before
@@ -546,8 +552,7 @@ module Dashboard = struct
       typically self-recover.  Floor 1 keeps the counter at least
       reachable.  *)
   let full_health_critical_failure_threshold =
-    Stdlib.max 1
-      (get_int ~default:5 "MASC_FULL_HEALTH_CRITICAL_FAILURE_THRESHOLD")
+    Stdlib.max 1 (Env_setting.Int_knob.get Full_health_critical_failure_threshold)
 end
 
 (** {1 Internal Timers and TTLs}
@@ -580,15 +585,16 @@ module InternalTimers = struct
       [server_bootstrap_loops] wakes at this cadence to fetch repositories
       with [auto_sync = true]. Default: 300 (5 min). *)
   let repo_sync_interval_sec =
-    let value = get_float ~default:300.0 "MASC_REPO_SYNC_INTERVAL_SEC" in
-    if value > 0.0 then value else 300.0
+    let value = Env_setting.Float_knob.get Repo_sync_interval_sec in
+    if value > 0.0
+    then value
+    else Env_setting.Float_knob.default Repo_sync_interval_sec
 
   (** Rate-limit bucket staleness TTL (seconds). Buckets with no traffic for
       this long are dropped by the maintenance loop. Default: 300 (5 min). Raise
       for longer client quiet periods; lower to free memory faster under
       churn. [Rate_limit.cleanup] takes an int, so this is int-typed. *)
-  let rate_limit_bucket_ttl_sec =
-    get_int ~default:300 "MASC_RATE_LIMIT_BUCKET_TTL_SEC"
+  let rate_limit_bucket_ttl_sec = Env_setting.Int_knob.get Rate_limit_bucket_ttl_sec
 end
 
 (** {1 Sidecar reconcile loop}
@@ -638,7 +644,11 @@ module Workspace_file = struct
       @category Policies
       @ops_class operator *)
   let max_read_bytes =
-    max 1 (get_int_nonneg ~default:1_048_576 "MASC_WORKSPACE_FILE_MAX_READ_BYTES")
+    max
+      1
+      (get_int_nonneg
+         ~default:(Env_setting.Int_knob.default Workspace_file_max_read_bytes)
+         (Env_setting.Int_knob.env_name Workspace_file_max_read_bytes))
 end
 
 (** {1 Internal Safety Configuration} *)

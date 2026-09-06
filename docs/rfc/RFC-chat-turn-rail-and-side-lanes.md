@@ -243,12 +243,24 @@ STREAM 은 `KEEPER_STREAM_*` 로 이미 온다.
 `keeper_webmcp_call` 은 MCP 호출인데, 둘 다 이름이 `keeper_` 로 시작해서
 Keeper 작업으로 세어졌다.
 
-**병렬 그룹이 기다리는 것은 저장이 아니라 전달이다.** `stream_scope` 는
-라이브와 히스토리 양쪽에 도착한다 — `masc_tui_keeper_chat_log` 가
-`tool_occurrence` 를 그대로 싣는다. 막힌 자리는 그 다음이다:
-`tool_activity` 에 occurrence 필드가 없어서, 투영이 렌더러에게 넘기기 전에
-"어느 scope 의 몇 번째 블록인가" 를 버린다. 6 은 그 필드를 붙이는 것에서
-시작한다.
+**병렬 그룹은 두 군데서 막혀 있다.** 처음엔 "히스토리가 `stream_scope` 를
+안 싣는다" 고 적었는데, 세어 보니 자리가 둘이고 성격이 다르다.
+
+`masc_tui_keeper_chat_log` 는 라이브 SSE 와 v2 저널 재생을 같은 로그로
+받고, 둘 다 `tool_occurrence` 를 그대로 싣는다. 여기까지는 온다.
+
+버려지는 곳이 그 다음 둘이다.
+
+1. `tool_activity` 에 occurrence 필드가 없다. 투영이 렌더러에게 넘기기
+   전에 "어느 scope 의 몇 번째 블록인가" 를 버린다.
+2. durable 행에는 애초에 안 적힌다. `keeper_chat_store` 가 쓰는 필드는
+   `tool_call_id`·`execution_id`·`tool_call_name` 이고 `stream_scope` 는
+   없다.
+
+1 만 고치면 저널 창 안에서는 `┬`/`┴` 가 그려지고 스크롤백으로 밀려나는
+순간 사라진다 — 같은 턴이 방금일 때와 어제일 때 다르게 보이는 화면이고,
+그것이 이 RFC 가 §1.1 에서 고치려던 종류의 불일치다. 6 은 2 를 먼저 하고
+1 을 얹는다.
 
 **접힘은 행 커서가 아니라 이미 있는 축에 붙는다.** 처음에는 행마다 접었다
 펴는 상태를 두려 했고, 그러려면 "어느 행" 을 가리킬 커서가 필요했다. 그

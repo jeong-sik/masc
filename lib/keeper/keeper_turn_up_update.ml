@@ -98,13 +98,21 @@ let turn_in_flight_rejection ~keeper_name
      path (metadata commit takes ownership of the foreign fence), and the
      concurrent-update race it also matches is absorbed by the existing
      launch-conflict arm. *)
+let diag_t0 = ref 0.0
+
+let diag mark =
+  let now = Unix.gettimeofday () in
+  if !diag_t0 = 0.0 then diag_t0 := now;
+  Printf.printf "DIAG5 %-28s +%.3fs\n%!" mark (now -. !diag_t0)
+;;
+
 let rec swap_keepalive_lane_fenced (ctx : _ context) (updated : keeper_meta)
   : (joined_stop_result * start_keepalive_outcome, tool_result) result =
   if not (Eio_context.root_switch_on_current_domain ())
      && Option.is_some (Eio_context.get_root_switch_opt ())
   then
     Eio_context.run_on_owner_domain (fun () ->
-      swap_keepalive_lane_fenced ctx updated)
+      (diag "swap-hop-domain"; swap_keepalive_lane_fenced ctx updated))
   else
     let base_path = ctx.config.base_path in
   let keeper_name = updated.name in
@@ -341,6 +349,7 @@ let finish_published_update ~supersession ctx updated =
     | Ok
         ( Keeper_shutdown_supersession.No_shutdown_admission
         | Keeper_shutdown_supersession.Shutdown_superseded _ ) ->
+      diag "before-swap-lane";
       (match swap_keepalive_lane_fenced ctx updated with
        | Error rejection -> rejection
        | Ok (stop_outcome, launch_outcome) ->
@@ -394,6 +403,7 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
     (ctx : _ context) (p : parsed_args)
     (old : keeper_meta) : tool_result
     =
+  diag "update-keeper-enter";
   match
     match p.sandbox_profile_opt with
     (* Same precedence as [effective_meta_of_profile_defaults]: the TOML owns
@@ -501,7 +511,8 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
      [Local], and that profile no longer exists. What remains is reached the
      same way. *)
          (match
-            Keeper_shutdown_supersession.preflight
+            (diag "before-preflight";
+             Keeper_shutdown_supersession.preflight)
               ~config:ctx.config
               ~keeper_name:updated.name
               ~actor:ctx.agent_name
@@ -625,7 +636,8 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
                            (outcome, config_publication_rollback_result detail)))
             in
             (match
-               Keeper_turn_up_config_persistence.persist_with_publication
+               (diag "before-persist";
+                Keeper_turn_up_config_persistence.persist_with_publication)
                  ~expected_revision:expected_config_revision
                  ~config:ctx.config
                  ~parsed:p

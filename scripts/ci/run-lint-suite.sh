@@ -152,6 +152,15 @@ blocking_pr_lints() {
   # the count drifted to 32 and back to 0 without anyone seeing either move.
   # Blocking at 0 keeps the next one from landing unnoticed.
   run_lint "Cancel guard on wildcard catches" bash scripts/lint-cancel-guard.sh
+  # A match whose every arm is a bare wildcard computes its scrutinee and
+  # throws it away, while reading as if it told two cases apart. Four were in
+  # the tree on 2026-09-06 and two of them sat on a real classifier, so the
+  # next reader kept looking for a distinction that was not there. Blocking at
+  # zero is what stops the fifth.
+  run_self_test_when_changed "Wildcard-only match self-test" \
+    scripts/ci/check-wildcard-only-match.py \
+    python3 scripts/ci/test_check_wildcard_only_match.py
+  run_lint "Wildcard-only match" python3 scripts/ci/check-wildcard-only-match.py
 }
 
 advisory_lints() {

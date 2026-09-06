@@ -28,7 +28,7 @@ let public_tool_help_schemas () =
 (* Resource projections use the synchronous Workspace/Fs_compat APIs.  Keep
    those reads off the cooperative Eio domain; Session actor access remains on
    the calling fiber because it may yield through the registry mailbox. *)
-let run_blocking_resource_io f = Eio_unix.run_in_systhread f
+let run_blocking_resource_io f = Eio_unix.run_in_systhread ~label:"mcp-resource-io" f
 
 module For_testing = struct
   let blocking_io_execution_context () =

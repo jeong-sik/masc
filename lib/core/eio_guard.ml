@@ -81,10 +81,16 @@ let with_mutex_ro mutex f =
     only improves the surfaced error — the poison still happens in the inner
     [use_rw] frame before control returns here — so it diagnoses the bug
     faster, it does not prevent it. *)
-let run_in_systhread f =
+(* [label] is required, not optional. Eio writes it into the runtime-events
+   ring as the fiber's suspend reason, and a trace reads a long run as
+   "resumed from X, suspended on Y"; an unlabelled call is "systhread" there,
+   which names nothing. The 2026-09-06 23:23 KST window had "systhread ->
+   systhread" as the longest class left on the main domain, three runs and
+   412 ms, with no way to tell which of the thirty call sites it was. *)
+let run_in_systhread ~label f =
   match execution_context () with
   | Eio_fiber ->
-    Eio_unix.run_in_systhread (fun () ->
+    Eio_unix.run_in_systhread ~label (fun () ->
       try f () with
       | Effect.Unhandled _ as exn ->
         failwith

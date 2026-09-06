@@ -972,7 +972,7 @@ let load_owned_regular_file_with_snapshot ~ownership_root path =
       load_owned_regular_file_with_snapshot_blocking ~ownership_root path)
     (fun _fs ->
        let result =
-         Eio_unix.run_in_systhread (fun () ->
+         Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-file" path) (fun () ->
            load_owned_regular_file_with_snapshot_blocking
              ~ownership_root
              path)
@@ -1026,7 +1026,7 @@ let load_owned_regular_file_prefix ~ownership_root ~max_bytes path =
         ~ownership_root ~max_bytes path)
     (fun _fs ->
        let result =
-         Eio_unix.run_in_systhread (fun () ->
+         Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-prefix" path) (fun () ->
            load_owned_regular_file_prefix_blocking
              ~ownership_root ~max_bytes path)
        in
@@ -1082,7 +1082,7 @@ let load_owned_regular_file_range
         ~ownership_root ~offset ~max_bytes path)
     (fun _fs ->
        let result =
-         Eio_unix.run_in_systhread (fun () ->
+         Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-range" path) (fun () ->
            load_owned_regular_file_range_blocking
              ~ownership_root ~offset ~max_bytes path)
        in
@@ -1121,7 +1121,7 @@ let file_size (path : string) : int option =
       try Some (Unix.stat path).st_size with
       | Unix.Unix_error _ -> None)
     (fun _fs ->
-       try Some (Eio_unix.run_in_systhread (fun () -> (Unix.stat path).st_size)) with
+       try Some (Eio_unix.run_in_systhread ~label:(labelled "fs-compat-file-size" path) (fun () -> (Unix.stat path).st_size)) with
        | Unix.Unix_error _ -> None)
 ;;
 
@@ -1132,7 +1132,7 @@ let file_mtime (path : string) : float option =
       try Some (Unix.stat path).st_mtime with
       | Unix.Unix_error _ -> None)
     (fun _fs ->
-       try Some (Eio_unix.run_in_systhread (fun () -> (Unix.stat path).st_mtime)) with
+       try Some (Eio_unix.run_in_systhread ~label:(labelled "fs-compat-file-mtime" path) (fun () -> (Unix.stat path).st_mtime)) with
        | Unix.Unix_error _ -> None)
 ;;
 
@@ -1191,14 +1191,14 @@ let remove_tree (path : string) : unit =
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> remove_tree_unix path)
-    (fun _fs -> Eio_unix.run_in_systhread (fun () -> remove_tree_unix path))
+    (fun _fs -> Eio_unix.run_in_systhread ~label:(labelled "fs-compat-remove-tree" path) (fun () -> remove_tree_unix path))
 ;;
 
 let realpath (path : string) : string =
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> Unix.realpath path)
-    (fun _fs -> Eio_unix.run_in_systhread (fun () -> Unix.realpath path))
+    (fun _fs -> Eio_unix.run_in_systhread ~label:(labelled "fs-compat-realpath" path) (fun () -> Unix.realpath path))
 ;;
 
 let realpath_lenient (path : string) : string =

@@ -617,7 +617,7 @@ let read_apc_body reader =
 
 (** Read one key, one paste, or one thing the terminal said back. *)
 let read_input ?(timeout = 0.1) reader () : input_event option =
-  Eio_guard.run_in_systhread (fun () ->
+  Eio_guard.run_in_systhread ~label:"tui-read-key" (fun () ->
       let key name = Some (Key name) in
       (* A character left half-read by the previous call is finished before
          anything else is looked at. Its remaining bytes are the next thing in
@@ -6573,7 +6573,7 @@ let () =
   compute_and_store_mosaic :=
     fun img ->
       match
-        Eio_guard.run_in_systhread (fun () ->
+        Eio_guard.run_in_systhread ~label:"tui-image-mosaic" (fun () ->
             image_url_to_mosaic ~cols:mosaic_cols ~rows:mosaic_pixel_rows img)
       with
       | Some lines -> Masc_tui_link_preview.mosaic_store img lines
@@ -6678,7 +6678,7 @@ let launch_image_render ~mailbox ~notice ~title ~caption url =
     notice ~role:Message_local (Printf.sprintf "Loading image: %s" url);
     let run () =
       let result =
-        Eio_guard.run_in_systhread (fun () -> prepare_remote_image_bytes url)
+        Eio_guard.run_in_systhread ~label:"tui-remote-image-bytes" (fun () -> prepare_remote_image_bytes url)
       in
       enqueue_async mailbox (Image_render_ready { title; caption; result })
     in
@@ -12008,7 +12008,7 @@ let toggle_mouse_tracking () =
 let terminal_probe_wait_seconds = 0.2
 
 let read_terminal_probe reader ~palette_requested =
-  Eio_guard.run_in_systhread (fun () ->
+  Eio_guard.run_in_systhread ~label:"tui-terminal-probe" (fun () ->
       let decoder =
         Masc_tui_terminal_probe.create ~palette_requested
       in

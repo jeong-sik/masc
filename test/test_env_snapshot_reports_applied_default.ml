@@ -49,6 +49,23 @@ let reported_env_names () =
     | _ -> None)
 ;;
 
+(* A knob moved into [Env_setting] whose hand-written row was not deleted is
+   reported twice. Writing this slice did exactly that: MASC_WEB_SEARCH_* were
+   already declared in Keeper_runtime_setting_registry, and declaring them again
+   put two rows in front of the operator. Arithmetic caught it -- nine
+   declarations moved the gap by seven -- which is not a check. *)
+let test_no_declaration_is_reported_twice () =
+  let reported = reported_env_names () in
+  let counted name = List.length (List.filter (String.equal name) reported) in
+  let duplicated =
+    Env_setting.all_rows
+    |> List.filter_map (fun (row : Env_setting.row) ->
+      let n = counted row.env_name in
+      if n > 1 then Some (Printf.sprintf "%s x%d" row.env_name n) else None)
+  in
+  check (list string) "declared knobs the snapshot reports more than once" [] duplicated
+;;
+
 let test_declarations_reach_the_operator_surface () =
   let declared = Env_setting.all_rows in
   check bool "at least one knob is declared" true (declared <> []);
@@ -192,6 +209,10 @@ let () =
             "declarations reach the operator surface"
             `Quick
             test_declarations_reach_the_operator_surface
+        ; test_case
+            "no declaration is reported twice"
+            `Quick
+            test_no_declaration_is_reported_twice
         ] )
     ]
 ;;

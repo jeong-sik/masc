@@ -2635,7 +2635,9 @@ let save_file_atomic_with_parent_sync
   let failure ~backtrace exception_ =
     Error { path; stage = !stage; exception_; backtrace }
   in
-  blocking_syscalls ~label:"fs-compat-atomic-replace" (fun () ->
+  blocking_syscalls
+    ~label:("fs-compat-atomic-replace " ^ Stdlib.Filename.basename path)
+    (fun () ->
     match
       try
         Ok

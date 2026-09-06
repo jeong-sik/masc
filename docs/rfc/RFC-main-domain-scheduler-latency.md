@@ -703,3 +703,31 @@ keeper 쪽 긴 실행은 전부 `turn:provider` 안이고 여전히 `append-file
 제목 추출, 설명 추출, 마크다운 렌더는 응답 본문에 대해 순수하므로 셋을 pool 작업 하나로 돌린다. `truncate_text` 는 전체 본문을 파일로 내보내므로 fiber 에 남는다. 대시보드 쪽(`Dashboard_snapshot` 루프, shell payload)은 이미 pool 로 내려가 있고, `keepers_json` 의 `Eio.Fiber.all` 은 그 pool 워커 도메인 위에서 돈다.
 
 남은 표적 넷: `turn:provider` 안의 append→load 계산(더 세분화가 필요하다), 이름 없는 boot fiber 28006, `tool tool_execute`, 그리고 HTTP 응답 fiber 의 `filter_map > Buf_write.with_flow`.
+
+#### P4p 를 넣고 잰 창 (09-06 19:31 KST, 부하 57–76)
+
+서버는 19:25 KST 에 `37cc8b8b` 로 떴고 그 안에 #33658 이 들어 있다. 90 초 창: main 점유 22.9%, ≥100 ms 실행 21, 최대 487.9 ms. 하네스는 p99 156.5 ms·max 439.7 ms.
+
+`tool masc_web_fetch` 는 라벨 표에서 **사라졌다**. 직전 창에서 1위였고(3회 1,524 ms·최대 626 ms) 이번에는 한 줄도 없다.
+
+| 라벨 | 10 ms 이상 | 합계 | 최대 |
+|---|---|---|---|
+| `Buf_write.with_flow > spawn_unix` | 29 | 2,076 ms | 139 ms |
+| `turn:post > with_open_in` | 30 | 1,009 ms | 205 ms |
+| `keeper rondo cycle > turn:provider` | 4 | 583 ms | **488 ms** |
+| `Buf_write.with_flow > with_open_in` | 14 | 664 ms | 238 ms |
+
+사유별로 묶으면 1위가 바뀌지 않는다.
+
+| 재개 → 중단 | 10 ms 이상 | 합계 | 최대 |
+|---|---|---|---|
+| `openat → switch` | 33 | 2,473 ms | 139 ms |
+| `fs-compat-append-file → fs-compat-load-file` | 11 | **2,076 ms** | 488 ms |
+| `fs-compat-atomic-replace → (없음)` | 25 | 1,029 ms | 238 ms |
+| `fs-compat-load-file → switch` | 49 | 864 ms | 97 ms |
+
+11 개 실행이 전부 `keeper <이름> cycle > turn:provider` 안이고, 다섯 keeper(rondo·polisher·edgar.a.poe·pr-updater·geek-scout)가 같은 모양을 낸다. 어떤 파일을 붙이고 어떤 파일을 읽는지는 라벨에 없다.
+
+#### P4q — 파일 I/O 라벨이 파일 이름을 말하게 (#33673)
+
+`Eio_unix.run_in_systhread ~label` 은 라벨을 링에 fiber 의 중단 사유로 적는다(eio 1.3 `lib_eio/unix/thread_pool.ml:123`). 그래서 추적기가 읽는 "재개 → 중단" 은 곧 이 라벨이다. `fs_compat` 의 load/save/append 와 `atomic_write` 의 replace 에 `Filename.basename` 을 붙이면 같은 실행이 `fs-compat-append-file chat.jsonl → fs-compat-load-file memory.json` 으로 읽힌다. turn 안에 switch 를 새로 넣지 않고 호출자를 특정하는 방법이다.

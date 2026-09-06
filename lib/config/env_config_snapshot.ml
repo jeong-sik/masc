@@ -420,7 +420,8 @@ let category_specs () =
     , runtime_entries
       @ message_gc_entries @ internal_timer_entries
       @ sse_entries @ telemetry_entries
-      @ tool_entries );
+      @ tool_entries
+      @ declared_entries "runtime" );
     "rate_limiting", rate_limiting_entries;
     "inference", model_routing_entries @ agent_core_sse_entries @ local_runtime_entries;
     ( "keeper"

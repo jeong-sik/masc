@@ -48,6 +48,12 @@ module Int_knob = struct
     | Oauth_refresh_token_ttl_sec
     | Oauth_max_pending_codes
     | Oauth_max_clients
+    | Sse_connect_max_in_window
+    | Board_flusher_inbox_capacity
+    | Executor_domain_count
+    | Full_health_critical_failure_threshold
+    | Rate_limit_bucket_ttl_sec
+    | Workspace_file_max_read_bytes
   [@@deriving enumerate]
 
   let spec = function
@@ -70,6 +76,37 @@ module Int_knob = struct
       , 128
       , "auth"
       , "Maximum durable dynamic-client registrations" )
+    | Sse_connect_max_in_window ->
+      ( "MASC_SSE_CONNECT_MAX_IN_WINDOW"
+      , 10
+      , "runtime"
+      , "SSE reconnects admitted inside one window; <= 0 disables the window limit" )
+    | Board_flusher_inbox_capacity ->
+      ( "MASC_BOARD_FLUSHER_INBOX_CAPACITY"
+      , 1000
+      , "runtime"
+      , "Board flusher inbox capacity" )
+    | Executor_domain_count ->
+      ( "MASC_EXECUTOR_DOMAIN_COUNT"
+      , 0
+      , "runtime"
+      , "Executor domain count override; <= 0 keeps the host-aware recommendation" )
+    | Full_health_critical_failure_threshold ->
+      ( "MASC_FULL_HEALTH_CRITICAL_FAILURE_THRESHOLD"
+      , 5
+      , "runtime"
+      , "Consecutive /health?full=1 refresh failures before the critical counter \
+         fires; floored at 1" )
+    | Rate_limit_bucket_ttl_sec ->
+      ( "MASC_RATE_LIMIT_BUCKET_TTL_SEC"
+      , 300
+      , "runtime"
+      , "Rate-limit bucket staleness TTL in seconds" )
+    | Workspace_file_max_read_bytes ->
+      ( "MASC_WORKSPACE_FILE_MAX_READ_BYTES"
+      , 1_048_576
+      , "runtime"
+      , "Maximum bytes the IDE workspace file endpoint serves in one response" )
   ;;
 
   let env_name t = let n, _, _, _ = spec t in n
@@ -93,6 +130,7 @@ module String_opt_knob = struct
     | Imessage_self_chat_guid
     | Imessage_poll_interval_sec
     | Imessage_cursor_path
+    | Sidecar_root
   [@@deriving enumerate]
 
   let spec = function
@@ -121,6 +159,11 @@ module String_opt_knob = struct
       , "(derived)"
       , "channel"
       , "Where the last delivered message ROWID is kept" )
+    | Sidecar_root ->
+      ( "MASC_SIDECAR_ROOT"
+      , "(derived)"
+      , "runtime"
+      , "Repository root the sidecar routes resolve paths against" )
   ;;
 
   let env_name t = let n, _, _, _ = spec t in n
@@ -133,9 +176,77 @@ module String_opt_knob = struct
   let get t = Env_config_core.trim_opt (Sys.getenv_opt (env_name t))
 end
 
+module Float_knob = struct
+  type t =
+    | Sse_reconnect_min_interval_s
+    | Sse_connect_window_s
+    | Sidecar_reconcile_backoff_sec
+    | Sidecar_control_timeout_sec
+    | Sidecar_schema_timeout_sec
+    | Full_health_refresh_timeout_sec
+    | Repo_sync_interval_sec
+  [@@deriving enumerate]
+
+  let spec = function
+    | Sse_reconnect_min_interval_s ->
+      ( "MASC_SSE_RECONNECT_MIN_INTERVAL_S"
+      , 1.0
+      , "runtime"
+      , "Minimum interval between SSE reconnects for one session; <= 0 disables \
+         the cooldown" )
+    | Sse_connect_window_s ->
+      ( "MASC_SSE_CONNECT_WINDOW_S"
+      , 60.0
+      , "runtime"
+      , "Sliding window over which SSE reconnects are counted; <= 0 disables \
+         the window limit" )
+    | Sidecar_reconcile_backoff_sec ->
+      ( "MASC_SIDECAR_RECONCILE_BACKOFF_SEC"
+      , 30.0
+      , "runtime"
+      , "Backoff between repeated same-generation sidecar start dispatches" )
+    | Sidecar_control_timeout_sec ->
+      ( "MASC_SIDECAR_CONTROL_TIMEOUT_SEC"
+      , 5.0
+      , "runtime"
+      , "Subprocess timeout for sidecar control commands; floored at 1s" )
+    | Sidecar_schema_timeout_sec ->
+      ( "MASC_SIDECAR_SCHEMA_TIMEOUT_SEC"
+      , 10.0
+      , "runtime"
+      , "Subprocess timeout for sidecar schema generation; floored at 1s" )
+    | Full_health_refresh_timeout_sec ->
+      ( "MASC_FULL_HEALTH_REFRESH_TIMEOUT_SEC"
+      , 20.0
+      , "runtime"
+      , "Timeout for a /health?full=1 cache refresh; floored at 1s" )
+    | Repo_sync_interval_sec ->
+      ( "MASC_REPO_SYNC_INTERVAL_SEC"
+      , 300.0
+      , "runtime"
+      , "Repository auto-sync interval in seconds; a non-positive value keeps \
+         the default" )
+  ;;
+
+  let env_name t = let n, _, _, _ = spec t in n
+  let default t = let _, d, _, _ = spec t in d
+
+  let row t =
+    let env_name, default, category, description = spec t in
+    { env_name
+    ; default_display = Printf.sprintf "%g" default
+    ; category
+    ; description
+    }
+  ;;
+
+  let get t = Env_config_core.get_float ~default:(default t) (env_name t)
+end
+
 let all_rows =
   List.map Bool_knob.row Bool_knob.all
   @ List.map Int_knob.row Int_knob.all
+  @ List.map Float_knob.row Float_knob.all
   @ List.map String_opt_knob.row String_opt_knob.all
 ;;
 let rows_in ~category = List.filter (fun r -> String.equal r.category category) all_rows

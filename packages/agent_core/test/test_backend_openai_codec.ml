@@ -602,18 +602,41 @@ let test_content_parts_cover_modalities () =
     "audio format"
     "wav"
     (member "input_audio" audio |> member "format" |> to_string)
+
+let test_content_parts_reference_carriers () =
+  (* RFC-0430: the two reference carriers stop dying at base64_data_url's
+     unsupported-source rejection and reach their native wire forms — an
+     external URL stays the image_url, a Files API id becomes the [file]
+     part's file_id. *)
+  let parts =
+    Serialize.openai_content_parts_of_blocks
+      [ Image { media_type = "image/png"; data = "https://example.com/a.png"
+              ; source_type = Types.Url }
+      ; Image { media_type = "image/png"; data = "file-api-1"
+              ; source_type = Types.File_id }
+      ]
+  in
+  check_int "reference parts" 2 (List.length parts);
+  let url_part = List.nth parts 0 in
+  check_string "url carrier type" "image_url" (member "type" url_part |> to_string);
+  check_string
+    "url carrier passthrough"
+    "https://example.com/a.png"
+    (member "image_url" url_part |> member "url" |> to_string);
+  let file_part = List.nth parts 1 in
+  check_string "file carrier type" "file" (member "type" file_part |> to_string);
+  check_string
+    "file carrier id"
+    "file-api-1"
+    (member "file" file_part |> member "file_id" |> to_string)
 ;;
 
 let test_non_base64_media_source_fails_closed () =
-  expect_invalid_arg "openai chat image url" (fun () ->
-    Serialize.openai_content_parts_of_blocks
-      [ Image
-          { media_type = "image/png"
-          ; data = "https://example.invalid/image.png"
-          ; source_type = Types.Url
-          }
-      ]
-    |> ignore);
+  (* RFC-0430: the openai-chat image URL carrier no longer fails closed — it
+     passes through as the image_url (see the reference-carriers test). The
+     fail-closed contract that remains is for backends with no native form
+     for the carrier: ollama rejects a URL image, and the responses surface
+     rejects a file_id document. *)
   expect_invalid_arg "ollama image url" (fun () ->
     ollama_messages
       ~supports_image_input:true
@@ -2276,6 +2299,10 @@ let () =
             "content parts cover modalities"
             `Quick
             test_content_parts_cover_modalities
+        ; Alcotest.test_case
+            "content parts carry url and file_id reference carriers"
+            `Quick
+            test_content_parts_reference_carriers
         ; Alcotest.test_case
             "openai user text/tool/empty"
             `Quick

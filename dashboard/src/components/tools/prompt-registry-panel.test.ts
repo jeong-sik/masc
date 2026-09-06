@@ -18,7 +18,29 @@ vi.mock('../../api', () => ({
 }))
 
 import type { DashboardPromptItem } from '../../api'
-import { PromptRegistryPanel, promptSourceCounts } from './prompt-registry-panel'
+import type { KeeperPromptAssemblyReport } from '../keeper-prompt-assembly-panel'
+import {
+  PromptRegistryPanel,
+  filterPrompts,
+  promptPresetOptions,
+  promptSourceCounts,
+} from './prompt-registry-panel'
+
+const EMPTY_REPORT: KeeperPromptAssemblyReport = {
+  rows: [],
+  stages: [],
+  warnings: [],
+  activePromptRoots: [],
+  stats: {
+    totalRows: 0,
+    overrideRows: 0,
+    missingRows: 0,
+    warningCount: 0,
+    criticalCount: 0,
+    sentPromptBytes: 0,
+    sentEstimatedTokens: 0,
+  },
+}
 
 function makePrompt(overrides: Partial<DashboardPromptItem>): DashboardPromptItem {
   return {
@@ -30,9 +52,7 @@ function makePrompt(overrides: Partial<DashboardPromptItem>): DashboardPromptIte
     file_value: null,
     override_value: null,
     file_path: null,
-    file_exists: true,
     source: 'file',
-    has_override: false,
     char_count: 0,
     required_file: true,
     template_variables: [],
@@ -64,7 +84,6 @@ function defaultPromptItems(): DashboardPromptItem[] {
       override_value: 'override world',
       file_path: 'fixture/config/prompts/keeper.md',
       source: 'override',
-      has_override: true,
       char_count: 14,
       template_variables: ['keeper'],
     }),
@@ -78,7 +97,6 @@ function defaultPromptItems(): DashboardPromptItem[] {
       override_value: null,
       file_path: 'fixture/config/prompts/analysis.dry_run.md',
       source: 'file',
-      has_override: false,
       char_count: 14,
       template_variables: [],
     }),
@@ -119,6 +137,26 @@ describe('promptSourceCounts', () => {
       override: 0,
       missing: 0,
     })
+  })
+})
+
+describe('the 수정/누락 tab', () => {
+  // The tab prints a count and then a list of rows. Those were two spellings
+  // of one predicate -- one over has_override, one over source -- eighty lines
+  // apart in the same file, and no test compared them. A prompt whose override
+  // was in force but whose has_override said otherwise would have been counted
+  // by one and hidden by the other.
+  it('counts exactly the rows it then shows', () => {
+    const counted = promptPresetOptions(HELPER_FIXTURES, EMPTY_REPORT).find(
+      preset => preset.id === 'attention',
+    )?.count
+    const shown = filterPrompts(HELPER_FIXTURES, 'all', '', EMPTY_REPORT, 'attention')
+    expect(counted).toBe(shown.length)
+  })
+
+  it('is the prompts that are not simply the file', () => {
+    const shown = filterPrompts(HELPER_FIXTURES, 'all', '', EMPTY_REPORT, 'attention')
+    expect(shown.map(prompt => prompt.key)).toEqual(['keeper.turn', 'planner.step'])
   })
 })
 

@@ -436,6 +436,51 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
         [ ("speaker_id", `String "98791450001");
           ("note", `String "tool matrix person note") ]
   | "keeper_tasks_list" -> `Assoc [ ("include_done", `Bool true) ]
+  | "keeper_artifact_read" ->
+      (* No artifact carries this digest in a fresh workspace, so the call
+         refuses rather than reading one. *)
+      `Assoc [ ("sha256", `String (String.make 64 '0')) ]
+  | "keeper_code_query" ->
+      `Assoc
+        [
+          ("question", `String "what does this define?");
+          ("path", `String "lib/sample.ml");
+          ("line", `Int 1);
+          ("symbol", `String "sample");
+        ]
+  | "keeper_spawn" ->
+      (* [pwd] exits immediately, so the case leaves no process behind. This
+         mirrors the [tool_execute] case above, which runs the same command. *)
+      `Assoc [ ("argv", `List [ `String "pwd" ]) ]
+  | "keeper_spawn_read" ->
+      `Assoc [ ("handle", `String "matrix-no-such-handle") ]
+  | "keeper_spawn_stop" ->
+      `Assoc [ ("handle", `String "matrix-no-such-handle") ]
+  | "keeper_spawn_wait" ->
+      (* A handle that was never issued refuses without waiting; the short
+         timeout bounds the case even if an implementation waits first. *)
+      `Assoc
+        [
+          ("handle", `String "matrix-no-such-handle");
+          ("until", `String "exit");
+          ("timeout_sec", `Float 0.1);
+        ]
+  | "keeper_task_cancel" ->
+      (* Deliberately not [Generic.ensure_task]: cancelling or releasing the
+         shared fixture task would decide the outcome of [keeper_task_done],
+         which claims the same one. An unknown id keeps the cases independent
+         and still exercises the call. *)
+      `Assoc
+        [
+          ("task_id", `String "matrix-no-such-task");
+          ("reason", `String "tool matrix cancel");
+        ]
+  | "keeper_task_release" ->
+      `Assoc
+        [
+          ("task_id", `String "matrix-no-such-task");
+          ("summary", `String "tool matrix release");
+        ]
   | "keeper_broadcast" ->
       `Assoc [ ("content", `String "tool matrix broadcast") ]
   | "keeper_task_done" ->

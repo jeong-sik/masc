@@ -120,11 +120,18 @@ export interface LspLanguageStatus {
   readonly last_error: string | null
 }
 
-export interface LspStatusSnapshot {
-  readonly langs: ReadonlyArray<LspLanguageStatus>
-}
+/** What this client knows about the language servers.
+ *
+ *  `unreadable` is a payload the parser refused. It is a state of its own
+ *  and not the previous answer kept a while longer: a count that names
+ *  languages reads as current, so a status one redeploy old is worse than
+ *  one that says it is unknown. */
+export type LspStatusSnapshot =
+  | { readonly kind: 'langs'; readonly langs: ReadonlyArray<LspLanguageStatus> }
+  | { readonly kind: 'unreadable' }
 
-export const EMPTY_LSP_STATUS_SNAPSHOT: LspStatusSnapshot = { langs: [] }
+export const EMPTY_LSP_STATUS_SNAPSHOT: LspStatusSnapshot = { kind: 'langs', langs: [] }
+export const UNREADABLE_LSP_STATUS_SNAPSHOT: LspStatusSnapshot = { kind: 'unreadable' }
 export const lspStatusSnapshot = signal<LspStatusSnapshot>(EMPTY_LSP_STATUS_SNAPSHOT)
 
 const LSP_TERMINAL_CLOSE_CODES = new Set([1008, 4401, 4403])
@@ -811,7 +818,7 @@ export function parseLspStatusSnapshot(value: unknown): LspStatusSnapshot | null
     if (status === null) return null
     parsed.push(status)
   }
-  return { langs: parsed }
+  return { kind: 'langs', langs: parsed }
 }
 
 function parseLspLanguageStatus(value: unknown): LspLanguageStatus | null {
@@ -841,6 +848,7 @@ function publishLspStatusSnapshot(value: unknown): void {
   const parsed = parseLspStatusSnapshot(value)
   if (parsed === null) {
     console.warn('[LSP] invalid masc/lspStatus payload')
+    lspStatusSnapshot.value = UNREADABLE_LSP_STATUS_SNAPSHOT
     return
   }
   lspStatusSnapshot.value = parsed

@@ -183,6 +183,7 @@ describe('LspConnection', () => {
     })
 
     expect(lspStatusSnapshot.value).toEqual({
+      kind: 'langs',
       langs: [{
         lang: 'ocaml',
         connected: false,
@@ -193,9 +194,10 @@ describe('LspConnection', () => {
     conn.dispose()
   })
 
-  it('rejects malformed masc/lspStatus payloads without mutating the snapshot', () => {
+  it('marks the status unreadable rather than keep the last one it could read', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     lspStatusSnapshot.value = {
+      kind: 'langs',
       langs: [{
         lang: 'ocaml',
         connected: true,
@@ -219,8 +221,9 @@ describe('LspConnection', () => {
     })
 
     expect(warn).toHaveBeenCalledWith('[LSP] invalid masc/lspStatus payload')
-    expect(lspStatusSnapshot.value.langs).toHaveLength(1)
-    expect(lspStatusSnapshot.value.langs[0]?.connected).toBe(true)
+    // The languages the old snapshot named are not known to be up any more,
+    // so the snapshot says it cannot answer instead of repeating them.
+    expect(lspStatusSnapshot.value).toEqual({ kind: 'unreadable' })
     conn.dispose()
   })
 

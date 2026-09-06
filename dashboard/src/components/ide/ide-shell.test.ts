@@ -627,6 +627,7 @@ describe('IdeShell', () => {
 
   it('surfaces LSP languages with no server in the IDE statusbar', async () => {
     lspStatusSnapshot.value = {
+      kind: 'langs',
       langs: [
         {
           lang: 'ocaml',
@@ -668,6 +669,25 @@ describe('IdeShell', () => {
       'ocaml: ocamllsp unavailable\nlua: lua-language-server not on PATH',
     )
     expect(chip.getAttribute('title')).not.toContain('typescript')
+  })
+
+  it('says so when it cannot read the LSP status at all', async () => {
+    lspStatusSnapshot.value = { kind: 'unreadable' }
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source', file: 'lib/runtime.ml' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const chip = await waitFor(() => {
+      const found = container.querySelector('[data-testid="ide-statusbar-chip-lsp-status"]')
+      expect(found).not.toBeNull()
+      return found!
+    })
+    expect(chip.textContent).toBe('LSP status unreadable')
+    expect(chip.getAttribute('title')).toContain('could not read')
   })
 
   it('rejects unsafe IDE route file focus params', async () => {

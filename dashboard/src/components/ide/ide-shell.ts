@@ -394,13 +394,29 @@ function workspaceIssueTitle(issues: ReadonlyArray<WorkspaceFetchIssue>): string
     .join('\n')
 }
 
-function lspUnavailableStatus(status: LspStatusSnapshot | undefined): ReadonlyArray<string> {
-  return (status?.langs ?? [])
+/** The statusbar's LSP chip: how many languages have no server, or that the
+ *  status itself could not be read. Absent when every language is up. */
+function lspStatusChip(
+  status: LspStatusSnapshot | undefined,
+): { readonly label: string | undefined; readonly title: string } {
+  if (status === undefined) return { label: undefined, title: '' }
+  if (status.kind === 'unreadable') {
+    return {
+      label: 'LSP status unreadable',
+      title: 'The server sent an LSP status this dashboard could not read. '
+        + 'The languages it lists are unknown until the next readable one.',
+    }
+  }
+  const down = status.langs
     .filter(lang => !lang.connected)
     .map(lang => {
       const error = lang.last_error?.trim()
       return error ? `${lang.lang}: ${error}` : lang.lang
     })
+  return {
+    label: down.length > 0 ? `LSP unavailable ${down.length}` : undefined,
+    title: down.join('\n'),
+  }
 }
 
 function addStatusbarChip(
@@ -454,14 +470,8 @@ export function deriveIdeStatusbarModel({
     'warn',
     workspaceIssueTitle(workspaceIssues),
   )
-  const lspUnavailable = lspUnavailableStatus(lspStatus)
-  addStatusbarChip(
-    chips,
-    'lsp-status',
-    lspUnavailable.length > 0 ? `LSP unavailable ${lspUnavailable.length}` : undefined,
-    'warn',
-    lspUnavailable.join('\n'),
-  )
+  const lsp = lspStatusChip(lspStatus)
+  addStatusbarChip(chips, 'lsp-status', lsp.label, 'warn', lsp.title)
   if (terminalOpen) addStatusbarChip(chips, 'terminal', 'terminal', 'info', 'Execute output drawer open')
   if (findOpen) addStatusbarChip(chips, 'find', 'find', 'ghost', 'Current-file find panel open')
   if (railsCollapsed) addStatusbarChip(chips, 'rails', 'rails hidden', 'ghost', 'IDE side rails hidden')

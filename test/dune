@@ -4607,6 +4607,11 @@
  (libraries masc_test_deps exec_ssh_protocol eio_main))
 
 (test
+ (name test_shell_ir_with_sandbox)
+ (modules test_shell_ir_with_sandbox)
+ (libraries masc_test_deps))
+
+(test
  (name test_keeper_tool_execute_observe)
  (modules test_keeper_tool_execute_observe)
  (libraries masc_test_deps))

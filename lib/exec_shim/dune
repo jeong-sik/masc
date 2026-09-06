@@ -2,7 +2,7 @@
 
 (library
  (name exec_shim)
- (modules exec_shim)
+ (modules exec_shim shim_build_id)
  (libraries exec_ssh_protocol unix)
  (foreign_stubs
   (language c)

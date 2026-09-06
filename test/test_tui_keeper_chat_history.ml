@@ -75,9 +75,17 @@ let origin_request_id = function
 
 let full_tool_rows = History.tool_rows
 
+(* The pane draws the pair apart. Joined is how a whole-row assertion reads
+   it, so the join lives here rather than in the module under test. *)
+let joined_label speaker surface =
+  match History.addressed_label_parts speaker surface with
+  | name, None -> name
+  | name, Some surface -> name ^ " \xc2\xb7 " ^ surface
+;;
+
 let kind_to_string : History.kind -> string = function
   | History.Addressed_to_keeper { speaker; surface } ->
-      Printf.sprintf "addressed(%s)" (History.addressed_label speaker surface)
+      Printf.sprintf "addressed(%s)" (joined_label speaker surface)
   | History.Said_by_keeper -> "keeper"
   | History.Autonomous_reply -> "autonomous"
   | History.Delivery_failed _ -> "delivery_failed"
@@ -551,10 +559,10 @@ let test_an_unresolved_speaker_reaches_the_column_whole () =
     (History.addressed_label_parts
        (History.Unresolved { id = Some "codex-mcp-client" })
        (Some History.Surface.Broadcast));
-  (* The joined form is what a caller with room for both still gets. *)
+  (* Joined, which is what a caller with room for both makes of them. *)
   check string "joined, they read as they always did"
     "codex-mcp-client \xc2\xb7 broadcast"
-    (History.addressed_label
+    (joined_label
        (History.Unresolved { id = Some "codex-mcp-client" })
        (Some History.Surface.Broadcast))
 ;;
@@ -632,7 +640,7 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
   let label json =
     match (List.hd (decode (`List [ json ])).History.rows).History.kind with
     | History.Addressed_to_keeper { speaker; surface } ->
-        History.addressed_label speaker surface
+        joined_label speaker surface
     | History.Said_by_keeper | History.Autonomous_reply
     | History.Delivery_failed _ | History.Tool_calls _
     | History.Skill_activity _ | History.Reasoning _

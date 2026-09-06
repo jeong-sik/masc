@@ -2021,6 +2021,33 @@ let test_the_badge_draws_a_broadcast_speaker_without_two_cuts () =
     (occurrences ~needle:"p-client" badge)
 ;;
 
+(* The operator's row is fitted by the same rule, because it is measured
+   against the same column. It reached this pane joined and the badge only
+   asked whether the whole string was still "you" -- true of a row typed at
+   the dashboard and of nothing else -- so a line written through a connector
+   was cut as one string and drew "yo\xe2\x80\xa6dcast": the speaker gone to
+   keep the tail of the surface. *)
+let test_the_operator_badge_keeps_who_it_is () =
+  let narrow = Layout.chat_role_label_width ~pane_cells:100 in
+  let badge column surface =
+    Layout.align_role_label ~column ~style:Layout.User
+      (Layout.fit_speaker ~column ~speaker:"YOU" ~surface ())
+  in
+  check int "a narrow column cuts the operator badge not at all" 0
+    (occurrences ~needle:"\xe2\x80\xa6" (badge narrow (Some "broadcast")));
+  check int "and keeps the speaker whole" 1
+    (occurrences ~needle:"YOU" (badge narrow (Some "broadcast")));
+  (* Where both fit, both are drawn: the operator row has no arrival siding,
+     so the surface is the only thing saying the line came in by a door. *)
+  (* Trimmed: what the badge pads out to is the column's business, and the
+     test above it already pins that. *)
+  check string "a column with room for both says both"
+    "\xe2\x96\xb6 YOU \xc2\xb7 agent"
+    (String.trim (badge wide_label_column (Some "agent")));
+  check string "a dashboard row still reads as it did" "\xe2\x96\xb6 YOU"
+    (String.trim (badge wide_label_column None))
+;;
+
 let () =
   run "tui_message_layout"
     [
@@ -2174,6 +2201,8 @@ let () =
             `Quick test_a_speaker_keeps_the_column_when_the_surface_cannot_share_it
         ; test_case "the badge draws a broadcast speaker without two cuts"
             `Quick test_the_badge_draws_a_broadcast_speaker_without_two_cuts
+        ; test_case "the operator badge keeps who it is" `Quick
+            test_the_operator_badge_keeps_who_it_is
         ; test_case "Skill states keep shapes without colour" `Quick
             test_skill_marks_keep_state_without_colour
         ; test_case "alignment padding is kept apart from the name" `Quick

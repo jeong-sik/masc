@@ -3470,6 +3470,10 @@ type state = {
      message: switching keepers or abandoning the draft must not leave an image
      attached to whatever is typed later. *)
   mutable msg_attachments: Masc_tui_keeper_chat_projection.attachment list;
+  (* Image references staged with :ref (#33728) — a URL the provider fetches
+     or a Files-API id. Same lifecycle as [msg_attachments]: part of the unsent
+     message, consumed by the send that consumes the draft. *)
+  mutable msg_references: Masc_tui_keeper_chat_projection.image_reference list;
   (* Ctrl-O weighs a staged image against a .png the conversation named by
      which is newer, so the batch carries a recency marker: an anchor to the
      history row that was newest when the newest attachment entered the
@@ -4441,6 +4445,7 @@ let create_state
   system_logs_detail_scroll = 0;
   msg_input = Buffer.create 256;
   msg_attachments = [];
+  msg_references = [];
   msg_attachments_since = None;
   msg_target_keeper_name = None;
   msg_return = Keeper_chat_return_detail;

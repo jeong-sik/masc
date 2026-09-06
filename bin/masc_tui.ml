@@ -1233,6 +1233,7 @@ let note_attachment_staged (state : state) =
 
 let clear_staged_attachments (state : state) =
   state.msg_attachments <- [];
+  state.msg_references <- [];
   state.msg_attachments_since <- None
 ;;
 
@@ -1535,6 +1536,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
             behind. *)
          clear_staged_attachments state;
          state.msg_attachments <- request.Keeper_chat.attachments;
+         state.msg_references <- request.Keeper_chat.references;
          (* The original staging moment is gone -- the send that queued this
             line cleared the marker with the batch -- so the recall is what
             Ctrl-O can weigh: the attachments are the freshest thing the
@@ -5698,10 +5700,14 @@ let drop_inflight state request =
 (* Staged images belong to the message being composed, so the send that consumes
    the draft consumes them too. Returning and clearing in one step keeps a failed
    send from silently re-attaching the same image to the next one. *)
+(* Staged references follow the same rule as staged images: the send that
+   consumes the draft consumes them. Returned together so every request
+   builder carries both or neither. *)
 let take_pending_attachments state =
   let staged = state.msg_attachments in
+  let references = state.msg_references in
   clear_staged_attachments state;
-  staged
+  (staged, references)
 ;;
 
 let launch_keeper_request ?promoted state ~mailbox request =
@@ -5866,7 +5872,8 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
             place_spilled_paste state ~base_path ~keeper_name text
           in
           let request =
-            Keeper_chat.create_request ~attachments:state.msg_attachments
+            let attachments, references = take_pending_attachments state in
+            Keeper_chat.create_request ~attachments ~references
               ~keeper_name ~message:text ()
           in
           (match
@@ -5921,9 +5928,11 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                target ->
           let original = editing.Chat_queue.request in
           let request =
+            let attachments, references = take_pending_attachments state in
             { original with
               message = text
-            ; attachments = take_pending_attachments state
+            ; attachments
+            ; references
             }
           in
           (match
@@ -5982,8 +5991,10 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
         (match send_disposition state ~keeper_name:target with
       | Sends ->
           let request =
+            let attachments, references = take_pending_attachments state in
             Keeper_chat.create_request
-              ~attachments:(take_pending_attachments state)
+              ~attachments
+              ~references
               ~keeper_name:target
               ~message:text
               ()
@@ -5999,8 +6010,10 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
              attachments included. Building it at dispatch instead is what sent
              an image with whichever line happened to go next. *)
           let request =
+            let attachments, references = take_pending_attachments state in
             Keeper_chat.create_request
-              ~attachments:(take_pending_attachments state)
+              ~attachments
+              ~references
               ~keeper_name:target
               ~message:text
               ()
@@ -6997,6 +7010,38 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       open_image state ~notice (String.trim path)
   | Masc_tui_command.Attach_image_missing_path ->
       notice ~role:Message_error "/attach needs a path on the same line"
+  | Masc_tui_command.Attach_image_ref_missing_value ->
+      notice ~role:Message_error "/ref needs a URL or file_id on the same line"
+  | Masc_tui_command.Attach_image_ref value -> (
+      Buffer.clear state.msg_input;
+      (* A whole-token http(s) URL is a URL reference; anything else non-blank
+         is a Files-API id. Both send no bytes — the provider resolves the
+         reference or visibly rejects it. *)
+      let value = String.trim value in
+      let reference =
+        if String_util.starts_with_ci ~prefix:"https://" value
+           || String_util.starts_with_ci ~prefix:"http://" value
+        then Some (Keeper_chat.Ref_url value)
+        else if value = "" then None
+        else Some (Keeper_chat.Ref_file_id value)
+      in
+      match reference with
+      | None ->
+          notice ~role:Message_error "/ref needs a URL or file_id on the same line"
+      | Some reference ->
+          state.msg_references <- state.msg_references @ [ reference ];
+          note_attachment_staged state;
+          let kind =
+            match reference with
+            | Keeper_chat.Ref_url _ -> "url"
+            | Keeper_chat.Ref_file_id _ -> "file_id"
+          in
+          notice ~role:Message_local
+            (Printf.sprintf
+               "referenced %s (%s) — the provider fetches it; %d reference(s)                 staged for the next message"
+               value
+               kind
+               (List.length state.msg_references)))
   | Masc_tui_command.Attach_image path -> (
       Buffer.clear state.msg_input;
       match Masc_tui_attachment.of_file ~path:(String.trim path) with
@@ -9645,6 +9690,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Inspect_context
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
        | Masc_tui_command.Attach_image _ | Masc_tui_command.Attach_image_missing_path
+       | Masc_tui_command.Attach_image_ref _ | Masc_tui_command.Attach_image_ref_missing_value
        | Masc_tui_command.Unknown _ ->
            (* A command keeps the surface: the operator asked the TUI, not
               the keeper, and the answer lands in Recent Events. *)

@@ -104,6 +104,45 @@ let upload ~sw ~net ~(api_key : string) ~boundary ~filename ~purpose ~content ()
     | code -> Error (Printf.sprintf "files upload: HTTP %d" code))
 ;;
 
+let list_files ~sw ~net ~(api_key : string) ()
+  : (file_object list, string) result =
+  match
+    Http_client.get_sync ~sw ~net
+      ~url:(files_base_url ^ "/files")
+      ~headers:(auth_headers ~api_key)
+      ()
+  with
+  | Error _ -> Error "files list: HTTP dispatch failed"
+  | Ok response -> (
+    (* GET /files; the reply is
+       {"object":"list","data":[file…],"has_more":bool}. Pagination
+       parameters exist but default to everything the account holds, which
+       is the shape a keeper listing its uploads wants. *)
+    match response.Http_client.status with
+    | 200 -> (
+      match Yojson.Safe.from_string response.body with
+      | exception _ -> Error "files list: reply is not JSON"
+      | `Assoc fields -> (
+        match List.assoc_opt "data" fields with
+        | Some (`List rows) ->
+          let decoded =
+            List.filter_map
+              (fun row ->
+                 match file_object_of_yojson row with
+                 | Ok obj -> Some obj
+                 | Error _ -> None)
+              rows
+          in
+          (* A row that does not decode is a forward-compat addition the
+             client has not been taught; dropping it silently would hide
+             files the operator owns, so the count must disagree visibly. *)
+          if List.length decoded = List.length rows then Ok decoded
+          else Error "files list: a row did not decode"
+        | _ -> Error "files list: reply carries no data array")
+      | _ -> Error "files list: reply is not a JSON object")
+    | code -> Error (Printf.sprintf "files list: HTTP %d" code))
+;;
+
 let delete ~sw ~net ~(api_key : string) ~(file_id : string) ()
   : (bool, string) result =
   match

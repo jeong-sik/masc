@@ -273,8 +273,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0430 | DeepSeek direct API full integration | Draft | - |
 | 0431 | 종류는 심각도가 아니다 — 테마에 없는 축 하나 | Implemented | - |
 | 0432 | 파일 변경 답은 매번 237MB 를 다시 읽는다 — 붙은 만큼만 읽으면 된다 | Implemented | - |
-| 0433 | 고갈은 말하고 끝나는 때는 안 말하는 provider — 그래서 하루 종일 죽은 곳으로 보낸다 | Draft | - |
-| 0434 | 로드는 그것을 만든 턴보다 오래 살아야 한다 — 한 턴에 한 번만 쓰는 도구는 영영 못 불린다 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |

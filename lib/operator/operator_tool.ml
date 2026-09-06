@@ -7,16 +7,6 @@ type 'a context = 'a Tool_operator.context
 
 module Operator_name = Tool_name.Operator_name
 
-let operator_tool_name name = Operator_name.to_string name
-
-let board_attention_quarantine_requeue_tool_name =
-  operator_tool_name Operator_name.Operator_board_attention_quarantine_requeue
-;;
-
-let task_recovery_tool_name =
-  operator_tool_name Operator_name.Operator_task_recovery_resolve
-;;
-
 (* RFC-0189 PR-1b.11 — typed result.
 
    [result_of_json] projects [Operator_control.*_json :
@@ -336,33 +326,44 @@ let remote_tool_names : string list =
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let tool_spec_read_only =
-  [
-    operator_tool_name Operator_name.Operator_snapshot;
-    operator_tool_name Operator_name.Operator_digest;
-  ]
+type registration_policy =
+  { read_only : bool
+  ; hidden : bool
+  ; allow_direct_call_when_hidden : bool
+      (** A hidden tool the operator profile still reaches directly. False for
+          the two that must go through the profile and nothing else. *)
+  }
 
-(* Tools with explicit catalog metadata that must be preserved. *)
-let operator_profile_only_tools =
-  [ board_attention_quarantine_requeue_tool_name
-  ; task_recovery_tool_name
-  ]
+(* One row per Operator_name constructor. This used to be four string lists
+   consulted with List.mem, so a tool got its policy by being absent from them:
+   a new one was silently not read-only, visible, and not directly callable.
+   Now the three answers are stated per constructor and the match is exhaustive,
+   so adding one is a compile error until they are given. *)
+let registration_policy : Operator_name.t -> registration_policy = function
+  | Operator_name.Operator_snapshot ->
+    { read_only = true; hidden = false; allow_direct_call_when_hidden = false }
+  | Operator_name.Operator_digest ->
+    { read_only = true; hidden = false; allow_direct_call_when_hidden = false }
+  | Operator_name.Operator_confirm ->
+    { read_only = false; hidden = false; allow_direct_call_when_hidden = false }
+  | Operator_name.Operator_action ->
+    { read_only = false; hidden = true; allow_direct_call_when_hidden = true }
+  | Operator_name.Operator_judgment_write ->
+    { read_only = false; hidden = true; allow_direct_call_when_hidden = true }
+  | Operator_name.Operator_board_attention_quarantine_requeue ->
+    { read_only = false; hidden = true; allow_direct_call_when_hidden = false }
+  | Operator_name.Operator_task_recovery_resolve ->
+    { read_only = false; hidden = true; allow_direct_call_when_hidden = false }
 ;;
 
-let tool_spec_hidden =
-  "masc_operator_judgment_write" :: operator_profile_only_tools
-;;
-
-let tool_spec_hidden_actions = [ operator_tool_name Operator_name.Operator_action ]
-
+(* Registration walks the vocabulary, not the schema list, so every constructor
+   is registered with the schema and policy that belong to it. *)
 let () =
   List.iter
-    (fun (s : tool_schema) ->
-      let is_hidden = List.mem s.name tool_spec_hidden || List.mem s.name tool_spec_hidden_actions in
+    (fun name ->
+      let (s : tool_schema) = local_schema name in
+      let policy = registration_policy name in
       let existing = Tool_catalog.metadata s.name in
-      let direct_call_when_hidden =
-        is_hidden && not (List.mem s.name operator_profile_only_tools)
-      in
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name
@@ -370,12 +371,13 @@ let () =
            ~module_tag:Tool_dispatch.Mod_operator
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
-           ~is_read_only:(List.mem s.name tool_spec_read_only)
-           ~visibility:(if is_hidden then Tool_catalog.Hidden else Tool_catalog.Default)
-           ~allow_direct_call_when_hidden:direct_call_when_hidden
+           ~is_read_only:policy.read_only
+           ~visibility:
+             (if policy.hidden then Tool_catalog.Hidden else Tool_catalog.Default)
+           ~allow_direct_call_when_hidden:policy.allow_direct_call_when_hidden
            ?reason:existing.reason
            ()))
-    schemas
+    Operator_name.all
 
 let () =
   Tool_operator.register_operator_tools ~dispatch ~remote_schemas;

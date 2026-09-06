@@ -5827,7 +5827,12 @@ def autonomous_turn_history_interaction() -> Interaction:
 def memory_journal_timeline_interaction(
     memory: SequencedHttpResponse,
 ) -> Interaction:
-    def assert_monotonic_direct_turn(frame: bytes) -> None:
+    def assert_monotonic_direct_turn(frame: bytes, drawn: bytes) -> None:
+        """[frame] is the one frame the ordering checks read. [drawn] is
+        everything the terminal has received, which is where a row that a
+        differential redraw did not resend still lives: the rail is written
+        once, when its hour first appears, and every later frame carries
+        only the rows that changed."""
         plain = CSI_RE.sub(b"", frame)
         hour = time.strftime(
             "%Y-%m-%d · %H:00", time.localtime(1788273291.814646)
@@ -5837,10 +5842,10 @@ def memory_journal_timeline_interaction(
             + "── ".encode()
             + re.escape(hour)
         )
-        if styled_rail.search(frame) is None:
+        if styled_rail.search(drawn) is None:
             raise AssertionError(
                 "Civil-hour rail was not drawn in semantic colour and bold "
-                f"weight for {hour!r}: {frame!r}"
+                f"weight for {hour!r}: {drawn!r}"
             )
         # The renderer groups by civil hour (checked above) and does not
         # also draw a per-message HH:MM:SS clock in the resting chat body
@@ -5925,7 +5930,7 @@ def memory_journal_timeline_interaction(
             b"Librarian committed current memory revision 9",
         )
         plain_resting = CSI_RE.sub(b"", resting)
-        assert_monotonic_direct_turn(resting)
+        assert_monotonic_direct_turn(resting, bytes(output))
         if b"\xc2\xb7 Ctrl-N" not in plain_resting:
             raise AssertionError(
                 f"Journal summary did not expose its detail key: {resting!r}"
@@ -5983,7 +5988,7 @@ def memory_journal_timeline_interaction(
             b"superseded by provider grouping",
         )
         plain_visible = CSI_RE.sub(b"", visible)
-        assert_monotonic_direct_turn(visible)
+        assert_monotonic_direct_turn(visible, bytes(output))
         if re.search("\u25c8\\s+JOURNAL".encode(), plain_visible) is None:
             raise AssertionError(
                 f"Memory timeline did not draw its distinct Journal marker: {visible!r}"

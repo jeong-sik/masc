@@ -1884,21 +1884,30 @@ let test_missing_operator_token_is_reported () =
        ~identifiers:[ "Masc_tui_credential.self_mint_expiry_hours" ]);
   (* Both refusal surfaces must ask what this process actually holds. Passing a
      constant would compile and read plausibly while asserting something the
-     401 never established -- which is the failure these lines exist to end. *)
-  check int "the chat surface asks whether a bearer was presented" 1
-    (Ast_grep.count_applications_with_exact_labelled_unit_call_in_value_binding
-       ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"apply_keeper_chat_result"
-       ~callee:"Keeper_chat.reconciliation_failure_detail"
-       ~label:"credential_sent"
-       ~nested_callee:"Masc_tui_http.operator_token_present");
-  check int "the roster surface asks the same question" 1
-    (Ast_grep.count_applications_with_exact_labelled_unit_call_in_value_binding
-       ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"apply_keeper_roster_load"
-       ~callee:"Keeper_control.roster_failure_message"
-       ~label:"credential_sent"
-       ~nested_callee:"Masc_tui_http.operator_token_present");
+     401 never established -- which is the failure these lines exist to end.
+
+     So every call passes the question, not one of them. A fixed number says
+     how many branches reach the detail, and the chat surface has two: the
+     unverified outcome and the plain error. Both ask; a third that did not
+     would leave the number alone and the property broken. *)
+  let asks_the_question ~binding_name ~callee ~label =
+    let asking =
+      Ast_grep.count_applications_with_exact_labelled_unit_call_in_value_binding
+        ~module_path:"bin/masc_tui.ml" ~binding_name ~callee ~label
+        ~nested_callee:"Masc_tui_http.operator_token_present"
+    in
+    let calls =
+      Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+        ~binding_name ~callee
+    in
+    check bool (binding_name ^ " reaches " ^ callee) true (calls > 0);
+    check int (binding_name ^ " asks on every call to " ^ callee) calls asking
+  in
+  asks_the_question ~binding_name:"apply_keeper_chat_result"
+    ~callee:"Keeper_chat.reconciliation_failure_detail"
+    ~label:"credential_sent";
+  asks_the_question ~binding_name:"apply_keeper_roster_load"
+    ~callee:"Keeper_control.roster_failure_message" ~label:"credential_sent";
   (* Every surface reads JSON through these two. Answering a refusal inside them
      is what keeps the server's auth body out of six different panes; a surface
      that decoded the status itself would print it again. *)

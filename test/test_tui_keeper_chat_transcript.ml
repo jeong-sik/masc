@@ -1193,16 +1193,23 @@ let test_compact_and_full_keep_the_same_typed_facts () =
     ; "? glob"
     ; "(2 steps not carried by the transcript)"
     ]
-    full.rows;
+    full.details;
   check int "full has three details plus the transcript omission" 4
-    (List.length full.rows);
+    (List.length full.details);
   check int "full hides no detail row" 0 full.hidden_activity_rows;
-  check int "compact keeps inventory, trouble and the transcript omission" 3
-    (List.length compact.rows);
+  (* Full draws a header too now, over details that are all visible: it is a
+     rollup, not a fold, so it claims no folded count. *)
+  check bool "full heads the block" true (full.header <> None);
+  check int "compact keeps the trouble row and the transcript omission" 2
+    (List.length compact.details);
   check int "compact states exactly how many rows it hid" 3
     compact.hidden_activity_rows;
-  let inventory = List.hd compact.rows in
-  let trouble = List.nth compact.rows 1 in
+  let inventory =
+    match compact.header with
+    | Some inventory -> inventory
+    | None -> Alcotest.fail "a folded three-call block heads with its inventory"
+  in
+  let trouble = List.hd compact.details in
   check bool "the inventory row reads as one activity summary" true
     (String.starts_with ~prefix:"✗ Tools 3" inventory);
   check bool "the inventory row carries the exact folded count" true
@@ -1220,7 +1227,7 @@ let test_compact_and_full_keep_the_same_typed_facts () =
   check bool "the trouble row carries its own mark" true
     (String.starts_with ~prefix:"✗ " trouble);
   check string "compact does not count the visible omission as hidden"
-    (List.nth full.rows 3) (List.nth compact.rows 2)
+    (List.nth full.details 3) (List.nth compact.details 1)
 
 let test_compact_summary_counts_registered_public_names () =
   let activity name =

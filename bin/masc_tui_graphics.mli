@@ -65,6 +65,14 @@ val delete_all : string
     a picture behind: the terminal holds images in its own layer, and text
     drawn over them does not necessarily erase them. *)
 
+type graphics_protocol =
+  | Kitty_protocol
+  | ITerm2_protocol
+  | Unsupported_protocol
+
+val iterm2_place : data:string -> placement -> string
+(** Bytes that put [data] on an iTerm2-compatible terminal at the cursor using OSC 1337. *)
+
 val tmux_wrapped : string -> string
 (** Wrap escapes so tmux forwards them to the terminal underneath instead of
     eating them. Only correct inside tmux, and only with

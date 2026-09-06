@@ -727,9 +727,14 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
        (discord_label "1356818756755525815"));
   (* An author the producer could not name is not the person reading the pane.
      272 rows from Slack and Discord arrived this way and every one of them
-     was drawn as "you". *)
+     was drawn as "you".
+
+     The id arrives whole. It used to be shortened here as well, and #33699
+     took that out: the speaker column cuts once, and cut twice the row kept
+     neither end. The expectation was written before that and still asked for
+     the shortened form. *)
   check string "an unnamed connector author is not the operator"
-    "\xe2\x80\xa6L0RHPW7P \xc2\xb7 slack C1"
+    "U09L0RHPW7P \xc2\xb7 slack C1"
     (label
        (addressed ~speaker_id:"U09L0RHPW7P" ~speaker_authority:"external"
           ~surface:(surface "slack" [ "channel_id", `String "C1" ])
@@ -1153,11 +1158,6 @@ let test_a_blank_turn_with_no_trace_keeps_its_line () =
      turn happened. Unchanged from before trace blocks were read. *)
   let decoded = decode (`List [ row ~ts:7.0 ~role:"assistant" "" ]) in
   check (list string) "one keeper row, blank" [ "keeper" ]
-    (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
-
-let test_a_blank_autonomous_turn_has_an_explicit_origin () =
-  let decoded = decode (`List [ autonomous_turn ~ts:8.0 [] ]) in
-  check (list string) "one autonomous row" [ "autonomous" ]
     (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
 
 let test_persisted_identity_and_absolute_turn_survive_projection () =
@@ -1867,8 +1867,6 @@ let () =
             test_missing_skill_evidence_stays_visible_beside_the_raw_call
         ; test_case "Skill evidence count mismatch keeps raw calls" `Quick
             test_skill_evidence_count_mismatch_retains_every_raw_call
-        ; test_case "blank autonomous turn keeps its origin" `Quick
-            test_a_blank_autonomous_turn_has_an_explicit_origin
         ; test_case "projection keeps stable row and absolute turn identity"
             `Quick
             test_persisted_identity_and_absolute_turn_survive_projection

@@ -197,6 +197,10 @@ let for_surface = function
       ; b Navigate "h/l" "pane" ~help:"focus the post list or detail pane"
         (* Beside [f], not instead of it: [f] narrows the list to one hearth,
            this jumps the cursor to a post without changing what is listed. *)
+      ; b Navigate "PgUp / PgDn" "detail page"
+        (* The global page dispatcher already scrolls the open post body and
+           its comment thread by a window; it answers in the detail pane, so
+           the help owed it a line. *)
       ; b Search "/" "find" ~help:"jump the cursor to a matching post id, author or title"
       ; b Search "n / N" "next / previous match"
       ]

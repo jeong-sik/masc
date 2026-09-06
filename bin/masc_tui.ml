@@ -16065,8 +16065,21 @@ and is loaded on demand through keeper_skill.
                 launch_runtime_surface_load state ~mailbox:async_messages
                   ~force:true
             | Tools -> launch_tools_load state ~mailbox:async_messages
-            | Config ->
-                launch_runtime_config_load state ~mailbox:async_messages
+            | Config -> (
+                (* Same per-pane dispatch as goto_surface: each Config pane
+                   loads its own source, so a manual refresh must not
+                   quietly fall back to runtime.toml's loader for panes
+                   that read somewhere else (presets, prompts, params,
+                   voice). *)
+                match state.config_pane with
+                | Config_prompts -> launch_prompts_load state ~mailbox:async_messages
+                | Config_presets -> launch_presets_load state ~mailbox:async_messages
+                | Config_params ->
+                    launch_runtime_params_load state ~mailbox:async_messages
+                | Config_voice ->
+                    launch_voice_config_load state ~mailbox:async_messages
+                | Config_runtime | Config_models | Config_themes ->
+                    launch_runtime_config_load state ~mailbox:async_messages)
             | Resources ->
                 launch_resources_list state ~mailbox:async_messages
             | Schedules -> launch_schedules_load state ~mailbox:async_messages

@@ -3,7 +3,7 @@
 
     Two ingestion paths backing the public surface:
     - In-memory ring of recent tool-skip events fed by
-      {!record_tool_skipped} (the [Keeper_keepalive_signal] callback).
+      [record_tool_skipped] (the [Keeper_keepalive_signal] callback).
     - Workspace-scoped durable approval queue reads.
 
     The ring buffer, rejection event record, and supporting helpers
@@ -20,13 +20,6 @@ type approval_summary = {
   p95_wait_sec : float option;
   oldest_pending_sec : float option;
 }
-
-val record_tool_skipped : tool_name:string -> reason_code:string -> unit
-(** Record a tool-skip event into the bounded ring. Safe to call from
-    cancellable Eio fibers — internal cancellation is re-raised, all
-    other exceptions are reported via
-    {!Keeper_metrics.(to_string LifecycleCallbackFailures)} and logged
-    without failing the SSE broadcast path. *)
 
 val approval_queue_summary :
   now_ts:float ->

@@ -4,10 +4,6 @@
 
     @since 2.125.0 — extracted from Runtime *)
 
-(** Parse an environment variable as int, clamped to [[min_v, max_v]].
-    Returns [default] when unset or unparseable. *)
-val int_of_env_default : string -> default:int -> min_v:int -> max_v:int -> int
-
 (** Compute total tokens from AGENT_CORE api_usage. *)
 val total_tokens : Agent_core.Types.api_usage -> int
 

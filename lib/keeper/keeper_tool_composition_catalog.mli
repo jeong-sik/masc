@@ -166,8 +166,6 @@ val skill_tool_name : string
 
 val error_to_string : error -> string
 
-val param_type_to_string : param_type -> string
-
 val input_schema_of_params : param list -> Yojson.Safe.t
 (** The model-visible input schema for an entry: an object with one required,
     described property per declared param, closed to extras. The empty list

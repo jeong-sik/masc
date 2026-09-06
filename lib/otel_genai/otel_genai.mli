@@ -20,8 +20,6 @@ module Attr_key : sig
   val masc_turn_blocks : string
   val masc_turn_profile : string
   val masc_turn_execution_ids : string
-  val keeper_name : string
-  val keeper_agent_name : string
 end
 
 module Mcp_attr_key : sig
@@ -33,8 +31,6 @@ module Mcp_attr_key : sig
   val network_protocol_version : string
   val network_transport : string
   val error_type : string
-  val server_address : string
-  val server_port : string
   val masc_mcp_tool_failure_class : string
 end
 
@@ -44,7 +40,6 @@ module Mcp_value : sig
 end
 
 module Mcp_metric_name : sig
-  val client_operation_duration : string
   val server_operation_duration : string
   val server_session_duration : string
 end

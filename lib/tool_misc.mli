@@ -15,8 +15,6 @@ type context = {
   help_schemas : Masc_domain.tool_schema list;
 }
 
-val schemas : Masc_domain.tool_schema list
-
 val parse_searxng_json : string -> (string * string * string) list
 val parse_brave_json : string -> (string * string * string) list
 val parse_brave_llm_context_json : string -> (string * string * string list) list

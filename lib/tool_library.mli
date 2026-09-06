@@ -13,7 +13,7 @@
     either in it or it is not.
 
     Issue #8601 SSOT shape: {!library_source} variant +
-    {!source_to_string} + {!valid_source_strings} +
+    [source_to_string] + {!valid_source_strings} +
     {!source_of_string_opt} are kept in sync — adding a 5th
     constructor forces compile errors in [source_to_string].  There is
     no [library_source_ssot] test; the compile errors are the whole
@@ -28,23 +28,13 @@
 
 (** Variant SSOT for the library document [source] field
     (issue #8601).  Adding a 5th constructor forces compile
-    errors across {!source_to_string} and the
+    errors across [source_to_string] and the
     [library_source_ssot] test. *)
 type library_source =
   | Direct_experience
   | Research
   | Experiment
   | Observation
-
-val source_to_string : library_source -> string
-(** [source_to_string s] returns the canonical lowercase label:
-    ["direct_experience"] / ["research"] / ["experiment"] /
-    ["observation"]. *)
-
-val all_sources : library_source list
-(** [all_sources] is the canonical witness list — one entry per
-    {!library_source} constructor (in declaration order).  Used
-    by {!valid_source_strings}. *)
 
 val valid_source_strings : string list
 (** [valid_source_strings] is [List.map source_to_string
@@ -53,12 +43,6 @@ val valid_source_strings : string list
     field — adding a constructor updates both automatically. *)
 
 (** {1 String helper} *)
-
-val string_contains : needle:string -> string -> bool
-(** [string_contains ~needle s] is [true] iff [needle] is a contiguous
-    substring of [s].  Byte-wise — case-sensitive.  Callers
-    lowercase both inputs when case-insensitive matching is
-    required (see {!handle_read} / {!handle_search}). *)
 
 (** {1 Context} *)
 

@@ -51,8 +51,6 @@ module SubscriptionStore : sig
     resource:resource_type -> resource_id:string -> subscription list
   val queue_notification : string -> notification -> unit
   val pop_notifications : string -> notification list
-  val list_all : unit -> subscription list
-  val count : unit -> int
 end
 
 (** {1 Session Push Bridge} *)

@@ -2335,14 +2335,6 @@ let run_command_with_status
         | _ -> Error (format_docker_exec_error ~head_program ~st ~out)))
 ;;
 
-let run_command ?(ok_exit_codes = [ 0 ]) ~timeout_sec t ~cwd ~command_argv ~max_bytes () =
-  match
-    run_command_with_status ~ok_exit_codes ~timeout_sec t ~cwd ~command_argv ~max_bytes ()
-  with
-  | Ok (_st, out) -> Ok out
-  | Error _ as err -> err
-;;
-
 let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()
   =
   let cmd =

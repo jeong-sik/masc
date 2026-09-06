@@ -17,28 +17,13 @@ type session_context = Keeper_types.session_context
 
 (** {1 Working Context Operations} *)
 
-val text_of_message : Agent_core.Types.message -> string
 val message_count : working_context -> int
 val checkpoint_of_context : working_context -> Agent_core.Checkpoint.t
-val resume_checkpoint_of_context : working_context -> Agent_core.Checkpoint.t
-val agent_core_context_of_context : working_context -> Agent_core.Context.t
-val system_prompt_of_context : working_context -> string
 val messages_of_context : working_context -> Agent_core.Types.message list
 val create : eio:bool -> system_prompt:string -> working_context
 val set_system_prompt : working_context -> system_prompt:string -> working_context
 val append : working_context -> Agent_core.Types.message -> working_context
-val append_many : working_context -> Agent_core.Types.message list -> working_context
-val sync_agent_core_context : working_context -> working_context
 
-val role_to_string : Agent_core.Types.role -> string
-
-(** Strict variant — returns [None] for unrecognised role strings.
-    Use this in checkpoint loaders / new code where silently
-    misattributing a chat-history message would corrupt the
-    LLM-visible conversation. *)
-val role_of_string_opt : string -> Agent_core.Types.role option
-val message_to_json : Agent_core.Types.message -> Yojson.Safe.t
-val message_of_json : Yojson.Safe.t -> Agent_core.Types.message
 val create_session : session_id:string -> base_dir:string -> session_context
 val persist_message : ?source:string -> session_context -> Agent_core.Types.message -> unit
 
@@ -152,8 +137,6 @@ val context_budget_json_of_resolution
 (** {1 Mention Detection} *)
 (** {1 Mention Detection} *)
 
-val exact_direct_mention_present : targets:string list -> string -> bool
-
 (** {1 Prompt Delegation} *)
 
 val build_keeper_system_prompt
@@ -164,5 +147,3 @@ val build_keeper_system_prompt
   -> string
 
 (** {1 Fragment Detection (used by dashboard)} *)
-
-val looks_fragmentary_history_text : string -> bool

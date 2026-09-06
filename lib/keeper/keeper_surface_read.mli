@@ -22,7 +22,6 @@ type participant = {
 }
 
 val default_limit : int
-val max_limit : int
 
 (** [respond ~surface ~limit ~has_more messages] filters [messages] to
     rows whose [source] label equals [surface] (trimmed, exact),

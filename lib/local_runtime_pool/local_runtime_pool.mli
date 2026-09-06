@@ -100,13 +100,6 @@ val runtime_id_of_base_url : string -> string
 
 (** {1 Read accessors (locked)} *)
 
-val parse_errors : unit -> string list
-(** Returns the [pool_state.parse_errors] list.  Populated
-    when [load_runtimes_from_env] could not interpret an
-    entry of [LLM_ENDPOINTS] — Agent Core's
-    [Llm_provider.Discovery.llm_endpoints_env_var], not a
-    MASC-prefixed name; surfaced to the operator dashboard. *)
-
 val snapshots : unit -> runtime_snapshot list
 (** Read-only projection of every {!runtime} into a
     {!runtime_snapshot} (adds derived [port]).  Caller may

@@ -33,23 +33,9 @@ val load_context_from_checkpoint :
 (** Generate unique trace ID for a keeper turn. *)
 val generate_trace_id : ?now:float -> unit -> string
 
-(** Resolve effective model labels for a turn. *)
-val effective_model_labels_for_turn : keeper_meta -> string list
-
 (** {1 Mention Detection} *)
 
-(** Check if any target mention is directly present in content. *)
-val exact_direct_mention_present : targets:string list -> string -> bool
-
 (** {1 System Prompt and Identity} *)
-
-(** Build system prompt for keeper agent. *)
-val build_keeper_system_prompt :
-  instructions:string ->
-  ?keeper_name:string ->
-  ?workspace_root:string ->
-  unit ->
-  string
 
 (** Check if text appears fragmentary (incomplete sentence fragments). *)
 val looks_fragmentary_history_text : string -> bool

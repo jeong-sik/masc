@@ -3,7 +3,7 @@
     {!Safe_ops} plus canonical error/OK response helpers.
 
     All [tool_*.ml] files must use the canonical helpers
-    {!error_response} / {!ok_response} / {!error_response_typed} — either
+    {!error_response} / [ok_response] / {!error_response_typed} — either
     via [open Tool_args] (unqualified calls) or via qualified references
     (e.g. [Tool_args.ok_response]). The latter is the style used by
     {!Tool_local_runtime_core} and is equally canonical. Defining local
@@ -69,7 +69,7 @@ val error_code_to_string : error_code -> string
 
 (** [{"status":"error", <fields>}] as a [`Assoc] node.  Caller-supplied
     [status] fields are discarded so duplicate JSON keys cannot override
-    the canonical envelope status.  Counterpart to {!ok_response} /
+    the canonical envelope status.  Counterpart to [ok_response] /
     {!ok_result} on the success side, but returns the *unserialized*
     [Yojson.Safe.t] for embedding in a larger response or returning via
     [(Yojson.Safe.t, _) result]. *)
@@ -87,13 +87,10 @@ val error_response_with : (string * Yojson.Safe.t) list -> string
 (** [{"status":"error","error_code":"…","message":"…"}] *)
 val error_response_typed : code:error_code -> string -> string
 
-(** [{"status":"ok", <fields>}] as a serialized JSON string. *)
-val ok_response : (string * Yojson.Safe.t) list -> string
-
 (** [{"status":"ok", <fields>}] as a [`Assoc] node (no serialization).
     Use when embedding the envelope in a larger composed response — HTTP
     body builders, [(Yojson.Safe.t, string) result] pipelines, etc.
-    Identical field-order semantics to {!ok_response}: [status] is
+    Identical field-order semantics to [ok_response]: [status] is
     prepended to the [`Assoc] head and caller-supplied [status] fields are
     discarded. *)
 val ok_assoc : (string * Yojson.Safe.t) list -> Yojson.Safe.t

@@ -326,15 +326,5 @@ let validate_shell_ir_paths ?workdir shell_ir =
 
 let flat_stage_words = Literal_words.flat_stage_words
 
-let sanitize_command_for_log cmd =
-  let trimmed = String.trim cmd in
-  if trimmed = ""
-  then Log_sanitize.sanitize_command_for_log cmd
-  else (
-    match parse_string_to_ir ~mode:Tool_execute trimmed with
-    | Ok ir -> Log_sanitize.sanitize_command_for_log_of_ir ~fallback_cmd:cmd ir
-    | Error _ -> Log_sanitize.sanitize_command_for_log cmd)
-;;
-
 let sanitize_command_for_log_of_ir = Log_sanitize.sanitize_command_for_log_of_ir
 let truncate_for_log = Log_sanitize.truncate_for_log

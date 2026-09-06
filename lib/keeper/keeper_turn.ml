@@ -197,12 +197,6 @@ module For_testing = struct
   let direct_owner_conversation_context = direct_owner_conversation_context
   let direct_turn_dynamic_context = direct_turn_dynamic_context
   let surface_context_to_instructions = surface_context_to_instructions
-  let direct_no_progress_retry_reason =
-    Keeper_turn_runtime_budget.direct_no_progress_retry_reason
-  let direct_no_progress_retry_decision =
-    Keeper_turn_runtime_budget.direct_no_progress_retry_decision
-  let run_direct_no_progress_retry_loop =
-    Keeper_turn_runtime_budget.run_direct_no_progress_retry_loop
 end
 
 let resolve_turn_runtime_id (meta : keeper_meta) =

@@ -422,4 +422,3 @@ let revalidate ~descriptors contract =
 ;;
 
 let descriptor_id contract = contract.descriptor_id
-let accepted_tool_name contract = contract.accepted_tool_name

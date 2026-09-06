@@ -46,9 +46,6 @@ val fallback_message :
 (** Text fallback for the existing string-only keeper turn path.  Raw media data
     is never included. *)
 
-val modalities : user_input_block list -> string list
-(** Stable, duplicate-free modality labels present in the input. *)
-
 val to_agent_core_blocks :
   attachments:Keeper_chat_store.attachment list ->
   user_input_block list ->

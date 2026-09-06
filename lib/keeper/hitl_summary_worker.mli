@@ -204,6 +204,5 @@ module For_testing : sig
 
   val flow_evidence : prepared_flow -> Agent_core.Exact_output.flow_evidence
 
-  val summary_version : int
   val lane_id : string
 end

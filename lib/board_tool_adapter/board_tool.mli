@@ -58,10 +58,6 @@ val parse_sort_order : string -> (sort_order, string) Result.t
 
 (** {1 Identity meta keys} *)
 
-val raw_agent_name_meta_key : field:string -> string
-(** Canonical board-post meta key for preserving the raw runtime
-    identity surface associated with [field]. *)
-
 val author_raw_agent_name_meta_key : string
 (** Canonical board-post meta key for the raw runtime author
     identity preserved by HTTP/MCP identity enforcement. *)

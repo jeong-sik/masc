@@ -133,6 +133,3 @@ val events_json :
   unit ->
   Yojson.Safe.t
 (** Filtered recent-event JSON for the [/api/v1/gate/events] endpoint. *)
-
-val total_messages : unit -> int
-(** Sum of all channels' message counts. *)

@@ -2544,10 +2544,6 @@ let public_name_for_internal internal_name =
   | first :: _ -> Some first.public_name
 ;;
 
-let public_input_schema public =
-  Option.map (fun d -> d.input_schema) (find_public public)
-;;
-
 let translate_input ~public input =
   match find_public public with
   | Some descriptor -> translate_input_for_descriptor descriptor input

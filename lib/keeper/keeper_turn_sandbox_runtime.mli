@@ -139,9 +139,6 @@ module For_testing_microvm : sig
     -> unit
 end
 
-val container_path_of_host :
-  t -> host_path:string -> (string, string) result
-
 val container_cwd_of_host :
   t -> host_cwd:string -> string
 
@@ -213,16 +210,6 @@ val run_exec_pipeline_with_status :
 (** Execute [stages] as a streaming argv pipeline inside the turn-scoped
     container. Each stage is a separate [docker exec -i] process and adjacent
     stages are connected by host-side process pipes. *)
-
-val run_command :
-  ?ok_exit_codes:int list ->
-  timeout_sec:float ->
-  t ->
-  cwd:string ->
-  command_argv:string list ->
-  max_bytes:int ->
-  unit ->
-  (string, string) result
 
 val run_bash_with_status :
   timeout_sec:float ->

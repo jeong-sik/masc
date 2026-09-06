@@ -12,12 +12,6 @@ type t =
 
 val to_string : t -> string
 
-(** Inverse of {!to_string} over the closed custom-event sum. Strings outside
-    the vocabulary map to [None]. Lets dashboard cache patchers parse a wire
-    event name to the typed verb and match it exhaustively (compile-time
-    coverage) instead of reverse-classifying by raw string literals. *)
-val event_of_string : string -> t option
-
 val all_custom_events : t list
 (** Custom + phase-derived. Subscribe to this whole list to avoid
     silently missing half the supervisor stream. *)

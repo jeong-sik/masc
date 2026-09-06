@@ -29,18 +29,9 @@ type turn_event_bus_summary =
   ; payload_kinds : string list
   }
 
-(** Fold the drained AGENT_CORE event-bus events for a single keeper turn into
-    the signals MASC currently consumes. *)
-val summarize_turn_event_bus : Agent_core.Event_bus.event list -> turn_event_bus_summary
-
-val turn_event_bus_evidence_detail : turn_event_bus_summary -> string
-(** Compact forensic string for observed AGENT_CORE events around a typed overflow. *)
-
 (** Turn-local tool-event pairing state used to detect event-bus integrity
     failures. Exposed for targeted tests. *)
 type turn_tool_event_tracker
-
-val create_turn_tool_event_tracker : unit -> turn_tool_event_tracker
 
 val record_turn_tool_events
   :  keeper_name:string
@@ -88,8 +79,6 @@ val decide_turn_plan_at_phase_gate
   -> Keeper_state_machine.phase option
   -> turn_plan
 
-val turn_plan_manifest_status : turn_plan -> string
-val turn_plan_manifest_decision : turn_plan -> Yojson.Safe.t
 
 (** Resolve the next runtime to try after an auto-recoverable failure.
     Uses the current effective runtime and the default degraded rotation

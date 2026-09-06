@@ -46,8 +46,6 @@ val take : int -> 'a list -> 'a list
 val ensure_dir : string -> string
 val dedupe_keep_order : 'a list -> 'a list
 val normalize_name_list : string list -> string list
-val normalize_name_list_opt : string list -> string list option
-val lower_string_list_opt : string list -> string list option
 include module type of Keeper_types_profile_defaults
 
 val keeper_profile_defaults_materializable_for_name :
@@ -58,10 +56,7 @@ include module type of Keeper_types_profile_agent_core_env
 val profile_defaults_of_toml :
   Keeper_toml_loader.toml_doc -> (keeper_profile_defaults, string) result
 
-val parsed_field_key_names : string list
-val canonical_keeper_toml_key_names : string list
 val detect_unknown_keeper_toml_keys : Keeper_toml_loader.toml_doc -> string list
-val merge_string_list : base:'a list -> 'a list -> 'a list
 
 val merge_keeper_profile_defaults :
   base:keeper_profile_defaults ->
@@ -83,9 +78,7 @@ type keeper_toml_load_error =
   ; detail : string
   }
 
-val keeper_toml_error_kind_to_string : keeper_toml_error_kind -> string
 val keeper_toml_load_error_to_string : keeper_toml_load_error -> string
-val keeper_toml_load_error_paths : keeper_toml_load_error -> string list
 val load_keeper_toml :
   string -> (string * keeper_profile_defaults, keeper_toml_load_error) result
 
@@ -102,7 +95,6 @@ type keeper_toml_discovery =
 
 val keeper_toml_discovery_name : keeper_toml_discovery -> string
 val discover_keepers_toml : string -> keeper_toml_discovery list
-val keeper_toml_path_opt : string -> string option
 val keeper_toml_path_opt_for_base_path :
   base_path:string -> string -> string option
 val load_keeper_profile_defaults_result_for_base_path :

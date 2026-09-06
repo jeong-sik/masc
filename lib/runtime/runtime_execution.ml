@@ -30,11 +30,6 @@ type checkpoint_owner =
   | Masc_agent_core
   | Official_client
 
-let agent_core_provider_config = function
-  | Agent_core config -> Some config
-  | Codex_app_server _ | Claude_code _ | Antigravity_cli _ -> None
-;;
-
 let model_id = function
   | Agent_core config -> Some config.Llm_provider.Provider_config.model_id
   | Codex_app_server config -> config.model

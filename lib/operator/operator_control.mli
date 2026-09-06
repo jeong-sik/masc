@@ -13,8 +13,6 @@ val snapshot_json :
   'a context ->
   Yojson.Safe.t
 
-val recent_actions_json : Workspace.config -> Yojson.Safe.t
-
 val action_json :
   ?actor_hint:string ->
   float Eio.Time.clock_ty context ->

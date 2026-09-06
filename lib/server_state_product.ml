@@ -20,8 +20,6 @@ module Lifecycle = struct
     | Draining -> "draining"
     | Stopped -> "stopped"
 
-  let all_phases = [Booting; Serving; Draining; Stopped]
-
   type event =
     | Boot_complete
     | Start_draining
@@ -60,19 +58,10 @@ module Lazy_task_queue = struct
     | Pending tasks ->
       Printf.sprintf "pending[%d]" (List.length tasks)
 
-  let all_states = [Complete; Pending []]
-
   type event =
     | Tasks_appear of string list
     | Task_finish of string
     | Task_fail of { task: string; error: string }
-
-  let event_to_string = function
-    | Tasks_appear tasks ->
-      Printf.sprintf "tasks_appear[%d]" (List.length tasks)
-    | Task_finish task -> "task_finish:" ^ task
-    | Task_fail { task; error } ->
-      Printf.sprintf "task_fail:%s:%s" task error
 
   let apply_event ~current event =
     match current, event with
@@ -101,15 +90,9 @@ module Readiness = struct
     | NotReady -> "not_ready"
     | Ready -> "ready"
 
-  let all_phases = [NotReady; Ready]
-
   type event =
     | Set_ready
     | Set_not_ready
-
-  let event_to_string = function
-    | Set_ready -> "set_ready"
-    | Set_not_ready -> "set_not_ready"
 
   type transition = Applied of phase | Ignored of { phase: phase; event: event }
 

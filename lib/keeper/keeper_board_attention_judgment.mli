@@ -10,7 +10,6 @@ type t =
   }
 
 val decision_tokens : string list
-val decision_to_string : decision -> string
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 

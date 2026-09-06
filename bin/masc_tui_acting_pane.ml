@@ -409,22 +409,36 @@ let tool_line ~cols ~now ~can_finish (chunk : Acting.chunk) (tool : Acting.chunk
        ; duration
        ])
 
+(* The turn number a settle confirmed is the keeper's own count. An
+   unsettled chunk still carries the agent session's numbering, which the
+   viewer does not trust: a session restart renumbers from zero, so the
+   same turn once drew as 1740 on the header and 3084 on the summary
+   (live capture 2026-09-06). Only a settled chunk names its turn. *)
+let turn_name (chunk : Acting.chunk) =
+  if chunk.Acting.ck_settled then Some (Acting.turn_text chunk.Acting.ck_turn)
+  else None
+
 let turn_summary_line ~cols ~now (chunk : Acting.chunk) =
+  let named =
+    match turn_name chunk with
+    | Some text -> [ { text; tone = Plain } ]
+    | None -> []
+  in
   fit_line ~cols
     (with_border
-       [ { text = settled_glyph ^ " "; tone = Dim }
-       ; { text = Acting.turn_text chunk.Acting.ck_turn; tone = Plain }
-       ; { text =
-             middle_dot
-             ^ join
-                 [ calls_text (chunk_call_count chunk)
-                 ; tokens_text chunk.Acting.ck_tokens
-                 ; cost_text chunk.Acting.ck_cost_usd
-                 ]
-         ; tone = Dim
-         }
-       ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Dim }
-       ])
+       ( [ { text = settled_glyph ^ " "; tone = Dim } ]
+       @ named
+       @ [ { text =
+               middle_dot
+               ^ join
+                   [ calls_text (chunk_call_count chunk)
+                   ; tokens_text chunk.Acting.ck_tokens
+                   ; cost_text chunk.Acting.ck_cost_usd
+                   ]
+           ; tone = Dim
+           }
+         ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Dim }
+         ] ))
 
 (* Every focus row, oldest call first, then the earlier turns. The caller
    cuts to its budget. *)
@@ -442,12 +456,16 @@ let focus_lines ~cols input chunks name =
           else if can_finish then ("in turn", Ok)
           else ("unfinished", Warn)
         in
+        let named =
+          match turn_name current with
+          | Some text -> [ { text = middle_dot ^ text; tone = Plain } ]
+          | None -> []
+        in
         fit_line ~cols
           (with_border
-             [ { text = name; tone = Accent }
-             ; { text = middle_dot ^ Acting.turn_text current.Acting.ck_turn; tone = Plain }
-             ; { text = middle_dot ^ state_word; tone = state_tone }
-             ])
+             ( { text = name; tone = Accent }
+             :: named
+             @ [ { text = middle_dot ^ state_word; tone = state_tone } ] ))
     | [] ->
         fit_line ~cols
           (with_border

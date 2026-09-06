@@ -8,15 +8,16 @@ module Reading = Masc.Tui_decode
    mark and its gap, a name, a gap, and the reading. Sixteen name cells keep
    the configured names whole that the roster's window keeps whole. The
    reading's budget is set by the longest reading a row states in full:
-   [▶ network_read · 3 calls · 12.4s] is 32 cells, and a settled
-   [■ 5 calls · 38.2k tok · 41.0s] or a waiting [? approval · tool_execute]
-   fits inside it. A budget of 24 cut the tool name off every waiting row and
-   the age off every settled one. *)
+   [▶ network_read · 3 calls · 12.4s ago] is 36 cells, and a settled
+   [■ 5 calls · 38.2k tok · 41.0s ago] or a waiting [? approval ·
+   tool_execute] fits inside it. A budget of 24 cut the tool name off every
+   waiting row and the age off every settled one, and a budget of 32 cut
+   the [ago] off the settled rows (2026-09-06). *)
 let border_cells = 1
 let mark_cells = 2
 let name_cells = 16
 let gap_cells = 1
-let reading_cells = 32
+let reading_cells = 36
 let pane_cols = border_cells + mark_cells + name_cells + gap_cells + reading_cells
 
 (* What the roster pane leaves a surface is the least a surface lays out
@@ -186,10 +187,18 @@ let current_tool (chunk : Acting.chunk) =
   | tool :: _ -> Some tool.Acting.ct_tool
   | [] -> None
 
+(* A settled turn's count is the one its settle confirmed. Ledger rows
+   carry no turn number and keep landing on the newest chunk after the turn
+   ended, so counting them put a running total where a per-turn count
+   belonged -- a settled row read 2449 calls for a turn of one call (live
+   capture 2026-09-06). Before a settle the ledger is all there is, so the
+   open turn still counts its list. *)
 let chunk_call_count (chunk : Acting.chunk) =
-  match Acting.chunk_tools chunk with
-  | [] -> Option.value ~default:0 chunk.Acting.ck_calls
-  | tools -> List.length tools
+  if chunk.Acting.ck_settled then Option.value ~default:0 chunk.Acting.ck_calls
+  else
+    match Acting.chunk_tools chunk with
+    | [] -> Option.value ~default:0 chunk.Acting.ck_calls
+    | tools -> List.length tools
 
 (* An unsettled chunk means the feed never saw the turn end. A keeper whose
    process is gone can never send that end, so for [Health_offline] and
@@ -221,12 +230,12 @@ let keeper_state_text ~now ~health ~approval (chunk : Acting.chunk option) =
       in
       [ { text = running_glyph ^ " "; tone = Ok }
       ; { text = join [ on; (if calls > 0 then calls_text calls else "") ]; tone = Plain }
-      ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Dim }
+      ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at ^ " ago"; tone = Dim }
       ]
   | None, Some chunk when not chunk.Acting.ck_settled ->
       [ { text = unfinished_glyph ^ " "; tone = Warn }
       ; { text = "unfinished"; tone = Warn }
-      ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Dim }
+      ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at ^ " ago"; tone = Dim }
       ]
   | None, Some chunk ->
       [ { text = settled_glyph ^ " "; tone = Dim }
@@ -237,7 +246,7 @@ let keeper_state_text ~now ~health ~approval (chunk : Acting.chunk option) =
               ]
         ; tone = Plain
         }
-      ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Dim }
+      ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at ^ " ago"; tone = Dim }
       ]
   | None, None -> [ { text = quiet_glyph ^ " quiet"; tone = Dim } ]
 
@@ -437,7 +446,7 @@ let turn_summary_line ~cols ~now (chunk : Acting.chunk) =
                    ]
            ; tone = Dim
            }
-         ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Dim }
+         ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at ^ " ago"; tone = Dim }
          ] ))
 
 (* Every focus row, oldest call first, then the earlier turns. The caller
@@ -630,7 +639,7 @@ let file_glyph file =
 (* One file: its kind, the address cut in the middle so the file name and
    the repository both stay readable, the range when known, the age. *)
 let file_line ~cols ~now index file =
-  let age = { text = age_text ~now file.file_at; tone = Dim } in
+  let age = { text = age_text ~now file.file_at ^ " ago"; tone = Dim } in
   let where = Option.value ~default:"" file.file_where in
   let inner = cols - border_cells - mark_cells in
   let right = Layout.display_width age.text in

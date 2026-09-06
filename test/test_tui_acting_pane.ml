@@ -70,6 +70,14 @@ let fixture : Pane.input =
   ; entries =
       entries
         [ (900., settled ~at:900. "rondo")
+        ; ( 905.
+          , Observer.Keeper_tool_call
+              { Observer.kt_keeper = "rondo"
+              ; kt_tool = "keeper_artifact_read"
+              ; kt_duration_ms = Some 5.
+              ; kt_disposition = Some "completed"
+              ; kt_at = 905.
+              } )
         ; ( 980.
           , agent_core ~kind:Observer.Turn_started ~turn:5 ~at:980.
               ~correlation:"trace-sangsu" lane )
@@ -174,6 +182,15 @@ let test_a_gone_keepers_turn_is_not_read_as_running () =
   let row = find_row_in dead_texts "goner" in
   check bool "the gone row says unfinished" true (contains "unfinished" row);
   check bool "the gone row does not say running" false (contains "running" row)
+
+let test_a_settled_row_counts_only_what_the_settle_confirmed () =
+  (* The ledger row above landed after the settle and carries no turn
+     number; before the fix it made the settled row count the running
+     ledger total instead of the turn's confirmed calls. *)
+  let row = find_row "rondo" in
+  check bool "the settle's count stands" true (contains "3 calls" row);
+  check bool "no running total took the count" false (contains "4 calls" row);
+  check bool "a settled age says since when" true (contains "1m35s ago" row)
 
 let test_a_live_keeper_without_a_tool_says_in_turn () =
   let row = find_row_in dead_texts "bare" in
@@ -510,6 +527,8 @@ let () =
             test_a_gone_keepers_focus_header_says_unfinished
         ; test_case "a live keeper without a tool says in turn" `Quick
             test_a_live_keeper_without_a_tool_says_in_turn
+        ; test_case "a settled row counts only what the settle confirmed" `Quick
+            test_a_settled_row_counts_only_what_the_settle_confirmed
         ] )
     ; ( "targets"
       , [ test_case "targets name the keeper under each fleet row" `Quick

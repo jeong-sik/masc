@@ -8651,11 +8651,19 @@ let turn_rail_of ~siding ~(edge : Masc_tui_types.turn_edge)
 
 let compute_keeper_message_layout_entries (state : state) ~keeper_name
     ~chat_cols ~start_index visible_entries =
+  (* Bound before the labels because one of them is fitted to it: a row from
+     someone else names them, and adds the surface they came in by only when
+     the column holds both. *)
+  let role_label_column =
+    Message_layout.chat_role_label_width ~pane_cells:chat_cols
+  in
   (* Derived once for the width and again per row, so the badge the pane
      measures is the badge it draws. *)
   let base_role_label_of (message : Masc_tui_types.msg_entry) =
     match message.me_role with
-    | Message_user (Sent_by_other name) -> name
+    | Message_user (Sent_by_other { speaker; surface }) ->
+        Message_layout.fit_speaker ~column:role_label_column ~speaker ~surface
+          ()
     | Message_user (Sent_by_operator label) ->
         (* Pending input is not a transcript row. Once it enters a turn this
            label can say YOU without a second queue lookup or a transient
@@ -8696,9 +8704,6 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
   in
   let projected_tool_rows =
     keeper_message_tool_rows state ~keeper_name ~chat_cols
-  in
-  let role_label_column =
-    Message_layout.chat_role_label_width ~pane_cells:chat_cols
   in
   let layout_entries =
     (* The position distinguishes rows whose durable timestamp and request

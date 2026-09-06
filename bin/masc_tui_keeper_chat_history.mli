@@ -214,6 +214,11 @@ type decoded =
           that are not losses. *)
   }
 
+val addressed_label_parts : speaker -> Surface.t option -> string * string option
+(** The speaker and the surface they came in by, apart. The speaker column
+    cannot hold both, and cutting them as one string keeps the surface and
+    loses the name; whoever knows the column decides which to draw. *)
+
 val addressed_label : speaker -> Surface.t option -> string
 (** The name to draw beside an {!Addressed_to_keeper} row. An unnamed operator
     row is ["you"], the way it always read. A named author is drawn, and a

@@ -816,6 +816,33 @@ let role_label_mark_cells ?(column = chat_role_label_column) ~style () =
   let cells = display_width (speaker_mark style) + 1 in
   if column - cells < 1 then 0 else cells
 
+(* The widest mark any speaker draws, so a fit that must leave room for one
+   does not have to know which. Conservative by construction: reserving the
+   widest costs a row its surface one cell early and can never take a cell the
+   mark needed. Reads {!all_styles}, so a wider mark is accounted for the day
+   one arrives. *)
+let widest_speaker_mark_cells =
+  List.fold_left
+    (fun widest style -> max widest (display_width (speaker_mark style)))
+    0 all_styles
+
+(* The speaker column names the speaker. Where the row also carries the surface
+   it came in by and the pair fits, it says both; where it does not, the
+   surface goes.
+
+   Joined and cut as one string the row kept the wrong half: {!fit_middle}
+   favours the tail, and the tail of "<who> · <where>" is the where. One live
+   pane had twelve broadcast rows from an agent named [codex-mcp-client], each
+   drawn as "…p-…roadcast". An arrival draws its siding either way, so the row
+   still says it came from outside; who came through is what it cannot spare. *)
+let fit_speaker ?(column = chat_role_label_column) ~speaker ~surface () =
+  match surface with
+  | None -> speaker
+  | Some surface ->
+      let inner = max 1 (column - widest_speaker_mark_cells - 1) in
+      let joined = speaker ^ " \xc2\xb7 " ^ surface in
+      if display_width joined <= inner then joined else speaker
+
 let align_role_label ?(column = chat_role_label_column) ~style label =
   let column = max 1 column in
   let mark = speaker_mark style in

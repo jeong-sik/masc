@@ -125,10 +125,16 @@ type message_author =
   | Sent_by_operator of string
       (** The person reading this pane. ["you"], or ["you \xc2\xb7 <surface>"]
           where the line came in from somewhere other than the dashboard. *)
-  | Sent_by_other of string
+  | Sent_by_other of
+      { speaker : string
+      ; surface : string option
+      }
       (** Anyone else: another agent's broadcast, a connector, a second
-          operator. Named as the server named them, with the surface it
-          arrived on. *)
+          operator. Kept apart rather than joined here because the speaker
+          column is narrower than the pair: joined, the fit cuts the middle of
+          one string and the tail it favours is the surface, so the row keeps
+          which door it came in by and loses who came through it. Whoever
+          knows the column decides. *)
 
 type msg_role =
   | Message_user of message_author

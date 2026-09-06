@@ -80,6 +80,15 @@ blocking_lints() {
   run_self_test_when_changed "Dune suite scope self-test (RFC-0428)" \
     scripts/ci/dune_suite_scope.py \
     python3 scripts/ci/test_dune_suite_scope.py
+  # test.yml's targeted path runs a suite's executable outside dune, so the
+  # stanza's (setenv ...) does not apply and has to be read out. A stanza this
+  # reader cannot parse would otherwise surface as a dispatch that ran the
+  # suite under an environment nobody chose.
+  run_self_test_when_changed "Test stanza env reader self-test" \
+    scripts/ci/stanza_env.py \
+    python3 scripts/ci/stanza_env.py --self-test
+  run_lint "Test stanza env is readable" \
+    python3 scripts/ci/stanza_env.py --check-all
   run_lint "Hardcoded model prefix" bash scripts/lint/no-roadmap-stale-hardcoding.sh
   run_lint "Raw font-size px" bash scripts/lint/no-raw-font-size-px.sh
   run_lint "OCaml comment terminator trap" bash scripts/lint/no-ocaml-comment-terminator-trap.sh

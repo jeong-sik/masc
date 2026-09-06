@@ -162,7 +162,9 @@ val get_port : default:int -> string -> int
 
 val host_fd_pressure_state_file_env_key : string
 val host_fd_pressure_state_file_path_opt : unit -> string option
+val host_fd_pressure_poller_disabled_env_key : string
 val host_fd_pressure_poller_disabled : unit -> bool
+val host_fd_pressure_poll_interval_sec_env_key : string
 val host_fd_pressure_poll_interval_sec : unit -> float
 
 (** {1 Base path / storage} *)
@@ -209,11 +211,16 @@ val config_dir_env_key : string
 val data_dir_env_key : string
 (** {1 Auth} *)
 
+val jsonl_retention_days_env_key : string
+(** Named so [Env_config_snapshot] reports the knob without restating its
+    spelling, the way {!admin_token_env_key} already is. *)
+
 val admin_token_env_key : string
 val admin_token_opt : unit -> string option
 
 (** {1 Git} *)
 
+val git_fetch_timeout_sec_env_key : string
 val git_fetch_timeout_sec : unit -> float
 
 (** {1 Logging / telemetry} *)

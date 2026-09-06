@@ -212,9 +212,10 @@ let keeper_can_finish = function
 let unfinished_glyph = "!"
 
 (* Vocabulary: the word "running" names the keeper's process phase and
-   nothing else. An in-flight turn is "in turn" here, on the fleet row, on
-   the focus header, and on the last call's duration — one word per fact, so
-   a reader who learned either surface can read both. *)
+   nothing else. An in-flight turn is "in turn" on the fleet row and on the
+   focus header — one word per fact, and once per block: the calls under
+   the header name what they were doing and since when, not the state the
+   header above them already states. *)
 let keeper_state_text ~now ~health ~approval (chunk : Acting.chunk option) =
   match approval, chunk with
   | Some tool, _ ->
@@ -394,10 +395,11 @@ let tool_line ~cols ~now ~can_finish (chunk : Acting.chunk) (tool : Acting.chunk
   let duration =
     match tool.Acting.ct_duration_ms with
     | Some ms -> { text = Acting.elapsed_text ms; tone = Dim }
-    | None when is_last && not chunk.Acting.ck_settled && can_finish ->
-        { text = "in turn" ^ middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Ok }
+    (* The header states the turn's state; the call's line states what it
+       was doing and since when, so the state word does not repeat under
+       its own header. The age is elapsed, so it says [ago]. *)
     | None when is_last && not chunk.Acting.ck_settled ->
-        { text = "unfinished" ^ middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Warn }
+        { text = age_text ~now chunk.Acting.ck_at ^ " ago"; tone = Dim }
     | None -> { text = ""; tone = Dim }
   in
   let glyph =
@@ -510,26 +512,9 @@ let focus_lines ~cols input chunks name =
               tool_line ~cols ~now:input.now ~can_finish current tool ~is_last:(index = count - 1))
             tools
         in
-        let calls =
-          if calls = [] && not current.Acting.ck_settled then
-            [ (if can_finish then
-                 [ { text = running_glyph ^ " "; tone = Ok }
-                 ; { text =
-                       "in turn" ^ middle_dot ^ age_text ~now:input.now current.Acting.ck_at
-                   ; tone = Ok
-                   }
-                 ]
-               else
-                 [ { text = unfinished_glyph ^ " "; tone = Warn }
-                 ; { text =
-                       "unfinished" ^ middle_dot ^ age_text ~now:input.now current.Acting.ck_at
-                   ; tone = Warn
-                   }
-                 ])
-              |> fit_line ~cols |> with_border
-            ]
-          else calls
-        in
+        (* A call-less open turn draws no body row: the header already
+           states the state and the age, and a row under it would repeat
+           both. *)
         calls @ List.map (turn_summary_line ~cols ~now:input.now) earlier
   in
   List.map (fun line -> (line, Target_none)) ((header :: approval_line) @ body)

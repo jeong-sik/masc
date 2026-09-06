@@ -495,7 +495,7 @@ let preflight_timeout_sec t = float_of_int t.connect_timeout_sec +. 5.0
 let warn_on_release_skew t release =
   let repair =
     Printf.sprintf
-      "reinstall it with masc-exec-ssh-bootstrap --endpoint %s --shim <the        masc-exec-shim-linux-ARCH asset of %s>"
+      "reinstall it with masc-exec-ssh-bootstrap --endpoint %s --shim <the masc-exec-shim-linux-ARCH asset of %s>"
       t.name Build_version.current
   in
   match release with
@@ -503,12 +503,13 @@ let warn_on_release_skew t release =
   | Some release ->
     Log.Keeper.warn
       ~keeper_name:t.keeper_name
-      "remote_shim_outdated: endpoint %s runs the shim from release %s and this server        is %s; %s"
+      "remote_shim_outdated: endpoint %s runs the shim from release %s and this server is %s; %s"
       t.name release Build_version.current repair
   | None ->
     Log.Keeper.warn
       ~keeper_name:t.keeper_name
-      "remote_shim_outdated: endpoint %s runs a shim that does not name its release (it        predates the stamp) and this server is %s; %s"
+      "remote_shim_outdated: endpoint %s runs a shim that does not name its \
+       release (it predates the stamp) and this server is %s; %s"
       t.name Build_version.current repair
 ;;
 

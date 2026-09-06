@@ -609,3 +609,22 @@ P4k #33555 는 `load_all` 을 증분으로 바꾼다. path 별 캐시에 파싱�
 부팅 직후 창과 표준 창 모두에서 세 조각이 겨냥한 부류가 사라졌다. `openat -> switch`(체크포인트·backlog·채팅 기록 읽기 뒤의 계산)는 150회에서 2회로, 정규식 매칭은 2,903 에서 71 샘플로, 스폰의 `fork` 잠금은 샘플 상위에서 보이지 않는다. 표준 창의 p99 는 20 ms 이고, 부팅 직후의 118 ms 는 첫 턴들이 몰리는 부하(점유 18%, 할당 188 MB/s)에서의 값이다.
 
 남은 100 ms 넘는 실행은 표준 창에 9회이고 부류가 흩어져 있다: `-> fstat` 22회(최대 106 ms), `fs-compat-atomic-commit -> ` 13회(저장이 끝난 뒤 이어지는 계산, 최대 67 ms; 부팅 직후엔 226 ms), `fstat -> fstat` 11회(171 ms), `(first run) -> Promise.await` 10회(pool 작업을 기다리기 전의 계산, 137 ms), `Promise.await -> Promise.await` 249 ms 한 건(GC 72 ms 포함). 부팅 직후 샘플의 `Hashtbl.key_index` 858(busy 의 9%)은 호출자가 잘려 귀속되지 않았다. `String.split_on_char` 는 대시보드의 `Keeper_memory_os_current.read_journal_tail_indexed`(128) 와 `Prompt_registry` 의 본문·frontmatter 파싱(56) 이다.
+
+#### P4l — fiber 에 이름을 붙이니 남은 부류가 읽혔다 (#33587), 그리고 P4m (#33589)
+
+귀속이 안 되던 이유는 이름이 없어서였다. Eio 는 `Switch.run ~name` 으로 연 cancellation context 에만 `eio.name` 이벤트를 남기고 fiber 에는 이름을 붙이지 않는데, masc 는 이름 있는 switch 를 한 곳도 쓰지 않았다. 스택 샘플러(`sample`, Instruments)는 fiber 스택 경계를 못 넘어 `Hashtbl.key_index` 858 샘플이 `Fun.protect <- caml_startup` 바로 아래로만 보였다. P4l 은 서버의 root-level fiber 8개, HTTP 연결(listener tag), proactive refresh 루프, OTel store writer, keeper lane(`keeper <name>`)과 board-attention worker 가 몸체 첫 줄에서 이름 있는 switch 를 열게 하고, 추적기가 "fiber 가 가장 최근에 연 이름 있는 switch" 를 라벨로 쓰며 domain 0 만의 상위 15 실행과 라벨·turn 깊이별 묶음 표를 찍게 한다.
+
+추적기만 바꿔 현재 서버(pid 7905, P4i·j·k)에 붙이자 masc 의 이름이 없어도 답이 나왔다. Eio 자신이 내부 switch 에 이름을 붙이기 때문이다.
+
+| 라벨 (turn 깊이) | 10 ms 이상 실행 | 합계 | 최대 |
+|---|---|---|---|
+| `with_open_out` (1) | 15 | 506 ms | 125 ms |
+| `with_open_in` (1) | 12 | 389 ms | 53 ms |
+| `with_open_out` (0) | 10 | 327 ms | 120 ms |
+| `with_open_out` (2) | 3 | 234 ms | 132 ms |
+| `with_open_in` (0) | 6 | 129 ms | 30 ms |
+| `Buf_write.with_flow` (1) | 2 | 75 ms | 47 ms |
+
+`with_open_out` 은 `Eio.Path.save` = `Fs_compat.save_file`, `with_open_in` 은 `Eio.Path.load` = `Fs_compat.load_file` 이다. eio_posix 는 일반 파일의 `readv`·`writev` 를 fiber 위에서 그대로 실행한다(일반 파일은 "준비 안 됨" 을 보고하지 않으므로 `await_writable` 을 거치지 않는다). 따라서 2 MB 파일 하나를 저장하는 데 120~130 ms, 큰 파일 하나를 읽는 데 40~50 ms 가 fiber 에서 흘렀고, 이것이 P4g 이후 모든 창에 있던 `openat -> switch` 부류의 마지막 정체다. P4h-5 는 그중 체크포인트 읽기 하나만 옮긴 것이었다.
+
+P4m 은 `Fs_compat.load_file`·`save_file`·`append_file` 의 Eio 분기를 Unix 구현의 systhread 실행으로 바꾼다(§7.2 Phase 2 의 모양). 호출자 12·14·16곳과 원자 쓰기 약 30곳이 한 번에 fiber 밖으로 나간다. 원자 쓰기는 blocking writer 를 직접 받아 임시 파일 생성부터 부모 fsync 까지를 작업 하나로 돈다. append 는 Eio 안에서도 path 별 mutex 로 직렬화된다. 판정은 재기동 뒤 라벨 표에서 `with_open_out`·`with_open_in` 이 사라지는지다.

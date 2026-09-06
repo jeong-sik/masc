@@ -793,15 +793,15 @@ let tool_arguments fixture (schema : Masc_domain.tool_schema) =
       | "masc_start" -> [ "path"; "task_title" ]
       | "masc_heartbeat_start" -> [ "interval" ]
       | "masc_board_post" ->
-          (* Schema no longer requires content|author (both are validated at
-             the handler layer so body/content aliases both work). Matrix
-             test still needs to supply body so board_core accepts it. *)
-          [ "body" ]
+          (* The schema declares [content] as the field the handler layer
+             validates; the strict field gate (#33565) rejects anything else,
+             so the matrix fixture must supply [content]. *)
+          [ "content" ]
       | "masc_board_post_update" ->
-          (* Same as masc_board_post: body is optional in the schema
-             (validated at the handler layer), but the matrix fixture must
-             supply a non-empty body or the handler rejects the edit. *)
-          [ "body" ]
+          (* Same as masc_board_post: [content] is optional in the schema,
+             but the matrix fixture must supply a non-empty [content] or the
+             handler rejects the edit. *)
+          [ "content" ]
       | "masc_goal_transition" -> [ "note" ]
       | _ -> []
     in

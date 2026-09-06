@@ -93,6 +93,25 @@ agent_core가 deepseek.com 직접 API를 카탈로그·런타임 양쪽에서 �
   기록한다.
 - 가격·배율은 과금 회계(cost_ledger)의 단가와 대조한다.
 
+## 실측 결과 (2026-09-06, api.deepseek.com 직접, deepseek-v4-flash)
+
+- 잔액 확인: USD $49.90 (topped_up) — 이 날 충전분. `is_available=true`.
+- baseline thinking+tools 턴: `finish=tool_calls`, `reasoning_content` 존재,
+  usage 에 `prompt_cache_hit_tokens`/`prompt_cache_miss_tokens` 실재
+  (첫 요청 0/359). 문서 회계 가정 확인.
+- **`tool_choice=required` 및 named function: thinking 모드에서 400**
+  ("Thinking mode does not support this tool_choice"). `thinking:disabled`
+  에서는 `required` 수용. 즉 카탈로그의 `supports_required_tool_choice=false`/
+  `supports_named_tool_choice=false` 를 유지한다 — 근거는 V3 시절 이슈에서
+  이 실측으로 교체. masc 가 deepseek 를 thinking 으로 쓰는 한 강제
+  tool_choice 는 불가능하다.
+- **reasoning_content 회귀 규칙은 문서보다 완화돼 있다**: tools 요청의 2턴
+  재현에서 이전 assistant 턴의 reasoning_content 를 빼고 보내도 400 없이
+  통과했다(문서는 400 이라 명시). 포함/미포함 모두 동일 finish. 그러나
+  `preserve_with_tool` 정책은 (a) 문서 규칙이 특정 조건(복수 턴 누적 등)에
+  여전히 적용될 때 (b) 완화된 지금 모두 통과하는 안전한 방향이므로
+  Phase 0 의 선택을 유지한다.
+
 ## 관계
 
 - 런타임 체인 등록(2026-09-06, runtime.toml lane 3곳 + `[providers.deepseek]`)은

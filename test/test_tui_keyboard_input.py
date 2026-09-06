@@ -12573,6 +12573,67 @@ def run_board_json_regression(executable: str) -> None:
     )
 
 
+def run_theme_scheme_regression(executable: str) -> None:
+    """Picking a scheme sends the whole scheme, colour codes included.
+
+    The gap this closes: between #30781 and the OSC 4 change, a pick sent the
+    page and the default text and nothing else. Everything masc says with
+    colour is drawn by naming a code, so a scheme reached the two quietest
+    colours on the screen and stopped. The catalogue's high-contrast schemes
+    were hit hardest -- the readability lift was the only path a chosen colour
+    had to a code, and a scheme that needs no lift got none, so picking the
+    top row changed nothing at all.
+
+    Driven through the picker rather than the presenter because the presenter
+    already has unit cover. What was missing was nobody asking whether the key
+    the reader presses reaches it.
+    """
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Config")
+        # [p] cycles the Config panes and themes is the last of them, so the
+        # walk stops on the header rather than counting presses.
+        for _ in range(8):
+            if b"MASC Themes" in CSI_RE.sub(b"", bytes(output)):
+                break
+            send_and_wait(process, master_fd, output, b"p", b"MASC ")
+        else:
+            raise AssertionError("[p] never reached the themes pane")
+
+        before = len(output)
+        # The cursor opens on the first row, which the picker sorts to be a
+        # native-pass scheme -- the case that used to send nothing.
+        send_and_wait(process, master_fd, output, b"\r", b"Enter picks another")
+        sent = bytes(output[before:])
+
+        if b"\x1b]4;" not in sent:
+            raise AssertionError(
+                "picking a scheme sent no OSC 4: the colour codes stayed the "
+                "terminal's, so nothing masc says with colour moved"
+            )
+        if b"\x1b]10;" not in sent or b"\x1b]11;" not in sent:
+            raise AssertionError("picking a scheme stopped sending the page")
+
+        # Back to Overview, then arm the quit the harness confirms with its
+        # own second press.
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        send_and_wait(
+            process, master_fd, output, b"q", b"q: press again to quit"
+        )
+
+    run_terminal_scenario(
+        executable,
+        description="picking a theme sends its colour codes",
+        interact=interact,
+    )
+
+
 def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "cli-base-path":
         run_cli_base_path_regression(os.path.abspath(sys.argv[1]))
@@ -12593,6 +12654,10 @@ def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "config":
         run_config_regression(os.path.abspath(sys.argv[1]))
         print("tui Config regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "theme-scheme":
+        run_theme_scheme_regression(os.path.abspath(sys.argv[1]))
+        print("tui theme scheme regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "chat-clarity":
         run_chat_clarity_regression(os.path.abspath(sys.argv[1]))

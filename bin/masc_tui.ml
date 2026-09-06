@@ -12195,17 +12195,30 @@ let main () =
     ~flush:(fun () -> flush stdout);
   (* Reads the palette rather than taking a colour, so every caller sends
      whatever is in force at the moment it asks -- picking a scheme, dropping
-     one, and the first paint all go through the same answer. *)
+     one, and the first paint all go through the same answer.
+
+     Gated on the reader's own pick rather than on the palette alone. The
+     palette is also what the terminal answered about itself, and sending a
+     terminal its own colours back is masc claiming an opinion it does not
+     have. It read as harmless while only the page travelled; the sixteen
+     make it a round trip through masc's 8-bit parse of a reply a terminal
+     may have given at 16. *)
   let sync_theme_page () =
-    Frame_presenter.sync_page ~write:(output_string stdout)
+    Frame_presenter.sync_scheme ~write:(output_string stdout)
       ~flush:(fun () -> flush stdout)
-      (Option.map
-         (fun palette ->
-           { Frame_presenter.foreground =
-               Masc_tui_terminal_palette.foreground palette
-           ; background = Masc_tui_terminal_palette.background palette
-           })
-         (Masc_tui_terminal_palette.current ()))
+      (match state.theme_choice with
+       | None -> None
+       | Some _ ->
+         Option.map
+           (fun palette ->
+             { Frame_presenter.foreground =
+                 Masc_tui_terminal_palette.foreground palette
+             ; background = Masc_tui_terminal_palette.background palette
+             ; ansi =
+                 Array.init Masc_tui_terminal_palette.ansi_slot_count
+                   (Masc_tui_terminal_palette.ansi palette)
+             })
+           (Masc_tui_terminal_palette.current ()))
   in
   (* The pick, written to the runtime.toml boot reads it back from. Only a
      commit comes here: a preview is a look at a scheme, not a choice of one,

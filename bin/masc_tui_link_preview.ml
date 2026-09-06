@@ -36,9 +36,22 @@ let cache_store preview =
   Stdlib.Mutex.protect preview_cache_mu (fun () ->
       Masc_tui_lru.set !preview_cache preview.url preview)
 
+(* Rendered half-block mosaics keyed by image URL, filled asynchronously after a
+   preview's image is downloaded and decoded off the render loop. Read by
+   [render_modal_card]; a miss simply draws no preview. *)
+let mosaic_cache_mu = Stdlib.Mutex.create ()
+let mosaic_cache : (string, string list) Hashtbl.t = Hashtbl.create 64
+
+let mosaic_lookup url =
+  Stdlib.Mutex.protect mosaic_cache_mu (fun () -> Hashtbl.find_opt mosaic_cache url)
+
+let mosaic_store url lines =
+  Stdlib.Mutex.protect mosaic_cache_mu (fun () -> Hashtbl.replace mosaic_cache url lines)
+
 let clear_cache () =
   Stdlib.Mutex.protect preview_cache_mu (fun () ->
-      preview_cache := Masc_tui_lru.create ~capacity:preview_cache_capacity)
+      preview_cache := Masc_tui_lru.create ~capacity:preview_cache_capacity);
+  Stdlib.Mutex.protect mosaic_cache_mu (fun () -> Hashtbl.clear mosaic_cache)
 
 let path_segments uri =
   Uri.path uri
@@ -545,6 +558,15 @@ let render_modal_card ~width ~height:_ p =
   let add s = lines := s :: !lines in
   List.iter add card;
   add "";
+  (match p.image_url with
+   | Some img -> (
+       match mosaic_lookup img with
+       | Some (_ :: _ as mosaic) ->
+           add "  preview";
+           List.iter (fun l -> add ("  " ^ l)) mosaic;
+           add ""
+       | _ -> ())
+   | None -> ());
   (match p.kind with
    | Image_direct { ext } ->
        add (Printf.sprintf "  \xf0\x9f\x96\xbc\xef\xb8\x8f  Direct Image: %s format" (String.uppercase_ascii ext));

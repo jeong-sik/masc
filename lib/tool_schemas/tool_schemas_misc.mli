@@ -37,6 +37,10 @@ val control_schemas : Masc_domain.tool_schema list
 val web_search_schema : Masc_domain.tool_schema
 val web_fetch_schema : Masc_domain.tool_schema
 val web_schemas : Masc_domain.tool_schema list
+val browser_tabs_schema : Masc_domain.tool_schema
+val browser_read_schema : Masc_domain.tool_schema
+val browser_lane_schemas : Masc_domain.tool_schema list
+(** Browser-lane reader tools (docs/design/browser-lane.md). *)
 (** Canonical input schemas owned by the Tool_misc web handlers. *)
 
 val schemas : Masc_domain.tool_schema list
@@ -87,6 +91,8 @@ type misc_operation =
   | Misc_tool_help
   | Misc_web_fetch
   | Misc_web_search
+  | Misc_browser_tabs
+  | Misc_browser_read
 [@@deriving enumerate]
 (** Closed vocabulary routed by [Tool_misc.dispatch]. *)
 

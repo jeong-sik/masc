@@ -4635,6 +4635,11 @@
  (libraries masc_test_deps exec_ssh_protocol eio_main masc.build_version))
 
 (test
+ (name test_browser_lane)
+ (modules test_browser_lane)
+ (libraries alcotest eio_main eio masc.browser_lane masc masc.time_compat))
+
+(test
  (name test_shell_ir_with_sandbox)
  (modules test_shell_ir_with_sandbox)
  (libraries masc_test_deps))

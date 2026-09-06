@@ -19,3 +19,5 @@ let schema_of_name name : Masc_domain.tool_schema =
 
 let web_search = schema_of_name "masc_web_search"
 let web_fetch = schema_of_name "masc_web_fetch"
+let browser_tabs = schema_of_name "masc_browser_tabs"
+let browser_read = schema_of_name "masc_browser_read"

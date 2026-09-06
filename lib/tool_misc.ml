@@ -173,6 +173,10 @@ let dispatch ctx ~name ~args : Tool_result.result option =
       Some (handle_web_search ~tool_name:name ~start_time:start ctx args)
   | Some Tool_schemas_misc.Misc_web_fetch ->
       Some (handle_web_fetch ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_misc.Misc_browser_tabs ->
+      Some (Tool_misc_browser_lane.handle_tabs ~tool_name:name ~start_time:start args)
+  | Some Tool_schemas_misc.Misc_browser_read ->
+      Some (Tool_misc_browser_lane.handle_read ~tool_name:name ~start_time:start args)
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
@@ -185,6 +189,10 @@ let is_read_only = function
   (* Read-back only: records nothing, matching the descriptor's readonly flag
      and the MCP lane's runtime_tool_policy. *)
   | Tool_schemas_misc.Misc_ask_status -> true
+  (* Browser readers change nothing in the browser; the verb set in
+     Browser_lane is this classification's source of truth. *)
+  | Tool_schemas_misc.Misc_browser_tabs
+  | Tool_schemas_misc.Misc_browser_read -> true
   | Tool_schemas_misc.Misc_ask
   | Tool_schemas_misc.Misc_ask_withdraw
   | Tool_schemas_misc.Misc_config

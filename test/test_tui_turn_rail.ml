@@ -55,6 +55,20 @@ let test_every_piece_is_one_cell () =
     every_rail
 ;;
 
+(* The budget is what the layout subtracts from the body, so the margin has
+   to spend all of it. Measuring the widths against each other only says they
+   agree; it does not say they agree with [turn_rail_cells]. They did not: the
+   gutter drew three lead cells and one glyph and stopped, and the cell the
+   budget keeps between the glyph and the clock was taken by the label's first
+   character instead. *)
+let test_the_gutter_spends_its_whole_budget () =
+  List.iter
+    (fun rail ->
+      check int "the gutter is the budget wide" Layout.turn_rail_cells
+        (Layout.display_width (Layout.turn_rail_gutter rail)))
+    every_rail
+;;
+
 (* An alphabet is closed when each mark means one thing. Two rail pieces
    sharing a glyph would put "the turn ended" and "the turn did this" behind
    the same shape. *)
@@ -304,6 +318,8 @@ let () =
   run "tui turn rail"
     [ ( "glyphs"
       , [ test_case "every piece is one cell" `Quick test_every_piece_is_one_cell
+        ; test_case "the gutter spends its whole budget" `Quick
+            test_the_gutter_spends_its_whole_budget
         ; test_case "the drawn pieces are distinct" `Quick
             test_the_drawn_pieces_are_distinct
         ] )

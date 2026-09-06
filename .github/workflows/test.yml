@@ -325,6 +325,10 @@ jobs:
         if: (failure() || cancelled()) && github.event_name == 'schedule'
         env:
           GH_TOKEN: ${{ github.token }}
+          # gh infers the repo from the checkout's git remote. This step also
+          # runs when the job failed before Checkout, where there is no remote
+          # to read, so name the repo outright.
+          GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           JOB_STATUS: ${{ job.status }}
         run: |

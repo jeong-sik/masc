@@ -329,11 +329,16 @@ let prepare_agent_setup
   let global_skill_catalog, skill_projection_diagnostics =
     Keeper_skill_catalog.of_snapshot skill_snapshot
   in
+  let snapshot_rev =
+    Skill_catalog_snapshot.snapshot_revision_to_string
+      (Skill_catalog_snapshot.snapshot_revision skill_snapshot)
+  in
   List.iter
     (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
        Log.Keeper.warn
-         "Skill projection diagnostic for keeper=%s identity=%s error=%s"
+         "Skill projection diagnostic for keeper=%s snapshot_revision=%s identity=%s error=%s"
          meta.name
+         snapshot_rev
          (Yojson.Safe.to_string
             (Skill_catalog_snapshot.identity_to_yojson diagnostic.identity))
          (Keeper_skill_catalog.error_to_string diagnostic.error))
@@ -343,8 +348,9 @@ let prepare_agent_setup
        Option.iter
          (fun diagnostic ->
             Log.Keeper.warn
-              "Task Skill frozen as instruction for keeper=%s reference=%s error=%s"
+              "Task Skill frozen as instruction for keeper=%s snapshot_revision=%s reference=%s error=%s"
               meta.name
+              snapshot_rev
               (Skill_reference.to_yojson selected.reference |> Yojson.Safe.to_string)
               (Keeper_skill_catalog.error_to_string diagnostic))
          selected.diagnostic)
@@ -363,8 +369,9 @@ let prepare_agent_setup
   List.iter
     (fun unavailable ->
        Log.Keeper.warn
-         "Task Skill unavailable for keeper=%s error=%s"
+         "Task Skill unavailable for keeper=%s snapshot_revision=%s error=%s"
          meta.name
+         snapshot_rev
          (Keeper_skill_catalog.turn_unavailable_to_string unavailable))
     turn_skill_projection.unavailable;
   let executable_task_skill_selection =

@@ -427,10 +427,12 @@ let test_input_cursor_uses_visible_terminal_cells () =
     10 (Layout.display_width (badge "you"));
   check int "wide-char role label pads by cells not bytes"
     10 (Layout.display_width (badge "한글"));
-  (* An overrun is cut at the head: two canaries differ only in their tails
-     and a head-preserving cut would draw them identically. *)
-  check string "long role label loses its head, not its tail"
-    ("\xe2\x97\x8f " ^ "…abcdefg")
+  (* An overrun is cut in the middle: two canaries differ in their tails, and
+     they also share a family prefix that a tail-only cut throws away. The
+     tail takes two thirds of what is left, so the deciding end survives a
+     narrow column longest. *)
+  check string "long role label keeps both ends of the name"
+    ("\xe2\x97\x8f " ^ "01…cdefg")
     (badge "0123456789abcdefg");
   check string "inner-width role label reads whole"
     ("\xe2\x97\x8f " ^ "01234567")
@@ -1383,14 +1385,18 @@ let test_badge_keeps_the_tail_when_it_cannot_fit () =
   let drawn = Layout.align_role_label ~column:width ~style:Layout.Keeper long in
   check int "the badge still spends exactly its budget" width
     (Layout.display_width drawn);
-  (* The mark leads and the ellipsis follows it: the cut is still at the head
-     of the name, and the glyph is outside the cut so the longest labels are
-     not the ones that lose it. *)
+  (* The mark leads and the cut falls inside the name: the glyph is outside
+     the cut, so the longest labels are not the ones that lose it. *)
   let mark = Layout.speaker_mark Layout.Keeper ^ " " in
   check bool "the mark leads the badge" true
     (String.starts_with ~prefix:mark drawn);
-  check bool "the head is what goes" true
-    (String.starts_with ~prefix:(mark ^ "\xe2\x80\xa6") drawn);
+  check bool "the cut is inside the name, not at the mark" true
+    (not (String.starts_with ~prefix:(mark ^ "\xe2\x80\xa6") drawn));
+  check bool "the middle is what goes" true
+    (let cut = "\xe2\x80\xa6" in
+     let n = String.length drawn and m = String.length cut in
+     let rec seen i = i + m <= n && (String.sub drawn i m = cut || seen (i + 1)) in
+     seen (String.length mark));
   check bool "the surface survives the cut" true
     (let suffix = "agent" in
      let n = String.length drawn and m = String.length suffix in
@@ -1572,7 +1578,7 @@ let test_normal_inline_margin_bytes_stay_stable () =
   with
   | [ first; second ] ->
       check string "normal first gutter bytes"
-        (no_rail ^ "12:34 " ^ Layout.speaker_mark Layout.Keeper ^ " …per.one")
+        (no_rail ^ "12:34 " ^ Layout.speaker_mark Layout.Keeper ^ " ke…r.one")
         first.Layout.gutter;
       check string "normal continuation bytes"
         (no_rail ^ "12:35 " ^ Layout.continued_mark Layout.Keeper

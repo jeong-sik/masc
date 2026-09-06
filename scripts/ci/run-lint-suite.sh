@@ -109,6 +109,7 @@ blocking_lints() {
   run_lint "Provider name hardcoding ratchet" bash scripts/lint/no-provider-name-hardcoding.sh --fail
   run_lint "Keeper behavior hardcoding" bash scripts/lint/no-keeper-behavior-hardcoding.sh
   run_lint "Eval tool-selector runtime import" bash scripts/lint/no-eval-tool-selector-runtime-import.sh
+  run_lint "One process manager in lib" bash scripts/lint/one-process-manager.sh
   run_lint "Legacy tool surface name" bash scripts/lint/no-legacy-tool-surface-name.sh --fail
   run_lint "Retired tool husk ratchet" bash scripts/lint/no-retired-tool-husks.sh --fail
   run_lint "Synthetic tool-call residue ratchet" bash scripts/lint/no-synthetic-tool-call-residue.sh --fail

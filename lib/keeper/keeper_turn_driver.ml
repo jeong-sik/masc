@@ -319,6 +319,13 @@ let attempt_runtime_candidates
             Runtime_lane_preference.note_success ~lane_id
               ~candidate:attempt_runtime_id
           | None -> ());
+         (* A call getting through is the only evidence a quota came back that
+            a provider stating no reset time leaves available, so it is what
+            clears the observation. A stated window is left alone: it names a
+            time, and one success inside it does not make that untrue. *)
+         (match attempt_quota_scope with
+          | Some scope -> Runtime_quota_window.note_succeeded ~scope
+          | None -> ());
          Ok value
        | Error error, _checkpoint_after, effect_disposition ->
          emit_runtime_manifest
@@ -351,6 +358,19 @@ let attempt_runtime_candidates
                  (* NDT-OK: [retry_after] is relative to the provider response;
                     convert it to the wall-clock expiry at this ingress. *)
                  ~resets_at:(Unix.gettimeofday () +. retry_after_s)
+             | None -> ())
+          | Agent_core.Error.Provider
+              (Llm_provider.Error.HardQuota { retry_after = None; _ }) ->
+            (* The provider said the account is spent and did not say when it
+               comes back. Recording the observation is not inventing a
+               cooldown: it names no time and the next success on this scope
+               drops it. Both metered providers this fleet reaches answer this
+               way -- ollama.com and api.z.ai each 429 with no Retry-After
+               (2026-09-06) -- so without this branch the table stays empty
+               and the walk re-dispatches into a spent account every turn for
+               as long as it is spent. RFC-0433. *)
+            (match attempt_quota_scope with
+             | Some scope -> Runtime_quota_window.note_observed_exhausted ~scope
              | None -> ())
           | _ -> ());
          (* The window just learned above must affect this same lane walk.

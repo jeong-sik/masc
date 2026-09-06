@@ -1950,6 +1950,26 @@ type 'a mailed = {
 let enqueue_async mailbox msg =
   Eio.Stream.add mailbox { ready_at = Unix.gettimeofday (); message = msg }
 
+(* Wire the web-link-preview background fetcher. On the first cache miss for a
+   URL, Masc_tui_link_preview renders the synthesized card immediately and calls
+   this hook; the fetched <title>/og:* then replace that entry in the shared
+   cache, and the next render (a periodic loader tick, sub-second) shows the real
+   card. A failed fetch leaves the synthesized card. Runs on its own daemon fiber
+   so a slow site never blocks the render loop, and sends no masc auth header to
+   the third-party URL. *)
+let () =
+  Masc_tui_link_preview.set_background_fetch (fun url ->
+      match Eio_context.get_switch_opt () with
+      | None -> ()
+      | Some sw ->
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+              (match Masc_tui_http.fetch_link_preview_body ~url with
+               | Ok body ->
+                   Masc_tui_link_preview.cache_store
+                     (Masc_tui_link_preview.parse_og_html ~url ~body)
+               | Error _ -> ());
+              `Stop_daemon))
+
 let current_clock_text () =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min

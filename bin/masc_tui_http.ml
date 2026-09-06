@@ -178,6 +178,29 @@ let http_get ~(host : string) ~(port : int) ~(path : string) :
   | Ok (status, body) -> Ok (status, body)
   | Error e -> Error (report_err "GET failed" e)
 
+(** Fetch an arbitrary external URL's body for web link previews. Unlike the
+    dashboard helpers above this sends NO masc auth header -- the URL is a
+    third-party site, so leaking the operator's token there would be a real
+    credential exposure. Only http(s) is followed, and only a 2xx response
+    yields a body. Response size is capped by {!Masc_http_client} (8 MB). *)
+let fetch_link_preview_body ~(url : string) : (string, string) result =
+  if not (String.starts_with ~prefix:"http://" url
+          || String.starts_with ~prefix:"https://" url)
+  then Error "link preview: unsupported url scheme"
+  else
+    let headers =
+      [ ("User-Agent", "masc-tui/link-preview (+https://github.com/jeong-sik/masc)")
+      ; ("Accept", "text/html,application/xhtml+xml") ]
+    in
+    match
+      Masc_http_client.get_response_sync ?clock:(request_clock ())
+        ~timeout_sec:(request_timeout_sec ()) ~url ~headers ()
+    with
+    | Error e -> Error (report_err "link preview GET failed" e)
+    | Ok { Masc_http_client.status; body; _ } ->
+        if status >= 200 && status < 300 then Ok body
+        else Error (Printf.sprintf "link preview: HTTP %d" status)
+
 (** Send an HTTP POST request with a JSON body and return the structured status/body pair. *)
 let http_post_with_timeout ~timeout_sec ~headers ~(host : string) ~(port : int)
     ~(path : string) ~(body : string) : (int * string, string) result =

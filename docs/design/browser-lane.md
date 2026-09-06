@@ -99,8 +99,10 @@ MVP 범위: 읽기 동사 + session.open/close + page.goto까지. page.goto는
 
 - keeper 노출은 `Keeper_tool_descriptor`(웹 도구와 같은 길). misc 파사드의
   등록 루프는 스키마가 None인 연산을 건너뛴다.
-- 닫힌 runtime_handler variant는 소비자 5곳(레지스트리 태그, 파일 변경
-  투영 2곳, 번들, 런타임 디스패치)을 컴파일러가 강제 갱신한다 — wildcard 없음.
+- 닫힌 runtime_handler variant는 소비자 6곳(레지스트리 태그, 파일 변경
+  투영 2곳, 번들, 런타임 디스패치, TUI 트랜스크립트 폴드)을 컴파일러가
+  강제 갱신한다 — wildcard 없음. 로컬 `dune build lib/`는 TUI 바이너리를
+  안 덮으므로 @check가 진짜 검증이다.
 - `Concurrent` 실행 모드는 정적 읽기 전용 힌트가 있을 때만 선언 가능.
   goto는 Serial — 단일 브라우저 자원이라 어차피 직렬이 정직한 분류.
 - 동사 분류는 두 개: `verb_is_read`(도구 예산)와 `verb_allowed_on_live`

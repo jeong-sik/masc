@@ -122,7 +122,10 @@ let tui_input_wait_seconds = 0.016
    TUI. Kept as the negative control, so the next reading starts past it. *)
 let spin_like_the_tui ~finished =
   while not !finished do
-    ignore (Unix.select [ Unix.stdin ] [] [] tui_input_wait_seconds);
+    (* The waiting is the point; which descriptor came back is not read. *)
+    let _readable, _, _ =
+      Unix.select [ Unix.stdin ] [] [] tui_input_wait_seconds
+    in
     Eio.Fiber.yield ()
   done
 
@@ -141,13 +144,12 @@ let run ~env ~args ~token =
 let () =
   match parse_args Sys.argv with
   | Error detail ->
-      prerr_endline detail;
-      prerr_endline usage;
+      Printf.eprintf "%s\n%s\n%!" detail usage;
       exit 2
   | Ok args -> (
       match Option.map read_token args.token_file with
       | Some (Error detail) ->
-          prerr_endline ("token file: " ^ detail);
+          Printf.eprintf "token file: %s\n%!" detail;
           exit 2
       | token_result ->
           let token =

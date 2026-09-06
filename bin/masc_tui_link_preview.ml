@@ -276,21 +276,17 @@ let title_tag ~head ~lhead =
           | Some e ->
               Some (decode_entities (String.trim (String.sub head (gt + 1) (e - gt - 1))))))
 
-(* og:* and <title> live in <head>; bound the scan so a large body stays cheap. *)
-let og_head_limit = 262144
-
 (* Merge a fetched page's real metadata onto the URL-synthesized base, keeping
    its [kind] (and thus its banner styling). Returns the base unchanged when the
    page yielded no title or og:* at all, so [has_metadata] never claims fetched
-   data we do not have. *)
+   data we do not have. The whole body is scanned rather than a head window:
+   real pages (YouTube, for one) place og:* hundreds of KB in, after large inline
+   scripts, so a small window would silently miss them. The body is already
+   capped at 8 MB by the fetch, and the scan is a linear byte walk. *)
 let parse_og_html ~url ~body =
   let base = synthesize_preview url in
-  let head =
-    if String.length body > og_head_limit then String.sub body 0 og_head_limit
-    else body
-  in
-  let lhead = String.lowercase_ascii head in
-  let meta key = meta_content ~head ~lhead key in
+  let lhead = String.lowercase_ascii body in
+  let meta key = meta_content ~head:body ~lhead key in
   let non_empty = function
     | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
     | _ -> None
@@ -299,7 +295,7 @@ let parse_og_html ~url ~body =
   let og_desc = non_empty (meta "og:description") in
   let og_image = non_empty (meta "og:image") in
   let og_site = non_empty (meta "og:site_name") in
-  let html_title = non_empty (title_tag ~head ~lhead) in
+  let html_title = non_empty (title_tag ~head:body ~lhead) in
   let got_real =
     og_title <> None || og_desc <> None || og_image <> None || html_title <> None
   in

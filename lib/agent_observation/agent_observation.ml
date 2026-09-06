@@ -275,26 +275,7 @@ type annotation_kind =
   | Question
   | Bookmark
 
-let annotation_kind_to_string = function
-  | Comment -> "Comment"
-  | Decision -> "Decision"
-  | Question -> "Question"
-  | Bookmark -> "Bookmark"
-;;
-
 let all_annotation_kinds = [ Comment; Decision; Question; Bookmark ]
-
-let valid_annotation_kind_strings =
-  List.map annotation_kind_to_string all_annotation_kinds
-;;
-
-let annotation_kind_of_string = function
-  | "Comment" -> Some Comment
-  | "Decision" -> Some Decision
-  | "Question" -> Some Question
-  | "Bookmark" -> Some Bookmark
-  | _ -> None
-;;
 
 type tool_event_sink = tool_event -> unit
 

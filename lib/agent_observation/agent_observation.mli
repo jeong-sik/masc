@@ -133,13 +133,9 @@ type annotation_kind =
   | Question
   | Bookmark
 
-val annotation_kind_to_string : annotation_kind -> string
-
 val all_annotation_kinds : annotation_kind list
-val valid_annotation_kind_strings : string list
-(** The schema's enum, derived from the constructors rather than restated, so a
-    new kind cannot reach the wire without appearing here. *)
-val annotation_kind_of_string : string -> annotation_kind option
+(** Every kind, in constructor order. The words a kind is spelled with live
+    in [Ide_memo], the one grammar that carries a kind. *)
 
 type tool_event_sink = tool_event -> unit
 

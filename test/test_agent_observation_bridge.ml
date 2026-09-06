@@ -99,11 +99,12 @@ let test_snapshot_reset_clears_accumulated_observations () =
   check int "tool events cleared" 0 (summary_count "tool_event_count" after)
 ;;
 
-(* keeper_ide_annotate declares kind as a JSON-schema enum and the runtime
-   parses it back with annotation_kind_of_string. Two hand-written lists of the
-   same four names drift silently: before this test the runtime folded every
-   unrecognised value onto Comment, so a schema that grew a fifth kind would
-   have filed it as a comment rather than failing. Compare the two directly. *)
+(* keeper_ide_annotate declares kind as a JSON-schema enum in its TOML and
+   the runtime parses it back with [Ide_memo.kind_of_word]. A hand-written
+   enum and the constructor-derived word list drift silently: before this
+   test the runtime folded every unrecognised value onto Comment, so a schema
+   that grew a fifth kind would have filed it as a comment rather than
+   failing. Compare the two directly. *)
 let schema_kind_enum () =
   let annotate =
     List.find
@@ -123,24 +124,7 @@ let test_annotation_kind_enum_matches_variants () =
   check (list string)
     "schema enum == annotation_kind constructors"
     (schema_kind_enum ())
-    Agent_observation.valid_annotation_kind_strings
-;;
-
-let test_annotation_kind_parser_round_trips_every_kind () =
-  List.iter
-    (fun k ->
-      let s = Agent_observation.annotation_kind_to_string k in
-      match Agent_observation.annotation_kind_of_string s with
-      | Some back -> check bool ("round trip " ^ s) true (back = k)
-      | None -> failf "annotation_kind_of_string rejected %S" s)
-    Agent_observation.all_annotation_kinds
-;;
-
-let test_annotation_kind_parser_rejects_wrong_case () =
-  (* The casing an LLM reaches for. The runtime now rejects it instead of
-     filing the annotation as a Comment. *)
-  check bool "lowercase decision is not a kind" true
-    (Agent_observation.annotation_kind_of_string "decision" = None)
+    Ide_memo.kind_words
 ;;
 
 let () =
@@ -159,14 +143,6 @@ let () =
             "annotation kind enum matches variants"
             `Quick
             test_annotation_kind_enum_matches_variants
-        ; test_case
-            "annotation kind parser round trips every kind"
-            `Quick
-            test_annotation_kind_parser_round_trips_every_kind
-        ; test_case
-            "annotation kind parser rejects wrong case"
-            `Quick
-            test_annotation_kind_parser_rejects_wrong_case
         ] )
     ]
 ;;

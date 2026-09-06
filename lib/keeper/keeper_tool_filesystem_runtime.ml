@@ -1987,7 +1987,7 @@ let publication_recovery_unavailable_attempt unavailable =
         Keeper_publication_recovery_availability.unavailable_to_string unavailable
     ; data =
         Keeper_publication_recovery_availability.unavailable_to_yojson unavailable
-    ; class_ = Tool_result.Runtime_failure
+    ; class_ = Keeper_publication_recovery_availability.failure_class unavailable
     }
 ;;
 
@@ -2030,19 +2030,21 @@ let publication_recovery_cleanup_failed_attempt
     | Publication_write_indeterminate ->
       fs_guidance_text Recovery_lane_indeterminate, `Null
   in
+  let class_ = Tool_result.Runtime_failure in
   Write_failed_data
     { message
     ; data =
         `Assoc
           [ "error", `String "publication_recovery_cleanup_failed"
-          ; "failure_class", `String "runtime_failure"
+          ; ( "failure_class"
+            , `String (Tool_result.tool_failure_class_to_string class_) )
           ; "state", `String "lane_release_failed"
           ; "detail", `String (fs_guidance_text Recovery_lane_cleanup_detail)
           ; "write_executed", write_executed
           ; "keeper_active", `Bool true
           ; "publication_result", publication_result
           ]
-    ; class_ = Tool_result.Runtime_failure
+    ; class_
     }
 ;;
 

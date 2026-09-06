@@ -535,6 +535,23 @@ let test_a_direct_turn_keeps_its_blank_reply () =
   check (list string) "the keeper row survives" [ "keeper" ]
     (List.map (fun row -> kind_to_string row.History.kind) decoded.History.rows)
 
+(* The production shape: no [turn_ref] field, no delivery key, the turn id in
+   the marker. Of 598 rows on one live pane, 198 were autonomous and every one
+   looked like this, so reading only the other two places left every one of
+   them in no turn at all -- and the pane draws a turn's bracket, folds a
+   repeated speaker and hangs work off its turn from exactly that id. *)
+let test_an_autonomous_turn_is_identified_by_its_marker () =
+  let decoded = decode (`List [ autonomous_turn [ reason "look"; tool "Read" ] ]) in
+  check (list (option string)) "the trace rows share the marker's turn"
+    [ Some "trace-1#54"; Some "trace-1#54" ]
+    (List.map (fun row -> row.History.turn_id) decoded.History.rows);
+  (* Turn identity, not an operation: the journal endpoint is keyed by the
+     latter and an autonomous turn never ran as one. *)
+  check (list (option string)) "and claim no operation"
+    [ None; None ]
+    (List.map (fun row -> row.History.operation_id) decoded.History.rows)
+;;
+
 let test_autonomous_trace_rows_keep_the_turn_ref () =
   let decoded =
     decode
@@ -1800,6 +1817,8 @@ let () =
             test_consecutive_tools_from_different_turns_do_not_merge
         ; test_case "autonomous trace rows retain turn_ref" `Quick
             test_autonomous_trace_rows_keep_the_turn_ref
+        ; test_case "an autonomous turn is identified by its marker" `Quick
+            test_an_autonomous_turn_is_identified_by_its_marker
         ; test_case "a silent autonomous turn draws no row" `Quick
             test_a_silent_autonomous_turn_draws_no_row
         ; test_case "a whitespace autonomous reply is as blank as none" `Quick

@@ -349,6 +349,19 @@ let bool_field_opt fields name =
 (* The transcript carries an exact operation key for direct turns and a
    [turn_ref] for autonomous turns. Keep whichever authority the producer
    supplied; timestamps and row adjacency are not turn identity. *)
+(* An autonomous turn records which turn it is inside the [autonomous_turn]
+   marker and nowhere else. Measured on one live pane: of 598 chat rows, 198
+   were autonomous, and every one of them carried a marker id while none
+   carried a [turn_ref] or a delivery key. Read from those two places alone,
+   every autonomous row belonged to no turn -- so the pane could not bracket a
+   turn's work, could not fold a repeated speaker, and could not tell two
+   turns apart. 108 of those rows carried a trace, which is where the tool
+   calls are. *)
+let autonomous_turn_id_of_fields fields =
+  match List.assoc_opt "autonomous_turn" fields with
+  | Some (`Assoc marker) -> string_field marker "turn_id"
+  | Some _ | None -> None
+
 let turn_id_of_fields fields =
   match Delivery_identity.delivery_provenance_of_fields fields with
   | Ok (Some provenance) ->
@@ -361,7 +374,10 @@ let turn_id_of_fields fields =
             request_id
       in
       Some (Delivery_identity.Request_id.to_string request_id)
-  | Ok None | Error _ -> string_field fields "turn_ref"
+  | Ok None | Error _ -> (
+      match string_field fields "turn_ref" with
+      | Some _ as turn_ref -> turn_ref
+      | None -> autonomous_turn_id_of_fields fields)
 
 (* The operation a direct turn ran as, and nothing else: an autonomous turn's
    [turn_ref] and the other delivery keys are turn identity ([turn_id]) but

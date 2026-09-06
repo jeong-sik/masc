@@ -56,6 +56,7 @@ module Int_knob = struct
     | Workspace_file_max_read_bytes
     | Tcp_listen_backlog
     | Ws_missed_pong_threshold
+    | Gc_space_overhead
   [@@deriving enumerate]
 
   let spec = function
@@ -117,6 +118,11 @@ module Int_knob = struct
       , "transport"
       , "Missed pongs before a WebSocket session is closed; read once per \
          session at creation" )
+    | Gc_space_overhead ->
+      ( "MASC_GC_SPACE_OVERHEAD"
+      , 100
+      , "runtime"
+      , "OCaml GC space_overhead the server sets at boot" )
   ;;
 
   let env_name t = let n, _, _, _ = spec t in n
@@ -141,6 +147,7 @@ module String_opt_knob = struct
     | Imessage_poll_interval_sec
     | Imessage_cursor_path
     | Sidecar_root
+    | Voice_realtime_ws_url
   [@@deriving enumerate]
 
   let spec = function
@@ -174,6 +181,11 @@ module String_opt_knob = struct
       , "(derived)"
       , "runtime"
       , "Repository root the sidecar routes resolve paths against" )
+    | Voice_realtime_ws_url ->
+      ( "MASC_VOICE_REALTIME_WS_URL"
+      , "(none)"
+      , "transport"
+      , "WebSocket endpoint for the realtime voice bridge" )
   ;;
 
   let env_name t = let n, _, _, _ = spec t in n
@@ -196,6 +208,7 @@ module Float_knob = struct
     | Full_health_refresh_timeout_sec
     | Repo_sync_interval_sec
     | Snapshot_interval_sec
+    | Lazy_task_boot_guard_sec
   [@@deriving enumerate]
 
   let spec = function
@@ -242,6 +255,12 @@ module Float_knob = struct
       , 5.0
       , "runtime"
       , "Minimum seconds between SSE snapshot broadcasts" )
+    | Lazy_task_boot_guard_sec ->
+      ( "MASC_LAZY_TASK_BOOT_GUARD_SEC"
+      , 120.0
+      , "server"
+      , "How long boot waits on lazy tasks before publishing readiness; a \
+         non-positive value keeps the default" )
   ;;
 
   let env_name t = let n, _, _, _ = spec t in n

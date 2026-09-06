@@ -486,7 +486,9 @@ let () =
        in this env var crashed server bootstrap. [get_int_nonneg] also
        maps a negative value to the default. *)
     let gc_space_overhead =
-      Env_config_core.get_int_nonneg ~default:100 "MASC_GC_SPACE_OVERHEAD"
+      Env_config_core.get_int_nonneg
+        ~default:(Env_setting.Int_knob.default Gc_space_overhead)
+        (Env_setting.Int_knob.env_name Gc_space_overhead)
     in
     let ctrl = get () in
     set { ctrl with

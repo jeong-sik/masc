@@ -296,7 +296,10 @@ let test_focus_block_names_the_current_turn () =
   check bool "first call returned" true (contains "Read" (nth (header + 1)));
   check bool "with its duration" true (contains "2.0s" (nth (header + 1)));
   check bool "second call still out" true (contains "Execute" (nth (header + 2)));
-  check bool "the last call says in turn" true (contains "in turn" (nth (header + 2)))
+  check bool "the last call says since when, not the header's state" true
+    (contains "10.0s ago" (nth (header + 2)));
+  check bool "the call line does not repeat the header's state" false
+    (contains "in turn" (nth (header + 2)))
 
 let test_focus_falls_back_to_who_acted_last () =
   let drawn = Pane.lines ~rows ~cols ~scroll:0 { fixture with Pane.selected = None } in

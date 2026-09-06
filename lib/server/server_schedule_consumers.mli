@@ -1,4 +1,3 @@
-val supported_payload_kinds : string list
 
 type keeper_wake_reaction_ledger_status =
   | Keeper_wake_reaction_ledger_recorded

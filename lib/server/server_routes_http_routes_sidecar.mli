@@ -24,12 +24,7 @@ val known_ids : string list
 val validate_name : string option -> (string, string) result
 (** [Ok id] when [name] passes [known_ids] gating. *)
 
-val parse_name : Httpun.Request.t -> (string, string) result
-(** Parse + validate the sidecar id from the request path. *)
-
 (** {1 String helpers} *)
-
-val trim_opt : string option -> string option
 
 (** {1 Base-path / project root resolution} *)
 
@@ -40,27 +35,6 @@ val runtime_base_path : ?base_path:string -> unit -> string
 val runtime_base_path_result : ?base_path:string -> unit -> (string, string) result
 (** Effective [base_path] for runtime path resolution. The request-scoped
     [base_path] wins; otherwise the resolver's env-derived base path wins. *)
-
-val request_base_path : Mcp_server.server_state -> string
-(** Base path bound to the server state for the current process. *)
-
-val dir_exists : string -> bool
-(** [Sys.file_exists]+[is_directory] guarded against EACCES. *)
-
-val project_root_from_executable : unit -> string option
-(** Resolve the masc project root from [Sys.executable_name];
-    [None] for installed binaries that live outside a checkout. *)
-
-val sidecar_root : unit -> string option
-(** [SIDECAR_ROOT] env override, normalised to absolute path. *)
-
-val sidecar_root_candidates :
-  ?sidecar_root:'a -> ?project_root:'a -> base_path:'a -> unit -> 'a list
-(** Ordered candidates for the sidecar root (env > project > base_path). *)
-
-val sidecar_dir_under : string -> string -> string
-(** [sidecar_dir_under root id] computes the conventional
-    [<root>/sidecars/<id>] path. *)
 
 val resolve_existing_sidecar_dir :
   ?sidecar_root:string ->
@@ -89,55 +63,12 @@ type sidecar_status_config = {
 (** Where a sidecar's status file may be configured, and the variable
     naming the age at which its heartbeat stops counting as alive. *)
 
-val sidecar_status_config : string -> sidecar_status_config
-(** Per-sidecar status config; raises on an id outside {!known_ids}. *)
-
-val default_status_stale_sec : int
-
-val status_stale_sec : string -> int
-(** Heartbeat age limit for this sidecar, from its
-    [MASC_*_STATUS_STALE_SEC] variable — the same window the gate state
-    modules apply when rendering "stale". *)
-
-val read_file : string -> string
-(** Read whole file; returns empty string when the file is missing. *)
-
-val strip_matching_quotes : string -> string
-(** Strip a single matching pair of single or double quotes from [s]. *)
-
-val parse_env_assignment : string -> (string * string) option
-(** Parse [KEY=VALUE] from a [.env]-style line; [None] for comments/
-    blanks. *)
-
-val env_file_lookup : string -> string list -> string option
-(** Find the value for any of [keys] in [path]. *)
-
-val toml_lookup : string -> string list -> string option
-(** Crude top-level TOML key lookup that doesn't require a full
-    parser dep on the request path. *)
-
-val resolve_relative_path : roots:string list -> string -> string list
-(** Expand [rel] against each root, returning every existing match. *)
-
-val first_existing_or_first : string list -> string option
-(** First existing path, or [None]; ordering preserved. *)
-
-val runtime_toml_path : base_path:string -> string -> string
-(** Path of the sidecar's runtime TOML config under [base_path]. *)
-
-val status_file_candidates :
-  ?sidecar_root:string ->
-  ?project_root:string ->
-  ?sidecar_dir:string -> base_path:string -> string -> string list
 val status_file :
   ?sidecar_root:string ->
   ?project_root:string ->
   ?sidecar_dir:string -> base_path:string -> string -> string
 (** Resolve the canonical [status.json] path for a sidecar. *)
 
-val log_file_candidates :
-  ?sidecar_root:string ->
-  ?project_root:string -> base_path:string -> string -> string list
 val today_log_file :
   ?sidecar_root:string ->
   ?project_root:string -> base_path:string -> string -> string
@@ -145,10 +76,6 @@ val today_log_file :
 
 val runtime_sidecar_dir_result :
   ?base_path:string -> string -> (string, string) result
-val runtime_sidecar_script_result :
-  ?base_path:string -> string -> (string, string) result
-(** Locate the sidecar directory and start script for runtime
-    operations; [Error msg] when missing, with a path enumeration. *)
 
 type sidecar_start_plan = {
   argv : string list;
@@ -208,8 +135,6 @@ type record_decode_error =
 val record_decode_error_to_string : record_decode_error -> string
 
 val desired_state_to_string : desired_state -> string
-val desired_state_of_string : string -> desired_state option
-val observed_state_to_string : observed_state -> string
 val reconcile_result_to_string : reconcile_result -> string
 
 val attempt_record_of_json_result :
@@ -263,10 +188,6 @@ val reconcile_desired_once :
     [observed_state], honours backoff, and either invokes
     [start_process] or returns a [Reconcile_noop] reason. *)
 
-val attempt_fields :
-  attempt_record option -> (string * Yojson.Safe.t) list
-(** Render attempt fields as JSON-friendly assoc list (possibly empty). *)
-
 (** Combined lifecycle JSON: status fields + desired/attempt projection. *)
 
 (** Append a [(key, value)] pair to a JSON assoc. *)
@@ -276,25 +197,11 @@ val clamp_lines : int option -> int
 
 (** {1 HTTP responders} *)
 
-val respond_json :
-  Httpun.Request.t ->
-  Httpun.Reqd.t -> status:Httpun.Status.t -> Yojson.Safe.t -> unit
-val bad_request : Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 val read_status_json : base_path:string -> string -> Yojson.Safe.t
 
-val handle_status :
-  Mcp_server.server_state ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
-val handle_stop :
-  Mcp_server.server_state ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
-val handle_logs :
-  Mcp_server.server_state ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
 
 (** {1 Schema cache} *)
 
-val schema_cache : (string, string) Hashtbl.t
 val reset_schema_cache : unit -> unit
 val python_argv_for : string -> string list
 val fetch_schema : ?base_path:string -> string -> (string, string) result
@@ -307,9 +214,6 @@ type toml_value =
   | Tfloat of float
   | Tbool of bool
 
-val max_value_bytes : int
-(** Cap on individual TOML value sizes accepted via PUT. *)
-
 val escape_toml_string : string -> string
 val render_value : toml_value -> string
 val render_toml : (string * toml_value) list -> string
@@ -320,19 +224,12 @@ type declared_type = [ `Boolean | `Integer | `Number | `String ]
 (** Subset of JSON-schema types accepted on PUT. *)
 
 val parse_declared_type : Yojson__Safe.t -> declared_type option
-val schema_field_types :
-  ?base_path:string -> string -> (string * declared_type) list
 val coerce_value : declared_type -> string -> (toml_value, string) result
 (** Coerce a string value to [declared_type] or return a parse error. *)
 
-val config_toml_path : base_path:string -> string -> string
 val parse_body_pairs : string -> ((string * string) list, string) result
 
 (** {1 Config / schema / lifecycle handlers} *)
-
-val handle_start :
-  Mcp_server.server_state ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
 
 val add_routes :
   sw:'a -> clock:'b -> Http.Router.t -> Http.Router.t

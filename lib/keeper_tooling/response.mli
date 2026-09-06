@@ -20,8 +20,6 @@ type accept_rejection =
   ; response_shape : Agent_core.Response_shape.content_shape option
   }
 
-val accept_rejection_kind_to_string : accept_rejection_kind -> string
-
 (** Format an accept rejection reason for a runtime attempt. When the built-in
     keeper progress contract would accept the response, the returned reason is
     tagged as a caller-specific predicate rejection instead of no-progress. *)

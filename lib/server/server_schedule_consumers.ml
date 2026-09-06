@@ -2,7 +2,6 @@
    the server maintenance loop logs aggregate dispatch counts for runtime
    telemetry. *)
 
-let supported_payload_kinds = Schedule_payload_projection.supported_payload_kinds
 let keeper_wake_enqueued_kind = "masc.keeper_wake.enqueued"
 let keeper_event_queue_label = "keeper_event_queue"
 let reaction_ledger_recorded_label = "recorded"

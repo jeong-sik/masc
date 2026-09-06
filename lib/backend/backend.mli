@@ -80,7 +80,6 @@ module Memory : sig
   val exists : t -> string -> bool
   val delete : t -> string -> unit result
   val list_keys : t -> prefix:string -> string list result
-  val get_all : t -> prefix:string -> (string * string) list result
   val set_if_not_exists : t -> string -> string -> bool result
   val clear : t -> unit
   val get_or_create : base_path:string -> t

@@ -191,6 +191,11 @@ let rec should_retry_unix_fallback = function
    failure) or other [Eio.Net.error] variants. *)
 let is_downstream_pipe_closed = function
   | Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> true
+  | Unix.Unix_error (Unix.EPIPE, _, _) -> true
+  | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EPIPE, _, _)), _) -> true
+  | Sys_error msg
+    when String_util.contains_substring (String.lowercase_ascii msg) "broken pipe" ->
+    true
   | _ -> false
 [@@warning "-4"]
 
@@ -1002,7 +1007,8 @@ let spawn_and_drain_both_with_stdin_held_open
         ~sinks:[ "stdin", stdin_w ]
         ~sources:[ "stdout", stdout_r; "stderr", stderr_r ])
     (fun () ->
-      Eio.Flow.copy_string stdin_content stdin_w;
+      (try Eio.Flow.copy_string stdin_content stdin_w with
+       | exn when is_downstream_pipe_closed exn -> ());
       Eio.Fiber.both
         (fun () -> drain_to_eof stdout_r stdout_buf ~on_chunk:on_stdout_chunk)
         (fun () -> drain_to_eof stderr_r stderr_buf ~on_chunk:on_stderr_chunk);
@@ -1364,6 +1370,12 @@ let run_argv_with_stdin_held_open_and_status_split
         in
         timed_out_status, stdout, stderr
       | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn when is_downstream_pipe_closed exn ->
+        Log.Misc.debug "[Process_eio] held-open stdin pipe closed by reader: %s — %s"
+          label (Printexc.to_string exn);
+        ( Unix.WEXITED 127
+        , Exec_buffer.render stdout_buf
+        , process_error_output ~label ~reason:"pipe closed by reader" () )
       | exn ->
         Log.Misc.error "[Process_eio] held-open stdin argv error: %s — %s"
           label (Printexc.to_string exn);

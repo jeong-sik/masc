@@ -87,7 +87,22 @@ GitHub identity 스냅샷, 작업 볼륨(`masc-keeper-work-<keeper>` →
 데도 쓸 수 없다. 크기는 커널 기본값(게스트 메모리의 절반, 기본 게스트에서
 551M 실측)이고 게스트가 내려가면 사라진다. 그게 전부다.
 
-## shim 만들기
+## shim 받기
+
+shim 은 서버 릴리즈의 자산이다(RFC-0427 B-1). 릴리즈마다 `masc-exec-shim-linux-arm64`
+와 `masc-exec-shim-linux-amd64` 가 서버 바이너리 옆에 올라오고, 릴리즈 워크플로가
+같은 아키텍처의 러너에서 정적으로 빌드해 `--probe` 까지 확인한 것이다. 게스트는
+arm64 다.
+
+```bash
+# 서버와 같은 태그의 자산을 받는다
+gh release download vX.Y.Z -R jeong-sik/masc -p masc-exec-shim-linux-arm64 -D /tmp/shim
+mkdir -p ~/me/.masc/microvm/shim
+install -m 755 /tmp/shim/masc-exec-shim-linux-arm64 ~/me/.masc/microvm/shim/masc-exec-shim
+```
+
+서버와 shim 은 한 major 차이를 서로 참으므로(위 계약 표 아래 문단) 순서는 상관없다.
+릴리즈 없이 지금 트리로 만들어야 할 때만 아래처럼 직접 빌드한다.
 
 ```bash
 # Docker 가 있으면

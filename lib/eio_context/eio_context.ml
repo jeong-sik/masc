@@ -82,9 +82,10 @@ let set_switch sw =
   let owner_domain = Domain.self () in
   let dispatch_stream = Eio.Stream.create 512 in
   let binding = { switch = sw; owner_domain; dispatch_stream } in
-  Atomic.set current_sw (Some binding);
+  let some_binding = Some binding in
+  Atomic.set current_sw some_binding;
   Eio.Switch.on_release sw (fun () ->
-    let _ = Atomic.compare_and_set current_sw (Some binding) None in
+    let _ = Atomic.compare_and_set current_sw some_binding None in
     let rec drain () =
       match Eio.Stream.take_nonblocking dispatch_stream with
       | Some task ->
@@ -101,8 +102,35 @@ let set_switch sw =
     done;
     `Stop_daemon)
 
+module For_testing = struct
+  let clear_root_switch () =
+    Atomic.set current_sw None
+end
+
+(* A finished switch is not a root switch.
+
+   Nothing owns this slot's lifetime. Boot writes it once, and
+   [Mcp_server_eio_execute] rewrites it with the request's own switch on every
+   tool call -- its comment says why, "tests may leave a finished switch in
+   the global slot" -- but no one clears it when that scope ends. So between
+   requests the slot still answers [Some] with a switch nothing can fork into.
+
+   The caller then learns about it at [Fiber.fork], as
+   [Invalid_argument "Switch finished!"], far from the write that left it.
+   That is what [Keeper_keepalive]'s [lane_parent_sw] hits: it prefers the
+   root switch and falls back to [ctx.sw], and the fallback is right, but a
+   dead switch never reaches it. Measured 2026-09-06 in
+   test_heartbeat_integration, where six cases fail this way (#33200).
+
+   Asking the switch is the only way to know: a finished switch is not a
+   failed one, so [get_error] answers [None] for it. *)
 let get_root_switch_opt () =
-  Option.map (fun binding -> binding.switch) (Atomic.get current_sw)
+  match Atomic.get current_sw with
+  | None -> None
+  | Some binding ->
+    (match Eio.Switch.check binding.switch with
+     | () -> Some binding.switch
+     | exception _ -> None)  (* cancel-guard-ok: reports on another switch, not on the caller's fiber; every reason check raises means the same thing to someone asking for a switch to fork into *)
 
 let root_switch_on_current_domain () =
   match Atomic.get current_sw with
@@ -199,19 +227,6 @@ let get_clock () : (float Eio.Time.clock_ty Eio.Resource.t, string) result =
   | None ->
       Error "Eio clock not initialized - ensure set_clock is called during server startup"
 
-let get_switch () : (Eio.Switch.t, string) result =
-  match get_switch_opt () with
-  | Some sw -> Ok sw
-  | None ->
-      Error "Eio switch not initialized - ensure set_switch is called during server startup"
-
-(** TLS connector for Cohttp_eio HTTPS support.
-
-    Stored as an [Atomic.t] cell so concurrent reads from multiple OCaml 5
-    domains are safe.  Initialization uses [Atomic.compare_and_set] for a
-    lock-free once pattern: the first domain that observes [None] builds the
-    connector and publishes it; any racing builder discards its own result and
-    returns the published one. *)
 let _https_connector_cache :
   ((Uri.t ->
      [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->

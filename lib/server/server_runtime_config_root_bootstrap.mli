@@ -1,4 +1,3 @@
-val project_root_from_executable : unit -> string option
 
 val config_bootstrap_mode : unit -> [ `Auto | `Empty | `Skip ]
 

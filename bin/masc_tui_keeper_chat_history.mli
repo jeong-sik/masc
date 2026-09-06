@@ -138,6 +138,19 @@ type kind =
           exact added/removed claims or typed failure detail; [summary] is the
           producer-built one-line projection. Neutral system rows reuse this
           lane with [None] and therefore remain whole in summary mode. *)
+  | Fusion_conclusion of fusion_conclusion
+      (** A [Fusion] block the assistant row carried: the deliberation
+          conclusion is the row's own [content], and this names the run and
+          the board post holding the panel/judge detail. [fusion_run_id] is
+          absent only on a wire older than the block schema. *)
+
+and fusion_conclusion =
+  { fusion_run_id : string option
+  ; fusion_board_post_id : string
+        (** The board post the fusion sink wrote for this run; the pointer the
+            dashboard's fusion card lazy-fetches, kept here so the transcript
+            names the same evidence. *)
+  }
 
 val tool_rows : Masc_tui_keeper_chat_transcript.tool_block -> string list
 (** The current full-detail rows for a typed history block. This delegates to

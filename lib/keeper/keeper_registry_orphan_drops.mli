@@ -4,9 +4,6 @@
     updates against a missing keeper should escalate from DEBUG-only drops to
     the single threshold WARN/metric edge. *)
 
-val threshold : int
-(** Number of drops inside {!window_sec} that trips the edge. *)
-
 val window_sec : float
 (** Drop-count window in seconds. *)
 

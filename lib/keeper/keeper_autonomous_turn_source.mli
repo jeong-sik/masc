@@ -13,11 +13,6 @@ type turn =
   ; trace : Keeper_chat_blocks.trace_step list
   }
 
-val default_limit : int
-(** Newest current-schema turn records inspected per request. Shared with
-    {!Keeper_raw_trace_retention.history_limit}; retention cannot evict an
-    exact run that this reader still considers current. *)
-
 val load_recent :
   config:Workspace.config ->
   keeper_name:string ->

@@ -58,11 +58,6 @@ module Path : sig
   (** The sanctioned rendering for anything a keeper will read. *)
   val visible_to_string : visible t -> string
 
-  (** Erasure that drops the guarantee. Every call site is a place the type
-      stopped protecting the caller, so this stays deliberately awkward to
-      name and easy to grep. *)
-  val unsafe_to_string : _ t -> string
-
   type conversion_error =
     | Outside_sandbox_root of {
         path : string;

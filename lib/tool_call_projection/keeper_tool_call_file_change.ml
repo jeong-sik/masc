@@ -362,6 +362,16 @@ let fold_row tally row =
     }
 ;;
 
+(* Every classified row lands in exactly one of the three: [fold_row] matches
+   on [classify], whose three constructors are these. So their sum is what was
+   read, and an incremental caller can answer "of m calls" from a tally it kept
+   instead of a row list it dropped. *)
+let rows_counted tally =
+  List.length tally.changes
+  + List.length tally.unreadable_rows
+  + tally.not_file_changes
+;;
+
 let seal_tally tally =
   { tally with
     changes = List.rev tally.changes

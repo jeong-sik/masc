@@ -76,8 +76,6 @@ let search_metadata_key ws key =
       | _ -> None)
     ws.artifacts
 
-let provenance_dag ws = ws.dag
-
 let origins_of ws id = Multimodal_hydrator.origins_of ws.dag id
 
 let descendants_of ws id = Multimodal_hydrator.descendants_of ws.dag id

@@ -1839,6 +1839,49 @@ let test_live_a_moved_proxy_port_replaces_the_guest () =
       "which means it was replaced, not adopted"
       true
       (not (String.equal first after))
+let test_unbooted_microvm_guest_is_not_booted_and_skips_freshness_scan () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir "microvm_freshness_" in
+  let config = Masc.Workspace.default_config base in
+  let meta = microvm_meta ~name:"vm-freshness-unbooted" in
+  Alcotest.(check bool) "initially not booted" false
+    (Masc.Keeper_turn_sandbox_runtime.is_microvm_guest_booted ~config ~meta ());
+  Alcotest.(check bool) "lane reflects not booted" false
+    (Masc.Keeper_sandbox_remote_lane.is_guest_booted ~config ~meta ());
+  let expected_root =
+    Filename.concat
+      Masc.Keeper_sandbox_microvm.work_volume_guest_root
+      (Playground_paths.sanitize_keeper_name meta.name)
+  in
+  (match
+     Masc.Keeper_sandbox_remote_checkouts.discover_and_inspect
+       ~timeout_sec:5.0 ~config ~meta ~catalog:(Ok []) ()
+   with
+   | Error (Masc.Keeper_playground_checkouts.Root_missing { root }) ->
+     Alcotest.(check string) "root is keeper playground root" expected_root root
+   | Error (Root_unreadable { detail; _ }) ->
+     Alcotest.failf "unexpected Root_unreadable: %s" detail
+   | Error (Root_not_directory _) ->
+     Alcotest.fail "unexpected Root_not_directory"
+   | Ok _ -> Alcotest.fail "expected Root_missing for unbooted microvm guest");
+  (match Masc.Keeper_sandbox_control.checkout_freshness_rows ~config ~meta () with
+   | Error (Masc.Keeper_playground_checkouts.Root_missing { root }) ->
+     Alcotest.(check string) "root is keeper playground root" expected_root root
+   | Error scan_err ->
+     Alcotest.failf "unexpected checkout_freshness_rows scan error: %s"
+       (Masc.Keeper_playground_checkouts.scan_error_to_string scan_err)
+   | Ok _ -> Alcotest.fail "expected Root_missing from checkout_freshness_rows");
+  Masc.Keeper_turn_sandbox_runtime.For_testing_microvm.mark_microvm_guest_booted
+    ~config ~meta ();
+  Alcotest.(check bool) "marked booted" true
+    (Masc.Keeper_turn_sandbox_runtime.is_microvm_guest_booted ~config ~meta ());
+  Alcotest.(check bool) "lane reflects booted" true
+    (Masc.Keeper_sandbox_remote_lane.is_guest_booted ~config ~meta ());
+  Masc.Keeper_turn_sandbox_runtime.forget_microvm_guest_booted ~config ~meta ();
+  Alcotest.(check bool) "evicted not booted" false
+    (Masc.Keeper_turn_sandbox_runtime.is_microvm_guest_booted ~config ~meta ());
+  Alcotest.(check bool) "lane reflects evicted" false
+    (Masc.Keeper_sandbox_remote_lane.is_guest_booted ~config ~meta ())
 ;;
 
 let () =
@@ -1911,6 +1954,8 @@ let () =
             test_turn_start_argv_shape
         ; Alcotest.test_case "inspect state parser" `Quick
             test_inspect_state_parser
+        ; Alcotest.test_case "unbooted microvm guest skips freshness scan" `Quick
+            test_unbooted_microvm_guest_is_not_booted_and_skips_freshness_scan
         ; Alcotest.test_case "live guest cat (MASC_MICROVM_LIVE=1)" `Slow
             test_live_turn_runtime_cat
         ] )

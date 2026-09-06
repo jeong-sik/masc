@@ -9,8 +9,5 @@
     {!Tool_workspace.valid_assertion_strings}; the sync regression test
     [test_assertion_kind_mirror] catches drift. *)
 
-(** Enum of valid [masc_check] assertion strings. *)
-val assertion_kind_enum_strings : string list
-
 (** Tool schemas: [masc_status], [masc_check], [masc_heartbeat]. *)
 val schemas : Masc_domain.tool_schema list

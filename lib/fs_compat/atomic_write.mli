@@ -11,8 +11,10 @@
     SIGKILL'd after creating its temp file.
 
     The [save_file] primitive is injected so this module stays free of
-    [Fs_compat]'s Eio bridge. Recovery uses only typed [Unix] operations and
-    returns every failure to the caller. *)
+    [Fs_compat]'s Eio bridge; it must be a blocking writer, because the
+    replacement runs as one blocking job (a system thread inside Eio) from
+    temp-file creation to the parent directory fsync. Recovery uses only
+    typed [Unix] operations and returns every failure to the caller. *)
 
 (** [save_file_atomic ~save_file path content] writes [content] to
     a temp file in [path]'s directory, fsyncs the tmp, renames it

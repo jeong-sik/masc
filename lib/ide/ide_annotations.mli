@@ -11,10 +11,6 @@
 
 open Ide_annotation_types
 
-val store_path : base_dir:string -> string
-(** [store_path ~base_dir] returns [base_dir/.masc-ide/], the store
-    root. Per-codebase paths come from {!Ide_paths.code_store_dir}. *)
-
 val store_file : base_dir:string -> codebase:string -> unit -> string
 (** [store_file ~base_dir ~codebase ()] is the append-only
     [annotations.jsonl] inside the codebase's store directory. Exposed so a

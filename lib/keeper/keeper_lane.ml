@@ -109,7 +109,6 @@ let create () =
 ;;
 
 let id t = t.id
-let exited t = t.exited_p
 let peek_exit t = Eio.Promise.peek t.exited_p
 let await_exit t = Eio.Promise.await t.exited_p
 

@@ -137,7 +137,6 @@ type run_page =
     serialized to 246 MB on every load, and again on every refresh event. *)
 val recent_runs : t -> limit:int -> before:(float * string) option -> run_page
 val get : t -> run_id:string -> run option
-val outcome_label : outcome -> string
 val status_label : run_status -> string
 (** Identity and outcome without either exact payload. A lane run embeds the
     captured template and actual input material needed to reconstruct its

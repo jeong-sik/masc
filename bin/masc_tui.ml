@@ -5223,7 +5223,8 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
         | Keeper_chat_history.Skill_activity _
         | Keeper_chat_history.Reasoning _
         | Keeper_chat_history.Gate_activity _
-        | Keeper_chat_history.Memory_activity _ ->
+        | Keeper_chat_history.Memory_activity _
+        | Keeper_chat_history.Fusion_conclusion _ ->
             None)
       rows
   in
@@ -5240,7 +5241,8 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
         | Keeper_chat_history.Skill_activity _
         | Keeper_chat_history.Reasoning _
         | Keeper_chat_history.Gate_activity _
-        | Keeper_chat_history.Memory_activity _ -> None)
+        | Keeper_chat_history.Memory_activity _
+        | Keeper_chat_history.Fusion_conclusion _ -> None)
       rows
   in
   state.msg_history <-
@@ -5310,7 +5312,8 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     | Keeper_chat_history.Delivery_failed _
     | Keeper_chat_history.Tool_calls _
     | Keeper_chat_history.Skill_activity _
-    | Keeper_chat_history.Reasoning _ -> None
+    | Keeper_chat_history.Reasoning _
+    | Keeper_chat_history.Fusion_conclusion _ -> None
   in
   let memory_summary =
     match row.Keeper_chat_history.kind with
@@ -5322,7 +5325,8 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     | Keeper_chat_history.Delivery_failed _
     | Keeper_chat_history.Tool_calls _
     | Keeper_chat_history.Skill_activity _
-    | Keeper_chat_history.Reasoning _ ->
+    | Keeper_chat_history.Reasoning _
+    | Keeper_chat_history.Fusion_conclusion _ ->
         None
   in
   let role, turn_phase, text, tool_block, skill_activity =
@@ -5386,6 +5390,22 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         , None )
     | Keeper_chat_history.Memory_activity _ ->
         (Message_memory, Turn_progress, row.text, None, None)
+    | Keeper_chat_history.Fusion_conclusion
+        { fusion_run_id; fusion_board_post_id } ->
+        (* A pointer row, not keeper speech: the conclusion text is the
+           Said_by_keeper row it rides on, and this names the run whose
+           panel/judge detail the Runs tab holds. Status, not Memory, so it
+           keeps the Gate lane's non-journal slot. *)
+        let pointer =
+          match fusion_run_id with
+          | Some run_id -> "run " ^ run_id
+          | None -> "post " ^ fusion_board_post_id
+        in
+        ( Message_status
+        , Turn_progress
+        , Printf.sprintf "Fusion deliberation %s — 상세는 Runs 탭" pointer
+        , None
+        , None )
   in
   let submitted_at =
     match row.Keeper_chat_history.kind, row.Keeper_chat_history.turn_id with
@@ -5398,7 +5418,8 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
       | Keeper_chat_history.Skill_activity _
       | Keeper_chat_history.Reasoning _
       | Keeper_chat_history.Gate_activity _
-      | Keeper_chat_history.Memory_activity _), _
+      | Keeper_chat_history.Memory_activity _
+      | Keeper_chat_history.Fusion_conclusion _), _
     | Keeper_chat_history.Addressed_to_keeper _, None -> None
   in
   let timestamp =
@@ -16044,8 +16065,21 @@ and is loaded on demand through keeper_skill.
                 launch_runtime_surface_load state ~mailbox:async_messages
                   ~force:true
             | Tools -> launch_tools_load state ~mailbox:async_messages
-            | Config ->
-                launch_runtime_config_load state ~mailbox:async_messages
+            | Config -> (
+                (* Same per-pane dispatch as goto_surface: each Config pane
+                   loads its own source, so a manual refresh must not
+                   quietly fall back to runtime.toml's loader for panes
+                   that read somewhere else (presets, prompts, params,
+                   voice). *)
+                match state.config_pane with
+                | Config_prompts -> launch_prompts_load state ~mailbox:async_messages
+                | Config_presets -> launch_presets_load state ~mailbox:async_messages
+                | Config_params ->
+                    launch_runtime_params_load state ~mailbox:async_messages
+                | Config_voice ->
+                    launch_voice_config_load state ~mailbox:async_messages
+                | Config_runtime | Config_models | Config_themes ->
+                    launch_runtime_config_load state ~mailbox:async_messages)
             | Resources ->
                 launch_resources_list state ~mailbox:async_messages
             | Schedules -> launch_schedules_load state ~mailbox:async_messages

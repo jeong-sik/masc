@@ -119,10 +119,6 @@ let error_response_typed ~code message =
 let ok_assoc fields : Yojson.Safe.t =
   `Assoc (("status", `String "ok") :: without_status_field fields)
 
-(** Build a JSON OK response string with additional fields. *)
-let ok_response fields =
-  Yojson.Safe.to_string (ok_assoc fields)
-
 (** {1 Tool_result.result Helpers}
 
     These return structured [Tool_result.result] instead of [(bool * string)].

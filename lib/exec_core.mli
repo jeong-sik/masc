@@ -1,7 +1,5 @@
 val process_status_to_json : Unix.process_status -> Yojson.Safe.t
 
-val process_status_is_success : Unix.process_status -> bool
-
 val process_result_json :
   ?extra:(string * Yojson.Safe.t) list ->
   status:Unix.process_status ->

@@ -22,13 +22,6 @@ type lookup =
 
 val detail_prefix : string
 
-val find : registry:Fusion_run_registry.t -> run_id:string -> lookup
-(** [find] reads the current run first. For a known run, evidence comes only
-    from {!Board_dispatch.find_post_by_run_id} and must retain the exact
-    [origin.source = "fusion"] / [origin.fusion_run_id = run_id] pair. A valid
-    hit is [Recorded], a miss is [Pending] while the run is running, and
-    [Absent] once it is completed. *)
-
 val to_yojson : generated_at:string -> detail -> Yojson.Safe.t
 (** Serialize the detail contract with explicit [evidence.post] JSON or null. *)
 

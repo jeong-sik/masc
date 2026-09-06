@@ -115,12 +115,6 @@ val runtime_env_for_tool :
 (** Local tools receive a per-dispatch copy-on-write snapshot and an explicit
     cleanup capability. They never receive the operator-owned identity path. *)
 
-val docker_args :
-  config:Workspace.config ->
-  keeper_name:string ->
-  container_masc_dir:string ->
-  (string list, string) result
-
 (** Stable-directory variant for keeper-lifetime containers: the mount is the
     live config directory (read-only), not a per-turn snapshot, so identity
     changes made on the host reach a running container through the bind

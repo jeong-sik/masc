@@ -1,6 +1,5 @@
 (** Filesystem path normalization and allowlist checks for exec policy. *)
 
-val normalize_path : ?base_dir:string -> string -> string
 val resolve_path : ?base_dir:string -> string -> string
 val validate_path :
   ?workdir:string -> string -> bool

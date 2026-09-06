@@ -75,23 +75,6 @@ val source_clock_of_string : string -> source_clock option
 val source_clock_of_event : event_kind -> source_clock
 
 val schema_version : int
-val clock_refs :
-  ?edge_id:string ->
-  ?lane:string ->
-  ?source_clock:source_clock ->
-  ?observed_at:string ->
-  ?started_at:string ->
-  ?finished_at:string ->
-  ?elapsed_ms:int ->
-  ?tool_batch_id:string ->
-  ?checkpoint_id:string ->
-  ?event_bus_correlation_id:string ->
-  ?event_bus_run_id:string ->
-  ?parent_event_id:string ->
-  ?caused_by:string ->
-  ?logical_seq:int ->
-  unit ->
-  Yojson.Safe.t
 
 val clock_refs_for_context :
   turn_context ->
@@ -147,19 +130,14 @@ val public_projection_of_decision : Yojson.Safe.t -> Yojson.Safe.t
 (** Decode and validate the common persisted envelope before classifying its
     event as active or unsupported. *)
 val decode_persisted_row : Yojson.Safe.t -> (decoded_row, string) result
-val of_json : Yojson.Safe.t -> (t, string) result
 
 val execution_receipt_path_for_today :
   Workspace.config -> keeper_name:string -> string
-
-(** [.masc/keepers/<keeper>/runtime-manifests]. *)
-val base_dir : Workspace.config -> keeper_name:string -> string
 
 (** [.masc/keepers/<keeper>/runtime-manifests/<trace_id>.jsonl].
     [trace_id] is sanitized as a path segment. *)
 val path_for_trace : Workspace.config -> keeper_name:string -> trace_id:string -> string
 
-val append : Workspace.config -> t -> (unit, string) result
 val append_best_effort : ?site:string -> Workspace.config -> t -> unit
 
 (** Extract the source_clock from a manifest's decision JSON. *)

@@ -77,8 +77,6 @@ val injected_env : t -> (string * string) list
 (** The server-authored env every request carries: [GH_CONFIG_DIR] and
     [GIT_TERMINAL_PROMPT], then the endpoint's own injected pairs. *)
 
-val keeper_root : remote_root:string -> keeper_name:string -> string
-
 val lane_prefix : transport -> string
 (** ["remote_ssh"] or ["microvm_remote"]: the prefix every lane-specific
     error code starts with. *)

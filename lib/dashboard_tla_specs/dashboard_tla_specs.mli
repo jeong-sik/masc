@@ -1,7 +1,7 @@
 
 (** Dashboard projection for TLA+ specs.
 
-    Enumerates [*.tla] files under {!specs_dir} (env [MASC_SPECS_DIR], default
+    Enumerates [*.tla] files under [specs_dir] (env [MASC_SPECS_DIR], default
     ["specs"]) along with their companion [.cfg] files.  Surfaces formal
     verification coverage in the dashboard without re-running TLC.
 
@@ -24,12 +24,8 @@ type spec_entry = {
   mtime : float;          (** Unix timestamp of the [.tla] file. *)
 }
 
-val specs_dir : unit -> string
-(** Resolved specs directory.  Reads [MASC_SPECS_DIR], falls back to ["specs"]
-    (relative to the current working directory). *)
-
 val list_specs : unit -> spec_entry list
-(** Enumerate all [.tla] files under {!specs_dir}.  Returns [[]] when the
+(** Enumerate all [.tla] files under [specs_dir].  Returns [[]] when the
     directory does not exist.  Sort order: [(category, name)] ascending. *)
 
 val specs_json : unit -> Yojson.Safe.t

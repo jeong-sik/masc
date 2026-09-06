@@ -98,5 +98,4 @@ module For_testing = struct
   ;;
 
   let set_active b = Atomic.set active b
-  let is_active () = Atomic.get active
 end

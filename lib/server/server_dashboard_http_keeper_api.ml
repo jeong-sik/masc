@@ -939,8 +939,12 @@ let handle_keeper_get_subroutes state req request reqd =
       with
       | Error detail -> respond_error reqd detail
       | Ok window_hours ->
-      let rows = Keeper_tool_call_log.read_window ~keeper_name:name ~window_hours () in
-      let tally = Keeper_tool_call_file_change.classify_all rows in
+      (* Folds what the store gained since the last call rather than reading
+         the window again: this route answered 1.8-8.8s per call on
+         2026-09-06 and was the profile's top allocator. *)
+      let tally =
+        Keeper_tool_call_log.file_change_tally ~keeper_name:name ~window_hours ()
+      in
       let json =
         `Assoc
           [ ("keeper", `String name)
@@ -949,7 +953,11 @@ let handle_keeper_get_subroutes state req request reqd =
                do not say what was looked at: no changes in an hour and no
                calls in an hour are different facts. *)
           ; ("window_hours", `Float window_hours)
-          ; ("calls_in_window", `Int (List.length rows))
+            (* From the tally, not the row list: the three outcomes partition
+               what was read, and a caller that folds rows as it reads them
+               does not keep the list to measure. *)
+          ; ( "calls_in_window"
+            , `Int (Keeper_tool_call_file_change.rows_counted tally) )
           ; ( "changes"
             , `List (List.map Keeper_tool_call_file_change.to_json tally.Keeper_tool_call_file_change.changes) )
             (* Both counts ride the answer rather than a log line. A reader

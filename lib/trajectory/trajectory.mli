@@ -76,7 +76,6 @@ type trajectory_line =
 
 (** {1 JSON serialization} *)
 
-val outcome_to_json : trajectory_outcome -> Yojson.Safe.t
 val outcome_to_string : trajectory_outcome -> string
 val entry_to_json :
   ?result_max_len:int ->

@@ -42,7 +42,6 @@ val clear_startup_error : unit -> unit
     configuration as an ordinary disconnected connector. *)
 
 val set_trigger_policy : Slack_gateway_state.trigger_policy -> unit
-val get_trigger_policy : unit -> Slack_gateway_state.trigger_policy option
 
 (** Typed failure modes for Slack REST actions. Closed sum. *)
 type send_error =

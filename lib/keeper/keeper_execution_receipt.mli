@@ -26,12 +26,6 @@ val outcome_kind_to_string : outcome_kind -> string
     similarly maps to ["receipt_failed"]. *)
 val outcome_kind_to_tla_receipt : outcome_kind -> string
 
-(** [true] for [`Ok] and [`Skipped] (PhaseGateSkip is a successful
-    no-op, not a failure). [false] for [`Error] and [`Cancelled].
-    Used by dashboard "healthy" classification and action_radius
-    success accounting. *)
-val outcome_kind_is_terminal_success : outcome_kind -> bool
-
 type error_kind = private Error_kind of string
 
 val error_kind_of_string : string -> error_kind
@@ -80,8 +74,6 @@ type runtime_rotation_outcome =
   | Rotation_setup_failed
   | Rotation_retry_scheduled
 
-val runtime_rotation_outcome_to_string : runtime_rotation_outcome -> string
-
 (** Receipt-level summary of how the in-turn runtime attempt sequence
     ended. Closed set; wire form is [runtime_outcome_to_string]. *)
 type runtime_outcome =
@@ -104,8 +96,6 @@ type completion_contract_result =
   | Completion_tool_execution_observed
 
 val completion_contract_result_to_string : completion_contract_result -> string
-
-val completion_contract_result_of_string : string -> completion_contract_result option
 
 type runtime_rotation_attempt =
   { from_runtime : string

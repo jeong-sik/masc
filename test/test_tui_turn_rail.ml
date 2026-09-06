@@ -221,7 +221,7 @@ let test_the_rail_boundary_is_inside_the_label_offset () =
       | row :: _ ->
           check bool "rail cells are the head of the label offset" true
             (row.Layout.gutter_rail_cells <= row.Layout.gutter_label_at);
-          check int "the rail is the glyph and its separator"
+          check int "the gutter is the run, the glyph and its separator"
             row.Layout.gutter_rail_cells
             (Layout.display_width
                (Layout.take_cells row.Layout.gutter

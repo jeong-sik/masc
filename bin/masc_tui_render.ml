@@ -8432,6 +8432,11 @@ let keeper_message_tool_activity_details state ~keeper_name
    own file changes. The committed history and the turn still streaming both
    ask this, so a diff folded into the history and the same diff arriving live
    cannot be projected two ways. *)
+(* One step. Deep enough that a call reads as belonging to the rollup above
+   it, shallow enough that a block of eight calls does not walk off the pane
+   on a narrow terminal. *)
+let tool_detail_indent = "  "
+
 let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection =
   let role_label_column =
     Message_layout.chat_role_label_width ~pane_cells:chat_cols
@@ -8455,7 +8460,14 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
      with four tool blocks carried the same sentence four times -- which is
      what pushed the tool names onto a second line and broke the read of the
      conversation they sit inside. *)
-  rows
+  match projection.Keeper_chat_transcript.header with
+  | None -> rows
+  | Some header ->
+      (* The rollup is the block's first line and the calls hang under it,
+         one step in. The projection knows which line is the header; how far
+         the calls sit from it is this pane's decision, so the indent is
+         applied here rather than baked into the strings upstream. *)
+      header :: List.map (fun row -> tool_detail_indent ^ row) rows
 
 (* Every committed row of one keeper's conversation, as the layout entries the
    pane draws -- the grouping, the aligned badges, the tool projections, and

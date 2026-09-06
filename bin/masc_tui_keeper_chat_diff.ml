@@ -328,10 +328,10 @@ let section ~max_line_cells prepared =
 let rows ~mode ~max_line_cells ?(activity_details = fun _ -> []) indexed
     (projection : Transcript.tool_projection) =
   match mode with
-  | Transcript.Compact -> projection.rows
+  | Transcript.Compact -> projection.details
   | Transcript.Full ->
-      if List.length projection.rows < List.length projection.activities then
-        projection.rows
+      if List.length projection.details < List.length projection.activities then
+        projection.details
       else
         let rec weave previews_left withheld reversed activities activity_rows =
           match activities, activity_rows with
@@ -371,6 +371,7 @@ let rows ~mode ~max_line_cells ?(activity_details = fun _ -> []) indexed
                   ]
               in
               rows @ withheld_row @ remaining
-          | _ :: _, [] -> projection.rows
+          | _ :: _, [] -> projection.details
         in
-        weave max_previews_per_block 0 [] projection.activities projection.rows
+        weave max_previews_per_block 0 [] projection.activities
+          projection.details

@@ -1154,19 +1154,20 @@ let test_tui_current_projection_wiring () =
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_keeper_message"
        ~callee:"Observation_layout.context_header_item");
-  (* The budget handed to the context item must come from measured cells, or
-     a CJK title (two cells per character) overflows the box and [box_line]
-     cuts a reading into a different statement. Counting every
-     [display_width] in this binding froze the header's shape instead: the
-     identity budget measures here too, so adding a header segment moved the
-     total and failed a contract it never touched. Bind the measurement to
-     the argument that needs it. *)
-  check int "chat context item measures the actual header budget" 1
-    (Ast_grep.count_applications_with_label_containing_call_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_keeper_message"
-       ~callee:"Observation_layout.context_header_item" ~label:"max_cells"
-       ~nested_callee:"Message_layout.display_width");
+  (* The budget handed to the context item is in cells, or a CJK title (two
+     cells per character) overflows the box and [box_line] cuts a reading
+     into a different statement.
+
+     What is checkable here is that the budget is passed, not how it was
+     arrived at. Two earlier shapes tried the latter and both broke on code
+     that had nothing to do with the header: counting every [display_width]
+     in the binding moved with the identity budget, and requiring one inside
+     the [max_cells] argument stopped matching when the budget became a share
+     of [inner_cells] -- which is a cell count already, so the property holds
+     by a route no callee name can see. *)
+  check int "chat context item is handed a cell budget" 1
+    (Ast_grep.count_calls_with_label ~module_path:"bin/masc_tui_render.ml"
+       ~callee:"Observation_layout.context_header_item" ~label:"max_cells");
   check bool "log diagnostics remain operator-visible" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"

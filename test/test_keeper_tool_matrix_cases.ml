@@ -336,11 +336,14 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("content", `String "tool matrix ide annotation");
         ]
   | "masc_board_post" ->
+      (* The keeper projection in config/tools/masc_board_post.toml sets
+         additional_properties = false and does not list visibility, so a
+         keeper caller sending it is rejected before the handler runs. The
+         general projection has the field; this matrix calls as a keeper. *)
       `Assoc
         [
           ("title", `String "Keeper Tool Matrix");
           ("content", `String "tool-matrix-post");
-          ("visibility", `String "internal");
         ]
   | "masc_board_post_get" ->
       `Assoc [ ("post_id", `String (Generic.ensure_board_post fixture.generic)) ]

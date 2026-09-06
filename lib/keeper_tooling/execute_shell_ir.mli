@@ -39,9 +39,10 @@ val validate_paths :
   (unit, string) result
 (** Validate explicit Shell IR [cwd] and redirect targets against the keeper
     workspace boundary. Positional argv stays opaque to policy.
-    When [sandbox] is an endpoint-owned target (such as [Micro_vm] or [Ssh]) or
-    [requires_existing_dir] is false, [cwd] is validated for lexical boundary
-    containment without requiring the directory to physically exist on the host. *)
+    When [requires_existing_dir] is false (or omitted and [sandbox] is an
+    endpoint-owned target such as [Micro_vm] or [Ssh]), [cwd] is validated for
+    lexical boundary containment without requiring the directory to physically
+    exist on the host. *)
 
 val dispatch :
   ?allow_pipes:bool ->

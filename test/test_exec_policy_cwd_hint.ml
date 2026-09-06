@@ -141,7 +141,7 @@ let test_cwd_missing_on_host_is_rejected_by_default () =
       Alcotest.(check bool)
         "missing directory surfaces cwd_not_directory by default"
         true
-        (Masc.String_util.contains_substring msg "cwd_not_directory")
+        (String_util.contains_substring msg "cwd_not_directory")
     | Ok () -> Alcotest.fail "missing directory must fail by default")
 ;;
 
@@ -174,7 +174,7 @@ let test_cwd_outside_workdir_is_rejected_even_when_requires_existing_dir_false (
       Alcotest.(check bool)
         "outside workdir surfaces path_outside_whitelist"
         true
-        (Masc.String_util.contains_substring msg "path_outside_whitelist")
+        (String_util.contains_substring msg "path_outside_whitelist")
     | Ok () ->
       Alcotest.fail
         "cwd outside workdir must be rejected even when requires_existing_dir is false")
@@ -191,6 +191,19 @@ let dummy_runner
   failwith "dummy runner is never invoked during path validation"
 ;;
 
+let dummy_ssh_endpoint : Masc_exec.Sandbox_target.ssh_endpoint =
+  { name = "test-endpoint"
+  ; host = "test.internal"
+  ; user = "masc"
+  ; port = 22
+  ; identity_file = "/base/.masc/ssh/test.key"
+  ; known_hosts_file = "/base/.masc/ssh/known_hosts.d/test"
+  ; remote_root = "/srv/masc/playground/keeper"
+  ; connect_timeout_sec = 10
+  ; env_allowlist = [ "PATH" ]
+  }
+;;
+
 let test_execute_shell_ir_validate_paths_respects_sandbox_target () =
   with_temp_tree (fun workdir ->
     let ir = shell_ir ~cwd:"repos/masc" ~workdir [] in
@@ -204,7 +217,7 @@ let test_execute_shell_ir_validate_paths_respects_sandbox_target () =
        Alcotest.(check bool)
          "host target rejects missing host directory"
          true
-         (Masc.String_util.contains_substring msg "cwd_not_directory")
+         (String_util.contains_substring msg "cwd_not_directory")
      | Ok () -> Alcotest.fail "host target must reject missing directory");
     (match
        Keeper_tooling.Execute_shell_ir.validate_paths
@@ -220,7 +233,7 @@ let test_execute_shell_ir_validate_paths_respects_sandbox_target () =
        Alcotest.(check bool)
          "docker target rejects missing host directory"
          true
-         (Masc.String_util.contains_substring msg "cwd_not_directory")
+         (String_util.contains_substring msg "cwd_not_directory")
      | Ok () -> Alcotest.fail "docker target must reject missing directory");
     (match
        Keeper_tooling.Execute_shell_ir.validate_paths
@@ -237,6 +250,21 @@ let test_execute_shell_ir_validate_paths_respects_sandbox_target () =
        Alcotest.failf
          "micro_vm target must allow endpoint-owned directory, got: %s"
          msg);
+    (match
+       Keeper_tooling.Execute_shell_ir.validate_paths
+         ~sandbox:
+           (Masc_exec.Sandbox_target.ssh
+              ~endpoint:dummy_ssh_endpoint
+              ~runner:dummy_runner
+              ())
+         ~workdir
+         ir
+     with
+     | Ok () -> ()
+     | Error msg ->
+       Alcotest.failf
+         "ssh target must allow endpoint-owned directory, got: %s"
+         msg);
     let ir_escape = shell_ir ~cwd:"/etc" ~workdir [] in
     match
       Keeper_tooling.Execute_shell_ir.validate_paths
@@ -252,7 +280,7 @@ let test_execute_shell_ir_validate_paths_respects_sandbox_target () =
       Alcotest.(check bool)
         "micro_vm target rejects outside workdir"
         true
-        (Masc.String_util.contains_substring msg "path_outside_whitelist")
+        (String_util.contains_substring msg "path_outside_whitelist")
     | Ok () -> Alcotest.fail "micro_vm target must reject path outside workdir")
 ;;
 

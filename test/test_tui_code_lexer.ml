@@ -216,6 +216,40 @@ let test_a_toml_table_header_is_taken_whole () =
         (List.filter (fun (piece, _) -> piece <> "") header)
   | [] -> Alcotest.fail "the lexer answered no rows"
 
+(* A negative number used to stop the json lexer: the sign is not a digit,
+   so scanning for digits from the sign's own index returned that index and
+   the loop re-entered at the same place. Opening a .json file holding one
+   froze the TUI. This case answers whether the lexer finishes at all, and
+   the next one keeps the sign from swallowing a subtraction. *)
+let test_json_reads_a_negative_number () =
+  check seg "the sign belongs to the number"
+    [ ("{", Masc_tui_code_lexer.kind_code)
+    ; ("\"a\"", Masc_tui_code_lexer.kind_type)
+    ; (": ", Masc_tui_code_lexer.kind_code)
+    ; ("-1", Masc_tui_code_lexer.kind_number)
+    ; ("}", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "json" "{\"a\": -1}");
+  check seg "a decimal keeps its sign too"
+    [ ("[", Masc_tui_code_lexer.kind_code)
+    ; ("-1.5", Masc_tui_code_lexer.kind_number)
+    ; ("]", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "json" "[-1.5]")
+
+let test_json_leaves_a_subtraction_alone () =
+  check seg "the minus between two numbers is not a sign"
+    [ ("[", Masc_tui_code_lexer.kind_code)
+    ; ("3", Masc_tui_code_lexer.kind_number)
+    ; (" - ", Masc_tui_code_lexer.kind_code)
+    ; ("1", Masc_tui_code_lexer.kind_number)
+    ; ("]", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "json" "[3 - 1]");
+  check seg "a minus with no digit after it is plain text"
+    [ ("[-]", Masc_tui_code_lexer.kind_code) ]
+    (spans "json" "[-]")
+
 let test_sql_reads_a_keyword_however_it_is_spelled () =
   let kinds text = List.map snd (spans "sql" text) in
   check Alcotest.(list string) "shouting does not change the shape"
@@ -322,6 +356,12 @@ let () =
             test_toml_reads_a_key_a_string_and_a_comment
         ; Alcotest.test_case "a toml table header is taken whole" `Quick
             test_a_toml_table_header_is_taken_whole
+        ] )
+    ; ( "json"
+      , [ Alcotest.test_case "a negative number lexes and keeps its sign" `Quick
+            test_json_reads_a_negative_number
+        ; Alcotest.test_case "a subtraction is not a signed number" `Quick
+            test_json_leaves_a_subtraction_alone
         ] )
     ; ( "sql"
       , [ Alcotest.test_case "a keyword however it is spelled" `Quick

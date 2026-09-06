@@ -17,6 +17,7 @@ let entry ?(timestamp = "12:34:56") ?timeline_bucket
   ; body
   ; markdown_source
   ; turn_rail = Layout.Rail_none
+  ; action = Layout.Action_none
   }
 
 let test_keeps_latest_reply () =
@@ -622,6 +623,7 @@ let transcript count =
         role_label_mark_cells = 0;
         markdown_source = Layout.Markdown_streaming;
         turn_rail = Layout.Rail_none;
+        action = Layout.Action_none;
       })
 
 let test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity () =

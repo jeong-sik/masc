@@ -147,13 +147,13 @@ let test_a_run_of_only_continuations_still_draws () =
    does not. *)
 let test_a_line_within_the_cap_comes_back_whole () =
   let line = "tool_execute \xc2\xb7 ls" in
-  check string "unchanged" line (Gate_text.folded_argument ~cap:40 line)
+  check string "unchanged" line ((Gate_text.fold_argument ~cap:40 line).Gate_text.fa_text)
 ;;
 
 let test_a_long_argument_folds_and_says_how_much () =
   let argument = String.make 300 'x' in
   let line = "tool_execute \xc2\xb7 " ^ argument in
-  let folded = Gate_text.folded_argument ~cap:40 line in
+  let folded = (Gate_text.fold_argument ~cap:40 line).Gate_text.fa_text in
   check int "the fold fits the cap plus its tail" 40
     (Layout.display_width (Layout.take_cells folded 40));
   check bool "and names the cells it is holding" true
@@ -165,7 +165,7 @@ let test_a_long_argument_folds_and_says_how_much () =
    the height rather than the argument's own line breaks. *)
 let test_newlines_are_flattened_before_the_cap_applies () =
   let line = "tool_execute \xc2\xb7 a\nb\nc" in
-  let folded = Gate_text.folded_argument ~cap:80 line in
+  let folded = (Gate_text.fold_argument ~cap:80 line).Gate_text.fa_text in
   check bool "no newline survives" false (String.contains folded '\n')
 ;;
 
@@ -182,9 +182,22 @@ let test_the_held_count_does_not_depend_on_the_cap_being_a_row () =
       check bool
         (Printf.sprintf "cap %d names %d" cap (held cap))
         true
-        (contains (Gate_text.folded_argument ~cap line)
+        (contains (Gate_text.fold_argument ~cap line).Gate_text.fa_text
            (Printf.sprintf "%d" (held cap))))
     [ 24; 40; 120 ]
+;;
+
+(* The caller decides whether a row can be pressed from this number, so it has
+   to be zero exactly when nothing was folded. Comparing the text against the
+   input instead would read the newline flattening as a fold. *)
+let test_held_cells_is_zero_exactly_when_nothing_folded () =
+  let short = "tool_execute \xc2\xb7 a\nb" in
+  check int "a flattened line holds nothing" 0
+    (Gate_text.fold_argument ~cap:80 short).Gate_text.fa_held_cells;
+  let long = "tool_execute \xc2\xb7 " ^ String.make 300 'x' in
+  check int "and a folded one holds the difference"
+    (Layout.display_width long - 40)
+    (Gate_text.fold_argument ~cap:40 long).Gate_text.fa_held_cells
 ;;
 
 let () =
@@ -217,5 +230,7 @@ let () =
             test_newlines_are_flattened_before_the_cap_applies
         ; test_case "the held count is in cells, not rows" `Quick
             test_the_held_count_does_not_depend_on_the_cap_being_a_row
+        ; test_case "held cells is zero exactly when nothing folded" `Quick
+            test_held_cells_is_zero_exactly_when_nothing_folded
         ] )
     ]

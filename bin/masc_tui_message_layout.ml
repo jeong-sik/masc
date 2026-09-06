@@ -61,6 +61,14 @@ type turn_rail =
           it landed inside did not produce it and did not read it. *)
   | Rail_none
 
+(* What a press on this row opens. One case today -- a Gate argument held
+   behind a fold -- and a variant rather than a bool because the pane must not
+   recover the answer from the glyphs it drew: text that changes would kill
+   the click silently, and a press has no error to report. *)
+type row_action =
+  | Action_none
+  | Action_unfold_argument
+
 type markdown_source =
   | Markdown_stable of {
       keeper_name : string;
@@ -93,6 +101,10 @@ type entry = {
   body : string;
   markdown_source : markdown_source;
   turn_rail : turn_rail;
+  action : row_action;
+      (** What a press on this entry's first row opens. Carried on the entry
+          because the entry is where the folding was decided; the rows below
+          it are continuations of one decision, not decisions of their own. *)
 }
 
 type metadata =
@@ -126,6 +138,7 @@ type row = {
   gutter_rail_cells : int;
   gutter_label_at : int;
   gutter : string;
+  action : row_action;
 }
 
 let utf8_scalar_byte_length first =
@@ -992,6 +1005,7 @@ let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
       ; gutter_rail_cells = 0
       ; gutter_label_at = 0
       ; gutter = ""
+      ; action = Action_none
       }
 
 let same_timeline_bucket left right =
@@ -1032,6 +1046,7 @@ let timeline_break_row ~(previous : entry option) ~inner_width (entry : entry) =
         ; gutter_rail_cells = 0
         ; gutter_label_at = 0
         ; gutter = ""
+        ; action = Action_none
         }
 
 (* A body is a document, not a row. [sanitize] is applied to each line rather
@@ -1277,6 +1292,10 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
       ; gutter_rail_cells = rail_cells
       ; gutter_label_at = (if index = 0 then label_at else rail_cells)
       ; gutter = rail_at index ^ (if index = 0 then margin else blank)
+      (* The fold marker sits at the end of the first row, so that is the
+         row a press lands on. A continuation carries the same text and none
+         of the affordance. *)
+      ; action = (if index = 0 then entry.action else Action_none)
       })
   in
   let message_rows =
@@ -1346,6 +1365,7 @@ let collapse_repeated_body_rows ~inner_width rows =
     ; gutter_rail_cells = row.gutter_rail_cells
     ; gutter_label_at = 0
     ; gutter = row.gutter
+    ; action = Action_none
     }
   in
   let emit_run reversed row count =
@@ -1409,6 +1429,7 @@ let newest_entry_window ~inner_width ~height rows =
         ; gutter_rail_cells = 0
         ; gutter_label_at = 0
         ; gutter = ""
+        ; action = Action_none
         }
       in
       start @ (gap :: tail)

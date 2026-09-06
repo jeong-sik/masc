@@ -1551,7 +1551,10 @@ let stop_keepalive_and_await ~base_path name =
   | None -> Keeper_not_registered
   | Some entry ->
     request_entry_stop entry;
+    Printf.printf "DIAG14 join-before-lane-exit\n%!";
     let lane_exit = Keeper_lane.await_exit entry.lane in
+    Printf.printf "DIAG14 join-after-lane-exit\n%!";
     let terminal = Eio.Promise.await entry.done_p in
+    Printf.printf "DIAG14 join-after-done\n%!";
     Keeper_joined { lane_exit; terminal }
 ;;

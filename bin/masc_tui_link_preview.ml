@@ -147,6 +147,181 @@ let synthesize_preview url =
         ; has_metadata = false
         }
 
+(* ---- Real OpenGraph fetch upgrade ----
+
+   [synthesize_preview] above builds a card from the URL shape alone: the
+   instant, offline fallback. The parser below reads a fetched page's <title>
+   and og:* meta tags so a card shows the real title/description/image instead
+   of a guess. It is a pure, reentrant scanner -- [Str] keeps global match state
+   that is unsafe across the fetch fibers, and a scanner is unit-testable with no
+   network. The HTTP call itself lives in the TUI layer (which owns the HTTP
+   client and the redraw mailbox) and is injected through [set_background_fetch],
+   so this render library keeps no network dependency. *)
+
+(* Allocation-free forward substring search. *)
+let index_sub ~sub s from =
+  let ls = String.length s and lsub = String.length sub in
+  if lsub = 0 then Some (max 0 from)
+  else begin
+    let last = ls - lsub in
+    let rec loop i =
+      if i > last then None
+      else begin
+        let rec eq j = j >= lsub || (s.[i + j] = sub.[j] && eq (j + 1)) in
+        if eq 0 then Some i else loop (i + 1)
+      end
+    in
+    loop (max 0 from)
+  end
+
+let is_ws c = c = ' ' || c = '\t' || c = '\n' || c = '\r'
+
+let skip_ws s i =
+  let n = String.length s in
+  let rec loop i = if i < n && is_ws s.[i] then loop (i + 1) else i in
+  loop i
+
+(* Decode the few HTML entities that occur in meta content. Unknown entities are
+   kept verbatim rather than dropped, so no text is silently lost. *)
+let decode_entities s =
+  let n = String.length s in
+  let buf = Buffer.create n in
+  let i = ref 0 in
+  while !i < n do
+    if s.[!i] = '&' then begin
+      match String.index_from_opt s !i ';' with
+      | Some semi when semi - !i <= 8 ->
+          let ent =
+            String.lowercase_ascii (String.sub s (!i + 1) (semi - !i - 1))
+          in
+          let repl =
+            match ent with
+            | "amp" -> "&"
+            | "lt" -> "<"
+            | "gt" -> ">"
+            | "quot" -> "\""
+            | "apos" | "#39" -> "'"
+            | "#47" | "#x2f" -> "/"
+            | _ -> ""
+          in
+          if repl = "" then (Buffer.add_char buf '&'; incr i)
+          else (Buffer.add_string buf repl; i := semi + 1)
+      | _ -> Buffer.add_char buf '&'; incr i
+    end
+    else (Buffer.add_char buf s.[!i]; incr i)
+  done;
+  Buffer.contents buf
+
+(* Value of [name="v"] / [name='v'] inside a single tag body. [lower] is the
+   lowercased [tag]; the name match is case-insensitive and boundary-guarded so
+   ["name"] does not match inside a longer attribute. Only quoted values. *)
+let tag_attr ~tag ~lower name =
+  let name = String.lowercase_ascii name in
+  let n = String.length tag in
+  let rec search from =
+    match index_sub ~sub:name lower from with
+    | None -> None
+    | Some i ->
+        let boundary_ok = i = 0 || is_ws lower.[i - 1] in
+        let j = skip_ws lower (i + String.length name) in
+        if boundary_ok && j < n && tag.[j] = '=' then begin
+          let k = skip_ws lower (j + 1) in
+          if k < n && (tag.[k] = '"' || tag.[k] = '\'') then
+            match String.index_from_opt tag (k + 1) tag.[k] with
+            | Some e -> Some (String.sub tag (k + 1) (e - k - 1))
+            | None -> None
+          else search (i + String.length name)
+        end
+        else search (i + String.length name)
+  in
+  search 0
+
+(* [content] of the first <meta> whose property or name attribute equals [key]
+   (already lowercased). [head]/[lhead] are the page head and its lowercase. *)
+let meta_content ~head ~lhead key =
+  let n = String.length head in
+  let rec loop from =
+    match index_sub ~sub:"<meta" lhead from with
+    | None -> None
+    | Some i ->
+        let close =
+          match String.index_from_opt head i '>' with Some c -> c | None -> n
+        in
+        let tag = String.sub head i (close - i) in
+        let lower = String.lowercase_ascii tag in
+        let prop =
+          match tag_attr ~tag ~lower "property" with
+          | Some _ as p -> p
+          | None -> tag_attr ~tag ~lower "name"
+        in
+        (match prop with
+         | Some p when String.equal (String.lowercase_ascii (String.trim p)) key ->
+             (match tag_attr ~tag ~lower "content" with
+              | Some c -> Some (decode_entities (String.trim c))
+              | None -> loop (close + 1))
+         | _ -> loop (close + 1))
+  in
+  loop 0
+
+(* Text of the first <title>...</title>. *)
+let title_tag ~head ~lhead =
+  match index_sub ~sub:"<title" lhead 0 with
+  | None -> None
+  | Some i -> (
+      match String.index_from_opt head i '>' with
+      | None -> None
+      | Some gt -> (
+          match index_sub ~sub:"</title" lhead (gt + 1) with
+          | None -> None
+          | Some e ->
+              Some (decode_entities (String.trim (String.sub head (gt + 1) (e - gt - 1))))))
+
+(* og:* and <title> live in <head>; bound the scan so a large body stays cheap. *)
+let og_head_limit = 262144
+
+(* Merge a fetched page's real metadata onto the URL-synthesized base, keeping
+   its [kind] (and thus its banner styling). Returns the base unchanged when the
+   page yielded no title or og:* at all, so [has_metadata] never claims fetched
+   data we do not have. *)
+let parse_og_html ~url ~body =
+  let base = synthesize_preview url in
+  let head =
+    if String.length body > og_head_limit then String.sub body 0 og_head_limit
+    else body
+  in
+  let lhead = String.lowercase_ascii head in
+  let meta key = meta_content ~head ~lhead key in
+  let non_empty = function
+    | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
+    | _ -> None
+  in
+  let og_title = non_empty (meta "og:title") in
+  let og_desc = non_empty (meta "og:description") in
+  let og_image = non_empty (meta "og:image") in
+  let og_site = non_empty (meta "og:site_name") in
+  let html_title = non_empty (title_tag ~head ~lhead) in
+  let got_real =
+    og_title <> None || og_desc <> None || og_image <> None || html_title <> None
+  in
+  if not got_real then base
+  else
+    let title =
+      match og_title with
+      | Some _ as t -> t
+      | None -> ( match html_title with Some _ as t -> t | None -> base.title)
+    in
+    let description = match og_desc with Some _ as d -> d | None -> base.description in
+    let image_url = match og_image with Some _ as im -> im | None -> base.image_url in
+    let site_name = match og_site with Some _ as s -> s | None -> base.site_name in
+    { base with title; description; site_name; image_url; has_metadata = true }
+
+(* Injected by the TUI at startup: given a URL, spawn a background fetch that
+   replaces the synthesized cache entry with fetched metadata and requests a
+   redraw. A no-op until registered, so [get_preview] stays pure in tests. *)
+let background_fetch : (string -> unit) ref = ref (fun _ -> ())
+
+let set_background_fetch f = background_fetch := f
+
 let has_informative_preview p = p.has_metadata
 
 let get_preview url =
@@ -155,6 +330,11 @@ let get_preview url =
   | None ->
       let p = synthesize_preview url in
       cache_store p;
+      (* Kick off a real fetch exactly once -- this is the only cache miss for
+         the url. Its result replaces this synthesized card on the next render;
+         a failed or unregistered fetch simply leaves the synthesized card. A
+         direct image URL has no HTML page to read, so it is not fetched. *)
+      (match p.kind with Image_direct _ -> () | _ -> !background_fetch url);
       p
 
 let site_icon p =

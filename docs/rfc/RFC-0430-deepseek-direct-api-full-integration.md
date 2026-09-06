@@ -112,6 +112,17 @@ agent_core가 deepseek.com 직접 API를 카탈로그·런타임 양쪽에서 �
   여전히 적용될 때 (b) 완화된 지금 모두 통과하는 안전한 방향이므로
   Phase 0 의 선택을 유지한다.
 
+### 라이브 체인 검증 (2026-09-06 06:30Z, 서버 재부팅 후 첫 failover)
+
+- 런타임 id 가 동작하려면 카탈로그 행과 runtime.toml `[models.<id>]` 바인딩이
+  **쌍**으로 필요하다 — 첫 재시작이 `candidate "deepseek.deepseek-v4-flash"
+  not found among 61 runtimes` 로 FATAL, 바인딩 추가로 해소. lane 에 후보를
+  넣을 때 같은 창에서 바인딩까지 확인한다(운영 규칙으로 승격).
+- glm-5.3 lane keeper(pr-updater)의 턴이 api.z.ai 429 로 죽자 체인이
+  `deepseek.deepseek-v4-flash` 로 회전: `stop=tools_executed`(4.3s) 이어
+  `stop=end_turn`(39.3s) — thinking+tools 턴이 400 없이 완주했다. Phase 0 의
+  replay 정책이 라이브에서 증명됐다.
+
 ## 관계
 
 - 런타임 체인 등록(2026-09-06, runtime.toml lane 3곳 + `[providers.deepseek]`)은

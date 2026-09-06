@@ -93,6 +93,7 @@ let preflight ~config ~keeper_name ~actor =
 let commit_after_metadata_update ~config = function
   | No_shutdown_admission_token -> Ok No_shutdown_admission
   | Operator_supersession_token token ->
+    Printf.printf "DIAG14 sup-before-supersede\n%!";
     (match
        Keeper_shutdown_store.supersede_blocked_operator_stop
          ~config
@@ -103,6 +104,7 @@ let commit_after_metadata_update ~config = function
      | Ok
          ( Keeper_shutdown_store.Superseded_persisted operation
          | Keeper_shutdown_store.Superseded_already_persisted operation ) ->
+       Printf.printf "DIAG14 sup-after-supersede\n%!";
        let operation_id =
          Keeper_shutdown_store.supersession_token_operation_id token
        in
@@ -113,6 +115,7 @@ let commit_after_metadata_update ~config = function
         with
         | Error error -> Error (Metadata_committed_successor_lookup_failed error)
         | Ok successor_operation_id ->
+          Printf.printf "DIAG14 sup-before-transition\n%!";
           (match
              Keeper_owner_registry.transition_shutdown
                ~base_path:config.Workspace.base_path

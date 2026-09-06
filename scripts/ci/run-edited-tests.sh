@@ -43,6 +43,30 @@ changed=$(gh api "repos/${repo}/pulls/${pr_number}/files" \
 sources=$( { printf '%s\n' "${changed}" \
   | grep -E '(^|/)test/test_[a-z0-9_]+\.ml$' || [ $? -eq 1 ]; } | sort -u)
 
+# A guard can protect an input that is not itself a test, and then no pull
+# request that breaks it ever edits it.
+# test_managed_assets_sync_from_binary runs the real sync over the real
+# embedded set, so a config/ asset added without its line in that domain's
+# managed-assets.json fails there rather than at the next boot -- which is
+# what its header says it is for. But a pull request that adds
+# config/tools/foo.toml edits no test/*.ml, so the selector above picks
+# nothing and the guard never runs.
+#
+# Measured 2026-09-06: #33472 added keeper_lane_status.toml and #33639 added
+# the three masc_file_* tools. Neither ran the guard, neither updated the
+# manifest, and every boot since printed the half-built-binary WARN with
+# those four stranded out of the runtime directory.
+#
+# So map the guarded input back to its guard.
+assets=$( { printf '%s\n' "${changed}" \
+  | grep -E '^config/(prompts|tools|mcp)/' || [ $? -eq 1 ]; } | head -1)
+if [ -n "${assets}" ]; then
+  echo "this pull request changes managed config assets; adding their guard"
+  sources=$(printf '%s\n%s\n' "${sources}" \
+    "test/test_managed_assets_sync_from_binary.ml" \
+    | grep -v '^[[:space:]]*$' | sort -u)
+fi
+
 if [ -z "${sources}" ]; then
   echo "no test source in this pull request; nothing to run"
   exit 0

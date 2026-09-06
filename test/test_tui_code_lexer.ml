@@ -216,6 +216,34 @@ let test_a_toml_table_header_is_taken_whole () =
         (List.filter (fun (piece, _) -> piece <> "") header)
   | [] -> Alcotest.fail "the lexer answered no rows"
 
+(* A negative number used to stop the json lexer where it stood: the branch
+   admits a leading sign, the digit scan rejects one, and a scan that matches
+   nothing returns the index it was given. Opening a .json file holding one
+   froze the TUI. The first case answers whether the lexer finishes at all;
+   the rest keep the sign from taking more than its own number. *)
+let test_json_reads_a_negative_number () =
+  check seg "the sign belongs to the number"
+    [ ("{", Masc_tui_code_lexer.kind_code)
+    ; ("\"a\"", Masc_tui_code_lexer.kind_type)
+    ; (": ", Masc_tui_code_lexer.kind_code)
+    ; ("-1", Masc_tui_code_lexer.kind_number)
+    ; ("}", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "json" {|{"a": -1}|});
+  check seg "a negative decimal in a list"
+    [ ("[", Masc_tui_code_lexer.kind_code)
+    ; ("-2.5", Masc_tui_code_lexer.kind_number)
+    ; (", ", Masc_tui_code_lexer.kind_code)
+    ; ("3", Masc_tui_code_lexer.kind_number)
+    ; ("]", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "json" "[-2.5, 3]");
+  (* A sign with no digit after it is not a number, and must not stop the
+     lexer either. *)
+  check Alcotest.(list string) "a lone sign stays plain"
+    [ Masc_tui_code_lexer.kind_code ]
+    (List.sort_uniq compare (List.map snd (spans "json" "{-}")))
+
 let test_sql_reads_a_keyword_however_it_is_spelled () =
   let kinds text = List.map snd (spans "sql" text) in
   check Alcotest.(list string) "shouting does not change the shape"
@@ -322,6 +350,8 @@ let () =
             test_toml_reads_a_key_a_string_and_a_comment
         ; Alcotest.test_case "a toml table header is taken whole" `Quick
             test_a_toml_table_header_is_taken_whole
+        ; Alcotest.test_case "json reads a negative number" `Quick
+            test_json_reads_a_negative_number
         ] )
     ; ( "sql"
       , [ Alcotest.test_case "a keyword however it is spelled" `Quick

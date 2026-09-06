@@ -325,9 +325,21 @@ let json_lexer text =
       else if is_digit char || ((char = '-') && index + 1 < limit && is_digit text.[index + 1]) then begin
         (* Digits and one decimal shape. An exponent's [e] stays plain rather
            than colouring one token wider than the set: [-] inside [3 - 1]
-           must not join the number that follows it. *)
+           must not join the number that follows it.
+
+           The scan starts past a leading sign. The predicate below rejects
+           [-], so scanning from the sign's own index returns that index and
+           the loop re-enters where it already was: opening a .json file with
+           a negative number in it froze the whole TUI. *)
+        let start =
+          if char = '-' then begin
+            runs_add runs kind_number char;
+            index + 1
+          end
+          else index
+        in
         let stop =
-          take_while text index (fun c -> is_digit c || c = '.')
+          take_while text start (fun c -> is_digit c || c = '.')
             kind_number runs
         in
         advance stop

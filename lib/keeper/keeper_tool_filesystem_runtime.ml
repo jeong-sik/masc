@@ -2282,7 +2282,7 @@ let handle_file_write_with_outcome
                      , `String (Keeper_gate.unavailable_reason_to_string reason)
                      ]
                    (fs_guidance_text Gate_record_unavailable)
-             ; class_ = Tool_result.Runtime_failure
+             ; class_ = Tool_result.Dependency_unavailable
              })
       | Keeper_gate.Allow authorization ->
         Log.Keeper.info

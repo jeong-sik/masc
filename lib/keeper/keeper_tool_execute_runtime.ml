@@ -529,6 +529,7 @@ let handle_tool_execute_typed
            |> Keeper_gate_deferred_payload.to_execution
          | Keeper_gate.Unavailable reason ->
            typed_error_json
+             ~class_:Tool_result.Dependency_unavailable
              ~extra_fields:
                [ "error", `String "gate_unavailable"
                ; "gate_reason"

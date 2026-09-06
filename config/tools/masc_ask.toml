@@ -1,46 +1,6 @@
 name = "masc_ask"
 description = """
-Ask the operator a question that carries named choices, then keep working.
-
-The question is recorded durably and appears on every surface the operator \
-watches. Your turn does not stop and your lane is not held; the answer \
-arrives as a separate wake.
-
-Use this when the next step depends on a choice that is not yours to make. \
-Do not use it to confirm work you could verify yourself, and do not use it \
-to ask whether you may run a tool -- that is the approval gate's job. When \
-weighing whether the choice is really yours, remember the asymmetry: a \
-question costs one person one minute; a wrong silent guess burns hours \
-unattended.
-
-Several open questions is not an error, but a human answers the top one and \
-leaves the rest -- ask what actually blocks your next step.
-
-Put the reason in `context`: a reader who cannot see why you are asking \
-cannot weigh the decision. Give a `choice_id` that still means the same \
-thing after someone rewords its label: the answer names the id, never the \
-label.
-
-Every field except `context`, `task_id` and `goal_id` belongs to a question \
-inside the `questions` array, never beside it. One ask can carry several \
-questions, and a question can offer choices and free text at once:
-
-    {"context": "the deploy window closes in an hour",
-     "questions": [
-       {"question_id": "rollout", "header": "Rollout", "mode": "single",
-        "prompt": "Ship behind a flag, or hold for the next window?",
-        "choices": [{"choice_id": "flag", "label": "Behind a flag",
-                     "description": "Off by default; we turn it on Monday"},
-                    {"choice_id": "hold", "label": "Hold"}]},
-       {"question_id": "reviewers", "header": "Reviewers", "mode": "multi",
-        "prompt": "Who should read it before it goes out?",
-        "free_text": true, "free_text_hint": "name someone else",
-        "choices": [{"choice_id": "sre", "label": "SRE"},
-                    {"choice_id": "sec", "label": "Security"}]}]}
-
-`mode` is `single` for one choice and `multi` for several. `free_text` lets \
-the operator type instead of picking; a question with no `choices` needs it, \
-and a question with choices may still offer it."""
+Ask the operator questions with named choices; answers arrive in a separate wake. Use when blocked on an external choice."""
 additional_properties = false
 # RFC-0403 후속. 이 셋은 2026-08-03 ~ 09-02 31일간 fleet 전체에서 호출 0회이고,
 # 그 사이 agent-core keeper 4곳의 요청마다 5,498 B 를 싣고 있었다. 지연의
@@ -57,10 +17,7 @@ defer_loading = true
 name = "questions"
 type = "array"
 required = true
-description = """
-One or more questions asked together. Ask together what the operator can \
-decide together; a question that depends on the answer to another belongs \
-in a later ask."""
+description = "Questions to ask together."
 
 [params.items]
 type = "object"
@@ -70,46 +27,41 @@ additional_properties = false
 name = "question_id"
 type = "string"
 required = true
-description = "Stable id for this question within the ask. The answer names it."
+description = "Stable question id."
 
 [[params.items.params]]
 name = "header"
 type = "string"
 required = true
-description = """
-Two or three words naming the decision. Narrow surfaces such as the TUI show \
-this instead of the full prompt."""
+description = "Short decision title."
 
 [[params.items.params]]
 name = "prompt"
 type = "string"
 required = true
-description = "The question as the operator reads it."
+description = "Question prompt for operator."
 
 [[params.items.params]]
 name = "mode"
 type = "string"
 required = true
 enum = ["single", "multi"]
-description = "single takes one choice; multi takes several."
+description = "Mode: single or multi."
 
 [[params.items.params]]
 name = "free_text"
 type = "boolean"
-description = """
-Whether the operator may type an answer instead of picking one. Defaults to \
-false. A question with no choices requires this to be true, otherwise \
-nothing could answer it and the ask is refused."""
+description = "Allow free text input."
 
 [[params.items.params]]
 name = "free_text_hint"
 type = "string"
-description = "Placeholder shown where free text is typed."
+description = "Placeholder for free text."
 
 [[params.items.params]]
 name = "choices"
 type = "array"
-description = "Named choices. May be omitted only when free_text is true."
+description = "Named choices (required unless free_text is true)."
 
 [params.items.params.items]
 type = "object"
@@ -119,34 +71,30 @@ additional_properties = false
 name = "choice_id"
 type = "string"
 required = true
-description = """
-Stable id. The recorded answer names this and never the label, so rewording \
-a label does not orphan answers already given."""
+description = "Stable choice id."
 
 [[params.items.params.items.params]]
 name = "label"
 type = "string"
 required = true
-description = "What the operator reads on the choice."
+description = "Operator visible label."
 
 [[params.items.params.items.params]]
 name = "description"
 type = "string"
-description = "What picking this choice commits to."
+description = "Commitment of choice."
 
 [[params]]
 name = "context"
 type = "string"
-description = """
-Why you are asking, in your own words. Surfaces render this beside the \
-prompt."""
+description = "Context and reason for asking."
 
 [[params]]
 name = "task_id"
 type = "string"
-description = "Task this question belongs to, when it belongs to one."
+description = "Related task id."
 
 [[params]]
 name = "goal_id"
 type = "string"
-description = "Goal this question belongs to, when it belongs to one."
+description = "Related goal id."

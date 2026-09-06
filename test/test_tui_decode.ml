@@ -220,6 +220,22 @@ let test_terminal_text_is_idempotent_and_single_line () =
   Alcotest.(check string) "sanitization is idempotent" once
     (Tui_decode.sanitize_terminal_text once)
 
+let test_preview_line_marks_breaks_and_escapes_the_rest () =
+  let mark = "\xe2\x8f\x8e" in
+  Alcotest.(check string) "a break is one return mark" ("a" ^ mark ^ "b")
+    (Tui_decode.preview_line "a\nb");
+  Alcotest.(check string) "CR LF is one break, not two" ("a" ^ mark ^ "b")
+    (Tui_decode.preview_line "a\r\nb");
+  Alcotest.(check string) "a lone CR is a break" ("a" ^ mark ^ "b")
+    (Tui_decode.preview_line "a\rb");
+  Alcotest.(check string) "a tab is a space" "a b" (Tui_decode.preview_line "a\tb");
+  Alcotest.(check string) "other controls still escape" "a\\x1Bb"
+    (Tui_decode.preview_line "a\027b");
+  Alcotest.(check string) "printable UTF-8 survives" ("정상" ^ mark ^ "café")
+    (Tui_decode.preview_line "정상\ncafé");
+  Alcotest.(check bool) "the result is one row" false
+    (String.contains (Tui_decode.preview_line "x\ny\nz") '\n')
+
 let keeper_call_row ~keeper ~tool ?(success = true) ?duration_ms ?turn
     ?execution_id ?tool_use_id ?planned_index ?batch_index ?batch_size
     ?execution_mode ?result_bytes ?truncated_to ?disposition () =
@@ -280,6 +296,40 @@ let test_keeper_calls_decode_exact_execution_schedule () =
                   (schedule.kcs_execution_mode = Tui_decode.Keeper_call_concurrent)
             | None -> Alcotest.fail "schedule was dropped")
        | _ -> Alcotest.fail "expected one call")
+
+(* The header draws the verdict and, since the gap case, the reason beside
+   it. Four of this route's words come with a reason restating themselves --
+   "empty" with "no_entries" -- but "coverage_gap" carries the gap record's
+   own message, and no other field on that header can supply it. The decode
+   has to keep it for the header to have anything to draw. *)
+let test_keeper_calls_keep_the_reason_beside_the_verdict () =
+  let snapshot ?stale_reason health =
+    Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
+      (`Assoc
+         ([ "keeper", `String "largo"
+          ; "count", `Int 0
+          ; "health", `String health
+          ; "entries", `List []
+          ]
+          @
+          match stale_reason with
+          | None -> []
+          | Some reason -> [ "stale_reason", `String reason ]))
+  in
+  (match snapshot ~stale_reason:"telemetry gap at 2026-09-06T02:00Z" "coverage_gap" with
+   | Error detail -> Alcotest.failf "a gap snapshot must decode: %s" detail
+   | Ok decoded ->
+       Alcotest.(check (option string))
+         "the gap's own message survives"
+         (Some "telemetry gap at 2026-09-06T02:00Z")
+         decoded.Tui_decode.kcs_stale_reason;
+       Alcotest.(check string) "and the verdict beside it" "coverage_gap"
+         decoded.Tui_decode.kcs_health);
+  match snapshot "ok" with
+  | Error detail -> Alcotest.failf "an ok snapshot must decode: %s" detail
+  | Ok decoded ->
+      Alcotest.(check (option string)) "a healthy log claims no reason" None
+        decoded.Tui_decode.kcs_stale_reason
 
 let test_keeper_calls_reject_partial_or_unknown_schedule () =
   let decode row =
@@ -5622,6 +5672,7 @@ let prompts_payload =
                ("effective", `String "overridden text");
                ("has_override", `Bool true);
                ("file_exists", `Bool false);
+               ("source", `String "override");
              ];
          ]);
       ( "runtime_assets"
@@ -5748,8 +5799,8 @@ let test_decode_prompts_reads_the_live_shape () =
     Alcotest.(check string) "key" "keeper" first.Tui_decode.pr_key;
     Alcotest.(check string) "the effective text keeps its line break"
       "You are a keeper.\nWork the task." first.Tui_decode.pr_effective;
-    Alcotest.(check bool) "no override" false first.Tui_decode.pr_has_override;
-    Alcotest.(check string) "source" "file" first.Tui_decode.pr_source;
+    Alcotest.(check bool) "the file's words, no override" true
+      (first.Tui_decode.pr_source = Tui_decode.Prompt_file);
     Alcotest.(check bool) "primary surface" true
       (first.Tui_decode.pr_operator_surface = Tui_decode.Prompt_primary);
     Alcotest.(check (list string)) "template input names"
@@ -5780,7 +5831,10 @@ let test_prompt_rows_hide_fragments_by_default () =
 
 let test_decode_prompts_defaults_legacy_surface_to_primary () =
   let json =
-    `Assoc [ "prompts", `List [ `Assoc [ "key", `String "legacy" ] ] ]
+    `Assoc
+      [ ( "prompts"
+        , `List [ `Assoc [ "key", `String "legacy"; "source", `String "file" ] ] )
+      ]
   in
   match Tui_decode.decode_prompts json with
   | Error detail -> Alcotest.fail detail
@@ -5797,6 +5851,7 @@ let test_decode_prompts_rejects_unknown_operator_surface () =
             [ `Assoc
                 [ "key", `String "future"
                 ; "operator_surface", `String "mystery"
+                ; "source", `String "file"
                 ]
             ] )
       ]
@@ -5804,6 +5859,45 @@ let test_decode_prompts_rejects_unknown_operator_surface () =
   match Tui_decode.decode_prompts json with
   | Ok _ -> Alcotest.fail "an unknown operator surface must not be guessed"
   | Error _ -> ()
+
+(* [source] is the one field of a prompt row that decides what the operator is
+   looking at, and every one of the three readers -- the list mark, the detail
+   line, the clear guard -- now asks it. A word this build does not know is a
+   server it does not match, and guessing would draw a row that says "file"
+   about an override. *)
+let test_decode_prompts_rejects_an_unknown_source () =
+  let json =
+    `Assoc
+      [ ( "prompts"
+        , `List
+            [ `Assoc
+                [ "key", `String "future"
+                ; "source", `String "inherited"
+                ]
+            ] )
+      ]
+  in
+  match Tui_decode.decode_prompts json with
+  | Ok _ -> Alcotest.fail "an unknown prompt source must not be guessed"
+  | Error detail ->
+    Alcotest.(check bool) "and the word it did not know is in the sentence" true
+      (Astring.String.is_infix ~affix:"inherited" detail)
+
+(* The server writes [source] on every row it serializes, unconditionally.
+   An absent one is therefore not a sparse row but a different server, and the
+   row it would decode to has no honest default: "missing" would claim the
+   prompt has no text at all. *)
+let test_decode_prompts_rejects_a_row_with_no_source () =
+  let json =
+    `Assoc [ "prompts", `List [ `Assoc [ "key", `String "sourceless" ] ] ]
+  in
+  match Tui_decode.decode_prompts json with
+  | Ok _ -> Alcotest.fail "a row with no source must not decode"
+  | Error detail ->
+    (* An absence reported as a type error sends the reader looking for a
+       wrong value where there is no value. *)
+    Alcotest.(check string) "reported as an absence"
+      "missing required field 'source'" detail
 
 let test_decode_prompts_survives_a_sparse_row () =
   match Tui_decode.decode_prompts prompts_payload with
@@ -5813,9 +5907,7 @@ let test_decode_prompts_survives_a_sparse_row () =
     Alcotest.(check string) "a row with no description reads empty" ""
       second.Tui_decode.pr_description;
     Alcotest.(check bool) "and its override is carried" true
-      second.Tui_decode.pr_has_override;
-    Alcotest.(check bool) "as is the absent file" false
-      second.Tui_decode.pr_file_exists
+      (second.Tui_decode.pr_source = Tui_decode.Prompt_override)
 
 let test_decode_prompts_rejects_a_row_with_no_key () =
   (* The key is what a write is addressed to. A row without one cannot be
@@ -7940,6 +8032,8 @@ let () =
           test_terminal_text_escapes_malformed_utf8_bytes
       ; Alcotest.test_case "is idempotent and single-line" `Quick
           test_terminal_text_is_idempotent_and_single_line
+      ; Alcotest.test_case "preview marks breaks and escapes the rest" `Quick
+          test_preview_line_marks_breaks_and_escapes_the_rest
       ; Alcotest.test_case "sanitizes timestamp slices after selection" `Quick
           test_timestamp_slices_are_sanitized_after_selection
       ] );
@@ -7949,6 +8043,8 @@ let () =
           test_keeper_calls_decode_exact_execution_schedule
       ; Alcotest.test_case "rejects partial or unknown schedule" `Quick
           test_keeper_calls_reject_partial_or_unknown_schedule
+      ; Alcotest.test_case "keeps the reason beside the verdict" `Quick
+          test_keeper_calls_keep_the_reason_beside_the_verdict
       ; Alcotest.test_case "rejects rows naming another keeper" `Quick
           test_keeper_calls_reject_rows_naming_another_keeper
       ; Alcotest.test_case "requires the envelope" `Quick
@@ -8058,6 +8154,10 @@ let () =
           test_decode_prompts_defaults_legacy_surface_to_primary;
         Alcotest.test_case "rejects an unknown operator surface" `Quick
           test_decode_prompts_rejects_unknown_operator_surface;
+        Alcotest.test_case "rejects an unknown source" `Quick
+          test_decode_prompts_rejects_an_unknown_source;
+        Alcotest.test_case "rejects a row with no source" `Quick
+          test_decode_prompts_rejects_a_row_with_no_source;
         Alcotest.test_case "survives a sparse row" `Quick
           test_decode_prompts_survives_a_sparse_row;
         Alcotest.test_case "rejects a row with no key" `Quick

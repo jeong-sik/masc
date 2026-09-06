@@ -446,6 +446,17 @@ let fence_language line =
 
 let fence_rows_of_segments = Masc_tui_code_lexer.rows_of_segments
 
+(* Why a mermaid fence shows its source instead of a drawing. *)
+let mermaid_failure_text = function
+  | Masc_tui_mermaid.Unsupported what ->
+      "mermaid: " ^ what ^ " is not drawn here; the source follows"
+  | Masc_tui_mermaid.Parse_error { line; what } ->
+      Printf.sprintf "mermaid: line %d: %s; the source follows" line what
+  | Masc_tui_mermaid.Too_wide { cells; cols } ->
+      Printf.sprintf
+        "mermaid: the drawing needs %d cells and this pane has %d; the source follows"
+        cells cols
+
 let styled_piece palette (text, kind) =
   if String.length text = 0 then ""
   else
@@ -913,12 +924,22 @@ let render_streaming ~palette ~width text =
     Option.iter
       (fun language -> emit_all [ code_header palette ~width language ])
       language;
-    (match lexer with
-     | Some lexer ->
+    (match language, lexer with
+     | Some "mermaid", _ -> (
+         (* Drawn, not lexed: the rows come back the width the code rows
+            have inside the gutter. A diagram this module cannot draw shows
+            its source under one row that says why (RFC-0429 §3.3). *)
+         let body_width = max 1 (width - Layout.display_width palette.code_gutter) in
+         match Masc_tui_mermaid.render ~cols:body_width (String.concat "\n" body) with
+         | Ok rows -> List.iter (fun row -> emit_all (code_rows palette ~width row)) rows
+         | Error failure ->
+             emit_all (code_rows palette ~width (mermaid_failure_text failure));
+             List.iter (fun line -> emit_all (code_rows palette ~width line)) body)
+     | _, Some lexer ->
          fence_rows_of_segments (lexer (String.concat "\n" body))
          |> List.iter
               (fun pieces -> emit_all (styled_code_rows palette ~width pieces))
-     | None ->
+     | _, None ->
          List.iter (fun line -> emit_all (code_rows palette ~width line)) body);
     if closed && Option.is_some language then
       emit_all [ code_footer palette ~width ]

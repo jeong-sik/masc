@@ -276,6 +276,7 @@ let active_top_level_namespaces =
   ; "web_search"
   ; "exec"
   ; "egress"
+  ; "lsp"
   ; Skill_source_config.top_level_namespace
   ]
 ;;
@@ -1656,6 +1657,68 @@ let parse_exec_endpoints (toml : Otoml.t)
                   "[exec.ssh.endpoints] must be a TOML table of endpoint tables"))))
 ;;
 
+(* [lsp.servers]: the command that starts a language's server, keyed by the
+   language's wire id. It replaces the client's table for that language and
+   no other. A key that names no language and a value that is not a
+   non-empty array of strings are refused at load: a server nobody can
+   start is a typo, not a preference. *)
+let parse_lsp_server ~(lang_id : string) (value : Otoml.t)
+  : (string * (string * string list), parse_error list) result
+  =
+  let path = "lsp.servers." ^ lang_id in
+  match Lsp_process_manager.language_of_lang_id lang_id with
+  | None ->
+    Error
+      (error
+         path
+         (Printf.sprintf
+            "unknown language %S; expected one of %s"
+            lang_id
+            (String.concat
+               ", "
+               (List.map
+                  Lsp_process_manager.lang_id_of_language
+                  Lsp_process_manager.all_languages))))
+  | Some _ ->
+    (match value with
+     | Otoml.TomlArray items ->
+       let words =
+         List.map
+           (function
+             | Otoml.TomlString word -> Some word
+             | _ -> None)
+           items
+       in
+       (match List.filter_map Fun.id words with
+        | (executable :: _ as argv) when List.for_all Option.is_some words ->
+          Ok (lang_id, (executable, argv))
+        | _ ->
+          Error
+            (error
+               path
+               "expected a non-empty array of strings: the executable, then its arguments"))
+     | _ ->
+       Error
+         (error path "expected an array of strings: the executable, then its arguments"))
+;;
+
+let parse_lsp_servers (toml : Otoml.t)
+  : ((string * (string * string list)) list, parse_error list) result
+  =
+  match Otoml.find_opt toml Fun.id [ "lsp" ] with
+  | None -> Ok []
+  | Some lsp_value ->
+    (match exec_single_child ~path:"lsp" ~child_key:"servers" lsp_value with
+     | Error _ as error -> error
+     | Ok None -> Ok []
+     | Ok (Some servers_value) ->
+       (match servers_value with
+        | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+          partition_results
+            (List.map (fun (lang_id, value) -> parse_lsp_server ~lang_id value) entries)
+        | _ -> Error (error "lsp.servers" "expected a table of language = [\"command\", ...]")))
+;;
+
 (* --- Reserved namespace detection --- *)
 
 let reject_obsolete_top_level_namespaces (toml : Otoml.t)
@@ -2309,6 +2372,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   let exact_output_lanes_result = parse_exact_output_lanes toml in
   let exec_ssh_endpoints_result = parse_exec_endpoints toml in
   let egress_allowlists_result = parse_egress_allowlists toml in
+  let lsp_servers_result = parse_lsp_servers toml in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let all_errors =
     errs obsolete_namespaces_result
@@ -2321,6 +2385,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     @ errs exact_output_lanes_result
     @ errs exec_ssh_endpoints_result
     @ errs egress_allowlists_result
+    @ errs lsp_servers_result
   in
   if all_errors <> []
   then Error all_errors
@@ -2354,6 +2419,9 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     let egress_allowlists =
       extract_after_all_errors_guard ~label:"egress_allowlists" egress_allowlists_result
     in
+    let lsp_servers =
+      extract_after_all_errors_guard ~label:"lsp_servers" lsp_servers_result
+    in
     (* Cross-table Gate: a binding field only reaches the wire through its
        provider's request builder, so whether it is carriable is a fact about
        the provider, not about the binding table it was written in. *)
@@ -2371,6 +2439,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
         ; exact_output_lane_decls
         ; exec_ssh_endpoints
         ; egress_allowlists
+        ; lsp_servers
         })
 ;;
 

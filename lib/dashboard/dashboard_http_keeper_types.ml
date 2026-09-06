@@ -16,7 +16,8 @@ let prompt_block_json key =
   `Assoc
     [
       ("key", `String key);
-      ("source", `String resolved.source);
+      ( "source",
+        `String (Prompt_registry.prompt_source_to_string resolved.source) );
       ("text", `String resolved.effective);
     ]
 

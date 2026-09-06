@@ -1798,7 +1798,10 @@ let add_routes ~sw ~clock router =
                        ("ok", `Bool true);
                        ("message", `String message);
                        ("key", `String key);
-                       ("source", `String (Prompt_registry.prompt_source key));
+                       ( "source",
+                         `String
+                           (Prompt_registry.prompt_source_to_string
+                              (Prompt_registry.prompt_source key)) );
                        ("effective", `String (Prompt_registry.get_prompt key));
                      ])
               | Error (`Validation message) ->

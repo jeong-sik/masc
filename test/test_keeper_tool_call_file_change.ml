@@ -479,6 +479,40 @@ let test_classify_all_counts_each_outcome () =
   check int "over budget" 0 tally.Change.over_budget
 ;;
 
+(* The reason [fold_row] is named: a caller reading rows in batches must end
+   with the same tally as one that read them all at once, or an incremental
+   reader answers something a whole read never would. *)
+let test_folding_in_batches_equals_reading_at_once () =
+  let rows =
+    [ row (edit_input ~before:"first" ~after:"1" ())
+    ; row ~descriptor_id:"agent.read_file" (`Assoc [ ("file_path", `String "x.ml") ])
+    ; row (edit_input ~before:"second" ~after:"2" ())
+    ; row (`Assoc [ ("file_path", `String "x.ml") ])
+    ]
+  in
+  let at_once = Change.classify_all rows in
+  let in_batches =
+    let first_half = [ List.nth rows 0; List.nth rows 1 ] in
+    let second_half = [ List.nth rows 2; List.nth rows 3 ] in
+    let tally = List.fold_left Change.fold_row Change.empty_tally first_half in
+    Change.seal_tally (List.fold_left Change.fold_row tally second_half)
+  in
+  let befores tally =
+    List.map
+      (fun (c : Change.t) ->
+        match c.Change.kind with Change.Edited { before; _ } -> before | Change.Written _ -> "")
+      tally.Change.changes
+  in
+  check (list string) "same changes in the same order"
+    (befores at_once) (befores in_batches);
+  check int "same not-file-changes"
+    at_once.Change.not_file_changes in_batches.Change.not_file_changes;
+  check int "same malformed" at_once.Change.malformed in_batches.Change.malformed;
+  check int "same over-budget" at_once.Change.over_budget in_batches.Change.over_budget;
+  check int "an empty tally is empty" 0
+    (List.length Change.empty_tally.Change.changes)
+;;
+
 let test_classify_all_preserves_order () =
   let rows =
     [ row (edit_input ~before:"first" ~after:"1" ())
@@ -582,6 +616,8 @@ let () =
     ; ( "classify_all"
       , [ test_case "counts each outcome" `Quick test_classify_all_counts_each_outcome
         ; test_case "preserves order" `Quick test_classify_all_preserves_order
+        ; test_case "folding in batches equals reading at once" `Quick
+            test_folding_in_batches_equals_reading_at_once
         ; test_case "repo file filter is exact" `Quick
             test_repo_file_filter_is_exact_and_preserves_order
         ; test_case "unreadable filter uses resolved target" `Quick

@@ -1,8 +1,8 @@
 name = "keeper_code_query"
 description = """
-Definition, type, or references for one name at one file line. Not a search.
+Query the language server for definition, hover type/docs, or references of a symbol at a specific file and line.
 
-Ask the language server about a name you have already located: give the file, the line it is on, and the name itself. It answers where the name is defined, or what its type and documentation are. The answer comes from the compiler's view of the code, so a same-named binding in an unrelated module is not confused with this one, and a name inside a comment or a string is not an occurrence. Find the line with Grep first, then ask about that line. Every answer is as fresh as the last build of the project: this reads what the compiler recorded, not the file on disk."""
+Locate the symbol and line with Grep first. Answers reflect the compiler index."""
 additional_properties = false
 
 # Held back from the request until the model asks for it by name.
@@ -16,27 +16,27 @@ name = "question"
 type = "string"
 enum = ["definition", "hover", "references"]
 required = true
-description = "definition is where the name comes from. hover is its type and its documentation comment. references is every place the name is used, which needs the project's reference index built; if it is missing the answer says which command builds it rather than returning a short list."
+description = "Query type: definition for where defined, hover for type and docs, references for usages across project."
 
 [[params]]
 name = "path"
 type = "string"
 required = true
-description = "File to ask about, inside the keeper workspace. The language server is started at the project this file belongs to, not at the workspace root."
+description = "File path within the keeper workspace to query."
 
 [[params]]
 name = "line"
 type = "integer"
 required = true
-description = "Line the name is on, counted from 1 the way Grep and Read report it."
+description = "1-based line number where the symbol appears."
 
 [[params]]
 name = "symbol"
 type = "string"
 required = true
-description = "The name to ask about, matched literally against that line. Give the last part of a qualified name: for Executable_path.path_has_executable, give path_has_executable."
+description = "Literal symbol name on that line (e.g. function or variable name)."
 
 [[params]]
 name = "occurrence"
 type = "integer"
-description = "Which occurrence on that line, counted from 1. Defaults to the first. Only needed when the name appears more than once on the line, which the answer says when it does."
+description = "1-based occurrence index if the symbol appears multiple times on the line. Defaults to 1."

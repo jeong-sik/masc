@@ -53,6 +53,7 @@ val pp_error : Format.formatter -> error -> unit
 val with_pool
   :  clock:float Eio.Time.clock_ty Eio.Resource.t
   -> proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
+  -> servers:Lsp_process_manager.servers
   -> (t -> 'a)
   -> 'a
 

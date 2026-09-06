@@ -194,14 +194,18 @@ let chunk_call_count (chunk : Acting.chunk) =
 (* An unsettled chunk means the feed never saw the turn end. A keeper whose
    process is gone can never send that end, so for [Health_offline] and
    [Health_zombie] the row states what is known — the turn is unfinished —
-   instead of a "running" that reads as progress beside the gone mark. No
-   health reading ([None]) keeps the turn's own claim. *)
+   instead of an in-flight word that reads as progress beside the gone mark.
+   No health reading ([None]) keeps the turn's own claim. *)
 let keeper_can_finish = function
   | Some Reading.Health_offline | Some Reading.Health_zombie -> false
   | Some _ | None -> true
 
 let unfinished_glyph = "!"
 
+(* Vocabulary: the word "running" names the keeper's process phase and
+   nothing else. An in-flight turn is "in turn" here, on the fleet row, on
+   the focus header, and on the last call's duration — one word per fact, so
+   a reader who learned either surface can read both. *)
 let keeper_state_text ~now ~health ~approval (chunk : Acting.chunk option) =
   match approval, chunk with
   | Some tool, _ ->
@@ -213,7 +217,7 @@ let keeper_state_text ~now ~health ~approval (chunk : Acting.chunk option) =
       let on =
         match current_tool chunk with
         | Some tool -> tool
-        | None -> "running"
+        | None -> "in turn"
       in
       [ { text = running_glyph ^ " "; tone = Ok }
       ; { text = join [ on; (if calls > 0 then calls_text calls else "") ]; tone = Plain }
@@ -382,7 +386,7 @@ let tool_line ~cols ~now ~can_finish (chunk : Acting.chunk) (tool : Acting.chunk
     match tool.Acting.ct_duration_ms with
     | Some ms -> { text = Acting.elapsed_text ms; tone = Dim }
     | None when is_last && not chunk.Acting.ck_settled && can_finish ->
-        { text = "running" ^ middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Ok }
+        { text = "in turn" ^ middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Ok }
     | None when is_last && not chunk.Acting.ck_settled ->
         { text = "unfinished" ^ middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Warn }
     | None -> { text = ""; tone = Dim }
@@ -479,7 +483,7 @@ let focus_lines ~cols input chunks name =
             [ (if can_finish then
                  [ { text = running_glyph ^ " "; tone = Ok }
                  ; { text =
-                       "running" ^ middle_dot ^ age_text ~now:input.now current.Acting.ck_at
+                       "in turn" ^ middle_dot ^ age_text ~now:input.now current.Acting.ck_at
                    ; tone = Ok
                    }
                  ]

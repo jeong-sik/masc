@@ -138,7 +138,7 @@ let dead_fixture : Pane.input =
     Pane.keepers =
       keeper ~mark:"\xc3\x97" ~tone:Pane.Bad
         ~health:(Some Masc.Tui_decode.Health_offline) "goner"
-      :: fixture.Pane.keepers
+      :: keeper "bare" :: fixture.Pane.keepers
   ; selected = Some "goner"
   ; entries =
       fixture.Pane.entries
@@ -149,6 +149,9 @@ let dead_fixture : Pane.input =
           ; ( 996.
             , agent_core ~tool:"Read" ~turn:7 ~tool_use_id:"c" ~at:996.
                 ~correlation:"trace-goner" lane )
+          ; ( 997.
+            , agent_core ~kind:Observer.Turn_started ~turn:9 ~at:997.
+                ~correlation:"trace-bare" lane )
           ]
   }
 
@@ -159,6 +162,13 @@ let test_a_gone_keepers_turn_is_not_read_as_running () =
   let row = find_row_in dead_texts "goner" in
   check bool "the gone row says unfinished" true (contains "unfinished" row);
   check bool "the gone row does not say running" false (contains "running" row)
+
+let test_a_live_keeper_without_a_tool_says_in_turn () =
+  let row = find_row_in dead_texts "bare" in
+  check bool "a live turn with no call names its state" true
+    (contains "in turn" row);
+  check bool "the fleet row never borrows the phase word" false
+    (contains "running" row)
 
 let test_a_gone_keepers_focus_header_says_unfinished () =
   let header = index_of_in dead_texts "turn 7" in
@@ -233,7 +243,7 @@ let test_focus_block_names_the_current_turn () =
   check bool "first call returned" true (contains "Read" (nth (header + 1)));
   check bool "with its duration" true (contains "2.0s" (nth (header + 1)));
   check bool "second call still out" true (contains "Execute" (nth (header + 2)));
-  check bool "marked running" true (contains "running" (nth (header + 2)))
+  check bool "the last call says in turn" true (contains "in turn" (nth (header + 2)))
 
 let test_focus_falls_back_to_who_acted_last () =
   let drawn = Pane.lines ~rows ~cols ~scroll:0 { fixture with Pane.selected = None } in
@@ -484,6 +494,8 @@ let () =
             test_a_gone_keepers_turn_is_not_read_as_running
         ; test_case "a gone keeper's focus header says unfinished" `Quick
             test_a_gone_keepers_focus_header_says_unfinished
+        ; test_case "a live keeper without a tool says in turn" `Quick
+            test_a_live_keeper_without_a_tool_says_in_turn
         ] )
     ; ( "targets"
       , [ test_case "targets name the keeper under each fleet row" `Quick

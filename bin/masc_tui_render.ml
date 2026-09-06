@@ -4095,7 +4095,7 @@ let planning_phase_column =
    The count of these was thirteen. This is the last of them. *)
 let planning_phase_color = function
   | Goal_phase.Executing -> (Theme.info ())
-  | Goal_phase.Verifying -> Theme.category Theme.Slot_4
+  | Goal_phase.Verifying -> Theme.category Theme.Slot_2
   | Goal_phase.Completed -> (Theme.ok ())
   | Goal_phase.Dropped -> (Theme.muted ())
 
@@ -5571,7 +5571,7 @@ let keeper_flag_cell (runtime : keeper_runtime option) =
       let sandbox =
         match row.kr_sandbox_profile with
         | "docker" -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "D" ^ Ansi.reset
-        | "microvm" -> (Theme.category Theme.Slot_4) ^ "M" ^ Ansi.reset
+        | "microvm" -> (Theme.category Theme.Slot_2) ^ "M" ^ Ansi.reset
         | "local" -> Ansi.dim ^ "L" ^ Ansi.reset
         | other when String.length other > 0 ->
           (Theme.warn ()) ^ String.uppercase_ascii (String.sub other 0 1) ^ Ansi.reset
@@ -12970,8 +12970,8 @@ let change_row_summary (change : Masc.Tui_decode.file_change) =
 
 let change_kind_badge (change : Masc.Tui_decode.file_change) =
   match change.Masc.Tui_decode.fc_kind with
-  | Masc.Tui_decode.Fc_edited _ -> Theme.category Theme.Slot_4, "EDIT"
-  | Masc.Tui_decode.Fc_inserted _ -> Theme.category Theme.Slot_4, "MEMO"
+  | Masc.Tui_decode.Fc_edited _ -> Theme.category Theme.Slot_2, "EDIT"
+  | Masc.Tui_decode.Fc_inserted _ -> Theme.category Theme.Slot_2, "MEMO"
   | Masc.Tui_decode.Fc_written _ -> (Masc_tui_theme.tone Masc_tui_theme.Accent), "WRITE"
 
 let change_result_badge (change : Masc.Tui_decode.file_change) =
@@ -14712,6 +14712,9 @@ let render_code (state : state) =
           let marker =
             if node.Masc.Tui_decode.wt_has_children then
               if selected then "\xe2\x96\xb8 "
+              (* The mark colour the files below it take. A folder is not a
+                 kind of file, and the arrow already says which of the two
+                 this row is. *)
               else (Theme.category Theme.Slot_1) ^ "\xe2\x96\xb8 " ^ Ansi.reset
             else
               let kind =
@@ -14721,31 +14724,44 @@ let render_code (state : state) =
               if selected then glyph ^ " "
               else
                 let colour =
-                  (* Six kinds, six categorical slots (RFC-0431). These were
-                     constant SGR codes, so a file list was one of the places
-                     a theme could not reach: everything around it moved when
-                     the terminal answered with its palette and these did not.
+                  (* One colour for "this is a file mark". Which kind it is
+                     belongs to the glyph, and the glyph already carries it --
+                     seven kinds, seven distinct marks in File_icon.glyph.
 
-                     Six kinds and five slots, so Script and Media share
-                     one. They did before too -- magenta and bright magenta,
-                     a hue apart -- and the honest form of that is the same
-                     hue with two marks rather than two hues a reader cannot
-                     separate. Media had red for one commit, which is [bad]
-                     to the byte: a .png in the listing drew the same escape
-                     as the blame failure on its own half of the row.
+                     Colour used to carry the kind, over four slots, and it
+                     could not. Two reasons, both measured.
 
-                     Plain recedes through the theme rather than a constant
-                     [dim], for the same reason the six above it do. *)
-                  (* Six kinds over four slots, and the glyph is what tells
-                     any two apart inside one: [.vue] and [.ts] are the same
-                     job, so Web reads with Code rather than spending a hue
-                     the alphabet does not have. *)
+                     RFC-0431 measured the slot hues across every shipped
+                     scheme: 0.0014 to 0.0044 apart in Oklab under
+                     deuteranopia and protanopia, against the 0.024 a colour
+                     has to clear to read as a distinction at all. About a
+                     seventh of it. For roughly one reader in twelve the axis
+                     was never splitting, whatever the slots held.
+
+                     And it cost what it could not buy. write_two_panes joins
+                     this listing to the content pane on one terminal row, and
+                     that pane draws Theme.bad, ok, info and warn -- red,
+                     green, cyan, yellow. Of the seven colours a theme names
+                     that leaves blue and magenta, so a kind axis wider than
+                     two was a status token to the byte on somebody's row.
+                     #33477 caught red against bad, when a .png in the listing
+                     drew the blame failure's escape beside it. #33722 caught
+                     green against ok. Cyan against info and yellow against
+                     warn were the same defect and outlived both, because the
+                     test that was supposed to stop this named only bad and
+                     ok.
+
+                     Blue rather than magenta, because magenta already means
+                     Verifying, microvm, EDIT, MEMO and two context readings
+                     elsewhere, and one more meaning on it is the pile
+                     RFC-0431 was opened to take apart.
+
+                     Plain recedes rather than taking a constant [dim], so a
+                     mark nobody classified still moves with the theme. *)
                   match kind with
-                  | File_icon.Code | File_icon.Web -> Theme.category Theme.Slot_1
-                  | File_icon.Data -> Theme.category Theme.Slot_2
-                  | File_icon.Prose -> Theme.category Theme.Slot_3
-                  | File_icon.Script | File_icon.Media ->
-                    Theme.category Theme.Slot_4
+                  | File_icon.Code | File_icon.Web | File_icon.Data
+                  | File_icon.Prose | File_icon.Script | File_icon.Media ->
+                    Theme.category Theme.Slot_1
                   | File_icon.Plain -> Theme.recede ()
                 in
                 colour ^ glyph ^ Ansi.reset ^ " "
@@ -16668,7 +16684,7 @@ module Context_bars = Masc_tui_context_bars
 
 let context_component_style = function
   | Turn_record.Prompt_block Prompt_block_id.Memory_os_recall ->
-      Ansi.bold ^ Theme.category Theme.Slot_4
+      Ansi.bold ^ Theme.category Theme.Slot_2
   | Turn_record.Prompt_block _ -> Ansi.bold
   | Turn_record.Tool_schemas -> (Theme.warn ())
   | Turn_record.Message_user -> (Theme.info ())
@@ -16684,7 +16700,7 @@ let context_evidence_style = function
   | Masc_tui_context_inspector.Serialized_turn_snapshot ->
       Ansi.bold ^ Theme.info ()
   | Masc_tui_context_inspector.Producer_digest_only ->
-      Ansi.bold ^ Theme.category Theme.Slot_4
+      Ansi.bold ^ Theme.category Theme.Slot_2
   | Masc_tui_context_inspector.Byte_count_only ->
       Ansi.bold ^ (Theme.recede ())
 

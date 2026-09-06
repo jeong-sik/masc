@@ -761,18 +761,29 @@ let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars ~fetched_at_unix =
           match content_kind_of_content_type response.content_type with
           | Error content_type -> Error (Unsupported_content_type content_type)
           | Ok content_kind ->
-              let title =
-                match content_kind with
-                | Html -> extract_title response.body
-                | Plain_text | Json_text | Xml_text -> None
-              in
-              let description =
-                match content_kind with
-                | Html -> extract_description response.body
-                | Plain_text | Json_text | Xml_text -> None
-              in
-              let rendered, extraction_source =
-                render_payload ~extract_mode ~content_kind response.body
+              (* Parsing the document, the regex passes over it and the
+                 markdown rendering are pure CPU over [response.body]. On the
+                 calling fiber they held the main domain 430-625 ms per fetch
+                 (2026-09-06 trace, label [tool masc_web_fetch]; the stack
+                 sample there was Markup's encoder and [extract_description]).
+                 The three run as one job on the domain pool when one is
+                 installed, and inline otherwise. [truncate_text] stays on the
+                 fiber: it offloads the full text to a file. *)
+              let title, description, (rendered, extraction_source) =
+                Domain_pool_ref.submit_cpu_or_inline (fun () ->
+                  let title =
+                    match content_kind with
+                    | Html -> extract_title response.body
+                    | Plain_text | Json_text | Xml_text -> None
+                  in
+                  let description =
+                    match content_kind with
+                    | Html -> extract_description response.body
+                    | Plain_text | Json_text | Xml_text -> None
+                  in
+                  ( title
+                  , description
+                  , render_payload ~extract_mode ~content_kind response.body ))
               in
               let text, truncated, full_text_sha256 =
                 truncate_text ~max_chars ~source_url:response.final_url ~title

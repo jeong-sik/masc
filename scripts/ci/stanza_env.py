@@ -182,18 +182,27 @@ def suite_env(
         pairs = collect_setenv(forms)
     else:
         pairs = []
+        unattributable = False
         for form in forms:
-            if not isinstance(form, list) or not form:
-                continue
-            if form[0] not in ("test", "tests"):
+            named = (
+                isinstance(form, list)
+                and form
+                and form[0] in ("test", "tests")
+                and stanza_names(form)
+            )
+            if not named:
+                # A setenv that belongs to no named stanza belongs to no
+                # suite this can name -- a (rule (alias runtest) ...) carries
+                # no (name ...) to match on. Running any suite from this file
+                # would then risk a partial environment, which is the failure
+                # this whole script exists to stop.
+                if collect_setenv(form):
+                    unattributable = True
                 continue
             if suite not in stanza_names(form):
                 continue
             pairs.extend(collect_setenv(form))
-        # test/dune declares hundreds of suites. Finding a setenv there that
-        # this could not attribute would mean running with a partial
-        # environment, which is the failure this whole script exists to stop.
-        if not pairs and "(setenv" in text and suite in text:
+        if unattributable:
             raise StanzaError(
                 "declared inline in test/dune next to a setenv this could not "
                 "attribute; give the suite its own test/stanzas file or extend "
@@ -330,6 +339,16 @@ def self_test() -> int:
     except StanzaError:
         print("pass an unattributable inline setenv is an error, not an empty result")
 
+    # test/dune declares hundreds of suites and three of them set an
+    # environment. A suite that sets none stands beside those three, and its
+    # empty environment is the answer rather than a gap: every setenv in the
+    # file is inside a named stanza, so nothing was left unassigned. Asking
+    # only whether the file contained "(setenv" anywhere refused every one of
+    # them, and test_tui_turn_rail could not be dispatched at all.
+    neighbours = FIXTURE_PLAIN + "\n" + FIXTURE_GROUP
+    env, _ = suite_env("test_one", neighbours, own_file=False)
+    check("a suite with no setenv beside one that has some", env, [])
+
     # The one suite test.yml used to hardcode still reads the same three.
     real = os.path.join(STANZA_DIR, "test_heartbeat_integration.inc")
     if os.path.exists(real):
@@ -352,20 +371,38 @@ def self_test() -> int:
     return 0
 
 
+def inline_suite_names() -> list[str]:
+    """The suites test/dune declares directly, rather than through a stanza
+    file. There are far more of these than there are stanza files, and a
+    targeted dispatch names them the same way."""
+    with open(os.path.join(REPO_ROOT, "test", "dune"), encoding="utf-8") as handle:
+        forms = parse(tokenize(handle.read()))
+    names: list[str] = []
+    for form in forms:
+        if isinstance(form, list) and form and form[0] in ("test", "tests"):
+            names.extend(stanza_names(form))
+    return sorted(set(names))
+
+
 def check_all() -> int:
-    """Every stanza file, so a new one this cannot read fails at PR time.
+    """Every suite a dispatch can name, so one this cannot read fails at PR
+    time.
 
     The alternative is finding out during a dispatch, where the symptom is a
-    suite that ran under an environment nobody chose.
+    suite that ran under an environment nobody chose -- or, as happened on
+    2026-09-06, a suite that could not be dispatched at all. Reading only the
+    stanza files left the 800-odd suites test/dune declares inline unchecked,
+    which is where that one was.
     """
     names = sorted(
         name[: -len(".inc")]
         for name in os.listdir(STANZA_DIR)
         if name.endswith(".inc")
     )
+    inline = [name for name in inline_suite_names() if name not in set(names)]
     broken = 0
     with_env = 0
-    for suite in names:
+    for suite in names + inline:
         try:
             text, own_file = stanza_text(suite)
             env, _ = suite_env(suite, text, own_file=own_file)
@@ -379,7 +416,8 @@ def check_all() -> int:
         print(f"stanza env: {broken} stanza(s) this cannot read", file=sys.stderr)
         return 1
     print(
-        f"stanza env: read all {len(names)} stanzas; {with_env} declare an environment"
+        f"stanza env: read all {len(names)} stanza files and {len(inline)} suites "
+        f"declared inline in test/dune; {with_env} declare an environment"
     )
     return 0
 

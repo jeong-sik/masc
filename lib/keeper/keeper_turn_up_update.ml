@@ -106,6 +106,7 @@ let rec swap_keepalive_lane_fenced (ctx : _ context) (updated : keeper_meta)
     Eio_context.run_on_owner_domain (fun () ->
       swap_keepalive_lane_fenced ctx updated)
   else
+    let () = Printf.printf "DIAG14 upd-local-branch\n%!" in
     let base_path = ctx.config.base_path in
   let keeper_name = updated.name in
   let rollback ~operation_id =
@@ -122,9 +123,12 @@ let rec swap_keepalive_lane_fenced (ctx : _ context) (updated : keeper_meta)
   in
   let swap () = stop_keepalive_and_await ~base_path keeper_name in
   let operation_id = Keeper_shutdown_types.Operation_id.generate () in
-  match
+  Printf.printf "DIAG14 upd-before-begin-shutdown\n%!";
+  let begin_result =
     Keeper_owner_registry.begin_shutdown ~base_path ~keeper_name ~operation_id
-  with
+  in
+  Printf.printf "DIAG14 upd-after-begin-shutdown\n%!";
+  match begin_result with
   | Error error ->
     Error
       (tool_result_error ~class_:Tool_result.Runtime_failure

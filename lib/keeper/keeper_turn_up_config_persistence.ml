@@ -474,7 +474,9 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
     else Ok ()
   in
   let transaction () =
+    Printf.printf "DIAG14 tx-enter\n%!";
     match with_lock path (fun () ->
+    Printf.printf "DIAG14 tx-inside-manifest-lock\n%!";
     match
       Runtime.with_keeper_assignment_transaction
         ~runtime_config_path:
@@ -482,6 +484,7 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
              ~base_path:config.base_path)
         ~keeper_name:meta.name
         (fun runtime_transaction ->
+      Printf.printf "DIAG14 tx-inside-runtime-transaction\n%!";
       let ( let* ) = Result.bind in
       let* () = instructions_result |> Result.map_error (fun error -> Io_error error) in
       let* snapshot =

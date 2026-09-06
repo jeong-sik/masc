@@ -9796,7 +9796,26 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         then Buffer.add_char state.msg_input ' ';
         Buffer.add_string state.msg_input text;
         save_message_draft state;
-        state.last_action <- Some ("voice: " ^ text, Unix.gettimeofday ()))
+        state.last_action <- Some ("voice: " ^ text, Unix.gettimeofday ());
+        (* [voice.stt].send_on_stop: the operator who says a sentence and
+           stops the capture has finished the sentence, and the Enter that
+           follows says nothing the stop did not. Off by default, because the
+           draft is also where a spoken half-sentence waits for typing, and
+           taking the review step away costs an operator who works that way
+           more than it saves the one who does not.
+
+           Sent by handing the composer the send key rather than calling the
+           send path: that path decides what a draft is (a message, a slash
+           command, a preset) and which surface comes forward, and a second
+           caller would be a second answer to those questions. A capture in
+           continuous mode re-arms above before this, so the microphone is
+           already listening for the next sentence when this returns. *)
+        if state.voice_send_on_stop
+        then (
+          let (_ : bool) =
+            handle_composer_key state ~base_path ~mailbox Composer.send_key
+          in
+          ()))
   | Voice_silent { keeper; reason } ->
       if state.voice_capture = Some keeper then (
         state.voice_capture <- None;
@@ -12139,6 +12158,12 @@ let main () =
     Option.value
       (Masc_tui_config.coalesce_queued_input ~base_path)
       ~default:true;
+  (* Default false, unlike its neighbours: this one sends without the operator
+     confirming, so absence is not consent. *)
+  state.voice_send_on_stop <-
+    Option.value
+      (Masc_tui_config.voice_send_on_stop ~base_path)
+      ~default:false;
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in

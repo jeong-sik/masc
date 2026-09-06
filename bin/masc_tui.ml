@@ -6556,17 +6556,17 @@ let convert_to_png input_path =
 (* Put a picture on the terminal, or say why not. The refusal is text for the
    pane: there is nothing to draw, and taking the screen away from the frame
    to say so would hide the only surface that can say it. *)
-(* Mosaic preview size: 120 cells wide, 64 pixels tall -> 32 half-block rows.
-   Bigger = sharper (og:images are high-res; cell count is the cap). The modal
-   only draws it when it fits the width (render_modal_card guards), so a narrow
-   terminal skips it rather than wrapping. Decode and draw stay a few ms. *)
+(* Mosaic preview width, in cells. Only the width is fixed; the height follows
+   the image's aspect ratio (see [image_url_to_mosaic]), so the picture is never
+   stretched. Bigger = sharper (og:images are high-res; cell count is the cap).
+   The modal draws it only when it fits the width (render_modal_card guards), so
+   a narrow terminal skips it rather than wrapping. Decode/draw stay a few ms. *)
 let mosaic_cols = 120
-let mosaic_pixel_rows = 64
 
 (* Download a preview image and decode it into half-block mosaic lines, or None.
    Blocking (curl + ffmpeg through Unix.system): the caller runs it off the
    render loop inside run_in_systhread. *)
-let image_url_to_mosaic ~cols ~rows url =
+let image_url_to_mosaic ~cols url =
   match download_remote_image url with
   | Error _ -> None
   | Ok local_path -> (
@@ -6574,14 +6574,17 @@ let image_url_to_mosaic ~cols ~rows url =
         Filename.concat
           (ensure_img_cache_dir ())
           ("mosaic_"
-          ^ Digest.to_hex (Digest.string (Printf.sprintf "%s_%dx%d" url cols rows))
+          ^ Digest.to_hex (Digest.string (Printf.sprintf "%s_ar%d" url cols))
           ^ ".raw")
       in
+      (* Width is fixed at [cols]; height follows the image's own aspect ratio.
+         scale=cols:-2 keeps the ratio and rounds to an even height for the
+         half-block pairing, so the picture is never stretched. *)
       let cmd =
         Printf.sprintf
-          "ffmpeg -y -loglevel error -i %s -vf scale=%d:%d -f rawvideo -pix_fmt \
+          "ffmpeg -y -loglevel error -i %s -vf scale=%d:-2 -f rawvideo -pix_fmt \
            rgb24 %s"
-          (Filename.quote local_path) cols rows (Filename.quote raw)
+          (Filename.quote local_path) cols (Filename.quote raw)
       in
       match Unix.system cmd with
       | Unix.WEXITED 0 when Sys.file_exists raw -> (
@@ -6589,6 +6592,7 @@ let image_url_to_mosaic ~cols ~rows url =
             let ic = open_in_bin raw in
             let data = really_input_string ic (in_channel_length ic) in
             close_in ic;
+            let rows = String.length data / (cols * 3) in
             match Masc_tui_image_mosaic.render ~cols ~rows data with
             | [] -> None
             | lines -> Some lines
@@ -6600,7 +6604,7 @@ let () =
     fun img ->
       match
         Eio_guard.run_in_systhread ~label:"tui-image-mosaic" (fun () ->
-            image_url_to_mosaic ~cols:mosaic_cols ~rows:mosaic_pixel_rows img)
+            image_url_to_mosaic ~cols:mosaic_cols img)
       with
       | Some lines -> Masc_tui_link_preview.mosaic_store img lines
       | None -> ()

@@ -267,14 +267,30 @@ let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.p
 
 let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~registry_entry ~kind
     ~base_url =
+  (* The registry carries the catalog [providers] rows verbatim — including
+     their request_path (provider_registry.default registers every
+     Model_catalog provider entry). A provider whose catalog row names a
+     different surface (deepseek-responses -> "/responses") must not have the
+     protocol default stamped over it, so a registry-declared path wins over
+     the Chat-completions default. Providers absent from the catalog keep the
+     protocol default exactly as before: their registry entries carry only the
+     kind default, and no catalog row means no separate surface to name. *)
   let request_path =
-    match provider.api_format, kind with
-    | Runtime_schema.Chat_completions_api, Llm_provider.Provider_config.OpenAI_compat ->
-      Masc_network_defaults.chat_completions_path
+    match registry_entry with
+    | Some entry
+      when not
+             (String.equal
+                entry.Llm_provider.Provider_registry.defaults.request_path
+                "") ->
+      entry.Llm_provider.Provider_registry.defaults.request_path
     | _ ->
-      (match registry_entry with
-       | Some entry -> entry.Llm_provider.Provider_registry.defaults.request_path
-       | None -> Llm_provider.Provider_config.request_path_default_for_kind kind)
+      (match provider.api_format, kind with
+       | Runtime_schema.Chat_completions_api, Llm_provider.Provider_config.OpenAI_compat ->
+         Masc_network_defaults.chat_completions_path
+       | _ ->
+         (match registry_entry with
+          | Some entry -> entry.Llm_provider.Provider_registry.defaults.request_path
+          | None -> Llm_provider.Provider_config.request_path_default_for_kind kind))
   in
   match kind with
   | Llm_provider.Provider_config.OpenAI_compat ->

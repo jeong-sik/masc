@@ -87,9 +87,10 @@ type kind =
       }
   | Said_by_keeper
   | Autonomous_reply
-      (** What an autonomous turn said after its trace. A blank reply remains
-          a row, but callers can mark it instead of drawing an empty keeper
-          message. *)
+      (** What an autonomous turn said after its trace. Always something: a
+          turn that wrote nothing produces no row at all, because nobody asked
+          it to speak and an empty line said less than the header already
+          does. A direct turn's blank reply is still a row. *)
   | Delivery_failed of
       { origin_request_id : string option
       ; recovered_at : float option

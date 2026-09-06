@@ -1255,13 +1255,28 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                   , [] )
               in
               let said =
-                (* Skill rows count as the turn's visible content too: when
+                (* An autonomous turn that wrote nothing has nothing to say.
+                   With a trace the calls are the turn; without one the wake
+                   produced neither, and as a row it was a speaker label over
+                   an empty line -- which a later change filled with a middle
+                   dot so the line would not look broken. Eleven of the
+                   fourteen Keeper rows on one live screen were that dot.
+
+                   A direct turn keeps its blank row: someone asked, and an
+                   empty answer is part of that exchange. Nobody asked for an
+                   autonomous one.
+
+                   Trimmed rather than compared against "": a reply of a
+                   single newline is as blank as no reply, and an exact
+                   comparison let it through to be drawn as the dot.
+
+                   Skill rows count as the turn's visible content too: when
                    the projection replaces the raw skill tool, trace_rows is
-                   empty and the old guard let an empty utterance row through
+                   empty and an older guard let an empty utterance row through
                    under the Skill row. *)
                 if
-                  String.equal content ""
-                  && (skill_rows <> [] || trace_rows <> [])
+                  String.trim content = ""
+                  && (autonomous || skill_rows <> [] || trace_rows <> [])
                 then []
                 else
                   [ Utterance

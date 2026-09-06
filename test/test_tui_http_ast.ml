@@ -542,9 +542,11 @@ let test_keeper_chat_uses_current_async_contract () =
        predicted the caret's row by repeating the pane's layout arithmetic,
        which only stayed true while every row the pane drew was also counted
        in the row budget. The renderer now reads the rows it has already put
-       in the frame, so [frame_lines] is what this list pins instead. *)
+       in the frame, so [count_frame_lines] is what this list pins instead --
+       the count, not the list: the caret needs how many rows sit above it and
+       nothing about their text. *)
     [ "Message_layout.input_viewport"
-    ; "frame_lines"
+    ; "count_frame_lines"
     ; "Message_layout.input_cursor_column"
     ; "Message_layout.message_viewport_supported"
       (* Renamed by #30141, which put a surface strip above every frame.  The

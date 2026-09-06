@@ -134,6 +134,42 @@ let test_render_inline_card_column_alignment () =
          first_width w)
     widths
 
+let test_render_notion_card_2column_alignment () =
+  let urls =
+    [ "https://github.com/jeong-sik/masc/pull/30866"
+    ; "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    ; "https://arxiv.org/abs/2301.07041"
+    ; "https://news.ycombinator.com/item?id=38912345"
+    ; "https://example.com/assets/diagram.png"
+    ; "https://example.com/article"
+    ]
+  in
+  List.iter
+    (fun url ->
+       let p = synthesize_preview url in
+       let card_lines = render_notion_card ~width:70 p in
+       check bool "2-column card has 7 lines (top + 5 content + bottom)" true (List.length card_lines = 7);
+       let widths = List.map Masc_tui_message_layout.display_width card_lines in
+       let first_w = List.hd widths in
+       check bool "first line has positive width" true (first_w > 0);
+       List.iter
+         (fun w ->
+            check int (Printf.sprintf "all 7 lines match cell width for %s" url) first_w w)
+         widths)
+    urls
+
+let test_render_notion_card_narrow_fallback () =
+  let p = synthesize_preview "https://github.com/jeong-sik/masc/pull/30866" in
+  let card_lines = render_notion_card ~width:45 p in
+  check bool "narrow card has lines" true (List.length card_lines >= 4);
+  let widths = List.map Masc_tui_message_layout.display_width card_lines in
+  let first_w = List.hd widths in
+  check bool "first line has positive width" true (first_w > 0);
+  List.iter
+    (fun w ->
+       check int "narrow card all lines match cell width" first_w w)
+    widths
+
 let test_render_modal_card () =
   let p = synthesize_preview "https://example.com/photo.png" in
   let modal_lines = render_modal_card ~width:60 ~height:20 p in
@@ -159,6 +195,8 @@ let () =
     ; ( "render"
       , [ test_case "compact badge" `Quick test_render_compact_badge
         ; test_case "inline card column alignment" `Quick test_render_inline_card_column_alignment
+        ; test_case "notion 2-column card alignment" `Quick test_render_notion_card_2column_alignment
+        ; test_case "notion narrow fallback" `Quick test_render_notion_card_narrow_fallback
         ; test_case "modal card" `Quick test_render_modal_card
         ] )
     ]

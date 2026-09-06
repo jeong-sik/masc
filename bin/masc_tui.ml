@@ -6285,6 +6285,7 @@ let paste_clipboard_image state =
    and remembered: the answer cannot change while the process runs, and asking
    again would put another reply on the key stream. [None] until asked. *)
 let terminal_draws_images = ref None
+let active_graphics_protocol = ref Masc_tui_graphics.Unsupported_protocol
 
 (* Said the same at both doors a picture comes through: the capability was
    asked once and the answer cannot change, so neither does the sentence that
@@ -6489,29 +6490,78 @@ let draw_image state ~refuse ~title data =
            Masc_tui_graphics.payload_media_type media)
   | Ok _ ->
       let rows, columns = get_terminal_size () in
-      (* Three rows kept back, not the two this comment used to claim: the
-         name above the picture, the way out below it, and one more.
-         Counting what is drawn, the picture starts at row 2 and the way
-         out is written at row [rows], so [rows - 2] would already clear
-         it -- the third row is spare.
-         Left as it is on purpose. Some terminals scroll when an image
-         reaches the last row, and a spare row is the usual guard, but
-         nothing here records whether that is why. Naming it after a reason
-         that may not be the real one would put a guess in the code, so the
-         comment says what is true and stops there. *)
       let box =
         { Masc_tui_graphics.columns = max 1 (columns - 2)
         ; rows = max 1 (rows - 3)
         }
       in
+      let img_escape =
+        match !active_graphics_protocol with
+        | Masc_tui_graphics.ITerm2_protocol ->
+            Masc_tui_graphics.iterm2_place ~data box
+        | Masc_tui_graphics.Kitty_protocol | Masc_tui_graphics.Unsupported_protocol ->
+            Masc_tui_graphics.place ~data box
+      in
       write_to_terminal
         (Ansi.clear ^ Masc_tui_graphics.delete_all
         ^ Printf.sprintf "\x1b[1;1H%s\x1b[2;1H"
             (Message_layout.fit_width title (max 1 (columns - 1)))
-        ^ Masc_tui_graphics.place ~data box
+        ^ img_escape
         ^ Printf.sprintf "\x1b[%d;1H%s" rows
             (Message_layout.fit_width "  any key: back" (max 1 (columns - 1))));
       state.image_open <- true
+
+let ensure_img_cache_dir () =
+  let dir = Filename.concat (Filename.get_temp_dir_name ()) "masc_img_cache" in
+  (try Unix.mkdir dir 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  dir
+
+let download_remote_image url =
+  let cache_dir = ensure_img_cache_dir () in
+  let hash = Digest.to_hex (Digest.string url) in
+  let target_file = Filename.concat cache_dir ("img_" ^ hash) in
+  if Sys.file_exists target_file && (Unix.stat target_file).st_size > 0 then
+    Ok target_file
+  else
+    let cmd =
+      Printf.sprintf "curl -s -L --max-time 5 -o %s %s"
+        (Filename.quote target_file)
+        (Filename.quote url)
+    in
+    match Unix.system cmd with
+    | Unix.WEXITED 0 when Sys.file_exists target_file && (Unix.stat target_file).st_size > 0 ->
+        Ok target_file
+    | _ ->
+        (try Sys.remove target_file with _ -> ());
+        Error "could not download remote image"
+
+let convert_to_png input_path =
+  let cache_dir = ensure_img_cache_dir () in
+  let hash = Digest.to_hex (Digest.string (input_path ^ "_converted_png")) in
+  let target_png = Filename.concat cache_dir ("conv_" ^ hash ^ ".png") in
+  if Sys.file_exists target_png && (Unix.stat target_png).st_size > 0 then
+    Ok target_png
+  else
+    let commands =
+      [ Printf.sprintf "sips -s format png %s --out %s >/dev/null 2>&1"
+          (Filename.quote input_path) (Filename.quote target_png)
+      ; Printf.sprintf "convert %s %s >/dev/null 2>&1"
+          (Filename.quote input_path) (Filename.quote target_png)
+      ; Printf.sprintf "ffmpeg -y -i %s %s >/dev/null 2>&1"
+          (Filename.quote input_path) (Filename.quote target_png)
+      ]
+    in
+    let rec try_cmd = function
+      | [] -> Error "could not convert image to PNG"
+      | cmd :: rest ->
+          match Unix.system cmd with
+          | Unix.WEXITED 0 when Sys.file_exists target_png && (Unix.stat target_png).st_size > 0 ->
+              Ok target_png
+          | _ ->
+              (try Sys.remove target_png with _ -> ());
+              try_cmd rest
+    in
+    try_cmd commands
 
 (* Put a picture on the terminal, or say why not. The refusal is text for the
    pane: there is nothing to draw, and taking the screen away from the frame
@@ -6520,13 +6570,62 @@ let open_image state ~notice path =
   let refuse reason =
     notice ~role:Message_error (Printf.sprintf "/image %s: %s" path reason)
   in
-  match !terminal_draws_images with
-  | Some false -> refuse terminal_draws_no_images
-  | Some true | None -> (
-      match read_file_bytes path with
-      | Error detail -> refuse detail
-      | Ok data when String.length data = 0 -> refuse "the file is empty"
-      | Ok data -> draw_image state ~refuse ~title:path data)
+  let is_remote =
+    String.starts_with ~prefix:"http://" path
+    || String.starts_with ~prefix:"https://" path
+  in
+  if is_remote && !terminal_draws_images = Some false then
+    match Masc_tui_browser.open_url path with
+    | Ok opener ->
+        notice ~role:Message_local
+          (Printf.sprintf "Opened in browser (%s): %s" opener path)
+    | Error err ->
+        refuse (Printf.sprintf "Could not open browser: %s" err)
+  else
+    let local_path_res =
+      if is_remote then download_remote_image path else Ok path
+    in
+    match local_path_res with
+    | Error dl_err ->
+        (match Masc_tui_browser.open_url path with
+         | Ok opener ->
+             notice ~role:Message_local
+               (Printf.sprintf "Image download failed. Opened in browser (%s): %s" opener path)
+         | Error _ ->
+             refuse dl_err)
+    | Ok local_path -> (
+        match !terminal_draws_images with
+        | Some false -> refuse terminal_draws_no_images
+        | Some true | None -> (
+            match read_file_bytes local_path with
+            | Error detail -> refuse detail
+            | Ok data when String.length data = 0 -> refuse "the file is empty"
+            | Ok initial_data ->
+                let prepared_data =
+                  match Masc.Keeper_vision_tool.sniff_image_media_type initial_data with
+                  | Ok media when String.equal media Masc_tui_graphics.payload_media_type ->
+                      initial_data
+                  | _ -> (
+                      match convert_to_png local_path with
+                      | Ok png_path -> (
+                          match read_file_bytes png_path with
+                          | Ok png_data -> png_data
+                          | Error _ -> initial_data)
+                      | Error _ -> initial_data)
+                in
+                match Masc.Keeper_vision_tool.sniff_image_media_type prepared_data with
+                | Ok media when String.equal media Masc_tui_graphics.payload_media_type ->
+                    draw_image state ~refuse ~title:path prepared_data
+                | _ ->
+                    if is_remote then
+                      match Masc_tui_browser.open_url path with
+                      | Ok opener ->
+                          notice ~role:Message_local
+                            (Printf.sprintf "Terminal draws PNG only. Opened image in browser (%s): %s" opener path)
+                      | Error _ ->
+                          draw_image state ~refuse ~title:path prepared_data
+                    else
+                      draw_image state ~refuse ~title:path prepared_data))
 
 (* The staged door. Ctrl-V leaves the image in the attachment as base64 for
    the wire to the endpoint; the terminal wants the PNG's own bytes, so they
@@ -12374,11 +12473,20 @@ let main () =
    | true, None ->
      install_late_palette_publisher input_reader ~request_full_repaint
    | true, Some _ | false, _ -> ());
+  let proto =
+    match terminal_probe.graphics with
+    | Some Masc_tui_graphics.Supported -> Masc_tui_graphics.Kitty_protocol
+    | Some (Masc_tui_graphics.Refused _) | None ->
+        (match Sys.getenv_opt "TERM_PROGRAM" with
+         | Some "iTerm.app" -> Masc_tui_graphics.ITerm2_protocol
+         | _ -> Masc_tui_graphics.Unsupported_protocol)
+  in
+  active_graphics_protocol := proto;
   terminal_draws_images :=
     Some
-      (match terminal_probe.graphics with
-       | Some Masc_tui_graphics.Supported -> true
-       | Some (Masc_tui_graphics.Refused _) | None -> false);
+      (match proto with
+       | Masc_tui_graphics.Kitty_protocol | Masc_tui_graphics.ITerm2_protocol -> true
+       | Masc_tui_graphics.Unsupported_protocol -> false);
 
   (* ── Keeper settings over $EDITOR (#29684) ─────────────────────
      The editor itself is the confirmation step: an exit other than 0
@@ -14433,12 +14541,12 @@ and is loaded on demand through keeper_skill.
                 (match state.link_modal_url with
                  | Some url ->
                      let p = Masc_tui_link_preview.get_preview url in
+                     let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
                      (match p.image_url with
                       | Some img_url ->
-                          let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
                           open_image state ~notice img_url
                       | None ->
-                          add_event state "system" "Selected link is not an image resource")
+                          open_image state ~notice url)
                  | None -> ())
             | _ -> ())
        | Some k when state.patch_modal_open ->

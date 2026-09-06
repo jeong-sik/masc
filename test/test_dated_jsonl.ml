@@ -703,6 +703,72 @@ let test_count_entries () =
   check int "counts non-empty rows across dated files" 5
     (Dated_jsonl.count_entries store)
 
+(* ── fold_range_appended reads only what was appended ──── *)
+
+let today_utc () =
+  let open Unix in
+  let tm = gmtime (gettimeofday ()) in
+  Printf.sprintf "%04d-%02d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+;;
+
+(* The whole point is that the second call does not re-read the first call's
+   rows. A fold that returns the right total by reading everything again would
+   pass a total-only check, so the accumulator counts rows and the check is
+   what the second fold saw, not what the store holds. *)
+let test_fold_range_appended_sees_only_new_rows () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "dated_jsonl_fold_appended" in
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  let today = today_utc () in
+  List.iter (fun i -> Dated_jsonl.append store (make_json i)) [ 1; 2; 3 ];
+  let seen, cursors =
+    Dated_jsonl.fold_range_appended store ~since:today ~until:today ~cursors:[]
+      ~init:[] ~f:(fun acc json -> json_i json :: acc)
+  in
+  check (list int) "a first fold reads the file whole" [ 3; 2; 1 ] seen;
+  let seen_again, cursors_again =
+    Dated_jsonl.fold_range_appended store ~since:today ~until:today ~cursors
+      ~init:[] ~f:(fun acc json -> json_i json :: acc)
+  in
+  check (list int) "nothing appended, nothing read" [] seen_again;
+  check bool "the cursor did not move" true (cursors_again = cursors);
+  List.iter (fun i -> Dated_jsonl.append store (make_json i)) [ 4; 5 ];
+  let appended, cursors_after =
+    Dated_jsonl.fold_range_appended store ~since:today ~until:today
+      ~cursors:cursors_again ~init:[] ~f:(fun acc json -> json_i json :: acc)
+  in
+  check (list int) "only the rows appended since" [ 5; 4 ] appended;
+  check bool "the cursor advanced" true (cursors_after <> cursors_again);
+  let outside, _ =
+    Dated_jsonl.fold_range_appended store ~since:"2099-01-01" ~until:"2099-12-31"
+      ~cursors:[] ~init:[] ~f:(fun acc json -> json_i json :: acc)
+  in
+  check (list int) "a range with no files reads nothing" [] outside
+;;
+
+(* [range_day_file_paths] names files without opening them, and it must name
+   exactly the files [iter_range] would read -- a path it omits is a row an
+   incremental caller would never see again. *)
+let test_range_day_file_paths_matches_iter_range () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "dated_jsonl_range_paths" in
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  let today = today_utc () in
+  Dated_jsonl.append store (make_json 1);
+  let paths = Dated_jsonl.range_day_file_paths store ~since:today ~until:today in
+  check int "today names one file" 1 (List.length paths);
+  check bool "and it exists" true (List.for_all Sys.file_exists paths);
+  let rows = ref 0 in
+  Dated_jsonl.iter_range store ~since:today ~until:today (fun _ -> incr rows);
+  check bool "the file iter_range read" true (!rows > 0);
+  check (list string) "a future range names none" []
+    (Dated_jsonl.range_day_file_paths store ~since:"2099-01-01" ~until:"2099-12-31");
+  check (list string) "invalid dates name none" []
+    (Dated_jsonl.range_day_file_paths store ~since:"bad" ~until:"dates")
+;;
+
 (* ── read_range filters by date ────────────────────────── *)
 
 let test_read_range () =
@@ -1281,6 +1347,10 @@ let () =
       ( "read_range",
         [
           test_case "today range non-empty" `Quick test_read_range;
+          test_case "fold_range_appended sees only new rows" `Quick
+            test_fold_range_appended_sees_only_new_rows;
+          test_case "range_day_file_paths matches iter_range" `Quick
+            test_range_day_file_paths_matches_iter_range;
           test_case "malformed dates safe" `Quick test_read_range_malformed;
           test_case "range_recent returns newest n in window" `Quick test_read_range_recent;
           test_case "iter_all chronological" `Quick

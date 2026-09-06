@@ -193,14 +193,23 @@ let handle_runtime_ollama_probe (ctx : Core.context) args : Core.tool_result =
            ~continue)
 ;;
 
+(* Resolved against the same [definitions] list registration walks, so an
+   operation added to [Tool_schemas_local_runtime] is a compile error here. *)
+let find_operation name =
+  List.find_opt
+    (fun (definition : Tool_schemas_local_runtime.definition) ->
+      String.equal definition.schema.name name)
+    Tool_schemas_local_runtime.definitions
+  |> Option.map (fun (definition : Tool_schemas_local_runtime.definition) ->
+       definition.operation)
+
 let dispatch ctx ~name ~args : Core.tool_result option =
-  match name with
-  (* Canonical names *)
-  | "masc_runtime_verify" ->
+  match find_operation name with
+  | None -> None
+  | Some Tool_schemas_local_runtime.Verify ->
       Some (handle_runtime_verify ctx args)
-  | "masc_runtime_ollama_probe" ->
+  | Some Tool_schemas_local_runtime.Ollama_probe ->
       Some (handle_runtime_ollama_probe ctx args)
-  | _ -> None
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

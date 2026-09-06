@@ -49,9 +49,6 @@ val set_background_fetch : (string -> unit) -> unit
     fetch the page, replace the synthesized cache entry via {!cache_store}, and
     request a redraw. A no-op until registered (keeps [get_preview] pure). *)
 
-val site_icon : og_preview -> string
-(** Decorative glyph for the site (e.g. 🐙, 📄, 🟧, ▶️, 🖼️, 🌐). *)
-
 val site_label : og_preview -> string
 (** Human-readable site name or domain. *)
 

@@ -19,6 +19,7 @@
   masc.fs_compat
   masc.masc_core
   masc.masc_log
+  masc.masc_process
   cstruct
   eio
   eio.unix

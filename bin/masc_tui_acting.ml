@@ -99,7 +99,11 @@ let glyph_text = function
   | Turn_settled -> "\xe2\x96\xa0"
   | Failure -> "\xe2\x9c\x97"
   | Attention -> "?"
-  | Quiet -> "\xc2\xb7"
+  (* A quiet row claims no state, so it draws no mark: a blank first cell.
+     [\xc2\xb6] here read as the roster's idle glyph -- the same character
+     saying two things in one line (#33691). The label beside the cell
+     names the row. *)
+  | Quiet -> " "
 
 type row = {
   at : float;

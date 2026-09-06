@@ -511,7 +511,7 @@ let test_state_text_reads_each_case () =
   check bool "approval outranks a running turn" true
     (contains "approval"
        (plain (Pane.keeper_state_text ~now ~health:None ~approval:(Some "Write") None)));
-  check string "no chunk is quiet" "\xc2\xb7 quiet"
+  check string "no chunk is quiet, and draws no mark" "  quiet"
     (plain (Pane.keeper_state_text ~now ~health:None ~approval:None None))
 
 let test_tokens_and_ages_are_compact () =

@@ -893,7 +893,7 @@ let test_deleted_but_unpublished_is_explicit () =
 
 let test_server_skill_snapshot_runtime_refresh () =
   with_workspace @@ fun base_path ->
-  let _skill_path, _source_text, _reference, _refresh =
+  let skill_path, _source_text, _reference, _refresh =
     setup base_path ~access:"read-write"
   in
   let runtime_config_path = Filename.concat base_path "runtime.toml" in
@@ -905,24 +905,49 @@ let test_server_skill_snapshot_runtime_refresh () =
   match Runtime.load_config_observation ~runtime_config_path () with
   | Error msg -> fail msg
   | Ok observation ->
+    let rev1 =
+      match
+        Server_skill_snapshot_runtime.refresh_from_observation
+          ~base_path
+          observation
+      with
+      | Error err -> fail (Server_skill_snapshot_runtime.error_to_string err)
+      | Ok (Skill_catalog_snapshot_service.Published snapshot)
+      | Ok (Skill_catalog_snapshot_service.Unchanged snapshot) ->
+        let rev =
+          Skill_catalog_snapshot.snapshot_revision snapshot
+          |> Skill_catalog_snapshot.snapshot_revision_to_string
+        in
+        check bool "revision is non-empty" true (String.length rev > 0);
+        check
+          int
+          "one entry in snapshot"
+          1
+          (List.length (Skill_catalog_snapshot.entries snapshot));
+        rev
+      | Ok Skill_catalog_snapshot_service.Workspace_retired ->
+        fail "unexpected workspace retired"
+    in
+    let updated_text = skill_text "Updated description." "# Updated body" in
+    write_file skill_path updated_text;
     (match
        Server_skill_snapshot_runtime.refresh_from_observation
          ~base_path
          observation
      with
      | Error err -> fail (Server_skill_snapshot_runtime.error_to_string err)
-     | Ok (Skill_catalog_snapshot_service.Published snapshot)
-     | Ok (Skill_catalog_snapshot_service.Unchanged snapshot) ->
-       let rev =
+     | Ok (Skill_catalog_snapshot_service.Published snapshot) ->
+       let rev2 =
          Skill_catalog_snapshot.snapshot_revision snapshot
          |> Skill_catalog_snapshot.snapshot_revision_to_string
        in
-       check bool "revision is non-empty" true (String.length rev > 0);
        check
-         int
-         "one entry in snapshot"
-         1
-         (List.length (Skill_catalog_snapshot.entries snapshot))
+         bool
+         "new revision after mutation"
+         true
+         (not (String.equal rev1 rev2))
+     | Ok (Skill_catalog_snapshot_service.Unchanged _) ->
+       fail "expected published after skill file mutation, got unchanged"
      | Ok Skill_catalog_snapshot_service.Workspace_retired ->
        fail "unexpected workspace retired")
 ;;

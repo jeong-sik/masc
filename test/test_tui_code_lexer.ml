@@ -304,9 +304,71 @@ let test_python_reads_triple_quoted_string () =
     ]
     (Masc_tui_code_lexer.python_lexer "x = \"\"\"doc\"\"\"")
 
+(* Every branch of every lexer has to move the cursor. One that does not
+   turns opening a file into a frozen TUI, and no assertion catches it: the
+   lexer never answers, right or wrong. So this asks the only question that
+   can be asked -- does it come back -- for the fragments that make a branch
+   read one character and decide something about the next one. The alarm
+   turns a hang into a failed test naming the case in flight, instead of a
+   CI job that runs until its own timeout. *)
+let awkward_fragments =
+  [ ""; " "; "\n"; "\t"; "-"; "-1"; "--"; "---"; "+"; "0x"; "0x_"; "1e"; "1.";
+    ".5"; "e-"; "'"; "\""; "`"; "'''"; "\"\"\""; "\\"; "/*"; "*/"; "//"; "#";
+    "{"; "}"; "["; "]"; ":"; ": -"; "= -"; "@@"; "$"; "<<"; ">>";
+    {|{"a": -1}|}; "[-2.5, 3]"; "a = -1"; "x: -1"; "select -1"; "let x = -1";
+    "echo -1" ]
+
+let lexer_languages =
+  [ "ocaml"; "bash"; "json"; "diff"; "memory"; "yaml"; "toml"; "sql";
+    "typescript"; "go"; "rust"; "c"; "python" ]
+
+let in_flight = ref "the suite"
+
+(* One alarm for the whole run, armed before the first case and never
+   cancelled. A per-case alarm would not do: the case that catches the hang
+   disarms it on the way out, and the next case that walks into the same
+   branch waits with no one watching. OCaml 5 polls for signals inside
+   loops, so the handler reaches a branch that is making no progress, and
+   the process ends naming what it was reading. *)
+let start_the_watchdog () =
+  (* Alcotest redirects stderr into a per-case log while a case runs, and a
+     message about a case that never ends belongs where the run is being
+     read. So the descriptor is taken before the first case and written to
+     directly. *)
+  let runner_stderr = Unix.dup Unix.stderr in
+  ignore
+    (Sys.signal Sys.sigalrm
+       (Sys.Signal_handle
+          (fun _ ->
+            let said = Printf.sprintf "a lexer did not finish: %s\n" !in_flight in
+            ignore (Unix.write_substring runner_stderr said 0 (String.length said));
+            exit 2)));
+  ignore (Unix.alarm 120)
+
+let test_every_lexer_finishes_on_awkward_fragments () =
+  (fun () ->
+      List.iter
+        (fun language ->
+          match Masc_tui_code_lexer.lexer_of_language language with
+          | None -> Alcotest.failf "no lexer for %s" language
+          | Some lex ->
+            List.iter
+              (fun fragment ->
+                in_flight := Printf.sprintf "%s on %S" language fragment;
+                ignore (List.length (lex fragment)))
+              awkward_fragments)
+        lexer_languages)
+    ();
+  Alcotest.(check bool) "every lexer answered" true true
+
 let () =
+  start_the_watchdog ();
   Alcotest.run "masc_tui_code_lexer"
-    [ ( "ocaml"
+    [ ( "termination"
+      , [ Alcotest.test_case "every lexer finishes on awkward fragments" `Quick
+            test_every_lexer_finishes_on_awkward_fragments
+        ] )
+    ; ( "ocaml"
       , [ Alcotest.test_case "reserved words colour as keywords" `Quick
             test_reserved_words_colour_as_keywords
         ; Alcotest.test_case "a nested comment ends at its real close" `Quick

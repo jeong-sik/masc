@@ -950,6 +950,7 @@ let initialize_owner_state_blocking
      Sampled here rather than inside [Gc_sampler] so neither that module nor
      [Activity_graph] gains a dependency on the other. *)
   Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run ~name:"activity-cache-gauges" @@ fun _ ->
     let rec loop () =
       (try
          let stats = Activity_graph.cache_stats () in
@@ -968,6 +969,7 @@ let initialize_owner_state_blocking
     in
     loop ());
   Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run ~name:"tool-usage-flush" @@ fun _ ->
     let rec loop () =
       Eio.Time.sleep clock 5.0;
       (try Keeper_registry_tool_usage_persistence.flush_all_dirty () with
@@ -980,6 +982,7 @@ let initialize_owner_state_blocking
     in
     loop ());
   Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run ~name:"trajectory-flush" @@ fun _ ->
     let rec loop () =
       Eio.Time.sleep clock 2.0;
       (try Trajectory.flush_all_pending () with
@@ -1395,7 +1398,9 @@ let start_owner_lazy_tasks ~sw state =
    | Ok () -> ()
    | Error error ->
      raise (Owner_initialization_failed (Lazy_startup_barrier_failed error)));
-  Eio.Fiber.fork ~sw (fun () -> List.iter run_lazy_task_group task_groups)
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run ~name:"lazy-startup-tasks" @@ fun _ ->
+    List.iter run_lazy_task_group task_groups)
 
 let claim_and_start_keeper_persistence
       ~prepared_persistence
@@ -1638,6 +1643,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
      exits immediately rather than leaving that partial owner alive; only an
      auxiliary failure after readiness may continue as degraded serving. *)
   Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run ~name:"owner-initialization" @@ fun _ ->
     let handle_initialization_failure error =
       match
         startup_failure_disposition
@@ -1934,6 +1940,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
          or later keeper loop startup (#keeper-bootstrap-stuck). *)
       Atomic.set Server_dashboard_http.shell_warming true;
       Eio.Fiber.fork ~sw (fun () ->
+        Eio.Switch.run ~name:"dashboard-shell-prewarm" @@ fun _ ->
         let outer_timeout_sec =
           Env_config_runtime.Dashboard.shell_prewarm_outer_timeout_sec
         in
@@ -1964,6 +1971,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
      Prevents zombie-listener state where the socket is open but HTTP
      requests hang because init is stuck. *)
   Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run ~name:"startup-watchdog" @@ fun _ ->
     try
       let timeout_sec = Server_startup_state.watchdog_timeout_sec () in
       Eio.Time.sleep clock timeout_sec;

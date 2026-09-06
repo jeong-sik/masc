@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **The release ships the exec shim.** Every tagged release now carries
+  `masc-exec-shim-linux-arm64` and `masc-exec-shim-linux-amd64`, built
+  statically on a runner of the same architecture and probed before upload.
+  Operators download the asset beside the server binary instead of building
+  it; the runbook says so (RFC-0427 B-1).
+
 ## [0.33.0] - 2026-09-06
 
 - **TUI: Notion-grade 2-column web bookmarks, visual banners, and remote image viewer.**

@@ -15,6 +15,42 @@ max_output_tokens = 128000
 input_per_million = 10.0
 output_per_million = 50.0
 
+# 2026-09-06 RFC-0430 Phase 1: the same two direct models served over
+# DeepSeek's Anthropic-compatible surface. Probed live 2026-09-06: x-api-key
+# auth, deepseek model ids pass through unmapped (claude-* names map
+# server-side), usage carries the anthropic cache_creation/cache_read fields.
+# thinking rides the anthropic `thinking` param (budget_tokens ignored) with
+# effort high|max (https://api-docs.deepseek.com/guides/anthropic_api).
+# tool_choice stays auto-only: the direct surface rejects required/named
+# under thinking mode (measured), and this surface adds no such support.
+[[models]]
+id_prefix = "deepseek-v4-pro"
+base = "anthropic"
+provider_name = "deepseek-anthropic"
+anthropic_thinking_control = "always_adaptive"
+accepted_reasoning_efforts = ["high", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_native_streaming = true
+input_per_million = 1.32
+output_per_million = 3.96
+
+[[models]]
+id_prefix = "deepseek-v4-flash"
+base = "anthropic"
+provider_name = "deepseek-anthropic"
+anthropic_thinking_control = "always_adaptive"
+accepted_reasoning_efforts = ["high", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_native_streaming = true
+input_per_million = 0.44
+output_per_million = 1.32
+
 [[models]]
 id_prefix = "claude-mythos-5"
 base = "anthropic"
@@ -330,6 +366,11 @@ cache_read_multiplier = 1.0
 # serializing a request the model 400s on. Plain auto still works, so
 # supports_tool_choice stays true (mirrors the Kimi/GLM profiles).
 [[models]]
+# 2026-09-06 RFC-0430 Phase 0: 2026-08-16 peak pricing (off-peak 50%).
+# Cache-hit input bills at ~1/30 of the miss price (docs: kv_cache,
+# pricing). reasoning_replay mirrors the ollama_cloud deepseek rows:
+# docs require re-sending every prior turn's reasoning_content on
+# tools requests (400 otherwise) and ignore it without tools.
 id_prefix = "deepseek-v4-pro"
 base = "openai_chat"
 provider_name = "deepseek"
@@ -344,17 +385,23 @@ supports_extended_thinking = true
 supports_reasoning_budget = false
 accepted_reasoning_efforts = ["high", "max"]
 thinking_control_format = "thinking_object"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
 supports_response_format_json = true
 supports_structured_output = false
 supports_native_streaming = true
 supports_caching = true
 supports_prompt_caching = false
-input_per_million = 0.435
-output_per_million = 0.87
+input_per_million = 1.32
+output_per_million = 3.96
 cache_write_multiplier = 1.0
-cache_read_multiplier = 0.008333333333333333
+cache_read_multiplier = 0.0333
 
 [[models]]
+# 2026-09-06 RFC-0430 Phase 0: 2026-08-16 peak pricing (off-peak 50%).
+# Cache-hit input bills at ~1/30 of the miss price (docs: kv_cache,
+# pricing). reasoning_replay mirrors the ollama_cloud deepseek rows:
+# docs require re-sending every prior turn's reasoning_content on
+# tools requests (400 otherwise) and ignore it without tools.
 id_prefix = "deepseek-ai/deepseek-v4-pro"
 base = "openai_chat"
 provider_name = "deepseek"
@@ -369,17 +416,23 @@ supports_extended_thinking = true
 supports_reasoning_budget = false
 accepted_reasoning_efforts = ["high", "max"]
 thinking_control_format = "thinking_object"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
 supports_response_format_json = true
 supports_structured_output = false
 supports_native_streaming = true
 supports_caching = true
 supports_prompt_caching = false
-input_per_million = 0.435
-output_per_million = 0.87
+input_per_million = 1.32
+output_per_million = 3.96
 cache_write_multiplier = 1.0
-cache_read_multiplier = 0.008333333333333333
+cache_read_multiplier = 0.0333
 
 [[models]]
+# 2026-09-06 RFC-0430 Phase 0: 2026-08-16 peak pricing (off-peak 50%).
+# Cache-hit input bills at ~1/30 of the miss price (docs: kv_cache,
+# pricing). reasoning_replay mirrors the ollama_cloud deepseek rows:
+# docs require re-sending every prior turn's reasoning_content on
+# tools requests (400 otherwise) and ignore it without tools.
 id_prefix = "deepseek-v4-flash"
 base = "openai_chat"
 provider_name = "deepseek"
@@ -394,17 +447,23 @@ supports_extended_thinking = true
 supports_reasoning_budget = false
 accepted_reasoning_efforts = ["high", "max"]
 thinking_control_format = "thinking_object"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
 supports_response_format_json = true
 supports_structured_output = true
 supports_native_streaming = true
 supports_caching = true
 supports_prompt_caching = false
-input_per_million = 0.14
-output_per_million = 0.28
+input_per_million = 0.44
+output_per_million = 1.32
 cache_write_multiplier = 1.0
-cache_read_multiplier = 0.02
+cache_read_multiplier = 0.0333
 
 [[models]]
+# 2026-09-06 RFC-0430 Phase 0: 2026-08-16 peak pricing (off-peak 50%).
+# Cache-hit input bills at ~1/30 of the miss price (docs: kv_cache,
+# pricing). reasoning_replay mirrors the ollama_cloud deepseek rows:
+# docs require re-sending every prior turn's reasoning_content on
+# tools requests (400 otherwise) and ignore it without tools.
 id_prefix = "deepseek-ai/deepseek-v4-flash"
 base = "openai_chat"
 provider_name = "deepseek"
@@ -419,15 +478,52 @@ supports_extended_thinking = true
 supports_reasoning_budget = false
 accepted_reasoning_efforts = ["high", "max"]
 thinking_control_format = "thinking_object"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
 supports_response_format_json = true
 supports_structured_output = false
 supports_native_streaming = true
 supports_caching = true
 supports_prompt_caching = false
-input_per_million = 0.14
-output_per_million = 0.28
+input_per_million = 0.44
+output_per_million = 1.32
 cache_write_multiplier = 1.0
-cache_read_multiplier = 0.02
+cache_read_multiplier = 0.0333
+
+# 2026-09-06 RFC-0430 Phase 1: experimental vision model (news260821).
+# Text abilities equal v4-flash; adds image input. Images are billed as
+# input tokens after a dimension-based conversion capped at 384 tokens per
+# image, at flash prices. Only user-role image parts are accepted (system/
+# assistant image parts 400) and image inputs ride the same
+# /chat/completions endpoint — base64 data URL, external https URL, or a
+# Files API file_id part. Source: https://api-docs.deepseek.com/guides/vision
+# and /news/news260821, read 2026-09-06.
+[[models]]
+id_prefix = "deepseek-v4-flash-vision-exp"
+base = "openai_chat"
+provider_name = "deepseek"
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+accepted_reasoning_efforts = ["high", "max"]
+thinking_control_format = "thinking_object"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
+supports_response_format_json = true
+supports_structured_output = false
+supports_native_streaming = true
+supports_caching = true
+supports_prompt_caching = false
+supports_multimodal_inputs = true
+supports_image_input = true
+input_per_million = 0.44
+output_per_million = 1.32
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.0333
 
 # MiniMax Models
 # Source: official MiniMax docs checked 2026-06-30:
@@ -2306,6 +2402,19 @@ kind = "anthropic"
 base_url = "https://api.anthropic.com"
 request_path = "/v1/messages"
 api_key_env = "ANTHROPIC_API_KEY"
+capabilities_base = "anthropic"
+
+# 2026-09-06 RFC-0430 Phase 1: DeepSeek's Anthropic-compatible surface
+# (https://api-docs.deepseek.com/guides/anthropic_api, probed live
+# 2026-09-06): x-api-key fully supported, deepseek model ids pass through
+# unmapped (claude-* names map server-side to flash/pro). Same auth env as
+# the direct provider.
+[[providers]]
+id = "deepseek-anthropic"
+kind = "anthropic"
+base_url = "https://api.deepseek.com/anthropic"
+request_path = "/v1/messages"
+api_key_env = "DEEPSEEK_API_KEY"
 capabilities_base = "anthropic"
 
 [[providers]]

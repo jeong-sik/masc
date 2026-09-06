@@ -130,6 +130,7 @@ let start ~sw ~clock ~config:raw_config ~compute ~on_result =
       raw_config
   in
   Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run ~name:(config.label ^ " warm") @@ fun _ ->
     if config.warm_delay_s > 0.0 then begin
       Log.Dashboard.debug "%s warm cache delayed %.0fs" config.label config.warm_delay_s;
       Eio.Time.sleep clock config.warm_delay_s
@@ -160,6 +161,7 @@ let start ~sw ~clock ~config:raw_config ~compute ~on_result =
            (Time_compat.now () -. t0) (failure_message failure)
        end));
   Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run ~name:(config.label ^ " refresh") @@ fun _ ->
     Log.Dashboard.info "starting %s refresh loop" config.label;
     let consecutive_failures = ref 0 in
     let current_interval = ref config.interval_s in

@@ -518,16 +518,26 @@ let handle_check ~tool_name ~start_time ctx args =
   Workspace_assertions.handle_check ~inspect_state:inspect ~tool_name ~start_time ctx args
 ;;
 
+(* Goal tools route on their closed type. [dispatchable_names] and the routing
+   below both read Tool_name.Goal_name, so a constructor added there is a
+   compile error in [goal_handler] rather than a tool that gets advertised and
+   then answers "unknown". The two entries left in [dispatch_bindings] own no
+   closed type yet. *)
+let goal_handler : Tool_name.Goal_name.t -> dispatch_handler = function
+  | Tool_name.Goal_name.Goal_list -> Workspace_goals.handle_goal_list
+  | Tool_name.Goal_name.Goal_upsert -> Workspace_goals.handle_goal_upsert
+  | Tool_name.Goal_name.Goal_transition -> Workspace_goals.handle_goal_transition
+;;
+
 let dispatch_bindings : (string * dispatch_handler) list =
   [ "masc_heartbeat", handle_heartbeat
-  ; "masc_goal_list", Workspace_goals.handle_goal_list
-  ; "masc_goal_upsert", Workspace_goals.handle_goal_upsert
-  ; "masc_goal_transition", Workspace_goals.handle_goal_transition
   ; "masc_check", handle_check
   ]
 ;;
 
-let dispatchable_names = "masc_status" :: List.map fst dispatch_bindings
+let dispatchable_names =
+  ("masc_status" :: List.map fst dispatch_bindings)
+  @ List.map Tool_name.Goal_name.to_string Tool_name.Goal_name.all
 
 let dispatch_with_task_list_projection task_list_projection ctx ~name ~args =
   let start_time = Time_compat.now () in
@@ -541,9 +551,12 @@ let dispatch_with_task_list_projection task_list_projection ctx ~name ~args =
          ctx
          args)
   else
-    match List.assoc_opt name dispatch_bindings with
-    | Some handle -> Some (handle ~tool_name:name ~start_time ctx args)
-    | None -> None
+    match Tool_name.Goal_name.of_string name with
+    | Some goal -> Some (goal_handler goal ~tool_name:name ~start_time ctx args)
+    | None ->
+      (match List.assoc_opt name dispatch_bindings with
+       | Some handle -> Some (handle ~tool_name:name ~start_time ctx args)
+       | None -> None)
 ;;
 
 let dispatch ctx ~name ~args =

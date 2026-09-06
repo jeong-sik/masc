@@ -21,17 +21,19 @@ module Palette = Masc_tui_terminal_palette
 
 module Catalog = Masc_tui_theme_catalog
 
-(* [Catalog.all] reads config/themes relative to the process cwd, and a dune
-   test runs in _build/default/test, where that directory does not exist: the
-   list would quietly narrow to the bundled themes and every contrast below
-   would measure a copy instead of the shipped ones. The prompt gate
-   (test_prompt_templates_render) reads its directory through
-   DUNE_SOURCEROOT; this stanza deps (source_tree config/themes) the same
-   directory, so the two halves agree here. *)
+(* [Catalog.all]/[Catalog.find] take [~base_path] as the project root and
+   append "config/themes" to it themselves (theme_dirs_for_base in
+   masc_tui_theme_catalog.ml); the caller passes the root, not the themes
+   directory. A dune test runs in _build/default/test, where the process cwd
+   has no [config] at all: the list would quietly narrow to the bundled
+   themes and every contrast below would measure a copy instead of the
+   shipped ones. The prompt gate (test_prompt_templates_render) reads its
+   directory through DUNE_SOURCEROOT; this stanza deps (source_tree
+   config/themes) the same directory, so the two halves agree here. *)
 let themes_base_path () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root -> Filename.concat root "config/themes"
-  | None -> Filename.concat (Sys.getcwd ()) "config/themes"
+  | Some root -> root
+  | None -> Sys.getcwd ()
 ;;
 
 (* The schemes are the ones masc ships, not a copy of them. A number here is

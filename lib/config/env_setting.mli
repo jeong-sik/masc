@@ -39,6 +39,7 @@ module Int_knob : sig
     | Workspace_file_max_read_bytes
     | Tcp_listen_backlog
     | Ws_missed_pong_threshold
+    | Gc_space_overhead
   [@@deriving enumerate]
 
   val env_name : t -> string
@@ -56,6 +57,7 @@ module Float_knob : sig
     | Full_health_refresh_timeout_sec
     | Repo_sync_interval_sec
     | Snapshot_interval_sec
+    | Lazy_task_boot_guard_sec
   [@@deriving enumerate]
 
   val env_name : t -> string
@@ -71,6 +73,7 @@ module String_opt_knob : sig
     | Imessage_poll_interval_sec
     | Imessage_cursor_path
     | Sidecar_root
+    | Voice_realtime_ws_url
   [@@deriving enumerate]
 
   val env_name : t -> string

@@ -317,8 +317,6 @@ val load_list :
     keeper→runtime-id list; [media_failover] is the RFC-0265 ordered reroute
     list; [lanes] is the ordered failover candidate lists. *)
 
-val runtime_ids : t list -> string list
-
 type request_body_cap_error = Missing_or_non_positive_request_body_cap of
   { runtime_id : string
   }

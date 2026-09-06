@@ -108,12 +108,6 @@ let with_eio_lock ~check_after owner f =
   | Raised (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
 ;;
 
-let with_lock owner f =
-  match Eio_guard.execution_context () with
-  | Eio_guard.Eio_fiber -> with_eio_lock ~check_after:true owner f
-  | Eio_guard.Non_eio -> Stdlib.Mutex.protect owner.cross_context_mutex f
-;;
-
 let with_durable_lock owner f =
   match Eio_guard.execution_context () with
   | Eio_guard.Eio_fiber -> with_eio_lock ~check_after:false owner f

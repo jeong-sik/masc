@@ -64,8 +64,6 @@ val autosave_prefix : string
 val is_valid_name : string -> bool
 (** [[A-Za-z0-9._-]+], and neither "." nor "..". *)
 
-val presets_dir : base_path:string -> string
-
 val capture :
   base_path:string -> name:string -> description:string -> (snapshot, string) result
 (** The live state as a snapshot. Fails when the name is invalid or the

@@ -536,9 +536,6 @@ let raw_trace_reference_for_turn ~turn_trace_ref ~sink =
 let terminal_effect_boundary_decision = Keeper_tool_terminal_boundary.decision
 
 module For_testing = struct
-  let sse_event_progress_kind = Turn_helpers.sse_event_progress_kind
-  let sse_event_watchdog_progress_kind =
-    Turn_helpers.sse_event_watchdog_progress_kind
   let registry_progress_on_event = Turn_helpers.registry_progress_on_event
   let progress_keeper_tool_names_for_contract =
     Contract_helpers.progress_keeper_tool_names_for_contract

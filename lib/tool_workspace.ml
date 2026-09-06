@@ -20,11 +20,7 @@ type assertion_kind = Workspace_assertions.assertion_kind =
   | Task_claimed
   | Current_task_set
 
-let assertion_kind_to_string = Workspace_assertions.assertion_kind_to_string
-let all_assertion_kinds = Workspace_assertions.all_assertion_kinds
 let valid_assertion_strings = Workspace_assertions.valid_assertion_strings
-let assertion_kind_of_string_lenient = Workspace_assertions.assertion_kind_of_string_lenient
-
 let effective_cluster_name (config : Workspace.config) =
   match String.trim config.backend_config.Backend_types.cluster_name with
   | "" -> Env_config_core.cluster_name ()

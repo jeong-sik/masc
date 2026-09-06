@@ -76,11 +76,6 @@ val get_origin_url :
     for the repository at [local_path]. Missing configuration, a bounded
     timeout, and other Git failures remain distinct typed outcomes. *)
 
-val worktree_root : local_path:string -> (string, string) result
-(** [worktree_root ~local_path] returns Git's [--show-toplevel] path for
-    [local_path]. It is read-only and bounded; callers use it to avoid treating
-    an arbitrary file's dirname as a repository root. *)
-
 type checkout_identity = {
   toplevel : string;
       (** Git's [--show-toplevel] for the queried path: the root of the
@@ -98,7 +93,7 @@ val checkout_identity :
   local_path:string -> (checkout_identity, string) result
 (** [checkout_identity ~local_path] answers both questions in one
     read-only, bounded git invocation ([--path-format=absolute]).
-    Errors mirror {!worktree_root}: not a repository, timeout, or
+    Errors mirror [worktree_root]: not a repository, timeout, or
     unexpected output shape. *)
 
 val origin_head_branch : local_path:string -> (string, string) result

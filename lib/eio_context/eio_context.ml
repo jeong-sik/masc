@@ -199,19 +199,6 @@ let get_clock () : (float Eio.Time.clock_ty Eio.Resource.t, string) result =
   | None ->
       Error "Eio clock not initialized - ensure set_clock is called during server startup"
 
-let get_switch () : (Eio.Switch.t, string) result =
-  match get_switch_opt () with
-  | Some sw -> Ok sw
-  | None ->
-      Error "Eio switch not initialized - ensure set_switch is called during server startup"
-
-(** TLS connector for Cohttp_eio HTTPS support.
-
-    Stored as an [Atomic.t] cell so concurrent reads from multiple OCaml 5
-    domains are safe.  Initialization uses [Atomic.compare_and_set] for a
-    lock-free once pattern: the first domain that observes [None] builds the
-    connector and publishes it; any racing builder discards its own result and
-    returns the published one. *)
 let _https_connector_cache :
   ((Uri.t ->
      [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->

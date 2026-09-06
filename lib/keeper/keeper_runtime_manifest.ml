@@ -536,13 +536,6 @@ let decode_persisted_row json =
      | Some event -> Ok (Active_row (active_row row event))
      | None -> Ok (Unsupported_row (row_identity row, row.event_wire)))
 
-let of_json json =
-  match decode_persisted_row json with
-  | Ok (Active_row row) -> Ok row
-  | Ok (Unsupported_row (_, event)) ->
-      Error (Printf.sprintf "unknown event: %S" event)
-  | Error _ as error -> error
-
 let execution_receipt_path_for_today config ~keeper_name =
   (* [Jsonl_writer.dated_path_now] is the same calculation the writer runs;
      a second copy here is free to drift to a different calendar (#27143). *)

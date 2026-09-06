@@ -45,7 +45,6 @@ val to_yojson : t -> Yojson.Safe.t
 (** The canonical JSON the string form encodes; also what the revision hash
     covers so a later page never answers [unchanged] for an earlier one. *)
 
-val error_kind_to_string : error -> string
 val rejection_json : error -> Yojson.Safe.t
 (** The typed rejection a caller reads: [ok=false], [field="cursor"],
     [error_kind], and both filters when they disagree. *)

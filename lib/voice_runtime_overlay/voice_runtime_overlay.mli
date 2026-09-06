@@ -33,7 +33,6 @@ type stt_request =
   ; file_field : string * string
   }
 
-val adapters : adapter list
 val resolve_adapter : string -> adapter option
 val adapter_for_endpoint : Voice_config.endpoint -> adapter
 val select_endpoints : ?provider:string -> Voice_config.endpoint list -> Voice_config.endpoint list

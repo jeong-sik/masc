@@ -1132,13 +1132,6 @@ let rename_if_exists ~src ~dst =
       | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> false)
 ;;
 
-let rmdir (path : string) : unit =
-  with_fs_or_fallback
-    ~path
-    ~fallback:(fun () -> Unix.rmdir path)
-    (fun fs -> Eio.Path.rmdir Eio.Path.(fs / path))
-;;
-
 let remove_tree_unix (path : string) : unit =
   let rec remove path =
     match Unix.lstat path with
@@ -1468,8 +1461,6 @@ let fold_jsonl_lines ~init ~f path =
    - The cache lookup uses a separate, microsecond-scoped mutex
      ([fd_cache_mu]) so two appends to *different* paths never
      contend on a global fd-cache lock. *)
-let close_all_cached_writers () = Fd_cache.close_all ()
-
 let invalidate_cached_writer path =
   let path_mu = get_append_path_mutex path in
   Stdlib.Mutex.protect path_mu (fun () -> Fd_cache.invalidate path)

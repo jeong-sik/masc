@@ -18,11 +18,6 @@ type attention_item = {
 
 (** {1 Severity helpers} *)
 
-val severity_to_string : severity -> string
-
-(** Coerce to canonical {!Severity.t} for cross-module communication. *)
-val to_severity : severity -> Severity.t
-
 (** {1 Collection} *)
 
 (** [collect ~now snapshots] scans for stuck agents and idle-with-

@@ -7,8 +7,6 @@ module StringMap = Set_util.StringMap
 (** Inject the shared Event_bus for keeper snapshot publishing. *)
 val set_bus : Agent_core.Event_bus.t -> unit
 
-val register_grpc_heartbeat_starter : Keeper_keepalive_signal.grpc_heartbeat_starter_fn -> unit
-
 (** Apply one typed runtime directive to a Keeper lane. [Wakeup] only
     signals scheduling and never clears an operator pause; paused-work resume
     belongs to [Keeper_paused_work_resume_transaction]. *)
@@ -43,15 +41,6 @@ val not_in_registry_warn_state_step :
   now:float ->
   float StringMap.t ->
   not_in_registry_warn_decision * float StringMap.t
-
-(** Keepalive loop meta selection. Disk wins when it changed; otherwise
-    fall back to the latest registry snapshot instead of the original boot
-    meta so continuity/runtime fields do not regress across turns. *)
-val effective_keepalive_meta :
-  base_path:string ->
-  fallback:keeper_meta ->
-  disk_meta_opt:keeper_meta option ->
-  keeper_meta
 
 val wakeup_relevant_keeper_for_board_signal :
   config:Workspace.config -> Board_dispatch.addressed_board_signal -> unit

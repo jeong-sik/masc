@@ -29,16 +29,6 @@ val resolve :
 val base_path : t -> string
 val keeper_name : t -> Keeper_id.Keeper_name.t
 
-val with_lock : t -> (unit -> 'a) -> 'a
-(** Serialize [f] with every Eio and non-Eio caller for this owner.
-
-    Eio callers wait cooperatively: one fiber waits on the Eio gate and polls
-    the shared Stdlib mutex with [Mutex.try_lock] plus [Fiber.yield].  Once both
-    locks are held, cancellation is protected until [f] finishes and both
-    locks are released; cancellation is checked again before a value or an
-    ordinary exception can leave the lock boundary.
-    Non-Eio callers use the same Stdlib mutex directly. *)
-
 val with_durable_lock : t -> (unit -> 'a) -> 'a
 (** Transaction lock for durable state changes.  Lock acquisition remains
     cancellable.  Once acquired, [f] and lock release are cancellation

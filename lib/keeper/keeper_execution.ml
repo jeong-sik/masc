@@ -14,4 +14,3 @@ include Keeper_prompt
 let log_keeper_exn = Keeper_context_runtime.log_keeper_exn
 let load_context_from_checkpoint = Keeper_context_runtime.load_context_from_checkpoint
 let generate_trace_id = Keeper_context_runtime.generate_trace_id
-let effective_model_labels_for_turn = Keeper_context_runtime.effective_model_labels_for_turn

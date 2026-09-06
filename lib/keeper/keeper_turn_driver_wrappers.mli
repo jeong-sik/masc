@@ -9,29 +9,6 @@
 
 (** {1 Model-label execution} *)
 
-val run_model_by_label :
-  model_label:string ->
-  goal:string ->
-  ?system_prompt:string ->
-  ?tools:Agent_core.Tool.t list ->
-  ?stream_idle_timeout_s:float ->
-  ?temperature:float ->
-  ?max_tokens:int ->
-  ?accept:(Agent_core.Types.api_response -> bool) ->
-  ?hooks:Agent_core.Hooks.hooks ->
-  ?enable_thinking:bool ->
-  ?provider_config_transform:
-    (Llm_provider.Provider_config.t ->
-    (Llm_provider.Provider_config.t, Agent_core.Error.t) result) ->
-  ?on_event:(Agent_core.Types.sse_event -> unit) ->
-  ?transport:Masc_grpc_transport.t ->
-  ?sw:Eio.Switch.t ->
-  ?net:Eio_context.eio_net ->
-  unit ->
-  (Runtime_agent.run_result, Agent_core.Error.t) result
-(** Run a single [Agent.run] using a model label string
-    (e.g. ["llama:qwen3.5"]).  Validates the label before execution. *)
-
 (** {1 MASC tool bridging} *)
 
 val run_named_with_masc_tools :

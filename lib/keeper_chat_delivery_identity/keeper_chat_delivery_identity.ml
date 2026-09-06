@@ -26,7 +26,6 @@ module Request_id = struct
     else Error "Keeper request id contains an unsupported character"
   ;;
 
-  let generate () = Random_id.prefixed ~prefix:"kmsg-" ~bytes:16
   let to_string value = value
   let equal = String.equal
 end

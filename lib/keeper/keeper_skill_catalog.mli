@@ -161,11 +161,6 @@ val all_entries_of_snapshot :
     the operator-surface projection. Executable turn catalogs start with
     {!of_snapshot}, then {!project_turn} merges exact Task-selected shadows. *)
 
-val project_entry :
-  Skill_catalog_snapshot.t -> Skill_catalog_snapshot.entry -> (skill, error) result
-(** Project one exact snapshot entry, including a shadowed entry. The returned
-    Skill preserves the entry's exact reference and source provenance. *)
-
 val project_entry_or_fallback :
   Skill_catalog_snapshot.t -> Skill_catalog_snapshot.entry -> entry_projection
 (** Canonical projection for global, Task-selected, and shadowed entries.

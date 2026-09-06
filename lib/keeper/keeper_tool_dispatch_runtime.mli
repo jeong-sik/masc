@@ -2,7 +2,6 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-val keeper_model_tool_names : unit -> string list
 val keeper_model_tool_schemas : unit -> Masc_domain.tool_schema list
 
 (** Test-only hooks for the global tool-call recorder and descriptor routing. *)

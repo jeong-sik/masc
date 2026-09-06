@@ -12,9 +12,6 @@ type t =
 val to_label : t -> string
 (** Stable wire label for metrics and JSON payloads. *)
 
-val standard : t list
-(** Bounded, first-class origins with stable labels. *)
-
 val process_origins : t list
 (** Origins emitted by [Process_eio] subprocess timeouts. *)
 

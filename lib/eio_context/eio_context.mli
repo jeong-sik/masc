@@ -91,10 +91,6 @@ val get_clock : unit -> (float Eio.Time.clock_ty Eio.Resource.t, string) result
 (** Get the Eio clock.
     Returns Error if not initialized. *)
 
-val get_switch : unit -> (Eio.Switch.t, string) result
-(** Get the Eio switch.
-    Returns Error if not initialized. *)
-
 (** [get_https_connector] removed — use [get_https_connector_result] instead. *)
 
 val get_https_connector_result :

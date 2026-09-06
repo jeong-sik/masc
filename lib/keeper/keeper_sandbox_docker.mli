@@ -9,12 +9,6 @@
     in [Keeper_sandbox_exec_failure]. Call those qualified rather than
     relying on a re-export here. *)
 
-(** Per-invocation container name [masc-keeper-<safe>-<pid>-<ms>]. *)
-val keeper_sandbox_container_name :
-  Keeper_meta_contract.keeper_meta -> string
-
-val keeper_private_container_root : Keeper_meta_contract.keeper_meta -> string
-
 (** Translate a host cwd into the in-container path mirror,
     falling back to the container root when [host_cwd] is outside
     the keeper sandbox root. *)

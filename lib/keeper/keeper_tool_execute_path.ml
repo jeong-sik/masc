@@ -132,14 +132,3 @@ let resolve_tool_read_path
 
 let shell_command_available name =
   Executable_path.command_available name
-
-let normalize_for_containment path =
-  Keeper_alerting_path.normalize_path_for_check path
-  |> Keeper_alerting_path.strip_trailing_slashes
-
-let in_playground ~root ~cwd ~meta =
-  let cwd_canonical = normalize_for_containment cwd in
-  let playground_rel = Keeper_sandbox.sandbox_root_rel_of_meta ~meta in
-  let playground_abs = normalize_for_containment (Filename.concat root playground_rel) in
-  String.starts_with ~prefix:(playground_abs ^ "/") (cwd_canonical ^ "/")
-  || String.equal playground_abs cwd_canonical

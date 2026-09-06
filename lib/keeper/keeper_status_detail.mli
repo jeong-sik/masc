@@ -20,20 +20,8 @@ type tail_order = Keeper_status_options_defaults.tail_order =
 val keeper_exists_config :
   config:Workspace.config -> string -> (bool, string) result
 
-val tail_order_to_string : tail_order -> string
-
-(** Every variant in [tail_order]; used by the [Keeper_schema]
-    enum mirror. *)
-val all_tail_orders : tail_order list
-
 (** Variant labels used in tool-input enum schemas. *)
 val valid_tail_order_strings : string list
-
-(** [keeper_status] tool handler. Builds a fresh observation so time-derived,
-    file-backed, registry, queue, and sandbox fields cannot be frozen behind
-    an incomplete cache identity. *)
-val handle_keeper_status :
-  _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
 
 (** RFC-0182 §3.1 — ctx-free entry point for keeper_dispatch_ref path. *)
 val handle_keeper_status_config :

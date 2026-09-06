@@ -49,8 +49,6 @@ type probe_state =
   | Stopped of string  (** the probe raised; the message *)
   | Cancelled  (** the switch that owned the probe was cancelled *)
 
-val probe_state : t -> probe_state
-
 val to_fields : t -> (string * Yojson.Safe.t) list
 (** Wire shape used by [/health]. Always carries [probe] ("not_started",
     "running", "stopped" with [stopped_reason], or "cancelled"),

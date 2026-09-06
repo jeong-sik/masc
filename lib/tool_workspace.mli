@@ -42,27 +42,11 @@ type assertion_kind = Workspace_assertions.assertion_kind =
   | Task_claimed
   | Current_task_set
 
-(** [assertion_kind_to_string k] returns the canonical lowercase
-    label for [k].  Re-export of
-    {!Workspace_assertions.assertion_kind_to_string}.  No suite pins
-    this label set today. *)
-val assertion_kind_to_string : assertion_kind -> string
-
-(** [all_assertion_kinds] is the canonical witness list — one
-    entry per {!assertion_kind} constructor.  Re-export of
-    {!Workspace_assertions.all_assertion_kinds}.  No suite pins the
-    witness list against the constructor set today. *)
-val all_assertion_kinds : assertion_kind list
-
 (** [valid_assertion_strings] is the canonical list of
     assertion kind labels (one per constructor).  Used by error
     messages + the [masc_assert] schema [enum] field — adding a
     constructor automatically updates this list. *)
 val valid_assertion_strings : string list
-
-(** [assertion_kind_of_string_lenient s] parses a canonical assertion label.
-    Returns [None] on unknown. *)
-val assertion_kind_of_string_lenient : string -> assertion_kind option
 
 (** {1 Dispatch} *)
 

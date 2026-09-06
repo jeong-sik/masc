@@ -113,10 +113,6 @@ val runtime_toml_path_for_base_path : base_path:string -> string
     config-root override and base-path rules as {!resolve_for_base_path}. The
     file need not exist. *)
 
-val keeper_runtime_store_of_dirname : string -> Common.keeper_runtime_store option
-(** Base-path-independent resolver for canonical child-store names under
-    [Common.keepers_runtime_dirname]. *)
-
 val keeper_toml_path_opt_for_base_path :
   base_path:string -> string -> string option
 (** Base-path-scoped variant of {!keeper_toml_path_opt}. *)
@@ -259,5 +255,4 @@ val log_resolution : ?context:string -> unit -> unit
 
 val source_to_string : source -> string
 val status_to_string : status -> string
-val item_to_json : path_item -> Yojson.Safe.t
 val to_json : resolution -> Yojson.Safe.t

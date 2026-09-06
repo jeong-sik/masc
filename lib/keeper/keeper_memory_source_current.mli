@@ -75,17 +75,6 @@ val list_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
 val read_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> (t option, string) result
 
-(** Maximum source bytes read on the write and recall paths. *)
-val max_source_bytes : int
-
-(** Read one keeper-visible regular file within the keeper sandbox. Refuses an
-    absent, non-regular, or oversized source. *)
-val read_source :
-  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> source_path:string
-  -> (string, source_read_failure) result
-
 (** Upsert the single current claim for [source_path]. The exact source bytes
     are read inside this call; callers cannot supply their own digest. A
     successful replacement clears the pending invalidation for that path.
@@ -121,5 +110,4 @@ val revalidate :
 
 val render_fact : fact -> string
 val render_invalidation : invalidation -> string
-val render_payload : fact list -> invalidation list -> string
 val to_json : t -> Yojson.Safe.t

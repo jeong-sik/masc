@@ -33,20 +33,9 @@ val classify_usage_trust :
 (** Classify usage counters without reconstructing concrete provider/model
     identity. *)
 
-val estimate_usage_cost_usd :
-  Agent_core.Types.api_usage ->
-  float
-(** Return the AGENT_CORE-reported turn cost verbatim. cost_usd is the provider's authoritative
-    cost field and is accounted independently of token-count trust (token⊥cost).
-    MASC does not estimate provider/model pricing locally. Missing cost uses
-    the aggregate identity [0.0]; a reported zero or negative value is not
-    rewritten. *)
-
 val usage_trust_to_string : usage_trust -> string
 
 val usage_trust_reasons : usage_trust -> string list
-
-val usage_trust_json_fields : usage_trust -> (string * Yojson.Safe.t) list
 
 (** Canonical metric names for the per-turn usage-trust counters
     (#9959).  Exposed so tests can pin the names without hard-coding
@@ -74,13 +63,6 @@ val record_usage_trust :
   keeper_name:string ->
   trust:usage_trust ->
   unit
-
-val record_keeper_total_cost_usd :
-  keeper_name:string ->
-  total_cost_usd:float ->
-  unit
-(** Set [masc_keeper_total_cost_usd{keeper_name}] to the keeper runtime's
-    accumulated provider-reported USD cost. *)
 
 val context_max_bucket : int -> string
 (** #9953: bucket a raw [context_max] integer into a bounded
@@ -182,23 +164,8 @@ val append_decision_record :
   unit ->
   unit
 
-val has_substantive_tool_calls : string list -> bool
-
-val visible_run_validation :
-  Keeper_agent_run.run_result -> Agent_core.Raw_trace.run_validation option
-
 val turn_mode_of_result : Keeper_agent_run.run_result -> turn_mode
 
 val turn_mode_to_string : turn_mode -> string
 
-val turn_mode_of_string : string -> turn_mode option
-
-val turn_mode_of_json : Yojson.Safe.t -> turn_mode option
-
-val work_kind_of_turn_mode : turn_mode -> string
-
 val work_kind_of_json : Yojson.Safe.t -> string option
-
-val decision_channel_of_observation :
-  Keeper_world_observation.world_observation ->
-  Keeper_world_observation.keeper_cycle_channel

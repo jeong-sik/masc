@@ -248,6 +248,14 @@ let restore_snapshot_unlocked path = function
                  "cannot durably roll back created keeper manifest: %s"
                  (Printexc.to_string exn))))
 
+let diag5_t0 = ref 0.0
+
+let diag5 mark =
+  let now = Unix.gettimeofday () in
+  if !diag5_t0 = 0.0 then diag5_t0 := now;
+  Printf.printf "DIAG5 %-28s +%.3fs\n%!" mark (now -. !diag5_t0)
+;;
+
 let manifest_path ~(config : Workspace.config) ~keeper_name =
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
@@ -471,7 +479,9 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
     else Ok ()
   in
   let transaction () =
+    diag5 "p0-tx-enter";
     match with_lock path (fun () ->
+    diag5 "p1-manifest-lock";
     match
       Runtime.with_keeper_assignment_transaction
         ~runtime_config_path:
@@ -479,6 +489,7 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
              ~base_path:config.base_path)
         ~keeper_name:meta.name
         (fun runtime_transaction ->
+      diag5 "p2-runtime-tx";
       let ( let* ) = Result.bind in
       let* () = instructions_result |> Result.map_error (fun error -> Io_error error) in
       let* snapshot =
@@ -497,6 +508,7 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
         else Ok ()
       in
       let created = observed_manifest = Missing in
+      diag5 "p3-before-staged-write";
       let* write_warnings =
         (if created
          then
@@ -510,6 +522,7 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
            else Keeper_toml_loader.edit_keeper_toml_fields_strict_staged ~path edits)
         |> strict_write_result
       in
+      diag5 "p4-staged-write-done";
       let restore_publication_state () =
         Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
         let runtime_restore =
@@ -564,6 +577,7 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
                  detail))
        | Ok revision ->
          let outcome = { path; created; revision } in
+         diag5 "p5-before-publish";
          let publication =
            match publish runtime_transaction outcome with
            | decision -> Ok decision

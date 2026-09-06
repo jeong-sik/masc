@@ -659,9 +659,12 @@ let start
      keeper manifest lock, the runtime.toml lock and the lifecycle key lock
      for as long as the process ran (#33200). The drain now says so when it
      leaves its loop, which is the moment the owner stops answering. *)
+  (* [exchange] is the once-guard: exactly one caller sees [false], and only
+     that one resolves. Both the drain exit and on_release call this, in
+     whichever order the teardown takes. *)
   let mark_no_longer_answering () =
-    Atomic.set t.closed true;
-    ignore (Eio.Promise.try_resolve resolve_closed () : bool)
+    if not (Atomic.exchange t.closed true)
+    then Eio.Promise.resolve resolve_closed ()
   in
   Eio.Switch.on_release sw (fun () ->
     mark_no_longer_answering ();

@@ -957,10 +957,17 @@ let test_planning_phase_uses_goal_ssot () =
        ~module_path:"bin/masc_tui_render.ml"
        ~callee:"Goal_phase.to_string"
      >= 1);
-  check int "renderer does not lowercase planning status strings" 0
-    (Ast_grep.count_calls
-       ~module_path:"bin/masc_tui_render.ml"
-       ~callee:"String.lowercase_ascii");
+  (* Asked of the bindings that draw a phase, not of the module. The renderer
+     lowercases a MIME type before splitting it, which is not a planning
+     status and never was; a module-wide count of a stdlib call cannot tell
+     the two apart. *)
+  List.iter
+    (fun binding_name ->
+      check int (binding_name ^ " does not lowercase a planning status") 0
+        (Ast_grep.count_calls_in_value_binding
+           ~module_path:"bin/masc_tui_render.ml" ~binding_name
+           ~callee:"String.lowercase_ascii"))
+    [ "planning_phase_label"; "planning_phase_column"; "planning_phase_color" ];
   check int "projection rejects an unknown canonical phase" 1
     (Ast_grep.count_string_literals
        ~module_path:"lib/tui_decode.ml"

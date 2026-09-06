@@ -5,6 +5,7 @@ type operation =
   | Read_document
   | Add_document
   | Search_documents
+[@@deriving enumerate]
 
 type definition =
   { operation : operation
@@ -28,16 +29,18 @@ let definition operation ~read_only (loaded : Tool_definition_toml.loaded) =
   }
 ;;
 
-let definitions : definition list =
-  [ (* masc_library_list *)
-    definition List_documents ~read_only:true Tool_schemas_library_toml.list
-  ; (* masc_library_read *)
-    definition Read_document ~read_only:true Tool_schemas_library_toml.read
-  ; (* masc_library_add *)
-    definition Add_document ~read_only:false Tool_schemas_library_toml.add
-  ; (* masc_library_search *)
+let definition_for = function
+  (* masc_library_list *)
+  | List_documents -> definition List_documents ~read_only:true Tool_schemas_library_toml.list
+  (* masc_library_read *)
+  | Read_document -> definition Read_document ~read_only:true Tool_schemas_library_toml.read
+  (* masc_library_add *)
+  | Add_document -> definition Add_document ~read_only:false Tool_schemas_library_toml.add
+  (* masc_library_search *)
+  | Search_documents ->
     definition Search_documents ~read_only:true Tool_schemas_library_toml.search
-  ]
 ;;
+
+let definitions : definition list = List.map definition_for all_of_operation
 
 let schemas = List.map (fun definition -> definition.schema) definitions

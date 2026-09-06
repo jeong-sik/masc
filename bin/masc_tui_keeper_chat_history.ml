@@ -1143,10 +1143,17 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id at summary =
           }
       ]
 
-(* Annotated rather than inferred: an inferred parameter widens to an open
+(* [None] is an entry this reader could not make sense of; [Some rows] is one
+   it read, and those rows are empty when the entry is real and draws nothing.
+   The two were one empty list, and [rows_of_json] counted every empty one as
+   dropped -- so once #33692 stopped drawing a wake that produced nothing,
+   every such turn was reported to the operator as a row that could not be
+   read.
+
+   Annotated rather than inferred: an inferred parameter widens to an open
    variant and accepts tags Yojson does not have, which leaves the match below
    exhaustive over nothing. yojson 3 has no `Tuple or `Variant. *)
-let parse_row (entry : Yojson.Safe.t) : parsed list =
+let parse_row (entry : Yojson.Safe.t) : parsed list option =
   match entry with
   | `Assoc fields -> (
       let at = Option.value ~default:0.0 (float_field fields "ts") in
@@ -1189,17 +1196,18 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
             | None | Some `Null -> None
             | Some json -> surface_of_json json
           in
-          [ Utterance
-              { at
-              ; structural_id = structural_id_of_fields fields "utterance"
-              ; turn_sequence
-              ; turn_id
-              ; operation_id
-              ; kind = Addressed_to_keeper { speaker; surface }
-              ; text = content
-              ; attachments = attachment_notes_of fields
-              }
-          ]
+          Some
+            [ Utterance
+                { at
+                ; structural_id = structural_id_of_fields fields "utterance"
+                ; turn_sequence
+                ; turn_id
+                ; operation_id
+                ; kind = Addressed_to_keeper { speaker; surface }
+                ; text = content
+                ; attachments = attachment_notes_of fields
+                }
+            ]
       | Some "assistant" -> (
           match string_field fields "kind" with
           | Some "transport_failure" ->
@@ -1215,7 +1223,8 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                     | Some _ | None -> None)
                 | Some _ | None -> None
               in
-              [ Utterance
+              Some
+                [ Utterance
                   { at
                   ; structural_id = structural_id_of_fields fields "failure"
                   ; turn_sequence
@@ -1327,7 +1336,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                       }
                   ]
               in
-              fusion_rows @ skill_rows @ trace_rows @ said)
+              Some (fusion_rows @ skill_rows @ trace_rows @ said))
       | Some "system" ->
           (* Durable approval lifecycle rows are server-owned status, never
              Keeper speech. A row that carries the typed lifecycle is read as
@@ -1372,9 +1381,12 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
               None
           in
           (match kind with
-           | None -> []
+           (* A lifecycle this reader does not know is an entry it could not
+              read, not an entry with nothing in it. *)
+           | None -> None
            | Some kind ->
-             [ Utterance
+             Some
+               [ Utterance
                  { at
                  ; structural_id = structural_id_of_fields fields "system"
                  ; turn_sequence
@@ -1391,7 +1403,8 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
              makes. *)
           match string_field fields "tool_call_name" with
           | Some tool_name ->
-              [ Tool_call
+              Some
+                [ Tool_call
                   { at
                   ; structural_id = structural_id_of_fields fields "tool"
                   ; turn_sequence
@@ -1403,9 +1416,9 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                   ; args = content
                   }
               ]
-          | None -> [])
-      | Some _ | None -> [])
-  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> []
+          | None -> None)
+      | Some _ | None -> None)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 
 (* Fold consecutive tool calls into one block, the way a live turn draws its
    calls, and keep every other row where it was. Order is the server's: it
@@ -1520,9 +1533,13 @@ let rows_of_json (payload : Yojson.Safe.t) =
   match payload with
   | `List entries ->
       let parsed = List.map parse_row entries in
-      let dropped = List.length (List.filter (fun rows -> rows = []) parsed) in
+      (* What the operator is told could not be read. An entry that was read
+         and draws nothing -- a wake that produced neither speech nor work --
+         is not one of them. *)
+      let dropped = List.length (List.filter Option.is_none parsed) in
       let rows =
-        fold_tool_blocks (List.concat parsed) |> annotate_recovered_interruptions
+        fold_tool_blocks (List.concat (List.filter_map Fun.id parsed))
+        |> annotate_recovered_interruptions
       in
       Ok { rows; dropped }
   | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _ ->

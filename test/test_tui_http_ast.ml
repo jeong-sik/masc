@@ -1585,12 +1585,16 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "overview renderer consumes one shared layout" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_overview" ~callee:"overview_layout");
-  (* 6 = the five allocation-sourced bounds plus the task-panel window, which
-     follows the cursor through the same [task_rows] value (#29684). Every
-     bound still comes from the one shared allocation above. *)
-  check int "overview bounds each variable section from that allocation" 6
-    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:render_path ~binding_name:"render_overview" ~callees:[]
+  (* The overview reads its bounds off [row_budget], the one value the layout
+     above returns. How many times it reads them is how much the surface
+     draws, not whether the allocation is shared: #29684 moved the number
+     from five to six by adding a task-panel window that reads the same
+     [task_rows]. A second source is what breaks the sharing, so that is what
+     is asked for, and none is allowed. *)
+  check int "overview bounds every variable section from that one allocation" 0
+    (Ast_grep.count_field_accesses_off_other_records_in_value_binding
+       ~module_path:render_path ~binding_name:"render_overview"
+       ~record:"row_budget"
        ~fields:[ "attention_rows"; "task_error_rows"; "task_rows" ]);
   check int "board read consumes one shared row allocation" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
@@ -2137,8 +2141,15 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
 
      [String.equal] finds the open goal's row in the sidebar and [List.mem]
      asks which tasks name this goal. Neither reaches the terminal, and the
-     labels the sidebar draws are sanitized where they are drawn. *)
-  check_fields ~non_rendering_calls:[ "List.mem" ] "planning_detail_pane"
+     labels the sidebar draws are sanitized where they are drawn.
+
+     [Planning_detail.timeline] takes the goal id to answer one question --
+     whether the timeline that came back is this goal's or the previous
+     one's -- and draws the events, never the id
+     (masc_tui_planning_detail.ml). *)
+  check_fields
+    ~non_rendering_calls:[ "List.mem"; "Planning_detail.timeline" ]
+    "planning_detail_pane"
     [ "pg_id"; "pg_title"; "pg_due_date"; "pg_metric"; "pg_target_value" ];
   check_fields ~non_rendering_calls:[ "String.equal" ] "render_planning_detail"
     [ "pg_id" ];

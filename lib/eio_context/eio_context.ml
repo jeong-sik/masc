@@ -49,6 +49,10 @@ let with_test_env_lock = Eio.Mutex.create ()
    identity is what [with_binding] / [get] use to look up the value. *)
 let sw_key : Eio.Switch.t Eio.Fiber.key = Eio.Fiber.create_key ()
 
+(* [snapshot] is the opaque .mli face of [state_snapshot]: the fields are
+   written by [snapshot_state] and read by [restore_state] only. *)
+type snapshot = state_snapshot
+
 let snapshot_state () =
   {
     net = Atomic.get current_net;

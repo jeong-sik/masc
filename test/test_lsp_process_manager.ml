@@ -324,6 +324,13 @@ let test_every_language_with_comments_writes_a_memo_it_reads_back () =
        "<!-- masc(alpha) question: why three -->" line
    | Error refusal ->
      Alcotest.fail (Lsp_process_manager.memo_line_refusal_to_string refusal));
+  (match Lsp_process_manager.memo_markers_of_path "init.lua" with
+   | Ok (Ide_memo.Line "--") -> ()
+   | Ok markers ->
+     Alcotest.failf "lua: wrong markers: %s"
+       (Ide_memo.to_line markers memo)
+   | Error refusal ->
+     Alcotest.fail (Lsp_process_manager.memo_line_refusal_to_string refusal));
   (match Lsp_process_manager.memo_line ~path:"data.json" memo with
    | Error (Lsp_process_manager.No_comment_syntax Lsp_process_manager.Json) -> ()
    | Error refusal ->

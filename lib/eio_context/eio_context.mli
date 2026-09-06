@@ -101,3 +101,10 @@ val get_https_connector_result :
    string)
   result
 (** Non-raising HTTPS connector lookup. *)
+
+module For_testing : sig
+  val clear_root_switch : unit -> unit
+  (** Clear the root switch binding. Test scopes that install a temporary
+      root switch should invoke this in their finalizer to prevent cross-test
+      pollution. *)
+end

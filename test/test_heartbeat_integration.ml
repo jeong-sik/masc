@@ -836,11 +836,13 @@ let test_cross_domain_start_keepalive_and_swap () =
   Eio_main.run @@ fun env ->
   install_test_env env;
   R.For_testing.clear ();
+  Eio_context.For_testing.clear_root_switch ();
   let base_dir = temp_dir "cross-domain-keepalive" in
   let keeper_name = "cross-domain-keeper" in
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
+      Eio_context.For_testing.clear_root_switch ();
       cleanup_dir base_dir)
     (fun () ->
       ensure_default_runtime ();
@@ -896,12 +898,14 @@ let test_cross_domain_shutdown_submit () =
   install_test_env env;
   R.For_testing.clear ();
   Masc.Keeper_process_switch.For_testing.clear ();
+  Eio_context.For_testing.clear_root_switch ();
   let base_dir = temp_dir "cross-domain-shutdown" in
   let keeper_name = "cross-domain-shutdown-keeper" in
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
       Masc.Keeper_process_switch.For_testing.clear ();
+      Eio_context.For_testing.clear_root_switch ();
       cleanup_dir base_dir)
     (fun () ->
       ensure_default_runtime ();

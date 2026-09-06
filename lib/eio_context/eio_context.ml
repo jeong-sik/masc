@@ -82,9 +82,10 @@ let set_switch sw =
   let owner_domain = Domain.self () in
   let dispatch_stream = Eio.Stream.create 512 in
   let binding = { switch = sw; owner_domain; dispatch_stream } in
-  Atomic.set current_sw (Some binding);
+  let some_binding = Some binding in
+  Atomic.set current_sw some_binding;
   Eio.Switch.on_release sw (fun () ->
-    let _ = Atomic.compare_and_set current_sw (Some binding) None in
+    let _ = Atomic.compare_and_set current_sw some_binding None in
     let rec drain () =
       match Eio.Stream.take_nonblocking dispatch_stream with
       | Some task ->
@@ -100,6 +101,11 @@ let set_switch sw =
         try task () with _ -> ())  (* cancel-guard-ok: daemon safety net; a task's own catch resolves its promise first, so this arm only sees fork-teardown noise the daemon must survive *)
     done;
     `Stop_daemon)
+
+module For_testing = struct
+  let clear_root_switch () =
+    Atomic.set current_sw None
+end
 
 (* A finished switch is not a root switch.
 

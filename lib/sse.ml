@@ -200,7 +200,9 @@ let snapshot_min_interval_sec =
      this env var crashed the module at load. [get_float_nonneg] also maps
      negative / NaN / +-inf to the default, which is correct for an
      interval-seconds knob. *)
-  Env_config_core.get_float_nonneg ~default:5.0 "MASC_SNAPSHOT_INTERVAL_SEC"
+  Env_config_core.get_float_nonneg
+    ~default:(Env_setting.Float_knob.default Snapshot_interval_sec)
+    (Env_setting.Float_knob.env_name Snapshot_interval_sec)
 
 (** Timestamp of the last completed snapshot.  CAS-guarded so that
     concurrent [broadcast_impl] fibers racing to snapshot after the

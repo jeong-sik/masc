@@ -54,6 +54,8 @@ module Int_knob = struct
     | Full_health_critical_failure_threshold
     | Rate_limit_bucket_ttl_sec
     | Workspace_file_max_read_bytes
+    | Tcp_listen_backlog
+    | Ws_missed_pong_threshold
   [@@deriving enumerate]
 
   let spec = function
@@ -107,6 +109,14 @@ module Int_knob = struct
       , 1_048_576
       , "runtime"
       , "Maximum bytes the IDE workspace file endpoint serves in one response" )
+    | Tcp_listen_backlog ->
+      ( "MASC_TCP_LISTEN_BACKLOG", 128, "server", "TCP listen backlog" )
+    | Ws_missed_pong_threshold ->
+      ( "MASC_WS_MISSED_PONG_THRESHOLD"
+      , 3
+      , "transport"
+      , "Missed pongs before a WebSocket session is closed; read once per \
+         session at creation" )
   ;;
 
   let env_name t = let n, _, _, _ = spec t in n
@@ -185,6 +195,7 @@ module Float_knob = struct
     | Sidecar_schema_timeout_sec
     | Full_health_refresh_timeout_sec
     | Repo_sync_interval_sec
+    | Snapshot_interval_sec
   [@@deriving enumerate]
 
   let spec = function
@@ -226,6 +237,11 @@ module Float_knob = struct
       , "runtime"
       , "Repository auto-sync interval in seconds; a non-positive value keeps \
          the default" )
+    | Snapshot_interval_sec ->
+      ( "MASC_SNAPSHOT_INTERVAL_SEC"
+      , 5.0
+      , "runtime"
+      , "Minimum seconds between SSE snapshot broadcasts" )
   ;;
 
   let env_name t = let n, _, _, _ = spec t in n

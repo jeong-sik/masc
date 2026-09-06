@@ -37,6 +37,8 @@ module Int_knob : sig
     | Full_health_critical_failure_threshold
     | Rate_limit_bucket_ttl_sec
     | Workspace_file_max_read_bytes
+    | Tcp_listen_backlog
+    | Ws_missed_pong_threshold
   [@@deriving enumerate]
 
   val env_name : t -> string
@@ -53,6 +55,7 @@ module Float_knob : sig
     | Sidecar_schema_timeout_sec
     | Full_health_refresh_timeout_sec
     | Repo_sync_interval_sec
+    | Snapshot_interval_sec
   [@@deriving enumerate]
 
   val env_name : t -> string

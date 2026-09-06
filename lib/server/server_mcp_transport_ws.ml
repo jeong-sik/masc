@@ -968,7 +968,7 @@ let heartbeat_should_close ~now ~last_pong_at ~threshold ~interval_s =
     read once per session at creation time; changes to the environment variable
     affect only new sessions. *)
 let missed_pong_threshold () =
-  max 0 (Env_config_core.get_int ~default:3 "MASC_WS_MISSED_PONG_THRESHOLD")
+  max 0 (Env_setting.Int_knob.get Ws_missed_pong_threshold)
 
 let __test_missed_pong_threshold = missed_pong_threshold
 

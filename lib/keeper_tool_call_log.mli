@@ -327,6 +327,21 @@ val file_change_tally :
     what aged out. That happens once a day; the repeats this exists for happen
     within one. *)
 
+val carried_entry_answers :
+  entry_since_ts:float ->
+  entry_oldest_row_ts:float option ->
+  since_ts:float ->
+  since:string ->
+  bool
+(** Whether a tally folded against [entry_since_ts], whose oldest counted row
+    is [entry_oldest_row_ts], still answers for a window whose floor is now
+    [since_ts] over the day range starting [since].
+
+    A folded tally cannot drop a row — an unreadable row carries no timestamp —
+    so it stays usable only while nothing it counted has fallen behind the
+    floor. Exposed because the read that uses it needs a clock and this does
+    not. *)
+
 val reset_file_change_cache_for_testing : unit -> unit
 (** Drop every carried tally. Tests that write rows and read them back in one
     process need the next read to start from an empty window. *)

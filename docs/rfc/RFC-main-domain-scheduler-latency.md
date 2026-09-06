@@ -582,3 +582,13 @@ CI 는 C 스텁을 컴파일하지 않고 테스트도 돌리지 않으므로 �
 | posix_spawn | 1.2 ms | 1.3 ms | 1.4 ms |
 
 라이브 서버의 fork 는 malloc 상태가 더 커서 약 141 ms 였다. 판정은 재기동 뒤 샘플에서 `caml_eio_posix_spawn`·`_xzm_foreach_lock` 이 사라지는지다.
+
+#### 정정 — `Re.Compile` 은 컴파일이 아니라 매칭이다
+
+ocaml-re 의 `Re__Compile.loop` 은 `lib/compile.ml` 의 스캔 루프이고 `make_match_str` 은 매치 결과를 만든다. 앞 절들에서 "정규식 컴파일" 이라 부른 샘플은 정규식 *매칭* 시간이다. P4h-4 가 줄인 것은 스냅샷을 새로 컴파일할 때마다 비어 있는 DFA 를 첫 매칭에서 다시 채우던 몫이고, 그 뒤에도 남은 것은 매칭 자체다.
+
+#### 릴리즈 바이너리 창과 P4k (pid 3793, `masc start`, 커밋 a0518e4f26 = v0.32.0 컷, P4i·P4j 미포함)
+
+00:06Z(ready+6분, 호스트 부하 117): 하네스 p99 432 ms·max 1,481 ms, main 점유 33.5%, ≥100 ms 실행 57회, 최대 691 ms. 샘플(main busy 53%)의 상위는 `Re.Compile.loop` + `make_match_str` 2,903(busy 의 19%), `Hashtbl.key_index` 1,120, `Yojson` 렉서 1,073 이다. 귀속되는 프레임은 `Secret_patterns.redact_text` ← `Keeper_chat_store.redact_block`/`redact_message` 이고, `Keeper_chat_store.load_all` 은 keeper 가 깰 때마다(`Keeper_world_observation_message_scope`) 기록 전체 — 라이브 root 에서 19 파일, 최대 3,520 KB·3,705 줄 — 를 읽어 줄마다 파싱하고 메시지마다 N+5 개 패턴으로 `Re.replace_string` 을 돈다. 기록은 append-only 다(쓰는 곳은 private JSONL 잠금 아래의 append 하나).
+
+P4k #33555 는 `load_all` 을 증분으로 바꾼다. path 별 캐시에 파싱·redact 한 메시지와 마지막 파싱 줄 끝 오프셋을 두고, 파일의 device·inode 가 같고 크기가 그 오프셋 아래로 줄지 않았고 redaction 스냅샷이 같으면(`Keeper_secret_redaction` 의 메모가 같은 값을 돌려준다) `Fs_compat.read_private_jsonl_slice_locked_result ~from` 으로 새 바이트만 읽어 pool 에서 파싱·redact 해 덧붙인다. 아니면, 그리고 torn tail 이면, `read_private_jsonl_rows_locked_result` 로 전체를 다시 읽는다. 트레이드오프는 파싱본이 힙에 남는 것이다. 값이 크면 소비자(`pending_messages_of_messages`, fleet 행)를 "최근 창" 으로 바꾸는 쪽이 다음이다.

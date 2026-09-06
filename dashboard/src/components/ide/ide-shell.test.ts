@@ -625,20 +625,24 @@ describe('IdeShell', () => {
     expect(chip.getAttribute('title')).toContain('diff endpoint unavailable')
   })
 
-  it('surfaces overlay-only LSP languages in the IDE statusbar', async () => {
+  it('surfaces LSP languages with no server in the IDE statusbar', async () => {
     lspStatusSnapshot.value = {
       langs: [
         {
           lang: 'ocaml',
           connected: false,
-          overlay_only: true,
           command: 'ocamllsp',
           last_error: 'ocamllsp unavailable',
         },
         {
+          lang: 'lua',
+          connected: false,
+          command: 'lua-language-server',
+          last_error: 'lua-language-server not on PATH',
+        },
+        {
           lang: 'typescript',
           connected: true,
-          overlay_only: false,
           command: 'typescript-language-server',
           last_error: null,
         },
@@ -657,8 +661,12 @@ describe('IdeShell', () => {
       expect(found).not.toBeNull()
       return found!
     })
-    expect(chip.textContent).toBe('LSP overlay-only 1')
-    expect(chip.getAttribute('title')).toContain('ocaml: ocamllsp unavailable')
+    expect(chip.textContent).toBe('LSP unavailable 2')
+    // One line per language, so an operator reads which ones and why
+    // instead of a count that names nothing.
+    expect(chip.getAttribute('title')).toBe(
+      'ocaml: ocamllsp unavailable\nlua: lua-language-server not on PATH',
+    )
     expect(chip.getAttribute('title')).not.toContain('typescript')
   })
 

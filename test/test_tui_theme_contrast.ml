@@ -471,8 +471,7 @@ let labelled_categories =
          | Masc_tui_ansi.Theme.Slot_1 -> "Slot_1"
          | Masc_tui_ansi.Theme.Slot_2 -> "Slot_2"
          | Masc_tui_ansi.Theme.Slot_3 -> "Slot_3"
-         | Masc_tui_ansi.Theme.Slot_4 -> "Slot_4"
-         | Masc_tui_ansi.Theme.Slot_5 -> "Slot_5")
+         | Masc_tui_ansi.Theme.Slot_4 -> "Slot_4")
       , slot ))
     Masc_tui_ansi.Theme.all_categories
 ;;
@@ -490,9 +489,11 @@ let categorical_slot_colours =
    Theme.ok () once across the two panes write_two_panes joins, and for one
    commit its media mark was Bright_red -- Theme.bad () to the byte.
 
-   So this holds the slot set clear of those two. Info and warn are still
-   aliased, and are safe only because that surface draws neither; a surface
-   reaching for slot 1 or 2 owes the same check this test makes here. *)
+   So this holds the slot set clear of those two. That is what bounds the
+   alphabet at four: red, green and the receding black are spoken for, and
+   four hues are what is left. Info and warn are still aliased, and are safe
+   only because that surface draws neither; a surface reaching for slot 1 or 2
+   owes the same check this test makes here. *)
 let test_no_categorical_slot_aliases_a_drawn_status_token () =
   let drawn = [ "bad", Masc_tui_ansi.Theme.bad; "ok", Masc_tui_ansi.Theme.ok ] in
   List.iter

@@ -783,7 +783,13 @@ let turn_rail_gutter (piece : turn_rail) =
     | Rail_opens | Rail_says | Rail_does | Rail_closes | Rail_none ->
         String.make siding_lead_cells ' '
   in
-  lead ^ turn_rail_glyph piece ^ ""
+  let drawn = lead ^ turn_rail_glyph piece in
+  (* Pad to the budget rather than trusting the parts to add up to it. The
+     margin is charged {!turn_rail_cells} whether or not the glyph fills it,
+     so a gutter one cell short does not shrink the margin — it slides the
+     clock and the label one cell left, and the row that follows lands in a
+     different column than the one the layout reserved. *)
+  drawn ^ String.make (max 0 (turn_rail_cells - display_width drawn)) ' '
 
 (* Cells the speaker mark and its separator occupy at the head of a label, or
    zero when the column was too narrow to keep the mark at all. One reader, so

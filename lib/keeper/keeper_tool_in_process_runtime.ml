@@ -173,7 +173,7 @@ let external_gate_decision
                   ; "gate_reason"
                   , `String (Keeper_gate.unavailable_reason_to_string reason)
                   ])
-         ; failure_class = Tool_result.Runtime_failure
+         ; failure_class = Tool_result.Dependency_unavailable
          })
   | Keeper_gate.Allow authorization ->
     Log.Keeper.info

@@ -3096,6 +3096,7 @@
   astring
   masc
   masc.masc_types
+  masc_tui_footer
   masc_tui_interrupt_signal
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log

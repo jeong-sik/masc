@@ -5951,7 +5951,7 @@ def memory_journal_timeline_interaction(
         # fence draws in whole.
         send_and_wait(process, master_fd, output, b"/memory", composer_showing(b"/memory"))
         full_start = len(output)
-        send_and_wait(process, master_fd, output, b"\r", b"memory:full")
+        send_and_wait(process, master_fd, output, b"\r", b"journal:full")
         wait_for_output(
             process,
             master_fd,
@@ -6073,7 +6073,7 @@ def memory_journal_timeline_interaction(
         )
 
         # Ctrl-N walks the same cycle without the composer: full -> hidden.
-        hidden = send_and_wait(process, master_fd, output, b"\x0e", b"memory:off")
+        hidden = send_and_wait(process, master_fd, output, b"\x0e", b"journal:off")
         if b"Librarian committed current memory revision 9" in hidden:
             raise AssertionError(f"Hidden Memory timeline still drew its row: {hidden!r}")
 
@@ -6085,7 +6085,7 @@ def memory_journal_timeline_interaction(
             b"\x0e",
             b"Librarian committed current memory revision 9",
         )
-        if b"memory:off" in restored:
+        if b"journal:off" in restored:
             raise AssertionError(f"Restored Memory timeline stayed off: {restored!r}")
         if b"superseded by provider grouping" in restored:
             raise AssertionError(
@@ -6119,10 +6119,10 @@ def memory_journal_timeline_interaction(
             output,
             rows=31,
             columns=100,
-            needle=b"memory:full",
+            needle=b"journal:full",
             controls=(FULL_REDRAW,),
         )
-        if b"memory:full" not in CSI_RE.sub(b"", widened):
+        if b"journal:full" not in CSI_RE.sub(b"", widened):
             raise AssertionError(
                 "A display toggle pressed on the narrow-pane notice screen "
                 f"was swallowed by the composer gate: {widened!r}"

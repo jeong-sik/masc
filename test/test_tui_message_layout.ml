@@ -533,7 +533,7 @@ let test_chat_history_height_uses_the_shared_chrome () =
     (Layout.message_history_height ~terminal_rows:46 ~status_rows:3)
 
 let test_chat_title_yields_before_projection_modes () =
-  let modes = "  memory:off · reasoning:full · tools:full" in
+  let modes = "  journal:off · reasoning:full · tools:full" in
   let row =
     Layout.chat_title_row ~inner_cells:52
       ~title:"Keepers ▸ a-very-long-keeper-identity ▸ chat"

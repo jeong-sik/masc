@@ -77,7 +77,25 @@ async function answer(id, ok, data, error) {
 // --- verbs --------------------------------------------------------------------
 
 async function ensurePw() {
-  if (!pw) pw = require("playwright");
+  if (!pw) {
+    // Node resolves from the script's directory, and the daemon may run from
+    // anywhere (launchd, a shell in another tree). Try beside the script,
+    // then the working directory, before giving up — the module sits beside
+    // whichever of the two was set up with `npm install playwright`.
+    const candidates = ["playwright"];
+    try {
+      pw = require(candidates[0]);
+    } catch (root) {
+      try {
+        pw = require(require.resolve("playwright", { paths: [process.cwd()] }));
+      } catch (cwd) {
+        throw new Error(
+          "playwright module not found: run `npm install playwright` in " +
+          __dirname + " or the directory the daemon runs from (" + root.message.split("\n")[0] + ")"
+        );
+      }
+    }
+  }
   return pw;
 }
 

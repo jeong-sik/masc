@@ -2464,6 +2464,7 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
       Printf.printf "DIAG14 before-update-switch\n%!";
       let update_sw = Eio.Promise.await update_switch in
       Printf.printf "DIAG14 after-update-switch\n%!";
+      (try
       Eio.Time.with_timeout_exn clock 1.0 (fun () ->
         let rec await_lane_swap_fence () =
           match
@@ -2476,7 +2477,10 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
             Eio.Fiber.yield ();
             await_lane_swap_fence ()
         in
-        await_lane_swap_fence ());
+        await_lane_swap_fence ())
+       with exn ->
+         Printf.printf "DIAG14 fence-raised=%s\n%!" (Printexc.to_string exn);
+         raise exn);
       Printf.printf "DIAG14 after-fence\n%!";
       Eio.Switch.fail update_sw Cancel_keeper_up_after_metadata;
       Eio.Promise.resolve resolve_release_librarian ();

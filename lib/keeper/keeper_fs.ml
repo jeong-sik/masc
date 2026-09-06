@@ -295,6 +295,7 @@ let save_bytes_durable_atomic_core
       bytes
   =
   let dir = Filename.dirname path in
+  Printf.printf "DIAG14 fs-0-enter %s\n%!" path;
   (* DET-OK: an omitted staging directory means the destination directory;
      both paths are derived from the same explicit destination [path]. *)
   let temp_dir = Option.value temp_dir ~default:dir in
@@ -317,8 +318,10 @@ let save_bytes_durable_atomic_core
         ?ownership_root
         temp_dir
   in
+  Printf.printf "DIAG14 fs-1-dir-leases-ready\n%!";
   let result =
     Eio_guard.run_in_systhread (fun () ->
+    Printf.printf "DIAG14 fs-2-inside-systhread\n%!";
     let temp_path = ref None in
     let channel = ref None in
     let renamed = ref false in

@@ -17866,6 +17866,12 @@ and is loaded on demand through keeper_skill.
              | Some gid ->
                  (match state.planning with
                   | Some snap ->
+                      (* The cursor indexes the rows the pane draws, which
+                         [clamp_planning_cursor] also bounds by that list. The
+                         raw goal list is in the order the server sent; the
+                         filter hides goals and the sort reorders them, so an
+                         index found in it lands on a different row than the
+                         goal it was found for. *)
                       let rec find_idx i = function
                         | [] -> ()
                         | (g : planning_goal) :: rest ->
@@ -17873,7 +17879,9 @@ and is loaded on demand through keeper_skill.
                               state.planning_cursor <- i
                             else find_idx (i + 1) rest
                       in
-                      find_idx 0 snap.pl_goals
+                      find_idx 0
+                        (planning_visible_goals ~filter:state.planning_filter
+                           ~sort:state.planning_sort snap.pl_goals)
                   | None -> ());
                  clamp_planning_cursor state
              | None ->

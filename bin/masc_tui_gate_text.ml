@@ -118,3 +118,26 @@ let fold_line ~phases ~tool ~summary =
   | Some (_, phase), true ->
     Some (lifecycle_line ~phase ~tool ~summary ^ " · " ^ continuation_wording)
 ;;
+
+(* A Gate row's text carries the argument of the call it gated, and nothing
+   caps it: one base64 argument took eight rows of the pane. Compact keeps
+   what fits on a line and says how much it is holding.
+
+   Counted in cells, not rows. How many rows this becomes is the layout's
+   answer, decided after wrapping at a width this function does not have, so a
+   row count read here would be a guess printed as a fact. Cells are what the
+   text is, whatever the pane does with it.
+
+   Folded, not truncated: Ctrl-D brings the whole argument back. A row that
+   also said so would repeat the footer on every Gate row, which is what
+   pushed the tool names onto a second line before. *)
+let folded_argument ~cap text =
+  let flat =
+    String.concat " " (String.split_on_char '\n' (String.trim text))
+  in
+  let width = Message_layout.display_width flat in
+  if width <= cap then flat
+  else
+    Printf.sprintf "%s \xe2\x8c\x84 %d\xec\x9e\x90"
+      (Message_layout.take_cells flat cap)
+      (width - cap)

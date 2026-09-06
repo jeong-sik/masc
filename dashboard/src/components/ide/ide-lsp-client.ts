@@ -1,6 +1,5 @@
 /**
- * IDE LSP Client — CodeMirror 6 extension for Language Server Protocol
- * with MASC observational overlay integration.
+ * IDE LSP Client — CodeMirror 6 extension for Language Server Protocol.
  *
  * Implements JSON-RPC 2.0 request-response over WebSocket.
  * The server (server_ide_lsp_proxy.ml) expects client-initiated requests
@@ -28,11 +27,12 @@ import { DEFAULT_LANGUAGE_ID } from './ide-language'
 // ── Types ─────────────────────────────────────────────────────────
 
 /**
- * Which codebase this editor's LSP connection is looking at.
+ * Which workspace this editor's LSP connection is looking at.
  *
- * `codebase` addresses the optional MASC overlay store. `repoId`/`keeper`
- * independently select the workspace tree. A connection without a codebase
- * gets language-server passthrough with no guessed MASC overlay.
+ * `codebase` declares the IDE scope, which fixes the tree the connection's
+ * document paths are relative to. `repoId`/`keeper` select that tree
+ * independently. Without a codebase the server takes the tree from the
+ * client's `rootUri` instead.
  */
 export interface LspScope {
   readonly repoId: string | null
@@ -115,8 +115,8 @@ export const lspDiagnosticSnapshot = signal<ReadonlyMap<string, ReadonlyArray<Ls
 export interface LspLanguageStatus {
   readonly lang: string
   readonly connected: boolean
-  readonly overlay_only: boolean
   readonly command: string | null
+  /** Why the language has no server, when it is not connected. */
   readonly last_error: string | null
 }
 
@@ -816,16 +816,14 @@ export function parseLspStatusSnapshot(value: unknown): LspStatusSnapshot | null
 
 function parseLspLanguageStatus(value: unknown): LspLanguageStatus | null {
   if (!isRecord(value)) return null
-  const { lang, connected, overlay_only, command, last_error } = value
+  const { lang, connected, command, last_error } = value
   if (typeof lang !== 'string') return null
   if (typeof connected !== 'boolean') return null
-  if (typeof overlay_only !== 'boolean') return null
   if (!isStringOrNull(command)) return null
   if (!isStringOrNull(last_error)) return null
   return {
     lang,
     connected,
-    overlay_only,
     command,
     last_error,
   }

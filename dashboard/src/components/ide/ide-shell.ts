@@ -394,9 +394,9 @@ function workspaceIssueTitle(issues: ReadonlyArray<WorkspaceFetchIssue>): string
     .join('\n')
 }
 
-function lspOverlayOnlyStatus(status: LspStatusSnapshot | undefined): ReadonlyArray<string> {
+function lspUnavailableStatus(status: LspStatusSnapshot | undefined): ReadonlyArray<string> {
   return (status?.langs ?? [])
-    .filter(lang => lang.overlay_only)
+    .filter(lang => !lang.connected)
     .map(lang => {
       const error = lang.last_error?.trim()
       return error ? `${lang.lang}: ${error}` : lang.lang
@@ -454,13 +454,13 @@ export function deriveIdeStatusbarModel({
     'warn',
     workspaceIssueTitle(workspaceIssues),
   )
-  const lspOverlayOnly = lspOverlayOnlyStatus(lspStatus)
+  const lspUnavailable = lspUnavailableStatus(lspStatus)
   addStatusbarChip(
     chips,
     'lsp-status',
-    lspOverlayOnly.length > 0 ? `LSP overlay-only ${lspOverlayOnly.length}` : undefined,
+    lspUnavailable.length > 0 ? `LSP unavailable ${lspUnavailable.length}` : undefined,
     'warn',
-    lspOverlayOnly.join('\n'),
+    lspUnavailable.join('\n'),
   )
   if (terminalOpen) addStatusbarChip(chips, 'terminal', 'terminal', 'info', 'Execute output drawer open')
   if (findOpen) addStatusbarChip(chips, 'find', 'find', 'ghost', 'Current-file find panel open')

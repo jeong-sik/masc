@@ -176,7 +176,6 @@ describe('LspConnection', () => {
         langs: [{
           lang: 'ocaml',
           connected: false,
-          overlay_only: true,
           command: 'ocamllsp',
           last_error: 'ocamllsp unavailable',
         }],
@@ -187,7 +186,6 @@ describe('LspConnection', () => {
       langs: [{
         lang: 'ocaml',
         connected: false,
-        overlay_only: true,
         command: 'ocamllsp',
         last_error: 'ocamllsp unavailable',
       }],
@@ -201,7 +199,6 @@ describe('LspConnection', () => {
       langs: [{
         lang: 'ocaml',
         connected: true,
-        overlay_only: false,
         command: 'ocamllsp',
         last_error: null,
       }],

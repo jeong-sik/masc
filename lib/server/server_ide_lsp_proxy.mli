@@ -45,17 +45,18 @@ module For_testing : sig
     Yojson.Safe.t ->
     (resolved_document_request, document_request_error) result
 
-  (** Per-language LSP health (task-1691). [Overlay_only] carries the last
+  (** Per-language LSP health (task-1691). [Unavailable] carries the last
       error that left the language without a server; the proxy answers its
       requests with empty results until one comes up. *)
   type health =
     | Connected
-    | Overlay_only of string
+    | Unavailable of string
 
   (** [lang_status_json ~lang_id health] projects one language's health into
-      the [masc/lspStatus] wire object: [lang] / [connected] / [overlay_only]
-      / [command] (the configured LSP executable, [null] when none is mapped)
-      / [last_error]. *)
+      the [masc/lspStatus] wire object: [lang] / [connected] / [command] (the
+      configured LSP executable, [null] when none is mapped) / [last_error].
+      [connected] carries the health whole and [last_error] says why when it
+      is false. *)
   val lang_status_json : lang_id:string -> health -> Yojson.Safe.t
 
   (** [status_snapshot_json healths] renders the full per-language snapshot

@@ -27,6 +27,7 @@
   - Universal fast image format conversion: added `convert_to_png` leveraging macOS built-in `/usr/bin/sips` (with ImageMagick `convert` and `ffmpeg` fallback) to convert JPEG, WebP, GIF, and TIFF images to PNG in milliseconds (#33544).
 - **TUI: line memos from lexed comments, Mermaid text rendering, and categorical themes.**
   - Line memos are comments in the file (`masc(AUTHOR): TEXT`, `masc(AUTHOR) KIND: TEXT`), read directly off lexer rows without network round-trips or server drift (#33543).
+  - `keeper_ide_annotate` writes its memo into the file as a comment — the write side of the same design: language-specific comment markers, a line-anchored insert instead of text substitution, Markdown included (#33592).
   - Mermaid diagram rendering: draws `mermaid` graph and flowchart code blocks as clean Unicode/ASCII box-and-arrow diagrams within the TUI viewport (#33508).
   - Categorical 6-slot theming extended across all remaining axes in `render.ml` with raw hues removed (#33485).
   - Palette matchers fold case internally (#33536, #33522); `K`/`D`/`R` shortcuts open the palette as a choice among the line's names (#33514); multiline preview uses return marks instead of raw `\n` (#33482); stopped keepers display as `paused` instead of `offline` (#33510).

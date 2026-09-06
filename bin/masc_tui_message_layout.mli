@@ -137,6 +137,10 @@ type entry = {
       (** Which piece of its turn's bracket this entry draws. Carried on the
           entry because only the caller knows the turn's extent: the layout
           sees one entry at a time. *)
+  action : row_action;
+      (** What a press on this entry's first row opens. Carried on the entry
+          because the entry is where the folding was decided; the rows below
+          it are continuations of one decision, not decisions of their own. *)
 }
 
 type metadata =

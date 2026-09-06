@@ -441,8 +441,14 @@ let test_http_client_does_not_own_tui_env_contract () =
 
 let test_keeper_chat_uses_current_async_contract () =
   let module_path = "bin/masc_tui.ml" in
-  check int "TUI keeper chat has no removed models field" 0
-    (Ast_grep.count_string_literals ~module_path ~needle:"models");
+  (* Asked where the body is built, and on the whole literal. The needle used
+     to be the substring "models" over every literal in masc_tui.ml, which
+     does not build this body at all: the runtime table's
+     [runtime.toml at [models.%s]] rows are what the substring found. *)
+  check int "the keeper chat body carries no models field" 0
+    (Ast_grep.count_string_literals_in_value_binding
+       ~module_path:"lib/keeper/keeper_chat_operation_payload.ml"
+       ~binding_name:"input_to_json" ~literals:[ "models" ]);
   check int "TUI targets the keeper chat stream once" 1
     (Ast_grep.count_string_literals
        ~module_path:"bin/masc_tui_http.ml"

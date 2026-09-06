@@ -53,6 +53,7 @@ val pp_error : Format.formatter -> error -> unit
 val with_pool
   :  clock:float Eio.Time.clock_ty Eio.Resource.t
   -> proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
+  -> servers:Lsp_process_manager.servers
   -> (t -> 'a)
   -> 'a
 
@@ -70,7 +71,7 @@ val ensure
 
 (** One JSON-RPC request to the server for [(lang_id, workspace_root)], with
     the server started if needed. A request that outlives
-    {!request_timeout_sec} answers [Server_failed] and leaves the server in the
+    [request_timeout_sec] answers [Server_failed] and leaves the server in the
     pool — that timeout describes this question, not the server's health. *)
 val ask
   :  t
@@ -90,9 +91,3 @@ val notify
   -> method_:string
   -> params:Yojson.Safe.t
   -> (unit, error) result
-
-(** How long {!ask} waits for one answer. *)
-val request_timeout_sec : float
-
-(** How long {!ensure} waits for [initialize]. *)
-val initialize_timeout_sec : float

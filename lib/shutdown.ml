@@ -388,6 +388,3 @@ let rec is_benign_termination ~benign exn =
 
 let current_phase state = state.phase
 let is_shutting_down state = state.phase <> Running && state.phase <> Done
-let elapsed state =
-  if state.started_at > 0.0 then Unix.gettimeofday () -. state.started_at
-  else 0.0

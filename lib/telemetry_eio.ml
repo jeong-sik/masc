@@ -460,12 +460,3 @@ let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
           let context = String.concat " " context_parts in
           track ?fs config
             (Error_occurred { code = trimmed_kind; message; context })
-
-(** Prune telemetry entries older than [max_age_days] days.
-    Replaces the old rotate function; date-split makes rewriting unnecessary. *)
-let rotate ~fs:_ config ~max_age_days : unit =
-  let store = get_telemetry_store config in
-  let pruned = Dated_jsonl.prune store ~days:max_age_days in
-  if pruned > 0 then
-    Log.Metrics.info "telemetry_eio: pruned %d old day-files (max_age=%d days)"
-      pruned max_age_days

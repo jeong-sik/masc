@@ -25,8 +25,6 @@ type call_kind =
   | Unix_open_process_args_in
   | Unix_open_process_args_full
 
-val kind_to_string : call_kind -> string
-
 (** {1 Control} *)
 
 val enable : writer:(string -> unit) -> unit

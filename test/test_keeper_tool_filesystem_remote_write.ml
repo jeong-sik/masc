@@ -164,6 +164,7 @@ remote_endpoint = "build-box"
           ; "MASC_EXEC_SHIM_CONFIG=/opt/masc-exec-shim/masc-exec-shim.conf"
           ; "masc-keeper-vm-keeper-a"
           ]
+      ; probe_prefix = None
       ; container_name = "masc-keeper-vm-keeper-a"
       ; shim_path = "/opt/masc-exec-shim/masc-exec-shim"
       }

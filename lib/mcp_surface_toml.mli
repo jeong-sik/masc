@@ -72,13 +72,6 @@ type prompt_entry =
   ; prompt_arguments : prompt_argument list
   }
 
-val load_prompts : contents:string -> (prompt_entry list, string) result
-(** [load_prompts ~contents] parses [contents] as [mcp/prompts.toml]. The only
-    accepted top-level key is [[prompts]]; a prompt carries [name], [title]
-    and [description] (required non-empty strings) and [[prompts.arguments]]
-    entries of [name] / [description] / [required]. Everything else is an
-    [Error] naming the offending key. *)
-
 val prompts : prompt_entry list
 (** Decoded from the embedded [mcp/prompts.toml] at module init. *)
 

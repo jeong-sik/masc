@@ -45,18 +45,20 @@ val configure_agent_core_model_catalog_overlay :
 (** {1 Runtime Context}
 
     Extracts Eio resources from the standard environment.
-    Returns (clock, mono_clock, net, domain_mgr, proc_mgr, fs). *)
+    Returns (clock, mono_clock, net, domain_mgr, proc_mgr, fs). The proc_mgr is
+    always [Posix_spawn_process_mgr.mgr] — children start via posix_spawn so a
+    large live heap does not tax every spawn. *)
 
 val init_runtime_context :
   < clock : ([> float Eio.Time.clock_ty] as 'a) Eio.Resource.t;
     mono_clock : ([> Eio.Time.Mono.ty] as 'b) Eio.Resource.t;
     net : ([> [> `Generic] Eio.Net.ty] as 'c) Eio.Resource.t;
     domain_mgr : ([> Eio.Domain_manager.ty] as 'd) Eio.Resource.t;
-    process_mgr : ([> [> `Generic] Eio.Process.mgr_ty] as 'e) Eio.Resource.t;
+    process_mgr : [> [> `Generic] Eio.Process.mgr_ty] Eio.Resource.t;
     fs : ([> Eio.Fs.dir_ty] as 'f) Eio.Path.t;
     .. > ->
   'a Eio.Resource.t * 'b Eio.Resource.t * 'c Eio.Resource.t *
-  'd Eio.Resource.t * 'e Eio.Resource.t * 'f Eio.Path.t
+  'd Eio.Resource.t * Eio_unix.Process.mgr_ty Eio.Resource.t * 'f Eio.Path.t
 
 (** {1 Server State Lifecycle} *)
 
@@ -99,7 +101,6 @@ val restore_persisted_sessions : Mcp_server.server_state -> unit
 val bootstrap_server_state_blocking : Mcp_server.server_state -> unit
 (** {1 Startup Tasks} *)
 
-val startup_prune_jsonl : Mcp_server.server_state -> unit
 val sync_bootable_keeper_credentials : Mcp_server.server_state -> unit
 
 type lazy_startup_execution =

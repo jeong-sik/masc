@@ -668,24 +668,20 @@ let exec_argv_for backend ~container_name ~uid ~gid ~container_cwd ~stdin ~comma
     environment entry on the exec. All three CLIs document that entry --
     [msb exec] has [-e, --env <ENV>] the same as the other two.
 
-    What [msb] does not document is the identity the shim runs under.
+    What [msb] does not document is numeric [uid:gid] under [--user].
     [container exec --user] documents [name|uid[:gid]] and nerdctl takes
     Docker's, so the mapped [uid:gid] this lane runs the keeper's commands as
     is a value those CLIs accept. [msb exec -u, --user <USER>] documents
     "Run the command as the specified guest user" and no numeric form
-    (0.6.16, 2026-09-04). Sending [501:20] there would be a value read from
-    no help output, and if msb resolved it as a user name the shim would run
-    as somebody else on a tree owned by that uid -- a silent wrong-identity
-    write, not a failed call. So this refuses. Settling it means either msb
-    documenting the numeric form or the lane naming a guest user, which is a
-    decision about identity rather than a spelling. *)
-let shim_exec_prefix_for backend ~container_name ~uid ~gid ~remote_root ~shim_config_path =
+    (0.6.16, 2026-09-04). For msb, [--user] is omitted; the work volume's
+    [uid=,gid=] mount places writes at the right host uid. *)
+let shim_exec_prefix_for ?(stdin = true) backend ~container_name ~uid ~gid ~remote_root ~shim_config_path =
   match (backend : Backend.t) with
   | Backend.Apple_container | Backend.Nerdctl_kata ->
     Ok
       (command_argv_for backend
        @ [ "exec" ]
-       @ Backend.exec_stdin_args backend
+       @ (if stdin then Backend.exec_stdin_args backend else [])
        @ [ "--user"
          ; Printf.sprintf "%d:%d" uid gid
          ; "-w"
@@ -704,7 +700,7 @@ let shim_exec_prefix_for backend ~container_name ~uid ~gid ~remote_root ~shim_co
     Ok
       (command_argv_for backend
        @ [ "exec" ]
-       @ Backend.exec_stdin_args backend
+       @ (if stdin then Backend.exec_stdin_args backend else [])
        @ [ "-w"
          ; remote_root
          ; "--env"
@@ -895,6 +891,56 @@ let keeper_work_root ~keeper_name =
 let shim_guest_dir = "/opt/masc-exec-shim"
 let shim_binary_name = "masc-exec-shim"
 let shim_config_name = "masc-exec-shim.conf"
+let shim_sidecar_name = "masc-exec-shim.sha256"
+
+(* RFC-0427 B-2. The installer places the release's shim and, beside it, the
+   sha256 the release's SHA256SUMS gave for that asset. The boot reads the
+   pair: a binary that does not match its own sidecar is refused by name,
+   because a shim the release did not ship is the 2026-09-05 outage waiting
+   to recur. No sidecar means a hand-built shim; it runs, and the boot log
+   says it was not verified. *)
+type shim_provenance =
+  | Shim_verified of { sha256 : string }
+  | Shim_unverified
+
+let sha256_of_file path =
+  In_channel.with_open_bin path In_channel.input_all
+  |> Digestif.SHA256.digest_string
+  |> Digestif.SHA256.to_hex
+;;
+
+let verify_shim_sidecar ~dir =
+  let binary = Filename.concat dir shim_binary_name in
+  let sidecar = Filename.concat dir shim_sidecar_name in
+  if not (Sys.file_exists sidecar)
+  then Ok Shim_unverified
+  else
+    match In_channel.with_open_bin sidecar In_channel.input_all with
+    | exception Sys_error detail ->
+      Error (Printf.sprintf "microvm_shim_sidecar_unreadable: %s: %s" sidecar detail)
+    | content ->
+      let want =
+        match String.split_on_char ' ' (String.trim content) with
+        | first :: _ -> String.trim first
+        | [] -> ""
+      in
+      if not (String_util.is_lowercase_sha256_hex want)
+      then
+        Error
+          (Printf.sprintf
+             "microvm_shim_sidecar_invalid: %s does not begin with a lowercase sha256 hex digest"
+             sidecar)
+      else
+        match sha256_of_file binary with
+        | exception Sys_error detail ->
+          Error (Printf.sprintf "microvm_shim_unreadable: %s: %s" binary detail)
+        | got when String.equal got want -> Ok (Shim_verified { sha256 = got })
+        | got ->
+          Error
+            (Printf.sprintf
+               "microvm_shim_hash_mismatch: %s is %s but %s says %s; reinstall both with scripts/install.sh, or remove the sidecar to run a hand-built shim unverified"
+               binary got sidecar want)
+;;
 let shim_guest_path = Filename.concat shim_guest_dir shim_binary_name
 let shim_config_guest_path = Filename.concat shim_guest_dir shim_config_name
 

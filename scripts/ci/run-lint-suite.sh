@@ -63,6 +63,15 @@ blocking_lints() {
   run_self_test_when_changed "OCaml test suite reporter self-test" \
     scripts/ci-run-test-suite.sh \
     bash scripts/ci-run-test-suite.sh --self-test
+  # The three words a prompt's source can be, on both sides of the wire.
+  # They are asserted only in test/, which this CI does not run, so a typo in
+  # prompt_source_to_string type-checks and passes every other lint while
+  # breaking the dashboard's filter and the TUI's label.
+  run_self_test_when_changed "Prompt source words self-test" \
+    scripts/lint/prompt-source-words-agree.sh \
+    bash scripts/lint/prompt-source-words-agree.sh --self-test
+  run_lint "Prompt source words agree" \
+    bash scripts/lint/prompt-source-words-agree.sh
   run_lint "Hardcoded model prefix" bash scripts/lint/no-roadmap-stale-hardcoding.sh
   run_lint "Raw font-size px" bash scripts/lint/no-raw-font-size-px.sh
   run_lint "OCaml comment terminator trap" bash scripts/lint/no-ocaml-comment-terminator-trap.sh

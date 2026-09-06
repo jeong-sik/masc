@@ -23,6 +23,7 @@ let schema_of_name name : Masc_domain.tool_schema =
 ;;
 
 let time_now = schema_of_name "keeper_time_now"
+let lane_status = schema_of_name "keeper_lane_status"
 let context_status = schema_of_name "keeper_context_status"
 let memory_search = schema_of_name "keeper_memory_search"
 let memory_retract = schema_of_name "keeper_memory_retract"

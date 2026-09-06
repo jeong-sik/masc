@@ -242,15 +242,13 @@ let keeper_health ~keepers_dir keeper_id =
     }
 ;;
 
-let alert_json ~code ~severity ~target ~label ~message ~value =
+let alert_json ~code ~severity ~target ~label ~message =
   `Assoc
     [ "code", `String code
     ; "severity", `String severity
     ; "target", `String target
     ; "label", `String label
     ; "message", `String message
-    ; "value", `Float value
-    ; "threshold", `Float 0.0
     ]
 ;;
 
@@ -265,7 +263,6 @@ let alerts (h : keeper_health) =
           ~target:"snapshot_read_error"
           ~label:"읽기"
           ~message
-          ~value:1.0
       ]
   in
   let source_read_error_alert =
@@ -278,7 +275,6 @@ let alerts (h : keeper_health) =
           ~target:"source_snapshot_read_error"
           ~label:"소스 읽기"
           ~message
-          ~value:1.0
       ]
   in
   let lane_busy_alert =
@@ -292,7 +288,6 @@ let alerts (h : keeper_health) =
           ~label:"Librarian"
           ~message:
             "The Librarian memory lane was busy; current-memory selection was deferred."
-          ~value:(float_of_int h.librarian_lane_busy)
       ]
   in
   let failure_alert =
@@ -307,7 +302,6 @@ let alerts (h : keeper_health) =
           ~label:"Librarian"
           ~message:
             "Librarian runs failed since boot; the existing current-memory snapshot keeps serving recall but is no longer being updated."
-          ~value:(float_of_int h.librarian_failures)
       ]
     else
       [ alert_json
@@ -321,7 +315,6 @@ let alerts (h : keeper_health) =
                "Librarian runs failed and no ordinary current-memory snapshot exists. A source-bound snapshot remains available, but it does not demonstrate or repair Librarian selection."
              else
                "Librarian runs failed and no ordinary or source-bound current-memory snapshot exists; the keeper is running memoryless and cannot leave that state on its own.")
-          ~value:(float_of_int h.librarian_failures)
       ]
   in
   let vision_ingest_alert =
@@ -342,7 +335,6 @@ let alerts (h : keeper_health) =
                      (fun (reason, count) ->
                         Printf.sprintf "%s x%d" reason count)
                      h.vision_ingest_error_reasons)))
-          ~value:(float_of_int h.vision_ingest_errors)
       ]
   in
   read_error_alert @ source_read_error_alert @ lane_busy_alert @ failure_alert

@@ -299,14 +299,6 @@ type turn_verdict =
   | Run of { reasons : turn_reason * turn_reason list }
   | Skip of { reasons : skip_reason * skip_reason list }
 
-(** Convert a single turn reason to a flat string tag.
-    The tag is a stable snake_case form of the typed variant.
-    Variant payloads are intentionally omitted. *)
-val turn_reason_to_string : turn_reason -> string
-
-(** Convert an Event Queue stimulus trigger into the corresponding run reason. *)
-val turn_reason_of_event_queue_trigger : event_queue_trigger -> turn_reason
-
 (** Convert a single skip reason to a flat string tag.
     The tag is a stable snake_case form of the typed variant.
     Variant payloads are intentionally omitted. *)

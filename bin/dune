@@ -801,10 +801,22 @@
  (modules masc_tui_code_lexer))
 
 (library
+ (name masc_tui_mermaid)
+ (wrapped false)
+ (modules masc_tui_mermaid)
+ (libraries masc_tui_message_layout))
+
+(library
+ (name masc_tui_memo)
+ (wrapped false)
+ (modules masc_tui_memo)
+ (libraries masc_tui_code_lexer masc.ide_memo))
+
+(library
  (name masc_tui_markdown)
  (wrapped false)
  (modules masc_tui_markdown)
- (libraries masc_tui_code_lexer masc_tui_message_layout))
+ (libraries masc_tui_code_lexer masc_tui_mermaid masc_tui_message_layout))
 
 (library
  (name masc_tui_composer)
@@ -928,6 +940,7 @@
  (modules masc_tui_types)
  (libraries
   masc
+  masc_tui_acting_pane
   masc_tui_gate_text
   masc_tui_model_runtime_table
   masc_tui_mcp
@@ -1105,10 +1118,12 @@
   masc_tui_terminal_palette
   masc_tui_terminal_probe
   masc_tui_code_lexer
+  masc_tui_memo
   masc_tui_span
   masc_tui_diff
   masc_tui_keeper_chat_diff
   masc
+  masc.ide_memo
   masc.auth
   masc.masc_random_id
    masc.time_codec
@@ -1168,6 +1183,7 @@
   masc_tui_image_preview
   masc_tui_link
   masc_tui_link_label
+  masc_tui_link_preview
   masc_tui_markdown_render_cache
   masc_tui_message_layout
   masc_tui_paste
@@ -1302,3 +1318,9 @@
  (wrapped false)
  (modules masc_tui_link_label)
  (libraries uri))
+
+(library
+ (name masc_tui_link_preview)
+ (wrapped false)
+ (modules masc_tui_link_preview)
+ (libraries masc_tui_link_label masc_tui_lru masc_tui_message_layout masc_tui_theme uri))

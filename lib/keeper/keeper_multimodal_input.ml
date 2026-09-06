@@ -291,18 +291,6 @@ let fallback_message ~attachments blocks =
     in
     if from_blocks <> "" then from_blocks else fallback_message_of_attachments attachments
 
-let add_unique label labels =
-  if List.exists (String.equal label) labels then labels else labels @ [ label ]
-
-let modalities blocks =
-  List.fold_left
-    (fun acc -> function
-       | User_text _ -> add_unique "text" acc
-       | User_image _ -> add_unique "image" acc
-       | User_document _ -> add_unique "document" acc
-       | User_audio _ -> add_unique "audio" acc)
-    [] blocks
-
 (* Attachments are a byte store: only user_blocks media blocks referencing an
    attachment_id are materialized into AGENT_CORE content blocks. An
    attachment nothing references would be silently dropped, so the request is

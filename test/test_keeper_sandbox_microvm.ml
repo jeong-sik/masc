@@ -8,6 +8,14 @@ module Backend = Masc.Keeper_microvm_backend
 module Runtime = Masc.Keeper_sandbox_runtime
 module Profile = Keeper_types_profile_sandbox
 
+(* [List.ends_with] does not exist in the standard library; this is the
+   suffix check the probe-argv assertions below need. *)
+let list_ends_with suffix lst =
+  let suffix_len = List.length suffix in
+  let rec drop n l = if n <= 0 then l else drop (n - 1) (List.tl l) in
+  List.length lst >= suffix_len && drop (List.length lst - suffix_len) lst = suffix
+;;
+
 (* This file is Apple's lane. Measured against container CLI 1.3.0, and the
    per-runtime table lives in test_keeper_microvm_backend.ml, so a boot argv
    here is the Apple one made unconditional. A refusal would mean the Apple
@@ -731,13 +739,14 @@ let test_live_turn_runtime_cat () =
         | _ -> Alcotest.fail "a microvm binding must build a Micro_vm target"
       in
       match
-        runner
-          ~on_stdout_chunk:None
-          ~on_stderr_chunk:None
-          ~stdin_content:None
-          ~argv:[ "sh"; "-c"; "printf hello-from-microvm > probe.txt && cat probe.txt" ]
-          ~env:[||]
-          ~cwd:(Some host_root)
+        Masc_exec.Sandbox_target.status_tuple
+          (runner
+             ~on_stdout_chunk:None
+             ~on_stderr_chunk:None
+             ~stdin_content:None
+             ~argv:[ "sh"; "-c"; "printf hello-from-microvm > probe.txt && cat probe.txt" ]
+             ~env:[||]
+             ~cwd:(Some host_root))
       with
       | Unix.WEXITED 0, out, _ ->
         if not (Astring.String.is_infix ~affix:"hello-from-microvm" out)
@@ -1180,6 +1189,44 @@ let test_the_box_the_toml_names_is_the_box_the_shim_is_asked_for () =
   Alcotest.(check string) "guest_local" "guest_local" (mode Profile.Guest_local)
 ;;
 
+(* RFC-0427 B-2: the installer leaves a sha256 sidecar beside the shim, and
+   the boot reads the pair. A matching pair is verified, a missing sidecar is
+   a hand-built shim run unverified, and a binary that disagrees with its
+   sidecar -- or a sidecar that is not a digest -- refuses the boot by name. *)
+let test_the_shim_sidecar_decides_the_boot () =
+  let dir = temp_dir "masc-shim-sidecar" in
+  let binary = Filename.concat dir M.shim_binary_name in
+  let sidecar = Filename.concat dir M.shim_sidecar_name in
+  let write path content = ignore (Fs_compat.save_file_atomic path content) in
+  write binary "#!/bin/sh\necho shim\n";
+  let digest =
+    Digestif.SHA256.(to_hex (digest_string "#!/bin/sh\necho shim\n"))
+  in
+  (match M.verify_shim_sidecar ~dir with
+   | Ok M.Shim_unverified -> ()
+   | Ok (M.Shim_verified _) -> Alcotest.fail "verified without a sidecar"
+   | Error e -> Alcotest.fail e);
+  write sidecar (digest ^ "  masc-exec-shim-linux-arm64\n");
+  (match M.verify_shim_sidecar ~dir with
+   | Ok (M.Shim_verified { sha256 }) -> Alcotest.(check string) "the digest" digest sha256
+   | Ok M.Shim_unverified -> Alcotest.fail "a matching sidecar read as absent"
+   | Error e -> Alcotest.fail e);
+  write binary "#!/bin/sh\necho another shim\n";
+  (match M.verify_shim_sidecar ~dir with
+   | Error e ->
+     Alcotest.(check bool) "named mismatch" true
+       (String_util.contains_substring e "microvm_shim_hash_mismatch");
+     Alcotest.(check bool) "carries the sidecar's digest" true
+       (String_util.contains_substring e digest)
+   | Ok _ -> Alcotest.fail "a binary that disagrees with its sidecar passed");
+  write sidecar "not a digest\n";
+  match M.verify_shim_sidecar ~dir with
+  | Error e ->
+    Alcotest.(check bool) "named invalid sidecar" true
+      (String_util.contains_substring e "microvm_shim_sidecar_invalid")
+  | Ok _ -> Alcotest.fail "a sidecar without a digest passed"
+;;
+
 let test_shim_travels_read_only_with_its_config () =
   Alcotest.(check bool)
     "shim dir is a read-only mount"
@@ -1358,6 +1405,11 @@ let test_running_guest_is_a_remote_endpoint () =
        Alcotest.(check (list string)) "the transport appends only the shim"
          (guest.prefix @ [ guest.shim_path ])
          argv;
+       let probe_argv = Masc.Keeper_sandbox_remote.probe_argv endpoint in
+       Alcotest.(check bool) "probe argv does not pass -i (#33431)" false
+         (List.mem "-i" probe_argv);
+       Alcotest.(check bool) "probe argv ends with --probe" true
+         (list_ends_with [ "--probe" ] probe_argv);
        (* [create_minimal] runs as 0:0, so this is the runtime's own pair
           reaching the exec rather than a value the prefix invented. *)
        Alcotest.(check bool) "execs as the runtime's uid:gid" true
@@ -1375,6 +1427,76 @@ let test_running_guest_is_a_remote_endpoint () =
      | Error message ->
        Alcotest.(check bool) "refusal is named" true
          (String.starts_with ~prefix:"microvm_remote_endpoint_requires_microvm:" message))
+;;
+
+let test_shim_exec_prefix_for_microsandbox_probe_omits_stream () =
+  let container_name = "masc-keeper-vm-msb-probe" in
+  let remote_root = "/masc-work" in
+  let shim_config_path = "/opt/masc-exec-shim/masc-exec-shim.conf" in
+  (match
+     Masc.Keeper_sandbox_microvm.shim_exec_prefix_for
+       ~stdin:true
+       Masc.Keeper_microvm_backend.Microsandbox
+       ~container_name
+       ~uid:501
+       ~gid:20
+       ~remote_root
+       ~shim_config_path
+   with
+   | Error err -> Alcotest.fail err
+   | Ok prefix ->
+     Alcotest.(check bool) "stdin prefix includes --stream" true
+       (List.mem "--stream" prefix);
+     Alcotest.(check bool) "stdin prefix includes command separator --" true
+       (List.mem "--" prefix));
+  (match
+     Masc.Keeper_sandbox_microvm.shim_exec_prefix_for
+       ~stdin:false
+       Masc.Keeper_microvm_backend.Microsandbox
+       ~container_name
+       ~uid:501
+       ~gid:20
+       ~remote_root
+       ~shim_config_path
+   with
+   | Error err -> Alcotest.fail err
+   | Ok probe_prefix ->
+     Alcotest.(check bool) "probe prefix omits --stream (#33431)" false
+       (List.mem "--stream" probe_prefix);
+     Alcotest.(check bool) "probe prefix still ends with command separator --" true
+       (list_ends_with [ "--" ] probe_prefix);
+     Alcotest.(check bool) "probe prefix retains remote_root" true
+       (contains remote_root probe_prefix);
+     Alcotest.(check bool) "probe prefix retains shim config env" true
+       (contains ("MASC_EXEC_SHIM_CONFIG=" ^ shim_config_path) probe_prefix));
+  (match
+     Masc.Keeper_sandbox_microvm.shim_exec_prefix_for
+       ~stdin:false
+       Masc.Keeper_microvm_backend.Apple_container
+       ~container_name
+       ~uid:501
+       ~gid:20
+       ~remote_root
+       ~shim_config_path
+   with
+   | Error err -> Alcotest.fail err
+   | Ok apple_probe_prefix ->
+     Alcotest.(check bool) "apple probe prefix omits -i" false
+       (List.mem "-i" apple_probe_prefix));
+  (match
+     Masc.Keeper_sandbox_microvm.shim_exec_prefix_for
+       ~stdin:false
+       Masc.Keeper_microvm_backend.Nerdctl_kata
+       ~container_name
+       ~uid:501
+       ~gid:20
+       ~remote_root
+       ~shim_config_path
+   with
+   | Error err -> Alcotest.fail err
+   | Ok probe_prefix ->
+     Alcotest.(check bool) "nerdctl probe prefix omits -i" false
+       (List.mem "-i" probe_prefix))
 ;;
 
 (* The volume probe's ambiguity: [container volume inspect] exits 1 for an
@@ -1755,6 +1877,49 @@ let test_live_a_moved_proxy_port_replaces_the_guest () =
       "which means it was replaced, not adopted"
       true
       (not (String.equal first after))
+let test_unbooted_microvm_guest_is_not_booted_and_skips_freshness_scan () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir "microvm_freshness_" in
+  let config = Masc.Workspace.default_config base in
+  let meta = microvm_meta ~name:"vm-freshness-unbooted" in
+  Alcotest.(check bool) "initially not booted" false
+    (Masc.Keeper_turn_sandbox_runtime.is_microvm_guest_booted ~config ~meta ());
+  Alcotest.(check bool) "lane reflects not booted" false
+    (Masc.Keeper_sandbox_remote_lane.is_guest_booted ~config ~meta ());
+  let expected_root =
+    Filename.concat
+      Masc.Keeper_sandbox_microvm.work_volume_guest_root
+      (Playground_paths.sanitize_keeper_name meta.name)
+  in
+  (match
+     Masc.Keeper_sandbox_remote_checkouts.discover_and_inspect
+       ~timeout_sec:5.0 ~config ~meta ~catalog:(Ok []) ()
+   with
+   | Error (Masc.Keeper_playground_checkouts.Root_missing { root }) ->
+     Alcotest.(check string) "root is keeper playground root" expected_root root
+   | Error (Root_unreadable { detail; _ }) ->
+     Alcotest.failf "unexpected Root_unreadable: %s" detail
+   | Error (Root_not_directory _) ->
+     Alcotest.fail "unexpected Root_not_directory"
+   | Ok _ -> Alcotest.fail "expected Root_missing for unbooted microvm guest");
+  (match Masc.Keeper_sandbox_control.checkout_freshness_rows ~config ~meta () with
+   | Error (Masc.Keeper_playground_checkouts.Root_missing { root }) ->
+     Alcotest.(check string) "root is keeper playground root" expected_root root
+   | Error scan_err ->
+     Alcotest.failf "unexpected checkout_freshness_rows scan error: %s"
+       (Masc.Keeper_playground_checkouts.scan_error_to_string scan_err)
+   | Ok _ -> Alcotest.fail "expected Root_missing from checkout_freshness_rows");
+  Masc.Keeper_turn_sandbox_runtime.For_testing_microvm.mark_microvm_guest_booted
+    ~config ~meta ();
+  Alcotest.(check bool) "marked booted" true
+    (Masc.Keeper_turn_sandbox_runtime.is_microvm_guest_booted ~config ~meta ());
+  Alcotest.(check bool) "lane reflects booted" true
+    (Masc.Keeper_sandbox_remote_lane.is_guest_booted ~config ~meta ());
+  Masc.Keeper_turn_sandbox_runtime.forget_microvm_guest_booted ~config ~meta ();
+  Alcotest.(check bool) "evicted not booted" false
+    (Masc.Keeper_turn_sandbox_runtime.is_microvm_guest_booted ~config ~meta ());
+  Alcotest.(check bool) "lane reflects evicted" false
+    (Masc.Keeper_sandbox_remote_lane.is_guest_booted ~config ~meta ())
 ;;
 
 let () =
@@ -1827,6 +1992,8 @@ let () =
             test_turn_start_argv_shape
         ; Alcotest.test_case "inspect state parser" `Quick
             test_inspect_state_parser
+        ; Alcotest.test_case "unbooted microvm guest skips freshness scan" `Quick
+            test_unbooted_microvm_guest_is_not_booted_and_skips_freshness_scan
         ; Alcotest.test_case "live guest cat (MASC_MICROVM_LIVE=1)" `Slow
             test_live_turn_runtime_cat
         ] )
@@ -1837,6 +2004,8 @@ let () =
             test_volume_create_argv_carries_a_size
         ; Alcotest.test_case "shim travels read-only with its config" `Quick
             test_shim_travels_read_only_with_its_config
+        ; Alcotest.test_case "the shim sidecar decides the boot" `Quick
+            test_the_shim_sidecar_decides_the_boot
         ; Alcotest.test_case "the box the TOML names is the box the shim is asked for" `Quick
             test_the_box_the_toml_names_is_the_box_the_shim_is_asked_for
         ; Alcotest.test_case "keeper work root is created as root with a mode" `Quick
@@ -1849,6 +2018,10 @@ let () =
             test_keeper_work_root_write_probe_runs_as_the_keeper
         ; Alcotest.test_case "running guest is a remote endpoint" `Quick
             test_running_guest_is_a_remote_endpoint
+        ; Alcotest.test_case
+            "shim exec prefix for microsandbox probe omits stream"
+            `Quick
+            test_shim_exec_prefix_for_microsandbox_probe_omits_stream
         ] )
     ; ( "work volume provisioning"
       , [ Alcotest.test_case "volume names parse from the listing" `Quick

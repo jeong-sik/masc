@@ -62,7 +62,7 @@ val parse_max_context_override :
     is unreachable is refused the same way a new one is. The test suite has
     no daemon and passes its own probe. *)
 val parse :
-  ?docker_preflight:(timeout_sec:float -> Keeper_sandbox_runtime.docker_preflight option) ->
+  ?docker_preflight:(?image:string -> timeout_sec:float -> unit -> Keeper_sandbox_runtime.docker_preflight option) ->
   _ context ->
   Yojson.Safe.t ->
   (parsed_args, tool_result) result
@@ -82,10 +82,6 @@ val creation_stem : string
     in an operator's editor. *)
 
 val known_turn_up_args : string list
-
-(** Typed rejection (R09 [turn_up_arg_unknown]) naming every unrecognised
-    key the caller sent. *)
-val turn_up_arg_unknown : string list -> tool_result
 
 (** Resolve mention targets with dedupe + blank filter. [None] falls through to
     [fallback_targets] → [[name]]; [Some []] is an explicit clear. *)

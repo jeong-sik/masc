@@ -82,7 +82,51 @@ module Theme = struct
     ; quiet : string
     ; probe : string
     ; message : string
+    (* Six slots for an axis whose members are kinds, not degrees. A file
+       type, a goal phase, a sandbox: nothing in such a set outranks its
+       siblings and the reader's only job is to tell them apart, which is
+       neither what [ok]/[warn]/[bad] say nor what [tone] says. Without
+       them a surface reaches past the theme for a colour name, and a
+       constant SGR does not move when the terminal palette answers -- so
+       the rows saying "kind" were the ones a theme could not reach.
+
+       Numbered, not named. Two axes never on the same screen can hold the
+       same slot, and a global kind-to-colour map runs out of colours.
+
+       Five, not six, and none of them is free of status. The theme names
+       seven ANSI colours and [status_ansi_color] already claims five --
+       green, yellow, red, cyan and the receding black -- so a slot is the
+       same bytes as some status token by construction. Red is the one
+       nobody can use: it is [bad], and it turned a media file's mark into
+       the failure text sharing its terminal row. Blue and magenta are the
+       only hues status leaves alone; a surface reaching for any of the
+       other three owes a check that it does not draw that status token.
+       RFC-0427. *)
+    ; slot_1 : string
+    ; slot_2 : string
+    ; slot_3 : string
+    ; slot_4 : string
+    ; slot_5 : string
     }
+
+  (* A slot, so the accessor below is total. *)
+  type category =
+    | Slot_1
+    | Slot_2
+    | Slot_3
+    | Slot_4
+    | Slot_5
+
+  (* One place says which hue a slot carries, so the contrast suite measures
+     the mapping the renderer actually draws instead of a copy of it. *)
+  let category_colour = function
+    | Slot_1 -> Masc_tui_theme.Bright_cyan
+    | Slot_2 -> Masc_tui_theme.Bright_yellow
+    | Slot_3 -> Masc_tui_theme.Bright_green
+    | Slot_4 -> Masc_tui_theme.Bright_magenta
+    | Slot_5 -> Masc_tui_theme.Bright_blue
+
+  let all_categories = [ Slot_1; Slot_2; Slot_3; Slot_4; Slot_5 ]
 
   let resolved_cache : resolved option Atomic.t = Atomic.make None
 
@@ -113,11 +157,27 @@ module Theme = struct
         ; quiet = of_colour Masc_tui_theme.Bright_black
         ; probe = of_colour Masc_tui_theme.Bright_cyan
         ; message = of_colour Masc_tui_theme.Bright_magenta
+        (* Every hue but the receding one and [bad]'s red. *)
+        ; slot_1 = of_colour (category_colour Slot_1)
+        ; slot_2 = of_colour (category_colour Slot_2)
+        ; slot_3 = of_colour (category_colour Slot_3)
+        ; slot_4 = of_colour (category_colour Slot_4)
+        ; slot_5 = of_colour (category_colour Slot_5)
         }
       in
       if Atomic.compare_and_set resolved_cache previous (Some next) then next
       else resolved ()
   ;;
+
+  (* Which slot a surface gives to which member is the surface's own
+     business; this only promises the six are distinct and that all six
+     move when the palette does. *)
+  let category = function
+    | Slot_1 -> (resolved ()).slot_1
+    | Slot_2 -> (resolved ()).slot_2
+    | Slot_3 -> (resolved ()).slot_3
+    | Slot_4 -> (resolved ()).slot_4
+    | Slot_5 -> (resolved ()).slot_5
 
   let ok () = (resolved ()).ok
   let warn () = (resolved ()).warn
@@ -421,6 +481,7 @@ let fit_width = Masc_tui_message_layout.fit_width
     styling or width calculation is applied. *)
 module Terminal_text = struct
   let single_line text = Masc.Tui_decode.sanitize_terminal_text text
+  let preview_line text = Masc.Tui_decode.preview_line text
   let optional_single_line = Option.map single_line
 
   let single_line_or ~default value =

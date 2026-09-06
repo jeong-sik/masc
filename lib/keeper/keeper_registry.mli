@@ -144,12 +144,6 @@ val all : ?base_path:string -> unit -> registry_entry list
 val registry_entry_validation_error_to_string :
   registry_entry_validation_error -> string
 
-val validate_registry_entry :
-  base_path:string ->
-  string ->
-  registry_entry ->
-  (unit, registry_entry_validation_error) result
-
 (** Like [get] but returns the entry together with its health verdict.
     Returns [Some _] even when the entry is corrupted, so callers can decide
     whether to consume it. *)
@@ -194,15 +188,6 @@ val update_entry_exact_for_lifecycle :
   registry_entry ->
   (registry_entry -> registry_entry) ->
   exact_update_result
-
-(** Update a registered entry and return [true] only when a validated write
-    was installed.  Missing keepers, no-op closures, and validation failures
-    return [false]. *)
-val update_entry_if_registered :
-  base_path:string ->
-  string ->
-  (registry_entry -> registry_entry * bool) ->
-  bool
 
 (* Runtime-attempt persistence + enrichment moved to
    Keeper_registry_runtime_attempt (record / enrich_fiber_unresolved_outcome). *)
@@ -291,16 +276,6 @@ val mark_turn_provider_attempt_started : base_path:string -> string -> unit
 (** Update the live turn's phase directly. No-op if idle. *)
 val set_turn_phase :
   base_path:string -> string -> packed_turn_phase -> unit
-
-(** Runtime transition guards against the TLA+ transition matrix.
-    [validate_turn_phase_transition] dispatches through
-    [resolve_turn_phase_transition] and raises the typed
-    [Turn_phase_transition_violation] on a forbidden pair (RFC-0072
-    Phase 4b + 5).  It bumps
-    [Otel_metric_store.metric_fsm_guard_violation] via
-    [Keeper_fsm_guard_runtime.wrap_unit]. *)
-val validate_turn_phase_transition :
-  from:packed_turn_phase -> to_:packed_turn_phase -> unit
 
 (** Record the surface model selected for the current turn. No-op if idle. *)
 val set_turn_selected_model :
@@ -586,15 +561,6 @@ val dispatch_event_unit :
   base_path:string ->
   ?origin:lifecycle_event_origin ->
   string -> Keeper_state_machine.event -> unit
-(** Like [dispatch_event_with_audit], but logs and emits a Otel_metric_store
-    counter on [Error]. *)
-val dispatch_event_with_audit_and_log :
-  base_path:string ->
-  ?origin:lifecycle_event_origin ->
-  ?events_fired:Keeper_state_machine.event list ->
-  ?selected_event:Keeper_state_machine.event ->
-  string -> Keeper_state_machine.event ->
-  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
 (** Get the fine-grained phase of a keeper. *)
 val get_phase : base_path:string -> string -> Keeper_state_machine.phase option

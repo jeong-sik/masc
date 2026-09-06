@@ -22,7 +22,6 @@ module Lifecycle : sig
     | Stopped       (** Server has shut down *)
 
   val phase_to_string : phase -> string
-  val all_phases : phase list
 
   type event =
     | Boot_complete
@@ -34,7 +33,6 @@ module Lifecycle : sig
   type transition = Applied of phase | Ignored of { phase: phase; event: event }
 
   val apply_event : current:phase -> event -> transition
-  val apply_event_lossy : current:phase -> event -> phase
   val pp_phase : Format.formatter -> phase -> unit
 end
 
@@ -46,14 +44,11 @@ module Lazy_task_queue : sig
     | Pending of string list  (** Tasks still pending *)
 
   val to_string : t -> string
-  val all_states : t list
 
   type event =
     | Tasks_appear of string list
     | Task_finish of string
     | Task_fail of { task: string; error: string }
-
-  val event_to_string : event -> string
 
   val apply_event : current:t -> event -> t
   val pp : Format.formatter -> t -> unit
@@ -67,18 +62,14 @@ module Readiness : sig
     | Ready         (** Accepting traffic *)
 
   val phase_to_string : phase -> string
-  val all_phases : phase list
 
   type event =
     | Set_ready
     | Set_not_ready
 
-  val event_to_string : event -> string
-
   type transition = Applied of phase | Ignored of { phase: phase; event: event }
 
   val apply_event : current:phase -> event -> transition
-  val apply_event_lossy : current:phase -> event -> phase
   val pp_phase : Format.formatter -> phase -> unit
 end
 

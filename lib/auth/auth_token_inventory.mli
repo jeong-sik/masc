@@ -16,7 +16,6 @@ val classify : now:float -> Types_auth.agent_credential -> expiry
     stamp nothing can read is not evidence a credential is dead, and reading it
     as dead would let a prune delete a working token. *)
 
-val expiry_label : expiry -> string
 val is_expired : expiry -> bool
 
 val row : now:float -> raw_present:bool -> Types_auth.agent_credential -> string

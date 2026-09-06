@@ -148,9 +148,10 @@ let handle_with_endpoint
             | Ok remote_path ->
               let write ~content_mode ~mode_label ~body ~evidence =
                 let status, _stdout, stderr =
-                  run ~endpoint ~cwd:keeper_root
-                    ~argv:(write_argv ~mode:content_mode ~remote_path)
-                    ~stdin:body
+                  Masc_exec.Sandbox_target.status_tuple
+                    (run ~endpoint ~cwd:keeper_root
+                       ~argv:(write_argv ~mode:content_mode ~remote_path)
+                       ~stdin:body)
                 in
                 match status with
                 | Unix.WEXITED 0 ->
@@ -198,7 +199,9 @@ let handle_with_endpoint
                               ()))
                     else
                       let status, current, stderr =
-                        run ~endpoint ~cwd:keeper_root ~argv:(read_source_argv ~remote_path) ~stdin:""
+                        Masc_exec.Sandbox_target.status_tuple
+                          (run ~endpoint ~cwd:keeper_root
+                             ~argv:(read_source_argv ~remote_path) ~stdin:"")
                       in
                       (match status with
                        | Unix.WEXITED 0 ->

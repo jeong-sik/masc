@@ -235,6 +235,7 @@ val exec_argv_for :
     command bare with [-i]. *)
 
 val shim_exec_prefix_for :
+  ?stdin:bool ->
   Keeper_microvm_backend.t ->
   container_name:string ->
   uid:int ->
@@ -249,13 +250,10 @@ val shim_exec_prefix_for :
     under. All three CLIs document the environment entry the first needs
     ([msb exec] has [-e, --env]).
 
-    [Error] for [msb]: [container exec --user] documents [name|uid[:gid]] and
-    nerdctl takes Docker's, but [msb exec --user] documents a guest user name
-    and no numeric form (0.6.16), so the mapped [uid:gid] a keeper's commands
-    run as cannot be named. Sending it would either be rejected or resolved
-    as somebody else's user name, writing to the keeper's tree as that user.
-    Naming a guest user for the lane is the change that would settle it,
-    which is a decision about identity rather than a spelling. *)
+    [container exec --user] documents [name|uid[:gid]] and nerdctl takes
+    Docker's. [msb exec --user] documents a guest user name and no numeric form,
+    so msb omits [--user]; the work volume's [uid=,gid=] mount places writes
+    at the right host uid. *)
 
 val stop_argv_for :
   Keeper_microvm_backend.t -> container_name:string -> string list
@@ -303,6 +301,24 @@ val keeper_work_root : keeper_name:string -> string
 val shim_guest_dir : string
 val shim_binary_name : string
 val shim_config_name : string
+
+val shim_sidecar_name : string
+(** [masc-exec-shim.sha256], written by [scripts/install.sh] beside the shim
+    it placed: the sha256 the release's SHA256SUMS gave for that asset, in
+    [sha256sum] format (digest, two spaces, asset name). *)
+
+(** RFC-0427 B-2: what the boot knows about the shim it is about to run. *)
+type shim_provenance =
+  | Shim_verified of { sha256 : string }
+      (** the binary's digest equals the sidecar's *)
+  | Shim_unverified  (** no sidecar: a hand-built shim, run as it is *)
+
+val verify_shim_sidecar : dir:string -> (shim_provenance, string) result
+(** Reads [dir/masc-exec-shim.sha256] if present and compares it with the
+    digest of [dir/masc-exec-shim]. [Error] names the case:
+    [microvm_shim_hash_mismatch] (both digests in the text),
+    [microvm_shim_sidecar_invalid], [microvm_shim_sidecar_unreadable],
+    [microvm_shim_unreadable]. Never raises. *)
 val shim_guest_path : string
 val shim_config_guest_path : string
 val shim_mount_args : host_dir:string -> string list

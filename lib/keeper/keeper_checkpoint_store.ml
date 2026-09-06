@@ -226,6 +226,26 @@ let classify_core_error (e : Agent_core.Error.t) : checkpoint_load_error =
   | Orchestration _ | Internal _ | Internal_carried { message = _; _ } ->
       Agent_core_error (Agent_core.Error.to_string e)
 
+(* Both checkpoint reads take their bytes through
+   [Fs_compat.load_owned_regular_file]: the read runs on a system thread when
+   the Eio filesystem is active, and the file must sit inside the owned chain
+   the writers publish into ([~ownership_root], the parent of the session
+   directory), so a symbolic link or a changed parent is refused. Until
+   2026-09-05 the bytes came through [Fs_compat.load_file], whose Eio branch
+   ([Eio.Path.load]) copied the 13-35 MB file on the calling fiber and held
+   the main domain 45-180 ms per turn — the [openat -> switch] class of RFC
+   main-domain-scheduler-latency §8.8. *)
+let read_checkpoint_bytes ~(session_dir : string) path : (string, checkpoint_load_error) result =
+  match
+    Fs_compat.load_owned_regular_file
+      ~ownership_root:(Filename.dirname session_dir)
+      path
+  with
+  | Ok (Some bytes) -> Ok bytes
+  | Ok None -> Error Not_found
+  | Error error ->
+    Error (Io_error (Fs_compat.owned_regular_file_read_error_to_string error))
+
 let load_agent_core_history_file ~(session_dir : string) ~(snapshot_id : string) :
     (Agent_core.Checkpoint.t, checkpoint_load_error) result =
   (* [snapshot_id] reaches this entry point from the dashboard HTTP
@@ -236,9 +256,12 @@ let load_agent_core_history_file ~(session_dir : string) ~(snapshot_id : string)
     let path = agent_core_history_path ~session_dir ~snapshot_id in
     if Fs_compat.file_exists path then
       try
-        match decode_checkpoint_off_scheduler (Fs_compat.load_file path) with
-        | Ok ckpt -> Ok ckpt
-        | Error e -> Error (classify_core_error e)
+        match read_checkpoint_bytes ~session_dir path with
+        | Error e -> Error e
+        | Ok bytes ->
+          (match decode_checkpoint_off_scheduler bytes with
+           | Ok ckpt -> Ok ckpt
+           | Error e -> Error (classify_core_error e))
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> Error (Io_error (Printexc.to_string exn))
@@ -344,9 +367,9 @@ let load_agent_core ~(session_dir : string) ~(session_id : string) :
      any read, so a missing checkpoint is never inferred from a stringified
      error detail and [classify_core_error] keeps no [Not_found] arm.
 
-     One read path for Eio and non-Eio contexts: [Fs_compat.load_file] is
-     Eio-native when the fs capability is installed, and the decode is
-     routed off the calling fiber (#25077). The previous
+     One read path for Eio and non-Eio contexts: [read_checkpoint_bytes]
+     reads on a system thread when the fs capability is installed, and the
+     decode is routed off the calling fiber (#25077). The previous
      [Agent_core.Checkpoint_store.load] branch read the same file but
      decoded the 0.7-1.4MB payload inline in agent core on the calling fiber
      (agent-core boundary), and its [create] could mkdir on a pure read. Agent Core
@@ -360,11 +383,14 @@ let load_agent_core ~(session_dir : string) ~(session_id : string) :
   if Fs_compat.file_exists path then
     let identity_before = canonical_identity_opt path in
     try
-      match decode_checkpoint_off_scheduler (Fs_compat.load_file path) with
-      | Ok ckpt ->
-        publish_summary_after_parse ~canonical_path:path ~identity_before ckpt;
-        Ok ckpt
-      | Error e -> Error (classify_core_error e)
+      match read_checkpoint_bytes ~session_dir path with
+      | Error e -> Error e
+      | Ok bytes ->
+        (match decode_checkpoint_off_scheduler bytes with
+         | Ok ckpt ->
+           publish_summary_after_parse ~canonical_path:path ~identity_before ckpt;
+           Ok ckpt
+         | Error e -> Error (classify_core_error e))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn -> Error (Io_error (Printexc.to_string exn))

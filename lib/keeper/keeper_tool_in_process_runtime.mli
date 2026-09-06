@@ -57,8 +57,6 @@ val network_read_call_summary : network_read_replay -> string option
     and the replay engine both state it through this function. [None] when
     the leaf's argument is absent, not a string, or blank. *)
 
-val connector_post_gate_operation : string
-
 type connector_post_replay =
   | Replay_discord_post of
       { input : Yojson.Safe.t
@@ -179,18 +177,6 @@ val handle_person_note_set
   -> string
 
 val handle_person_note_set_with_outcome
-  :  config:Workspace.config
-  -> meta:keeper_meta
-  -> args:Yojson.Safe.t
-  -> Keeper_tool_execution.t
-
-val handle_ide_annotate
-  :  config:Workspace.config
-  -> meta:keeper_meta
-  -> args:Yojson.Safe.t
-  -> string
-
-val handle_ide_annotate_with_outcome
   :  config:Workspace.config
   -> meta:keeper_meta
   -> args:Yojson.Safe.t

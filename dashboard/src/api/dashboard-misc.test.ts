@@ -67,8 +67,6 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
         target: 'snapshot_read_error',
         label: '읽기',
         message: 'invalid current snapshot',
-        value: 1,
-        threshold: 0,
       }],
     }],
     totals: {
@@ -134,8 +132,6 @@ function starvingKeeperPayload(): KeeperMemoryHealthResponse {
         target: 'librarian_starvation',
         label: 'Librarian',
         message: 'Librarian runs failed and no current-memory snapshot exists',
-        value: 4,
-        threshold: 0,
       }],
     }],
     totals: {
@@ -277,8 +273,6 @@ describe('fetchKeeperMemoryHealth', () => {
       target: 'source_snapshot_read_error',
       label: '소스 읽기',
       message: broken.source_read_error,
-      value: 1,
-      threshold: 0,
     })
     payload.totals.source_snapshot_bytes = 160
     payload.totals.source_read_errors = 1
@@ -309,8 +303,6 @@ describe('fetchKeeperMemoryHealth', () => {
       target: 'vision_ingest_errors',
       label: 'Vision',
       message: 'Image ingestion failed 3 times.',
-      value: 3,
-      threshold: 0,
     })
     payload.totals.vision_ingest_errors = 3
     payload.alert_summary.total_alerts = 2
@@ -331,6 +323,24 @@ describe('fetchKeeperMemoryHealth', () => {
     const payload = starvingKeeperPayload()
     payload.keepers[0]!.alerts[0]!.severity = 'warn'
     getMock.mockResolvedValue(payload)
+
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow(
+      '유효하지 않은 keeper memory health payload',
+    )
+  })
+
+  it('rejects an alert that carries legacy threshold or value fields', async () => {
+    const payloadWithThreshold = starvingKeeperPayload()
+    ;(payloadWithThreshold.keepers[0]!.alerts[0] as unknown as Record<string, unknown>).threshold = 0
+    getMock.mockResolvedValue(payloadWithThreshold)
+
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow(
+      '유효하지 않은 keeper memory health payload',
+    )
+
+    const payloadWithValue = starvingKeeperPayload()
+    ;(payloadWithValue.keepers[0]!.alerts[0] as unknown as Record<string, unknown>).value = 4
+    getMock.mockResolvedValue(payloadWithValue)
 
     await expect(fetchKeeperMemoryHealth()).rejects.toThrow(
       '유효하지 않은 keeper memory health payload',

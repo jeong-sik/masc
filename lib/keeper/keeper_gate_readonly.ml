@@ -96,7 +96,17 @@ let gh_flag_leaves_the_guest flag = String.equal flag "--web" || String.equal fl
 
 (* [gh api] is a GET only while nothing on the line makes it anything else.
    A field flag alone flips the method to POST, which is why they are refused
-   here rather than only the explicit method flags. *)
+   here rather than only the explicit method flags.
+
+   This includes [graphql] subcommands carrying a query via [-f]/[--field]:
+   measured 2026-09-05, `gh api graphql -f query={ viewer { login } }` was
+   deferred to the judge and, once approved, exited 0 with pure read data
+   ({"viewer":{"login":…}}, 779ms) — the read itself is real. Deciding
+   read-ness from the query text would mean parsing GraphQL (queries and
+   mutations share one POST endpoint), which is a string classifier over an
+   open language and exactly what this table refuses to become. A field flag
+   therefore stays a write-shaped request and keeps its judge turn, whatever
+   the query says. *)
 let gh_api_flag_writes flag =
   List.mem flag
     [ "-X"; "--method"; "-f"; "--raw-field"; "-F"; "--field"; "--input" ]
@@ -147,9 +157,11 @@ let find_flag_writes_or_execs flag =
   || String.starts_with ~prefix:"-fprint" flag
 ;;
 
-let sed_flag_is_in_place flag =
-  String.starts_with ~prefix:"-i" flag || String.equal flag "--in-place"
-;;
+(* [sed] is deliberately not fast-pathed. Its write ([w]/[W]) and execute
+   ([e]) verbs live in the script argument, not in a flag, so no flag
+   denylist can prove a [sed] invocation observation-only -- [sed 's/a/b/e' f]
+   runs a shell and [sed 'w /path' f] writes a file, both with no [-i]. It
+   falls through to the configured judge like any unclassified command. *)
 
 let writes_to_file flag =
   String.equal flag "-o" || String.starts_with ~prefix:"--output" flag
@@ -190,7 +202,6 @@ let classify_argv argv =
     (match command with
      | "env" -> rest = [] (* [env CMD …] executes CMD; only bare [env] prints. *)
      | "find" -> not (rejected find_flag_writes_or_execs)
-     | "sed" -> not (rejected sed_flag_is_in_place)
      | "sort" | "diff" -> not (rejected writes_to_file)
      | "rg" -> not (rejected rg_flag_runs_preprocessor)
      | "date" -> not (rejected sets_system_time)
@@ -270,8 +281,58 @@ let redirect_is_observation = function
    directory before observing is still an observation. *)
 let shell_directory_step = "cd"
 
+(* Environment assignments a simple command may carry without changing what
+   it does. The IR already separates them from argv into [simple.Ir.env],
+   so the question is only which names are inert. [NO_COLOR=1 gh pr list]
+   used to lose its observation fast path to a judge turn that inspected
+   nothing the assignment could change.
+
+   Stripping is sound only for names on a closed list. Arbitrary names are
+   not inert: PATH=. swaps interpreter lookup; LD_PRELOAD injects code;
+   BASH_ENV/ENV run shell startup scripts; GIT_EXTERNAL_DIFF makes an
+   in-table [git diff] exec a chosen program; GIT_CONFIG_COUNT with
+   GIT_CONFIG_KEY_n/VALUE_n injects arbitrary config (core.pager exec);
+   GIT_INDEX_FILE redirects the stat cache [git status] refreshes;
+   PAGER/GH_PAGER spawn a process; GIT_SSH_COMMAND swaps the transport. A
+   denylist of known-bad names would enumerate an open world; the
+   uncertain-goes-to-judge rule this module follows asks instead for a
+   closed set of names whose effect is confined to output formatting. *)
+let inert_env_assignment_names =
+  [ "NO_COLOR"; "CLICOLOR"; "CLICOLOR_FORCE"; "TERM"; "TZ"; "LANG"; "LC_ALL" ]
+;;
+
+(* [true] when every assignment the command carries is inert. The names are
+   on the closed list above, and [TZ] additionally requires a value that is
+   not a tzfile reference: glibc treats a value starting with [:] (or any
+   value containing [/]) as a path to open and parse as a timezone file,
+   which turns [TZ=:/etc/passwd git log] into a file-existence oracle. A
+   bare zone name ([UTC], [Asia/Seoul] is POSIX form, but a value with [/]
+   could also be a path) — so the guard is: reject [:] prefix and [/]. *)
+let env_assignment_inert (name : string) (value : string) : bool =
+  match name with
+  | "TZ" ->
+    (* Zone abbreviations like [UTC] or [EST5EDT] are inert; anything that
+       could name a file is not. *)
+    not (String.length value > 0 && value.[0] = ':')
+    && not (String.contains value '/')
+  | name -> List.mem name inert_env_assignment_names
+;;
+
+(* [true] when every assignment the command carries is inert — the names
+   are on the closed list above, whatever their values, except [TZ] whose
+   value must not be a tzfile reference (see [env_assignment_inert]). *)
+let env_assignments_inert (env : (string * Ir.arg) list) : bool =
+  List.for_all
+    (fun (name, value) ->
+      match value with
+      | Ir.Lit (v, _) -> env_assignment_inert name v
+      | Ir.Concat _ -> false
+      | Ir.Var _ -> false)
+    env
+;;
+
 let classify_simple (simple : Ir.simple) =
-  simple.Ir.env = []
+  env_assignments_inert simple.Ir.env
   && List.for_all redirect_is_observation simple.Ir.redirects
   &&
   match literals_of_args simple.Ir.args with
@@ -374,6 +435,17 @@ let network_capability_of_gate_input input =
   | _ -> None
 ;;
 
+(* [sandbox_profile = None] reaching this check is not a tool_execute
+   escape hatch. Measured over lib/ (2026-09-05): every gate_request
+   carrying profile None originates from exactly four places — the
+   identity_call in keeper_identity_gate, keeper_tool_in_process_runtime,
+   the write path in keeper_tool_filesystem_runtime, and the empty
+   defaults record in keeper_types_profile_defaults — while the
+   tool_execute origin in keeper_tool_execute_runtime always sends Some
+   dispatch_bundle.sandbox_profile, so None cannot describe a
+   disposable-guest command today. [None -> false] stays as fail-closed:
+   a future origin that forgets its profile must lose, not win, the
+   observation fast path. *)
 let observation_only_request ~operation ~sandbox_profile ~input =
   (String.equal operation "tool_execute"
    && (match sandbox_profile with

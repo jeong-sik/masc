@@ -1368,6 +1368,29 @@ def board_json_http_fixtures() -> HttpFixtures:
         200,
         {"post": posts[1], "comments": []},
     )
+    # The scenario tabs to "MASC Approvals" before Board, but
+    # Masc_tui_types.is_surface_active keeps Approvals off the visible
+    # surface ring while approval_items is empty, so tab_until would burn
+    # every key without the screen ever existing. Seed one pending keeper
+    # tool approval (shape mirrors compact_input_gate_http_fixtures) to put
+    # the surface back on the ring.
+    fixtures["/api/v1/keepers/tool-approvals"] = (
+        200,
+        {
+            "pending": [
+                {
+                    "keeper": "alpha",
+                    "tool_call_id": "tool-board-json-probe",
+                    "tool": "Execute",
+                    "args": "{}",
+                    "question": "Run the board-json probe?",
+                    "because": None,
+                    "asked_at": 1787766400.0,
+                    "timeout_sec": 300.0,
+                }
+            ]
+        },
+    )
     return fixtures
 
 
@@ -7512,10 +7535,14 @@ def planning_review_hierarchy_interaction() -> Interaction:
                     f"Task Verdicts did not explain itself ({needle!r}): "
                     f"{verdicts_plain!r}"
                 )
-        # The walk continues through the two children that keep their own
-        # headers, then wraps back round to Goals.
-        send_and_wait(process, master_fd, output, b"v", b"MASC Schedules")
-        send_and_wait(process, master_fd, output, b"v", b"MASC Fusion")
+        # Planning's [v] strip has exactly three stops — Goals, Task Review,
+        # Task Verdicts — and wraps back round to Goals. The walk used to
+        # keep two extra children, Schedules and Fusion, but Schedules was
+        # promoted to its own top-level surface (palette: "go Schedules";
+        # the wake-schedule scenario asserts that entry point) and Fusion
+        # became a tab of the selected Keeper (RFC-tui-operator-ia 3.1).
+        # Waiting for their boxed titles here starved with the strip
+        # redrawn every stop but theirs never drawn.
         goals_again = send_and_wait(
             process, master_fd, output, b"v", b"\xe2\x96\xb8Goals"
         )
@@ -7524,7 +7551,10 @@ def planning_review_hierarchy_interaction() -> Interaction:
                 f"Goals did not retain the Task Review sibling: {goals_again!r}"
             )
         # The children are [v] stops, not the next top-level Tab destination.
-        send_and_wait(process, master_fd, output, b"\t", b"MASC Workspace")
+        # From Planning, the ring's next stop is Fusion (surface_ring:
+        # ... Planning; Fusion; Workspace/Repositories; ...), so one Tab
+        # lands on Fusion's boxed title, not on Workspace two stops later.
+        send_and_wait(process, master_fd, output, b"\t", b"MASC Fusion")
         os.write(master_fd, b"q")
 
     return interact
@@ -7786,11 +7816,11 @@ def project_changes_interaction(
     os.write(master_fd, b"q")
 
 
-def repositories_enter_interaction(requests: HttpRequests) -> Interaction:
+def repositories_enter_interaction() -> Interaction:
     """Enter on a Repositories row opens that repository's own tree on the
     Code surface, through the ?repo_id= axis; the header names whose tree
-    it is. Then m reads the notes anchored to a file, and w adds one
-    through the $EDITOR form -- the assertion is the recorded POST body."""
+    it is. Then m lists the memos the file carries as comments, read off
+    the lexed rows rather than fetched."""
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -7809,35 +7839,24 @@ def repositories_enter_interaction(requests: HttpRequests) -> Interaction:
             raise AssertionError(
                 f"the Code header does not name the repository: {code_plain!r}"
             )
-        # Open a file in the repository scope, then m: the notes anchored to
-        # it arrive through the codebase slug the repositories row carries.
+        # Open a file in the repository scope, then m: the memo is the
+        # comment on line 1, in the file's own syntax, so the list needs no
+        # request and names the line, the author, the kind and the text.
         send_and_wait(process, master_fd, output, b"j\r", b"let")
         notes = send_and_wait(
             process, master_fd, output, b"m", b"keep n at three"
         )
         notes_plain = CSI_RE.sub(b"", notes).decode("utf-8")
-        for needle in ("notes: note.ml", "L1", "alpha", "Decision", "task-77"):
+        for needle in ("notes: note.ml", "L1", "alpha", "(decision)"):
             if needle not in notes_plain:
                 raise AssertionError(
                     f"the notes view missed {needle!r}: {notes_plain!r}"
                 )
-        # w: the $EDITOR stub saves the form, and the wire carries it.
-        os.write(master_fd, b"w")
-        body = wait_for_http_request(
-            process, master_fd, output, requests,
-            path="/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc",
-        )
-        payload = json.loads(body)
-        if payload != {"file_path": "note.ml", "line_start": 1,
-                       "line_end": 1, "kind": "Question",
-                       "content": "why three?"}:
-            raise AssertionError(f"note POST body: {payload!r}")
         back = send_and_wait(process, master_fd, output, b"\x1b", b"let")
-        # The loaded notes now decorate the gutter: line 1 carries the
-        # note anchor mark.
+        # The memo decorates the gutter: line 1 carries the anchor mark.
         if "●".encode() not in back:
             raise AssertionError(
-                f"the note anchor mark is missing from the gutter: {back!r}"
+                f"the memo mark is missing from the gutter: {back!r}"
             )
         # H over the repo-scoped file: the commits that touched it,
         # newest first.
@@ -7905,23 +7924,6 @@ def reject_editor_script() -> Iterator[str]:
     fd, path = tempfile.mkstemp(prefix="masc-tui-reject-editor-", suffix=".sh")
     try:
         os.write(fd, b'#!/bin/sh\nprintf %s \'{"reason": "needs a repro"}\' > "$1"\n')
-        os.close(fd)
-        os.chmod(path, 0o755)
-        yield path
-    finally:
-        os.unlink(path)
-
-
-@contextmanager
-def note_editor_script() -> Iterator[str]:
-    """An $EDITOR that fills the note form and exits 0 -- the saved form."""
-    fd, path = tempfile.mkstemp(prefix="masc-tui-note-editor-", suffix=".sh")
-    try:
-        os.write(
-            fd,
-            b'#!/bin/sh\nprintf %s \'{"line_start": 1, "line_end": 1, '
-            b'"kind": "Question", "content": "why three?"}\' > "$1"\n',
-        )
         os.close(fd)
         os.chmod(path, 0o755)
         yield path
@@ -10224,6 +10226,15 @@ def runtime_surface_interaction(
                         f"{catalog_detail_plain!r}"
                     )
             send_and_wait(process, master_fd, output, b"\x1b", b"All runtimes (4)")
+            # b10d25cc12 turned [p] into a three-stop circuit: lanes tab,
+            # catalog, then the standalone Lanes surface ("off the ring"),
+            # and [p] there returns to the lanes tab. The old two-stop step
+            # waited for the tab header right after leaving the catalog and
+            # starved on the standalone surface instead, whose header stays
+            # "(not loaded)" because this fixture serves no
+            # /api/v1/dashboard/standalone-lanes body. Walk the full circuit
+            # so the return leg is what gets asserted.
+            send_and_wait(process, master_fd, output, b"p", b"MASC Lanes")
             send_and_wait(process, master_fd, output, b"p", b"Lanes (3 lanes, 4 slots)")
 
             # The overflow scroll hint is unreachable with this fixture: it
@@ -11718,27 +11729,20 @@ def run_keyboard_regression(executable: str) -> None:
              "hueIndex": None},
         ],
     )
-    repo_file = (200, {"ok": True, "content": "let n = 3\n"})
+    repo_file = (
+        200,
+        {
+            "ok": True,
+            "content": (
+                "(* masc(alpha) decision: keep n at three until the probe lands *)\n"
+                "let n = 3\n"
+            ),
+        },
+    )
     for file_path in (
         "/api/v1/workspace/file?path=note.ml&repo_id=masc",
     ):
         repositories_fixtures[file_path] = repo_file
-    notes_response = (
-        200,
-        {
-            "ok": True,
-            "data": [
-                {"id": "an-1", "file_path": "note.ml", "line_start": 1,
-                 "line_end": 1, "keeper_id": "alpha", "kind": "Decision",
-                 "content": "keep n at three until the probe lands",
-                 "goal_id": None, "task_id": "task-77", "references": [],
-                 "created_at_ms": 1, "updated_at_ms": 1},
-            ],
-        },
-    )
-    repositories_fixtures[
-        "/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc&file_path=note.ml"
-    ] = notes_response
     repositories_fixtures[
         "/api/v1/git/log?path=note.ml&limit=50&repo_id=masc"
     ] = (
@@ -11748,26 +11752,12 @@ def run_keyboard_regression(executable: str) -> None:
              "author": "keeper", "subject": "docs: seed the file (#1256)"},
         ]},
     )
-    repositories_fixtures[
-        "/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc"
-    ] = (
-        201,
-        {"ok": True, "data": {"id": "an-2", "file_path": "note.ml",
-         "line_start": 1, "line_end": 1, "keeper_id": "masc-tui",
-         "kind": "Question", "content": "why three?", "goal_id": None,
-         "task_id": None, "references": [], "created_at_ms": 2,
-         "updated_at_ms": 2}},
+    run_terminal_scenario(
+        executable,
+        description="Repositories Enter opens the Code tree",
+        interact=repositories_enter_interaction(),
+        http_fixtures=repositories_fixtures,
     )
-    note_requests: HttpRequests = []
-    with note_editor_script() as note_editor:
-        run_terminal_scenario(
-            executable,
-            description="Repositories Enter opens the Code tree",
-            interact=repositories_enter_interaction(note_requests),
-            http_fixtures=repositories_fixtures,
-            http_requests=note_requests,
-            extra_env={"EDITOR": note_editor},
-        )
     add_requests: HttpRequests = []
     with repository_declaration_editor_script() as repo_editor:
         run_terminal_scenario(

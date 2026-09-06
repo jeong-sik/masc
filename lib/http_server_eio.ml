@@ -484,32 +484,6 @@ module Request = struct
         | `Too_large max_bytes -> respond_too_large reqd max_bytes
         | `Internal exn -> respond_internal_error reqd exn)
 
-  (** Read request body synchronously - uses Condition for proper synchronization *)
-  let read_body_sync reqd =
-    let result_promise, resolve_result = Eio.Promise.create () in
-    let resolved = Atomic.make false in
-
-    let resolve_once outcome =
-      if Atomic.compare_and_set resolved false true then
-        Eio.Promise.resolve resolve_result outcome
-    in
-
-    read_body_async_with_limit reqd
-      ~max_bytes:max_body_bytes
-      ~on_body:(fun body_str ->
-        resolve_once (Ok body_str))
-      ~on_error:(function
-        | `Too_large max_bytes ->
-            respond_too_large reqd max_bytes;
-            resolve_once
-              (Error
-                 (Printf.sprintf "Request too large (max %d bytes)" max_bytes))
-        | `Internal exn ->
-            respond_internal_error reqd exn;
-            resolve_once (Error (Printexc.to_string exn)));
-
-    Eio.Promise.await result_promise
-
   (** Get path from request target *)
   let path (request : Httpun.Request.t) =
     match String.index_opt request.target '?' with

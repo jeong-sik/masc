@@ -69,15 +69,6 @@ type invariants_check = {
 
 
 
-(** [NoRuntimeBeforeMeasurement] is specified as: runtime selection past
-    [idle] requires a captured measurement. The implementation discards both
-    arguments and returns [true], so
-    [masc_keeper_invariant_violations_total\{invariant="NoRuntimeBeforeMeasurement"\}]
-    cannot increment and the dashboard always reports this one as holding.
-    Tracked in #26989 — do not read a [true] here as a verified invariant. *)
-val check_no_runtime_before_measurement :
-  runtime_state:runtime_state -> measurement_captured:bool -> bool
-
 (** Runtime-visible mirror of
     [Keeper_invariant_check.DerivePhaseAgreement]: the recorded registry
     phase must equal [Keeper_state_machine.derive_phase conditions]. *)
@@ -182,10 +173,6 @@ type run_state =
       rs_last_skip : last_skip option;
     }
   | Suspended of Keeper_state_machine.phase
-
-val run_state_to_json : run_state -> Yojson.Safe.t
-(** [{"kind": "in_turn" | "waiting" | "suspended"; ...}]. See [.ml] for the
-    exact per-kind shape. *)
 
 type fsm_guard_violation_bucket = {
   action : string;

@@ -13,7 +13,6 @@ val cadence_step_keyed
   -> (string * int) * bool
 val cadence_counter_entries : unit -> int
 
-val max_messages : unit -> int
 val prompt_max_messages : unit -> int
 
 (** The immutable input projected into the Librarian prompt. The exact-run

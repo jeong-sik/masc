@@ -107,6 +107,7 @@ type runtime_handler =
   | Tool_edit_file
   | Tool_write_file
   | Tool_time_now
+  | Tool_lane_status
   | Tool_tools_list
   | Tool_capability_search
   | Tool_context_status
@@ -250,7 +251,6 @@ val registered_names : t -> string list
 
 val public_names_of_descriptor : t -> string list
 val public_names : unit -> string list
-val internal_names : t -> string list
 val find_public : string -> t option
 val public_name_for_internal : string -> string option
 val public_descriptors_for_internal : string -> t list
@@ -268,7 +268,6 @@ val translate_input_for_descriptor : t -> Yojson.Safe.t -> Yojson.Safe.t
     handler names whose descriptor policy declares a static read-only hint. *)
 val readonly_internal_names : unit -> string list
 
-val public_input_schema : string -> Yojson.Safe.t option
 val translate_input : public:string -> Yojson.Safe.t -> Yojson.Safe.t
 val route_evidence_json : t -> Yojson.Safe.t
 

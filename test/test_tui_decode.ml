@@ -220,6 +220,22 @@ let test_terminal_text_is_idempotent_and_single_line () =
   Alcotest.(check string) "sanitization is idempotent" once
     (Tui_decode.sanitize_terminal_text once)
 
+let test_preview_line_marks_breaks_and_escapes_the_rest () =
+  let mark = "\xe2\x8f\x8e" in
+  Alcotest.(check string) "a break is one return mark" ("a" ^ mark ^ "b")
+    (Tui_decode.preview_line "a\nb");
+  Alcotest.(check string) "CR LF is one break, not two" ("a" ^ mark ^ "b")
+    (Tui_decode.preview_line "a\r\nb");
+  Alcotest.(check string) "a lone CR is a break" ("a" ^ mark ^ "b")
+    (Tui_decode.preview_line "a\rb");
+  Alcotest.(check string) "a tab is a space" "a b" (Tui_decode.preview_line "a\tb");
+  Alcotest.(check string) "other controls still escape" "a\\x1Bb"
+    (Tui_decode.preview_line "a\027b");
+  Alcotest.(check string) "printable UTF-8 survives" ("정상" ^ mark ^ "café")
+    (Tui_decode.preview_line "정상\ncafé");
+  Alcotest.(check bool) "the result is one row" false
+    (String.contains (Tui_decode.preview_line "x\ny\nz") '\n')
+
 let keeper_call_row ~keeper ~tool ?(success = true) ?duration_ms ?turn
     ?execution_id ?tool_use_id ?planned_index ?batch_index ?batch_size
     ?execution_mode ?result_bytes ?truncated_to ?disposition () =
@@ -280,6 +296,40 @@ let test_keeper_calls_decode_exact_execution_schedule () =
                   (schedule.kcs_execution_mode = Tui_decode.Keeper_call_concurrent)
             | None -> Alcotest.fail "schedule was dropped")
        | _ -> Alcotest.fail "expected one call")
+
+(* The header draws the verdict and, since the gap case, the reason beside
+   it. Four of this route's words come with a reason restating themselves --
+   "empty" with "no_entries" -- but "coverage_gap" carries the gap record's
+   own message, and no other field on that header can supply it. The decode
+   has to keep it for the header to have anything to draw. *)
+let test_keeper_calls_keep_the_reason_beside_the_verdict () =
+  let snapshot ?stale_reason health =
+    Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
+      (`Assoc
+         ([ "keeper", `String "largo"
+          ; "count", `Int 0
+          ; "health", `String health
+          ; "entries", `List []
+          ]
+          @
+          match stale_reason with
+          | None -> []
+          | Some reason -> [ "stale_reason", `String reason ]))
+  in
+  (match snapshot ~stale_reason:"telemetry gap at 2026-09-06T02:00Z" "coverage_gap" with
+   | Error detail -> Alcotest.failf "a gap snapshot must decode: %s" detail
+   | Ok decoded ->
+       Alcotest.(check (option string))
+         "the gap's own message survives"
+         (Some "telemetry gap at 2026-09-06T02:00Z")
+         decoded.Tui_decode.kcs_stale_reason;
+       Alcotest.(check string) "and the verdict beside it" "coverage_gap"
+         decoded.Tui_decode.kcs_health);
+  match snapshot "ok" with
+  | Error detail -> Alcotest.failf "an ok snapshot must decode: %s" detail
+  | Ok decoded ->
+      Alcotest.(check (option string)) "a healthy log claims no reason" None
+        decoded.Tui_decode.kcs_stale_reason
 
 let test_keeper_calls_reject_partial_or_unknown_schedule () =
   let decode row =
@@ -2976,8 +3026,6 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
                   ; ("label", `String "Librarian")
                   ; ( "message"
                     , `String "running memoryless and cannot leave that state" )
-                  ; ("value", `Float 4.0)
-                  ; ("threshold", `Float 0.0)
                   ]
               ]
           else `List [] )
@@ -3165,7 +3213,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
 (* The alert's typed code is the only field the renderer reads: the wire's
    severity and target are functions of it, and the decoder refuses a payload
    that disagrees rather than trusting the string it was handed. *)
-let memory_alert_snapshot ~code ~severity ~target =
+let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
     [ ("schema", `String "keeper.memory_os.current_health.v3")
     ; ("generated_at", `Float 1_775_000_000.0)
@@ -3197,14 +3245,13 @@ let memory_alert_snapshot ~code ~severity ~target =
               ; ( "alerts"
                 , `List
                     [ `Assoc
-                        [ ("code", `String code)
-                        ; ("severity", `String severity)
-                        ; ("target", `String target)
-                        ; ("label", `String "Librarian")
-                        ; ("message", `String "running memoryless")
-                        ; ("value", `Float 4.0)
-                        ; ("threshold", `Float 0.0)
-                        ]
+                        (extra_alert_fields
+                        @ [ ("code", `String code)
+                          ; ("severity", `String severity)
+                          ; ("target", `String target)
+                          ; ("label", `String "Librarian")
+                          ; ("message", `String "running memoryless")
+                          ])
                     ] )
               ]
           ] )
@@ -3239,6 +3286,8 @@ let memory_alert_snapshot ~code ~severity ~target =
           ] )
     ]
 
+let memory_alert_snapshot = memory_alert_snapshot_with_extra []
+
 let test_decode_memory_alert_keeps_the_code_contract () =
   (match
      Tui_decode.decode_memory_health_snapshot
@@ -3266,7 +3315,15 @@ let test_decode_memory_alert_keeps_the_code_contract () =
        ~target:"librarian_starvation");
   rejected "a target that disagrees with the code is refused"
     (memory_alert_snapshot ~code:"librarian_starvation" ~severity:"error"
-       ~target:"librarian_lane_busy")
+       ~target:"librarian_lane_busy");
+  rejected "legacy threshold field is rejected by exact fields"
+    (memory_alert_snapshot_with_extra [ ("threshold", `Float 0.0) ]
+       ~code:"librarian_starvation" ~severity:"error"
+       ~target:"librarian_starvation");
+  rejected "legacy value field is rejected by exact fields"
+    (memory_alert_snapshot_with_extra [ ("value", `Float 4.0) ]
+       ~code:"librarian_starvation" ~severity:"error"
+       ~target:"librarian_starvation")
 
 let test_decode_memory_health_rejects_stale_schema () =
   let json =
@@ -3634,7 +3691,8 @@ let test_decode_keeper_lanes_requires_the_table_fields () =
         (String.starts_with ~prefix:"snapshots[0]: missing required field 'idle_seconds'" detail)
 
 let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
-    ?(running = 0) ?(selected_slots = []) lane_id label =
+    ?(running = 0) ?(selected_slots = []) ?(configuration_state = "ready")
+    lane_id label =
   `Assoc
     ([ "lane_id", `String lane_id
      ; "label", `String label
@@ -3643,7 +3701,7 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
      @ [ "required", `Bool true
     ; "observation_only", `Bool true
     ; "configured", `Bool true
-    ; "configuration_state", `String "ready"
+    ; "configuration_state", `String configuration_state
     ; "admitted_slots", `List [ `String "qwen-primary" ]
     ; "cli_slots", `List []
     ; "dropped_slots", `List []
@@ -3660,6 +3718,70 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ; "p50_elapsed_s", (if retained = 0 then `Null else `Float 1.)
     ; "selected_slots", `List selected_slots
     ])
+
+(* The server collapses "nobody configured this lane" and "the registry could
+   not be read" into one status word, and keeps them apart only in
+   [configuration_state]. Decoding that word into a variant is what lets the
+   detail pane say which of the two it is. *)
+let test_decode_standalone_lane_configuration_is_a_closed_set () =
+  (* All four lanes, because the snapshot decoder demands each known lane
+     exactly once and a one-lane fixture never reaches the configuration
+     word at all. Only the board lane's state varies. *)
+  let snapshot configuration_state =
+    `Assoc
+      [ "schema", `String "masc.standalone_llm_lanes.v1"
+      ; "generated_at", `String "2026-08-27T00:00:00Z"
+      ; "observed_at_unix", `Float 20.
+      ; "observation_only", `Bool true
+      ; "exact_run_projection_count", `Int 1
+      ; "exact_run_source_total", `Int 1
+      ; "exact_run_projection_truncated", `Bool false
+      ; ( "lanes"
+        , `List
+            [ standalone_lane_json ~configuration_state "board_attention_exact"
+                "Board Attention"
+            ; standalone_lane_json "hitl_auto_judge" "HITL Auto Judge"
+            ; standalone_lane_json "librarian_exact" "Librarian"
+            ; standalone_lane_json "verifier_exact" "Verifier"
+            ] )
+      ]
+  in
+  let board configuration_state =
+    match Tui_decode.decode_standalone_lanes_snapshot (snapshot configuration_state) with
+    | Error detail -> Error detail
+    | Ok snapshot ->
+      (match
+         List.find_opt
+           (fun (lane : Tui_decode.standalone_lane) ->
+             String.equal lane.sl_lane_id "board_attention_exact")
+           snapshot.Tui_decode.sls_lanes
+       with
+       | Some lane -> Ok lane.Tui_decode.sl_configuration_state
+       | None -> Error "the board lane did not survive the decode")
+  in
+  let reads word expected =
+    match board word with
+    | Ok state ->
+      Alcotest.(check bool) (word ^ " decodes to its own variant") true
+        (state = expected)
+    | Error detail -> Alcotest.failf "%s did not decode: %s" word detail
+  in
+  reads "ready" Tui_decode.Lane_ready;
+  (* The server's word here is "degraded", which on the status axis means a
+     lane whose last run failed. This one means configured with nothing
+     admitted, so the variant does not reuse the spelling. *)
+  reads "degraded" Tui_decode.Lane_slotless;
+  reads "unconfigured" Tui_decode.Lane_unconfigured;
+  reads "unavailable" Tui_decode.Lane_registry_unavailable;
+  (* Refused by the configuration reader specifically, not merely refused:
+     a fixture that broke for any other reason would satisfy a bare
+     "this did not decode". *)
+  match board "half-configured" with
+  | Ok _ -> Alcotest.fail "a word outside the set was accepted"
+  | Error detail ->
+    Alcotest.(check bool) "the configuration reader is what refused it" true
+      (String.starts_with
+         ~prefix:"lanes[0]: standalone lane configuration: unknown value" detail)
 
 (* The start of the newest run. The fixture has carried it since this suite
    was written and the decoder read it into an underscore, so the field
@@ -5550,6 +5672,7 @@ let prompts_payload =
                ("effective", `String "overridden text");
                ("has_override", `Bool true);
                ("file_exists", `Bool false);
+               ("source", `String "override");
              ];
          ]);
       ( "runtime_assets"
@@ -5676,8 +5799,8 @@ let test_decode_prompts_reads_the_live_shape () =
     Alcotest.(check string) "key" "keeper" first.Tui_decode.pr_key;
     Alcotest.(check string) "the effective text keeps its line break"
       "You are a keeper.\nWork the task." first.Tui_decode.pr_effective;
-    Alcotest.(check bool) "no override" false first.Tui_decode.pr_has_override;
-    Alcotest.(check string) "source" "file" first.Tui_decode.pr_source;
+    Alcotest.(check bool) "the file's words, no override" true
+      (first.Tui_decode.pr_source = Tui_decode.Prompt_file);
     Alcotest.(check bool) "primary surface" true
       (first.Tui_decode.pr_operator_surface = Tui_decode.Prompt_primary);
     Alcotest.(check (list string)) "template input names"
@@ -5708,7 +5831,10 @@ let test_prompt_rows_hide_fragments_by_default () =
 
 let test_decode_prompts_defaults_legacy_surface_to_primary () =
   let json =
-    `Assoc [ "prompts", `List [ `Assoc [ "key", `String "legacy" ] ] ]
+    `Assoc
+      [ ( "prompts"
+        , `List [ `Assoc [ "key", `String "legacy"; "source", `String "file" ] ] )
+      ]
   in
   match Tui_decode.decode_prompts json with
   | Error detail -> Alcotest.fail detail
@@ -5725,6 +5851,7 @@ let test_decode_prompts_rejects_unknown_operator_surface () =
             [ `Assoc
                 [ "key", `String "future"
                 ; "operator_surface", `String "mystery"
+                ; "source", `String "file"
                 ]
             ] )
       ]
@@ -5732,6 +5859,45 @@ let test_decode_prompts_rejects_unknown_operator_surface () =
   match Tui_decode.decode_prompts json with
   | Ok _ -> Alcotest.fail "an unknown operator surface must not be guessed"
   | Error _ -> ()
+
+(* [source] is the one field of a prompt row that decides what the operator is
+   looking at, and every one of the three readers -- the list mark, the detail
+   line, the clear guard -- now asks it. A word this build does not know is a
+   server it does not match, and guessing would draw a row that says "file"
+   about an override. *)
+let test_decode_prompts_rejects_an_unknown_source () =
+  let json =
+    `Assoc
+      [ ( "prompts"
+        , `List
+            [ `Assoc
+                [ "key", `String "future"
+                ; "source", `String "inherited"
+                ]
+            ] )
+      ]
+  in
+  match Tui_decode.decode_prompts json with
+  | Ok _ -> Alcotest.fail "an unknown prompt source must not be guessed"
+  | Error detail ->
+    Alcotest.(check bool) "and the word it did not know is in the sentence" true
+      (Astring.String.is_infix ~affix:"inherited" detail)
+
+(* The server writes [source] on every row it serializes, unconditionally.
+   An absent one is therefore not a sparse row but a different server, and the
+   row it would decode to has no honest default: "missing" would claim the
+   prompt has no text at all. *)
+let test_decode_prompts_rejects_a_row_with_no_source () =
+  let json =
+    `Assoc [ "prompts", `List [ `Assoc [ "key", `String "sourceless" ] ] ]
+  in
+  match Tui_decode.decode_prompts json with
+  | Ok _ -> Alcotest.fail "a row with no source must not decode"
+  | Error detail ->
+    (* An absence reported as a type error sends the reader looking for a
+       wrong value where there is no value. *)
+    Alcotest.(check string) "reported as an absence"
+      "missing required field 'source'" detail
 
 let test_decode_prompts_survives_a_sparse_row () =
   match Tui_decode.decode_prompts prompts_payload with
@@ -5741,9 +5907,7 @@ let test_decode_prompts_survives_a_sparse_row () =
     Alcotest.(check string) "a row with no description reads empty" ""
       second.Tui_decode.pr_description;
     Alcotest.(check bool) "and its override is carried" true
-      second.Tui_decode.pr_has_override;
-    Alcotest.(check bool) "as is the absent file" false
-      second.Tui_decode.pr_file_exists
+      (second.Tui_decode.pr_source = Tui_decode.Prompt_override)
 
 let test_decode_prompts_rejects_a_row_with_no_key () =
   (* The key is what a write is addressed to. A row without one cannot be
@@ -7547,6 +7711,43 @@ let test_blame_block_at_names_the_run_and_its_first_line () =
       Alcotest.(check string) "past the end nothing covers" "-" (show (at 10));
       Alcotest.(check string) "before the first, nothing either" "-" (show (at 0))
 
+let test_decode_file_change_reads_an_insert () =
+  let change =
+    `Assoc
+      [ ("at", `Float 1.)
+      ; ("keeper", `String "alpha")
+      ; ("turn", `Null)
+      ; ("task_id", `Null)
+      ; ("execution_id", `String "exec-1")
+      ; ("line_evidence", `Null)
+      ; ("location", `Assoc [ ("kind", `String "absolute"); ("path", `String "/tmp/src.ml") ])
+      ; ("change", `Assoc [ ("kind", `String "insert"); ("line", `Int 3); ("text", `String "# masc(alpha): why") ])
+      ; ("succeeded", `Bool true)
+      ]
+  in
+  let snapshot =
+    `Assoc
+      [ ("keeper", `String "alpha")
+      ; ("window_hours", `Float 1.)
+      ; ("calls_in_window", `Int 1)
+      ; ("changes", `List [ change ])
+      ; ("over_budget", `Int 0)
+      ; ("malformed", `Int 0)
+      ]
+  in
+  match Tui_decode.decode_file_change_snapshot snapshot with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+    (match snapshot.Tui_decode.fcs_changes with
+     | [ change ] ->
+       (match change.Tui_decode.fc_kind with
+        | Tui_decode.Fc_inserted { line; text } ->
+          Alcotest.(check int) "line" 3 line;
+          Alcotest.(check string) "the comment line" "# masc(alpha): why" text
+        | Tui_decode.Fc_edited _ | Tui_decode.Fc_written _ -> Alcotest.fail "expected an insert")
+     | [] | _ :: _ :: _ -> Alcotest.fail "expected one change")
+;;
+
 let () =
   Alcotest.run "tui_decode" [
     ( "decode_verification_evidence",
@@ -7681,6 +7882,8 @@ let () =
           test_decode_memory_health_rejects_stale_schema;
         Alcotest.test_case "memory alert keeps the code contract" `Quick
           test_decode_memory_alert_keeps_the_code_contract;
+        Alcotest.test_case "standalone lane configuration is a closed set" `Quick
+          test_decode_standalone_lane_configuration_is_a_closed_set;
         Alcotest.test_case "memory facts keep both stores" `Quick
           test_decode_memory_facts_keeps_both_stores;
         Alcotest.test_case "memory fact row carries the use record" `Quick
@@ -7866,6 +8069,8 @@ let () =
           test_terminal_text_escapes_malformed_utf8_bytes
       ; Alcotest.test_case "is idempotent and single-line" `Quick
           test_terminal_text_is_idempotent_and_single_line
+      ; Alcotest.test_case "preview marks breaks and escapes the rest" `Quick
+          test_preview_line_marks_breaks_and_escapes_the_rest
       ; Alcotest.test_case "sanitizes timestamp slices after selection" `Quick
           test_timestamp_slices_are_sanitized_after_selection
       ] );
@@ -7875,6 +8080,8 @@ let () =
           test_keeper_calls_decode_exact_execution_schedule
       ; Alcotest.test_case "rejects partial or unknown schedule" `Quick
           test_keeper_calls_reject_partial_or_unknown_schedule
+      ; Alcotest.test_case "keeps the reason beside the verdict" `Quick
+          test_keeper_calls_keep_the_reason_beside_the_verdict
       ; Alcotest.test_case "rejects rows naming another keeper" `Quick
           test_keeper_calls_reject_rows_naming_another_keeper
       ; Alcotest.test_case "requires the envelope" `Quick
@@ -7984,6 +8191,10 @@ let () =
           test_decode_prompts_defaults_legacy_surface_to_primary;
         Alcotest.test_case "rejects an unknown operator surface" `Quick
           test_decode_prompts_rejects_unknown_operator_surface;
+        Alcotest.test_case "rejects an unknown source" `Quick
+          test_decode_prompts_rejects_an_unknown_source;
+        Alcotest.test_case "rejects a row with no source" `Quick
+          test_decode_prompts_rejects_a_row_with_no_source;
         Alcotest.test_case "survives a sparse row" `Quick
           test_decode_prompts_survives_a_sparse_row;
         Alcotest.test_case "rejects a row with no key" `Quick
@@ -8124,4 +8335,6 @@ let () =
       ; Alcotest.test_case "timestamp ties compare parsed instants" `Quick
           test_decode_skill_evidence_tie_compares_rfc3339_instants
       ] );
+    ( "file change"
+    , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert ] );
   ]

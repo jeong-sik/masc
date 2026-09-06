@@ -352,9 +352,6 @@ let runtime_toml_path_for_base_path ~base_path =
     (resolve_for_base_path ~base_path).config_root.path
     runtime_toml_filename
 
-let keeper_runtime_store_of_dirname =
-  Common.keeper_runtime_store_of_dirname
-
 let keeper_toml_path_opt name =
   let path = Filename.concat (keepers_dir ()) (name ^ ".toml") in
   if existing_file path then Some path else None

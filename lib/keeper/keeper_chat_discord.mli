@@ -2,7 +2,7 @@
 
     Streaming mode: the first stable text segment POST creates the Discord
     message. Subsequent deltas PATCH the message at most once per
-    {!min_edit_interval_s} (Discord rate limit: 5 edits / 5 s).
+    [min_edit_interval_s] (Discord rate limit: 5 edits / 5 s).
     [Text_message_end] and [Run_finished] force a final PATCH so the
     user always sees the complete text. Streaming PATCH/POST content
     holds back the current trailing non-whitespace segment until a
@@ -19,21 +19,9 @@
 
     @since 2.145.0 *)
 
-val min_edit_interval_s : float
-(** Minimum seconds between PATCH edits (default 1.0). *)
-
 type error = Discord_rest_client.error
 
 val pp_error : Format.formatter -> error -> unit
-
-val send_message :
-  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  token:string -> channel_id:string -> content:string -> unit -> (unit, error) result
-(** [send_message ~token ~channel_id ~content] posts to Discord.
-    Errors are logged as warnings and returned to the caller.
-    Content exceeding Discord's 2000-character limit is split into
-    multiple messages. All chunks are attempted; the first failure is
-    returned after the remaining chunks have been attempted. *)
 
 val adapter_loop :
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
@@ -50,7 +38,7 @@ val adapter_loop :
     - [Text_delta] (first stable segment): POST creates the message,
       stores its id.
     - [Text_delta] (subsequent): PATCH edits the message content, at most
-      once per {!min_edit_interval_s}.
+      once per [min_edit_interval_s].
     - [Text_message_end]: force PATCH if content changed since last edit.
     - [Run_finished]: force final PATCH with complete text.
       Standalone links, images, code, and Mermaid blocks in the final text

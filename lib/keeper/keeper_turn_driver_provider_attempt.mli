@@ -2,5 +2,3 @@
 
 val success_selected_model_raw :
   Runtime_candidate.t -> string option
-
-val runtime_candidate_label : string

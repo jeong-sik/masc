@@ -31,6 +31,15 @@ val root_switch_on_current_domain : unit -> bool
     domains must check this exact ownership boundary before forking. This guard
     does not transfer work to the owner domain. *)
 
+val run_on_owner_domain : (unit -> 'a) -> 'a
+(** [run_on_owner_domain f] executes [f ()] on the domain that installed the
+    root switch via [set_switch]. If called from the owner domain (or when no
+    root switch is installed, e.g. in test scopes), [f ()] is executed inline.
+    If called from another domain (such as the HTTP serving domain or a domain
+    pool worker), the thunk is dispatched to the owner domain's event loop
+    and the caller suspends until the result is ready. Exceptions raised by
+    [f] on the owner domain are re-raised to the caller. *)
+
 val set_env : Eio_unix.Stdenv.base -> unit
 (** Set the global Eio standard environment.  Required by long-lived
     consumers that need more than [net]/[clock] (e.g. piaf
@@ -82,10 +91,6 @@ val get_clock : unit -> (float Eio.Time.clock_ty Eio.Resource.t, string) result
 (** Get the Eio clock.
     Returns Error if not initialized. *)
 
-val get_switch : unit -> (Eio.Switch.t, string) result
-(** Get the Eio switch.
-    Returns Error if not initialized. *)
-
 (** [get_https_connector] removed — use [get_https_connector_result] instead. *)
 
 val get_https_connector_result :
@@ -96,3 +101,10 @@ val get_https_connector_result :
    string)
   result
 (** Non-raising HTTPS connector lookup. *)
+
+module For_testing : sig
+  val clear_root_switch : unit -> unit
+  (** Clear the root switch binding. Test scopes that install a temporary
+      root switch should invoke this in their finalizer to prevent cross-test
+      pollution. *)
+end

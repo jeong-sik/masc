@@ -148,7 +148,6 @@ module For_testing = struct
         option ref
     = ref None
 
-  let elapsed_duration_ms = elapsed_duration_ms
   let model_execute_location_fields = model_execute_location_fields
   let redact_execute_output_with_additional_secret_files
         ~additional_secret_files

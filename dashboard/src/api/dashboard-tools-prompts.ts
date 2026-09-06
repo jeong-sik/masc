@@ -1628,9 +1628,11 @@ export interface DashboardPromptItem {
   file_value: string | null
   override_value: string | null
   file_path: string | null
-  file_exists: boolean
+  /** Where the effective text came from. The server resolves this once, from
+   *  the override and the file, and sends the answer. It also sends the two
+   *  booleans that resolution consumed; modelling them here gave the panel a
+   *  second way to spell the same decision, and it used both. */
   source: PromptSource
-  has_override: boolean
   char_count: number
   required_file: boolean
   template_variables: string[]

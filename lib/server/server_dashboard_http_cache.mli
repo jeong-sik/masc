@@ -132,16 +132,6 @@ val cached_surface_or_first_success_json :
     tracking) so a fiber cancellation does not pollute the surface
     with a synthetic error. *)
 
-val cached_surface_or_first_success_payload :
-  cached_surface ->
-  cache_key:string ->
-  ttl:float ->
-  clock:_ Eio.Time.clock ->
-  timeout_sec:float ->
-  (unit -> Yojson.Safe.t) ->
-  cached_surface_payload
-(** Like {!cached_surface_or_first_success_json} but returns the full {!cached_surface_payload}. *)
-
 (** {1 Assoc-list helper}
 
     Exposed because sister dashboard surface modules

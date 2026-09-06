@@ -6,101 +6,41 @@
 type attr = string * [ `Bool of bool | `Int of int | `String of string ]
 
 module Attr_key = struct
-  type boundary =
-    | Official_gen_ai
-    | Masc_extension
-    | Keeper_namespace
-
-  let registry_ref = ref []
-
-  let register boundary key =
-    registry_ref := (key, boundary) :: !registry_ref;
-    key
-  ;;
-
-  let gen_ai_operation_name =
-    register Official_gen_ai "gen_ai.operation.name"
-  ;;
-
-  let gen_ai_provider_name = register Official_gen_ai "gen_ai.provider.name"
-  let gen_ai_agent_name = register Official_gen_ai "gen_ai.agent.name"
-  let gen_ai_agent_id = register Official_gen_ai "gen_ai.agent.id"
-
-  let gen_ai_conversation_id =
-    register Official_gen_ai "gen_ai.conversation.id"
-  ;;
-
-  let gen_ai_tool_name = register Official_gen_ai "gen_ai.tool.name"
-  let gen_ai_request_model = register Official_gen_ai "gen_ai.request.model"
-  let gen_ai_request_stream = register Official_gen_ai "gen_ai.request.stream"
-  let gen_ai_response_model = register Official_gen_ai "gen_ai.response.model"
-  let gen_ai_token_type = register Official_gen_ai "gen_ai.token.type"
-  let gen_ai_usage_input_tokens =
-    register Official_gen_ai "gen_ai.usage.input_tokens"
-  ;;
-
-  let gen_ai_usage_output_tokens =
-    register Official_gen_ai "gen_ai.usage.output_tokens"
-  ;;
+  let gen_ai_operation_name = "gen_ai.operation.name"
+  let gen_ai_provider_name = "gen_ai.provider.name"
+  let gen_ai_agent_name = "gen_ai.agent.name"
+  let gen_ai_agent_id = "gen_ai.agent.id"
+  let gen_ai_conversation_id = "gen_ai.conversation.id"
+  let gen_ai_tool_name = "gen_ai.tool.name"
+  let gen_ai_request_model = "gen_ai.request.model"
+  let gen_ai_request_stream = "gen_ai.request.stream"
+  let gen_ai_response_model = "gen_ai.response.model"
+  let gen_ai_token_type = "gen_ai.token.type"
+  let gen_ai_usage_input_tokens = "gen_ai.usage.input_tokens"
+  let gen_ai_usage_output_tokens = "gen_ai.usage.output_tokens"
 
   let gen_ai_usage_cache_creation_input_tokens =
-    register Official_gen_ai "gen_ai.usage.cache_creation.input_tokens"
+    "gen_ai.usage.cache_creation.input_tokens"
   ;;
 
-  let gen_ai_usage_cache_read_input_tokens =
-    register Official_gen_ai "gen_ai.usage.cache_read.input_tokens"
-  ;;
-
-  let gen_ai_usage_reasoning_output_tokens =
-    register Official_gen_ai "gen_ai.usage.reasoning.output_tokens"
-  ;;
-
-  let gen_ai_response_time_to_first_chunk =
-    register Official_gen_ai "gen_ai.response.time_to_first_chunk"
-  ;;
-
-  let masc_gen_ai_keeper_name =
-    register Masc_extension "masc.gen_ai.keeper.name"
-  ;;
-
-  let masc_gen_ai_runtime_id =
-    register Masc_extension "masc.gen_ai.runtime_id"
-  ;;
-
-  let masc_gen_ai_response_finish_reason =
-    register Masc_extension "masc.gen_ai.response.finish_reason"
-  ;;
+  let gen_ai_usage_cache_read_input_tokens = "gen_ai.usage.cache_read.input_tokens"
+  let gen_ai_usage_reasoning_output_tokens = "gen_ai.usage.reasoning.output_tokens"
+  let gen_ai_response_time_to_first_chunk = "gen_ai.response.time_to_first_chunk"
+  let masc_gen_ai_keeper_name = "masc.gen_ai.keeper.name"
+  let masc_gen_ai_runtime_id = "masc.gen_ai.runtime_id"
+  let masc_gen_ai_response_finish_reason = "masc.gen_ai.response.finish_reason"
 
   (* RFC-0233 §2.3 - per-turn TurnRecord projection onto the turn span. *)
-  let masc_turn_blocks = register Masc_extension "masc.turn.blocks"
-  let masc_turn_profile = register Masc_extension "masc.turn.profile"
-
-  let masc_turn_execution_ids =
-    register Masc_extension "masc.turn.execution_ids"
-  ;;
-
-  let keeper_name = register Keeper_namespace "keeper.name"
-  let keeper_agent_name = register Keeper_namespace "keeper.agent_name"
-  let keeper_trace_id = register Keeper_namespace "keeper.trace_id"
-  let keeper_max_context = register Keeper_namespace "keeper.max_context"
-  let keeper_channel = register Keeper_namespace "keeper.channel"
-  let keeper_is_retry = register Keeper_namespace "keeper.is_retry"
-  let keeper_current_task_id = register Keeper_namespace "keeper.current_task_id"
-
-  let registry = List.rev !registry_ref
-
-  let keys_for boundary =
-    registry
-    |> List.filter_map (fun (key, registered_boundary) ->
-      if registered_boundary = boundary then Some key else None)
-  ;;
-
-  let all_known = List.map fst registry
-  let official_gen_ai = keys_for Official_gen_ai
-  let masc_extensions = keys_for Masc_extension
-
-  let is_official_gen_ai key = List.mem key official_gen_ai
-  let is_masc_extension key = List.mem key masc_extensions
+  let masc_turn_blocks = "masc.turn.blocks"
+  let masc_turn_profile = "masc.turn.profile"
+  let masc_turn_execution_ids = "masc.turn.execution_ids"
+  let keeper_name = "keeper.name"
+  let keeper_agent_name = "keeper.agent_name"
+  let keeper_trace_id = "keeper.trace_id"
+  let keeper_max_context = "keeper.max_context"
+  let keeper_channel = "keeper.channel"
+  let keeper_is_retry = "keeper.is_retry"
+  let keeper_current_task_id = "keeper.current_task_id"
 end
 
 module Metric_name = struct
@@ -118,16 +58,12 @@ end
 module Mcp_attr_key = struct
   let mcp_method_name = "mcp.method.name"
   let jsonrpc_request_id = "jsonrpc.request.id"
-  let jsonrpc_protocol_version = "jsonrpc.protocol.version"
   let mcp_protocol_version = "mcp.protocol.version"
   let mcp_session_id = "mcp.session.id"
   let network_protocol_name = "network.protocol.name"
   let network_protocol_version = "network.protocol.version"
   let network_transport = "network.transport"
   let error_type = "error.type"
-  let rpc_response_status_code = "rpc.response.status_code"
-  let server_address = "server.address"
-  let server_port = "server.port"
   let masc_mcp_tool_failure_class = "masc.mcp.tool.failure_class"
 end
 
@@ -137,9 +73,7 @@ module Mcp_value = struct
 end
 
 module Mcp_metric_name = struct
-  let client_operation_duration = "mcp.client.operation.duration"
   let server_operation_duration = "mcp.server.operation.duration"
-  let client_session_duration = "mcp.client.session.duration"
   let server_session_duration = "mcp.server.session.duration"
 end
 
@@ -148,7 +82,6 @@ module Event_name = struct
     "gen_ai.client.inference.operation.details"
   ;;
 
-  let client_operation_exception = "gen_ai.client.operation.exception"
 end
 
 let keeper_turn_span_name ~keeper_name = "invoke_agent " ^ keeper_name

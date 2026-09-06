@@ -1175,12 +1175,6 @@ module For_testing = struct
   let snapshot_server_state = current_server_state
   let restore_server_state state = Atomic.set server_state state
 
-  let snapshot_auth_config () =
-    match Atomic.get resolved_config with
-    | Unconfigured -> None
-    | Configured config -> Some config
-  ;;
-
   let restore_auth_config = function
     | None -> Atomic.set resolved_config Unconfigured
     | Some config -> Atomic.set resolved_config (Configured config)

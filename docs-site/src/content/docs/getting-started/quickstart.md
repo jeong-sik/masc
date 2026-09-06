@@ -179,10 +179,9 @@ them works without a key:
 The variable is read from the environment **the server was started in**, not
 from a config file. MASC never asks for a key and never writes one to disk.
 
-The catalog ships 31 provider/model bindings as documented examples; the 13 that
-declare `max-request-body-bytes` can take a Keeper turn, and startup names the
-rest in a warning that says exactly which key to add. `[runtime].default` is one
-of the 13, so the default works as soon as its key is present.
+The catalog ships 31 provider/model bindings as documented examples, all declaring
+`max-request-body-bytes` so any configured model can take a Keeper turn without
+startup warnings. `[runtime].default` works as soon as its key is present.
 
 **A sandbox image.** A Keeper runs every turn inside one, and MASC ships none:
 
@@ -213,10 +212,29 @@ absent the tool reports it rather than failing quietly.
 | Language | Program |
 | --- | --- |
 | OCaml | `ocamllsp` |
-| TypeScript, JavaScript | `typescript-language-server` |
-| Python | `pylsp` |
+| TypeScript | `typescript-language-server` |
+| JavaScript | `typescript-language-server` |
+| Python | `pyright-langserver` |
 | Rust | `rust-analyzer` |
 | Go | `gopls` |
+| C | `clangd` |
+| C++ | `clangd` |
+| Swift | `sourcekit-lsp` |
+| Java | `jdtls` |
+| Kotlin | `kotlin-language-server` |
+| Ruby | `ruby-lsp` |
+| PHP | `intelephense` |
+| Lua | `lua-language-server` |
+| Bash | `bash-language-server` |
+| JSON | `vscode-json-language-server` |
+| YAML | `yaml-language-server` |
+| Zig | `zls` |
+| Haskell | `haskell-language-server-wrapper` |
+| Elixir | `elixir-ls` |
+| Dart | `dart` |
+| Scala | `metals` |
+| C# | `csharp-ls` |
+| Markdown | `marksman` |
 
 ## If something goes wrong
 

@@ -201,6 +201,23 @@ let test_tmux_passthrough_doubles_every_escape () =
   check string "survives the round trip" payload undoubled
 ;;
 
+let test_iterm2_places_inline_image () =
+  let data = "test_image_bytes" in
+  let escape =
+    Masc_tui_graphics.iterm2_place ~data
+      { Masc_tui_graphics.columns = 30; rows = 15 }
+  in
+  check bool "starts with iTerm2 OSC 1337 introducer" true
+    (String.starts_with ~prefix:"\x1b]1337;File=inline=1;width=30;height=15;preserveAspectRatio=1:" escape);
+  check bool "ends with BEL terminator" true
+    (String.ends_with ~suffix:"\x07" escape);
+  let empty =
+    Masc_tui_graphics.iterm2_place ~data:""
+      { Masc_tui_graphics.columns = 10; rows = 10 }
+  in
+  check string "empty data produces empty escape" "" empty
+;;
+
 let () =
   run
     "tui_graphics"
@@ -215,6 +232,8 @@ let () =
             test_the_named_format_is_the_one_the_escape_asks_for
         ; test_case "an empty image places nothing" `Quick
             test_an_empty_image_places_nothing
+        ; test_case "iterm2 places inline image" `Quick
+            test_iterm2_places_inline_image
         ] )
     ; ( "capability"
       , [ test_case "the query asks without drawing" `Quick

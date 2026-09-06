@@ -33,8 +33,6 @@ let create ?(interval_s = default_interval_s) ?(window = default_window) () =
 ;;
 
 let global = create ()
-let probe_state t = Atomic.get t.state
-
 let record t ~lag_s =
   let n = Atomic.get t.cursor in
   Atomic.set t.slots.(n mod Array.length t.slots) lag_s;

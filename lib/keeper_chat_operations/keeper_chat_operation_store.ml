@@ -1044,8 +1044,6 @@ module For_testing = struct
   let fail_next_commit fault = Atomic.set next_commit_fault (Some fault)
   let clear_commit_fault () = Atomic.set next_commit_fault None
   let database_file = database_file
-  let database_schema = database_schema
   let database_application_id = database_application_id
-  let database_user_version = database_user_version
   let table_column_counts = table_column_counts
 end

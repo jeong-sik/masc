@@ -9,7 +9,7 @@
       {!runtime_observation_with_metrics} pair.
     - {b Runtime audit actor}: a single-fiber consumer
       ({!start_actor_if_needed}) that drains an
-      [Eio.Stream] of {!record_runtime} requests so
+      [Eio.Stream] of [record_runtime] requests so
       concurrent callers do not contend on the in-memory
       counter maps.
 
@@ -76,12 +76,6 @@ type runtime_observation = {
 
 (** {1 Provider config helpers} *)
 
-val provider_name_of_config :
-  Llm_provider.Provider_config.t -> string
-(** Canonical provider slug from a config. Free-form string used as
-    the runtime counter key; the function does not enumerate
-    specific providers. *)
-
 (** {1 Runtime metrics capture} *)
 
 type runtime_metrics_capture
@@ -139,19 +133,6 @@ val start_actor_if_needed : sw:Eio.Switch.t -> unit
     has not already been started in the current process.
     Idempotent — a second call is a no-op so the bootstrap
     paths can call it from multiple entry points. *)
-
-val record_runtime :
-  ?keeper_name:string ->
-  observation:runtime_observation option ->
-  runtime_id:string ->
-  outcome:[ `Success | `Failure | `Rejected ] ->
-  unit ->
-  unit
-(** Posts a record-runtime message onto the audit stream.
-    The actor consumes it asynchronously, bumping the
-    per-runtime counters and persisting the audit JSON
-    via {!record_runtime_audit}.  Non-blocking — the
-    caller does not wait for the actor to drain. *)
 
 
 (** {1 JSON projections (runtime-include consumers)} *)

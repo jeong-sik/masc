@@ -71,6 +71,12 @@ type kind =
       ; summary : string option
       }
   | Memory_activity of { summary : string option }
+  | Fusion_conclusion of fusion_conclusion
+
+and fusion_conclusion =
+  { fusion_run_id : string option
+  ; fusion_board_post_id : string
+  }
 
 let tool_rows block =
   let projection = Transcript.project_tool_block Transcript.Full block in
@@ -776,6 +782,39 @@ let trace_summary_of fields =
       }
   | Some _ | None -> empty_trace
 
+(* A [Fusion] block is a pointer, not prose: the row's content already carries
+   the deliberation conclusion text, and the block names the run and the board
+   post holding the panel/judge detail. It becomes its own row so the
+   transcript says where the conclusion came from. board_post_id is required
+   the same way the dashboard's block normalizer requires it -- without it the
+   pointer has nothing to point at. *)
+let fusion_conclusions_of fields =
+  match List.assoc_opt "blocks" fields with
+  | Some (`List blocks) ->
+      List.filter_map
+        (fun block ->
+           match block with
+           | `Assoc block_fields
+             when String.equal
+                    (Option.value ~default:"" (string_field block_fields "t"))
+                    "fusion" ->
+               (* An empty id points at nothing; the dashboard's normalizer
+                  drops the same row, so both surfaces read one vocabulary. *)
+               let board_post_id =
+                 match string_field block_fields "board_post_id" with
+                 | Some id when String.trim id <> "" -> Some id
+                 | _ -> None
+               in
+               Option.map
+                 (fun board_post_id ->
+                    { fusion_run_id = string_field block_fields "run_id"
+                    ; fusion_board_post_id = board_post_id
+                    })
+                 board_post_id
+           | _ -> None)
+        blocks
+  | Some _ | None -> []
+
 let skill_projection_schema = "masc.keeper_chat.skill_activations.v1"
 
 type skill_projection =
@@ -1177,6 +1216,22 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                 | Some _ | None -> false
               in
               let skill_projection = skill_projection_of_fields fields in
+              let fusion_rows =
+                List.map
+                  (fun fusion ->
+                     Utterance
+                       { at
+                       ; structural_id =
+                           Option.map (fun id -> id ^ ":fusion") source_id
+                       ; turn_sequence
+                       ; turn_id
+                       ; operation_id
+                       ; kind = Fusion_conclusion fusion
+                       ; text = ""
+                       ; attachments = []
+                       })
+                  (fusion_conclusions_of fields)
+              in
               let skill_rows, trace_rows =
                 if autonomous then
                   let summary = trace_summary_of fields in
@@ -1220,7 +1275,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                       }
                   ]
               in
-              skill_rows @ trace_rows @ said)
+              fusion_rows @ skill_rows @ trace_rows @ said)
       | Some "system" ->
           (* Durable approval lifecycle rows are server-owned status, never
              Keeper speech. A row that carries the typed lifecycle is read as
@@ -1401,7 +1456,7 @@ let annotate_recovered_interruptions rows =
           }, later_reply_at
         | Addressed_to_keeper _ | Said_by_keeper | Autonomous_reply
         | Tool_calls _ | Skill_activity _ | Reasoning _ | Gate_activity _
-        | Memory_activity _ ->
+        | Memory_activity _ | Fusion_conclusion _ ->
           row, later_reply_at
       in
       loop later_reply_at (row :: acc) rest

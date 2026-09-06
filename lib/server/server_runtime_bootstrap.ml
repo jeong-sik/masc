@@ -512,7 +512,11 @@ let init_runtime_context env =
   let mono_clock = Eio.Stdenv.mono_clock env in
   let net = Eio.Stdenv.net env in
   let domain_mgr = Eio.Stdenv.domain_mgr env in
-  let proc_mgr = Eio.Stdenv.process_mgr env in
+  (* Children start with posix_spawn(2), not eio_posix's fork(): on macOS the
+     parent side of a fork locks every malloc zone and held the main domain
+     about 141 ms per spawn with this process's heap (RFC
+     main-domain-scheduler-latency §8.8). *)
+  let proc_mgr = Posix_spawn_process_mgr.mgr in
   let fs = Eio.Stdenv.fs env in
   (clock, mono_clock, net, domain_mgr, proc_mgr, fs)
 
@@ -945,8 +949,12 @@ let initialize_owner_state_blocking
      churn, and 30s is often enough to see it move when retention sweeps.
      Sampled here rather than inside [Gc_sampler] so neither that module nor
      [Activity_graph] gains a dependency on the other. *)
+  (* The maintenance loops open their named switch once per iteration, not
+     once per fiber: the runtime-events ring keeps a name only until it is
+     overwritten, so a tracer attached later sees the per-iteration names. *)
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
+      Eio.Switch.run ~name:"activity-cache-gauges" (fun _ ->
       (try
          let stats = Activity_graph.cache_stats () in
          Otel_metric_store.set_gauge
@@ -958,7 +966,7 @@ let initialize_owner_state_blocking
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
-         Log.Server.warn "activity cache gauge sample failed: %s" (Printexc.to_string exn));
+         Log.Server.warn "activity cache gauge sample failed: %s" (Printexc.to_string exn)));
       Eio.Time.sleep clock 30.0;
       loop ()
     in
@@ -966,24 +974,26 @@ let initialize_owner_state_blocking
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       Eio.Time.sleep clock 5.0;
+      Eio.Switch.run ~name:"tool-usage-flush" (fun _ ->
       (try Keeper_registry_tool_usage_persistence.flush_all_dirty () with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
          Log.Keeper.warn
            "tool_usage flush_all_dirty failed: %s"
-           (Printexc.to_string exn));
+           (Printexc.to_string exn)));
       loop ()
     in
     loop ());
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       Eio.Time.sleep clock 2.0;
+      Eio.Switch.run ~name:"trajectory-flush" (fun _ ->
       (try Trajectory.flush_all_pending () with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
          Log.Keeper.warn
            "trajectory flush_all_pending failed: %s"
-           (Printexc.to_string exn));
+           (Printexc.to_string exn)));
       loop ()
     in
     loop ());
@@ -1391,7 +1401,9 @@ let start_owner_lazy_tasks ~sw state =
    | Ok () -> ()
    | Error error ->
      raise (Owner_initialization_failed (Lazy_startup_barrier_failed error)));
-  Eio.Fiber.fork ~sw (fun () -> List.iter run_lazy_task_group task_groups)
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run ~name:"lazy-startup-tasks" @@ fun _ ->
+    List.iter run_lazy_task_group task_groups)
 
 let claim_and_start_keeper_persistence
       ~prepared_persistence
@@ -1634,6 +1646,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
      exits immediately rather than leaving that partial owner alive; only an
      auxiliary failure after readiness may continue as degraded serving. *)
   Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run ~name:"owner-initialization" @@ fun _ ->
     let handle_initialization_failure error =
       match
         startup_failure_disposition
@@ -1930,6 +1943,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
          or later keeper loop startup (#keeper-bootstrap-stuck). *)
       Atomic.set Server_dashboard_http.shell_warming true;
       Eio.Fiber.fork ~sw (fun () ->
+        Eio.Switch.run ~name:"dashboard-shell-prewarm" @@ fun _ ->
         let outer_timeout_sec =
           Env_config_runtime.Dashboard.shell_prewarm_outer_timeout_sec
         in
@@ -1960,6 +1974,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
      Prevents zombie-listener state where the socket is open but HTTP
      requests hang because init is stuck. *)
   Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run ~name:"startup-watchdog" @@ fun _ ->
     try
       let timeout_sec = Server_startup_state.watchdog_timeout_sec () in
       Eio.Time.sleep clock timeout_sec;

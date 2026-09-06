@@ -102,15 +102,6 @@ let find_runtime_eviction_candidate counters =
 (* Provider label helpers                                            *)
 (* ================================================================ *)
 
-(** Map provider_kind to a runtime-label prefix. Delegates to the
-    current AGENT_CORE registry helper so endpoint-distinct providers track
-    the pinned agent_core behavior. The function does not enumerate
-    specific providers; the registry resolves them. *)
-let provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
-  match Agent_core.Provider_runtime_binding.binding_for_provider_config cfg with
-  | Some binding -> binding.Agent_core.Provider_runtime_binding.id
-  | None -> Llm_provider.Provider_registry.provider_name_of_config cfg
-
 (* ================================================================ *)
 (* Observation building                                              *)
 (* ================================================================ *)
@@ -613,11 +604,6 @@ let run_actor () =
 
 let start_actor_if_needed ~sw =
   Eio.Fiber.fork_daemon ~sw run_actor
-
-let record_runtime ?keeper_name ~observation ~runtime_id ~outcome () =
-  let now = Time_compat.now () in
-  Eio.Stream.add stream
-    (Record_runtime { keeper_name; runtime_id; observation; outcome; now })
 
 let runtime_metrics_json () =
   let p, u = Eio.Promise.create () in

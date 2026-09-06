@@ -76,7 +76,6 @@ type trajectory_line =
 
 (** {1 JSON serialization} *)
 
-val outcome_to_json : trajectory_outcome -> Yojson.Safe.t
 val outcome_to_string : trajectory_outcome -> string
 val entry_to_json :
   ?result_max_len:int ->
@@ -99,10 +98,6 @@ val append_entry :
   ?action_radius:Yojson.Safe.t ->
   masc_root:string -> keeper_name:string -> trace_id:string ->
   tool_call_entry -> unit
-
-val append_summary :
-  masc_root:string -> keeper_name:string -> trace_id:string ->
-  trajectory -> unit
 
 val append_withheld_thinking :
   masc_root:string -> keeper_name:string -> trace_id:string ->

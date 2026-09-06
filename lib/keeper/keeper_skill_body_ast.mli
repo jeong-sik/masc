@@ -24,5 +24,4 @@ type block =
 type t = private block list
 
 val parse : string -> t
-val blocks : t -> block list
 val fenced_code_blocks : t -> fenced_code_block list

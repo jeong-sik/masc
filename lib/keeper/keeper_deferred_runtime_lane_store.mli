@@ -28,5 +28,3 @@ val save :
 val clear :
   base_path:string -> keeper_name:string -> (unit, error) result
 
-val to_json : Keeper_turn_driver.deferred_runtime_lane -> Yojson.Safe.t
-val of_json : Yojson.Safe.t -> (Keeper_turn_driver.deferred_runtime_lane, error) result

@@ -1925,6 +1925,60 @@ let add_routes ~sw ~clock router =
                     (Server_skill_editor.save_outcome_to_yojson outcome)
                     reqd)))
          request reqd)
+  |> Http.Router.post "/api/v1/skills/refresh" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state agent_name req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           match Runtime.load_config_observation () with
+           | Error message ->
+             respond_dashboard_error ~status:`Internal_server_error ~request:req reqd message
+           | Ok observation ->
+             (match
+                Server_skill_snapshot_runtime.refresh_from_observation
+                  ~base_path
+                  observation
+              with
+              | Error error ->
+                respond_dashboard_error
+                  ~status:`Internal_server_error
+                  ~request:req
+                  reqd
+                  (Server_skill_snapshot_runtime.error_to_string error)
+              | Ok publication ->
+                let snapshot =
+                  match publication with
+                  | Skill_catalog_snapshot_service.Published s
+                  | Skill_catalog_snapshot_service.Unchanged s -> Some s
+                  | Skill_catalog_snapshot_service.Workspace_retired -> None
+                in
+                let snapshot_revision =
+                  match snapshot with
+                  | Some s ->
+                    Skill_catalog_snapshot.snapshot_revision_to_string
+                      (Skill_catalog_snapshot.snapshot_revision s)
+                  | None -> ""
+                in
+                let publication_status =
+                  match publication with
+                  | Skill_catalog_snapshot_service.Published _ -> "published"
+                  | Skill_catalog_snapshot_service.Unchanged _ -> "unchanged"
+                  | Skill_catalog_snapshot_service.Workspace_retired -> "retired"
+                in
+                Log.Server.info
+                  "Skill snapshot refreshed by operator=%s revision=%s status=%s"
+                  agent_name
+                  snapshot_revision
+                  publication_status;
+                Http.Response.json_value
+                  ~compress:true
+                  ~request:req
+                  (`Assoc
+                     [ "ok", `Bool true
+                     ; "snapshot_revision", `String snapshot_revision
+                     ; "publication", `String publication_status
+                     ])
+                  reqd))
+         request reqd)
   |> Http.Router.get "/api/v1/runtime/config/raw" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun _state _agent_name req reqd ->

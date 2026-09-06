@@ -139,6 +139,12 @@ type standalone_lane_status =
   | Standalone_no_retained_observation
   | Standalone_unavailable
 
+type standalone_lane_configuration =
+  | Lane_ready
+  | Lane_slotless
+  | Lane_unconfigured
+  | Lane_registry_unavailable
+
 type standalone_lane_slot_count = {
   slsc_slot_id : string;
   slsc_count : int;
@@ -150,7 +156,7 @@ type standalone_lane = {
   sl_purpose : string option;
   sl_required : bool;
   sl_status : standalone_lane_status;
-  sl_configuration_state : string;
+  sl_configuration_state : standalone_lane_configuration;
   sl_admitted_slots : string list;
   sl_cli_slots : string list;
   sl_dropped_slots : string list;
@@ -807,6 +813,38 @@ let sanitize_terminal_text text =
   in
   append 0;
   Buffer.contents output
+;;
+
+(* One row of a text that has rows. The terminal boundary escapes control
+   bytes because an external value may carry them by mistake or on purpose;
+   a file's newline is neither, it is the text's own shape, and a list cell
+   that prints it as [\x0A] reads as damage. So a break becomes a one-cell
+   return mark, a tab a space, and the rest goes through the same escape as
+   every other external value. The mark is neutral-width (U+23CE), so a
+   preview grows by one cell per line, never by six. *)
+let preview_line text =
+  let return_mark = "\xe2\x8f\x8e" in
+  let output = Buffer.create (String.length text) in
+  let length = String.length text in
+  let rec walk index =
+    if index < length
+    then (
+      match text.[index] with
+      | '\r' when index + 1 < length && text.[index + 1] = '\n' ->
+        Buffer.add_string output return_mark;
+        walk (index + 2)
+      | '\n' | '\r' ->
+        Buffer.add_string output return_mark;
+        walk (index + 1)
+      | '\t' ->
+        Buffer.add_char output ' ';
+        walk (index + 1)
+      | byte ->
+        Buffer.add_char output byte;
+        walk (index + 1))
+  in
+  walk 0;
+  sanitize_terminal_text (Buffer.contents output)
 ;;
 
 let short_timestamp_for_terminal text =
@@ -4302,7 +4340,7 @@ let decode_memory_alert json =
   let* () =
     require_exact_object_fields
       "memory alert"
-      [ "code"; "severity"; "target"; "label"; "message"; "value"; "threshold" ]
+      [ "code"; "severity"; "target"; "label"; "message" ]
       json
   in
   let* code = required_string_field json "code" in
@@ -4310,19 +4348,12 @@ let decode_memory_alert json =
   let* target = required_string_field json "target" in
   let* ma_label = required_string_field json "label" in
   let* ma_message = required_string_field json "message" in
-  (* [value] and [threshold] are read to hold the server to the contract and
-     then dropped: the count is already drawn from the health record, and the
-     server sends 0.0 for every threshold. *)
-  let* value = require_float_field json "value" in
-  let* threshold = require_float_field json "threshold" in
   (match memory_alert_code_of_wire code with
    | Some ma_code
      when String.equal code target
           && String.equal severity (memory_alert_severity_wire ma_code)
           && not (String.equal ma_label "")
-          && not (String.equal ma_message "")
-          && Float.is_finite value
-          && Float.is_finite threshold -> Ok { ma_code; ma_label; ma_message }
+          && not (String.equal ma_message "") -> Ok { ma_code; ma_label; ma_message }
    | Some _ | None -> Error "memory alert has an invalid typed code contract")
 
 let decode_memory_keeper_health json =
@@ -5264,6 +5295,22 @@ let decode_keeper_lanes_snapshot json =
   let* kls_lanes = decode_list "snapshots" decode_keeper_lane items in
   Ok { kls_generated_at; kls_count; kls_lanes }
 
+let standalone_lane_configuration_of_string = function
+  | "ready" -> Ok Lane_ready
+  (* The server calls this one "degraded": configured, but nothing admitted.
+     The word it shares with the status axis means something else there, so
+     the type says what the state is rather than how bad it is. *)
+  | "degraded" -> Ok Lane_slotless
+  | "unconfigured" -> Ok Lane_unconfigured
+  | "unavailable" -> Ok Lane_registry_unavailable
+  | other -> Error ("standalone lane configuration: unknown value " ^ other)
+
+let standalone_lane_configuration_to_string = function
+  | Lane_ready -> "ready"
+  | Lane_slotless -> "no slot admitted"
+  | Lane_unconfigured -> "not configured"
+  | Lane_registry_unavailable -> "registry unreadable"
+
 let standalone_lane_status_of_string = function
   | "running" -> Ok Standalone_running
   | "idle" -> Ok Standalone_idle
@@ -5300,7 +5347,10 @@ let decode_standalone_lane json =
     else Error "standalone lane row is not observation-only"
   in
   let* _configured = required_nullable_bool_field json "configured" in
-  let* sl_configuration_state = required_string_field json "configuration_state" in
+  let* configuration_state = required_string_field json "configuration_state" in
+  let* sl_configuration_state =
+    standalone_lane_configuration_of_string configuration_state
+  in
   let* admitted_slots = required_list_field json "admitted_slots" in
   let* sl_admitted_slots =
     decode_list
@@ -6858,16 +6908,19 @@ type prompt_operator_surface =
   | Prompt_primary
   | Prompt_fragment
 
+type prompt_source =
+  | Prompt_override
+  | Prompt_file
+  | Prompt_missing
+
 type prompt_row = {
   pr_key : string;
   pr_category : string;
   pr_operator_surface : prompt_operator_surface;
   pr_description : string;
   pr_effective : string;
-  pr_has_override : bool;
-  pr_file_exists : bool;
   pr_file_path : string;
-  pr_source : string;
+  pr_source : prompt_source;
   pr_template_variables : string list;
 }
 
@@ -6901,11 +6954,6 @@ let decode_prompt_row json =
     | `String value -> value
     | _ -> ""
   in
-  let bool_or field =
-    match member field json with
-    | `Bool value -> value
-    | _ -> false
-  in
   let string_list_or_empty field =
     match member field json with
     | `Null -> Ok []
@@ -6927,16 +6975,23 @@ let decode_prompt_row json =
       Error (Printf.sprintf "unknown prompt operator_surface %S" value)
     | value -> field_type_error "operator_surface" "a string" value
   in
+  let* pr_source =
+    match member "source" json with
+    | `String "override" -> Ok Prompt_override
+    | `String "file" -> Ok Prompt_file
+    | `String "missing" -> Ok Prompt_missing
+    | `String value -> Error (Printf.sprintf "unknown prompt source %S" value)
+    | `Null -> Error (Printf.sprintf "missing required field '%s'" "source")
+    | value -> field_type_error "source" "a string" value
+  in
   Ok
     { pr_key
     ; pr_category = string_or "category"
     ; pr_operator_surface
     ; pr_description = string_or "description"
     ; pr_effective = string_or "effective"
-    ; pr_has_override = bool_or "has_override"
-    ; pr_file_exists = bool_or "file_exists"
     ; pr_file_path = string_or "file_path"
-    ; pr_source = string_or "source"
+    ; pr_source
     ; pr_template_variables
     }
 ;;
@@ -7910,6 +7965,10 @@ type file_change_kind =
       replace_all : bool;
     }
   | Fc_written of { content : string }
+  | Fc_inserted of {
+      line : int;
+      text : string;
+    }
 
 type file_change = {
   fc_at : float;
@@ -7988,6 +8047,10 @@ let decode_file_change_kind json =
   | "write" ->
       let* content = required_string_field json "content" in
       Ok (Fc_written { content })
+  | "insert" ->
+      let* line = required_int_field json "line" in
+      let* text = required_string_field json "text" in
+      Ok (Fc_inserted { line; text })
   | other -> Error (Printf.sprintf "unknown file change kind %S" other)
 
 let validate_line_evidence_contract
@@ -8012,8 +8075,17 @@ let validate_line_evidence_contract
         { occurrence_count; occurrences = _ })
     when occurrence_count <> 1 ->
     Error "single Edit carries an occurrence_count other than one"
+  | Fc_inserted _,
+    Some
+      (Keeper_file_change_evidence.Edited
+        { occurrence_count; occurrences = _ })
+    when occurrence_count <> 1 ->
+    Error "an insert carries an occurrence_count other than one"
   | Fc_edited _, Some (Keeper_file_change_evidence.Edited _) -> Ok ()
+  | Fc_inserted _, Some (Keeper_file_change_evidence.Edited _) -> Ok ()
   | Fc_written _, Some (Keeper_file_change_evidence.Written _) -> Ok ()
+  | Fc_inserted _, Some (Keeper_file_change_evidence.Written _) ->
+    Error "insert change carries Write line_evidence"
   | Fc_edited _, Some (Keeper_file_change_evidence.Written _) ->
     Error "Edit change carries Write line_evidence"
   | Fc_written _, Some (Keeper_file_change_evidence.Edited _) ->
@@ -8316,36 +8388,6 @@ let blame_block_at blocks line =
         else find rest
   in
   find blocks
-
-(* ── IDE annotations: notes anchored to lines of a codebase ────────── *)
-
-type ide_annotation = {
-  ia_line_start : int;
-  ia_line_end : int;
-  ia_keeper : string;
-  (* The server's kind vocabulary (comment / decision / question /
-     bookmark), carried as its own word: the TUI only prints it, so an
-     added kind shows itself instead of killing the listing. *)
-  ia_kind : string;
-  ia_content : string;
-  ia_task : string option;
-}
-
-let decode_ide_annotation json =
-  let* ia_line_start = required_int_field json "line_start" in
-  let* ia_line_end = required_int_field json "line_end" in
-  let* ia_keeper = required_string_field json "keeper_id" in
-  let* ia_kind = required_string_field json "kind" in
-  let* ia_content = required_string_field json "content" in
-  let* ia_task = optional_string_field json "task_id" in
-  Ok { ia_line_start; ia_line_end; ia_keeper; ia_kind; ia_content; ia_task }
-
-let decode_ide_annotations json =
-  let* ok = required_bool_field json "ok" in
-  if not ok then Error "annotations answered ok=false"
-  else
-    let* rows_json = required_list_field json "data" in
-    decode_list "data" decode_ide_annotation rows_json
 
 (* ── the /api/v1/lsp/question answer ───────────────────────────────── *)
 

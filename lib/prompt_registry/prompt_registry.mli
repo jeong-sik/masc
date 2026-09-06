@@ -73,9 +73,21 @@ type prompt_meta = Prompt_registry_types.prompt_meta = {
   template_variables : string list;
 }
 
+type prompt_source = Prompt_registry_types.prompt_source =
+  | Override
+  | File
+  | Missing
+(** Where a prompt's effective text came from. Override, then file, then
+    neither: these three are the whole answer, and the word the HTTP
+    surfaces send is {!prompt_source_to_string} of one of them. *)
+
+val prompt_source_to_string : prompt_source -> string
+(** ["override"] / ["file"] / ["missing"], unchanged from what these
+    surfaces have always sent. *)
+
 type prompt_resolution = Prompt_registry_types.prompt_resolution = {
   effective : string;
-  source : string;
+  source : prompt_source;
   file_value : string option;
   override_value : string option;
   file_path : string option;
@@ -130,9 +142,10 @@ val get_prompt : string -> string
     Returns the empty string when [key] is missing from
     every source. *)
 
-val prompt_source : string -> string
-(** [(resolve_prompt key).source]: ["override"] /
-    ["file"] / ["missing"]. *)
+val prompt_source : string -> prompt_source
+(** [(resolve_prompt key).source]. Typed rather than the wire word, so a
+    caller that wants the word asks {!prompt_source_to_string} for it at the
+    boundary where the JSON is built, like the two other sites that send it. *)
 
 (** {1 Rendering} *)
 

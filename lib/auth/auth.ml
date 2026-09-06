@@ -62,24 +62,6 @@ type credential_status =
   | Credential_present of agent_credential
   | Credential_missing
 
-(** Refresh a token (generate new one, update credential) *)
-let refresh_token config ~agent_name ~old_token
-  : (string * agent_credential, masc_error) result
-  =
-  match verify_token config ~agent_name ~token:old_token with
-  | Error (Auth (Auth_error.TokenExpired _)) ->
-    (* Allow refresh even if expired *)
-    (match load_credential config agent_name with
-     | None ->
-       Error (Auth (Auth_error.Unauthorized
-         { reason = Missing_token
-         ; message = "No credential found for " ^ agent_name
-         }))
-     | Some old_cred -> create_token config ~agent_name ~role:old_cred.role)
-  | Error e -> Error e
-  | Ok old_cred -> create_token config ~agent_name ~role:old_cred.role
-;;
-
 (* ============================================ *)
 (* Authorization                                *)
 (* ============================================ *)

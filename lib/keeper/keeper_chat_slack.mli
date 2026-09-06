@@ -25,15 +25,6 @@ val effect_disposition : error -> Tool_result.failure_effect_disposition
     {!Tool_result.Proven_pre_effect} so the refusal stays correctable inside
     the provider turn instead of reaching the terminal effect boundary. *)
 
-val send_message :
-  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  ?timeout_sec:float ->
-  ?thread_ts:string ->
-  token:string -> channel:string -> content:string -> unit -> (unit, error) result
-(** [send_message ~token ~channel ~content] posts to
-    [chat.postMessage]. Logs errors via [Log.Keeper.warn] and returns the
-    outcome. *)
-
 val send_message_with_blocks :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->
@@ -46,27 +37,11 @@ val send_message_with_blocks :
     visible blocks assembled by the caller. Logs errors via [Log.Keeper.warn]
     and returns the outcome. *)
 
-val content_blocks_of_text : string -> Yojson.Safe.t list
-(** [content_blocks_of_text text] puts the complete LLM-authored standard
-    Markdown in Slack's native [markdown] block, which renders headings,
-    emphasis, lists, links, code, task lists, and tables without a local
-    Markdown-to-mrkdwn heuristic. Safe image chat blocks are also projected as
-    image blocks. Blank text produces no block. *)
-
 val message_blocks_of_text :
   mention_user_ids:string list -> string -> Yojson.Safe.t list
 (** Prepend one visible mrkdwn mention section to
     {!content_blocks_of_text}. Ids must already have passed the surface-post
     validator. *)
-
-val link_block_json :
-  url:string -> title:string -> description:string option -> Yojson.Safe.t
-(** Block Kit section block of the form [*<url|title>*\ndescription]. The
-    url/title/description are redacted and mrkdwn-escaped; the result is
-    truncated to the per-block text limit. *)
-
-val image_block_json : url:string -> caption:string option -> Yojson.Safe.t
-(** Block Kit image block; [caption] becomes the redacted [alt_text]. *)
 
 val adapter_loop :
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
@@ -131,10 +106,6 @@ module For_testing : sig
 
   val message_blocks_of_text :
     mention_user_ids:string list -> string -> Yojson.Safe.t list
-
-  val markdown_block_json : string -> Yojson.Safe.t
-
-  val mention_block_json : string list -> Yojson.Safe.t
 
   val final_message_blocks :
     content:string -> event_blocks:Yojson.Safe.t list -> Yojson.Safe.t list

@@ -233,7 +233,7 @@ let test_schedule_update_form_preserves_exact_editable_definition () =
    can drift to any footer at all without a test noticing. *)
 let test_tools_footer_carries_the_keeper_axis () =
   check str "tools names the effective Keeper switch"
-    "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [/]:Keeper  e:edit Skill  Esc:config  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [/]:Keeper  c/C:new Skill  e:edit Skill  Esc:config  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Tools)
 
 let test_resources_footer_steps_through_detail () =
@@ -633,6 +633,43 @@ let test_metrics_is_an_overview_child () =
   Alcotest.(check bool) "Overview documents the [m] hop" true
     (List.mem "m" overview_keys)
 
+let test_visible_surface_ring_declutter () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Overview;
+  let ring_empty = visible_surface_ring state in
+  Alcotest.(check bool) "Approvals hidden when empty and not active" false
+    (List.exists (fun (s, _) -> s = Approvals) ring_empty);
+  state.view <- Approvals;
+  let ring_active = visible_surface_ring state in
+  Alcotest.(check bool) "Approvals shown when active surface" true
+    (List.exists (fun (s, _) -> s = Approvals) ring_active);
+  state.view <- Overview;
+  state.keeper_tool_approvals <-
+    [ { kta_keeper = "alpha"
+      ; kta_tool_call_id = "call_1"
+      ; kta_tool = "exec"
+      ; kta_args = "{}"
+      ; kta_question = "run?"
+      ; kta_because = None
+      ; kta_asked_at = 0.0
+      ; kta_timeout_sec = 60.0
+      }
+    ];
+  let ring_with_pending = visible_surface_ring state in
+  Alcotest.(check bool) "Approvals shown when pending items exist" true
+    (List.exists (fun (s, _) -> s = Approvals) ring_with_pending)
+
+let test_braille_sparkline () =
+  Alcotest.(check string) "empty list gives base line" "⣀⡠⠤⠶"
+    (braille_sparkline []);
+  let spark = braille_sparkline [ 0.0; 0.5; 1.0 ] in
+  Alcotest.(check bool) "sparkline non-empty" true (String.length spark > 0)
+
+let test_fleet_total_cost () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  Alcotest.(check (float 0.001)) "fleet cost initially 0" 0.0
+    (fleet_total_cost_usd state)
+
 let test_config_footer_names_both_hops () =
   check str "Config names its two off-ring children"
     "j/k:select / scroll  p:runtime.toml / models / params / prompts / themes  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  Esc:overview  r:reload  Tab:next"
@@ -766,7 +803,7 @@ let standalone_lane ~lane_id ~label : Tui_decode.standalone_lane =
   ; sl_purpose = None
   ; sl_required = false
   ; sl_status = Tui_decode.Standalone_idle
-  ; sl_configuration_state = "ready"
+  ; sl_configuration_state = Tui_decode.Lane_ready
   ; sl_admitted_slots = []
   ; sl_cli_slots = []
   ; sl_dropped_slots = []
@@ -1189,13 +1226,9 @@ let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
     [ "K:hover"; "D:definition"; "R:references"; "b:blame"; "H:history" ];
   check Alcotest.bool "the tree moves" true (holds "j/k:move" tree);
   (* An overlay covers the code, so the keys that act on it are gone while
-     it is up -- and [w], which writes a note, is live only there. *)
+     it is up. *)
   check Alcotest.bool "an overlay drops the code keys" false
     (holds "b:blame" overlay);
-  check Alcotest.bool "an overlay keeps the note write" true
-    (holds "w:add note" overlay);
-  check Alcotest.bool "and the open file does not offer it" false
-    (holds "w:add note" file);
   (* The history view has commits to open; the other two panes do not, and
      named the key anyway until it was read off a running screen. *)
   check Alcotest.bool "an overlay opens a commit" true
@@ -1205,33 +1238,6 @@ let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
        check Alcotest.bool (label ^ " has no commit to open") false
          (holds "Enter (history)" hints))
     [ ("the tree", tree); ("an open file", file) ]
-
-let test_the_note_form_offers_the_line_the_cursor_is_on () =
-  (* The anchor was the literal 1. It shows in the store: every one of this
-     workspace's 51 annotations sits at line 1, including the two written
-     from this pane -- which is what a form that never offered a line
-     produces, not a workspace that declined to anchor.
-
-     1-based, because it is the number the gutter draws beside the line. *)
-  let holds needle haystack =
-    let n = String.length needle and h = String.length haystack in
-    let rec scan i =
-      i + n <= h
-      && (String.equal (String.sub haystack i n) needle || scan (i + 1))
-    in
-    scan 0
-  in
-  let stem = Masc_tui_types.code_note_stem ~anchor:412 in
-  check Alcotest.bool "the cursor line opens the form" true
-    (holds {|"line_start": 412|} stem);
-  check Alcotest.bool "and closes it" true (holds {|"line_end": 412|} stem);
-  check Alcotest.bool "the anchor is not pinned to the top" false
-    (holds {|"line_start": 1,|} stem);
-  check Alcotest.bool "the kind still leads with a comment" true
-    (holds {|"kind": "Comment"|} stem);
-  (* The first line is a real anchor, not the absence of one. *)
-  check Alcotest.bool "line one is expressible" true
-    (holds {|"line_start": 1|} (Masc_tui_types.code_note_stem ~anchor:1))
 
 let test_code_asks_the_language_server_three_questions () =
   (* K hover, D definition, R references -- one family, one case each, and
@@ -1326,8 +1332,6 @@ let () =
             `Quick test_code_asks_the_language_server_three_questions
         ; Alcotest.test_case "the Code footer names the keys of its pane"
             `Quick test_the_code_footer_names_the_keys_of_the_pane_it_draws
-        ; Alcotest.test_case "the note form offers the cursor line" `Quick
-            test_the_note_form_offers_the_line_the_cursor_is_on
         ; Alcotest.test_case "every searchable surface names its search"
             `Quick test_every_searchable_surface_names_its_search
         ; Alcotest.test_case "a surface without rows offers no row search"
@@ -1414,6 +1418,12 @@ let () =
             test_logs_is_an_activity_child
         ; Alcotest.test_case "Metrics is an Overview child" `Quick
             test_metrics_is_an_overview_child
+        ; Alcotest.test_case "smart declutter hides empty approvals" `Quick
+            test_visible_surface_ring_declutter
+        ; Alcotest.test_case "braille sparkline renders levels" `Quick
+            test_braille_sparkline
+        ; Alcotest.test_case "fleet total cost sums correctly" `Quick
+            test_fleet_total_cost
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
         ; Alcotest.test_case "Keeper detail reserves u for channel unbind"

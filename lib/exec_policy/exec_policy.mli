@@ -41,6 +41,7 @@ val existing_sibling_dirs_hint : ?workdir:string -> string -> string option
     ancestor directory has child directories to surface. *)
 
 val validate_shell_ir_paths :
+  ?requires_existing_dir:bool ->
   ?workdir:string ->
   Masc_exec.Shell_ir.t ->
   (unit, string) result
@@ -56,7 +57,6 @@ val flat_stage_words : Masc_exec.Shell_ir.t -> string list
 (** All typed callers now route through {!parse_string_to_ir} +
     {!Exec_policy_literal_words.flat_stage_words}. *)
 
-val sanitize_command_for_log : string -> string
 val sanitize_command_for_log_of_ir :
   fallback_cmd:string -> Masc_exec.Shell_ir.t -> string
 val truncate_for_log : ?max_len:int -> string -> string

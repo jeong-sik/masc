@@ -105,13 +105,6 @@ type verification_intent =
   | Cancel_task
 [@@deriving show]
 
-val verification_intent_to_string : verification_intent -> string
-
-val verification_intent_of_string : string -> (verification_intent, string) result
-(** Closed parse. An unknown word is an error, never a default: reading an
-    unrecognised intent as [Complete_task] would turn a cancellation into a
-    completion at the moment a verdict lands. *)
-
 (** What the producer places before the authority. [verification_intent] is
     the projection the task status carries; the request record the authority
     reads carries the claim itself. *)

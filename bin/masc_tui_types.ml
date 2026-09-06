@@ -2589,6 +2589,18 @@ let metrics_section_label = function
   | Section_resources -> "Fleet & Velocity"
   | Section_tools -> "Memory & Gate Safety"
 
+(* What the [:] palette is for right now. A jump lists every destination
+   the strip and roster offer; a choice lists the names on the Code
+   cursor line for one language-server question and nothing else -- a
+   task whose title happens to spell h-o-v-e-r in order is not an answer
+   to "which name?" (RFC-0429 §1.4). *)
+type palette_mode =
+  | Palette_jump
+  | Palette_choice of {
+      choice_question : string;  (* "hover", "definition", "references" *)
+      choice_line : int;  (* 1-based, what the title says *)
+    }
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -2667,6 +2679,16 @@ type state = {
   (* Rows scrolled into the pane's full list; zero is the overview. The
      renderer clamps it to what the list holds and a toggle resets it. *)
   mutable acting_pane_scroll: int;
+  (* Which of the pane's two readings is up. Survives a toggle: a reader
+     who put the pane away on Changes gets Changes back. *)
+  mutable acting_pane_tab: Masc_tui_acting_pane.tab;
+  (* The selected keeper's recorded file changes, keyed by keeper name, for
+     the pane's Changes tab. Refetched when the feed shows that keeper
+     complete a tool call and on the operator cadence. *)
+  mutable acting_pane_changes:
+    (string, Tui_decode.file_change_snapshot) Masc_tui_fetched.t;
+  (* When the answer on screen landed, so the tab can say how old it is. *)
+  mutable acting_pane_changes_at: float option;
   (* Derived display phase for the selected long name in the narrow roster.
      The main loop advances it only while that roster is visible. *)
   mutable roster_marquee_frame: int;
@@ -2701,6 +2723,7 @@ type state = {
   mutable palette_open: bool;
   mutable palette_query: string;
   mutable palette_cursor: int;
+  mutable palette_mode: palette_mode;
   (* [/] on the roster: a search that moves the cursor, not a filter that
      subsets the list -- every action reads the same [keepers] the rows
      draw, so nothing can act on a hidden row. [Some q] while typing;
@@ -3230,6 +3253,22 @@ type state = {
   mutable repository_changes_diff_path: string option;
   mutable repository_changes_diff_scroll: int;
   mutable repository_changes_return_chat: bool;
+  (* Interactive patch review modal: 3D drop-shadow overlay for reviewing
+     and resolving pending code changes, git diffs, and approval gates. *)
+  mutable patch_modal_open: bool;
+  mutable patch_modal_scroll: int;
+  mutable patch_modal_path: string option;
+  mutable patch_modal_diff: (string * Tui_decode.git_diff) option;
+  mutable patch_modal_error: string option;
+  (* Web Link Preview and Rich Embed modal & settings *)
+  mutable link_modal_open: bool;
+  mutable link_modal_scroll: int;
+  mutable link_modal_url: string option;
+  mutable link_modal_links: string list;
+  mutable link_modal_cursor: int;
+  mutable link_previews_mode: [ `Rich | `Compact | `Off ];
+  (* Real-time Token Burn Velocity and Financial HUD *)
+  mutable burn_hud_visible: bool;
   (* Code surface: one directory level at a time through the lazy /children
      route; the file arrives whole and is lexed once at load. *)
   mutable code_dir: string;
@@ -3284,7 +3323,6 @@ type state = {
      which only a Repositories row carries) swaps the content for the notes
      anchored to the file. *)
   (* The notes anchored to the open file, keyed by its path. *)
-  mutable code_notes: (string, Tui_decode.ide_annotation list) Masc_tui_fetched.t;
   mutable code_notes_open: bool;
   mutable code_notes_scroll: int;
   (* The file pane's blame margin: b on an open file fetches who last touched
@@ -4006,6 +4044,9 @@ let create_state
   roster_pane_hidden = false;
   acting_pane_hidden = false;
   acting_pane_scroll = 0;
+  acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;
+  acting_pane_changes = Masc_tui_fetched.initial;
+  acting_pane_changes_at = None;
   roster_marquee_frame = 0;
   activity_frame = -1;
   keeper_detail_focus = Right_pane;
@@ -4021,6 +4062,7 @@ let create_state
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;
+  palette_mode = Palette_jump;
   search = None;
   search_last = "";
   voice_config = None;
@@ -4286,6 +4328,18 @@ let create_state
   repository_changes_diff_path = None;
   repository_changes_diff_scroll = 0;
   repository_changes_return_chat = false;
+  patch_modal_open = false;
+  patch_modal_scroll = 0;
+  patch_modal_path = None;
+  patch_modal_diff = None;
+  patch_modal_error = None;
+  link_modal_open = false;
+  link_modal_scroll = 0;
+  link_modal_url = None;
+  link_modal_links = [];
+  link_modal_cursor = 0;
+  link_previews_mode = `Rich;
+  burn_hud_visible = false;
   code_dir = "";
   code_entries = [];
   code_entries_error = None;
@@ -4304,7 +4358,6 @@ let create_state
   code_diff = Masc_tui_fetched.initial;
   code_diff_open = false;
   code_diff_scroll = 0;
-  code_notes = Masc_tui_fetched.initial;
   code_notes_open = false;
   code_notes_scroll = 0;
   code_blame = Masc_tui_fetched.initial;
@@ -4851,24 +4904,18 @@ type memory_fact_row =
   | Memory_row_source_fact of Tui_decode.memory_source_fact
   | Memory_row_invalidation of Tui_decode.memory_invalidation
 
-(* Prefix match: the lowercased label starts with the query. An empty query
-   is a prefix of everything. *)
-let palette_starts_with ~needle haystack =
-  String.starts_with ~prefix:needle (String.lowercase_ascii haystack)
+(* The three palette matchers fold case themselves, on both sides. A caller
+   hands them the operator's text as typed; "ADM" and "adm" find the same
+   rows, and a new caller cannot forget a step it never had. *)
 
-let palette_contains ~needle haystack =
-  let h = String.lowercase_ascii haystack in
-  let n_str = String.lowercase_ascii needle in
-  let n = String.length n_str and hl = String.length h in
-  if n = 0 then true
-  else begin
-    let found = ref false in
-    for start = 0 to hl - n do
-      if (not !found) && String.equal (String.sub h start n) n_str then
-        found := true
-    done;
-    !found
-  end
+(* Prefix match: the label starts with the query. An empty query is a prefix
+   of everything. *)
+let palette_starts_with ~needle haystack =
+  String.starts_with
+    ~prefix:(String.lowercase_ascii needle)
+    (String.lowercase_ascii haystack)
+
+let palette_contains ~needle haystack = lowercase_contains ~needle haystack
 
 (* The flat row list the browser's cursor, scroll, and search all read. The
    category filter narrows only ordinary facts: source-bound rows carry no
@@ -4924,11 +4971,8 @@ let memory_fact_rows (state : state) : memory_fact_row list =
       let all_rows = ordinary @ source_rows @ invalidation_rows in
       let query =
         match state.search with
-        | Some q -> String.lowercase_ascii (String.trim q)
-        | None ->
-            if String.length (String.trim state.search_last) > 0 then
-              String.lowercase_ascii (String.trim state.search_last)
-            else ""
+        | Some q -> String.trim q
+        | None -> String.trim state.search_last
       in
       let filtered_rows =
         if query = "" then all_rows
@@ -5230,21 +5274,6 @@ let scrolled_surface (state : state) (surface : surface) : scrolled option =
   scrolled_surface_rows state surface
 ;;
 
-(* The $EDITOR form [w] opens, anchored to one line.
-
-   A form rather than a prompt because a note carries four fields, and a
-   stem rather than an empty file because the shape is the thing an operator
-   should not have to remember. [anchor] is 1-based: it is what the reader
-   sees in the gutter, not the index behind it.
-
-   The anchor was the literal 1 until it was measured -- every one of this
-   workspace's 51 stored annotations sits at line 1, which is what a form
-   that never offered a line produces. *)
-let code_note_stem ~anchor =
-  Printf.sprintf
-    "{\n  \"line_start\": %d,\n  \"line_end\": %d,\n  \"kind\": \"Comment\",\n  \"content\": \"\"\n}\n"
-    anchor anchor
-
 (* The text a "/" search reads for each row: the identifiers an operator
    would type, not the drawn bytes. [Some texts] means the surface is
    searchable and [texts] is the same decoded list the row cursor names, in
@@ -5271,6 +5300,86 @@ let approval_items (state : state) =
   List.map (fun held -> Keeper_tool_row held) state.keeper_tool_approvals
   @ List.map (fun pending -> Gate_row pending) state.gate_pending
   @ List.map (fun item -> Operator_row item) (operator_approval_items state)
+
+let is_surface_active (state : state) (s : surface) =
+  match s with
+  | Metrics -> false
+  | Approvals ->
+      state.view = Approvals || List.length (approval_items state) > 0
+  | _ -> true
+;;
+
+let visible_surface_ring (state : state) : (surface * string) list =
+  List.filter (fun (s, _) -> is_surface_active state s) surface_ring
+;;
+
+let visible_surface_ring_index (state : state) (view : surface) =
+  let ring = visible_surface_ring state in
+  let family =
+    match view with
+    | Keepers _ -> Keepers Keeper_list
+    | Verification | Harness -> Planning
+    | Changes | Connectors | Schedules -> Keepers Keeper_list
+    | Lanes -> Runtime
+    | Clients -> Runtime
+    | Code -> Repositories
+    | Resources | Tools -> Config
+    | System_logs -> Acting
+    | Metrics -> Overview
+    | v -> v
+  in
+  let rec find i = function
+    | [] -> 0
+    | (surface, _) :: rest -> if surface = family then i else find (i + 1) rest
+  in
+  find 0 ring
+;;
+
+let braille_sparkline values =
+  if values = [] then "⣀⡠⠤⠶"
+  else
+    let max_v = List.fold_left max 0.0001 values in
+    let levels = [| " "; "⡀"; "⣀"; "⣄"; "⣤"; "⣦"; "⣶"; "⣷"; "⣿" |] in
+    let glyphs =
+      List.map
+        (fun v ->
+          let ratio = max 0.0 (min 1.0 (v /. max_v)) in
+          let idx = min 8 (int_of_float (ratio *. 8.0)) in
+          levels.(idx))
+        values
+    in
+    String.concat "" glyphs
+;;
+
+let fleet_token_sparkline (state : state) =
+  let tokens =
+    List.map (fun (k : keeper) -> float_of_int k.k_total_tokens) state.keepers
+  in
+  braille_sparkline tokens
+;;
+
+let fleet_total_cost_usd (state : state) =
+  List.fold_left (fun acc (k : keeper) -> acc +. k.k_total_cost_usd) 0.0 state.keepers
+;;
+
+let conversation_urls (state : state) : string list =
+  let seen = Hashtbl.create 16 in
+  let acc = ref [] in
+  let scan (e : msg_entry) =
+    let urls = Masc_tui_message_layout.bare_urls e.me_text in
+    List.iter
+      (fun u ->
+         if not (Hashtbl.mem seen u) then begin
+           Hashtbl.add seen u ();
+           acc := u :: !acc
+         end)
+      urls
+  in
+  List.iter scan state.msg_history;
+  List.iter scan state.msg_loaded;
+  List.rev !acc
+;;
+
 
 
 let surface_row_texts (state : state) : surface -> string list option = function
@@ -5734,20 +5843,26 @@ let palette_entries (state : state) =
    "keeper adm-race". *)
 let palette_subsequence ~needle haystack =
   let h = String.lowercase_ascii haystack in
-  let hl = String.length h and nl = String.length needle in
+  let n = String.lowercase_ascii needle in
+  let hl = String.length h and nl = String.length n in
   let rec walk hi ni =
     if ni >= nl then true
     else if hi >= hl then false
-    else if Char.equal h.[hi] needle.[ni] then walk (hi + 1) (ni + 1)
+    else if Char.equal h.[hi] n.[ni] then walk (hi + 1) (ni + 1)
     else walk (hi + 1) ni
   in
   walk 0 0
 
 let palette_matches (state : state) =
-  let needle =
-    String.lowercase_ascii (String.trim state.palette_query)
+  let needle = String.trim state.palette_query in
+  let entries =
+    match state.palette_mode with
+    | Palette_jump -> palette_entries state
+    | Palette_choice { choice_question; _ } ->
+        List.map
+          (fun name -> (name, Palette_lsp (choice_question, name)))
+          (code_cursor_line_symbols state)
   in
-  let entries = palette_entries state in
   (* Three ranks, entry order kept inside each: a label that starts with the
      query, then one that contains it, then one that only has its characters
      in order. A K/D pre-fill of "def " therefore lists the cursor line's

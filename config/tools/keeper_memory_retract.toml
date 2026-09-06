@@ -1,11 +1,13 @@
 name = "keeper_memory_retract"
 description = """
-Retract one exact ordinary-current Memory OS fact.
-
+Retract one exact ordinary-current Memory OS fact. \
 Use the memory_id returned \
 by memory write or search and state the concrete reason. The same atomic commit \
 removes every derived fact that no longer has a complete support path and \
-records both the direct reason and the support invalidations for inspection."""
+records both the direct reason and the support invalidations for inspection. \
+This is a terminal-contract tool: when it succeeds, the turn ends. The runtime \
+rejects any batch that places it alongside another tool call — call it alone \
+in its own turn, never batched with reads, writes, or shell execution."""
 additional_properties = false
 
 
@@ -32,6 +34,7 @@ short_description = "Retract a current keeper memory fact."
 when_to_use = "Use when an ordinary-current fact is false, obsolete, or no longer supported."
 key_constraints = [
   "Use an exact memory_id from memory write or search.",
+  "This is a terminal-contract tool: it must be the only tool call in its turn — a batch that mixes it with any other call is rejected whole before any effect.",
   "A source-bound fact is not an ordinary-current fact and cannot be retracted here.",
   "The reason is durable journal evidence, not transient commentary.",
 ]

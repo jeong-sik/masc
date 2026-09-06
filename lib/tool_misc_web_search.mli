@@ -53,14 +53,6 @@ type simulated_provider_outcome =
 
 (** {1 Provider fallback plan} *)
 
-val no_provider_configured_message : string
-(** Rendered when the credentialed provider chain is empty (no
-    searxng URL and no provider API key in the environment).
-    Pinned in the .mli so the tool-matrix expectation references
-    this exact message instead of duplicating the string — a
-    credential-less runner (CI) answers [masc_web_search] with
-    this guard rather than a hit list. *)
-
 val provider_plan : unit -> string list
 (** [provider_plan ()] returns the resolved provider order as
     canonical lowercase labels ([searxng] / [brave] / [tavily] /

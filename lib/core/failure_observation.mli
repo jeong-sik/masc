@@ -44,10 +44,6 @@ val record_failure : t -> agent_id:string -> reason:string -> unit
 (** [record_failure t ~agent_id ~reason] appends a {!failure_record}
     to the agent's failure history. *)
 
-val record_success : t -> agent_id:string -> unit
-(** [record_success t ~agent_id] records the successful observation time.
-    It does not erase prior failure facts. *)
-
 (** {1 Introspection} *)
 
 val get_observation : t -> agent_id:string -> observation

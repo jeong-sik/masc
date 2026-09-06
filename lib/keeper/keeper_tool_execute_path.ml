@@ -78,25 +78,32 @@ let requested_tool_execute_cwd ~config ~meta ~write_enabled ~args =
   then Filename.concat (keeper_default_write_root ~config ~meta) raw_cwd
   else raw_cwd
 
+(* Whose filesystem says whether the cwd exists follows where the tree is
+   (RFC-0427 A-1). A shared-mount tree is on this host, so the host answers
+   and the allowed-root identity is verified here. A tree the endpoint owns
+   (a microvm work volume, a remote_ssh account) is not: the host directory
+   of the same name is the bookkeeping bundle, and asking it refused 38
+   Execute calls on 2026-09-05 whose cwd existed in the guest. The path is
+   still confined lexically above, the remote lane maps it lexically
+   ([Keeper_remote_path.host_to_remote]), and the endpoint's shim chdirs
+   into it inside its own jail and answers ENOENT itself. *)
 let resolve_tool_execute_cwd_typed ~config ~meta ~write_enabled ~args =
   let raw_path = requested_tool_execute_cwd ~config ~meta ~write_enabled ~args in
-  let resolved =
-    resolve_keeper_execute_cwd_typed ~config ~meta ~raw_path
-    |> Result.map_error (fun rejection -> Cwd_rejected rejection)
-  in
-  match resolved with
-  | Error _ as err -> err
-  | Ok confined when
-      let cwd = Keeper_alerting_path.confined_host_path confined in
-      Fs_compat.file_exists cwd && Sys.is_directory cwd ->
-    (match Keeper_tool_shared_runtime.verify_keeper_confined_root confined with
-     | Ok () -> Ok (Keeper_alerting_path.confined_host_path confined)
-     | Error detail -> Error (Cwd_root_verification_failed { detail }))
+  match resolve_keeper_execute_cwd_typed ~config ~meta ~raw_path with
+  | Error rejection -> Error (Cwd_rejected rejection)
   | Ok confined ->
     let cwd = Keeper_alerting_path.confined_host_path confined in
-    if not (Fs_compat.file_exists cwd)
-    then Error (Cwd_missing { cwd })
-    else Error (Cwd_not_directory { cwd })
+    (match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
+     | Keeper_types_profile_sandbox.Endpoint_owned -> Ok cwd
+     | Keeper_types_profile_sandbox.Shared_mount ->
+       if Fs_compat.file_exists cwd && Sys.is_directory cwd
+       then
+         (match Keeper_tool_shared_runtime.verify_keeper_confined_root confined with
+          | Ok () -> Ok cwd
+          | Error detail -> Error (Cwd_root_verification_failed { detail }))
+       else if not (Fs_compat.file_exists cwd)
+       then Error (Cwd_missing { cwd })
+       else Error (Cwd_not_directory { cwd }))
 
 let resolve_tool_execute_cwd ~config ~meta ~write_enabled ~args =
   resolve_tool_execute_cwd_typed ~config ~meta ~write_enabled ~args
@@ -125,14 +132,3 @@ let resolve_tool_read_path
 
 let shell_command_available name =
   Executable_path.command_available name
-
-let normalize_for_containment path =
-  Keeper_alerting_path.normalize_path_for_check path
-  |> Keeper_alerting_path.strip_trailing_slashes
-
-let in_playground ~root ~cwd ~meta =
-  let cwd_canonical = normalize_for_containment cwd in
-  let playground_rel = Keeper_sandbox.sandbox_root_rel_of_meta ~meta in
-  let playground_abs = normalize_for_containment (Filename.concat root playground_rel) in
-  String.starts_with ~prefix:(playground_abs ^ "/") (cwd_canonical ^ "/")
-  || String.equal playground_abs cwd_canonical

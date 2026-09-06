@@ -277,22 +277,6 @@ let get_origin_url ?(timeout_sec = inspection_timeout_sec) ~local_path () =
   | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ ->
     Error (Origin_lookup_failed (git_failure_detail args status stdout stderr))
 
-let worktree_root ~local_path =
-  match
-    run_git
-      ~cwd:local_path
-      ~env:read_only_git_env
-      ~timeout_sec:inspection_timeout_sec
-      [ "rev-parse"; "--show-toplevel" ]
-  with
-  | Ok (root :: _) ->
-    let root = String.trim root in
-    if String.equal root ""
-    then Stdlib.Error "git rev-parse --show-toplevel returned blank"
-    else Stdlib.Ok root
-  | Ok [] -> Stdlib.Error "git rev-parse --show-toplevel returned no output"
-  | Error msg -> Stdlib.Error msg
-
 type checkout_identity = {
   toplevel : string;
   git_common_dir : string;

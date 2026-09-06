@@ -113,10 +113,6 @@ val runtime_toml_path_for_base_path : base_path:string -> string
     config-root override and base-path rules as {!resolve_for_base_path}. The
     file need not exist. *)
 
-val keeper_runtime_store_of_dirname : string -> Common.keeper_runtime_store option
-(** Base-path-independent resolver for canonical child-store names under
-    [Common.keepers_runtime_dirname]. *)
-
 val keeper_toml_path_opt_for_base_path :
   base_path:string -> string -> string option
 (** Base-path-scoped variant of {!keeper_toml_path_opt}. *)
@@ -192,10 +188,6 @@ val repositories_toml_path : base_path:string -> string
 (** [<base_path>/.masc/config/repositories.toml]. Direct derivation from
     [base_path]. *)
 
-val config_signature_exists : string -> bool
-(** [config_signature_exists dir] checks whether [dir] looks like a valid
-    MASC config directory (has runtime.toml, prompts/, or keepers/). *)
-
 (** {1 Env introspection}
 
     Sanitized env var readers that strip inherited test values when running
@@ -263,5 +255,4 @@ val log_resolution : ?context:string -> unit -> unit
 
 val source_to_string : source -> string
 val status_to_string : status -> string
-val item_to_json : path_item -> Yojson.Safe.t
 val to_json : resolution -> Yojson.Safe.t

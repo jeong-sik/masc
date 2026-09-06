@@ -184,24 +184,40 @@ let try_handle_with_outcome
                          leading-dash pattern parses as an rg flag (latent
                          argv-injection-shaped failure; 24h audit #7). *)
                       base_argv @ type_argv @ glob_argv @ [ "-e"; pattern; cpath ])
-                    ~ok_exit_codes:[ 0; 1 ]
+                    ~ok_exit_codes:[ 0; 1; 2 ]
                     ~max_bytes:1_000_000
                     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
                     ()
                 with
                 | Error response -> Keeper_tool_execution.failure response
                 | Ok (st, out) ->
-                  Keeper_tool_execution.success
-                    (Yojson.Safe.to_string
-                       (`Assoc
-                           [ "ok", `Bool true
+                  let is_ok =
+                    match st with
+                    | Unix.WEXITED 0 | Unix.WEXITED 1 -> true
+                    | _ -> false
+                  in
+                  let trimmed_out = String.trim out in
+                  let error_detail =
+                    if is_ok || String.equal trimmed_out ""
+                    then []
+                    else [ "error_detail", `String trimmed_out ]
+                  in
+                  let payload =
+                    Yojson.Safe.to_string
+                      (`Assoc
+                          ([ "ok", `Bool is_ok
                            ; "op", `String op
                            ; "path", `String target
                            ; "pattern", `String pattern
                            ; "via", `String Keeper_sandbox_read_runner.backend_via
                            ; "status", Keeper_alerting_path.process_status_to_json st
-                           ; "matches", lines_to_json ~limit out
-                           ])))
+                           ; "matches", (if is_ok then lines_to_json ~limit out else `List [])
+                           ]
+                           @ error_detail))
+                  in
+                  if is_ok
+                  then Keeper_tool_execution.success payload
+                  else Keeper_tool_execution.failure payload)
            else
              let rg_available = Keeper_tool_execute_path.shell_command_available "rg" in
              if not rg_available then
@@ -267,16 +283,4 @@ let try_handle_with_outcome
                    then Keeper_tool_execution.success payload
                    else Keeper_tool_execution.failure payload)))))
   | _ -> None
-;;
-
-let try_handle ~turn_sandbox_factory ~config ~meta ~args ~op ~raw_path =
-  Option.map
-    (fun (result : Keeper_tool_execution.t) -> result.raw_output)
-    (try_handle_with_outcome
-       ~turn_sandbox_factory
-       ~config
-       ~meta
-       ~args
-       ~op
-       ~raw_path)
 ;;

@@ -5,14 +5,9 @@ type tool_result = Tool_result.result
 
 type 'a context = 'a Tool_operator.context
 
-module Operator_remote_name = Tool_name.Operator_remote_name
 module Operator_name = Tool_name.Operator_name
 
-let operator_remote_tool_name name = Operator_remote_name.to_string name
-
-let operator_tool_name name =
-  operator_remote_tool_name (Operator_remote_name.Operator_tool name)
-;;
+let operator_tool_name name = Operator_name.to_string name
 
 let board_attention_quarantine_requeue_tool_name =
   operator_tool_name Operator_name.Operator_board_attention_quarantine_requeue
@@ -235,8 +230,21 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
       mcp_session_id = ctx.mcp_session_id;
     }
   in
-  match name with
-  | "masc_operator_snapshot" ->
+  let module O = Tool_name.Operator_name in
+  (* Routing is decided on the closed Operator vocabulary; the string arms below
+     are reached only for names outside it. A constructor added to
+     Tool_name.Operator_name is a compile error in [operator_name_arm]. *)
+  let operator_name_arm = function
+    | O.Operator_snapshot -> `Snapshot
+    | O.Operator_digest -> `Digest
+    | O.Operator_action -> `Action
+    | O.Operator_board_attention_quarantine_requeue -> `Quarantine_requeue
+    | O.Operator_task_recovery_resolve -> `Task_recovery
+    | O.Operator_confirm -> `Confirm
+    | O.Operator_judgment_write -> `Judgment_write
+  in
+  match Option.map operator_name_arm (O.of_string name) with
+  | Some `Snapshot ->
       (* The tool is the observation half of operator CAS commands. Dashboard
          refreshes may use the cache, but an explicit operator observation must
          not return a stale assignee/backlog version. *)
@@ -249,7 +257,7 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
         (json_ok ~tool_name:name ~start_time:start
            (Operator_control.snapshot_json ?actor ?view ~include_messages
               ~include_keepers control_ctx))
-  | "masc_operator_digest" ->
+  | Some `Digest ->
       let actor = get_string_opt args "actor" in
       let target_type = get_string_opt args "target_type" in
       let target_id = get_string_opt args "target_id" in
@@ -258,54 +266,71 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.digest_json ?actor ?target_type ?target_id
               ~include_workers control_ctx))
-  | "masc_operator_action" ->
+  | Some `Action ->
       Some
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.action_json control_ctx args))
-  | tool_name
-    when String.equal tool_name board_attention_quarantine_requeue_tool_name ->
+  | Some `Quarantine_requeue ->
       Some
         (board_attention_quarantine_requeue_result
-           ~tool_name
+           ~tool_name:name
            ~start_time:start
            ctx
            args)
-  | tool_name when String.equal tool_name task_recovery_tool_name ->
-      Some (task_recovery_result ~tool_name ~start_time:start ctx args)
-  | "masc_operator_confirm" ->
+  | Some `Task_recovery ->
+      Some (task_recovery_result ~tool_name:name ~start_time:start ctx args)
+  | Some `Confirm ->
       Some
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.confirm_json control_ctx args))
-  | "masc_operator_judgment_write" ->
+  | Some `Judgment_write ->
       Some
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.judgment_write_json control_ctx args))
-  | _ ->
+  | None ->
       Log.Misc.warn "operator_dispatch_unknown: tool=%s agent=%s" name ctx.agent_name;
       None
 
-let schemas : tool_schema list =
-  [ snapshot_schemas.local
-  ; digest_schemas.local
-  ; action_schemas.local
-  ; board_attention_quarantine_requeue_schema
-  ; task_recovery_schema
-  ; confirm_schema
-  ; judgment_write_schema
-  ]
+(* Both surfaces are derived from Tool_name.Operator_name, so a constructor
+   added there cannot be advertised locally without a schema, nor slip into the
+   Operator_remote profile by omission: [remote_schema] must say [None] out
+   loud. The two functions are exhaustive, so that decision is a compile error
+   rather than a default. *)
+let local_schema : Operator_name.t -> tool_schema = function
+  | Operator_name.Operator_snapshot -> snapshot_schemas.local
+  | Operator_name.Operator_digest -> digest_schemas.local
+  | Operator_name.Operator_action -> action_schemas.local
+  | Operator_name.Operator_board_attention_quarantine_requeue ->
+    board_attention_quarantine_requeue_schema
+  | Operator_name.Operator_task_recovery_resolve -> task_recovery_schema
+  | Operator_name.Operator_confirm -> confirm_schema
+  | Operator_name.Operator_judgment_write -> judgment_write_schema
 ;;
+
+(* [None] means the tool is local-only: the Operator_remote profile gates on
+   these names (Mcp_server_eio_tool_profile), so widening the set is a
+   deliberate edit here. *)
+let remote_schema : Operator_name.t -> tool_schema option = function
+  | Operator_name.Operator_snapshot -> Some snapshot_schemas.remote
+  | Operator_name.Operator_digest -> Some digest_schemas.remote
+  | Operator_name.Operator_action -> Some action_schemas.remote
+  | Operator_name.Operator_board_attention_quarantine_requeue ->
+    Some board_attention_quarantine_requeue_schema
+  | Operator_name.Operator_task_recovery_resolve -> Some task_recovery_schema
+  | Operator_name.Operator_confirm -> Some confirm_schema
+  | Operator_name.Operator_judgment_write -> None
+;;
+
+let schemas : tool_schema list = List.map local_schema Operator_name.all
 
 let remote_schemas : tool_schema list =
-  [ snapshot_schemas.remote
-  ; digest_schemas.remote
-  ; action_schemas.remote
-  ; board_attention_quarantine_requeue_schema
-  ; task_recovery_schema
-  ; confirm_schema
-  ]
+  List.filter_map remote_schema Operator_name.all
 ;;
 
-let remote_tool_names : string list = Operator_remote_name.all_strings
+let remote_tool_names : string list =
+  List.map (fun (s : tool_schema) -> s.name) remote_schemas
+;;
+
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
@@ -353,7 +378,7 @@ let () =
     schemas
 
 let () =
-  Tool_operator.register_operator_tools ~dispatch ~schemas ~remote_schemas;
+  Tool_operator.register_operator_tools ~dispatch ~remote_schemas;
   Dashboard_projection_cache.register_operator_snapshot_json { Dashboard_projection_cache.snapshot = Operator_control.snapshot_json };
   Dashboard_projection_cache.register_operator_digest_json { Dashboard_projection_cache.digest = Operator_control.digest_json };
   Atomic.set

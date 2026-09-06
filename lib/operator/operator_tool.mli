@@ -77,10 +77,12 @@ val remote_schemas : Masc_domain.tool_schema list
 
 val schemas : Masc_domain.tool_schema list
 (** Full operator tool schemas — consumed by keeper-local dispatchers
-    and schema coverage checks. *)
+    and schema coverage checks. One per [Tool_name.Operator_name] constructor. *)
 
 val remote_tool_names : string list
-(** Operator-remote tool names from {!Tool_name.Operator_remote_name.all_strings}.
-    Kept aligned with {!remote_schemas} by coverage tests. *)
+(** Names of {!remote_schemas}, which the Operator_remote profile gates on.
+    Derived from the same function that builds those schemas, so the two cannot
+    disagree; which tools are remote is decided in [Operator_tool.remote_schema]
+    and is exhaustive over [Tool_name.Operator_name]. *)
 
 val force_link : unit

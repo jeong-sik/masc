@@ -2405,7 +2405,9 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
          failf
            "cancelled-update Librarian fixture was not submitted: %s"
            (memory_lane_outcome_name other));
+      Printf.printf "DIAG14 before-librarian-started\n%!";
       Eio.Promise.await librarian_started;
+      Printf.printf "DIAG14 after-librarian-started\n%!";
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with
           sandbox_profile = Some meta.sandbox_profile
@@ -2459,7 +2461,9 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
           | exn -> `Raised exn  (* cancel-guard-ok: not a swallow -- the exception, Cancelled included, is re-delivered through update_done to the fiber awaiting it *)
         in
         Eio.Promise.resolve resolve_update_done disposition);
+      Printf.printf "DIAG14 before-update-switch\n%!";
       let update_sw = Eio.Promise.await update_switch in
+      Printf.printf "DIAG14 after-update-switch\n%!";
       Eio.Time.with_timeout_exn clock 1.0 (fun () ->
         let rec await_lane_swap_fence () =
           match
@@ -2473,8 +2477,10 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
             await_lane_swap_fence ()
         in
         await_lane_swap_fence ());
+      Printf.printf "DIAG14 after-fence\n%!";
       Eio.Switch.fail update_sw Cancel_keeper_up_after_metadata;
       Eio.Promise.resolve resolve_release_librarian ();
+      Printf.printf "DIAG14 before-update-done\n%!";
       (match Eio.Promise.await update_done with
        | `Cancelled -> ()
        | `Returned -> fail "keeper update returned after its caller was cancelled"

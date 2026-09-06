@@ -430,9 +430,10 @@ let category_specs () =
   [
     ( "server"
     , server_entries @ path_entries
-      @ docker_playground_entries @ test_entries );
+      @ docker_playground_entries @ test_entries
+      @ declared_entries "server" );
     "auth", auth_entries;
-    "transport", transport_entries;
+    "transport", transport_entries @ declared_entries "transport";
     "storage", storage_entries @ cache_entries @ board_entries;
     ( "runtime"
     , runtime_entries

@@ -635,6 +635,12 @@ describe('IdeShell', () => {
           last_error: 'ocamllsp unavailable',
         },
         {
+          lang: 'lua',
+          connected: false,
+          command: 'lua-language-server',
+          last_error: 'lua-language-server not on PATH',
+        },
+        {
           lang: 'typescript',
           connected: true,
           command: 'typescript-language-server',
@@ -655,8 +661,12 @@ describe('IdeShell', () => {
       expect(found).not.toBeNull()
       return found!
     })
-    expect(chip.textContent).toBe('LSP unavailable 1')
-    expect(chip.getAttribute('title')).toContain('ocaml: ocamllsp unavailable')
+    expect(chip.textContent).toBe('LSP unavailable 2')
+    // One line per language, so an operator reads which ones and why
+    // instead of a count that names nothing.
+    expect(chip.getAttribute('title')).toBe(
+      'ocaml: ocamllsp unavailable\nlua: lua-language-server not on PATH',
+    )
     expect(chip.getAttribute('title')).not.toContain('typescript')
   })
 

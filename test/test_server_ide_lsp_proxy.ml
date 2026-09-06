@@ -254,9 +254,9 @@ let test_unmapped_lang_has_null_command () =
 ;;
 
 (* The health is two states, so the wire says so once: [connected] carries it
-   and [last_error] says why when it is false. A second boolean that is
-   [connected] negated gives a reader two fields to reconcile and a way to
-   disagree with itself, so the object is pinned field by field. *)
+   and [last_error] says why when it is false. The field names and their order
+   are pinned here so a second field saying the same thing a different way
+   cannot be added without this failing; the two tests above pin the values. *)
 let test_status_says_the_health_once () =
   List.iter
     (fun health ->

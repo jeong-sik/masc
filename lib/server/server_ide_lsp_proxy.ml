@@ -65,11 +65,13 @@ type resolved_document_request =
     open.  RFC-0281 Phase 2. *)
 (** Per-language LSP health (task-1691). A language is [Connected] once its
     LSP process is spawned and initialized; it is [Unavailable] (carrying the
-    last error) when the process could not be started or initialized, and the
-    proxy answers that language's requests with empty results until a server
-    comes up. Degradation is per-language — the whole LSP process is
-    unavailable, not one method — so a single state covers every handler, and
-    every degraded handler records it instead of failing the request, so the
+    last error) when the process could not be started or initialized.
+    Degradation is per-language — the whole LSP process is unavailable, not
+    one method — so a single state covers every handler. What a request gets
+    while a language is [Unavailable] depends on the method: the six that go
+    through [relay_or_empty] answer that method's empty result, a relayed
+    method answers a JSON-RPC error, and a document-sync notification is
+    only logged. Every one of them records the state first, so the
     [masc/lspStatus] notification can report the degradation to the dashboard. *)
 type lang_health =
   | Connected
@@ -399,8 +401,7 @@ let send_client_notification cs method_ params =
 (* Pure projection of one language's health into the [masc/lspStatus] wire
    shape: [connected] / [command] (the configured LSP executable, [null] when
    none is mapped) / [last_error]. The health is two states, so [connected]
-   carries it whole and [last_error] says why when it is false; the wire used
-   to carry a third field that was the negation of [connected]. *)
+   carries it whole and [last_error] says why when it is false. *)
 let lang_status_json ~lang_id (health : lang_health) : Yojson.Safe.t =
   let command =
     match Lsp_process_manager.language_of_lang_id lang_id with

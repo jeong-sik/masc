@@ -46,8 +46,10 @@ module For_testing : sig
     (resolved_document_request, document_request_error) result
 
   (** Per-language LSP health (task-1691). [Unavailable] carries the last
-      error that left the language without a server; the proxy answers its
-      requests with empty results until one comes up. *)
+      error that left the language without a server. What a request gets
+      then depends on the method: the ones the proxy answers itself return
+      that method's empty result, while a relayed method returns a JSON-RPC
+      error. *)
   type health =
     | Connected
     | Unavailable of string

@@ -281,40 +281,88 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
       Log.Misc.warn "operator_dispatch_unknown: tool=%s agent=%s" name ctx.agent_name;
       None
 
-(* Both surfaces are derived from Tool_name.Operator_name, so a constructor
-   added there cannot be advertised locally without a schema, nor slip into the
-   Operator_remote profile by omission: [remote_schema] must say [None] out
-   loud. The two functions are exhaustive, so that decision is a compile error
-   rather than a default. *)
-let local_schema : Operator_name.t -> tool_schema = function
-  | Operator_name.Operator_snapshot -> snapshot_schemas.local
-  | Operator_name.Operator_digest -> digest_schemas.local
-  | Operator_name.Operator_action -> action_schemas.local
+(* One row per Tool_name.Operator_name constructor.
+
+   Everything the surface knows about a tool that does not depend on the
+   request lives here: which schema advertises it, whether the Operator_remote
+   profile carries it, and how it is registered. Splitting these across
+   separate matches meant adding a tool touched three places and could touch
+   only two; one exhaustive function means one row, and omitting it does not
+   compile.
+
+   [remote = None] is local-only. Mcp_server_eio_tool_profile gates the remote
+   profile on these names, so widening the set is a deliberate edit here.
+
+   [allow_direct_call_when_hidden] is a hidden tool the operator profile still
+   reaches directly; false for the two that must go through the profile and
+   nothing else. This used to be recovered with List.mem over four string
+   lists, so a tool got its policy by being absent from them. *)
+type tool_def =
+  { schema : tool_schema
+  ; remote : tool_schema option
+  ; read_only : bool
+  ; hidden : bool
+  ; allow_direct_call_when_hidden : bool
+  }
+
+let tool_def : Operator_name.t -> tool_def = function
+  | Operator_name.Operator_snapshot ->
+    { schema = snapshot_schemas.local
+    ; remote = Some snapshot_schemas.remote
+    ; read_only = true
+    ; hidden = false
+    ; allow_direct_call_when_hidden = false
+    }
+  | Operator_name.Operator_digest ->
+    { schema = digest_schemas.local
+    ; remote = Some digest_schemas.remote
+    ; read_only = true
+    ; hidden = false
+    ; allow_direct_call_when_hidden = false
+    }
+  | Operator_name.Operator_confirm ->
+    { schema = confirm_schema
+    ; remote = Some confirm_schema
+    ; read_only = false
+    ; hidden = false
+    ; allow_direct_call_when_hidden = false
+    }
+  | Operator_name.Operator_action ->
+    { schema = action_schemas.local
+    ; remote = Some action_schemas.remote
+    ; read_only = false
+    ; hidden = true
+    ; allow_direct_call_when_hidden = true
+    }
+  | Operator_name.Operator_judgment_write ->
+    { schema = judgment_write_schema
+    ; remote = None
+    ; read_only = false
+    ; hidden = true
+    ; allow_direct_call_when_hidden = true
+    }
   | Operator_name.Operator_board_attention_quarantine_requeue ->
-    board_attention_quarantine_requeue_schema
-  | Operator_name.Operator_task_recovery_resolve -> task_recovery_schema
-  | Operator_name.Operator_confirm -> confirm_schema
-  | Operator_name.Operator_judgment_write -> judgment_write_schema
+    { schema = board_attention_quarantine_requeue_schema
+    ; remote = Some board_attention_quarantine_requeue_schema
+    ; read_only = false
+    ; hidden = true
+    ; allow_direct_call_when_hidden = false
+    }
+  | Operator_name.Operator_task_recovery_resolve ->
+    { schema = task_recovery_schema
+    ; remote = Some task_recovery_schema
+    ; read_only = false
+    ; hidden = true
+    ; allow_direct_call_when_hidden = false
+    }
 ;;
 
-(* [None] means the tool is local-only: the Operator_remote profile gates on
-   these names (Mcp_server_eio_tool_profile), so widening the set is a
-   deliberate edit here. *)
-let remote_schema : Operator_name.t -> tool_schema option = function
-  | Operator_name.Operator_snapshot -> Some snapshot_schemas.remote
-  | Operator_name.Operator_digest -> Some digest_schemas.remote
-  | Operator_name.Operator_action -> Some action_schemas.remote
-  | Operator_name.Operator_board_attention_quarantine_requeue ->
-    Some board_attention_quarantine_requeue_schema
-  | Operator_name.Operator_task_recovery_resolve -> Some task_recovery_schema
-  | Operator_name.Operator_confirm -> Some confirm_schema
-  | Operator_name.Operator_judgment_write -> None
+let schemas : tool_schema list =
+  List.map (fun name -> (tool_def name).schema) Operator_name.all
 ;;
-
-let schemas : tool_schema list = List.map local_schema Operator_name.all
 
 let remote_schemas : tool_schema list =
-  List.filter_map remote_schema Operator_name.all
+  List.filter_map (fun name -> (tool_def name).remote) Operator_name.all
 ;;
 
 let remote_tool_names : string list =
@@ -326,43 +374,13 @@ let remote_tool_names : string list =
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-type registration_policy =
-  { read_only : bool
-  ; hidden : bool
-  ; allow_direct_call_when_hidden : bool
-      (** A hidden tool the operator profile still reaches directly. False for
-          the two that must go through the profile and nothing else. *)
-  }
-
-(* One row per Operator_name constructor. This used to be four string lists
-   consulted with List.mem, so a tool got its policy by being absent from them:
-   a new one was silently not read-only, visible, and not directly callable.
-   Now the three answers are stated per constructor and the match is exhaustive,
-   so adding one is a compile error until they are given. *)
-let registration_policy : Operator_name.t -> registration_policy = function
-  | Operator_name.Operator_snapshot ->
-    { read_only = true; hidden = false; allow_direct_call_when_hidden = false }
-  | Operator_name.Operator_digest ->
-    { read_only = true; hidden = false; allow_direct_call_when_hidden = false }
-  | Operator_name.Operator_confirm ->
-    { read_only = false; hidden = false; allow_direct_call_when_hidden = false }
-  | Operator_name.Operator_action ->
-    { read_only = false; hidden = true; allow_direct_call_when_hidden = true }
-  | Operator_name.Operator_judgment_write ->
-    { read_only = false; hidden = true; allow_direct_call_when_hidden = true }
-  | Operator_name.Operator_board_attention_quarantine_requeue ->
-    { read_only = false; hidden = true; allow_direct_call_when_hidden = false }
-  | Operator_name.Operator_task_recovery_resolve ->
-    { read_only = false; hidden = true; allow_direct_call_when_hidden = false }
-;;
-
 (* Registration walks the vocabulary, not the schema list, so every constructor
    is registered with the schema and policy that belong to it. *)
 let () =
   List.iter
     (fun name ->
-      let (s : tool_schema) = local_schema name in
-      let policy = registration_policy name in
+      let def = tool_def name in
+      let (s : tool_schema) = def.schema in
       let existing = Tool_catalog.metadata s.name in
       Tool_spec.register
         (Tool_spec.create
@@ -371,10 +389,10 @@ let () =
            ~module_tag:Tool_dispatch.Mod_operator
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
-           ~is_read_only:policy.read_only
+           ~is_read_only:def.read_only
            ~visibility:
-             (if policy.hidden then Tool_catalog.Hidden else Tool_catalog.Default)
-           ~allow_direct_call_when_hidden:policy.allow_direct_call_when_hidden
+             (if def.hidden then Tool_catalog.Hidden else Tool_catalog.Default)
+           ~allow_direct_call_when_hidden:def.allow_direct_call_when_hidden
            ?reason:existing.reason
            ()))
     Operator_name.all

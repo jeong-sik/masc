@@ -30,7 +30,7 @@ let err_response ~tool_name ~start_time ~class_ msg : Core.tool_result =
 ;;
 
 let run_runtime_verify args : Core.tool_result =
-  let tool_name = "masc_runtime_verify" in
+  let tool_name = Tool_schemas_local_runtime.tool_name Verify in
   let start_time = Time_compat.now () in
   let runtime_pool = Json_util.get_string args "runtime_pool" in
   let expected_model = Json_util.get_string args "expected_model" in
@@ -64,14 +64,14 @@ let handle_runtime_verify (ctx : Core.context) args : Core.tool_result =
   | None -> continue ()
   | Some authorize ->
     authorize
-      ~operation:"masc_runtime_verify"
+      ~operation:(Tool_schemas_local_runtime.tool_name Verify)
       ~input:args
       ~continue
 ;;
 
 let run_runtime_ollama_probe ~probe_runs ~max_tokens ~ps_timeout_sec ?timeout_sec
     args : Core.tool_result =
-  let tool_name = "masc_runtime_ollama_probe" in
+  let tool_name = Tool_schemas_local_runtime.tool_name Ollama_probe in
   let start_time = Time_compat.now () in
   let server_url = Json_util.get_string args "server_url" in
   let model = Json_util.get_string args "model" in
@@ -175,7 +175,7 @@ let handle_runtime_ollama_probe (ctx : Core.context) args : Core.tool_result =
   match runtime_ollama_probe_bounds args with
   | Error message ->
       err_response
-        ~tool_name:"masc_runtime_ollama_probe"
+        ~tool_name:(Tool_schemas_local_runtime.tool_name Ollama_probe)
         ~start_time:(Time_compat.now ())
         ~class_:Tool_result.Workflow_rejection
         message
@@ -188,7 +188,7 @@ let handle_runtime_ollama_probe (ctx : Core.context) args : Core.tool_result =
        | None -> continue ()
        | Some authorize ->
          authorize
-           ~operation:"masc_runtime_ollama_probe"
+           ~operation:(Tool_schemas_local_runtime.tool_name Ollama_probe)
            ~input:args
            ~continue)
 ;;

@@ -124,9 +124,3 @@ val parse : string -> (diagram, failure) result
 val render : cols:int -> string -> (string list, failure) result
 (** {!parse}, then lay out and draw. Each row is at most [cols] cells and
     carries no trailing spaces; rows are not padded. *)
-
-val render_graph : cols:int -> graph -> (string list, failure) result
-(** The drawing half of {!render}, for a graph already read. *)
-
-val render_sequence : cols:int -> sequence -> (string list, failure) result
-(** The drawing half of {!render}, for a sequence diagram already read. *)

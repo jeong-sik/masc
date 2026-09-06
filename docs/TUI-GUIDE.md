@@ -573,7 +573,7 @@ Memory journal rows open in summary mode, using producer-owned compact text
 instead of reconstructing a summary from rendered prose. The summary itself
 ends in `Ctrl-N: journal detail`; `Ctrl-N` or `/memory`
 cycles those rows through summary, full, and hidden; the header names the two
-non-default states as `memory:full` and `memory:off`. Neutral system rows that
+non-default states as `journal:full` and `journal:off`. Neutral system rows that
 share the journal lane have no summary projection and therefore remain whole.
 
 The folded tool row retains exact outcome counts and ends with

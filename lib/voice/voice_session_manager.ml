@@ -76,7 +76,9 @@ let realtime_supported = function
   | Turn_based -> false
   | Realtime_bridge _ -> true
 
-let realtime_bridge_env = "MASC_VOICE_REALTIME_WS_URL"
+let realtime_bridge_env =
+  Env_setting.String_opt_knob.env_name Voice_realtime_ws_url
+;;
 
 let has_prefix ~prefix s =
   let prefix_len = String.length prefix in

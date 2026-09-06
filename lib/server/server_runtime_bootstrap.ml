@@ -486,7 +486,9 @@ let () =
        in this env var crashed server bootstrap. [get_int_nonneg] also
        maps a negative value to the default. *)
     let gc_space_overhead =
-      Env_config_core.get_int_nonneg ~default:100 "MASC_GC_SPACE_OVERHEAD"
+      Env_config_core.get_int_nonneg
+        ~default:(Env_setting.Int_knob.default Gc_space_overhead)
+        (Env_setting.Int_knob.env_name Gc_space_overhead)
     in
     let ctrl = get () in
     set { ctrl with
@@ -848,7 +850,7 @@ let initialize_owner_state_blocking
      denote the same requested path when the former is absent. *)
   let requested_base_path = Option.value input_base_path ~default:base_path in
   let base_path =
-    match Eio_unix.run_in_systhread (fun () -> Unix.realpath base_path) with
+    match Eio_unix.run_in_systhread ~label:"bootstrap-realpath-base-path" (fun () -> Unix.realpath base_path) with
     | canonical -> canonical
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | exception ((Unix.Unix_error _ | Sys_error _) as exception_) ->
@@ -1193,7 +1195,7 @@ let initialize_owner_state_blocking
            (Keeper_persistence_preparation_failed error))
   in
   (match
-     Eio_unix.run_in_systhread (fun () ->
+     Eio_unix.run_in_systhread ~label:"wire-capture-prune" (fun () ->
        Keeper_wire_capture.prune_expired
          ~masc_root:(Workspace.masc_root_dir (Mcp_server.workspace_config state)))
    with

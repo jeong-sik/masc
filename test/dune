@@ -249,7 +249,6 @@
   test_lsp_questions
   test_lsp_message_router
   test_lsp_workspace_pool
-  test_ide_annotations
   test_agent_observation_bridge
   test_enum_mirror_sync
   test_blocker_class_mirror
@@ -264,8 +263,6 @@
   test_server_activity_http
   test_ide_paths
   test_ide_canonical_url_join
-  test_ide_lsp_join_key
-  test_ide_diagnostics
   test_claimable_task_summaries
   test_schema_surface_index
   test_keeper_lifecycle_registry_dispatch
@@ -600,7 +597,6 @@
   test_lsp_questions
   test_lsp_message_router
   test_lsp_workspace_pool
-  test_ide_annotations
   test_agent_observation_bridge
   test_enum_mirror_sync
   test_blocker_class_mirror
@@ -616,8 +612,6 @@
   test_server_activity_http
   test_ide_paths
   test_ide_canonical_url_join
-  test_ide_lsp_join_key
-  test_ide_diagnostics
   test_claimable_task_summaries
   test_schema_surface_index
   test_keeper_lifecycle_registry_dispatch
@@ -2931,16 +2925,6 @@
   ../lib/keeper/keeper_tool_surface_ops.ml
   ../lib/tool_workspace.ml))
 
-; RFC-0085 PR-12 — Tool_spec list bindings renamed (drop misleading
-; _ prefix that signalled "unused" in OCaml but was wrong because the
-; bindings are actively used by List.mem in the Tool_spec.register loop).
-
-(test
- (name test_rfc_0085_pr12_tool_spec_rename)
- (modules test_rfc_0085_pr12_tool_spec_rename)
- (libraries alcotest ast_grep)
- (deps ../lib/tool_workspace.ml))
-
 ; RFC-0085 PR-11 — Env_config_core deprecation mechanism removed.
 
 (test
@@ -3102,6 +3086,7 @@
   astring
   masc
   masc.masc_types
+  masc_tui_footer
   masc_tui_interrupt_signal
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
@@ -3299,7 +3284,8 @@
 (test
  (name test_tui_gate_fold)
  (modules test_tui_gate_fold)
- (libraries alcotest masc masc_tui_types masc_tui_gate_text))
+ (libraries alcotest masc masc_tui_types masc_tui_gate_text
+   masc_tui_message_layout))
 
 (test
  (name test_tui_server_identity_refresh)
@@ -3723,6 +3709,38 @@
 ; output instead of one undifferentiated suite.
 
 (rule
+ (alias runtest-test_tui_keyboard_input-memory-journal)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   memory-journal)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-memory-journal)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-code-memo)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   code-memo)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-code-memo)))
+
+(rule
  (alias runtest-test_tui_keyboard_input-cli-base-path)
  (deps
   test_tui_keyboard_input.py
@@ -3737,6 +3755,22 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-cli-base-path)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-theme-scheme)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   theme-scheme)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-theme-scheme)))
 
 (rule
  (alias runtest-test_tui_keyboard_input-planning-review)
@@ -4153,6 +4187,7 @@
  (modules test_tui_acting_pane)
  (libraries
   alcotest
+  masc
   masc_tui_acting_pane
   masc_tui_acting
   masc_tui_observer
@@ -4604,7 +4639,12 @@
 (test
  (name test_keeper_sandbox_remote)
  (modules test_keeper_sandbox_remote)
- (libraries masc_test_deps exec_ssh_protocol eio_main))
+ (libraries masc_test_deps exec_ssh_protocol eio_main masc.build_version))
+
+(test
+ (name test_browser_lane)
+ (modules test_browser_lane)
+ (libraries alcotest eio_main eio masc.browser_lane masc masc.time_compat))
 
 (test
  (name test_shell_ir_with_sandbox)
@@ -4650,3 +4690,8 @@
  (name test_keeper_sandbox_remote_checkouts)
  (modules test_keeper_sandbox_remote_checkouts)
  (libraries alcotest masc yojson))
+
+(test
+ (name test_tui_image_mosaic)
+ (modules test_tui_image_mosaic)
+ (libraries alcotest masc_tui_image_mosaic))

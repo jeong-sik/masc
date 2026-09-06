@@ -33,9 +33,17 @@ max_context_tokens = 1000000
 max_output_tokens = 384000
 supports_tools = true
 supports_tool_choice = true
+# Adversarial F2: without these the anthropic preset inherits true and lets a
+# forced required/named tool_choice through — the surface stays auto-only.
+supports_required_tool_choice = false
+supports_named_tool_choice = false
 supports_native_streaming = true
 input_per_million = 1.32
 output_per_million = 3.96
+# Adversarial F3: the anthropic wire reports cache_creation/cache_read tokens;
+# without multipliers every cached request loses its cost estimate.
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.0333
 
 [[models]]
 id_prefix = "deepseek-v4-flash"
@@ -47,9 +55,13 @@ max_context_tokens = 1000000
 max_output_tokens = 384000
 supports_tools = true
 supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
 supports_native_streaming = true
 input_per_million = 0.44
 output_per_million = 1.32
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.0333
 
 # 2026-09-06 RFC-0430 Phase 2: the same two models over the native
 # Responses API. The provider's /responses request_path selects the
@@ -73,6 +85,8 @@ supports_tool_choice = true
 supports_native_streaming = true
 input_per_million = 1.32
 output_per_million = 3.96
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.0333
 
 [[models]]
 id_prefix = "deepseek-v4-flash"
@@ -90,6 +104,8 @@ supports_tool_choice = true
 supports_native_streaming = true
 input_per_million = 0.44
 output_per_million = 1.32
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.0333
 
 [[models]]
 id_prefix = "claude-mythos-5"

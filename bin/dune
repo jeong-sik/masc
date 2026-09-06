@@ -378,7 +378,9 @@
  (modules masc_tui_gate_text)
  ;; The wording is a function of Keeper_chat_store's closed phase sum, so a
  ;; phase the store adds fails this compile instead of drawing as unknown.
- (libraries masc))
+ ;; message_layout for terminal cells: folding an argument to fit a line is
+ ;; a question about width, and this module already owns what the row says.
+ (libraries masc masc_tui_message_layout))
 
 (library
  (name masc_tui_preset_text)
@@ -424,6 +426,7 @@
  (modules masc_tui_keeper_chat_transcript)
  (libraries
   masc
+  masc.keeper_tool_name
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
   masc_tui_keeper_chat_projection
@@ -500,6 +503,7 @@
  (modules masc_tui_theme_catalog)
  (libraries
   masc.config_dir_resolver
+  masc.embedded_config
   masc.fs_compat
   masc.keeper_toml
   masc_tui_terminal_palette))
@@ -508,7 +512,8 @@
  (name masc_tui_theme_choice)
  (wrapped false)
  (modules masc_tui_theme_choice)
- (libraries masc_tui_color masc_tui_terminal_palette masc_tui_theme_catalog))
+ (libraries masc_tui_color masc_tui_terminal_palette masc_tui_theme
+  masc_tui_theme_catalog))
 
 (library
  (name masc_tui_color)
@@ -740,6 +745,9 @@
  (wrapped false)
  (modules masc_tui_acting_pane)
  (libraries
+  masc ; the health reading is a typed variant: the pane decides what a gone
+       ; keeper's unsettled turn may claim, as masc_tui_keeper_mark already
+       ; reads the same variant for its glyph.
   masc_tui_acting
   masc_tui_observer
   masc_tui_message_layout
@@ -810,7 +818,7 @@
  (name masc_tui_memo)
  (wrapped false)
  (modules masc_tui_memo)
- (libraries masc_tui_code_lexer masc.ide_memo))
+ (libraries masc_tui_code_lexer masc.ide_memo masc.lsp_client))
 
 (library
  (name masc_tui_markdown)
@@ -939,6 +947,7 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries
+  msx
   masc
   masc_tui_acting_pane
   masc_tui_gate_text
@@ -957,6 +966,7 @@
   masc_tui_fetched
   masc_tui_attachment
   masc_tui_code_lexer
+  masc_tui_memo
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_queue
   masc_tui_keeper_chat_diff
@@ -1131,6 +1141,7 @@
   base64
   masc_tui_credential
   masc_tui_types
+  masc_tui_msx
   masc_tui_terminal_profile
   masc_tui_terminal_title
   masc_tui_runtime_config_receipt
@@ -1184,6 +1195,7 @@
   masc_tui_link
   masc_tui_link_label
   masc_tui_link_preview
+  masc_tui_image_mosaic
   masc_tui_markdown_render_cache
   masc_tui_message_layout
   masc_tui_paste
@@ -1324,3 +1336,21 @@
  (wrapped false)
  (modules masc_tui_link_preview)
  (libraries masc_tui_link_label masc_tui_lru masc_tui_message_layout masc_tui_theme uri))
+
+(library
+ (name masc_tui_image_mosaic)
+ (wrapped false)
+ (modules masc_tui_image_mosaic))
+
+;; The MSX spectator screen. Depends on the worktree-local copy of the
+;; ocaml-msx core (lib/msx) -- see that directory's comment for the
+;; pin-instead-of-copy graduation path.
+(library
+ (name masc_tui_msx)
+ (wrapped false)
+ (modules masc_tui_msx)
+ (libraries
+  masc_tui_types
+  masc_tui_ansi
+  masc_tui_image_mosaic
+  msx))

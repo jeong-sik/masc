@@ -637,6 +637,105 @@ let test_repeated_exact_tool_call_reset_across_checkpoint_restart () =
    This exercises the real production function on real [Agent_core.Types]
    messages — not a hand-built list — so it fails before the fix lands and
    passes after. *)
+(* [digest_tool_io] keeps the answers it has already computed, because the
+   history walk asks for them again on every turn. What the memo must not do
+   is answer for bytes that are no longer there: checkpoint purge replaces a
+   result body with a placeholder and keeps the tool_use_id, so an entry held
+   under anything coarser than the bytes would hand back a fingerprint for a
+   body that has been cleared. *)
+let digest tool_name input output_text =
+  match
+    Masc.Keeper_tool_progress_identity.digest_tool_io ~tool_name ~input ~output_text
+  with
+  | Some { Masc.Keeper_tool_progress_identity.input_fingerprint; output_fingerprint } ->
+    input_fingerprint, output_fingerprint
+  | None -> fail "digest_tool_io refused the fixture"
+;;
+
+let test_tool_io_digest_is_keyed_on_the_bytes () =
+  let input = `Assoc [ ("argv", `List [ `String "status" ]) ] in
+  let body = "{\"ok\":true,\"rows\":3}" in
+  let first = digest "masc_status" input body in
+  check
+    (pair string string)
+    "the same question gets the same answer"
+    first
+    (digest "masc_status" input body);
+  (* The purge shape: same tool, same input, body replaced. *)
+  let cleared = digest "masc_status" input "[tool result cleared]" in
+  check
+    bool
+    "a replaced body is not answered from the old one"
+    false
+    (String.equal (snd first) (snd cleared));
+  check
+    string
+    "and the input side is untouched by that"
+    (fst first)
+    (fst cleared);
+  let other_input = `Assoc [ ("argv", `List [ `String "list" ]) ] in
+  check
+    bool
+    "a different input is not answered from the old one"
+    false
+    (String.equal (fst first) (fst (digest "masc_status" other_input body)));
+  check
+    bool
+    "and neither is a different tool"
+    false
+    (String.equal (fst first) (fst (digest "keeper_tasks_list" input body)))
+;;
+
+(* Forty calls that differ only in their tail, three tool names between
+   them. Each has to keep its own answer, and a second pass in the opposite
+   order has to agree with the first -- a memo that let two near-identical
+   keys share an entry would show up as a repeated fingerprint here or as a
+   disagreement there. The bodies stay under the preview truncation
+   ([Observability_redact.redact_preview] cuts at 4000 characters) so the
+   part that differs is the part that is hashed. *)
+let test_tool_io_digest_keeps_similar_calls_apart () =
+  let shared = String.make 1024 'a' in
+  let calls =
+    List.init 40 (fun index ->
+      let name = Printf.sprintf "tool_%d" (index mod 3) in
+      let input = `Assoc [ ("argv", `String (string_of_int index)) ] in
+      let body = shared ^ "|" ^ string_of_int index in
+      name, input, body)
+  in
+  let answers = List.map (fun (n, i, b) -> digest n i b) calls in
+  let distinct = List.sort_uniq compare (List.map snd answers) in
+  check int "each body has its own output fingerprint" 40 (List.length distinct);
+  List.iter2
+    (fun (name, input, body) expected ->
+      check (pair string string) "the second pass agrees" expected (digest name input body))
+    (List.rev calls)
+    (List.rev answers)
+;;
+
+(* Past the byte cap the oldest entries are dropped. A dropped answer has to
+   be recomputed, and recomputing it has to give what it gave before. *)
+let test_tool_io_digest_survives_eviction () =
+  let input = `Assoc [ ("argv", `String "first") ] in
+  let body = "{\"ok\":true,\"first\":1}" in
+  let first = digest "masc_status" input body in
+  (* Only their size matters: past the preview cut these all fingerprint
+     alike, but each is its own key and each key is counted. *)
+  let filler = String.make 262_144 'f' in
+  List.iter
+    (fun index ->
+      ignore
+        (digest
+           "filler_tool"
+           (`Assoc [ ("argv", `String (string_of_int index)) ])
+           (filler ^ string_of_int index)))
+    (List.init 44 Fun.id);
+  check
+    (pair string string)
+    "an evicted answer is recomputed, not lost or changed"
+    first
+    (digest "masc_status" input body)
+;;
+
 let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
   let open Agent_core.Types in
   let message role content = { role; content; name = None; tool_call_id = None; metadata = [] } in
@@ -1265,6 +1364,12 @@ let () =
             test_repeated_exact_tool_call_reset_across_checkpoint_restart;
           test_case "repeated exact tool call seeded from checkpoint history" `Quick
             test_repeated_exact_tool_call_seeded_from_checkpoint_history;
+          test_case "tool io digest is keyed on the bytes" `Quick
+            test_tool_io_digest_is_keyed_on_the_bytes;
+          test_case "tool io digest keeps similar calls apart" `Quick
+            test_tool_io_digest_keeps_similar_calls_apart;
+          test_case "tool io digest survives eviction" `Quick
+            test_tool_io_digest_survives_eviction;
           test_case "repeated tool input boundary" `Quick
             test_repeated_tool_call_input_boundary;
           test_case "repeated assistant text boundary" `Quick

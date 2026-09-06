@@ -202,6 +202,32 @@ let test_container_path_nested_maps_with_suffix () =
         mapped
   | Error e -> Alcotest.fail e
 
+(* RFC-0427 A: a microvm keeper's tree is on its work volume, so a host path
+   under the keeper's bundle root maps to /masc-work/<keeper>/<suffix> whether
+   or not that suffix exists on the host. The suffix here does not: the host
+   bundle is bookkeeping, and the guest is the authority on what is there. *)
+let test_microvm_host_path_maps_to_the_work_volume () =
+  let base, config, docker = setup_config "jazz-developer" in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let meta =
+    { docker with
+      Masc.Keeper_meta_contract.sandbox_profile = Keeper_types_profile_sandbox.Micro_vm }
+  in
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  ensure_dir host_root;
+  let host_path = Filename.concat host_root "lib" in
+  Alcotest.(check bool) "the suffix is absent on the host" false (Sys.file_exists host_path);
+  match
+    Keeper_sandbox_read_backend.container_path_of_host ~config ~meta ~host_path
+  with
+  | Ok mapped ->
+    Alcotest.(check string) "guest volume path"
+      (Filename.concat
+         (Filename.concat Keeper_sandbox_microvm.work_volume_guest_root "jazz-developer")
+         "lib")
+      mapped
+  | Error e -> Alcotest.fail e
+
 let test_container_path_outside_playground_errors () =
   let base, config, meta = setup_config "acme-sandbox" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -2520,6 +2546,8 @@ let run_tests ~clock () =
         ] );
       ( "container_path_of_host",
         [
+          Alcotest.test_case "a microvm host path maps to the work volume" `Quick
+            test_microvm_host_path_maps_to_the_work_volume;
           Alcotest.test_case "docker network args follow policy" `Quick
             test_docker_network_args_follow_masc_policy;
           Alcotest.test_case "docker refuses the policy lane" `Quick

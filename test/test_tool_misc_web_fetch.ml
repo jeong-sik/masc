@@ -67,6 +67,82 @@ let test_html_metadata_and_article_extraction () =
         (String_util.contains_substring text "[ref](https://example.com/ref)");
       check bool "nav dropped" false (String_util.contains_substring text "drop me"))
 
+(* Title, description and the markdown rendering run as one job on the
+   domain pool when one is installed. The same document must extract to the
+   same fields inline and pooled; two urls keep the response cache out of it. *)
+let test_extraction_matches_on_the_pool () =
+  let html =
+    {|<!doctype html>
+<html>
+  <head>
+    <title>Pooled &amp; Inline</title>
+    <meta property="og:description" content="Same document, two lanes">
+  </head>
+  <body>
+    <nav>drop me</nav>
+    <article>
+      <h1>Heading</h1>
+      <p>Body <b>text</b> with a <a href="https://example.com/ref">ref</a>.</p>
+    </article>
+  </body>
+</html>|}
+  in
+  let fields url =
+    Masc.Tool_misc_web_fetch.with_http_fetch_for_test
+      (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ _url ->
+        Ok
+          { Masc.Tool_misc_web_fetch.http_status = Some 200
+          ; final_url = "https://example.com/final"
+          ; redirect_count = 0
+          ; content_type = Some "text/html; charset=utf-8"
+          ; downloaded_bytes = Some (String.length html)
+          ; body = html
+          })
+      (fun () ->
+        let call () =
+          Masc.Tool_misc_web_fetch.handle
+            ~tool_name:"masc_web_fetch"
+            ~start_time:(Unix.gettimeofday ())
+            (`Assoc
+               [ "url", `String url
+               ; "extractMode", `String "markdown"
+               ; "maxChars", `Int 5_000
+               ])
+        in
+        let result =
+          Eio_main.run
+          @@ fun env ->
+          if String.equal url "https://example.com/pooled"
+          then
+            Eio.Switch.run (fun sw ->
+              let pool =
+                Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env)
+              in
+              Domain_pool_ref.set pool;
+              Fun.protect ~finally:Domain_pool_ref.clear_for_tests call)
+          else call ()
+        in
+        let json = success_json result in
+        let open Yojson.Safe.Util in
+        ( json |> member "title" |> to_string
+        , json |> member "description" |> to_string
+        , json |> member "extraction_source" |> to_string
+        , json |> member "text" |> to_string ))
+  in
+  let inline_title, inline_description, inline_source, inline_text =
+    fields "https://example.com/inline"
+  in
+  let pooled_title, pooled_description, pooled_source, pooled_text =
+    fields "https://example.com/pooled"
+  in
+  check string "title" "Pooled & Inline" inline_title;
+  check string "pooled title" inline_title pooled_title;
+  check string "pooled description" inline_description pooled_description;
+  check string "pooled extraction source" inline_source pooled_source;
+  check string "pooled text" inline_text pooled_text;
+  check bool "heading rendered" true (String_util.contains_substring inline_text "# Heading")
+;;
+
 let test_plain_text_preserves_angle_brackets () =
   let body = "Keep <literal> tokens\nand second line." in
   Masc.Tool_misc_web_fetch.with_http_fetch_for_test
@@ -403,6 +479,8 @@ let () =
             test_html_metadata_and_article_extraction;
           test_case "plain text preserves angle brackets" `Quick
             test_plain_text_preserves_angle_brackets;
+          test_case "extraction matches on the pool" `Quick
+            test_extraction_matches_on_the_pool;
           test_case "invalid redirect class" `Quick
             test_invalid_redirect_is_workflow_rejection;
           test_case "truncation offloads full text" `Quick

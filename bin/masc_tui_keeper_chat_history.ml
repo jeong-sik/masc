@@ -221,7 +221,12 @@ let float_field fields name =
 (* A channel reference, cut to its tail rather than its head. Discord ids are
    snowflakes: consecutive channels share a long prefix, so [1356818755795157113]
    and [1356818756755525815] are the same string for the first eleven digits.
-   Cutting the head is what tells them apart. *)
+   Cutting the head is what tells them apart.
+
+   {!Masc_tui_message_layout.fit_middle} cuts the label again at the speaker
+   column, keeping a third of the head and two thirds of the tail. The tail
+   there is whatever the label ends with, which for {!addressed_label} is the
+   surface rather than the speaker. *)
 let channel_reference_cells = 8
 
 let short_channel reference =
@@ -235,10 +240,12 @@ let connector_label name channel =
   match channel with
   | None -> Some name
   (* A room name is left whole. The label is fitted to the speaker column
-     further down, and that cut keeps the head -- which is the half of a name
-     that carries it. Cutting again here would only cut it shorter. *)
+     further down, and cutting again here would only cut it shorter. *)
   | Some (Surface.Channel_name room) -> Some (name ^ " #" ^ String.trim room)
-  (* An id is cut here because the fit above keeps the wrong half of one. *)
+  (* An id is cut here as well, so the label reaching the column already has
+     an ellipsis in it and the column's own cut adds a second. What a label
+     should keep when it does not fit -- the speaker or the surface -- is
+     #33699. *)
   | Some (Surface.Channel_id reference) ->
       Some (name ^ " " ^ short_channel (String.trim reference))
 
@@ -293,19 +300,31 @@ let surface_of_json : Yojson.Safe.t -> Surface.t option = function
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 
-let addressed_label speaker surface =
+(* Who and where, apart. The speaker column is narrower than the two joined,
+   and joined they were cut as one string: [fit_middle] keeps a third of the
+   head and two thirds of the tail, and the tail of "<who> · <where>" is the
+   where. One live pane had twelve broadcast rows from an agent named
+   [codex-mcp-client], every one drawn as "…p-…roadcast" -- two ellipses, and
+   neither half of the name left. *)
+let addressed_label_parts speaker surface =
   let name =
     match speaker with
     | Operator -> "you"
     | Named name -> name
-    (* Named by its id where there is one: an unresolved author is still a
-       particular author, and two of them in a channel are two people. *)
-    | Unresolved { id = Some id } -> short_channel id
+    (* Whole. An unresolved author is still a particular author, and the
+       column's own fit keeps two thirds of the tail -- which is the half that
+       tells two ids apart. Shortened here as well, the row was cut twice and
+       kept neither end. *)
+    | Unresolved { id = Some id } -> id
     | Unresolved { id = None } -> "someone"
   in
-  match Option.bind surface surface_label with
-  | None -> name
-  | Some surface -> name ^ " \xc2\xb7 " ^ surface
+  (name, Option.bind surface surface_label)
+;;
+
+let addressed_label speaker surface =
+  match addressed_label_parts speaker surface with
+  | name, None -> name
+  | name, Some surface -> name ^ " \xc2\xb7 " ^ surface
 ;;
 
 (* What one server row is, before consecutive tool rows are folded. Parsed once
@@ -342,6 +361,19 @@ let bool_field_opt fields name =
 (* The transcript carries an exact operation key for direct turns and a
    [turn_ref] for autonomous turns. Keep whichever authority the producer
    supplied; timestamps and row adjacency are not turn identity. *)
+(* An autonomous turn records which turn it is inside the [autonomous_turn]
+   marker and nowhere else. Measured on one live pane: of 598 chat rows, 198
+   were autonomous, and every one of them carried a marker id while none
+   carried a [turn_ref] or a delivery key. Read from those two places alone,
+   every autonomous row belonged to no turn -- so the pane could not bracket a
+   turn's work, could not fold a repeated speaker, and could not tell two
+   turns apart. 108 of those rows carried a trace, which is where the tool
+   calls are. *)
+let autonomous_turn_id_of_fields fields =
+  match List.assoc_opt "autonomous_turn" fields with
+  | Some (`Assoc marker) -> string_field marker "turn_id"
+  | Some _ | None -> None
+
 let turn_id_of_fields fields =
   match Delivery_identity.delivery_provenance_of_fields fields with
   | Ok (Some provenance) ->
@@ -354,7 +386,10 @@ let turn_id_of_fields fields =
             request_id
       in
       Some (Delivery_identity.Request_id.to_string request_id)
-  | Ok None | Error _ -> string_field fields "turn_ref"
+  | Ok None | Error _ -> (
+      match string_field fields "turn_ref" with
+      | Some _ as turn_ref -> turn_ref
+      | None -> autonomous_turn_id_of_fields fields)
 
 (* The operation a direct turn ran as, and nothing else: an autonomous turn's
    [turn_ref] and the other delivery keys are turn identity ([turn_id]) but
@@ -1255,13 +1290,28 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                   , [] )
               in
               let said =
-                (* Skill rows count as the turn's visible content too: when
+                (* An autonomous turn that wrote nothing has nothing to say.
+                   With a trace the calls are the turn; without one the wake
+                   produced neither, and as a row it was a speaker label over
+                   an empty line -- which a later change filled with a middle
+                   dot so the line would not look broken. Eleven of the
+                   fourteen Keeper rows on one live screen were that dot.
+
+                   A direct turn keeps its blank row: someone asked, and an
+                   empty answer is part of that exchange. Nobody asked for an
+                   autonomous one.
+
+                   Trimmed rather than compared against "": a reply of a
+                   single newline is as blank as no reply, and an exact
+                   comparison let it through to be drawn as the dot.
+
+                   Skill rows count as the turn's visible content too: when
                    the projection replaces the raw skill tool, trace_rows is
-                   empty and the old guard let an empty utterance row through
+                   empty and an older guard let an empty utterance row through
                    under the Skill row. *)
                 if
-                  String.equal content ""
-                  && (skill_rows <> [] || trace_rows <> [])
+                  String.trim content = ""
+                  && (autonomous || skill_rows <> [] || trace_rows <> [])
                 then []
                 else
                   [ Utterance

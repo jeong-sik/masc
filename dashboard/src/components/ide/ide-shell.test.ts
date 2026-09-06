@@ -59,7 +59,7 @@ import {
   synchronizeIdeWorkspaceIdentity,
 } from './ide-state'
 import { resetIdeDataWorkspaceStoreForTest } from './ide-workspace-singleton'
-import { EMPTY_LSP_STATUS_SNAPSHOT, lspStatusSnapshot } from './ide-lsp-client'
+import { EMPTY_LSP_STATUS_SNAPSHOT, lspStatusRejected, lspStatusSnapshot } from './ide-lsp-client'
 import { DEFAULT_MOBILE_BREAKPOINT } from '../../hooks/use-is-mobile'
 
 function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
@@ -118,7 +118,6 @@ const dashboardFetchHandlers: ReadonlyArray<[
   [/\/api\/v1\/workspace\/file/, () => jsonResponse({ ok: true, content: '{}', language: 'json' })],
   [/\/api\/v1\/git\/blame/, () => jsonResponse([])],
   [/\/api\/v1\/git\/diff/, () => jsonResponse({ unified: [] })],
-  [/\/api\/v1\/ide\/annotations/, () => jsonResponse({ ok: true, data: [] })],
   [/\/api\/v1\/activity\/events/, () => jsonResponse({ events: [] })],
   [/\/api\/v1\/ide\/events/, () => jsonResponse({ ok: true, data: { events: [] } })],
   [/\/state-diagram/, () => jsonResponse({
@@ -141,17 +140,6 @@ function dashboardFetchMockWithFailure(
   return (input: RequestInfo | URL): Promise<Response> => {
     const url = String(input)
     if (pattern.test(url)) return Promise.reject(error)
-    return dashboardFetchMock(input)
-  }
-}
-
-function dashboardFetchMockWithResponse(
-  pattern: RegExp,
-  response: Response,
-): (input: RequestInfo | URL) => Promise<Response> {
-  return (input: RequestInfo | URL): Promise<Response> => {
-    const url = String(input)
-    if (pattern.test(url)) return Promise.resolve(response.clone())
     return dashboardFetchMock(input)
   }
 }
@@ -193,6 +181,7 @@ describe('IdeShell', () => {
     })
     ideContextFocus.value = null
     lspStatusSnapshot.value = EMPTY_LSP_STATUS_SNAPSHOT
+    lspStatusRejected.value = false
     clearTraces()
     clearLocalStorage()
   })
@@ -206,7 +195,7 @@ describe('IdeShell', () => {
   it('hydrates only view-compatible layers from the route layers param', () => {
     route.value = {
       tab: 'code',
-      params: { section: 'ide-shell', view: 'source', layers: 'time,notes' },
+      params: { section: 'ide-shell', view: 'source', layers: 'time,keeper-trace' },
       postId: null,
     }
 
@@ -218,13 +207,13 @@ describe('IdeShell', () => {
     expect(container.querySelector('.v2-ide-toolbar')).not.toBeNull()
     expect(container.querySelector('[data-testid="ide-readiness-notice"]')?.textContent)
       .toContain('실험 · 미검증')
-    expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('true')
+    expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('true')
     const layerButtons = container.querySelectorAll('[data-testid="ide-toolbar-layers"] button')
     expect(Array.from(layerButtons).some(button => button.textContent === 'Time')).toBe(false)
     expect(Array.from(layerButtons).some(button => button.textContent === 'Parallel')).toBe(false)
     expect(container.textContent).toContain('Work Context')
     expect(container.textContent).toContain('Active overlays')
-    expect(container.textContent).toContain('Notes')
+    expect(container.textContent).toContain('Trace')
   })
 
   it('removes BLAME-only layers and command actions outside the BLAME view', async () => {
@@ -240,7 +229,6 @@ describe('IdeShell', () => {
     expect(layers?.textContent).not.toContain('Time')
     expect(layers?.textContent).not.toContain('Parallel')
     expect(buttonByText(container, 'Trace').disabled).toBe(false)
-    expect(buttonByText(container, 'Notes').disabled).toBe(false)
 
     const input = ideCommandInput(container)
     input.value = 'parallel'
@@ -266,7 +254,7 @@ describe('IdeShell', () => {
   it('drops BLAME-only layers from the route when leaving BLAME', () => {
     route.value = {
       tab: 'code',
-      params: { section: 'ide-shell', view: 'blame', layers: 'time,parallel,notes' },
+      params: { section: 'ide-shell', view: 'blame', layers: 'time,parallel,keeper-trace' },
       postId: null,
     }
 
@@ -274,7 +262,7 @@ describe('IdeShell', () => {
     fireEvent.click(buttonByText(container, 'SOURCE'))
 
     expect(route.value.params.view).toBe('source')
-    expect(route.value.params.layers).toBe('notes')
+    expect(route.value.params.layers).toBe('keeper-trace')
     expect(container.querySelector('[data-testid="ide-toolbar-layers"]')?.textContent)
       .not.toContain('Time')
   })
@@ -302,7 +290,7 @@ describe('IdeShell', () => {
     expect(layerLabels).not.toContain('Time')
     expect(layerLabels).not.toContain('Parallel')
     expect(layerLabels).toEqual(
-      expect.arrayContaining(['Notes', 'Trace']),
+      expect.arrayContaining(['Trace']),
     )
   })
 
@@ -416,7 +404,7 @@ describe('IdeShell', () => {
   it('derives compact operational statusbar chips from IDE route context', () => {
     const model = deriveIdeStatusbarModel({
       activeView: 'split-diff',
-      activeLayers: new Set(['keeper-trace', 'notes']),
+      activeLayers: new Set(['keeper-trace', 'parallel']),
       activeFilePath: 'dashboard/src/components/ide/ide-shell.ts',
       findOpen: true,
       terminalOpen: true,
@@ -638,18 +626,15 @@ describe('IdeShell', () => {
     expect(chip.getAttribute('title')).toContain('diff endpoint unavailable')
   })
 
-  it('surfaces malformed annotation responses in the IDE statusbar', async () => {
-    // RFC-0378 §5.4: annotations are code facts; the fetch only fires for an
-    // explicitly selected codebase, so the malformed-row guard is observed
-    // behind a persisted selection.
-    window.localStorage.setItem('masc.ide.activeRepositoryId', 'masc')
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(dashboardFetchMockWithResponse(
-        /\/api\/v1\/ide\/annotations/,
-        jsonResponse({ ok: true, data: [null] }),
-      )),
-    )
+  it('says the LSP reading is stale when a payload was rejected', async () => {
+    // The snapshot still holds the last readable payload, so without this chip
+    // the statusbar would describe a fleet it can no longer see.
+    lspStatusSnapshot.value = {
+      langs: [
+        { lang: 'ocaml', connected: true, command: 'ocamllsp', last_error: null },
+      ],
+    }
+    lspStatusRejected.value = true
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source', file: 'lib/runtime.ml' },
@@ -659,30 +644,32 @@ describe('IdeShell', () => {
     render(h(IdeShell, {}), container)
 
     const chip = await waitFor(() => {
-      const found = container.querySelector('[data-testid="ide-statusbar-chip-workspace-fetch"]')
+      const found = container.querySelector('[data-testid="ide-statusbar-chip-lsp-payload"]')
       expect(found).not.toBeNull()
       return found!
     })
-    expect(chip.textContent).toBe('IDE fetch degraded annotations')
-    expect(chip.getAttribute('title')).toContain(
-      'fetchIdeAnnotations returned malformed row at index 0',
-    )
+    expect(chip.textContent).toBe('LSP status stale')
+    expect(chip.getAttribute('title')).toContain('could not be read')
   })
 
-  it('surfaces overlay-only LSP languages in the IDE statusbar', async () => {
+  it('surfaces LSP languages with no server in the IDE statusbar', async () => {
     lspStatusSnapshot.value = {
       langs: [
         {
           lang: 'ocaml',
           connected: false,
-          overlay_only: true,
           command: 'ocamllsp',
           last_error: 'ocamllsp unavailable',
         },
         {
+          lang: 'lua',
+          connected: false,
+          command: 'lua-language-server',
+          last_error: 'lua-language-server not on PATH',
+        },
+        {
           lang: 'typescript',
           connected: true,
-          overlay_only: false,
           command: 'typescript-language-server',
           last_error: null,
         },
@@ -701,8 +688,12 @@ describe('IdeShell', () => {
       expect(found).not.toBeNull()
       return found!
     })
-    expect(chip.textContent).toBe('LSP overlay-only 1')
-    expect(chip.getAttribute('title')).toContain('ocaml: ocamllsp unavailable')
+    expect(chip.textContent).toBe('LSP unavailable 2')
+    // One line per language, so an operator reads which ones and why
+    // instead of a count that names nothing.
+    expect(chip.getAttribute('title')).toBe(
+      'ocaml: ocamllsp unavailable\nlua: lua-language-server not on PATH',
+    )
     expect(chip.getAttribute('title')).not.toContain('typescript')
   })
 
@@ -751,7 +742,7 @@ describe('IdeShell', () => {
   it('persists layer toggles back to the route', async () => {
     route.value = {
       tab: 'code',
-      params: { section: 'ide-shell', view: 'split-diff', layers: 'notes' },
+      params: { section: 'ide-shell', view: 'split-diff' },
       postId: null,
     }
 
@@ -762,10 +753,10 @@ describe('IdeShell', () => {
     fireEvent.click(buttonByText(container, 'Trace'))
 
     expect(route.value.params.view).toBe('split-diff')
-    expect(route.value.params.layers).toBe('keeper-trace,notes')
-
-    fireEvent.click(buttonByText(container, 'Notes'))
     expect(route.value.params.layers).toBe('keeper-trace')
+
+    fireEvent.click(buttonByText(container, 'Trace'))
+    expect(route.value.params.layers).toBeUndefined()
   })
 
   it('turns focus=review into a unified review workspace with review layers', async () => {
@@ -782,7 +773,6 @@ describe('IdeShell', () => {
       expect(container.querySelector('[aria-label="Unified diff preview"]')).not.toBeNull()
     })
     expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('true')
-    expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('true')
     expect(container.querySelector('[data-testid="ide-toolbar-layers"]')?.textContent)
       .not.toContain('Parallel')
   })
@@ -800,7 +790,6 @@ describe('IdeShell', () => {
     expect(container.querySelector('[data-testid="ide-toolbar-layers"]')?.textContent)
       .not.toContain('Parallel')
     expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('false')
-    expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('false')
   })
 
   it('persists an explicit empty review-focus layer override', () => {
@@ -812,12 +801,10 @@ describe('IdeShell', () => {
 
     render(h(IdeShell, {}), container)
     fireEvent.click(buttonByText(container, 'Trace'))
-    fireEvent.click(buttonByText(container, 'Notes'))
 
     expect(route.value.params.layers).toBe('none')
     expect(container.querySelector('[data-testid="ide-review-focus"]')).not.toBeNull()
     expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('false')
-    expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('false')
   })
 
   it('does not activate review focus outside the unified view', () => {
@@ -831,7 +818,6 @@ describe('IdeShell', () => {
 
     expect(container.querySelector('[data-testid="ide-review-focus"]')).toBeNull()
     expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('false')
-    expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('false')
   })
 
   it('runs view commands from the IDE command bar', async () => {
@@ -938,7 +924,7 @@ describe('IdeShell', () => {
     })
   })
 
-  it('starts on the reference activity rail and keeps work context available without a fourth tab', () => {
+  it('starts on the activity rail and keeps work context behind a disclosure', () => {
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source' },
@@ -950,9 +936,8 @@ describe('IdeShell', () => {
     const rail = container.querySelector('[data-testid="ide-right-rail"]')
     expect(rail).not.toBeNull()
     expect(rail?.classList.contains('ide-rail')).toBe(true)
-    expect(buttonByText(container, '활동').getAttribute('aria-selected')).toBe('true')
     expect(buttonByText(container, 'Work Context').getAttribute('aria-expanded')).toBe('false')
-    expect(container.querySelectorAll('.ide-rail-tab')).toHaveLength(2)
+    expect(container.querySelector('[data-testid="ide-right-rail"] [role="tablist"]')).toBeNull()
     expect(container.querySelector('.ide-activity-compact-status')?.getAttribute('role')).toBe('status')
     expect(container.querySelector('.ide-v2-presence-state')?.getAttribute('aria-label')).toBeTruthy()
     expect(container.querySelector('.ide-v2-connection-dot')?.getAttribute('aria-label')).toBeTruthy()
@@ -963,10 +948,6 @@ describe('IdeShell', () => {
     fireEvent.click(observationToggle!)
     expect(container.querySelector('.ide-run-progress')).not.toBeNull()
     expect(container.querySelector('.ide-context-lens')?.textContent).toContain('CONTEXT LENS')
-    expect(buttonByText(container, '활동').getAttribute('title'))
-      .toBe('Workspace and keeper activity linked to the active file and repository')
-    expect(buttonByText(container, '어노테이션').getAttribute('title'))
-      .toBe('File-addressable comments, decisions, questions, and bookmarks')
     expect(container.querySelector('[data-testid="ide-dashboard-connection"]')?.getAttribute('title'))
       .toContain('Dashboard event transport')
     expect(container.querySelector('[data-testid="ide-right-context-stack"]')).toBeNull()
@@ -998,38 +979,11 @@ describe('IdeShell', () => {
     expect(primaryRail).not.toBeNull()
     expect(rail?.classList.contains('ide-rail')).toBe(true)
     expect(buttonByText(container, 'Work Context').getAttribute('aria-expanded')).toBe('true')
-    expect(buttonByText(container, '활동').getAttribute('title'))
-      .toBe('Workspace and keeper activity linked to the active file and repository')
     expect(container.querySelector('[data-testid="ide-dashboard-connection"]')?.getAttribute('title'))
       .toContain('Dashboard event transport')
     expect(container.querySelector('.ide-plane-activity')).not.toBeNull()
   })
 
-
-  it('switches the IDE right rail tabs', () => {
-    window.localStorage.setItem('masc.ide.activeRepositoryId', 'masc')
-    route.value = {
-      tab: 'code',
-      params: { section: 'ide-shell', view: 'source' },
-      postId: null,
-    }
-    render(h(IdeShell, {}), container)
-
-    expect(buttonByText(container, '활동').getAttribute('aria-selected')).toBe('true')
-    expect(container.querySelector('[data-testid="ide-right-context-stack"]')).toBeNull()
-    expect(container.querySelector('.ide-plane-activity')).not.toBeNull()
-
-    fireEvent.click(buttonByText(container, '활동'))
-    expect(buttonByText(container, '활동').getAttribute('aria-selected')).toBe('true')
-    expect(container.querySelector('.ide-plane-activity')).not.toBeNull()
-    expect(container.querySelector('[data-testid="ide-right-context-stack"]')).toBeNull()
-    expect(container.querySelector('[data-testid="ide-annotation-rail"]')).toBeNull()
-
-    fireEvent.click(buttonByText(container, '어노테이션'))
-    expect(buttonByText(container, '어노테이션').getAttribute('aria-selected')).toBe('true')
-    expect(container.querySelector('.ide-plane-activity')).toBeNull()
-    expect(container.querySelector('[data-testid="ide-annotation-rail"]')).not.toBeNull()
-  })
 
   it('hydrates collapsed IDE rails from the route', () => {
     route.value = {
@@ -1089,7 +1043,7 @@ describe('IdeShell', () => {
     expect(container.querySelector('.ide-plane-tree')).not.toBeNull()
   })
 
-  it('does not mount the polling rail on mobile and keeps annotation creation in the editor', async () => {
+  it('does not mount the polling rail on mobile', async () => {
     const originalWidth = window.innerWidth
     Object.defineProperty(window, 'innerWidth', {
       configurable: true,
@@ -1124,10 +1078,6 @@ describe('IdeShell', () => {
       expect(vi.mocked(fetch).mock.calls.some(([input]) =>
         String(input).includes('/api/v1/activity/events'),
       )).toBe(false)
-      await waitFor(() => {
-        expect(container.querySelector('.ide-v2-responsive-annotation-composer [data-testid="ide-annotation-composer-closed"]'))
-          .not.toBeNull()
-      })
     } finally {
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth })
     }

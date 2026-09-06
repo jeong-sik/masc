@@ -1210,10 +1210,14 @@ let test_compact_and_full_keep_the_same_typed_facts () =
     | None -> Alcotest.fail "a folded three-call block heads with its inventory"
   in
   let trouble = List.hd compact.details in
-  check bool "the inventory row reads as one activity summary" true
-    (String.starts_with ~prefix:"✗ Tools 3" inventory);
-  check bool "the inventory row carries the exact folded count" true
-    (contains ~needle:"3 details folded" inventory);
+  (* The mark opens the row and the names follow it; the row does not spell
+     the TOOLS label the transcript already draws beside it. *)
+  check bool "the inventory row opens with the block's mark and a name" true
+    (String.starts_with ~prefix:"✗ read_file 1" inventory);
+  check bool "the inventory row does not spell its own label" false
+    (contains ~needle:"Tools" inventory);
+  check bool "the inventory row claims no fold" false
+    (contains ~needle:"folded" inventory);
   check bool "the inventory row keeps what returned" true
     (contains ~needle:"1 returned" inventory);
   check bool "the inventory row leaves the failure to the row below" false
@@ -1245,12 +1249,40 @@ let test_compact_summary_counts_registered_public_names () =
         (fun expected ->
           check bool ("summary contains " ^ expected) true
             (contains ~needle:expected summary))
-        [ "Tools 4"; "Read 2"; "Edit 1"; "Execute 1" ]
+        [ "Read 2"; "Edit 1"; "Execute 1" ]
   | _, details ->
       failf "every call returned, so the header was expected alone, got %d details"
         (List.length details)
 
-let test_compact_summary_keeps_operational_tool_kinds () =
+let test_compact_summary_adds_up_a_kind_it_ran_twice () =
+  let activity name =
+    Transcript.make_tool_activity ~call_id:None ~tool_name:name ~args:"{}"
+      ~outcome:Transcript.Returned ~duration:None ()
+  in
+  let projection =
+    Transcript.tool_block
+      [ activity "masc_keeper_status"
+      ; activity "masc_keeper_list"
+      ; activity "Read"
+      ]
+    |> Transcript.project_tool_block Transcript.Compact
+  in
+  match projection.header, projection.details with
+  | Some summary, [] ->
+      check bool "the two keeper tools are added up" true
+        (contains ~needle:"Keeper 2" summary);
+      (* The tag is what the names leave separate. Both are still named. *)
+      check bool "and each name keeps its own count" true
+        (contains ~needle:"Read 1" summary)
+  | _, details ->
+      failf "every call returned, so the header was expected alone, got %d details"
+        (List.length details)
+
+let test_compact_summary_does_not_tag_a_kind_it_ran_once () =
+  (* On one live screen every [Keeper N] was exactly the count of one
+     [keeper_*] tool named a few clauses along on the same line -- in all
+     eight blocks that carried the tag. A tag over one name is that name's
+     number, said twice. *)
   let activity name =
     Transcript.make_tool_activity ~call_id:None ~tool_name:name ~args:"{}"
       ~outcome:Transcript.Returned ~duration:None ()
@@ -1267,13 +1299,82 @@ let test_compact_summary_keeps_operational_tool_kinds () =
   match projection.header, projection.details with
   | Some summary, [] ->
       List.iter
-        (fun expected ->
-          check bool ("summary keeps " ^ expected) true
-            (contains ~needle:expected summary))
-        [ "Skill 1"; "Keeper 1"; "Fusion 1" ]
+        (fun tag ->
+          check bool ("summary does not repeat " ^ tag) false
+            (contains ~needle:tag summary))
+        [ "Skill 1"; "Keeper 1"; "Fusion 1" ];
+      check bool "and each name keeps its own count" true
+        (contains ~needle:"Read 1" summary)
   | _, details ->
       failf "every call returned, so the header was expected alone, got %d details"
         (List.length details)
+
+(* The summary's family tags are read from the tool registry, so what a name
+   is spelled like no longer decides which family it lands in. *)
+let kind_activity name =
+  Transcript.make_tool_activity ~call_id:None ~tool_name:name ~args:"{}"
+    ~outcome:Transcript.Returned ~duration:None ()
+
+let compact_summary_of activities =
+  let projection =
+    Transcript.tool_block activities
+    |> Transcript.project_tool_block Transcript.Compact
+  in
+  match projection.Transcript.header with
+  | Some summary -> summary
+  | None -> fail "a block of several calls was expected to carry a header"
+
+let test_compact_summary_separates_a_handoff_from_a_keeper_read () =
+  (* Two of each kind, because a tag over a single name is dropped as a
+     repeat of that name's count. *)
+  let summary =
+    compact_summary_of
+      [ kind_activity "masc_keeper_delegate"
+      ; kind_activity "masc_keeper_delegate_cancel"
+      ; kind_activity "masc_keeper_delegate_status"
+      ; kind_activity "masc_keeper_status"
+      ; kind_activity "Read"
+      ]
+  in
+  check bool "the handoffs are counted as delegations" true
+    (contains ~needle:"Delegate 2" summary);
+  (* Reading how a delegation is going is not delegating. The status read
+     carries the same [masc_keeper_delegate] prefix as the handoff, so a
+     spelling test cannot tell them apart. *)
+  check bool "the reads stay keeper work" true
+    (contains ~needle:"Keeper 2" summary)
+
+let test_compact_summary_does_not_call_a_code_query_keeper_work () =
+  (* [keeper_code_query] is a code search and [keeper_webmcp_call] an MCP
+     call. Both are named for the process that hosts them, and a prefix test
+     counted them as work done on Keepers. *)
+  let summary =
+    compact_summary_of
+      [ kind_activity "keeper_code_query"
+      ; kind_activity "keeper_webmcp_call"
+      ; kind_activity "Read"
+      ]
+  in
+  check bool "no delegation is claimed" false
+    (contains ~needle:"Delegate" summary);
+  check bool "no keeper work is claimed" false
+    (contains ~needle:"Keeper" summary)
+
+let test_compact_summary_leaves_an_unregistered_name_untagged () =
+  (* A trace from an older or external provider may name no registered tool.
+     It gets no family tag rather than an invented one. *)
+  let summary =
+    compact_summary_of
+      [ kind_activity "some_provider_native_tool"
+      ; kind_activity "another_native_tool"
+      ]
+  in
+  check bool "both names are counted" true
+    (contains ~needle:"some_provider_native_tool 1" summary);
+  List.iter
+    (fun tag ->
+      check bool ("no " ^ tag ^ " tag") false (contains ~needle:tag summary))
+    [ "Delegate"; "Keeper"; "Fusion"; "Skill" ]
 
 let full_tool_rows block =
   (Transcript.project_tool_block Transcript.Full block).Transcript.details
@@ -1684,8 +1785,32 @@ let test_a_single_call_gets_no_header () =
 ;;
 
 (* The reason this split exists: before it, a reader could see the rollup or
-   the calls, never both. Full now answers "how many, how did they end" on
+   the calls, never both. Full now answers "what ran, how did they end" on
    the header while every call keeps its row underneath. *)
+(* The transcript draws this row under its own TOOLS label, and the row used
+   to open with "Tools N": the label twice, and a count the same line gives
+   as the sum of its names and again as "N returned". *)
+let test_the_rollup_does_not_repeat_the_rows_label () =
+  let projection =
+    Transcript.project_tool_block Transcript.Compact
+      (Transcript.tool_block ~omitted_steps:0
+         [ activity ~name:"read_file" ~outcome:Transcript.Returned
+         ; activity ~name:"read_file" ~outcome:Transcript.Returned
+         ; activity ~name:"glob" ~outcome:Transcript.Returned
+         ])
+  in
+  match projection.Transcript.header with
+  | None -> Alcotest.fail "a three-call block draws a header"
+  | Some header ->
+      check bool "the row does not spell its own label" false
+        (contains_substring header "Tools");
+      List.iter
+        (fun part ->
+          check bool ("the header keeps " ^ part) true
+            (contains_substring header part))
+        [ "read_file 2"; "glob 1"; "3 returned" ]
+;;
+
 let test_full_shows_the_rollup_and_the_calls_together () =
   let projection =
     Transcript.project_tool_block Transcript.Full
@@ -1698,11 +1823,13 @@ let test_full_shows_the_rollup_and_the_calls_together () =
   (match projection.Transcript.header with
    | None -> Alcotest.fail "a three-call block draws a header"
    | Some header ->
-       check bool "the header counts the calls" true
-         (contains_substring header "Tools 3");
-       (* Nothing is behind a fold here, so a fold is not what the header
-          reports. A "0 details folded" tail would describe a fold that is
-          not there. *)
+       List.iter
+         (fun name ->
+           check bool ("the header names " ^ name) true
+             (contains_substring header name))
+         [ "read_file 1"; "web_fetch 1"; "glob 1" ];
+       (* Neither mode's header claims a fold: whether the pane is folded is
+          the mode, not this row. *)
        check bool "and claims no fold" false
          (contains_substring header "folded"));
   check int "every call keeps its row" 3
@@ -1744,8 +1871,8 @@ let test_an_all_failed_block_keeps_a_readable_inventory_row () =
   let inventory = summary_row Transcript.Compact calls in
   check bool "no outcome clause is claimed" false
     (contains_substring inventory "returned");
-  check bool "the fold count still closes the row" true
-    (contains_substring inventory "3 details folded");
+  check bool "and no fold clause is added to close the row" false
+    (contains_substring inventory "folded");
   check bool "and the failures are on the row below" true
     (contains_substring (trouble_row Transcript.Compact calls) "3 failed")
 ;;
@@ -1835,8 +1962,16 @@ let () =
             test_compact_and_full_keep_the_same_typed_facts
         ; test_case "compact summary counts registered public names" `Quick
             test_compact_summary_counts_registered_public_names
-        ; test_case "compact summary keeps operational tool kinds" `Quick
-            test_compact_summary_keeps_operational_tool_kinds
+        ; test_case "compact summary adds up a kind it ran twice" `Quick
+            test_compact_summary_adds_up_a_kind_it_ran_twice
+        ; test_case "compact summary does not tag a kind it ran once" `Quick
+            test_compact_summary_does_not_tag_a_kind_it_ran_once
+        ; test_case "compact summary separates a handoff from a keeper read"
+            `Quick test_compact_summary_separates_a_handoff_from_a_keeper_read
+        ; test_case "compact summary does not call a code query keeper work"
+            `Quick test_compact_summary_does_not_call_a_code_query_keeper_work
+        ; test_case "compact summary leaves an unregistered name untagged"
+            `Quick test_compact_summary_leaves_an_unregistered_name_untagged
         ; test_case "a fold reports the outcome its marker stands for" `Quick
             test_a_fold_reports_the_outcome_its_marker_stands_for
         ; test_case "a fold names the tool that failed" `Quick
@@ -1851,6 +1986,8 @@ let () =
             test_the_header_stays_out_of_the_call_pairing
         ; test_case "a single call gets no header" `Quick
             test_a_single_call_gets_no_header
+        ; test_case "the rollup does not repeat the row's label" `Quick
+            test_the_rollup_does_not_repeat_the_rows_label
         ; test_case "full shows the rollup and the calls together" `Quick
             test_full_shows_the_rollup_and_the_calls_together
         ; test_case "the trouble row carries the block mark" `Quick

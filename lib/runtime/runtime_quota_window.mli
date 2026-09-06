@@ -13,12 +13,15 @@
     the table is shared across keepers on purpose because provider quota
     windows are account-scoped.
 
-    Windows are recorded only when the provider stated a reset time.  A
-    quota failure without [retry_after] records nothing: inventing a
-    cooldown here would be a synthesized default the provider never
-    reported.  Expiry is the provider-stated [resets_at] itself, pruned
-    lazily on read; there is no background sweeper and no TTL knob.
-    RFC-0370 §3.3. *)
+    A window with a stated reset expires at that time, pruned lazily on read;
+    there is no background sweeper and no TTL knob.  Inventing a cooldown for
+    a provider that stated none would be a synthesized default, so
+    {!note_observed_exhausted} records the observation instead and claims no
+    end: it is cleared by the next success on the scope, not by a clock.
+    Both metered providers this fleet reaches answer 429 with no Retry-After
+    (2026-09-06: ollama.com and api.z.ai), so without that second form the
+    table stays empty and every lane re-dispatches into a spent account for
+    as long as it is spent.  RFC-0370 §3.3, RFC-0433. *)
 
 type scope
 (** A non-secret quota ownership key.  The representation is deliberately
@@ -31,6 +34,26 @@ val note_exhausted : scope:scope -> resets_at:float -> unit
     scope extends the window; an earlier one is ignored so a stale
     retry hint cannot shorten a window a fresher response already
     established. *)
+
+val note_observed_exhausted : scope:scope -> unit
+(** Remember that [scope] answered a hard quota rejection without stating when
+    it resets.  No end time is claimed and none is invented: the record stands
+    until {!note_succeeded} clears it.  A scope that already has a stated
+    window keeps it — the provider's own answer says more than an
+    observation. *)
+
+val note_succeeded : scope:scope -> unit
+(** A call on [scope] got through, so an observation recorded by
+    {!note_observed_exhausted} no longer holds and is dropped.  A stated
+    window is left alone: one call succeeding inside it does not make the
+    provider's answer about a time untrue. *)
+
+val is_exhausted : scope:scope -> now:float -> bool
+(** Whether ordering should hold [scope] back at [now] — a stated window that
+    has not passed, or an observation no success has cleared.  This is what
+    {!demote_order} asks; {!active_until} answers the narrower question of
+    when a stated window ends, and is [None] for an observation because an
+    observation names no time. *)
 
 val active_until : scope:scope -> now:float -> float option
 (** [Some resets_at] when [scope] has a recorded window that has not

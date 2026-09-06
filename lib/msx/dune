@@ -1,0 +1,11 @@
+;; Worktree-local copy of the ocaml-msx core (~/me/workspace/yousleepwhen/
+;; ocaml-msx, commit c577459) so the attachment demo builds without an opam
+;; pin. Graduation is deleting this directory and taking the library from
+;; `opam pin add ocaml-msx --kind=path` instead -- until then keep the two
+;; files byte-identical with the core repo.
+(include_subdirs no)
+
+(library
+ (name msx)
+ (wrapped false)
+ (modules msx))

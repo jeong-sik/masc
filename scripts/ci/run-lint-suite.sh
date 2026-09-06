@@ -72,6 +72,23 @@ blocking_lints() {
     bash scripts/lint/prompt-source-words-agree.sh --self-test
   run_lint "Prompt source words agree" \
     bash scripts/lint/prompt-source-words-agree.sh
+
+  # The report-only step that runs a pull request's edited suites trusts this
+  # tool to say which of them can be run by executing the binary. A wrong
+  # "run" reports a failure the change did not cause, which is how a report
+  # stops being read (RFC-0428).
+  run_self_test_when_changed "Dune suite scope self-test (RFC-0428)" \
+    scripts/ci/dune_suite_scope.py \
+    python3 scripts/ci/test_dune_suite_scope.py
+  # test.yml's targeted path runs a suite's executable outside dune, so the
+  # stanza's (setenv ...) does not apply and has to be read out. A stanza this
+  # reader cannot parse would otherwise surface as a dispatch that ran the
+  # suite under an environment nobody chose.
+  run_self_test_when_changed "Test stanza env reader self-test" \
+    scripts/ci/stanza_env.py \
+    python3 scripts/ci/stanza_env.py --self-test
+  run_lint "Test stanza env is readable" \
+    python3 scripts/ci/stanza_env.py --check-all
   run_lint "Hardcoded model prefix" bash scripts/lint/no-roadmap-stale-hardcoding.sh
   run_lint "Raw font-size px" bash scripts/lint/no-raw-font-size-px.sh
   run_lint "OCaml comment terminator trap" bash scripts/lint/no-ocaml-comment-terminator-trap.sh
@@ -92,6 +109,7 @@ blocking_lints() {
   run_lint "Provider name hardcoding ratchet" bash scripts/lint/no-provider-name-hardcoding.sh --fail
   run_lint "Keeper behavior hardcoding" bash scripts/lint/no-keeper-behavior-hardcoding.sh
   run_lint "Eval tool-selector runtime import" bash scripts/lint/no-eval-tool-selector-runtime-import.sh
+  run_lint "One process manager in lib" bash scripts/lint/one-process-manager.sh
   run_lint "Legacy tool surface name" bash scripts/lint/no-legacy-tool-surface-name.sh --fail
   run_lint "Retired tool husk ratchet" bash scripts/lint/no-retired-tool-husks.sh --fail
   run_lint "Synthetic tool-call residue ratchet" bash scripts/lint/no-synthetic-tool-call-residue.sh --fail
@@ -135,6 +153,15 @@ blocking_pr_lints() {
   # the count drifted to 32 and back to 0 without anyone seeing either move.
   # Blocking at 0 keeps the next one from landing unnoticed.
   run_lint "Cancel guard on wildcard catches" bash scripts/lint-cancel-guard.sh
+  # A match whose every arm is a bare wildcard computes its scrutinee and
+  # throws it away, while reading as if it told two cases apart. Four were in
+  # the tree on 2026-09-06 and two of them sat on a real classifier, so the
+  # next reader kept looking for a distinction that was not there. Blocking at
+  # zero is what stops the fifth.
+  run_self_test_when_changed "Wildcard-only match self-test" \
+    scripts/ci/check-wildcard-only-match.py \
+    python3 scripts/ci/test_check_wildcard_only_match.py
+  run_lint "Wildcard-only match" python3 scripts/ci/check-wildcard-only-match.py
 }
 
 advisory_lints() {

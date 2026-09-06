@@ -394,10 +394,30 @@ let float_of_string_with_default ~default str =
   | None -> default
 
 (** Read JSON file safely *)
+(* Reading the bytes already leaves the fiber ([Fs_compat.load_file] runs the
+   read on a systhread), but the parse that follows it did not, and a big
+   store is a long run on the calling domain: schedules.json is 1,883,832
+   bytes and parsed in 129.6 ms on the main domain in the 2026-09-06 22:13
+   KST window, the longest run left there.
+
+   [parse_json_safe] is pure - it trims, repairs UTF-8 into a fresh buffer and
+   calls Yojson - so the pool can run it. A handoff is not worth it for a
+   small document, and the boundary is where the parse itself becomes a run
+   the scheduler trace counts as long. That one measurement gives about
+   14.5 MB/s, so 10 ms is roughly 150 KB; this is the power of two below it.
+   It rests on a single sample, so read it as an order of magnitude rather
+   than a tuned value. *)
+let json_parse_offload_min_bytes = 128 * 1024
+
+let parse_json_off_fiber ~context str : (Yojson.Safe.t, string) result =
+  if String.length str < json_parse_offload_min_bytes
+  then parse_json_safe ~context str
+  else Domain_pool_ref.submit_cpu_or_inline (fun () -> parse_json_safe ~context str)
+
 let read_json_file_safe path : (Yojson.Safe.t, string) result =
   match read_file_safe path with
   | Error e -> Error e
-  | Ok content -> parse_json_safe ~context:path content
+  | Ok content -> parse_json_off_fiber ~context:path content
 
 (** Read JSON file safely, logging errors instead of silently discarding them.
     Returns [Some json] on success, [None] on failure with a warning log.

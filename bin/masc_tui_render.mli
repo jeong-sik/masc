@@ -72,6 +72,15 @@ val acting_pane_drawn_cols : unit -> int
 val acting_pane_target_at : line:int -> Masc_tui_acting_pane.row_target
 
 val acting_pane_scroll_limit : unit -> int
+
+val chat_row_action_at : row:int -> Masc_tui_message_layout.row_action
+(** What a press on this terminal row opens in the chat history the last frame
+    drew, and {!Masc_tui_message_layout.Action_none} for any row outside it.
+
+    Absolute terminal rows: the two-pane split places the chat beside the
+    roster rather than below it, so a line keeps the vertical position its
+    buffer gave it. Answers {!Action_none} until a frame has drawn a history,
+    so a press cannot be served by a row that is no longer on screen. *)
 val keeper_roster_marquee_target :
   Masc_tui_types.state -> cols:int -> string option
 val finish_surface :

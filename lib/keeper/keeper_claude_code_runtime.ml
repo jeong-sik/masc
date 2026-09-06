@@ -624,7 +624,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
       | Ok () -> Ok ()
       | Error error -> Error (claude_error_to_core_error error)
     in
-    let process_mgr = Eio.Stdenv.process_mgr env in
+    let process_mgr = Posix_spawn_process_mgr.mgr in
     let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
     let probe_config =
       bounded_probe_config ~fallback_timeout_s:config.timeout_s client_config

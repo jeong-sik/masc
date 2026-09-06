@@ -14,8 +14,10 @@
     parity truth, and drift between the TOML declarations and a consumer's
     expectation shows up as a baseline diff.
 
-    Invoked manually by: dune build @regen_tool_parity_artifacts
-    (the alias lives in test/dune via tools/tool_parity_regen.inc). *)
+    Invoked manually by: dune build bin/tool_parity_generator.exe, then run
+    _build/default/bin/tool_parity_generator.exe from the repository root —
+    the generator resolves [config/tools] and [test/golden] relative to its
+    working directory, so it must be launched from the repository root. *)
 
 let tool_config_dir = "config/tools"
 

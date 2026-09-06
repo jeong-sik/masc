@@ -151,9 +151,8 @@
 
 ;; Tool parity artifact generator (task-1363): reads config/tools/*.toml
 ;; through the production loader (Tool_definition_toml.load) and regenerates
-;; the test/golden/tool_parity_*.txt baselines. Manual-only via
-;; @regen_tool_parity_artifacts (tools/tool_parity_regen.inc); never a build
-;; dependency of anything.
+;; the test/golden/tool_parity_*.txt baselines. Manual-only (see the regen
+;; note at the alias rule below); never a build dependency of anything.
 (executable
  (name tool_parity_generator)
  (modules tool_parity_generator)
@@ -163,9 +162,14 @@
   yojson))
 
 ;; Manual-only regeneration entry point for the tool parity baselines
-;; (task-1363): dune build @regen_tool_parity_artifacts. The generator reads
-;; config/tools/*.toml through the production loader and rewrites
-;; test/golden/tool_parity_*.txt; it is never a build dependency of anything.
+;; (task-1363). NOTE (task-1409, from PR #33770 review): this alias action
+;; runs the generator with the dune sandbox root as its working directory,
+;; so the generator's relative [config/tools] / [test/golden] paths resolve
+;; inside _build and the alias fails. Until repaired (data_only_dirs for the
+;; read + promote for the write), regenerate by building and running the
+;; executable from the repository root instead:
+;;   dune build bin/tool_parity_generator.exe
+;;   _build/default/bin/tool_parity_generator.exe   # from the repo root
 (rule
  (alias regen_tool_parity_artifacts)
  (action

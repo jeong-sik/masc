@@ -565,17 +565,7 @@ let dress_tool_clause (clause : string) : string =
       String.trim (String.sub c (String.length m) (String.length c - String.length m))
     in
     let col = tool_marker_color m in
-    if String.starts_with ~prefix:"Tools " rest || String.starts_with ~prefix:"Ran " rest then
-      match split_last_space rest with
-      | Some (word, count) when is_all_digits count ->
-        Printf.sprintf "%s%s%s %s%s%s %s%s%s" col m Ansi.reset
-          (Ansi.bold ^ Theme.info ()) word Ansi.reset
-          (Theme.recede () ^ Ansi.dim) count Ansi.reset
-      | _ ->
-        Printf.sprintf "%s%s%s %s%s%s" col m Ansi.reset
-          (Ansi.bold ^ Theme.info ()) rest Ansi.reset
-    else
-      (match String.index_opt rest ' ' with
+    (match String.index_opt rest ' ' with
        | Some idx ->
          let name = String.sub rest 0 idx in
          let args = String.sub rest idx (String.length rest - idx) in
@@ -585,14 +575,7 @@ let dress_tool_clause (clause : string) : string =
          Printf.sprintf "%s%s%s %s%s%s" col m Ansi.reset
            (Theme.tool_origin ()) rest Ansi.reset)
   | None ->
-    if String.starts_with ~prefix:"Tools " c then
-      match split_last_space c with
-      | Some (word, count) when is_all_digits count ->
-        Printf.sprintf "%s%s%s %s%s%s"
-          (Ansi.bold ^ Theme.info ()) word Ansi.reset
-          (Theme.recede () ^ Ansi.dim) count Ansi.reset
-      | _ -> Printf.sprintf "%s%s%s" (Ansi.bold ^ Theme.info ()) c Ansi.reset
-    else if contains_sub c "detail" && contains_sub c "folded" then
+    if contains_sub c "detail" && contains_sub c "folded" then
       Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c Ansi.reset
     else if String.starts_with ~prefix:"Ctrl-" c || contains_sub c "carried by the transcript" then
       Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c Ansi.reset

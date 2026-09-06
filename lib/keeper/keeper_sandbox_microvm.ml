@@ -928,7 +928,7 @@ let verify_shim_sidecar ~dir =
       then
         Error
           (Printf.sprintf
-             "microvm_shim_sidecar_invalid: %s does not begin with a lowercase sha256 hex               digest"
+             "microvm_shim_sidecar_invalid: %s does not begin with a lowercase sha256 hex digest"
              sidecar)
       else
         match sha256_of_file binary with
@@ -938,7 +938,7 @@ let verify_shim_sidecar ~dir =
         | got ->
           Error
             (Printf.sprintf
-               "microvm_shim_hash_mismatch: %s is %s but %s says %s; reinstall both with                 scripts/install.sh, or remove the sidecar to run a hand-built shim                 unverified"
+               "microvm_shim_hash_mismatch: %s is %s but %s says %s; reinstall both with scripts/install.sh, or remove the sidecar to run a hand-built shim unverified"
                binary got sidecar want)
 ;;
 let shim_guest_path = Filename.concat shim_guest_dir shim_binary_name

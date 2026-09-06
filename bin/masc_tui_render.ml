@@ -4086,7 +4086,7 @@ let planning_phase_column =
    for health, [tone] for weight and [Syntax] for what a token is, and
    nothing for a kind.
 
-   It takes a categorical slot now (RFC-0427). Slot 4 is magenta, the hue it
+   It takes a categorical slot now (RFC-0431). Slot 4 is magenta, the hue it
    already drew, and magenta is one of the two the status axis does not
    claim -- which matters here, because the three phases beside it are
    status tokens and a slot aliasing one of those would read as a verdict.
@@ -14685,7 +14685,7 @@ let render_code (state : state) =
               if selected then glyph ^ " "
               else
                 let colour =
-                  (* Six kinds, six categorical slots (RFC-0427). These were
+                  (* Six kinds, six categorical slots (RFC-0431). These were
                      constant SGR codes, so a file list was one of the places
                      a theme could not reach: everything around it moved when
                      the terminal answered with its palette and these did not.

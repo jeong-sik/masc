@@ -22,7 +22,16 @@ val fold_line :
     [Approval_continuation_recorded] rides as a suffix because it says
     something no outcome says. [None] for an empty run. *)
 
-val folded_argument : cap:int -> string -> string
+type folded_argument =
+  { fa_text : string  (** The line as drawn, folded or not. *)
+  ; fa_held_cells : int
+        (** Cells behind the fold, zero when nothing was folded. The caller
+            needs this to know whether the row has anything to open; deciding
+            it by comparing [fa_text] against the input would read the newline
+            flattening as a fold. *)
+  }
+
+val fold_argument : cap:int -> string -> folded_argument
 (** One Gate line held to [cap] terminal cells, with what it is holding named
     in cells rather than rows.
 

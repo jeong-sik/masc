@@ -133,13 +133,21 @@ let fold_line ~phases ~tool ~summary =
    Folded, not truncated: Ctrl-D brings the whole argument back. A row that
    also said so would repeat the footer on every Gate row, which is what
    pushed the tool names onto a second line before. *)
-let folded_argument ~cap text =
+type folded_argument =
+  { fa_text : string
+  ; fa_held_cells : int
+  }
+
+let fold_argument ~cap text =
   let flat =
     String.concat " " (String.split_on_char '\n' (String.trim text))
   in
   let width = Message_layout.display_width flat in
-  if width <= cap then flat
+  if width <= cap then { fa_text = flat; fa_held_cells = 0 }
   else
-    Printf.sprintf "%s \xe2\x8c\x84 %d\xec\x9e\x90"
-      (Message_layout.take_cells flat cap)
-      (width - cap)
+    { fa_text =
+        Printf.sprintf "%s \xe2\x8c\x84 %d\xec\x9e\x90"
+          (Message_layout.take_cells flat cap)
+          (width - cap)
+    ; fa_held_cells = width - cap
+    }

@@ -75,6 +75,13 @@ type turn_rail =
     emits no {!Rail_closes}, so the rail stays open until the turn ends -- the
     fact is structural rather than a second spinner. *)
 
+(** What a press on a row opens. A variant rather than a bool because the
+    input layer must not recover the answer from the glyphs the row drew:
+    changing that text would kill the click with nothing to report. *)
+type row_action =
+  | Action_none
+  | Action_unfold_argument
+
 type markdown_source =
   | Markdown_stable of {
       keeper_name : string;
@@ -130,6 +137,10 @@ type entry = {
       (** Which piece of its turn's bracket this entry draws. Carried on the
           entry because only the caller knows the turn's extent: the layout
           sees one entry at a time. *)
+  action : row_action;
+      (** What a press on this entry's first row opens. Carried on the entry
+          because the entry is where the folding was decided; the rows below
+          it are continuations of one decision, not decisions of their own. *)
 }
 
 type metadata =
@@ -213,6 +224,10 @@ type row = {
           under the other two it holds the origin on a message's first row and
           the same width in blanks on the rest, so a wrapped body lines up
           under where it started. *)
+  action : row_action;
+      (** What a press on this row opens, {!Action_none} on every row but the
+          first of an entry that carries one. The fold marker sits at the end
+          of the first row, so that is the row a press lands on. *)
 }
 
 val siding_lead : siding -> string

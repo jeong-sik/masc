@@ -757,6 +757,16 @@ let bound_egress_proxy_port (t : t) =
 
 module For_testing_microvm = struct
   let microvm_container_name = microvm_container_name
+
+  let mark_microvm_guest_booted ~(config : Workspace.config) ~(meta : keeper_meta) () =
+    let container_name =
+      microvm_container_name
+        ~config
+        ~keeper_name:meta.name
+        ~network_mode:meta.network_mode
+    in
+    mark_microvm_work_root_ready container_name
+  ;;
 end
 
 let keeper_vm_name (t : t) =
@@ -1865,6 +1875,29 @@ let microvm_guest_absence_reason ?timeout_sec ~(config : Workspace.config)
            "microvm_guest_not_running: keeper %s's guest %s is not running; a read \
             attaches to a running guest and never boots one"
            meta.name container_name)
+;;
+
+let is_microvm_guest_booted ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  if meta.sandbox_profile <> Keeper_types_profile_sandbox.Micro_vm
+  then false
+  else
+    let container_name =
+      microvm_container_name
+        ~config
+        ~keeper_name:meta.name
+        ~network_mode:meta.network_mode
+    in
+    microvm_work_root_ready container_name
+;;
+
+let forget_microvm_guest_booted ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  let container_name =
+    microvm_container_name
+      ~config
+      ~keeper_name:meta.name
+      ~network_mode:meta.network_mode
+  in
+  forget_microvm_work_root container_name
 ;;
 
 let retire_current_github_identity_snapshot t =

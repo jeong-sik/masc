@@ -145,6 +145,45 @@ let recent_roles lines =
       MS.direct_line_role_to_label line.role)
     lines
 
+(* [load_all] parses only the rows appended since its last call and must
+   agree with [load], which parses the file afresh; a replaced file (new
+   inode) is reloaded whole. *)
+let test_load_all_is_incremental_and_follows_appends () =
+  let base_dir = temp_base_path "keeper-chat-store-incremental" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      with_eio_fs @@ fun () ->
+      let keeper_name = "keeper-chat-incremental" in
+      let ids messages = List.map (fun (m : K.chat_message) -> m.id) messages in
+      let append n =
+        K.append_turn ~base_dir ~keeper_name
+          ~user_content:(Printf.sprintf "question %d" n)
+          ~user_attachments:[]
+          ~assistant_content:(Printf.sprintf "answer %d" n)
+          ()
+      in
+      append 1;
+      let first = K.load_all ~base_dir ~keeper_name in
+      Alcotest.(check int) "first load parses the whole transcript" 2 (List.length first);
+      append 2;
+      append 3;
+      let grown = K.load_all ~base_dir ~keeper_name in
+      Alcotest.(check int) "later loads see the appended turns" 6 (List.length grown);
+      Alcotest.(check (list string)) "incremental load agrees with a fresh parse"
+        (ids (K.load ~base_dir ~keeper_name)) (ids grown);
+      Alcotest.(check (list string)) "earlier messages are kept in order"
+        (ids first) (ids (List.filteri (fun i _ -> i < 2) grown));
+      (* A replaced file: same path, new inode, fewer rows. *)
+      let path = chat_path ~base_dir ~keeper_name in
+      let first_row = String.split_on_char '\n' (read_file path) |> List.hd in
+      Sys.remove path;
+      write_file path (first_row ^ "\n");
+      let replaced = K.load_all ~base_dir ~keeper_name in
+      Alcotest.(check int) "a replaced transcript is reloaded whole" 1 (List.length replaced);
+      Alcotest.(check (list string)) "and agrees with a fresh parse"
+        (ids (K.load ~base_dir ~keeper_name)) (ids replaced))
+
 let test_append_turn_roundtrip () =
   let base_dir = temp_base_path "keeper-chat-store-turn" in
   Fun.protect
@@ -3368,5 +3407,7 @@ let () =
             `Quick test_transcript_absent_returns_empty;
           Alcotest.test_case "purge plan removes the chat store" `Quick
             test_purge_plan_removes_chat_store;
+          Alcotest.test_case "load_all is incremental and follows appends" `Quick
+            test_load_all_is_incremental_and_follows_appends;
         ] );
     ]

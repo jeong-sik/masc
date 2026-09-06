@@ -129,6 +129,18 @@ let index_of_in texts name =
 
 let index_of name = index_of_in texts name
 
+(* The focus header repeats a name the fleet row already used; its own row
+   is the later one. *)
+let last_index_of_in texts name =
+  let rec go i best = function
+    | [] -> Option.value ~default:0 best
+    | row :: rest ->
+        go (i + 1) (if contains name row then Some i else best) rest
+  in
+  go 0 None texts
+
+let last_index_of name = last_index_of_in texts name
+
 (* goner's process is gone: the mark says the keeper is not there, the
    health reading is Offline. Its last turn never settled — the end event
    died with the keeper — so neither the fleet row nor the focus block may
@@ -171,11 +183,13 @@ let test_a_live_keeper_without_a_tool_says_in_turn () =
     (contains "running" row)
 
 let test_a_gone_keepers_focus_header_says_unfinished () =
-  let header = index_of_in dead_texts "turn 7" in
+  let header = index_of_in dead_texts "goner" in
   check bool "the focus header says unfinished" true
     (contains "unfinished" (List.nth dead_texts header));
   check bool "the focus header does not say in turn" false
-    (contains "in turn" (List.nth dead_texts header))
+    (contains "in turn" (List.nth dead_texts header));
+  check bool "an open turn does not borrow the session number" false
+    (contains "turn 7" (List.nth dead_texts header))
 
 (* ── width contract ─────────────────────────────────────────────────── *)
 
@@ -238,7 +252,7 @@ let test_fleet_rows_read_the_state () =
   check bool "quiet says so" true (contains "quiet" (find_row "quiet-one"))
 
 let test_focus_block_names_the_current_turn () =
-  let header = index_of "turn 5" in
+  let header = last_index_of "sangsu" in
   check bool "the turn is in flight" true (contains "in turn" (nth header));
   check bool "first call returned" true (contains "Read" (nth (header + 1)));
   check bool "with its duration" true (contains "2.0s" (nth (header + 1)));
@@ -249,7 +263,7 @@ let test_focus_falls_back_to_who_acted_last () =
   let drawn = Pane.lines ~rows ~cols ~scroll:0 { fixture with Pane.selected = None } in
   let texts = List.map text drawn.Pane.rows in
   check bool "sangsu acted last" true
-    (List.exists (fun row -> contains "turn 5" row) texts)
+    (List.exists (fun row -> contains "sangsu" row) texts)
 
 let test_narrow_budget_folds_the_fleet () =
   let drawn = Pane.lines ~rows:4 ~cols ~scroll:0 fixture in
@@ -271,7 +285,7 @@ let test_targets_name_the_keeper_under_each_fleet_row () =
   check string "then the settled one" "keeper:rondo" (List.nth targets 3);
   check string "then the quiet one" "keeper:quiet-one" (List.nth targets 4);
   check string "the rule acts on nothing" "none" (List.nth targets 5);
-  check string "focus rows act on nothing" "none" (List.nth targets (index_of "turn 5"));
+  check string "focus rows act on nothing" "none" (List.nth targets (last_index_of "sangsu"));
   check string "padding acts on nothing" "none" (List.nth targets (rows - 1))
 
 (* ── scroll ─────────────────────────────────────────────────────────── *)

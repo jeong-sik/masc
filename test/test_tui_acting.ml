@@ -124,6 +124,29 @@ let test_turns_fold_the_two_planes_into_one_row_per_turn () =
     ]
     (List.map text rows)
 
+(* The wire numbers a turn from the agent session; the settle numbers it
+   from the keeper's lifetime, and after a runtime restart the two
+   disagree. The same real turn then drew as two rows -- the open one
+   hoarding the ledger calls, the settled one holding the tokens (live
+   capture 2026-09-06: turn 1740 beside turn 3084). The settle joins the
+   newest open chunk and stamps it with the keeper's own number. *)
+let test_a_settle_joins_the_open_turn_it_ends_despite_the_number () =
+  let k = "kpr-08" in
+  let events_oldest_first =
+    [ agent_core ~kind:Observer.Turn_started ~turn:500 k
+    ; agent_core ~kind:Observer.Tool_called ~tool:"Read" ~turn:500
+        ~tool_use_id:"c500" k
+    ; ledger_tool ~duration_ms:12. ~keeper:k "Read"
+    ; turn_settled ~keeper:k ~turn:3084 ~input:2000 ~output:40 ~cost:0.0040
+    ]
+  in
+  let rows = Acting.chunk_rows ~traces:[] (entries_of events_oldest_first) in
+  check int "one turn, not two" 1 (List.length rows);
+  check (list string)
+    "the keeper's number, settled, with the ledger call on the same row"
+    [ "\xe2\x96\xa0 kpr-08 turn 3084 | Read 12ms \xc2\xb7 in 2000 out 40 \xc2\xb7 $0.0040" ]
+    (List.map text rows)
+
 (* What is not turn lifecycle stays its own row, in feed position. *)
 let test_turns_pass_non_lifecycle_rows_through () =
   let events_oldest_first =
@@ -571,6 +594,8 @@ let () =
             test_skill_tools_wear_a_skill_label
         ; test_case "turns fold the two planes into one row per turn" `Quick
             test_turns_fold_the_two_planes_into_one_row_per_turn
+        ; test_case "a settle joins the open turn it ends despite the number" `Quick
+            test_a_settle_joins_the_open_turn_it_ends_despite_the_number
         ; test_case "a running turn names its in-flight call" `Quick
             test_a_running_turn_names_its_in_flight_call
         ; test_case "turns pass non-lifecycle rows through" `Quick

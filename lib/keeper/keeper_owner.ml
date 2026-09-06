@@ -650,9 +650,21 @@ let start
     ; on_turn_slot_released
     }
   in
-  Eio.Switch.on_release sw (fun () ->
+  (* [closed_p] is what a caller of {!request} waits on to learn that no
+     answer is coming. It used to be set here only, on switch release — and a
+     switch releases when its fibers finish, which the caller is one of. A
+     cancelled drain therefore left every in-flight request waiting on a
+     promise nobody would resolve, inside the [Cancel.protect] that
+     with_durable_lock puts around a persistence transaction, holding the
+     keeper manifest lock, the runtime.toml lock and the lifecycle key lock
+     for as long as the process ran (#33200). The drain now says so when it
+     leaves its loop, which is the moment the owner stops answering. *)
+  let mark_no_longer_answering () =
     Atomic.set t.closed true;
-    Eio.Promise.resolve resolve_closed ();
+    ignore (Eio.Promise.try_resolve resolve_closed () : bool)
+  in
+  Eio.Switch.on_release sw (fun () ->
+    mark_no_longer_answering ();
     let projection = Atomic.get t.projection in
     Atomic.set t.projection { projection with stopping = true };
     match Chat_operation_store.close operation_store with
@@ -1144,7 +1156,16 @@ let start
              loop state shutdown_operation_id)
     in
     start_child_if_needed initial_state None;
-    loop initial_state None);
+    (* Cancellation reaches the drain at its [Stream.take]. Whatever the
+       reason, the loop is the owner's only reader, so leaving it means no
+       queued or future command will be answered. *)
+    match loop initial_state None with
+    | value ->
+      mark_no_longer_answering ();
+      value
+    | exception exn ->
+      mark_no_longer_answering ();
+      raise exn);
   Ok t))
 ;;
 

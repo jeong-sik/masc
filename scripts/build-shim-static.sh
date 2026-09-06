@@ -60,7 +60,14 @@ if ! docker version >/dev/null 2>&1; then
   exit 1
 fi
 
-stage="$(mktemp -d)"
+# Under the repo and not $TMPDIR or /tmp. The docker daemon resolves a bind
+# mount on its own filesystem: on macOS it shares the Mac's /Users but hands
+# out its own /tmp, and $TMPDIR is /var/folders, which it does not share at
+# all. A source path it cannot see is not an error -- it arrives as an empty
+# directory -- so the whole scratch project silently went missing and dune
+# reported that it could not find a project root. dist/ is ignored by git.
+mkdir -p "$repo_root/dist"
+stage="$(mktemp -d "$repo_root/dist/shim-static.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/src" "$stage/out"
 
@@ -131,6 +138,13 @@ docker run --rm ${platform_args[@]+"${platform_args[@]}"} \
     # The image runs as the unprivileged opam user; / is not writable.
     cp -r /src \"\$HOME/work\"
     cd \"\$HOME/work\"
+    # An unshared bind mount arrives as an empty directory. Say that, rather
+    # than letting dune report that it cannot find the root of a project it
+    # was never given.
+    [ -f dune-project ] || {
+      echo 'build-shim-static: the staged sources did not reach the container; check the docker daemon file sharing for /tmp' >&2
+      exit 1
+    }
     dune build ./masc_exec_shim.exe
     cp _build/default/masc_exec_shim.exe /out/masc-exec-shim
     strip /out/masc-exec-shim 2>/dev/null || true

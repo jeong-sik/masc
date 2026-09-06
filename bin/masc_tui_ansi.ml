@@ -106,7 +106,6 @@ module Theme = struct
     ; slot_2 : string
     ; slot_3 : string
     ; slot_4 : string
-    ; slot_5 : string
     }
 
   (* A slot, so the accessor below is total. *)
@@ -115,18 +114,23 @@ module Theme = struct
     | Slot_2
     | Slot_3
     | Slot_4
-    | Slot_5
 
   (* One place says which hue a slot carries, so the contrast suite measures
-     the mapping the renderer actually draws instead of a copy of it. *)
+     the mapping the renderer actually draws instead of a copy of it.
+
+     Four, because the palette holds seven hues and three of them are spoken
+     for by colours a categorical mark must not be mistaken for: [bad]'s red,
+     [ok]'s green, and the receding black. A fifth slot would have to take one
+     of those back, and the file pane draws both bad and ok on the rows it
+     colours by kind. Cyan and yellow still read as info and warn, which is
+     safe only on a surface that draws neither. *)
   let category_colour = function
     | Slot_1 -> Masc_tui_theme.Bright_cyan
     | Slot_2 -> Masc_tui_theme.Bright_yellow
-    | Slot_3 -> Masc_tui_theme.Bright_green
+    | Slot_3 -> Masc_tui_theme.Bright_blue
     | Slot_4 -> Masc_tui_theme.Bright_magenta
-    | Slot_5 -> Masc_tui_theme.Bright_blue
 
-  let all_categories = [ Slot_1; Slot_2; Slot_3; Slot_4; Slot_5 ]
+  let all_categories = [ Slot_1; Slot_2; Slot_3; Slot_4 ]
 
   let resolved_cache : resolved option Atomic.t = Atomic.make None
 
@@ -157,12 +161,11 @@ module Theme = struct
         ; quiet = of_colour Masc_tui_theme.Bright_black
         ; probe = of_colour Masc_tui_theme.Bright_cyan
         ; message = of_colour Masc_tui_theme.Bright_magenta
-        (* Every hue but the receding one and [bad]'s red. *)
+        (* See [category_colour]: the hues no status token draws. *)
         ; slot_1 = of_colour (category_colour Slot_1)
         ; slot_2 = of_colour (category_colour Slot_2)
         ; slot_3 = of_colour (category_colour Slot_3)
         ; slot_4 = of_colour (category_colour Slot_4)
-        ; slot_5 = of_colour (category_colour Slot_5)
         }
       in
       if Atomic.compare_and_set resolved_cache previous (Some next) then next
@@ -177,7 +180,6 @@ module Theme = struct
     | Slot_2 -> (resolved ()).slot_2
     | Slot_3 -> (resolved ()).slot_3
     | Slot_4 -> (resolved ()).slot_4
-    | Slot_5 -> (resolved ()).slot_5
 
   let ok () = (resolved ()).ok
   let warn () = (resolved ()).warn

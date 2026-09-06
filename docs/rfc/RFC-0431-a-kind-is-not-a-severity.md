@@ -116,7 +116,11 @@ categorical 축도 같은 규칙을 따른다. 색이 유일한 채널이면 안
 
 테마가 이름 붙인 7색 중 `status_ansi_color` 가 이미 다섯을 갖는다(green·yellow·red·cyan·물러나는 black). 그래서 slot 은 **어떤 status 토큰과 바이트가 같다.** 안 겹치는 건 blue·magenta 둘뿐이다.
 
-`slot_6 = Bright_red` 는 `Theme.bad ()` 와 **완전히 같은 이스케이프**였고, `write_two_panes` 가 파일 목록과 content 팬을 한 터미널 행에 붙이는 바람에 목록의 `.png` 가 옆 실패 문구와 같은 색으로 그려졌다. 슬롯을 5개로 줄이고, 그리는 표면이 그 status 토큰을 안 그린다는 확인을 테스트로 넣었다.
+`slot_6 = Bright_red` 는 `Theme.bad ()` 와 **완전히 같은 이스케이프**였고, `write_two_panes` 가 파일 목록과 content 팬을 한 터미널 행에 붙이는 바람에 목록의 `.png` 가 옆 실패 문구와 같은 색으로 그려졌다. 그리는 표면이 그 status 토큰을 안 그린다는 확인을 테스트로 넣었다.
+
+**슬롯은 넷이다.** 종류 표시가 흉내 내면 안 되는 색이 셋이다 — `bad` 의 red, `ok` 의 green, 물러나는 black. 7색에서 그 셋을 빼면 cyan·yellow·blue·magenta 넷이 남고, 그게 알파벳 전부다. 다섯 번째 슬롯은 이름이 무엇이든 저 셋 중 하나를 도로 가져온다 (#33696). 파일 팬의 색칠하는 종류 여섯이 넷을 나눠 쓴다 — Web 은 Code 와, Media 는 Script 와 같이 읽고, 한 슬롯 안에서 둘을 가르는 건 글리프다.
+
+여덟 번째 색을 만드는 쪽은 재보고 접었다. ANSI 15 는 base07 인데 `config/themes` 52개 중 여섯에서 base07 과 base05(본문 전경색)가 같은 바이트라, 그 테마에서 슬롯이 파일 이름 글자와 구별되지 않는다.
 
 **3. 팔레트가 바뀔 때 13곳이 따라 움직이는가** — 그렇다. `bin/masc_tui_render.ml` 의 raw hue 식별자는 **0** 이고, AST 가드가 그 자리를 지킨다 (`blue`·`bright_blue`·`bright_cyan`·`bright_magenta`·`bright_yellow`·`bright_green`·`bright_red`·`magenta`). `cyan` 은 열어뒀다 — `tone Accent` 가 그걸로 resolve 되고 스무 곳쯤이 그걸 읽는다.
 
@@ -132,4 +136,5 @@ categorical 축도 같은 규칙을 따른다. 색이 유일한 채널이면 안
 
 - `cyan` 이 래칫 밖이다. `tone Accent` 를 어떻게 볼지는 raw hue 문제가 아니라 그 토큰에 대한 질문이다
 - `glyphs_distinct` 는 바이트만 본다. 마크가 실제로 떨어져 읽히는지는 안 쟀다
-- 슬롯이 status 토큰과 겹치는 건 남아 있다. 지금 테스트는 파일 팬이 그리는 `bad`·`ok` 두 개만 막는다. 다른 표면이 슬롯을 쓰려면 자기가 그리는 토큰에 대해 같은 확인을 해야 한다
+- 슬롯 cyan·yellow 는 여전히 `info`·`warn` 과 바이트가 같다. 지금 테스트는 파일 팬이 그리는 `bad`·`ok` 두 개만 막는다. 다른 표면이 슬롯을 쓰려면 자기가 그리는 토큰에 대해 같은 확인을 해야 한다
+- 슬롯이 본문 전경색(base05)과 떨어지는지는 계약이 없다. 여덟 번째 색을 검토할 때 그게 먼저다

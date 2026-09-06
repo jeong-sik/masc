@@ -169,7 +169,7 @@ let test_the_categorical_guard_rejects_a_raw_hue () =
   in
   if violations "let _ = Ansi.bright_blue" = [] then
     failf "the categorical guard let a raw hue through";
-  if violations "let _ = Theme.category Theme.Slot_5" <> [] then
+  if violations "let _ = Theme.category Theme.Slot_4" <> [] then
     failf "the categorical guard rejected a theme slot"
 ;;
 

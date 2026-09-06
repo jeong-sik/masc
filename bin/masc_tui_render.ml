@@ -14751,13 +14751,16 @@ let render_code (state : state) =
 
                      Plain recedes through the theme rather than a constant
                      [dim], for the same reason the six above it do. *)
+                  (* Six kinds over four slots, and the glyph is what tells
+                     any two apart inside one: [.vue] and [.ts] are the same
+                     job, so Web reads with Code rather than spending a hue
+                     the alphabet does not have. *)
                   match kind with
-                  | File_icon.Code -> Theme.category Theme.Slot_1
+                  | File_icon.Code | File_icon.Web -> Theme.category Theme.Slot_1
                   | File_icon.Data -> Theme.category Theme.Slot_2
                   | File_icon.Prose -> Theme.category Theme.Slot_3
                   | File_icon.Script | File_icon.Media ->
                     Theme.category Theme.Slot_4
-                  | File_icon.Web -> Theme.category Theme.Slot_5
                   | File_icon.Plain -> Theme.recede ()
                 in
                 colour ^ glyph ^ Ansi.reset ^ " "

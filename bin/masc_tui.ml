@@ -11889,10 +11889,21 @@ let drain_async_messages state ~base_path ~http_refresh_inflight
   in
   loop false
 
-let invalidate_frame_for_resize frame_presenter render_schedule =
-  invalidate_terminal_size ();
+(* What a size change costs, wherever it was noticed: the presenter's cached
+   screen describes the old geometry, and the next frame has to be drawn
+   rather than skipped as unchanged. Both doors below end here so the two
+   cannot come to disagree about what a resize costs. *)
+let discard_frame_for_new_size frame_presenter render_schedule =
   Frame_presenter.invalidate frame_presenter;
   Render_schedule.request render_schedule Render_schedule.Force
+
+(* SIGWINCH says the size changed without saying to what, so the cached size
+   is dropped and the next reader re-probes. The loop's own ioctl snapshot
+   takes the other door: it already holds the new size and has to keep it, or
+   the frame it is about to draw would read a different one. *)
+let invalidate_frame_for_resize frame_presenter render_schedule =
+  invalidate_terminal_size ();
+  discard_frame_for_new_size frame_presenter render_schedule
 
 let request_console_write_repair render_schedule =
   Terminal_write_repair.request_repaint render_schedule
@@ -12066,10 +12077,13 @@ let apply_raw_mode new_term =
 
 let enter_terminal_session ~cleanup ~terminate ~request_interrupt
     ~request_full_repaint ~suspend ~new_term =
-  at_exit cleanup;
-  (* After [cleanup] registers, so the summary is written once the terminal is
-     back and cannot land in the middle of a restored screen. *)
+  (* [at_exit] runs its callbacks in the reverse of this order and stops at
+     the first one that raises, so the terminal restore is registered last
+     and runs first. The frame summary appends to a file and can raise on a
+     write -- registered the other way round it would take the restore with
+     it and leave the terminal in raw mode. *)
   at_exit Masc_tui_frame_timing.report;
+  at_exit cleanup;
   (* SIGINT is the only one of these a person sends by hand mid-sentence, so
      it asks the loop rather than ending the process. The rest still mean the
      session is over. *)
@@ -13686,8 +13700,7 @@ and is loaded on demand through keeper_skill.
          SIGWINCH, without allowing nested renderers to disagree mid-frame. *)
       (match refresh_terminal_size () with
        | Render_schedule.Terminal_size_cache.Changed _ ->
-           Frame_presenter.invalidate frame_presenter;
-           Render_schedule.request render_schedule Render_schedule.Force
+           discard_frame_for_new_size frame_presenter render_schedule
        | Render_schedule.Terminal_size_cache.Unchanged _ -> ());
       (* Any deliberate input withdraws a standing Ctrl-C. Without this the
          armed state outlives the moment it was meant for, and a Ctrl-C typed

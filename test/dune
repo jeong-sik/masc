@@ -4684,3 +4684,6 @@
  (name test_tui_image_mosaic)
  (modules test_tui_image_mosaic)
  (libraries alcotest masc_tui_image_mosaic))
+
+; Tool definition parity artifact regeneration
+(include ../tools/tool_parity_regen.inc)

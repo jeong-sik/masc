@@ -669,3 +669,37 @@ P4m 은 `Fs_compat.load_file`·`save_file`·`append_file` 의 Eio 분기를 Unix
 남은 긴 실행은 전부 keeper cycle 안, **append 가 끝난 뒤 다음 load 를 부르기 전의 순수 계산**이다(GC 는 4~29 ms). cycle 의 단계 집계(metrics 저장소 행의 `presence/snapshot/board/turn`)는 이 시간을 `turn`(50~330초, provider 대기 포함)으로만 말한다. board 게시물은 메모리 Hashtbl 이라 파싱이 아니다. `code-reviewer` 의 `openat → switch` 둘은 `Fs_compat` 를 거치지 않는 직접 `Eio.Path.load` 다. 대시보드 쪽은 `[keepers_json:<keeper>] sub-op audit=205ms trust=100ms total=346ms` 로그가 있는데, HTTP fiber 의 일이라 이 RFC 의 범위 밖이고 별도 항목이다.
 
 P4o(#33623)는 turn 의 단계에 이름을 붙인다: `turn:prompt`(프롬프트 조립), `turn:provider`(provider 시도, 스트리밍·도구 루프 포함), `tool <name>`(도구 호출마다), `turn:post`(post-turn). `Eio_guard.with_named_switch` 는 fiber 안에서만 switch 를 열고 밖에서는 그대로 실행한다. 다음 창의 라벨 `keeper <name> cycle > 단계` 가 140~360 ms 의 주인을 가른다.
+
+#### P4o 라이브 — 단계와 도구 이름이 붙었다 (pid 65328, 커밋 0a002722e2, 09:44:38Z 기동)
+
+두 창을 잡았다. 첫 창(09:47Z, ready+3분)은 호스트 부하 69~110 의 부팅 폭풍이고, 둘째 창(09:49Z, ready+4.5분)은 부하가 내려간 뒤다.
+
+부팅 폭풍 창: 하네스 p99 755 ms·max 1,456 ms, main 점유 68.4%, ≥100 ms 실행 86. 라벨 상위는 이렇다.
+
+| 라벨 | 10 ms 이상 | 합계 | 최대 |
+|---|---|---|---|
+| `-` (이름 없는 boot fiber 28006) | 11 | 10,464 ms | 7,672 ms |
+| `keeper rondo cycle > turn:provider` | 11 | 2,977 ms | 2,275 ms |
+| `keeper polisher cycle > turn:provider` | 11 | 2,601 ms | 1,370 ms |
+| `keeper pr-updater cycle > turn:provider` | 11 | 1,956 ms | 694 ms |
+| `Buf_write.with_flow` | 38 | 1,810 ms | 174 ms |
+| `Process.parse_out > spawn_unix` | 10 | 1,506 ms | 615 ms |
+
+keeper 쪽 긴 실행은 전부 `turn:provider` 안이고 여전히 `append-file → load-file` 사이의 계산이다. 가장 큰 것은 라벨이 없는 fiber 28006 인데, 부팅 때 만들어져 이름 있는 switch 를 연 적이 없다.
+
+부하가 내려간 창: 하네스 p99 378 ms·max 2,486 ms(정리 중), main 점유 13.6%, ≥100 ms 실행 9. 여기서 1위가 도구다.
+
+| 라벨 | 10 ms 이상 | 합계 | 최대 |
+|---|---|---|---|
+| `tool masc_web_fetch > with_open_in` | 3 | 1,524 ms | **626 ms** |
+| `filter_map > Buf_write.with_flow` | 13 | 796 ms | 458 ms |
+| `keeper rondo cycle > turn:provider` | 5 | 640 ms | 490 ms |
+| `tool tool_execute > both` | 8 | 330 ms | 204 ms |
+
+스택 샘플도 같은 곳을 짚었다: `Tool_misc_web_fetch.handle`/`fetch_impl` 613, `extract_description` 260, `Markup.Encoding.run` 237. 세 실행 모두 `Promise.await`(HTTP 응답)에서 재개해 `fs-compat-atomic-replace`(본문 오프로드)로 끝난다. 그 사이가 문서 파싱이다.
+
+#### P4p — 받아온 문서의 파싱을 pool 로 (#33658)
+
+제목 추출, 설명 추출, 마크다운 렌더는 응답 본문에 대해 순수하므로 셋을 pool 작업 하나로 돌린다. `truncate_text` 는 전체 본문을 파일로 내보내므로 fiber 에 남는다. 대시보드 쪽(`Dashboard_snapshot` 루프, shell payload)은 이미 pool 로 내려가 있고, `keepers_json` 의 `Eio.Fiber.all` 은 그 pool 워커 도메인 위에서 돈다.
+
+남은 표적 넷: `turn:provider` 안의 append→load 계산(더 세분화가 필요하다), 이름 없는 boot fiber 28006, `tool tool_execute`, 그리고 HTTP 응답 fiber 의 `filter_map > Buf_write.with_flow`.

@@ -2632,6 +2632,11 @@ type state = {
      queued line has not been sent, so joining two changes what one turn
      receives rather than what a turn in flight sees. *)
   mutable coalesce_queued_input: bool;
+  (* Whether ^Y ending a voice capture also sends what was heard
+     ([tui].voice_send_on_stop at boot). Off by default: the transcript lands
+     in the draft either way, and that draft is also where a spoken
+     half-sentence waits for typing. *)
+  mutable voice_send_on_stop: bool;
   mutable answering_open: bool;
   mutable answering_scroll: int;
   (* Cursor over the overlay's actionable rows (running / just finished);
@@ -4025,6 +4030,7 @@ let create_state
   agenda_scroll = 0;
   hints_visible = true;
   coalesce_queued_input = true;
+  voice_send_on_stop = false;
   answering_open = false;
   answering_scroll = 0;
   answering_cursor = 0;

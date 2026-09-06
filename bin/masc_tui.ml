@@ -9489,22 +9489,6 @@ let launch_voice_capture state ~mailbox ~keeper =
    the mode can be turned off between utterances — a fiber that re-armed itself
    would have to be cancelled mid-recording, and that throws away speech
    already said. *)
-(* [voice.stt].send_on_stop, read off the config the TUI already holds rather
-   than a second load: the voice config arrives once as JSON and this is one
-   field of it, so a reload that changes the setting changes this with it.
-
-   Absent or malformed reads false. The field decides whether a spoken
-   sentence is sent without the operator confirming it, and a value this
-   cannot parse is not the operator having asked for that. *)
-let voice_sends_on_stop state =
-  match state.voice_config with
-  | None -> false
-  | Some json ->
-    (match Yojson.Safe.Util.(json |> member "stt" |> member "send_on_stop") with
-     | `Bool value -> value
-     | _ -> false)
-;;
-
 let rearm_continuous_capture state ~mailbox ~keeper =
   match state.voice_continuous with
   | Some active when String.equal active keeper && state.voice_capture = None ->
@@ -9826,7 +9810,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            caller would be a second answer to those questions. A capture in
            continuous mode re-arms above before this, so the microphone is
            already listening for the next sentence when this returns. *)
-        if voice_sends_on_stop state
+        if state.voice_send_on_stop
         then (
           let (_ : bool) =
             handle_composer_key state ~base_path ~mailbox Composer.send_key
@@ -12174,6 +12158,12 @@ let main () =
     Option.value
       (Masc_tui_config.coalesce_queued_input ~base_path)
       ~default:true;
+  (* Default false, unlike its neighbours: this one sends without the operator
+     confirming, so absence is not consent. *)
+  state.voice_send_on_stop <-
+    Option.value
+      (Masc_tui_config.voice_send_on_stop ~base_path)
+      ~default:false;
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in

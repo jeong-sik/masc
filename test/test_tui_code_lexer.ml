@@ -216,12 +216,30 @@ let test_a_toml_table_header_is_taken_whole () =
         (List.filter (fun (piece, _) -> piece <> "") header)
   | [] -> Alcotest.fail "the lexer answered no rows"
 
+(* Both lexer tests below run under this: a hang has to end as a failure
+   with a name, not as a job that runs until CI stops it. OCaml 5 polls for
+   signals inside loops, so the handler reaches even a branch that is making
+   no progress. *)
+let under_alarm seconds report body =
+  let previous =
+    Sys.signal Sys.sigalrm
+      (Sys.Signal_handle (fun _ -> Alcotest.failf "did not finish: %s" (report ())))
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Unix.alarm 0);
+      Sys.set_signal Sys.sigalrm previous)
+    (fun () ->
+      ignore (Unix.alarm seconds);
+      body ())
+
 (* A negative number used to stop the json lexer where it stood: the branch
    admits a leading sign, the digit scan rejects one, and a scan that matches
    nothing returns the index it was given. Opening a .json file holding one
    froze the TUI. The first case answers whether the lexer finishes at all;
    the rest keep the sign from taking more than its own number. *)
 let test_json_reads_a_negative_number () =
+  under_alarm 10 (fun () -> "json on a negative number") @@ fun () ->
   check seg "the sign belongs to the number"
     [ ("{", Masc_tui_code_lexer.kind_code)
     ; ("\"a\"", Masc_tui_code_lexer.kind_type)
@@ -243,6 +261,42 @@ let test_json_reads_a_negative_number () =
   check Alcotest.(list string) "a lone sign stays plain"
     [ Masc_tui_code_lexer.kind_code ]
     (List.sort_uniq compare (List.map snd (spans "json" "{-}")))
+
+(* Every branch of every lexer has to move the cursor. One that does not
+   turns opening a file into a frozen TUI, and no assertion catches it: the
+   lexer never answers, right or wrong. So this asks the only question that
+   can be asked -- does it come back -- for the fragments that make a branch
+   read one character and decide something about the next one. The alarm
+   turns a hang into a failed test naming the case in flight, instead of a
+   CI job that runs until its own timeout. *)
+let awkward_fragments =
+  [ ""; " "; "\n"; "\t"; "-"; "-1"; "--"; "---"; "+"; "0x"; "0x_"; "1e"; "1.";
+    ".5"; "e-"; "'"; "\""; "`"; "'''"; "\"\"\""; "\\"; "/*"; "*/"; "//"; "#";
+    "{"; "}"; "["; "]"; ":"; ": -"; "= -"; "@@"; "$"; "<<"; ">>";
+    {|{"a": -1}|}; "[-2.5, 3]"; "a = -1"; "x: -1"; "select -1"; "let x = -1";
+    "echo -1" ]
+
+let lexer_languages =
+  [ "ocaml"; "bash"; "json"; "diff"; "memory"; "yaml"; "toml"; "sql";
+    "typescript"; "go"; "rust"; "c"; "python" ]
+
+let test_every_lexer_finishes_on_awkward_fragments () =
+  let in_flight = ref "" in
+  under_alarm 10
+    (fun () -> !in_flight)
+    (fun () ->
+      List.iter
+        (fun language ->
+          match Masc_tui_code_lexer.lexer_of_language language with
+          | None -> Alcotest.failf "no lexer for %s" language
+          | Some lex ->
+            List.iter
+              (fun fragment ->
+                in_flight := Printf.sprintf "%s on %S" language fragment;
+                ignore (List.length (lex fragment)))
+              awkward_fragments)
+        lexer_languages);
+  Alcotest.(check bool) "every lexer answered" true true
 
 let test_sql_reads_a_keyword_however_it_is_spelled () =
   let kinds text = List.map snd (spans "sql" text) in
@@ -352,6 +406,8 @@ let () =
             test_a_toml_table_header_is_taken_whole
         ; Alcotest.test_case "json reads a negative number" `Quick
             test_json_reads_a_negative_number
+        ; Alcotest.test_case "every lexer finishes on awkward fragments" `Quick
+            test_every_lexer_finishes_on_awkward_fragments
         ] )
     ; ( "sql"
       , [ Alcotest.test_case "a keyword however it is spelled" `Quick

@@ -1247,7 +1247,7 @@ let test_compact_summary_counts_registered_public_names () =
         (fun expected ->
           check bool ("summary contains " ^ expected) true
             (contains ~needle:expected summary))
-        [ "Tools 4"; "Read 2"; "Edit 1"; "Execute 1" ]
+        [ "Read 2"; "Edit 1"; "Execute 1" ]
   | _, details ->
       failf "every call returned, so the header was expected alone, got %d details"
         (List.length details)
@@ -1270,8 +1270,8 @@ let test_compact_summary_adds_up_a_kind_it_ran_twice () =
       check bool "the two keeper tools are added up" true
         (contains ~needle:"Keeper 2" summary);
       (* The tag is what the names leave separate. Both are still named. *)
-      check bool "and the block still counts its calls" true
-        (contains ~needle:"Tools 3" summary)
+      check bool "and each name keeps its own count" true
+        (contains ~needle:"Read 1" summary)
   | _, details ->
       failf "every call returned, so the header was expected alone, got %d details"
         (List.length details)
@@ -1301,8 +1301,8 @@ let test_compact_summary_does_not_tag_a_kind_it_ran_once () =
           check bool ("summary does not repeat " ^ tag) false
             (contains ~needle:tag summary))
         [ "Skill 1"; "Keeper 1"; "Fusion 1" ];
-      check bool "and the block still counts its calls" true
-        (contains ~needle:"Tools 4" summary)
+      check bool "and each name keeps its own count" true
+        (contains ~needle:"Read 1" summary)
   | _, details ->
       failf "every call returned, so the header was expected alone, got %d details"
         (List.length details)
@@ -1367,8 +1367,8 @@ let test_compact_summary_leaves_an_unregistered_name_untagged () =
       ; kind_activity "another_native_tool"
       ]
   in
-  check bool "the block is still counted" true
-    (contains ~needle:"Tools 2" summary);
+  check bool "both names are counted" true
+    (contains ~needle:"some_provider_native_tool 1" summary);
   List.iter
     (fun tag ->
       check bool ("no " ^ tag ^ " tag") false (contains ~needle:tag summary))
@@ -1783,8 +1783,32 @@ let test_a_single_call_gets_no_header () =
 ;;
 
 (* The reason this split exists: before it, a reader could see the rollup or
-   the calls, never both. Full now answers "how many, how did they end" on
+   the calls, never both. Full now answers "what ran, how did they end" on
    the header while every call keeps its row underneath. *)
+(* The transcript draws this row under its own TOOLS label, and the row used
+   to open with "Tools N": the label twice, and a count the same line gives
+   as the sum of its names and again as "N returned". *)
+let test_the_rollup_does_not_repeat_the_rows_label () =
+  let projection =
+    Transcript.project_tool_block Transcript.Compact
+      (Transcript.tool_block ~omitted_steps:0
+         [ activity ~name:"read_file" ~outcome:Transcript.Returned
+         ; activity ~name:"read_file" ~outcome:Transcript.Returned
+         ; activity ~name:"glob" ~outcome:Transcript.Returned
+         ])
+  in
+  match projection.Transcript.header with
+  | None -> Alcotest.fail "a three-call block draws a header"
+  | Some header ->
+      check bool "the row does not spell its own label" false
+        (contains_substring header "Tools");
+      List.iter
+        (fun part ->
+          check bool ("the header keeps " ^ part) true
+            (contains_substring header part))
+        [ "read_file 2"; "glob 1"; "3 returned" ]
+;;
+
 let test_full_shows_the_rollup_and_the_calls_together () =
   let projection =
     Transcript.project_tool_block Transcript.Full
@@ -1797,10 +1821,12 @@ let test_full_shows_the_rollup_and_the_calls_together () =
   (match projection.Transcript.header with
    | None -> Alcotest.fail "a three-call block draws a header"
    | Some header ->
-       check bool "the header counts the calls" true
-         (contains_substring header "Tools 3");
-       (* Neither mode's header claims a fold: how much a folded block holds
-          is the count it already carries, and whether the pane is folded is
+       List.iter
+         (fun name ->
+           check bool ("the header names " ^ name) true
+             (contains_substring header name))
+         [ "read_file 1"; "web_fetch 1"; "glob 1" ];
+       (* Neither mode's header claims a fold: whether the pane is folded is
           the mode, not this row. *)
        check bool "and claims no fold" false
          (contains_substring header "folded"));
@@ -1958,6 +1984,8 @@ let () =
             test_the_header_stays_out_of_the_call_pairing
         ; test_case "a single call gets no header" `Quick
             test_a_single_call_gets_no_header
+        ; test_case "the rollup does not repeat the row's label" `Quick
+            test_the_rollup_does_not_repeat_the_rows_label
         ; test_case "full shows the rollup and the calls together" `Quick
             test_full_shows_the_rollup_and_the_calls_together
         ; test_case "the trouble row carries the block mark" `Quick

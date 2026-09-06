@@ -740,14 +740,19 @@ let compact_activity_kinds activities =
    outcome summary. *)
 (* The block's rollup, on a line of its own.
 
-   It used to close with "N details folded", and that N was always the count
-   already at the head of the same line: the hidden rows are one row per call,
-   so [hidden_activity_rows] and [Tools N] were the same number by
-   construction. Six blocks on one live screen all read "Tools N ... N details
-   folded". The clause is gone rather than replaced -- how much is behind the
-   fold is [Tools N], and that the pane is folded is the mode the reader chose
-   and the footer keeps showing. A per-row mark would say the opposite of what
-   is true: the fold is Ctrl-D over the whole pane, not this line.
+   Three counts have left this line for the same reason, and the reason is
+   worth keeping: a number the same line already gives costs width and buys
+   a second place to disagree. "N details folded" was the count at the head.
+   [Keeper 1] over a single [keeper_*] name was that name's own number. And
+   the head itself, [Tools N], was the sum of the name counts beside it --
+   on a block where every call returned it was also the [N returned] that
+   closes the line, so one screen read "Tools 9 ... 9 returned" six times.
+   The row is drawn under the transcript's own TOOLS label, which says what
+   kind of row it is, so the word was the label a second time as well.
+
+   What the line keeps is what nothing else says: how it went (the mark),
+   what ran (the names and their counts), and what came of it (the
+   outcomes).
 
    [outcomes] is passed rather than derived because the two modes count
    different calls: folded, the trouble gets a line of its own and the rollup
@@ -759,10 +764,7 @@ let compact_activity_kinds activities =
    separators. *)
 let inventory_row ~outcomes activities =
   let parts =
-    (Printf.sprintf "Tools %d" (List.length activities)
-     :: compact_activity_kinds activities)
-    @ compact_tool_parts activities
-    @ outcomes
+    compact_activity_kinds activities @ compact_tool_parts activities @ outcomes
   in
   safe_line
     (Printf.sprintf "%s %s"

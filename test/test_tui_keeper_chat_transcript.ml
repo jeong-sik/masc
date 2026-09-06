@@ -1275,6 +1275,69 @@ let test_compact_summary_keeps_operational_tool_kinds () =
       failf "every call returned, so the header was expected alone, got %d details"
         (List.length details)
 
+(* The summary's family tags are read from the tool registry, so what a name
+   is spelled like no longer decides which family it lands in. *)
+let kind_activity name =
+  Transcript.make_tool_activity ~call_id:None ~tool_name:name ~args:"{}"
+    ~outcome:Transcript.Returned ~duration:None ()
+
+let compact_summary_of activities =
+  let projection =
+    Transcript.tool_block activities
+    |> Transcript.project_tool_block Transcript.Compact
+  in
+  match projection.Transcript.header with
+  | Some summary -> summary
+  | None -> fail "a block of several calls was expected to carry a header"
+
+let test_compact_summary_separates_a_handoff_from_a_keeper_read () =
+  let summary =
+    compact_summary_of
+      [ kind_activity "masc_keeper_delegate"
+      ; kind_activity "masc_keeper_delegate_status"
+      ; kind_activity "Read"
+      ]
+  in
+  check bool "the handoff is counted as a delegation" true
+    (contains ~needle:"Delegate 1" summary);
+  (* Reading how a delegation is going is not delegating. Both names carry
+     the same [masc_keeper_delegate] prefix, so a spelling test cannot tell
+     them apart. *)
+  check bool "the status read stays keeper work" true
+    (contains ~needle:"Keeper 1" summary)
+
+let test_compact_summary_does_not_call_a_code_query_keeper_work () =
+  (* [keeper_code_query] is a code search and [keeper_webmcp_call] an MCP
+     call. Both are named for the process that hosts them, and a prefix test
+     counted them as work done on Keepers. *)
+  let summary =
+    compact_summary_of
+      [ kind_activity "keeper_code_query"
+      ; kind_activity "keeper_webmcp_call"
+      ; kind_activity "Read"
+      ]
+  in
+  check bool "no delegation is claimed" false
+    (contains ~needle:"Delegate" summary);
+  check bool "no keeper work is claimed" false
+    (contains ~needle:"Keeper" summary)
+
+let test_compact_summary_leaves_an_unregistered_name_untagged () =
+  (* A trace from an older or external provider may name no registered tool.
+     It gets no family tag rather than an invented one. *)
+  let summary =
+    compact_summary_of
+      [ kind_activity "some_provider_native_tool"
+      ; kind_activity "another_native_tool"
+      ]
+  in
+  check bool "the block is still counted" true
+    (contains ~needle:"Tools 2" summary);
+  List.iter
+    (fun tag ->
+      check bool ("no " ^ tag ^ " tag") false (contains ~needle:tag summary))
+    [ "Delegate"; "Keeper"; "Fusion"; "Skill" ]
+
 let full_tool_rows block =
   (Transcript.project_tool_block Transcript.Full block).Transcript.details
 
@@ -1837,6 +1900,12 @@ let () =
             test_compact_summary_counts_registered_public_names
         ; test_case "compact summary keeps operational tool kinds" `Quick
             test_compact_summary_keeps_operational_tool_kinds
+        ; test_case "compact summary separates a handoff from a keeper read"
+            `Quick test_compact_summary_separates_a_handoff_from_a_keeper_read
+        ; test_case "compact summary does not call a code query keeper work"
+            `Quick test_compact_summary_does_not_call_a_code_query_keeper_work
+        ; test_case "compact summary leaves an unregistered name untagged"
+            `Quick test_compact_summary_leaves_an_unregistered_name_untagged
         ; test_case "a fold reports the outcome its marker stands for" `Quick
             test_a_fold_reports_the_outcome_its_marker_stands_for
         ; test_case "a fold names the tool that failed" `Quick

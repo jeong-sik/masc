@@ -426,6 +426,7 @@
  (modules masc_tui_keeper_chat_transcript)
  (libraries
   masc
+  masc.keeper_tool_name
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
   masc_tui_keeper_chat_projection

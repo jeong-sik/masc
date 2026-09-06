@@ -10,29 +10,32 @@ type reader =
   | Lexed
   | By_markers of Ide_memo.markers
 
-let is_blank text = String.equal (String.trim text) ""
-
-(* A row the lexer cut into one comment and nothing else. The lexer carries
-   the state a single row does not -- a string opened two rows up, a block
-   comment still running -- so where there is one, it decides. *)
-let lone_comment row =
-  match List.filter (fun (text, _) -> not (is_blank text)) row with
-  | [ (text, kind) ] when String.equal kind Masc_tui_code_lexer.kind_comment -> Some text
-  | [] | [ _ ] | _ :: _ :: _ -> None
-
-(* The row's text, however the lexer cut it -- or did not: a language
-   without a lexer arrives as one code segment per row. *)
-let text_of_row row = String.concat "" (List.map fst row)
-
 (* A file written on Windows carries a carriage return at the end of every
    row, and the wire escapes it to the four characters [\x0D] rather than
-   let it move a terminal cursor. It is not part of the comment. *)
+   let it move a terminal cursor. It belongs to neither the row's text nor
+   the comment on it: a lexer closes the comment before it and leaves the
+   escape as a run of its own, so a row that is one comment reads as two. *)
 let carriage_return = "\\x0D"
 
 let drop_trailing_carriage_return text =
   match String.length text - String.length carriage_return with
   | cut when cut >= 0 && String.ends_with ~suffix:carriage_return text -> String.sub text 0 cut
   | _ -> text
+
+let clean text = drop_trailing_carriage_return (String.trim text)
+let is_blank text = String.equal (clean text) ""
+
+(* A row the lexer cut into one comment and nothing else. The lexer carries
+   the state a single row does not -- a string opened two rows up, a block
+   comment still running -- so where there is one, it decides. *)
+let lone_comment row =
+  match List.filter (fun (text, _) -> not (is_blank text)) row with
+  | [ (text, kind) ] when String.equal kind Masc_tui_code_lexer.kind_comment -> Some (clean text)
+  | [] | [ _ ] | _ :: _ :: _ -> None
+
+(* The row's text, however the lexer cut it -- or did not: a language
+   without a lexer arrives as one code segment per row. *)
+let text_of_row row = String.concat "" (List.map fst row)
 
 (* A memo is the whole row: it opens with the file's own marker and, for a
    block marker, closes on the same row. Code before the marker makes the
@@ -46,9 +49,8 @@ let is_a_comment_row ~markers line =
 
 (* The comment on this row, or [None] when the row does not carry one whole. *)
 let comment_of_row ~reader row =
-  let clean text = drop_trailing_carriage_return (String.trim text) in
   match reader with
-  | Lexed -> Option.map clean (lone_comment row)
+  | Lexed -> lone_comment row
   | By_markers markers ->
     let line = clean (text_of_row row) in
     if is_a_comment_row ~markers line then Some line else None

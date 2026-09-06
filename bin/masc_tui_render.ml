@@ -1398,6 +1398,7 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
         { Pane.name = keeper.k_name
         ; mark = Masc_tui_keeper_mark.glyph ~paused reading_of_health
         ; mark_tone
+        ; health = reading_of_health
         ; trace_id = keeper.k_trace_id
         })
       state.keepers

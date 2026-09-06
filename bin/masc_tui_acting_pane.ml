@@ -1,5 +1,6 @@
 module Acting = Masc_tui_acting
 module Layout = Masc_tui_message_layout
+module Reading = Masc.Tui_decode
 
 (* ── Width ───────────────────────────────────────────────────────────────
 
@@ -57,6 +58,7 @@ type keeper = {
   name : string;
   mark : string;
   mark_tone : tone;
+  health : Reading.keeper_health_reading option;
   trace_id : string;
 }
 
@@ -189,13 +191,24 @@ let chunk_call_count (chunk : Acting.chunk) =
   | [] -> Option.value ~default:0 chunk.Acting.ck_calls
   | tools -> List.length tools
 
-let keeper_state_text ~now ~approval (chunk : Acting.chunk option) =
+(* An unsettled chunk means the feed never saw the turn end. A keeper whose
+   process is gone can never send that end, so for [Health_offline] and
+   [Health_zombie] the row states what is known — the turn is unfinished —
+   instead of a "running" that reads as progress beside the gone mark. No
+   health reading ([None]) keeps the turn's own claim. *)
+let keeper_can_finish = function
+  | Some Reading.Health_offline | Some Reading.Health_zombie -> false
+  | Some _ | None -> true
+
+let unfinished_glyph = "!"
+
+let keeper_state_text ~now ~health ~approval (chunk : Acting.chunk option) =
   match approval, chunk with
   | Some tool, _ ->
       [ { text = attention_glyph ^ " "; tone = Warn }
       ; { text = join [ "approval"; tool ]; tone = Warn }
       ]
-  | None, Some chunk when not chunk.Acting.ck_settled ->
+  | None, Some chunk when not chunk.Acting.ck_settled && keeper_can_finish health ->
       let calls = chunk_call_count chunk in
       let on =
         match current_tool chunk with
@@ -204,6 +217,11 @@ let keeper_state_text ~now ~approval (chunk : Acting.chunk option) =
       in
       [ { text = running_glyph ^ " "; tone = Ok }
       ; { text = join [ on; (if calls > 0 then calls_text calls else "") ]; tone = Plain }
+      ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Dim }
+      ]
+  | None, Some chunk when not chunk.Acting.ck_settled ->
+      [ { text = unfinished_glyph ^ " "; tone = Warn }
+      ; { text = "unfinished"; tone = Warn }
       ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Dim }
       ]
   | None, Some chunk ->
@@ -327,7 +345,7 @@ let fleet_row ~cols input newest keeper =
             }
           ; { text = String.make gap_cells ' '; tone = Plain }
           ]
-          @ keeper_state_text ~now:input.now ~approval chunk))
+          @ keeper_state_text ~now:input.now ~health:keeper.health ~approval chunk))
   , Target_keeper keeper.name )
 
 let more_line ~cols n =
@@ -354,17 +372,26 @@ let focus_keeper input newest =
         newest None
       |> Option.map fst
 
-let tool_line ~cols ~now (chunk : Acting.chunk) (tool : Acting.chunk_tool) ~is_last =
+let health_of input name =
+  match List.find_opt (fun keeper -> String.equal keeper.name name) input.keepers with
+  | Some keeper -> keeper.health
+  | None -> None
+
+let tool_line ~cols ~now ~can_finish (chunk : Acting.chunk) (tool : Acting.chunk_tool) ~is_last =
   let duration =
     match tool.Acting.ct_duration_ms with
     | Some ms -> { text = Acting.elapsed_text ms; tone = Dim }
-    | None when is_last && not chunk.Acting.ck_settled ->
+    | None when is_last && not chunk.Acting.ck_settled && can_finish ->
         { text = "running" ^ middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Ok }
+    | None when is_last && not chunk.Acting.ck_settled ->
+        { text = "unfinished" ^ middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Warn }
     | None -> { text = ""; tone = Dim }
   in
   let glyph =
     if is_last && (not chunk.Acting.ck_settled) && Option.is_none tool.Acting.ct_duration_ms
-    then { text = running_glyph ^ " "; tone = Ok }
+    then
+      if can_finish then { text = running_glyph ^ " "; tone = Ok }
+      else { text = unfinished_glyph ^ " "; tone = Warn }
     else { text = settled_glyph ^ " "; tone = Dim }
   in
   let inner = cols - border_cells - mark_cells in
@@ -402,18 +429,20 @@ let focus_lines ~cols input chunks name =
     List.filter (fun (c : Acting.chunk) -> String.equal c.Acting.ck_keeper name) chunks
   in
   let approval = approval_for input.approvals name in
+  let can_finish = keeper_can_finish (health_of input name) in
   let header =
     match own with
     | (current : Acting.chunk) :: _ ->
+        let state_word, state_tone =
+          if current.Acting.ck_settled then ("settled", Dim)
+          else if can_finish then ("in turn", Ok)
+          else ("unfinished", Warn)
+        in
         fit_line ~cols
           (with_border
              [ { text = name; tone = Accent }
              ; { text = middle_dot ^ Acting.turn_text current.Acting.ck_turn; tone = Plain }
-             ; { text =
-                   middle_dot
-                   ^ (if current.Acting.ck_settled then "settled" else "in turn")
-               ; tone = (if current.Acting.ck_settled then Dim else Ok)
-               }
+             ; { text = middle_dot ^ state_word; tone = state_tone }
              ])
     | [] ->
         fit_line ~cols
@@ -442,18 +471,26 @@ let focus_lines ~cols input chunks name =
         let calls =
           List.mapi
             (fun index tool ->
-              tool_line ~cols ~now:input.now current tool ~is_last:(index = count - 1))
+              tool_line ~cols ~now:input.now ~can_finish current tool ~is_last:(index = count - 1))
             tools
         in
         let calls =
           if calls = [] && not current.Acting.ck_settled then
-            [ fit_line ~cols
-                (with_border
-                   [ { text = running_glyph ^ " "; tone = Ok }
-                   ; { text = "running" ^ middle_dot ^ age_text ~now:input.now current.Acting.ck_at
-                     ; tone = Ok
-                     }
-                   ])
+            [ (if can_finish then
+                 [ { text = running_glyph ^ " "; tone = Ok }
+                 ; { text =
+                       "running" ^ middle_dot ^ age_text ~now:input.now current.Acting.ck_at
+                   ; tone = Ok
+                   }
+                 ]
+               else
+                 [ { text = unfinished_glyph ^ " "; tone = Warn }
+                 ; { text =
+                       "unfinished" ^ middle_dot ^ age_text ~now:input.now current.Acting.ck_at
+                   ; tone = Warn
+                   }
+                 ])
+              |> fit_line ~cols |> with_border
             ]
           else calls
         in

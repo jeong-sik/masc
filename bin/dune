@@ -740,6 +740,9 @@
  (wrapped false)
  (modules masc_tui_acting_pane)
  (libraries
+  masc ; the health reading is a typed variant: the pane decides what a gone
+       ; keeper's unsettled turn may claim, as masc_tui_keeper_mark already
+       ; reads the same variant for its glyph.
   masc_tui_acting
   masc_tui_observer
   masc_tui_message_layout

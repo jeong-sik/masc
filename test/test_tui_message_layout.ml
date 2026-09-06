@@ -517,10 +517,14 @@ let test_input_cursor_uses_visible_terminal_cells () =
     (supported 30 (Layout.chat_min_terminal_cols - 1) 0);
   check bool "the chat minimum is admitted" true
     (supported 30 Layout.chat_min_terminal_cols 0);
-  (* Frame inner width minus indent (2), rail (2), and the label column
-     floor (10) is the body the gate guarantees. *)
+  (* Frame inner width minus the indent (2), the rail, and the label column
+     floor (10) is the body the gate guarantees. The rail is read from
+     [turn_rail_cells] rather than spelled here, because that is the value
+     [chat_min_terminal_cols] adds: a literal can disagree with the gate this
+     checks and the check would still look like arithmetic. *)
   check int "the minimum terminal leaves a twenty-cell framed body" 20
-    (Frame.inner_width ~cols:Layout.chat_min_terminal_cols - 2 - 2 - 10)
+    (Frame.inner_width ~cols:Layout.chat_min_terminal_cols
+     - 2 - Layout.turn_rail_cells - 10)
 
 let test_chat_history_height_uses_the_shared_chrome () =
   check int "46-row pane exposes 38 transcript rows" 38

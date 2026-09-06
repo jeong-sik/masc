@@ -9660,6 +9660,68 @@ def code_lane_fixtures() -> HttpFixtures:
     return fixtures
 
 
+CODE_MEMO_FILE_PATH = "/api/v1/workspace/file?path=init.lua"
+CODE_MEMO_SOURCE = (
+    "local lock = 1\n"
+    "-- masc(alpha) decision: keep the coroutine, the pool is single threaded\n"
+    "local function read() return lock end\n"
+)
+
+
+def code_memo_fixtures() -> HttpFixtures:
+    """A Lua file with a memo in it. Lua has no lexer in the TUI, so this is
+    the case the memo list used to miss: it read only rows the lexer had
+    marked as a comment, and an unlexed file has none."""
+    fixtures = keeper_runtime_http_fixtures()
+    fixtures[WORKSPACE_TREE_ROOT_PATH] = (
+        200,
+        [
+            {"path": "init.lua", "label": "init.lua", "depth": 0, "parent": "",
+             "hasChildren": False, "diff": None, "keeperId": None,
+             "hueIndex": None},
+        ],
+    )
+    fixtures[CODE_MEMO_FILE_PATH] = (200, {"ok": True, "content": CODE_MEMO_SOURCE})
+    return fixtures
+
+
+def code_memo_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """m on an open file lists the memos written in that file's own comment
+    syntax. The file here is Lua, whose comments the TUI does not colour, so
+    the list is the proof that the reader looks for the file's markers rather
+    than for something the lexer marked."""
+    palette_go(process, master_fd, output, b"go code", b"init.lua")
+    send_and_wait(process, master_fd, output, b"\r", b"local lock = 1")
+    listed = send_and_wait(
+        process, master_fd, output, b"m", b"keep the coroutine"
+    )
+    plain = CSI_RE.sub(b"", listed).decode("utf-8")
+    for needle in ("notes: init.lua", "L2", "alpha", "(decision)"):
+        if needle not in plain:
+            raise AssertionError(
+                f"the memo list missed {needle!r}: {plain!r}"
+            )
+    if "no memo in this file" in plain:
+        raise AssertionError(
+            f"the memo list called a file with a memo empty: {plain!r}"
+        )
+    # The same key puts the list away and the file comes back.
+    closed = send_and_wait(
+        process, master_fd, output, b"m", b"local function read"
+    )
+    if "notes: init.lua" in CSI_RE.sub(b"", closed).decode("utf-8"):
+        raise AssertionError(
+            f"a second m left the memo list open: {closed!r}"
+        )
+    os.write(master_fd, b"q")
+
+
 def code_lane_interaction(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -11610,6 +11672,7 @@ def run_keyboard_regression(executable: str) -> None:
         interact=code_lane_interaction,
         http_fixtures=code_lane_fixtures(),
     )
+    run_code_memo_regression(executable)
     enter_split_fixtures = keeper_runtime_http_fixtures()
     enter_split_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
     run_terminal_scenario(
@@ -12414,6 +12477,15 @@ def run_keeper_lanes_regression(executable: str) -> None:
     )
 
 
+def run_code_memo_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="Code lane lists a memo in a language with no lexer",
+        interact=code_memo_interaction,
+        http_fixtures=code_memo_fixtures(),
+    )
+
+
 def run_board_json_regression(executable: str) -> None:
     run_terminal_scenario(
         executable,
@@ -12464,11 +12536,15 @@ def main() -> None:
         run_board_json_regression(os.path.abspath(sys.argv[1]))
         print("tui Board JSON regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "code-memo":
+        run_code_memo_regression(os.path.abspath(sys.argv[1]))
+        print("tui Code memo regression: PASS")
+        return
     if len(sys.argv) != 2:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
             "[cli-base-path|planning-review|repositories|project-changes|config|"
-            "chat-clarity|runtime|resources|keepers-lanes|board-json]"
+            "chat-clarity|runtime|resources|keepers-lanes|board-json|code-memo]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

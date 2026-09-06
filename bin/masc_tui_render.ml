@@ -14787,10 +14787,11 @@ let render_code (state : state) =
     let content_height = code_pane_content_height state in
     (if notes_showing then
        (* The memos are the file's own comments, so the overlay lists what
-          the lexed rows hold and has no reading state of its own. *)
+          the loaded rows hold in the file's comment syntax and has no
+          reading state of its own. *)
        let memos =
          match Masc_tui_fetched.current state.code_file with
-         | Some (_, Masc_tui_fetched.Ready rows) -> Masc_tui_memo.of_rows rows
+         | Some (path, Masc_tui_fetched.Ready rows) -> Masc_tui_memo.of_file ~path rows
          | Some
              ( _
              , ( Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
@@ -15049,7 +15050,7 @@ let render_code (state : state) =
            for _ = 1 to content_height do
              box_empty pane_buf pane_cols
            done
-       | Some (_, Masc_tui_fetched.Ready file_rows) ->
+       | Some (open_path, Masc_tui_fetched.Ready file_rows) ->
            let total_lines = List.length file_rows in
            let max_scroll = max 0 (total_lines - content_height) in
            let scroll = max 0 (min state.code_file_scroll max_scroll) in
@@ -15071,7 +15072,7 @@ let render_code (state : state) =
                (fun found ->
                  let line = Masc_tui_memo.line_of found in
                  (line, line))
-               (Masc_tui_memo.of_rows file_rows)
+               (Masc_tui_memo.of_file ~path:open_path file_rows)
            in
            let keeper_spans =
              match Masc_tui_fetched.current state.code_history with

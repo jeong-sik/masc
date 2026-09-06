@@ -815,7 +815,7 @@
  (name masc_tui_memo)
  (wrapped false)
  (modules masc_tui_memo)
- (libraries masc_tui_code_lexer masc.ide_memo))
+ (libraries masc_tui_code_lexer masc.ide_memo masc.lsp_client))
 
 (library
  (name masc_tui_markdown)

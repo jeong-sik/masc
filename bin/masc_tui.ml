@@ -16583,10 +16583,10 @@ and is loaded on demand through keeper_skill.
                 else if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then (
                     match Masc_tui_fetched.current state.code_file with
-                    | Some (_, Masc_tui_fetched.Ready rows) ->
+                    | Some (path, Masc_tui_fetched.Ready rows) ->
                         state.code_notes_scroll <-
                           min
-                            (max 0 (List.length (Masc_tui_memo.of_rows rows) - 1))
+                            (max 0 (List.length (Masc_tui_memo.of_file ~path rows) - 1))
                             (state.code_notes_scroll + 1)
                     | Some (_, _) | None -> ())
                   else if state.code_diff_open then (

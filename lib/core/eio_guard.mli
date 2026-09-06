@@ -24,6 +24,12 @@ type execution_context = Fs_compat.execution_context =
   | Non_eio
 
 val execution_context : unit -> execution_context
+
+val with_named_switch : string -> (unit -> 'a) -> 'a
+(** [with_named_switch name f] runs [f] inside [Eio.Switch.run ~name] when
+    called from an Eio fiber, so a tracer reading the runtime-events ring
+    labels the fiber's runs with [name]; outside Eio it runs [f] directly.
+    The switch owns no fibers; cancellation is unchanged. *)
 val is_eio_fiber : unit -> bool
 
 type mutex_access = Read_write | Read_only

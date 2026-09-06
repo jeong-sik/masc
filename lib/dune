@@ -87,6 +87,7 @@
   masc.attribution
   masc.exec_policy
   masc.keeper_registry
+  masc.keeper_tool_name
   masc.keeper_checkpoint_ref
   masc.keeper_contract
   masc.keeper_approval

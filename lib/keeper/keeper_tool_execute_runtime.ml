@@ -478,7 +478,10 @@ let handle_tool_execute_typed
            authority has declined. The same IR, the same cwd and budget, a
            target whose runner asks the shim for [Observe]; no output
            streaming, because until the gate has read the answer this run is
-           not yet the call's result. *)
+           not yet the call's result. The IR is rewritten with the box's
+           target because execution reads the target from the IR, not from
+           [~sandbox] — handing the effect-built IR to the box unchanged ran
+           the real call and reported its exit as an observation. *)
         let observation =
           Keeper_tool_execute_observe.create
             ~route:dispatch_bundle.observe_route
@@ -488,7 +491,7 @@ let handle_tool_execute_typed
                 ~sandbox
                 ~timeout_sec
                 ?base_host_env
-                ir)
+                (Masc_exec.Shell_ir.with_sandbox sandbox ir))
         in
         let gate_decision =
           Keeper_gate.decide

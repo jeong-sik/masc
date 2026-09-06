@@ -22,19 +22,24 @@ jobs:
           - os: macos-14  # Apple Silicon
             arch: macos-arm64
             may-fail: true   # upstream opam macOS arm64 binary missing (#7475)
+            shim-arch: ''    # the exec shim is a Linux guest binary; none here
           - os: ubuntu-latest
             arch: linux-x64
             may-fail: false
+            shim-arch: amd64
           # aarch64 Linux 타깃. Raspberry Pi 5 / arm64 SBC 에 바이너리를 그대로
           # 내려받아 실행하기 위한 것으로, 기기에서 직접 빌드하지 않는다.
           # ubuntu-24.04-arm 은 public repo 에서 4vCPU 로 제공된다.
           - os: ubuntu-24.04-arm
             arch: linux-arm64
             may-fail: false
+            shim-arch: arm64
 
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.may-fail }}
-    timeout-minutes: 45
+    # The Linux jobs also build the exec shim in a container (an opam install
+    # on the first run), on top of the server build.
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v7
@@ -207,6 +212,25 @@ jobs:
           chmod +x scripts/install-smoke.sh
           scripts/install-smoke.sh dist ${{ matrix.arch }}
 
+      # RFC-0427 B-1: the exec shim ships with the server release instead of
+      # being built by the operator. It is a static musl binary built in a
+      # container on this runner's own architecture (no emulation), and it is
+      # probed once here: a shim that cannot answer --probe is not an asset.
+      # The runbook points operators at this asset; a server that places the
+      # shim itself by hash (B-2) reads the same asset.
+      - name: Build exec shim (static ${{ matrix.shim-arch }})
+        if: matrix.shim-arch != ''
+        run: |
+          chmod +x scripts/remote-ssh/build-shim.sh
+          scripts/remote-ssh/build-shim.sh --arch "${{ matrix.shim-arch }}" --out dist
+          shim="dist/masc-exec-shim-linux-${{ matrix.shim-arch }}"
+          conf="$(mktemp)"
+          printf 'remote_root=/tmp\n' > "$conf"
+          probe="$(MASC_EXEC_SHIM_CONFIG="$conf" "$shim" --probe)"
+          echo "probe: $probe"
+          echo "$probe" | jq -e '.name == "masc-exec-shim" and (.version | test("^[0-9]+\\.")) and (.capabilities | type == "array")' >/dev/null
+          sha256sum "$shim"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
@@ -242,6 +266,14 @@ jobs:
                 exit 1
               fi
             done
+          done
+          # The exec shim (RFC-0427 B-1): one static Linux binary per guest
+          # architecture, named by the shim's own convention.
+          for shim in masc-exec-shim-linux-amd64 masc-exec-shim-linux-arm64; do
+            if [ ! -f "dist/$shim" ]; then
+              echo "required release asset missing: $shim"
+              exit 1
+            fi
           done
 
       - name: Generate release checksums

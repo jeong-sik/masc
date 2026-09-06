@@ -211,7 +211,9 @@ type decoded =
   ; dropped : int
       (** Rows the decoder could not read. Reported rather than inferred from
           the list's length: folding tool blocks shortens the list for reasons
-          that are not losses. *)
+          that are not losses, and so does an entry that was read and draws
+          nothing -- an autonomous wake that produced neither speech nor work
+          is not a row anyone lost. *)
   }
 
 val addressed_label_parts : speaker -> Surface.t option -> string * string option

@@ -45,9 +45,10 @@ on:
         description: >-
           Comma-separated test executables under test/ to build and run on
           their own instead of the full runner, for example
-          test_heartbeat_integration,test_hitl_summary_worker. A name with
-          a test/<name>.py script runs its dune alias runtest-<name>
-          instead (test_tui_keyboard_input). Empty runs the full suite.
+          test_heartbeat_integration,test_hitl_summary_worker. A name that
+          test/dune declares as (alias runtest-<name>) builds that alias
+          instead: test_tui_keyboard_input, or one of its groups such as
+          test_tui_keyboard_input-repositories. Empty runs the full suite.
         type: string
         default: ""
       eio_backend:
@@ -222,11 +223,12 @@ jobs:
           for suite in "${requested[@]}"; do
             suite="${suite// /}"
             [ -n "${suite}" ] || continue
-            # A suite that is a script under a dune alias rather than an
-            # executable: test/<suite>.py with (alias runtest-<suite>) in
-            # test/dune, the PTY suite being the one. Dune runs the script
-            # as the alias's action, so building the alias is the run.
-            if [ -f "test/${suite}.py" ]; then
+            # A suite that is a dune alias rather than an executable:
+            # (alias runtest-<suite>) in test/dune, which is how the PTY
+            # suite and its scenario groups are named. Dune runs the
+            # script as the alias's action, so building the alias is the
+            # run.
+            if grep -Fq "(alias runtest-${suite})" test/dune; then
               aliases+=("${suite}")
             else
               suites+=("${suite}")

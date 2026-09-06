@@ -36,15 +36,30 @@
     half takes some five hundred. Ten milliseconds of work per iteration is
     enough to turn an eighteen-millisecond read into five seconds, and fifty
     reaches the ten-second timeout RFC-0429 §1.2 recorded against the live
-    TUI. The main loop and the request share one domain, and the request
-    only moves when the loop yields.
+    TUI.
+
+    What decides that is not the domain they share but where the loop waits.
+    [--eio-wait] and [--eio-stdin] wait the same sixteen milliseconds inside
+    Eio rather than inside the kernel, and the same 1.78 MB with the same
+    10 ms of work per iteration reads:
+
+    {v
+    how the loop waits                       briefing (1.78 MB)
+    Unix.select on stdin                     5544-5631 ms
+    Eio.Time.sleep                              14-26 ms
+    Eio.Flow.single_read on stdin, bounded      67-202 ms
+    v}
+
+    A loop blocked in the kernel freezes the whole domain, so the request
+    gets one step per pass. A loop blocked inside Eio leaves the run queue,
+    and the request runs until it blocks in turn.
 
     Usage: masc-http-probe --url URL [--token-file PATH] [--trials N]
     [--agent NAME] [--mimic-tui-loop] *)
 
 let usage =
   "masc-http-probe --url URL [--token-file PATH] [--trials N] [--agent NAME] \
-   [--mimic-tui-loop] [--loop-work-ms MS]"
+   [--mimic-tui-loop] [--loop-work-ms MS] [--eio-wait] [--eio-stdin]"
 
 type args = {
   url : string;
@@ -53,6 +68,8 @@ type args = {
   agent : string;
   mimic_tui_loop : bool;
   loop_work_ms : float;
+  wait_through_eio : bool;
+  wait_on_eio_stdin : bool;
 }
 
 (* The TUI sends this header on every request; the probe is only a control if
@@ -72,6 +89,12 @@ let parse_args argv =
         walk { acc with token_file = Some value } rest
     | "--agent" :: value :: rest -> walk { acc with agent = value } rest
     | "--mimic-tui-loop" :: rest -> walk { acc with mimic_tui_loop = true } rest
+    | "--eio-stdin" :: rest ->
+        walk
+          { acc with mimic_tui_loop = true; wait_on_eio_stdin = true }
+          rest
+    | "--eio-wait" :: rest ->
+        walk { acc with mimic_tui_loop = true; wait_through_eio = true } rest
     | "--loop-work-ms" :: value :: rest -> (
         match float_of_string_opt value with
         | Some work when work >= 0.0 ->
@@ -93,7 +116,9 @@ let parse_args argv =
         trials = default_trials;
         agent = default_agent;
         mimic_tui_loop = false;
-        loop_work_ms = 0.0
+        loop_work_ms = 0.0;
+        wait_through_eio = false;
+        wait_on_eio_stdin = false
       }
       (List.tl (Array.to_list argv))
   with
@@ -163,12 +188,48 @@ let burn_cpu_for ~milliseconds =
     done
   end
 
-let spin_like_the_tui ~finished ~work_ms =
+(* The same wait, told to Eio instead of to the kernel directly. A fiber that
+   blocks here leaves the run queue, so whatever else is waiting on a socket
+   runs until it blocks in turn -- rather than one step per pass, which is
+   all a yield gives it.
+
+   This waits on time alone, not on the keyboard, so it measures the one
+   thing it is here to measure: what changes when the loop blocks inside Eio
+   instead of inside the kernel. Racing [Eio_unix.await_readable Unix.stdin]
+   against this sleep under [Fiber.first] is the shape a real loop would
+   want, and on eio 1.3 it dies in the posix scheduler
+   (lib_eio_posix/sched.ml:155, assertion failed) on the second pass, when
+   the losing await is cancelled. Wiring the TUI's keyboard wait through Eio
+   has to solve that first; the reading below does not depend on it. *)
+let wait_through_eio_for ~clock =
+  Eio.Time.sleep clock tui_input_wait_seconds
+
+(* What a loop that must also wake on a key would do: read the terminal
+   through Eio, bounded by the same 16 ms. Unlike [await_readable] this asks
+   the flow for bytes, which is what the loop wants anyway -- it is about to
+   read them. Whether cancelling the losing read is safe on a tty is the
+   question this mode exists to answer. *)
+let wait_on_eio_stdin_for ~clock ~stdin ~buffer =
+  Eio.Fiber.first
+    (fun () ->
+      match Eio.Flow.single_read stdin buffer with
+      | _read -> ()
+      | exception End_of_file -> Eio.Time.sleep clock tui_input_wait_seconds)
+    (fun () -> Eio.Time.sleep clock tui_input_wait_seconds)
+
+let spin_like_the_tui ~finished ~work_ms ~wait_through_eio ~wait_on_eio_stdin
+    ~clock ~stdin =
+  let buffer = Cstruct.create 1024 in
   while not !finished do
-    (* The waiting is the point; which descriptor came back is not read. *)
-    let _readable, _, _ =
-      Unix.select [ Unix.stdin ] [] [] tui_input_wait_seconds
-    in
+    if wait_on_eio_stdin then wait_on_eio_stdin_for ~clock ~stdin ~buffer
+    else if wait_through_eio then wait_through_eio_for ~clock
+    else begin
+      (* The waiting is the point; which descriptor came back is not read. *)
+      let _readable, _, _ =
+        Unix.select [ Unix.stdin ] [] [] tui_input_wait_seconds
+      in
+      ()
+    end;
     burn_cpu_for ~milliseconds:work_ms;
     Eio.Fiber.yield ()
   done
@@ -182,7 +243,12 @@ let run ~env ~args ~token =
         Fun.protect
           ~finally:(fun () -> finished := true)
           (fun () -> trials ~env ~args ~token))
-      (fun () -> spin_like_the_tui ~finished ~work_ms:args.loop_work_ms)
+      (fun () ->
+        spin_like_the_tui ~finished ~work_ms:args.loop_work_ms
+          ~wait_through_eio:args.wait_through_eio
+          ~wait_on_eio_stdin:args.wait_on_eio_stdin
+          ~clock:(Eio.Stdenv.clock env)
+          ~stdin:(Eio.Stdenv.stdin env))
   end
 
 let () =

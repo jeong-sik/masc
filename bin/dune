@@ -1389,7 +1389,9 @@
  (libraries
   masc.http_client
   masc.masc_eio_context
+  cstruct
   eio
+  eio.unix
   eio_main
   unix
   mtime.clock.os))

@@ -417,6 +417,13 @@ val split_aligned_role_label :
     though they were the badge. The mark is empty for a label
     narrow enough that {!align_role_label} dropped it. *)
 
+val fit_speaker :
+  ?column:int -> speaker:string -> surface:string option -> unit -> string
+(** The label for a row someone else put here. Names the speaker, and adds the
+    surface they came in by only when both fit the column: cut as one string
+    the pair keeps the surface and loses the name, and an arrival's siding
+    already says the row came from outside. *)
+
 val align_role_label : ?column:int -> style:style -> string -> string
 (** Left-align a role label in [column] cells, defaulting to
     {!chat_role_label_column}; pass the budget {!chat_role_label_width}

@@ -1974,6 +1974,53 @@ let test_scrolling_measures_the_mode_it_draws () =
         [ 0; 1; 5; bound; bound + 4 ])
     [ Layout.Origin_row; Layout.Origin_inline; Layout.Origin_bare ]
 
+(* The column is narrower than a name and a surface together, and joined they
+   were cut as one string: the fit favours the tail, and the tail is the
+   surface. One live pane had twelve broadcast rows from an agent called
+   [codex-mcp-client] and drew every one as "…p-…roadcast" -- two ellipses,
+   with neither end of the name left. *)
+let occurrences ~needle text =
+  let needle_length = String.length needle in
+  let text_length = String.length text in
+  if needle_length = 0 then 0
+  else
+    let rec walk from found =
+      if from + needle_length > text_length then found
+      else if String.equal (String.sub text from needle_length) needle then
+        walk (from + needle_length) (found + 1)
+      else walk (from + 1) found
+    in
+    walk 0 0
+
+let wide_label_column = Layout.chat_role_label_width ~pane_cells:200
+
+let test_a_speaker_keeps_the_column_when_the_surface_cannot_share_it () =
+  let column = wide_label_column in
+  check string "a name too wide to share keeps the column whole"
+    "codex-mcp-client"
+    (Layout.fit_speaker ~column ~speaker:"codex-mcp-client"
+       ~surface:(Some "broadcast") ());
+  check string "a pair that fits says both" "amp \xc2\xb7 agent"
+    (Layout.fit_speaker ~column ~speaker:"amp" ~surface:(Some "agent") ());
+  check string "no surface, nothing to weigh" "alder"
+    (Layout.fit_speaker ~column ~speaker:"alder" ~surface:None ())
+;;
+
+(* What the pane draws for that row: one cut at most, and the end that tells
+   two agents apart still on it. *)
+let test_the_badge_draws_a_broadcast_speaker_without_two_cuts () =
+  let column = wide_label_column in
+  let badge =
+    Layout.align_role_label ~column ~style:Layout.Inbound
+      (Layout.fit_speaker ~column ~speaker:"codex-mcp-client"
+         ~surface:(Some "broadcast") ())
+  in
+  check int "the badge cuts at most once" 1
+    (occurrences ~needle:"\xe2\x80\xa6" badge);
+  check int "and keeps the end that names the agent" 1
+    (occurrences ~needle:"p-client" badge)
+;;
+
 let () =
   run "tui_message_layout"
     [
@@ -2123,6 +2170,10 @@ let () =
             test_a_continuation_does_not_borrow_the_reasoning_glyph
         ; test_case "every speaker mark is distinct" `Quick
             test_every_speaker_mark_is_distinct
+        ; test_case "a speaker keeps the column when the surface cannot share it"
+            `Quick test_a_speaker_keeps_the_column_when_the_surface_cannot_share_it
+        ; test_case "the badge draws a broadcast speaker without two cuts"
+            `Quick test_the_badge_draws_a_broadcast_speaker_without_two_cuts
         ; test_case "Skill states keep shapes without colour" `Quick
             test_skill_marks_keep_state_without_colour
         ; test_case "alignment padding is kept apart from the name" `Quick

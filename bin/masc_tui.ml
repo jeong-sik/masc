@@ -5373,12 +5373,19 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     | Keeper_chat_history.Addressed_to_keeper { speaker; surface } ->
         (* The label is what the row draws; the speaker is what it is. Both
            come from the same decode, and only the label used to survive. *)
-        let label = Keeper_chat_history.addressed_label speaker surface in
+        let name, arrived_by =
+          Keeper_chat_history.addressed_label_parts speaker surface
+        in
         let author =
           match speaker with
-          | Keeper_chat_history.Operator -> Sent_by_operator label
+          | Keeper_chat_history.Operator ->
+              (* "you", or "you · <surface>": short enough that the column
+                 holds both, so it is joined here as it always was. *)
+              Sent_by_operator
+                (Keeper_chat_history.addressed_label speaker surface)
           | Keeper_chat_history.Named _
-          | Keeper_chat_history.Unresolved _ -> Sent_by_other label
+          | Keeper_chat_history.Unresolved _ ->
+              Sent_by_other { speaker = name; surface = arrived_by }
         in
         (Message_user author, Turn_input, row.text, None, None)
     | Keeper_chat_history.Said_by_keeper ->

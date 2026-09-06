@@ -300,19 +300,31 @@ let surface_of_json : Yojson.Safe.t -> Surface.t option = function
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 
-let addressed_label speaker surface =
+(* Who and where, apart. The speaker column is narrower than the two joined,
+   and joined they were cut as one string: [fit_middle] keeps a third of the
+   head and two thirds of the tail, and the tail of "<who> · <where>" is the
+   where. One live pane had twelve broadcast rows from an agent named
+   [codex-mcp-client], every one drawn as "…p-…roadcast" -- two ellipses, and
+   neither half of the name left. *)
+let addressed_label_parts speaker surface =
   let name =
     match speaker with
     | Operator -> "you"
     | Named name -> name
-    (* Named by its id where there is one: an unresolved author is still a
-       particular author, and two of them in a channel are two people. *)
-    | Unresolved { id = Some id } -> short_channel id
+    (* Whole. An unresolved author is still a particular author, and the
+       column's own fit keeps two thirds of the tail -- which is the half that
+       tells two ids apart. Shortened here as well, the row was cut twice and
+       kept neither end. *)
+    | Unresolved { id = Some id } -> id
     | Unresolved { id = None } -> "someone"
   in
-  match Option.bind surface surface_label with
-  | None -> name
-  | Some surface -> name ^ " \xc2\xb7 " ^ surface
+  (name, Option.bind surface surface_label)
+;;
+
+let addressed_label speaker surface =
+  match addressed_label_parts speaker surface with
+  | name, None -> name
+  | name, Some surface -> name ^ " \xc2\xb7 " ^ surface
 ;;
 
 (* What one server row is, before consecutive tool rows are folded. Parsed once

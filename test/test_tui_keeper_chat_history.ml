@@ -540,6 +540,25 @@ let test_a_direct_turn_keeps_its_blank_reply () =
    looked like this, so reading only the other two places left every one of
    them in no turn at all -- and the pane draws a turn's bracket, folds a
    repeated speaker and hangs work off its turn from exactly that id. *)
+(* The pane cannot tell a readable name repeated in the id field from an
+   opaque id, so an agent called [codex-mcp-client] arrives unresolved. What
+   the decoder must not do is shorten it here as well: the speaker column cuts
+   once, and cut twice the row kept neither end -- twelve broadcast rows on
+   one live pane read "…p-…roadcast". *)
+let test_an_unresolved_speaker_reaches_the_column_whole () =
+  check (pair string (option string)) "the name and the surface arrive apart"
+    ("codex-mcp-client", Some "broadcast")
+    (History.addressed_label_parts
+       (History.Unresolved { id = Some "codex-mcp-client" })
+       (Some History.Surface.Broadcast));
+  (* The joined form is what a caller with room for both still gets. *)
+  check string "joined, they read as they always did"
+    "codex-mcp-client \xc2\xb7 broadcast"
+    (History.addressed_label
+       (History.Unresolved { id = Some "codex-mcp-client" })
+       (Some History.Surface.Broadcast))
+;;
+
 let test_an_autonomous_turn_is_identified_by_its_marker () =
   let decoded = decode (`List [ autonomous_turn [ reason "look"; tool "Read" ] ]) in
   check (list (option string)) "the trace rows share the marker's turn"
@@ -1819,6 +1838,8 @@ let () =
             test_autonomous_trace_rows_keep_the_turn_ref
         ; test_case "an autonomous turn is identified by its marker" `Quick
             test_an_autonomous_turn_is_identified_by_its_marker
+        ; test_case "an unresolved speaker reaches the column whole" `Quick
+            test_an_unresolved_speaker_reaches_the_column_whole
         ; test_case "a silent autonomous turn draws no row" `Quick
             test_a_silent_autonomous_turn_draws_no_row
         ; test_case "a whitespace autonomous reply is as blank as none" `Quick

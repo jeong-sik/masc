@@ -28,16 +28,15 @@ module Sse_connect_guard = struct
   (** Minimum interval between SSE reconnects for one session (seconds).
       [<= 0.0] disables the per-session cooldown. *)
   let reconnect_min_interval_seconds =
-    get_float ~default:1.0 "MASC_SSE_RECONNECT_MIN_INTERVAL_S"
+    Env_setting.Float_knob.get Sse_reconnect_min_interval_s
 
   (** Sliding window over which reconnects are counted (seconds).
       [<= 0.0] disables the window limit. *)
-  let connect_window_seconds =
-    get_float ~default:60.0 "MASC_SSE_CONNECT_WINDOW_S"
+  let connect_window_seconds = Env_setting.Float_knob.get Sse_connect_window_s
 
   (** Reconnects admitted inside one window. [<= 0] disables the window
       limit. *)
-  let connect_max_in_window = get_int ~default:10 "MASC_SSE_CONNECT_MAX_IN_WINDOW"
+  let connect_max_in_window = Env_setting.Int_knob.get Sse_connect_max_in_window
 
   (* Re-readable twins of the three bindings above.  They exist so a
      test can pin the documented disable semantics — [<= 0], negative
@@ -51,13 +50,10 @@ module Sse_connect_guard = struct
      tests and any future hot-reload call site. *)
   module Re_read = struct
     let reconnect_min_interval_seconds () =
-      get_float ~default:1.0 "MASC_SSE_RECONNECT_MIN_INTERVAL_S"
+      Env_setting.Float_knob.get Sse_reconnect_min_interval_s
 
-    let connect_window_seconds () =
-      get_float ~default:60.0 "MASC_SSE_CONNECT_WINDOW_S"
-
-    let connect_max_in_window () =
-      get_int ~default:10 "MASC_SSE_CONNECT_MAX_IN_WINDOW"
+    let connect_window_seconds () = Env_setting.Float_knob.get Sse_connect_window_s
+    let connect_max_in_window () = Env_setting.Int_knob.get Sse_connect_max_in_window
   end
 end
 
@@ -606,7 +602,7 @@ module Sidecar = struct
       [running + unavailable] start dispatches. Default: 30 (matches the
       inline literal that landed in #8919). *)
   let reconcile_backoff_sec =
-    get_float ~default:30.0 "MASC_SIDECAR_RECONCILE_BACKOFF_SEC"
+    Env_setting.Float_knob.get Sidecar_reconcile_backoff_sec
 
   (** Subprocess timeout (seconds) for sidecar control commands —
       [stop], [tail], and similar quick housekeeping operations.
@@ -617,8 +613,7 @@ module Sidecar = struct
       typo from making every control command return "timeout" before
       the sidecar even handles the signal. *)
   let control_command_timeout_sec =
-    Float.max 1.0
-      (get_float ~default:5.0 "MASC_SIDECAR_CONTROL_TIMEOUT_SEC")
+    Float.max 1.0 (Env_setting.Float_knob.get Sidecar_control_timeout_sec)
 
   (** Subprocess timeout (seconds) for sidecar Python schema
       generation. Wraps [Process_eio.run_argv_with_status] at
@@ -633,8 +628,7 @@ module Sidecar = struct
       reorder the implicit precedence and surprise downstream
       diagnostics. *)
   let schema_generation_timeout_sec =
-    Float.max 1.0
-      (get_float ~default:10.0 "MASC_SIDECAR_SCHEMA_TIMEOUT_SEC")
+    Float.max 1.0 (Env_setting.Float_knob.get Sidecar_schema_timeout_sec)
 end
 
 module Workspace_file = struct

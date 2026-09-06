@@ -31,11 +31,26 @@ module Int_knob : sig
     | Oauth_refresh_token_ttl_sec
     | Oauth_max_pending_codes
     | Oauth_max_clients
+    | Sse_connect_max_in_window
   [@@deriving enumerate]
 
   val env_name : t -> string
   val default : t -> int
   val get : t -> int
+end
+
+module Float_knob : sig
+  type t =
+    | Sse_reconnect_min_interval_s
+    | Sse_connect_window_s
+    | Sidecar_reconcile_backoff_sec
+    | Sidecar_control_timeout_sec
+    | Sidecar_schema_timeout_sec
+  [@@deriving enumerate]
+
+  val env_name : t -> string
+  val default : t -> float
+  val get : t -> float
 end
 
 module String_opt_knob : sig
@@ -45,6 +60,7 @@ module String_opt_knob : sig
     | Imessage_self_chat_guid
     | Imessage_poll_interval_sec
     | Imessage_cursor_path
+    | Sidecar_root
   [@@deriving enumerate]
 
   val env_name : t -> string

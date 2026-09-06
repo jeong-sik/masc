@@ -45,8 +45,9 @@ on:
         description: >-
           Comma-separated test executables under test/ to build and run on
           their own instead of the full runner, for example
-          test_heartbeat_integration,test_hitl_summary_worker. Empty runs
-          the full suite.
+          test_heartbeat_integration,test_hitl_summary_worker. A name with
+          a test/<name>.py script runs its dune alias runtest-<name>
+          instead (test_tui_keyboard_input). Empty runs the full suite.
         type: string
         default: ""
       eio_backend:
@@ -216,23 +217,50 @@ jobs:
           fi
           suites=()
           exes=()
+          aliases=()
           IFS=',' read -r -a requested <<< "${TARGET_SUITES}"
           for suite in "${requested[@]}"; do
             suite="${suite// /}"
             [ -n "${suite}" ] || continue
-            suites+=("${suite}")
-            exes+=("test/${suite}.exe")
+            # A suite that is a script under a dune alias rather than an
+            # executable: test/<suite>.py with (alias runtest-<suite>) in
+            # test/dune, the PTY suite being the one. Dune runs the script
+            # as the alias's action, so building the alias is the run.
+            if [ -f "test/${suite}.py" ]; then
+              aliases+=("${suite}")
+            else
+              suites+=("${suite}")
+              exes+=("test/${suite}.exe")
+            fi
           done
           # dune build with no target builds everything; a suite input of
           # separators only must not turn into the full build.
-          if [ "${#suites[@]}" -eq 0 ]; then
+          if [ "${#suites[@]}" -eq 0 ] && [ "${#aliases[@]}" -eq 0 ]; then
             log "[targeted] FAIL - the suite input names no executable: '${TARGET_SUITES}'"
             exit 2
           fi
           log "[targeted] EIO_BACKEND=${EIO_BACKEND:-<unset>} timeout=${TARGET_SUITE_TIMEOUT_SEC}s per suite"
+          status=0
+          for suite in ${aliases[@]+"${aliases[@]}"}; do
+            log "[targeted] ${suite}: start $(date -u +%Y-%m-%dT%H:%M:%SZ) (dune alias)"
+            started=$(date +%s)
+            rc=0
+            timeout -s TERM -k "${TARGET_SUITE_KILL_GRACE_SEC}" "${TARGET_SUITE_TIMEOUT_SEC}"               opam exec -- dune build --root . "@runtest-${suite}" 2>&1 | tee -a "${CI_TEST_LOG_FILE}" || rc=$?
+            elapsed=$(( $(date +%s) - started ))
+            case "${rc}" in
+              0)   log "[targeted] ${suite}: OK in ${elapsed}s" ;;
+              124|137)
+                   log "[targeted] ${suite}: TIMEOUT exit ${rc} after ${elapsed}s"
+                   status=1 ;;
+              *)   log "[targeted] ${suite}: FAIL exit ${rc} in ${elapsed}s"
+                   status=1 ;;
+            esac
+          done
+          if [ "${#exes[@]}" -eq 0 ]; then
+            exit "${status}"
+          fi
           log "[targeted] dune build ${exes[*]}"
           opam exec -- dune build --root . "${exes[@]}" 2>&1 | tee -a "${CI_TEST_LOG_FILE}"
-          status=0
           cd _build/default/test
           for suite in "${suites[@]}"; do
             case "${suite}" in

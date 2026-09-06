@@ -331,7 +331,7 @@ describe('fetchKeeperMemoryHealth', () => {
 
   it('rejects an alert that carries legacy threshold or value fields', async () => {
     const payloadWithThreshold = starvingKeeperPayload()
-    ;(payloadWithThreshold.keepers[0]!.alerts[0] as Record<string, unknown>).threshold = 0
+    ;(payloadWithThreshold.keepers[0]!.alerts[0] as unknown as Record<string, unknown>).threshold = 0
     getMock.mockResolvedValue(payloadWithThreshold)
 
     await expect(fetchKeeperMemoryHealth()).rejects.toThrow(
@@ -339,7 +339,7 @@ describe('fetchKeeperMemoryHealth', () => {
     )
 
     const payloadWithValue = starvingKeeperPayload()
-    ;(payloadWithValue.keepers[0]!.alerts[0] as Record<string, unknown>).value = 4
+    ;(payloadWithValue.keepers[0]!.alerts[0] as unknown as Record<string, unknown>).value = 4
     getMock.mockResolvedValue(payloadWithValue)
 
     await expect(fetchKeeperMemoryHealth()).rejects.toThrow(

@@ -145,6 +145,27 @@ agent_core가 deepseek.com 직접 API를 카탈로그·런타임 양쪽에서 �
 미확인 1건: non-streaming 빈 줄·streaming `: keep-alive` 코멘트는 10 분급
 대기 턴에서만 발생 — 실측 생략, 문서 명시로 충분.
 
+## 남은 슬라이스 체크리스트 (2026-09-06 작성 시점 기준)
+
+Files API keeper 도구 등록 — 구조는 전부 확인됨:
+
+1. `config/tools/masc_file_{upload,delete,list}.toml` — TOML 이 스키마까지
+   완전 정의한다(`Tool_definition_toml.load` 가 디코드; `masc_run_*.toml`
+   선례). upload 파라미터: filename, content_base64, purpose(고정
+   "user_data"). delete: file_id. list: 없음.
+2. `lib/tool_schemas/tool_schemas_files_toml.ml` — 임베드에서 읽어 노출
+   (`tool_schemas_run_toml.ml` 과 동일 형상).
+3. dispatch — 그룹 핸들러 연결(`mcp_tool_runtime_board.ml` 의
+   masc_board_* 패턴). files 도구의 그룹 배치는 신규 그룹 또는 기존
+   provider 도구 그룹.
+4. 핸들러 — `Provider_files.upload/delete`(agent_core) 를 keeper 도구
+   결과로 랩. api_key 주입 경로 확인 필요(DEEPSEEK_API_KEY env).
+5. keeper projection·권한(`defer_loading` 등) 과 테스트 등록 검사
+   (lint suite 의 테스트 등록 검사가 강제).
+
+vision 요청의 `{"type":"file","file_id":…}` 파트 — multimodal 직렬화
+경로(keeper paste 등)에 file 참조 파트 추가. Files API 와 세트.
+
 ## 관계
 
 - 런타임 체인 등록(2026-09-06, runtime.toml lane 3곳 + `[providers.deepseek]`)은

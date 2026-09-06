@@ -24,9 +24,6 @@ val of_toml_content : ?default_name:string -> string -> (t, string) result
 val load_file : string -> (t, string) result
 (** Load a theme from a single TOML file. *)
 
-val load_dir : string -> t list
-(** Load all valid [.toml] themes from a directory. Ignores unreadable or invalid files. *)
-
 val all : ?base_path:string -> unit -> t list
 (** Returns all available schemes: bundled base16 schemes plus any [.toml] schemes
     discovered under [config/themes/] or [<base-path>/.masc/config/themes/].

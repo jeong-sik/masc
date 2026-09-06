@@ -392,7 +392,7 @@ let trace_request ~mode ~plan argv =
     let size =
       match Unix.stat request_trace_path with
       | { Unix.st_size; _ } -> st_size
-      | exception _ -> 0
+      | exception Unix.Unix_error _ -> 0
     in
     if size <= request_trace_byte_cap then begin
       let fd =
@@ -407,10 +407,11 @@ let trace_request ~mode ~plan argv =
           (Exec_ssh_protocol.mode_to_string mode) plan
           (match argv with arg0 :: _ -> arg0 | [] -> "-")
       in
+      (* fire-and-forget: a short write only shortens one trace line *)
       ignore (Unix.write_substring fd line 0 (String.length line));
       Unix.close fd
     end
-  with _ -> ()
+  with Unix.Unix_error _ -> ()
 ;;
 
 let scratch_env ~scratch env =

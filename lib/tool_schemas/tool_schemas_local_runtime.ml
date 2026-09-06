@@ -39,4 +39,9 @@ let definition_for operation =
 
 let definitions : definition list = List.map definition_for all_of_operation
 
+(* Taken from the declaration rather than restated, so the name a handler
+   labels its result with -- and the name it hands
+   [authorize_external_effect] -- cannot drift from the advertised one. *)
+let tool_name operation = (definition_for operation).schema.name
+
 let schemas = List.map (fun definition -> definition.schema) definitions

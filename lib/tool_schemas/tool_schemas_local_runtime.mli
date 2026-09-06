@@ -21,5 +21,8 @@ type keeper_model_exposure = Local_runtime_tool_policy.model_exposure =
 val operation_id : operation -> string
 val keeper_model_exposure : operation -> keeper_model_exposure
 val execution_policy : operation -> Local_runtime_tool_policy.t
+val tool_name : operation -> string
+(** Canonical wire name, read from the declaration rather than restated. *)
+
 val definitions : definition list
 val schemas : Masc_domain.tool_schema list

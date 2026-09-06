@@ -947,6 +947,7 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries
+  msx
   masc
   masc_tui_acting_pane
   masc_tui_gate_text
@@ -1140,6 +1141,7 @@
   base64
   masc_tui_credential
   masc_tui_types
+  masc_tui_msx
   masc_tui_terminal_profile
   masc_tui_terminal_title
   masc_tui_runtime_config_receipt
@@ -1339,3 +1341,16 @@
  (name masc_tui_image_mosaic)
  (wrapped false)
  (modules masc_tui_image_mosaic))
+
+;; The MSX spectator screen. Depends on the worktree-local copy of the
+;; ocaml-msx core (lib/msx) -- see that directory's comment for the
+;; pin-instead-of-copy graduation path.
+(library
+ (name masc_tui_msx)
+ (wrapped false)
+ (modules masc_tui_msx)
+ (libraries
+  masc_tui_types
+  masc_tui_ansi
+  masc_tui_image_mosaic
+  msx))

@@ -30,6 +30,8 @@ let global =
   ; b Meta ";" "agenda: what is coming, and who is waiting on you"
   ; b Meta "@" "answering: who is mid-turn or just finished; Enter opens their chat"
   ; b Meta "?" "this help"
+  ; b Meta "&"
+      "the MSX screen: the emulator core over the whole terminal (esc: back)"
   ; b Meta "Ctrl-B" "show or hide a visible keeper roster pane"
   ; b Meta "Ctrl-L"
       "show or hide the Activity pane: what every keeper is doing right now, and \

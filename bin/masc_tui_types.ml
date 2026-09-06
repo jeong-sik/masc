@@ -2727,6 +2727,12 @@ type state = {
      record of what was drawn -- the title line above the picture is drawn by
      [draw_image] from its own parameter, and nothing reads the rest. *)
   mutable image_open: bool;
+  (* The MSX spectator screen, the image overlay's twin: while [msx_open] is
+     set the loop draws no frames and every key belongs to the emulator. The
+     machine is [Option] so it exists only once the screen has been opened,
+     and it survives closing -- reopening continues the same frame. *)
+  mutable msx_open: bool;
+  mutable msx: Msx.t option;
   (* The [:] command palette: a typed filter over jump targets. Query and
      cursor live only while it is open. *)
   mutable palette_open: bool;
@@ -4069,6 +4075,8 @@ let create_state
      else Workspace_identity_unread);
   help_scroll = 0;
   image_open = false;
+  msx_open = false;
+  msx = None;
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;

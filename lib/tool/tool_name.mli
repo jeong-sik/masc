@@ -94,12 +94,3 @@ module Operator_name : sig
   val pp : Stdlib.Format.formatter -> t -> unit
 end
 
-module Operator_remote_name : sig
-  type t = Operator_tool of Operator_name.t
-
-  val to_string : t -> string
-  val of_string : string -> t option
-  val all : t list
-  val all_strings : string list
-  val pp : Stdlib.Format.formatter -> t -> unit
-end

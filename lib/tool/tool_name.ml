@@ -176,32 +176,6 @@ module Operator_name = struct
   let pp fmt t = Format.pp_print_string fmt (to_string t)
 end
 
-module Operator_remote_name = struct
-  type t = Operator_tool of Operator_name.t
-
-  let to_string = function
-    | Operator_tool tool -> Operator_name.to_string tool
-  ;;
-
-  let of_string value =
-    match Operator_name.of_string value with
-    | Some tool -> Some (Operator_tool tool)
-    | None -> None
-  ;;
-
-  let all =
-    [ Operator_tool Operator_name.Operator_snapshot
-    ; Operator_tool Operator_name.Operator_digest
-    ; Operator_tool Operator_name.Operator_action
-    ; Operator_tool Operator_name.Operator_board_attention_quarantine_requeue
-    ; Operator_tool Operator_name.Operator_task_recovery_resolve
-    ; Operator_tool Operator_name.Operator_confirm
-    ]
-  ;;
-
-  let all_strings = List.map to_string all
-  let pp fmt t = Format.pp_print_string fmt (to_string t)
-end
 
 (** Domain_tool — the single domain-owned grouping of Task/Board/Goal/Operator
     tool names.

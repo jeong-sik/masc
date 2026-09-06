@@ -5,14 +5,9 @@ type tool_result = Tool_result.result
 
 type 'a context = 'a Tool_operator.context
 
-module Operator_remote_name = Tool_name.Operator_remote_name
 module Operator_name = Tool_name.Operator_name
 
-let operator_remote_tool_name name = Operator_remote_name.to_string name
-
-let operator_tool_name name =
-  operator_remote_tool_name (Operator_remote_name.Operator_tool name)
-;;
+let operator_tool_name name = Operator_name.to_string name
 
 let board_attention_quarantine_requeue_tool_name =
   operator_tool_name Operator_name.Operator_board_attention_quarantine_requeue
@@ -296,28 +291,46 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
       Log.Misc.warn "operator_dispatch_unknown: tool=%s agent=%s" name ctx.agent_name;
       None
 
-let schemas : tool_schema list =
-  [ snapshot_schemas.local
-  ; digest_schemas.local
-  ; action_schemas.local
-  ; board_attention_quarantine_requeue_schema
-  ; task_recovery_schema
-  ; confirm_schema
-  ; judgment_write_schema
-  ]
+(* Both surfaces are derived from Tool_name.Operator_name, so a constructor
+   added there cannot be advertised locally without a schema, nor slip into the
+   Operator_remote profile by omission: [remote_schema] must say [None] out
+   loud. The two functions are exhaustive, so that decision is a compile error
+   rather than a default. *)
+let local_schema : Operator_name.t -> tool_schema = function
+  | Operator_name.Operator_snapshot -> snapshot_schemas.local
+  | Operator_name.Operator_digest -> digest_schemas.local
+  | Operator_name.Operator_action -> action_schemas.local
+  | Operator_name.Operator_board_attention_quarantine_requeue ->
+    board_attention_quarantine_requeue_schema
+  | Operator_name.Operator_task_recovery_resolve -> task_recovery_schema
+  | Operator_name.Operator_confirm -> confirm_schema
+  | Operator_name.Operator_judgment_write -> judgment_write_schema
 ;;
+
+(* [None] means the tool is local-only: the Operator_remote profile gates on
+   these names (Mcp_server_eio_tool_profile), so widening the set is a
+   deliberate edit here. *)
+let remote_schema : Operator_name.t -> tool_schema option = function
+  | Operator_name.Operator_snapshot -> Some snapshot_schemas.remote
+  | Operator_name.Operator_digest -> Some digest_schemas.remote
+  | Operator_name.Operator_action -> Some action_schemas.remote
+  | Operator_name.Operator_board_attention_quarantine_requeue ->
+    Some board_attention_quarantine_requeue_schema
+  | Operator_name.Operator_task_recovery_resolve -> Some task_recovery_schema
+  | Operator_name.Operator_confirm -> Some confirm_schema
+  | Operator_name.Operator_judgment_write -> None
+;;
+
+let schemas : tool_schema list = List.map local_schema Operator_name.all
 
 let remote_schemas : tool_schema list =
-  [ snapshot_schemas.remote
-  ; digest_schemas.remote
-  ; action_schemas.remote
-  ; board_attention_quarantine_requeue_schema
-  ; task_recovery_schema
-  ; confirm_schema
-  ]
+  List.filter_map remote_schema Operator_name.all
 ;;
 
-let remote_tool_names : string list = Operator_remote_name.all_strings
+let remote_tool_names : string list =
+  List.map (fun (s : tool_schema) -> s.name) remote_schemas
+;;
+
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

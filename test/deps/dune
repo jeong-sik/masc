@@ -116,6 +116,7 @@
   (re_export masc.gate)
   (re_export masc.agent_observation)
   (re_export masc.ide)
+  (re_export masc.ide_memo)
   (re_export masc.masc_backend)
   (re_export masc.masc_compression)
   (re_export masc.mcp_session)

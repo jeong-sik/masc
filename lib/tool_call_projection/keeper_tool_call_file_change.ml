@@ -13,6 +13,10 @@ type kind =
       replace_all : bool;
     }
   | Written of { content : string }
+  | Inserted of {
+      line : int;
+      text : string;
+    }
 
 type t = {
   at : float;
@@ -67,7 +71,9 @@ let named_tool_of_row row =
    a [_ -> Not_a_file_change] arm would do silently. *)
 let writes_files (handler : Keeper_tool_descriptor.runtime_handler) =
   match handler with
-  | Keeper_tool_descriptor.Tool_edit_file | Keeper_tool_descriptor.Tool_write_file -> true
+  | Keeper_tool_descriptor.Tool_edit_file
+  | Keeper_tool_descriptor.Tool_write_file
+  | Keeper_tool_descriptor.Tool_ide_annotate -> true
   | Keeper_tool_descriptor.Tool_execute
   | Keeper_tool_descriptor.Tool_search_files
   | Keeper_tool_descriptor.Tool_read_file
@@ -85,7 +91,6 @@ let writes_files (handler : Keeper_tool_descriptor.runtime_handler) =
   | Keeper_tool_descriptor.Tool_surface_read
   | Keeper_tool_descriptor.Tool_surface_post
   | Keeper_tool_descriptor.Tool_person_note_set
-  | Keeper_tool_descriptor.Tool_ide_annotate
   | Keeper_tool_descriptor.Tool_voice_dispatch
   | Keeper_tool_descriptor.Tool_task_dispatch
   | Keeper_tool_descriptor.Tool_board_dispatch
@@ -115,6 +120,13 @@ let optional_int row key = Json_field.to_option (Json_field.int row key)
 
 let required_string row key =
   match Json_field.string row key with
+  | Json_field.Found value -> Ok value
+  | Json_field.Field_absent -> Error (Malformed (Printf.sprintf "%s is absent" key))
+  | Json_field.Wrong_shape { expected; got } ->
+      Error (Malformed (Printf.sprintf "%s is %s, expected %s" key got expected))
+
+let required_int row key =
+  match Json_field.int row key with
   | Json_field.Found value -> Ok value
   | Json_field.Field_absent -> Error (Malformed (Printf.sprintf "%s is absent" key))
   | Json_field.Wrong_shape { expected; got } ->
@@ -166,8 +178,19 @@ let validate_line_evidence ~execution_id ~succeeded kind line_evidence =
     Error
       (Malformed
          "single Edit carries a file_change_evidence occurrence_count other than one")
+  | Inserted _,
+    Some
+      (Keeper_file_change_evidence.Edited
+        { occurrence_count; occurrences = _ })
+    when occurrence_count <> 1 ->
+    Error
+      (Malformed
+         "an insert carries a file_change_evidence occurrence_count other than one")
   | Edited _, Some (Keeper_file_change_evidence.Edited _)
+  | Inserted _, Some (Keeper_file_change_evidence.Edited _)
   | Written _, Some (Keeper_file_change_evidence.Written _) -> Ok ()
+  | Inserted _, Some (Keeper_file_change_evidence.Written _) ->
+    Error (Malformed "insert input carries write file_change_evidence")
   | Edited _, Some (Keeper_file_change_evidence.Written _) ->
     Error (Malformed "edit input carries write file_change_evidence")
   | Written _, Some (Keeper_file_change_evidence.Edited _) ->
@@ -189,7 +212,7 @@ let location_of_target ~target_path =
     | Some (repo_id, relative_path) -> In_repo { repo_id; relative_path }
     | None -> In_bundle { bundle_path = target_path }
 
-let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) input =
+let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) ~keeper input =
   match handler with
   | Keeper_tool_descriptor.Tool_edit_file -> (
       match (required_string input "old_string", required_string input "new_string") with
@@ -205,6 +228,33 @@ let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) input =
       match required_string input "content" with
       | Ok content -> Ok (Written { content })
       | Error detail -> Error detail)
+  | Keeper_tool_descriptor.Tool_ide_annotate -> (
+      (* The line the file received is composed the way the tool composed
+         it, from the same three inputs and the same function, so the
+         projection shows the comment that is in the file. *)
+      match
+        ( required_string input "file_path"
+        , required_int input "line"
+        , required_string input "text" )
+      with
+      | Ok file_path, Ok line, Ok text -> (
+          let kind =
+            match Json_field.string input "kind" with
+            | Json_field.Found word -> Ide_memo.kind_of_word word
+            | Json_field.Field_absent -> Some Agent_observation.Comment
+            | Json_field.Wrong_shape _ -> None
+          in
+          match kind with
+          | None -> Error (Malformed "kind is not a memo kind")
+          | Some kind -> (
+              match Ide_memo.make ~author:keeper ~kind ~text with
+              | Error why -> Error (Malformed ("memo: " ^ why))
+              | Ok memo -> (
+                  match Lsp_process_manager.memo_line ~path:file_path memo with
+                  | Error refusal ->
+                      Error (Malformed (Lsp_process_manager.memo_line_refusal_to_string refusal))
+                  | Ok comment_line -> Ok (Inserted { line; text = comment_line }))))
+      | Error detail, _, _ | _, Error detail, _ | _, _, Error detail -> Error detail)
   | Keeper_tool_descriptor.Tool_execute
   | Keeper_tool_descriptor.Tool_search_files
   | Keeper_tool_descriptor.Tool_read_file
@@ -222,7 +272,6 @@ let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) input =
   | Keeper_tool_descriptor.Tool_surface_read
   | Keeper_tool_descriptor.Tool_surface_post
   | Keeper_tool_descriptor.Tool_person_note_set
-  | Keeper_tool_descriptor.Tool_ide_annotate
   | Keeper_tool_descriptor.Tool_voice_dispatch
   | Keeper_tool_descriptor.Tool_task_dispatch
   | Keeper_tool_descriptor.Tool_board_dispatch
@@ -277,7 +326,8 @@ let classify row =
         in
         let parsed =
           Result.bind input (fun input ->
-              Result.bind (kind_of_input ~handler input) (fun kind ->
+              Result.bind (required_string row "keeper") (fun keeper ->
+              Result.bind (kind_of_input ~handler ~keeper input) (fun kind ->
                   let succeeded =
                     Option.value ~default:false
                       (Json_field.to_option (Json_field.bool row "success"))
@@ -292,7 +342,6 @@ let classify row =
                          line_evidence)
                       (fun () ->
                         Result.bind (target_path_of_row row) (fun target_path ->
-                          Result.bind (required_string row "keeper") (fun keeper ->
                           let at =
                             Option.value ~default:0.
                               (Json_field.to_option (Json_field.float row "ts"))
@@ -421,6 +470,8 @@ let kind_to_json = function
         ; ("replace_all", `Bool replace_all)
         ]
   | Written { content } -> `Assoc [ ("kind", `String "write"); ("content", `String content) ]
+  | Inserted { line; text } ->
+      `Assoc [ ("kind", `String "insert"); ("line", `Int line); ("text", `String text) ]
 
 let optional_json to_json = function None -> `Null | Some value -> to_json value
 

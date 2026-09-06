@@ -1652,14 +1652,6 @@ let handle_surface_post_with_outcome
       |> Keeper_tool_execution.with_surface_post_receipt target))
 ;;
 
-let handle_ide_annotate ~config ~(meta : keeper_meta) ~args =
-  Keeper_tool_ide_runtime.handle_ide_annotate ~config ~meta ~args
-;;
-
-let handle_ide_annotate_with_outcome ~config ~(meta : keeper_meta) ~args =
-  Keeper_tool_ide_runtime.handle_ide_annotate_with_outcome ~config ~meta ~args
-;;
-
 let handle_voice_with_outcome
       ~config
       ~(meta : keeper_meta)

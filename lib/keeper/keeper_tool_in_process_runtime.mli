@@ -182,18 +182,6 @@ val handle_person_note_set_with_outcome
   -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
 
-val handle_ide_annotate
-  :  config:Workspace.config
-  -> meta:keeper_meta
-  -> args:Yojson.Safe.t
-  -> string
-
-val handle_ide_annotate_with_outcome
-  :  config:Workspace.config
-  -> meta:keeper_meta
-  -> args:Yojson.Safe.t
-  -> Keeper_tool_execution.t
-
 (** [handle_voice_with_outcome] dispatches to
     [Keeper_tool_voice_runtime.handle_voice_tool_with_outcome] by [name]. Caller
     must pass a name in the voice cluster. *)

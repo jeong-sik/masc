@@ -1,0 +1,20 @@
+name = "blade"
+light = false
+
+[palette]
+base00 = "0f0d0b"
+base01 = "17140f"
+base02 = "241f17"
+base03 = "574c3a"
+base04 = "8f7f63"
+base05 = "e6dcc8"
+base06 = "f2ebdc"
+base07 = "fbf7ee"
+base08 = "ff6144"
+base09 = "ff9a3d"
+base0a = "ffc94d"
+base0b = "8fd97a"
+base0c = "3fd9d0"
+base0d = "5fa8e6"
+base0e = "a97bff"
+base0f = "ff7fb0"

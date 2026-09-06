@@ -1,8 +1,9 @@
 # 번들된 색 스킴의 출처
 
-masc TUI 는 색 스킴 47개를 함께 배포하며 `config/themes/` 디렉터리의 TOML 테마를
+masc TUI 는 색 스킴 52개를 함께 배포하며 `config/themes/` 디렉터리의 TOML 테마를
 지원한다. 그중 `default-dark`, `default-light`, `dungeon-gold`, `norton`, `msx`,
-`pc-tools`, `msc`, `cyber`, 그리고 아래 절의 레트로 프리셋 4개(`norton-commander`,
+`pc-tools`, `msc`, `cyber`, `vaporwave`, `toxic`, `abyss`, `solar-flare`,
+`blade`, 그리고 아래 절의 레트로 프리셋 4개(`norton-commander`,
 `msx-retro`, `pc-tools-vintage`, `cga-classic`)는 masc 자체 것이고,
 **나머지 35개는 다른 사람이 만든 것**이다. 이 문서가 누가 만들었고 어떤 조건으로 쓰는지를 적는다.
 
@@ -125,6 +126,11 @@ Pro 의 라이선스 문구도 `Monokai Pro extensions` 로 범위가 그쪽에 
 | `dungeon-gold` | — | masc | 이 저장소의 MIT |
 | `norton` | — | masc | 이 저장소의 MIT |
 | `msx` | — | masc | 이 저장소의 MIT |
+| `vaporwave` | — | masc | 이 저장소의 MIT |
+| `toxic` | — | masc | 이 저장소의 MIT |
+| `abyss` | — | masc | 이 저장소의 MIT |
+| `solar-flare` | — | masc | 이 저장소의 MIT |
+| `blade` | — | masc | 이 저장소의 MIT |
 
 ## 여기 없는 것
 

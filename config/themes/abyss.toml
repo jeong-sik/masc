@@ -1,0 +1,20 @@
+name = "abyss"
+light = false
+
+[palette]
+base00 = "041014"
+base01 = "071c23"
+base02 = "0d2b35"
+base03 = "2f5f6d"
+base04 = "6d9aa6"
+base05 = "cfe8ef"
+base06 = "e4f3f7"
+base07 = "f4fbfd"
+base08 = "ff6b6b"
+base09 = "ffa14d"
+base0a = "ffe27a"
+base0b = "5ce6a8"
+base0c = "2ee6d6"
+base0d = "5aa9ff"
+base0e = "9d7cff"
+base0f = "ff7ec2"

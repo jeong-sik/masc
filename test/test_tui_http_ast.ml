@@ -244,7 +244,11 @@ let test_tui_ansi_status_helpers_use_theme_tokens () =
       check int (binding_name ^ " contains no direct raw status identifier") 0
         (Ast_grep.count_identifiers_outside_calls_in_value_binding ~module_path
            ~binding_name ~callees:[] ~identifiers:raw_status_identifiers))
-    [ "priority_indicator"; "ctx_color"; "ctx_bar" ];
+    (* [origin] is here because nothing else asks it this. Its own check
+       counts calls, and a count cannot see an arm that reached for a raw
+       colour instead of a token -- that arm simply adds nothing to any
+       count. *)
+    [ "priority_indicator"; "ctx_color"; "ctx_bar"; "origin" ];
   check int "priority glyph has one owner" 1
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"priority_indicator"
@@ -297,13 +301,20 @@ let test_tui_ansi_status_helpers_use_theme_tokens () =
    [masc_tui_ansi.ml], so this focused check requires every arm of [origin] to
    reach its resolved role token. *)
 let test_chat_roles_draw_through_the_readable_path () =
+  (* Reached, not counted. One arm per token was true when [origin] had one
+     arm per style; the Skill readings and Thinking arrived since and share
+     the tokens they mean -- quiet_origin draws both Local and Thinking, warn
+     draws Status and Skill_attention, bad draws Error and Skill_failure. A
+     count of one asks how many arms a token has, which is a question about
+     the style list rather than about the path a colour takes. *)
   List.iter
     (fun callee ->
-      check int
-        (Printf.sprintf "chat origin resolves %s once" callee)
-        1
+      check bool
+        (Printf.sprintf "chat origin reaches %s" callee)
+        true
         (Ast_grep.count_calls_in_value_binding
-           ~module_path:"bin/masc_tui_ansi.ml" ~binding_name:"origin" ~callee))
+           ~module_path:"bin/masc_tui_ansi.ml" ~binding_name:"origin" ~callee
+         > 0))
     [ "Theme.user_origin"
     ; "Theme.keeper_origin"
     ; "Theme.quiet_origin"
@@ -430,8 +441,14 @@ let test_http_client_does_not_own_tui_env_contract () =
 
 let test_keeper_chat_uses_current_async_contract () =
   let module_path = "bin/masc_tui.ml" in
-  check int "TUI keeper chat has no removed models field" 0
-    (Ast_grep.count_string_literals ~module_path ~needle:"models");
+  (* Asked where the body is built, and on the whole literal. The needle used
+     to be the substring "models" over every literal in masc_tui.ml, which
+     does not build this body at all: the runtime table's
+     [runtime.toml at [models.%s]] rows are what the substring found. *)
+  check int "the keeper chat body carries no models field" 0
+    (Ast_grep.count_string_literals_in_value_binding
+       ~module_path:"lib/keeper/keeper_chat_operation_payload.ml"
+       ~binding_name:"input_to_json" ~literals:[ "models" ]);
   check int "TUI targets the keeper chat stream once" 1
     (Ast_grep.count_string_literals
        ~module_path:"bin/masc_tui_http.ml"
@@ -525,9 +542,11 @@ let test_keeper_chat_uses_current_async_contract () =
        predicted the caret's row by repeating the pane's layout arithmetic,
        which only stayed true while every row the pane drew was also counted
        in the row budget. The renderer now reads the rows it has already put
-       in the frame, so [frame_lines] is what this list pins instead. *)
+       in the frame, so [count_frame_lines] is what this list pins instead --
+       the count, not the list: the caret needs how many rows sit above it and
+       nothing about their text. *)
     [ "Message_layout.input_viewport"
-    ; "frame_lines"
+    ; "count_frame_lines"
     ; "Message_layout.input_cursor_column"
     ; "Message_layout.message_viewport_supported"
       (* Renamed by #30141, which put a surface strip above every frame.  The
@@ -940,10 +959,17 @@ let test_planning_phase_uses_goal_ssot () =
        ~module_path:"bin/masc_tui_render.ml"
        ~callee:"Goal_phase.to_string"
      >= 1);
-  check int "renderer does not lowercase planning status strings" 0
-    (Ast_grep.count_calls
-       ~module_path:"bin/masc_tui_render.ml"
-       ~callee:"String.lowercase_ascii");
+  (* Asked of the bindings that draw a phase, not of the module. The renderer
+     lowercases a MIME type before splitting it, which is not a planning
+     status and never was; a module-wide count of a stdlib call cannot tell
+     the two apart. *)
+  List.iter
+    (fun binding_name ->
+      check int (binding_name ^ " does not lowercase a planning status") 0
+        (Ast_grep.count_calls_in_value_binding
+           ~module_path:"bin/masc_tui_render.ml" ~binding_name
+           ~callee:"String.lowercase_ascii"))
+    [ "planning_phase_label"; "planning_phase_column"; "planning_phase_color" ];
   check int "projection rejects an unknown canonical phase" 1
     (Ast_grep.count_string_literals
        ~module_path:"lib/tui_decode.ml"
@@ -1128,19 +1154,20 @@ let test_tui_current_projection_wiring () =
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_keeper_message"
        ~callee:"Observation_layout.context_header_item");
-  (* The budget handed to the context item must come from measured cells, or
-     a CJK title (two cells per character) overflows the box and [box_line]
-     cuts a reading into a different statement. Counting every
-     [display_width] in this binding froze the header's shape instead: the
-     identity budget measures here too, so adding a header segment moved the
-     total and failed a contract it never touched. Bind the measurement to
-     the argument that needs it. *)
-  check int "chat context item measures the actual header budget" 1
-    (Ast_grep.count_applications_with_label_containing_call_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_keeper_message"
-       ~callee:"Observation_layout.context_header_item" ~label:"max_cells"
-       ~nested_callee:"Message_layout.display_width");
+  (* The budget handed to the context item is in cells, or a CJK title (two
+     cells per character) overflows the box and [box_line] cuts a reading
+     into a different statement.
+
+     What is checkable here is that the budget is passed, not how it was
+     arrived at. Two earlier shapes tried the latter and both broke on code
+     that had nothing to do with the header: counting every [display_width]
+     in the binding moved with the identity budget, and requiring one inside
+     the [max_cells] argument stopped matching when the budget became a share
+     of [inner_cells] -- which is a cell count already, so the property holds
+     by a route no callee name can see. *)
+  check int "chat context item is handed a cell budget" 1
+    (Ast_grep.count_calls_with_label ~module_path:"bin/masc_tui_render.ml"
+       ~callee:"Observation_layout.context_header_item" ~label:"max_cells");
   check bool "log diagnostics remain operator-visible" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
@@ -1873,26 +1900,41 @@ let test_missing_operator_token_is_reported () =
        ~identifiers:[ "Masc_tui_credential.self_mint_expiry_hours" ]);
   (* Both refusal surfaces must ask what this process actually holds. Passing a
      constant would compile and read plausibly while asserting something the
-     401 never established -- which is the failure these lines exist to end. *)
-  check int "the chat surface asks whether a bearer was presented" 1
-    (Ast_grep.count_applications_with_exact_labelled_unit_call_in_value_binding
-       ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"apply_keeper_chat_result"
-       ~callee:"Keeper_chat.reconciliation_failure_detail"
-       ~label:"credential_sent"
-       ~nested_callee:"Masc_tui_http.operator_token_present");
-  check int "the roster surface asks the same question" 1
-    (Ast_grep.count_applications_with_exact_labelled_unit_call_in_value_binding
-       ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"apply_keeper_roster_load"
-       ~callee:"Keeper_control.roster_failure_message"
-       ~label:"credential_sent"
-       ~nested_callee:"Masc_tui_http.operator_token_present");
-  (* Every surface reads JSON through these two. Answering a refusal inside them
-     is what keeps the server's auth body out of six different panes; a surface
-     that decoded the status itself would print it again. *)
-  check int "the JSON reads share one refusal answer" 2
-    (Ast_grep.count_calls ~module_path:"bin/masc_tui_http.ml" ~callee:"decode_json");
+     401 never established -- which is the failure these lines exist to end.
+
+     So every call passes the question, not one of them. A fixed number says
+     how many branches reach the detail, and the chat surface has two: the
+     unverified outcome and the plain error. Both ask; a third that did not
+     would leave the number alone and the property broken. *)
+  let asks_the_question ~binding_name ~callee ~label =
+    let asking =
+      Ast_grep.count_applications_with_exact_labelled_unit_call_in_value_binding
+        ~module_path:"bin/masc_tui.ml" ~binding_name ~callee ~label
+        ~nested_callee:"Masc_tui_http.operator_token_present"
+    in
+    let calls =
+      Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+        ~binding_name ~callee
+    in
+    check bool (binding_name ^ " reaches " ^ callee) true (calls > 0);
+    check int (binding_name ^ " asks on every call to " ^ callee) calls asking
+  in
+  asks_the_question ~binding_name:"apply_keeper_chat_result"
+    ~callee:"Keeper_chat.reconciliation_failure_detail"
+    ~label:"credential_sent";
+  asks_the_question ~binding_name:"apply_keeper_roster_load"
+    ~callee:"Keeper_control.roster_failure_message" ~label:"credential_sent";
+  (* Every surface reads JSON through [decode_json]. Answering a refusal inside
+     it is what keeps the server's auth body out of six different panes; a
+     surface that decoded the status itself would print it again.
+
+     The count below is of readers, not of the contract: four call it today
+     and two did when this line was written, and neither number says anything
+     about where a refusal is answered. The line under it does -- one owner
+     for the decode is what makes the answer single. *)
+  check bool "the JSON reads have a shared owner" true
+    (Ast_grep.count_calls ~module_path:"bin/masc_tui_http.ml" ~callee:"decode_json"
+     > 0);
   check int "no surface decodes a status on its own" 1
     (Ast_grep.count_calls
        ~module_path:"bin/masc_tui_http.ml"

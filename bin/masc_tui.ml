@@ -1964,6 +1964,11 @@ let enqueue_async mailbox msg =
    card. A failed fetch leaves the synthesized card. Runs on its own daemon fiber
    so a slow site never blocks the render loop, and sends no masc auth header to
    the third-party URL. *)
+(* Set once the image helpers below are in scope: downloads and decodes a
+   preview's image into a half-block mosaic off the render loop. A no-op until
+   then, so a preview fetched during early init simply carries no mosaic. *)
+let compute_and_store_mosaic : (string -> unit) ref = ref (fun _ -> ())
+
 let () =
   Masc_tui_link_preview.set_background_fetch (fun url ->
       match Eio_context.get_switch_opt () with
@@ -1972,8 +1977,11 @@ let () =
           Eio.Fiber.fork_daemon ~sw (fun () ->
               (match Masc_tui_http.fetch_link_preview_body ~url with
                | Ok body ->
-                   Masc_tui_link_preview.cache_store
-                     (Masc_tui_link_preview.parse_og_html ~url ~body)
+                   let preview = Masc_tui_link_preview.parse_og_html ~url ~body in
+                   Masc_tui_link_preview.cache_store preview;
+                   (match preview.Masc_tui_link_preview.image_url with
+                    | Some img -> !compute_and_store_mosaic img
+                    | None -> ())
                | Error _ -> ());
               `Stop_daemon))
 
@@ -6509,6 +6517,53 @@ let convert_to_png input_path =
 (* Put a picture on the terminal, or say why not. The refusal is text for the
    pane: there is nothing to draw, and taking the screen away from the frame
    to say so would hide the only surface that can say it. *)
+(* Mosaic preview size: 40 cells wide, 20 pixels tall -> 10 half-block rows.
+   Small enough to decode and draw cheaply, large enough to recognise. *)
+let mosaic_cols = 40
+let mosaic_pixel_rows = 20
+
+(* Download a preview image and decode it into half-block mosaic lines, or None.
+   Blocking (curl + ffmpeg through Unix.system): the caller runs it off the
+   render loop inside run_in_systhread. *)
+let image_url_to_mosaic ~cols ~rows url =
+  match download_remote_image url with
+  | Error _ -> None
+  | Ok local_path -> (
+      let raw =
+        Filename.concat
+          (ensure_img_cache_dir ())
+          ("mosaic_"
+          ^ Digest.to_hex (Digest.string (Printf.sprintf "%s_%dx%d" url cols rows))
+          ^ ".raw")
+      in
+      let cmd =
+        Printf.sprintf
+          "ffmpeg -y -loglevel error -i %s -vf scale=%d:%d -f rawvideo -pix_fmt \
+           rgb24 %s"
+          (Filename.quote local_path) cols rows (Filename.quote raw)
+      in
+      match Unix.system cmd with
+      | Unix.WEXITED 0 when Sys.file_exists raw -> (
+          try
+            let ic = open_in_bin raw in
+            let data = really_input_string ic (in_channel_length ic) in
+            close_in ic;
+            match Masc_tui_image_mosaic.render ~cols ~rows data with
+            | [] -> None
+            | lines -> Some lines
+          with _ -> None)
+      | _ -> None)
+
+let () =
+  compute_and_store_mosaic :=
+    fun img ->
+      match
+        Eio_guard.run_in_systhread (fun () ->
+            image_url_to_mosaic ~cols:mosaic_cols ~rows:mosaic_pixel_rows img)
+      with
+      | Some lines -> Masc_tui_link_preview.mosaic_store img lines
+      | None -> ()
+
 let open_image state ~notice path =
   let refuse reason =
     notice ~role:Message_error (Printf.sprintf "/image %s: %s" path reason)

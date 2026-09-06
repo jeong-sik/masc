@@ -4678,3 +4678,8 @@
  (name test_keeper_sandbox_remote_checkouts)
  (modules test_keeper_sandbox_remote_checkouts)
  (libraries alcotest masc yojson))
+
+(test
+ (name test_tui_image_mosaic)
+ (modules test_tui_image_mosaic)
+ (libraries alcotest masc_tui_image_mosaic))

@@ -1110,15 +1110,22 @@ let run_keeper_cycle
                             and its answer thrown away by a lone wildcard, which
                             read as if the two were told apart.
 
-                            They are not, and the reason is the state machine, not
-                            this call site: {!Turn_fsm} has no edge from Streaming
-                            to [Failure_runtime_error], so a masc-internal failure
-                            has nowhere else to go. It rides the provider edge and
-                            says what it really is in [kind] — "internal" rather
-                            than "provider". 54 turns took that path on 2026-09-06
-                            (grep [masc_agent_core_error] in the system log).
+                            They are not, and nothing upstream stops them from
+                            being: {!Turn_fsm} admits every failure reason out of
+                            an active state through
+                            [_, Any (Failed _) when is_active from_state], which
+                            names the event [GenericFail]. A masc-internal failure
+                            given [Failure_runtime_error] here would be allowed and
+                            would report GenericFail where it now reports
+                            ProviderError. That is the open question, and it is
+                            about which event operators should count, not about
+                            what the machine permits — #33671.
 
-                            Giving them an edge of their own is #33671. *)
+                            Until it is answered an internal failure rides the
+                            provider edge and says what it really is in [kind] —
+                            "internal" rather than "provider". 54 turns took that
+                            path on 2026-09-06 (grep [masc_agent_core_error] in the
+                            system log). *)
                          Keeper_turn_fsm.Failure_provider_error
                            { kind = Agent_core.Error.(category err |> category_label)
                            ; detail = short_preview e_str

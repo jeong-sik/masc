@@ -40,9 +40,8 @@ module Code_address : sig
       Layering: the keeper write resolver lexically collapses dot
       segments in raw tool arguments before minting, so on that path
       these rejections guard the resolver's own invariant. Wire-facing
-      callers (RFC-0378 §5.3 — annotate and the REST annotation POST)
-      hand user input to [v] directly; that is where the rejections
-      fire as typed contract errors. *)
+      callers hand user input to [v] directly; that is where the
+      rejections fire as typed contract errors. *)
 
   val codebase : t -> string
   val path : t -> string
@@ -91,8 +90,8 @@ type unaddressed =
             for records that never joined a codebase. *)
   }
 
-(** Where a fact that names a file belongs. An annotation or write region
-    always names a file, so [Pathless] is unrepresentable for them. *)
+(** Where a fact that names a file belongs. A write region always names
+    a file, so [Pathless] is unrepresentable for it. *)
 type file_attribution =
   | Addressed of addressed
   | Unaddressed of unaddressed
@@ -142,49 +141,11 @@ val valid_annotation_kind_strings : string list
     new kind cannot reach the wire without appearing here. *)
 val annotation_kind_of_string : string -> annotation_kind option
 
-type annotation_reference =
-  { relation : string
-  ; reference : string
-  }
-(** Product-neutral link carried by an annotation.  Both fields are opaque to
-    the observation bus: producers choose the relation label and reference
-    value, while consumers may render but must not interpret them. *)
-
-val annotation_references_to_json : annotation_reference list -> Yojson.Safe.t
-
-val annotation_references_of_json :
-  Yojson.Safe.t -> (annotation_reference list, string) result
-(** Decode a [references] array.  [`Null] means no references.  Malformed or
-    blank entries are rejected explicitly instead of being dropped. *)
-
-type annotation_request =
-  { base_path : string
-  ; attribution : file_attribution
-  ; keeper_id : string
-  ; line_start : int
-  ; line_end : int
-  ; kind : annotation_kind
-  ; content : string
-  ; goal_id : string option
-  ; task_id : string option
-  ; references : annotation_reference list
-  }
-
-type annotation_result =
-  { id : string
-  ; file_path : string
-  ; line_start : int
-  ; line_end : int
-  }
-
 type tool_event_sink = tool_event -> unit
-type annotation_sink = annotation_request -> (annotation_result, string) result
 
 val register_tool_event_sink : tool_event_sink -> unit
-val register_annotation_sink : annotation_sink -> unit
 
 val emit_tool_event : tool_event -> unit
-val emit_annotation_request : annotation_request -> (annotation_result, string) result
 
 type snapshot
 

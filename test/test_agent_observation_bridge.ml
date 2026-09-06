@@ -29,8 +29,8 @@ let install_fresh_ide_sink () =
   Ide_bridge.install_agent_observation_sinks ()
 ;;
 
-(* RFC-0378 A2: test-side attribution builder ([file_attribution] for
-   annotation facts; wrap in [File] for tool facts). *)
+(* RFC-0378 A2: test-side attribution builder; wrap in [File] for tool
+   facts. *)
 let addressed_file ~codebase ~path =
   match Agent_observation.Code_address.v ~codebase ~path with
   | Ok address -> Agent_observation.Addressed { address; checkout = None }
@@ -72,95 +72,6 @@ let test_tool_observation_reaches_ide_storage () =
       check string "tool_name" "keeper_ide_annotate" (json_string "tool_name" event);
       check string "keeper_id" "keeper-alpha" (json_string "keeper_id" event)
     | _ -> fail "expected one tool event")
-;;
-
-let test_annotation_request_reaches_ide_storage () =
-  with_temp_dir (fun base_dir ->
-    install_fresh_ide_sink ();
-    let result =
-      Agent_observation.emit_annotation_request
-        { base_path = base_dir
-        ; attribution =
-            addressed_file ~codebase:"github.com_owner_repo" ~path:"lib/annotated.ml"
-        ; keeper_id = "keeper-epsilon"
-        ; line_start = 7
-        ; line_end = 9
-        ; kind = Agent_observation.Decision
-        ; content = "route through neutral observation bus"
-        ; goal_id = Some "goal-17"
-        ; task_id = None
-        ; references =
-            [ { relation = "discussion"; reference = "thread-3" } ]
-        }
-    in
-    match result with
-    | Error msg -> failf "annotation request failed: %s" msg
-    | Ok created ->
-      check string "result file" "lib/annotated.ml" created.file_path;
-      check int "result line start" 7 created.line_start;
-      check int "result line end" 9 created.line_end;
-      let filter : Ide_annotation_types.annotation_filter =
-        { file_path = Some "lib/annotated.ml"
-        ; keeper_id = Some "keeper-epsilon"
-        ; goal_id = Some "goal-17"
-        ; task_id = None
-        }
-      in
-      (match
-         Ide_annotations.list
-           ~base_dir
-           ~codebase:("github.com_owner_repo")
-           ~filter
-           ()
-       with
-       | [ annotation ] ->
-         check string "id" created.id annotation.id;
-         check string "content" "route through neutral observation bus" annotation.content;
-         check yojson "opaque reference preserved"
-           (`List
-             [ `Assoc
-                 [ "relation", `String "discussion"
-                 ; "reference", `String "thread-3"
-                 ]
-             ])
-           (Agent_observation.annotation_references_to_json annotation.references);
-         (match annotation.kind with
-          | Ide_annotation_types.Decision -> ()
-          | _ -> fail "expected Decision annotation kind")
-       | rows -> failf "expected one annotation, got %d" (List.length rows)))
-;;
-
-let test_annotation_references_reject_malformed_entries () =
-  let malformed =
-    `List
-      [ `Assoc
-          [ "relation", `String "discussion"
-          ; "reference", `String ""
-          ]
-      ]
-  in
-  match Agent_observation.annotation_references_of_json malformed with
-  | Ok _ -> fail "blank opaque reference was accepted"
-  | Error msg ->
-    check string "explicit malformed reference error"
-      "references[0] relation and reference must be non-empty strings"
-      msg
-;;
-
-let test_annotation_references_preserve_unknown_relations () =
-  let opaque =
-    `List
-      [ `Assoc
-          [ "relation", `String "producer-defined-relation"
-          ; "reference", `String "opaque://value"
-          ]
-      ]
-  in
-  match Agent_observation.annotation_references_of_json opaque with
-  | Error msg -> failf "opaque reference rejected: %s" msg
-  | Ok references ->
-    check yojson "unknown relation round-trips without interpretation" opaque
-      (Agent_observation.annotation_references_to_json references)
 ;;
 
 let test_snapshot_reset_clears_accumulated_observations () =
@@ -240,14 +151,6 @@ let () =
             "tool observation reaches IDE storage"
             `Quick
             test_tool_observation_reaches_ide_storage
-        ; test_case
-            "annotation request reaches IDE storage"
-            `Quick
-            test_annotation_request_reaches_ide_storage
-        ; test_case "annotation references reject malformed entries" `Quick
-            test_annotation_references_reject_malformed_entries
-        ; test_case "annotation references preserve unknown relations" `Quick
-            test_annotation_references_preserve_unknown_relations
         ; test_case
             "snapshot reset clears accumulated observations"
             `Quick

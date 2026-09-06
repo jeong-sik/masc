@@ -7,8 +7,8 @@
 # name `json_kind_name`, so a copy under any other name passed while
 # this script printed OK. Five did, under kind_label,
 # kind_name_of_json, yojson_variant_name and two spellings of
-# kind_name. One says so in its own comment (ide_annotation_types.ml):
-# "Name [kind_label] (not [json_kind_name]) slips the
+# kind_name. One said so in its own comment (a store module since
+# deleted): "Name [kind_label] (not [json_kind_name]) slips the
 # no-inline-json-kind-name lint regex".
 #
 # Rationale: PR #16534 (initial 6-site dedup) + #16546 (yojson 3.0

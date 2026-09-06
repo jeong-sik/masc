@@ -1,5 +1,4 @@
-(** Server IDE LSP Proxy — WebSocket bridge for Language Server Protocol
-    with MASC observational overlays. *)
+(** Server IDE LSP Proxy — WebSocket bridge for Language Server Protocol. *)
 
 (** Add LSP proxy routes to the router.
     Exposes [/api/v1/ide/lsp] WebSocket endpoint for LSP traffic. *)
@@ -47,7 +46,8 @@ module For_testing : sig
     (resolved_document_request, document_request_error) result
 
   (** Per-language LSP health (task-1691). [Overlay_only] carries the last
-      error that forced the language into overlay-only mode. *)
+      error that left the language without a server; the proxy answers its
+      requests with empty results until one comes up. *)
   type health =
     | Connected
     | Overlay_only of string

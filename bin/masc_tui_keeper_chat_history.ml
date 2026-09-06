@@ -80,7 +80,9 @@ and fusion_conclusion =
 
 let tool_rows block =
   let projection = Transcript.project_tool_block Transcript.Full block in
-  projection.rows
+  (* Steps only. The context inspector lists what the turn ran, and a rollup
+     over those steps is not itself a step. *)
+  projection.details
 
 (* The surface half of the label. An operator's own surfaces say nothing extra:
    a dashboard row from a named person is that person, and the pane the

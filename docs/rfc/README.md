@@ -275,6 +275,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |
 | RFC-auth-bootstrap-grace-token-proof | Auth bootstrap-grace requires proof of token possession | Implemented | - |
 | RFC-chat-references-are-recorded-not-guessed | 대화의 명시 참조와 해석된 언급을 구분해 기록한다 | Draft | - |
+| RFC-chat-turn-rail-and-side-lanes | 턴은 본선, 밖에서 온 것은 측선 — 채팅 화면의 위계를 레일로 그린다 | Draft | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |
 | RFC-claude-code-context-overflow-bounded-restart | Admit Claude Code bootstrap input without replaying rejected episodes | Draft | - |
 | RFC-claude-setting-sources-opt-in | Claude Code settings layers as a keeper-profile opt-in | Implemented | - |

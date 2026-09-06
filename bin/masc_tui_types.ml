@@ -3323,7 +3323,6 @@ type state = {
      which only a Repositories row carries) swaps the content for the notes
      anchored to the file. *)
   (* The notes anchored to the open file, keyed by its path. *)
-  mutable code_notes: (string, Tui_decode.ide_annotation list) Masc_tui_fetched.t;
   mutable code_notes_open: bool;
   mutable code_notes_scroll: int;
   (* The file pane's blame margin: b on an open file fetches who last touched
@@ -4359,7 +4358,6 @@ let create_state
   code_diff = Masc_tui_fetched.initial;
   code_diff_open = false;
   code_diff_scroll = 0;
-  code_notes = Masc_tui_fetched.initial;
   code_notes_open = false;
   code_notes_scroll = 0;
   code_blame = Masc_tui_fetched.initial;
@@ -5275,21 +5273,6 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
 let scrolled_surface (state : state) (surface : surface) : scrolled option =
   scrolled_surface_rows state surface
 ;;
-
-(* The $EDITOR form [w] opens, anchored to one line.
-
-   A form rather than a prompt because a note carries four fields, and a
-   stem rather than an empty file because the shape is the thing an operator
-   should not have to remember. [anchor] is 1-based: it is what the reader
-   sees in the gutter, not the index behind it.
-
-   The anchor was the literal 1 until it was measured -- every one of this
-   workspace's 51 stored annotations sits at line 1, which is what a form
-   that never offered a line produces. *)
-let code_note_stem ~anchor =
-  Printf.sprintf
-    "{\n  \"line_start\": %d,\n  \"line_end\": %d,\n  \"kind\": \"Comment\",\n  \"content\": \"\"\n}\n"
-    anchor anchor
 
 (* The text a "/" search reads for each row: the identifiers an operator
    would type, not the drawn bytes. [Some texts] means the surface is

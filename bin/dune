@@ -807,6 +807,12 @@
  (libraries masc_tui_message_layout))
 
 (library
+ (name masc_tui_memo)
+ (wrapped false)
+ (modules masc_tui_memo)
+ (libraries masc_tui_code_lexer masc.ide_memo))
+
+(library
  (name masc_tui_markdown)
  (wrapped false)
  (modules masc_tui_markdown)
@@ -1112,10 +1118,12 @@
   masc_tui_terminal_palette
   masc_tui_terminal_probe
   masc_tui_code_lexer
+  masc_tui_memo
   masc_tui_span
   masc_tui_diff
   masc_tui_keeper_chat_diff
   masc
+  masc.ide_memo
   masc.auth
   masc.masc_random_id
    masc.time_codec

@@ -2454,21 +2454,6 @@ val blame_block_at : blame_block list -> int -> (blame_block * bool) option
     cover is the only one; the flag is what lets a gutter name an author once
     per run instead of once per line. *)
 
-(** One [/api/v1/ide/annotations] note: where it anchors, who left it, the
-    server's kind word, and what it says. *)
-type ide_annotation = {
-  ia_line_start : int;
-  ia_line_end : int;
-  ia_keeper : string;
-  ia_kind : string;
-  ia_content : string;
-  ia_task : string option;
-}
-
-val decode_ide_annotations :
-  Yojson.Safe.t -> (ide_annotation list, string) result
-(** The route's [{ok; data}] envelope. *)
-
 (** The [/api/v1/lsp/question] answer: where a name is defined (1-based,
     workspace-relative when inside), or what the server says it is. *)
 type lsp_location = {

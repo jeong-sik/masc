@@ -131,7 +131,9 @@ let test_assembled_prompt_carries_system_anchor () =
     (contains golden_workspace_root);
   check bool "custom instructions reach the prompt" true
     (contains "Golden custom instruction line one.");
-  check bool "active goals reach the prompt" true (contains "goal-golden-1")
+  check bool "active goals reach the prompt" true (contains "goal-golden-1");
+  check bool "GH_CONFIG_DIR preauth guidance reaches the prompt" true
+    (contains "GH_CONFIG_DIR")
 
 let () =
   run "keeper_system_prompt_bytes"

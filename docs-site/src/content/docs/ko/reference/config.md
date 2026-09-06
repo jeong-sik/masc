@@ -45,10 +45,9 @@ description: .masc/config/*.toml 파일의 스키마와 예시입니다.
 `llama_server`·`vllm`·`mlx_server` 는 주석 상태로 들어 있습니다 —
 [로컬 AI 모델 연결](/ko/runbooks/llama-server/) 참고.
 
-**시드된 바인딩 대부분은 턴을 못 받습니다.** 카탈로그에는 예시를 겸해 provider·모델
-쌍 31개가 있고, 그중 `max-request-body-bytes` 를 선언한 **13개만** 디스패치됩니다.
-나머지 18개는 부팅 경고가 어느 키를 넣어야 하는지 이름까지 찍어 줍니다.
-`[runtime].default` 는 13개 안에 있습니다.
+**시드된 바인딩은 모두 keeper-dispatchable 합니다.** 카탈로그에는 예시를 겸해 provider·모델
+쌍 31개가 있고, 31개 모두 `max-request-body-bytes` 가 선언되어 부팅 경고 없이
+Keeper 턴을 받을 수 있습니다. `[runtime].default` 는 31개 안에 있습니다.
 
 ## runtime.toml
 

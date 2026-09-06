@@ -746,6 +746,7 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.minimax-m3]
+max-request-body-bytes = 524288
 
 # Kimi K2.7 Code (Ollama Cloud) — vision-capable Cloud runtime. The model name
 # is kept separate from Kimi's direct API route; AGENT_CORE owns provider/model wire
@@ -773,6 +774,7 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.kimi-k2-7-code]
+max-request-body-bytes = 524288
 
 # Ollama Cloud canonical model seeds
 # Source: https://ollama.com/api/tags + /api/show, checked 2026-06-20 KST.
@@ -865,6 +867,7 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-deepseek-v4-pro]
+max-request-body-bytes = 524288
 
 [models.ollama-cloud-gemma4-31b]
 api-name = "gemma4:31b"
@@ -904,6 +907,7 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-glm-5-1]
+max-request-body-bytes = 524288
 
 [models.ollama-cloud-glm-5-2]
 api-name = "glm-5.2"
@@ -921,6 +925,7 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-glm-5-2]
+max-request-body-bytes = 524288
 
 # Zhipu GLM-5.3 through Ollama Cloud. /api/show 2026-08-29:
 # caps=[completion,thinking,tools], context_length=1048576, arch=glm_dsa_moe.
@@ -993,6 +998,7 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-gpt-oss-20b]
+max-request-body-bytes = 524288
 
 [models.ollama-cloud-gpt-oss-120b]
 api-name = "gpt-oss:120b"
@@ -1010,6 +1016,7 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-gpt-oss-120b]
+max-request-body-bytes = 524288
 
 [models.ollama-cloud-kimi-k2-6]
 api-name = "kimi-k2.6"
@@ -1027,6 +1034,7 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-kimi-k2-6]
+max-request-body-bytes = 524288
 
 [models.ollama-cloud-kimi-k2-7-code]
 api-name = "kimi-k2.7-code"
@@ -1044,6 +1052,7 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-kimi-k2-7-code]
+max-request-body-bytes = 524288
 
 # Moonshot Kimi K3 through Ollama Cloud. /api/show 2026-08-29:
 # caps=[vision,thinking,completion,tools], context_length=1048576.
@@ -1086,6 +1095,7 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-minimax-m2-7]
+max-request-body-bytes = 524288
 
 [models.ollama-cloud-minimax-m3]
 api-name = "minimax-m3"
@@ -1106,6 +1116,7 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-minimax-m3]
+max-request-body-bytes = 524288
 
 [models.ollama-cloud-mistral-large-3-675b]
 api-name = "mistral-large-3:675b"
@@ -1123,6 +1134,7 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-mistral-large-3-675b]
+max-request-body-bytes = 524288
 
 [models.ollama-cloud-nemotron-3-nano-30b]
 api-name = "nemotron-3-nano:30b"
@@ -1140,6 +1152,7 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-nemotron-3-nano-30b]
+max-request-body-bytes = 524288
 
 [models.ollama-cloud-nemotron-3-super]
 api-name = "nemotron-3-super"
@@ -1157,6 +1170,7 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-nemotron-3-super]
+max-request-body-bytes = 524288
 
 [models.ollama-cloud-nemotron-3-ultra]
 api-name = "nemotron-3-ultra"
@@ -1174,6 +1188,7 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-nemotron-3-ultra]
+max-request-body-bytes = 524288
 
 [models.ollama-cloud-qwen3-5-397b]
 api-name = "qwen3.5:397b"
@@ -1200,13 +1215,16 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-qwen3-5-397b]
+max-request-body-bytes = 524288
 
 [ollama.gemma4-26b-a4b-qat]
 wizard-default = true
 max-concurrent = 1
+max-request-body-bytes = 524288
 
 [ollama.gemma4-e2b-it-qat]
 max-concurrent = 1
+max-request-body-bytes = 524288
 
 
 # ── Runtime lanes (ordered failover) ─────────────────────────────────

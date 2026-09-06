@@ -25,7 +25,7 @@
     A turn that cannot reach an Eio environment runs without a pool rather than
     failing over a capability it may never use — {!get_opt} answers [None] and
     the tool says so. *)
-val with_turn_pool : (unit -> 'a) -> 'a
+val with_turn_pool : servers:Lsp_process_manager.servers -> (unit -> 'a) -> 'a
 
 val get_opt : unit -> Lsp_workspace_pool.t option
 (** [None] outside a turn, and inside one that has no pool. *)

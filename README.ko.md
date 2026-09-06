@@ -225,10 +225,10 @@ network_mode = "none"
 export 하세요. TUI로 시작할 때 놓치기 쉬운데, TUI가 띄운 서버는 TUI의 환경을 그대로
 물려받기 때문입니다. 켜기 **전에** export 하세요.
 
-**시드된 모델 카탈로그 대부분은 바로 못 씁니다.** 카탈로그에는 예시를 겸해
-provider/model 바인딩 31개가 들어 있고, 그중 `max-request-body-bytes`를 선언한
-13개만 Keeper 턴을 받습니다. 나머지는 부팅 경고에 어떤 키를 넣어야 하는지까지
-같이 찍힙니다. `[runtime].default`는 13개 안에 있습니다.
+**시드된 모델 카탈로그는 모두 keeper-dispatchable 합니다.** 카탈로그에는 예시를 겸해
+provider/model 바인딩 31개가 들어 있고, 31개 모두 `max-request-body-bytes`를 선언하여
+설정된 어떤 모델이든 부팅 경고 없이 Keeper 턴을 받을 수 있습니다. `[runtime].default`는
+31개 안에 있습니다.
 
 ### 갓 만든 Keeper가 할 수 있는 일
 
@@ -431,11 +431,37 @@ Keeper에게 바로 넘깁니다. `masc_ask`로 질문을 던진 Keeper에게는
 언어 서버는 MASC가 같이 배포하지 않습니다. 프로젝트 언어에 맞는 프로그램을
 `PATH`에서 찾아 직접 띄우고, 없으면 짐작하는 대신 `Command_not_found`로
 답합니다. OCaml은 `ocamllsp`, TypeScript와 JavaScript는
-`typescript-language-server`, Python은 `pylsp`, Rust는 `rust-analyzer`, Go는
-`gopls`입니다. Keeper의 `keeper_code_query` 도구도 같은 서버를 쓰므로, 서버가
+`typescript-language-server`, Python은 `pyright-langserver`, Rust는 `rust-analyzer`, Go는
+`gopls`입니다. 언어별 프로그램과 프로젝트 표지는 아래 표와 같습니다. Keeper의 `keeper_code_query` 도구도 같은 서버를 쓰므로, 서버가
 없는 언어를 맡은 Keeper는 파일을 글자로 읽는 데까지만 갑니다. OCaml에서
 `references`는 `dune build @ocaml-index`가 추가로 필요하고, 없으면 답이 그
 명령을 알려 줍니다.
+
+| 언어 | 프로그램 | 프로젝트 표지 |
+|---|---|---|
+| OCaml | `ocamllsp` | `dune-project`, `dune-workspace` |
+| TypeScript | `typescript-language-server` | `tsconfig.json`, `package.json` |
+| JavaScript | `typescript-language-server` | `jsconfig.json`, `package.json` |
+| Python | `pyright-langserver` | `pyproject.toml`, `setup.py`, `setup.cfg` |
+| Rust | `rust-analyzer` | `Cargo.toml` |
+| Go | `gopls` | `go.mod` |
+| C | `clangd` | `compile_commands.json`, `CMakeLists.txt`, `Makefile` |
+| C++ | `clangd` | `compile_commands.json`, `CMakeLists.txt`, `Makefile` |
+| Swift | `sourcekit-lsp` | `Package.swift` |
+| Java | `jdtls` | `pom.xml`, `build.gradle`, `build.gradle.kts` |
+| Kotlin | `kotlin-language-server` | `build.gradle.kts`, `settings.gradle.kts`, `build.gradle` |
+| Ruby | `ruby-lsp` | `Gemfile` |
+| PHP | `intelephense` | `composer.json` |
+| Lua | `lua-language-server` | `.luarc.json` |
+| Bash | `bash-language-server` | 작업 공간 경계 |
+| JSON | `vscode-json-language-server` | 작업 공간 경계 |
+| YAML | `yaml-language-server` | 작업 공간 경계 |
+| Zig | `zls` | `build.zig` |
+| Haskell | `haskell-language-server-wrapper` | `stack.yaml`, `cabal.project` |
+| Elixir | `elixir-ls` | `mix.exs` |
+| Dart | `dart` | `pubspec.yaml` |
+| Scala | `metals` | `build.sbt` |
+| C# | `csharp-ls` | 작업 공간 경계 |
 
 TUI와 서버가 서로 다른 작업 공간을 보고 있으면 머리글이 그렇게 말합니다 — 연결
 표시 옆 `[workspace mismatch]`, 그리고 아래 줄에 두 경로가 같이 나옵니다. 그동안

@@ -815,6 +815,38 @@ let sanitize_terminal_text text =
   Buffer.contents output
 ;;
 
+(* One row of a text that has rows. The terminal boundary escapes control
+   bytes because an external value may carry them by mistake or on purpose;
+   a file's newline is neither, it is the text's own shape, and a list cell
+   that prints it as [\x0A] reads as damage. So a break becomes a one-cell
+   return mark, a tab a space, and the rest goes through the same escape as
+   every other external value. The mark is neutral-width (U+23CE), so a
+   preview grows by one cell per line, never by six. *)
+let preview_line text =
+  let return_mark = "\xe2\x8f\x8e" in
+  let output = Buffer.create (String.length text) in
+  let length = String.length text in
+  let rec walk index =
+    if index < length
+    then (
+      match text.[index] with
+      | '\r' when index + 1 < length && text.[index + 1] = '\n' ->
+        Buffer.add_string output return_mark;
+        walk (index + 2)
+      | '\n' | '\r' ->
+        Buffer.add_string output return_mark;
+        walk (index + 1)
+      | '\t' ->
+        Buffer.add_char output ' ';
+        walk (index + 1)
+      | byte ->
+        Buffer.add_char output byte;
+        walk (index + 1))
+  in
+  walk 0;
+  sanitize_terminal_text (Buffer.contents output)
+;;
+
 let short_timestamp_for_terminal text =
   sanitize_terminal_text
     (if String.length text > 19 then String.sub text 0 19
@@ -6876,16 +6908,19 @@ type prompt_operator_surface =
   | Prompt_primary
   | Prompt_fragment
 
+type prompt_source =
+  | Prompt_override
+  | Prompt_file
+  | Prompt_missing
+
 type prompt_row = {
   pr_key : string;
   pr_category : string;
   pr_operator_surface : prompt_operator_surface;
   pr_description : string;
   pr_effective : string;
-  pr_has_override : bool;
-  pr_file_exists : bool;
   pr_file_path : string;
-  pr_source : string;
+  pr_source : prompt_source;
   pr_template_variables : string list;
 }
 
@@ -6919,11 +6954,6 @@ let decode_prompt_row json =
     | `String value -> value
     | _ -> ""
   in
-  let bool_or field =
-    match member field json with
-    | `Bool value -> value
-    | _ -> false
-  in
   let string_list_or_empty field =
     match member field json with
     | `Null -> Ok []
@@ -6945,16 +6975,23 @@ let decode_prompt_row json =
       Error (Printf.sprintf "unknown prompt operator_surface %S" value)
     | value -> field_type_error "operator_surface" "a string" value
   in
+  let* pr_source =
+    match member "source" json with
+    | `String "override" -> Ok Prompt_override
+    | `String "file" -> Ok Prompt_file
+    | `String "missing" -> Ok Prompt_missing
+    | `String value -> Error (Printf.sprintf "unknown prompt source %S" value)
+    | `Null -> Error (Printf.sprintf "missing required field '%s'" "source")
+    | value -> field_type_error "source" "a string" value
+  in
   Ok
     { pr_key
     ; pr_category = string_or "category"
     ; pr_operator_surface
     ; pr_description = string_or "description"
     ; pr_effective = string_or "effective"
-    ; pr_has_override = bool_or "has_override"
-    ; pr_file_exists = bool_or "file_exists"
     ; pr_file_path = string_or "file_path"
-    ; pr_source = string_or "source"
+    ; pr_source
     ; pr_template_variables
     }
 ;;
@@ -8334,36 +8371,6 @@ let blame_block_at blocks line =
         else find rest
   in
   find blocks
-
-(* ── IDE annotations: notes anchored to lines of a codebase ────────── *)
-
-type ide_annotation = {
-  ia_line_start : int;
-  ia_line_end : int;
-  ia_keeper : string;
-  (* The server's kind vocabulary (comment / decision / question /
-     bookmark), carried as its own word: the TUI only prints it, so an
-     added kind shows itself instead of killing the listing. *)
-  ia_kind : string;
-  ia_content : string;
-  ia_task : string option;
-}
-
-let decode_ide_annotation json =
-  let* ia_line_start = required_int_field json "line_start" in
-  let* ia_line_end = required_int_field json "line_end" in
-  let* ia_keeper = required_string_field json "keeper_id" in
-  let* ia_kind = required_string_field json "kind" in
-  let* ia_content = required_string_field json "content" in
-  let* ia_task = optional_string_field json "task_id" in
-  Ok { ia_line_start; ia_line_end; ia_keeper; ia_kind; ia_content; ia_task }
-
-let decode_ide_annotations json =
-  let* ok = required_bool_field json "ok" in
-  if not ok then Error "annotations answered ok=false"
-  else
-    let* rows_json = required_list_field json "data" in
-    decode_list "data" decode_ide_annotation rows_json
 
 (* ── the /api/v1/lsp/question answer ───────────────────────────────── *)
 

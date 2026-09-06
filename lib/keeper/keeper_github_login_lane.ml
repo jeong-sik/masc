@@ -47,12 +47,13 @@ let run_remote endpoint ~timeout_sec ~on_stdout_chunk ~on_stderr_chunk ~argv =
    redaction runs before truncation so a cut cannot leave half a secret. *)
 let step ~redaction endpoint ~argv =
   match
-    run_remote
-      endpoint
-      ~timeout_sec:step_timeout_sec
-      ~on_stdout_chunk:None
-      ~on_stderr_chunk:None
-      ~argv
+    Masc_exec.Sandbox_target.status_tuple
+      (run_remote
+         endpoint
+         ~timeout_sec:step_timeout_sec
+         ~on_stdout_chunk:None
+         ~on_stderr_chunk:None
+         ~argv)
   with
   | Unix.WEXITED 0, stdout, _ -> Ok stdout
   | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, stderr ->
@@ -115,22 +116,24 @@ let remote_lane ~(config : Workspace.config) ~keeper_name ~hostname =
   let lane : Keeper_github_identity.login_lane =
     { run_login =
         (fun ~on_stdout_chunk ~on_stderr_chunk ->
-          run_remote
-            endpoint
-            ~timeout_sec:Keeper_github_identity.login_timeout_sec
-            ~on_stdout_chunk:(Some on_stdout_chunk)
-            ~on_stderr_chunk:(Some on_stderr_chunk)
-            ~argv:(Keeper_github_identity.login_argv ~hostname))
+          Masc_exec.Sandbox_target.status_tuple
+            (run_remote
+               endpoint
+               ~timeout_sec:Keeper_github_identity.login_timeout_sec
+               ~on_stdout_chunk:(Some on_stdout_chunk)
+               ~on_stderr_chunk:(Some on_stderr_chunk)
+               ~argv:(Keeper_github_identity.login_argv ~hostname)))
     ; secure_after_login = (fun () -> secure_config_files ~redaction endpoint ~gh_dir)
     ; observe_after_login =
         (fun () ->
           let run =
-            run_remote
-              endpoint
-              ~timeout_sec:step_timeout_sec
-              ~on_stdout_chunk:None
-              ~on_stderr_chunk:None
-              ~argv:(Keeper_github_identity.auth_probe_argv ~hostname)
+            Masc_exec.Sandbox_target.status_tuple
+              (run_remote
+                 endpoint
+                 ~timeout_sec:step_timeout_sec
+                 ~on_stdout_chunk:None
+                 ~on_stderr_chunk:None
+                 ~argv:(Keeper_github_identity.auth_probe_argv ~hostname))
           in
           let result =
             Keeper_github_identity.auth_result_of_probe ~base_path ~keeper_name run

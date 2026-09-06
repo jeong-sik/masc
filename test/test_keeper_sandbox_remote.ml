@@ -256,8 +256,9 @@ let test_openssh_probe_stays_one_word () =
 ;;
 
 let run_request runner ?(env = [| "LANG=C" |]) ?(cwd = None) () =
-  runner ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:(Some "in")
-    ~argv:[ "/usr/bin/printf"; "hello" ] ~env ~cwd
+  Masc_exec.Sandbox_target.status_tuple
+    (runner ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:(Some "in")
+       ~argv:[ "/usr/bin/printf"; "hello" ] ~env ~cwd)
 ;;
 
 let test_frame_exit_and_injected_env () =

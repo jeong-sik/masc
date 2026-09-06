@@ -47,9 +47,13 @@ val render_compact_badge : og_preview -> string option
 (** One-line compact badge for the link (e.g. "╰─ 🐙 [GitHub] masc PR #30866").
     Returns [None] for links that carry no informative metadata (silence contract). *)
 
+val render_notion_card : width:int -> og_preview -> string list
+(** Notion-grade 2-column web bookmark block with platform branding and TrueColor visual banner.
+    On narrow viewports (width < 55), gracefully degrades to a 1-column layout. *)
+
 val render_inline_card : width:int -> og_preview -> string list
 (** Multi-line styled Unicode box embed card for chat stream rendering.
-    Uses grapheme-safe cell width measurement. *)
+    Uses grapheme-safe cell width measurement and Notion-style 2-column layout. *)
 
 val render_modal_card : width:int -> height:int -> og_preview -> string list
 (** Full-width rich embed layout for the 3D drop-shadow preview modal. *)

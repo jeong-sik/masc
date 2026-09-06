@@ -443,7 +443,7 @@ export function buildKeeperPromptAssemblyReport(
         lane: stage.lane,
         promptKey,
         source: prompt?.source ?? 'missing',
-        hasOverride: prompt?.has_override ?? false,
+        hasOverride: prompt?.source === 'override',
         filePath: prompt?.file_path ?? null,
         text,
         bytes: textByteLength(text),
@@ -721,7 +721,6 @@ function PromptDocumentRow({ row, stage }: { row: KeeperPromptAssemblyRow; stage
         </div>
         <div class="ml-auto flex flex-wrap gap-1">
           <${StatusChip} tone=${sourceTone(row)} uppercase=${false}>${sourceLabel(row.source)}<//>
-          ${row.hasOverride && row.source !== 'override' ? html`<${StatusChip} tone="warn" uppercase=${false}>edited<//>` : null}
           ${row.missing && row.source !== 'missing' ? html`<${StatusChip} tone="bad" uppercase=${false}>missing<//>` : null}
         </div>
       </div>

@@ -663,38 +663,61 @@ let project_tool_block mode (block : tool_block) =
            its own under its own mark, so a block's trouble is a line rather
            than a clause in the middle of one.
 
-           A block where every call returned keeps its single line. *)
-        let settled, unsettled =
+           A block keeps its single line when nothing needs the second one:
+           every call accounted for, or too few calls for the split to save
+           anything. *)
+        let inventory_activities, trouble_activities =
           List.partition
             (fun activity ->
                match activity.outcome with
                | Returned -> true
-               | Started | Awaiting_result | Failed | Never_returned
-               | Outcome_unrecorded -> false)
+               (* Not trouble. The history loader writes this for a call with
+                  no execution_id and for a step whose status field is absent
+                  or unknown -- a gap in the bookkeeping, not a call that
+                  failed or is still out. A scrollback block of five calls
+                  with one missing id would otherwise get a line of its own
+                  saying so, on a block where nothing went wrong. *)
+               | Outcome_unrecorded -> true
+               | Started | Awaiting_result | Failed | Never_returned -> false)
             activities
         in
+        (* Splitting costs a row, so it is worth it only while the fold still
+           saves one: at two calls a split block draws the two rows Full
+           draws, and Full's rows carry each call's subject and duration. *)
+        let trouble_activities =
+          if activity_count > 2 then trouble_activities else []
+        in
+        let inventory_activities =
+          match trouble_activities with
+          | [] -> activities
+          | _ :: _ -> inventory_activities
+        in
         let inventory =
-          let returned =
-            match compact_outcome_parts settled with
+          let outcomes =
+            match compact_outcome_parts inventory_activities with
             | [] -> ""
             | parts -> String.concat ", " parts ^ " · "
           in
           safe_line
             (Printf.sprintf "%s Tools %d%s · %s · %s%s folded"
                (compact_marker activities)
-               activity_count kinds mix returned
+               activity_count kinds mix outcomes
                (plural hidden_activity_rows "detail"))
         in
-        let unsettled_rows =
-          match unsettled with
+        (* The mark is the block's own: compact_outcome tests exactly the four
+           outcomes this list holds, so the two calls cannot disagree while
+           the row exists. It is here to give the clause a line to start on,
+           not to say something the block glyph did not. *)
+        let trouble_rows =
+          match trouble_activities with
           | [] -> []
-          | unsettled ->
+          | trouble ->
             [ safe_line
-                (Printf.sprintf "%s %s" (compact_marker unsettled)
-                   (String.concat ", " (compact_outcome_parts unsettled)))
+                (Printf.sprintf "%s %s" (compact_marker trouble)
+                   (String.concat ", " (compact_outcome_parts trouble)))
             ]
         in
-        ( inventory :: unsettled_rows
+        ( inventory :: trouble_rows
         , hidden_activity_rows
         , Some (compact_outcome activities) )
   in

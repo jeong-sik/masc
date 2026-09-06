@@ -5,13 +5,14 @@
    read could find. *)
 let pool_key : Lsp_workspace_pool.t Eio.Fiber.key = Eio.Fiber.create_key ()
 
-let with_turn_pool f =
+let with_turn_pool ~servers f =
   match Eio_context.get_env_opt () with
   | None -> f ()
   | Some env ->
     Lsp_workspace_pool.with_pool
       ~clock:(Eio.Stdenv.clock env)
       ~proc_mgr:(Eio.Stdenv.process_mgr env)
+      ~servers
       (fun pool -> Eio.Fiber.with_binding pool_key pool f)
 ;;
 

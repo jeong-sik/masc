@@ -52,9 +52,16 @@ type prompt_meta = Types.prompt_meta = {
   template_variables: string list;
 }
 
+type prompt_source = Types.prompt_source =
+  | Override
+  | File
+  | Missing
+
+let prompt_source_to_string = Types.prompt_source_to_string
+
 type prompt_resolution = Types.prompt_resolution = {
   effective: string;
-  source: string;
+  source: prompt_source;
   file_value: string option;
   override_value: string option;
   file_path: string option;
@@ -624,12 +631,7 @@ let clear () : unit =
 let build_resolved_from_snapshot ~key ~override_value ~file_value =
   let file_path = prompt_source_path key in
   let source, effective =
-    match override_value with
-    | Some value -> ("override", value)
-    | None -> (
-        match file_value with
-        | Some value -> ("file", value)
-        | None -> ("missing", ""))
+    Prompt_registry_types.resolve_source ~override_value ~file_value
   in
   {
     effective;
@@ -693,7 +695,8 @@ let prompt_item_json_of_resolved key (meta : prompt_meta) resolved =
       ( "override_value", Json_util.string_opt_to_json resolved.override_value );
       ( "file_path", Json_util.string_opt_to_json resolved.file_path );
       ("file_exists", `Bool resolved.file_exists);
-      ("source", `String resolved.source);
+      ( "source",
+        `String (Prompt_registry_types.prompt_source_to_string resolved.source) );
       ("has_override", `Bool resolved.has_override);
       ("char_count", `Int (String.length resolved.effective));
       ("required_file", `Bool meta.required_file);
@@ -722,12 +725,7 @@ let resolve_prompt key =
              entry.value)
     in
     let source, effective =
-      match override_value with
-      | Some value -> ("override", value)
-      | None -> (
-          match file_value with
-          | Some value -> ("file", value)
-          | None -> ("missing", ""))
+      Prompt_registry_types.resolve_source ~override_value ~file_value
     in
     {
       effective; source; file_value; override_value;
@@ -878,9 +876,16 @@ let validate_prompt_templates () =
     (fun acc s ->
       let resolved = resolved_of_snapshot s in
       let issues =
-        match resolved with
-        | { effective = ""; source = "missing"; _ } -> []
-        | resolved ->
+        (* A key nothing resolves and that carries no text has no template
+           to check. Every source is named rather than caught by a wildcard:
+           this arm decides what a new one would mean, and the compiler
+           should ask rather than fold it in with the rest. *)
+        match resolved.source, resolved.effective with
+        | Prompt_registry_types.Missing, "" -> []
+        | ( Prompt_registry_types.Missing
+          | Prompt_registry_types.Override
+          | Prompt_registry_types.File ),
+          _ ->
             unexpected_template_variables s.snap_meta resolved.effective
             |> List.map (fun variable -> (s.snap_key, variable))
       in

@@ -348,6 +348,29 @@ let test_fenced_code_keeps_its_line_breaks () =
        ])
     (render "```ocaml\nlet x = 1\nlet y = 2\n```")
 
+(* A mermaid fence is drawn, not lexed: the rows the diagram module lays
+   out ride the plain code rows inside the gutter, under the fence header
+   the tag already earned. *)
+let test_mermaid_fence_is_drawn () =
+  check_rows "mermaid"
+    (tagged_fence "mermaid"
+       [ "<c>\xe2\x94\x82 \xe2\x94\x8c\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x90  \xe2\x94\x8c\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x90</c>"
+       ; "<c>\xe2\x94\x82 \xe2\x94\x82 A \xe2\x94\x9c\xe2\x94\x80>\xe2\x94\xa4 B \xe2\x94\x82</c>"
+       ; "<c>\xe2\x94\x82 \xe2\x94\x94\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x98  \xe2\x94\x94\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x98</c>"
+       ])
+    (render "```mermaid\ngraph LR\nA --> B\n```")
+
+(* A diagram the module does not draw keeps its source, under one row that
+   says why: a reader sees what the keeper wrote, not a blank. *)
+let test_mermaid_fence_of_another_kind_shows_its_source () =
+  check_rows "unsupported kind"
+    (tagged_fence ~width:70 "mermaid"
+       [ "<c>\xe2\x94\x82 mermaid: classDiagram is not drawn here; the source follows</c>"
+       ; "<c>\xe2\x94\x82 classDiagram</c>"
+       ; "<c>\xe2\x94\x82 Animal <|-- Duck</c>"
+       ])
+    (render ~width:70 "```mermaid\nclassDiagram\nAnimal <|-- Duck\n```")
+
 (* {1 Fenced-code highlighting} *)
 
 (* The tag decides: the same body, untagged, stays the single code span --
@@ -734,6 +757,9 @@ let () =
     ; ( "fenced code"
       , [ Alcotest.test_case "keeps its line breaks" `Quick
             test_fenced_code_keeps_its_line_breaks
+        ; Alcotest.test_case "a mermaid fence is drawn" `Quick test_mermaid_fence_is_drawn
+        ; Alcotest.test_case "a mermaid fence of another kind shows its source" `Quick
+            test_mermaid_fence_of_another_kind_shows_its_source
         ; Alcotest.test_case "the markers are not drawn" `Quick
             test_fence_markers_are_not_drawn
         ; Alcotest.test_case "an unclosed fence renders its body" `Quick

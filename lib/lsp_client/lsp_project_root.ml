@@ -27,13 +27,15 @@ let within ~boundary dir =
 ;;
 
 let resolve ~language ~file ~boundary =
-  let markers = Lsp_process_manager.project_markers_of_language language in
   let canonical_file = Fs_compat.realpath_lenient file in
   let boundary = strip_trailing_sep (Fs_compat.realpath_lenient boundary) in
   let start = Filename.dirname canonical_file in
   if not (within ~boundary start)
   then Outside_boundary { file = canonical_file; boundary }
   else (
+    match Lsp_process_manager.root_rule_of_language language with
+    | Lsp_process_manager.Boundary_root -> Project_root boundary
+    | Lsp_process_manager.Marker_files markers ->
     (* Any marker makes the directory a root, so the nearest directory wins and
        the order within [markers] does not decide anything. *)
     let holds_marker dir =
@@ -50,7 +52,7 @@ let resolve ~language ~file ~boundary =
            this total even if [within] and the walk ever disagreed. *)
         if String.equal parent dir then None else walk parent)
     in
-    match walk start with
-    | Some root -> Project_root root
-    | None -> No_project_root { file = canonical_file; markers })
+    (match walk start with
+     | Some root -> Project_root root
+     | None -> No_project_root { file = canonical_file; markers }))
 ;;

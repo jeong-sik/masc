@@ -1066,16 +1066,15 @@ let handle_keeper_get_subroutes state req request reqd =
               List.rev coverage_gaps |> List.find_opt (fun _ -> true)
             in
             let health, stale_reason =
-              match latest_gap with
-              | Some gap ->
-                  ( "coverage_gap",
-                    Safe_ops.json_string ~default:"coverage_gap" "stale_reason" gap )
-              | None -> (
-                  match latest_age_s with
-                  | None -> ("empty", "no_entries")
-                  | Some age when age > freshness_slo_s ->
-                      ("stale", "freshness_slo_exceeded")
-                  | Some _ -> ("ok", ""))
+              Keeper_status_runtime.keeper_tool_call_source_health
+                ~gap:
+                  (Option.map
+                     (fun gap ->
+                        ( Safe_ops.json_float_opt "ts" gap,
+                          Safe_ops.json_string ~default:"coverage_gap"
+                            "stale_reason" gap ))
+                     latest_gap)
+                ~latest_ts ~latest_age_s ~freshness_slo_s
             in
             `Assoc [
               ("keeper", `String name);
@@ -1194,17 +1193,15 @@ let handle_keeper_get_subroutes state req request reqd =
                 List.rev coverage_gaps |> List.find_opt (fun _ -> true)
               in
               let health, stale_reason =
-                match latest_gap with
-                | Some gap ->
-                  ( "coverage_gap",
-                    Safe_ops.json_string ~default:"coverage_gap" "stale_reason"
-                      gap )
-                | None -> (
-                    match latest_age_s with
-                    | None -> ("empty", "no_entries")
-                    | Some age when age > freshness_slo_s ->
-                        ("stale", "freshness_slo_exceeded")
-                    | Some _ -> ("ok", ""))
+                Keeper_status_runtime.keeper_tool_call_source_health
+                  ~gap:
+                    (Option.map
+                       (fun gap ->
+                          ( Safe_ops.json_float_opt "ts" gap,
+                            Safe_ops.json_string ~default:"coverage_gap"
+                              "stale_reason" gap ))
+                       latest_gap)
+                  ~latest_ts ~latest_age_s ~freshness_slo_s
               in
               `Assoc [
                 ("keeper", `String name);

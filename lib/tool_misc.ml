@@ -143,62 +143,76 @@ let ask_context (ctx : context) arguments : Mcp_tool_runtime_ask.context =
   ; arguments
   }
 
+(* The wire name is parsed once and the operations are matched, so an operation
+   added to [Tool_schemas_misc.misc_operation] is a compile error here. [None]
+   means the name is not this facade's -- the tag dispatcher owns that case. *)
 let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
-  match name with
-  | "masc_config" ->
+  match Tool_schemas_misc.misc_operation_of_tool_name name with
+  | None -> None
+  | Some Tool_schemas_misc.Misc_config ->
       Some (Tool_misc_introspection.handle_config ~tool_name:name ~start_time:start args)
-  | "masc_dashboard" ->
+  | Some Tool_schemas_misc.Misc_dashboard ->
       Some (handle_dashboard ~tool_name:name ~start_time:start ctx args)
-  | "masc_keeper_waiting_inventory" ->
+  | Some Tool_schemas_misc.Misc_keeper_waiting_inventory ->
       Some (handle_keeper_waiting_inventory ~tool_name:name ~start_time:start ctx args)
-  | "masc_gc" -> Some (handle_gc ~tool_name:name ~start_time:start ctx args)
-  | "masc_tool_help" ->
+  | Some Tool_schemas_misc.Misc_gc ->
+      Some (handle_gc ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_misc.Misc_tool_help ->
       Some (handle_tool_help ~schemas:ctx.help_schemas ~tool_name:name ~start_time:start ctx args)
-  | "masc_ask" ->
+  | Some Tool_schemas_misc.Misc_ask ->
       Mcp_tool_runtime_ask.handle_ask ~tool_name:name ~start_time:start
         (ask_context ctx args)
-  | "masc_ask_status" ->
+  | Some Tool_schemas_misc.Misc_ask_status ->
       Mcp_tool_runtime_ask.handle_ask_status ~tool_name:name ~start_time:start
         (ask_context ctx args)
-  | "masc_ask_withdraw" ->
+  | Some Tool_schemas_misc.Misc_ask_withdraw ->
       Mcp_tool_runtime_ask.handle_ask_withdraw ~tool_name:name ~start_time:start
         (ask_context ctx args)
-  | "masc_web_search" ->
+  | Some Tool_schemas_misc.Misc_web_search ->
       Some (handle_web_search ~tool_name:name ~start_time:start ctx args)
-  | "masc_web_fetch" ->
+  | Some Tool_schemas_misc.Misc_web_fetch ->
       Some (handle_web_fetch ~tool_name:name ~start_time:start ctx args)
-  | _ -> None
-
-let schemas = Tool_schemas_misc.schemas
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let tool_spec_read_only =
-  [
-    "masc_tool_help";
-    "masc_dashboard";
-    "masc_keeper_waiting_inventory";
-    (* Read-back only: records nothing, matching the descriptor's
-       readonly flag and the MCP lane's runtime_tool_policy. *)
-    "masc_ask_status";
-  ]
+let is_read_only = function
+  | Tool_schemas_misc.Misc_dashboard
+  | Tool_schemas_misc.Misc_keeper_waiting_inventory
+  | Tool_schemas_misc.Misc_tool_help
+  (* Read-back only: records nothing, matching the descriptor's readonly flag
+     and the MCP lane's runtime_tool_policy. *)
+  | Tool_schemas_misc.Misc_ask_status -> true
+  | Tool_schemas_misc.Misc_ask
+  | Tool_schemas_misc.Misc_ask_withdraw
+  | Tool_schemas_misc.Misc_config
+  | Tool_schemas_misc.Misc_gc
+  | Tool_schemas_misc.Misc_web_fetch
+  | Tool_schemas_misc.Misc_web_search -> false
 
+(* Registration walks the same list [dispatch] matches, so this facade can no
+   longer register a name it does not route. It used to register the whole
+   [Tool_schemas_misc.schemas] list: masc_broadcast, masc_messages, masc_start
+   and the three masc_plan_* names went in under [Mod_misc] with no route here,
+   and answered correctly only because Tool_plan and Mcp_tool_runtime link later
+   and overwrite the tag. *)
 let () =
-  List.iter
-    (fun (s : Masc_domain.tool_schema) ->
-      Tool_spec.register
-        (Tool_spec.create
-           ~name:s.name
-           ~description:s.description
-           ~module_tag:Tool_dispatch.Mod_misc
-           ~input_schema:s.input_schema
-           ~handler_binding:Tag_dispatch
-           ~is_read_only:(List.mem s.name tool_spec_read_only)
-           ()))
-    schemas
+  Tool_schemas_misc.misc_operations
+  |> List.iter (fun operation ->
+       match Tool_schemas_misc.misc_registered_schema operation with
+       | None -> ()
+       | Some (schema : Masc_domain.tool_schema) ->
+         Tool_spec.register
+           (Tool_spec.create
+              ~name:(Tool_schemas_misc.misc_tool_name operation)
+              ~description:schema.description
+              ~module_tag:Tool_dispatch.Mod_misc
+              ~input_schema:schema.input_schema
+              ~handler_binding:Tag_dispatch
+              ~is_read_only:(is_read_only operation)
+              ()))
 let parse_searxng_json = Tool_misc_web_search.parse_searxng_json
 let parse_brave_json = Tool_misc_web_search.parse_brave_json
 let parse_brave_llm_context_json = Tool_misc_web_search.parse_brave_llm_context_json

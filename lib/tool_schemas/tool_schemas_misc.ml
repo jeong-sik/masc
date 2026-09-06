@@ -6,8 +6,9 @@ type control_operation =
   | Pause
   | Resume
   | Pause_status
+[@@deriving enumerate]
 
-let control_operations = [ Pause; Resume; Pause_status ]
+let control_operations = all_of_control_operation
 
 let control_operation_id = function
   | Pause -> "pause"
@@ -40,9 +41,9 @@ type mcp_runtime_operation =
   | Ask
   | Ask_status
   | Ask_withdraw
+[@@deriving enumerate]
 
-let mcp_runtime_operations =
-  [ Start; Broadcast; Messages; Ask; Ask_status; Ask_withdraw ]
+let mcp_runtime_operations = all_of_mcp_runtime_operation
 
 let mcp_runtime_tool_name = function
   | Start -> "masc_start"
@@ -53,14 +54,10 @@ let mcp_runtime_tool_name = function
   | Ask_withdraw -> "masc_ask_withdraw"
 ;;
 
-let mcp_runtime_operation_of_tool_name = function
-  | "masc_start" -> Some Start
-  | "masc_broadcast" -> Some Broadcast
-  | "masc_messages" -> Some Messages
-  | "masc_ask" -> Some Ask
-  | "masc_ask_status" -> Some Ask_status
-  | "masc_ask_withdraw" -> Some Ask_withdraw
-  | _ -> None
+let mcp_runtime_operation_of_tool_name value =
+  List.find_opt
+    (fun operation -> String.equal value (mcp_runtime_tool_name operation))
+    mcp_runtime_operations
 ;;
 
 let mcp_runtime_schema operation =
@@ -75,3 +72,69 @@ let mcp_runtime_schema operation =
 ;;
 
 let mcp_runtime_schemas = List.map mcp_runtime_schema mcp_runtime_operations
+
+(* [misc_operation] is the set [Tool_misc.dispatch] routes.
+
+   The facade used to register the whole [schemas] list under [Mod_misc] while
+   routing only part of it. masc_broadcast, masc_messages, masc_start and the
+   three masc_plan_* names were registered there without a route and answered
+   correctly only because Tool_plan and Mcp_tool_runtime link later and
+   overwrite the module tag -- [Tool_dispatch.register_module_tag] is a map
+   insert, so the last registrar wins. Registration now walks this list, so the
+   set advertised here and the set routed here are the same set. *)
+type misc_operation =
+  | Misc_ask
+  | Misc_ask_status
+  | Misc_ask_withdraw
+  | Misc_config
+  | Misc_dashboard
+  | Misc_gc
+  | Misc_keeper_waiting_inventory
+  | Misc_tool_help
+  | Misc_web_fetch
+  | Misc_web_search
+[@@deriving enumerate]
+
+let misc_operations = all_of_misc_operation
+
+let misc_tool_name = function
+  | Misc_ask -> "masc_ask"
+  | Misc_ask_status -> "masc_ask_status"
+  | Misc_ask_withdraw -> "masc_ask_withdraw"
+  | Misc_config -> "masc_config"
+  | Misc_dashboard -> "masc_dashboard"
+  | Misc_gc -> "masc_gc"
+  | Misc_keeper_waiting_inventory -> "masc_keeper_waiting_inventory"
+  | Misc_tool_help -> "masc_tool_help"
+  | Misc_web_fetch -> "masc_web_fetch"
+  | Misc_web_search -> "masc_web_search"
+;;
+
+let misc_operation_of_tool_name value =
+  List.find_opt
+    (fun operation -> String.equal value (misc_tool_name operation))
+    misc_operations
+;;
+
+(* [None] marks a name the facade routes but must not advertise: the two web
+   tools reach the inventory through [Config.raw_all_tool_schemas] and take
+   their module tag from their keeper descriptor. A name whose declaration is
+   missing refuses the boot rather than registering a partial surface. *)
+let misc_registered_schema operation : tool_schema option =
+  match operation with
+  | Misc_web_fetch | Misc_web_search -> None
+  | Misc_ask
+  | Misc_ask_status
+  | Misc_ask_withdraw
+  | Misc_config
+  | Misc_dashboard
+  | Misc_gc
+  | Misc_keeper_waiting_inventory
+  | Misc_tool_help ->
+    let name = misc_tool_name operation in
+    (match
+       List.find_opt (fun (schema : tool_schema) -> String.equal schema.name name) schemas
+     with
+     | Some schema -> Some schema
+     | None -> invalid_arg ("missing misc schema: " ^ name))
+;;

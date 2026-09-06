@@ -374,9 +374,8 @@ describe('LspConnection', () => {
   })
 
   // The connection URL is how the server learns which codebase this editor is
-  // looking at: it picks both the annotation partition the overlay reads and
-  // the tree our repo-relative document paths resolve against. Without it the
-  // server had to guess, and read the wrong store.
+  // looking at: it picks the tree our repo-relative document paths resolve
+  // against. Without it the server had to guess.
   it('declares the repository scope on the connection URL', () => {
     installWebSocketMock()
     publishLspScope({

@@ -49,11 +49,6 @@ describe('keeper-v2 IDE responsive contract', () => {
       .toBe('minmax(0, 1fr)')
   })
 
-  it('keeps annotation creation available when the right rail is not mounted', () => {
-    expect(declarations(`${MOBILE_SHELL} .ide-v2-responsive-annotation-composer`).display)
-      .toBe('block')
-  })
-
   it('keeps the mobile file tree reachable while hiding the unavailable polling rail', () => {
     expect(declarations(`${MOBILE_SHELL} .ide-v2-tree-toggle`).display).toBe('inline-flex')
     expect(declarations(`${MOBILE_SHELL} .ide-v2-rail-toggle`).display).toBe('none')

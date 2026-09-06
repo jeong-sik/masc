@@ -1163,7 +1163,15 @@ let start
              loop state shutdown_operation_id)
     in
     start_child_if_needed initial_state None;
-    loop initial_state None);
+    match loop initial_state None with
+    | value ->
+      Printf.printf "DIAG14 dr-7-daemon-returned\n%!";
+      value
+    | exception exn ->
+      Printf.printf
+        "DIAG14 dr-6-daemon-raised=%s\n%!"
+        (Printexc.to_string exn);
+      raise exn);
   Ok t))
 ;;
 

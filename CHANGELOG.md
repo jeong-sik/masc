@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## [0.33.0] - 2026-09-06
+
+- **The release ships the exec shim.** Every tagged release now carries
+  `masc-exec-shim-linux-arm64` and `masc-exec-shim-linux-amd64`, built
+  statically on a runner of the same architecture and probed before upload.
+  Operators download the asset beside the server binary instead of building
+  it; the runbook says so (RFC-0427 B-1).
 - **The installer places the guest exec shim, and the boot verifies it.**
   `scripts/install.sh` downloads `masc-exec-shim-linux-<guest arch>` from the
   release beside the other companions, places it at
@@ -11,13 +18,6 @@
   `microvm_shim_hash_mismatch`; a shim without a sidecar (hand-built) runs
   unverified and the boot log says so. The release job's installer smoke
   covers both paths (RFC-0427 B-2).
-- **The release ships the exec shim.** Every tagged release now carries
-  `masc-exec-shim-linux-arm64` and `masc-exec-shim-linux-amd64`, built
-  statically on a runner of the same architecture and probed before upload.
-  Operators download the asset beside the server binary instead of building
-  it; the runbook says so (RFC-0427 B-1).
-
-## [0.33.0] - 2026-09-06
 
 - **TUI: Notion-grade 2-column web bookmarks, visual banners, and remote image viewer.**
   - 2-column Notion-style bookmark cards with domain favicon/header, title, description summary, URL, and action pills (`[o:Browser]`, `[y:Copy]`, `[v:Visual]`), with mathematically grapheme-safe cell width alignment across all lines and responsive fallback to 1-column on narrow terminals (< 55 cols) (#33541).
@@ -27,6 +27,7 @@
   - Universal fast image format conversion: added `convert_to_png` leveraging macOS built-in `/usr/bin/sips` (with ImageMagick `convert` and `ffmpeg` fallback) to convert JPEG, WebP, GIF, and TIFF images to PNG in milliseconds (#33544).
 - **TUI: line memos from lexed comments, Mermaid text rendering, and categorical themes.**
   - Line memos are comments in the file (`masc(AUTHOR): TEXT`, `masc(AUTHOR) KIND: TEXT`), read directly off lexer rows without network round-trips or server drift (#33543).
+  - `keeper_ide_annotate` writes its memo into the file as a comment — the write side of the same design: language-specific comment markers, a line-anchored insert instead of text substitution, Markdown included (#33592).
   - Mermaid diagram rendering: draws `mermaid` graph and flowchart code blocks as clean Unicode/ASCII box-and-arrow diagrams within the TUI viewport (#33508).
   - Categorical 6-slot theming extended across all remaining axes in `render.ml` with raw hues removed (#33485).
   - Palette matchers fold case internally (#33536, #33522); `K`/`D`/`R` shortcuts open the palette as a choice among the line's names (#33514); multiline preview uses return marks instead of raw `\n` (#33482); stopped keepers display as `paused` instead of `offline` (#33510).

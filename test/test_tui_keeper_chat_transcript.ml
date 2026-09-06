@@ -1212,8 +1212,10 @@ let test_compact_and_full_keep_the_same_typed_facts () =
   let trouble = List.hd compact.details in
   check bool "the inventory row reads as one activity summary" true
     (String.starts_with ~prefix:"✗ Tools 3" inventory);
-  check bool "the inventory row carries the exact folded count" true
-    (contains ~needle:"3 details folded" inventory);
+  (* How much is behind the fold is the count at the head of the same line:
+     the hidden rows are one row per call. The row used to say it twice. *)
+  check bool "the inventory row does not repeat its own count" false
+    (contains ~needle:"folded" inventory);
   check bool "the inventory row keeps what returned" true
     (contains ~needle:"1 returned" inventory);
   check bool "the inventory row leaves the failure to the row below" false
@@ -1700,9 +1702,9 @@ let test_full_shows_the_rollup_and_the_calls_together () =
    | Some header ->
        check bool "the header counts the calls" true
          (contains_substring header "Tools 3");
-       (* Nothing is behind a fold here, so a fold is not what the header
-          reports. A "0 details folded" tail would describe a fold that is
-          not there. *)
+       (* Neither mode's header claims a fold: how much a folded block holds
+          is the count it already carries, and whether the pane is folded is
+          the mode, not this row. *)
        check bool "and claims no fold" false
          (contains_substring header "folded"));
   check int "every call keeps its row" 3
@@ -1744,8 +1746,8 @@ let test_an_all_failed_block_keeps_a_readable_inventory_row () =
   let inventory = summary_row Transcript.Compact calls in
   check bool "no outcome clause is claimed" false
     (contains_substring inventory "returned");
-  check bool "the fold count still closes the row" true
-    (contains_substring inventory "3 details folded");
+  check bool "and no fold clause is added to close the row" false
+    (contains_substring inventory "folded");
   check bool "and the failures are on the row below" true
     (contains_substring (trouble_row Transcript.Compact calls) "3 failed")
 ;;

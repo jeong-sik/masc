@@ -638,12 +638,19 @@ let compact_activity_kinds activities =
 
 (* Both projections retain the same typed activities. [Full] is the shipping
    view and therefore stays byte-compatible with the old formatter. [Compact]
-   folds only the presentation rows; it reports exactly how many detail rows
-   it hid and keeps failures/open calls visible in its outcome summary. *)
-(* The block's rollup, on a line of its own. [folded] is how many detail rows
-   sit behind it: zero when the details are drawn underneath, and the count
-   when they are not. A rollup reading "0 details folded" would describe a
-   fold that is not there.
+   folds only the presentation rows; the count of what it hid is the call
+   count it already carries, and it keeps failures/open calls visible in its
+   outcome summary. *)
+(* The block's rollup, on a line of its own.
+
+   It used to close with "N details folded", and that N was always the count
+   already at the head of the same line: the hidden rows are one row per call,
+   so [hidden_activity_rows] and [Tools N] were the same number by
+   construction. Six blocks on one live screen all read "Tools N ... N details
+   folded". The clause is gone rather than replaced -- how much is behind the
+   fold is [Tools N], and that the pane is folded is the mode the reader chose
+   and the footer keeps showing. A per-row mark would say the opposite of what
+   is true: the fold is Ctrl-D over the whole pane, not this line.
 
    [outcomes] is passed rather than derived because the two modes count
    different calls: folded, the trouble gets a line of its own and the rollup
@@ -653,13 +660,12 @@ let compact_activity_kinds activities =
    Assembled from parts instead of one format string so a part with nothing
    to say drops out, rather than leaving an empty clause between two
    separators. *)
-let inventory_row ~folded ~outcomes activities =
+let inventory_row ~outcomes activities =
   let parts =
     (Printf.sprintf "Tools %d" (List.length activities)
      :: compact_activity_kinds activities)
     @ compact_tool_parts activities
     @ outcomes
-    @ (if folded = 0 then [] else [ plural folded "detail" ^ " folded" ])
   in
   safe_line
     (Printf.sprintf "%s %s"
@@ -678,7 +684,7 @@ let project_tool_block mode (block : tool_block) =
     | (Full | Compact), ([] | [ _ ]) -> None, full_activity_rows, 0, None
     | Full, activities ->
         ( Some
-            (inventory_row ~folded:0
+            (inventory_row
                ~outcomes:(compact_outcome_parts activities)
                activities)
         , full_activity_rows
@@ -735,7 +741,7 @@ let project_tool_block mode (block : tool_block) =
             ]
         in
         ( Some
-            (inventory_row ~folded:hidden_activity_rows
+            (inventory_row
                ~outcomes:(compact_outcome_parts inventory_activities)
                activities)
         , trouble_rows

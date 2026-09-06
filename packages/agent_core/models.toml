@@ -330,6 +330,11 @@ cache_read_multiplier = 1.0
 # serializing a request the model 400s on. Plain auto still works, so
 # supports_tool_choice stays true (mirrors the Kimi/GLM profiles).
 [[models]]
+# 2026-09-06 RFC-0430 Phase 0: 2026-08-16 peak pricing (off-peak 50%).
+# Cache-hit input bills at ~1/30 of the miss price (docs: kv_cache,
+# pricing). reasoning_replay mirrors the ollama_cloud deepseek rows:
+# docs require re-sending every prior turn's reasoning_content on
+# tools requests (400 otherwise) and ignore it without tools.
 id_prefix = "deepseek-v4-pro"
 base = "openai_chat"
 provider_name = "deepseek"
@@ -344,17 +349,23 @@ supports_extended_thinking = true
 supports_reasoning_budget = false
 accepted_reasoning_efforts = ["high", "max"]
 thinking_control_format = "thinking_object"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
 supports_response_format_json = true
 supports_structured_output = false
 supports_native_streaming = true
 supports_caching = true
 supports_prompt_caching = false
-input_per_million = 0.435
-output_per_million = 0.87
+input_per_million = 1.32
+output_per_million = 3.96
 cache_write_multiplier = 1.0
-cache_read_multiplier = 0.008333333333333333
+cache_read_multiplier = 0.0333
 
 [[models]]
+# 2026-09-06 RFC-0430 Phase 0: 2026-08-16 peak pricing (off-peak 50%).
+# Cache-hit input bills at ~1/30 of the miss price (docs: kv_cache,
+# pricing). reasoning_replay mirrors the ollama_cloud deepseek rows:
+# docs require re-sending every prior turn's reasoning_content on
+# tools requests (400 otherwise) and ignore it without tools.
 id_prefix = "deepseek-ai/deepseek-v4-pro"
 base = "openai_chat"
 provider_name = "deepseek"
@@ -369,17 +380,23 @@ supports_extended_thinking = true
 supports_reasoning_budget = false
 accepted_reasoning_efforts = ["high", "max"]
 thinking_control_format = "thinking_object"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
 supports_response_format_json = true
 supports_structured_output = false
 supports_native_streaming = true
 supports_caching = true
 supports_prompt_caching = false
-input_per_million = 0.435
-output_per_million = 0.87
+input_per_million = 1.32
+output_per_million = 3.96
 cache_write_multiplier = 1.0
-cache_read_multiplier = 0.008333333333333333
+cache_read_multiplier = 0.0333
 
 [[models]]
+# 2026-09-06 RFC-0430 Phase 0: 2026-08-16 peak pricing (off-peak 50%).
+# Cache-hit input bills at ~1/30 of the miss price (docs: kv_cache,
+# pricing). reasoning_replay mirrors the ollama_cloud deepseek rows:
+# docs require re-sending every prior turn's reasoning_content on
+# tools requests (400 otherwise) and ignore it without tools.
 id_prefix = "deepseek-v4-flash"
 base = "openai_chat"
 provider_name = "deepseek"
@@ -394,17 +411,23 @@ supports_extended_thinking = true
 supports_reasoning_budget = false
 accepted_reasoning_efforts = ["high", "max"]
 thinking_control_format = "thinking_object"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
 supports_response_format_json = true
 supports_structured_output = true
 supports_native_streaming = true
 supports_caching = true
 supports_prompt_caching = false
-input_per_million = 0.14
-output_per_million = 0.28
+input_per_million = 0.44
+output_per_million = 1.32
 cache_write_multiplier = 1.0
-cache_read_multiplier = 0.02
+cache_read_multiplier = 0.0333
 
 [[models]]
+# 2026-09-06 RFC-0430 Phase 0: 2026-08-16 peak pricing (off-peak 50%).
+# Cache-hit input bills at ~1/30 of the miss price (docs: kv_cache,
+# pricing). reasoning_replay mirrors the ollama_cloud deepseek rows:
+# docs require re-sending every prior turn's reasoning_content on
+# tools requests (400 otherwise) and ignore it without tools.
 id_prefix = "deepseek-ai/deepseek-v4-flash"
 base = "openai_chat"
 provider_name = "deepseek"
@@ -419,15 +442,16 @@ supports_extended_thinking = true
 supports_reasoning_budget = false
 accepted_reasoning_efforts = ["high", "max"]
 thinking_control_format = "thinking_object"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
 supports_response_format_json = true
 supports_structured_output = false
 supports_native_streaming = true
 supports_caching = true
 supports_prompt_caching = false
-input_per_million = 0.14
-output_per_million = 0.28
+input_per_million = 0.44
+output_per_million = 1.32
 cache_write_multiplier = 1.0
-cache_read_multiplier = 0.02
+cache_read_multiplier = 0.0333
 
 # MiniMax Models
 # Source: official MiniMax docs checked 2026-06-30:

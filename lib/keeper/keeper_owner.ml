@@ -409,9 +409,13 @@ let request t command =
 ;;
 
 let commit store transition =
+  Printf.printf "DIAG14 dr-c0-commit-enter\n%!";
   match transition.Keeper_owner_reducer.persistence with
-  | Keeper_owner_reducer.No_persistence -> Ok transition.state
+  | Keeper_owner_reducer.No_persistence ->
+    Printf.printf "DIAG14 dr-c1-no-persistence\n%!";
+    Ok transition.state
   | Replace_snapshot meta ->
+    Printf.printf "DIAG14 dr-c2-before-replace\n%!";
     (match store.replace meta with
      | Ok () -> Ok transition.state
      | Error detail -> Error (Store_unavailable detail))
@@ -815,16 +819,19 @@ let start
              Eio.Promise.resolve resolve (Error error);
              loop state shutdown_operation_id
            | Ok () ->
-          (match !(t.store_error) with
+          (Printf.printf "DIAG14 dr-2-store-ready\n%!";
+           match !(t.store_error) with
            | Some detail ->
              Eio.Promise.resolve resolve (Error (Store_unavailable detail));
              loop state shutdown_operation_id
            | None ->
+             Printf.printf "DIAG14 dr-3-no-store-error\n%!";
              (match Keeper_owner_reducer.apply_meta state command with
               | Error error ->
                 Eio.Promise.resolve resolve (Error (Reducer_rejected error));
                 loop state shutdown_operation_id
               | Ok transition ->
+                Printf.printf "DIAG14 dr-4-reducer-ok\n%!";
                 (match apply_transition t store state transition with
                  | Error (state, error) ->
                    Eio.Promise.resolve resolve (Error error);

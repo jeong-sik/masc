@@ -1100,13 +1100,26 @@ let run_keeper_cycle
                        then
                          Keeper_turn_fsm.Failure_receipt_lost
                            { primary_error = e_str; fallback_path = None }
-                      else
-                        match Keeper_turn_driver.classify_masc_internal_error err with
-                         | _ ->
-                           Keeper_turn_fsm.Failure_provider_error
-                             { kind = Agent_core.Error.(category err |> category_label)
-                             ; detail = short_preview e_str
-                             }
+                       else
+                         (* Every remaining failure out of Streaming is reported as
+                            a provider error, including the ones that are ours.
+                            [classify_masc_internal_error] used to be called here
+                            and its answer thrown away by a lone wildcard, which
+                            read as if the two were told apart.
+
+                            They are not, and the reason is the state machine, not
+                            this call site: {!Turn_fsm} has no edge from Streaming
+                            to [Failure_runtime_error], so a masc-internal failure
+                            has nowhere else to go. It rides the provider edge and
+                            says what it really is in [kind] — "internal" rather
+                            than "provider". 54 turns took that path on 2026-09-06
+                            (grep [masc_agent_core_error] in the system log).
+
+                            Giving them an edge of their own is #33671. *)
+                         Keeper_turn_fsm.Failure_provider_error
+                           { kind = Agent_core.Error.(category err |> category_label)
+                           ; detail = short_preview e_str
+                           }
                      in
                      Keeper_turn_fsm.emit_transition
                        ~keeper_name:meta.name

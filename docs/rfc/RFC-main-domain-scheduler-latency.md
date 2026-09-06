@@ -643,4 +643,4 @@ P4m 은 `Fs_compat.load_file`·`save_file`·`append_file` 의 Eio 분기를 Unix
 
 `Eio.Path.save` 를 fiber 에서 돌리던 부류는 사라졌다. `with_open_in` 6회는 P4m 을 거치지 않는 직접 `Eio.Path.load` 호출(`Backend.get`, `Log`)이고 최대 28 ms 다. 첫 창의 385 ms 한 건은 append 뒤 순수 계산(GC 17 ms)이었고, 두 번째 창에는 50 ms 를 넘는 실행이 없다.
 
-라벨은 그러나 masc 의 이름이 아니라 Eio 내부 switch 이름(`both`, `filter_map`, `Buf_write.with_flow`)만 보여 주었다. Eio 는 switch 가 열릴 때 이름을 링에 적고 링은 몇 분 안에 덮이므로, fiber 시작 때 한 번 연 P4l 의 이름은 뒤늦게 붙는 추적기에 보이지 않는다. P4n(#33591 계열)은 유지보수 루프는 반복마다, keeper 는 cycle 마다 이름을 열게 하고, 추적기는 창 안에서 처음 연 이름을 라벨로 쓰며 뒤의 Eio 내부 이름은 `첫이름 > 최근이름` 으로 덧붙인다.
+라벨은 그러나 masc 의 이름이 아니라 Eio 내부 switch 이름(`both`, `filter_map`, `Buf_write.with_flow`)만 보여 주었다. Eio 는 switch 가 열릴 때 이름을 링에 적고 링은 몇 분 안에 덮이므로, fiber 시작 때 한 번 연 P4l 의 이름은 뒤늦게 붙는 추적기에 보이지 않는다. P4n(#33606)은 유지보수 루프는 반복마다, keeper 는 cycle 마다 이름을 열게 하고, 추적기는 창 안에서 처음 연 이름을 라벨로 쓰며 뒤의 Eio 내부 이름은 `첫이름 > 최근이름` 으로 덧붙인다.

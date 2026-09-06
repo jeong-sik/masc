@@ -8611,9 +8611,10 @@ let keeper_message_visible_messages ?messages (state : state) ~keeper_name =
 
 (* Which piece of its turn's bracket a row draws.
 
-   [Turn_alone] draws nothing. One row is not a hierarchy, and marking it would
-   put a rail on nearly every row of ordinary chatter, which is where a reader
-   stops seeing it at all.
+   A lone row of speech draws nothing. One thing said is not a hierarchy, and
+   marking it would put a rail on nearly every row of ordinary chatter, which
+   is where a reader stops seeing it at all. A lone row of work is a different
+   case and keeps its branch.
 
    The split between speech and work is the fact the pane was missing.
    Reasoning, tool calls and skills are what a turn did to arrive at what it
@@ -8651,18 +8652,19 @@ let turn_rail_of ~siding ~(edge : Masc_tui_types.turn_edge)
       match siding with
       | Some siding -> Message_layout.Rail_joins siding
       | None -> Message_layout.Rail_none)
-  | Turn_alone -> Message_layout.Rail_none
+  (* A turn of one row still divides into speech and work. It read as neither
+     while an autonomous turn also wrote an empty reply -- two rows, so the
+     turn drew a bracket -- and once that row stopped being drawn (#33692) the
+     common autonomous turn became a single tool block with nothing marking it
+     as work at all. *)
+  | Turn_alone ->
+      Message_layout.rail_for_style ~work:Message_layout.Rail_does
+        ~speech:Message_layout.Rail_none style
   | Turn_opens -> Message_layout.Rail_opens
   | Turn_closes -> Message_layout.Rail_closes
-  | Turn_continues -> (
-      match style with
-      | Message_layout.Tool | Message_layout.Skill _ | Message_layout.Thinking
-        ->
-          Message_layout.Rail_does
-      | Message_layout.User | Message_layout.Inbound | Message_layout.Keeper
-      | Message_layout.Status | Message_layout.Local | Message_layout.Journal
-      | Message_layout.Error ->
-          Message_layout.Rail_says)
+  | Turn_continues ->
+      Message_layout.rail_for_style ~work:Message_layout.Rail_does
+        ~speech:Message_layout.Rail_says style
 
 let compute_keeper_message_layout_entries (state : state) ~keeper_name
     ~chat_cols ~start_index visible_entries =

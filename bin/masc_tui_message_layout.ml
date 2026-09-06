@@ -732,6 +732,20 @@ let speaker_mark : style -> string = function
   | Skill Skill_failure -> "\xe2\x9c\x97"
   | Thinking -> "\xc2\xb7"
 
+(* Speech or work -- the one question the rail's ordinary pieces answer.
+
+   Reasoning, tool calls and skills are what a turn did to arrive at what it
+   said. Drawn at the same depth as the reply they read as its siblings, so
+   the rail hangs them off the trunk instead.
+
+   Which of the two a row is does not depend on how many rows came with it,
+   which is why both the running turn and the turn of a single row decide it
+   here. The callers differ only in what a speech row gets: inside a running
+   turn the trunk continues, and a lone utterance has no trunk to draw. *)
+let rail_for_style ~work ~speech : style -> turn_rail = function
+  | Tool | Skill _ | Thinking -> work
+  | User | Inbound | Keeper | Status | Local | Journal | Error -> speech
+
 (* The bracket a turn draws down the left margin. One cell of box drawing plus
    the space that keeps it off the clock.
 
@@ -740,9 +754,11 @@ let speaker_mark : style -> string = function
    second question into the first was the shape that failed -- a mark that
    means two things stops meaning either.
 
-   [Rail_none] is a blank rather than a fifth glyph. A turn of one row has no
-   hierarchy to show, and marking it would put the rail on nearly every row of
-   an ordinary conversation, which is where a reader stops seeing it. *)
+   [Rail_none] is a blank rather than a fifth glyph, and it is what a lone
+   utterance draws: one thing said is not a hierarchy, and marking it would
+   put the rail on nearly every row of an ordinary conversation, which is
+   where a reader stops seeing it. A lone row of work is not that case --
+   {!rail_for_style} still calls it work. *)
 let turn_rail_glyph : turn_rail -> string = function
   | Rail_opens -> "\xe2\x95\xad"   (* the turn starts here *)
   | Rail_says -> "\xe2\x94\x82"    (* the turn itself, still going *)

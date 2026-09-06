@@ -1,5 +1,5 @@
 ---
-rfc: "0430-deepseek-direct-api-full-integration"
+rfc: "0430"
 title: "DeepSeek direct API full integration"
 status: Draft
 created: 2026-09-06

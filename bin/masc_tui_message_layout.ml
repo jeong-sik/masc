@@ -54,6 +54,7 @@ type turn_rail =
   | Rail_opens
   | Rail_says
   | Rail_does
+  | Rail_stands
   | Rail_closes
   | Rail_joins of siding
       (** Belongs to no turn and arrived while one was running. It joins the
@@ -763,6 +764,7 @@ let turn_rail_glyph : turn_rail -> string = function
   | Rail_opens -> "\xe2\x95\xad"   (* the turn starts here *)
   | Rail_says -> "\xe2\x94\x82"    (* the turn itself, still going *)
   | Rail_does -> "\xe2\x94\x9c"    (* work hanging off the turn *)
+  | Rail_stands -> "\xe2\x95\xb6"  (* work that is the whole turn *)
   | Rail_closes -> "\xe2\x95\xb0"  (* the turn ended on this row *)
   | Rail_joins _ -> "\xe2\x94\xa4"  (* something from outside meets the line *)
   | Rail_none -> " "
@@ -796,7 +798,8 @@ let turn_rail_gutter (piece : turn_rail) =
   let lead =
     match piece with
     | Rail_joins siding -> siding_lead siding
-    | Rail_opens | Rail_says | Rail_does | Rail_closes | Rail_none ->
+    | Rail_opens | Rail_says | Rail_does | Rail_stands | Rail_closes
+    | Rail_none ->
         String.make siding_lead_cells ' '
   in
   let drawn = lead ^ turn_rail_glyph piece in
@@ -1324,6 +1327,10 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
           | Rail_says -> Rail_says
           | Rail_opens -> if index = 0 then Rail_opens else Rail_says
           | Rail_does -> if index = 0 then Rail_does else Rail_says
+          (* A wrapped body still belongs to the one row that is the turn, so
+             the rows under it continue the line the stub started rather than
+             each standing alone. *)
+          | Rail_stands -> if index = 0 then Rail_stands else Rail_says
           | Rail_closes -> if index = last then Rail_closes else Rail_says
           (* Only the first row joins. A wrapped arrival keeps its body under
              the join without drawing a second one, and it never picks up the

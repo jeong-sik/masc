@@ -1,13 +1,14 @@
 ---
 rfc: "0433"
 title: "고갈은 말하고 끝나는 때는 안 말하는 provider — 그래서 하루 종일 죽은 곳으로 보낸다"
-status: Draft
+status: Implemented
 created: 2026-09-06
-updated: 2026-09-06
+updated: 2026-09-07
 author: vincent
 supersedes: null
 superseded_by: null
 related: ["0370"]
+implemented_by: ["#33720"]
 ---
 
 ## 1. 문제
@@ -67,9 +68,29 @@ RFC-0370 이 거부한 것은 **지어낸 기간**이다. 이 RFC 는 기간을 
 시계가 아니라 **다음 성공**이 지운다.
 
 ```
-mark   : HardQuota 응답, retry_after 없음  → scope 를 "관찰된 고갈" 로 표시
+mark   : 고갈 거절, retry_after 없음  → scope 를 "관찰된 고갈" 로 표시
 demote : 표시된 후보는 순서 뒤로 (기존 demote_order 그대로)
-clear  : 그 scope 로 어떤 호출이든 성공    → 표시 제거
+clear  : 그 scope 로 어떤 호출이든 성공  → 표시 제거
+```
+
+**"고갈 거절"은 둘이다.** 이 초안은 여기에 `HardQuota` 만 적었고, 그대로
+구현했다면 아무것도 기록되지 않았을 것이다. 2026-09-06 추적:
+
+| 응답 | classify_error | of_retry_api_error | 도착하는 변형 |
+|---|---|---|---|
+| 402 | `PaymentRequired` | — | `HardQuota` |
+| **429** | `RateLimited` | ↓ | **`RateLimit`** |
+
+**쓴 쿼터는 429 로 온다.** `HardQuota` 는 402 전용이라 이 플릿에서 사실상
+안 온다. 그러니 §1 이 말한 사고(librarian 실패 41건이 전부 한 슬롯)는
+`HardQuota` 만 보는 창으로는 한 건도 안 잡힌다.
+
+구현은 둘 다 받는다:
+
+```ocaml
+| Agent_core.Error.Provider (Llm_provider.Error.HardQuota { retry_after; _ })
+| Agent_core.Error.Provider (Llm_provider.Error.RateLimit { retry_after; _ })
+  -> note_quota retry_after
 ```
 
 한도가 리셋되면 그것을 알아내는 방법은 하나뿐이다 — 불러보는 것. 그리고
@@ -156,7 +177,8 @@ RFC 가 만든 두 상태의 차이이고, 운영자가 "언제 돌아오나"를
 | 무엇 | 어떻게 |
 |---|---|
 | retry_after 있는 경우가 안 바뀐다 | 기존 `Runtime_quota_window` 테스트 그대로 통과 |
-| retry_after 없는 고갈이 표시된다 | `HardQuota { retry_after = None }` 이후 `demote_order` 가 뒤로 보낸다 |
+| retry_after 없는 고갈이 표시된다 | `RateLimit { retry_after = None }` 이후 `demote_order` 가 뒤로 보낸다 |
+| **429 가 실제로 그 변형으로 도착한다** | 손으로 만든 값이 아니라 provider 응답에서 확인 |
 | 성공이 표시를 지운다 | 표시 후 그 scope 성공 → `demote_order` 가 원래 자리로 |
 | 배제가 아니다 | 표시된 후보가 유일할 때 여전히 시도된다 |
 | 시각을 지어내지 않는다 | 표시된 항목의 `stated_reset` 이 `null` |
@@ -189,3 +211,46 @@ ollama_cloud 모델      minimax-m3 0/18 · kimi-k3 0/11 · gemma4 0/11 · gpt-o
 
 마지막 두 줄이 이 문제의 성격을 말한다. 모델이 아니라 **경로**가 죽었고,
 그 경로만 뒤로 보내면 된다.
+
+## 10. 구현 후기 (2026-09-07)
+
+#33720 으로 머지됐다. 초안과 다르게 간 곳과, 그 이유다.
+
+### 초안이 틀린 자리 — 받는 변형
+
+§3.1 에 적었던 `HardQuota` 하나로는 **한 건도 안 잡힌다.** 위 표 참고.
+초안대로 짰다가 "확실한지" 물음을 받고 되짚어서 찾았다.
+
+찾고 나서 더 불편한 것이 나왔다. 이 축의 테스트가 **전부 오류 값을 손으로
+만들어** 넣고 있었다.
+
+```ocaml
+note_quota (Llm_provider.Error.HardQuota { retry_after = None; ... })
+```
+
+그래서 "provider 가 429 를 보내면 이 변형으로 도착하는가"를 **아무도 안
+물었다.** 창을 켜는 조건과 창을 여는 테스트가 같은 가정을 공유했고, 그
+가정이 틀렸다. 테스트는 내내 초록이었다.
+
+§7 에 행을 하나 더한 이유다.
+
+### 초안이 맞은 자리 — 지우는 쪽
+
+"시계가 아니라 다음 성공이 지운다"는 그대로 갔다. 되짚는 동안 여러 번
+"그냥 15분 쿨다운"으로 돌아가고 싶었는데, RFC-0370 이 거부한 것이 정확히
+그 지어낸 기간이라 안 했다.
+
+### 결과
+
+재기동 후, 초안이 §9 에 적은 그 슬롯에서:
+
+```
+librarian 실패    41 → 0
+glm-5.3 → deepseek 대체   4회 (failover 가 실제로 도는 것)
+```
+
+첫 실패 한 번은 §3.3 이 말한 대로 남는다.
+
+### 남은 것
+
+§8 의 "표시가 오래 남는다"는 그대로 남아 있다. 아직 관찰된 해는 없다.

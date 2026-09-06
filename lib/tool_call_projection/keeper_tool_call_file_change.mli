@@ -49,6 +49,14 @@ type kind =
       (** The whole file body the call wrote. There is no [before]: a write
           replaces the file without reading it, so the call itself never knew
           the previous contents. *)
+  | Inserted of {
+      line : int;
+      text : string;
+    }
+      (** One line put above [line] (1-based), which is how a memo is left:
+          [text] is the comment line as the file received it, composed from
+          the call's memo text, its kind and the keeper's name in the file's
+          own comment syntax. *)
 
 type t = {
   at : float;  (** Unix time the call was logged. *)

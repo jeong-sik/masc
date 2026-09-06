@@ -4335,7 +4335,7 @@
 (test
  (name test_keeper_ide_annotate_contract)
  (modules test_keeper_ide_annotate_contract)
- (libraries alcotest yojson masc masc_test_deps))
+ (libraries alcotest yojson masc masc_test_deps eio eio_main fs_compat unix))
 
 (test
  (name test_goal_tool_toml_parity)

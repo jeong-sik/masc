@@ -62,6 +62,14 @@ let prepare (change : Masc.Tui_decode.file_change) =
           Diff.preview ~context:preview_context ~max_rows:preview_rows rows
         in
         Edited { preview; omitted; removed; added; replace_all }
+    | Masc.Tui_decode.Fc_inserted { text; _ } ->
+        (* A memo is an edit that removed nothing: the one line, added. *)
+        let rows = Diff.rows ~before:"" ~after:text in
+        let removed, added = Diff.counts rows in
+        let preview, omitted =
+          Diff.preview ~context:preview_context ~max_rows:preview_rows rows
+        in
+        Edited { preview; omitted; removed; added; replace_all = false }
     | Masc.Tui_decode.Fc_written { content } ->
         let rows = Diff.rows ~before:"" ~after:content in
         let preview, omitted =

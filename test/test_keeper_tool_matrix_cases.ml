@@ -326,14 +326,12 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   | "keeper_analyze_image" ->
       `Assoc [ ("artifact", `String "tool-matrix-missing-query") ]
   | "keeper_ide_annotate" ->
-      (* RFC-0378 §5.3: the anchor is the co-view vocabulary — a codebase
-         slug plus a repo-root-relative path, handed back verbatim. *)
+      (* A memo above line 1 of a file, in that file's comment syntax. *)
       `Assoc
         [
-          ("codebase", `String "github.com_owner_repo");
           ("file_path", `String "lib/sample.ml");
-          ("line_start", `Int 1);
-          ("content", `String "tool matrix ide annotation");
+          ("line", `Int 1);
+          ("text", `String "tool matrix memo");
         ]
   | "masc_board_post" ->
       `Assoc

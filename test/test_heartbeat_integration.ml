@@ -165,11 +165,6 @@ default = "test_provider.test_model"
 display-name = "Test Provider"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1"
-# Runtime.validate_request_body_cap refuses a keeper turn on a provider with no
-# positive ceiling, and every Keeper provider-call boundary calls it. The TOML
-# parser allows the key to be omitted ("no declared ceiling"), so a fixture
-# without it loads clean and dies at the first turn instead.
-max-request-body-bytes = 1048576
 
 [models.test_model]
 api-name = "test-model"
@@ -180,6 +175,16 @@ streaming = true
 [test_provider.test_model]
 is-default = true
 max-concurrent = 1
+# Runtime.validate_request_body_cap refuses a keeper turn on a runtime with no
+# positive ceiling, and every Keeper provider-call boundary calls it. The TOML
+# parser allows the key to be omitted ("no declared ceiling"), so a fixture
+# without it loads clean and dies at the first turn instead.
+#
+# The key belongs on the runtime row, not on [providers.<name>]: that is where
+# test_runtime_per_keeper_routing puts it ([runpod_mtp.qwen], [openai.gpt]) and
+# where the ceiling is read from. A first attempt placed it on the provider
+# and the turn failed exactly as before.
+max-request-body-bytes = 1048576
 |}
   in
   let path = Filename.temp_file "heartbeat_integ_runtime_" ".toml" in

@@ -3,6 +3,7 @@ type operation =
   | Read_document
   | Add_document
   | Search_documents
+[@@deriving enumerate]
 
 type definition =
   { operation : operation

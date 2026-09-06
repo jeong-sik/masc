@@ -4,6 +4,7 @@
 type operation = Local_runtime_tool_policy.operation =
   | Verify
   | Ollama_probe
+[@@deriving enumerate]
 
 type definition =
   { operation : operation
@@ -25,10 +26,17 @@ type keeper_model_exposure = Local_runtime_tool_policy.model_exposure =
 let keeper_model_exposure = Local_runtime_tool_policy.model_exposure
 let execution_policy = Local_runtime_tool_policy.execution_policy
 
-let definitions : definition list =
-  [
-    { operation = Verify; schema = Tool_schemas_local_runtime_toml.verify };
-    { operation = Ollama_probe; schema = Tool_schemas_local_runtime_toml.ollama_probe };
-  ]
+(* One definition per constructor, and [definitions] is [all_of_operation]
+   mapped through it. Writing the list out instead let a new operation compile
+   -- [operation_id] and the policy functions are exhaustive -- while quietly
+   staying out of the list registration walks, so it would be routable and
+   never advertised. *)
+let definition_for operation =
+  match operation with
+  | Verify -> { operation; schema = Tool_schemas_local_runtime_toml.verify }
+  | Ollama_probe -> { operation; schema = Tool_schemas_local_runtime_toml.ollama_probe }
+;;
+
+let definitions : definition list = List.map definition_for all_of_operation
 
 let schemas = List.map (fun definition -> definition.schema) definitions

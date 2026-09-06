@@ -185,7 +185,9 @@ let file_activity_json ~codebase ~repo_id ~file_path ~window_hours =
     ; "repo_id", `String repo_id
     ; "file_path", `String file_path
     ; "window_hours", `Float window_hours
-    ; "calls_in_window", `Int (List.length rows)
+      (* Same source as the keeper route: the tally already partitions what
+         was read. *)
+    ; "calls_in_window", `Int (Keeper_tool_call_file_change.rows_counted tally)
     ; "changes", `List (List.map Keeper_tool_call_file_change.to_json changes)
     ; "incomplete_over_budget", `Int incomplete_over_budget
     ; "incomplete_malformed", `Int incomplete_malformed

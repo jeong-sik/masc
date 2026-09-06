@@ -131,6 +131,12 @@ type tally = {
 val empty_tally : tally
 (** The tally of no rows. *)
 
+val rows_counted : tally -> int
+(** How many rows a tally was folded from: changes, unreadable rows and
+    not-file-changes are a partition of what was read, so this is the row count
+    without keeping the rows. A caller that reports "n changes out of m calls"
+    reads m here rather than measuring the list it no longer holds. *)
+
 val fold_row : tally -> Yojson.Safe.t -> tally
 (** Fold one row into a tally. [classify_all] is this over a list; a caller
     reading rows incrementally holds the tally between reads instead. Both

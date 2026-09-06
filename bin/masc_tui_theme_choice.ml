@@ -4,6 +4,10 @@ module Palette = Masc_tui_terminal_palette
 module Catalog = Masc_tui_theme_catalog
 module Color = Masc_tui_color
 
+(* SGR 49: back to the terminal's own page, without touching the foreground
+   the row is drawing its name in. *)
+let background_reset = "\027[49m"
+
 type entry =
   { name : string
   ; light : bool
@@ -92,6 +96,21 @@ let contrast_status ~lift_on (entry : entry) =
   if entry.lifted = 0 then Printf.sprintf "native %d/%d" entry.measured entry.measured
   else if lift_on then Printf.sprintf "lift %d/%d" entry.lifted entry.measured
   else Printf.sprintf "%d/%d low" entry.lifted entry.measured
+;;
+
+(* The swatch as the row draws it, rather than as a list of colours the
+   caller has to turn into escapes itself.
+
+   The picker is the one screen that shows a colour for its own sake: every
+   other surface asks the theme for a meaning and gets whatever hue carries it
+   today. So the raw background escape belongs here, beside the colours it
+   draws, and not in the renderer -- which names no raw hue at all, and has an
+   AST guard over it that says so. *)
+let swatch_cells (entry : entry) =
+  entry.swatch
+  |> List.map (fun rgb ->
+       Masc_tui_theme.Sgr.background (Palette.best_color rgb) ^ "  " ^ background_reset)
+  |> String.concat ""
 ;;
 
 (* The reader's own choice, held beside the terminal's answer rather than

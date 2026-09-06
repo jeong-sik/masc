@@ -16159,13 +16159,7 @@ let render_themes (state : state) =
           | Some name -> String.equal name entry.name
           | None -> false
         in
-        let swatch =
-          entry.Theme_choice.swatch
-          |> List.map (fun rgb ->
-               Masc_tui_theme.Sgr.background (Masc_tui_terminal_palette.best_color rgb)
-               ^ "  \027[49m")
-          |> String.concat ""
-        in
+        let swatch = Theme_choice.swatch_cells entry in
         let row =
           Printf.sprintf "  %s %s " (if picked then chosen_mark else " ")
             (fit_width (Terminal_text.single_line entry.name) name_width)

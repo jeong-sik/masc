@@ -512,7 +512,8 @@
  (name masc_tui_theme_choice)
  (wrapped false)
  (modules masc_tui_theme_choice)
- (libraries masc_tui_color masc_tui_terminal_palette masc_tui_theme_catalog))
+ (libraries masc_tui_color masc_tui_terminal_palette masc_tui_theme
+  masc_tui_theme_catalog))
 
 (library
  (name masc_tui_color)

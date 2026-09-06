@@ -8786,8 +8786,13 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                  and a neutral system row with no projection remains whole. *)
               | Memory_full | Memory_hidden -> message.me_text
               | Memory_summary -> (
+                  (* A summarised row is a cut row, so it says which key
+                     uncuts it. What that key does is the footer's line,
+                     which is on screen whenever this row is: spelling
+                     "journal detail" here again cost twenty-five cells on
+                     every journal row of the pane. *)
                   match message.me_memory_summary with
-                  | Some summary -> summary ^ " · Ctrl-N: journal detail"
+                  | Some summary -> summary ^ " · Ctrl-N"
                   | None -> message.me_text))
           (* Only a gated row: a Gate step's text ends in the argument the
              call asked for, while a status row without one is a sentence the

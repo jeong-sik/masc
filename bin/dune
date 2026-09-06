@@ -159,8 +159,8 @@
 ;; (task-1363): dune build @regen_tool_parity_artifacts. The generator reads
 ;; config/tools/*.toml through the production loader and rewrites
 ;; test/golden/tool_parity_*.txt; it is never a build dependency of anything.
-(alias
- (name regen_tool_parity_artifacts)
+(rule
+ (alias regen_tool_parity_artifacts)
  (action
   (chdir %{workspace_root}
     (run %{exe:tool_parity_generator.exe}))))

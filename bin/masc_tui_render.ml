@@ -8582,10 +8582,38 @@ let keeper_message_visible_messages ?messages (state : state) ~keeper_name =
    said, and they were drawn at the same depth as the answer -- same column,
    same indent, same clock -- so a turn's work read as a sibling of its speech.
    They hang off the trunk instead. *)
-let turn_rail_of ~(edge : Masc_tui_types.turn_edge)
+(* Which siding a row came in on, or [None] when it is not an arrival.
+
+   Exhaustive on purpose: a new row kind has to say whether it arrived from
+   outside, and the compiler is the only thing that will ask.
+
+   [Sent_by_operator] is not here. A prompt the operator sent from another
+   surface did arrive from outside, but which surface is in the label's text
+   and not in the constructor, and reading it back out of the string is the
+   pane deciding something the type never recorded. *)
+let siding_of_message (message : Masc_tui_types.msg_entry) =
+  match message.me_role with
+  | Masc_tui_types.Message_memory -> Some Message_layout.Siding_journal
+  | Masc_tui_types.Message_user (Masc_tui_types.Sent_by_other _) ->
+      Some Message_layout.Siding_arrival
+  | Masc_tui_types.Message_user (Masc_tui_types.Sent_by_operator _)
+  | Masc_tui_types.Message_keeper | Masc_tui_types.Message_autonomous
+  | Masc_tui_types.Message_status | Masc_tui_types.Message_local
+  | Masc_tui_types.Message_error | Masc_tui_types.Message_tool
+  | Masc_tui_types.Message_skill _ | Masc_tui_types.Message_thinking ->
+      None
+
+(* [siding] only reaches the rail through [Turn_outside]: a row that owns a
+   request is on the line whoever sent it, and a broadcast that opened a turn
+   is that turn's first row rather than something beside it. *)
+let turn_rail_of ~siding ~(edge : Masc_tui_types.turn_edge)
     ~(style : Message_layout.style) =
   match edge with
-  | Turn_outside | Turn_alone -> Message_layout.Rail_none
+  | Turn_outside -> (
+      match siding with
+      | Some siding -> Message_layout.Rail_joins siding
+      | None -> Message_layout.Rail_none)
+  | Turn_alone -> Message_layout.Rail_none
   | Turn_opens -> Message_layout.Rail_opens
   | Turn_closes -> Message_layout.Rail_closes
   | Turn_continues -> (
@@ -8823,7 +8851,8 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                    observed_at = message.me_at;
                    entry_index;
                  };
-             turn_rail = turn_rail_of ~edge ~style;
+             turn_rail =
+               turn_rail_of ~siding:(siding_of_message message) ~edge ~style;
            }
             : Message_layout.entry))
       visible_entries
@@ -9474,7 +9503,8 @@ let render_keeper_message (state : state) =
                       body;
                       markdown_source;
                       turn_rail =
-                        turn_rail_of ~edge:Masc_tui_types.Turn_continues ~style;
+                        turn_rail_of ~siding:None
+                          ~edge:Masc_tui_types.Turn_continues ~style;
                     }
                      : Message_layout.entry)
                in
@@ -9636,10 +9666,16 @@ let render_keeper_message (state : state) =
                 | false, true -> Turn_closes
                 | false, false -> Turn_continues
               in
+              let siding =
+                match tag with
+                | Tagged_row message -> siding_of_message message
+                | Tagged_block _ -> None
+              in
               ( tag
               , { entry with
                   Message_layout.turn_rail =
-                    turn_rail_of ~edge ~style:entry.Message_layout.style
+                    turn_rail_of ~siding ~edge
+                      ~style:entry.Message_layout.style
                 } )
           | Some _, None | None, Some _ | None, None -> item)
         merged

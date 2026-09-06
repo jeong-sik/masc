@@ -669,7 +669,10 @@ let start
         "keeper_owner: operation store close failed keeper=%s error=%s"
         keeper_name
         (Chat_operation_store.error_to_string error));
+  Eio.Switch.on_release sw (fun () ->
+    Printf.printf "DIAG14 dr-9-switch-released\n%!");
   Eio.Fiber.fork_daemon ~sw (fun () ->
+    Printf.printf "DIAG14 dr-8-daemon-started\n%!";
     let finish_operation_child claimed_operation_id execution =
       match claimed_operation_id, execution with
       | None, _ -> Ok ()
@@ -794,11 +797,13 @@ let start
                        { claimed_operation_id = !claimed_operation_id; execution })))
           ))
     and loop state shutdown_operation_id =
+        Printf.printf "DIAG14 dr-0-take-wait depth=%d\n%!" (Eio.Stream.length t.mailbox);
         match Eio.Stream.take t.mailbox with
         | Command (Exact_projection, resolve) ->
           Eio.Promise.resolve resolve (Ok (Keeper_owner_reducer.projection state));
           loop state shutdown_operation_id
         | Command (Apply_meta command, resolve) ->
+          Printf.printf "DIAG14 dr-1-took-apply-meta\n%!";
           let operation_store_ready =
             match command, (Keeper_owner_reducer.projection state).meta with
             | Keeper_owner_reducer.Create _, None ->

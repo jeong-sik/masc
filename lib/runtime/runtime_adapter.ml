@@ -265,6 +265,21 @@ let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.p
             provider.protocol))
 ;;
 
+(* [provider_kind] has no equality in agent core and every variant is
+   constant, so this is a total match rather than [=]: adding a variant makes
+   the compiler ask about it here instead of silently answering false. *)
+let same_provider_kind left right =
+  let open Llm_provider.Provider_config in
+  match (left : provider_kind), (right : provider_kind) with
+  | Anthropic, Anthropic
+  | Kimi, Kimi
+  | OpenAI_compat, OpenAI_compat
+  | Ollama, Ollama
+  | Gemini, Gemini
+  | Glm, Glm -> true
+  | (Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | Glm), _ -> false
+;;
+
 let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~registry_entry ~kind
     ~base_url =
   (* The registry carries the catalog [providers] rows verbatim — including
@@ -272,16 +287,32 @@ let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~regist
      Model_catalog provider entry). A provider whose catalog row names a
      different surface (deepseek-responses -> "/responses") must not have the
      protocol default stamped over it, so a registry-declared path wins over
-     the Chat-completions default. Providers absent from the catalog keep the
-     protocol default exactly as before: their registry entries carry only the
-     kind default, and no catalog row means no separate surface to name. *)
+     the Chat-completions default.
+
+     It wins only for the kind that path belongs to. A catalog row can serve
+     more than one surface — ollama_cloud declares
+     [identity_kinds = ["ollama"; "openai_compat"]] — while carrying a single
+     [request_path], and that path names its own kind's surface ("/api/chat",
+     the native Ollama one). A workspace that reaches the same provider over
+     the OpenAI-compatible surface selects [OpenAI_compat] here, and stamping
+     the native path on it built https://ollama.com/v1/api/chat: 794 requests
+     404'd across five keepers on 2026-09-06, two of them 30 cycles deep
+     (#33652). Comparing kinds keeps deepseek-responses working — its catalog
+     row is OpenAI_compat and so is the runtime that names it — without
+     matching on the path text.
+
+     Providers absent from the catalog keep the protocol default exactly as
+     before: no catalog row means no separate surface to name. *)
   let request_path =
     match registry_entry with
     | Some entry
-      when not
-             (String.equal
-                entry.Llm_provider.Provider_registry.defaults.request_path
-                "") ->
+      when same_provider_kind
+             entry.Llm_provider.Provider_registry.defaults.kind
+             kind
+           && not
+                (String.equal
+                   entry.Llm_provider.Provider_registry.defaults.request_path
+                   "") ->
       entry.Llm_provider.Provider_registry.defaults.request_path
     | _ ->
       (match provider.api_format, kind with

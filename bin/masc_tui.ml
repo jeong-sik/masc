@@ -10467,6 +10467,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 in
                 max widest row_width)
               0 rows;
+          state.code_memos <- Masc_tui_memo.of_file ~path rows;
           state.code_focus_file <- Right_pane;
           (* A new file starts on its content; the old file's history or
              diff would caption the wrong bytes. *)
@@ -10480,6 +10481,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.code_notes_scroll <- 0;
           state.code_blame <- Masc_tui_fetched.clear state.code_blame
       | Error detail ->
+          state.code_memos <- [];
           state.code_file <-
             Masc_tui_fetched.complete ~equal:String.equal state.code_file request
               (Error detail))
@@ -16687,13 +16689,10 @@ and is loaded on demand through keeper_skill.
                   state.repository_changes_scroll <- scroll
                 else if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then (
-                    match Masc_tui_fetched.current state.code_file with
-                    | Some (path, Masc_tui_fetched.Ready rows) ->
-                        state.code_notes_scroll <-
-                          min
-                            (max 0 (List.length (Masc_tui_memo.of_file ~path rows) - 1))
-                            (state.code_notes_scroll + 1)
-                    | Some (_, _) | None -> ())
+                    state.code_notes_scroll <-
+                      min
+                        (max 0 (List.length state.code_memos - 1))
+                        (state.code_notes_scroll + 1))
                   else if state.code_diff_open then (
                     match Masc_tui_fetched.current state.code_diff with
                     | Some (_, Masc_tui_fetched.Ready diff) ->

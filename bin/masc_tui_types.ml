@@ -3319,7 +3319,10 @@ type state = {
   mutable code_diff_open: bool;
   mutable code_diff_scroll: int;
   (* The file pane's notes view: m on an open file swaps the content for
-     the memos written as comments in the file itself. *)
+     the memos written as comments in the file itself. Read off the rows
+     once at load, like the width above: the memos change when the file
+     does, and rebuilding them per frame walks every row of it. *)
+  mutable code_memos: Masc_tui_memo.found list;
   mutable code_notes_open: bool;
   mutable code_notes_scroll: int;
   (* The file pane's blame margin: b on an open file fetches who last touched
@@ -4348,6 +4351,7 @@ let create_state
   code_jump_back = [];
   code_file_hscroll = 0;
   code_file_max_width = 0;
+  code_memos = [];
   code_focus_file = Left_pane;
   code_history = Masc_tui_fetched.initial;
   code_history_open = false;

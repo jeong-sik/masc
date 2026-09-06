@@ -70,7 +70,8 @@ let origin_request_id = function
   | History.Addressed_to_keeper _ | History.Said_by_keeper
   | History.Autonomous_reply
   | History.Tool_calls _ | History.Skill_activity _ | History.Reasoning _
-  | History.Gate_activity _ | History.Memory_activity _ -> None
+  | History.Gate_activity _ | History.Memory_activity _
+  | History.Fusion_conclusion _ -> None
 
 let full_tool_rows = History.tool_rows
 
@@ -92,6 +93,7 @@ let kind_to_string : History.kind -> string = function
         (Masc.Keeper_chat_store.approval_lifecycle_phase_to_label phase)
         (match tool with None -> "" | Some tool -> " " ^ tool)
   | History.Memory_activity _ -> "memory"
+  | History.Fusion_conclusion _ -> "fusion"
 
 (* An assistant row the way an autonomous turn persists it: the server's
    [autonomous_turn] marker, a blank [content], and a [t: "trace"] block of
@@ -310,7 +312,8 @@ let test_roles_map_to_what_the_pane_draws () =
        check (option string) "a neutral system row stays whole" None summary
    | History.Addressed_to_keeper _ | History.Said_by_keeper
    | History.Autonomous_reply | History.Delivery_failed _
-   | History.Tool_calls _ | History.Skill_activity _ | History.Reasoning _ ->
+   | History.Tool_calls _ | History.Skill_activity _ | History.Reasoning _
+   | History.Fusion_conclusion _ ->
        fail "expected the system row to use the neutral Memory lane")
 
 (* The pane writes its own row when a turn fails, because most error rows are
@@ -531,6 +534,7 @@ let test_an_addressed_row_says_who_sent_it_not_only_what_to_draw () =
     | History.Said_by_keeper | History.Autonomous_reply
     | History.Delivery_failed _ | History.Tool_calls _
     | History.Skill_activity _ | History.Reasoning _
+    | History.Fusion_conclusion _
     | History.Gate_activity _ -> failf "unexpected gate row"
     | History.Memory_activity _ ->
         failf "expected an addressed row"
@@ -562,6 +566,7 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
     | History.Said_by_keeper | History.Autonomous_reply
     | History.Delivery_failed _ | History.Tool_calls _
     | History.Skill_activity _ | History.Reasoning _
+    | History.Fusion_conclusion _
     | History.Gate_activity _ -> failf "unexpected gate row"
     | History.Memory_activity _ ->
         failf "expected an addressed row"
@@ -726,6 +731,7 @@ let test_consecutive_tool_rows_become_one_block () =
        | History.Autonomous_reply
        | History.Delivery_failed _ | History.Skill_activity _
        | History.Reasoning _
+       | History.Fusion_conclusion _
        | History.Gate_activity _ -> failf "unexpected gate row"
     | History.Memory_activity _ ->
            fail "expected the middle row to be a tool block");
@@ -864,6 +870,7 @@ let test_an_autonomous_turn_draws_what_it_did () =
        | History.Autonomous_reply
        | History.Delivery_failed _ | History.Skill_activity _
        | History.Reasoning _
+       | History.Fusion_conclusion _
        | History.Gate_activity _ -> failf "unexpected gate row"
     | History.Memory_activity _ ->
            fail "expected the second row to be a tool block");
@@ -1290,7 +1297,7 @@ let test_memory_commit_names_added_removed_and_drop_reason () =
        | History.Addressed_to_keeper _ | History.Said_by_keeper
        | History.Autonomous_reply | History.Delivery_failed _
        | History.Tool_calls _ | History.Skill_activity _
-       | History.Reasoning _ ->
+       | History.Reasoning _ | History.Fusion_conclusion _ ->
            fail "journal row lost its Memory activity type");
       List.iter
         (fun needle ->
@@ -1345,7 +1352,7 @@ let test_memory_failure_keeps_kind_and_detail () =
        | History.Addressed_to_keeper _ | History.Said_by_keeper
        | History.Autonomous_reply | History.Delivery_failed _
        | History.Tool_calls _ | History.Skill_activity _
-       | History.Reasoning _ ->
+       | History.Reasoning _ | History.Fusion_conclusion _ ->
            fail "failed journal row lost its Memory activity type");
       check bool "failure kind survives" true
         (contains row.text "exact_execution_failure");
@@ -1661,11 +1668,76 @@ let test_a_sized_row_decodes_its_pixels () =
      | other -> Alcotest.failf "expected one row, got %d" (List.length other))
 ;;
 
+(* A fusion conclusion arrives as a direct-conversation assistant row: the
+   conclusion is the [content], and a [t: "fusion"] block names the run and
+   the board post that hold the panel/judge detail. The row the block becomes
+   rides ahead of the conclusion so the transcript says where the text is
+   from. [board_post_id] is required the way the dashboard's normalizer
+   requires it: a fusion block without it points at nothing and makes no
+   row. *)
+let fusion_row ?(run_id = Some "kmsg-fus-1") ?(board_post_id = "p-fus-1")
+    content =
+  `Assoc
+    ([ "id", `String "fusion-1"
+     ; "role", `String "assistant"
+     ; "content", `String content
+     ; "ts", `Float 1.0
+     ]
+    @ [ ( "blocks"
+        , `List
+            [ `Assoc
+                ([ "t", `String "fusion"
+                 ; "board_post_id", `String board_post_id
+                 ]
+                 @ (match run_id with
+                    | None -> []
+                    | Some r -> [ "run_id", `String r ]))
+            ] ) ])
+;;
+
+let test_a_fusion_block_names_the_run_ahead_of_the_conclusion () =
+  match
+    decode
+      (`List
+         [ fusion_row "Fusion deliberation (run kmsg-fus-1) — answer — 결론 본문" ])
+  with
+  | { History.rows = [ pointer; conclusion ]; _ } -> (
+      (match pointer.History.kind with
+       | History.Fusion_conclusion { fusion_run_id; fusion_board_post_id } ->
+           check (option string) "run id" (Some "kmsg-fus-1") fusion_run_id;
+           check string "board post id" "p-fus-1" fusion_board_post_id
+       | _ -> failf "expected a fusion pointer row first") |> ignore;
+      match conclusion.History.kind with
+      | History.Said_by_keeper ->
+          check string "the conclusion stays the row's text"
+            "Fusion deliberation (run kmsg-fus-1) — answer — 결론 본문"
+            conclusion.History.text
+      | _ -> failf "expected the conclusion row second")
+  | { History.rows = other; _ } ->
+      failf "expected two rows, got %d" (List.length other)
+;;
+
+let test_a_fusion_block_without_a_post_id_makes_no_row () =
+  match
+    decode (`List [ fusion_row ~board_post_id:"" "Fusion deliberation — 결론" ])
+  with
+  | { History.rows = [ conclusion ]; _ } -> (
+      match conclusion.History.kind with
+      | History.Said_by_keeper -> ()
+      | _ -> failf "expected only the conclusion row")
+  | { History.rows = other; _ } ->
+      failf "expected one row, got %d" (List.length other)
+;;
+
 let () =
   run "tui_keeper_chat_history"
     [ ( "rows"
       , [ test_case "roles map to what the pane draws" `Quick
             test_roles_map_to_what_the_pane_draws
+        ; test_case "a fusion block names the run ahead of the conclusion"
+            `Quick test_a_fusion_block_names_the_run_ahead_of_the_conclusion
+        ; test_case "a fusion block without a post id makes no row" `Quick
+            test_a_fusion_block_without_a_post_id_makes_no_row
         ; test_case "a gate row carries its approval" `Quick
             test_a_gate_row_carries_its_approval
         ; test_case "a gate row carries its call summary" `Quick

@@ -127,6 +127,21 @@ export interface LspStatusSnapshot {
 export const EMPTY_LSP_STATUS_SNAPSHOT: LspStatusSnapshot = { langs: [] }
 export const lspStatusSnapshot = signal<LspStatusSnapshot>(EMPTY_LSP_STATUS_SNAPSHOT)
 
+/**
+ * Whether the last `masc/lspStatus` payload was rejected.
+ *
+ * A payload is taken whole or not at all, so one unreadable language entry
+ * drops the snapshot and `lspStatusSnapshot` keeps what it had. That value is
+ * then a past reading presented as the present one: the chip can say
+ * `LSP unavailable 1` about a server that has since come back, or say nothing
+ * about one that has since died, and neither corrects itself before a reload.
+ *
+ * This is the separate fact the statusbar needs to say so. It is not folded
+ * into the snapshot because the snapshot answers which languages have a
+ * server, and this answers whether that answer is current.
+ */
+export const lspStatusRejected = signal(false)
+
 const LSP_TERMINAL_CLOSE_CODES = new Set([1008, 4401, 4403])
 
 // ── State Effects ────────────────────────────────────────────────
@@ -841,9 +856,11 @@ function publishLspStatusSnapshot(value: unknown): void {
   const parsed = parseLspStatusSnapshot(value)
   if (parsed === null) {
     console.warn('[LSP] invalid masc/lspStatus payload')
+    lspStatusRejected.value = true
     return
   }
   lspStatusSnapshot.value = parsed
+  lspStatusRejected.value = false
 }
 
 function publishLspDiagnosticSnapshot(

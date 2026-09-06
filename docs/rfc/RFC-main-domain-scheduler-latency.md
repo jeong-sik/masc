@@ -731,3 +731,30 @@ keeper 쪽 긴 실행은 전부 `turn:provider` 안이고 여전히 `append-file
 #### P4q — 파일 I/O 라벨이 파일 이름을 말하게 (#33673)
 
 `Eio_unix.run_in_systhread ~label` 은 라벨을 링에 fiber 의 중단 사유로 적는다(eio 1.3 `lib_eio/unix/thread_pool.ml:123`). 그래서 추적기가 읽는 "재개 → 중단" 은 곧 이 라벨이다. `fs_compat` 의 load/save/append 와 `atomic_write` 의 replace 에 `Filename.basename` 을 붙이면 같은 실행이 `fs-compat-append-file chat.jsonl → fs-compat-load-file memory.json` 으로 읽힌다. turn 안에 switch 를 새로 넣지 않고 호출자를 특정하는 방법이다.
+
+#### P4q·P4r 를 넣고 잰 창 (09-06 20:29 KST, 부하 19)
+
+서버는 20:25 KST 에 `974ffa6f` 로 떴고 #33673·#33678 이 둘 다 들어 있다. 호스트가 조용해서(부하 19.6 → 17.7) P4h-0~3 이후 처음으로 부하에 덜 오염된 읽기다.
+
+| | P4p 창 (부하 57–76) | 이 창 (부하 19) |
+|---|---|---|
+| 하네스 p99 / max | 156 / 440 ms | **15.0 / 158 ms** |
+| main 점유 | 22.9% | 7.5% |
+| main ≥100 ms 실행 | 21 | 3 |
+| 최대 실행 | 488 ms | 222 ms |
+| `spawn_unix` 등장 | 37회 2,385 ms | **0회** |
+
+`spawn_unix` 이 트레이스 전체에서 사라진 것은 부하와 무관한 판정이다. 스택 샘플에서도 `fork`·`_malloc_fork_parent`·`_xzm_foreach_lock` 이 함께 사라졌고, `Config_dir_resolver.current_working_dir` 의 `getcwd`(직전 창 361 샘플)도 상위에서 빠졌다.
+
+파일 이름 라벨은 첫 창에서 바로 값을 냈다. domain 0 의 긴 실행이 전부 한 모양이다.
+
+| 재개 → 중단 | 실행 | 최대 | 라벨 |
+|---|---|---|---|
+| `fs-compat-append-file trace-*.jsonl → fs-compat-load-file disabled.json` | 5 | 222 ms | keeper 다섯(code-reviewer·geek-scout·jazz-developer·kidsnote-pr-jira-checker·critic) |
+| `fs-compat-load-file runtime.toml → switch` | 13 | 35 ms | — |
+| `fs-compat-load-file schedules.json → openat` | 6 | 35 ms | — |
+| `fs-compat-load-file masc-tui.json → switch` | 9 | 35 ms | — |
+
+`disabled.json` 을 읽는 곳은 `Keeper_identity_tools.for_turn` 하나다(턴당 한 번). 그러니 이 실행은 raw trace 한 줄을 붙인 뒤 그 턴의 identity 도구를 꾸리기 시작하기까지의 계산이다. 다음 조각은 이 사이를 가르는 것이다.
+
+측정 도구 주의: `sample` 은 스택 프레임마다 한 줄을 찍으므로, 줄 수를 그대로 더하면 꼬리재귀가 아닌 호출이 부풀려진다. 이 창에서 `List.combine` 이 336 샘플로 1위처럼 보였는데 실제로는 **한 샘플이 337 프레임 깊이**였다(`Keeper_provider_input_snapshot.write_best_effort` 의 메시지 zip). 잎만 세면 main 스레드 busy 는 4.1% 이고 1위는 `caml_lex_engine` 138(10%)이다. `scratchpad/rtev/sample_leaf.py` 가 잎만 센다.

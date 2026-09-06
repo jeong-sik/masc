@@ -35,7 +35,24 @@
 
 open Alcotest
 
-let tools_dir = "config/tools"
+(* Resolved against the checkout rather than the working directory. The
+   stanza's [(deps ...)] stage this directory into dune's own runtest action,
+   so a relative path found it there -- and nowhere else. The targeted CI
+   runner executes the binary straight out of [_build/default/test], where
+   every case died on [Sys_error "config/tools: No such file or directory"],
+   which is a report about a working directory wearing the name of a report
+   about tool names.
+
+   [DUNE_SOURCEROOT] is what dune sets to the workspace root, and it is how
+   every other suite that reads source finds it. The deps stay: they are what
+   makes a new tool re-run this test. *)
+let tools_dir =
+  let root =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root when Sys.file_exists root -> root
+    | Some _ | None -> Sys.getcwd ()
+  in
+  Filename.concat root "config/tools"
 
 (* [tool_] is not a third namespace. These five are the runtime handlers the
    catalog marks hidden from the public MCP schema surface; a Keeper reaches

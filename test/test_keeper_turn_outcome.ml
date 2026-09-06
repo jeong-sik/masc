@@ -594,6 +594,41 @@ let test_repeated_exact_tool_call_boundary () =
        ; tool_call ~output:(Some "a") "Execute"
        ])
 
+(* task-1204 / #26057 — the cross-turn shape. The detector folds over the
+   run-local hook accumulator ([Keeper_run_tools.hook_accumulator], created
+   fresh per Agent.run execution), while the persisted checkpoint keeps only
+   the AGENT_CORE message history. A keeper that repeats the identical call
+   across a checkpoint restart therefore presents each new run with an empty
+   accumulator: the fold below counts what one run saw, not what the keeper
+   did. Four identical calls split 2 + 2 across two runs escape both axes at
+   threshold 3 — the same four in one run are caught on the third call.
+   This is the reproduction the #26057 handoff asked for: a repeat that is
+   only visible across the restart boundary. *)
+let test_repeated_exact_tool_call_reset_across_checkpoint_restart () =
+  let detect =
+    Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
+  in
+  (* Run 1: two identical calls, then a yield persists the checkpoint.
+     Newest-first, as in [test_repeated_exact_tool_call_boundary]. *)
+  let run_1_saw = [ tool_call "keeper_tasks_list"; tool_call "keeper_tasks_list" ] in
+  check (option (pair string int)) "two identical calls inside one run stay silent" None
+    (detect run_1_saw);
+  (* Restart: the next run's accumulator starts empty; the checkpoint history
+     is not folded in, so the two earlier identical calls are invisible. *)
+  let run_2_saw = [ tool_call "keeper_tasks_list"; tool_call "keeper_tasks_list" ] in
+  check (option (pair string int))
+    "restart hides the earlier identical calls from the fold" None
+    (detect run_2_saw);
+  (* Control: the same four calls in a single run are caught on the third. *)
+  check (option (pair string int)) "the same four in one run are caught"
+    (Some ("keeper_tasks_list", 4))
+    (detect
+       [ tool_call "keeper_tasks_list"
+       ; tool_call "keeper_tasks_list"
+       ; tool_call "keeper_tasks_list"
+       ; tool_call "keeper_tasks_list"
+       ])
+
 let test_repeated_assistant_text_boundary () =
   let detect =
     Masc.Keeper_agent_run.For_testing.repeated_assistant_text ~threshold:3
@@ -1107,6 +1142,8 @@ let () =
             test_applied_gate_replay_seeds_terminal_settlement;
           test_case "repeated exact tool call boundary" `Quick
             test_repeated_exact_tool_call_boundary;
+          test_case "repeated exact tool call reset across checkpoint restart" `Quick
+            test_repeated_exact_tool_call_reset_across_checkpoint_restart;
           test_case "repeated tool input boundary" `Quick
             test_repeated_tool_call_input_boundary;
           test_case "repeated assistant text boundary" `Quick

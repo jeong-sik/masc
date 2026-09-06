@@ -76,31 +76,6 @@ module Goal_name : sig
   val pp : Stdlib.Format.formatter -> t -> unit
 end
 
-module Keeper_name : sig
-  type t =
-    | Keeper_audit
-    | Keeper_clear
-    | Keeper_delegate
-    | Keeper_delegate_cancel
-    | Keeper_delegate_list
-    | Keeper_delegate_status
-    | Keeper_down
-    | Keeper_list
-    | Keeper_msg
-    | Keeper_reset
-    | Keeper_sandbox_start
-    | Keeper_sandbox_stop
-    | Keeper_status
-    | Keeper_up
-
-  val all : t list
-  (** Exhaustive Keeper operation vocabulary. *)
-
-  val to_string : t -> string
-  val of_string : string -> t option
-  val pp : Stdlib.Format.formatter -> t -> unit
-end
-
 module Operator_name : sig
   type t =
     | Operator_action

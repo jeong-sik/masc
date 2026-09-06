@@ -347,13 +347,13 @@ let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
   (* Routing reads Tool_name.Keeper_name, so a constructor added there is a
      compile error here rather than a tool that is advertised and answers
      nothing. Unknown names keep returning None. *)
-  match Tool_name.Keeper_name.of_string name with
+  match Keeper_tool_name.of_string name with
   | None -> None
   | Some keeper_name ->
     (match keeper_name with
-    | Tool_name.Keeper_name.Keeper_up -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_up ctx args))
-    | Tool_name.Keeper_name.Keeper_status -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_status ctx args))
-    | Tool_name.Keeper_name.Keeper_delegate ->
+    | Keeper_tool_name.Keeper_up -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_up ctx args))
+    | Keeper_tool_name.Keeper_status -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_status ctx args))
+    | Keeper_tool_name.Keeper_delegate ->
         Some
           (tool_result_with_tool_name
              ~tool_name:name
@@ -362,7 +362,7 @@ let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
                 ~submitted_by:ctx.agent_name
                 ctx
                 args))
-    | Tool_name.Keeper_name.Keeper_msg ->
+    | Keeper_tool_name.Keeper_msg ->
         Some
           (tool_result_with_tool_name
              ~tool_name:name
@@ -370,36 +370,36 @@ let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
                 ~submitted_by:ctx.agent_name
                 ctx
                 args))
-    | Tool_name.Keeper_name.Keeper_delegate_status ->
+    | Keeper_tool_name.Keeper_delegate_status ->
         Some
           (tool_result_with_tool_name ~tool_name:name
              (Keeper_tool_surface_ops.keeper_delegate_status_body
                 ~config:ctx.config ~caller:ctx.agent_name args))
-    | Tool_name.Keeper_name.Keeper_delegate_cancel ->
+    | Keeper_tool_name.Keeper_delegate_cancel ->
         Some
           (tool_result_with_tool_name ~tool_name:name
              (Keeper_tool_surface_ops.keeper_delegate_cancel_body
                 ~config:ctx.config ~caller:ctx.agent_name args))
-    | Tool_name.Keeper_name.Keeper_delegate_list ->
+    | Keeper_tool_name.Keeper_delegate_list ->
         Some
           (tool_result_with_tool_name ~tool_name:name
              (Keeper_tool_surface_ops.keeper_delegate_list_body
                 ~config:ctx.config ~caller:ctx.agent_name args))
-    | Tool_name.Keeper_name.Keeper_down -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_down ctx args))
-    | Tool_name.Keeper_name.Keeper_list -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_list ctx args))
-    | Tool_name.Keeper_name.Keeper_audit ->
+    | Keeper_tool_name.Keeper_down -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_down ctx args))
+    | Keeper_tool_name.Keeper_list -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_list ctx args))
+    | Keeper_tool_name.Keeper_audit ->
       Some
         (tool_result_with_tool_name
            ~tool_name:name
            (handle_keeper_audit ctx args))
-    | Tool_name.Keeper_name.Keeper_reset -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_reset ctx args))
-    | Tool_name.Keeper_name.Keeper_clear -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_clear ctx args))
-    | Tool_name.Keeper_name.Keeper_sandbox_start ->
+    | Keeper_tool_name.Keeper_reset -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_reset ctx args))
+    | Keeper_tool_name.Keeper_clear -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_clear ctx args))
+    | Keeper_tool_name.Keeper_sandbox_start ->
       Some
         (tool_result_with_tool_name
            ~tool_name:name
            (handle_keeper_sandbox_start ctx args))
-    | Tool_name.Keeper_name.Keeper_sandbox_stop ->
+    | Keeper_tool_name.Keeper_sandbox_stop ->
       Some
         (tool_result_with_tool_name
            ~tool_name:name
@@ -407,7 +407,7 @@ let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
     )
 
 let dispatch_keeper_msg ~submitted_by ?continuation_channel ctx ~message : tool_result =
-  let name = Tool_name.Keeper_name.(to_string Keeper_msg) in
+  let name = Keeper_tool_name.(to_string Keeper_msg) in
   let ctx = resolve_ctx ctx ~name in
   tool_result_with_tool_name
     ~tool_name:name
@@ -425,7 +425,7 @@ let dispatch_keeper_msg_stream_admitted
       ctx
       ~message
   =
-  let name = Tool_name.Keeper_name.(to_string Keeper_msg) in
+  let name = Keeper_tool_name.(to_string Keeper_msg) in
   let ctx = resolve_ctx ctx ~name in
   Some
     (tool_result_with_tool_name
@@ -528,13 +528,13 @@ let () =
     (* Same vocabulary as [dispatch]; this path is the one that has the Eio
        context. Both read Tool_name.Keeper_name, so a constructor cannot be
        handled on one path and silently dropped on the other. *)
-    match Tool_name.Keeper_name.of_string name with
+    match Keeper_tool_name.of_string name with
     | None -> None
     | Some keeper_name ->
       (match keeper_name with
-      | Tool_name.Keeper_name.Keeper_list ->
+      | Keeper_tool_name.Keeper_list ->
         Some (tool_result_with_tool_name ~tool_name:name (keeper_list_body ~config args))
-      | Tool_name.Keeper_name.Keeper_delegate_status ->
+      | Keeper_tool_name.Keeper_delegate_status ->
         Some
           (tool_result_with_tool_name
              ~tool_name:name
@@ -542,7 +542,7 @@ let () =
                 ~config
                 ~caller:agent_name
                 args))
-      | Tool_name.Keeper_name.Keeper_delegate_cancel ->
+      | Keeper_tool_name.Keeper_delegate_cancel ->
         Some
           (tool_result_with_tool_name
              ~tool_name:name
@@ -550,7 +550,7 @@ let () =
                 ~config
                 ~caller:agent_name
                 args))
-      | Tool_name.Keeper_name.Keeper_delegate_list ->
+      | Keeper_tool_name.Keeper_delegate_list ->
         Some
           (tool_result_with_tool_name
              ~tool_name:name
@@ -558,34 +558,34 @@ let () =
                 ~config
                 ~caller:agent_name
                 args))
-      | Tool_name.Keeper_name.Keeper_clear ->
+      | Keeper_tool_name.Keeper_clear ->
         run_external_effect (fun () ->
           Some (tool_result_with_tool_name ~tool_name:name (keeper_clear_body ~config args)))
-      | Tool_name.Keeper_name.Keeper_reset ->
+      | Keeper_tool_name.Keeper_reset ->
         Some (tool_result_with_tool_name ~tool_name:name (keeper_reset_body ~config args))
-      | Tool_name.Keeper_name.Keeper_audit ->
+      | Keeper_tool_name.Keeper_audit ->
         Some
           (tool_result_with_tool_name
              ~tool_name:name
              (Keeper_tool_keeper_audit.handle ~config args))
-      | Tool_name.Keeper_name.Keeper_status ->
+      | Keeper_tool_name.Keeper_status ->
         Some
           (tool_result_with_tool_name
              ~tool_name:name
              (Keeper_tool_surface_ops.keeper_status_body ~config ~agent_name args))
-      | Tool_name.Keeper_name.Keeper_sandbox_start ->
+      | Keeper_tool_name.Keeper_sandbox_start ->
         run_external_effect (fun () ->
           Some
             (tool_result_with_tool_name
                ~tool_name:name
                (keeper_sandbox_start_body ~config args)))
-      | Tool_name.Keeper_name.Keeper_sandbox_stop ->
+      | Keeper_tool_name.Keeper_sandbox_stop ->
         run_external_effect (fun () ->
           Some
             (tool_result_with_tool_name
                ~tool_name:name
                (keeper_sandbox_stop_body ~config args)))
-      | Tool_name.Keeper_name.Keeper_down ->
+      | Keeper_tool_name.Keeper_down ->
         with_eio_context (fun ctx ->
            run_external_effect (fun () ->
              Keeper_tool_surface_ops.invalidate_keeper_list_cache ();
@@ -593,14 +593,14 @@ let () =
                (tool_result_with_tool_name
                   ~tool_name:name
                   (Keeper_turn_lifecycle.handle_keeper_down ctx args))))
-      | Tool_name.Keeper_name.Keeper_delegate ->
+      | Keeper_tool_name.Keeper_delegate ->
         with_eio_context (fun ctx ->
           Some
             (Keeper_tool_surface_ops.handle_keeper_delegate
                ~submitted_by:agent_name
                ctx
                args))
-      | Tool_name.Keeper_name.Keeper_msg ->
+      | Keeper_tool_name.Keeper_msg ->
         with_eio_context (fun ctx ->
           Some
             (tool_result_with_tool_name
@@ -609,7 +609,7 @@ let () =
                   ~submitted_by:agent_name
                   ctx
                   args)))
-      | Tool_name.Keeper_name.Keeper_up ->
+      | Keeper_tool_name.Keeper_up ->
         (match sw, clock with
          | Some sw, Some clock ->
            Some
@@ -622,6 +622,6 @@ let () =
                 ?proc_mgr
                 ?net
                 args)
-         | _ -> eio_context_missing Tool_name.Keeper_name.(to_string Keeper_up))
+         | _ -> eio_context_missing Keeper_tool_name.(to_string Keeper_up))
       )
 ;;

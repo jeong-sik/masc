@@ -225,6 +225,7 @@ let channel_gate_entries =
     entry ~default:"4000" "MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH"
       "Max content length (floored at 1)";
   ]
+  @ declared_entries "channel"
 
 let decision_entries =
   [

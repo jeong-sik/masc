@@ -38,6 +38,21 @@ module Int_knob : sig
   val get : t -> int
 end
 
+module String_opt_knob : sig
+  type t =
+    | Imessage_chat_db_path
+    | Imessage_reply_mode
+    | Imessage_self_chat_guid
+    | Imessage_poll_interval_sec
+    | Imessage_cursor_path
+  [@@deriving enumerate]
+
+  val env_name : t -> string
+
+  val get : t -> string option
+  (** The trimmed value, or [None] when the variable is unset or blank. *)
+end
+
 val all_rows : row list
 (** Every declared knob, bool knobs first. *)
 

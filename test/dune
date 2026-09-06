@@ -4600,7 +4600,7 @@
 (test
  (name test_keeper_sandbox_remote)
  (modules test_keeper_sandbox_remote)
- (libraries masc_test_deps exec_ssh_protocol eio_main))
+ (libraries masc_test_deps exec_ssh_protocol eio_main masc.build_version))
 
 (test
  (name test_shell_ir_with_sandbox)

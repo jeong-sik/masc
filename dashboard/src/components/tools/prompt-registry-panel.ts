@@ -21,7 +21,6 @@ import {
   buildKeeperPromptAssemblyReport,
   KeeperPromptAssemblyPanel,
   type KeeperPromptAssemblyReport,
-  type KeeperPromptAssemblyRow,
   type KeeperPromptAssemblyStage,
 } from '../keeper-prompt-assembly-panel'
 import { PromptBookPanel } from './prompt-book-panel'
@@ -114,7 +113,6 @@ function sourceBadgeClass(source: PromptSource): string {
 }
 
 const STAGE_PRESET_PREFIX = 'stage:'
-const COMPUTED_PROMPT_SOURCE: KeeperPromptAssemblyRow['source'] = 'computed'
 const NOT_SENT_MESSAGE_SLOT = 'not sent'
 const MODEL_INPUT_STAGE_ROLE: KeeperPromptAssemblyStage['role'] = 'model_input'
 
@@ -123,16 +121,12 @@ function stagePresetId(preset: PromptPresetId): string | null {
   return preset.slice(STAGE_PRESET_PREFIX.length)
 }
 
-function promptAssemblyRows(stage: KeeperPromptAssemblyStage): KeeperPromptAssemblyRow[] {
-  return stage.rows.filter(row => row.source !== COMPUTED_PROMPT_SOURCE)
-}
-
 function promptPresetRows(report: KeeperPromptAssemblyReport, preset: PromptPresetId): Set<string> | null {
   const stageId = stagePresetId(preset)
   if (!stageId) return null
   const stage = report.stages.find(item => item.id === stageId)
   if (!stage) return new Set()
-  return new Set(promptAssemblyRows(stage).map(row => row.promptKey))
+  return new Set(stage.rows.map(row => row.promptKey))
 }
 
 function stagePresetLabel(stage: KeeperPromptAssemblyStage): string {
@@ -170,10 +164,10 @@ export function promptPresetOptions(
   report: KeeperPromptAssemblyReport,
 ): PromptPreset[] {
   const stagePresets = report.stages
-    .filter(stage => promptAssemblyRows(stage).length > 0)
+    .filter(stage => stage.rows.length > 0)
     .map(stage => {
       const id: PromptPresetId = `${STAGE_PRESET_PREFIX}${stage.id}`
-      const stagePromptKeys = new Set(promptAssemblyRows(stage).map(row => row.promptKey))
+      const stagePromptKeys = new Set(stage.rows.map(row => row.promptKey))
       return {
         id,
         label: stagePresetLabel(stage),

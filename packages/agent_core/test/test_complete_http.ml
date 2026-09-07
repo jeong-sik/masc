@@ -739,10 +739,11 @@ let test_complete_openai_responses_json_mode_body () =
   | Exit -> ()
 ;;
 
-let start_responses_sse_server ~sw ~net response_body =
+let start_responses_sse_server ~sw ~net ?capture_body response_body =
   let port = fresh_port () in
   let handler _conn _req body =
-    let _ = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    let request_body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    Option.iter (fun seen -> seen := Some request_body) capture_body;
     let headers = Cohttp.Header.of_list [ "content-type", "text/event-stream" ] in
     Cohttp_eio.Server.respond_string ~status:`OK ~headers ~body:response_body ()
   in
@@ -3692,10 +3693,133 @@ let test_complete_rejects_missing_anthropic_output_ceiling_before_io () =
 
 (* ── Runner ──────────────────────────────────────────── *)
 
+let test_responses_tool_images_on_http ~stream () =
+  let open Types in
+  let inline_image =
+    Image { media_type = "image/png"; data = "aW1hZ2U="; source_type = Base64 }
+  in
+  let url_image =
+    Image { media_type = "image/png"; data = "https://images.invalid/reference.png"
+          ; source_type = Url }
+  in
+  let file_image =
+    Image { media_type = "image/png"; data = "file_fixture_image"; source_type = File_id }
+  in
+  let failed =
+    Tool_failed { failure_kind = Reported_tool_error; error_class = Some Transient }
+  in
+  let cases =
+    [ "mixed", Tool_succeeded, "captured images",
+        Some [ Text "first"; inline_image; Text "middle"; url_image; file_image; Text "last" ]
+    ; "image_only", Tool_succeeded, "", Some [ inline_image ]
+    ; "failed_image", failed, "capture incomplete",
+        Some [ Text "capture incomplete"; inline_image ]
+    ; "plain_failure", failed, "camera unavailable", None
+    ; "text_blocks", Tool_succeeded, "still text", Some [ Text "still text" ]
+    ; "empty_blocks", Tool_succeeded, "", Some []
+    ; "audio_and_image", Tool_succeeded, "mixed media",
+        Some [ Audio { media_type = "audio/wav"; data = "YXVkaW8="; source_type = Base64 }
+             ; inline_image ]
+    ]
+  in
+  let history =
+    make_message ~role:User [ Text "earlier image"; url_image ]
+    :: List.concat_map
+         (fun (id, outcome, content, content_blocks) ->
+            [ make_message ~role:Assistant
+                [ ToolUse { id; name = "capture"; input = `Assoc [] } ]
+            ; make_message ~role:Tool
+                [ ToolResult { tool_use_id = id; content; outcome; json = None
+                             ; content_blocks } ] ])
+         cases
+    @ [ user_msg "Compare with the earlier image." ]
+  in
+  let text value = `Assoc [ "type", `String "input_text"; "text", `String value ] in
+  let inline =
+    `Assoc [ "type", `String "input_image"
+           ; "image_url", `String "data:image/png;base64,aW1hZ2U=" ]
+  in
+  let url =
+    `Assoc [ "type", `String "input_image"
+           ; "image_url", `String "https://images.invalid/reference.png" ]
+  in
+  let file =
+    `Assoc [ "type", `String "input_image"; "file_id", `String "file_fixture_image" ]
+  in
+  let expected_outputs =
+    [ "mixed", `List [ text "first"; inline; text "middle"; url; file; text "last" ]
+    ; "image_only", `List [ inline ]
+    ; "failed_image", `List [ text "capture incomplete"; inline ]
+    ; "plain_failure", `String "camera unavailable"
+    ; "text_blocks", `String {|[{"type":"text","text":"still text"}]|}
+    ; "empty_blocks", `String "[]"
+    ; "audio_and_image",
+        `List [ text {|{"type":"audio","source":{"type":"base64","media_type":"audio/wav","data":"YXVkaW8="}}|}
+              ; inline ]
+    ]
+  in
+  Eio_main.run @@ fun env ->
+  try
+    Eio.Switch.run @@ fun sw ->
+    let captured = ref None in
+    let base_url =
+      if stream then
+        start_responses_sse_server ~sw ~net:env#net ~capture_body:captured
+          (openai_responses_sse_tool_call_response ())
+      else
+        start_mock_server ~sw ~net:env#net ~capture_body:captured
+          (openai_responses_tool_call_response ())
+    in
+    let config =
+      Provider_config.make ~kind:Provider_config.OpenAI_compat ~model_id:"gpt-5.5"
+        ~base_url ~request_path:"/v1/responses" ~temperature:0.0 ~max_tokens:100 ()
+    in
+    let result =
+      if stream then
+        Complete.complete_stream ~sw ~net:env#net ~config ~messages:history
+          ~on_event:(fun _ -> ()) ()
+      else Complete.complete ~sw ~net:env#net ~config ~messages:history ()
+    in
+    (match result with Ok _ -> () | Error _ -> fail "Responses fixture completion failed");
+    let body = match !captured with
+      | Some body -> Yojson.Safe.from_string body
+      | None -> fail "Responses HTTP fixture received no request"
+    in
+    let open Yojson.Safe.Util in
+    let input = body |> member "input" |> to_list in
+    let check_json label expected actual =
+      check bool label true (Yojson.Safe.equal expected actual)
+    in
+    check_json "historical user image remains native"
+      (`List [ text "earlier image"; url ]) (List.hd input |> member "content");
+    let tool_items = List.tl input |> List.rev |> List.tl |> List.rev in
+    check int "every tool call and output remains in order"
+      (2 * List.length expected_outputs) (List.length tool_items);
+    List.iteri (fun index (id, output) ->
+      check_json (id ^ " call identity")
+        (`Assoc [ "type", `String "function_call"; "call_id", `String id
+                ; "name", `String "capture"; "arguments", `String "{}" ])
+        (List.nth tool_items (2 * index));
+      check_json (id ^ " output preserves content and pairing")
+        (`Assoc [ "type", `String "function_call_output"; "call_id", `String id
+                ; "output", output ])
+        (List.nth tool_items ((2 * index) + 1))) expected_outputs;
+    check_json "followup stays after all tool outputs"
+      (`List [ text "Compare with the earlier image." ])
+      (List.hd (List.rev input) |> member "content");
+    Eio.Switch.fail sw Exit
+  with Exit -> ()
+;;
+
 let () =
   run
     "complete_http"
-    [ ( "complete"
+    [ ( "Responses tool image wire"
+      , [ test_case "sync native tool images and history" `Quick
+            (test_responses_tool_images_on_http ~stream:false)
+        ; test_case "stream native tool images and history" `Quick
+            (test_responses_tool_images_on_http ~stream:true) ] )
+    ; ( "complete"
       , [ test_case "anthropic ok" `Quick test_complete_anthropic_ok
         ; test_case
             "Kimi path override stays Anthropic"

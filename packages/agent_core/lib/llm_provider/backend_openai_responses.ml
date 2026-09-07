@@ -158,29 +158,35 @@ let content_string_of_tool_result ~content ~content_blocks =
   | None -> Utf8_sanitize.sanitize content
 ;;
 
+let input_text_content_part text =
+  `Assoc [ "type", `String "input_text"; "text", `String (Utf8_sanitize.sanitize text) ]
+;;
+
+let input_image_content_part ~media_type ~data ~source_type =
+  (* The responses surface takes image_url OR file_id on input_image,
+     mutually exclusive; the docs' file_id names a Files API upload. Same
+     three-carrier mapping as the chat serializer. *)
+  match source_type with
+  | Url ->
+    `Assoc [ "type", `String "input_image"; "image_url", `String data ]
+  | File_id ->
+    `Assoc [ "type", `String "input_image"; "file_id", `String data ]
+  | Base64 ->
+    let image_url =
+      Api_common.base64_media_data_url
+        ~backend:"openai_responses"
+        ~block:"image"
+        ~media_type
+        ~data
+        source_type
+    in
+    `Assoc [ "type", `String "input_image"; "image_url", `String image_url ]
+;;
+
 let input_content_part_of_block = function
-  | Text s ->
-    Some
-      (`Assoc [ "type", `String "input_text"; "text", `String (Utf8_sanitize.sanitize s) ])
-  | Image { media_type; data; source_type } -> (
-    (* The responses surface takes image_url OR file_id on input_image,
-       mutually exclusive; the docs' file_id names a Files API upload. Same
-       three-carrier mapping as the chat serializer. *)
-    match source_type with
-    | Url ->
-      Some (`Assoc [ "type", `String "input_image"; "image_url", `String data ])
-    | File_id ->
-      Some (`Assoc [ "type", `String "input_image"; "file_id", `String data ])
-    | Base64 ->
-      let image_url =
-        Api_common.base64_media_data_url
-          ~backend:"openai_responses"
-          ~block:"image"
-          ~media_type
-          ~data
-          source_type
-      in
-      Some (`Assoc [ "type", `String "input_image"; "image_url", `String image_url ]))
+  | Text s -> Some (input_text_content_part s)
+  | Image { media_type; data; source_type } ->
+    Some (input_image_content_part ~media_type ~data ~source_type)
   | Document { media_type; data; source_type } ->
     let file_data =
       Api_common.base64_media_data_url
@@ -261,11 +267,33 @@ let assistant_output_item_of_block ?phase = function
   | Thinking _ | Text _ | ToolResult _ | Image _ | Document _ | Audio _ -> None
 ;;
 
+(* Responses function outputs accept an array of input_text/input_image/input_file,
+   not the full input-message union (in particular, not input_audio). Project
+   images natively and retain other structured blocks as their existing JSON
+   text representation. The canonical ToolResult and checkpoint stay unchanged.
+   https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_function_call_output_item_list_param.py *)
+let function_call_output_content ~content ~content_blocks =
+  match content_blocks with
+  | Some blocks when List.exists (function Image _ -> true | _ -> false) blocks ->
+    `List
+      (List.map
+         (function
+           | Text text -> input_text_content_part text
+           | Image { media_type; data; source_type } ->
+             input_image_content_part ~media_type ~data ~source_type
+           | (Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+             | ToolResult _ | Document _ | Audio _) as block ->
+             input_text_content_part
+               (Yojson.Safe.to_string (Api_common.content_block_to_json block)))
+         blocks)
+  | Some _ | None -> `String (content_string_of_tool_result ~content ~content_blocks)
+;;
+
 let function_call_output_item ~tool_use_id ~content ~content_blocks =
   `Assoc
     [ "type", `String "function_call_output"
     ; "call_id", `String tool_use_id
-    ; "output", `String (content_string_of_tool_result ~content ~content_blocks)
+    ; "output", function_call_output_content ~content ~content_blocks
     ]
 ;;
 

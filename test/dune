@@ -3313,7 +3313,7 @@
 (test
  (name test_tui_workspace_entries)
  (modules test_tui_workspace_entries)
- (libraries alcotest masc.server masc_tui_types))
+ (libraries alcotest masc masc.server masc_tui_fetched masc_tui_types))
 
 (test
  (name test_tui_acting)
@@ -3650,6 +3650,8 @@
  (libraries
   alcotest
   masc
+  masc_tui_frame
+  masc_tui_scroll
   masc_tui_message_layout
   masc_tui_render_memory
   masc_tui_theme

@@ -73,7 +73,7 @@ let test_plain_listing_footer_shape () =
      hints between its own keys and the shared meta tail. That order is the
      shape being pinned: groups, then declaration order inside each. *)
   let canonical =
-    "j/k:scroll  b / u:bind / unbind  Esc:keeper  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "B / S:Browser / Slack Lane  j/k:scroll  b / u:bind / unbind  Esc:keeper  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
   in
   check str "the plain listing keeps its footer" canonical
     (Masc_tui_keys.footer_hints Connectors)
@@ -248,7 +248,7 @@ let test_resources_footer_steps_through_detail () =
 
 let test_repositories_footer_offers_code_and_git_changes () =
   check str "repositories names the Code and Git changes paths"
-    "j/k:scroll  Enter:browse  d:Git changes  a:add  Left / Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  H:recent activity  Enter:browse  d:Git changes  a:add  Left / Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Repositories)
 
 let test_memory_footer_offers_the_fact_browser () =
@@ -488,6 +488,15 @@ let test_planning_footer_carries_filter_and_sort () =
     "j/k:move  v:next Planning tab  f:filter  s:sort  [ / ]:previous / next  Right / Enter:detail  Left / Esc:back  c:complete  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Planning)
 
+let test_board_footer_names_reversible_hearth_navigation () =
+  let keys =
+    List.map
+      (fun (binding : Masc_tui_keys.binding) -> binding.key)
+      (Masc_tui_keys.for_surface Board)
+  in
+  check Alcotest.bool "both hearth directions" true (List.mem "f / F" keys);
+  check Alcotest.bool "direct hearth chooser" true (List.mem "H" keys)
+
 let test_board_and_planning_explain_their_order () =
   check str "hot formula" "net votes first; newer breaks ties"
     (board_sort_explanation Board_hot);
@@ -680,6 +689,28 @@ let test_metrics_is_an_overview_child () =
   in
   Alcotest.(check bool) "Overview documents the [m] hop" true
     (List.mem "m" overview_keys)
+
+let test_browser_lanes_highlight_config () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Connectors;
+  check Alcotest.int "channel bindings remain under Keepers"
+    (visible_surface_ring_index state (Keepers Keeper_list))
+    (visible_surface_ring_index state Connectors);
+  List.iter (fun app ->
+    List.iter (fun source ->
+      state.browser_lane <- Some
+        (Browser_lane_view.switch_source source (Browser_lane_view.create app));
+      let index = visible_surface_ring_index state Connectors in
+      check Alcotest.int "Browser and Slack readers highlight Config"
+        (visible_surface_ring_index state Config) index;
+      check Alcotest.bool "the selected ring entry is Config, not the fallback"
+        true (fst (List.nth (visible_surface_ring state) index) = Config))
+      [Browser_lane_view.Live; Browser_lane_view.Automation])
+    [Browser_lane_view.Browser; Browser_lane_view.Slack];
+  state.browser_lane <- None;
+  check Alcotest.int "closing the reader restores the Keeper parent"
+    (visible_surface_ring_index state (Keepers Keeper_list))
+    (visible_surface_ring_index state Connectors)
 
 let test_visible_surface_ring_declutter () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
@@ -1444,6 +1475,8 @@ let () =
             `Quick test_every_detail_surface_steps_through_its_list
         ; Alcotest.test_case "Planning carries filter and sort" `Quick
             test_planning_footer_carries_filter_and_sort
+        ; Alcotest.test_case "Board names both hearth directions and chooser"
+            `Quick test_board_footer_names_reversible_hearth_navigation
         ; Alcotest.test_case "Board and Planning explain order" `Quick
             test_board_and_planning_explain_their_order
         ; Alcotest.test_case "Task Review is a Planning child" `Quick
@@ -1468,6 +1501,8 @@ let () =
             test_logs_is_an_activity_child
         ; Alcotest.test_case "Metrics is an Overview child" `Quick
             test_metrics_is_an_overview_child
+        ; Alcotest.test_case "Browser and Slack readers belong to Config" `Quick
+            test_browser_lanes_highlight_config
         ; Alcotest.test_case "smart declutter hides empty approvals" `Quick
             test_visible_surface_ring_declutter
         ; Alcotest.test_case "braille sparkline renders levels" `Quick

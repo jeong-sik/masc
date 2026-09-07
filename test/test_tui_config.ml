@@ -290,9 +290,19 @@ let store_cases =
             check_opt "none" None (Config.theme ~base_path)))
   ]
 
+let board_sort_cases =
+  [ Alcotest.test_case "last Board order survives a new read" `Quick (fun () ->
+        with_storable_base (fun ~base_path ->
+          (match Config.set_board_sort ~base_path "discussed" with
+           | Ok () -> () | Error message -> Alcotest.fail message);
+          check_opt "stored order" (Some "discussed") (Config.board_sort ~base_path);
+          store_or_fail ~base_path (Some "gruvbox-dark");
+          check_opt "theme update keeps order" (Some "discussed") (Config.board_sort ~base_path))) ]
+
 let () =
   Alcotest.run "tui_config"
-    [ ("theme_of_doc", cases)
+    [ ("board_sort", board_sort_cases)
+    ; ("theme_of_doc", cases)
     ; ("table_frame_of_doc", frame_cases)
     ; ( "lift_colours", lift_cases )
     ; ("hints_visible_of_doc", hints_cases)

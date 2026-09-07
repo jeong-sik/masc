@@ -1,4 +1,4 @@
-(** The Activity pane: what every keeper is doing right now, beside whatever
+(** The Activity pane: recent observed keeper activity, beside whatever
     surface is up.
 
     The observer feed already reaches the TUI for the whole session, and the
@@ -7,8 +7,8 @@
     chat or on the board sees the fleet move without leaving.
 
     Two tabs. [Tab_fleet] is the feed: one row per keeper ordered by who acted
-    last, then the keeper the cursor is on with the calls of its current turn
-    and the turns before it. [Tab_changes] is the files that keeper changed
+    last, then the keeper the cursor is on with the calls of its newest feed
+    record and the records before it. [Tab_changes] is the files that keeper changed
     in its workspace, newest first, as the Changes surface lists them, kept
     current from the feed.
 
@@ -49,15 +49,16 @@ val next_tab : tab -> tab
 type feed =
   | Feed_off  (** no server has answered yet *)
   | Feed_opening
-  | Feed_live of int  (** frames received on this stream *)
+  | Feed_live of int  (** frames received; only transport state is displayed *)
   | Feed_closed of string  (** why *)
 
 (** One keeper as the fleet block draws it. [mark] is the one-cell health
     glyph the roster draws ({!Masc_tui_keeper_mark}); [mark_tone] is the
     colour the caller reads out of the same health. [health] is that same
-    reading, and it decides one thing here: whether a turn that has not
-    settled can still end. [trace_id] resolves agent-core events, which name
-    their runtime lane, back to the keeper. *)
+    reading. A gone process marks an unclosed feed record [unfinished]; every
+    other unclosed record is [open/gap], without asserting a current turn.
+    [trace_id] resolves agent-core events, which name their runtime lane,
+    back to the keeper. *)
 type keeper = {
   name : string;
   mark : string;
@@ -121,8 +122,8 @@ type input = {
   feed : feed;
   keepers : keeper list;
   selected : string option;
-      (** the keeper the cursor is on; on the fleet tab the most recently
-          active keeper stands in when there is none *)
+      (** the keeper the cursor is on; on the Recent tab the most recently
+          observed keeper stands in when there is none *)
   approvals : approval list;  (** pending, any keeper *)
   entries : Masc_tui_acting.entry list;  (** newest first, as the TUI holds them *)
   changes : changes;  (** the selected keeper's, for the changes tab *)
@@ -139,7 +140,7 @@ type line = span list
     targets of the last frame beside its rows, so a click answers what was
     on screen, not what a later frame would draw. *)
 type row_target =
-  | Target_none  (** rule, indicators, padding, focus rows, status rows *)
+  | Target_none  (** legend, rule, indicators, padding, focus rows, status rows *)
   | Target_next_tab  (** the header row: a press shows the other tab *)
   | Target_keeper of string  (** a fleet row: the keeper it names *)
   | Target_more
@@ -160,15 +161,18 @@ val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
 (** Exactly [rows] lines, each exactly [cols] display cells once its spans
     are joined: a line that would overflow is cut at the right edge, a short
     one is padded, and rows the content does not need are blank. The header
-    row carries the two tabs and the feed's state on both tabs.
+    row carries the two tabs and the feed's transport state on both tabs.
+    The Recent tab reserves a second header row for the event-age and count
+    legend. Changes keeps its single header row.
 
-    Fleet tab, two layouts. At [scroll = 0] the overview: the fleet takes at
+    Recent tab, two layouts. At [scroll = 0] the overview: the fleet takes at
     most half the rows below the header when the focus block has something to
     show, a fold line counts the keepers left out, and the focus block takes
     the rest. Any other [scroll] (clamped to [scroll_max]) is the full list --
     every fleet row, the rule, every focus row -- windowed from that offset,
     with an [↑ N more] row where content is above and a [↓ N more] row where
-    it is below. When everything fits the two layouts are the same list and
+    it is below, when indicators leave room for content. A single available
+    body row shows the selected content directly. When everything fits the two layouts are the same list and
     no fold or indicator draws.
 
     Changes tab: a status row for the keeper and the fetch, then one row per
@@ -180,13 +184,11 @@ val keeper_state_text :
   approval:string option ->
   Masc_tui_acting.chunk option ->
   span list
-(** The fleet row's reading for one keeper: a pending approval outranks
-    everything (the keeper is waiting on the reader), then the current turn's
-    tool and call count, then the settled turn's calls and tokens, then
-    [quiet] for a keeper the feed has not shown acting. A turn that has not
-    settled reads as [running] while its keeper can still end it; for a
-    keeper whose process is gone it reads as [unfinished], because the end
-    event died with the keeper. *)
+(** The fleet row's recent observation: approval first, then the newest
+    record's tool and observed count ([seen]) or settled count ([total]).
+    Unknown settled totals stay unknown. [evt] is elapsed since the newest
+    locally received event, not turn duration. Unclosed records are [open/gap]
+    or [unfinished] when the process is gone; neither asserts current work. *)
 
 val tokens_text : int option * int option -> string
 (** Input and output tokens as one compact figure ([38.2k tok], [412 tok]);

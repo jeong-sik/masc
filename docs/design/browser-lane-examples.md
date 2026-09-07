@@ -139,7 +139,8 @@ input/change 이벤트를 발생시키며 Enter나 submit을 호출하지 않는
 | 탭 열기·이동·닫기 | 미지원 | 지원 |
 | 클릭·입력·스크롤 (`BrowserInteract`) | 지원 | 지원 |
 | 네이티브 키·선택·히스토리 (`BrowserAct`) | 미지원 | 지원 |
-| iframe/shadow root 대상 지정·대화상자·업로드·다운로드 | 미지원 | 미지원 |
+| 중첩 iframe·JavaScript 대화상자·파일 업로드 | 미지원 | 지원 |
+| shadow root 대상 지정·다운로드 | 미지원 | 미지원 |
 
 텍스트 모드는 URL, 제목, 전체 문자 수(`chars`)와 잘림 여부(`truncated`)를
 반환하며 기본 한도는 50,000 code points다. 컨트롤 관측은 최대 200개이며

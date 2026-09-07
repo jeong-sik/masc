@@ -12,10 +12,20 @@ out=args.out.resolve();out.mkdir(parents=True,exist_ok=True)
 # A failed rerun must not leave a previous screenshot looking like new evidence.
 for name in ('screenshot.b64','screenshot.png'):(out/name).unlink(missing_ok=True)
 (out/'probe.log').write_text('')
-html='''<!doctype html><meta charset="utf-8"><title>Firefox controls fixture</title><style>body{font:20px sans-serif;padding:32px;min-height:1800px}input,select,button{font:inherit;margin:8px}output{display:block}</style><h1>Firefox fixture</h1><form><input aria-label="name"><input type="password" aria-label="password" value="private-fixture"><select aria-label="country"><option value="opaque-01">US</option><option value="opaque-02">Canada</option></select><button aria-label="submit">Apply</button></form><output>0 submissions</output><script>let count=0;document.querySelector('form').onsubmit=e=>{e.preventDefault();document.querySelector('output').textContent=(++count)+' submissions: '+document.querySelector('input').value+' / '+document.querySelector('select').value}</script>'''
+upload_path=out/'upload-fixture.txt';upload_path.write_text('Firefox upload 한글\n')
+html='''<!doctype html><meta charset="utf-8"><title>Firefox controls fixture</title><style>body{font:20px sans-serif;padding:32px;min-height:1800px}input,select,button{font:inherit;margin:8px}output{display:block}</style><h1>Firefox fixture</h1><form><input aria-label="name"><input type="password" aria-label="password" value="private-fixture"><select aria-label="country"><option value="opaque-01">US</option><option value="opaque-02">Canada</option></select><button aria-label="submit">Apply</button></form><output>0 submissions</output><button onclick="alert('Firefox alert')" aria-label="alert">Alert</button><button onclick="document.querySelector('#dialog-result').textContent=String(confirm('Firefox confirm'))" aria-label="confirm">Confirm</button><button onclick="document.querySelector('#dialog-result').textContent=String(prompt('Firefox prompt'))" aria-label="prompt">Prompt</button><output id="dialog-result"></output><iframe id="outer-frame" src="/frame"></iframe><script>if(location.pathname==='/load-dialog')alert('Load-time dialog');let count=0;document.querySelector('form').onsubmit=e=>{e.preventDefault();document.querySelector('output').textContent=(++count)+' submissions: '+document.querySelector('input').value+' / '+document.querySelector('select').value}</script>'''
 class Handler(http.server.BaseHTTPRequestHandler):
  def do_GET(self):
-  data=html.encode();self.send_response(200);self.send_header('Content-Type','text/html; charset=utf-8');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
+  content=html
+  if self.path=='/frame':content='<h1>Outer frame</h1><iframe id="nested-frame" src="http://localhost:'+str(self.server.server_port)+'/nested"></iframe>'
+  elif self.path=='/nested':content='<h1>Nested frame</h1><input id="nested-input"><button id="nested-apply" onclick="document.querySelector(\'#nested-result\').textContent=document.querySelector(\'#nested-input\').value">Apply</button><output id="nested-result"></output>'
+  elif self.path=='/upload':content='<form method="post" action="/uploaded" enctype="multipart/form-data"><input id="upload" name="attachment" type="file"><button id="send-upload">Upload</button></form>'
+  data=content.encode();self.send_response(200);self.send_header('Content-Type','text/html; charset=utf-8');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
+ def do_POST(self):
+  body=self.rfile.read(int(self.headers['Content-Length']))
+  verified=upload_path.read_bytes() in body and b'filename="upload-fixture.txt"' in body
+  data=('Upload verified' if verified else 'Upload invalid').encode()
+  self.send_response(200 if verified else 400);self.send_header('Content-Type','text/html');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
  def log_message(self,*args):pass
 def stop_owned_group(process):
  # Each child starts a new session: only this probe's descendants receive signals.
@@ -77,7 +87,7 @@ execution={'mode':'compiled' if args.compiled_probe else 'interpreter','state':'
 try:
  if args.compiled_probe:execution['probe_sha256']=hashlib.sha256(args.compiled_probe.read_bytes()).hexdigest()
  (out/'sources.json').write_text(json.dumps({p:hashlib.sha256((repo/p).read_bytes()).hexdigest() for p in [
-  'lib/browser_webdriver.ml','lib/browser_lane/browser_action.ml','lib/browser_lane/browser_lane.ml',
+  'lib/browser_webdriver.ml','lib/browser_lane/browser_action.ml','lib/browser_lane/browser_lane.ml','lib/browser_lane/browser_upload_lease.ml',
   'lib/browser_page_script.ml','scripts/fixtures/firefox_controls_probe.ml','scripts/probe-firefox-controls.py','test/dune']},indent=2)+'\n')
  server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
  threading.Thread(target=server.serve_forever,daemon=True).start()
@@ -101,7 +111,8 @@ try:
   verbs=lane[lane.index('type interaction ='):lane.index('\nlet verb_to_string')]
   verbs+=lane[lane.index('let interaction_args'):lane.index('\nlet verb_json')]
   answer=lane[lane.index('type answer ='):].split('\n\n',1)[0]
-  source+='module Browser_action = struct\n'+action+'\nend;;\nmodule Browser_lane = struct module Action = Browser_action\n'+verbs+answer+'\nend;;\n'
+  source+='module Browser_upload_lease = struct\n'+(repo/'lib/browser_lane/browser_upload_lease.ml').read_text()+'\nend;;\n'
+  source+='module Browser_action = struct\n'+action+'\nend;;\nmodule Browser_lane = struct module Action = Browser_action\nmodule Upload_lease = Browser_upload_lease\n'+verbs+answer+'\nend;;\n'
   interaction=(repo/'lib/browser_interaction.ml').read_text()
   source+='module Browser_interaction = struct\n'+interaction[interaction.index('let script ='):]+'\nend;;\n'
   for module,path in [('Browser_page_script','lib/browser_page_script.ml'),('Driver','lib/browser_webdriver.ml')]:
@@ -109,7 +120,7 @@ try:
   source+=(repo/'scripts/fixtures/firefox_controls_probe.ml').read_text()
   script=out/'probe.ml';script.write_text(source)
   command=['ocaml','-noinit',str(script)]
- env=dict(os.environ,MASC_PROBE_DRIVER_URL=f'http://127.0.0.1:{port}',MASC_PROBE_FIXTURE_URL=f'http://127.0.0.1:{server.server_port}',MASC_PROBE_SCREENSHOT_BASE64=str(out/'screenshot.b64'))
+ env=dict(os.environ,MASC_PROBE_DRIVER_URL=f'http://127.0.0.1:{port}',MASC_PROBE_FIXTURE_URL=f'http://127.0.0.1:{server.server_port}',MASC_PROBE_SCREENSHOT_BASE64=str(out/'screenshot.b64'),MASC_PROBE_UPLOAD_PATH=str(upload_path))
  execution['state']='running'
  with (out/'probe.log').open('w') as probe_log:
   probe=subprocess.Popen(command,env=env,stdout=probe_log,stderr=subprocess.STDOUT,start_new_session=True)

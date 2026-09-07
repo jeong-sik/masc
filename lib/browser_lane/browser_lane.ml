@@ -13,6 +13,7 @@
 
 open Time_compat
 module Action = Browser_action
+module Upload_lease = Browser_upload_lease
 
 type interaction = Click of string | Fill of { selector : string; text : string }
   | Scroll of { x : int; y : int }
@@ -27,6 +28,7 @@ type verb =
   | Page_goto of { url : string; tab_id : int option }
   | Page_elements of { tab_id : int option }
   | Page_act of Browser_action.t
+  | Page_context of { tab_id : int; frame_path : string list; mode : [ `Text of int | `Elements | `Frames | `Dialog ] }
 
 let verb_to_string = function
   | Tabs_list -> "tabs.list"
@@ -38,6 +40,7 @@ let verb_to_string = function
   | Page_goto _ -> "page.goto"
   | Page_elements _ -> "page.elements"
   | Page_act _ -> "page.act"
+  | Page_context _ -> "page.context"
 ;;
 
 (* The wire carries a verb name plus args; the closed variant is the only
@@ -79,6 +82,12 @@ let verb_json = function
   | Page_elements { tab_id } ->
     `Assoc ["verb", `String "page.elements"; "args", `Assoc
       (Option.to_list (Option.map (fun id -> "tabId", `Int id) tab_id))]
+  | Page_context {tab_id;frame_path;mode} ->
+    let name, extra = match mode with
+      | `Text cap -> "text", ["maxChars",`Int cap]
+      | `Elements -> "elements", [] | `Frames -> "frames", [] | `Dialog -> "dialog", [] in
+    `Assoc ["verb",`String "page.context";"args",`Assoc
+      (["tabId",`Int tab_id;"framePath",`List (List.map (fun s -> `String s) frame_path);"mode",`String name] @ extra)]
   | Page_act action ->
     `Assoc ["verb", `String "page.act"; "args", Browser_action.to_json action]
 ;;
@@ -92,11 +101,12 @@ let verb_json = function
      Readers and explicit-tab interactions are supported. Session ownership
      and direct navigation remain with the automation backend. *)
 let verb_is_read = function
-  | Tabs_list | Page_read _ | Page_elements _ | Page_capture _ -> true
+  | Tabs_list | Page_read _ | Page_elements _ | Page_capture _ | Page_context _ -> true
   | Session_open _ | Session_close | Page_goto _ | Page_act _ | Page_interact _ -> false
 ;;
 
 let verb_allowed_on_live = function
+  | Page_context _ -> false
   | Tabs_list | Page_read _ | Page_elements _ | Page_capture _ | Page_interact _ -> true
   | Session_open _ | Session_close | Page_goto _ | Page_act _ -> false
 ;;

@@ -50,8 +50,8 @@ Firefox is driven through Mozilla's [geckodriver](https://firefox-source-docs.mo
 
 Validation lives in `test_browser_controls`, `test_browser_webdriver`,
 `test_browser_lane`, and the tool registry tests. CI build/test results and live
-Firefox measurements must be recorded independently. Frame/shadow root targeting, dialogs and download/upload workflows are separate capability
-increments; this document does not claim them implemented.
+Firefox measurements must be recorded independently. Shadow root targeting and download workflows are separate capability increments.
+Iframe, dialog and upload behavior is described below.
 
 ## Screenshot to Vision
 
@@ -91,3 +91,48 @@ cleanup to the owned probe, Firefox and geckodriver processes.
 This makes native browser behavior a CI check rather than relying solely on
 source interpretation or a simulated WebDriver response. It still does not
 claim a complete deployed Keeper/model/operator-browser session.
+
+## Frames, dialogs and uploads
+
+Automation `BrowserRead mode=frames` requires `tabId` and returns iframe/frame
+selectors in the current document. Pass `framePath` as an outer-to-inner array of
+those selectors for text/elements/frames reads and element/scroll actions. Each
+call selects its tab and frame chain under the session lock; there is no shared
+"selected frame" API. Nested cross-origin frames are supported by native
+WebDriver frame switching. Omit the path to operate on the top-level page.
+Screenshots remain whole tab viewports and do not accept framePath.
+
+The session sets `unhandledPromptBehavior=ignore`: unexpected prompts remain for
+inspection. `BrowserRead mode=dialog` returns `{open,text}` for a pending dialog
+or `{open:false}`. `BrowserAct accept_dialog` accepts it, optionally supplying
+`text` for a prompt; `dismiss_dialog` cancels it. These require an explicit tabId
+and an empty framePath. They cover JavaScript alert/confirm/prompt dialogs, not
+arbitrary operating-system dialogs.
+
+`BrowserAct upload` requires `tabId`, a unique file-input `selector` and a nonempty
+array of Keeper-readable `paths` (playground-relative or visible absolute paths).
+Optional framePath targets an
+input inside a frame. Native WebDriver clears the existing selection and sends
+these files; clicking the site's submit control remains a separate action.
+The Keeper file resolver validates every path before issuing any browser command.
+The selected sandbox backend reads the bytes, including endpoint-owned trees;
+backend errors never fall back to a same-named host file. Files are privately
+staged with their basenames. Once WebDriver may expose a snapshot to a File
+object, the owning browser session retains it through later reads/submissions,
+tab closure and uncertain action outcomes. Only confirmed session teardown
+releases these files; pre-effect rejection removes unclaimed snapshots.
+Caller source files are never owned or removed. A 16 MiB per-file resource limit rejects oversized
+files before browser effects, without uploading truncated prefixes. Byte reads
+use bounded hex chunks sized from the subprocess capture head, including BSD
+od spacing, so the full supported range survives process-output retention. Generic
+tool callers without authoritative Keeper context cannot upload.
+
+The real Firefox scenario covers nested cross-origin frame input, top-level
+recovery, missing-frame rejection before mutation, alert/confirm/prompt outcomes,
+and multipart upload with server-side file-byte verification.
+
+A page may open a prompt during navigation. `open_tab` then returns its tabId
+with `navigation=blocked_by_dialog` and the requested URL, without claiming a
+completed page read. Inspect/answer that tab's dialog and read it again. If a tab
+scan is blocked, its error also identifies the exact tabId. Opening a new task
+tab can recover after the previously current tab was closed.

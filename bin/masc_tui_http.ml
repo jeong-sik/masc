@@ -2456,7 +2456,7 @@ let browser_lane_action ~host ~port operation =
     | Read -> Error "read is not a browser action"
     | Open_session -> Ok ("session", `Assoc ["action", `String "open"], 65.0)
     | Close_session -> Ok ("session", `Assoc ["action", `String "close"], 65.0)
-    | Goto url -> Ok ("goto", `Assoc ["url", `String url], 45.0)
+    | Goto url -> Ok ("goto", `Assoc ["url", `String url], 65.0)
   in
   let* endpoint, json, timeout_sec = request in
   let body = Yojson.Safe.to_string json in

@@ -13362,7 +13362,9 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       (screen_title (" MASC " ^ label)) (source_name view.source)
       (connection_badge state) in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
-    ~hints:Masc_tui_keys.footer_hints_browser_lane
+    ~hints:(match view.url_draft with
+      | Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear"
+      | None -> Masc_tui_keys.footer_hints_browser_lane)
     ~body:(fun ~budget c ->
       let status, style = match view.load with
         | Loading (_, Read) -> "Reading Firefox…", Theme.info ()
@@ -13378,7 +13380,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       c.push_styled ~style ("  " ^ status);
       c.push_styled ~style:(Theme.info ())
         (match view.url_draft with
-         | Some draft -> "  URL> " ^ Terminal_text.single_line draft ^ "▏  Enter:go • Esc:cancel"
+         | Some draft -> browser_lane_url_line ~cols draft
          | None -> match view.source with
              | Live -> "  Live Firefox • B:Browser / S:Slack • a:automation"
              | Automation -> "  Automation Firefox • g:URL • o:open / x:close • l:live");

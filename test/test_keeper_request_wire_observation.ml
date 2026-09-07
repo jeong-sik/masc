@@ -36,7 +36,7 @@ let observe series body_bytes =
   Observation.observer
     ~keeper_name:series.keeper_name
     ~runtime_id:series.runtime_id
-    ~max_request_body_bytes:series.max_request_body_bytes
+    ~max_request_body_bytes:(Some series.max_request_body_bytes)
     (observation ~body_bytes)
 ;;
 
@@ -228,7 +228,7 @@ let test_forwards_exact_observation () =
         observed := Some (runtime_id, body_bytes))
       ~keeper_name:"wire-observation-callback"
       ~runtime_id:"wire-runtime-callback"
-      ~max_request_body_bytes:524_288
+      ~max_request_body_bytes:(Some 524_288)
       (observation ~body_bytes:333_777)
   in
   check
@@ -249,6 +249,18 @@ let test_metric_name_is_stable () =
     "dashboards and alerts key off this name"
     "masc_keeper_runtime_request_wire_bytes"
     metric_name
+;;
+
+let test_absent_cap_is_observed_without_fabricating_a_limit () =
+  let keeper_name = "wire-observation-no-cap" in
+  let runtime_id = "wire-runtime-no-cap" in
+  check (result unit reject) "uncapped observation is admitted" (Ok ())
+    (Observation.observer ~keeper_name ~runtime_id ~max_request_body_bytes:None
+       (observation ~body_bytes:700_000));
+  let labels = [ "keeper", keeper_name; "runtime_id", runtime_id
+               ; "max_request_body_bytes", "none" ] in
+  check (float 0.) "exact bytes retain absent-cap provenance" 700_000.
+    (Otel_metric_store_core.metric_value_or_zero metric_name ~labels ())
 ;;
 
 let () =
@@ -284,6 +296,7 @@ let () =
             `Quick
             test_forwards_exact_observation
         ; test_case "metric name is stable" `Quick test_metric_name_is_stable
+        ; test_case "absent cap retains exact observation" `Quick test_absent_cap_is_observed_without_fabricating_a_limit
         ] )
     ]
 ;;

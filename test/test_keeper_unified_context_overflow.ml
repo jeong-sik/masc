@@ -186,7 +186,7 @@ let test_byte_axis_forwards_exact_request_wire_observation () =
   let observed = ref None in
   Masc.Keeper_turn_driver_try_provider.For_testing.observe_request_wire_error
     ~runtime_id:"anthropic.fallback"
-    ~max_request_body_bytes:1_048_576
+    ~max_request_body_bytes:(Some 1_048_576)
     ~on_request_wire_observation:
       (Some
          (fun ~runtime_id ~max_request_body_bytes ~body_bytes ~serialized ->
@@ -197,14 +197,14 @@ let test_byte_axis_forwards_exact_request_wire_observation () =
        ~actual_bytes:1_671_330
        ~limit_bytes:1_048_576);
   check
-    (option (triple string int int))
+    (option (triple string (option int) int))
     "typed byte refusal preserves runtime, cap and exact body bytes"
-    (Some ("anthropic.fallback", 1_048_576, 1_671_330))
+    (Some ("anthropic.fallback", Some 1_048_576, 1_671_330))
     !observed;
   observed := None;
   Masc.Keeper_turn_driver_try_provider.For_testing.observe_request_wire_error
     ~runtime_id:"anthropic.fallback"
-    ~max_request_body_bytes:1_048_576
+    ~max_request_body_bytes:(Some 1_048_576)
     ~on_request_wire_observation:
       (Some
          (fun ~runtime_id ~max_request_body_bytes ~body_bytes ~serialized ->
@@ -214,7 +214,7 @@ let test_byte_axis_forwards_exact_request_wire_observation () =
     (Agent_core.Error.Api
        (ContextOverflow { message = "exceeded"; limit = Some 32768 }));
   check
-    (option (triple string int int))
+    (option (triple string (option int) int))
     "token-axis refusal does not fabricate request wire bytes"
     None
     !observed

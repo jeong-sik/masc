@@ -140,7 +140,7 @@ let direct_no_progress_retry_decision err =
     ~attempted_runtimes:[ "runtime.direct-empty" ]
     err
 
-let test_dispatch_rejects_runtime_without_serialized_request_cap () =
+let test_dispatch_accepts_runtime_without_serialized_request_cap () =
   let snapshot = Runtime.For_testing.snapshot () in
   let path = Filename.temp_file "uncapped_keeper_runtime_" ".toml" in
   let uncapped =
@@ -175,18 +175,9 @@ let test_dispatch_rejects_runtime_without_serialized_request_cap () =
             Masc.Keeper_turn_driver.For_testing.resolve_runtime_candidate_for_attempt
               "test_provider.test_model"
           with
-          | Error
-              (Agent_core.Error.Config
-                (Agent_core.Error.InvalidConfig
-                  { field = "max-request-body-bytes"; _ })) ->
-            ()
-          | Error error ->
-            Alcotest.failf
-              "wrong typed cap rejection: %s"
-              (Agent_core.Error.to_string error)
-          | Ok _ ->
-            Alcotest.fail
-              "uncapped Keeper runtime must be rejected before provider dispatch"))
+          | Ok _ -> ()
+          | Error error -> Alcotest.failf "uncapped runtime should resolve for dispatch: %s"
+              (Agent_core.Error.to_string error)))
 
 type direct_retry_observed_attempt =
   { observed_runtime_id : string
@@ -2228,9 +2219,9 @@ let () =
             `Quick
             test_session_conflict_exhaustion_preserves_typed_terminal_reason;
           Alcotest.test_case
-            "dispatch rejects runtime without serialized-request cap"
+            "dispatch accepts runtime without serialized-request cap"
             `Quick
-            test_dispatch_rejects_runtime_without_serialized_request_cap;
+            test_dispatch_accepts_runtime_without_serialized_request_cap;
           Alcotest.test_case
             "runtime exhaustion labels cap free-text detail"
             `Quick

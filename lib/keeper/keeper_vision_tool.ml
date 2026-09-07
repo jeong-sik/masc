@@ -396,7 +396,7 @@ let run_candidates_outcome
         record_vision_candidate_attempt
           ~runtime_id
           ~result:"error"
-          ~reason:"missing_request_body_cap";
+          ~reason:"invalid_request_body_cap";
         Vo_provider
           { failure_class = Tool_result.Runtime_failure
           ; detail = Runtime.request_body_cap_error_to_string error

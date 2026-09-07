@@ -1344,10 +1344,11 @@ List.iter
          | None -> failf "expected bounded Keeper runtime in seed: %s" runtime_id
          | Some runtime ->
            (match (agent_core_provider_config runtime).max_request_body_bytes with
+            | None -> ()
             | Some cap when cap > 0 -> ()
-            | None | Some _ ->
+            | Some _ ->
               failf
-                "%s must declare a positive exact request body budget"
+                "%s has a non-positive explicit request body cap"
                 runtime_id))
       keeper_dispatch_ids;
     check int "Ollama Cloud canonical seed count"
@@ -2459,7 +2460,7 @@ let with_config_save_model_catalog f =
     "[[models]]\nid_prefix = %S\nprovider_name = \"local\"\nbase = \"openai_chat\"\nmax_context_tokens = 1024\n" id in
   with_model_catalog_content (String.concat "\n" (List.map row ["sample"; "lane"; "dormant"])) f
 
-let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
+let test_runtime_config_validation_accepts_uncapped_keeper_candidate () =
   with_config_save_model_catalog @@ fun () ->
   let content =
     "[providers.local]\n\
@@ -2498,26 +2499,18 @@ let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
     (fun () ->
        match Runtime.save_config_text ~runtime_config_path:path content with
        | Ok _receipt ->
-         fail "uncapped Keeper lane candidate must fail runtime config validation"
-       | Error detail ->
-         check bool "typed config diagnostic names the cap" true
-           (String_util.contains_substring detail "max-request-body-bytes");
-         check bool "typed config diagnostic names the candidate" true
-           (String_util.contains_substring detail "local.lane"))
+         (match Runtime.get_runtime_by_id "local.lane" with
+          | None -> fail "uncapped Keeper candidate was not published"
+          | Some runtime ->
+            check (option int) "omitted cap remains absent after config save" None
+              (agent_core_provider_config runtime).max_request_body_bytes;
+            check bool "uncapped candidate is dispatchable" true
+              (Runtime.keeper_dispatch_readiness runtime = Runtime.Dispatchable))
+       | Error detail -> failf "uncapped Keeper lane candidate should load: %s" detail)
 ;;
 
-(* The Agent_core rule above bounds the serialized request body, and stops
-   there. An official-client turn never builds that body: it hands its
-   conversation to a spawned vendor client that owns its own context window and
-   refuses an oversized one in a typed terminal, which the shrink sequence
-   retries with less. Requiring a declared max-prompt-bytes there made the
-   provider's own window a boot-time obligation on the operator, so a
-   deployment could not choose to let the provider decide — and the ceiling it
-   demanded was in wire bytes, which is not the unit the window is in.
-
-   This pins the removal in both directions: the official-client side must
-   load undeclared, and the Agent_core side must still reject. Without the
-   second half, deleting the whole check would also pass. *)
+(* Caller byte caps are optional for both HTTP and official-client runtimes.
+   Explicit positive declarations remain supported. *)
 let test_runtime_config_validation_admits_undeclared_official_client_seed () =
   with_config_save_model_catalog @@ fun () ->
   let content ~bound ~agent_core_cap =
@@ -2583,25 +2576,10 @@ let test_runtime_config_validation_admits_undeclared_official_client_seed () =
    with
    | Ok _receipt -> ()
    | Error detail -> failf "a declared seed bound must still load: %s" detail);
-  (* Control. The Agent_core half of this validator must still reject, or the
-     two assertions above would also pass with the whole check deleted. The
-     remediation assertion is kept from #28175: a diagnostic naming a
-     syntactically plausible but unconsumed table would satisfy a bare key
-     substring while startup stayed stuck. *)
   match attempt (content ~bound:"" ~agent_core_cap:"") with
-  | Ok _receipt ->
-    fail "an Agent_core Keeper runtime with no max-request-body-bytes must be rejected"
-  | Error detail ->
-    check bool "the diagnostic names the Agent_core key" true
-      (String_util.contains_substring detail "max-request-body-bytes");
-    check bool
-      "the remediation points at the binding table that owns the key"
-      true
-      (String_util.contains_substring
-         detail
-         "[local.sample].max-request-body-bytes");
-    check bool "the diagnostic does not demand the seed key" false
-      (String_util.contains_substring detail "max-prompt-bytes")
+  | Ok _receipt -> ()
+  | Error detail -> failf "HTTP and official-client runtimes may omit caller byte caps: %s" detail
+
 ;;
 
 let test_runtime_config_validation_allows_uncapped_dormant_lane_candidate () =
@@ -3075,14 +3053,8 @@ let test_sibling_exact_lanes_keep_catalog_only_slots () =
     [ "hitl_auto_judge"; "librarian_exact"; "board_attention_exact" ]
 ;;
 
-(* masc#28404. Same config the test above proves must still boot: [local.sample]
-   is routed and capped, [local.dormant] is declared, materialized, and cannot
-   carry a keeper turn. Boot staying up is correct; the runtime being blocked
-   with nothing anywhere saying so is the defect. Seven live runtimes were in
-   this state on 2026-08-12 and finding them took a script that re-parsed the
-   TOML, because the runtime list reported them exactly like the assignable
-   ones. *)
-let test_declared_uncapped_runtime_reports_its_dispatch_blocker () =
+(* Optional caps do not make a declared, unassigned runtime unavailable. *)
+let test_declared_uncapped_runtime_is_dispatchable () =
   let runtime_toml =
     "[providers.local]\n\
      protocol = \"openai-compatible-http\"\n\
@@ -3112,22 +3084,9 @@ let test_declared_uncapped_runtime_reports_its_dispatch_blocker () =
       check (list string) "both runtimes materialize"
         [ "local.sample"; "local.dormant" ]
         (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes);
-      (match Runtime.keeper_dispatch_blocked runtimes with
-       | [ (blocked, reason) ] ->
-         check string "the uncapped runtime is the blocked one" "local.dormant"
-           blocked.id;
-         check bool "reason names the table to edit" true
-           (String_util.contains_substring reason "[local.dormant]");
-         check bool "reason names the missing field" true
-           (String_util.contains_substring reason "max-request-body-bytes")
-       | blocked ->
-         failf
-           "expected exactly the uncapped runtime to be blocked; got [%s]"
-           (String.concat "; "
-              (List.map (fun ((r : Runtime.t), _) -> r.id) blocked)));
-      (* The routed runtime is judged by the same predicate, so a projection
-         that reported everything blocked would fail here rather than read as a
-         fleet-wide outage. *)
+      check (list string) "neither optional cap state blocks dispatch" []
+        (List.map (fun ((runtime : Runtime.t), _) -> runtime.id)
+           (Runtime.keeper_dispatch_blocked runtimes));
       check bool "the routed runtime is dispatchable" true
         (match
            List.find_opt
@@ -5030,8 +4989,8 @@ let () =
             "keeper dispatch graph enumeration"
             `Quick test_keeper_dispatch_runtime_graph_enumeration;
           test_case
-            "runtime config rejects uncapped keeper candidate"
-            `Quick test_runtime_config_validation_rejects_uncapped_keeper_candidate;
+            "runtime config accepts uncapped keeper candidate"
+            `Quick test_runtime_config_validation_accepts_uncapped_keeper_candidate;
           test_case
             "runtime config admits an undeclared official-client seed"
             `Quick
@@ -5041,8 +5000,8 @@ let () =
             `Quick
             test_runtime_config_validation_allows_uncapped_dormant_lane_candidate;
           test_case
-            "declared uncapped runtime reports its dispatch blocker"
-            `Quick test_declared_uncapped_runtime_reports_its_dispatch_blocker;
+            "declared uncapped runtime is dispatchable"
+            `Quick test_declared_uncapped_runtime_is_dispatchable;
           test_case
             "official-client runtime is dispatchable without a body cap"
             `Quick test_official_client_runtime_is_dispatchable_without_a_body_cap;

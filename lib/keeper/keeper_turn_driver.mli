@@ -144,7 +144,7 @@ val run_named :
   ?on_runtime_observation:(Runtime_observation.runtime_observation -> unit) ->
   ?on_request_wire_observation:
     (runtime_id:string ->
-     max_request_body_bytes:int ->
+     max_request_body_bytes:int option ->
      body_bytes:int ->
      serialized:Llm_provider.Request_wire_observer.observation option ->
      unit) ->

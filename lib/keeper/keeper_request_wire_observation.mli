@@ -27,7 +27,7 @@ val metric : Keeper_metrics.t
 val record :
   keeper_name:string ->
   runtime_id:string ->
-  max_request_body_bytes:int ->
+  max_request_body_bytes:int option ->
   body_bytes:int ->
   unit
 (** Record one exact wire observation at the upper Keeper consumer. Provider
@@ -38,12 +38,13 @@ val observer :
   ?on_observation:(runtime_id:string -> body_bytes:int -> unit) ->
   keeper_name:string ->
   runtime_id:string ->
-  max_request_body_bytes:int ->
+  max_request_body_bytes:int option ->
   Agent_core.Agent.pre_dispatch_serialization_observer
 (** [observer ?on_observation ~keeper_name ~runtime_id
     ~max_request_body_bytes] records [body_bytes] under {!metric}, forwards the
     same exact boundary value to [on_observation], and admits the observation.
-    The cap is the value already validated on the final provider config, so a
+    The optional cap is the value validated on the final provider config;
+    None is recorded as "none", not zero or a synthetic bound. Thus a
     hot-reload that changes a runtime's cap starts a distinct metric series. It
     never rejects: this path exists only to measure, and a rejection would
     manufacture typed failure evidence out of measurement. *)

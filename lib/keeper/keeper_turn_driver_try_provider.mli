@@ -24,8 +24,8 @@ type provider_progress_sample =
 type try_provider_ctx =
   { runtime_id : string
   ; error_runtime_id : string
-  ; max_request_body_bytes : int
-  ; model_input_capacity_bytes : int
+  ; max_request_body_bytes : int option
+  ; model_input_capacity_bytes : int option
   ; base_path : string
   ; keeper_name : string
   ; name : string
@@ -78,7 +78,7 @@ type try_provider_ctx =
       (Runtime_observation.runtime_observation -> unit) option
   ; on_request_wire_observation :
       (runtime_id:string ->
-       max_request_body_bytes:int ->
+       max_request_body_bytes:int option ->
        body_bytes:int ->
        serialized:Llm_provider.Request_wire_observer.observation option ->
        unit)
@@ -258,10 +258,10 @@ module For_testing : sig
 
   val observe_request_wire_error :
     runtime_id:string ->
-    max_request_body_bytes:int ->
+    max_request_body_bytes:int option ->
     on_request_wire_observation:
       (runtime_id:string ->
-       max_request_body_bytes:int ->
+       max_request_body_bytes:int option ->
        body_bytes:int ->
        serialized:Llm_provider.Request_wire_observer.observation option ->
        unit)

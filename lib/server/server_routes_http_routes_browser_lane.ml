@@ -49,15 +49,29 @@ let object_of_body body =
 
 let error_json message : Yojson.Safe.t = `Assoc [ "ok", `Bool false; "error", `String message ]
 
-let lane_of_request request =
-  match
-    Server_mcp_transport_http_session.get_header_any_case
-      request.Httpun.Request.headers
-      "x-lane"
-  with
-  | Some lane when String.equal lane Browser_lane.external_lane_name -> Ok lane
-  | Some _ -> Error "external browser transport requires the live lane"
-  | None -> Error "x-lane header is required"
+let ( let* ) = Result.bind
+let client_of_request request =
+  let header name = Server_mcp_transport_http_session.get_header_any_case
+      request.Httpun.Request.headers name in
+  let required name = match header name with
+    | Some value when value <> "" -> Ok value
+    | _ -> Error (name ^ " header is required") in
+  let* lane = required "x-lane" in
+  let* () = if lane = Browser_lane.external_lane_name then Ok () else Error "unknown_lane" in
+  let* raw_id = required "x-browser-client-id" in
+  let* client_id = Browser_lane.client_id_of_string raw_id in
+  let* name = required "x-browser-name" in
+  let* browser = Browser_lane.browser_of_string name in
+  let version name =
+    let* value = required name in
+    if String.length value <= 64 && String.for_all (fun c -> Char.code c >= 33 && Char.code c <= 126) value
+    then Ok value else Error "invalid_browser_version" in
+  let* version = version "x-browser-version" in
+  let* engine_version = required "x-browser-engine-version" in
+  if String.length engine_version > 64
+     || not (String.for_all (fun c -> Char.code c >= 33 && Char.code c <= 126) engine_version)
+  then Error "invalid_browser_version"
+  else Ok ({client_id; browser; version; engine_version} : Browser_lane.client_info)
 ;;
 
 (* A poll holds one command for the window. The answer is flat
@@ -84,11 +98,11 @@ let add_routes router =
   |> Http.Router.post "/browser-lane/poll" (fun request reqd ->
        if not (lane_authorized request) then refuse request reqd
        else
-         match lane_of_request request with
+         match client_of_request request with
          | Error message ->
            respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
-         | Ok lane -> (
-           match Browser_lane.take_command ~lane_name:lane ~window_sec:25. with
+         | Ok client_info -> (
+           match Browser_lane.take_command ~client_info ~window_sec:25. with
            | Error message ->
              respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
            | Ok None ->
@@ -106,10 +120,10 @@ let add_routes router =
              | Error message ->
                respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
              | Ok fields ->
-               (match lane_of_request request with
+               (match client_of_request request with
                | Error message ->
                  respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
-               | Ok lane -> (
+               | Ok client_info -> (
                  match List.assoc_opt "id" fields with
                  | Some (`String id) ->
                    let payload =
@@ -119,11 +133,20 @@ let add_routes router =
                        ; ("error", Option.value (List.assoc_opt "error" fields) ~default:`Null)
                        ]
                    in
-                   (match Browser_lane.deliver_result ~lane_name:lane ~id ~payload with
+                   (match Browser_lane.deliver_result ~client_id:client_info.client_id ~id ~payload with
                     | Ok () -> respond ~status:`OK []
                     | Error message ->
                       respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message))
                  | _ ->
                    respond_json_value_with_cors ~status:`Bad_request request reqd
                      (error_json "id is required")))))
+  |> Http.Router.post "/browser-lane/disconnect" (fun request reqd ->
+       if not (lane_authorized request) then refuse request reqd
+       else match client_of_request request with
+       | Error message -> respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
+       | Ok info ->
+         match Browser_lane.disconnect_client ~client_id:info.client_id with
+         | Error message -> respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
+         | Ok () -> respond_json_value_with_cors request reqd (`Assoc ["ok", `Bool true]))
+
 ;;

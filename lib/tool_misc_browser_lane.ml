@@ -52,13 +52,43 @@ let answer_to_result ~tool_name ~start_time = function
     make_workflow_err ~tool_name ~start_time reason
 ;;
 
+let tool_request args =
+  let input = match args with
+    | `Assoc fields -> `Assoc (List.filter (fun (key, _) -> List.mem key ["lane"; "tabId"; "clientId"]) fields)
+    | other -> other in
+  Browser_surface.parse_request input
+let add_client target = function
+  | Browser_lane.Answered (`Assoc envelope) ->
+    let data = match List.assoc_opt "data" envelope with
+      | Some (`Assoc fields) -> `Assoc (("clientId", Browser_surface.client_id_json target) :: fields)
+      | Some (`List tabs) -> `Assoc ["tabs", `List tabs; "clientId", Browser_surface.client_id_json target]
+      | Some other -> other | None -> `Null in
+    Browser_lane.Answered (`Assoc (("data", data) :: List.remove_assoc "data" envelope))
+  | other -> other
+(* Keep the discovery payload in both channels: Keeper's adapter retains [data]
+   but its model-facing raw output uses the error message. No tab command runs
+   until resolution succeeds, including when a formerly pinned client vanished. *)
+let selection_error ~tool_name ~start_time request error =
+  let clients = match request.Browser_surface.source with
+    | Live -> Browser_lane.active_clients () |> List.map Browser_lane.client_json
+    | Automation -> [] in
+  let data = `Assoc [
+    "error", `String error;
+    "clients", `List clients;
+    "retry", `String "Choose a connected browser and retry BrowserTabs with its clientId. No browser command was dispatched."] in
+  Tool_result.make_err ~tool_name ~start_time
+    ~class_:Tool_result.Workflow_rejection ~data (Yojson.Safe.to_string data)
+
 let handle_tabs ~tool_name ~start_time args : Tool_result.result =
-  match lane_of ~tool_name ~start_time args with
-  | Error error -> error
-  | Ok lane ->
-    answer_to_result ~tool_name ~start_time
-      (Browser_lane.issue ~lane_name:lane ~verb:Browser_lane.Tabs_list
-         ~timeout_sec:default_timeout_sec)
+  match tool_request args with
+  | Error error -> make_workflow_err ~tool_name ~start_time error
+  | Ok request ->
+    match Browser_surface.resolved_target request with
+    | Error error -> selection_error ~tool_name ~start_time request error
+    | Ok target ->
+      answer_to_result ~tool_name ~start_time
+        (Browser_lane.issue_for ~target ~verb:Browser_lane.Tabs_list ~timeout_sec:default_timeout_sec
+         |> add_client target)
 ;;
 
 (* Sessions and navigations are automation-lane verbs; the state module
@@ -111,24 +141,30 @@ let handle_read ~tool_name ~start_time args : Tool_result.result =
   | Error error -> make_workflow_err ~tool_name ~start_time error
   | Ok Image ->
     let input = match args with
-      | `Assoc fields -> `Assoc (List.filter (fun (key, _) -> List.mem key ["lane"; "tabId"]) fields)
+      | `Assoc fields -> `Assoc (List.filter (fun (key, _) -> List.mem key ["lane"; "tabId"; "clientId"]) fields)
       | other -> other in
     (match Result.bind (Browser_surface.parse_capture_request input) Browser_surface.capture with
      | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
      | Error error -> make_workflow_err ~tool_name ~start_time error)
   | Ok Text ->
-      match lane_of ~tool_name ~start_time args with
-      | Error error -> error
-      | Ok lane ->
-        let max_chars = max 1 (min 100_000 (get_int args "maxChars" 50_000)) in
-        let verb = match get_string args "mode" "text" with
-          | "text" -> Ok (Browser_lane.Page_read {tab_id=get_int_opt args "tabId";max_chars=Some max_chars})
-          | "elements" -> Ok (Browser_lane.Page_elements {tab_id=get_int_opt args "tabId"})
-          | _ -> Error "mode must be text or elements" in
-        match verb with
-        | Error detail -> make_workflow_err ~tool_name ~start_time detail
-        | Ok verb -> answer_to_result ~tool_name ~start_time
-            (Browser_lane.issue ~lane_name:lane ~verb ~timeout_sec:default_timeout_sec)
+    (match tool_request args with
+     | Error error -> make_workflow_err ~tool_name ~start_time error
+     | Ok request ->
+       match Browser_surface.resolved_target request with
+       | Error error -> make_workflow_err ~tool_name ~start_time error
+       | Ok target ->
+         let max_chars = max 1 (min 100_000 (get_int args "maxChars" 50_000)) in
+         let verb = match get_string args "mode" "text" with
+           | "text" -> Ok (Browser_lane.Page_read { tab_id=request.tab_id; max_chars=Some max_chars })
+           | "elements" -> Ok (Browser_lane.Page_elements { tab_id=request.tab_id })
+           | _ -> Error "mode must be text or elements" in
+         match verb with
+         | Error error -> make_workflow_err ~tool_name ~start_time error
+         | Ok verb -> answer_to_result ~tool_name ~start_time
+           (Browser_lane.issue_for ~target
+              ~verb
+              ~timeout_sec:default_timeout_sec |> add_client target))
+
 ;;
 
 let handle_act_with_phase ~tool_name ~start_time args =
@@ -155,9 +191,11 @@ let handle_interact ~tool_name ~start_time args : Tool_result.result =
   | Error error -> make_workflow_err ~tool_name ~start_time error
   | Ok request ->
     let lane_name = match request.source with Browser_surface.Live -> "live" | Automation -> "automation" in
-    answer_to_result ~tool_name ~start_time
-      (Browser_lane.issue ~lane_name
-        ~verb:(Browser_lane.Page_interact {tab_id=request.tab_id;
-          expected_url=request.expected_url; action=request.action})
-        ~timeout_sec:default_timeout_sec)
+    (match Browser_lane.resolve_target ~lane_name ~client_id:request.client_id with
+     | Error error -> make_workflow_err ~tool_name ~start_time error
+     | Ok target -> answer_to_result ~tool_name ~start_time
+       (Browser_lane.issue_for ~target
+         ~verb:(Browser_lane.Page_interact {tab_id=request.tab_id;
+           expected_url=request.expected_url; action=request.action})
+         ~timeout_sec:default_timeout_sec |> add_client target))
 ;;

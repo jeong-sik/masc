@@ -179,6 +179,10 @@ async function onHostMessage(msg) {
   const reply = { id: msg?.id, ok: false };
   try {
     switch (msg?.verb) {
+      case "browser.info":
+        reply.data = await browser.runtime.getBrowserInfo();
+        reply.ok = true;
+        break;
       case "tabs.list":
         reply.data = await tabsList();
         reply.ok = true;

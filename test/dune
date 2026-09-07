@@ -4705,3 +4705,8 @@
  (name test_monotonic_deadline)
  (modules test_monotonic_deadline)
  (libraries alcotest masc.monotonic_deadline unix))
+
+(test
+ (name test_tui_browser_lane)
+ (modules test_tui_browser_lane)
+ (libraries masc_tui_types))

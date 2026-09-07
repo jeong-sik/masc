@@ -2615,6 +2615,125 @@ type palette_mode =
       choice_line : int;  (* 1-based, what the title says *)
     }
 
+(* Browser reads remain separate from connector routing. A request generation
+   belongs to this view instance, so late Firefox replies cannot replace a
+   different app, source or tab after the operator moves. *)
+module Browser_lane_view = struct
+  type source = Live | Automation
+  type app = Browser | Slack
+  type tab = { id : int; title : string; url : string; active : bool }
+  type page = {
+    tab_id : int; title : string; url : string; text : string;
+    chars : int; truncated : bool;
+  }
+  type reading = {
+    tabs : tab list; page : page option; source : source; app : app;
+    elapsed_ms : float;
+  }
+  type operation = Read | Open_session | Close_session
+  type load = Idle | Loading of int * operation | Failed of string
+  type t = {
+    app : app; source : source; selected_tab : int option; scroll : int;
+    reading : reading option; load : load;
+  }
+
+  let source_name = function Live -> "live" | Automation -> "automation"
+  let app_name = function Browser -> "browser" | Slack -> "slack"
+  let create app =
+    { app; source = Live; selected_tab = None; scroll = 0;
+      reading = None; load = Idle }
+  let switch_source source t =
+    { t with source; selected_tab = None; scroll = 0; reading = None; load = Idle }
+  let busy t = match t.load with Loading _ -> true | Idle | Failed _ -> false
+  let request_body t =
+    `Assoc ([ "lane", `String (source_name t.source);
+              "app", `String (app_name t.app) ]
+            @ match t.selected_tab with None -> [] | Some id -> ["tabId", `Int id])
+  let ( let* ) = Result.bind
+  let field name = function
+    | `Assoc fields -> (match List.assoc_opt name fields with
+        | Some value -> Ok value | None -> Error ("missing " ^ name))
+    | _ -> Error "expected object"
+  let string = function `String s -> Ok s | _ -> Error "expected string"
+  let integer = function `Int n when n >= 0 -> Ok n | _ -> Error "expected nonnegative integer"
+  let boolean = function `Bool b -> Ok b | _ -> Error "expected boolean"
+  let parse_source = function
+    | `String "live" -> Ok Live | `String "automation" -> Ok Automation
+    | _ -> Error "unknown browser source"
+  let parse_app = function
+    | `String "browser" -> Ok Browser | `String "slack" -> Ok Slack
+    | _ -> Error "unknown browser app"
+  let get parse name json = let* value = field name json in parse value
+  let parse_tab json =
+    let* id = get integer "id" json in
+    let* title = get string "title" json in
+    let* url = get string "url" json in
+    let* active = get boolean "active" json in
+    Ok { id; title; url; active }
+  let parse_page = function
+    | `Null -> Ok None
+    | json ->
+        let* tab_id = get integer "tabId" json in
+        let* title = get string "title" json in
+        let* url = get string "url" json in
+        let* text = get string "text" json in
+        let* chars = get integer "chars" json in
+        let* truncated = get boolean "truncated" json in
+        Ok (Some { tab_id; title; url; text; chars; truncated })
+  let parse_tabs = function
+    | `List tabs ->
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | json :: rest -> let* tab = parse_tab json in loop (tab :: acc) rest
+        in loop [] tabs
+    | _ -> Error "expected tabs array"
+  let milliseconds = function
+    | `Float f when Float.is_finite f && f >= 0. -> Ok f
+    | `Int n when n >= 0 -> Ok (float_of_int n)
+    | _ -> Error "expected nonnegative elapsed_ms"
+  let decode json =
+    let* ok = get boolean "ok" json in
+    if not ok then let* detail = get string "error" json in Error detail
+    else
+      let* data = field "data" json in
+      let* tabs = get parse_tabs "tabs" data in
+      let* page = get parse_page "page" data in
+      let* source = get parse_source "source" data in
+      let* app = get parse_app "app" data in
+      let* elapsed_ms = get milliseconds "elapsed_ms" data in
+      match page with
+      | Some page when not (List.exists (fun (tab : tab) -> tab.id = page.tab_id) tabs) ->
+          Error "page tab is absent from returned tabs"
+      | _ -> Ok { tabs; page; source; app; elapsed_ms }
+  let accept ~generation (result : (reading, string) result) t =
+    match t.load with
+    | Loading (current, Read) when current = generation ->
+        (match result with
+         | Ok reading when reading.source = t.source && reading.app = t.app ->
+             { t with reading = Some reading; load = Idle;
+               selected_tab = Option.map (fun page -> page.tab_id) reading.page }
+         | Ok _ -> { t with load = Failed "browser response source/app mismatch" }
+         | Error detail -> { t with load = Failed detail })
+    | Loading _ | Idle | Failed _ -> t
+  let select_tab direction t =
+    match t.reading with
+    | None -> t
+    | Some reading ->
+        let count = List.length reading.tabs in
+        if count = 0 then t else
+        let current =
+          let rec find i = function
+            | [] -> 0
+            | (tab : tab) :: rest ->
+                if Some tab.id = t.selected_tab then i else find (i + 1) rest
+          in find 0 reading.tabs
+        in
+        let index = (current + direction + count) mod count in
+        match List.nth_opt reading.tabs index with
+        | None -> t
+        | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; load = Idle }
+end
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -3223,6 +3342,8 @@ type state = {
   mutable tools_skill_evidence: (string * Yojson.Safe.t) option;
   mutable tools_async_observation: Yojson.Safe.t option;
   mutable tools_async_observation_error: string option;
+  mutable browser_lane: Browser_lane_view.t option;
+  mutable browser_lane_generation: int;
   mutable connectors: Tui_decode.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_scroll: int;
@@ -4315,6 +4436,8 @@ let create_state
   tools_skill_evidence = None;
   tools_async_observation = None;
   tools_async_observation_error = None;
+  browser_lane = None;
+  browser_lane_generation = 0;
   connectors = None;
   connectors_error = None;
   connectors_scroll = 0;
@@ -5251,6 +5374,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         (match state.repository_changes with
          | None -> 0
          | Some s -> List.length s.Tui_decode.rcs_changes)
+  | Connectors when Option.is_some state.browser_lane -> None
   | Connectors ->
       listing ~error:state.connectors_error
         (match state.connectors with
@@ -5518,6 +5642,7 @@ let surface_row_texts (state : state) : surface -> string list option = function
               s.Tui_decode.mhs_keepers
             @ [ "memory detail" ])
           state.memory_health
+  | Connectors when Option.is_some state.browser_lane -> None
   | Connectors ->
       Option.map
         (fun s ->
@@ -5748,6 +5873,7 @@ let keeper_message_support_status_rows state ~status_rows =
    draws; keepers come from the loaded roster, so the palette can only offer
    a chat the roster can open. *)
 type palette_action =
+  | Palette_browser_lane of Browser_lane_view.app
   | Palette_goto of surface
   | Palette_config of config_pane
   | Palette_chat of string
@@ -5840,6 +5966,8 @@ let palette_entries (state : state) =
   @ [ "go Code", Palette_goto Code ]
   @ [ "go Resources", Palette_goto Resources ]
   @ [ "go Tools", Palette_goto Tools ]
+  @ [ "go Browser Lane", Palette_browser_lane Browser_lane_view.Browser;
+      "go Slack Lane", Palette_browser_lane Browser_lane_view.Slack ]
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Metrics", Palette_goto Metrics ]
   @ [ "metrics", Palette_goto Metrics ]

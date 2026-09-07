@@ -1,6 +1,6 @@
 (* Slack_lane — the in-server ring buffer of collected Slack messages.
 
-   docs/design/slack-lane.md, task-1418. The poll fiber
+   docs/design/slack-integration.md, task-1418. The poll fiber
    ({!Server_slack_poll_lane}) appends what conversations.history returned
    after filtering; the TUI tab and the keeper reader tool read the same
    state. Memory only — the durable truth is Slack itself plus the poll

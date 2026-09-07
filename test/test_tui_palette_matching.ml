@@ -69,6 +69,11 @@ let test_the_palette_lists_tasks_and_posts () =
       ; bp_kind = None
       } ];
   let labels = List.map fst (palette_entries state) in
+  Alcotest.(check (list string)) "one Browser destination"
+    ["go Browser Lane"]
+    (List.filter_map (function label, Palette_browser_lane -> Some label | _ -> None)
+       (palette_entries state));
+  check_bool "Slack is not a separate destination" false (List.mem "go Slack Lane" labels);
   check_bool "settings is a direct entry" true
     (List.exists
        (function

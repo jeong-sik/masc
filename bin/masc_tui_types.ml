@@ -2723,36 +2723,32 @@ type palette_mode =
 
 (* Browser reads remain separate from connector routing. A request generation
    belongs to this view instance, so late Firefox replies cannot replace a
-   different app, source or tab after the operator moves. *)
+   different source or tab after the operator moves. *)
 module Browser_lane_view = struct
   type source = Live | Automation
-  type app = Browser | Slack
   type tab = { id : int; title : string; url : string; active : bool }
   type page = {
     tab_id : int; title : string; url : string; text : string;
     chars : int; truncated : bool;
   }
   type reading = {
-    tabs : tab list; page : page option; source : source; app : app;
+    tabs : tab list; page : page option; source : source;
     elapsed_ms : float;
   }
   type operation = Read | Open_session | Close_session | Goto of string
   type load = Idle | Loading of int * operation | Failed of string
   type t = {
-    app : app; source : source; selected_tab : int option; scroll : int;
+    source : source; selected_tab : int option; scroll : int;
     reading : reading option; load : load; url_draft : string option;
   }
 
   let source_name = function Live -> "live" | Automation -> "automation"
-  let app_name = function Browser -> "browser" | Slack -> "slack"
   let context_label t =
-    let app = match t.app with Browser -> "Browser Lane" | Slack -> "Slack Lane" in
-    Printf.sprintf "%s · %s · Firefox page reader" app (source_name t.source)
-  let create app =
-    { app; source = Live; selected_tab = None; scroll = 0;
+    Printf.sprintf "Browser Lane · %s · Firefox page reader" (source_name t.source)
+  let create () =
+    { source = Live; selected_tab = None; scroll = 0;
       reading = None; load = Idle; url_draft = None }
-  let switch_source source t =
-    { t with source; selected_tab = None; scroll = 0; reading = None; load = Idle; url_draft = None }
+  let switch_source source _t = { (create ()) with source }
   let refresh t = { t with selected_tab = None; scroll = 0 }
   let fail_action detail t =
     let url_draft = match t.load with
@@ -2775,13 +2771,8 @@ module Browser_lane_view = struct
     | Read_ok -> "HTTP read ok"
     | Read_failed -> "HTTP failed"
   let busy t = match t.load with Loading _ -> true | Idle | Failed _ -> false
-  let should_refresh_on_tick t =
-    match t.app, t.source, t.url_draft, t.load with
-    | Slack, Live, None, (Idle | Failed _) -> true
-    | _ -> false
   let request_body t =
-    `Assoc ([ "lane", `String (source_name t.source);
-              "app", `String (app_name t.app) ]
+    `Assoc ([ "lane", `String (source_name t.source) ]
             @ match t.selected_tab with None -> [] | Some id -> ["tabId", `Int id])
   let ( let* ) = Result.bind
   let field name = function
@@ -2794,9 +2785,6 @@ module Browser_lane_view = struct
   let parse_source = function
     | `String "live" -> Ok Live | `String "automation" -> Ok Automation
     | _ -> Error "unknown browser source"
-  let parse_app = function
-    | `String "browser" -> Ok Browser | `String "slack" -> Ok Slack
-    | _ -> Error "unknown browser app"
   let get parse name json = let* value = field name json in parse value
   let parse_tab json =
     let* id = get integer "id" json in
@@ -2833,20 +2821,19 @@ module Browser_lane_view = struct
       let* tabs = get parse_tabs "tabs" data in
       let* page = get parse_page "page" data in
       let* source = get parse_source "source" data in
-      let* app = get parse_app "app" data in
       let* elapsed_ms = get milliseconds "elapsed_ms" data in
       match page with
       | Some page when not (List.exists (fun (tab : tab) -> tab.id = page.tab_id) tabs) ->
           Error "page tab is absent from returned tabs"
-      | _ -> Ok { tabs; page; source; app; elapsed_ms }
+      | _ -> Ok { tabs; page; source; elapsed_ms }
   let accept ~generation (result : (reading, string) result) t =
     match t.load with
     | Loading (current, Read) when current = generation ->
         (match result with
-         | Ok reading when reading.source = t.source && reading.app = t.app ->
+         | Ok reading when reading.source = t.source ->
              { t with reading = Some reading; load = Idle;
                selected_tab = Option.map (fun page -> page.tab_id) reading.page }
-         | Ok _ -> { t with load = Failed "browser response source/app mismatch" }
+         | Ok _ -> { t with load = Failed "browser response source mismatch" }
          | Error detail -> { t with load = Failed detail })
     | Loading _ | Idle | Failed _ -> t
   let select_tab direction t =
@@ -6280,7 +6267,7 @@ let gate_mode_label = function
   | Masc.Keeper_gate_mode.Always_allow -> "Allow every call without review"
 
 type palette_action =
-  | Palette_browser_lane of Browser_lane_view.app
+  | Palette_browser_lane
   | Palette_goto of surface
   | Palette_config of config_pane
   | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
@@ -6381,8 +6368,7 @@ let palette_entries (state : state) =
   @ [ "go Code", Palette_goto Code ]
   @ [ "go Resources", Palette_goto Resources ]
   @ [ "go Tools", Palette_goto Tools ]
-  @ [ "go Browser Lane", Palette_browser_lane Browser_lane_view.Browser;
-      "go Slack Lane", Palette_browser_lane Browser_lane_view.Slack ]
+  @ [ "go Browser Lane", Palette_browser_lane ]
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Metrics", Palette_goto Metrics ]
   @ [ "metrics", Palette_goto Metrics ]

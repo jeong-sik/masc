@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capture public Example Domain/empty Slack proof on an isolated scratch runtime.
+"""Capture public browser page and session recovery proof on an isolated scratch runtime.
 
 Opens, navigates and closes automation Firefox. Use an absent live connection
 or an isolated live profile containing only Example Domain. The preflight
@@ -78,14 +78,13 @@ def main():
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     args.out.mkdir(parents=True, exist_ok=True)
     report = {
-        "schema": "masc.browser_slack.capture.v1",
-        "scope": "isolated scratch runtime; public Example Domain and empty Slack only",
+        "schema": "masc.browser.capture.v1",
+        "scope": "isolated scratch runtime; public Example Domain only",
         "api_port": args.api_port,
         "script_sha256": cap.sha256_file(Path(__file__)),
         "tui": {"sha256": cap.sha256_file(args.executable),
                 "artifact_source_commit": args.tui_source_commit},
         "measurements": [], "screenshots": [], "display_observations": [],
-        "authenticated_slack_content_measured": False,
         "live_native_host_binary_verified": False,
         "result": "failed",
     }
@@ -108,7 +107,7 @@ def main():
             "label": label, "path": path, "status": status,
             "elapsed_ms": round((time.monotonic() - started) * 1000, 1),
             "ok": value.get("ok"),
-            "request": {key: data[key] for key in ("app", "lane", "action") if data and key in data},
+            "request": {key: data[key] for key in ("lane", "action") if data and key in data},
         })
         return status, value
 
@@ -146,10 +145,10 @@ def main():
         build = health.get("build", {})
         report["server"] = {key: build.get(key) for key in (
             "release_version", "binary_commit", "binary_commit_source", "executable_sha256")}
-        # Entering Browser/Slack in the TUI initially selects live, before the
+        # Entering Browser in the TUI initially selects live, before the
         # automation key is pressed. Verify that this is a public fixture or
         # absent; a private live read is never copied into public evidence.
-        status, live = request("live_fixture_check", API + "/read", {"lane": "live", "app": "browser"})
+        status, live = request("live_fixture_check", API + "/read", {"lane": "live"})
         if status == 400 and live.get("error") == "browser lane is disconnected":
             report["live_fixture"] = "disconnected"
         else:
@@ -168,9 +167,7 @@ def main():
         good("automation_navigate", API + "/goto", {"url": EXAMPLE})
         for number in range(1, 6):
             public_page(good(f"automation_read_{number}", API + "/read",
-                             {"lane": "automation", "app": "browser"}))
-        slack = good("slack_empty", API + "/read", {"lane": "automation", "app": "slack"})
-        require(slack.get("tabs") == [] and slack.get("page") is None, "slack_was_not_empty")
+                             {"lane": "automation"}))
 
         from playwright.sync_api import sync_playwright
         with sync_playwright() as playwright:
@@ -185,18 +182,10 @@ def main():
                     cap.press(page, "a")
                     wait(page, "Browser Lane", "automation", "Example Domain")
                     capture(page, "01-browser-native")
-                    cap.press(page, "S")
-                    wait(page, "Slack Lane")
-                    cap.press(page, "a")
-                    wait(page, "Slack Lane", "automation", "Read ", "No matching tabs")
-                    capture(page, "02-slack-empty")
-                    cap.press(page, "B")
-                    cap.press(page, "a")
-                    wait(page, "Browser Lane", "automation", "Example Domain")
                     cap.press(page, "x")
                     wait(page, "closed", timeout=70)
                     status, closed = request("closed_session_read", API + "/read",
-                                             {"lane": "automation", "app": "browser"})
+                                             {"lane": "automation"})
                     require(status == 400 and closed.get("ok") is False
                             and "Firefox session is closed" in closed.get("error", ""),
                             "closed_session_was_not_confirmed")
@@ -210,7 +199,7 @@ def main():
                     cap.press(page, "Enter")
                     wait(page, "Example Domain", timeout=70)
                     public_page(good("recovered_session_read", API + "/read",
-                                     {"lane": "automation", "app": "browser"}), url=recovered_url)
+                                     {"lane": "automation"}), url=recovered_url)
                     capture(page, "05-session-recovered")
             finally:
                 browser.close()

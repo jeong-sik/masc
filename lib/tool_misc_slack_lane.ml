@@ -1,4 +1,4 @@
-(** Slack-lane reader tool (docs/design/slack-lane.md, task-1430).
+(** Slack-lane reader tool (docs/design/slack-integration.md, task-1430).
 
     [masc_slack_read] reads the in-server buffer the poll fiber
     ({!Server_slack_poll_lane}) fills. Read-only by construction: it touches

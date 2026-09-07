@@ -1,11 +1,9 @@
 name = "masc_slack_read"
 description = """
-Read the slack-lane buffer: the messages the in-process poll fiber \
-collected from bound Slack channels. action=messages with channel_id \
-returns that channel's recent messages (newest first); without \
-channel_id it returns the per-channel summary. The buffer is memory: \
-it holds what was collected since the fiber last started, not full \
-history. Thread reading arrives with the write increment."""
+Read recent messages collected by the Slack API connector using bot credentials, \
+not browser tabs. With channel_id, return buffered messages newest first; \
+otherwise return a per-channel summary. The in-memory buffer covers collection \
+since startup, not full history or on-demand thread retrieval."""
 additional_properties = false
 
 [[params]]

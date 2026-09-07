@@ -38,6 +38,13 @@ Point it at the same root the server uses. A TUI reading one root while the
 server writes another shows stale keepers with no error, because both roots are
 valid on their own.
 
+## Browser
+
+Use `:`, then `go Browser Lane` (or `B` from Connectors). `l` / `a` select
+live / automation Firefox. `[` / `]` choose among open tabs and `r` refreshes.
+Live reads use the operator's browser login; automation owns an isolated session.
+See the [Browser guide](guides/tui-browser-lanes.md) for setup and controls.
+
 ## Options
 
 | Option | Default | Effect |

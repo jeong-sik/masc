@@ -41,16 +41,17 @@ async function pageRead(args) {
       ? args.tabId
       : (await browser.tabs.query({ active: true, currentWindow: true }))[0]?.id;
   if (typeof tabId !== "number") throw new Error("no_active_tab");
-  const [res] = await browser.tabs.executeScript(tabId, {
-    code: "document.body ? document.body.innerText : ''",
+  const cap = args?.maxChars ?? READ_CAP;
+  if (!Number.isInteger(cap) || cap < 1 || cap > 100000) throw new Error("bad_max_chars");
+  const [page] = await browser.tabs.executeScript(tabId, {
+    code: `(() => {
+      const chars = Array.from(document.body?.innerText ?? '');
+      return {url:location.href,title:document.title,
+        text:chars.slice(0,${cap}).join(''),chars:chars.length,truncated:chars.length>${cap}};
+    })()`,
   });
-  const text = String(res ?? "");
-  const cap = typeof args?.maxChars === "number" ? args.maxChars : READ_CAP;
-  return {
-    tabId,
-    text: text.length > cap ? text.slice(0, cap) + `\n[TRUNCATED ${text.length} chars]` : text,
-    chars: text.length,
-  };
+  if (!page) throw new Error("page_unavailable");
+  return {tabId, ...page};
 }
 
 async function onHostMessage(msg) {

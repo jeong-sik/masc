@@ -190,7 +190,10 @@ module Json_pointer = struct
          | `Assoc fields ->
            (match
               Option.map
-                (fun kind -> Option.value (nullable_schema_type kind) ~default:kind)
+                (fun kind ->
+                   match nullable_schema_type kind with
+                   | Some non_null_kind -> non_null_kind
+                   | None -> kind)
                 (List.assoc_opt "type" fields)
             with
             | Some (`String "object") ->

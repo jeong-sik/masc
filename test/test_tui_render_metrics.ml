@@ -337,6 +337,27 @@ let test_render_metrics_body_budget () =
   check bool "lines within budget" true (!count <= 15)
 ;;
 
+let test_compact_metrics_preserve_source_labels () =
+  List.iter (fun cols ->
+    let state = make_state () in
+    state.metrics_section <- Types.Section_fleet;
+    let lines = ref [] in
+    let push line = lines := line :: !lines in
+    Render_metrics.render_metrics_body ~cols ~budget:40 state
+      ~push ~push_styled:(fun ~style:_ line -> push line)
+      ~push_selected:push ~push_divider:(fun () -> ())
+      ~push_empty:(fun () -> ());
+    let output = String.concat "\n" !lines in
+    check bool "task source availability remains readable" true
+      (contains output "Task snapshot unavailable");
+    check bool "scheduler observation remains readable" true
+      (contains output "Lag not observed");
+    List.iter (fun line ->
+      check bool "summary stays inside viewport" true
+        (Layout.display_width line <= cols)) !lines)
+    [ 85; 100; 120; 150; 170 ]
+;;
+
 let test_render_metrics_body_all_sections () =
   let state = make_state () in
   let sections = [ Types.Section_fleet; Types.Section_resources; Types.Section_tools ] in
@@ -382,6 +403,7 @@ let () =
       , [ test_case "narrow_and_wide" `Quick test_narrow_and_wide_terminals ] )
     ; ( "render_body"
       , [ test_case "budget" `Quick test_render_metrics_body_budget
+        ; test_case "compact metrics preserve source labels" `Quick test_compact_metrics_preserve_source_labels
         ; test_case "all_sections" `Quick test_render_metrics_body_all_sections
         ] )
     ]

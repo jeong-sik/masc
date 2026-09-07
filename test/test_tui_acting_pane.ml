@@ -109,6 +109,63 @@ let width (line : Pane.line) =
     (fun acc s -> acc + Masc_tui_message_layout.display_width s.Pane.text)
     0 line
 
+let span_values (line : Pane.line) =
+  List.map (fun (span : Pane.span) ->
+    let tone = match span.tone with
+      | Pane.Plain -> "plain" | Pane.Dim -> "dim" | Pane.Accent -> "accent"
+      | Pane.Ok -> "ok" | Pane.Warn -> "warn" | Pane.Bad -> "bad" | Pane.Info -> "info"
+    in
+    span.text, tone) line
+
+let test_clipped_header_preserves_spans_and_padding () =
+  let prefix =
+    [ "│", "dim"; "[Recent]", "accent"; " ", "plain";
+      "Changes", "dim"; " · 4 keepers · ", "dim" ]
+  in
+  let reason = "\027[31m한\027[0me\204\129🙂X" in
+  let input = { fixture with Pane.feed = Pane.Feed_closed reason } in
+  (* Explicit rendered spans pin ANSI bytes and tones, including a wide
+     grapheme that leaves a one-cell gap filled by a separate Plain span. *)
+  let cases =
+    [ 0, []
+    ; -1, []
+    ; 1, [ "│", "dim" ]
+    ; 4, [ "│", "dim"; "[Re", "accent" ]
+    ; 9, [ "│", "dim"; "[Recent]", "accent" ]
+    ; 10, [ "│", "dim"; "[Recent]", "accent"; " ", "plain" ]
+    ; 17, [ "│", "dim"; "[Recent]", "accent"; " ", "plain"; "Changes", "dim" ]
+    ; 32, prefix
+    ; 45, prefix @ [ "feed closed: \027[31m", "bad" ]
+    ; 46, prefix @ [ "feed closed: \027[31m", "bad"; " ", "plain" ]
+    ; 47, prefix @ [ "feed closed: \027[31m한\027[0m", "bad" ]
+    ; 48, prefix @ [ "feed closed: \027[31m한\027[0me\204\129", "bad" ]
+    ; 49, prefix @ [ "feed closed: \027[31m한\027[0me\204\129", "bad"; " ", "plain" ]
+    ; 50, prefix @ [ "feed closed: \027[31m한\027[0me\204\129🙂", "bad" ]
+    ; 51, prefix @ [ "feed closed: " ^ reason, "bad" ]
+    ; 53, prefix @ [ "feed closed: " ^ reason, "bad"; "  ", "plain" ]
+    ]
+  in
+  List.iter (fun (cols, expected) ->
+    let drawn = Pane.lines ~rows:1 ~cols ~scroll:0 input in
+    let row = List.hd drawn.Pane.rows in
+    check (list (pair string string)) (Printf.sprintf "header at %d cells" cols)
+      expected (span_values row);
+    check int "rendered cell budget" (max 0 cols) (width row)) cases
+
+let test_full_width_row_retains_empty_toned_spans () =
+  let drawn = Pane.lines ~rows:14 ~cols:Pane.pane_cols ~scroll:0 fixture in
+  let row = List.find (fun row -> contains "Execute" (text row))
+    (List.rev drawn.Pane.rows) in
+  let trailing = List.rev (span_values row) in
+  match trailing with
+  | duration :: gap :: _ ->
+    check (pair string string) "unknown duration retains its empty Dim span"
+      ("", "dim") duration;
+    check (pair string string) "absent duration gap retains its empty Plain span"
+      ("", "plain") gap;
+    check int "tool row still exactly fills the pane" Pane.pane_cols (width row)
+  | _ -> fail "tool row lost its spans"
+
 let target_text = function
   | Pane.Target_none -> "none"
   | Pane.Target_next_tab -> "next-tab"
@@ -654,6 +711,10 @@ let () =
             test_content_cols_give_the_surface_the_rest
         ; test_case "threshold leaves the surface the roster floor" `Quick
             test_threshold_leaves_the_surface_the_roster_floor
+        ; test_case "clipped header preserves styled Unicode spans" `Quick
+            test_clipped_header_preserves_spans_and_padding
+        ; test_case "full-width row retains empty toned spans" `Quick
+            test_full_width_row_retains_empty_toned_spans
         ] )
     ; ( "rows"
       , [ test_case "every row is the pane width" `Quick test_every_row_is_the_pane_width

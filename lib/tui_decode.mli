@@ -1782,9 +1782,27 @@ type runtime_prompt_asset = {
   pra_file_exists : bool;
 }
 
+type held_back_override = {
+  hbo_key : string;
+  hbo_bytes : int;
+  hbo_contract_revision : string;
+      (** The revision the override was written against. It no longer matches
+          the prompt's current contract, which is why the override is on disk
+          and not in force. *)
+}
+(** An override the operator saved and the registry declined to restore.
+
+    A prompt override pins the revision of the body it was written against,
+    and a release that edits that body invalidates the pin, so masc falls
+    back to the shipped text. The override is kept rather than deleted --
+    writing the key again re-pins it to the current revision. *)
+
 type prompts_snapshot = {
   ps_rows : prompt_row list;
   ps_runtime_assets : runtime_prompt_asset list;
+  ps_held_back : held_back_override list;
+      (** Empty in the ordinary case. Non-empty means the reader has
+          customization that is not reaching any turn. *)
 }
 (** GET /api/v1/prompts. *)
 

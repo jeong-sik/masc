@@ -1120,6 +1120,10 @@ let () =
         ; test_case "help table round-trips" `Quick test_help_table_round_trips
         ; test_case "help decode is fail-closed" `Quick
             test_help_table_is_fail_closed
+        ; test_case "identity_fields round-trip" `Quick
+            test_identity_fields_round_trip
+        ; test_case "identity_fields decode is fail-closed" `Quick
+            test_identity_fields_are_fail_closed
         ; test_case "no params yields empty properties" `Quick
             test_no_params_yields_empty_properties
         ; test_case "published JSON preserves the author's key order" `Quick

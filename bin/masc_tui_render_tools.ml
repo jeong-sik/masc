@@ -354,13 +354,13 @@ let tools_pane_strip (state : state) =
     else Ansi.dim ^ " " ^ label ^ Ansi.reset
   in
   String.concat (Ansi.dim ^ " |" ^ Ansi.reset)
-    [ name Masc_tui_types.Tools_surface "available"
-    ; name Masc_tui_types.Tools_async "async runs"
-    ; name Masc_tui_types.Tools_activations "receipts"
-    ; name Masc_tui_types.Tools_usage "usage"
-    ; name Masc_tui_types.Tools_catalog "all tools"
+    [ name Masc_tui_types.Tools_surface "호출 범위"
+    ; name Masc_tui_types.Tools_async "비동기 작업"
+    ; name Masc_tui_types.Tools_activations "Skill 기록"
+    ; name Masc_tui_types.Tools_usage "사용 집계"
+    ; name Masc_tui_types.Tools_catalog "전체 도구"
     ]
-  ^ Ansi.dim ^ "  p:next" ^ Ansi.reset
+  ^ Ansi.dim ^ "  p:다음 탭" ^ Ansi.reset
 ;;
 
 let tools_display_lines (state : state) =
@@ -419,11 +419,11 @@ let tools_display_lines (state : state) =
                  });
           _ } ->
         let native = Option.value ~default:"n/a" ets_native_posture in
-        let delivery =
+        let delivery_tone, delivery =
           match ets_tool_delivery with
-          | Masc.Tui_decode.Effective_tools_delivered -> "delivered"
+          | Masc.Tui_decode.Effective_tools_delivered -> Ansi.dim, "지원"
           | Masc.Tui_decode.Effective_tools_suppressed_runtime_unsupported ->
-            "suppressed:runtime_tools_unsupported"
+            Theme.warn (), "미지원으로 제외"
         in
         let resource_bound =
           match ets_skill_resource_read_max_bytes with
@@ -754,10 +754,11 @@ let tools_display_lines (state : state) =
             (Terminal_text.single_line ets_keeper_name)
             (List.length ets_tools);
           Ansi.dim,
-          Printf.sprintf "   runtime=%s  client=%s  native=%s  delivery=%s"
+          Printf.sprintf "   runtime=%s  client=%s  native=%s"
             (Terminal_text.single_line ets_runtime_id)
             (Terminal_text.single_line ets_official_client_kind)
-            native (Terminal_text.single_line delivery);
+            native;
+          delivery_tone, "   Runtime 도구 전달: " ^ delivery;
           Ansi.dim,
           Printf.sprintf "   instruction skills=%s  composition skills=%s"
             (Terminal_text.single_line instruction)
@@ -1261,29 +1262,29 @@ let tools_display_lines (state : state) =
   let explanation =
     match state.tools_pane with
     | Masc_tui_types.Tools_surface ->
-        [ Theme.info (), " What this answers — what can this Keeper call now?"
-        ; Ansi.dim, "   Effective runtime delivery plus loaded Skills."
-        ; Ansi.dim, "   Available does not mean used; open usage for evidence."
+        [ Theme.info (), " 선택 Keeper의 도구·Skill 노출 범위입니다."
+        ; Ansi.dim, "   ORIGIN=도구 출처 · 전달 지원과 실제 호출은 별도입니다."
+        ; Ansi.dim, "   사용 증거: Skill 기록 · Tool 호출별 입출력: Acting"
         ]
     | Masc_tui_types.Tools_async ->
-        [ Theme.info (), " What this answers — what is the async composition broker doing?"
-        ; Ansi.dim, "   Live queued, running, and recovery state."
-        ; Ansi.dim, "   This is neither the tool catalog nor usage history."
+        [ Theme.info (), " 워크스페이스의 비동기 요청·복구 상태입니다."
+        ; Ansi.dim, "   active=활성 원장 요청 수 · runtime-owned=현재 런타임 소유"
+        ; Ansi.dim, "   ownership-unknown=소유 확인 안 됨 · 성공 여부는 개별 상태 확인"
         ]
     | Masc_tui_types.Tools_activations ->
-        [ Theme.info (), " What this answers — which Skill receipts exist in this Keeper session?"
-        ; Ansi.dim, "   Invocations, delivered bodies/resources, and observed actions."
-        ; Ansi.dim, "   Missing means not retained here; it does not prove never used."
+        [ Theme.info (), " 선택 Keeper의 현재 세션에 보존된 Skill 증거입니다."
+        ; Ansi.dim, "   invoked=호출 · deliveries/handoffs=전달 · actions=이후 Tool 행동"
+        ; Ansi.dim, "   호출·전달·이후 행동은 별도 증거이며, 기록 없음은 미사용 확정이 아닙니다."
         ]
     | Masc_tui_types.Tools_usage ->
-        [ Theme.info (), " What this answers — which Skill invocations were retained for each Keeper?"
-        ; Ansi.dim, "   Current-session activation ledgers: invocation/delivery/action totals and last-use time."
-        ; Ansi.dim, "   Unobserved Skills are omitted; unavailable ledgers are reported below."
+        [ Theme.info (), " 현재 Keeper 세션들에서 읽힌 Skill revision별 사용 집계입니다."
+        ; Ansi.dim, "   inv/delivered/actions=호출/전달/이후 행동 · 마지막 사용 시각"
+        ; Ansi.dim, "   호출 기록이 있는 행만 표시합니다. 읽지 못한 원장은 아래에 표시합니다."
         ]
     | Masc_tui_types.Tools_catalog ->
-        [ Theme.info (), " What this answers — which tools are registered anywhere in MASC?"
-        ; Ansi.dim, "   Registration is not delivery. Surfaces names reachability."
-        ; Ansi.dim, "   A tool with surfaces=none is currently unreachable."
+        [ Theme.info (), " MASC 전체 등록 도구 목록입니다. 선택 Keeper의 호출 범위는 별도입니다."
+        ; Ansi.dim, "   DIRECT=직접 호출 허용 · SURFACES=도구가 노출되는 경로"
+        ; Ansi.dim, "   surfaces=none은 노출 경로 없음입니다. 등록만으로 사용을 뜻하지 않습니다."
         ]
   in
   let pane_lines =
@@ -1296,4 +1297,3 @@ let tools_display_lines (state : state) =
   in
   explanation @ pane_lines
 ;;
-

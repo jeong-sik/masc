@@ -4045,6 +4045,16 @@
  (deps (alias runtest-test_tui_keyboard_input-skill-usage-coverage)))
 
 (rule
+ (alias runtest-test_tui_keyboard_input-tools-purpose)
+ (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_keyboard_input.py} %{dep:../bin/masc_tui.exe} tools-purpose)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-tools-purpose)))
+
+(rule
  (alias runtest-test_tui_keyboard_input-acting-call-evidence)
  (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action
@@ -4121,6 +4131,20 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_frame_latency_verdict)))
+
+(rule
+ (alias runtest-test_release_binary_smoke)
+ (deps
+  test_release_binary_smoke.py
+  ../scripts/release-binary-smoke.sh
+  ../scripts/readme-cli-subcommands.py
+  ../README.md)
+ (action
+  (run python3 %{dep:test_release_binary_smoke.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_release_binary_smoke)))
 
 (rule
  (alias runtest-test_response_latency_probe)
@@ -4492,7 +4516,6 @@
 (include stanzas/test_ide_memo.inc)
 
 (include stanzas/test_tui_memo.inc)
-(include stanzas/test_tui_mode.inc)
 (include stanzas/test_lsp_position.inc)
 (include stanzas/test_tui_theme.inc)
 (include stanzas/test_tui_theme_contrast.inc)
@@ -4902,6 +4925,8 @@
  (modules test_tui_browser_lane_text)
  (libraries masc_tui_types masc_tui_message_layout))
 
+(include stanzas/test_browser_downloads.inc)
+(include stanzas/test_browser_bidi_lifecycle.inc)
 (include stanzas/test_browser_webdriver.inc)
 (include stanzas/test_browser_controls.inc)
 
@@ -4963,17 +4988,18 @@
 ; MASC interfaces for the CI-owned native Firefox run.
 (rule
  (targets firefox_controls_probe.ml)
- (deps ../scripts/fixtures/firefox_controls_probe.ml)
+ (deps ../scripts/fixtures/firefox_controls_probe.ml ../scripts/fixtures/firefox_download_artifact_probe.ml)
  (action
   (with-stdout-to %{targets}
    (progn
-    (echo "module Driver = Masc.Browser_webdriver\nmodule Browser_action = Browser_lane.Action\n")
+    (echo "module Driver = Masc.Browser_webdriver\nmodule Browser_action = Browser_lane.Action\nmodule Browser_bidi_downloads = Masc.Browser_bidi_downloads\n")
+    (cat %{dep:../scripts/fixtures/firefox_download_artifact_probe.ml})
     (cat %{dep:../scripts/fixtures/firefox_controls_probe.ml})))))
 
 (executable
  (name firefox_controls_probe)
  (modules firefox_controls_probe)
- (libraries masc masc.browser_lane eio eio_main yojson unix))
+ (libraries masc masc.browser_lane eio eio_main eio.unix yojson unix base64))
 
 
 

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **The embedded tree is the managed asset set; the hand-written manifest is
+  gone.** `config/{tools,prompts,mcp}/managed-assets.json` listed the files
+  beside it a second time, and five releases running shipped with a file on
+  one side and not the other -- v0.33.0 warned `half-built binary` on every
+  boot over `keeper_lane_status.toml`, which was embedded but unlisted. The
+  sync now computes the managed set from what the binary embeds, refuses an
+  empty set instead of projecting it, and still writes the runtime
+  directory's `managed-assets.json` as the record of what it owns there.
+  Adding a tool, prompt, or MCP file is one file again. (#31283)
 - **The shim names the release it came from, and the server says when they
   differ.** `masc-exec-shim --probe` now answers with a `release` field taken
   from `dune-project` through a generated module, so no build step has to

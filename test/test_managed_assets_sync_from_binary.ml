@@ -1,15 +1,15 @@
 (** The binary's own prompt, tool, and MCP surface assets sync into a runtime
     directory without a single failure.
 
-    [Managed_asset_sync.sync] refuses the whole domain when the embedded
-    manifest and the embedded asset set disagree -- the state of a binary
-    built after a file was added to [config/prompts/] or [config/tools/]
-    without a line in that domain's [managed-assets.json]. At boot that is
-    one WARN line and every asset added since the last successful sync stays
-    out of the runtime directory: on 2026-09-02 five tool-failure sentences
-    and two previous-turn observations never reached a Keeper for that
-    reason. This test runs the real sync over the real embedded set so the
-    omission fails here, on the pull request, instead of at the next boot. *)
+    The embedded tree is the managed set (#31283 removed the hand-written
+    [managed-assets.json] that listed it a second time and drifted from it),
+    so what is left to go wrong is the embedding itself: a crunch step that
+    lost a domain, or an asset the sync cannot read or place. At boot that
+    is one WARN line and a runtime directory missing what the binary
+    carries: on 2026-09-02 five tool-failure sentences and two previous-turn
+    observations never reached a Keeper for that reason. This test runs the
+    real sync over the real embedded set so a broken embedding fails here,
+    on the pull request, instead of at the next boot. *)
 
 open Alcotest
 module Sync = Masc.Managed_asset_sync
@@ -44,7 +44,7 @@ let syncs_without_failure ~label ~domain () =
   in
   check
     (list (pair string string))
-    (label ^ ": every embedded asset is listed in its manifest")
+    (label ^ ": every embedded asset syncs without failure")
     []
     result.Sync.failed;
   check bool (label ^ ": the runtime directory received the assets") true

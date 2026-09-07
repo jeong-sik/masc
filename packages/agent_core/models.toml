@@ -3330,6 +3330,7 @@ supports_extended_thinking = true
 supports_multimodal_inputs = true
 supports_image_input = true
 supports_native_streaming = true
+reasoning_streaming_format = "delta:reasoning_content"
 
 # Provider-scoped twin of the bare glm-4.6v row above. A runtime config always
 # names its provider, and a provider-scoped lookup never reads a bare row, so
@@ -3353,6 +3354,7 @@ supports_extended_thinking = true
 supports_multimodal_inputs = true
 supports_image_input = true
 supports_native_streaming = true
+reasoning_streaming_format = "delta:reasoning_content"
 
 # Provider-scoped twin of the bare glm-4.6v row above. A runtime config always
 # names its provider, and a provider-scoped lookup never reads a bare row, so
@@ -3376,6 +3378,7 @@ supports_extended_thinking = true
 supports_multimodal_inputs = true
 supports_image_input = true
 supports_native_streaming = true
+reasoning_streaming_format = "delta:reasoning_content"
 
 [[models]]
 id_prefix = "glm-4.5v"

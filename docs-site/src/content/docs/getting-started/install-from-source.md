@@ -11,7 +11,7 @@ compiles the OCaml server and dashboard and can take several minutes.
 ## Prerequisites
 
 - **macOS or Linux**
-- **OCaml** 5.5.0, with `opam`
+- **OCaml** 5.5.1, with `opam`
 - **Node.js** 22+ (only for the web dashboard)
 
 ## 1. Clone and install dependencies

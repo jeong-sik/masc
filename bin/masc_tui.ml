@@ -14228,8 +14228,11 @@ and is loaded on demand through keeper_skill.
           >= 0
         then begin
           state.msx_last_poll_ns <- now_ns;
+          (* The poll advances the machine a step and reads the frame it lands
+             on (RFC-0439 §3.2): a game flows while it is watched, even when no
+             keeper is pressing. A plain read would freeze between presses. *)
           state.msx_frame <-
-            Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
+            Masc_tui_http.tick_msx ~host:server_peer_host ~port:state.port;
           Masc_tui_msx.render ~write:write_to_terminal state.msx_frame
         end
       end;

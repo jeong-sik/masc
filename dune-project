@@ -37,7 +37,7 @@
  (synopsis "Multi-Agent Shared Context MCP Server in OCaml")
  (description "Multi-Agent Shared Context: a harness for running several coding agents against one repository, with the shared workspace state served over MCP and a terminal UI")
  (depends
-  (ocaml (= 5.5.0))
+  (ocaml (= 5.5.1))
   ; [dune] dependency is implicit from [(lang dune 3.22)] above —
   ; declaring it again here makes the generated .opam emit
   ; [{>= "3.22" & >= "3.22"}] (audited continuous-loop iter #10).

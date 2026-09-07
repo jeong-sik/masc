@@ -76,11 +76,14 @@ open Alcotest
    Preserve the MSX tool surface ceiling's headroom: 88,000 + 1,628 + 202 - 18. *)
 (* Contexts/dialogs/uploads add 862 measured schema bytes (BrowserRead +299,
    BrowserAct +563 including the Keeper file boundary), preserving the preceding ceiling headroom. *)
+(* Downloads add 117 bytes measured with the production Tool_definition_toml
+   renderer against contexts 21bfcdf89b: BrowserRead is 1493 -> 1610 bytes.
+   No other schema changes in this unit; preserve the base surface headroom. *)
 (* Main adds BrowserInteract: production TOML rendering is 1,394 bytes,
    or 1,388 with its public name, plus one list separator. BrowserGoto
    guidance grows by 33 bytes. Preserve the existing headroom after merge. *)
 (* Explicit native client selection adds 1004 measured browser schema bytes. *)
-let ceiling_bytes = 93_100
+let ceiling_bytes = 93_217
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

@@ -1,7 +1,7 @@
 # MASC Keeper Sandbox
 # Runtime environment for keeper agents executing Bash/Read/Edit tools.
 #
-# Base: masc.opam pins `"ocaml" {= "5.5.0"}`. The previous
+# Base: masc.opam pins `"ocaml" {= "5.5.1"}`. The previous
 # `ubuntu:24.04` + `opam switch create ocaml-system` combination resolved to
 # the distribution compiler (4.x), so `opam install --deps-only` for this repo
 # could never succeed there. The upstream opam image ships the pinned compiler

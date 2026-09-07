@@ -11,7 +11,7 @@ description: OCaml 소스에서 MASC 서버와 터미널 UI 를 직접 빌드합
 ## 준비물
 
 - **macOS 또는 Linux**
-- **OCaml** 5.5.0, `opam` 포함
+- **OCaml** 5.5.1, `opam` 포함
 - **Node.js** 22+ (웹 대시보드에만 필요)
 
 ## 1. 클론하고 의존성 설치

@@ -10,7 +10,7 @@
 
 # ---- Stage 1: OCaml server from source --------------------------------------
 # Mirrors .github/workflows/release.yml: pin external deps, deps-only install,
-# `dune build --release bin/main_eio.exe`. OCaml 5.5.0 per dune-project.
+# `dune build --release bin/main_eio.exe`. OCaml 5.5.1 per dune-project.
 FROM ocaml/opam:ubuntu-24.04-ocaml-5.5 AS ocaml-builder
 
 USER root

@@ -717,7 +717,6 @@ let test_validate_embedded () =
   let good = minimal "masc_example_ok" in
   let embedded =
     [ "tools/masc_example_ok.toml", good
-    ; "tools/managed-assets.json", "{}"
     ; "prompts/keeper.md", "not a tool"
     ; "runtime.toml", "[runtime]\n"
     ]
@@ -753,6 +752,18 @@ let test_validate_embedded () =
    | Ok () -> fail "expected a non-TOML file to be an error"
    | Error message ->
      check bool "unexpected file named" true
+       (contains ~needle:"unexpected file" message));
+  (* The tree has no manifest since #31283: a managed-assets.json that comes
+     back under tools/ is a stray file, not a declaration. *)
+  (match
+     Tool_definition_toml.validate_embedded
+       ~read:(fun rel ->
+         if String.equal rel "tools/managed-assets.json" then Some "{}" else None)
+       ~files:[ "tools/managed-assets.json" ]
+   with
+   | Ok () -> fail "expected a manifest under tools/ to be an error"
+   | Error message ->
+     check bool "manifest named as unexpected" true
        (contains ~needle:"unexpected file" message));
   match
     Tool_definition_toml.validate_embedded

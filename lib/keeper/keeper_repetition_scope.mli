@@ -52,3 +52,22 @@ val restore : source:Agent_core.Context.t -> target:Agent_core.Context.t -> (t, 
     existing target is an error and remains unchanged. An absent source cannot
     clear a populated target. Callers serialize this operation. This does not
     supply the separate official-client or durable child-parent stores. *)
+
+module Execution : sig
+  type t
+  val direct_operation : Keeper_chat_operation.Operation_id.t -> t
+  (** Allocate once from the claimed operation, outside provider retry loops.
+      Direct operations interrupted by process restart remain terminal under
+      the owner store contract; this does not resurrect their execution. *)
+  val prepare : t -> source:Agent_core.Context.t -> target:Agent_core.Context.t ->
+    (Keeper_agent_result.tool_call_detail list, error) result
+  (** First attempt loads and admits the direct scope. Later attempts reuse
+      its observations even if the previous provider returned no checkpoint.
+      Returns only this scope's prior calls, excluding other work. *)
+  val observe : t -> target:Agent_core.Context.t -> Keeper_agent_result.tool_call_detail -> unit
+  (** Called by the serialized tool observer before checkpoint capture. Records
+      validation failures explicitly; [failure] must stop later provider calls.
+      The owner serializes prepare/observe and terminates old attempt callbacks
+      before preparing a new attempt. Context projection alone is not disk I/O. *)
+  val failure : t -> error option
+end

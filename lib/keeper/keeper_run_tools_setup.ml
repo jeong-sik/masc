@@ -329,6 +329,7 @@ let prepare_agent_setup
       ~(task_skill_selection :
           (Keeper_task_skill_turn.t, Keeper_task_skill_turn.error) result)
       ~(trajectory_acc : Trajectory.accumulator option)
+      ?repetition_execution
       ?runtime_manifest_context
       ?runtime_manifest_append
       ?continuation_channel
@@ -475,9 +476,19 @@ let prepare_agent_setup
     |> Result.map_error (fun error ->
          Agent_core.Error.Internal (Keeper_tool_load_receipts.error_to_string error))
   in
+  let* historical_tool_calls =
+    match repetition_execution with
+    | None -> Ok (initial_tool_calls ~history_messages)
+    | Some execution ->
+      Keeper_repetition_scope.Execution.prepare execution
+        ~source:(Keeper_context_core.agent_core_context_of_context ctx_work)
+        ~target:shared_context
+      |> Result.map_error (fun error ->
+           Agent_core.Error.Internal (Keeper_repetition_scope.error_to_string error))
+  in
   let acc =
     Keeper_run_tools_hook_accumulator.create ~meta
-      ~historical_tool_calls:(initial_tool_calls ~history_messages)
+      ~historical_tool_calls
       ~tool_surface:
         { turn_lane = Keeper_agent_tool_surface.Lane_text_only
         ; config_root
@@ -876,6 +887,7 @@ let prepare_agent_setup
     }
   in
   Keeper_run_tools_hooks.assemble_hooks
+    ?repetition_execution
     ~ctx ~session ~turn_system_prompt ~user_message ~dynamic_context
     ~history_messages ~prompt_metrics ~shared_context
     ~start_turn_count

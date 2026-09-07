@@ -57,7 +57,6 @@ type keeper = {
   mark : string;
   mark_tone : tone;
   health : Reading.keeper_health_reading option;
-  trace_id : string;
 }
 
 and tone =
@@ -107,7 +106,7 @@ type input = {
   keepers : keeper list;
   selected : string option;
   approvals : approval list;
-  entries : Acting.entry list;
+  chunks : Acting.chunk list;
   changes : changes;
 }
 
@@ -581,8 +580,7 @@ let window ~cols ~below ~scroll ~overview body =
     (drawn, scroll_max)
 
 let fleet_lines ~cols ~below ~scroll input =
-  let traces = List.map (fun keeper -> (keeper.name, keeper.trace_id)) input.keepers in
-  let chunks = Acting.chunks ~traces input.entries in
+  let chunks = input.chunks in
   let newest = newest_chunk_by_keeper chunks in
   let focus = focus_keeper input newest in
   let ordered = fleet_order input newest in

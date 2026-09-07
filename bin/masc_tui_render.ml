@@ -1407,7 +1407,6 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
         ; mark = Masc_tui_keeper_mark.glyph ~paused reading_of_health
         ; mark_tone
         ; health = reading_of_health
-        ; trace_id = keeper.k_trace_id
         })
       state.keepers
   in
@@ -1417,6 +1416,18 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
     | Observer_opening -> Pane.Feed_opening
     | Observer_live { events; _ } -> Pane.Feed_live events
     | Observer_closed { reason; _ } -> Pane.Feed_closed reason
+  in
+  (* This input is built only when the pane is visible. Changes does not
+     consume event chunks, so retain the previous projection without folding. *)
+  let chunks = match state.acting_pane_tab with
+    | Pane.Tab_changes -> []
+    | Pane.Tab_fleet ->
+      let traces = List.map (fun (keeper : keeper) -> keeper.k_name, keeper.k_trace_id)
+        state.keepers in
+      let projection = Masc_tui_acting.refresh_projection
+        ~previous:state.acting_chunk_projection ~traces state.acting in
+      state.acting_chunk_projection <- Some projection;
+      Masc_tui_acting.projection_chunks projection
   in
   { Pane.now = Unix.gettimeofday ()
   ; tab = state.acting_pane_tab
@@ -1441,7 +1452,7 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
               ; approval_tool = item.ap_delegated_tool
               })
         (Masc_tui_types.approval_items state)
-  ; entries = state.acting
+  ; chunks
   ; changes = acting_pane_changes state
   }
 

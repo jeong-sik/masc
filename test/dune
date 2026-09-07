@@ -4708,6 +4708,12 @@
  (libraries masc_test_deps exec_ssh_protocol exec_shim))
 
 (test
+ (name test_exec_shim_observe)
+ (modules test_exec_shim_observe)
+ (enabled_if (= %{system} linux))
+ (libraries alcotest exec_shim unix))
+
+(test
  (name test_shim_clock)
  (modules test_shim_clock)
  (libraries alcotest shim_clock unix))
